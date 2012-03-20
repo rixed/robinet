@@ -55,7 +55,7 @@ clean: clean-spec
 
 # Dependencies
 .depend:
-	$(OCAMLDEP) $(SYNTAX) -package "$(REQUIRES)" -I .. *.ml *.mli > $@
+	$(OCAMLDEP) $(SYNTAX) -package "$(REQUIRES)" -I .. *.ml *.mli */*.ml > $@
 
 doc: $(wildcard *.ml)
 	mkdir -p $@

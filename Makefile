@@ -54,5 +54,6 @@ robinet.top: $(ARCHIVE)
 	$(OCAMLMKTOP) -o $@ -package "$(REQUIRES)" -linkpkg $(ARCHIVE)
 
 clean-spec:
-	rm -f *.pcap examples/*.cm[ioxa] $(EXAMPLES) $(EXAMPLES)/*.o
+	rm -f *.pcap
+	rm -f examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
 
