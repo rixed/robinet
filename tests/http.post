@@ -1,0 +1,15 @@
+POST /nevrax/do_login.html HTTP/1.1
+Host: vsonde99:8080
+User-Agent: Mozilla/5.0 (X11; U; Linux x86_64; en-US; rv:1.9.1.16) Gecko/20110323 Iceweasel/3.5.16 (like Firefox/3.5.16)
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: fr,en-us;q=0.7,en;q=0.3
+Accept-Encoding: gzip,deflate
+Accept-Charset: ISO-8859-1,utf-8;q=0.7,*;q=0.7
+Keep-Alive: 300
+Connection: keep-alive
+Referer: http://vsonde99:8080/nevrax/login.html?came_from=%2F
+Cookie: zope3_cs_12a918de=E-T7bb8N2YCP3Pes6vw-.3NHLAgsVicRDtNSioCFUZhc6o0-CfMaF4; auth_tkt=""
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 57
+
+login=admin&password=admin&submit=Connexion&came_from=%2F

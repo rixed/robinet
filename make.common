@@ -1,0 +1,64 @@
+OCAMLC     = ocamlfind ocamlc -thread
+OCAMLOPT   = ocamlfind ocamlopt -thread
+OCAMLDEP   = ocamlfind ocamldep
+OCAMLDOC   = ocamlfind ocamldoc -keep-code -html -all-params -colorize-code -thread
+OCAMLMKTOP = ocamlfind ocamlmktop -thread -g
+override OCAMLOPTFLAGS += $(INCS) -w Ael -g
+override OCAMLFLAGS    += $(INCS) -w Ael -g
+
+CAMLINCLUDE = $(shell ocamlfind printconf stdlib)
+CPPFLAGS   += -I $(CAMLINCLUDE) -I .
+CFLAGS     += -std=c99 -W -Wall -D_GNU_SOURCE
+
+all:
+
+.PHONY: all opt clean clean-spec install uninstall reinstall doc
+
+ifdef PKG_NAME
+OBJECTS  = $(SOURCES:.ml=.cmo)
+XOBJECTS = $(OBJECTS:.cmo=.cmx)
+ARCHIVE  = $(PKG_NAME).cma
+XARCHIVE = $(ARCHIVE:.cma=.cmxa)
+$(ARCHIVE): $(OBJECTS) $(CLIB)
+	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES)" -custom -linkpkg $(OCAMLFLAGS) $(OBJECTS) $(CLIB) $(LIBS) -a -o $@
+$(XARCHIVE): $(XOBJECTS) $(CLIB)
+	$(OCAMLOPT) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $(XOBJECTS) $(CLIB) $(LIBS) -a -o $@
+install: $(ARCHIVE)
+	if test -f "$(XARCHIVE)" ; then extra="$(XARCHIVE) "`basename "$(XARCHIVE)" .cmxa`.a ; fi ; \
+	ocamlfind install "$(PKG_NAME)" *.cmi "$(ARCHIVE)" META $$extra
+uninstall:
+	ocamlfind remove $(PKG_NAME)
+reinstall: uninstall install
+endif
+
+# Common rules
+.SUFFIXES: .ml .mli .cmo .cmi .cmx .opt .byte
+
+.cmo.byte: $(ARCHIVE)
+	$(OCAMLC)   -o $@ $(SYNTAX) -package "$(REQUIRES)" $(ARCHIVE) -linkpkg $(OCAMLFLAGS) $<
+
+.cmx.opt: $(XARCHIVE)
+	OCAMLPATH=../ $(OCAMLOPT) -o $@ $(SYNTAX) -package "$(REQUIRES)" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
+
+.ml.cmo:
+	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLFLAGS) -c $<
+
+.mli.cmi:
+	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLFLAGS) -c $<
+
+.ml.cmx:
+	$(OCAMLOPT) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) -c $<
+
+# Clean up
+clean: clean-spec
+	rm -f *.cm[ioxa] *.cmxa *.a *.s *.o *.byte *.opt *.top .depend
+
+# Dependencies
+.depend:
+	$(OCAMLDEP) $(SYNTAX) -package "$(REQUIRES)" -I .. *.ml *.mli > $@
+
+doc: $(wildcard *.ml)
+	mkdir -p $@
+	$(OCAMLDOC) $(SYNTAX) -package "$(REQUIRES)" -d doc $^
+
+-include .depend

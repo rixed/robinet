@@ -1,0 +1,14 @@
+* {
+	font-family: Verdana, sans-serif;
+}
+
+#menu {
+	font-family: fantasy;
+	font-weight: bold;
+	font-variant: small-caps;
+}
+
+table.log tbody {
+    font-family: monospace;
+}
+

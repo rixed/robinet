@@ -1,0 +1,7 @@
+name,href,label
+home,/home.dyn,Home
+net editor,/net.dyn,Net Editor
+scenarii,/scenarii.dyn,Scenarii
+engine,/engine.dyn,Engine
+metrics,/metrics.dyn,Metrics
+logs,/logs.dyn,Logs

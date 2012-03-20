@@ -1,0 +1,55 @@
+<?xml version="1.0"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<!-- vim:expandtab
+-->
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+<head>
+    <title>Generic Graph Editor (Test)</title>
+    <link rel="stylesheet" type="text/css" media="screen" href="svg.css" />
+    <script type="text/javascript" src="d3.js"></script>
+    <script type="text/javascript" src="d3.csv.js"></script>
+    <script type="text/javascript" src="myfuncs.js"></script>
+    <script type="text/javascript" src="gge.js"></script>
+</head>
+<body>
+<div id="view" style="border:1px solid black;">
+    <svg id="net" />
+</div>
+<script type="text/javascript">
+	var gge = gge_new("net");
+	var nop = function () {}
+	var add_text = function(sel, text) {
+        sel.append("text")
+            .attr("text-anchor", "middle")
+            .style("font-size", "1em")
+            .text(text);
+    }
+    var vertex = [
+		{
+			x: 100, y: 100,
+		  	draw: function(s) { add_text(s, "hello!"); }, on_select: nop,
+		}, {
+			x: 200, y: 170,
+			draw: nop, on_select: nop,
+		}, {
+			x: 300, y: 270,
+			draw: nop, on_select: nop,
+		}, {
+			x: 400, y: 120,
+			draw: nop, on_select: nop,
+		},
+	];
+	var edges = [
+        { from: vertex[0], to: vertex[1], draw: nop, },
+        { from: vertex[1], to: vertex[2], draw: nop, },
+        { from: vertex[2], to: vertex[3], draw: nop, },
+        { from: vertex[3], to: vertex[0], draw: nop, },
+        { from: vertex[0], to: vertex[2], draw: nop, },
+    ];
+
+    foreach(vertex, function(v) { gge_vertex_add(gge, v); });
+    foreach(edges,  function(e) { gge_edge_add(gge, e); });
+
+</script>
+</div>
+</body>

@@ -1,0 +1,50 @@
+(* vim:sw=4 ts=4 sts=4 expandtab
+  This test program test communications between two hosts
+*)
+open Bitstring
+open Tools
+
+let server_f _h tcp bits =
+    Printf.printf "Server received '%s'\n" (string_of_bitstring bits) ;
+    if bitstring_length bits > 0 then
+        tcp.Tcp.TRX.trx.tx bits  (* echo *)
+    else (
+        Printf.printf "Closing\n" ;
+        tcp.Tcp.TRX.close ()
+    )
+
+let run () =
+    let h1 = Host.make_static "server"
+                              (Eth.addr_of_string "12:34:56:78:90:ab")
+                              (Ip.addr_of_string "192.168.0.1")
+    and h2 = Host.make_static "client"
+                              (Eth.addr_of_string "ab:cd:ef:01:23:45")
+                              (Ip.addr_of_string "192.168.0.2")
+    and hub = Hub.Repeater.make 3
+    in
+    let gigabit = Eth.limited 0.01 1_000_000_000. in
+    h1.Host.set_emit (gigabit (Hub.Repeater.rx 0 hub)) ;
+    Hub.Repeater.set_emit 0 hub (gigabit h1.Host.rx) ;
+    h2.Host.set_emit (gigabit (Hub.Repeater.rx 1 hub)) ;
+    Hub.Repeater.set_emit 1 hub (gigabit h2.Host.rx) ;
+    (* Save everything into sock_test.pcap *)
+    Hub.Repeater.set_emit 2 hub (Pcap.save "sock_test.pcap") ;
+    (* Start a server on h1 *)
+    h1.Host.tcp_server 7 (fun tcp -> tcp.Tcp.TRX.trx.set_recv (server_f h1 tcp)) ;
+    (* Client connects and write a msg *)
+    let client_f tcp bits =
+        Printf.printf "Client received '%s'\n" (string_of_bitstring bits) ;
+        if bitstring_length bits > 0 then
+            tcp.Tcp.TRX.close ()
+        else (
+            Printf.printf "Received unexpected close\n%!" ;
+            assert false
+        )
+    in
+    lwt tcp = h2.Host.tcp_connect (Host.IPv4 (Ip.addr_of_string "192.168.0.1")) 7 in
+    tcp.Tcp.TRX.trx.set_recv (client_f tcp) ;
+    tcp.Tcp.TRX.trx.tx (bitstring_of_string "Hello world!") ;
+    Lwt.return ()
+
+let main =
+    Lwt_main.run (run ())

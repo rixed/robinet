@@ -1,0 +1,251 @@
+(* vim:sw=4 ts=4 sts=4 expandtab
+*)
+open Batteries
+open Bitstring
+open Tools
+
+let debug = false
+
+(* Opcodes, types, etc *)
+
+let bootrequest = 1
+let bootreply = 2
+type opcode = BootRequest | BootReply
+let discover = 1
+let offer = 2
+let request = 3
+let decline = 4
+let ack = 5
+let nack = 6
+let release = 7
+let inform = 8
+
+(* DHCP messages *)
+
+module Pdu =
+struct
+    type t =
+        { op : opcode ;
+          htype : int ; (* same values than Arp.hw_type_* *)
+          hlen : int ; hops : int ;
+          xid : int32 ;
+          secs : int ; broadcast : bool ;
+          ciaddr : Ip.addr ; yiaddr : Ip.addr ;
+          siaddr : Ip.addr ; giaddr : Ip.addr ;
+          chaddr : bitstring ;
+          sname : string ;
+          file : string ;
+          (* Bootp options *)
+          mutable msg_type : int option ;
+          mutable subnet_mask : Ip.addr option ;
+          mutable router : Ip.addr option ;
+          mutable ntp_server : Ip.addr option ;
+          mutable smtp_server : Ip.addr option ;
+          mutable pop3_server : Ip.addr option ;
+          mutable name_server : Ip.addr option ;
+          mutable client_name : string option ;
+          mutable search_sfx : string option ;
+          mutable lease_time : int32 option ; (* in seconds *)
+          mutable server_id : Ip.addr option ;
+          mutable requested_ip : Ip.addr option ;
+          mutable message : string option ;
+          mutable client_id : bitstring option ;
+          mutable request_list : string option }
+
+    let rec unpack_options t bits = bitmatch bits with
+        | { 0 : 8 ;
+            rest : -1 : bitstring } -> unpack_options t rest
+        | { 255 : 8 } -> true
+        | { 1 : 8 ; 4 : 8 ; subnet_mask : 32 ;
+            rest : -1 : bitstring } ->
+            t.subnet_mask <- Some subnet_mask ;
+            unpack_options t rest
+        | { 3 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
+            rest : -1 : bitstring } ->
+            t.router <- Some (Ip.addr_of_bitstring (takebits 32 ips)) ;
+            unpack_options t rest
+        | { 42 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
+            rest : -1 : bitstring } ->
+            t.ntp_server <- Some (Ip.addr_of_bitstring (takebits 32 ips)) ;
+            unpack_options t rest
+        | { 69 : 8 ; len : 8 : check (len >= 4 && len land 3 = 0) ; ips : 8*len : bitstring ;
+            rest : -1 : bitstring } ->
+            t.smtp_server <- Some (Ip.addr_of_bitstring (takebits 32 ips)) ;
+            unpack_options t rest
+        | { 70 : 8 ; len : 8 : check (len >= 4 && len land 3 = 0) ; ips : 8*len : bitstring ;
+            rest : -1 : bitstring } ->
+            t.pop3_server <- Some (Ip.addr_of_bitstring (takebits 32 ips)) ;
+            unpack_options t rest
+        | { 6 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
+            rest : -1 : bitstring } ->
+            t.name_server <- Some (Ip.addr_of_bitstring (takebits 32 ips)) ;
+            unpack_options t rest
+        | { 12 : 8 ; len : 8 : check (len >= 1) ; name : 8*len : string ;
+            rest : -1 : bitstring } ->
+            t.client_name <- Some name ;
+            unpack_options t rest
+        | { 15 : 8 ; len : 8 : check (len >= 1) ; sfx : 8*len : string ;
+            rest : -1 : bitstring } ->
+            t.search_sfx <- Some sfx ;
+            unpack_options t rest
+        | { 50 : 8 ; 4 : 8 ; req_ip : 32 ;
+            rest : -1 : bitstring } ->
+            t.requested_ip <- Some req_ip ;
+            unpack_options t rest
+        | { 51 : 8 ; 4 : 8 ; lease : 32 ;
+            rest : -1 : bitstring } ->
+            t.lease_time <- Some lease ;
+            unpack_options t rest
+        | { 53 : 8 ; 1 : 8 ; msg_type : 8 : check (msg_type > 0 && msg_type < 9) ;
+            rest : -1 : bitstring } ->
+            t.msg_type <- Some msg_type ;
+            unpack_options t rest
+        | { 54 : 8 ; 4 : 8 ; ip : 32 ;
+            rest : -1 : bitstring } ->
+            t.server_id <- Some ip ;
+            unpack_options t rest
+        | { 55 : 8 ; len : 8 : check (len > 0) ; params : 8*len : string ;
+            rest : -1 : bitstring } ->
+            t.request_list <- Some params ;
+            unpack_options t rest
+        | { 56 : 8 ; len : 8 : check (len > 0) ; msg : 8*len : string ;
+            rest : -1 : bitstring } ->
+            t.message <- Some msg ;
+            unpack_options t rest
+        | { 61 : 8 ; len : 8 : check (len >= 2) ; id : 8*len : bitstring ;
+            rest : -1 : bitstring } ->
+            t.client_id <- Some id ;
+            unpack_options t rest
+        (* FIXME: IP Layer parameters setting could be interresting to get/set via DHCP.
+           At least netmask *)
+        (* FIXME: handle option overload of file/sname fields with more options *)
+        | { _ : 8 ; len : 8 ; _ : 8*len ; rest : -1 : bitstring } ->
+            unpack_options t rest
+        | { _ } -> false
+
+    let unpack bits = bitmatch bits with
+        | { op : 8 : check (op = bootrequest || op = bootreply) ;
+            htype : 8 ; hlen : 8 ; hops : 8 ;
+            xid : 32 ; secs : 16 ;
+            flags : 16 : check (flags land 0x7fff = 0) ;
+            ciaddr : 32 : bitstring ;
+            yiaddr : 32 : bitstring ;
+            siaddr : 32 : bitstring ;
+            giaddr : 32 : bitstring ;
+            chaddr : 16*8 : bitstring ;
+            sname : 64*8 : string ;
+            file : 128*8 : string ;
+            0x63825363l : 32 ;
+            options : -1 : bitstring } ->
+          let t = { op = if op = bootrequest then BootRequest else BootReply ;
+                    htype ; hlen ; hops ; xid ;
+                    secs ; broadcast = flags land 0x8000 = 0x8000 ;
+                    ciaddr = Ip.addr_of_bitstring ciaddr ;
+                    yiaddr = Ip.addr_of_bitstring yiaddr ;
+                    siaddr = Ip.addr_of_bitstring siaddr ;
+                    giaddr = Ip.addr_of_bitstring giaddr ;
+                    chaddr ; sname ; file ;
+                    subnet_mask = None ;
+                    router = None ;
+                    ntp_server = None ;
+                    smtp_server = None ;
+                    pop3_server = None ;
+                    name_server = None ;
+                    client_name = None ;
+                    search_sfx = None ;
+                    lease_time = None ;
+                    msg_type = None ;
+                    server_id = None ;
+                    requested_ip = None ;
+                    message = None ;
+                    client_id = None ;
+                    request_list = None } in
+          if unpack_options t options then Some t
+          else err "Dhcp: Cannot decode options"
+        | { _ } -> err "Dhcp: Not DHCP"
+
+    let pack_options t =
+        let may_pack_int8   t v = Option.map (fun v -> (BITSTRING { t : 8 ; 1 : 8 ; v : 8 })) v
+        and may_pack_int32  t v = Option.map (fun v -> (BITSTRING { t : 8 ; 4 : 8 ; v : 32 })) v
+        and may_pack_ip     t v = Option.map (fun v -> (BITSTRING { t : 8 ; 4 : 8 ; v : 32 })) v
+        and may_pack_string t v = Option.map (fun v -> (BITSTRING { t : 8 ; String.length v : 8 ; v : -1 : string })) v
+        and may_pack_bits   t v = Option.map (fun v -> (BITSTRING { t : 8 ; bytelength v : 8 ; v : -1 : bitstring })) v
+        in
+        List.enum [ may_pack_int8 53 t.msg_type ;
+                    may_pack_int32 1 t.subnet_mask ; (* must apear before router *)
+                    may_pack_ip 3 t.router ;
+                    may_pack_ip 42 t.ntp_server ;
+                    may_pack_ip 69 t.smtp_server ;
+                    may_pack_ip 70 t.pop3_server ;
+                    may_pack_ip 6 t.name_server ;
+                    may_pack_string 12 t.client_name ;
+                    may_pack_string 15 t.search_sfx ;
+                    may_pack_int32 51 t.lease_time ;
+                    may_pack_ip 50 t.requested_ip ;
+                    may_pack_int32 54 t.server_id ;
+                    may_pack_string 56 t.message ;
+                    may_pack_bits 61 t.client_id ;
+                    may_pack_string 55 t.request_list ;
+                    Some (BITSTRING { 255 : 8 }) ] //@
+            identity |>
+            List.of_enum |>
+            Bitstring.concat
+
+    let pack t =
+        let string_extend str len =
+            let l = String.length str in
+            if l >= len then String.sub str 0 len
+            else str ^ (String.make (len-l) (Char.chr 0))
+        in
+        (BITSTRING {
+            match t.op with BootRequest -> 1 | BootReply -> 2 : 8 ;
+            t.htype : 8 ; t.hlen : 8 ; t.hops : 8 ;
+            t.xid : 32 ;
+            t.secs : 16 ; if t.broadcast then 0x8000 else 0 : 16 ;
+            Ip.bitstring_of_addr t.ciaddr : -1 : bitstring ;
+            Ip.bitstring_of_addr t.yiaddr : -1 : bitstring ;
+            Ip.bitstring_of_addr t.siaddr : -1 : bitstring ;
+            Ip.bitstring_of_addr t.giaddr : -1 : bitstring ;
+            t.chaddr : -1 : bitstring ;
+            string_extend t.sname 64 : 64*8 : string ;
+            string_extend t.file 128 : 128*8 : string ;
+            0x63825363l : 32 ;
+            pack_options t : -1 : bitstring })
+
+    let make_base ?(mac=Eth.addr_zero) ?xid ?name msg_type =
+        let xid = may_default xid (fun () -> Random.int32 Int32.max_int) in
+        { op = BootRequest ;
+          htype = Arp.hw_type_eth ;
+          hlen = 6 ; hops = 0 ;
+          xid ;
+          secs = 0 ; broadcast = false ;
+          ciaddr = Ip.addr_zero ;
+          yiaddr = Ip.addr_zero ;
+          siaddr = Ip.addr_zero ;
+          giaddr = Ip.addr_zero ;
+          chaddr = Bitstring.concat [ Eth.bitstring_of_addr mac ; create_bitstring 80 ] ;
+          sname = "" ; file = "" ;
+          msg_type = Some msg_type ;
+          subnet_mask = None ; router = None ;
+          ntp_server = None ; smtp_server = None ;
+          pop3_server = None ; name_server = None ;
+          client_name = name ; requested_ip = None ;
+          search_sfx = None ; lease_time = None ;
+          server_id = None ; message = None ;
+          client_id = None ; request_list = None }
+
+    let make_discover ?(mac=Eth.addr_zero) ?xid ?name () =
+        let t = make_base ~mac ?xid ?name discover in
+        t.client_id <- Some (BITSTRING { Arp.hw_type_eth : 8 ; mac : 6*8 : bitstring }) ;
+        t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
+        t
+
+    let make_request ?(mac=Eth.addr_zero) ?xid ?name yiaddr server_id =
+        let t = make_base ~mac ?xid ?name request in
+        t.client_id <- Some (BITSTRING { Arp.hw_type_eth : 8 ; mac : 6*8 : bitstring }) ;
+        t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
+        t.requested_ip <- Some yiaddr ;
+        t.server_id <- server_id ;
+        t
+
+end

@@ -1,0 +1,36 @@
+let interactive = !Sys.interactive;;
+Sys.interactive := false;; (*Pretend to be in non-interactive mode*)
+#use "topfind";;
+Sys.interactive := interactive;; (*Return to regular interactive mode*)
+
+Toploop.use_silently
+	Format.err_formatter (Filename.concat (Findlib.package_directory "batteries") "battop.ml");;
+
+#require "bitstring";;
+#require "batteries.pa_string.syntax";;
+#camlp4o;;
+
+open Bitstring;;
+
+let colorize =
+    Format.set_tags true ;
+    Format.set_mark_tags false ;
+    let def_funs = Format.get_formatter_tag_functions () in
+    let colorize = function
+        | "addr" | "time" | "proto" | "port" | "code" -> Format.printf "\027[1;35m"
+        | x -> def_funs.Format.print_open_tag x
+    and uncolorize = function
+        | "addr" | "time" | "proto" | "port" | "code" -> Format.printf "\027[0m"
+        | x -> def_funs.Format.print_close_tag x in
+    Format.set_formatter_tag_functions { def_funs with
+        Format.print_open_tag = colorize ;
+        Format.print_close_tag = uncolorize
+    } ;;
+
+(*#install_printer Eth.print_addr;;
+ #install_printer Ip.print_addr;;
+ #install_printer Ip.print_proto;;
+ #install_printer Tcp.print_port;;
+ #install_printer Clock.time_printer;;
+ #install_printer Http.print_code;;
+*)

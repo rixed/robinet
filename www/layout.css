@@ -1,0 +1,114 @@
+body {
+	margin: 0;
+	padding: 0;
+}
+
+input {
+	margin: 0;
+/*	border: 0;*/
+}
+
+table * {
+	border-collapse: collapse;
+}
+
+/* menu */
+
+#menu {
+	padding: 2.2em 0em 0.1em 0em;
+	letter-spacing: -.31em;	/* magic values from Yahoo grids */
+	word-spacing: -.43em;
+}
+
+#menu a {
+	display: inline-block;
+	letter-spacing: normal;
+	word-spacing: normal;
+	padding: 0.3em 1em 0.5em 1em;
+	margin: 0;
+	border-color: black;
+	border-width: 2px 2px 2px 0;
+	border-style: solid;
+	width: 8em;
+	text-align: center;
+	font-size: 1.1em;
+	text-decoration: none;
+}
+
+#menu a:first-child {
+	border-left-width: 2px;
+}
+
+/* page */
+
+#page {
+	padding: 1em 0em 1em 0em;
+/*	letter-spacing: -.31em;
+	word-spacing: -.43em;*/
+}
+
+#controls {
+	display: inline-block;
+	letter-spacing: normal;
+	word-spacing: normal;
+	border: 1px solid black;
+	padding: 4px;
+	vertical-align: top;
+    width: 20em;
+    overflow: auto;
+}
+
+#controls label {
+	display: block;
+	text-align: right;
+}
+#controls label input {
+}
+#dyncontrols textarea {
+    width: 19em;
+    display: block;
+    margin: auto;
+}
+
+#controls span.buttons {
+	display: block;
+	margin-top: 1em;
+}
+
+#controls span.away {
+	float: right;
+}
+
+#controls input.link_started {
+    background-color: #40d030;
+}
+
+#controls input.unlink_started {
+    background-color: #d04030;
+}
+
+#view {
+	display: inline-block;
+	letter-spacing: normal;
+	word-spacing: normal;
+	border: 1px solid black;
+	width: 680px;
+	height: 480px;
+	overflow: scroll;
+}
+
+table.log tbody td {
+    border-bottom: 1px dashed;
+    border-right: 1px solid;
+}
+
+table.log tbody td.time {
+    vertical-align: top;
+    text-align: right;
+}
+
+/* foot */
+
+#foot {
+	font-size: 0.5em;
+}

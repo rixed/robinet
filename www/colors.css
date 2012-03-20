@@ -1,0 +1,43 @@
+/* Palette color codes
+
+primary-1: #999966
+primary-3: #999933
+primary-4: #FFFFCC
+primary-5: #FFFFFF
+
+secondary-a-1: #996666
+secondary-a-3: #993333
+secondary-a-4: #FFCCCC
+
+secondary-b-1: #336666
+secondary-b-3: #333366
+secondary-b-4: #CCCCFF
+
+*/
+
+body {
+	/*background: #999933;*/
+	background: white url("bg-gradient.png") repeat-x scroll top left;
+}
+
+#menu {
+/*	background: #999966;*/
+}
+
+#menu a {
+	background: #FFFFCC;
+	color: #996666;
+}
+
+#menu a.selected {
+	background: #993333;
+	color: #FFFFCC;
+}
+
+td {
+    border-color: #FFFFCC;
+}
+
+th {
+    background-color: #FFFFCC;
+}
