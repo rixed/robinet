@@ -25,27 +25,25 @@ let debug = false
 
 (* Ports *)
 
-type port = Tcp.port
-let string_of_port = Tcp.string_of_port
-let print_port = Tcp.print_port
+module Port = Tcp.MakePort (struct let srv = "udp" end)
 
 (* UDP datagrams *)
 
 module Pdu =
 struct
     type t = {
-        src_port : int   ; dst_port : int ;
+        src_port : Port.t ; dst_port : Port.t ;
         length   : int   ; checksum : int option ;
         payload  : bitstring }
 
-    let make ?(src_port=1024) ?(dst_port=80)
+    let make ?(src_port = Port.of_int 1024) ?(dst_port = Port.of_int 80)
              ?(length) ?checksum payload =
         let length = may_default length (fun () -> bytelength payload + 8) in
         { src_port ; dst_port ; length   ; checksum ; payload }
 
     let pack t =
         concat [ (BITSTRING {
-            t.src_port : 16 ; t.dst_port : 16 ;
+            (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
             t.length   : 16 ; (Option.default 0 t.checksum) : 16 }) ;
             t.payload ]
 
@@ -53,7 +51,7 @@ struct
         | { src_port : 16 ; dst_port : 16 ;
             length   : 16 ; checksum : 16 ;
             payload  : (length-8) * 8 : bitstring } when length >= 8 ->
-            Some { src_port = src_port ; dst_port = dst_port ;
+            Some { src_port = Port.of_int src_port ; dst_port = Port.of_int dst_port ;
                    length   = length   ; checksum = Some checksum ;
                    payload  = payload }
         | { _ } -> err "Not UDP"
@@ -64,14 +62,14 @@ end
 module TRX =
 struct
     type t = {
-        mutable src : port ; mutable dst : port option ;
+        mutable src : Port.t ; mutable dst : Port.t option ;
         mutable emit : payload -> unit ;
         mutable recv : payload -> unit }
 
     let tx t bits =
         let src_port = t.src and dst_port = Option.get t.dst in
         let udp = Pdu.make ~src_port ~dst_port bits in
-        if debug then Printf.printf "Udp: Emitting a packet from %d to %d\n%!" src_port dst_port ;
+        if debug then Printf.printf "Udp: Emitting a packet from %s to %s\n%!" (Port.to_string src_port) (Port.to_string dst_port) ;
         t.emit (Pdu.pack udp)
 
     (* TODO: check checksum *)

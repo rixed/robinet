@@ -45,7 +45,7 @@ type t = { host : Host.host_trx ;
            (* We maintain a pool of unused cnx to some destination/port, so that
               we can reuse them if necessary. These are closed after some time,
               and we do not keep more than a given number (10, specifically) *)
-           mutable vacant_cnxs : (Host.addr * int, vacant_cnx) Hashtbl.t ;
+           mutable vacant_cnxs : (Host.addr * Tcp.Port.t, vacant_cnx) Hashtbl.t ;
            max_vacant_cnx : int ; max_idle_cnx : float }
 
 let make ?(user_agent="RobiNet") ?(max_vacant_cnx=10) ?(max_idle_cnx=15.) host =
@@ -264,7 +264,8 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url =
         return (err (Printf.sprintf "Browser: bad scheme: %s" (Url.to_string url)))
     ) else (
         let get_start = Metric.Timed.start message_get in
-        let addr, port = Host.Name url.Url.net_loc, 80 in
+        let addr = Host.Name url.Url.net_loc
+        and port = Tcp.Port.of_int 80 in
         Lwt.catch (fun () ->
             lwt msg, tcp = get_msg addr port in
             Metric.Timed.stop message_get get_start (Url.to_string url) ;

@@ -30,8 +30,8 @@ let run port =
     let resources =
         [ Str.regexp "/static/\\([^/]+/[^/]+\\)/\\(.*\\)$", Opache.static_file_server "./" ;
           Str.regexp ".*", Opache.it_works ] in
-    Opache.serve host port (Opache.multiplexer resources) ;
-    Myadmin.make host (port+1) ;
+    Opache.serve host (Tcp.Port.of_int port) (Opache.multiplexer resources) ;
+    Myadmin.make host (Tcp.Port.of_int (port+1)) ;
     (* Run everything *)
     Lwt.join [ Clock.run () ]
 

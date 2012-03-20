@@ -27,6 +27,9 @@ let colorize =
         Format.print_close_tag = uncolorize
     } ;;
 
+#install_printer Tcp.Port.print;;
+#install_printer Udp.Port.print;;
+
 (*#install_printer Eth.print_addr;;
  #install_printer Ip.print_addr;;
  #install_printer Ip.print_proto;;

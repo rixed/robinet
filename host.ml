@@ -33,11 +33,11 @@ type addr = IPv4 of Ip.addr | Name of string
 type host_trx = {
     name          : string ;
     logger        : Log.logger ;
-    tcp_connect   : addr -> ?src_port:int -> int -> Tcp.TRX.tcp_trx Lwt.t ;
-    udp_connect   : addr -> ?src_port:int -> int -> (Tools.trx -> Tools.payload -> unit) -> trx Lwt.t ;
+    tcp_connect   : addr -> ?src_port:Tcp.Port.t -> Tcp.Port.t -> Tcp.TRX.tcp_trx Lwt.t ;
+    udp_connect   : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> (Tools.trx -> Tools.payload -> unit) -> trx Lwt.t ;
     gethostbyname : string -> Ip.addr list Lwt.t ;
-    tcp_server    : int -> (Tcp.TRX.tcp_trx -> unit) -> unit ;
-    udp_server    : int -> (trx -> unit ) -> unit ;
+    tcp_server    : Tcp.Port.t -> (Tcp.TRX.tcp_trx -> unit) -> unit ;
+    udp_server    : Udp.Port.t -> (trx -> unit ) -> unit ;
     signal_err    : string -> unit ;
     set_emit      : (payload -> unit) -> unit ;
     rx            : payload -> unit }
@@ -51,16 +51,16 @@ type socks = { ip : trx ;
                   a "close" for UDP (since once closed all incoming packets must be rejected,
                   contrary to TCP where we still want to handle incoming FIN).
                   *)
-               tcps : (Tcp.port * Tcp.port (* local, remote *), Tcp.TRX.tcp_trx) Hashtbl.t ;
-               udps : (Udp.port * Udp.port (* local, remote *), trx) Hashtbl.t }
+               tcps : (Tcp.Port.t * Tcp.Port.t (* local, remote *), Tcp.TRX.tcp_trx) Hashtbl.t ;
+               udps : (Udp.Port.t * Udp.Port.t (* local, remote *), trx) Hashtbl.t }
 
 type t = { mutable host_trx : host_trx ;
            mutable my_ip : Ip.addr ;
            eth : Eth.TRX.eth_trx ;
            socks : (Ip.addr, socks) Hashtbl.t ;
            (* the listening servers *)
-           tcp_servers : (Tcp.port, (Tcp.TRX.tcp_trx -> unit)) Hashtbl.t ;
-           udp_servers : (Udp.port, (trx -> unit)) Hashtbl.t ;
+           tcp_servers : (Tcp.Port.t, (Tcp.TRX.tcp_trx -> unit)) Hashtbl.t ;
+           udp_servers : (Udp.Port.t, (trx -> unit)) Hashtbl.t ;
            (* the resolver *)
            search_sfx : string option ;
            nameserver : Ip.addr option ;
@@ -97,7 +97,7 @@ let sock_rx t proto socks bits =
                         ) else raise No_socket) in
                 trx.Tcp.TRX.trx.Tools.rx bits (* will reorder fragments and transmit the messages up to its emit function *)
             with No_socket ->
-                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for TCP packet on port %d" tcp.Tcp.Pdu.dst_port))) ;
+                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for TCP packet on port %s" (Tcp.Port.to_string tcp.Tcp.Pdu.dst_port)))) ;
                 Tcp.Pdu.make_reset_of tcp |> Tcp.Pdu.pack |> socks.ip.tx
     ) else if proto = Ip.proto_udp then (match Udp.Pdu.unpack bits with
         | None -> ()
@@ -114,7 +114,7 @@ let sock_rx t proto socks bits =
                         trx) in
                 trx.Tools.rx bits
             with No_socket ->
-                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for UDP packet on port %d" udp.Udp.Pdu.dst_port))) ;
+                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for UDP packet on port %s" (Udp.Port.to_string udp.Udp.Pdu.dst_port)))) ;
                 (* TODO: send ICMP error *)
     ) else signal_err t "Sock is neither TCP nor UDP"
 
@@ -179,7 +179,7 @@ let rec resolver t =
     | Some trx, _    -> Lwt.return trx
     | None, None     -> Lwt.fail CannotResolveName
     | None, Some srv ->
-        lwt resolv_trx = udp_connect t (IPv4 srv) 53 ~src_port:53 dns_recv in
+        lwt resolv_trx = udp_connect t (IPv4 srv) (Udp.Port.of_int 53) ~src_port:(Udp.Port.of_int 53) dns_recv in
         t.resolv_trx <- Some resolv_trx ;
         Lwt.return resolv_trx
 
@@ -238,11 +238,11 @@ and tcp_connect t dst ?src_port dst_port =
         lwt src_port = match src_port with
             | None ->
                 let start = Random.int (0x10000 - 1024) + 1024 in
-                let rec aux src_port =
-                    if find_alive_tcp socks.tcps (src_port, dst_port) = None then (
-                        Lwt.return src_port
+                let rec aux pnum =
+                    if find_alive_tcp socks.tcps (Tcp.Port.of_int pnum, dst_port) = None then (
+                        Lwt.return (Tcp.Port.of_int pnum)
                     ) else (
-                        let next = src_port + 1 in
+                        let next = pnum + 1 in
                         let next = if next < 0x10000 then next else 1024 in
                         ensure (next <> start) "Host: No more ports available?" ;
                         aux next
@@ -286,7 +286,7 @@ and udp_connect t dst ?src_port dst_port client_f =
             trx.Tools.set_emit t.eth.Eth.TRX.trx.tx ;
             trx.set_recv (sock_rx t Ip.proto_udp socks) ;
             socks) in
-        let src_port = may_default src_port (fun () -> Random.int 0x10000) in
+        let src_port = may_default src_port (fun () -> Udp.Port.of_int (Random.int 0x10000)) in
         let key = src_port, dst_port in
         if Hashtbl.mem socks.udps key then (
             Metric.Atomic.fire udp_cnxs_err ;
@@ -377,17 +377,17 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
             ) else (match Udp.Pdu.unpack ip.Ip.Pdu.payload with
                 | None -> ()
                 | Some udp ->
-                    if udp.Udp.Pdu.src_port <> 67 || udp.Udp.Pdu.dst_port <> 68 then (
-                        Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Ignoring UDP packet from %s:%d to %s:%d while waiting for DHCP offer"
-                            (Ip.string_of_addr ip.Ip.Pdu.src) udp.Udp.Pdu.src_port
-                            (Ip.string_of_addr ip.Ip.Pdu.dst) udp.Udp.Pdu.dst_port)))
+                    if udp.Udp.Pdu.src_port <> (Udp.Port.of_int 67) || udp.Udp.Pdu.dst_port <> (Udp.Port.of_int 68) then (
+                        Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Ignoring UDP packet from %s:%s to %s:%s while waiting for DHCP offer"
+                            (Ip.string_of_addr ip.Ip.Pdu.src) (Udp.Port.to_string udp.Udp.Pdu.src_port)
+                            (Ip.string_of_addr ip.Ip.Pdu.dst) (Udp.Port.to_string udp.Udp.Pdu.dst_port))))
                     ) else (match Dhcp.Pdu.unpack udp.Udp.Pdu.payload with
                         | None -> ()
                         | Some ({ Dhcp.Pdu.msg_type = Some op ; _ } as dhcp) when op = Dhcp.offer ->
                             Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Got DHCP OFFER from %s" (Ip.string_of_addr ip.Ip.Pdu.src)))) ;
                             (* TODO: check the Xid? *)
                             let pdu = Dhcp.Pdu.make_request ~mac:my_mac ~xid:dhcp.Dhcp.Pdu.xid ~name dhcp.Dhcp.Pdu.yiaddr dhcp.Dhcp.Pdu.server_id in
-                            let pdu = Udp.Pdu.make ~src_port:68 ~dst_port:67 (Dhcp.Pdu.pack pdu) in
+                            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.of_int 68) ~dst_port:(Udp.Port.of_int 67) (Dhcp.Pdu.pack pdu) in
                             let pdu = Ip.Pdu.make Ip.proto_udp Ip.addr_zero Ip.addr_broadcast (Udp.Pdu.pack pdu) in
                             t.eth.Eth.TRX.trx.Tools.tx (Ip.Pdu.pack pdu)
                         | Some ({ Dhcp.Pdu.msg_type = Some op ; _ } as dhcp) when op = Dhcp.ack ->
@@ -401,7 +401,7 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
         if t.my_ip = Ip.addr_zero then (
             Log.(log t.host_trx.logger Info (lazy "Sending DHCP DISCOVER")) ;
             let pdu = Dhcp.Pdu.make_discover ~mac:my_mac ~name () in
-            let pdu = Udp.Pdu.make ~src_port:68 ~dst_port:67 (Dhcp.Pdu.pack pdu) in
+            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.of_int 68) ~dst_port:(Udp.Port.of_int 67) (Dhcp.Pdu.pack pdu) in
             let pdu = Ip.Pdu.make Ip.proto_udp Ip.addr_zero Ip.addr_broadcast (Udp.Pdu.pack pdu) in
             t.eth.Eth.TRX.trx.Tools.tx (Ip.Pdu.pack pdu) ;
             Clock.delay (Clock.sec (5.+.(Random.float 3.))) send_discover ()

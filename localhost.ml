@@ -121,14 +121,14 @@ let gethostbyname name =
         List.of_enum |>
         Lwt.return
 
-let tcp_connect dst ?src_port dst_port =
+let tcp_connect dst ?src_port (dst_port : Tcp.Port.t) =
     let connect_tcp_ inet_addr =
         Log.(log logger Debug (lazy (Printf.sprintf "Connecting to %s" (Unix.string_of_inet_addr inet_addr)))) ;
         let sock = Lwt_unix.socket Lwt_unix.PF_INET Lwt_unix.SOCK_STREAM 0 in
-        Option.may (fun port ->
-            Lwt_unix.bind sock (Lwt_unix.ADDR_INET (Unix.inet_addr_any, port)))
+        Option.may (fun (port : Tcp.Port.t) ->
+            Lwt_unix.bind sock (Lwt_unix.ADDR_INET (Unix.inet_addr_any, (port :> int))))
             src_port ;
-        lwt () = Lwt_unix.connect sock (Lwt_unix.ADDR_INET (inet_addr, dst_port)) in
+        lwt () = Lwt_unix.connect sock (Lwt_unix.ADDR_INET (inet_addr, (dst_port :> int))) in
         Lwt.return (tcp_trx_of_socket sock)
     in
     match dst with
@@ -145,10 +145,10 @@ let tcp_connect dst ?src_port dst_port =
             connect_tcp_ dst_ips.(0)
 
 let tcp_server src_port server_f =
-    Log.(log logger Debug (lazy (Printf.sprintf "Establishing a server on port %d" src_port))) ;
+    Log.(log logger Debug (lazy (Printf.sprintf "Establishing a server on port %s" (Tcp.Port.to_string src_port)))) ;
     let sock = Lwt_unix.socket Lwt_unix.PF_INET Lwt_unix.SOCK_STREAM 0 in
     Lwt_unix.setsockopt sock Lwt_unix.SO_REUSEADDR true ;
-    Lwt_unix.bind sock (Lwt_unix.ADDR_INET (Unix.inet_addr_any, src_port)) ;
+    Lwt_unix.bind sock (Lwt_unix.ADDR_INET (Unix.inet_addr_any, (src_port :> int))) ;
     Lwt_unix.listen sock 5 ;
     let rec sock_server () =
         lwt fd, _ = Lwt_unix.accept sock in

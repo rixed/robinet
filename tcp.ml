@@ -25,23 +25,34 @@ let debug = false
 
 (* Ports *)
 
-type port = int
+let show_ports_by_name = ref true
+module MakePort (Serv : sig val srv : string end) : sig
+    type t = private int
+    val to_string : t -> string
+    val print : Format.formatter -> t -> unit
+    val of_int : int -> t
+end =
+struct
+    type t = int
 
-let string_of_port (p : port) = match p with
-    | 21 -> "FTP"
-    | 22 -> "SSH"
-    | 80 -> "HTTP"
-    |  x -> Printf.sprintf "Port(%d)" x
+    let to_string p =
+        if !show_ports_by_name then (
+            try (Unix.getservbyport p Serv.srv).Unix.s_name
+            with Not_found -> string_of_int p
+        ) else string_of_int p
 
-let print_port fmt (p : port) =
-    Format.fprintf fmt "@{<port>%s@}" (string_of_port p)
+    let print fmt p = Format.fprintf fmt "@{<port>%s@}" (to_string p)
+    let of_int p = assert (p < 0x10000) ; p
+end
+
+module Port = MakePort (struct let srv = "tcp" end)
 
 (* TCP segments *)
 
 module Pdu =
 struct
     type t = {
-        src_port : int   ; dst_port : int ;
+        src_port : Port.t  ; dst_port : Port.t ;
         seq_num  : int32 ; ack_num  : int32 ;
         hdr_len  : int   ; urg      : bool ;
         ack      : bool  ; psh      : bool ;
@@ -51,7 +62,7 @@ struct
         urg_ptr  : int   ; options  : bitstring ;
         payload  : bitstring }
 
-    let make ?(src_port=1024) ?(dst_port=80)
+    let make ?(src_port = Port.of_int 1024) ?(dst_port = Port.of_int 80)
              ?(seq_num=0l) ?(ack_num=0l)
              ?(urg=false) ?(ack=false) ?(psh=false) ?(rst=false) ?(syn=false) ?(fin=false)
              ?(win_size=1024) ?checksum ?(urg_ptr=0)
@@ -72,7 +83,7 @@ struct
 
     let pack t =
         concat [ (BITSTRING {
-            t.src_port : 16 ; t.dst_port : 16 ;
+            (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
             t.seq_num  : 32 ; t.ack_num  : 32 ;
             t.hdr_len lsr 2 : 4 ; 0 : 6 ;
             t.urg : 1 ; t.ack : 1 ; t.psh : 1 ; t.rst : 1 ; t.syn : 1 ; t.fin : 1 ;
@@ -88,7 +99,7 @@ struct
             win_size : 16 ; checksum : 16 ; urg_ptr  : 16 ;
             options : ((hdr_len lsl 2) - 20) * 8 : bitstring ;
             payload  : -1 : bitstring } ->
-        Some { src_port = src_port ; dst_port = dst_port ;
+        Some { src_port = Port.of_int src_port ; dst_port = Port.of_int dst_port ;
                seq_num  = seq_num  ; ack_num  = ack_num ;
                hdr_len  = hdr_len ;
                urg = urg ; ack = ack ; psh = psh ; rst = rst ; syn = syn ; fin = fin ;
@@ -117,8 +128,8 @@ struct
           close : unit -> unit ; (* close the trx *)
           is_closed : unit -> bool }
     type t = {
-        mutable src : port ;
-        mutable dst : port ;
+        mutable src : Port.t ;
+        mutable dst : Port.t ;
         mutable emit : payload -> unit ;
         mutable recv : payload -> unit ;
         mtu : int ;
@@ -154,7 +165,7 @@ struct
         if ack || psh || rst || syn || fin || bitstring_length bits > 0 then (
             let tcp = Pdu.make ~src_port ~dst_port ~seq_num ?ack_num
                                ~ack ~psh ~rst ~syn ~fin bits in
-            if debug then Printf.printf "Tcp: Emitting a packet from %d to %d, seq %ld, length %d, content '%s'\n%!" src_port dst_port seq_num (bytelength bits) (string_of_bitstring bits) ;
+            if debug then Printf.printf "Tcp: Emitting a packet from %s to %s, seq %ld, length %d, content '%s'\n%!" (Port.to_string src_port) (Port.to_string dst_port) seq_num (bytelength bits) (string_of_bitstring bits) ;
             t.emit (Pdu.pack tcp) ;
             if ack then t.rcvd_acked <- t.rcvd_pld ;
             if bitstring_length bits > 0 then

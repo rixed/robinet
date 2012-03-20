@@ -49,7 +49,7 @@ let run () =
     (* Save everything into sock_test.pcap *)
     Hub.Repeater.set_emit 2 hub (Pcap.save "sock_test.pcap") ;
     (* Start a server on h1 *)
-    h1.Host.tcp_server 7 (fun tcp -> tcp.Tcp.TRX.trx.set_recv (server_f h1 tcp)) ;
+    h1.Host.tcp_server (Tcp.Port.of_int 7) (fun tcp -> tcp.Tcp.TRX.trx.set_recv (server_f h1 tcp)) ;
     (* Client connects and write a msg *)
     let client_f tcp bits =
         Printf.printf "Client received '%s'\n" (string_of_bitstring bits) ;
@@ -60,7 +60,7 @@ let run () =
             assert false
         )
     in
-    lwt tcp = h2.Host.tcp_connect (Host.IPv4 (Ip.addr_of_string "192.168.0.1")) 7 in
+    lwt tcp = h2.Host.tcp_connect (Host.IPv4 (Ip.addr_of_string "192.168.0.1")) (Tcp.Port.of_int 7) in
     tcp.Tcp.TRX.trx.set_recv (client_f tcp) ;
     tcp.Tcp.TRX.trx.tx (bitstring_of_string "Hello world!") ;
     Lwt.return ()

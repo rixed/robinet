@@ -50,7 +50,7 @@ let rec stripped url =
 
 (* Main entry point: build an HTTP TRX and pass incoming messages to a user supplied function *)
 let serve host port f =
-    let logger = Log.(make (Printf.sprintf "%s/Httpd:%d" host.Host.logger.name port) 50) in
+    let logger = Log.(make (Printf.sprintf "%s/Httpd:%s" host.Host.logger.name (Tcp.Port.to_string port)) 50) in
     let count_queries_per_url = Hashtbl.create 11 in
     let count_query cmd url =
         let key = cmd^"/"^(stripped url) in

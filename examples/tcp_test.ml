@@ -30,7 +30,7 @@ let perform_get my_ip my_mac peer_ip ?nameserver ?gw ifname url =
     let host  = Host.make_static "tester" ?nameserver ?gw my_mac my_ip in
     host.Host.set_emit (Pcap.inject_pdu iface) ;
     let run () =
-        lwt tcp = host.Host.tcp_connect (Host.IPv4 peer_ip) 80 in
+        lwt tcp = host.Host.tcp_connect (Host.IPv4 peer_ip) (Tcp.Port.of_int 80) in
         tcp.Tcp.TRX.trx.set_recv (fun bits ->
             if bitstring_is_empty bits then tcp.Tcp.TRX.close ()) ;
         (* Send the get *)
