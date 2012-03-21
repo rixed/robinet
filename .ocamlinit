@@ -17,10 +17,10 @@ let colorize =
     Format.set_mark_tags false ;
     let def_funs = Format.get_formatter_tag_functions () in
     let colorize = function
-        | "addr" | "time" | "proto" | "port" | "code" -> Format.printf "\027[1;35m"
+        | "addr" | "time" | "proto" | "port" | "seqnum" | "code" -> Format.printf "\027[1;35m"
         | x -> def_funs.Format.print_open_tag x
     and uncolorize = function
-        | "addr" | "time" | "proto" | "port" | "code" -> Format.printf "\027[0m"
+        | "addr" | "time" | "proto" | "port" | "seqnum" | "code" -> Format.printf "\027[0m"
         | x -> def_funs.Format.print_close_tag x in
     Format.set_formatter_tag_functions { def_funs with
         Format.print_open_tag = colorize ;
@@ -28,7 +28,9 @@ let colorize =
     } ;;
 
 #install_printer Tcp.Port.print;;
+#install_printer Tcp.SeqNum.print;;
 #install_printer Udp.Port.print;;
+#install_printer Eth.Proto.print;;
 
 (*#install_printer Eth.print_addr;;
  #install_printer Ip.print_addr;;

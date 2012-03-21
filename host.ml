@@ -179,7 +179,7 @@ let rec resolver t =
     | Some trx, _    -> Lwt.return trx
     | None, None     -> Lwt.fail CannotResolveName
     | None, Some srv ->
-        lwt resolv_trx = udp_connect t (IPv4 srv) (Udp.Port.of_int 53) ~src_port:(Udp.Port.of_int 53) dns_recv in
+        lwt resolv_trx = udp_connect t (IPv4 srv) (Udp.Port.o 53) ~src_port:(Udp.Port.o 53) dns_recv in
         t.resolv_trx <- Some resolv_trx ;
         Lwt.return resolv_trx
 
@@ -239,8 +239,8 @@ and tcp_connect t dst ?src_port dst_port =
             | None ->
                 let start = Random.int (0x10000 - 1024) + 1024 in
                 let rec aux pnum =
-                    if find_alive_tcp socks.tcps (Tcp.Port.of_int pnum, dst_port) = None then (
-                        Lwt.return (Tcp.Port.of_int pnum)
+                    if find_alive_tcp socks.tcps (Tcp.Port.o pnum, dst_port) = None then (
+                        Lwt.return (Tcp.Port.o pnum)
                     ) else (
                         let next = pnum + 1 in
                         let next = if next < 0x10000 then next else 1024 in
@@ -286,7 +286,7 @@ and udp_connect t dst ?src_port dst_port client_f =
             trx.Tools.set_emit t.eth.Eth.TRX.trx.tx ;
             trx.set_recv (sock_rx t Ip.proto_udp socks) ;
             socks) in
-        let src_port = may_default src_port (fun () -> Udp.Port.of_int (Random.int 0x10000)) in
+        let src_port = may_default src_port (fun () -> Udp.Port.o (Random.int 0x10000)) in
         let key = src_port, dst_port in
         if Hashtbl.mem socks.udps key then (
             Metric.Atomic.fire udp_cnxs_err ;
@@ -377,7 +377,7 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
             ) else (match Udp.Pdu.unpack ip.Ip.Pdu.payload with
                 | None -> ()
                 | Some udp ->
-                    if udp.Udp.Pdu.src_port <> (Udp.Port.of_int 67) || udp.Udp.Pdu.dst_port <> (Udp.Port.of_int 68) then (
+                    if udp.Udp.Pdu.src_port <> (Udp.Port.o 67) || udp.Udp.Pdu.dst_port <> (Udp.Port.o 68) then (
                         Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Ignoring UDP packet from %s:%s to %s:%s while waiting for DHCP offer"
                             (Ip.string_of_addr ip.Ip.Pdu.src) (Udp.Port.to_string udp.Udp.Pdu.src_port)
                             (Ip.string_of_addr ip.Ip.Pdu.dst) (Udp.Port.to_string udp.Udp.Pdu.dst_port))))
@@ -387,7 +387,7 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
                             Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Got DHCP OFFER from %s" (Ip.string_of_addr ip.Ip.Pdu.src)))) ;
                             (* TODO: check the Xid? *)
                             let pdu = Dhcp.Pdu.make_request ~mac:my_mac ~xid:dhcp.Dhcp.Pdu.xid ~name dhcp.Dhcp.Pdu.yiaddr dhcp.Dhcp.Pdu.server_id in
-                            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.of_int 68) ~dst_port:(Udp.Port.of_int 67) (Dhcp.Pdu.pack pdu) in
+                            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
                             let pdu = Ip.Pdu.make Ip.proto_udp Ip.addr_zero Ip.addr_broadcast (Udp.Pdu.pack pdu) in
                             t.eth.Eth.TRX.trx.Tools.tx (Ip.Pdu.pack pdu)
                         | Some ({ Dhcp.Pdu.msg_type = Some op ; _ } as dhcp) when op = Dhcp.ack ->
@@ -401,7 +401,7 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
         if t.my_ip = Ip.addr_zero then (
             Log.(log t.host_trx.logger Info (lazy "Sending DHCP DISCOVER")) ;
             let pdu = Dhcp.Pdu.make_discover ~mac:my_mac ~name () in
-            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.of_int 68) ~dst_port:(Udp.Port.of_int 67) (Dhcp.Pdu.pack pdu) in
+            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
             let pdu = Ip.Pdu.make Ip.proto_udp Ip.addr_zero Ip.addr_broadcast (Udp.Pdu.pack pdu) in
             t.eth.Eth.TRX.trx.Tools.tx (Ip.Pdu.pack pdu) ;
             Clock.delay (Clock.sec (5.+.(Random.float 3.))) send_discover ()

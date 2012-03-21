@@ -98,7 +98,7 @@ let main =
                 "-dst-ip",    Arg.String (fun str -> dst := Some (Host.Name str)),
                                                           "Other end IP address (will wait for connections if not set)" ;
                 "-http-port", Arg.Set_int http_port,      "Destination port (optional, default: 80)" ;
-                "-src-port",  Arg.Int (fun i -> src_port := Some (Tcp.Port.of_int i)),
+                "-src-port",  Arg.Int (fun i -> src_port := Some (Tcp.Port.o i)),
                                                           "Source port (optional, default: random)" ]
               (fun _ -> raise (Arg.Bad "Unknown parameter"))
               "Tunnel traffic into HTTP" ;
@@ -108,7 +108,7 @@ let main =
                    (Ip.addr_of_string  !tun_ip)
                    (Eth.addr_of_string !tun_mac)
                    !gw  !search_sfx !nameserver
-                   !dst (Tcp.Port.of_int !http_port)  !src_port)
+                   !dst (Tcp.Port.o !http_port)  !src_port)
             (fun exn ->
                 Printf.printf "Tunnel: We got an exception : %a\n%!" Printexc.print exn ;
                 Lwt.return ())

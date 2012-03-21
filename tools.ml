@@ -126,6 +126,30 @@ let hash_merge h h' =
 let file_content f =
     File.with_file_in f IO.read_all
 
+(* A Module with a private int type and custom printer, used
+   to constomize printing of various protocolar fields such as
+   TCP ports and so on. A little convoluted but we gain:
+   - the toplevel don't mix TCP ports with ETH protocol fields
+     and can display them differently;
+   - the programmer can't confuse the two either or will be told
+     by the compiler. *)
+module MakePrivate (Inner : sig
+    type t
+    val to_string : t -> string
+    val is_valid : t -> bool
+    val repl_tag : string
+end) : sig
+    type t = private Inner.t
+    val to_string : t -> string
+    val print : Format.formatter -> t -> unit
+    val o : Inner.t -> t
+end = struct
+    type t = Inner.t
+    let to_string = Inner.to_string
+    let print fmt t = Format.fprintf fmt "@{<%s>%s@}" Inner.repl_tag (to_string t)
+    let o t = assert (Inner.is_valid t) ; t
+end
+
 type trx = { tx : payload -> unit ; (* transmit this payload *)
              rx : payload -> unit ; (* receive this payload *)
              set_emit : (payload -> unit) -> unit ;

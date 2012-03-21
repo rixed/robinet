@@ -265,7 +265,7 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url =
     ) else (
         let get_start = Metric.Timed.start message_get in
         let addr = Host.Name url.Url.net_loc
-        and port = Tcp.Port.of_int 80 in
+        and port = Tcp.Port.o 80 in
         Lwt.catch (fun () ->
             lwt msg, tcp = get_msg addr port in
             Metric.Timed.stop message_get get_start (Url.to_string url) ;

@@ -23,24 +23,24 @@ open Tools
 
 let debug = false
 
-(* Protocols *)
+(* Private Types *)
 
-type proto = int
+module Proto = MakePrivate(struct
+    type t = int
+    let to_string = function
+        | 0x0800 -> "IP"
+        | 0x86DD -> "IPv6"
+        | 0x0806 -> "ARP"
+        | 0x8100 -> "Eth8021q"
+        |      x -> Printf.sprintf "Protocol(%X)" x
+    let is_valid x = x < 0x10000
+    let repl_tag = "proto"
+end)
 
-let proto_ip4   : proto = 0x0800
-let proto_ip6   : proto = 0x86DD
-let proto_arp   : proto = 0x0806
-let proto_8021q : proto = 0x8100
-
-let string_of_proto (p : proto) = match p with
-    | 0x0800 -> "IP"
-    | 0x86DD -> "IPv6"
-    | 0x0806 -> "ARP"
-    | 0x8100 -> "Eth8021q"
-    |      x -> Printf.sprintf "Protocol(%X)" x
-
-let print_proto fmt (p : proto) =
-    Format.fprintf fmt "@{<proto>%s@}" (string_of_proto p)
+let proto_ip4   = Proto.o 0x0800
+let proto_ip6   = Proto.o 0x86DD
+let proto_arp   = Proto.o 0x0806
+let proto_8021q = Proto.o 0x8100
 
 (* Addresses *)
 
@@ -83,25 +83,25 @@ let gw_addr_of_string str =
 module Pdu = struct
     type t = { src : addr ; dst : addr ;
                vlan : int option ;
-               proto : int ;
+               proto : Proto.t ;
                payload : bitstring }
 
     let make ?vlan proto src dst payload =
         { src ; dst ; vlan ; proto ; payload }
 
     let pack t =
-        (* TODO: pad into minimal size? *)
+        (* TODO: pad into minimal (64bytes) size? *)
         concat [ (match t.vlan with
             | None -> (BITSTRING {
                         t.dst : 6*8 : bitstring ;
                         t.src : 6*8 : bitstring ;
-                        t.proto : 16 })
+                        (t.proto :> int) : 16 })
             | Some v -> (BITSTRING {
                         t.dst : 6*8 : bitstring ;
                         t.src : 6*8 : bitstring ;
-                        proto_8021q : 16 ;
+                        (proto_8021q :> int) : 16 ;
                         v : 16 ;
-                        t.proto : 16 })) ;
+                        (t.proto :> int) : 16 })) ;
             t.payload ]
 
     let unpack bits = bitmatch bits with (* FIXME: decode 8021q vlans *)
@@ -110,7 +110,7 @@ module Pdu = struct
             proto : 16 ;    (* FIXME: might not be a proto if < 1500 *)
             payload : -1 : bitstring } ->
             Some { src = src ; dst = dst ;
-                   vlan = None ; proto = proto ; payload = payload }
+                   vlan = None ; proto = Proto.o proto ; payload }
         | { _ } ->
             err "Not Eth"
 end
@@ -122,7 +122,8 @@ end
 module TRX =
 struct
     type t =
-        { src : addr ; gw : gw_addr option ; proto : proto ; mtu : int ;
+        { src : addr ; gw : gw_addr option ;
+          proto : Proto.t ; mtu : int ;
           mutable my_addresses : bitstring list ;
           mutable emit : payload -> unit ;
           mutable recv : payload -> unit ;
@@ -137,11 +138,11 @@ struct
 
     let send t proto dst bits =
         let pdu = Pdu.make proto t.src dst bits in
-        if debug then Printf.printf "Eth: Emitting an Eth packet, proto %x, from %s to %s (content '%s')\n%!" proto (string_of_addr t.src) (string_of_addr dst) (string_of_bitstring bits) ;
+        if debug then Printf.printf "Eth: Emitting an Eth packet, proto %s, from %s to %s (content '%s')\n%!" (Proto.to_string proto) (string_of_addr t.src) (string_of_addr dst) (string_of_bitstring bits) ;
         t.emit (Pdu.pack pdu)
 
     let resolve_proto_addr t bits sender_proto_addr target_proto_addr =
-        let request = Arp.Pdu.make_request Arp.hw_type_eth t.proto t.src sender_proto_addr target_proto_addr in
+        let request = Arp.Pdu.make_request Arp.hw_type_eth (t.proto :> int) t.src sender_proto_addr target_proto_addr in
         send t proto_arp addr_broadcast (Arp.Pdu.pack request) ;
         if debug then Printf.printf "Eth: Delaying a msg for '%s'\n%!" (hexstring_of_bitstring target_proto_addr) ;
         BitHash.add t.delayed target_proto_addr bits
@@ -186,7 +187,7 @@ struct
     let rx t bits = (match Pdu.unpack bits with
         | None -> ()
         | Some frame ->
-            if debug then Printf.printf "Eth: Got an eth frame of proto 0x%x for %s\n%!" frame.Pdu.proto (string_of_addr frame.Pdu.dst) ;
+            if debug then Printf.printf "Eth: Got an eth frame of proto %s for %s\n%!" (Proto.to_string frame.Pdu.proto) (string_of_addr frame.Pdu.dst) ;
             if frame.Pdu.proto = t.proto &&
                (addr_eq frame.Pdu.dst t.src || addr_eq frame.Pdu.dst addr_broadcast) then (
                 if debug then Printf.printf "Eth:...for me!\n%!" ;
@@ -200,7 +201,7 @@ struct
                         if debug then Printf.printf "Eth:...regarding an ethernet device!\n%!" ;
                         let sender_hw = addr_of_bitstring arp.Arp.Pdu.sender_hw (* will raise if not of the advertised type *)
                         and merge_flag = ref false in
-                        if arp.Arp.Pdu.proto_type = t.proto then (
+                        if arp.Arp.Pdu.proto_type = (t.proto :> int) then (
                             if debug then Printf.printf "Eth:...transporting same proto than me!\n%!" ;
                             if BitHash.mem t.arp_cache arp.Arp.Pdu.sender_proto then (
                                 if debug then Printf.printf "Eth:...updating entry %s->%s in ARP cache\n%!" (hexstring_of_bitstring arp.Arp.Pdu.sender_proto) (string_of_addr sender_hw) ;
@@ -240,10 +241,9 @@ struct
 
     let make ?(mtu=1500) src ?gw ?(promisc=ignore) proto my_addresses =
         if debug then Printf.printf "Eth: Creating an eth TRX with %d addresses\n%!" (List.length my_addresses) ;
-        let t = { src = src ; gw = gw ; proto = proto ;
+        let t = { src ; gw ; proto ;
                   emit = ignore ; recv = ignore ;
-                  mtu = mtu ; promisc = promisc ;
-                  my_addresses = my_addresses ;
+                  mtu ; promisc ; my_addresses ;
                   arp_cache = BitHash.create 3 ;
                   delayed = BitHash.create 3 } in
         { trx = { tx = tx t ;

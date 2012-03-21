@@ -24,7 +24,7 @@ open Bitstring
 let iface = Pcap.openif "eth0" true "" 1800
 
 let arp_query src_eth src_ip target_ip =
-    let arp = Arp.Pdu.make_request Arp.hw_type_eth Eth.proto_ip4
+    let arp = Arp.Pdu.make_request Arp.hw_type_eth (Eth.proto_ip4 :> int)
                                    (Eth.bitstring_of_addr src_eth)
                                    ( Ip.bitstring_of_addr src_ip)
                                    ( Ip.bitstring_of_addr target_ip) in

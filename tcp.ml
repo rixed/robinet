@@ -23,29 +23,29 @@ open Tools
 
 let debug = false
 
-(* Ports *)
+(* Private Types *)
 
 let show_ports_by_name = ref true
-module MakePort (Serv : sig val srv : string end) : sig
-    type t = private int
-    val to_string : t -> string
-    val print : Format.formatter -> t -> unit
-    val of_int : int -> t
-end =
-struct
-    type t = int
-
-    let to_string p =
-        if !show_ports_by_name then (
-            try (Unix.getservbyport p Serv.srv).Unix.s_name
-            with Not_found -> string_of_int p
-        ) else string_of_int p
-
-    let print fmt p = Format.fprintf fmt "@{<port>%s@}" (to_string p)
-    let of_int p = assert (p < 0x10000) ; p
-end
+module MakePort (Serv : sig val srv : string end) =
+    MakePrivate(struct
+        type t = int
+        let to_string p =
+            if !show_ports_by_name then (
+                try (Unix.getservbyport p Serv.srv).Unix.s_name
+                with Not_found -> string_of_int p
+            ) else string_of_int p
+        let is_valid p = p < 0x10000
+        let repl_tag = "port"
+    end)
 
 module Port = MakePort (struct let srv = "tcp" end)
+
+module SeqNum = MakePrivate(struct
+    type t = int32
+    let to_string t = Printf.sprintf "0x%08lX" t
+    let is_valid _ = true
+    let repl_tag = "seqnum"
+end)
 
 (* TCP segments *)
 
@@ -53,7 +53,7 @@ module Pdu =
 struct
     type t = {
         src_port : Port.t  ; dst_port : Port.t ;
-        seq_num  : int32 ; ack_num  : int32 ;
+        seq_num  : SeqNum.t ; ack_num  : SeqNum.t ;
         hdr_len  : int   ; urg      : bool ;
         ack      : bool  ; psh      : bool ;
         rst      : bool  ; syn      : bool ;
@@ -62,8 +62,8 @@ struct
         urg_ptr  : int   ; options  : bitstring ;
         payload  : bitstring }
 
-    let make ?(src_port = Port.of_int 1024) ?(dst_port = Port.of_int 80)
-             ?(seq_num=0l) ?(ack_num=0l)
+    let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80)
+             ?(seq_num = SeqNum.o 0l) ?(ack_num = SeqNum.o 0l)
              ?(urg=false) ?(ack=false) ?(psh=false) ?(rst=false) ?(syn=false) ?(fin=false)
              ?(win_size=1024) ?checksum ?(urg_ptr=0)
              ?(options=empty_bitstring)
@@ -78,13 +78,13 @@ struct
 
     let make_reset_of pdu =
         make ~src_port:pdu.dst_port ~dst_port:pdu.src_port
-             ~seq_num:pdu.ack_num ~ack_num:(Int32.succ pdu.seq_num)
+             ~seq_num:pdu.ack_num ~ack_num:(SeqNum.o (Int32.succ (pdu.seq_num:>int32)))
              ~ack:true ~rst:true empty_bitstring
 
     let pack t =
         concat [ (BITSTRING {
             (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
-            t.seq_num  : 32 ; t.ack_num  : 32 ;
+            (t.seq_num :> int32)  : 32 ; (t.ack_num :> int32)  : 32 ;
             t.hdr_len lsr 2 : 4 ; 0 : 6 ;
             t.urg : 1 ; t.ack : 1 ; t.psh : 1 ; t.rst : 1 ; t.syn : 1 ; t.fin : 1 ;
             t.win_size : 16 ; (Option.default 0 t.checksum) : 16 ;
@@ -99,12 +99,11 @@ struct
             win_size : 16 ; checksum : 16 ; urg_ptr  : 16 ;
             options : ((hdr_len lsl 2) - 20) * 8 : bitstring ;
             payload  : -1 : bitstring } ->
-        Some { src_port = Port.of_int src_port ; dst_port = Port.of_int dst_port ;
-               seq_num  = seq_num  ; ack_num  = ack_num ;
-               hdr_len  = hdr_len ;
-               urg = urg ; ack = ack ; psh = psh ; rst = rst ; syn = syn ; fin = fin ;
-               win_size = win_size ; checksum = Some checksum ;
-               urg_ptr  = urg_ptr  ; options = options ; payload  = payload }
+        Some { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
+               seq_num  = SeqNum.o seq_num  ; ack_num  = SeqNum.o ack_num ;
+               hdr_len ; urg ; ack ; psh ; rst ; syn ; fin ;
+               win_size ; checksum = Some checksum ;
+               urg_ptr  ; options ; payload }
         | { _ } -> err "Not TCP"
 end
 
@@ -133,8 +132,8 @@ struct
         mutable emit : payload -> unit ;
         mutable recv : payload -> unit ;
         mtu : int ;
-        isn : int32 ; (* initial seq num *)
-        mutable rcvd_isn : int32 option ;
+        isn : SeqNum.t ; (* initial seq num *)
+        mutable rcvd_isn : SeqNum.t option ;
         mutable closed : bool ; (* set whenever the user want to cloe or we received a FIN *)
         mutable sent_fin : bool ;
         mutable sent_pld : int ;    (* what was already send, with syn and fin counting as 1 *)
@@ -152,10 +151,10 @@ struct
 
     let int_of_bool x = if x then 1 else 0
     let (+/) = Int32.add and (-/) = Int32.sub
-    let next_seq_num t = (Int32.of_int t.sent_pld) +/ t.isn
-    let next_ack_num t = 
+    let next_seq_num t = SeqNum.o ((Int32.of_int t.sent_pld) +/ (t.isn :> int32))
+    let next_ack_num t =
         if t.rcvd_pld > 0 then
-            Some ((Int32.of_int t.rcvd_pld) +/ (Option.get t.rcvd_isn))
+            Some (SeqNum.o ((Int32.of_int t.rcvd_pld) +/ ((Option.get t.rcvd_isn) :> int32)))
         else None
 
     let emit_one t ?(psh=false) ?(rst=false) ?(syn=false) ?(fin=false) bits =
@@ -165,7 +164,7 @@ struct
         if ack || psh || rst || syn || fin || bitstring_length bits > 0 then (
             let tcp = Pdu.make ~src_port ~dst_port ~seq_num ?ack_num
                                ~ack ~psh ~rst ~syn ~fin bits in
-            if debug then Printf.printf "Tcp: Emitting a packet from %s to %s, seq %ld, length %d, content '%s'\n%!" (Port.to_string src_port) (Port.to_string dst_port) seq_num (bytelength bits) (string_of_bitstring bits) ;
+            if debug then Printf.printf "Tcp: Emitting a packet from %s to %s, seq %s, length %d, content '%s'\n%!" (Port.to_string src_port) (Port.to_string dst_port) (SeqNum.to_string seq_num) (bytelength bits) (string_of_bitstring bits) ;
             t.emit (Pdu.pack tcp) ;
             if ack then t.rcvd_acked <- t.rcvd_pld ;
             if bitstring_length bits > 0 then
@@ -257,11 +256,11 @@ struct
         )
 
     and inqueue_pkt t tcp =
-        let offset = Int32.to_int (tcp.Pdu.seq_num -/ (Option.get t.rcvd_isn)) in
+        let offset = Int32.to_int ((tcp.Pdu.seq_num :> int32) -/ ((Option.get t.rcvd_isn) :> int32)) in
         if debug then Printf.printf "Tcp: Got a packet with %d bytes, %spush\n%!"
             (bytelength tcp.Pdu.payload) (if tcp.Pdu.psh then "" else "don't ") ;
         if tcp.Pdu.ack then (
-            let acked = Int32.to_int (tcp.Pdu.ack_num -/ t.isn) in
+            let acked = Int32.to_int ((tcp.Pdu.ack_num :> int32) -/ (t.isn :> int32)) in
             if acked > t.sent_acked then (
                 if acked > t.sent_pld then (
                     if debug then Printf.printf "Tcp: Acking %d while we only sent %d bytes\n%!" acked t.sent_pld
@@ -346,7 +345,7 @@ struct
           dst = dst ;
           emit = ignore ; recv = ignore ;
           mtu = mtu ;
-          isn = may_default isn (fun () -> 0l (*Random.int32 0x7FFFFFFFl*)) ;
+          isn = may_default isn (fun () -> SeqNum.o 0l (*Random.int32 0x7FFFFFFFl*)) ;
           rcvd_isn = None ;
           closed = false ; sent_fin = false ;
           sent_pld = 0 ; sent_acked = 0 ; rcvd_pld = 0 ; rcvd_acked = 0 ;
