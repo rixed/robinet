@@ -59,7 +59,7 @@ let addrs_of_string str =
 
 let addr_of_bitstring bits : addr = bitmatch bits with
     | { ip : 32 } -> ip
-    | { _ } -> 0l (* FIXME: wither monadic error or anything... *)
+    | { _ } -> 0l (* FIXME: either monadic error or anything... *)
 
 let bitstring_of_addr (ip : addr) = (BITSTRING { ip : 32 })
 
@@ -68,6 +68,9 @@ let addr_of_string str = List.hd (addrs_of_string str)
 let string_of_addr (ip : addr) = bitmatch (BITSTRING { ip : 32 }) with
       { a : 8 ; b : 8 ; c : 8 ; d : 8 } -> Printf.sprintf "%d.%d.%d.%d" a b c d
     | { _ } -> "Not an IP addr (should not happen)" (* FIXME: either Option.Monad or a non local exit *)
+(*$T string_of_addr
+  string_of_addr (addr_of_string "1.2.3.4") = "1.2.3.4"
+*)
 
 let print_addr fmt (ip : addr) =
     Format.fprintf fmt "@{<addr>%s@}" (string_of_addr ip)
@@ -110,6 +113,7 @@ let random_addrs_of_cidr cidr n =
 (* IP packet *)
 
 module Pdu = struct
+    (*$< Pdu *)
 
     let id_seq = ref 0
     let next_id () = id_seq := (!id_seq + 1) mod 0xffff ; !id_seq
@@ -142,6 +146,9 @@ module Pdu = struct
         let rec wrap s =
             if s < 0x10000 then s else wrap ((s land 0xffff) + (s lsr 16)) in
         (lnot (wrap s)) land 0xffff
+    (*$T sum
+      sum (bitstring_of_string "\x45\x00\x00\xaa\x03\xa6\x00\x00\x40\x06\x00\x00\xc0\xa8\x01\x45\xd1\x55\xe3\x67") = 0xfffd
+    *)
 
     let patch_tcp_checksum t pld = bitmatch pld with
         | { head : 128 : bitstring ;
@@ -210,6 +217,7 @@ module Pdu = struct
             err "Ip: Bad version"
         | { _ } ->
             err "Ip: Not IP"
+    (*$>*)
 end
 
 (* Transceiver *)
@@ -255,9 +263,4 @@ module TRX = struct
           set_recv = (fun f -> t.recv <- f) }
 
 end
-
-let check () =
-    (string_of_addr (addr_of_string "1.2.3.4") = "1.2.3.4") &&
-    (Pdu.sum (bitstring_of_string "\x45\x00\x00\xaa\x03\xa6\x00\x00\x40\x06\x00\x00\xc0\xa8\x01\x45\xd1\x55\xe3\x67") = 0xfffd)
-
 

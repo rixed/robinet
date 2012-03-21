@@ -1,8 +1,10 @@
+# vim:syntax=make
 OCAMLC     = ocamlfind ocamlc -thread
 OCAMLOPT   = ocamlfind ocamlopt -thread
 OCAMLDEP   = ocamlfind ocamldep
 OCAMLDOC   = ocamlfind ocamldoc -keep-code -html -all-params -colorize-code -thread
 OCAMLMKTOP = ocamlfind ocamlmktop -thread -g
+QTEST      = ocamlfind batteries/qtest
 override OCAMLOPTFLAGS += $(INCS) -w Ael -g
 override OCAMLFLAGS    += $(INCS) -w Ael -g
 
@@ -12,7 +14,7 @@ CFLAGS     += -std=c99 -W -Wall -D_GNU_SOURCE
 
 all:
 
-.PHONY: all opt clean clean-spec install uninstall reinstall doc
+.PHONY: all opt clean clean-spec install uninstall reinstall doc test
 
 ifdef PKG_NAME
 OBJECTS  = $(SOURCES:.ml=.cmo)
@@ -32,26 +34,49 @@ reinstall: uninstall install
 endif
 
 # Common rules
-.SUFFIXES: .ml .mli .cmo .cmi .cmx .opt .byte
+.SUFFIXES: .ml .mli .cmo .cmi .cmx .opt .byte .ml_test .cmo_test .cmx_test .byte_test .opt_test
 
 .cmo.byte: $(ARCHIVE)
 	$(OCAMLC)   -o $@ $(SYNTAX) -package "$(REQUIRES)" $(ARCHIVE) -linkpkg $(OCAMLFLAGS) $<
 
 .cmx.opt: $(XARCHIVE)
-	OCAMLPATH=../ $(OCAMLOPT) -o $@ $(SYNTAX) -package "$(REQUIRES)" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
+	$(OCAMLOPT) -o $@ $(SYNTAX) -package "$(REQUIRES)" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
 
 .ml.cmo:
-	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLFLAGS) -c $<
+	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLFLAGS) -c -impl $<
 
 .mli.cmi:
-	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLFLAGS) -c $<
+	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLFLAGS) -c -intf $<
 
 .ml.cmx:
-	$(OCAMLOPT) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) -c $<
+	$(OCAMLOPT) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) -c -impl $<
+
+# Tests with qtest
+
+all_tests.byte: all_tests.cmo $(ARCHIVE)
+	$(OCAMLC)   -o $@ $(SYNTAX) -package "$(REQUIRES) oUnit" quickcheck.cmo runner.cmo $(ARCHIVE) -linkpkg $(OCAMLFLAGS) $<
+
+all_tests.cmo: all_tests.ml $(OBJECTS)
+	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES) oUnit" $(OCAMLFLAGS) -c -impl $<
+
+all_tests.opt: all_tests.cmx $(XARCHIVE)
+	$(OCAMLOPT) -o $@ $(SYNTAX) -package "$(REQUIRES) oUnit" quickcheck.cmx runner.cmx $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
+
+all_tests.cmx: all_tests.ml $(XOBJECTS)
+	$(OCAMLOPT) $(SYNTAX) -package "$(REQUIRES) oUnit" $(OCAMLOPTFLAGS) -c -impl $<
+
+all_tests.ml: $(SOURCES)
+	$(QTEST) --preamble 'open Batteries;; open Bitstring' -o $@ extract $^
+
+test: all_tests.byte all_tests.opt
+	@for t in $^; do \
+		echo "Running $$t" ;\
+		./$$t ;\
+	done
 
 # Clean up
 clean: clean-spec
-	rm -f *.cm[ioxa] *.cmxa *.a *.s *.o *.byte *.opt *.top .depend
+	rm -f *.cm[ioxa] *.cmxa *.a *.s *.o *.byte *.opt *.top .depend all_tests.*
 
 # Dependencies
 .depend:

@@ -35,7 +35,7 @@ SYNTAX=-syntax camlp4o
 
 include $(top_srcdir)make.common
 
-.PHONY: all check examples
+.PHONY: check examples
 
 all: robinet.top examples
 
