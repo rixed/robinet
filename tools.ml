@@ -55,6 +55,14 @@ let hexstring_of_bitstring bs =
     let hexify c = Printf.sprintf "0x%02x" (Char.code c) in
     String.enum s /@ hexify |> List.of_enum |> String.join " "
 
+let show_bits_as_string = ref false
+let print_bitstring fmt bs =
+    Format.fprintf fmt "@{<bits>%s@}"
+        (if !show_bits_as_string then
+            string_of_bitstring bs
+        else
+            hexstring_of_bitstring bs)
+
 let abbrev ?(len=25) str =
     let tot_len = String.length str in
     if len < tot_len then (String.sub str 0 (len-3)) ^ "..."
