@@ -21,7 +21,6 @@
 let _ =
     let ok =
         Opache.check () &&
-        Ip.check () &&
         Tools.check () &&
         Http.check () &&
         Peg.check () &&
