@@ -29,12 +29,26 @@ let std_query = 0
 let inv_query = 1
 let srv_status_request = 2
 
-let qtype_a     = 1
-let qtype_ns    = 2
-let qtype_cname = 5
-let qtype_ptr   = 12
-let qtype_hinfo = 13
-let qtype_mx    = 15
+module QType = MakePrivate(struct
+    type t = int
+    let to_string = function
+        |  1 -> "A"
+        |  2 -> "NS"
+        |  5 -> "CNAME"
+        | 12 -> "PTR"
+        | 13 -> "HINFO"
+        | 15 -> "MX"
+        |  x -> string_of_int x
+    let is_valid t = t < 0x10000
+    let repl_tag = "code"
+end)
+
+let qtype_a     = QType.o 1
+let qtype_ns    = QType.o 2
+let qtype_cname = QType.o 5
+let qtype_ptr   = QType.o 12
+let qtype_hinfo = QType.o 13
+let qtype_mx    = QType.o 15
 
 let qclass_inet = 1
 
@@ -42,8 +56,8 @@ let qclass_inet = 1
 
 module Pdu =
 struct
-    type question = string * int * int
-    type rr = string * int * int * int32 * string
+    type question = string * QType.t * int
+    type rr = string * QType.t * int * int32 * string
     type t = { id : int ; is_query : bool ; opcode : int ;
                is_auth : bool ; truncated : bool ;
                rec_desired : bool ; rec_avlb : bool ;
@@ -94,9 +108,9 @@ struct
             if nb_qs = 0 then Some (qs, rest) else (
                 Option.Monad.bind (unpack_name pkt rest)
                     (fun (name, rest) ->
-                        let qtype = read_n16 pkt rest
+                        let qtype = QType.o (read_n16 pkt rest)
                         and qclass = read_n16 pkt (rest+2) in
-                        if debug then Printf.printf "Dns: Decoded question name '%s', qtype=%d, qclass=%d\n%!" name qtype qclass ;
+                        if debug then Printf.printf "Dns: Decoded question name '%s', qtype=%s, qclass=%d\n%!" name (QType.to_string qtype) qclass ;
                         aux ((name, qtype, qclass) :: qs) (rest+4) (nb_qs - 1))
             ) in
         aux [] rest nb_qs
@@ -109,7 +123,7 @@ struct
                 Option.Monad.bind (unpack_questions pkt rest 1) (function
                     | [ name, qtype, qclass ], rest ->
                         let ttl = read_n32 pkt rest in
-                        if debug then Printf.printf "Dns: Decoded RR %d name '%s', qtype=%d, qclass=%d, ttl=%ld\n%!" nb_rrs name qtype qclass ttl ;
+                        if debug then Printf.printf "Dns: Decoded RR %d name '%s', qtype=%s, qclass=%d, ttl=%ld\n%!" nb_rrs name (QType.to_string qtype) qclass ttl ;
                         let res_data_len = read_n16 pkt (rest+4) in
                         (* FIXME: catch String.sub errors *)
                         let res_data = String.sub pkt (rest+6) res_data_len in
@@ -168,14 +182,14 @@ struct
             )
         )
 
-    let pack_question (name, qtype, qclass) =
+    let pack_question (name, (qtype : QType.t), qclass) =
         let len = String.length name in
         if len = 0 || name.[0] = '.' || name.[len-1] <> '.' then (
             err "Dns: Bad name"
         ) else (
             let str = String.create (len + 1 + 4) in
             Option.Monad.bind (pack_name name 0 str 0) (fun o ->
-                pack_n16 qtype str o ;
+                pack_n16 (qtype :> int) str o ;
                 pack_n16 qclass str (o + 2) ;
                 Some str)
         )
