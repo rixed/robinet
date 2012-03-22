@@ -108,30 +108,44 @@ let save ?(caplen=65535) ?(linktype=dlt_en10mb) fname =
     Gc.finalise (fun _ -> close_out out_chan) f ;
     f
 
-let read tx fname =
-    (* With last_packet_timestamp (or None), schedule a function using the clock to read
-       the next packet from the file. *)
+(* from a pcap file, return an enumerator of (TS * bitstring) *)
+let enum_of fname =
     let in_chan = open_in_bin fname in
-    let rec read_next_pkt last_ts =
-        let pkt_hdr = IO.nread in_chan 16 in
+    ignore (IO.nread in_chan 24) ;
+    let rec read_next_pkt () =
+        let pkt_hdr = try IO.nread in_chan 16
+                      with IO.No_more_input -> raise Enum.No_more_elements in
         bitmatch (bitstring_of_string pkt_hdr) with
         | { sec      : 32 : littleendian ;
             usec     : 32 : littleendian ;
             caplen   : 32 : littleendian ;
-            wire_len : 32 : littleendian ;
-            bits : Int32.to_int caplen * 8 : bitstring } ->
+            wire_len : 32 : littleendian } ->
+            let pkt = try IO.nread in_chan (Int32.to_int caplen)
+                      with IO.No_more_input -> raise Enum.No_more_elements in
             if wire_len > caplen then (
-                Printf.printf "Truncated packet, skipping\n%!" ;
-                read_next_pkt last_ts
+                Printf.printf "Truncated packet, skipping\n%!" ; (* FIXME: use log *)
+                read_next_pkt ()
             ) else (
+                let bits = bitstring_of_string pkt in
                 let ts = Int32.to_float sec +. (Int32.to_float usec) *. 0.000001 in
+                ts, bits
+            )
+        | { _ } -> should_not_happen ()
+    in
+    Enum.from read_next_pkt
+
+let play tx fname =
+    (* With last_packet_timestamp (or None), schedule a function using the clock to read
+       the next packet from the file. *)
+    let packets = enum_of fname in
+    let rec read_next_pkt last_ts =
+        match Enum.get packets with
+            | None -> () (* pcap file is over *)
+            | Some (ts, bits) ->
                 let d = match last_ts with None -> 0. | Some lts -> ts -. lts in
                 Clock.delay d (fun () ->
                     tx bits ;
                     read_next_pkt (Some ts)) ()
-            )
-        | { _ } -> should_not_happen ()
     in
-    ignore (IO.nread in_chan 24) ;
     Clock.delay 0. read_next_pkt None
 
