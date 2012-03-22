@@ -105,10 +105,10 @@ let addr_eq (a : Addr.t) (b : Addr.t) =
 
 (* Gateways can be given either a MAC or an IP address *)
 
-type gw_addr = Mac of Addr.t | IPv4 of Ip.addr
+type gw_addr = Mac of Addr.t | IPv4 of Ip.Addr.t
 let string_of_gw_addr = function
     | Mac mac -> Addr.to_string mac
-    | IPv4 ip -> Ip.string_of_addr ip
+    | IPv4 ip -> Ip.Addr.to_string ip
 
 let gw_addr_of_string str =
     try Mac (addr_of_string str)

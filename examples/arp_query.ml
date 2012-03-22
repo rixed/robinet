@@ -59,7 +59,7 @@ let main =
         and src_ip         =  Ip.addr_of_string !src_ip_str in
         arp_query src_eth src_ip target_ip ;
         let answer = Eth.Addr.o (wait_answer target_ip_bits) in
-        Printf.printf "%s: %s\n" (Ip.string_of_addr target_ip) (Eth.Addr.to_string answer)
+        Printf.printf "%s: %s\n" (Ip.Addr.to_string target_ip) (Eth.Addr.to_string answer)
     in
     Arg.parse [ "-src-ip",  Arg.Set_string src_ip_str,  "IP to use as the query sender" ;
                 "-src-mac", Arg.Set_string src_eth_str, "MAC to use as the query sender" ]

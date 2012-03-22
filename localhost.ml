@@ -133,7 +133,7 @@ let tcp_connect dst ?src_port (dst_port : Tcp.Port.t) =
     in
     match dst with
         | Host.IPv4 dst_ip ->
-            connect_tcp_ (Unix.inet_addr_of_string (Ip.string_of_addr dst_ip))
+            connect_tcp_ (Unix.inet_addr_of_string (Ip.Addr.to_string dst_ip))
         | Host.Name name ->
             lwt dst_ips =
                 lwt h_entry = Lwt_unix.gethostbyname name in

@@ -39,9 +39,9 @@ type switch = { switch_nb_ports : int ;
                 switch_nb_macs : int }
 type host   = { host_gw : Eth.gw_addr ;
                 host_search_sfx : string ;
-                host_nameserver : Ip.addr ;
+                host_nameserver : Ip.Addr.t ;
                 host_mac : Eth.Addr.t ;
-                host_ip : Ip.addr option }
+                host_ip : Ip.Addr.t option }
                 (* Also: net, tap... *)
 type note   = string
 type plug   = HubPort of string * int
@@ -169,10 +169,10 @@ let csv_for_hosts oc t =
                 node_name x y
                 (Eth.string_of_gw_addr h.host_gw)
                 h.host_search_sfx
-                (Ip.string_of_addr h.host_nameserver)
+                (Ip.dotted_string_of_addr h.host_nameserver)
                 (Eth.Addr.to_string h.host_mac)
                 (match h.host_ip with
-                    | Some ip -> Ip.string_of_addr ip
+                    | Some ip -> Ip.dotted_string_of_addr ip
                     | _ -> "")
         | _ -> ())
         t.nodes
@@ -221,10 +221,10 @@ let csv_for_node oc = function
             node_name x y
             (Eth.string_of_gw_addr h.host_gw)
             h.host_search_sfx
-            (Ip.string_of_addr h.host_nameserver)
+            (Ip.dotted_string_of_addr h.host_nameserver)
             (Eth.Addr.to_string h.host_mac)
             (match h.host_ip with
-                | Some ip -> Ip.string_of_addr ip
+                | Some ip -> Ip.dotted_string_of_addr ip
                 | _ -> "")
     | { elmt = Switch s ; pos = x,y ; node_name } ->
         Printf.fprintf oc "switch,%S,%f,%f,%d,%d\n"

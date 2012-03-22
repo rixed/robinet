@@ -34,4 +34,6 @@ let colorize =
 #install_printer Udp.Port.print;;
 #install_printer Eth.Proto.print;;
 #install_printer Eth.Addr.print;;
+#install_printer Ip.Proto.print;;
+#install_printer Ip.Addr.print;;
 

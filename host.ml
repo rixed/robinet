@@ -28,14 +28,14 @@ open Batteries
 open Bitstring
 open Tools
 
-type addr = IPv4 of Ip.addr | Name of string
+type addr = IPv4 of Ip.Addr.t | Name of string
 
 type host_trx = {
     name          : string ;
     logger        : Log.logger ;
     tcp_connect   : addr -> ?src_port:Tcp.Port.t -> Tcp.Port.t -> Tcp.TRX.tcp_trx Lwt.t ;
     udp_connect   : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> (Tools.trx -> Tools.payload -> unit) -> trx Lwt.t ;
-    gethostbyname : string -> Ip.addr list Lwt.t ;
+    gethostbyname : string -> Ip.Addr.t list Lwt.t ;
     tcp_server    : Tcp.Port.t -> (Tcp.TRX.tcp_trx -> unit) -> unit ;
     udp_server    : Udp.Port.t -> (trx -> unit ) -> unit ;
     signal_err    : string -> unit ;
@@ -55,18 +55,18 @@ type socks = { ip : trx ;
                udps : (Udp.Port.t * Udp.Port.t (* local, remote *), trx) Hashtbl.t }
 
 type t = { mutable host_trx : host_trx ;
-           mutable my_ip : Ip.addr ;
+           mutable my_ip : Ip.Addr.t ;
            eth : Eth.TRX.eth_trx ;
-           socks : (Ip.addr, socks) Hashtbl.t ;
+           socks : (Ip.Addr.t, socks) Hashtbl.t ;
            (* the listening servers *)
            tcp_servers : (Tcp.Port.t, (Tcp.TRX.tcp_trx -> unit)) Hashtbl.t ;
            udp_servers : (Udp.Port.t, (trx -> unit)) Hashtbl.t ;
            (* the resolver *)
            search_sfx : string option ;
-           nameserver : Ip.addr option ;
+           nameserver : Ip.Addr.t option ;
            mutable resolv_trx : trx option ;
-           dns_queries : (string, (Ip.addr list Lwt.u * Clock.time option)) Hashtbl.t ;
-           dns_cache   : (string, Ip.addr list) Hashtbl.t }
+           dns_queries : (string, (Ip.Addr.t list Lwt.u * Clock.time option)) Hashtbl.t ;
+           dns_cache   : (string, Ip.Addr.t list) Hashtbl.t }
 
 exception No_socket
 
@@ -133,7 +133,7 @@ exception CannotResolveName
 exception DnsTimeout
 
 let string_of_addr = function
-    | IPv4 ip  -> Ip.string_of_addr ip
+    | IPv4 ip  -> Ip.Addr.to_string ip
     | Name str -> str
 
 let tcp_cnxs_ok  = Metric.Atomic.make "Host/Tcp/Connect/Ok"
@@ -228,7 +228,7 @@ and gethostbyname t name =
 
 and tcp_connect t dst ?src_port dst_port =
     let connect dst_ip =
-        Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Connecting to %s" (Ip.string_of_addr dst_ip)))) ;
+        Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Connecting to %s" (Ip.Addr.to_string dst_ip)))) ;
         let socks = hash_find_or_insert t.socks dst_ip (fun () ->
             let trx = Ip.TRX.make t.my_ip dst_ip Ip.proto_tcp in
             let socks = make_socks trx in
@@ -316,7 +316,7 @@ let ip_recv t bits = (match Ip.Pdu.unpack bits with
     | Some ip ->
         if ip.Ip.Pdu.proto <> Ip.proto_tcp &&
            ip.Ip.Pdu.proto <> Ip.proto_udp then
-            signal_err t (Printf.sprintf "Cannot handle socket for proto %d" ip.Ip.Pdu.proto)
+            signal_err t (Printf.sprintf "Cannot handle socket for proto %s" (Ip.Proto.to_string ip.Ip.Pdu.proto))
         else
             let sock =
                 hash_find_or_insert t.socks ip.Ip.Pdu.src (fun () ->
@@ -356,7 +356,7 @@ let make name ?gw ?search_sfx ?nameserver my_mac =
     t
 
 let set_ip t ip =
-    Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Setting my IP to %s" (Ip.string_of_addr ip)))) ;
+    Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Setting my IP to %s" (Ip.Addr.to_string ip)))) ;
     t.my_ip <- ip ;
     t.eth.Eth.TRX.set_addresses [ Ip.bitstring_of_addr t.my_ip ] ;
     t.eth.Eth.TRX.trx.set_recv (ip_recv t)
@@ -373,25 +373,25 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
         | None -> ()
         | Some ip ->
             if ip.Ip.Pdu.proto <> Ip.proto_udp then (
-                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Ignoring IP packet of proto %d while waiting for DHCP offer" ip.Ip.Pdu.proto)))
+                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Ignoring IP packet of proto %s while waiting for DHCP offer" (Ip.Proto.to_string ip.Ip.Pdu.proto))))
             ) else (match Udp.Pdu.unpack ip.Ip.Pdu.payload with
                 | None -> ()
                 | Some udp ->
                     if udp.Udp.Pdu.src_port <> (Udp.Port.o 67) || udp.Udp.Pdu.dst_port <> (Udp.Port.o 68) then (
                         Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Ignoring UDP packet from %s:%s to %s:%s while waiting for DHCP offer"
-                            (Ip.string_of_addr ip.Ip.Pdu.src) (Udp.Port.to_string udp.Udp.Pdu.src_port)
-                            (Ip.string_of_addr ip.Ip.Pdu.dst) (Udp.Port.to_string udp.Udp.Pdu.dst_port))))
+                            (Ip.Addr.to_string ip.Ip.Pdu.src) (Udp.Port.to_string udp.Udp.Pdu.src_port)
+                            (Ip.Addr.to_string ip.Ip.Pdu.dst) (Udp.Port.to_string udp.Udp.Pdu.dst_port))))
                     ) else (match Dhcp.Pdu.unpack udp.Udp.Pdu.payload with
                         | None -> ()
                         | Some ({ Dhcp.Pdu.msg_type = Some op ; _ } as dhcp) when op = Dhcp.offer ->
-                            Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Got DHCP OFFER from %s" (Ip.string_of_addr ip.Ip.Pdu.src)))) ;
+                            Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Got DHCP OFFER from %s" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
                             (* TODO: check the Xid? *)
                             let pdu = Dhcp.Pdu.make_request ~mac:my_mac ~xid:dhcp.Dhcp.Pdu.xid ~name dhcp.Dhcp.Pdu.yiaddr dhcp.Dhcp.Pdu.server_id in
                             let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
                             let pdu = Ip.Pdu.make Ip.proto_udp Ip.addr_zero Ip.addr_broadcast (Udp.Pdu.pack pdu) in
                             t.eth.Eth.TRX.trx.Tools.tx (Ip.Pdu.pack pdu)
                         | Some ({ Dhcp.Pdu.msg_type = Some op ; _ } as dhcp) when op = Dhcp.ack ->
-                            Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.string_of_addr ip.Ip.Pdu.src)))) ;
+                            Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
                             (* TODO: set other params than IP *)
                             set_ip t dhcp.Dhcp.Pdu.yiaddr
                         | Some _ ->

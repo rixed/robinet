@@ -25,62 +25,72 @@ let debug = false
 
 (* Protocols *)
 
-type proto = int
+module Proto = MakePrivate(struct
+    type t = int
+    let to_string t =
+        try (Unix.getprotobynumber t).Unix.p_name
+        with Not_found ->
+            Printf.sprintf "Protocol(%d)" t
+    let is_valid t = t < 0x100
+    let repl_tag = "proto"
+end)
 
-let proto_icmp : proto = 1
-let proto_tcp  : proto = 6
-let proto_udp  : proto = 17
-
-let string_of_proto (p : proto) = match p with
-    |  1 -> "ICMP"
-    |  6 -> "TCP"
-    | 17 -> "UDP"
-    |  x -> Printf.sprintf "Protocol(%d)" x
-
-let print_proto fmt (p : proto) =
-    Format.fprintf fmt "@{<proto>%s@}" (string_of_proto p)
+let proto_icmp = Proto.o 1
+let proto_tcp  = Proto.o 6
+let proto_udp  = Proto.o 17
 
 (* Addresses *)
 
-type addr = int32
-
-let addr_zero = 0l
-let addr_broadcast = 0xffffffffl
-
-let int32_of_inet_addr a : addr =
+(* actual type of Unix.inet_addr is string *)
+let int32_of_inet_addr a =
     bitmatch (bitstring_of_string (Obj.magic a)) with
-    | { addr : 32 } -> addr
+    | { i : 32 } -> i
+let inet_addr_of_int32 i : Unix.inet_addr =
+    Obj.magic (string_of_bitstring (BITSTRING { i : 32 }))
+
+let dotted_string_of_int32 i = bitmatch (BITSTRING { i : 32 }) with
+      { a : 8 ; b : 8 ; c : 8 ; d : 8 } -> Printf.sprintf "%d.%d.%d.%d" a b c d
+(*$T dotted_string_of_int32
+  dotted_string_of_int32 ((addr_of_string "1.2.3.4") :> int32) = "1.2.3.4"
+*)
+
+let show_ip_as_names = ref true
+
+module Addr = MakePrivate(struct
+    type t = int32
+    let to_string t =
+        if !show_ip_as_names then
+            try (Unix.gethostbyaddr (inet_addr_of_int32 t)).Unix.h_name
+            with Not_found ->
+                dotted_string_of_int32 t
+        else
+            dotted_string_of_int32 t
+    let is_valid _ = true
+    let repl_tag = "addr"
+end)
+
+let addr_zero = Addr.o 0l
+let addr_broadcast = Addr.o 0xffffffffl
+
+let dotted_string_of_addr (addr : Addr.t) = dotted_string_of_int32 (addr :> int32)
 
 let addrs_of_string str =
     let extract_addr info = match info.Unix.ai_addr with
-        | Unix.ADDR_INET (addr, _) -> Some (int32_of_inet_addr addr)
+        | Unix.ADDR_INET (addr, _) -> Some (Addr.o (int32_of_inet_addr addr))
         | _ -> None in
     List.filter_map extract_addr (Unix.getaddrinfo str "" [])
 
-let addr_of_bitstring bits : addr = bitmatch bits with
-    | { ip : 32 } -> ip
-    | { _ } -> 0l (* FIXME: either monadic error or anything... *)
-
-let bitstring_of_addr (ip : addr) = (BITSTRING { ip : 32 })
+let bitstring_of_addr (ip : Addr.t) = (BITSTRING { (ip :> int32) : 32 })
 
 let addr_of_string str = List.hd (addrs_of_string str)
 
-let string_of_addr (ip : addr) = bitmatch (BITSTRING { ip : 32 }) with
-      { a : 8 ; b : 8 ; c : 8 ; d : 8 } -> Printf.sprintf "%d.%d.%d.%d" a b c d
-    | { _ } -> "Not an IP addr (should not happen)" (* FIXME: either Option.Monad or a non local exit *)
-(*$T string_of_addr
-  string_of_addr (addr_of_string "1.2.3.4") = "1.2.3.4"
-*)
-
-let print_addr fmt (ip : addr) =
-    Format.fprintf fmt "@{<addr>%s@}" (string_of_addr ip)
-
-(* FIXME: use batteries IO to print instead of Format printer *)
+(* This printer can be composed with others (for instance to print a list of ips.
+ FIXME: always use batteries IO to print instead of Format printer? *)
 let print_addr' oc ip =
-    Printf.fprintf oc "%s" (string_of_addr ip)
+    Printf.fprintf oc "%s" (Addr.to_string ip)
 
 
-type cidr = addr * int
+type cidr = Addr.t * int
 (* TODO: printer, etc *)
 
 let cidr_of_string str =
@@ -89,8 +99,8 @@ let cidr_of_string str =
         with Not_found -> error (Printf.sprintf "cidr_of_string %s" str)
     in addr_of_string ip_str, int_of_string width_str
 
-let string_of_cidr (ip, width) =
-    (string_of_addr ip) ^ "/" ^ (string_of_int width)
+let string_of_cidr ((ip : Addr.t), width) =
+    (dotted_string_of_int32 (ip :> int32)) ^ "/" ^ (string_of_int width)
 
 let print_cidr fmt (cidr : cidr) =
     Format.fprintf fmt "@{<addr>%s@}" (string_of_cidr cidr)
@@ -100,9 +110,13 @@ let addr_in_cidr (net, mask) ip =
     and b = takebits mask (BITSTRING { ip  : 32 }) in
     a = b
 
-let addrs_of_cidr (ip, mask) =
+let addr_of_bitstring bits = bitmatch bits with
+    | { ip : 32 } -> Addr.o ip
+    | { _ } -> should_not_happen ()
+
+let addrs_of_cidr ((ip : Addr.t), mask) =
     if mask >= 32 then [ ip ] else
-    let prefix = takebits mask (BITSTRING { ip : 32 })
+    let prefix = takebits mask (BITSTRING { (ip :> int32) : 32 })
     and l = 32 - mask in
     List.init (1 lsl l) (fun i ->
         addr_of_bitstring (BITSTRING { prefix : mask : bitstring ; Int64.of_int i : l }))
@@ -120,8 +134,8 @@ module Pdu = struct
 
     type t = { hdr_len : int ; tos : int ; tot_len : int ;
                id : int ; dont_frag : bool ; more_frags : bool ; frag_offset : int ;
-               ttl : int ; proto : int ; checksum : int option ;
-               src : int32 ; dst : int32 ;
+               ttl : int ; proto : Proto.t ; checksum : int option ;
+               src : Addr.t ; dst : Addr.t ;
                options : bitstring ; payload : bitstring }
 
     let make ?(tos=0) ?tot_len
@@ -156,8 +170,8 @@ module Pdu = struct
             tail : -1 : bitstring (* FIXME: force urgent pointer at 0 if the urgent flag is unset *) (* FIXME: remove tcp payload? *) } ->
             if chk = 0 then (
                 let chk = sum (BITSTRING {
-                    t.src : 32 ; t.dst : 32 ;
-                    0 : 8 ; t.proto : 8 ; bytelength pld : 16 ;
+                    (t.src :> int32) : 32 ; (t.dst :> int32) : 32 ;
+                    0 : 8 ; (t.proto :> int) : 8 ; bytelength pld : 16 ;
                     head : 128 : bitstring ; 0 : 16 ; tail : -1 : bitstring (* all tail?? *)}) in
                 (BITSTRING { head : 128 : bitstring ; chk : 16 ; tail : -1 : bitstring })
             ) else pld
@@ -171,8 +185,8 @@ module Pdu = struct
             tail : -1 : bitstring } ->
             if chk = 0 then (
                 let chk = sum (BITSTRING {
-                    t.src : 32 ; t.dst : 32 ;
-                    0 : 8 ; t.proto : 8 ; bytelength pld : 16 ;
+                    (t.src :> int32) : 32 ; (t.dst :> int32) : 32 ;
+                    0 : 8 ; (t.proto :> int) : 8 ; bytelength pld : 16 ;
                     head : 48 : bitstring ; 0 : 16 ;
                     tail : -1 : bitstring }) in
                 (BITSTRING { head : 48 : bitstring ; chk : 16 ; tail : -1 : bitstring })
@@ -186,8 +200,8 @@ module Pdu = struct
             4 : 4 ; t.hdr_len/4 : 4 ; t.tos : 8 ;
             t.tot_len : 16 ;
             t.id : 16 ; false : 1 ; t.dont_frag : 1 ; t.more_frags : 1 ; t.frag_offset : 13 ;
-            t.ttl : 8 ; t.proto : 8 ; Option.default 0 t.checksum : 16 ;
-            t.src : 32 ; t.dst : 32 }) in
+            t.ttl : 8 ; (t.proto :> int) : 8 ; Option.default 0 t.checksum : 16 ;
+            (t.src :> int32) : 32 ; (t.dst :> int32) : 32 }) in
         let header = if t.checksum <> None then header else ( (* patch actual checksum *)
             let s = sum header in
             concat [ takebits 80 header ;
@@ -209,10 +223,10 @@ module Pdu = struct
             options : (hdr_len-5)*32 : bitstring ;
             payload : (tot_len - hdr_len*4)*8 : bitstring ;
             _padding : -1 : bitstring } ->
-        Some { hdr_len = hdr_len ; tos = tos ; tot_len = tot_len ;
-               id = id ; dont_frag = dont_frag ; more_frags = more_frags ; frag_offset = frag_offset ;
-               ttl = ttl ; proto = proto ; checksum = Some checksum ;
-               src = src ; dst = dst ; options = options ; payload = payload }
+        Some { hdr_len ; tos ; tot_len ;
+               id ; dont_frag ; more_frags ; frag_offset ;
+               ttl ; proto = Proto.o proto ; checksum = Some checksum ;
+               src = Addr.o src ; dst = Addr.o dst ; options ; payload }
         | { _version : 4 } ->
             err "Ip: Bad version"
         | { _ } ->
@@ -224,8 +238,8 @@ end
 
 module TRX = struct
 
-    type t = { src : addr ; dst : addr ;
-               proto : proto ; mtu : int ;
+    type t = { src : Addr.t ; dst : Addr.t ;
+               proto : Proto.t ; mtu : int ;
                mutable emit : payload -> unit ;
                mutable recv : payload -> unit }
 
@@ -239,7 +253,7 @@ module TRX = struct
                 (* The frag_offset is given in unit of 8 bytes.
                    So the MTU is required to be a multiple of 8 bytes as well. *)
                 let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst pld in
-                if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (string_of_addr t.src) (string_of_addr t.dst) (bytelength pld) (string_of_bitstring bits);
+                if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (dotted_string_of_int32 (t.src :> int32)) (dotted_string_of_int32 (t.dst :> int32)) (bytelength pld) (string_of_bitstring bits);
                 t.emit (Pdu.pack pdu) ;
                 aux (bit_offset + bitstring_length pld)
             ) in
@@ -254,8 +268,7 @@ module TRX = struct
 
     let make ?(mtu=1400) src dst proto =
         ensure ((mtu mod 8) = 0) "Ip: MTU is required to be a multiple of 8 bytes" ;
-        let t = { src = src ; dst = dst ;
-                  proto = proto ; mtu = mtu ;
+        let t = { src ; dst ; proto ; mtu ;
                   emit = ignore ; recv = ignore } in
         { tx = tx t ;
           rx = rx t ;

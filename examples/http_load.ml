@@ -31,7 +31,7 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
         let bs = Ip.bitstring_of_addr ip in
         Eth.Addr.o (BITSTRING { 0x1234 : 16 ; bs : 32 : bitstring }) in
     let host_of_ip ip =
-        Host.make_static (Ip.string_of_addr ip) ?gw ?search_sfx ?nameserver (mac_of_ip ip) ip in
+        Host.make_static (Ip.dotted_string_of_addr ip) ?gw ?search_sfx ?nameserver (mac_of_ip ip) ip in
     let hosts = List.of_enum (Ip.random_addrs_of_cidr src_range nb_srcs /@ host_of_ip)
     in
     (* Build the HUB and link it to hosts *)

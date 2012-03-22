@@ -47,24 +47,24 @@ struct
           hlen : int ; hops : int ;
           xid : int32 ;
           secs : int ; broadcast : bool ;
-          ciaddr : Ip.addr ; yiaddr : Ip.addr ;
-          siaddr : Ip.addr ; giaddr : Ip.addr ;
+          ciaddr : Ip.Addr.t ; yiaddr : Ip.Addr.t ;
+          siaddr : Ip.Addr.t ; giaddr : Ip.Addr.t ;
           chaddr : bitstring ;
           sname : string ;
           file : string ;
           (* Bootp options *)
           mutable msg_type : int option ;
-          mutable subnet_mask : Ip.addr option ;
-          mutable router : Ip.addr option ;
-          mutable ntp_server : Ip.addr option ;
-          mutable smtp_server : Ip.addr option ;
-          mutable pop3_server : Ip.addr option ;
-          mutable name_server : Ip.addr option ;
+          mutable subnet_mask : Ip.Addr.t option ;
+          mutable router : Ip.Addr.t option ;
+          mutable ntp_server : Ip.Addr.t option ;
+          mutable smtp_server : Ip.Addr.t option ;
+          mutable pop3_server : Ip.Addr.t option ;
+          mutable name_server : Ip.Addr.t option ;
           mutable client_name : string option ;
           mutable search_sfx : string option ;
           mutable lease_time : int32 option ; (* in seconds *)
-          mutable server_id : Ip.addr option ;
-          mutable requested_ip : Ip.addr option ;
+          mutable server_id : Ip.Addr.t option ;
+          mutable requested_ip : Ip.Addr.t option ;
           mutable message : string option ;
           mutable client_id : bitstring option ;
           mutable request_list : string option }
@@ -75,7 +75,7 @@ struct
         | { 255 : 8 } -> true
         | { 1 : 8 ; 4 : 8 ; subnet_mask : 32 ;
             rest : -1 : bitstring } ->
-            t.subnet_mask <- Some subnet_mask ;
+            t.subnet_mask <- Some (Ip.Addr.o subnet_mask) ;
             unpack_options t rest
         | { 3 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
             rest : -1 : bitstring } ->
@@ -107,7 +107,7 @@ struct
             unpack_options t rest
         | { 50 : 8 ; 4 : 8 ; req_ip : 32 ;
             rest : -1 : bitstring } ->
-            t.requested_ip <- Some req_ip ;
+            t.requested_ip <- Some (Ip.Addr.o req_ip) ;
             unpack_options t rest
         | { 51 : 8 ; 4 : 8 ; lease : 32 ;
             rest : -1 : bitstring } ->
@@ -119,7 +119,7 @@ struct
             unpack_options t rest
         | { 54 : 8 ; 4 : 8 ; ip : 32 ;
             rest : -1 : bitstring } ->
-            t.server_id <- Some ip ;
+            t.server_id <- Some (Ip.Addr.o ip) ;
             unpack_options t rest
         | { 55 : 8 ; len : 8 : check (len > 0) ; params : 8*len : string ;
             rest : -1 : bitstring } ->
@@ -184,12 +184,12 @@ struct
     let pack_options t =
         let may_pack_int8   t v = Option.map (fun v -> (BITSTRING { t : 8 ; 1 : 8 ; v : 8 })) v
         and may_pack_int32  t v = Option.map (fun v -> (BITSTRING { t : 8 ; 4 : 8 ; v : 32 })) v
-        and may_pack_ip     t v = Option.map (fun v -> (BITSTRING { t : 8 ; 4 : 8 ; v : 32 })) v
+        and may_pack_ip     t v = Option.map (fun (v : Ip.Addr.t) -> (BITSTRING { t : 8 ; 4 : 8 ; (v :> int32) : 32 })) v
         and may_pack_string t v = Option.map (fun v -> (BITSTRING { t : 8 ; String.length v : 8 ; v : -1 : string })) v
         and may_pack_bits   t v = Option.map (fun v -> (BITSTRING { t : 8 ; bytelength v : 8 ; v : -1 : bitstring })) v
         in
         List.enum [ may_pack_int8 53 t.msg_type ;
-                    may_pack_int32 1 t.subnet_mask ; (* must apear before router *)
+                    may_pack_ip 1 t.subnet_mask ; (* must apear before router *)
                     may_pack_ip 3 t.router ;
                     may_pack_ip 42 t.ntp_server ;
                     may_pack_ip 69 t.smtp_server ;
@@ -199,7 +199,7 @@ struct
                     may_pack_string 15 t.search_sfx ;
                     may_pack_int32 51 t.lease_time ;
                     may_pack_ip 50 t.requested_ip ;
-                    may_pack_int32 54 t.server_id ;
+                    may_pack_ip 54 t.server_id ;
                     may_pack_string 56 t.message ;
                     may_pack_bits 61 t.client_id ;
                     may_pack_string 55 t.request_list ;

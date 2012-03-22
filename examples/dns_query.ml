@@ -47,7 +47,7 @@ let main =
         host.Host.set_emit emit ;
         let query = Lwt_list.iter_p (fun name ->
             lwt ips = host.Host.gethostbyname name in
-            List.print (fun oc ip -> Printf.fprintf oc "%s\n" (Ip.string_of_addr ip)) stdout ips ;
+            List.print (fun oc ip -> Printf.fprintf oc "%s\n" (Ip.dotted_string_of_addr ip)) stdout ips ;
             Lwt.return ()) !names in
         Lwt.choose [ query ;
                      Pcap.sniffer iface host.Host.rx ;
