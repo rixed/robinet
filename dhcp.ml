@@ -240,7 +240,7 @@ struct
           yiaddr = Ip.addr_zero ;
           siaddr = Ip.addr_zero ;
           giaddr = Ip.addr_zero ;
-          chaddr = Bitstring.concat [ Eth.bitstring_of_addr mac ; create_bitstring 80 ] ;
+          chaddr = Bitstring.concat [ (mac :> bitstring) ; create_bitstring 80 ] ;
           sname = "" ; file = "" ;
           msg_type = Some msg_type ;
           subnet_mask = None ; router = None ;
@@ -253,13 +253,17 @@ struct
 
     let make_discover ?(mac=Eth.addr_zero) ?xid ?name () =
         let t = make_base ~mac ?xid ?name discover in
-        t.client_id <- Some (BITSTRING { Arp.hw_type_eth : 8 ; mac : 6*8 : bitstring }) ;
+        t.client_id <- Some (BITSTRING {
+            Arp.hw_type_eth : 8 ;
+            (mac :> bitstring) : 6*8 : bitstring }) ;
         t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
         t
 
     let make_request ?(mac=Eth.addr_zero) ?xid ?name yiaddr server_id =
         let t = make_base ~mac ?xid ?name request in
-        t.client_id <- Some (BITSTRING { Arp.hw_type_eth : 8 ; mac : 6*8 : bitstring }) ;
+        t.client_id <- Some (BITSTRING {
+            Arp.hw_type_eth : 8 ;
+            (mac :> bitstring) : 6*8 : bitstring }) ;
         t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
         t.requested_ip <- Some yiaddr ;
         t.server_id <- server_id ;

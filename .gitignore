@@ -19,3 +19,5 @@ doc
 persist
 TODO
 *.log
+all_tests.ml
+core

@@ -31,11 +31,5 @@ let colorize =
 #install_printer Tcp.SeqNum.print;;
 #install_printer Udp.Port.print;;
 #install_printer Eth.Proto.print;;
+#install_printer Eth.Addr.print;;
 
-(*#install_printer Eth.print_addr;;
- #install_printer Ip.print_addr;;
- #install_printer Ip.print_proto;;
- #install_printer Tcp.print_port;;
- #install_printer Clock.time_printer;;
- #install_printer Http.print_code;;
-*)

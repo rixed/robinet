@@ -7,12 +7,13 @@ SOURCES  = \
 	dns.ml url.ml http.ml \
 	tcp.ml udp.ml \
 	ip.ml arp.ml \
-	eth.ml dhcp.ml pcap.ml \
+	eth.ml \
+	dhcp.ml pcap.ml \
 	host.ml localhost.ml \
 	html.ml browser.ml \
 	hub.ml net.ml \
 	opache.ml myadmin.ml
-C_SOURCES = pcap_wrap.c
+C_SOURCES = pcap_wrap.c eth_vendors.c
 CLIB = libpcapw.a
 LIBS = -cclib -lpcap
 EXAMPLES_BYTE = \
@@ -26,7 +27,8 @@ EXAMPLES_BYTE = \
 	examples/http_echo_server.byte \
 	examples/wanaplay.byte \
 	examples/test_dhcp.byte \
-	examples/http_static_server.byte
+	examples/http_static_server.byte \
+	examples/beautify_mac.byte
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
@@ -39,6 +41,9 @@ include $(top_srcdir)make.common
 
 all: robinet.top examples
 
+$(EXAMPLES): $(ARCHIVE)
+$(EXAMPLES_OPT): $(XARCHIVE)
+
 $(CLIB): $(C_SOURCES:.c=.o)
 	$(AR) rcs $@ $^
 
@@ -48,7 +53,7 @@ check: check.byte check.opt
 	@./check.byte && ./check.opt && echo "OK"
 
 
-examples: $(ARCHIVE) $(XARCHIVE) $(EXAMPLES)
+examples: $(EXAMPLES)
 
 robinet.top: $(ARCHIVE)
 	$(OCAMLMKTOP) -o $@ -package "$(REQUIRES)" -linkpkg $(ARCHIVE)

@@ -23,9 +23,9 @@ open Bitstring
          make eth0 a command line arg *)
 let iface = Pcap.openif "eth0" true "" 1800
 
-let arp_query src_eth src_ip target_ip =
+let arp_query (src_eth : Eth.Addr.t) src_ip target_ip =
     let arp = Arp.Pdu.make_request Arp.hw_type_eth (Eth.proto_ip4 :> int)
-                                   (Eth.bitstring_of_addr src_eth)
+                                   (src_eth :> bitstring)
                                    ( Ip.bitstring_of_addr src_ip)
                                    ( Ip.bitstring_of_addr target_ip) in
     let eth = Eth.Pdu.make Eth.proto_arp src_eth Eth.addr_broadcast (Arp.Pdu.pack arp) in
@@ -58,8 +58,8 @@ let main =
         and src_eth        = Eth.addr_of_string !src_eth_str
         and src_ip         =  Ip.addr_of_string !src_ip_str in
         arp_query src_eth src_ip target_ip ;
-        let answer = Eth.addr_of_bitstring (wait_answer target_ip_bits) in
-        Printf.printf "%s: %s\n" (Ip.string_of_addr target_ip) (Eth.string_of_addr answer)
+        let answer = Eth.Addr.o (wait_answer target_ip_bits) in
+        Printf.printf "%s: %s\n" (Ip.string_of_addr target_ip) (Eth.Addr.to_string answer)
     in
     Arg.parse [ "-src-ip",  Arg.Set_string src_ip_str,  "IP to use as the query sender" ;
                 "-src-mac", Arg.Set_string src_eth_str, "MAC to use as the query sender" ]

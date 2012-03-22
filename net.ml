@@ -40,7 +40,7 @@ type switch = { switch_nb_ports : int ;
 type host   = { host_gw : Eth.gw_addr ;
                 host_search_sfx : string ;
                 host_nameserver : Ip.addr ;
-                host_mac : Eth.addr ;
+                host_mac : Eth.Addr.t ;
                 host_ip : Ip.addr option }
                 (* Also: net, tap... *)
 type note   = string
@@ -170,7 +170,7 @@ let csv_for_hosts oc t =
                 (Eth.string_of_gw_addr h.host_gw)
                 h.host_search_sfx
                 (Ip.string_of_addr h.host_nameserver)
-                (Eth.string_of_addr h.host_mac)
+                (Eth.Addr.to_string h.host_mac)
                 (match h.host_ip with
                     | Some ip -> Ip.string_of_addr ip
                     | _ -> "")
@@ -222,7 +222,7 @@ let csv_for_node oc = function
             (Eth.string_of_gw_addr h.host_gw)
             h.host_search_sfx
             (Ip.string_of_addr h.host_nameserver)
-            (Eth.string_of_addr h.host_mac)
+            (Eth.Addr.to_string h.host_mac)
             (match h.host_ip with
                 | Some ip -> Ip.string_of_addr ip
                 | _ -> "")

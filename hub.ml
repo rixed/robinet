@@ -18,6 +18,7 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 open Batteries
+open Bitstring
 open Tools
 
 let debug = false
@@ -89,7 +90,7 @@ struct
     end
 
     type mac_entry =
-        { mutable addr : Eth.addr option ;
+        { mutable addr : Eth.Addr.t option ;
           mutable port : int }
 
     type t =
@@ -110,8 +111,8 @@ struct
             (* forward *)
             (match BitHash.find_option t.macs_h dst with
             | None ->
-                if debug then Printf.printf "Switch: unknown dest %s broadcasting\n%!"
-                    (Eth.string_of_addr dst) ;
+                if debug then Printf.printf "Switch: unknown dest %s, broadcasting\n%!"
+                    (Eth.Addr.to_string (Eth.Addr.o dst)) ;
                 R.forward_from inp t.hub bits
             | Some n ->
                 t.hub.Repeater.ports.(t.macs.(n).port).Repeater.emit bits ;
@@ -120,18 +121,18 @@ struct
             (* update mac table *)
             (match BitHash.find_option t.macs_h src with
             | None ->
-                if debug then Printf.printf "Switch: new mac %s\n%!" (Eth.string_of_addr src) ;
+                if debug then Printf.printf "Switch: new mac %s\n%!" (Eth.Addr.to_string (Eth.Addr.o src)) ;
                 let last = t.last_used.OrdArray.last in
                 (match t.macs.(last).addr with None -> () | Some addr ->
-                    BitHash.remove t.macs_h addr) ;
-                t.macs.(last).addr <- Some src ;
+                    BitHash.remove t.macs_h (addr :> bitstring)) ;
+                t.macs.(last).addr <- Some (Eth.Addr.o src) ;
                 t.macs.(last).port <- inp ;
                 BitHash.add t.macs_h src last ;
                 OrdArray.promote t.last_used last
             | Some n ->
                 if t.macs.(n).port <> inp then (
                     if debug then Printf.printf "Switch: host %s changed from port %d to %d\n"
-                        (Eth.string_of_addr src) n inp ;
+                        (Eth.Addr.to_string (Eth.Addr.o src)) n inp ;
                     t.macs.(n).port <- inp
                 ) ;
                 OrdArray.promote t.last_used n)
