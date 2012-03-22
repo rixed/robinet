@@ -28,14 +28,31 @@ let debug = false
 let bootrequest = 1
 let bootreply = 2
 type opcode = BootRequest | BootReply
-let discover = 1
-let offer = 2
-let request = 3
-let decline = 4
-let ack = 5
-let nack = 6
-let release = 7
-let inform = 8
+
+module MsgType = MakePrivate(struct
+    type t = int
+    let to_string = function
+        | 1 -> "DISCOVER"
+        | 2 -> "OFFER"
+        | 3 -> "REQUEST"
+        | 4 -> "DECLINE"
+        | 5 -> "ACK"
+        | 6 -> "NACK"
+        | 7 -> "RELEASE"
+        | 8 -> "INFORM"
+        | _ -> should_not_happen ()
+    let is_valid x = x >= 1 && x <= 8
+    let repl_tag = "code"
+end)
+
+let discover = MsgType.o 1
+let offer    = MsgType.o 2
+let request  = MsgType.o 3
+let decline  = MsgType.o 4
+let ack      = MsgType.o 5
+let nack     = MsgType.o 6
+let release  = MsgType.o 7
+let inform   = MsgType.o 8
 
 (* DHCP messages *)
 
@@ -53,7 +70,7 @@ struct
           sname : string ;
           file : string ;
           (* Bootp options *)
-          mutable msg_type : int option ;
+          mutable msg_type : MsgType.t option ;
           mutable subnet_mask : Ip.Addr.t option ;
           mutable router : Ip.Addr.t option ;
           mutable ntp_server : Ip.Addr.t option ;
@@ -115,7 +132,7 @@ struct
             unpack_options t rest
         | { 53 : 8 ; 1 : 8 ; msg_type : 8 : check (msg_type > 0 && msg_type < 9) ;
             rest : -1 : bitstring } ->
-            t.msg_type <- Some msg_type ;
+            t.msg_type <- Some (MsgType.o msg_type) ;
             unpack_options t rest
         | { 54 : 8 ; 4 : 8 ; ip : 32 ;
             rest : -1 : bitstring } ->
@@ -182,13 +199,13 @@ struct
         | { _ } -> err "Dhcp: Not DHCP"
 
     let pack_options t =
-        let may_pack_int8   t v = Option.map (fun v -> (BITSTRING { t : 8 ; 1 : 8 ; v : 8 })) v
+        let may_pack_msgtyp t v = Option.map (fun (v : MsgType.t) -> (BITSTRING { t : 8 ; 1 : 8 ; (v :> int) : 8 })) v
         and may_pack_int32  t v = Option.map (fun v -> (BITSTRING { t : 8 ; 4 : 8 ; v : 32 })) v
         and may_pack_ip     t v = Option.map (fun (v : Ip.Addr.t) -> (BITSTRING { t : 8 ; 4 : 8 ; (v :> int32) : 32 })) v
         and may_pack_string t v = Option.map (fun v -> (BITSTRING { t : 8 ; String.length v : 8 ; v : -1 : string })) v
         and may_pack_bits   t v = Option.map (fun v -> (BITSTRING { t : 8 ; bytelength v : 8 ; v : -1 : bitstring })) v
         in
-        List.enum [ may_pack_int8 53 t.msg_type ;
+        List.enum [ may_pack_msgtyp 53 t.msg_type ;
                     may_pack_ip 1 t.subnet_mask ; (* must apear before router *)
                     may_pack_ip 3 t.router ;
                     may_pack_ip 42 t.ntp_server ;

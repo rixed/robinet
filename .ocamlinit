@@ -38,4 +38,5 @@ let colorize =
 #install_printer Eth.Addr.print;;
 #install_printer Ip.Proto.print;;
 #install_printer Ip.Addr.print;;
+#install_printer Dhcp.MsgType.print;;
 
