@@ -43,7 +43,7 @@ module Pdu =
 struct
     type t =
         { op : opcode ;
-          htype : int ; (* same values than Arp.hw_type_* *)
+          htype : Arp.HwType.t ;
           hlen : int ; hops : int ;
           xid : int32 ;
           secs : int ; broadcast : bool ;
@@ -155,7 +155,7 @@ struct
             0x63825363l : 32 ;
             options : -1 : bitstring } ->
           let t = { op = if op = bootrequest then BootRequest else BootReply ;
-                    htype ; hlen ; hops ; xid ;
+                    htype = Arp.HwType.o htype ; hlen ; hops ; xid ;
                     secs ; broadcast = flags land 0x8000 = 0x8000 ;
                     ciaddr = Ip.addr_of_bitstring ciaddr ;
                     yiaddr = Ip.addr_of_bitstring yiaddr ;
@@ -216,7 +216,7 @@ struct
         in
         (BITSTRING {
             match t.op with BootRequest -> 1 | BootReply -> 2 : 8 ;
-            t.htype : 8 ; t.hlen : 8 ; t.hops : 8 ;
+            (t.htype :> int) : 8 ; t.hlen : 8 ; t.hops : 8 ;
             t.xid : 32 ;
             t.secs : 16 ; if t.broadcast then 0x8000 else 0 : 16 ;
             Ip.bitstring_of_addr t.ciaddr : -1 : bitstring ;
@@ -254,7 +254,7 @@ struct
     let make_discover ?(mac=Eth.addr_zero) ?xid ?name () =
         let t = make_base ~mac ?xid ?name discover in
         t.client_id <- Some (BITSTRING {
-            Arp.hw_type_eth : 8 ;
+            (Arp.hw_type_eth :> int) : 8 ;
             (mac :> bitstring) : 6*8 : bitstring }) ;
         t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
         t
@@ -262,7 +262,7 @@ struct
     let make_request ?(mac=Eth.addr_zero) ?xid ?name yiaddr server_id =
         let t = make_base ~mac ?xid ?name request in
         t.client_id <- Some (BITSTRING {
-            Arp.hw_type_eth : 8 ;
+            (Arp.hw_type_eth :> int) : 8 ;
             (mac :> bitstring) : 6*8 : bitstring }) ;
         t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
         t.requested_ip <- Some yiaddr ;

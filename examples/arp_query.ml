@@ -24,11 +24,11 @@ open Bitstring
 let iface = Pcap.openif "eth0" true "" 1800
 
 let arp_query (src_eth : Eth.Addr.t) src_ip target_ip =
-    let arp = Arp.Pdu.make_request Arp.hw_type_eth (Eth.proto_ip4 :> int)
+    let arp = Arp.Pdu.make_request Arp.hw_type_eth Arp.proto_ip4
                                    (src_eth :> bitstring)
                                    ( Ip.bitstring_of_addr src_ip)
                                    ( Ip.bitstring_of_addr target_ip) in
-    let eth = Eth.Pdu.make Eth.proto_arp src_eth Eth.addr_broadcast (Arp.Pdu.pack arp) in
+    let eth = Eth.Pdu.make Arp.proto_arp src_eth Eth.addr_broadcast (Arp.Pdu.pack arp) in
     Pcap.inject iface (string_of_bitstring (Eth.Pdu.pack eth))
 
 let rec wait_answer target_ip_bits =
@@ -38,7 +38,7 @@ let rec wait_answer target_ip_bits =
         (match Eth.Pdu.unpack (bitstring_of_string packet) with
         | None -> failwith "Cannot unpack Eth"
         | Some eth ->
-            if eth.Eth.Pdu.proto <> Eth.proto_arp then aux () else 
+            if eth.Eth.Pdu.proto <> Arp.proto_arp then aux () else 
             (match Arp.Pdu.unpack eth.Eth.Pdu.payload with
             | None -> failwith "Cannot unpack ARP"
             | Some arp ->

@@ -25,25 +25,6 @@ let debug = false
 
 (* Private Types *)
 
-module Proto = MakePrivate(struct
-    type t = int
-    let to_string = function
-        | 0x0800 -> "IP"
-        | 0x86DD -> "IPv6"
-        | 0x0806 -> "ARP"
-        | 0x8100 -> "Eth8021q"
-        |      x -> Printf.sprintf "Protocol(%X)" x
-    let is_valid x = x < 0x10000
-    let repl_tag = "proto"
-end)
-
-let proto_ip4   = Proto.o 0x0800
-let proto_ip6   = Proto.o 0x86DD
-let proto_arp   = Proto.o 0x0806
-let proto_8021q = Proto.o 0x8100
-
-(* Addresses *)
-
 let show_addr_with_vendor = ref true
 
 let string_of_sfx l sfx =
@@ -119,7 +100,7 @@ let gw_addr_of_string str =
 module Pdu = struct
     type t = { src : Addr.t ; dst : Addr.t ;
                vlan : int option ;
-               proto : Proto.t ;
+               proto : Arp.HwProto.t ;
                payload : bitstring }
 
     let make ?vlan proto src dst payload =
@@ -135,7 +116,7 @@ module Pdu = struct
             | Some v -> (BITSTRING {
                         (t.dst :> bitstring) : 6*8 : bitstring ;
                         (t.src :> bitstring) : 6*8 : bitstring ;
-                        (proto_8021q :> int) : 16 ;
+                        (Arp.proto_8021q :> int) : 16 ;
                         v : 16 ;
                         (t.proto :> int) : 16 })) ;
             t.payload ]
@@ -146,7 +127,7 @@ module Pdu = struct
             proto : 16 ;    (* FIXME: might not be a proto if < 1500 *)
             payload : -1 : bitstring } ->
             Some { src = Addr.o src ; dst = Addr.o dst ;
-                   vlan = None ; proto = Proto.o proto ; payload }
+                   vlan = None ; proto = Arp.HwProto.o proto ; payload }
         | { _ } ->
             err "Not Eth"
 end
@@ -159,7 +140,7 @@ module TRX =
 struct
     type t =
         { src : Addr.t ; gw : gw_addr option ;
-          proto : Proto.t ; mtu : int ;
+          proto : Arp.HwProto.t ; mtu : int ;
           mutable my_addresses : bitstring list ;
           mutable emit : payload -> unit ;
           mutable recv : payload -> unit ;
@@ -174,12 +155,12 @@ struct
 
     let send t proto dst bits =
         let pdu = Pdu.make proto t.src dst bits in
-        if debug then Printf.printf "Eth: Emitting an Eth packet, proto %s, from %s to %s (content '%s')\n%!" (Proto.to_string proto) (Addr.to_string t.src) (Addr.to_string dst) (string_of_bitstring bits) ;
+        if debug then Printf.printf "Eth: Emitting an Eth packet, proto %s, from %s to %s (content '%s')\n%!" (Arp.HwProto.to_string proto) (Addr.to_string t.src) (Addr.to_string dst) (string_of_bitstring bits) ;
         t.emit (Pdu.pack pdu)
 
     let resolve_proto_addr t bits sender_proto_addr target_proto_addr =
-        let request = Arp.Pdu.make_request Arp.hw_type_eth (t.proto :> int) (t.src :> bitstring) sender_proto_addr target_proto_addr in
-        send t proto_arp addr_broadcast (Arp.Pdu.pack request) ;
+        let request = Arp.Pdu.make_request Arp.hw_type_eth t.proto (t.src :> bitstring) sender_proto_addr target_proto_addr in
+        send t Arp.proto_arp addr_broadcast (Arp.Pdu.pack request) ;
         if debug then Printf.printf "Eth: Delaying a msg for '%s'\n%!" (hexstring_of_bitstring target_proto_addr) ;
         BitHash.add t.delayed target_proto_addr bits
 
@@ -202,7 +183,7 @@ struct
         match t.gw with
         | None -> (* FIXME: or if the routes tells us that dest in on the same LAN than us *)
             (match t.proto with
-            | x when x = proto_ip4 ->
+            | x when x = Arp.proto_ip4 ->
                 Option.Monad.bind (Ip.Pdu.unpack bits) (fun ip ->
                     let sender_ip = Ip.bitstring_of_addr ip.Ip.Pdu.src
                     and target_ip = Ip.bitstring_of_addr ip.Ip.Pdu.dst in
@@ -223,21 +204,21 @@ struct
     let rx t bits = (match Pdu.unpack bits with
         | None -> ()
         | Some frame ->
-            if debug then Printf.printf "Eth: Got an eth frame of proto %s for %s\n%!" (Proto.to_string frame.Pdu.proto) (Addr.to_string frame.Pdu.dst) ;
+            if debug then Printf.printf "Eth: Got an eth frame of proto %s for %s\n%!" (Arp.HwProto.to_string frame.Pdu.proto) (Addr.to_string frame.Pdu.dst) ;
             if frame.Pdu.proto = t.proto &&
                (addr_eq frame.Pdu.dst t.src || addr_eq frame.Pdu.dst addr_broadcast) then (
                 if debug then Printf.printf "Eth:...for me!\n%!" ;
                 if bitstring_length frame.Pdu.payload > 0 then t.recv frame.Pdu.payload
-            ) else if frame.Pdu.proto = proto_arp then (
+            ) else if frame.Pdu.proto = Arp.proto_arp then (
                 match Arp.Pdu.unpack frame.Pdu.payload with
                 | None -> ()
                 | Some arp ->
-                    if debug then Printf.printf "Eth:...an ARP of opcode %d\n%!" arp.Arp.Pdu.operation ;
+                    if debug then Printf.printf "Eth:...an ARP of opcode %s\n%!" (Arp.Op.to_string arp.Arp.Pdu.operation) ;
                     if arp.Arp.Pdu.hw_type = Arp.hw_type_eth then (
                         if debug then Printf.printf "Eth:...regarding an ethernet device!\n%!" ;
                         let sender_hw = Addr.o arp.Arp.Pdu.sender_hw (* will raise if not of the advertised type *)
                         and merge_flag = ref false in
-                        if arp.Arp.Pdu.proto_type = (t.proto :> int) then (
+                        if arp.Arp.Pdu.proto_type = t.proto then (
                             if debug then Printf.printf "Eth:...transporting same proto than me!\n%!" ;
                             if BitHash.mem t.arp_cache arp.Arp.Pdu.sender_proto then (
                                 if debug then Printf.printf "Eth:...updating entry %s->%s in ARP cache\n%!" (hexstring_of_bitstring arp.Arp.Pdu.sender_proto) (Addr.to_string sender_hw) ;
@@ -256,7 +237,7 @@ struct
                                     let reply = Arp.Pdu.make_reply arp.Arp.Pdu.hw_type arp.Arp.Pdu.proto_type
                                                                    (t.src :> bitstring) arp.Arp.Pdu.target_proto
                                                                    arp.Arp.Pdu.sender_hw arp.Arp.Pdu.sender_proto in
-                                    send t proto_arp sender_hw (Arp.Pdu.pack reply)
+                                    send t Arp.proto_arp sender_hw (Arp.Pdu.pack reply)
                                 )
                             ) ;
                             (* Now that we may have gained knowledge, try to send the msg in waiting queue *)
