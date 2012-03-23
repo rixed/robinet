@@ -56,7 +56,7 @@ check: check.byte check.opt
 examples: $(EXAMPLES)
 
 robinet.top: $(ARCHIVE)
-	$(OCAMLMKTOP) -o $@ -package "$(REQUIRES)" -linkpkg $(ARCHIVE)
+	$(OCAMLMKTOP) -o $@ -package "findlib,$(REQUIRES)" -linkpkg $(ARCHIVE)
 
 clean-spec:
 	rm -f *.pcap
