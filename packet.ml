@@ -48,7 +48,7 @@ module Pdu = struct
                 aux (pack_1 p') ps in
         aux empty_bitstring t
 
-    let unpack_raw bits = [ Raw bits ]
+    let unpack_raw bits = if bitstring_is_empty bits then [] else [ Raw bits ]
     let try_unpack unp do_t bits =
         match unp bits with None -> unpack_raw bits
                           | Some x -> do_t x
