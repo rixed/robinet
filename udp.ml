@@ -34,26 +34,26 @@ struct
     type t = {
         src_port : Port.t ; dst_port : Port.t ;
         length   : int   ; checksum : int option ;
-        payload  : bitstring }
+        payload  : Payload.t }
 
     let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80)
              ?(length) ?checksum payload =
-        let length = may_default length (fun () -> bytelength payload + 8) in
+        let length = may_default length (fun () -> Payload.length payload + 8) in
         { src_port ; dst_port ; length   ; checksum ; payload }
 
     let pack t =
         concat [ (BITSTRING {
             (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
             t.length   : 16 ; (Option.default 0 t.checksum) : 16 }) ;
-            t.payload ]
+            (t.payload :> bitstring) ]
 
     let unpack bits = bitmatch bits with
         | { src_port : 16 ; dst_port : 16 ;
             length   : 16 ; checksum : 16 ;
             payload  : (length-8) * 8 : bitstring } when length >= 8 ->
             Some { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
-                   length   = length   ; checksum = Some checksum ;
-                   payload  = payload }
+                   length ; checksum = Some checksum ;
+                   payload  = Payload.o payload }
         | { _ } -> err "Not UDP"
 end
 
@@ -63,12 +63,12 @@ module TRX =
 struct
     type t = {
         mutable src : Port.t ; mutable dst : Port.t option ;
-        mutable emit : payload -> unit ;
-        mutable recv : payload -> unit }
+        mutable emit : bitstring -> unit ;
+        mutable recv : bitstring -> unit }
 
     let tx t bits =
         let src_port = t.src and dst_port = Option.get t.dst in
-        let udp = Pdu.make ~src_port ~dst_port bits in
+        let udp = Pdu.make ~src_port ~dst_port (Payload.o bits) in
         if debug then Printf.printf "Udp: Emitting a packet from %s to %s\n%!" (Port.to_string src_port) (Port.to_string dst_port) ;
         t.emit (Pdu.pack udp)
 
@@ -77,8 +77,8 @@ struct
         | None -> ()
         | Some udp ->
             if debug then Printf.printf "Udp: Received a datagram\n%!" ;
-            if debug then Printf.printf "Udp: Got a datagram with %d bytes\n%!" (bytelength udp.Pdu.payload) ;
-            if bitstring_length udp.Pdu.payload > 0 then t.recv udp.Pdu.payload)
+            if debug then Printf.printf "Udp: Got a datagram with %d bytes\n%!" (Payload.length udp.Pdu.payload) ;
+            if Payload.bitlength udp.Pdu.payload > 0 then t.recv (udp.Pdu.payload :> bitstring))
 
     let make ?dst src =
         let t = { src = src ; dst = dst ;

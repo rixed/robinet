@@ -55,14 +55,6 @@ let hexstring_of_bitstring bs =
     let hexify c = Printf.sprintf "0x%02x" (Char.code c) in
     String.enum s /@ hexify |> List.of_enum |> String.join " "
 
-let show_bits_as_string = ref false
-let print_bitstring fmt bs =
-    Format.fprintf fmt "@{<bits>%s@}"
-        (if !show_bits_as_string then
-            string_of_bitstring bs
-        else
-            hexstring_of_bitstring bs)
-
 let abbrev ?(len=25) str =
     let tot_len = String.length str in
     if len < tot_len then (String.sub str 0 (len-3)) ^ "..."
@@ -118,8 +110,6 @@ end
 
 module BitHash = Hashtbl.Make (HashedBits)
 
-type payload = bitstring
-
 let hash_find_or_insert h k f =
     try Hashtbl.find h k
     with Not_found -> (
@@ -158,10 +148,26 @@ end = struct
     let o t = assert (Inner.is_valid t) ; t
 end
 
-type trx = { tx : payload -> unit ; (* transmit this payload *)
-             rx : payload -> unit ; (* receive this payload *)
-             set_emit : (payload -> unit) -> unit ;
-             set_recv : (payload -> unit) -> unit  }
+module Payload = struct
+    include MakePrivate(struct
+        type t = bitstring
+        let to_string t =
+            let bytes = bytelength t in
+            if bytes > 0 then Printf.sprintf "%d bytes" bytes
+            else "empty"
+        let is_valid _ = true
+        let repl_tag = "bits"
+    end)
+
+    let empty = o empty_bitstring
+    let bitlength (t : t) = bitstring_length (t :> bitstring)
+    let length (t : t) = bytelength (t :> bitstring) (* TODO: rename to length *)
+end
+
+type trx = { tx : bitstring -> unit ; (* transmit this payload *)
+             rx : bitstring -> unit ; (* receive this payload *)
+             set_emit : (bitstring -> unit) -> unit ;
+             set_recv : (bitstring -> unit) -> unit  }
 
 let null_trx = { tx = ignore ;
                  rx = ignore ;

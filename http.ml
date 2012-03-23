@@ -267,7 +267,7 @@ struct
         | HttpError of string
         | HttpMsg of (Pdu.t * bool (* tells weither the underlying transport is still open *))
     type t = { parzer  : (Pdu.t, char) parzer ; (* The parser we use for reconstructing the PDU *)
-               mutable emit : payload -> unit ;
+               mutable emit : bitstring -> unit ;
                mutable recv : result -> unit }
 
     let set_emit t emit = t.emit <- emit
@@ -310,7 +310,7 @@ module TRX =
 struct
     type t = { cmd : cmd ;
                headers : header list ;
-               mutable recv : payload -> unit ;
+               mutable recv : bitstring -> unit ;
                top : TRXtop.t }
 
     let tx t bits =

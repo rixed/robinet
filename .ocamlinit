@@ -28,7 +28,7 @@ let colorize =
         Format.print_close_tag = uncolorize
     } ;;
 
-#install_printer Tools.print_bitstring;;
+#install_printer Tools.Payload.print;;
 #install_printer Tcp.Port.print;;
 #install_printer Tcp.SeqNum.print;;
 #install_printer Udp.Port.print;;

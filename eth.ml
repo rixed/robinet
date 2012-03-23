@@ -101,7 +101,7 @@ module Pdu = struct
     type t = { src : Addr.t ; dst : Addr.t ;
                vlan : int option ;
                proto : Arp.HwProto.t ;
-               payload : bitstring }
+               payload : Payload.t }
 
     let make ?vlan proto src dst payload =
         { src ; dst ; vlan ; proto ; payload }
@@ -119,7 +119,7 @@ module Pdu = struct
                         (Arp.proto_8021q :> int) : 16 ;
                         v : 16 ;
                         (t.proto :> int) : 16 })) ;
-            t.payload ]
+            (t.payload :> bitstring) ]
 
     let unpack bits = bitmatch bits with (* FIXME: decode 8021q vlans *)
         | { dst : 6*8 : bitstring ;
@@ -127,7 +127,8 @@ module Pdu = struct
             proto : 16 ;    (* FIXME: might not be a proto if < 1500 *)
             payload : -1 : bitstring } ->
             Some { src = Addr.o src ; dst = Addr.o dst ;
-                   vlan = None ; proto = Arp.HwProto.o proto ; payload }
+                   vlan = None ; proto = Arp.HwProto.o proto ;
+                   payload = Payload.o payload }
         | { _ } ->
             err "Not Eth"
 end
@@ -142,19 +143,19 @@ struct
         { src : Addr.t ; gw : gw_addr option ;
           proto : Arp.HwProto.t ; mtu : int ;
           mutable my_addresses : bitstring list ;
-          mutable emit : payload -> unit ;
-          mutable recv : payload -> unit ;
-          mutable promisc : payload -> unit ;
+          mutable emit : bitstring -> unit ;
+          mutable recv : bitstring -> unit ;
+          mutable promisc : bitstring -> unit ;
           (* TODO: these two should be timeouted, requiring a clock *)
           arp_cache : Addr.t option BitHash.t ;     (* proto_addr -> hw_addr option (None when resolving) *)
           delayed : bitstring BitHash.t }  (* dest_proto_addr -> msg *)
     type eth_trx =
         { trx : trx ;
-          set_promiscuous : (payload -> unit) -> unit ;
+          set_promiscuous : (bitstring -> unit) -> unit ;
           set_addresses : bitstring list -> unit }
 
     let send t proto dst bits =
-        let pdu = Pdu.make proto t.src dst bits in
+        let pdu = Pdu.make proto t.src dst (Payload.o bits) in
         if debug then Printf.printf "Eth: Emitting an Eth packet, proto %s, from %s to %s (content '%s')\n%!" (Arp.HwProto.to_string proto) (Addr.to_string t.src) (Addr.to_string dst) (string_of_bitstring bits) ;
         t.emit (Pdu.pack pdu)
 
@@ -208,9 +209,9 @@ struct
             if frame.Pdu.proto = t.proto &&
                (addr_eq frame.Pdu.dst t.src || addr_eq frame.Pdu.dst addr_broadcast) then (
                 if debug then Printf.printf "Eth:...for me!\n%!" ;
-                if bitstring_length frame.Pdu.payload > 0 then t.recv frame.Pdu.payload
+                if Payload.bitlength frame.Pdu.payload > 0 then t.recv (frame.Pdu.payload :> bitstring)
             ) else if frame.Pdu.proto = Arp.proto_arp then (
-                match Arp.Pdu.unpack frame.Pdu.payload with
+                match Arp.Pdu.unpack (frame.Pdu.payload :> bitstring) with
                 | None -> ()
                 | Some arp ->
                     if debug then Printf.printf "Eth:...an ARP of opcode %s\n%!" (Arp.Op.to_string arp.Arp.Pdu.operation) ;
@@ -253,7 +254,7 @@ struct
                     )
             ) else ( (* not for me, send to promisc function *)
                 if debug then Printf.printf "Eth:...not for me!\n%!" ;
-                if bitstring_length frame.Pdu.payload > 0 then t.promisc frame.Pdu.payload
+                if Payload.bitlength frame.Pdu.payload > 0 then t.promisc (frame.Pdu.payload :> bitstring)
             ))
 
     let make ?(mtu=1500) src ?gw ?(promisc=ignore) proto my_addresses =

@@ -18,6 +18,7 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 open Bitstring
+open Tools
 
 (* TODO: make this a parameter.
          make eth0 a command line arg *)
@@ -28,7 +29,7 @@ let arp_query (src_eth : Eth.Addr.t) src_ip target_ip =
                                    (src_eth :> bitstring)
                                    ( Ip.bitstring_of_addr src_ip)
                                    ( Ip.bitstring_of_addr target_ip) in
-    let eth = Eth.Pdu.make Arp.proto_arp src_eth Eth.addr_broadcast (Arp.Pdu.pack arp) in
+    let eth = Eth.Pdu.make Arp.proto_arp src_eth Eth.addr_broadcast (Payload.o (Arp.Pdu.pack arp)) in
     Pcap.inject iface (string_of_bitstring (Eth.Pdu.pack eth))
 
 let rec wait_answer target_ip_bits =
@@ -39,7 +40,7 @@ let rec wait_answer target_ip_bits =
         | None -> failwith "Cannot unpack Eth"
         | Some eth ->
             if eth.Eth.Pdu.proto <> Arp.proto_arp then aux () else 
-            (match Arp.Pdu.unpack eth.Eth.Pdu.payload with
+            (match Arp.Pdu.unpack (eth.Eth.Pdu.payload :> bitstring) with
             | None -> failwith "Cannot unpack ARP"
             | Some arp ->
                 if arp.Arp.Pdu.operation <> Arp.op_reply ||

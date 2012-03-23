@@ -136,7 +136,7 @@ module Pdu = struct
                id : int ; dont_frag : bool ; more_frags : bool ; frag_offset : int ;
                ttl : int ; proto : Proto.t ; checksum : int option ;
                src : Addr.t ; dst : Addr.t ;
-               options : bitstring ; payload : bitstring }
+               options : bitstring ; payload : Payload.t }
 
     let make ?(tos=0) ?tot_len
              ?id ?(dont_frag=false) ?(more_frags=false)
@@ -147,7 +147,7 @@ module Pdu = struct
         let hdr_len = 20
         and id = may_default id next_id in
         let tot_len = match tot_len with Some v -> v | None ->
-            bytelength payload + hdr_len in
+            Payload.length payload + hdr_len in
         { hdr_len ; tos ; tot_len ; id ; dont_frag ; more_frags ; frag_offset ;
           ttl ; proto ; checksum ; src ; dst ; options ; payload }
 
@@ -164,35 +164,35 @@ module Pdu = struct
       sum (bitstring_of_string "\x45\x00\x00\xaa\x03\xa6\x00\x00\x40\x06\x00\x00\xc0\xa8\x01\x45\xd1\x55\xe3\x67") = 0xfffd
     *)
 
-    let patch_tcp_checksum t pld = bitmatch pld with
+    let patch_tcp_checksum t (pld : Payload.t) = bitmatch (pld :> bitstring) with
         | { head : 128 : bitstring ;
             chk  : 16  ;
             tail : -1 : bitstring (* FIXME: force urgent pointer at 0 if the urgent flag is unset *) (* FIXME: remove tcp payload? *) } ->
             if chk = 0 then (
                 let chk = sum (BITSTRING {
                     (t.src :> int32) : 32 ; (t.dst :> int32) : 32 ;
-                    0 : 8 ; (t.proto :> int) : 8 ; bytelength pld : 16 ;
+                    0 : 8 ; (t.proto :> int) : 8 ; Payload.length pld : 16 ;
                     head : 128 : bitstring ; 0 : 16 ; tail : -1 : bitstring (* all tail?? *)}) in
-                (BITSTRING { head : 128 : bitstring ; chk : 16 ; tail : -1 : bitstring })
+                Payload.o (BITSTRING { head : 128 : bitstring ; chk : 16 ; tail : -1 : bitstring })
             ) else pld
         | { _ } ->
             Printf.fprintf stderr "Ip: Cannot patch checksum in TCP packet\n" ;
             pld
 
-    let patch_udp_checksum t pld = bitmatch pld with
+    let patch_udp_checksum t (pld : Payload.t) = bitmatch (pld :> bitstring) with
         | { head : 48 : bitstring ;
             chk  : 16  ;
             tail : -1 : bitstring } ->
             if chk = 0 then (
                 let chk = sum (BITSTRING {
                     (t.src :> int32) : 32 ; (t.dst :> int32) : 32 ;
-                    0 : 8 ; (t.proto :> int) : 8 ; bytelength pld : 16 ;
+                    0 : 8 ; (t.proto :> int) : 8 ; Payload.length pld : 16 ;
                     head : 48 : bitstring ; 0 : 16 ;
                     tail : -1 : bitstring }) in
-                (BITSTRING { head : 48 : bitstring ; chk : 16 ; tail : -1 : bitstring })
+                Payload.o (BITSTRING { head : 48 : bitstring ; chk : 16 ; tail : -1 : bitstring })
             ) else pld
         | { _ } ->
-            Printf.fprintf stderr "Ip: Cannot patch checksum in TCP packet\n" ;
+            Printf.fprintf stderr "Ip: Cannot patch checksum in UDP packet\n" ;
             pld
 
     let pack t =
@@ -212,7 +212,7 @@ module Pdu = struct
             if t.proto = proto_tcp then patch_tcp_checksum t t.payload
             else if t.proto = proto_udp then patch_udp_checksum t t.payload
             else t.payload in
-        concat [ header ; payload ]
+        concat [ header ; (payload :> bitstring) ]
 
     let unpack bits = bitmatch bits with
         | { 4 : 4 ; hdr_len : 4 ; tos : 8 ;
@@ -226,7 +226,8 @@ module Pdu = struct
         Some { hdr_len ; tos ; tot_len ;
                id ; dont_frag ; more_frags ; frag_offset ;
                ttl ; proto = Proto.o proto ; checksum = Some checksum ;
-               src = Addr.o src ; dst = Addr.o dst ; options ; payload }
+               src = Addr.o src ; dst = Addr.o dst ; options ;
+               payload = Payload.o payload }
         | { _version : 4 } ->
             err "Ip: Bad version"
         | { _ } ->
@@ -240,8 +241,8 @@ module TRX = struct
 
     type t = { src : Addr.t ; dst : Addr.t ;
                proto : Proto.t ; mtu : int ;
-               mutable emit : payload -> unit ;
-               mutable recv : payload -> unit }
+               mutable emit : bitstring -> unit ;
+               mutable recv : bitstring -> unit }
 
     let tx t bits =
         let id = Pdu.next_id () in
@@ -252,7 +253,7 @@ module TRX = struct
                                       else takebits (t.mtu*8) pld, true in
                 (* The frag_offset is given in unit of 8 bytes.
                    So the MTU is required to be a multiple of 8 bytes as well. *)
-                let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst pld in
+                let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst (Payload.o pld) in
                 if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (dotted_string_of_int32 (t.src :> int32)) (dotted_string_of_int32 (t.dst :> int32)) (bytelength pld) (string_of_bitstring bits);
                 t.emit (Pdu.pack pdu) ;
                 aux (bit_offset + bitstring_length pld)
@@ -264,7 +265,7 @@ module TRX = struct
     let rx t bits = (match Pdu.unpack bits with
         | None -> ()
         | Some ip ->
-            if bitstring_length ip.Pdu.payload > 0 then t.recv ip.Pdu.payload)
+            if Payload.bitlength ip.Pdu.payload > 0 then t.recv (ip.Pdu.payload :> bitstring))
 
     let make ?(mtu=1400) src dst proto =
         ensure ((mtu mod 8) = 0) "Ip: MTU is required to be a multiple of 8 bytes" ;

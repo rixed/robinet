@@ -31,7 +31,7 @@ let signal_err e =
 
 type t =
     { sock : Lwt_unix.file_descr ;
-      mutable recv : payload -> unit ;
+      mutable recv : bitstring -> unit ;
       mutable is_closed : bool ;
       mutable reader_running : bool }
 

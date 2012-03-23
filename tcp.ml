@@ -60,7 +60,7 @@ struct
         fin      : bool  ; win_size : int ;
         checksum : int option ; (* If None, will be set by IP layer - if in IP *)
         urg_ptr  : int   ; options  : bitstring ;
-        payload  : bitstring }
+        payload  : Payload.t }
 
     let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80)
              ?(seq_num = SeqNum.o 0l) ?(ack_num = SeqNum.o 0l)
@@ -79,7 +79,7 @@ struct
     let make_reset_of pdu =
         make ~src_port:pdu.dst_port ~dst_port:pdu.src_port
              ~seq_num:pdu.ack_num ~ack_num:(SeqNum.o (Int32.succ (pdu.seq_num:>int32)))
-             ~ack:true ~rst:true empty_bitstring
+             ~ack:true ~rst:true Payload.empty
 
     let pack t =
         concat [ (BITSTRING {
@@ -89,7 +89,7 @@ struct
             t.urg : 1 ; t.ack : 1 ; t.psh : 1 ; t.rst : 1 ; t.syn : 1 ; t.fin : 1 ;
             t.win_size : 16 ; (Option.default 0 t.checksum) : 16 ;
             t.urg_ptr  : 16 ; t.options : -1 : bitstring }) ;
-            t.payload ]
+            (t.payload :> bitstring) ]
 
     let unpack bits = bitmatch bits with
         | { src_port : 16 ; dst_port : 16 ;
@@ -103,7 +103,7 @@ struct
                seq_num  = SeqNum.o seq_num  ; ack_num  = SeqNum.o ack_num ;
                hdr_len ; urg ; ack ; psh ; rst ; syn ; fin ;
                win_size ; checksum = Some checksum ;
-               urg_ptr  ; options ; payload }
+               urg_ptr  ; options ; payload = Payload.o payload }
         | { _ } -> err "Not TCP"
 end
 
@@ -129,8 +129,8 @@ struct
     type t = {
         mutable src : Port.t ;
         mutable dst : Port.t ;
-        mutable emit : payload -> unit ;
-        mutable recv : payload -> unit ;
+        mutable emit : bitstring -> unit ;
+        mutable recv : bitstring -> unit ;
         mtu : int ;
         isn : SeqNum.t ; (* initial seq num *)
         mutable rcvd_isn : SeqNum.t option ;
@@ -163,7 +163,7 @@ struct
         let ack = ack_num <> None in
         if ack || psh || rst || syn || fin || bitstring_length bits > 0 then (
             let tcp = Pdu.make ~src_port ~dst_port ~seq_num ?ack_num
-                               ~ack ~psh ~rst ~syn ~fin bits in
+                               ~ack ~psh ~rst ~syn ~fin (Payload.o bits) in
             if debug then Printf.printf "Tcp: Emitting a packet from %s to %s, seq %s, length %d, content '%s'\n%!" (Port.to_string src_port) (Port.to_string dst_port) (SeqNum.to_string seq_num) (bytelength bits) (string_of_bitstring bits) ;
             t.emit (Pdu.pack tcp) ;
             if ack then t.rcvd_acked <- t.rcvd_pld ;
@@ -211,7 +211,7 @@ struct
                 if debug then Printf.printf "Tcp:...keep it for later\n%!"
             ) else ( (* recv now *)
                 let skip = t.rcvd_pld - o in
-                if skip <= bytelength tcp.Pdu.payload then (
+                if skip <= Payload.length tcp.Pdu.payload then (
                     if t.rcvd_pld = 0 then (
                         ensure tcp.Pdu.syn "Tcp: Should not happen: not a syn" ;
                         t.rcvd_pld <- 1 ;
@@ -219,7 +219,7 @@ struct
                         emit_one t ~syn:(t.sent_pld=0) empty_bitstring ;
                         establish_cnx t true
                     ) ;
-                    let pld = dropbytes skip tcp.Pdu.payload in
+                    let pld = dropbytes skip (tcp.Pdu.payload :> bitstring) in
                     t.rcvd_pld <- t.rcvd_pld + (bytelength pld) ;
                     if debug then Printf.printf "Tcp: I have now read %d bytes\n%!" t.rcvd_pld ;
                     if bitstring_length pld > 0 then t.recv pld ;
@@ -245,7 +245,7 @@ struct
 
     and drop_unacked_tx t =
         let seqlen tcp =
-            bytelength tcp.Pdu.payload + int_of_bool tcp.Pdu.fin + int_of_bool tcp.Pdu.syn in
+            Payload.length tcp.Pdu.payload + int_of_bool tcp.Pdu.fin + int_of_bool tcp.Pdu.syn in
         if not (Streambuf.is_empty t.unacked_tx) then (
             let (offset, tcp) as first = Streambuf.min_elt t.unacked_tx in
             let next_byte = offset + seqlen tcp in
@@ -258,7 +258,7 @@ struct
     and inqueue_pkt t tcp =
         let offset = Int32.to_int ((tcp.Pdu.seq_num :> int32) -/ ((Option.get t.rcvd_isn) :> int32)) in
         if debug then Printf.printf "Tcp: Got a packet with %d bytes, %spush\n%!"
-            (bytelength tcp.Pdu.payload) (if tcp.Pdu.psh then "" else "don't ") ;
+            (Payload.length tcp.Pdu.payload) (if tcp.Pdu.psh then "" else "don't ") ;
         if tcp.Pdu.ack then (
             let acked = Int32.to_int ((tcp.Pdu.ack_num :> int32) -/ (t.isn :> int32)) in
             if acked > t.sent_acked then (
@@ -274,8 +274,8 @@ struct
                 if debug then Printf.printf "Tcp: Retransmiting eveything from %d\n%!" acked ;
                 let retr = ref [] and retr_pld = ref 0 in
                 Streambuf.iter (fun (_, tcp) ->
-                    retr := tcp.Pdu.payload :: !retr ;
-                    retr_pld := !retr_pld + (bytelength tcp.Pdu.payload)) t.unacked_tx ;
+                    retr := (tcp.Pdu.payload :> bitstring) :: !retr ;
+                    retr_pld := !retr_pld + (Payload.length tcp.Pdu.payload)) t.unacked_tx ;
                 t.unacked_tx <- Streambuf.empty ;
                 t.to_send <- List.rev_append !retr t.to_send ;
                 t.sent_pld <- t.sent_pld - !retr_pld ;

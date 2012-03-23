@@ -27,7 +27,7 @@ let debug = false
    (but the one from which the frame came from) *)
 module Repeater =
 struct
-    type port = { mutable emit : payload -> unit }
+    type port = { mutable emit : bitstring -> unit }
     type t = { ports : port array }
 
     let make n = { ports = Array.init n (fun _ -> { emit = ignore }) }

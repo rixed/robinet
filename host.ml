@@ -34,13 +34,13 @@ type host_trx = {
     name          : string ;
     logger        : Log.logger ;
     tcp_connect   : addr -> ?src_port:Tcp.Port.t -> Tcp.Port.t -> Tcp.TRX.tcp_trx Lwt.t ;
-    udp_connect   : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> (Tools.trx -> Tools.payload -> unit) -> trx Lwt.t ;
+    udp_connect   : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> (Tools.trx -> bitstring -> unit) -> trx Lwt.t ;
     gethostbyname : string -> Ip.Addr.t list Lwt.t ;
     tcp_server    : Tcp.Port.t -> (Tcp.TRX.tcp_trx -> unit) -> unit ;
     udp_server    : Udp.Port.t -> (trx -> unit ) -> unit ;
     signal_err    : string -> unit ;
-    set_emit      : (payload -> unit) -> unit ;
-    rx            : payload -> unit }
+    set_emit      : (bitstring -> unit) -> unit ;
+    rx            : bitstring -> unit }
 
 type socks = { ip : trx ;
                (* Available sockets per IP dest.
@@ -374,21 +374,21 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
         | Some ip ->
             if ip.Ip.Pdu.proto <> Ip.proto_udp then (
                 Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Ignoring IP packet of proto %s while waiting for DHCP offer" (Ip.Proto.to_string ip.Ip.Pdu.proto))))
-            ) else (match Udp.Pdu.unpack ip.Ip.Pdu.payload with
+            ) else (match Udp.Pdu.unpack (ip.Ip.Pdu.payload :> bitstring) with
                 | None -> ()
                 | Some udp ->
                     if udp.Udp.Pdu.src_port <> (Udp.Port.o 67) || udp.Udp.Pdu.dst_port <> (Udp.Port.o 68) then (
                         Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Ignoring UDP packet from %s:%s to %s:%s while waiting for DHCP offer"
                             (Ip.Addr.to_string ip.Ip.Pdu.src) (Udp.Port.to_string udp.Udp.Pdu.src_port)
                             (Ip.Addr.to_string ip.Ip.Pdu.dst) (Udp.Port.to_string udp.Udp.Pdu.dst_port))))
-                    ) else (match Dhcp.Pdu.unpack udp.Udp.Pdu.payload with
+                    ) else (match Dhcp.Pdu.unpack (udp.Udp.Pdu.payload :> bitstring) with
                         | None -> ()
                         | Some ({ Dhcp.Pdu.msg_type = Some op ; _ } as dhcp) when op = Dhcp.offer ->
                             Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Got DHCP OFFER from %s" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
                             (* TODO: check the Xid? *)
                             let pdu = Dhcp.Pdu.make_request ~mac:my_mac ~xid:dhcp.Dhcp.Pdu.xid ~name dhcp.Dhcp.Pdu.yiaddr dhcp.Dhcp.Pdu.server_id in
-                            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
-                            let pdu = Ip.Pdu.make Ip.proto_udp Ip.addr_zero Ip.addr_broadcast (Udp.Pdu.pack pdu) in
+                            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Payload.o (Dhcp.Pdu.pack pdu)) in
+                            let pdu = Ip.Pdu.make Ip.proto_udp Ip.addr_zero Ip.addr_broadcast (Payload.o (Udp.Pdu.pack pdu)) in
                             t.eth.Eth.TRX.trx.Tools.tx (Ip.Pdu.pack pdu)
                         | Some ({ Dhcp.Pdu.msg_type = Some op ; _ } as dhcp) when op = Dhcp.ack ->
                             Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
@@ -401,8 +401,8 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
         if t.my_ip = Ip.addr_zero then (
             Log.(log t.host_trx.logger Info (lazy "Sending DHCP DISCOVER")) ;
             let pdu = Dhcp.Pdu.make_discover ~mac:my_mac ~name () in
-            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
-            let pdu = Ip.Pdu.make Ip.proto_udp Ip.addr_zero Ip.addr_broadcast (Udp.Pdu.pack pdu) in
+            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Payload.o (Dhcp.Pdu.pack pdu)) in
+            let pdu = Ip.Pdu.make Ip.proto_udp Ip.addr_zero Ip.addr_broadcast (Payload.o (Udp.Pdu.pack pdu)) in
             t.eth.Eth.TRX.trx.Tools.tx (Ip.Pdu.pack pdu) ;
             Clock.delay (Clock.sec (5.+.(Random.float 3.))) send_discover ()
         ) in
