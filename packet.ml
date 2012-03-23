@@ -81,3 +81,6 @@ module Pdu = struct
 
     let unpack = unpack_eth
 end
+
+let of_pcap (_ts, bits) = Pdu.unpack bits
+
