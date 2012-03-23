@@ -7,8 +7,8 @@ SOURCES  = \
 	dns.ml url.ml http.ml \
 	tcp.ml udp.ml \
 	ip.ml arp.ml \
-	eth.ml \
-	dhcp.ml pcap.ml \
+	eth.ml dhcp.ml \
+	packet.ml pcap.ml \
 	host.ml localhost.ml \
 	html.ml browser.ml \
 	hub.ml net.ml \
