@@ -87,7 +87,7 @@ let sock_rx t proto socks bits =
             try
                 let trx =
                     hash_find_or_insert socks.tcps key (fun () ->
-                        if tcp.Tcp.Pdu.syn then (
+                        if tcp.Tcp.Pdu.flags.Tcp.Pdu.syn then (
                             let server = try Hashtbl.find t.tcp_servers tcp.Tcp.Pdu.dst_port
                                          with Not_found -> raise No_socket in
                             let trx = Tcp.TRX.accept tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port in

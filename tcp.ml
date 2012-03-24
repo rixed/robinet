@@ -51,15 +51,34 @@ end)
 
 module Pdu =
 struct
+    type flags = {
+        urg      : bool ;
+        ack      : bool ;
+        psh      : bool ;
+        rst      : bool ;
+        syn      : bool ;
+        fin      : bool }
+    let string_of_flags f =
+        Printf.sprintf "%s%s%s%s%s%s"
+            (if f.urg then "Urg" else "")
+            (if f.ack then "Ack" else "")
+            (if f.psh then "Psh" else "")
+            (if f.rst then "Rst" else "")
+            (if f.syn then "Syn" else "")
+            (if f.fin then "Fin" else "")
+    let print_flags fmt f = Format.fprintf fmt "@{<flags>%s@}" (string_of_flags f)
+
     type t = {
-        src_port : Port.t  ; dst_port : Port.t ;
-        seq_num  : SeqNum.t ; ack_num  : SeqNum.t ;
-        hdr_len  : int   ; urg      : bool ;
-        ack      : bool  ; psh      : bool ;
-        rst      : bool  ; syn      : bool ;
-        fin      : bool  ; win_size : int ;
+        src_port : Port.t ;
+        dst_port : Port.t ;
+        seq_num  : SeqNum.t ;
+        ack_num  : SeqNum.t ;
+        hdr_len  : int ;
+        win_size : int ;
+        flags    : flags ;
         checksum : int option ; (* If None, will be set by IP layer - if in IP *)
-        urg_ptr  : int   ; options  : bitstring ;
+        urg_ptr  : int ;
+        options  : bitstring ;
         payload  : Payload.t }
 
     let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80)
@@ -71,7 +90,7 @@ struct
         { src_port ; dst_port ;
           seq_num  ; ack_num ;
           hdr_len  = 20 + bytelength options ;
-          urg ; ack ; psh ; rst ; syn ; fin ;
+          flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
           win_size ; checksum ;
           urg_ptr  ; options ;
           payload }
@@ -86,7 +105,8 @@ struct
             (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
             (t.seq_num :> int32)  : 32 ; (t.ack_num :> int32)  : 32 ;
             t.hdr_len lsr 2 : 4 ; 0 : 6 ;
-            t.urg : 1 ; t.ack : 1 ; t.psh : 1 ; t.rst : 1 ; t.syn : 1 ; t.fin : 1 ;
+            t.flags.urg : 1 ; t.flags.ack : 1 ; t.flags.psh : 1 ;
+            t.flags.rst : 1 ; t.flags.syn : 1 ; t.flags.fin : 1 ;
             t.win_size : 16 ; (Option.default 0 t.checksum) : 16 ;
             t.urg_ptr  : 16 ; t.options : -1 : bitstring }) ;
             (t.payload :> bitstring) ]
@@ -101,7 +121,7 @@ struct
             payload  : -1 : bitstring } ->
         Some { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
                seq_num  = SeqNum.o seq_num  ; ack_num  = SeqNum.o ack_num ;
-               hdr_len ; urg ; ack ; psh ; rst ; syn ; fin ;
+               hdr_len ; flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
                win_size ; checksum = Some checksum ;
                urg_ptr  ; options ; payload = Payload.o payload }
         | { _ } -> err "Not TCP"
@@ -213,7 +233,7 @@ struct
                 let skip = t.rcvd_pld - o in
                 if skip <= Payload.length tcp.Pdu.payload then (
                     if t.rcvd_pld = 0 then (
-                        ensure tcp.Pdu.syn "Tcp: Should not happen: not a syn" ;
+                        ensure tcp.Pdu.flags.Pdu.syn "Tcp: Should not happen: not a syn" ;
                         t.rcvd_pld <- 1 ;
                         (* inconditionnaly answer the SYN before the client starts writing *)
                         emit_one t ~syn:(t.sent_pld=0) empty_bitstring ;
@@ -223,13 +243,13 @@ struct
                     t.rcvd_pld <- t.rcvd_pld + (bytelength pld) ;
                     if debug then Printf.printf "Tcp: I have now read %d bytes\n%!" t.rcvd_pld ;
                     if bitstring_length pld > 0 then t.recv pld ;
-                    if tcp.Pdu.fin && not t.rcvd_fin then (
+                    if tcp.Pdu.flags.Pdu.fin && not t.rcvd_fin then (
                         if debug then Printf.printf "Tcp: received a FIN\n%!" ;
                         t.rcvd_pld <- t.rcvd_pld + 1 ;
                         t.rcvd_fin <- true ;
                         t.closed <- true ;
                         t.recv empty_bitstring (* signal the close *) (* FIXME: which is not very easy to use when the TRX is piped into another one. An Err would suit better *)
-                    ) else if tcp.Pdu.rst && not t.rcvd_fin then (
+                    ) else if tcp.Pdu.flags.Pdu.rst && not t.rcvd_fin then (
                         if debug then Printf.printf "Tcp: received a RST\n%!" ;
                         t.rcvd_fin <- true ;
                         t.closed <- true ;
@@ -245,7 +265,7 @@ struct
 
     and drop_unacked_tx t =
         let seqlen tcp =
-            Payload.length tcp.Pdu.payload + int_of_bool tcp.Pdu.fin + int_of_bool tcp.Pdu.syn in
+            Payload.length tcp.Pdu.payload + int_of_bool tcp.Pdu.flags.Pdu.fin + int_of_bool tcp.Pdu.flags.Pdu.syn in
         if not (Streambuf.is_empty t.unacked_tx) then (
             let (offset, tcp) as first = Streambuf.min_elt t.unacked_tx in
             let next_byte = offset + seqlen tcp in
@@ -258,8 +278,8 @@ struct
     and inqueue_pkt t tcp =
         let offset = Int32.to_int ((tcp.Pdu.seq_num :> int32) -/ ((Option.get t.rcvd_isn) :> int32)) in
         if debug then Printf.printf "Tcp: Got a packet with %d bytes, %spush\n%!"
-            (Payload.length tcp.Pdu.payload) (if tcp.Pdu.psh then "" else "don't ") ;
-        if tcp.Pdu.ack then (
+            (Payload.length tcp.Pdu.payload) (if tcp.Pdu.flags.Pdu.psh then "" else "don't ") ;
+        if tcp.Pdu.flags.Pdu.ack then (
             let acked = Int32.to_int ((tcp.Pdu.ack_num :> int32) -/ (t.isn :> int32)) in
             if acked > t.sent_acked then (
                 if acked > t.sent_pld then (
@@ -294,7 +314,7 @@ struct
         | Some tcp ->
             if debug then Printf.printf "Tcp: Received a segment!\n" ;
             (* TODO: check checksum *)
-            if tcp.Pdu.syn then (
+            if tcp.Pdu.flags.Pdu.syn then (
                 if t.rcvd_pld > 0 then (
                     if debug then Printf.printf "Tcp: ignoring Syn while inbound cnx is established\n" ;
                     if t.rcvd_isn = Some tcp.Pdu.seq_num then (
