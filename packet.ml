@@ -30,9 +30,17 @@ module Pdu = struct
              | Dhcp of Dhcp.Pdu.t | Eth of Eth.Pdu.t  | Arp of Arp.Pdu.t
              | Ip   of Ip.Pdu.t   | Udp of Udp.Pdu.t  | Tcp of Tcp.Pdu.t
              | Http of Http.Pdu.t | Dns of Dns.Pdu.t
-    type t = pkt list (* with inner layer first *)
+    type t = pkt list (* with outer layer first for more natural presentation *)
     
-    let new_payload _p _bits = todo "change payload"
+    let new_payload bits = function
+        | Raw _  -> Raw bits
+        (* can you spot a pattern here? *)
+        | Eth  p -> Eth { p with Eth.Pdu.payload = Payload.o bits }
+        | Ip   p -> Ip  { p with Ip.Pdu.payload = Payload.o bits }
+        | Udp  p -> Udp { p with Udp.Pdu.payload = Payload.o bits }
+        | Tcp  p -> Tcp { p with Tcp.Pdu.payload = Payload.o bits }
+        | x -> x
+
     let pack_1 = function (* there ought to be a better way *)
         | Dhcp t -> Dhcp.Pdu.pack t | Eth t -> Eth.Pdu.pack t
         | Arp t  -> Arp.Pdu.pack t  | Ip t  -> Ip.Pdu.pack t
@@ -41,12 +49,12 @@ module Pdu = struct
         | Raw t  -> t
     let pack t =
         let rec aux bits = function
-            | [] -> bits
+            | [] -> Option.get bits
             | p :: ps ->
-                (* bits is the new payload for p *)
-                let p' = new_payload p bits in
-                aux (pack_1 p') ps in
-        aux empty_bitstring t
+                (* bits, if set, is the new payload for p *)
+                let p' = match bits with None -> p | Some b -> new_payload b p in
+                aux (Some (pack_1 p')) ps in
+        aux None (List.rev t)
 
     let unpack_raw bits = if bitstring_is_empty bits then [] else [ Raw bits ]
     let try_unpack unp do_t bits =
@@ -82,5 +90,9 @@ module Pdu = struct
     let unpack = unpack_eth
 end
 
+(* Shorthands *)
+
 let of_pcap (_ts, bits) = Pdu.unpack bits
+
+let enum_of fname = Pcap.enum_of fname /@ of_pcap
 
