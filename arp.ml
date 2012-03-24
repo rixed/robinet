@@ -54,20 +54,23 @@ let op_InARP_request = Op.o 8
 let op_InARP_reply   = Op.o 9
 let op_ARP_NACK      = Op.o 10
 
-module HwType = MakePrivate(struct
-    type t = int
-    let to_string = function
-        | 1 -> "Eth"
-        | 2 -> "Expe Eth"
-        | 3 -> "AX25"
-        | 4 -> "Tok.Ring"
-        | 5 -> "Chaos"
-        | 6 -> "IEEE 802"
-        | 7 -> "ArcNet"
-        | x -> Printf.sprintf "HwType(%d)" x
-    let is_valid x = x >= 1
-    let repl_tag = "code"
-end)
+module HwType = struct
+    include MakePrivate(struct
+        type t = int
+        let to_string = function
+            | 1 -> "Eth"
+            | 2 -> "Expe Eth"
+            | 3 -> "AX25"
+            | 4 -> "Tok.Ring"
+            | 5 -> "Chaos"
+            | 6 -> "IEEE 802"
+            | 7 -> "ArcNet"
+            | x -> Printf.sprintf "HwType(%d)" x
+        let is_valid x = x >= 1
+        let repl_tag = "code"
+    end)
+    let random () = o (randi 3)
+end
 
 let hw_type_eth      = HwType.o 1
 let hw_type_expe_eth = HwType.o 2
@@ -77,17 +80,20 @@ let hw_type_chaos    = HwType.o 5
 let hw_type_IEEE_802 = HwType.o 6
 let hw_type_arcnet   = HwType.o 7
 
-module HwProto = MakePrivate(struct
-    type t = int
-    let to_string = function
-        | 0x0800 -> "IP"
-        | 0x86DD -> "IPv6"
-        | 0x0806 -> "ARP"
-        | 0x8100 -> "Eth8021q"
-        |      x -> Printf.sprintf "Protocol(%X)" x
-    let is_valid x = x < 0x10000
-    let repl_tag = "proto"
-end)
+module HwProto = struct
+    include MakePrivate(struct
+        type t = int
+        let to_string = function
+            | 0x0800 -> "IP"
+            | 0x86DD -> "IPv6"
+            | 0x0806 -> "ARP"
+            | 0x8100 -> "Eth8021q"
+            |      x -> Printf.sprintf "Protocol(%X)" x
+        let is_valid x = x < 0x10000
+        let repl_tag = "proto"
+    end)
+    let random () = o (randi 16)
+end
 
 let proto_ip4   = HwProto.o 0x0800
 let proto_ip6   = HwProto.o 0x86DD

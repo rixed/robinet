@@ -67,12 +67,15 @@ let string_of_mac mac =
   string_of_mac ((Eth.addr_of_string "ff:ff:07:c0:00:04") :> bitstring) = "ff:ff:07:c0:00:04"
 *)
 
-module Addr = MakePrivate(struct
-    type t = bitstring
-    let to_string = string_of_mac
-    let is_valid t = bitstring_length t = 48
-    let repl_tag = "addr"
-end)
+module Addr = struct
+    include MakePrivate(struct
+        type t = bitstring
+        let to_string = string_of_mac
+        let is_valid t = bitstring_length t = 48
+        let repl_tag = "addr"
+    end)
+    let random () = o (randbs 6)
+end
 
 let addr_of_string str =
     let pack_addr a b c d e f =
@@ -98,6 +101,7 @@ let gw_addr_of_string str =
 (* Ethernet frames *)
 
 module Pdu = struct
+    (*$< Pdu *)
     type t = { src : Addr.t ; dst : Addr.t ;
                vlan : int option ;
                proto : Arp.HwProto.t ;
@@ -105,6 +109,10 @@ module Pdu = struct
 
     let make ?vlan proto src dst payload =
         { src ; dst ; vlan ; proto ; payload }
+
+    let random () =
+        make (Arp.HwProto.random ()) (Addr.random ()) (Addr.random ())
+             (Payload.random 30)
 
     let pack t =
         (* TODO: pad into minimal (64bytes) size? *)
@@ -131,6 +139,11 @@ module Pdu = struct
                    payload = Payload.o payload }
         | { _ } ->
             err "Not Eth"
+
+    (*$Q pack
+      ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+     *)
+    (*$>*)
 end
 
 (* Transceiver (create it with a proto and a src MAC address and default GW dst MAC
