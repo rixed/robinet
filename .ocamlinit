@@ -9,6 +9,7 @@ Toploop.use_silently
 
 open Batteries;;
 open Bitstring;;
+open Tools;;
 
 let colorize =
     Format.set_tags true ;
@@ -27,6 +28,7 @@ let colorize =
     } ;;
 
 #install_printer Tools.Payload.print;;
+#install_printer Tools.print_bitstring;;
 #install_printer Tcp.Port.print;;
 #install_printer Tcp.SeqNum.print;;
 #install_printer Tcp.Pdu.print_flags;;

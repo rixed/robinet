@@ -8,7 +8,7 @@ SOURCES  = \
 	tcp.ml udp.ml \
 	ip.ml arp.ml \
 	eth.ml dhcp.ml \
-	packet.ml pcap.ml \
+	pcap.ml packet.ml \
 	host.ml localhost.ml \
 	html.ml browser.ml \
 	hub.ml net.ml \

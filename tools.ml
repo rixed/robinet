@@ -55,6 +55,9 @@ let hexstring_of_bitstring bs =
     let hexify c = Printf.sprintf "0x%02x" (Char.code c) in
     String.enum s /@ hexify |> List.of_enum |> String.join " "
 
+let print_bitstring fmt bs =
+    Format.fprintf fmt "%s" (hexstring_of_bitstring bs)
+
 let abbrev ?(len=25) str =
     let tot_len = String.length str in
     if len < tot_len then (String.sub str 0 (len-3)) ^ "..."
@@ -124,6 +127,17 @@ let hash_merge h h' =
 let file_content f =
     File.with_file_in f IO.read_all
 
+(* Some random generators for tests *)
+let randi bits =
+    let mask = (1 lsl bits) - 1 in
+    Random.bits () land mask
+let rand32 () = Int32.of_int64 (Random.int64 0x100000000L)
+let randb = Random.bool
+let randstr len = String.init len (fun _ -> Random.char ())
+let randbs len (* in bytes! *)=
+    randstr len |> bitstring_of_string
+
+
 (* A Module with a private int type and custom printer, used
    to constomize printing of various protocolar fields such as
    TCP ports and so on. A little convoluted but we gain:
@@ -162,6 +176,7 @@ module Payload = struct
     let empty = o empty_bitstring
     let bitlength (t : t) = bitstring_length (t :> bitstring)
     let length (t : t) = bytelength (t :> bitstring) (* TODO: rename to length *)
+    let random len = o (randbs len)
 end
 
 type trx = { tx : bitstring -> unit ; (* transmit this payload *)

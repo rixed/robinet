@@ -25,15 +25,18 @@ let debug = false
 
 (* Protocols *)
 
-module Proto = MakePrivate(struct
-    type t = int
-    let to_string t =
-        try (Unix.getprotobynumber t).Unix.p_name
-        with Not_found ->
-            Printf.sprintf "Protocol(%d)" t
-    let is_valid t = t < 0x100
-    let repl_tag = "proto"
-end)
+module Proto = struct
+    include MakePrivate(struct
+        type t = int
+        let to_string t =
+            try (Unix.getprotobynumber t).Unix.p_name
+            with Not_found ->
+                Printf.sprintf "Protocol(%d)" t
+        let is_valid t = t < 0x100
+        let repl_tag = "proto"
+    end)
+    let random () = o (randi 8)
+end
 
 let proto_icmp = Proto.o 1
 let proto_tcp  = Proto.o 6
@@ -54,20 +57,24 @@ let dotted_string_of_int32 i = bitmatch (BITSTRING { i : 32 }) with
   dotted_string_of_int32 ((addr_of_string "1.2.3.4") :> int32) = "1.2.3.4"
 *)
 
-let show_ip_as_names = ref true
+let show_ip_as_names = ref false
 
-module Addr = MakePrivate(struct
-    type t = int32
-    let to_string t =
-        if !show_ip_as_names then
-            try (Unix.gethostbyaddr (inet_addr_of_int32 t)).Unix.h_name
-            with Not_found ->
+module Addr = struct
+    include MakePrivate(struct
+        type t = int32
+        let to_string t =
+            if !show_ip_as_names then
+                try (Unix.gethostbyaddr (inet_addr_of_int32 t)).Unix.h_name
+                with Not_found ->
+                    dotted_string_of_int32 t
+            else
                 dotted_string_of_int32 t
-        else
-            dotted_string_of_int32 t
-    let is_valid _ = true
-    let repl_tag = "addr"
-end)
+        let is_valid _ = true
+        let repl_tag = "addr"
+    end)
+
+    let random () = o (rand32 ())
+end
 
 let addr_zero = Addr.o 0l
 let addr_broadcast = Addr.o 0xffffffffl
@@ -132,24 +139,28 @@ module Pdu = struct
     let id_seq = ref 0
     let next_id () = id_seq := (!id_seq + 1) mod 0xffff ; !id_seq
 
-    type t = { hdr_len : int ; tos : int ; tot_len : int ;
+    type t = { tos : int ; tot_len : int ;
                id : int ; dont_frag : bool ; more_frags : bool ; frag_offset : int ;
-               ttl : int ; proto : Proto.t ; checksum : int option ;
-               src : Addr.t ; dst : Addr.t ;
+               ttl : int ; proto : Proto.t ; src : Addr.t ; dst : Addr.t ;
                options : bitstring ; payload : Payload.t }
 
     let make ?(tos=0) ?tot_len
              ?id ?(dont_frag=false) ?(more_frags=false)
              ?(frag_offset=0) ?(ttl=64)
-             ?checksum
              ?(options=empty_bitstring)
              proto src dst payload =
-        let hdr_len = 20
+        let hdr_len = 20 + bytelength options
         and id = may_default id next_id in
         let tot_len = match tot_len with Some v -> v | None ->
             Payload.length payload + hdr_len in
-        { hdr_len ; tos ; tot_len ; id ; dont_frag ; more_frags ; frag_offset ;
-          ttl ; proto ; checksum ; src ; dst ; options ; payload }
+        { tos ; tot_len ; id ; dont_frag ; more_frags ; frag_offset ;
+          ttl ; proto ; src ; dst ; options ; payload }
+
+    let random () =
+        make ~tos:(randi 8) ~id:(randi 16) ~dont_frag:(randb ())
+             ~more_frags:(randb ()) ~frag_offset:(randi 13)
+             ~ttl:(randi 8) ~options:(randbs (4*(randi 3)))
+             (Proto.random ()) (Addr.random ()) (Addr.random ()) (Payload.random (Random.int 10 + 20))
 
     let sum bits =
         let rec aux s bits = bitmatch bits with
@@ -196,42 +207,49 @@ module Pdu = struct
             pld
 
     let pack t =
-        let header = (BITSTRING {
-            4 : 4 ; t.hdr_len/4 : 4 ; t.tos : 8 ;
-            t.tot_len : 16 ;
-            t.id : 16 ; false : 1 ; t.dont_frag : 1 ; t.more_frags : 1 ; t.frag_offset : 13 ;
-            t.ttl : 8 ; (t.proto :> int) : 8 ; Option.default 0 t.checksum : 16 ;
-            (t.src :> int32) : 32 ; (t.dst :> int32) : 32 }) in
-        let header = if t.checksum <> None then header else ( (* patch actual checksum *)
+        let header =
+            let hdr_len = 20 + bytelength t.options in
+            concat [ (BITSTRING {
+                4 : 4 ; hdr_len/4 : 4 ; t.tos : 8 ;
+                t.tot_len : 16 ;
+                t.id : 16 ; false : 1 ; t.dont_frag : 1 ; t.more_frags : 1 ; t.frag_offset : 13 ;
+                t.ttl : 8 ; (t.proto :> int) : 8 ; 0 : 16 ;
+                (t.src :> int32) : 32 ; (t.dst :> int32) : 32 }) ;
+            t.options ]
+            in
+        let header = (* patch actual IP checksum *)
             let s = sum header in
             concat [ takebits 80 header ;
                      (BITSTRING { s : 16 }) ;
                      dropbits 96 header ]
-        )
-        and payload =
+        and payload = (* and actual TCP/UDP checksums as well since they use some fields of the IP header *)
             if t.proto = proto_tcp then patch_tcp_checksum t t.payload
             else if t.proto = proto_udp then patch_udp_checksum t t.payload
             else t.payload in
         concat [ header ; (payload :> bitstring) ]
 
     let unpack bits = bitmatch bits with
-        | { 4 : 4 ; hdr_len : 4 ; tos : 8 ;
-            tot_len : 16 ;
+        | { 4 : 4 ; hdr_len : 4 ; tos : 8 ; tot_len : 16 ;
             id : 16 ; false : 1 ; dont_frag : 1 ; more_frags : 1 ; frag_offset : 13 ;
-            ttl : 8 ; proto : 8 ; checksum : 16 ;
-            src : 32 ; dst : 32 ;
+            ttl : 8 ; proto : 8 ; _checksum : 16 ;
+            src : 32 ;
+            dst : 32 ;
             options : (hdr_len-5)*32 : bitstring ;
             payload : (tot_len - hdr_len*4)*8 : bitstring ;
             _padding : -1 : bitstring } ->
-        Some { hdr_len ; tos ; tot_len ;
+        (* TODO: control the checksum ? *)
+        Some { tos ; tot_len ;
                id ; dont_frag ; more_frags ; frag_offset ;
-               ttl ; proto = Proto.o proto ; checksum = Some checksum ;
+               ttl ; proto = Proto.o proto ;
                src = Addr.o src ; dst = Addr.o dst ; options ;
                payload = Payload.o payload }
-        | { _version : 4 } ->
+        | { version : 4 } when version <> 4 ->
             err "Ip: Bad version"
         | { _ } ->
             err "Ip: Not IP"
+    (*$Q pack
+      ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+     *)
     (*$>*)
 end
 
