@@ -29,7 +29,7 @@ let arp_query (src_eth : Eth.Addr.t) src_ip target_ip =
                                    (src_eth :> bitstring)
                                    ( Ip.Addr.to_bitstring src_ip)
                                    ( Ip.Addr.to_bitstring target_ip) in
-    let eth = Eth.Pdu.make Arp.HwProto.arp src_eth Eth.addr_broadcast (Payload.o (Arp.Pdu.pack arp)) in
+    let eth = Eth.Pdu.make Arp.HwProto.arp src_eth Eth.Addr.broadcast (Payload.o (Arp.Pdu.pack arp)) in
     Pcap.inject iface (string_of_bitstring (Eth.Pdu.pack eth))
 
 let rec wait_answer target_ip_bits =
@@ -56,8 +56,8 @@ let main =
     let resolve_one target_ip_str =
         let target_ip      = Ip.Addr.of_string target_ip_str in
         let target_ip_bits = Ip.Addr.to_bitstring target_ip
-        and src_eth        = Eth.addr_of_string !src_eth_str
-        and src_ip         =  Ip.Addr.of_string !src_ip_str in
+        and src_eth        = Eth.Addr.of_string !src_eth_str
+        and src_ip         = Ip.Addr.of_string !src_ip_str in
         arp_query src_eth src_ip target_ip ;
         let answer = Eth.Addr.o (wait_answer target_ip_bits) in
         Printf.printf "%s: %s\n" (Ip.Addr.to_string target_ip) (Eth.Addr.to_string answer)

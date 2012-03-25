@@ -159,7 +159,7 @@ let rec resolver t =
                     let ips =
                         List.filter_map (fun (_name, qtype, qclass, _ttl, data) ->
                             if qclass = Dns.qclass_inet && qtype = Dns.qtype_a then
-                                Some (Ip.addr_of_bitstring (bitstring_of_string data))
+                                Some (Ip.Addr.of_bitstring (bitstring_of_string data))
                             else None
                         ) pdu.Dns.Pdu.answer_rrs in
                     let waiters = Hashtbl.find_all t.dns_queries name in

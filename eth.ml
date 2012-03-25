@@ -25,67 +25,71 @@ let debug = false
 
 (* Private Types *)
 
-let show_addr_with_vendor = ref true
-
-let string_of_sfx l sfx =
-    let rec aux prev l rem =
-        if l <= 0 then prev else
-        aux ((Printf.sprintf ":%02Lx" (Int64.logand rem 0xffL))^prev)
-            (l-8)
-            (Int64.shift_right_logical rem 8) in
-    aux "" l sfx
-(*$T string_of_sfx
-  string_of_sfx  8 0xabL = ":ab"
-  string_of_sfx 12 0x123L = ":01:23"
-  string_of_sfx  0 0x123L = ""
-  string_of_sfx 48 0x123456789abcL = ":12:34:56:78:9a:bc"
-*)
-
-external vendor_lookup : int64 -> (string * int) option = "wrap_eth_vendor_lookup"
-
-let string_of_mac mac =
-    let simple_name mac64 =
-        String.lchop (string_of_sfx 48 mac64) in
-    bitmatch mac with
-        | { mac64 : 48 } ->
-            if !show_addr_with_vendor then (
-                match vendor_lookup mac64 with
-                    | None -> simple_name mac64
-                    | Some (name, bits) ->
-                        let sfx_bits = 48 - bits in
-                        let sfx = Int64.logand mac64 (Int64.pred (Int64.shift_left 1L sfx_bits)) in
-                        name ^ (string_of_sfx sfx_bits sfx)
-            ) else (
-                simple_name mac64
-            )
-        | { _ } -> should_not_happen ()
-(*$T string_of_mac
-  string_of_mac ((Eth.addr_of_string "00:23:8b:5f:09:ce") :> bitstring) = "QuantaCo:5f:09:ce"
-  string_of_mac ((Eth.addr_of_string "80:ee:73:07:76:f1") :> bitstring) = "Shuttle:07:76:f1"
-  string_of_mac (Eth.addr_broadcast :> bitstring) = "Broadcast"
-  string_of_mac ((Eth.addr_of_string "00:50:c2:00:0a:bc") :> bitstring) = "TLS:0a:bc"
-  string_of_mac ((Eth.addr_of_string "ff:ff:07:c0:00:04") :> bitstring) = "ff:ff:07:c0:00:04"
-*)
-
 module Addr = struct
+    (*$< Addr *)
+    let print_with_vendor = ref true
+
+    let string_of_sfx l sfx =
+        let rec aux prev l rem =
+            if l <= 0 then prev else
+            aux ((Printf.sprintf ":%02Lx" (Int64.logand rem 0xffL))^prev)
+                (l-8)
+                (Int64.shift_right_logical rem 8) in
+        aux "" l sfx
+    (*$T string_of_sfx
+      string_of_sfx  8 0xabL = ":ab"
+      string_of_sfx 12 0x123L = ":01:23"
+      string_of_sfx  0 0x123L = ""
+      string_of_sfx 48 0x123456789abcL = ":12:34:56:78:9a:bc"
+    *)
+
+    external vendor_lookup : int64 -> (string * int) option = "wrap_eth_vendor_lookup"
+
+    let string_of_mac mac =
+        let simple_name mac64 =
+            String.lchop (string_of_sfx 48 mac64) in
+        bitmatch mac with
+            | { mac64 : 48 } ->
+                if !print_with_vendor then (
+                    match vendor_lookup mac64 with
+                        | None -> simple_name mac64
+                        | Some (name, bits) ->
+                            let sfx_bits = 48 - bits in
+                            let sfx = Int64.logand mac64 (Int64.pred (Int64.shift_left 1L sfx_bits)) in
+                            name ^ (string_of_sfx sfx_bits sfx)
+                ) else (
+                    simple_name mac64
+                )
+            | { _ } -> should_not_happen ()
+    (*$T string_of_mac
+      string_of_mac ((of_string "00:23:8b:5f:09:ce") :> bitstring) = "QuantaCo:5f:09:ce"
+      string_of_mac ((of_string "80:ee:73:07:76:f1") :> bitstring) = "Shuttle:07:76:f1"
+      string_of_mac (broadcast :> bitstring) = "Broadcast"
+      string_of_mac ((of_string "00:50:c2:00:0a:bc") :> bitstring) = "TLS:0a:bc"
+      string_of_mac ((of_string "ff:ff:07:c0:00:04") :> bitstring) = "ff:ff:07:c0:00:04"
+    *)
+
     include MakePrivate(struct
         type t = bitstring
         let to_string = string_of_mac
         let is_valid t = bitstring_length t = 48
         let repl_tag = "addr"
     end)
+
+    let of_string str =
+        let pack_addr a b c d e f =
+            o (BITSTRING { a : 8 ; b : 8 ; c : 8 ; d : 8 ; e : 8 ; f : 8 }) in
+        Scanf.sscanf str "%x:%x:%x:%x:%x:%x" pack_addr
+
+    let broadcast = of_string "FF:FF:FF:FF:FF:FF"
+    let zero = of_string "00:00:00:00:00:00"
+
+    let eq (a : t) (b : t) =
+        Bitstring.equals (a :> bitstring) (b :> bitstring)
+
     let random () = o (randbs 6)
+    (*$>*)
 end
-
-let addr_of_string str =
-    let pack_addr a b c d e f =
-        Addr.o (BITSTRING { a : 8 ; b : 8 ; c : 8 ; d : 8 ; e : 8 ; f : 8 }) in
-    Scanf.sscanf str "%x:%x:%x:%x:%x:%x" pack_addr
-
-let addr_broadcast = addr_of_string "FF:FF:FF:FF:FF:FF"
-let addr_zero = addr_of_string "00:00:00:00:00:00"
-let addr_eq (a : Addr.t) (b : Addr.t) =
-    Bitstring.equals (a :> bitstring) (b :> bitstring)
 
 (* Gateways can be given either a MAC or an IP address *)
 
@@ -95,7 +99,7 @@ let string_of_gw_addr = function
     | IPv4 ip -> Ip.Addr.to_string ip
 
 let gw_addr_of_string str =
-    try Mac (addr_of_string str)
+    try Mac (Addr.of_string str)
     with _ -> IPv4 (Ip.Addr.of_string str)
 
 (* Ethernet frames *)
@@ -174,13 +178,13 @@ struct
 
     let resolve_proto_addr t bits sender_proto_addr target_proto_addr =
         let request = Arp.Pdu.make_request Arp.HwType.eth t.proto (t.src :> bitstring) sender_proto_addr target_proto_addr in
-        send t Arp.HwProto.arp addr_broadcast (Arp.Pdu.pack request) ;
+        send t Arp.HwProto.arp Addr.broadcast (Arp.Pdu.pack request) ;
         if debug then Printf.printf "Eth: Delaying a msg for '%s'\n%!" (hexstring_of_bitstring target_proto_addr) ;
         BitHash.add t.delayed target_proto_addr bits
 
     type dst = Delayed | Dst of Addr.t
     let arp_resolve_ipv4 t bits sender_ip target_ip =
-        if target_ip = (Ip.Addr.to_bitstring Ip.Addr.broadcast) then Dst addr_broadcast
+        if target_ip = (Ip.Addr.to_bitstring Ip.Addr.broadcast) then Dst Addr.broadcast
         else (
             try Dst (Option.get (BitHash.find t.arp_cache target_ip)) ;
             with Not_found ->
@@ -220,7 +224,7 @@ struct
         | Some frame ->
             if debug then Printf.printf "Eth: Got an eth frame of proto %s for %s\n%!" (Arp.HwProto.to_string frame.Pdu.proto) (Addr.to_string frame.Pdu.dst) ;
             if frame.Pdu.proto = t.proto &&
-               (addr_eq frame.Pdu.dst t.src || addr_eq frame.Pdu.dst addr_broadcast) then (
+               (Addr.eq frame.Pdu.dst t.src || Addr.eq frame.Pdu.dst Addr.broadcast) then (
                 if debug then Printf.printf "Eth:...for me!\n%!" ;
                 if Payload.bitlength frame.Pdu.payload > 0 then t.recv (frame.Pdu.payload :> bitstring)
             ) else if frame.Pdu.proto = Arp.HwProto.arp then (

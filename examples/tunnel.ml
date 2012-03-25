@@ -106,7 +106,7 @@ let main =
         Lwt.catch (fun () ->
             tunnel !ifname
                    (Ip.Addr.of_string  !tun_ip)
-                   (Eth.addr_of_string !tun_mac)
+                   (Eth.Addr.of_string !tun_mac)
                    !gw  !search_sfx !nameserver
                    !dst (Tcp.Port.o !http_port)  !src_port)
             (fun exn ->

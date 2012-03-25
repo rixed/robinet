@@ -103,7 +103,7 @@ let host_of_csv str =
         { elmt = Host { host_gw = Eth.gw_addr_of_string gw ;
                         host_search_sfx = search_sfx ;
                         host_nameserver = Ip.Addr.of_string nameserver ;
-                        host_mac = Eth.addr_of_string mac ;
+                        host_mac = Eth.Addr.of_string mac ;
                         host_ip = if String.length ip > 0 then Some (Ip.Addr.of_string ip)
                                   else None } ;
           pos = x, y ;

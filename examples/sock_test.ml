@@ -34,10 +34,10 @@ let server_f _h tcp bits =
 
 let run () =
     let h1 = Host.make_static "server"
-                              (Eth.addr_of_string "12:34:56:78:90:ab")
+                              (Eth.Addr.of_string "12:34:56:78:90:ab")
                               (Ip.Addr.of_string "192.168.0.1")
     and h2 = Host.make_static "client"
-                              (Eth.addr_of_string "ab:cd:ef:01:23:45")
+                              (Eth.Addr.of_string "ab:cd:ef:01:23:45")
                               (Ip.Addr.of_string "192.168.0.2")
     and hub = Hub.Repeater.make 3
     in

@@ -21,7 +21,7 @@ open Bitstring
 
 let main =
     let beautify_one mac =
-        let addr = Eth.addr_of_string mac in
+        let addr = Eth.Addr.of_string mac in
         Printf.printf "%s\n" (Eth.Addr.to_string addr) in
     Arg.parse [] beautify_one "Display mac address with vendor name"
 

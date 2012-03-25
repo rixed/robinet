@@ -25,7 +25,7 @@ open Bitstring
 open Tools
 
 let run iface =
-    let host = Host.make_dhcp "tester" (Eth.addr_of_string "00:23:8b:5f:09:c1") in
+    let host = Host.make_dhcp "tester" (Eth.Addr.of_string "00:23:8b:5f:09:c1") in
     host.Host.set_emit (Pcap.inject_pdu iface) ;
     Pcap.sniffer iface host.Host.rx
 

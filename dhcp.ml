@@ -96,23 +96,23 @@ struct
             unpack_options t rest
         | { 3 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
             rest : -1 : bitstring } ->
-            t.router <- Some (Ip.addr_of_bitstring (takebits 32 ips)) ;
+            t.router <- Some (Ip.Addr.of_bitstring (takebits 32 ips)) ;
             unpack_options t rest
         | { 42 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
             rest : -1 : bitstring } ->
-            t.ntp_server <- Some (Ip.addr_of_bitstring (takebits 32 ips)) ;
+            t.ntp_server <- Some (Ip.Addr.of_bitstring (takebits 32 ips)) ;
             unpack_options t rest
         | { 69 : 8 ; len : 8 : check (len >= 4 && len land 3 = 0) ; ips : 8*len : bitstring ;
             rest : -1 : bitstring } ->
-            t.smtp_server <- Some (Ip.addr_of_bitstring (takebits 32 ips)) ;
+            t.smtp_server <- Some (Ip.Addr.of_bitstring (takebits 32 ips)) ;
             unpack_options t rest
         | { 70 : 8 ; len : 8 : check (len >= 4 && len land 3 = 0) ; ips : 8*len : bitstring ;
             rest : -1 : bitstring } ->
-            t.pop3_server <- Some (Ip.addr_of_bitstring (takebits 32 ips)) ;
+            t.pop3_server <- Some (Ip.Addr.of_bitstring (takebits 32 ips)) ;
             unpack_options t rest
         | { 6 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
             rest : -1 : bitstring } ->
-            t.name_server <- Some (Ip.addr_of_bitstring (takebits 32 ips)) ;
+            t.name_server <- Some (Ip.Addr.of_bitstring (takebits 32 ips)) ;
             unpack_options t rest
         | { 12 : 8 ; len : 8 : check (len >= 1) ; name : 8*len : string ;
             rest : -1 : bitstring } ->
@@ -174,10 +174,10 @@ struct
           let t = { op = if op = bootrequest then BootRequest else BootReply ;
                     htype = Arp.HwType.o htype ; hlen ; hops ; xid ;
                     secs ; broadcast = flags land 0x8000 = 0x8000 ;
-                    ciaddr = Ip.addr_of_bitstring ciaddr ;
-                    yiaddr = Ip.addr_of_bitstring yiaddr ;
-                    siaddr = Ip.addr_of_bitstring siaddr ;
-                    giaddr = Ip.addr_of_bitstring giaddr ;
+                    ciaddr = Ip.Addr.of_bitstring ciaddr ;
+                    yiaddr = Ip.Addr.of_bitstring yiaddr ;
+                    siaddr = Ip.Addr.of_bitstring siaddr ;
+                    giaddr = Ip.Addr.of_bitstring giaddr ;
                     chaddr ; sname ; file ;
                     subnet_mask = None ;
                     router = None ;
@@ -246,7 +246,7 @@ struct
             0x63825363l : 32 ;
             pack_options t : -1 : bitstring })
 
-    let make_base ?(mac=Eth.addr_zero) ?xid ?name msg_type =
+    let make_base ?(mac=Eth.Addr.zero) ?xid ?name msg_type =
         let xid = may_default xid (fun () -> Random.int32 Int32.max_int) in
         { op = BootRequest ;
           htype = Arp.HwType.eth ;
@@ -268,7 +268,7 @@ struct
           server_id = None ; message = None ;
           client_id = None ; request_list = None }
 
-    let make_discover ?(mac=Eth.addr_zero) ?xid ?name () =
+    let make_discover ?(mac=Eth.Addr.zero) ?xid ?name () =
         let t = make_base ~mac ?xid ?name discover in
         t.client_id <- Some (BITSTRING {
             (Arp.HwType.eth :> int) : 8 ;
@@ -276,7 +276,7 @@ struct
         t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
         t
 
-    let make_request ?(mac=Eth.addr_zero) ?xid ?name yiaddr server_id =
+    let make_request ?(mac=Eth.Addr.zero) ?xid ?name yiaddr server_id =
         let t = make_base ~mac ?xid ?name request in
         t.client_id <- Some (BITSTRING {
             (Arp.HwType.eth :> int) : 8 ;

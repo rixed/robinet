@@ -78,6 +78,9 @@ module Addr = struct
 
     let to_dotted_string (t : t) = dotted_string_of_int32 (t :> int32)
     let to_bitstring (t : t) = (BITSTRING { (t :> int32) : 32 })
+    let of_bitstring bits = bitmatch bits with
+        | { ip : 32 } -> o ip
+        | { _ } -> should_not_happen ()
     let list_of_string str =
         let extract_addr info = match info.Unix.ai_addr with
             | Unix.ADDR_INET (addr, _) -> Some (o (int32_of_inet_addr addr))
@@ -113,16 +116,12 @@ let addr_in_cidr (net, mask) ip =
     and b = takebits mask (BITSTRING { ip  : 32 }) in
     a = b
 
-let addr_of_bitstring bits = bitmatch bits with
-    | { ip : 32 } -> Addr.o ip
-    | { _ } -> should_not_happen ()
-
 let addrs_of_cidr ((ip : Addr.t), mask) =
     if mask >= 32 then [ ip ] else
     let prefix = takebits mask (BITSTRING { (ip :> int32) : 32 })
     and l = 32 - mask in
     List.init (1 lsl l) (fun i ->
-        addr_of_bitstring (BITSTRING { prefix : mask : bitstring ; Int64.of_int i : l }))
+        Addr.of_bitstring (BITSTRING { prefix : mask : bitstring ; Int64.of_int i : l }))
 
 let random_addrs_of_cidr cidr n =
     addrs_of_cidr cidr |> List.enum |> Random.multi_choice n
