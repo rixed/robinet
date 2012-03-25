@@ -83,8 +83,8 @@ module Pdu = struct
                   else if ip.Ip.Pdu.proto = Ip.Proto.udp then unpack_udp
                   else unpack_raw) (ip.Ip.Pdu.payload :> bitstring)))
     let unpack_eth = try_unpack Eth.Pdu.unpack (fun eth -> Eth eth ::
-                ((if eth.Eth.Pdu.proto = Arp.proto_ip4 then unpack_ip
-                  else if eth.Eth.Pdu.proto = Arp.proto_arp then unpack_arp
+                ((if eth.Eth.Pdu.proto = Arp.HwProto.ip4 then unpack_ip
+                  else if eth.Eth.Pdu.proto = Arp.HwProto.arp then unpack_arp
                   else unpack_raw) (eth.Eth.Pdu.payload :> bitstring)))
 
     let unpack = unpack_eth

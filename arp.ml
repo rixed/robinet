@@ -25,34 +25,36 @@ let debug = false
 
 (* ARP messages *)
 
-module Op = MakePrivate(struct
-    type t = int
-    let to_string = function
-        |  1 -> "request"
-        |  2 -> "reply"
-        |  3 -> "request rev"
-        |  4 -> "reply rev"
-        |  5 -> "DRARP request"
-        |  6 -> "DRARP reply"
-        |  7 -> "DRARP error"
-        |  8 -> "InARP request"
-        |  9 -> "InARP reply"
-        | 10 -> "NACK"
-        |  x -> string_of_int x
-    let is_valid t = t >= 1 && t <= 0x10000
-    let repl_tag = "code"
-end)
+module Op = struct
+    include MakePrivate(struct
+        type t = int
+        let to_string = function
+            |  1 -> "request"
+            |  2 -> "reply"
+            |  3 -> "request rev"
+            |  4 -> "reply rev"
+            |  5 -> "DRARP request"
+            |  6 -> "DRARP reply"
+            |  7 -> "DRARP error"
+            |  8 -> "InARP request"
+            |  9 -> "InARP reply"
+            | 10 -> "NACK"
+            |  x -> string_of_int x
+        let is_valid t = t >= 1 && t <= 0x10000
+        let repl_tag = "code"
+    end)
 
-let op_request       = Op.o 1
-let op_reply         = Op.o 2
-let op_request_rev   = Op.o 3
-let op_reply_rev     = Op.o 4
-let op_DRARP_request = Op.o 5
-let op_DRARP_reply   = Op.o 6
-let op_DRARP_error   = Op.o 7
-let op_InARP_request = Op.o 8
-let op_InARP_reply   = Op.o 9
-let op_ARP_NACK      = Op.o 10
+    let request       = o 1
+    let reply         = o 2
+    let request_rev   = o 3
+    let reply_rev     = o 4
+    let drarp_request = o 5
+    let drarp_reply   = o 6
+    let drarp_error   = o 7
+    let inarp_request = o 8
+    let inarp_reply   = o 9
+    let arp_nack      = o 10
+end
 
 module HwType = struct
     include MakePrivate(struct
@@ -69,16 +71,16 @@ module HwType = struct
         let is_valid x = x >= 1
         let repl_tag = "code"
     end)
+    let eth      = o 1
+    let expe_eth = o 2
+    let ax25     = o 3
+    let tokring  = o 4
+    let chaos    = o 5
+    let ieee_802 = o 6
+    let arcnet   = o 7
+
     let random () = o (randi 3)
 end
-
-let hw_type_eth      = HwType.o 1
-let hw_type_expe_eth = HwType.o 2
-let hw_type_AX25     = HwType.o 3
-let hw_type_tokring  = HwType.o 4
-let hw_type_chaos    = HwType.o 5
-let hw_type_IEEE_802 = HwType.o 6
-let hw_type_arcnet   = HwType.o 7
 
 module HwProto = struct
     include MakePrivate(struct
@@ -92,13 +94,13 @@ module HwProto = struct
         let is_valid x = x < 0x10000
         let repl_tag = "proto"
     end)
+    let ip4       = o 0x0800
+    let ip6       = o 0x86DD
+    let arp       = o 0x0806
+    let ieee8021q = o 0x8100
+
     let random () = o (randi 16)
 end
-
-let proto_ip4   = HwProto.o 0x0800
-let proto_ip6   = HwProto.o 0x86DD
-let proto_arp   = HwProto.o 0x0806
-let proto_8021q = HwProto.o 0x8100
 
 module Pdu = struct
     type t = { hw_type : HwType.t ; proto_type : HwProto.t ;
@@ -107,12 +109,12 @@ module Pdu = struct
                target_hw : bitstring ; target_proto : bitstring }
 
     let make_request hw_type proto_type sender_hw sender_proto target_proto =
-        { hw_type ; proto_type ; operation = op_request ;
+        { hw_type ; proto_type ; operation = Op.request ;
           sender_hw ; sender_proto ;
           target_hw = create_bitstring (bitstring_length sender_hw) ; target_proto }
 
     let make_reply hw_type proto_type sender_hw sender_proto target_hw target_proto =
-        { hw_type ; proto_type ; operation = op_reply ;
+        { hw_type ; proto_type ; operation = Op.reply ;
           sender_hw ; sender_proto ; target_hw ; target_proto }
 
     let pack t =

@@ -124,7 +124,7 @@ module Pdu = struct
             | Some v -> (BITSTRING {
                         (t.dst :> bitstring) : 6*8 : bitstring ;
                         (t.src :> bitstring) : 6*8 : bitstring ;
-                        (Arp.proto_8021q :> int) : 16 ;
+                        (Arp.HwProto.ieee8021q :> int) : 16 ;
                         v : 16 ;
                         (t.proto :> int) : 16 })) ;
             (t.payload :> bitstring) ]
@@ -173,8 +173,8 @@ struct
         t.emit (Pdu.pack pdu)
 
     let resolve_proto_addr t bits sender_proto_addr target_proto_addr =
-        let request = Arp.Pdu.make_request Arp.hw_type_eth t.proto (t.src :> bitstring) sender_proto_addr target_proto_addr in
-        send t Arp.proto_arp addr_broadcast (Arp.Pdu.pack request) ;
+        let request = Arp.Pdu.make_request Arp.HwType.eth t.proto (t.src :> bitstring) sender_proto_addr target_proto_addr in
+        send t Arp.HwProto.arp addr_broadcast (Arp.Pdu.pack request) ;
         if debug then Printf.printf "Eth: Delaying a msg for '%s'\n%!" (hexstring_of_bitstring target_proto_addr) ;
         BitHash.add t.delayed target_proto_addr bits
 
@@ -197,7 +197,7 @@ struct
         match t.gw with
         | None -> (* FIXME: or if the routes tells us that dest in on the same LAN than us *)
             (match t.proto with
-            | x when x = Arp.proto_ip4 ->
+            | x when x = Arp.HwProto.ip4 ->
                 Option.Monad.bind (Ip.Pdu.unpack bits) (fun ip ->
                     let sender_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.src
                     and target_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.dst in
@@ -223,12 +223,12 @@ struct
                (addr_eq frame.Pdu.dst t.src || addr_eq frame.Pdu.dst addr_broadcast) then (
                 if debug then Printf.printf "Eth:...for me!\n%!" ;
                 if Payload.bitlength frame.Pdu.payload > 0 then t.recv (frame.Pdu.payload :> bitstring)
-            ) else if frame.Pdu.proto = Arp.proto_arp then (
+            ) else if frame.Pdu.proto = Arp.HwProto.arp then (
                 match Arp.Pdu.unpack (frame.Pdu.payload :> bitstring) with
                 | None -> ()
                 | Some arp ->
                     if debug then Printf.printf "Eth:...an ARP of opcode %s\n%!" (Arp.Op.to_string arp.Arp.Pdu.operation) ;
-                    if arp.Arp.Pdu.hw_type = Arp.hw_type_eth then (
+                    if arp.Arp.Pdu.hw_type = Arp.HwType.eth then (
                         if debug then Printf.printf "Eth:...regarding an ethernet device!\n%!" ;
                         let sender_hw = Addr.o arp.Arp.Pdu.sender_hw (* will raise if not of the advertised type *)
                         and merge_flag = ref false in
@@ -246,12 +246,12 @@ struct
                                     BitHash.add t.arp_cache arp.Arp.Pdu.sender_proto (Some sender_hw) ;
                                     if debug then Printf.printf "Eth:...adding %s->%s in ARP cache\n%!" (hexstring_of_bitstring arp.Arp.Pdu.sender_proto) (Addr.to_string sender_hw) ;
                                 ) ;
-                                if arp.Arp.Pdu.operation = Arp.op_request then (
+                                if arp.Arp.Pdu.operation = Arp.Op.request then (
                                     if debug then Printf.printf "Eth:...It's a request, let's reply!\n%!" ;
                                     let reply = Arp.Pdu.make_reply arp.Arp.Pdu.hw_type arp.Arp.Pdu.proto_type
                                                                    (t.src :> bitstring) arp.Arp.Pdu.target_proto
                                                                    arp.Arp.Pdu.sender_hw arp.Arp.Pdu.sender_proto in
-                                    send t Arp.proto_arp sender_hw (Arp.Pdu.pack reply)
+                                    send t Arp.HwProto.arp sender_hw (Arp.Pdu.pack reply)
                                 )
                             ) ;
                             (* Now that we may have gained knowledge, try to send the msg in waiting queue *)

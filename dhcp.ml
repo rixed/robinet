@@ -249,7 +249,7 @@ struct
     let make_base ?(mac=Eth.addr_zero) ?xid ?name msg_type =
         let xid = may_default xid (fun () -> Random.int32 Int32.max_int) in
         { op = BootRequest ;
-          htype = Arp.hw_type_eth ;
+          htype = Arp.HwType.eth ;
           hlen = 6 ; hops = 0 ;
           xid ;
           secs = 0 ; broadcast = false ;
@@ -271,7 +271,7 @@ struct
     let make_discover ?(mac=Eth.addr_zero) ?xid ?name () =
         let t = make_base ~mac ?xid ?name discover in
         t.client_id <- Some (BITSTRING {
-            (Arp.hw_type_eth :> int) : 8 ;
+            (Arp.HwType.eth :> int) : 8 ;
             (mac :> bitstring) : 6*8 : bitstring }) ;
         t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
         t
@@ -279,7 +279,7 @@ struct
     let make_request ?(mac=Eth.addr_zero) ?xid ?name yiaddr server_id =
         let t = make_base ~mac ?xid ?name request in
         t.client_id <- Some (BITSTRING {
-            (Arp.hw_type_eth :> int) : 8 ;
+            (Arp.HwType.eth :> int) : 8 ;
             (mac :> bitstring) : 6*8 : bitstring }) ;
         t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
         t.requested_ip <- Some yiaddr ;
