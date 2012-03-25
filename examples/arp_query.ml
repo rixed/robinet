@@ -27,8 +27,8 @@ let iface = Pcap.openif "eth0" true "" 1800
 let arp_query (src_eth : Eth.Addr.t) src_ip target_ip =
     let arp = Arp.Pdu.make_request Arp.hw_type_eth Arp.proto_ip4
                                    (src_eth :> bitstring)
-                                   ( Ip.bitstring_of_addr src_ip)
-                                   ( Ip.bitstring_of_addr target_ip) in
+                                   ( Ip.Addr.to_bitstring src_ip)
+                                   ( Ip.Addr.to_bitstring target_ip) in
     let eth = Eth.Pdu.make Arp.proto_arp src_eth Eth.addr_broadcast (Payload.o (Arp.Pdu.pack arp)) in
     Pcap.inject iface (string_of_bitstring (Eth.Pdu.pack eth))
 
@@ -54,10 +54,10 @@ let rec wait_answer target_ip_bits =
 let main =
     let src_ip_str = ref "192.168.66.147" and src_eth_str = ref "01:23:45:67:89:ab" in
     let resolve_one target_ip_str =
-        let target_ip      = Ip.addr_of_string target_ip_str in
-        let target_ip_bits = Ip.bitstring_of_addr target_ip
+        let target_ip      = Ip.Addr.of_string target_ip_str in
+        let target_ip_bits = Ip.Addr.to_bitstring target_ip
         and src_eth        = Eth.addr_of_string !src_eth_str
-        and src_ip         =  Ip.addr_of_string !src_ip_str in
+        and src_ip         =  Ip.Addr.of_string !src_ip_str in
         arp_query src_eth src_ip target_ip ;
         let answer = Eth.Addr.o (wait_answer target_ip_bits) in
         Printf.printf "%s: %s\n" (Ip.Addr.to_string target_ip) (Eth.Addr.to_string answer)

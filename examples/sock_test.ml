@@ -35,10 +35,10 @@ let server_f _h tcp bits =
 let run () =
     let h1 = Host.make_static "server"
                               (Eth.addr_of_string "12:34:56:78:90:ab")
-                              (Ip.addr_of_string "192.168.0.1")
+                              (Ip.Addr.of_string "192.168.0.1")
     and h2 = Host.make_static "client"
                               (Eth.addr_of_string "ab:cd:ef:01:23:45")
-                              (Ip.addr_of_string "192.168.0.2")
+                              (Ip.Addr.of_string "192.168.0.2")
     and hub = Hub.Repeater.make 3
     in
     let gigabit = Eth.limited 0.01 1_000_000_000. in
@@ -60,7 +60,7 @@ let run () =
             assert false
         )
     in
-    lwt tcp = h2.Host.tcp_connect (Host.IPv4 (Ip.addr_of_string "192.168.0.1")) (Tcp.Port.o 7) in
+    lwt tcp = h2.Host.tcp_connect (Host.IPv4 (Ip.Addr.of_string "192.168.0.1")) (Tcp.Port.o 7) in
     tcp.Tcp.TRX.trx.set_recv (client_f tcp) ;
     tcp.Tcp.TRX.trx.tx (bitstring_of_string "Hello world!") ;
     Lwt.return ()

@@ -89,11 +89,11 @@ let main =
     Arg.parse [ "-i",         Arg.Set_string ifname,      "Interface name (optional, default eth0)" ;
                 "-tun-ip",    Arg.Set_string tun_ip,      "Tunnel IP address (this end)" ;
                 "-tun-mac",   Arg.Set_string tun_mac,     "Tunnel MAC address (this end ; optional, default random)" ;
-                "-gw",        Arg.String (fun str -> gw := Some (Eth.IPv4 (Ip.addr_of_string str))),
+                "-gw",        Arg.String (fun str -> gw := Some (Eth.IPv4 (Ip.Addr.of_string str))),
                                                           "Gateway IP address (optional)" ;
                 "-search",    Arg.String (fun str -> search_sfx := Some str),
                                                           "DNS search suffix (optional)" ;
-                "-dns",       Arg.String (fun str -> nameserver := Some (Ip.addr_of_string str)),
+                "-dns",       Arg.String (fun str -> nameserver := Some (Ip.Addr.of_string str)),
                                                           "IP of the DNS (optional)" ;
                 "-dst-ip",    Arg.String (fun str -> dst := Some (Host.Name str)),
                                                           "Other end IP address (will wait for connections if not set)" ;
@@ -105,7 +105,7 @@ let main =
     Lwt_main.run (
         Lwt.catch (fun () ->
             tunnel !ifname
-                   (Ip.addr_of_string  !tun_ip)
+                   (Ip.Addr.of_string  !tun_ip)
                    (Eth.addr_of_string !tun_mac)
                    !gw  !search_sfx !nameserver
                    !dst (Tcp.Port.o !http_port)  !src_port)

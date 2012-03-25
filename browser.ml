@@ -168,7 +168,7 @@ let cookie_check () =
     (cookie_dirname "/foo/" = "/foo") &&
     (cookie_dirname "/foo/bar" = "/foo") &&
     let host = Host.make_static "test"
-                    (Eth.addr_of_string "12:34:56:78:90:ab") (Ip.addr_of_string "1.2.3.4") in
+                    (Eth.addr_of_string "12:34:56:78:90:ab") (Ip.Addr.of_string "1.2.3.4") in
     let t = make host in
     (store_cookies t "www.example.com" "/"
         [ "Set-Cookie", "SID=31d4" ] ;

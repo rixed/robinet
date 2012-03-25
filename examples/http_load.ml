@@ -28,10 +28,10 @@ open Tools
 let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth start_url =
     (* Build the hosts *)
     let mac_of_ip ip = (*Eth.addr_of_string "00:26:5e:0a:d2:b9" in*)
-        let bs = Ip.bitstring_of_addr ip in
+        let bs = Ip.Addr.to_bitstring ip in
         Eth.Addr.o (BITSTRING { 0x1234 : 16 ; bs : 32 : bitstring }) in
     let host_of_ip ip =
-        Host.make_static (Ip.dotted_string_of_addr ip) ?gw ?search_sfx ?nameserver (mac_of_ip ip) ip in
+        Host.make_static (Ip.Addr.to_dotted_string ip) ?gw ?search_sfx ?nameserver (mac_of_ip ip) ip in
     let hosts = List.of_enum (Ip.random_addrs_of_cidr src_range nb_srcs /@ host_of_ip)
     in
     (* Build the HUB and link it to hosts *)
@@ -82,8 +82,8 @@ let main =
     if !dns_str = None && !gw_str <> None then dns_str := !gw_str ;
     Random.self_init () ;
     Lwt_main.run (
-        let gw  = Option.map (fun gw -> Eth.IPv4 (Ip.addr_of_string gw)) !gw_str
-        and nameserver = Option.map (fun ip -> Ip.addr_of_string ip) !dns_str in
+        let gw  = Option.map (fun gw -> Eth.IPv4 (Ip.Addr.of_string gw)) !gw_str
+        and nameserver = Option.map (fun ip -> Ip.Addr.of_string ip) !dns_str in
         Lwt.choose [
             run !ifname (Ip.cidr_of_string !src_range_str) !nb_srcs
                 ?gw ?search_sfx:!search_sfx ?nameserver ?pause:!pause !max_depth !start_url ;

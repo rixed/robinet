@@ -330,7 +330,7 @@ let ip_recv t bits = (match Ip.Pdu.unpack bits with
 
 let make name ?gw ?search_sfx ?nameserver my_mac =
     let rec t =
-        { my_ip       = Ip.addr_zero ;
+        { my_ip       = Ip.Addr.zero ;
           eth         = Eth.TRX.make my_mac ?gw:gw Arp.proto_ip4 [] ; (* FIXME: ne pas utiliser le gw systématiquement. Il faudrait vraissemblablement des routes, avec un eth par route ip *)
           socks       = Hashtbl.create 11 ;
           tcp_servers = Hashtbl.create 11 ;
@@ -358,7 +358,7 @@ let make name ?gw ?search_sfx ?nameserver my_mac =
 let set_ip t ip =
     Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Setting my IP to %s" (Ip.Addr.to_string ip)))) ;
     t.my_ip <- ip ;
-    t.eth.Eth.TRX.set_addresses [ Ip.bitstring_of_addr t.my_ip ] ;
+    t.eth.Eth.TRX.set_addresses [ Ip.Addr.to_bitstring t.my_ip ] ;
     t.eth.Eth.TRX.trx.set_recv (ip_recv t)
 
 let make_static name ?gw ?search_sfx ?nameserver my_mac my_ip =
@@ -388,7 +388,7 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
                             (* TODO: check the Xid? *)
                             let pdu = Dhcp.Pdu.make_request ~mac:my_mac ~xid:dhcp.Dhcp.Pdu.xid ~name dhcp.Dhcp.Pdu.yiaddr dhcp.Dhcp.Pdu.server_id in
                             let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Payload.o (Dhcp.Pdu.pack pdu)) in
-                            let pdu = Ip.Pdu.make Ip.proto_udp Ip.addr_zero Ip.addr_broadcast (Payload.o (Udp.Pdu.pack pdu)) in
+                            let pdu = Ip.Pdu.make Ip.proto_udp Ip.Addr.zero Ip.Addr.broadcast (Payload.o (Udp.Pdu.pack pdu)) in
                             t.eth.Eth.TRX.trx.Tools.tx (Ip.Pdu.pack pdu)
                         | Some ({ Dhcp.Pdu.msg_type = Some op ; _ } as dhcp) when op = Dhcp.ack ->
                             Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
@@ -398,11 +398,11 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
                             (* TODO: print it *)
                             t.host_trx.signal_err "Ignoring a DHCP message"))) in
     let rec send_discover () =
-        if t.my_ip = Ip.addr_zero then (
+        if t.my_ip = Ip.Addr.zero then (
             Log.(log t.host_trx.logger Info (lazy "Sending DHCP DISCOVER")) ;
             let pdu = Dhcp.Pdu.make_discover ~mac:my_mac ~name () in
             let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Payload.o (Dhcp.Pdu.pack pdu)) in
-            let pdu = Ip.Pdu.make Ip.proto_udp Ip.addr_zero Ip.addr_broadcast (Payload.o (Udp.Pdu.pack pdu)) in
+            let pdu = Ip.Pdu.make Ip.proto_udp Ip.Addr.zero Ip.Addr.broadcast (Payload.o (Udp.Pdu.pack pdu)) in
             t.eth.Eth.TRX.trx.Tools.tx (Ip.Pdu.pack pdu) ;
             Clock.delay (Clock.sec (5.+.(Random.float 3.))) send_discover ()
         ) in

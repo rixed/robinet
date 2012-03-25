@@ -102,9 +102,9 @@ let host_of_csv str =
     let make_host name x y gw search_sfx nameserver mac ip =
         { elmt = Host { host_gw = Eth.gw_addr_of_string gw ;
                         host_search_sfx = search_sfx ;
-                        host_nameserver = Ip.addr_of_string nameserver ;
+                        host_nameserver = Ip.Addr.of_string nameserver ;
                         host_mac = Eth.addr_of_string mac ;
-                        host_ip = if String.length ip > 0 then Some (Ip.addr_of_string ip)
+                        host_ip = if String.length ip > 0 then Some (Ip.Addr.of_string ip)
                                   else None } ;
           pos = x, y ;
           node_name = name } in
@@ -169,10 +169,10 @@ let csv_for_hosts oc t =
                 node_name x y
                 (Eth.string_of_gw_addr h.host_gw)
                 h.host_search_sfx
-                (Ip.dotted_string_of_addr h.host_nameserver)
+                (Ip.Addr.to_dotted_string h.host_nameserver)
                 (Eth.Addr.to_string h.host_mac)
                 (match h.host_ip with
-                    | Some ip -> Ip.dotted_string_of_addr ip
+                    | Some ip -> Ip.Addr.to_dotted_string ip
                     | _ -> "")
         | _ -> ())
         t.nodes
@@ -221,10 +221,10 @@ let csv_for_node oc = function
             node_name x y
             (Eth.string_of_gw_addr h.host_gw)
             h.host_search_sfx
-            (Ip.dotted_string_of_addr h.host_nameserver)
+            (Ip.Addr.to_dotted_string h.host_nameserver)
             (Eth.Addr.to_string h.host_mac)
             (match h.host_ip with
-                | Some ip -> Ip.dotted_string_of_addr ip
+                | Some ip -> Ip.Addr.to_dotted_string ip
                 | _ -> "")
     | { elmt = Switch s ; pos = x,y ; node_name } ->
         Printf.fprintf oc "switch,%S,%f,%f,%d,%d\n"

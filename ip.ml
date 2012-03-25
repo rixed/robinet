@@ -54,16 +54,16 @@ let inet_addr_of_int32 i : Unix.inet_addr =
 let dotted_string_of_int32 i = bitmatch (BITSTRING { i : 32 }) with
       { a : 8 ; b : 8 ; c : 8 ; d : 8 } -> Printf.sprintf "%d.%d.%d.%d" a b c d
 (*$T dotted_string_of_int32
-  dotted_string_of_int32 ((addr_of_string "1.2.3.4") :> int32) = "1.2.3.4"
+  dotted_string_of_int32 ((Addr.of_string "1.2.3.4") :> int32) = "1.2.3.4"
 *)
 
-let show_ip_as_names = ref false
-
 module Addr = struct
+    let print_as_names = ref false
+
     include MakePrivate(struct
         type t = int32
         let to_string t =
-            if !show_ip_as_names then
+            if !print_as_names then
                 try (Unix.gethostbyaddr (inet_addr_of_int32 t)).Unix.h_name
                 with Not_found ->
                     dotted_string_of_int32 t
@@ -73,23 +73,19 @@ module Addr = struct
         let repl_tag = "addr"
     end)
 
+    let zero = o 0l
+    let broadcast = o 0xffffffffl
+
+    let to_dotted_string (t : t) = dotted_string_of_int32 (t :> int32)
+    let to_bitstring (t : t) = (BITSTRING { (t :> int32) : 32 })
+    let list_of_string str =
+        let extract_addr info = match info.Unix.ai_addr with
+            | Unix.ADDR_INET (addr, _) -> Some (o (int32_of_inet_addr addr))
+            | _ -> None in
+        List.filter_map extract_addr (Unix.getaddrinfo str "" [])
+    let of_string str = List.hd (list_of_string str)
     let random () = o (rand32 ())
 end
-
-let addr_zero = Addr.o 0l
-let addr_broadcast = Addr.o 0xffffffffl
-
-let dotted_string_of_addr (addr : Addr.t) = dotted_string_of_int32 (addr :> int32)
-
-let addrs_of_string str =
-    let extract_addr info = match info.Unix.ai_addr with
-        | Unix.ADDR_INET (addr, _) -> Some (Addr.o (int32_of_inet_addr addr))
-        | _ -> None in
-    List.filter_map extract_addr (Unix.getaddrinfo str "" [])
-
-let bitstring_of_addr (ip : Addr.t) = (BITSTRING { (ip :> int32) : 32 })
-
-let addr_of_string str = List.hd (addrs_of_string str)
 
 (* This printer can be composed with others (for instance to print a list of ips.
  FIXME: always use batteries IO to print instead of Format printer? *)
@@ -104,7 +100,7 @@ let cidr_of_string str =
     let ip_str, width_str =
         try String.split str "/"
         with Not_found -> error (Printf.sprintf "cidr_of_string %s" str)
-    in addr_of_string ip_str, int_of_string width_str
+    in Addr.of_string ip_str, int_of_string width_str
 
 let string_of_cidr ((ip : Addr.t), width) =
     (dotted_string_of_int32 (ip :> int32)) ^ "/" ^ (string_of_int width)

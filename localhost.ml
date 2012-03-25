@@ -105,7 +105,7 @@ let tcp_trx_of_socket sock =
 
 let ip_addr_of_inet_addr i =
     Unix.string_of_inet_addr i |>
-    Ip.addr_of_string
+    Ip.Addr.of_string
 
 let inet_addr_print oc a =
     Printf.fprintf oc "%s" (Unix.string_of_inet_addr a)

@@ -58,14 +58,14 @@ let main =
                 "-src-mac", Arg.Set_string src_eth_str, "MAC to use as the HTTP client (default: 12:34:56:78:9a:bc)" ;
                 "-dst-ip",  Arg.Set_string dst_ip_str,  "IP to send the HTTP GET to (default: 192.168.1.254)" ;
                 "-gw",      Arg.String (fun gw -> gw_eth_str := Some (Eth.Mac (Eth.addr_of_string gw))), "Gateway MAC address (optional)" ;
-                "-dns",     Arg.String (fun str -> dns_ip := Some (Ip.addr_of_string str)), "IP of the DNS (optional)" ;
+                "-dns",     Arg.String (fun str -> dns_ip := Some (Ip.Addr.of_string str)), "IP of the DNS (optional)" ;
                 "-i",       Arg.Set_string ifname,      "Interface to use (default: eth0)" ;
                 "-url",     Arg.Set_string url,         "The URL to GET" ]
               (fun _ -> raise (Arg.Bad "Unknown parameter"))
               "Perform an HTTP get with faked addresses" ;
     Lwt_main.run (
-        perform_get (Ip.addr_of_string !src_ip_str) (Eth.addr_of_string !src_eth_str)
-                    (Ip.addr_of_string !dst_ip_str)
+        perform_get (Ip.Addr.of_string !src_ip_str) (Eth.addr_of_string !src_eth_str)
+                    (Ip.Addr.of_string !dst_ip_str)
                     ?nameserver:!dns_ip ?gw:!gw_eth_str
                     !ifname !url
     )

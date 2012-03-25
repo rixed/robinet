@@ -96,7 +96,7 @@ let string_of_gw_addr = function
 
 let gw_addr_of_string str =
     try Mac (addr_of_string str)
-    with _ -> IPv4 (Ip.addr_of_string str)
+    with _ -> IPv4 (Ip.Addr.of_string str)
 
 (* Ethernet frames *)
 
@@ -180,7 +180,7 @@ struct
 
     type dst = Delayed | Dst of Addr.t
     let arp_resolve_ipv4 t bits sender_ip target_ip =
-        if target_ip = (Ip.bitstring_of_addr Ip.addr_broadcast) then Dst addr_broadcast
+        if target_ip = (Ip.Addr.to_bitstring Ip.Addr.broadcast) then Dst addr_broadcast
         else (
             try Dst (Option.get (BitHash.find t.arp_cache target_ip)) ;
             with Not_found ->
@@ -199,12 +199,12 @@ struct
             (match t.proto with
             | x when x = Arp.proto_ip4 ->
                 Option.Monad.bind (Ip.Pdu.unpack bits) (fun ip ->
-                    let sender_ip = Ip.bitstring_of_addr ip.Ip.Pdu.src
-                    and target_ip = Ip.bitstring_of_addr ip.Ip.Pdu.dst in
+                    let sender_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.src
+                    and target_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.dst in
                     Some (arp_resolve_ipv4 t bits sender_ip target_ip))
             | _ -> err "Don't know how to resolve address for this protocol")
         | Some (Mac addr) -> Some (Dst addr)
-        | Some (IPv4 ip)  -> Some (arp_resolve_ipv4 t bits (List.hd t.my_addresses) (Ip.bitstring_of_addr ip))
+        | Some (IPv4 ip)  -> Some (arp_resolve_ipv4 t bits (List.hd t.my_addresses) (Ip.Addr.to_bitstring ip))
 
     let tx t bits =
         if debug then Printf.printf "Eth: TX a payload of %d bytes (while MTU=%d)\n" (bytelength bits) t.mtu ;
