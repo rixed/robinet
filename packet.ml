@@ -79,8 +79,8 @@ module Pdu = struct
                                   (udp.Udp.Pdu.dst_port :> int)
                                   (udp.Udp.Pdu.payload :> bitstring)))
     let unpack_ip  = try_unpack Ip.Pdu.unpack (fun ip -> Ip ip ::
-                ((if ip.Ip.Pdu.proto = Ip.proto_tcp then unpack_tcp
-                  else if ip.Ip.Pdu.proto = Ip.proto_udp then unpack_udp
+                ((if ip.Ip.Pdu.proto = Ip.Proto.tcp then unpack_tcp
+                  else if ip.Ip.Pdu.proto = Ip.Proto.udp then unpack_udp
                   else unpack_raw) (ip.Ip.Pdu.payload :> bitstring)))
     let unpack_eth = try_unpack Eth.Pdu.unpack (fun eth -> Eth eth ::
                 ((if eth.Eth.Pdu.proto = Arp.proto_ip4 then unpack_ip

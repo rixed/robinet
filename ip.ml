@@ -35,12 +35,12 @@ module Proto = struct
         let is_valid t = t < 0x100
         let repl_tag = "proto"
     end)
+    let icmp = o 1
+    let tcp  = o 6
+    let udp  = o 17
+
     let random () = o (randi 8)
 end
-
-let proto_icmp = Proto.o 1
-let proto_tcp  = Proto.o 6
-let proto_udp  = Proto.o 17
 
 (* Addresses *)
 
@@ -219,8 +219,8 @@ module Pdu = struct
                      (BITSTRING { s : 16 }) ;
                      dropbits 96 header ]
         and payload = (* and actual TCP/UDP checksums as well since they use some fields of the IP header *)
-            if t.proto = proto_tcp then patch_tcp_checksum t t.payload
-            else if t.proto = proto_udp then patch_udp_checksum t t.payload
+            if t.proto = Proto.tcp then patch_tcp_checksum t t.payload
+            else if t.proto = Proto.udp then patch_udp_checksum t t.payload
             else t.payload in
         concat [ header ; (payload :> bitstring) ]
 
