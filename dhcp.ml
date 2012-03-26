@@ -29,35 +29,43 @@ let bootrequest = 1
 let bootreply = 2
 type opcode = BootRequest | BootReply
 
-module MsgType = MakePrivate(struct
-    type t = int
-    let to_string = function
-        | 1 -> "DISCOVER"
-        | 2 -> "OFFER"
-        | 3 -> "REQUEST"
-        | 4 -> "DECLINE"
-        | 5 -> "ACK"
-        | 6 -> "NACK"
-        | 7 -> "RELEASE"
-        | 8 -> "INFORM"
-        | _ -> should_not_happen ()
-    let is_valid x = x >= 1 && x <= 8
-    let repl_tag = "code"
-end)
+module MsgType = struct
+    module Inner = struct
+        type t = int
+        let to_string = function
+            | 1 -> "DISCOVER"
+            | 2 -> "OFFER"
+            | 3 -> "REQUEST"
+            | 4 -> "DECLINE"
+            | 5 -> "ACK"
+            | 6 -> "NACK"
+            | 7 -> "RELEASE"
+            | 8 -> "INFORM"
+            | _ -> should_not_happen ()
+        let is_valid x = x >= 1 && x <= 8
+        let repl_tag = "code"
+    end
+    include MakePrivate(Inner)
 
-let discover = MsgType.o 1
-let offer    = MsgType.o 2
-let request  = MsgType.o 3
-let decline  = MsgType.o 4
-let ack      = MsgType.o 5
-let nack     = MsgType.o 6
-let release  = MsgType.o 7
-let inform   = MsgType.o 8
+    let discover = o 1
+    let offer    = o 2
+    let request  = o 3
+    let decline  = o 4
+    let ack      = o 5
+    let nack     = o 6
+    let release  = o 7
+    let inform   = o 8
+
+    let rec random () =
+        let p = randi 3 + 1 in
+        if Inner.is_valid p then p else random ()
+end
 
 (* DHCP messages *)
 
 module Pdu =
 struct
+    (*$< Pdu *)
     type t =
         { op : opcode ;
           htype : Arp.HwType.t ;
@@ -269,7 +277,7 @@ struct
           client_id = None ; request_list = None }
 
     let make_discover ?(mac=Eth.Addr.zero) ?xid ?name () =
-        let t = make_base ~mac ?xid ?name discover in
+        let t = make_base ~mac ?xid ?name MsgType.discover in
         t.client_id <- Some (BITSTRING {
             (Arp.HwType.eth :> int) : 8 ;
             (mac :> bitstring) : 6*8 : bitstring }) ;
@@ -277,7 +285,7 @@ struct
         t
 
     let make_request ?(mac=Eth.Addr.zero) ?xid ?name yiaddr server_id =
-        let t = make_base ~mac ?xid ?name request in
+        let t = make_base ~mac ?xid ?name MsgType.request in
         t.client_id <- Some (BITSTRING {
             (Arp.HwType.eth :> int) : 8 ;
             (mac :> bitstring) : 6*8 : bitstring }) ;
@@ -285,5 +293,17 @@ struct
         t.requested_ip <- Some yiaddr ;
         t.server_id <- server_id ;
         t
+
+    let random () =
+        let xid = rand32 () and name = randstr 8 in
+        if randb () then
+            make_discover ~xid ~name ()
+        else
+            make_request ~xid ~name (Ip.Addr.random ()) (if randb () then Some (Ip.Addr.random ()) else None)
+
+    (*$Q pack
+      ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+     *)
+    (*$>*)
 
 end
