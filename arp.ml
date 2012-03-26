@@ -57,7 +57,7 @@ module Op = struct
 end
 
 module HwType = struct
-    include MakePrivate(struct
+    module Inner = struct
         type t = int
         let to_string = function
             | 1 -> "Eth"
@@ -70,7 +70,8 @@ module HwType = struct
             | x -> Printf.sprintf "HwType(%d)" x
         let is_valid x = x >= 1
         let repl_tag = "code"
-    end)
+    end
+    include MakePrivate(Inner)
     let eth      = o 1
     let expe_eth = o 2
     let ax25     = o 3
@@ -79,7 +80,9 @@ module HwType = struct
     let ieee_802 = o 6
     let arcnet   = o 7
 
-    let random () = o (randi 3)
+    let rec random () =
+        let p = randi 3 in
+        if Inner.is_valid p then o p else random ()
 end
 
 module HwProto = struct
@@ -103,6 +106,8 @@ module HwProto = struct
 end
 
 module Pdu = struct
+    (*$< Pdu *)
+
     type t = { hw_type : HwType.t ; proto_type : HwProto.t ;
                operation : Op.t ;
                sender_hw : bitstring ; sender_proto : bitstring ;
@@ -116,6 +121,17 @@ module Pdu = struct
     let make_reply hw_type proto_type sender_hw sender_proto target_hw target_proto =
         { hw_type ; proto_type ; operation = Op.reply ;
           sender_hw ; sender_proto ; target_hw ; target_proto }
+
+    let random () =
+        let hw_type = HwType.random ()
+        and proto_type = HwProto.random ()
+        and sender_hw = randbs 6
+        and sender_proto = randbs 4
+        and target_proto = randbs 4 in
+        if randb () then
+            make_request hw_type proto_type sender_hw sender_proto target_proto
+        else
+            make_reply hw_type proto_type sender_hw sender_proto (randbs 6) target_proto
 
     let pack t =
         (BITSTRING {
@@ -146,5 +162,9 @@ module Pdu = struct
                    target_hw ; target_proto }
         | { _ } ->
             err "Not ARP"
+    (*$Q pack
+      ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+     *)
+    (*$>*)
 end
 
