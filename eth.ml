@@ -115,8 +115,8 @@ module Pdu = struct
         { src ; dst ; vlan ; proto ; payload }
 
     let random () =
-        make (Arp.HwProto.random ()) (Addr.random ()) (Addr.random ())
-             (Payload.random 30)
+        let vlan = if randb () then Some (randi 15) else None in
+        make ?vlan (Arp.HwProto.random ()) (Addr.random ()) (Addr.random ()) (Payload.random 30)
 
     let pack t =
         (* TODO: pad into minimal (64bytes) size? *)
