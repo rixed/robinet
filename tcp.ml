@@ -51,6 +51,7 @@ end)
 
 module Pdu =
 struct
+    (*$< Pdu *)
     type flags = {
         urg      : bool ;
         ack      : bool ;
@@ -73,7 +74,6 @@ struct
         dst_port : Port.t ;
         seq_num  : SeqNum.t ;
         ack_num  : SeqNum.t ;
-        hdr_len  : int ;
         win_size : int ;
         flags    : flags ;
         checksum : int option ; (* If None, will be set by IP layer - if in IP *)
@@ -89,11 +89,18 @@ struct
              payload =
         { src_port ; dst_port ;
           seq_num  ; ack_num ;
-          hdr_len  = 20 + bytelength options ;
           flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
           win_size ; checksum ;
           urg_ptr  ; options ;
           payload }
+
+    let random () =
+        make ~src_port:(Port.o (randi 16)) ~dst_port:(Port.o (randi 16))
+             ~seq_num:(SeqNum.o (rand32 ())) ~ack_num:(SeqNum.o (rand32 ()))
+             ~urg:(randb ()) ~ack:(randb ()) ~psh:(randb ()) ~rst:(randb ()) ~syn:(randb ()) ~fin:(randb ())
+             ~win_size:(randi 16) ~urg_ptr:(if randb () then randi 16 else 0)
+             ~options:(randbs 16)
+             (Payload.o (randbs 64))
 
     let make_reset_of pdu =
         make ~src_port:pdu.dst_port ~dst_port:pdu.src_port
@@ -101,10 +108,11 @@ struct
              ~ack:true ~rst:true Payload.empty
 
     let pack t =
+        let hdr_len = 20 + bytelength t.options in
         concat [ (BITSTRING {
             (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
             (t.seq_num :> int32)  : 32 ; (t.ack_num :> int32)  : 32 ;
-            t.hdr_len lsr 2 : 4 ; 0 : 6 ;
+            hdr_len lsr 2 : 4 ; 0 : 6 ;
             t.flags.urg : 1 ; t.flags.ack : 1 ; t.flags.psh : 1 ;
             t.flags.rst : 1 ; t.flags.syn : 1 ; t.flags.fin : 1 ;
             t.win_size : 16 ; (Option.default 0 t.checksum) : 16 ;
@@ -121,10 +129,15 @@ struct
             payload  : -1 : bitstring } ->
         Some { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
                seq_num  = SeqNum.o seq_num  ; ack_num  = SeqNum.o ack_num ;
-               hdr_len ; flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
+               flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
                win_size ; checksum = Some checksum ;
                urg_ptr  ; options ; payload = Payload.o payload }
         | { _ } -> err "Not TCP"
+
+    (*$Q pack
+      ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+     *)
+    (*$>*)
 end
 
 (* Transceiver *)
