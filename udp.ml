@@ -31,20 +31,24 @@ module Port = Tcp.MakePort (struct let srv = "udp" end)
 
 module Pdu =
 struct
+    (*$< Pdu *)
     type t = {
         src_port : Port.t ; dst_port : Port.t ;
-        length   : int   ; checksum : int option ;
-        payload  : Payload.t }
+        checksum : int option ; payload  : Payload.t }
 
     let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80)
-             ?(length) ?checksum payload =
-        let length = may_default length (fun () -> Payload.length payload + 8) in
-        { src_port ; dst_port ; length   ; checksum ; payload }
+             ?checksum payload =
+        { src_port ; dst_port ; checksum ; payload }
+
+    let random () =
+        make ~src_port:(Port.o (randi 16)) ~dst_port:(Port.o (randi 16))
+             (Payload.o (randbs 64))
 
     let pack t =
+        let length = Payload.length t.payload + 8 in
         concat [ (BITSTRING {
             (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
-            t.length   : 16 ; (Option.default 0 t.checksum) : 16 }) ;
+            length : 16 ; (Option.default 0 t.checksum) : 16 }) ;
             (t.payload :> bitstring) ]
 
     let unpack bits = bitmatch bits with
@@ -52,9 +56,14 @@ struct
             length   : 16 ; checksum : 16 ;
             payload  : (length-8) * 8 : bitstring } when length >= 8 ->
             Some { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
-                   length ; checksum = Some checksum ;
+                   checksum = Some checksum ;
                    payload  = Payload.o payload }
         | { _ } -> err "Not UDP"
+
+    (*$Q pack
+      ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+     *)
+    (*$>*)
 end
 
 (* Transceiver *)
