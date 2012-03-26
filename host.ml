@@ -154,11 +154,11 @@ let rec resolver t =
                List.length pdu.Dns.Pdu.questions = 1
             then (
                 let name, qtype, qclass = List.hd pdu.Dns.Pdu.questions in
-                if qtype = Dns.qtype_a && qclass = Dns.qclass_inet then (
+                if qtype = Dns.QType.a && qclass = Dns.qclass_inet then (
                     (* TODO: usr the A and CNAME results to feed the cache? *)
                     let ips =
                         List.filter_map (fun (_name, qtype, qclass, _ttl, data) ->
-                            if qclass = Dns.qclass_inet && qtype = Dns.qtype_a then
+                            if qclass = Dns.qclass_inet && qtype = Dns.QType.a then
                                 Some (Ip.Addr.of_bitstring (bitstring_of_string data))
                             else None
                         ) pdu.Dns.Pdu.answer_rrs in

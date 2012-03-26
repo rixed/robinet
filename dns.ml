@@ -29,26 +29,29 @@ let std_query = 0
 let inv_query = 1
 let srv_status_request = 2
 
-module QType = MakePrivate(struct
-    type t = int
-    let to_string = function
-        |  1 -> "A"
-        |  2 -> "NS"
-        |  5 -> "CNAME"
-        | 12 -> "PTR"
-        | 13 -> "HINFO"
-        | 15 -> "MX"
-        |  x -> string_of_int x
-    let is_valid t = t < 0x10000
-    let repl_tag = "code"
-end)
+module QType = struct
+    include MakePrivate(struct
+        type t = int
+        let to_string = function
+            |  1 -> "A"
+            |  2 -> "NS"
+            |  5 -> "CNAME"
+            | 12 -> "PTR"
+            | 13 -> "HINFO"
+            | 15 -> "MX"
+            |  x -> string_of_int x
+        let is_valid t = t < 0x10000
+        let repl_tag = "code"
+    end)
+    let a     = o 1
+    let ns    = o 2
+    let cname = o 5
+    let ptr   = o 12
+    let hinfo = o 13
+    let mx    = o 15
 
-let qtype_a     = QType.o 1
-let qtype_ns    = QType.o 2
-let qtype_cname = QType.o 5
-let qtype_ptr   = QType.o 12
-let qtype_hinfo = QType.o 13
-let qtype_mx    = QType.o 15
+    let random () = randi 16
+end
 
 let qclass_inet = 1
 
@@ -56,6 +59,7 @@ let qclass_inet = 1
 
 module Pdu =
 struct
+    (*$< Pdu *)
     type question = string * QType.t * int
     type rr = string * QType.t * int * int32 * string
     type t = { id : int ; is_query : bool ; opcode : int ;
@@ -75,12 +79,17 @@ struct
               is_auth = false ; truncated = false ;
               rec_desired = true ; rec_avlb = false ;
               status = 0 ;
-              questions = [ name, qtype_a, qclass_inet ] ;
+              questions = [ name, QType.a, qclass_inet ] ;
               answer_rrs = [] ; authority_rrs = [] ; additional_rrs = [] })
+
+    (* TODO: make_answer *)
+
+    let random () =
+        make_query (rand_hostname () ^ ".")
         
     let unpack_name pkt rest =
         let rec aux prevs o =
-            if o >= String.length pkt then err "DNS: cannot unpack_name" else
+            if o >= String.length pkt then err "DNS: Cannot unpack_name" else
             let count = Char.code pkt.[o] in
             if count = 0 then Some (""::prevs, o+1) else
             if count < 0xC0 then (
@@ -227,5 +236,10 @@ struct
                  bitstring_of_string answers ;
                  bitstring_of_string authority ;
                  bitstring_of_string additional ]
+
+    (*$Q pack
+      ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+     *)
+    (*$>*)
 end
 

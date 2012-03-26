@@ -133,9 +133,17 @@ let randi bits =
     Random.bits () land mask
 let rand32 () = Int32.of_int64 (Random.int64 0x100000000L)
 let randb = Random.bool
-let randstr len = String.init len (fun _ -> Random.char ())
+let randstr ?charset len =
+    let rc _i = Random.char ()
+    and sc s _s = s.[Random.int (String.length s)] in
+    String.init len (match charset with None -> rc | Some s -> sc s)
 let randbs len (* in bytes! *)=
     randstr len |> bitstring_of_string
+let rand_hostname () =
+    let nb_parts = 1 + randi 3 in
+    let parts = List.init nb_parts (fun _i ->
+        randstr ~charset:"abcdefghijklmnopqrstuvwxyz-" (3 + randi 4)) in
+    String.join "." parts
 
 
 (* A Module with a private int type and custom printer, used
