@@ -36,11 +36,11 @@ module Addr = struct
                 (l-8)
                 (Int64.shift_right_logical rem 8) in
         aux "" l sfx
-    (*$T string_of_sfx
-      string_of_sfx  8 0xabL = ":ab"
-      string_of_sfx 12 0x123L = ":01:23"
-      string_of_sfx  0 0x123L = ""
-      string_of_sfx 48 0x123456789abcL = ":12:34:56:78:9a:bc"
+    (*$= string_of_sfx & ~printer:identity
+      (string_of_sfx  8 0xabL) ":ab"
+      (string_of_sfx 12 0x123L) ":01:23"
+      (string_of_sfx  0 0x123L) ""
+      (string_of_sfx 48 0x123456789abcL) ":12:34:56:78:9a:bc"
     *)
 
     external vendor_lookup : int64 -> (string * int) option = "wrap_eth_vendor_lookup"
@@ -61,12 +61,12 @@ module Addr = struct
                     simple_name mac64
                 )
             | { _ } -> should_not_happen ()
-    (*$T string_of_mac
-      string_of_mac ((of_string "00:23:8b:5f:09:ce") :> bitstring) = "QuantaCo:5f:09:ce"
-      string_of_mac ((of_string "80:ee:73:07:76:f1") :> bitstring) = "Shuttle:07:76:f1"
-      string_of_mac (broadcast :> bitstring) = "Broadcast"
-      string_of_mac ((of_string "00:50:c2:00:0a:bc") :> bitstring) = "TLS:0a:bc"
-      string_of_mac ((of_string "ff:ff:07:c0:00:04") :> bitstring) = "ff:ff:07:c0:00:04"
+    (*$= string_of_mac & ~printer:identity
+      (string_of_mac ((of_string "00:23:8b:5f:09:ce") :> bitstring)) "QuantaCo:5f:09:ce"
+      (string_of_mac ((of_string "80:ee:73:07:76:f1") :> bitstring)) "Shuttle:07:76:f1"
+      (string_of_mac (broadcast :> bitstring)) "Broadcast"
+      (string_of_mac ((of_string "00:50:c2:00:0a:bc") :> bitstring)) "TLS:0a:bc"
+      (string_of_mac ((of_string "ff:ff:07:c0:00:04") :> bitstring)) "ff:ff:07:c0:00:04"
     *)
 
     include MakePrivate(struct

@@ -53,8 +53,8 @@ let inet_addr_of_int32 i : Unix.inet_addr =
 
 let dotted_string_of_int32 i = bitmatch (BITSTRING { i : 32 }) with
       { a : 8 ; b : 8 ; c : 8 ; d : 8 } -> Printf.sprintf "%d.%d.%d.%d" a b c d
-(*$T dotted_string_of_int32
-  dotted_string_of_int32 ((Addr.of_string "1.2.3.4") :> int32) = "1.2.3.4"
+(*$= dotted_string_of_int32 & ~printer:identity
+  (dotted_string_of_int32 ((Addr.of_string "1.2.3.4") :> int32)) "1.2.3.4"
 *)
 
 module Addr = struct
@@ -166,8 +166,8 @@ module Pdu = struct
         let rec wrap s =
             if s < 0x10000 then s else wrap ((s land 0xffff) + (s lsr 16)) in
         (lnot (wrap s)) land 0xffff
-    (*$T sum
-      sum (bitstring_of_string "\x45\x00\x00\xaa\x03\xa6\x00\x00\x40\x06\x00\x00\xc0\xa8\x01\x45\xd1\x55\xe3\x67") = 0xfffd
+    (*$= sum & ~printer:(fun d -> Printf.sprintf "%x" d)
+      (sum (bitstring_of_string "\x45\x00\x00\xaa\x03\xa6\x00\x00\x40\x06\x00\x00\xc0\xa8\x01\x45\xd1\x55\xe3\x67")) 0xfffd
     *)
 
     let patch_tcp_checksum t (pld : Payload.t) = bitmatch (pld :> bitstring) with
