@@ -146,7 +146,8 @@ let load fname =
     let global_header = read_global_header in_chan in
     let rec read_next_pkt () =
         let pkt_hdr = try IO.nread in_chan 16
-                      with IO.No_more_input -> raise Enum.No_more_elements in
+                      with IO.No_more_input | IO.Input_closed ->
+                           raise Enum.No_more_elements in
         bitmatch (bitstring_of_string pkt_hdr) with
         | { sec      : 32 : endian (global_header.endianness) ;
             usec     : 32 : endian (global_header.endianness) ;
@@ -201,6 +202,18 @@ let infos_of filename =
                                            stop_time = 1332451941.92178106 })
  *)
 
+let rec merge = function
+    | [] -> Enum.empty ()
+    | a :: rest ->
+        let test_ts (ts_a, _) (ts_b, _) = ts_a <= ts_b in
+        Enum.merge test_ts a (merge rest)
+(*$= merge & ~printer:BatPervasives.dump
+    (merge [ (enum_of "tests/someweb.pcap" // \
+        let r = ref true in fun _ -> r := not !r ; !r) ; \
+             (enum_of "tests/someweb.pcap" // \
+        let r = ref false in fun _ -> r := not !r ; !r) ] |> List.of_enum) \
+                                    (enum_of "tests/someweb.pcap" |> List.of_enum)
+ *)
 
 let play tx fname =
     (* With last_packet_timestamp (or None), schedule a function using the clock to read
