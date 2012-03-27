@@ -108,18 +108,42 @@ let save ?(caplen=65535) ?(linktype=dlt_en10mb) fname =
     Gc.finalise (fun _ -> close_out out_chan) f ;
     f
 
+type global_header = { endianness    : endian ;
+                       version_major : int ;
+                       version_minor : int ;
+                       this_zone     : int32 ;
+                       sigfigs       : int32 ;
+                       snaplen       : int32 ;
+                       network       : int32 (* DLT *) }
+
+exception Not_a_pcap_file
+
+let read_global_header ic =
+    let header = bitstring_of_string (IO.nread ic 24) ; in
+    let endianness = bitmatch (takebits 32 header) with
+        | { 0xa1b2c3d4l : 32 : bigendian } -> BigEndian
+        | { 0xa1b2c3d4l : 32 : littleendian } -> LittleEndian
+        | { _ } -> raise Not_a_pcap_file in
+    bitmatch (dropbits 32 header) with
+    | { version_major : 16 : endian (endianness) ; version_minor : 16 : endian (endianness) ;
+        this_zone : 32 : endian (endianness) ; sigfigs : 32 : endian (endianness) ;
+        snaplen : 32 : endian (endianness) ; network : 32 : endian (endianness) } ->
+        { endianness ; version_major ; version_minor ;
+          this_zone ; sigfigs ; snaplen ; network }
+   | { _ } -> raise Not_a_pcap_file
+
 (* from a pcap file, return an enumerator of (TS * bitstring) *)
 let enum_of fname =
     let in_chan = open_in_bin fname in
-    ignore (IO.nread in_chan 24) ;
+    let global_header = read_global_header in_chan in
     let rec read_next_pkt () =
         let pkt_hdr = try IO.nread in_chan 16
                       with IO.No_more_input -> raise Enum.No_more_elements in
         bitmatch (bitstring_of_string pkt_hdr) with
-        | { sec      : 32 : littleendian ;
-            usec     : 32 : littleendian ;
-            caplen   : 32 : littleendian ;
-            wire_len : 32 : littleendian } ->
+        | { sec      : 32 : endian (global_header.endianness) ;
+            usec     : 32 : endian (global_header.endianness) ;
+            caplen   : 32 : endian (global_header.endianness) ;
+            wire_len : 32 : endian (global_header.endianness) } ->
             let pkt = try IO.nread in_chan (Int32.to_int caplen)
                       with IO.No_more_input -> raise Enum.No_more_elements in
             if wire_len > caplen then (
