@@ -144,19 +144,32 @@ let enum_of fname =
             usec     : 32 : endian (global_header.endianness) ;
             caplen   : 32 : endian (global_header.endianness) ;
             wire_len : 32 : endian (global_header.endianness) } ->
+            if caplen > global_header.snaplen then (
+                (* We don't really care but the user might *)
+                Printf.printf "caplen > snaplen!\n%!"
+            ) ;
             let pkt = try IO.nread in_chan (Int32.to_int caplen)
                       with IO.No_more_input -> raise Enum.No_more_elements in
-            if wire_len > caplen then (
-                Printf.printf "Truncated packet, skipping\n%!" ; (* FIXME: use log *)
-                read_next_pkt ()
-            ) else (
-                let bits = bitstring_of_string pkt in
-                let ts = Int32.to_float sec +. (Int32.to_float usec) *. 0.000001 in
-                ts, bits
-            )
+            let bits = bitstring_of_string pkt in
+            let bits = if wire_len <= caplen then bits
+                       else (
+                           concat [ bits ; zeroes_bitstring (Int32.to_int (Int32.sub wire_len caplen)*8) ]
+                       ) in
+            let ts = Int32.to_float sec +. (Int32.to_float usec) *. 0.000001 in
+            ts, bits
         | { _ } -> should_not_happen ()
     in
     Enum.from read_next_pkt
+(* Check that we found the same values than capinfo *)
+(*$= enum_of & ~printer:string_of_int
+    (enum_of "tests/someweb.pcap" |> Enum.hard_count) 173
+    (fold (fun sz (_ts, bits) -> \
+        sz + bytelength bits) 0 (enum_of "tests/someweb.pcap")) 149461
+    (enum_of "tests/someweb_cut.pcap" |> Enum.hard_count) 173
+    (fold (fun sz (_ts, bits) -> \
+        sz + bytelength bits) 0 (enum_of "tests/someweb_cut.pcap")) 149461
+ *)
+
 
 let play tx fname =
     (* With last_packet_timestamp (or None), schedule a function using the clock to read

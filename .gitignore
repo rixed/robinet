@@ -13,7 +13,6 @@ gmon.out
 *.byte
 *.opt
 *.top
-*.pcap
 _build
 doc
 persist
