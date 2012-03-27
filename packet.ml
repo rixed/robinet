@@ -29,7 +29,7 @@ module Pdu = struct
     type layer = Raw of bitstring
              | Dhcp of Dhcp.Pdu.t | Eth of Eth.Pdu.t | Arp of Arp.Pdu.t
              | Ip   of Ip.Pdu.t   | Udp of Udp.Pdu.t | Tcp of Tcp.Pdu.t
-             | Http of Http.Pdu.t | Dns of Dns.Pdu.t | Sll of Sll.Pdu.t
+             | Dns of Dns.Pdu.t   | Sll of Sll.Pdu.t
     type t = layer list (* with outer layer first for more natural presentation *)
     
     let new_payload bits = function
@@ -46,8 +46,8 @@ module Pdu = struct
         | Dhcp t -> Dhcp.Pdu.pack t | Eth t -> Eth.Pdu.pack t
         | Arp t  -> Arp.Pdu.pack t  | Ip t  -> Ip.Pdu.pack t
         | Udp t  -> Udp.Pdu.pack t  | Tcp t -> Tcp.Pdu.pack t
-        | Http t -> Http.Pdu.pack t | Dns t -> Dns.Pdu.pack t
-        | Sll t  -> Sll.Pdu.pack t  | Raw t  -> t
+        | Dns t  -> Dns.Pdu.pack t  | Sll t -> Sll.Pdu.pack t
+        | Raw t  -> t
     let pack t =
         let rec aux bits = function
             | [] -> Option.get bits
@@ -61,20 +61,19 @@ module Pdu = struct
     let try_unpack unp do_t bits =
         match unp bits with None -> unpack_raw bits
                           | Some x -> do_t x
-    let unpack_http = try_unpack Http.Pdu.unpack (fun x -> [ Http x ])
     let unpack_dhcp = try_unpack Dhcp.Pdu.unpack (fun x -> [ Dhcp x])
     let unpack_dns  = try_unpack Dns.Pdu.unpack  (fun x -> [ Dns x])
     let unpack_arp  = try_unpack Arp.Pdu.unpack  (fun x -> [ Arp x])
     let unpack_ports src dst = (match src, dst with
             | 53, _ | _, 53 -> unpack_dns
             | 67, _ | _, 67 -> unpack_dhcp
-            | 80, _ | _, 80 -> unpack_http
-            | 8080, _ | _, 8080 -> unpack_http
             | _ -> unpack_raw)
     let unpack_tcp = try_unpack Tcp.Pdu.unpack (fun tcp -> Tcp tcp ::
-                    (unpack_ports (tcp.Tcp.Pdu.src_port :> int)
-                                  (tcp.Tcp.Pdu.dst_port :> int)
-                                  (tcp.Tcp.Pdu.payload :> bitstring)))
+                    (if Payload.length tcp.Tcp.Pdu.payload > 0 then
+                        (unpack_ports (tcp.Tcp.Pdu.src_port :> int)
+                                      (tcp.Tcp.Pdu.dst_port :> int)
+                                      (tcp.Tcp.Pdu.payload :> bitstring))
+                    else []))
     let unpack_udp = try_unpack Udp.Pdu.unpack (fun udp -> Udp udp ::
                     (unpack_ports (udp.Udp.Pdu.src_port :> int)
                                   (udp.Udp.Pdu.dst_port :> int)
