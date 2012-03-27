@@ -27,15 +27,16 @@ let debug = false
 
 module Pdu = struct
     type layer = Raw of bitstring
-             | Dhcp of Dhcp.Pdu.t | Eth of Eth.Pdu.t  | Arp of Arp.Pdu.t
-             | Ip   of Ip.Pdu.t   | Udp of Udp.Pdu.t  | Tcp of Tcp.Pdu.t
-             | Http of Http.Pdu.t | Dns of Dns.Pdu.t
+             | Dhcp of Dhcp.Pdu.t | Eth of Eth.Pdu.t | Arp of Arp.Pdu.t
+             | Ip   of Ip.Pdu.t   | Udp of Udp.Pdu.t | Tcp of Tcp.Pdu.t
+             | Http of Http.Pdu.t | Dns of Dns.Pdu.t | Sll of Sll.Pdu.t
     type t = layer list (* with outer layer first for more natural presentation *)
     
     let new_payload bits = function
         | Raw _  -> Raw bits
         (* can you spot a pattern here? *)
         | Eth  p -> Eth { p with Eth.Pdu.payload = Payload.o bits }
+        | Sll  p -> Sll { p with Sll.Pdu.payload = Payload.o bits }
         | Ip   p -> Ip  { p with Ip.Pdu.payload = Payload.o bits }
         | Udp  p -> Udp { p with Udp.Pdu.payload = Payload.o bits }
         | Tcp  p -> Tcp { p with Tcp.Pdu.payload = Payload.o bits }
@@ -46,7 +47,7 @@ module Pdu = struct
         | Arp t  -> Arp.Pdu.pack t  | Ip t  -> Ip.Pdu.pack t
         | Udp t  -> Udp.Pdu.pack t  | Tcp t -> Tcp.Pdu.pack t
         | Http t -> Http.Pdu.pack t | Dns t -> Dns.Pdu.pack t
-        | Raw t  -> t
+        | Sll t  -> Sll.Pdu.pack t  | Raw t  -> t
     let pack t =
         let rec aux bits = function
             | [] -> Option.get bits
@@ -86,12 +87,35 @@ module Pdu = struct
                 ((if eth.Eth.Pdu.proto = Arp.HwProto.ip4 then unpack_ip
                   else if eth.Eth.Pdu.proto = Arp.HwProto.arp then unpack_arp
                   else unpack_raw) (eth.Eth.Pdu.payload :> bitstring)))
+    let unpack_sll = try_unpack Sll.Pdu.unpack (fun sll -> Sll sll ::
+                ((if sll.Sll.Pdu.proto = Arp.HwProto.ip4 then unpack_ip
+                  else if sll.Sll.Pdu.proto = Arp.HwProto.arp then unpack_arp
+                  else unpack_raw) (sll.Sll.Pdu.payload :> bitstring)))
 
-    let unpack : bitstring -> t = unpack_eth
+    let unpack ?(dlt=Pcap.dlt_en10mb) bs =
+        if dlt = Pcap.dlt_linux_cooked then unpack_sll bs
+        else unpack_eth bs
+
 end
 
 (* Shorthands *)
 
-let of_pcap (_ts, bits) = Pdu.unpack bits
+let of_pcap ?dlt (_ts, bits) =
+    Pdu.unpack ?dlt bits
 
-let enum_of fname = Pcap.enum_of fname /@ of_pcap
+let enum_of fname =
+    let dlt = Pcap.dlt_of fname in
+    Pcap.enum_of fname /@ of_pcap ~dlt
+
+(* Check that we manage to decode the actual concent of the packets by counting the cnx establishments *)
+(*$= enum_of & ~printer:string_of_int
+    (enum_of "tests/someweb.pcap" // \
+        (function _ :: _ :: Pdu.Tcp { Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; \
+                                                        Tcp.Pdu.ack = true } } :: _ -> true \
+                | _ -> false) |> Enum.hard_count) 1
+    (enum_of "tests/someweb_sll.pcap" // \
+        (function _ :: _ :: Pdu.Tcp { Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; \
+                                                        Tcp.Pdu.ack = true } } :: _ -> true \
+                | _ -> false) |> Enum.hard_count) 1
+ *)
+

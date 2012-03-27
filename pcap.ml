@@ -67,6 +67,7 @@ let sniffer iface rx =
 
 (* Pcap files *)
 
+(* See /usr/include/pcap/bpf.h *)
 let dlt_null    = 0l (* BSD loopback encapsulation *)                                             
 let dlt_en10mb  = 1l (* Ethernet (10Mb) *)                                                        
 let dlt_en3mb   = 2l (* Experimental Ethernet (3Mb) *)                                            
@@ -78,6 +79,7 @@ let dlt_arcnet  = 7l (* ARCNET, with BSD-style header *)
 let dlt_slip    = 8l (* Serial Line IP *)                                                         
 let dlt_ppp     = 9l (* Point-to-point Protocol *)                                                
 let dlt_fddi    = 10l (* FDDI *)
+let dlt_linux_cooked = 113l (* Linux SLL *)
 
 let save ?(caplen=65535) ?(linktype=dlt_en10mb) fname =
     let out_chan = open_out_bin fname
@@ -131,6 +133,12 @@ let read_global_header ic =
         { endianness ; version_major ; version_minor ;
           this_zone ; sigfigs ; snaplen ; network }
    | { _ } -> raise Not_a_pcap_file
+
+let dlt_of fname =
+    let in_chan = open_in_bin fname in
+    let global_header = read_global_header in_chan in
+    close_in in_chan ;
+    global_header.network
 
 (* from a pcap file, return an enumerator of (TS * bitstring) *)
 let enum_of fname =

@@ -50,6 +50,11 @@ let bitstring_is_empty bs = bitstring_length bs = 0
 
 let dropbytes n bs = dropbits (n lsl 3) bs
 
+let fixedbits len bits =
+    let l = bitstring_length bits in
+    if l < len then concat [ bits ; zeroes_bitstring (len-l) ]
+    else takebits len bits
+
 let hexstring_of_bitstring bs =
     let s = string_of_bitstring bs in
     let hexify c = Printf.sprintf "0x%02x" (Char.code c) in
