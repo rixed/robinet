@@ -111,11 +111,11 @@ let enum_of fname =
 (*$= enum_of & ~printer:string_of_int
     (enum_of "tests/someweb.pcap" // \
         (function _ :: _ :: Pdu.Tcp { Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; \
-                                                        Tcp.Pdu.ack = true } } :: _ -> true \
+                                                        Tcp.Pdu.ack = true ; _ } ; _ } :: _ -> true \
                 | _ -> false) |> Enum.hard_count) 1
     (enum_of "tests/someweb_sll.pcap" // \
         (function _ :: _ :: Pdu.Tcp { Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; \
-                                                        Tcp.Pdu.ack = true } } :: _ -> true \
+                                                        Tcp.Pdu.ack = true ; _ } ; _ } :: _ -> true \
                 | _ -> false) |> Enum.hard_count) 1
  *)
 
