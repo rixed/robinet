@@ -26,11 +26,11 @@ let debug = false
 (* Pack/Unpack the whole protocol stack *)
 
 module Pdu = struct
-    type pkt = Raw of bitstring
+    type layer = Raw of bitstring
              | Dhcp of Dhcp.Pdu.t | Eth of Eth.Pdu.t  | Arp of Arp.Pdu.t
              | Ip   of Ip.Pdu.t   | Udp of Udp.Pdu.t  | Tcp of Tcp.Pdu.t
              | Http of Http.Pdu.t | Dns of Dns.Pdu.t
-    type t = pkt list (* with outer layer first for more natural presentation *)
+    type t = layer list (* with outer layer first for more natural presentation *)
     
     let new_payload bits = function
         | Raw _  -> Raw bits
@@ -87,7 +87,7 @@ module Pdu = struct
                   else if eth.Eth.Pdu.proto = Arp.HwProto.arp then unpack_arp
                   else unpack_raw) (eth.Eth.Pdu.payload :> bitstring)))
 
-    let unpack = unpack_eth
+    let unpack : bitstring -> t = unpack_eth
 end
 
 (* Shorthands *)
@@ -95,4 +95,3 @@ end
 let of_pcap (_ts, bits) = Pdu.unpack bits
 
 let enum_of fname = Pcap.enum_of fname /@ of_pcap
-
