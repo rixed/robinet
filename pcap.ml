@@ -116,7 +116,7 @@ type global_header = { endianness    : endian ;
                        this_zone     : int32 ;
                        sigfigs       : int32 ;
                        snaplen       : int32 ;
-                       network       : int32 (* DLT *) }
+                       dlt           : int32 }
 
 exception Not_a_pcap_file
 
@@ -129,19 +129,19 @@ let read_global_header ic =
     bitmatch (dropbits 32 header) with
     | { version_major : 16 : endian (endianness) ; version_minor : 16 : endian (endianness) ;
         this_zone : 32 : endian (endianness) ; sigfigs : 32 : endian (endianness) ;
-        snaplen : 32 : endian (endianness) ; network : 32 : endian (endianness) } ->
+        snaplen : 32 : endian (endianness) ; dlt : 32 : endian (endianness) } ->
         { endianness ; version_major ; version_minor ;
-          this_zone ; sigfigs ; snaplen ; network }
+          this_zone ; sigfigs ; snaplen ; dlt }
    | { _ } -> raise Not_a_pcap_file
 
 let dlt_of fname =
     let in_chan = open_in_bin fname in
     let global_header = read_global_header in_chan in
     close_in in_chan ;
-    global_header.network
+    global_header.dlt
 
-(* from a pcap file, return an enumerator of (TS * bitstring) *)
-let enum_of fname =
+(* from a pcap file, return an enumerator of (TS * bitstring) and the global header *)
+let load fname =
     let in_chan = open_in_bin fname in
     let global_header = read_global_header in_chan in
     let rec read_next_pkt () =
@@ -167,15 +167,38 @@ let enum_of fname =
             ts, bits
         | { _ } -> should_not_happen ()
     in
-    Enum.from read_next_pkt
+    Enum.from read_next_pkt, global_header
+
+let enum_of fname = fst (load fname)
+
+type infos = { filename : string ; data_link_type : int32 ;
+               num_packets : int ; data_size : int64 ;
+               start_time : float ; stop_time : float }
+let infos_of filename =
+    let pkts, global_header = load filename in
+    let min_ts = ref Float.max_num and max_ts = ref Float.min_num
+    and num_packets = ref 0 and data_size = ref 0L in
+    Enum.iter (fun (ts, bits) ->
+        incr num_packets ;
+        data_size := Int64.add !data_size (Int64.of_int (bytelength bits)) ;
+        min_ts := min !min_ts ts ;
+        max_ts := max !max_ts ts) pkts ;
+    { filename ; data_link_type = global_header.dlt ;
+      num_packets = !num_packets ; data_size = !data_size ;
+      start_time = !min_ts ; stop_time = !max_ts }
+
 (* Check that we found the same values than capinfo *)
-(*$= enum_of & ~printer:string_of_int
-    (enum_of "tests/someweb.pcap" |> Enum.hard_count) 173
-    (fold (fun sz (_ts, bits) -> \
-        sz + bytelength bits) 0 (enum_of "tests/someweb.pcap")) 149461
-    (enum_of "tests/someweb_cut.pcap" |> Enum.hard_count) 173
-    (fold (fun sz (_ts, bits) -> \
-        sz + bytelength bits) 0 (enum_of "tests/someweb_cut.pcap")) 149461
+(*$= infos_of & ~printer:BatPervasives.dump
+    (infos_of "tests/someweb.pcap") ({ filename = "tests/someweb.pcap" ;\
+                                       data_link_type = dlt_en10mb ;\
+                                       num_packets = 173 ; data_size = 149461L ;\
+                                       start_time = 1332451938.3774271 ;\
+                                       stop_time = 1332451941.92178106 })
+    (infos_of "tests/someweb_cut.pcap") ({ filename = "tests/someweb_cut.pcap" ;\
+                                           data_link_type = dlt_en10mb ;\
+                                           num_packets = 173 ; data_size = 149461L ;\
+                                           start_time = 1332451938.3774271 ;\
+                                           stop_time = 1332451941.92178106 })
  *)
 
 
