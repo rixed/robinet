@@ -77,11 +77,35 @@ let bitstring_fuzz err_rate bits =
 
 let hexstring_of_bitstring bs =
     let s = string_of_bitstring bs in
-    let hexify c = Printf.sprintf "0x%02x" (Char.code c) in
+    let hexify c = Printf.sprintf "%02x" (Char.code c) in
     String.enum s /@ hexify |> List.of_enum |> String.join " "
 
-let print_bitstring fmt bs =
-    Format.fprintf fmt "%s" (hexstring_of_bitstring bs)
+let printable str =
+    let is_printable c = Char.is_latin1 c || Char.is_digit c || Char.is_symbol c || c = ' ' in
+    String.map (fun c -> if is_printable c then c else '.') str
+
+let print_bitstring fmt bits =
+    let rec aux bits =
+        bitmatch bits with
+        | { a : 64 : bitstring ;
+            b : 64 : bitstring ;
+            rest : -1 : bitstring } ->
+            Format.fprintf fmt "%s - %s  %s%s@\n"
+                (hexstring_of_bitstring a) (hexstring_of_bitstring b)
+                (printable (string_of_bitstring a)) (printable (string_of_bitstring b)) ;
+            aux rest
+        | { a : 64 : bitstring ;
+            b : -1 : bitstring } when not (bitstring_is_empty b) ->
+            Format.fprintf fmt "%s - %-23s  %s%s@\n"
+                (hexstring_of_bitstring a) (hexstring_of_bitstring b)
+                (printable (string_of_bitstring a)) (printable (string_of_bitstring b))
+        | { a : -1 : bitstring } ->
+            if not (bitstring_is_empty a) then
+            Format.fprintf fmt "%-23s                            %s@\n"
+                (hexstring_of_bitstring a) (printable (string_of_bitstring a)) in
+    Format.open_vbox 0 ; (* if not 0 then the first line is less indented than the others *)
+    aux bits ;
+    Format.close_box ()
 
 let abbrev ?(len=25) str =
     let tot_len = String.length str in
