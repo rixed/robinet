@@ -121,7 +121,7 @@ type global_header = { endianness    : endian ;
 exception Not_a_pcap_file
 
 let read_global_header ic =
-    let header = bitstring_of_string (IO.nread ic 24) ; in
+    let header = bitstring_of_string (IO.really_nread ic 24) ; in
     let endianness = bitmatch (takebits 32 header) with
         | { 0xa1b2c3d4l : 32 : bigendian } -> BigEndian
         | { 0xa1b2c3d4l : 32 : littleendian } -> LittleEndian
@@ -134,6 +134,27 @@ let read_global_header ic =
           this_zone ; sigfigs ; snaplen ; dlt }
    | { _ } -> raise Not_a_pcap_file
 
+let read_next_pkt global_header in_chan =
+    let pkt_hdr = IO.really_nread in_chan 16 in
+    bitmatch (bitstring_of_string pkt_hdr) with
+    | { sec      : 32 : endian (global_header.endianness) ;
+        usec     : 32 : endian (global_header.endianness) ;
+        caplen   : 32 : endian (global_header.endianness) ;
+        wire_len : 32 : endian (global_header.endianness) } ->
+        if caplen > global_header.snaplen then (
+            (* We don't really care but the user might *)
+            Printf.printf "caplen > snaplen!\n%!"
+        ) ;
+        let pkt = IO.really_nread in_chan (Int32.to_int caplen) in
+        let bits = bitstring_of_string pkt in
+        let bits = if wire_len <= caplen then bits
+                   else (
+                       concat [ bits ; zeroes_bitstring (Int32.to_int (Int32.sub wire_len caplen)*8) ]
+                   ) in
+        let ts = Int32.to_float sec +. (Int32.to_float usec) *. 0.000001 in
+        ts, bits
+    | { _ } -> should_not_happen ()
+
 let dlt_of fname =
     let in_chan = open_in_bin fname in
     let global_header = read_global_header in_chan in
@@ -144,31 +165,11 @@ let dlt_of fname =
 let load fname =
     let in_chan = open_in_bin fname in
     let global_header = read_global_header in_chan in
-    let rec read_next_pkt () =
-        let pkt_hdr = try IO.nread in_chan 16
-                      with IO.No_more_input | IO.Input_closed ->
-                           raise Enum.No_more_elements in
-        bitmatch (bitstring_of_string pkt_hdr) with
-        | { sec      : 32 : endian (global_header.endianness) ;
-            usec     : 32 : endian (global_header.endianness) ;
-            caplen   : 32 : endian (global_header.endianness) ;
-            wire_len : 32 : endian (global_header.endianness) } ->
-            if caplen > global_header.snaplen then (
-                (* We don't really care but the user might *)
-                Printf.printf "caplen > snaplen!\n%!"
-            ) ;
-            let pkt = try IO.nread in_chan (Int32.to_int caplen)
-                      with IO.No_more_input -> raise Enum.No_more_elements in
-            let bits = bitstring_of_string pkt in
-            let bits = if wire_len <= caplen then bits
-                       else (
-                           concat [ bits ; zeroes_bitstring (Int32.to_int (Int32.sub wire_len caplen)*8) ]
-                       ) in
-            let ts = Int32.to_float sec +. (Int32.to_float usec) *. 0.000001 in
-            ts, bits
-        | { _ } -> should_not_happen ()
-    in
-    Enum.from read_next_pkt, global_header
+    let rec next () =
+        try read_next_pkt global_header in_chan
+        with IO.No_more_input | IO.Input_closed ->
+            raise Enum.No_more_elements in
+    Enum.from next, global_header
 
 let enum_of fname = fst (load fname)
 
@@ -214,6 +215,17 @@ let rec merge = function
         let r = ref false in fun _ -> r := not !r ; !r) ] |> List.of_enum) \
                                     (enum_of "tests/someweb.pcap" |> List.of_enum)
  *)
+
+let repair_file fname =
+    let in_chan = open_in_bin fname in
+    let in_chan, counter = IO.pos_in in_chan in
+    let global_header = read_global_header in_chan in
+    let rec aux () =
+        let ofs = counter () in
+        let cont = try ignore (read_next_pkt global_header in_chan) ; true
+                   with IO.No_more_input | IO.Input_closed -> false in
+        if cont then aux () else ofs in
+    Unix.truncate fname (aux ())
 
 let play tx fname =
     (* With last_packet_timestamp (or None), schedule a function using the clock to read
