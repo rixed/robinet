@@ -55,6 +55,26 @@ let fixedbits len bits =
     if l < len then concat [ bits ; zeroes_bitstring (len-l) ]
     else takebits len bits
 
+(* err_rate is the average number of errors per bits *)
+let bitstring_fuzz err_rate bits =
+    if err_rate = 0. then bits else
+    let noerr_len = 1. /. err_rate in (* average number of bits without errors *)
+    let rec aux prevs rest =
+        let len = Int.of_float (Random.float (2. *. noerr_len)) in (* incorrect but fast *)
+        bitmatch rest with
+        | { b1 : len-1 : bitstring ;
+            b  : 1 ;
+            b2 : -1 : bitstring } ->
+            let b = (if b then zeroes_bitstring else ones_bitstring) 1 in
+            aux (b :: b1 :: prevs) b2
+        | { rest : -1 : bitstring } ->
+            concat (List.rev (rest :: prevs)) in
+    aux [] bits
+(*$T bitstring_fuzz
+  let str = "pas glop pas glop" in \
+  string_of_bitstring (bitstring_fuzz 0.1 (bitstring_of_string str)) <> str
+*)
+
 let hexstring_of_bitstring bs =
     let s = string_of_bitstring bs in
     let hexify c = Printf.sprintf "0x%02x" (Char.code c) in
