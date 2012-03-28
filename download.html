@@ -1,0 +1,61 @@
+<!DOCTYPE html><!--
+ vim: filetype=html
+-->
+<html>
+<head>
+<meta charset='latin1'>
+<title>RobiNet</title>
+ <link rel="stylesheet" href="style.css" type="text/css" />
+
+ <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js"></script>
+
+ <!-- google analytics -->
+ <script type="text/javascript">
+  var _gaq = _gaq || [];
+  _gaq.push(['_setAccount', 'UA-30401390-1']);
+  _gaq.push(['_trackPageview']);
+  (function() {
+    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+   })();
+ </script>
+</head>
+<body onload="$('#download_link').addClass('selected');">
+<!--
+ vim: filetype=html
+-->
+ <div id="container">
+  <a href="https://github.com/rixed/RobiNet">
+   <img style="position: fixed; top: 0; right: 0; border: 0;" src="http://s3.amazonaws.com/github/ribbons/forkme_right_darkblue_121621.png" alt="Fork me on GitHub" />
+  </a>
+  <h1>RobiNet</h1>
+  <div id="menu">
+   <a href="index.html" id="home_link">Home</a>
+   <a href="download.html" id="download_link">Download</a>
+   <a href="packets.html" id="packets_link">Packets</a>
+   <a href="hosts.html" id="hosts_link">Fake Hosts</a>
+   <a href="nets.html" id="nets_link">Fake Networks</a>
+   <a href="scenarii.html" id="scenarii_link">Scneriarii</a>
+   <a href="metrics.html" id="metrics_link">Metrics</a>
+  </div>
+ <p>You can download this project in either:
+      <a href="https://github.com/rixed/RobiNet/zipball/master">
+        <img border="0" width="90" src="https://github.com/images/modules/download/zip.png"></a>
+      <a href="https://github.com/rixed/RobiNet/tarball/master">
+        <img border="0" width="90" src="https://github.com/images/modules/download/tar.png"></a>
+ </p>
+    <p>You can also clone the project with <a href="http://git-scm.com">Git</a>
+      by running:
+     <pre>$ git clone git://github.com/rixed/RobiNet</pre>
+    </p>
+ <p>To build RobiNet you need a recent OCaml and OCaml-Batteries-included.</p>
+ <p>Then to build:
+  <pre>$ cd RobiNet &amp;&amp; make</pre>
+ </p>
+<!--
+ vim: filetype=html
+-->
+ </div><!-- container -->
+</body>
+</html>
