@@ -1,0 +1,49 @@
+<html><head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Fifo" rel="Chapter" href="Fifo.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html"><title>Dns.Pdu.unpack_questions</title>
+</head>
+<body>
+<code class="code"><span class="keyword">let</span>&nbsp;unpack_questions&nbsp;pkt&nbsp;rest&nbsp;nb_qs&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;<span class="keyword">rec</span>&nbsp;aux&nbsp;qs&nbsp;rest&nbsp;nb_qs&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;nb_qs&nbsp;=&nbsp;0&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Some</span>&nbsp;(qs,&nbsp;rest)&nbsp;<span class="keyword">else</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Option</span>.<span class="constructor">Monad</span>.bind&nbsp;(unpack_name&nbsp;pkt&nbsp;rest)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="keyword">fun</span>&nbsp;(name,&nbsp;rest)&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;qtype&nbsp;=&nbsp;<span class="constructor">QType</span>.o&nbsp;(read_n16&nbsp;pkt&nbsp;rest)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;qclass&nbsp;=&nbsp;read_n16&nbsp;pkt&nbsp;(rest+2)&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Dns:&nbsp;Decoded&nbsp;question&nbsp;name&nbsp;'%s',&nbsp;qtype=%s,&nbsp;qclass=%d\n%!"</span>&nbsp;name&nbsp;(<span class="constructor">QType</span>.to_string&nbsp;qtype)&nbsp;qclass&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;aux&nbsp;((name,&nbsp;qtype,&nbsp;qclass)&nbsp;::&nbsp;qs)&nbsp;(rest+4)&nbsp;(nb_qs&nbsp;-&nbsp;1))<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;aux&nbsp;[]&nbsp;rest&nbsp;nb_qs</code></body></html>

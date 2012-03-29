@@ -1,0 +1,53 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link rel="previous" href="Hub.html">
+<link rel="next" href="Localhost.html">
+<link rel="Up" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Fifo" rel="Chapter" href="Fifo.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html"><title>Ip</title>
+</head>
+<body>
+<div class="navbar"><a href="Hub.html">Previous</a>
+&nbsp;<a href="index.html">Up</a>
+&nbsp;<a href="Localhost.html">Next</a>
+</div>
+<center><h1>Module <a href="type_Ip.html">Ip</a></h1></center>
+<br>
+<pre><span class="keyword">module</span> Ip: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
+<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALIp.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span class="keyword">module</span> <a href="Ip.Proto.html">Proto</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Proto.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span id="VALint32_of_inet_addr"><span class="keyword">val</span> <a href="code_VALIp.int32_of_inet_addr.html">int32_of_inet_addr</a></span> : <code class="type">'a -> int32</code></pre><pre><span id="VALinet_addr_of_int32"><span class="keyword">val</span> <a href="code_VALIp.inet_addr_of_int32.html">inet_addr_of_int32</a></span> : <code class="type">int32 -> Batteries.Unix.inet_addr</code></pre><pre><span id="VALdotted_string_of_int32"><span class="keyword">val</span> <a href="code_VALIp.dotted_string_of_int32.html">dotted_string_of_int32</a></span> : <code class="type">int32 -> string</code></pre><pre><span class="keyword">module</span> <a href="Ip.Addr.html">Addr</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span id="VALprint_addr'"><span class="keyword">val</span> <a href="code_VALIp.print_addr'.html">print_addr'</a></span> : <code class="type">'a BatInnerIO.output -> Addr.t -> unit</code></pre><pre><span id="TYPEcidr"><span class="keyword">type</span> <code class="type"></code>cidr</span> = <code class="type">Addr.t * int</code> </pre>
+
+<pre><span id="VALcidr_of_string"><span class="keyword">val</span> <a href="code_VALIp.cidr_of_string.html">cidr_of_string</a></span> : <code class="type">string -> Addr.t * int</code></pre><pre><span id="VALstring_of_cidr"><span class="keyword">val</span> <a href="code_VALIp.string_of_cidr.html">string_of_cidr</a></span> : <code class="type">Addr.t * int -> string</code></pre><pre><span id="VALprint_cidr"><span class="keyword">val</span> <a href="code_VALIp.print_cidr.html">print_cidr</a></span> : <code class="type">Batteries.Format.formatter -> <a href="Ip.html#TYPEcidr">cidr</a> -> unit</code></pre><pre><span id="VALaddr_in_cidr"><span class="keyword">val</span> <a href="code_VALIp.addr_in_cidr.html">addr_in_cidr</a></span> : <code class="type">int32 * int -> int32 -> bool</code></pre><pre><span id="VALaddrs_of_cidr"><span class="keyword">val</span> <a href="code_VALIp.addrs_of_cidr.html">addrs_of_cidr</a></span> : <code class="type">Addr.t * int -> Addr.t list</code></pre><pre><span id="VALrandom_addrs_of_cidr"><span class="keyword">val</span> <a href="code_VALIp.random_addrs_of_cidr.html">random_addrs_of_cidr</a></span> : <code class="type">Addr.t * int -> int -> Addr.t BatEnum.t</code></pre><pre><span class="keyword">module</span> <a href="Ip.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Ip.TRX.html">TRX</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre></body></html>

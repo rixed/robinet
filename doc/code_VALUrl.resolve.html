@@ -1,0 +1,112 @@
+<html><head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Fifo" rel="Chapter" href="Fifo.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html"><title>Url.resolve</title>
+</head>
+<body>
+<code class="code"><span class="keyword">let</span>&nbsp;resolve&nbsp;base&nbsp;url&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;aux&nbsp;base&nbsp;url&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;is_empty&nbsp;base&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;url.path&nbsp;=&nbsp;<span class="string">""</span>&nbsp;<span class="keywordsign">||</span>&nbsp;url.path.[0]&nbsp;!=&nbsp;<span class="string">'/'</span>&nbsp;<span class="keyword">then</span>&nbsp;{&nbsp;url&nbsp;<span class="keyword">with</span>&nbsp;path&nbsp;=&nbsp;<span class="string">"/"</span>^url.path&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">else</span>&nbsp;&nbsp;url<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;is_empty&nbsp;url&nbsp;<span class="keyword">then</span>&nbsp;base<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;url.scheme&nbsp;&lt;&gt;&nbsp;<span class="string">""</span>&nbsp;<span class="keyword">then</span>&nbsp;url<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;url.net_loc&nbsp;&lt;&gt;&nbsp;<span class="string">""</span>&nbsp;<span class="keyword">then</span>&nbsp;{&nbsp;url&nbsp;<span class="keyword">with</span>&nbsp;scheme&nbsp;=&nbsp;base.scheme&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;url.path&nbsp;&lt;&gt;&nbsp;<span class="string">""</span>&nbsp;<span class="keywordsign">&amp;&amp;</span>&nbsp;url.path.[0]&nbsp;=&nbsp;<span class="string">'/'</span>&nbsp;<span class="keyword">then</span>&nbsp;{&nbsp;url&nbsp;<span class="keyword">with</span>&nbsp;scheme&nbsp;=&nbsp;base.scheme&nbsp;;&nbsp;net_loc&nbsp;=&nbsp;base.net_loc&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;url.path&nbsp;=&nbsp;<span class="string">""</span>&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;url.params&nbsp;&lt;&gt;&nbsp;<span class="string">""</span>&nbsp;<span class="keyword">then</span>&nbsp;{&nbsp;url&nbsp;<span class="keyword">with</span>&nbsp;scheme&nbsp;=&nbsp;base.scheme&nbsp;;&nbsp;net_loc&nbsp;=&nbsp;base.net_loc&nbsp;;&nbsp;path&nbsp;=&nbsp;base.path&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;url.query&nbsp;&lt;&gt;&nbsp;<span class="string">""</span>&nbsp;<span class="keyword">then</span>&nbsp;{&nbsp;base&nbsp;<span class="keyword">with</span>&nbsp;query&nbsp;=&nbsp;url.query&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">else</span>&nbsp;base&nbsp;<span class="comment">(*&nbsp;should&nbsp;not&nbsp;happen&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;(&nbsp;<span class="comment">(*&nbsp;we&nbsp;have&nbsp;a&nbsp;relative&nbsp;url.path&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;u_path&nbsp;=&nbsp;<span class="keyword">try</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;righmost_slash&nbsp;=&nbsp;<span class="constructor">String</span>.rindex&nbsp;base.path&nbsp;<span class="string">'/'</span>&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">String</span>.sub&nbsp;base.path&nbsp;0&nbsp;(righmost_slash+1))&nbsp;^&nbsp;url.path<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">Not_found</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;url.path&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;Replace&nbsp;^./&nbsp;by&nbsp;/&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;u_path&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;<span class="keyword">rec</span>&nbsp;aux&nbsp;s&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;<span class="constructor">String</span>.starts_with&nbsp;s&nbsp;<span class="string">"./"</span>&nbsp;<span class="keyword">then</span>&nbsp;aux&nbsp;(<span class="constructor">String</span>.lchop&nbsp;~n:2&nbsp;s)&nbsp;<span class="keyword">else</span>&nbsp;s&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;aux&nbsp;u_path&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;we&nbsp;wrap&nbsp;Str.global_substitute&nbsp;for&nbsp;two&nbsp;reasons&nbsp;:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-&nbsp;we&nbsp;don't&nbsp;want&nbsp;our&nbsp;callback&nbsp;to&nbsp;be&nbsp;passed&nbsp;the&nbsp;whole&nbsp;string&nbsp;but&nbsp;the&nbsp;matching&nbsp;part&nbsp;(the&nbsp;two&nbsp;actually)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-&nbsp;we&nbsp;want&nbsp;to&nbsp;substitute&nbsp;even&nbsp;in&nbsp;the&nbsp;substituted&nbsp;segment,&nbsp;ie.&nbsp;retry&nbsp;until&nbsp;the&nbsp;string&nbsp;is&nbsp;no&nbsp;more&nbsp;changed&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;<span class="keyword">rec</span>&nbsp;really_global_substitute&nbsp;re&nbsp;f&nbsp;s&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;changed&nbsp;=&nbsp;ref&nbsp;<span class="keyword">false</span>&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;s'&nbsp;=&nbsp;<span class="constructor">Str</span>.global_substitute&nbsp;re&nbsp;(<span class="keyword">fun</span>&nbsp;s&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;m&nbsp;=&nbsp;<span class="constructor">Str</span>.matched_string&nbsp;s&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;m'&nbsp;=&nbsp;f&nbsp;s&nbsp;m&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;m'&nbsp;!=&nbsp;m&nbsp;<span class="keyword">then</span>&nbsp;changed&nbsp;:=&nbsp;<span class="keyword">true</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;m')&nbsp;s&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;not&nbsp;!changed&nbsp;<span class="keyword">then</span>&nbsp;s'&nbsp;<span class="keyword">else</span>&nbsp;really_global_substitute&nbsp;re&nbsp;f&nbsp;s'&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;Remove&nbsp;all&nbsp;other&nbsp;"./"&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;u_path&nbsp;=&nbsp;really_global_substitute&nbsp;dotslash_re&nbsp;(<span class="keyword">fun</span>&nbsp;_&nbsp;m&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;r&nbsp;=&nbsp;<span class="keyword">if</span>&nbsp;<span class="constructor">String</span>.starts_with&nbsp;m&nbsp;<span class="string">"/"</span>&nbsp;<span class="keyword">then</span>&nbsp;<span class="string">"/"</span>&nbsp;<span class="keyword">else</span>&nbsp;<span class="string">""</span>&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Url:&nbsp;substituting&nbsp;'%s'&nbsp;with&nbsp;'%s'\n"</span>&nbsp;m&nbsp;r&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;r)&nbsp;u_path&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;Remove&nbsp;ending&nbsp;.&nbsp;(if&nbsp;it's&nbsp;a&nbsp;complete&nbsp;path&nbsp;segment&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;u_path&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;u_path&nbsp;=&nbsp;<span class="string">"."</span>&nbsp;<span class="keyword">then</span>&nbsp;<span class="string">""</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;<span class="constructor">String</span>.ends_with&nbsp;u_path&nbsp;<span class="string">"/."</span>&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">String</span>.rchop&nbsp;u_path<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">else</span>&nbsp;u_path&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;removes&nbsp;"path/../"&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;u_path&nbsp;=&nbsp;really_global_substitute&nbsp;updir_re&nbsp;(<span class="keyword">fun</span>&nbsp;s&nbsp;m&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Url:&nbsp;substituting&nbsp;'%s',&nbsp;which&nbsp;\\2&nbsp;=&nbsp;'%s'&nbsp;?\n"</span>&nbsp;m&nbsp;(<span class="constructor">Str</span>.matched_group&nbsp;2&nbsp;s)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;<span class="constructor">Str</span>.matched_group&nbsp;2&nbsp;s&nbsp;=&nbsp;<span class="string">".."</span>&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Url:...no!\n"</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;m<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;<span class="constructor">String</span>.starts_with&nbsp;m&nbsp;<span class="string">"/"</span>&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Url:...replace&nbsp;with&nbsp;/\n"</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="string">"/"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Url:...replace&nbsp;with&nbsp;nothing\n"</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="string">""</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;))&nbsp;u_path&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;removes&nbsp;final&nbsp;"path/.."&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;u_path&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;<span class="keyword">rec</span>&nbsp;aux&nbsp;s&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;<span class="constructor">String</span>.ends_with&nbsp;s&nbsp;<span class="string">"/.."</span>&nbsp;<span class="keywordsign">&amp;&amp;</span>&nbsp;<span class="constructor">String</span>.length&nbsp;s&nbsp;&gt;&nbsp;3&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Url:&nbsp;trim&nbsp;final&nbsp;path/..&nbsp;from&nbsp;'%s'\n"</span>&nbsp;s&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;c&nbsp;=&nbsp;<span class="keyword">try</span>&nbsp;(<span class="constructor">String</span>.rindex_from&nbsp;s&nbsp;(<span class="constructor">String</span>.length&nbsp;s&nbsp;-&nbsp;4)&nbsp;<span class="string">'/'</span>)&nbsp;+&nbsp;1&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">Not_found</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;0&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;aux&nbsp;(<span class="constructor">String</span>.sub&nbsp;s&nbsp;0&nbsp;c)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;s&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;aux&nbsp;u_path&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;done!&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{&nbsp;url&nbsp;<span class="keyword">with</span>&nbsp;scheme&nbsp;=&nbsp;base.scheme&nbsp;;&nbsp;net_loc&nbsp;=&nbsp;base.net_loc&nbsp;;&nbsp;path&nbsp;=&nbsp;u_path&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;res&nbsp;=&nbsp;aux&nbsp;base&nbsp;url&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Url:&nbsp;resolving&nbsp;%s&nbsp;in&nbsp;%s&nbsp;-&gt;&nbsp;%s\n"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(to_string&nbsp;url)&nbsp;(to_string&nbsp;base)&nbsp;(to_string&nbsp;res)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;res</code></body></html>

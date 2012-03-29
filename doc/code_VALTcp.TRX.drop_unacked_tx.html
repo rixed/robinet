@@ -1,0 +1,191 @@
+<html><head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Fifo" rel="Chapter" href="Fifo.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html"><title>Tcp.TRX.drop_unacked_tx</title>
+</head>
+<body>
+<code class="code"><span class="keyword">let</span>&nbsp;<span class="keyword">rec</span>&nbsp;trx_of&nbsp;t&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{&nbsp;trx&nbsp;=&nbsp;{&nbsp;tx&nbsp;=&nbsp;tx&nbsp;t&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;rx&nbsp;=&nbsp;rx&nbsp;t&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;set_emit&nbsp;=&nbsp;(<span class="keyword">fun</span>&nbsp;f&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;t.emit&nbsp;&lt;-&nbsp;f)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;set_recv&nbsp;=&nbsp;(<span class="keyword">fun</span>&nbsp;f&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;t.recv&nbsp;&lt;-&nbsp;f)&nbsp;}&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;close&nbsp;=&nbsp;close&nbsp;t&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;is_closed&nbsp;=&nbsp;is_closed&nbsp;t&nbsp;}<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;The&nbsp;cnx&nbsp;is&nbsp;established&nbsp;(ie&nbsp;its&nbsp;behavior&nbsp;is&nbsp;driven&nbsp;by&nbsp;the&nbsp;rcvd&nbsp;and&nbsp;sent&nbsp;streambuf<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;*&nbsp;whenever&nbsp;we&nbsp;had&nbsp;the&nbsp;two&nbsp;syns,&nbsp;not&nbsp;when&nbsp;they&nbsp;are&nbsp;acked.&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;establish_cnx&nbsp;t&nbsp;ok&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">match</span>&nbsp;t.cnx_wakener&nbsp;<span class="keyword">with</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Some</span>&nbsp;w&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;waking&nbsp;up&nbsp;client\n%!"</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Lwt</span>.wakeup&nbsp;w&nbsp;(<span class="keyword">if</span>&nbsp;ok&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Some</span>&nbsp;(trx_of&nbsp;t)&nbsp;<span class="keyword">else</span>&nbsp;<span class="constructor">None</span>)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">None</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;no&nbsp;one&nbsp;was&nbsp;waiting\n%!"</span><br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;try_really_rx&nbsp;t&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;not&nbsp;(<span class="constructor">Streambuf</span>.is_empty&nbsp;t.rcvd_pkts)&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;(o,&nbsp;tcp)&nbsp;<span class="keyword">as</span>&nbsp;first&nbsp;=&nbsp;<span class="constructor">Streambuf</span>.min_elt&nbsp;t.rcvd_pkts&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;First&nbsp;of&nbsp;incoming&nbsp;waiting&nbsp;pkts&nbsp;starts&nbsp;at&nbsp;offset&nbsp;%d&nbsp;(while&nbsp;I've&nbsp;received&nbsp;up&nbsp;to&nbsp;%d)\n%!"</span>&nbsp;o&nbsp;t.rcvd_pld&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;o&nbsp;&gt;&nbsp;t.rcvd_pld&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:...keep&nbsp;it&nbsp;for&nbsp;later\n%!"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;(&nbsp;<span class="comment">(*&nbsp;recv&nbsp;now&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;skip&nbsp;=&nbsp;t.rcvd_pld&nbsp;-&nbsp;o&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;skip&nbsp;&lt;=&nbsp;<span class="constructor">Payload</span>.length&nbsp;tcp.<span class="constructor">Pdu</span>.payload&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;t.rcvd_pld&nbsp;=&nbsp;0&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ensure&nbsp;tcp.<span class="constructor">Pdu</span>.flags.<span class="constructor">Pdu</span>.syn&nbsp;<span class="string">"Tcp:&nbsp;Should&nbsp;not&nbsp;happen:&nbsp;not&nbsp;a&nbsp;syn"</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.rcvd_pld&nbsp;&lt;-&nbsp;1&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;inconditionnaly&nbsp;answer&nbsp;the&nbsp;SYN&nbsp;before&nbsp;the&nbsp;client&nbsp;starts&nbsp;writing&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;emit_one&nbsp;t&nbsp;~syn:(t.sent_pld=0)&nbsp;empty_bitstring&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;establish_cnx&nbsp;t&nbsp;<span class="keyword">true</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;pld&nbsp;=&nbsp;dropbytes&nbsp;skip&nbsp;(tcp.<span class="constructor">Pdu</span>.payload&nbsp;:&gt;&nbsp;bitstring)&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.rcvd_pld&nbsp;&lt;-&nbsp;t.rcvd_pld&nbsp;+&nbsp;(bytelength&nbsp;pld)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;I&nbsp;have&nbsp;now&nbsp;read&nbsp;%d&nbsp;bytes\n%!"</span>&nbsp;t.rcvd_pld&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;bitstring_length&nbsp;pld&nbsp;&gt;&nbsp;0&nbsp;<span class="keyword">then</span>&nbsp;t.recv&nbsp;pld&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;tcp.<span class="constructor">Pdu</span>.flags.<span class="constructor">Pdu</span>.fin&nbsp;<span class="keywordsign">&amp;&amp;</span>&nbsp;not&nbsp;t.rcvd_fin&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;received&nbsp;a&nbsp;FIN\n%!"</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.rcvd_pld&nbsp;&lt;-&nbsp;t.rcvd_pld&nbsp;+&nbsp;1&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.rcvd_fin&nbsp;&lt;-&nbsp;<span class="keyword">true</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.closed&nbsp;&lt;-&nbsp;<span class="keyword">true</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.recv&nbsp;empty_bitstring&nbsp;<span class="comment">(*&nbsp;signal&nbsp;the&nbsp;close&nbsp;*)</span>&nbsp;<span class="comment">(*&nbsp;FIXME:&nbsp;which&nbsp;is&nbsp;not&nbsp;very&nbsp;easy&nbsp;to&nbsp;use&nbsp;when&nbsp;the&nbsp;TRX&nbsp;is&nbsp;piped&nbsp;into&nbsp;another&nbsp;one.&nbsp;An&nbsp;Err&nbsp;would&nbsp;suit&nbsp;better&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;tcp.<span class="constructor">Pdu</span>.flags.<span class="constructor">Pdu</span>.rst&nbsp;<span class="keywordsign">&amp;&amp;</span>&nbsp;not&nbsp;t.rcvd_fin&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;received&nbsp;a&nbsp;RST\n%!"</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.rcvd_fin&nbsp;&lt;-&nbsp;<span class="keyword">true</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.closed&nbsp;&lt;-&nbsp;<span class="keyword">true</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.recv&nbsp;empty_bitstring&nbsp;<span class="comment">(*&nbsp;signal&nbsp;the&nbsp;close&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:...obsolete&nbsp;packet\n%!"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.rcvd_pkts&nbsp;&lt;-&nbsp;<span class="constructor">Streambuf</span>.remove&nbsp;first&nbsp;t.rcvd_pkts&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;try_really_rx&nbsp;t<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;drop_unacked_tx&nbsp;t&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;seqlen&nbsp;tcp&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Payload</span>.length&nbsp;tcp.<span class="constructor">Pdu</span>.payload&nbsp;+&nbsp;int_of_bool&nbsp;tcp.<span class="constructor">Pdu</span>.flags.<span class="constructor">Pdu</span>.fin&nbsp;+&nbsp;int_of_bool&nbsp;tcp.<span class="constructor">Pdu</span>.flags.<span class="constructor">Pdu</span>.syn&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;not&nbsp;(<span class="constructor">Streambuf</span>.is_empty&nbsp;t.unacked_tx)&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;(offset,&nbsp;tcp)&nbsp;<span class="keyword">as</span>&nbsp;first&nbsp;=&nbsp;<span class="constructor">Streambuf</span>.min_elt&nbsp;t.unacked_tx&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;next_byte&nbsp;=&nbsp;offset&nbsp;+&nbsp;seqlen&nbsp;tcp&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;t.sent_acked&nbsp;&gt;=&nbsp;next_byte&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.unacked_tx&nbsp;&lt;-&nbsp;<span class="constructor">Streambuf</span>.remove&nbsp;first&nbsp;t.unacked_tx&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;drop_unacked_tx&nbsp;t<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;inqueue_pkt&nbsp;t&nbsp;tcp&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;offset&nbsp;=&nbsp;<span class="constructor">Int32</span>.to_int&nbsp;((tcp.<span class="constructor">Pdu</span>.seq_num&nbsp;:&gt;&nbsp;int32)&nbsp;-/&nbsp;((<span class="constructor">Option</span>.get&nbsp;t.rcvd_isn)&nbsp;:&gt;&nbsp;int32))&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;Got&nbsp;a&nbsp;packet&nbsp;with&nbsp;%d&nbsp;bytes,&nbsp;%spush\n%!"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Payload</span>.length&nbsp;tcp.<span class="constructor">Pdu</span>.payload)&nbsp;(<span class="keyword">if</span>&nbsp;tcp.<span class="constructor">Pdu</span>.flags.<span class="constructor">Pdu</span>.psh&nbsp;<span class="keyword">then</span>&nbsp;<span class="string">""</span>&nbsp;<span class="keyword">else</span>&nbsp;<span class="string">"don't&nbsp;"</span>)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;tcp.<span class="constructor">Pdu</span>.flags.<span class="constructor">Pdu</span>.ack&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;acked&nbsp;=&nbsp;<span class="constructor">Int32</span>.to_int&nbsp;((tcp.<span class="constructor">Pdu</span>.ack_num&nbsp;:&gt;&nbsp;int32)&nbsp;-/&nbsp;(t.isn&nbsp;:&gt;&nbsp;int32))&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;acked&nbsp;&gt;&nbsp;t.sent_acked&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;acked&nbsp;&gt;&nbsp;t.sent_pld&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;Acking&nbsp;%d&nbsp;while&nbsp;we&nbsp;only&nbsp;sent&nbsp;%d&nbsp;bytes\n%!"</span>&nbsp;acked&nbsp;t.sent_pld<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;FIXME:&nbsp;raise&nbsp;an&nbsp;error?&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;Acked&nbsp;%d/%d\n%!"</span>&nbsp;acked&nbsp;t.sent_pld&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.sent_acked&nbsp;&lt;-&nbsp;acked&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;drop_unacked_tx&nbsp;t&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;acked&nbsp;=&nbsp;t.sent_acked&nbsp;<span class="keywordsign">&amp;&amp;</span>&nbsp;not&nbsp;(<span class="constructor">Streambuf</span>.is_empty&nbsp;t.unacked_tx)&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;Retransmiting&nbsp;eveything&nbsp;from&nbsp;%d\n%!"</span>&nbsp;acked&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;retr&nbsp;=&nbsp;ref&nbsp;[]&nbsp;<span class="keyword">and</span>&nbsp;retr_pld&nbsp;=&nbsp;ref&nbsp;0&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Streambuf</span>.iter&nbsp;(<span class="keyword">fun</span>&nbsp;(_,&nbsp;tcp)&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;retr&nbsp;:=&nbsp;(tcp.<span class="constructor">Pdu</span>.payload&nbsp;:&gt;&nbsp;bitstring)&nbsp;::&nbsp;!retr&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;retr_pld&nbsp;:=&nbsp;!retr_pld&nbsp;+&nbsp;(<span class="constructor">Payload</span>.length&nbsp;tcp.<span class="constructor">Pdu</span>.payload))&nbsp;t.unacked_tx&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.unacked_tx&nbsp;&lt;-&nbsp;<span class="constructor">Streambuf</span>.empty&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.to_send&nbsp;&lt;-&nbsp;<span class="constructor">List</span>.rev_append&nbsp;!retr&nbsp;t.to_send&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.sent_pld&nbsp;&lt;-&nbsp;t.sent_pld&nbsp;-&nbsp;!retr_pld&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;try_really_tx&nbsp;t<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.rcvd_pkts&nbsp;&lt;-&nbsp;<span class="constructor">Streambuf</span>.add&nbsp;(offset,&nbsp;tcp)&nbsp;t.rcvd_pkts&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;try_really_rx&nbsp;t&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Clock</span>.delay&nbsp;(<span class="constructor">Clock</span>.msec&nbsp;200.)&nbsp;delayed_ack&nbsp;t&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;try_really_tx&nbsp;t&nbsp;<span class="comment">(*&nbsp;because&nbsp;the&nbsp;advertized&nbsp;window&nbsp;may&nbsp;have&nbsp;changed,&nbsp;we&nbsp;might&nbsp;want&nbsp;to&nbsp;send&nbsp;a&nbsp;FIN,&nbsp;etc&nbsp;*)</span><br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;is_established&nbsp;t&nbsp;=&nbsp;t.sent_pld&nbsp;&gt;&nbsp;0&nbsp;<span class="keywordsign">&amp;&amp;</span>&nbsp;t.rcvd_pld&nbsp;&gt;&nbsp;0<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;rx&nbsp;t&nbsp;bits&nbsp;=&nbsp;(<span class="keyword">match</span>&nbsp;<span class="constructor">Pdu</span>.unpack&nbsp;bits&nbsp;<span class="keyword">with</span>&nbsp;<span class="comment">(*&nbsp;If&nbsp;rx&nbsp;were&nbsp;receiving&nbsp;unpacked&nbsp;PDUs&nbsp;then&nbsp;we&nbsp;could&nbsp;bind&nbsp;unpack&nbsp;to&nbsp;rx&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">None</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;()<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Some</span>&nbsp;tcp&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;Received&nbsp;a&nbsp;segment!\n"</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;TODO:&nbsp;check&nbsp;checksum&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;tcp.<span class="constructor">Pdu</span>.flags.<span class="constructor">Pdu</span>.syn&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;t.rcvd_pld&nbsp;&gt;&nbsp;0&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;ignoring&nbsp;Syn&nbsp;while&nbsp;inbound&nbsp;cnx&nbsp;is&nbsp;established\n"</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;t.rcvd_isn&nbsp;=&nbsp;<span class="constructor">Some</span>&nbsp;tcp.<span class="constructor">Pdu</span>.seq_num&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;retransmission&nbsp;of&nbsp;the&nbsp;syn,&nbsp;we&nbsp;may&nbsp;want&nbsp;to&nbsp;act&nbsp;on&nbsp;the&nbsp;ack&nbsp;(ie.&nbsp;retransmit&nbsp;something)&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;inqueue_pkt&nbsp;t&nbsp;tcp<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.rcvd_isn&nbsp;&lt;-&nbsp;<span class="constructor">Some</span>&nbsp;tcp.<span class="constructor">Pdu</span>.seq_num&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;inqueue_pkt&nbsp;t&nbsp;tcp<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;not&nbsp;(is_established&nbsp;t)&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;ignoring&nbsp;recvd&nbsp;packet&nbsp;while&nbsp;cnx&nbsp;is&nbsp;not&nbsp;establised\n"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;inqueue_pkt&nbsp;t&nbsp;tcp)<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;try_really_tx&nbsp;t&nbsp;=&nbsp;<span class="keyword">match</span>&nbsp;t.to_send&nbsp;<span class="keyword">with</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;bits&nbsp;::&nbsp;to_send'&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.to_send&nbsp;&lt;-&nbsp;to_send'&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;emit_multi&nbsp;t&nbsp;bits&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;try_really_tx&nbsp;t<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;[]&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;t.closed&nbsp;<span class="keywordsign">&amp;&amp;</span>&nbsp;not&nbsp;t.sent_fin&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;sending&nbsp;FIN\n%!"</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.sent_fin&nbsp;&lt;-&nbsp;<span class="keyword">true</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;emit_one&nbsp;t&nbsp;~fin:<span class="keyword">true</span>&nbsp;empty_bitstring&nbsp;<span class="comment">(*&nbsp;TODO:&nbsp;pack&nbsp;the&nbsp;FIN&nbsp;into&nbsp;the&nbsp;last&nbsp;payload?&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;(&nbsp;<span class="comment">(*&nbsp;maybe&nbsp;we&nbsp;should&nbsp;ack&nbsp;something&nbsp;?&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;close&nbsp;t&nbsp;()&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ensure&nbsp;(is_established&nbsp;t)&nbsp;<span class="string">"Tcp:&nbsp;Closing&nbsp;a&nbsp;cnx&nbsp;that's&nbsp;not&nbsp;established"</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;Closing&nbsp;cnx\n%!"</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.closed&nbsp;&lt;-&nbsp;<span class="keyword">true</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;try_really_tx&nbsp;t<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;tx&nbsp;t&nbsp;bits&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;TODO&nbsp;(in&nbsp;try_really_tx):&nbsp;Nagle&nbsp;algorithm:&nbsp;keep&nbsp;the&nbsp;data&nbsp;to&nbsp;send&nbsp;in&nbsp;a&nbsp;buffer<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;*&nbsp;if&nbsp;it's&nbsp;smaller&nbsp;than&nbsp;a&nbsp;segment&nbsp;and&nbsp;we&nbsp;have&nbsp;sent&nbsp;unacked&nbsp;data&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;t.closed&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;stderr&nbsp;<span class="string">"Tcp:&nbsp;writing&nbsp;to&nbsp;a&nbsp;closed&nbsp;TRX!\n%!"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;not&nbsp;(is_established&nbsp;t)&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;stderr&nbsp;<span class="string">"Tcp:&nbsp;writing&nbsp;to&nbsp;a&nbsp;non-established&nbsp;TRX!\n%!"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.to_send&nbsp;&lt;-&nbsp;t.to_send&nbsp;@&nbsp;[&nbsp;bits&nbsp;]&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;try_really_tx&nbsp;t<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)</code></body></html>

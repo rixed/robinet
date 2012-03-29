@@ -1,0 +1,93 @@
+<html><head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Fifo" rel="Chapter" href="Fifo.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html"><title>Html.extract_links</title>
+</head>
+<body>
+<code class="code"><span class="keyword">let</span>&nbsp;extract_links&nbsp;?(default_base=<span class="constructor">Url</span>.empty)&nbsp;headers&nbsp;tree&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;base_href&nbsp;=&nbsp;(<span class="constructor">Option</span>.<span class="constructor">Monad</span>.bind&nbsp;(find_first_node&nbsp;(<span class="keyword">fun</span>&nbsp;n&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;n.name&nbsp;=&nbsp;<span class="string">"base"</span>)&nbsp;tree)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="keyword">fun</span>&nbsp;n&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;find_attr&nbsp;<span class="string">"href"</span>&nbsp;n.attrs))&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Base&nbsp;href&nbsp;found&nbsp;in&nbsp;html&nbsp;header:&nbsp;%a\n"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Option</span>.print&nbsp;<span class="constructor">String</span>.print)&nbsp;base_href&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;base_href&nbsp;=&nbsp;<span class="keyword">if</span>&nbsp;base_href&nbsp;&lt;&gt;&nbsp;<span class="constructor">None</span>&nbsp;<span class="keyword">then</span>&nbsp;base_href&nbsp;<span class="keyword">else</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;if&nbsp;no&nbsp;base_href&nbsp;was&nbsp;found,&nbsp;look&nbsp;into&nbsp;the&nbsp;headers&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="keyword">match</span>&nbsp;headers_find&nbsp;<span class="string">"Base"</span>&nbsp;headers&nbsp;<span class="keyword">with</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Some</span>&nbsp;base&nbsp;<span class="keyword">when</span>&nbsp;<span class="constructor">String</span>.length&nbsp;base&nbsp;&gt;&nbsp;13&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Some</span>&nbsp;(<span class="constructor">String</span>.sub&nbsp;base&nbsp;5&nbsp;(<span class="constructor">String</span>.length&nbsp;base&nbsp;-&nbsp;6))<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;_&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">None</span>))&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Base&nbsp;href&nbsp;found&nbsp;in&nbsp;html&nbsp;or&nbsp;http&nbsp;headers:&nbsp;%a\n"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Option</span>.print&nbsp;<span class="constructor">String</span>.print)&nbsp;base_href&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;base&nbsp;=&nbsp;<span class="keyword">match</span>&nbsp;base_href&nbsp;<span class="keyword">with</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Some</span>&nbsp;href&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Url</span>.of_string&nbsp;~force_absolute:<span class="keyword">true</span>&nbsp;href<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">None</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;default_base&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;urls&nbsp;=&nbsp;ref&nbsp;[]&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;may_add_url&nbsp;u_opt&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Option</span>.may&nbsp;(<span class="keyword">fun</span>&nbsp;u&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;url&nbsp;=&nbsp;<span class="constructor">Url</span>.resolve&nbsp;base&nbsp;(<span class="constructor">Url</span>.of_string&nbsp;u)&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;urls&nbsp;:=&nbsp;url::!urls)&nbsp;u_opt&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;iter_node&nbsp;(<span class="keyword">function</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"form"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;(<span class="keyword">match</span>&nbsp;find_attr&nbsp;<span class="string">"method"</span>&nbsp;attrs&nbsp;<span class="keyword">with</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">None</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keyword">true</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Some</span>&nbsp;x&nbsp;<span class="keyword">when</span>&nbsp;<span class="constructor">String</span>.icompare&nbsp;x&nbsp;<span class="string">"get"</span>&nbsp;=&nbsp;0&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keyword">true</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;_&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keyword">false</span>)&nbsp;<span class="keyword">then</span>&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"action"</span>&nbsp;attrs)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"body"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"background"</span>&nbsp;attrs)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"blockquote"</span>&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"q"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"del"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"ins"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"cite"</span>&nbsp;attrs)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"object"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"classid"</span>&nbsp;attrs)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"data"</span>&nbsp;attrs)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"codebase"</span>&nbsp;attrs)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"usemap"</span>&nbsp;attrs)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"applet"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"codebase"</span>&nbsp;attrs)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"a"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"area"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"link"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"href"</span>&nbsp;attrs)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"img"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"src"</span>&nbsp;attrs)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"longdesc"</span>&nbsp;attrs)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"usemap"</span>&nbsp;attrs)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"frame"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"src"</span>&nbsp;attrs)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"longdesc"</span>&nbsp;attrs)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"usemap"</span>&nbsp;attrs)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"iframe"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"src"</span>&nbsp;attrs)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"longdesc"</span>&nbsp;attrs)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"usemap"</span>&nbsp;attrs)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"head"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"profile"</span>&nbsp;attrs)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"script"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;name&nbsp;=&nbsp;<span class="string">"input"</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;&nbsp;attrs&nbsp;=&nbsp;attrs&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"src"</span>&nbsp;attrs)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_add_url&nbsp;(find_attr&nbsp;<span class="string">"usemap"</span>&nbsp;attrs)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;_&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;())&nbsp;tree&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">List</span>.enum&nbsp;!urls</code></body></html>

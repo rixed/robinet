@@ -1,0 +1,64 @@
+<html><head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Fifo" rel="Chapter" href="Fifo.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html"><title>Peg.check_results</title>
+</head>
+<body>
+<code class="code"><span class="keyword">let</span>&nbsp;check_results&nbsp;name&nbsp;res_printer&nbsp;p&nbsp;rs&nbsp;bs&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;print_res&nbsp;oc&nbsp;=&nbsp;<span class="keyword">function</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Wait</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"Wait"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Fail</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"Fail"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Res</span>&nbsp;(res,&nbsp;rem)&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"Res&nbsp;(%a,&nbsp;%a)"</span>&nbsp;res_printer&nbsp;res&nbsp;print_intlist&nbsp;rem&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;<span class="keyword">rec</span>&nbsp;aux&nbsp;ret&nbsp;rs&nbsp;=&nbsp;<span class="keyword">function</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;[]&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;ret<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;b::bs'&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;expected&nbsp;=&nbsp;<span class="constructor">List</span>.hd&nbsp;rs&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;got&nbsp;=&nbsp;p&nbsp;b&nbsp;(bs'&nbsp;&lt;&gt;&nbsp;[])&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;ret&nbsp;=&nbsp;ref&nbsp;ret&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;got&nbsp;=&nbsp;expected&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Peg:&nbsp;%s:&nbsp;%a&nbsp;-&gt;&nbsp;%a&nbsp;OK\n"</span>&nbsp;name&nbsp;print_intlist&nbsp;b&nbsp;print_res&nbsp;got<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Peg:&nbsp;%s:&nbsp;%a&nbsp;-&gt;&nbsp;%a&nbsp;FAIL!&nbsp;got&nbsp;%a\n%!"</span>&nbsp;name&nbsp;print_intlist&nbsp;b&nbsp;print_res&nbsp;expected&nbsp;print_res&nbsp;got&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ret&nbsp;:=&nbsp;<span class="keyword">false</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;rem&nbsp;=&nbsp;(<span class="keyword">match</span>&nbsp;got&nbsp;<span class="keyword">with</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Res</span>&nbsp;(_,&nbsp;rem)&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;rem<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;_&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;[])&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;append&nbsp;rest&nbsp;to&nbsp;next&nbsp;sequence&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;bs''&nbsp;=&nbsp;(<span class="keyword">match</span>&nbsp;bs'&nbsp;<span class="keyword">with</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;[]&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;[]&nbsp;<span class="comment">(*&nbsp;don't&nbsp;parse&nbsp;remain&nbsp;when&nbsp;it's&nbsp;over&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;ns::ns'&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;(rem@ns)&nbsp;::&nbsp;ns')&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;aux&nbsp;!ret&nbsp;(<span class="constructor">List</span>.tl&nbsp;rs)&nbsp;bs''<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">in</span>&nbsp;aux&nbsp;<span class="keyword">true</span>&nbsp;rs&nbsp;bs</code></body></html>

@@ -1,0 +1,80 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link rel="previous" href="Opache.html">
+<link rel="next" href="Pcap.html">
+<link rel="Up" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Fifo" rel="Chapter" href="Fifo.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html"><link title="(Un)Packing" rel="Section" href="#1_UnPacking">
+<link title="Shorthands" rel="Section" href="#1_Shorthands">
+<title>Packet</title>
+</head>
+<body>
+<div class="navbar"><a href="Opache.html">Previous</a>
+&nbsp;<a href="index.html">Up</a>
+&nbsp;<a href="Pcap.html">Next</a>
+</div>
+<center><h1>Module <a href="type_Packet.html">Packet</a></h1></center>
+<br>
+<pre><span class="keyword">module</span> Packet: <code class="code"><span class="keyword">sig</span></code> <a href="Packet.html">..</a> <code class="code"><span class="keyword">end</span></code></pre> The purpose of this module is to help individual packet examination and
+ manipulation. It is not used when simulating a network.
+<p>
+
+ This is the module to look for if you want to fiddle with packets on a
+ one to one basis, for instance to fuzz some packet source, collect some
+ statistics on individual packets, search for some packets in a pcap file,
+ etc...
+<p>
+
+ Due to the fact that every packet is considered in isolation, is can only
+ decode the simpler protocols for which all required data are within a
+ single packet. In other words, it will not go much deeper than TCP/UDP.<br>
+<hr width="100%">
+<br>
+<span id="1_UnPacking"><h1>(Un)Packing</h1></span><br>
+<pre><span class="keyword">module</span> <a href="Packet.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Packet.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Pack/Unpack the whole protocol stack that fits entirely within a packet.
+</div>
+<br>
+<span id="1_Shorthands"><h1>Shorthands</h1></span><br>
+<pre><span id="VALof_pcap"><span class="keyword">val</span> <a href="code_VALPacket.of_pcap.html">of_pcap</a></span> : <code class="type">?dlt:int32 -> 'a * Bitstring.bitstring -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list</code></pre><div class="info">
+<code class="code"><span class="constructor">Packet</span>.of_pcap pkt</code> converts a raw packet (as returned by <a href="Pcap.html#VALread_next_pkt"><code class="code"><span class="constructor">Pcap</span>.read_next_pkt</code></a>
+ or <a href="Pcap.html#VALenum_of"><code class="code"><span class="constructor">Pcap</span>.enum_of</code></a>) into a printable/editable <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
+</div>
+<pre><span id="VALenum_of"><span class="keyword">val</span> <a href="code_VALPacket.enum_of.html">enum_of</a></span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list BatEnum.t</code></pre><div class="info">
+<code class="code"><span class="constructor">Packet</span>.enum_of filename</code> reads a pcap file and returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
+</div>
+</body></html>

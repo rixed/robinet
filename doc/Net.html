@@ -1,0 +1,238 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link rel="previous" href="Myadmin.html">
+<link rel="next" href="Opache.html">
+<link rel="Up" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Fifo" rel="Chapter" href="Fifo.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html"><title>Net</title>
+</head>
+<body>
+<div class="navbar"><a href="Myadmin.html">Previous</a>
+&nbsp;<a href="index.html">Up</a>
+&nbsp;<a href="Opache.html">Next</a>
+</div>
+<center><h1>Module <a href="type_Net.html">Net</a></h1></center>
+<br>
+<pre><span class="keyword">module</span> Net: <code class="code"><span class="keyword">sig</span></code> <a href="Net.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
+<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALNet.debug.html">debug</a></span> : <code class="type">bool</code></pre><br><code><span id="TYPEhub"><span class="keyword">type</span> <code class="type"></code>hub</span> = {</code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>hub_nb_ports&nbsp;: <code class="type">int</code>;</code></td>
+
+</tr></table>
+}
+
+
+<br><code><span id="TYPEswitch"><span class="keyword">type</span> <code class="type"></code>switch</span> = {</code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>switch_nb_ports&nbsp;: <code class="type">int</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>switch_nb_macs&nbsp;: <code class="type">int</code>;</code></td>
+
+</tr></table>
+}
+
+
+<br><code><span id="TYPEhost"><span class="keyword">type</span> <code class="type"></code>host</span> = {</code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>host_gw&nbsp;: <code class="type"><a href="Eth.html#TYPEgw_addr">Eth.gw_addr</a></code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>host_search_sfx&nbsp;: <code class="type">string</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>host_nameserver&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>host_mac&nbsp;: <code class="type">Eth.Addr.t</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>host_ip&nbsp;: <code class="type">Ip.Addr.t option</code>;</code></td>
+
+</tr></table>
+}
+
+
+<pre><span id="TYPEnote"><span class="keyword">type</span> <code class="type"></code>note</span> = <code class="type">string</code> </pre>
+
+<br><code><span id="TYPEplug"><span class="keyword">type</span> <code class="type"></code>plug</span> = </code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code><span class="keyword">|</span></code></td>
+<td align="left" valign="top" >
+<code><span class="constructor">HubPort</span> <span class="keyword">of</span> <code class="type">string * int</code></code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code><span class="keyword">|</span></code></td>
+<td align="left" valign="top" >
+<code><span class="constructor">SwitchPort</span> <span class="keyword">of</span> <code class="type">string * int</code></code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code><span class="keyword">|</span></code></td>
+<td align="left" valign="top" >
+<code><span class="constructor">HostAdapter</span> <span class="keyword">of</span> <code class="type">string</code></code></td>
+
+</tr></table>
+
+
+<br><code><span id="TYPEcable"><span class="keyword">type</span> <code class="type"></code>cable</span> = {</code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>plugs&nbsp;: <code class="type"><a href="Net.html#TYPEplug">plug</a> * <a href="Net.html#TYPEplug">plug</a></code>;</code></td>
+
+</tr></table>
+}
+
+
+<pre><span id="VALplug_printer"><span class="keyword">val</span> <a href="code_VALNet.plug_printer.html">plug_printer</a></span> : <code class="type">'a -> 'b BatInnerIO.output -> <a href="Net.html#TYPEplug">plug</a> -> unit</code></pre><br><code><span id="TYPEelmt"><span class="keyword">type</span> <code class="type"></code>elmt</span> = </code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code><span class="keyword">|</span></code></td>
+<td align="left" valign="top" >
+<code><span class="constructor">Hub</span> <span class="keyword">of</span> <code class="type"><a href="Net.html#TYPEhub">hub</a></code></code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code><span class="keyword">|</span></code></td>
+<td align="left" valign="top" >
+<code><span class="constructor">Switch</span> <span class="keyword">of</span> <code class="type"><a href="Net.html#TYPEswitch">switch</a></code></code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code><span class="keyword">|</span></code></td>
+<td align="left" valign="top" >
+<code><span class="constructor">Host</span> <span class="keyword">of</span> <code class="type"><a href="Net.html#TYPEhost">host</a></code></code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code><span class="keyword">|</span></code></td>
+<td align="left" valign="top" >
+<code><span class="constructor">Note</span> <span class="keyword">of</span> <code class="type"><a href="Net.html#TYPEnote">note</a></code></code></td>
+
+</tr></table>
+
+
+<br><code><span id="TYPEnode"><span class="keyword">type</span> <code class="type"></code>node</span> = {</code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>elmt&nbsp;: <code class="type"><a href="Net.html#TYPEelmt">elmt</a></code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span class="keyword">mutable&nbsp;</span>pos&nbsp;: <code class="type">float * float</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span class="keyword">mutable&nbsp;</span>node_name&nbsp;: <code class="type">string</code>;</code></td>
+
+</tr></table>
+}
+
+
+<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>name&nbsp;: <code class="type">string</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>nodes&nbsp;: <code class="type"><a href="Net.html#TYPEnode">node</a> list</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>cables&nbsp;: <code class="type"><a href="Net.html#TYPEcable">cable</a> list</code>;</code></td>
+
+</tr></table>
+}
+
+
+<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALNet.make.html">make</a></span> : <code class="type">string -> <a href="Net.html#TYPEnode">node</a> list -> <a href="Net.html#TYPEcable">cable</a> list -> <a href="Net.html#TYPEt">t</a></code></pre><pre><span id="VALempty"><span class="keyword">val</span> <a href="code_VALNet.empty.html">empty</a></span> : <code class="type">string -> <a href="Net.html#TYPEt">t</a></code></pre><pre><span id="EXCEPTIONCannot_parse"><span class="keyword">exception</span> Cannot_parse</span> <span class="keyword">of</span> <code class="type">(string * string)</code></pre>
+<pre><span id="VALhub_of_csv"><span class="keyword">val</span> <a href="code_VALNet.hub_of_csv.html">hub_of_csv</a></span> : <code class="type">string -> <a href="Net.html#TYPEnode">node</a></code></pre><pre><span id="VALswitch_of_csv"><span class="keyword">val</span> <a href="code_VALNet.switch_of_csv.html">switch_of_csv</a></span> : <code class="type">string -> <a href="Net.html#TYPEnode">node</a></code></pre><pre><span id="VALhost_of_csv"><span class="keyword">val</span> <a href="code_VALNet.host_of_csv.html">host_of_csv</a></span> : <code class="type">string -> <a href="Net.html#TYPEnode">node</a></code></pre><pre><span id="VALnote_of_csv"><span class="keyword">val</span> <a href="code_VALNet.note_of_csv.html">note_of_csv</a></span> : <code class="type">string -> <a href="Net.html#TYPEnode">node</a></code></pre><pre><span id="VALnode_of_csv"><span class="keyword">val</span> <a href="code_VALNet.node_of_csv.html">node_of_csv</a></span> : <code class="type">string -> string -> <a href="Net.html#TYPEnode">node</a></code></pre><pre><span id="VALcable_of_csv"><span class="keyword">val</span> <a href="code_VALNet.cable_of_csv.html">cable_of_csv</a></span> : <code class="type">string -> <a href="Net.html#TYPEcable">cable</a></code></pre><pre><span id="VALof_csv_file"><span class="keyword">val</span> <a href="code_VALNet.of_csv_file.html">of_csv_file</a></span> : <code class="type">BatIO.input -> string -> <a href="Net.html#TYPEt">t</a></code></pre><pre><span id="VALof_csv_string"><span class="keyword">val</span> <a href="code_VALNet.of_csv_string.html">of_csv_string</a></span> : <code class="type">string -> string -> <a href="Net.html#TYPEt">t</a></code></pre><pre><span id="VALcsv_for_hosts"><span class="keyword">val</span> <a href="code_VALNet.csv_for_hosts.html">csv_for_hosts</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALcsv_for_switches"><span class="keyword">val</span> <a href="code_VALNet.csv_for_switches.html">csv_for_switches</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALcsv_for_hubs"><span class="keyword">val</span> <a href="code_VALNet.csv_for_hubs.html">csv_for_hubs</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALcsv_for_notes"><span class="keyword">val</span> <a href="code_VALNet.csv_for_notes.html">csv_for_notes</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALcsv_for_cables"><span class="keyword">val</span> <a href="code_VALNet.csv_for_cables.html">csv_for_cables</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALcsv_for_node"><span class="keyword">val</span> <a href="code_VALNet.csv_for_node.html">csv_for_node</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEnode">node</a> -> unit</code></pre><pre><span id="VALcsv_for_cable"><span class="keyword">val</span> <a href="code_VALNet.csv_for_cable.html">csv_for_cable</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEcable">cable</a> -> unit</code></pre><pre><span id="VALto_csv_file"><span class="keyword">val</span> <a href="code_VALNet.to_csv_file.html">to_csv_file</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALsave"><span class="keyword">val</span> <a href="code_VALNet.save.html">save</a></span> : <code class="type"><a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALload"><span class="keyword">val</span> <a href="code_VALNet.load.html">load</a></span> : <code class="type">string -> <a href="Net.html#TYPEt">t</a></code></pre><pre><span id="VALinstanciate"><span class="keyword">val</span> <a href="code_VALNet.instanciate.html">instanciate</a></span> : <code class="type"><a href="Net.html#TYPEt">t</a> -><br>       (string, <a href="Hub.Repeater.html#TYPEt">Hub.Repeater.t</a>) Batteries.Hashtbl.t *<br>       (string, <a href="Hub.Switch.html#TYPEt">Hub.Switch.t</a>) Batteries.Hashtbl.t *<br>       (string, <a href="Host.html#TYPEhost_trx">Host.host_trx</a>) Batteries.Hashtbl.t *<br>       (string, <a href="Net.html#TYPEnote">note</a>) Batteries.Hashtbl.t</code></pre></body></html>

@@ -1,0 +1,60 @@
+<html><head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Fifo" rel="Chapter" href="Fifo.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html"><title>Localhost.tcp_connect</title>
+</head>
+<body>
+<code class="code"><span class="keyword">let</span>&nbsp;tcp_connect&nbsp;dst&nbsp;?src_port&nbsp;(dst_port&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t)&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;connect_tcp_&nbsp;inet_addr&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Log</span>.(log&nbsp;logger&nbsp;<span class="constructor">Debug</span>&nbsp;(<span class="keyword">lazy</span>&nbsp;(<span class="constructor">Printf</span>.sprintf&nbsp;<span class="string">"Connecting&nbsp;to&nbsp;%s"</span>&nbsp;(<span class="constructor">Unix</span>.string_of_inet_addr&nbsp;inet_addr))))&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;sock&nbsp;=&nbsp;<span class="constructor">Lwt_unix</span>.socket&nbsp;<span class="constructor">Lwt_unix</span>.<span class="constructor">PF_INET</span>&nbsp;<span class="constructor">Lwt_unix</span>.<span class="constructor">SOCK_STREAM</span>&nbsp;0&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Option</span>.may&nbsp;(<span class="keyword">fun</span>&nbsp;(port&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t)&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Lwt_unix</span>.bind&nbsp;sock&nbsp;(<span class="constructor">Lwt_unix</span>.<span class="constructor">ADDR_INET</span>&nbsp;(<span class="constructor">Unix</span>.inet_addr_any,&nbsp;(port&nbsp;:&gt;&nbsp;int))))<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;src_port&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;lwt&nbsp;()&nbsp;=&nbsp;<span class="constructor">Lwt_unix</span>.connect&nbsp;sock&nbsp;(<span class="constructor">Lwt_unix</span>.<span class="constructor">ADDR_INET</span>&nbsp;(inet_addr,&nbsp;(dst_port&nbsp;:&gt;&nbsp;int)))&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Lwt</span>.return&nbsp;(tcp_trx_of_socket&nbsp;sock)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">match</span>&nbsp;dst&nbsp;<span class="keyword">with</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Host</span>.<span class="constructor">IPv4</span>&nbsp;dst_ip&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;connect_tcp_&nbsp;(<span class="constructor">Unix</span>.inet_addr_of_string&nbsp;(<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.to_string&nbsp;dst_ip))<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Host</span>.<span class="constructor">Name</span>&nbsp;name&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;lwt&nbsp;dst_ips&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;lwt&nbsp;h_entry&nbsp;=&nbsp;<span class="constructor">Lwt_unix</span>.gethostbyname&nbsp;name&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Log</span>.(log&nbsp;logger&nbsp;<span class="constructor">Debug</span>&nbsp;(<span class="keyword">lazy</span>&nbsp;(<span class="constructor">Printf</span>.sprintf2&nbsp;<span class="string">"Got&nbsp;these&nbsp;IPs&nbsp;for&nbsp;'%s':&nbsp;%a"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;name<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Array</span>.print&nbsp;inet_addr_print)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;h_entry.<span class="constructor">Lwt_unix</span>.h_addr_list)))&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Lwt</span>.return&nbsp;(h_entry.<span class="constructor">Lwt_unix</span>.h_addr_list)&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;connect_tcp_&nbsp;dst_ips.(0)</code></body></html>

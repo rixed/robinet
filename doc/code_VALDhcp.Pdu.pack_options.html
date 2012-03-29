@@ -1,0 +1,64 @@
+<html><head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Fifo" rel="Chapter" href="Fifo.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html"><title>Dhcp.Pdu.pack_options</title>
+</head>
+<body>
+<code class="code"><span class="keyword">let</span>&nbsp;pack_options&nbsp;t&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;may_pack_msgtyp&nbsp;t&nbsp;v&nbsp;=&nbsp;<span class="constructor">Option</span>.map&nbsp;(<span class="keyword">fun</span>&nbsp;(v&nbsp;:&nbsp;<span class="constructor">MsgType</span>.t)&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;(<span class="constructor">BITSTRING</span>&nbsp;{&nbsp;t&nbsp;:&nbsp;8&nbsp;;&nbsp;1&nbsp;:&nbsp;8&nbsp;;&nbsp;(v&nbsp;:&gt;&nbsp;int)&nbsp;:&nbsp;8&nbsp;}))&nbsp;v<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;may_pack_int32&nbsp;&nbsp;t&nbsp;v&nbsp;=&nbsp;<span class="constructor">Option</span>.map&nbsp;(<span class="keyword">fun</span>&nbsp;v&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;(<span class="constructor">BITSTRING</span>&nbsp;{&nbsp;t&nbsp;:&nbsp;8&nbsp;;&nbsp;4&nbsp;:&nbsp;8&nbsp;;&nbsp;v&nbsp;:&nbsp;32&nbsp;}))&nbsp;v<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;may_pack_ip&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t&nbsp;v&nbsp;=&nbsp;<span class="constructor">Option</span>.map&nbsp;(<span class="keyword">fun</span>&nbsp;(v&nbsp;:&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t)&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;(<span class="constructor">BITSTRING</span>&nbsp;{&nbsp;t&nbsp;:&nbsp;8&nbsp;;&nbsp;4&nbsp;:&nbsp;8&nbsp;;&nbsp;(v&nbsp;:&gt;&nbsp;int32)&nbsp;:&nbsp;32&nbsp;}))&nbsp;v<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;may_pack_string&nbsp;t&nbsp;v&nbsp;=&nbsp;<span class="constructor">Option</span>.map&nbsp;(<span class="keyword">fun</span>&nbsp;v&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;(<span class="constructor">BITSTRING</span>&nbsp;{&nbsp;t&nbsp;:&nbsp;8&nbsp;;&nbsp;<span class="constructor">String</span>.length&nbsp;v&nbsp;:&nbsp;8&nbsp;;&nbsp;v&nbsp;:&nbsp;-1&nbsp;:&nbsp;string&nbsp;}))&nbsp;v<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;may_pack_bits&nbsp;&nbsp;&nbsp;t&nbsp;v&nbsp;=&nbsp;<span class="constructor">Option</span>.map&nbsp;(<span class="keyword">fun</span>&nbsp;v&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;(<span class="constructor">BITSTRING</span>&nbsp;{&nbsp;t&nbsp;:&nbsp;8&nbsp;;&nbsp;bytelength&nbsp;v&nbsp;:&nbsp;8&nbsp;;&nbsp;v&nbsp;:&nbsp;-1&nbsp;:&nbsp;bitstring&nbsp;}))&nbsp;v<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">List</span>.enum&nbsp;[&nbsp;may_pack_msgtyp&nbsp;53&nbsp;t.msg_type&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_ip&nbsp;1&nbsp;t.subnet_mask&nbsp;;&nbsp;<span class="comment">(*&nbsp;must&nbsp;apear&nbsp;before&nbsp;router&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_ip&nbsp;3&nbsp;t.router&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_ip&nbsp;42&nbsp;t.ntp_server&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_ip&nbsp;69&nbsp;t.smtp_server&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_ip&nbsp;70&nbsp;t.pop3_server&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_ip&nbsp;6&nbsp;t.name_server&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_string&nbsp;12&nbsp;t.client_name&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_string&nbsp;15&nbsp;t.search_sfx&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_int32&nbsp;51&nbsp;t.lease_time&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_ip&nbsp;50&nbsp;t.requested_ip&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_ip&nbsp;54&nbsp;t.server_id&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_string&nbsp;56&nbsp;t.message&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_bits&nbsp;61&nbsp;t.client_id&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;may_pack_string&nbsp;55&nbsp;t.request_list&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Some</span>&nbsp;(<span class="constructor">BITSTRING</span>&nbsp;{&nbsp;255&nbsp;:&nbsp;8&nbsp;})&nbsp;]&nbsp;//@<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;identity&nbsp;|&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">List</span>.of_enum&nbsp;|&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Bitstring</span>.concat</code></body></html>

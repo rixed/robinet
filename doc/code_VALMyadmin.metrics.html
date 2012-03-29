@@ -1,0 +1,95 @@
+<html><head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Fifo" rel="Chapter" href="Fifo.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html"><title>Myadmin.metrics</title>
+</head>
+<body>
+<code class="code"><span class="keyword">let</span>&nbsp;metrics&nbsp;_mth&nbsp;_matches&nbsp;vars&nbsp;_qry_body&nbsp;resp_body&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"MyAdmin:&nbsp;metric:&nbsp;vars&nbsp;=&nbsp;%a\n"</span>&nbsp;<span class="constructor">Opache</span>.print_vars&nbsp;vars&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;chds_min&nbsp;=&nbsp;ref&nbsp;0<span class="constructor">L</span>&nbsp;<span class="keyword">and</span>&nbsp;chds_max&nbsp;=&nbsp;ref&nbsp;0<span class="constructor">L</span>&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;serie_of_metric&nbsp;n&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;given&nbsp;the&nbsp;name&nbsp;of&nbsp;a&nbsp;metric,&nbsp;returns&nbsp;the&nbsp;serie&nbsp;of&nbsp;values&nbsp;we&nbsp;know&nbsp;for&nbsp;this&nbsp;metric&nbsp;and&nbsp;a&nbsp;color&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">match</span>&nbsp;<span class="constructor">Hashtbl</span>.find_option&nbsp;series&nbsp;n&nbsp;<span class="keyword">with</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">None</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;[],&nbsp;0x000000l<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Some</span>&nbsp;serie&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;<span class="keyword">rec</span>&nbsp;aux&nbsp;prev&nbsp;idx&nbsp;left&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;left&nbsp;&gt;&nbsp;0&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;v&nbsp;=&nbsp;serie.past.(idx)&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;v&nbsp;&lt;&nbsp;!chds_min&nbsp;<span class="keyword">then</span>&nbsp;chds_min&nbsp;:=&nbsp;v&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;v&nbsp;&gt;&nbsp;!chds_max&nbsp;<span class="keyword">then</span>&nbsp;chds_max&nbsp;:=&nbsp;v&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;aux&nbsp;(v::prev)&nbsp;(<span class="keyword">if</span>&nbsp;idx&gt;0&nbsp;<span class="keyword">then</span>&nbsp;idx-1&nbsp;<span class="keyword">else</span>&nbsp;serie_size-1)&nbsp;(left-1)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;prev&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;values&nbsp;=&nbsp;aux&nbsp;[]&nbsp;!serie_current_idx&nbsp;serie.used&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;values,&nbsp;serie.color<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;names,&nbsp;values,&nbsp;colors&nbsp;=&nbsp;<span class="constructor">Hashtbl</span>.fold&nbsp;(<span class="keyword">fun</span>&nbsp;n&nbsp;_&nbsp;((names,&nbsp;values,&nbsp;colors)&nbsp;<span class="keyword">as</span>&nbsp;prev)&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">match</span>&nbsp;serie_of_metric&nbsp;n&nbsp;<span class="keyword">with</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;[],&nbsp;_&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;prev<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;s,&nbsp;c&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;(<span class="constructor">Url</span>.encode&nbsp;n::names,&nbsp;s::values,&nbsp;c::colors))&nbsp;vars&nbsp;([],&nbsp;[],&nbsp;[])&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;chd&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;str&nbsp;=&nbsp;<span class="constructor">BatIO</span>.output_string&nbsp;()&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">List</span>.print&nbsp;~first:<span class="string">"t:"</span>&nbsp;~last:<span class="string">""</span>&nbsp;~sep:<span class="string">"|"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">List</span>.print&nbsp;~first:<span class="string">""</span>&nbsp;~last:<span class="string">""</span>&nbsp;~sep:<span class="string">","</span>&nbsp;<span class="constructor">Int64</span>.print)&nbsp;str&nbsp;values&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">BatIO</span>.close_out&nbsp;str<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;chdl&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;str&nbsp;=&nbsp;<span class="constructor">BatIO</span>.output_string&nbsp;()&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">List</span>.print&nbsp;~first:<span class="string">""</span>&nbsp;~last:<span class="string">""</span>&nbsp;~sep:<span class="string">"|"</span>&nbsp;<span class="constructor">String</span>.print&nbsp;str&nbsp;names&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">BatIO</span>.close_out&nbsp;str<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;chco&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;str&nbsp;=&nbsp;<span class="constructor">BatIO</span>.output_string&nbsp;()&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">List</span>.print&nbsp;~first:<span class="string">""</span>&nbsp;~last:<span class="string">""</span>&nbsp;~sep:<span class="string">","</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="keyword">fun</span>&nbsp;out&nbsp;t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;out&nbsp;<span class="string">"%06lX"</span>&nbsp;t)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;str&nbsp;colors&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">BatIO</span>.close_out&nbsp;str<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;width,&nbsp;height&nbsp;=&nbsp;640,&nbsp;460<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;page_head&nbsp;~selected:<span class="string">"metrics"</span>&nbsp;resp_body&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;resp_body&nbsp;<span class="string">"<br>
+&lt;div&nbsp;id=\"controls\"&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&lt;form&nbsp;id='metric'&nbsp;method='post'&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%a<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;input&nbsp;type='submit'&nbsp;name='redraw'&nbsp;value='redraw'/&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&lt;/form&gt;<br>
+&lt;/div&gt;<br>
+&lt;div&nbsp;id=\"view\"&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&lt;img&nbsp;width='%d'&nbsp;height='%d'&nbsp;class='chart'<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;src='https://chart.googleapis.com/chart?chs=%dx%d&amp;amp;cht=lc&amp;amp;chd=%s&amp;amp;chdl=%s&amp;amp;chdlp=b&amp;amp;chco=%s&amp;amp;chxt=x,y&amp;amp;chxl=0:|Past|Now&amp;amp;chxr=1,%Ld,%Ld&amp;amp;chds=%Ld,%Ld'<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;alt='Metrics'/&gt;<br>
+&lt;/div&gt;\n"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(print_tree&nbsp;vars)&nbsp;(<span class="constructor">Metric</span>.tree&nbsp;())<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;width&nbsp;height&nbsp;width&nbsp;height<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;chd&nbsp;chdl&nbsp;chco&nbsp;!chds_min&nbsp;!chds_max&nbsp;!chds_min&nbsp;!chds_max&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;page_foot&nbsp;resp_body&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;[&nbsp;<span class="string">"Content-Type"</span>,&nbsp;<span class="string">"text/html"</span>&nbsp;]</code></body></html>
