@@ -34,7 +34,8 @@
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
-<link title="Url" rel="Chapter" href="Url.html"><title>Index of values</title>
+<link title="Url" rel="Chapter" href="Url.html">
+<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Index of values</title>
 </head>
 <body>
 <center><h1>Index of values</h1></center>
@@ -127,7 +128,10 @@
 <tr><td><a href="Ip.Addr.html#VALbroadcast">broadcast</a> [<a href="Ip.Addr.html">Ip.Addr</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.Addr.html#VALbroadcast">broadcast</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Constant for Ethernet broadcast address.
+</div>
+</td></tr>
 <tr><td><a href="Tools.html#VALbytelength">bytelength</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
 <tr><td><a href="Pcap.html#VALbytes_in">bytes_in</a> [<a href="Pcap.html">Pcap</a>]</td>
@@ -459,7 +463,12 @@ Same than <a href="Pcap.html#VALload"><code class="code"><span class="constructo
 </div>
 </td></tr>
 <tr><td><a href="Eth.Addr.html#VALeq">eq</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Since Ethernet addresses are bitstrings, which cannot be compared
+ using the built-in <code class="code">=</code> operator, here is a dedicated comparison
+ operator for addresses.
+</div>
+</td></tr>
 <tr><td><a href="Tools.HashedBits.html#VALequal">equal</a> [<a href="Tools.HashedBits.html">Tools.HashedBits</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.html#VALerr">err</a> [<a href="Tools.html">Tools</a>]</td>
@@ -517,7 +526,10 @@ Same than <a href="Pcap.html#VALload"><code class="code"><span class="constructo
 <tr><td><a href="Host.html#VALgethostbyname">gethostbyname</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.html#VALgw_addr_of_string">gw_addr_of_string</a> [<a href="Eth.html">Eth</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Converts the other way around.
+</div>
+</td></tr>
 <tr><td align="left"><br>H</td></tr>
 <tr><td><a href="Tools.HashedBits.html#VALhash">hash</a> [<a href="Tools.HashedBits.html">Tools.HashedBits</a>]</td>
 <td></td></tr>
@@ -662,6 +674,16 @@ from a pcap file, returns an <code class="code"><span class="constructor">Enum</
 <tr><td><a href="Myadmin.html#VALlogs">logs</a> [<a href="Myadmin.html">Myadmin</a>]</td>
 <td></td></tr>
 <tr><td align="left"><br>M</td></tr>
+<tr><td><a href="Vlan.TRX.html#VALmake">make</a> [<a href="Vlan.TRX.html">Vlan.TRX</a>]</td>
+<td><div class="info">
+Creates a <a href="Vlan.TRX.html#TYPEt"><code class="code"><span class="constructor">Vlan</span>.<span class="constructor">TRX</span>.t</code></a>.
+</div>
+</td></tr>
+<tr><td><a href="Vlan.Pdu.html#VALmake">make</a> [<a href="Vlan.Pdu.html">Vlan.Pdu</a>]</td>
+<td><div class="info">
+Build a <code class="code"><span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.t</code> for the given <code class="code">payload</code>.
+</div>
+</td></tr>
 <tr><td><a href="Udp.TRX.html#VALmake">make</a> [<a href="Udp.TRX.html">Udp.TRX</a>]</td>
 <td></td></tr>
 <tr><td><a href="Udp.Pdu.html#VALmake">make</a> [<a href="Udp.Pdu.html">Udp.Pdu</a>]</td>
@@ -701,9 +723,15 @@ from a pcap file, returns an <code class="code"><span class="constructor">Enum</
 <tr><td><a href="Host.html#VALmake">make</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.TRX.html#VALmake">make</a> [<a href="Eth.TRX.html">Eth.TRX</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Creates an <a href="Eth.TRX.html#TYPEt"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">TRX</span>.t</code></a>.
+</div>
+</td></tr>
 <tr><td><a href="Eth.Pdu.html#VALmake">make</a> [<a href="Eth.Pdu.html">Eth.Pdu</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Build an <code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code> for the given <code class="code">payload</code>.
+</div>
+</td></tr>
 <tr><td><a href="Browser.html#VALmake">make</a> [<a href="Browser.html">Browser</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tcp.TRX.html#VALmake_">make_</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
@@ -845,7 +873,10 @@ from a pcap file, returns an <code class="code"><span class="constructor">Enum</
 <tr><td><a href="Ip.Addr.html#VALof_string">of_string</a> [<a href="Ip.Addr.html">Ip.Addr</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.Addr.html#VALof_string">of_string</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Converts a string to an address.
+</div>
+</td></tr>
 <tr><td><a href="Fifo.html#VALof_trx">of_trx</a> [<a href="Fifo.html">Fifo</a>]</td>
 <td></td></tr>
 <tr><td><a href="Dhcp.MsgType.html#VALoffer">offer</a> [<a href="Dhcp.MsgType.html">Dhcp.MsgType</a>]</td>
@@ -862,6 +893,12 @@ from a pcap file, returns an <code class="code"><span class="constructor">Enum</
 <tr><td><a href="Peg.html#VALoptional">optional</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
 <tr><td align="left"><br>P</td></tr>
+<tr><td><a href="Vlan.Pdu.html#VALpack">pack</a> [<a href="Vlan.Pdu.html">Vlan.Pdu</a>]</td>
+<td><div class="info">
+Pack a <code class="code"><span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.t</code> into its <code class="code">bitstring</code> raw representation, ready for
+ encapsulation into a <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code></a> (or anywhere you like).
+</div>
+</td></tr>
 <tr><td><a href="Udp.Pdu.html#VALpack">pack</a> [<a href="Udp.Pdu.html">Udp.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.PDU.html#VALpack">pack</a> [<a href="Tools.PDU.html">Tools.PDU</a>]</td>
@@ -880,7 +917,11 @@ from a pcap file, returns an <code class="code"><span class="constructor">Enum</
 <tr><td><a href="Http.Pdu.html#VALpack">pack</a> [<a href="Http.Pdu.html">Http.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.Pdu.html#VALpack">pack</a> [<a href="Eth.Pdu.html">Eth.Pdu</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Pack an <code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code> into its <code class="code">bitstring</code> raw representation, ready for
+ injection onto the wire (via <a href="Pcap.html#VALinject_pdu"><code class="code"><span class="constructor">Pcap</span>.inject_pdu</code></a> for instance).
+</div>
+</td></tr>
 <tr><td><a href="Dns.Pdu.html#VALpack">pack</a> [<a href="Dns.Pdu.html">Dns.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Dhcp.Pdu.html#VALpack">pack</a> [<a href="Dhcp.Pdu.html">Dhcp.Pdu</a>]</td>
@@ -999,7 +1040,16 @@ A counter for how many packets were sniffed.
 <tr><td><a href="Opache.html#VALprint_vars">print_vars</a> [<a href="Opache.html">Opache</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.Addr.html#VALprint_with_vendor">print_with_vendor</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
-<td></td></tr>
+<td><div class="info">
+If true, use the vendor database to decode address names:
+ <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.of_string&nbsp;<span class="string">"a4:ba:db:e6:15:fa"</span>;;</code><pre></pre>
+ <pre></pre><code class="code">-&nbsp;:&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.t&nbsp;=&nbsp;<span class="constructor">Dell</span>:e6:15:fa</code><pre></pre>
+ <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.print_with_vendor&nbsp;:=&nbsp;<span class="keyword">false</span>;;</code><pre></pre>
+ <pre></pre><code class="code">-&nbsp;:&nbsp;unit&nbsp;=&nbsp;()</code><pre></pre>
+ <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.of_string&nbsp;<span class="string">"a4:ba:db:e6:15:fa"</span>;;</code><pre></pre>
+ <pre></pre><code class="code">-&nbsp;:&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.t&nbsp;=&nbsp;a4:ba:db:e6:15:fa</code><pre></pre>
+</div>
+</td></tr>
 <tr><td><a href="Tools.html#VALprintable">printable</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
 <tr><td><a href="Hub.Switch.OrdArray.html#VALpromote">promote</a> [<a href="Hub.Switch.OrdArray.html">Hub.Switch.OrdArray</a>]</td>
@@ -1026,6 +1076,11 @@ A counter for how many packets were sniffed.
 <td></td></tr>
 <tr><td><a href="Tools.html#VALrandi">randi</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
+<tr><td><a href="Vlan.Pdu.html#VALrandom">random</a> [<a href="Vlan.Pdu.html">Vlan.Pdu</a>]</td>
+<td><div class="info">
+Returns a random <code class="code"><span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.t</code>.
+</div>
+</td></tr>
 <tr><td><a href="Udp.Pdu.html#VALrandom">random</a> [<a href="Udp.Pdu.html">Udp.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.Payload.html#VALrandom">random</a> [<a href="Tools.Payload.html">Tools.Payload</a>]</td>
@@ -1041,9 +1096,15 @@ A counter for how many packets were sniffed.
 <tr><td><a href="Ip.Proto.html#VALrandom">random</a> [<a href="Ip.Proto.html">Ip.Proto</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.Pdu.html#VALrandom">random</a> [<a href="Eth.Pdu.html">Eth.Pdu</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Returns a random <code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code>.
+</div>
+</td></tr>
 <tr><td><a href="Eth.Addr.html#VALrandom">random</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Returns a random Ethernet address.
+</div>
+</td></tr>
 <tr><td><a href="Dns.Pdu.html#VALrandom">random</a> [<a href="Dns.Pdu.html">Dns.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Dns.QType.html#VALrandom">random</a> [<a href="Dns.QType.html">Dns.QType</a>]</td>
@@ -1141,6 +1202,11 @@ Small utility that truncate a pcap file to the last valid packet.
 <td></td></tr>
 <tr><td><a href="Clock.html#VALrun">run</a> [<a href="Clock.html">Clock</a>]</td>
 <td></td></tr>
+<tr><td><a href="Vlan.TRX.html#VALrx">rx</a> [<a href="Vlan.TRX.html">Vlan.TRX</a>]</td>
+<td><div class="info">
+Receive function, called to output untaggd frames from the 802.1q tunnel.
+</div>
+</td></tr>
 <tr><td><a href="Udp.TRX.html#VALrx">rx</a> [<a href="Udp.TRX.html">Udp.TRX</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tcp.TRX.html#VALrx">rx</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
@@ -1156,7 +1222,10 @@ Small utility that truncate a pcap file to the last valid packet.
 <tr><td><a href="Http.TRXtop.html#VALrx">rx</a> [<a href="Http.TRXtop.html">Http.TRXtop</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.TRX.html#VALrx">rx</a> [<a href="Eth.TRX.html">Eth.TRX</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Receive function, called to input an Ethernet frame into the TRX.
+</div>
+</td></tr>
 <tr><td align="left"><br>S</td></tr>
 <tr><td><a href="Pcap.html#VALsave">save</a> [<a href="Pcap.html">Pcap</a>]</td>
 <td><div class="info">
@@ -1171,7 +1240,10 @@ Small utility that truncate a pcap file to the last valid packet.
 <tr><td><a href="Clock.html#VALsec">sec</a> [<a href="Clock.html">Clock</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.TRX.html#VALsend">send</a> [<a href="Eth.TRX.html">Eth.TRX</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Low level send fonction.
+</div>
+</td></tr>
 <tr><td><a href="Peg.html#VALseq">seq</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
 <tr><td><a href="Peg.html#VALseqf">seqf</a> [<a href="Peg.html">Peg</a>]</td>
@@ -1257,10 +1329,11 @@ Small utility that truncate a pcap file to the last valid packet.
 <tr><td><a href="Tcp.Pdu.html#VALstring_of_flags">string_of_flags</a> [<a href="Tcp.Pdu.html">Tcp.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.html#VALstring_of_gw_addr">string_of_gw_addr</a> [<a href="Eth.html">Eth</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Converts a <a href="Eth.html#TYPEgw_addr"><code class="code"><span class="constructor">Eth</span>.gw_addr</code></a> to a string.
+</div>
+</td></tr>
 <tr><td><a href="Http.html#VALstring_of_headers">string_of_headers</a> [<a href="Http.html">Http</a>]</td>
-<td></td></tr>
-<tr><td><a href="Eth.Addr.html#VALstring_of_mac">string_of_mac</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.Addr.html#VALstring_of_sfx">string_of_sfx</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
 <td></td></tr>
@@ -1337,6 +1410,11 @@ Small utility that truncate a pcap file to the last valid packet.
 <td></td></tr>
 <tr><td><a href="Tcp.TRX.html#VALtry_really_tx">try_really_tx</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
+<tr><td><a href="Vlan.TRX.html#VALtx">tx</a> [<a href="Vlan.TRX.html">Vlan.TRX</a>]</td>
+<td><div class="info">
+Transmit function.
+</div>
+</td></tr>
 <tr><td><a href="Udp.TRX.html#VALtx">tx</a> [<a href="Udp.TRX.html">Udp.TRX</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tcp.TRX.html#VALtx">tx</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
@@ -1350,7 +1428,10 @@ Small utility that truncate a pcap file to the last valid packet.
 <tr><td><a href="Http.TRXtop.html#VALtx">tx</a> [<a href="Http.TRXtop.html">Http.TRXtop</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.TRX.html#VALtx">tx</a> [<a href="Eth.TRX.html">Eth.TRX</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Transmit function.
+</div>
+</td></tr>
 <tr><td align="left"><br>U</td></tr>
 <tr><td><a href="Ip.Proto.html#VALudp">udp</a> [<a href="Ip.Proto.html">Ip.Proto</a>]</td>
 <td></td></tr>
@@ -1366,6 +1447,11 @@ Small utility that truncate a pcap file to the last valid packet.
 <td></td></tr>
 <tr><td><a href="Html.html#VALunify">unify</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
+<tr><td><a href="Vlan.Pdu.html#VALunpack">unpack</a> [<a href="Vlan.Pdu.html">Vlan.Pdu</a>]</td>
+<td><div class="info">
+Unpack a <code class="code">bitstring</code> into a <code class="code"><span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.t</code>
+</div>
+</td></tr>
 <tr><td><a href="Udp.Pdu.html#VALunpack">unpack</a> [<a href="Udp.Pdu.html">Udp.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.PDU.html#VALunpack">unpack</a> [<a href="Tools.PDU.html">Tools.PDU</a>]</td>
@@ -1384,7 +1470,10 @@ Convert a <code class="code">bitstring</code> into a <a href="Packet.Pdu.html#TY
 <tr><td><a href="Http.Pdu.html#VALunpack">unpack</a> [<a href="Http.Pdu.html">Http.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.Pdu.html#VALunpack">unpack</a> [<a href="Eth.Pdu.html">Eth.Pdu</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Unpack a <code class="code">bitstring</code> into an <code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code>
+</div>
+</td></tr>
 <tr><td><a href="Dns.Pdu.html#VALunpack">unpack</a> [<a href="Dns.Pdu.html">Dns.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Dhcp.Pdu.html#VALunpack">unpack</a> [<a href="Dhcp.Pdu.html">Dhcp.Pdu</a>]</td>
@@ -1421,7 +1510,10 @@ Convert a <code class="code">bitstring</code> into a <a href="Packet.Pdu.html#TY
 <tr><td><a href="Html.html#VALvar_printer">var_printer</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.Addr.html#VALvendor_lookup">vendor_lookup</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Low level wrapper around the C vendor database.
+</div>
+</td></tr>
 <tr><td align="left"><br>W</td></tr>
 <tr><td><a href="Persist.html#VALwith_input_file">with_input_file</a> [<a href="Persist.html">Persist</a>]</td>
 <td></td></tr>
@@ -1434,7 +1526,10 @@ Convert a <code class="code">bitstring</code> into a <a href="Packet.Pdu.html#TY
 <tr><td><a href="Ip.Addr.html#VALzero">zero</a> [<a href="Ip.Addr.html">Ip.Addr</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.Addr.html#VALzero">zero</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Constant for Ethernet all zeroes address.
+</div>
+</td></tr>
 </table><br>
 </body>
 </html>

@@ -38,7 +38,13 @@
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
-<link title="Url" rel="Chapter" href="Url.html"><title>Eth</title>
+<link title="Url" rel="Chapter" href="Url.html">
+<link title="Vlan" rel="Chapter" href="Vlan.html"><link title="Private Types" rel="Section" href="#1_PrivateTypes">
+<link title="(Un)Packing Ethernet frames" rel="Section" href="#1_UnPackingEthernetframes">
+<link title="Ethernet Transceiver" rel="Section" href="#1_EthernetTransceiver">
+<link title="Ethernet addresses" rel="Subsection" href="#2_Ethernetaddresses">
+<link title="Gateway specifications" rel="Subsection" href="#2_Gatewayspecifications">
+<title>Eth</title>
 </head>
 <body>
 <div class="navbar"><a href="Dns.html">Previous</a>
@@ -47,8 +53,23 @@
 </div>
 <center><h1>Module <a href="type_Eth.html">Eth</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Eth: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALEth.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span class="keyword">module</span> <a href="Eth.Addr.html">Addr</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><br><code><span id="TYPEgw_addr"><span class="keyword">type</span> <code class="type"></code>gw_addr</span> = </code><table class="typetable">
+<pre><span class="keyword">module</span> Eth: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.html">..</a> <code class="code"><span class="keyword">end</span></code></pre> Ethernet protocol implementation.
+<p>
+
+ TODO: (r)STP, optional padding<br>
+<hr width="100%">
+<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALEth.debug.html">debug</a></span> : <code class="type">bool</code></pre><br>
+<span id="1_PrivateTypes"><h1>Private Types</h1></span><br>
+<br>
+<span id="2_Ethernetaddresses"><h2>Ethernet addresses</h2></span><br>
+<pre><span class="keyword">module</span> <a href="Eth.Addr.html">Addr</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Ethernet addresses are implemented as <code class="code">bitstring</code> internally but
+ the abstract type Eth.Addr.t has a batter printer (which support
+ such thing as vendor decoding).
+</div>
+<br>
+<span id="2_Gatewayspecifications"><h2>Gateway specifications</h2></span><br>
+<br><code><span id="TYPEgw_addr"><span class="keyword">type</span> <code class="type"></code>gw_addr</span> = </code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
@@ -64,5 +85,27 @@
 
 </tr></table>
 
+<div class="info">
+The address of a gateway, which can be given either as an Ethernet address
+ of as an IP address.<br>
+</div>
 
-<pre><span id="VALstring_of_gw_addr"><span class="keyword">val</span> <a href="code_VALEth.string_of_gw_addr.html">string_of_gw_addr</a></span> : <code class="type"><a href="Eth.html#TYPEgw_addr">gw_addr</a> -> string</code></pre><pre><span id="VALgw_addr_of_string"><span class="keyword">val</span> <a href="code_VALEth.gw_addr_of_string.html">gw_addr_of_string</a></span> : <code class="type">string -> <a href="Eth.html#TYPEgw_addr">gw_addr</a></code></pre><pre><span class="keyword">module</span> <a href="Eth.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Eth.TRX.html">TRX</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span id="VALlimited"><span class="keyword">val</span> <a href="code_VALEth.limited.html">limited</a></span> : <code class="type">float -><br>       float -> (Bitstring.bitstring -> unit) -> Bitstring.bitstring -> unit</code></pre></body></html>
+<pre><span id="VALstring_of_gw_addr"><span class="keyword">val</span> <a href="code_VALEth.string_of_gw_addr.html">string_of_gw_addr</a></span> : <code class="type"><a href="Eth.html#TYPEgw_addr">gw_addr</a> -> string</code></pre><div class="info">
+Converts a <a href="Eth.html#TYPEgw_addr"><code class="code"><span class="constructor">Eth</span>.gw_addr</code></a> to a string.<br>
+</div>
+<pre><span id="VALgw_addr_of_string"><span class="keyword">val</span> <a href="code_VALEth.gw_addr_of_string.html">gw_addr_of_string</a></span> : <code class="type">string -> <a href="Eth.html#TYPEgw_addr">gw_addr</a></code></pre><div class="info">
+Converts the other way around.<br>
+</div>
+<br>
+<span id="1_UnPackingEthernetframes"><h1>(Un)Packing Ethernet frames</h1></span><br>
+<pre><span class="keyword">module</span> <a href="Eth.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Pack/Unpack an Ethernet frame.
+</div>
+<br>
+<span id="1_EthernetTransceiver"><h1>Ethernet Transceiver</h1></span><br>
+<pre><span class="keyword">module</span> <a href="Eth.TRX.html">TRX</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+An Ethernet TRX accepts raw packets, unpack them and forward the payload
+ to a callback; and it can be given some payload to transmit and it will emit
+ it as an Ethernet frame.
+</div>
+<pre><span id="VALlimited"><span class="keyword">val</span> <a href="code_VALEth.limited.html">limited</a></span> : <code class="type">float -><br>       float -> (Bitstring.bitstring -> unit) -> Bitstring.bitstring -> unit</code></pre></body></html>

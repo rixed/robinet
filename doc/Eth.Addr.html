@@ -37,7 +37,8 @@
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
-<link title="Url" rel="Chapter" href="Url.html"><title>Eth.Addr</title>
+<link title="Url" rel="Chapter" href="Url.html">
+<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Eth.Addr</title>
 </head>
 <body>
 <div class="navbar">&nbsp;<a href="Eth.html">Up</a>
@@ -45,6 +46,49 @@
 </div>
 <center><h1>Module <a href="type_Eth.Addr.html">Eth.Addr</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Addr: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<pre><span id="VALprint_with_vendor"><span class="keyword">val</span> <a href="code_VALEth.Addr.print_with_vendor.html">print_with_vendor</a></span> : <code class="type">bool Batteries.ref</code></pre><pre><span id="VALstring_of_sfx"><span class="keyword">val</span> <a href="code_VALEth.Addr.string_of_sfx.html">string_of_sfx</a></span> : <code class="type">int -> int64 -> string</code></pre><pre><span id="VALvendor_lookup"><span class="keyword">val</span> <a href="code_VALEth.Addr.vendor_lookup.html">vendor_lookup</a></span> : <code class="type">int64 -> (string * int) option</code></pre><pre><span id="VALstring_of_mac"><span class="keyword">val</span> <a href="code_VALEth.Addr.string_of_mac.html">string_of_mac</a></span> : <code class="type">string * int * int -> string</code></pre><pre><span class="keyword">include</span> struct ... end</pre>
-<pre><span id="VALof_string"><span class="keyword">val</span> <a href="code_VALEth.Addr.of_string.html">of_string</a></span> : <code class="type">string -> t</code></pre><pre><span id="VALbroadcast"><span class="keyword">val</span> <a href="code_VALEth.Addr.broadcast.html">broadcast</a></span> : <code class="type">t</code></pre><pre><span id="VALzero"><span class="keyword">val</span> <a href="code_VALEth.Addr.zero.html">zero</a></span> : <code class="type">t</code></pre><pre><span id="VALeq"><span class="keyword">val</span> <a href="code_VALEth.Addr.eq.html">eq</a></span> : <code class="type">t -> t -> bool</code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALEth.Addr.random.html">random</a></span> : <code class="type">unit -> t</code></pre></body></html>
+<pre><span class="keyword">module</span> Addr: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Ethernet addresses are implemented as <code class="code">bitstring</code> internally but
+ the abstract type Eth.Addr.t has a batter printer (which support
+ such thing as vendor decoding).
+<p>
+
+ Anyway, one is able to cast from/to a <code class="code">bitstring</code> with
+ <code class="code">(addr :&gt; bitstring)</code> for instance.<br>
+<hr width="100%">
+<pre><span id="VALprint_with_vendor"><span class="keyword">val</span> <a href="code_VALEth.Addr.print_with_vendor.html">print_with_vendor</a></span> : <code class="type">bool Batteries.ref</code></pre><div class="info">
+If true, use the vendor database to decode address names:
+ <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.of_string&nbsp;<span class="string">"a4:ba:db:e6:15:fa"</span>;;</code><pre></pre>
+ <pre></pre><code class="code">-&nbsp;:&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.t&nbsp;=&nbsp;<span class="constructor">Dell</span>:e6:15:fa</code><pre></pre>
+ <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.print_with_vendor&nbsp;:=&nbsp;<span class="keyword">false</span>;;</code><pre></pre>
+ <pre></pre><code class="code">-&nbsp;:&nbsp;unit&nbsp;=&nbsp;()</code><pre></pre>
+ <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.of_string&nbsp;<span class="string">"a4:ba:db:e6:15:fa"</span>;;</code><pre></pre>
+ <pre></pre><code class="code">-&nbsp;:&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.t&nbsp;=&nbsp;a4:ba:db:e6:15:fa</code><pre></pre>
+<p>
+
+ This only affect the printing of Ethernet addresses in the toplevel and
+ <code class="code"><span class="constructor">Eth</span>.<span class="constructor">Addr</span>.to_string</code>.<br>
+</div>
+<pre><span id="VALstring_of_sfx"><span class="keyword">val</span> <a href="code_VALEth.Addr.string_of_sfx.html">string_of_sfx</a></span> : <code class="type">int -> int64 -> string</code></pre><pre><span id="VALvendor_lookup"><span class="keyword">val</span> <a href="code_VALEth.Addr.vendor_lookup.html">vendor_lookup</a></span> : <code class="type">int64 -> (string * int) option</code></pre><div class="info">
+Low level wrapper around the C vendor database.<br>
+</div>
+<pre><span class="keyword">include</span> struct ... end</pre>
+<pre><span id="VALof_string"><span class="keyword">val</span> <a href="code_VALEth.Addr.of_string.html">of_string</a></span> : <code class="type">string -> t</code></pre><div class="info">
+Converts a string to an address. Note that the string must be in
+ hexadecimal notation (<code class="code"><span class="string">"a4:ba:db:e6:15:fa"</span></code>, not <code class="code"><span class="string">"Dell:e6:15:fa"</span></code>).
+ So <code class="code"><span class="constructor">Eth</span>.<span class="constructor">Addr</span>.of_string (<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.to_string <span class="string">"a4:ba:db:e6:15:fa"</span>)</code>
+ will <em>not</em> work if <a href="Eth.Addr.html#VALprint_with_vendor"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">Addr</span>.print_with_vendor</code></a> is true!<br>
+</div>
+<pre><span id="VALbroadcast"><span class="keyword">val</span> <a href="code_VALEth.Addr.broadcast.html">broadcast</a></span> : <code class="type">t</code></pre><div class="info">
+Constant for Ethernet broadcast address.<br>
+</div>
+<pre><span id="VALzero"><span class="keyword">val</span> <a href="code_VALEth.Addr.zero.html">zero</a></span> : <code class="type">t</code></pre><div class="info">
+Constant for Ethernet all zeroes address.<br>
+</div>
+<pre><span id="VALeq"><span class="keyword">val</span> <a href="code_VALEth.Addr.eq.html">eq</a></span> : <code class="type">t -> t -> bool</code></pre><div class="info">
+Since Ethernet addresses are bitstrings, which cannot be compared
+ using the built-in <code class="code">=</code> operator, here is a dedicated comparison
+ operator for addresses.<br>
+</div>
+<pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALEth.Addr.random.html">random</a></span> : <code class="type">unit -> t</code></pre><div class="info">
+Returns a random Ethernet address.<br>
+</div>
+</body></html>

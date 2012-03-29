@@ -33,7 +33,8 @@
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
-<link title="Url" rel="Chapter" href="Url.html"><title>Eth.Addr</title>
+<link title="Url" rel="Chapter" href="Url.html">
+<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Eth.Addr</title>
 </head>
 <body>
 <code class="code"><span class="keyword">sig</span><br>
@@ -41,7 +42,6 @@
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;string_of_sfx&nbsp;:&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;int64&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;string<br>
 &nbsp;&nbsp;<span class="keyword">external</span>&nbsp;vendor_lookup&nbsp;:&nbsp;int64&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;(string&nbsp;*&nbsp;int)&nbsp;option<br>
 &nbsp;&nbsp;&nbsp;&nbsp;=&nbsp;<span class="string">"wrap_eth_vendor_lookup"</span><br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;string_of_mac&nbsp;:&nbsp;string&nbsp;*&nbsp;int&nbsp;*&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;string<br>
 &nbsp;&nbsp;<span class="keyword">type</span>&nbsp;t&nbsp;=&nbsp;<span class="keyword">private</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;to_string&nbsp;:&nbsp;t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;string<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;print&nbsp;:&nbsp;<span class="constructor">Batteries</span>.<span class="constructor">Format</span>.formatter&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>

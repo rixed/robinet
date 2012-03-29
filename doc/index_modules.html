@@ -34,7 +34,8 @@
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
-<link title="Url" rel="Chapter" href="Url.html"><title>Index of modules</title>
+<link title="Url" rel="Chapter" href="Url.html">
+<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Index of modules</title>
 </head>
 <body>
 <center><h1>Index of modules</h1></center>
@@ -43,7 +44,12 @@
 <tr><td><a href="Ip.Addr.html">Addr</a> [<a href="Ip.html">Ip</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.Addr.html">Addr</a> [<a href="Eth.html">Eth</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Ethernet addresses are implemented as <code class="code">bitstring</code> internally but
+ the abstract type Eth.Addr.t has a batter printer (which support
+ such thing as vendor decoding).
+</div>
+</td></tr>
 <tr><td><a href="Arp.html">Arp</a> </td>
 <td></td></tr>
 <tr><td><a href="Metric.Atomic.html">Atomic</a> [<a href="Metric.html">Metric</a>]</td>
@@ -65,7 +71,10 @@
 <td></td></tr>
 <tr><td align="left"><br>E</td></tr>
 <tr><td><a href="Eth.html">Eth</a> </td>
-<td></td></tr>
+<td><div class="info">
+ Ethernet protocol implementation.
+</div>
+</td></tr>
 <tr><td align="left"><br>F</td></tr>
 <tr><td><a href="Fifo.html">Fifo</a> </td>
 <td></td></tr>
@@ -134,6 +143,11 @@
  packet injection, and pcap file reading and writing.
 </div>
 </td></tr>
+<tr><td><a href="Vlan.Pdu.html">Pdu</a> [<a href="Vlan.html">Vlan</a>]</td>
+<td><div class="info">
+Pack/Unpack a 802.1q tunnel
+</div>
+</td></tr>
 <tr><td><a href="Udp.Pdu.html">Pdu</a> [<a href="Udp.html">Udp</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tcp.Pdu.html">Pdu</a> [<a href="Tcp.html">Tcp</a>]</td>
@@ -150,7 +164,10 @@ Pack/Unpack the whole protocol stack that fits entirely within a packet.
 <tr><td><a href="Http.Pdu.html">Pdu</a> [<a href="Http.html">Http</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.Pdu.html">Pdu</a> [<a href="Eth.html">Eth</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Pack/Unpack an Ethernet frame.
+</div>
+</td></tr>
 <tr><td><a href="Dns.Pdu.html">Pdu</a> [<a href="Dns.html">Dns</a>]</td>
 <td></td></tr>
 <tr><td><a href="Dhcp.Pdu.html">Pdu</a> [<a href="Dhcp.html">Dhcp</a>]</td>
@@ -187,6 +204,13 @@ Pack/Unpack the whole protocol stack that fits entirely within a packet.
 <tr><td><a href="Hub.Switch.html">Switch</a> [<a href="Hub.html">Hub</a>]</td>
 <td></td></tr>
 <tr><td align="left"><br>T</td></tr>
+<tr><td><a href="Vlan.TRX.html">TRX</a> [<a href="Vlan.html">Vlan</a>]</td>
+<td><div class="info">
+A Vlan TRX accepts raw packets (presumably from some <a href="Eth.TRX.html"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">TRX</span></code></a>), unpack them
+ and forward the payload to a callback; and it can be given some payload to
+ tunnel and it will tag it and pass it presumably to an <a href="Eth.TRX.html"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">TRX</span></code></a>.
+</div>
+</td></tr>
 <tr><td><a href="Udp.TRX.html">TRX</a> [<a href="Udp.html">Udp</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tcp.TRX.html">TRX</a> [<a href="Tcp.html">Tcp</a>]</td>
@@ -196,7 +220,12 @@ Pack/Unpack the whole protocol stack that fits entirely within a packet.
 <tr><td><a href="Http.TRX.html">TRX</a> [<a href="Http.html">Http</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.TRX.html">TRX</a> [<a href="Eth.html">Eth</a>]</td>
-<td></td></tr>
+<td><div class="info">
+An Ethernet TRX accepts raw packets, unpack them and forward the payload
+ to a callback; and it can be given some payload to transmit and it will emit
+ it as an Ethernet frame.
+</div>
+</td></tr>
 <tr><td><a href="Http.TRXtop.html">TRXtop</a> [<a href="Http.html">Http</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tcp.html">Tcp</a> </td>
@@ -210,6 +239,12 @@ Pack/Unpack the whole protocol stack that fits entirely within a packet.
 <td></td></tr>
 <tr><td><a href="Url.html">Url</a> </td>
 <td></td></tr>
+<tr><td align="left"><br>V</td></tr>
+<tr><td><a href="Vlan.html">Vlan</a> </td>
+<td><div class="info">
+ Ethernet 802.1q Virtual Lan implementation.
+</div>
+</td></tr>
 </table><br>
 </body>
 </html>
