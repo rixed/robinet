@@ -34,7 +34,7 @@ open Batteries
 open Bitstring
 open Tools
 
-(** {1 (Un)Packing} *)
+(** {1 (Un)Packing any packet} *)
 
 (** Pack/Unpack the whole protocol stack that fits entirely within a packet.
  *

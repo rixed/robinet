@@ -17,16 +17,39 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
+(**
+ * Ethernet protocol implementation.
+ *
+ * TODO: (r)STP, optional padding
+ *)
 open Batteries
 open Bitstring
 open Tools
 
 let debug = false
 
-(* Private Types *)
+(** {1 Private Types} *)
 
+(** {2 Ethernet addresses} *)
+
+(** Ethernet addresses are implemented as [bitstring] internally but
+ * the abstract type Eth.Addr.t has a batter printer (which support
+ * such thing as vendor decoding).
+ *
+ * Anyway, one is able to cast from/to a [bitstring] with
+ * [(addr :> bitstring)] for instance. *)
 module Addr = struct
     (*$< Addr *)
+    (** If true, use the vendor database to decode address names:
+     * {[# Eth.Addr.of_string "a4:ba:db:e6:15:fa";;]}
+     * {[- : Eth.Addr.t = Dell:e6:15:fa]}
+     * {[# Eth.Addr.print_with_vendor := false;;]}
+     * {[- : unit = ()]}
+     * {[# Eth.Addr.of_string "a4:ba:db:e6:15:fa";;]}
+     * {[- : Eth.Addr.t = a4:ba:db:e6:15:fa]}
+     * 
+     * This only affect the printing of Ethernet addresses in the toplevel and
+     * {!Eth.Addr.to_string}. *)
     let print_with_vendor = ref true
 
     let string_of_sfx l sfx =
@@ -43,81 +66,102 @@ module Addr = struct
       (string_of_sfx 48 0x123456789abcL) ":12:34:56:78:9a:bc"
     *)
 
+    (** Low level wrapper around the C vendor database. *)
     external vendor_lookup : int64 -> (string * int) option = "wrap_eth_vendor_lookup"
-
-    let string_of_mac mac =
-        let simple_name mac64 =
-            String.lchop (string_of_sfx 48 mac64) in
-        bitmatch mac with
-            | { mac64 : 48 } ->
-                if !print_with_vendor then (
-                    match vendor_lookup mac64 with
-                        | None -> simple_name mac64
-                        | Some (name, bits) ->
-                            let sfx_bits = 48 - bits in
-                            let sfx = Int64.logand mac64 (Int64.pred (Int64.shift_left 1L sfx_bits)) in
-                            name ^ (string_of_sfx sfx_bits sfx)
-                ) else (
-                    simple_name mac64
-                )
-            | { _ } -> should_not_happen ()
-    (*$= string_of_mac & ~printer:identity
-      (string_of_mac ((of_string "00:23:8b:5f:09:ce") :> bitstring)) "QuantaCo:5f:09:ce"
-      (string_of_mac ((of_string "80:ee:73:07:76:f1") :> bitstring)) "Shuttle:07:76:f1"
-      (string_of_mac (broadcast :> bitstring)) "Broadcast"
-      (string_of_mac ((of_string "00:50:c2:00:0a:bc") :> bitstring)) "TLS:0a:bc"
-      (string_of_mac ((of_string "ff:ff:07:c0:00:04") :> bitstring)) "ff:ff:07:c0:00:04"
-    *)
 
     include MakePrivate(struct
         type t = bitstring
-        let to_string = string_of_mac
+        (** Converts an address to it's string representation. *)
+        let to_string mac =
+            let simple_name mac64 =
+                String.lchop (string_of_sfx 48 mac64) in
+            bitmatch mac with
+                | { mac64 : 48 } ->
+                    if !print_with_vendor then (
+                        match vendor_lookup mac64 with
+                            | None -> simple_name mac64
+                            | Some (name, bits) ->
+                                let sfx_bits = 48 - bits in
+                                let sfx = Int64.logand mac64 (Int64.pred (Int64.shift_left 1L sfx_bits)) in
+                                name ^ (string_of_sfx sfx_bits sfx)
+                    ) else (
+                        simple_name mac64
+                    )
+                | { _ } -> should_not_happen ()
+        (*$= to_string & ~printer:identity
+          (to_string (of_string "00:23:8b:5f:09:ce")) "QuantaCo:5f:09:ce"
+          (to_string (of_string "80:ee:73:07:76:f1")) "Shuttle:07:76:f1"
+          (to_string broadcast) "Broadcast"
+          (to_string (of_string "00:50:c2:00:0a:bc")) "TLS:0a:bc"
+          (to_string (of_string "ff:ff:07:c0:00:04")) "ff:ff:07:c0:00:04"
+        *)
         let is_valid t = bitstring_length t = 48
         let repl_tag = "addr"
     end)
 
+    (** Converts a string to an address. Note that the string must be in
+     * hexadecimal notation (["a4:ba:db:e6:15:fa"], not ["Dell:e6:15:fa"]).
+     * So [Eth.Addr.of_string (Eth.Addr.to_string "a4:ba:db:e6:15:fa")]
+     * will {e not} work if {!Eth.Addr.print_with_vendor} is true! *)
     let of_string str =
         let pack_addr a b c d e f =
             o (BITSTRING { a : 8 ; b : 8 ; c : 8 ; d : 8 ; e : 8 ; f : 8 }) in
         Scanf.sscanf str "%x:%x:%x:%x:%x:%x" pack_addr
 
+    (** Constant for Ethernet broadcast address. *)
     let broadcast = of_string "FF:FF:FF:FF:FF:FF"
+    (** Constant for Ethernet all zeroes address. *)
     let zero = of_string "00:00:00:00:00:00"
-
+    (** Since Ethernet addresses are bitstrings, which cannot be compared
+     * using the built-in [=] operator, here is a dedicated comparison
+     * operator for addresses. *)
     let eq (a : t) (b : t) =
         Bitstring.equals (a :> bitstring) (b :> bitstring)
 
+    (** Returns a random Ethernet address. *)
     let random () = o (randbs 6)
     (*$>*)
 end
 
-(* Gateways can be given either a MAC or an IP address *)
+(** {2 Gateway specifications} *)
 
+(** The address of a gateway, which can be given either as an Ethernet address
+ * of as an IP address. *)
 type gw_addr = Mac of Addr.t | IPv4 of Ip.Addr.t
+
+(** Converts a {!Eth.gw_addr} to a string. *)
 let string_of_gw_addr = function
     | Mac mac -> Addr.to_string mac
     | IPv4 ip -> Ip.Addr.to_string ip
 
+(** Converts the other way around. *)
 let gw_addr_of_string str =
     try Mac (Addr.of_string str)
     with _ -> IPv4 (Ip.Addr.of_string str)
 
-(* Ethernet frames *)
+(** {1 (Un)Packing Ethernet frames} *)
 
+(** Pack/Unpack an Ethernet frame.
+ *)
 module Pdu = struct
     (*$< Pdu *)
+    (** An Ethernet frame is made up from these constituents *)
     type t = { src : Addr.t ; dst : Addr.t ;
                vlan : int option ;
                proto : Arp.HwProto.t ;
                payload : Payload.t }
 
+    (** Build an [Eth.Pdu.t] for the given [payload]. *)
     let make ?vlan proto src dst payload =
         { src ; dst ; vlan ; proto ; payload }
 
+    (** Returns a random [Eth.Pdu.t]. *)
     let random () =
         let vlan = if randb () then Some (randi 15) else None in
         make ?vlan (Arp.HwProto.random ()) (Addr.random ()) (Addr.random ()) (Payload.random 30)
 
+    (** Pack an [Eth.Pdu.t] into its [bitstring] raw representation, ready for
+     * injection onto the wire (via {!Pcap.inject_pdu} for instance). *)
     let pack t =
         (* TODO: pad into minimal (64bytes) size? *)
         concat [ (match t.vlan with
@@ -134,6 +178,7 @@ module Pdu = struct
             (t.payload :> bitstring) ]
 
     let unpack bits = bitmatch bits with (* FIXME: decode 8021q vlans *)
+    (** Unpack a [bitstring] into an [Eth.Pdu.t] *)
         | { dst : 6*8 : bitstring ;
             src : 6*8 : bitstring ;
             proto : 16 ;    (* FIXME: might not be a proto if < 1500 *)
@@ -150,10 +195,16 @@ module Pdu = struct
     (*$>*)
 end
 
-(* Transceiver (create it with a proto and a src MAC address and default GW dst MAC
-   address, it will find the dst MAC itself using ARP).
-   So this require to know the proto, and will be able to resolve addr for this proto only. *)
+(** {1 Ethernet Transceiver} *)
 
+(** An Ethernet TRX accepts raw packets, unpack them and forward the payload
+ * to a callback; and it can be given some payload to transmit and it will emit
+ * it as an Ethernet frame.
+ *
+ * Create it with an {!Arp.HwProto.t}, a source {!Eth.Addr.t} and a default
+ * {!Eth.gw_addr},  and it will find the destination address itself using ARP.
+ * So this requires to know the protocol in advance, and the TRX will be able
+ * to resolve addr for this proto only. *)
 module TRX =
 struct
     type t =
@@ -171,6 +222,8 @@ struct
           set_promiscuous : (bitstring -> unit) -> unit ;
           set_addresses : bitstring list -> unit }
 
+    (** Low level send fonction. Takes a {!Arp.HwProto.t} since it's used both
+     * for the user payload protocol and ARP protocol. *)
     let send t proto dst bits =
         let pdu = Pdu.make proto t.src dst (Payload.o bits) in
         if debug then Printf.printf "Eth: Emitting an Eth packet, proto %s, from %s to %s (content '%s')\n%!" (Arp.HwProto.to_string proto) (Addr.to_string t.src) (Addr.to_string dst) (string_of_bitstring bits) ;
@@ -210,6 +263,7 @@ struct
         | Some (Mac addr) -> Some (Dst addr)
         | Some (IPv4 ip)  -> Some (arp_resolve_ipv4 t bits (List.hd t.my_addresses) (Ip.Addr.to_bitstring ip))
 
+    (** Transmit function. [tx t payload] Will send the payload. *)
     let tx t bits =
         if debug then Printf.printf "Eth: TX a payload of %d bytes (while MTU=%d)\n" (bytelength bits) t.mtu ;
         if bytelength bits <= t.mtu then (
@@ -219,6 +273,7 @@ struct
             | None -> if debug then Printf.printf "Eth:...no destination?!\n"
         )
 
+    (** Receive function, called to input an Ethernet frame into the TRX. *)
     let rx t bits = (match Pdu.unpack bits with
         | None -> ()
         | Some frame ->
@@ -274,6 +329,14 @@ struct
                 if Payload.bitlength frame.Pdu.payload > 0 then t.promisc (frame.Pdu.payload :> bitstring)
             ))
 
+    (** Creates an {!Eth.TRX.t}.
+     * @param mtu the maximum transmit unit (ie. you won't be able to send longer payloads)
+     * @param src the source {!Eth.Addr.t}
+     * @param gw an optional gateway
+     * @param promisc an optional function that will receive frames received but not destined to this TRX.
+     * @param proto the {!Arp.HwProto.t} we want to transmit/receive.
+     * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
+     *)
     let make ?(mtu=1500) src ?gw ?(promisc=ignore) proto my_addresses =
         if debug then Printf.printf "Eth: Creating an eth TRX with %d addresses\n%!" (List.length my_addresses) ;
         let t = { src ; gw ; proto ;
@@ -306,6 +369,4 @@ let limited latency throughput =
         let duration = max (Clock.usec 1.) (nb_bits /. throughput) in
         next_avlb := start +. duration ;
         Clock.at start emit bits)
-
-(* TODO: module bridge *)
 
