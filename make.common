@@ -5,6 +5,7 @@ OCAMLDEP   = ocamlfind ocamldep
 OCAMLDOC   = ocamlfind ocamldoc -html -colorize-code -thread -sort -stars
 OCAMLMKTOP = ocamlfind ocamlmktop -thread -g
 QTEST      = ocamlfind batteries/qtest
+DOCDIR    ?= doc/
 override OCAMLOPTFLAGS += $(INCS) -w Ael -g
 override OCAMLFLAGS    += $(INCS) -w Ael -g
 
@@ -84,6 +85,6 @@ clean: clean-spec
 
 doc: $(SOURCES)
 	mkdir -p $@
-	$(OCAMLDOC) $(SYNTAX) -package "$(REQUIRES)" -d doc $^
+	$(OCAMLDOC) $(SYNTAX) -package "$(REQUIRES)" -d $(DOCDIR) $^
 
 -include .depend
