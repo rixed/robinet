@@ -147,44 +147,35 @@ module Pdu = struct
     (*$< Pdu *)
     (** An Ethernet frame is made up from these constituents *)
     type t = { src : Addr.t ; dst : Addr.t ;
-               vlan : int option ;
                proto : Arp.HwProto.t ;
                payload : Payload.t }
 
     (** Build an [Eth.Pdu.t] for the given [payload]. *)
-    let make ?vlan proto src dst payload =
-        { src ; dst ; vlan ; proto ; payload }
+    let make proto src dst payload =
+        { src ; dst ; proto ; payload }
 
     (** Returns a random [Eth.Pdu.t]. *)
     let random () =
-        let vlan = if randb () then Some (randi 15) else None in
-        make ?vlan (Arp.HwProto.random ()) (Addr.random ()) (Addr.random ()) (Payload.random 30)
+        make (Arp.HwProto.random ()) (Addr.random ()) (Addr.random ()) (Payload.random 30)
 
     (** Pack an [Eth.Pdu.t] into its [bitstring] raw representation, ready for
      * injection onto the wire (via {!Pcap.inject_pdu} for instance). *)
     let pack t =
         (* TODO: pad into minimal (64bytes) size? *)
-        concat [ (match t.vlan with
-            | None -> (BITSTRING {
-                        (t.dst :> bitstring) : 6*8 : bitstring ;
-                        (t.src :> bitstring) : 6*8 : bitstring ;
-                        (t.proto :> int) : 16 })
-            | Some v -> (BITSTRING {
-                        (t.dst :> bitstring) : 6*8 : bitstring ;
-                        (t.src :> bitstring) : 6*8 : bitstring ;
-                        (Arp.HwProto.ieee8021q :> int) : 16 ;
-                        v : 16 ;
-                        (t.proto :> int) : 16 })) ;
-            (t.payload :> bitstring) ]
+        concat [ (BITSTRING {
+                     (t.dst :> bitstring) : 6*8 : bitstring ;
+                     (t.src :> bitstring) : 6*8 : bitstring ;
+                     (t.proto :> int) : 16 }) ;
+                 (t.payload :> bitstring) ]
 
-    let unpack bits = bitmatch bits with (* FIXME: decode 8021q vlans *)
     (** Unpack a [bitstring] into an [Eth.Pdu.t] *)
+    let unpack bits = bitmatch bits with
         | { dst : 6*8 : bitstring ;
             src : 6*8 : bitstring ;
             proto : 16 ;    (* FIXME: might not be a proto if < 1500 *)
             payload : -1 : bitstring } ->
             Some { src = Addr.o src ; dst = Addr.o dst ;
-                   vlan = None ; proto = Arp.HwProto.o proto ;
+                   proto = Arp.HwProto.o proto ;
                    payload = Payload.o payload }
         | { _ } ->
             err "Not Eth"
@@ -251,15 +242,23 @@ struct
         )
 
     let dst_for t bits =
+        let arp_resolve_ipv4_pld pld =
+            Option.Monad.bind (Ip.Pdu.unpack pld) (fun ip ->
+                let sender_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.src
+                and target_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.dst in
+                Some (arp_resolve_ipv4 t bits sender_ip target_ip)) in
         match t.gw with
         | None -> (* FIXME: or if the routes tells us that dest in on the same LAN than us *)
-            (match t.proto with
-            | x when x = Arp.HwProto.ip4 ->
-                Option.Monad.bind (Ip.Pdu.unpack bits) (fun ip ->
-                    let sender_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.src
-                    and target_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.dst in
-                    Some (arp_resolve_ipv4 t bits sender_ip target_ip))
-            | _ -> err "Don't know how to resolve address for this protocol")
+            if t.proto = Arp.HwProto.ip4 then (
+                arp_resolve_ipv4_pld bits
+            ) else if t.proto = Arp.HwProto.ieee8021q then (
+                Option.Monad.bind (Vlan.Pdu.unpack bits) (fun vlan ->
+                    if vlan.Vlan.Pdu.proto = Arp.HwProto.ip4 then
+                        arp_resolve_ipv4_pld (vlan.Vlan.Pdu.payload :> bitstring)
+                    else None)
+            ) else (
+                err "Don't know how to resolve address for this protocol"
+            )
         | Some (Mac addr) -> Some (Dst addr)
         | Some (IPv4 ip)  -> Some (arp_resolve_ipv4 t bits (List.hd t.my_addresses) (Ip.Addr.to_bitstring ip))
 

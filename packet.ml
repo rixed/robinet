@@ -45,30 +45,31 @@ open Tools
 module Pdu = struct
     (** Each layer can be of any one of these known protocol. *)
     type layer = Raw of bitstring (** the fallback when the actual protocol is not known *)
-               | Dhcp of Dhcp.Pdu.t | Eth of Eth.Pdu.t | Arp of Arp.Pdu.t
-               | Ip   of Ip.Pdu.t   | Udp of Udp.Pdu.t | Tcp of Tcp.Pdu.t
-               | Dns of Dns.Pdu.t   | Sll of Sll.Pdu.t
+               | Dhcp of Dhcp.Pdu.t | Eth of Eth.Pdu.t | Arp  of Arp.Pdu.t
+               | Ip   of Ip.Pdu.t   | Udp of Udp.Pdu.t | Tcp  of Tcp.Pdu.t
+               | Dns  of Dns.Pdu.t  | Sll of Sll.Pdu.t | Vlan of Vlan.Pdu.t
     (** A Pdu.t is a list of {!Packet.Pdu.layer}s, with the outer layer first for
      * a more natural presentation when printed. *)
     type t = layer list
-    
+
     (** [pack pdu] converts the layer list back to a [bitstring]. *)
     let pack (t:t) =
         let new_payload bits = function
             | Raw _  -> Raw bits
             (* can you spot a pattern here? *)
-            | Eth  p -> Eth { p with Eth.Pdu.payload = Payload.o bits }
-            | Sll  p -> Sll { p with Sll.Pdu.payload = Payload.o bits }
-            | Ip   p -> Ip  { p with Ip.Pdu.payload = Payload.o bits }
-            | Udp  p -> Udp { p with Udp.Pdu.payload = Payload.o bits }
-            | Tcp  p -> Tcp { p with Tcp.Pdu.payload = Payload.o bits }
+            | Eth  p -> Eth  { p with Eth.Pdu.payload = Payload.o bits }
+            | Sll  p -> Sll  { p with Sll.Pdu.payload = Payload.o bits }
+            | Vlan p -> Vlan { p with Vlan.Pdu.payload = Payload.o bits }
+            | Ip   p -> Ip   { p with Ip.Pdu.payload = Payload.o bits }
+            | Udp  p -> Udp  { p with Udp.Pdu.payload = Payload.o bits }
+            | Tcp  p -> Tcp  { p with Tcp.Pdu.payload = Payload.o bits }
             | x -> x in
         let pack_1 = function (* there ought to be a better way *)
             | Dhcp t -> Dhcp.Pdu.pack t | Eth t -> Eth.Pdu.pack t
             | Arp t  -> Arp.Pdu.pack t  | Ip t  -> Ip.Pdu.pack t
             | Udp t  -> Udp.Pdu.pack t  | Tcp t -> Tcp.Pdu.pack t
             | Dns t  -> Dns.Pdu.pack t  | Sll t -> Sll.Pdu.pack t
-            | Raw t  -> t in
+            | Vlan t -> Vlan.Pdu.pack t | Raw t -> t in
         let rec aux bits = function
             | [] -> Option.get bits
             | p :: ps ->
@@ -108,9 +109,14 @@ module Pdu = struct
                     ((if ip.Ip.Pdu.proto = Ip.Proto.tcp then unpack_tcp
                       else if ip.Ip.Pdu.proto = Ip.Proto.udp then unpack_udp
                       else unpack_raw) (ip.Ip.Pdu.payload :> bitstring))) in
+        let unpack_vlan = try_unpack Vlan.Pdu.unpack (fun vlan -> Vlan vlan ::
+                    ((if vlan.Vlan.Pdu.proto = Arp.HwProto.ip4 then unpack_ip
+                      else if vlan.Vlan.Pdu.proto = Arp.HwProto.arp then unpack_arp
+                      else unpack_raw) (vlan.Vlan.Pdu.payload :> bitstring))) in
         let unpack_eth = try_unpack Eth.Pdu.unpack (fun eth -> Eth eth ::
                     ((if eth.Eth.Pdu.proto = Arp.HwProto.ip4 then unpack_ip
                       else if eth.Eth.Pdu.proto = Arp.HwProto.arp then unpack_arp
+                      else if eth.Eth.Pdu.proto = Arp.HwProto.ieee8021q then unpack_vlan
                       else unpack_raw) (eth.Eth.Pdu.payload :> bitstring))) in
         let unpack_sll = try_unpack Sll.Pdu.unpack (fun sll -> Sll sll ::
                     ((if sll.Sll.Pdu.proto = Arp.HwProto.ip4 then unpack_ip
@@ -146,3 +152,9 @@ let enum_of fname =
                 | _ -> false) |> Enum.hard_count) 1
  *)
 
+(* Check we manage to decode vlan tags *)
+(*$= enum_of & ~printer:(Printf.sprintf2 "%a" (List.print Int.print))
+    ((enum_of "tests/various_vlans.pcap" //@ \
+        function _ :: Pdu.Vlan { Vlan.Pdu.id = id ; _ } :: _ -> Some id \
+               | _ -> None) |> List.of_enum) [ 1 ; 2 ]
+ *)
