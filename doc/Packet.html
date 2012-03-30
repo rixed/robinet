@@ -50,19 +50,101 @@
 </div>
 <center><h1>Module <a href="type_Packet.html">Packet</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Packet: <code class="code"><span class="keyword">sig</span></code> <a href="Packet.html">..</a> <code class="code"><span class="keyword">end</span></code></pre> The purpose of this module is to help individual packet examination and
- manipulation. It is not used when simulating a network.
+<pre><span class="keyword">module</span> Packet: <code class="code"><span class="keyword">sig</span></code> <a href="Packet.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Packet scrutiny
 <p>
 
- This is the module to look for if you want to fiddle with packets on a
- one to one basis, for instance to fuzz some packet source, collect some
- statistics on individual packets, search for some packets in a pcap file,
- etc...
+The purpose of this module is to help individual packet inquiry and
+manipulation by offering an <em>unpacked</em> view of a single packet.
+It is not used when simulating a network.
 <p>
 
- Due to the fact that every packet is considered in isolation, is can only
- decode the simpler protocols for which all required data are within a
- single packet. In other words, it will not go much deeper than TCP/UDP.<br>
+This is the module to look for if you want to fiddle with packets on a
+one to one basis, for instance to fuzz some packet source, collect some
+statistics on individual packets, search for some packets in a pcap file,
+etc...
+<p>
+
+Due to the fact that every packet is considered in isolation, it can only
+decode the simpler protocols for which all required data fits within a
+single packet. In other words, it will not venture much deeper than TCP/UDP.
+<p>
+
+<span id="1_Examples"><h1>Examples</h1></span>
+<p>
+
+<span id="2_Exploringapcapfile"><h2>Exploring a pcap file</h2></span>
+<p>
+
+This module is more usefull from the toplevel <code class="code">robinet.top</code>.
+Suppose you have this huge <a href="http://www.tcpdump.org">pcap</a> file
+of several tens of gigabyte, and we want to get some idea of what's
+in there. We start with the obvious:
+<p>
+
+<pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Pcap</span>.infos_of&nbsp;<span class="string">"big_one.pcap"</span>;;</code><pre></pre>
+<pre></pre><code class="code">-&nbsp;:&nbsp;<span class="constructor">Pcap</span>.infos&nbsp;=<br>
+{<span class="constructor">Pcap</span>.filename&nbsp;=&nbsp;<span class="string">"big_one.pcap"</span>;&nbsp;<span class="constructor">Pcap</span>.data_link_type&nbsp;=&nbsp;1l;<br>
+&nbsp;<span class="constructor">Pcap</span>.num_packets&nbsp;=&nbsp;53993956;&nbsp;<span class="constructor">Pcap</span>.data_size&nbsp;=&nbsp;40756596469<span class="constructor">L</span>;<br>
+&nbsp;&nbsp;<span class="constructor">Pcap</span>.start_time&nbsp;=&nbsp;1323766040.99259496;&nbsp;<span class="constructor">Pcap</span>.stop_time&nbsp;=&nbsp;1323767137.688411}<br>
+</code><pre></pre>
+<p>
+
+This will take a significant amount of time since the whole pcap file
+must be scanned.
+<p>
+
+Now we are interrested in all the packets attempting to connect port 80:
+<p>
+
+<pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="keyword">open</span>&nbsp;<span class="constructor">Packet</span>;;<br>
+<span class="keywordsign">#</span>&nbsp;<span class="keyword">let</span>&nbsp;s80&nbsp;=&nbsp;enum_of&nbsp;<span class="string">"big_one.pcap"</span>&nbsp;//<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">function</span>&nbsp;[_;_;_;&nbsp;<span class="constructor">Pdu</span>.<span class="constructor">Tcp</span>&nbsp;{&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.dst_port&nbsp;=&nbsp;p&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.flags&nbsp;=&nbsp;{&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.syn&nbsp;=&nbsp;<span class="keyword">true</span>&nbsp;;&nbsp;_&nbsp;}&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;_&nbsp;}]&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;p&nbsp;=&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.o&nbsp;80<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;_&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keyword">false</span>;;<br>
+<span class="keyword">val</span>&nbsp;s80&nbsp;:&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer&nbsp;list&nbsp;<span class="constructor">BatEnum</span>.t&nbsp;=&nbsp;&lt;abstr&gt;<br>
+</code><pre></pre>
+<p>
+
+This will return surprisingly fast, due to the lazy nature of Enum.filter.
+Note that in this exemple, for brevety, I pattern match for Tcp in 4th
+position only (since my big_file.pcap have a 802.1q tunnel between Ethernet
+and IP).
+<p>
+
+Let have a look at the first of them:
+<p>
+
+<pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Enum</span>.peek&nbsp;s80;;</code><pre></pre>
+<pre></pre><code class="code">-&nbsp;:&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer&nbsp;list&nbsp;option&nbsp;=<br>
+<span class="constructor">Some</span><br>
+&nbsp;[<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.<span class="constructor">Eth</span><br>
+&nbsp;&nbsp;&nbsp;{<span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.src&nbsp;=&nbsp;<span class="constructor">Cisco</span>:1d:6d:01;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.dst&nbsp;=&nbsp;<span class="constructor">Cisco</span>:4d:5c:01;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.proto&nbsp;=&nbsp;<span class="constructor">Eth8021q</span>;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.payload&nbsp;=&nbsp;64&nbsp;bytes};<br>
+&nbsp;&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.<span class="constructor">Vlan</span><br>
+&nbsp;&nbsp;&nbsp;{<span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.prio&nbsp;=&nbsp;0;&nbsp;<span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.cfi&nbsp;=&nbsp;<span class="keyword">false</span>;&nbsp;<span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.id&nbsp;=&nbsp;250;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.proto&nbsp;=&nbsp;<span class="constructor">IP</span>;&nbsp;<span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.payload&nbsp;=&nbsp;60&nbsp;bytes};<br>
+&nbsp;&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.<span class="constructor">Ip</span><br>
+&nbsp;&nbsp;&nbsp;{<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.tos&nbsp;=&nbsp;0;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.tot_len&nbsp;=&nbsp;60;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.id&nbsp;=&nbsp;25178;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.dont_frag&nbsp;=&nbsp;<span class="keyword">true</span>;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.more_frags&nbsp;=&nbsp;<span class="keyword">false</span>;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.frag_offset&nbsp;=&nbsp;0;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.ttl&nbsp;=&nbsp;62;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.proto&nbsp;=&nbsp;tcp;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.src&nbsp;=&nbsp;193.51.52.41;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.dst&nbsp;=&nbsp;91.202.200.31;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.options&nbsp;=&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.payload&nbsp;=&nbsp;40&nbsp;bytes};<br>
+&nbsp;&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.<span class="constructor">Tcp</span><br>
+&nbsp;&nbsp;&nbsp;{<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.src_port&nbsp;=&nbsp;44994;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.dst_port&nbsp;=&nbsp;www;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.seq_num&nbsp;=&nbsp;0xC7A42126;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.ack_num&nbsp;=&nbsp;0x00000000;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.win_size&nbsp;=&nbsp;5840;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.flags&nbsp;=&nbsp;<span class="constructor">Syn</span>;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.checksum&nbsp;=&nbsp;<span class="constructor">Some</span>&nbsp;38264;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.urg_ptr&nbsp;=&nbsp;0;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.options&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;02&nbsp;04&nbsp;05&nbsp;64&nbsp;01&nbsp;01&nbsp;08&nbsp;0a&nbsp;-&nbsp;8c&nbsp;61&nbsp;60&nbsp;83&nbsp;00&nbsp;00&nbsp;00&nbsp;00&nbsp;&nbsp;...d.....a......<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;01&nbsp;03&nbsp;03&nbsp;07&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;....<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.payload&nbsp;=&nbsp;empty}]<br>
+</code><pre></pre><br>
 <hr width="100%">
 <br>
 <span id="1_UnPackinganypacket"><h1>(Un)Packing any packet</h1></span><br>
