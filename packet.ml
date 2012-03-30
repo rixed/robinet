@@ -17,19 +17,94 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(**
- * The purpose of this module is to help individual packet examination and
- * manipulation. It is not used when simulating a network.
- *
- * This is the module to look for if you want to fiddle with packets on a
- * one to one basis, for instance to fuzz some packet source, collect some
- * statistics on individual packets, search for some packets in a pcap file,
- * etc...
- *
- * Due to the fact that every packet is considered in isolation, is can only
- * decode the simpler protocols for which all required data are within a
- * single packet. In other words, it will not go much deeper than TCP/UDP.
- *)
+(** Packet scrutiny
+
+The purpose of this module is to help individual packet inquiry and
+manipulation by offering an {e unpacked} view of a single packet.
+It is not used when simulating a network.
+
+This is the module to look for if you want to fiddle with packets on a
+one to one basis, for instance to fuzz some packet source, collect some
+statistics on individual packets, search for some packets in a pcap file,
+etc...
+
+Due to the fact that every packet is considered in isolation, it can only
+decode the simpler protocols for which all required data fits within a
+single packet. In other words, it will not venture much deeper than TCP/UDP.
+
+
+{1 Examples}
+
+{2 Exploring a pcap file}
+
+This module is more usefull from the toplevel [robinet.top].
+Suppose you have this huge {{:http://www.tcpdump.org}pcap} file
+of several tens of gigabyte, and we want to get some idea of what's
+in there. We start with the obvious:
+
+{[
+# Pcap.infos_of "big_one.pcap";;]}
+{[- : Pcap.infos =
+{Pcap.filename = "big_one.pcap"; Pcap.data_link_type = 1l;
+ Pcap.num_packets = 53993956; Pcap.data_size = 40756596469L;
+  Pcap.start_time = 1323766040.99259496; Pcap.stop_time = 1323767137.688411}
+]}
+
+This will take a significant amount of time since the whole pcap file
+must be scanned.
+
+Now we are interrested in all the packets attempting to connect port 80:
+
+{[
+# open Packet;;
+# let s80 = enum_of "big_one.pcap" //
+            function [_;_;_; Pdu.Tcp { Tcp.Pdu.dst_port = p ;
+                                       Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; _ } ;
+                                       _ }] -> p = Tcp.Port.o 80
+                   | _ -> false;;
+val s80 : Packet.Pdu.layer list BatEnum.t = <abstr>
+]}
+
+This will return surprisingly fast, due to the lazy nature of Enum.filter.
+Note that in this exemple, for brevety, I pattern match for Tcp in 4th
+position only (since my big_file.pcap have a 802.1q tunnel between Ethernet
+and IP).
+
+Let have a look at the first of them:
+
+{[
+# Enum.peek s80;;]}
+{[- : Packet.Pdu.layer list option =
+Some
+ [Packet.Pdu.Eth
+   {Eth.Pdu.src = Cisco:1d:6d:01;
+    Eth.Pdu.dst = Cisco:4d:5c:01;
+    Eth.Pdu.proto = Eth8021q;
+    Eth.Pdu.payload = 64 bytes};
+  Packet.Pdu.Vlan
+   {Vlan.Pdu.prio = 0; Vlan.Pdu.cfi = false; Vlan.Pdu.id = 250;
+    Vlan.Pdu.proto = IP; Vlan.Pdu.payload = 60 bytes};
+  Packet.Pdu.Ip
+   {Ip.Pdu.tos = 0; Ip.Pdu.tot_len = 60; Ip.Pdu.id = 25178;
+    Ip.Pdu.dont_frag = true; Ip.Pdu.more_frags = false;
+    Ip.Pdu.frag_offset = 0; Ip.Pdu.ttl = 62; Ip.Pdu.proto = tcp;
+    Ip.Pdu.src = 193.51.52.41;
+    Ip.Pdu.dst = 91.202.200.31; Ip.Pdu.options = ;
+    Ip.Pdu.payload = 40 bytes};
+  Packet.Pdu.Tcp
+   {Tcp.Pdu.src_port = 44994; Tcp.Pdu.dst_port = www;
+    Tcp.Pdu.seq_num = 0xC7A42126;
+    Tcp.Pdu.ack_num = 0x00000000; Tcp.Pdu.win_size = 5840;
+    Tcp.Pdu.flags = Syn; Tcp.Pdu.checksum = Some 38264;
+    Tcp.Pdu.urg_ptr = 0;
+    Tcp.Pdu.options =
+     02 04 05 64 01 01 08 0a - 8c 61 60 83 00 00 00 00  ...d.....a......
+     01 03 03 07                                        ....
+     ;
+    Tcp.Pdu.payload = empty}]
+]}
+
+*)
 open Batteries
 open Bitstring
 open Tools
