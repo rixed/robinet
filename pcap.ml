@@ -151,7 +151,8 @@ let save ?(caplen=65535) ?(dlt=dlt_en10mb) fname =
     f
 
 (** The global header of a pcap file. *)
-type global_header = { endianness    : endian ;
+type global_header = { name          : string ;
+                       endianness    : endian ;
                        version_major : int ;
                        version_minor : int ;
                        this_zone     : int32 ;
@@ -162,9 +163,10 @@ type global_header = { endianness    : endian ;
 (** When trying to read packets from a file that doesn't look like a pcap file. *)
 exception Not_a_pcap_file
 
-(** [read_global_header ic] reads the pcap global header from the input stream [ic]
- * and returns a {!Pcap.global_header}. The stream should point at the file beginning. *)
-let read_global_header ic =
+(** [read_global_header filename] reads the pcap global header from the
+ * fiven file, and returns both a {!Pcap.global_header} and the input channel. *)
+let read_global_header fname =
+    let ic = open_in_bin fname in
     let header = bitstring_of_string (IO.really_nread ic 24) ; in
     let endianness = bitmatch (takebits 32 header) with
         | { 0xa1b2c3d4l : 32 : bigendian } -> BigEndian
@@ -174,8 +176,8 @@ let read_global_header ic =
     | { version_major : 16 : endian (endianness) ; version_minor : 16 : endian (endianness) ;
         this_zone : 32 : endian (endianness) ; sigfigs : 32 : endian (endianness) ;
         snaplen : 32 : endian (endianness) ; dlt : 32 : endian (endianness) } ->
-        { endianness ; version_major ; version_minor ;
-          this_zone ; sigfigs ; snaplen ; dlt }
+        { name = fname ; endianness ; version_major ; version_minor ;
+          this_zone ; sigfigs ; snaplen ; dlt }, ic
    | { _ } -> raise Not_a_pcap_file
 
 (** [read_next_pkt global_header ic] will return the next packet that's to be read from
@@ -211,8 +213,7 @@ let dlt_of fname =
 (** from a pcap file, returns an [Enum.t] of timestamps and packets, and the
  * {!Pcap.global_header}. *)
 let load fname =
-    let ic = open_in_bin fname in
-    let global_header = read_global_header ic in
+    let global_header, ic = read_global_header fname in
     let rec next () =
         try read_next_pkt global_header ic
         with IO.No_more_input | IO.Input_closed ->
@@ -221,6 +222,8 @@ let load fname =
 
 (** Same than {!Pcap.load} but returns only the [Enum.t]. *)
 let enum_of fname = fst (load fname)
+
+(** {2 Tools} *)
 
 (** Informations on a pcap file. *)
 type infos = { filename : string ; data_link_type : int32 ;
@@ -275,15 +278,14 @@ let rec merge = function
  * Useful for those interrupted/damaged pcap files with an incomplete packet at the end,
  * that some tools then refuse to read. *)
 let repair_file fname =
-    let ic = open_in_bin fname in
+    let global_header, ic = read_global_header fname in
     let ic, counter = IO.pos_in ic in
-    let global_header = read_global_header ic in
     let rec aux () =
         let ofs = counter () in
         let cont = try ignore (read_next_pkt global_header ic) ; true
                    with IO.No_more_input | IO.Input_closed -> false in
         if cont then aux () else ofs in
-    Unix.truncate fname (aux ())
+    Unix.truncate fname (24 (* global header *) + (aux ()))
 
 (** [play tx "file.pcap"] will read packets from ["file.pcap"] and send them to [tx]
  * copying the pcap file frame rate. Notice that we use the internal {!Clock} for this,
