@@ -272,7 +272,7 @@ and tcp_connect t dst ?src_port dst_port =
             connect dst_ip
         | Name name ->
             lwt dst_ips = gethostbyname t name in
-            Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf2 "Got these IPs for '%s' : %a" name (List.print Ip.print_addr') dst_ips))) ;
+            Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf2 "Got these IPs for '%s' : %a" name (List.print Ip.Addr.print') dst_ips))) ;
             if dst_ips <> [] then
                 connect (List.hd dst_ips)
             else

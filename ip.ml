@@ -17,14 +17,22 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
+(**
+ * Everything related to IPv4 packets: (un)packing, addresses, transceiver...
+ *
+ * TODO: Some usual IP options should be understood.
+ *)
 open Batteries
 open Bitstring
 open Tools
 
 let debug = false
 
-(* Protocols *)
+(** {1 Private Types} *)
 
+(** {2 Protocols} *)
+
+(** Internet protocols, as in [/etc/protocols]. *)
 module Proto = struct
     include MakePrivate(struct
         type t = int
@@ -35,6 +43,9 @@ module Proto = struct
         let is_valid t = t < 0x100
         let repl_tag = "proto"
     end)
+
+    (** Some well know IP protocols. *)
+
     let icmp = o 1
     let tcp  = o 6
     let udp  = o 17
@@ -42,26 +53,53 @@ module Proto = struct
     let random () = o (randi 8)
 end
 
-(* Addresses *)
+(** {2 Addresses} *)
 
-(* actual type of Unix.inet_addr is string *)
+(** {3 inet_addr}
+ *
+ * Stdlib [Unix] module already have a type for IP addresses:
+ * [Unix.inet_addr] (actually a [string]). Here are the functions
+ * to convert our address ([int32]) from/to [inet_addr]. *)
+
+(** Convert an [inet_addr] into an [int32]... *)
 let int32_of_inet_addr a =
     bitmatch (bitstring_of_string (Obj.magic a)) with
     | { i : 32 } -> i
+(** ... and the other way around. *)
 let inet_addr_of_int32 i : Unix.inet_addr =
     Obj.magic (string_of_bitstring (BITSTRING { i : 32 }))
 
-let dotted_string_of_int32 i = bitmatch (BITSTRING { i : 32 }) with
-      { a : 8 ; b : 8 ; c : 8 ; d : 8 } -> Printf.sprintf "%d.%d.%d.%d" a b c d
-(*$= dotted_string_of_int32 & ~printer:identity
-  (dotted_string_of_int32 ((Addr.of_string "1.2.3.4") :> int32)) "1.2.3.4"
-*)
+(** {3 IP Addresses as int32} *)
 
+(** We use a private type for IPv4 addresses so that we can have a
+ * custom printer, but it's actually an [int32] and you can cast with:
+ * [(addr :> int32)] in one direction and [Ip.Addr.o int] in the other. *)
 module Addr = struct
+    (*$< Addr *)
+    (** If true, use the system's name resolver to find a name for each IP
+     * addresses that are printed. This can be very slow so is disabled by
+     * default, but you can change it to suit your taste:
+     * {[# let ip = Ip.Addr.of_string "217.70.184.38";;]}
+     * {[val ip : Ip.Addr.t = 217.70.184.38]}
+     * {[# Ip.Addr.print_as_names := true;;]}
+     * {[# ip;;]}
+     * {[- : Ip.Addr.t = webredir.vip.gandi.net]}
+     *
+     * This affects only printing of IP addresses, though, and thus is not
+     * expected to impact a simulation. *)
     let print_as_names = ref false
+
+    (** Regardless of the above setting, return the dotted representation (a
+     * [string] of a given [int32]. *)
+    let dotted_string_of_int32 i = bitmatch (BITSTRING { i : 32 }) with
+        { a : 8 ; b : 8 ; c : 8 ; d : 8 } -> Printf.sprintf "%d.%d.%d.%d" a b c d
+    (*$= dotted_string_of_int32 & ~printer:identity
+      (dotted_string_of_int32 ((Addr.of_string "1.2.3.4") :> int32)) "1.2.3.4"
+    *)
 
     include MakePrivate(struct
         type t = int32
+        (** Converts an address to it's string representation. *)
         let to_string t =
             if !print_as_names then
                 try (Unix.gethostbyaddr (inet_addr_of_int32 t)).Unix.h_name
@@ -73,11 +111,17 @@ module Addr = struct
         let repl_tag = "addr"
     end)
 
+    (** Some predefined addresses *)
+
     let zero = o 0l
     let broadcast = o 0xffffffffl
 
+    (** Convert an {!Ip.Addr.t} to dotted representation. *)
     let to_dotted_string (t : t) = dotted_string_of_int32 (t :> int32)
+
+    (** Convert an {!Ip.Addr.t} to a [bitstring]. *)
     let to_bitstring (t : t) = (BITSTRING { (t :> int32) : 32 })
+    (** Convert a [bitstring] into an {!Ip.Addr.t}. *)
     let of_bitstring bits = bitmatch bits with
         | { ip : 32 } -> o ip
         | { _ } -> should_not_happen ()
@@ -87,14 +131,19 @@ module Addr = struct
             | _ -> None in
         List.filter_map extract_addr (Unix.getaddrinfo str "" [])
     let of_string str = List.hd (list_of_string str)
+
+    (** Returns a random {!Ip.Addr.t}. *)
     let random () = o (rand32 ())
+    (*$>*)
+
+    (** This printer can be composed with others (for instance to print a list of ips.
+     FIXME: always use batteries IO to print instead of Format printer? *)
+    let print' oc ip =
+        Printf.fprintf oc "%s" (to_string ip)
+
 end
 
-(* This printer can be composed with others (for instance to print a list of ips.
- FIXME: always use batteries IO to print instead of Format printer? *)
-let print_addr' oc ip =
-    Printf.fprintf oc "%s" (Addr.to_string ip)
-
+(** {3 CIDR Addresses} *)
 
 type cidr = Addr.t * int
 (* TODO: printer, etc *)
@@ -106,7 +155,7 @@ let cidr_of_string str =
     in Addr.of_string ip_str, int_of_string width_str
 
 let string_of_cidr ((ip : Addr.t), width) =
-    (dotted_string_of_int32 (ip :> int32)) ^ "/" ^ (string_of_int width)
+    (Addr.dotted_string_of_int32 (ip :> int32)) ^ "/" ^ (string_of_int width)
 
 let print_cidr fmt (cidr : cidr) =
     Format.fprintf fmt "@{<addr>%s@}" (string_of_cidr cidr)
@@ -126,8 +175,9 @@ let addrs_of_cidr ((ip : Addr.t), mask) =
 let random_addrs_of_cidr cidr n =
     addrs_of_cidr cidr |> List.enum |> Random.multi_choice n
 
-(* IP packet *)
+(** {1 IP packet} *)
 
+(** (Un)Packing an IP packet. *)
 module Pdu = struct
     (*$< Pdu *)
 
@@ -248,7 +298,7 @@ module Pdu = struct
     (*$>*)
 end
 
-(* Transceiver *)
+(** {1 Transceiver} *)
 
 module TRX = struct
 
@@ -267,7 +317,7 @@ module TRX = struct
                 (* The frag_offset is given in unit of 8 bytes.
                    So the MTU is required to be a multiple of 8 bytes as well. *)
                 let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst (Payload.o pld) in
-                if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (dotted_string_of_int32 (t.src :> int32)) (dotted_string_of_int32 (t.dst :> int32)) (bytelength pld) (string_of_bitstring bits);
+                if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (Addr.dotted_string_of_int32 (t.src :> int32)) (Addr.dotted_string_of_int32 (t.dst :> int32)) (bytelength pld) (string_of_bitstring bits);
                 t.emit (Pdu.pack pdu) ;
                 aux (bit_offset + bitstring_length pld)
             ) in

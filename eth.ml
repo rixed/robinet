@@ -141,8 +141,7 @@ let gw_addr_of_string str =
 
 (** {1 (Un)Packing Ethernet frames} *)
 
-(** Pack/Unpack an Ethernet frame.
- *)
+(** Pack/Unpack an Ethernet frame.  *)
 module Pdu = struct
     (*$< Pdu *)
     (** An Ethernet frame is made up from these constituents *)
@@ -150,15 +149,15 @@ module Pdu = struct
                proto : Arp.HwProto.t ;
                payload : Payload.t }
 
-    (** Build an [Eth.Pdu.t] for the given [payload]. *)
+    (** Build an {!Eth.Pdu.t} for the given [payload]. *)
     let make proto src dst payload =
         { src ; dst ; proto ; payload }
 
-    (** Returns a random [Eth.Pdu.t]. *)
+    (** Returns a random {!Eth.Pdu.t}. *)
     let random () =
         make (Arp.HwProto.random ()) (Addr.random ()) (Addr.random ()) (Payload.random 30)
 
-    (** Pack an [Eth.Pdu.t] into its [bitstring] raw representation, ready for
+    (** Pack an {!Eth.Pdu.t} into its [bitstring] raw representation, ready for
      * injection onto the wire (via {!Pcap.inject_pdu} for instance). *)
     let pack t =
         (* TODO: pad into minimal (64bytes) size? *)
@@ -168,7 +167,7 @@ module Pdu = struct
                      (t.proto :> int) : 16 }) ;
                  (t.payload :> bitstring) ]
 
-    (** Unpack a [bitstring] into an [Eth.Pdu.t] *)
+    (** Unpack a [bitstring] into an {!Eth.Pdu.t} *)
     let unpack bits = bitmatch bits with
         | { dst : 6*8 : bitstring ;
             src : 6*8 : bitstring ;
