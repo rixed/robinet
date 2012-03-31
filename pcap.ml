@@ -89,33 +89,59 @@ let sniffer iface rx =
 (** {2 Pcap files} *)
 
 (** {e Data Link Layers} are constant values indicating what protocol and hardware technology
- * some captured packets were taken from. We support only the two most common: [dlt_en10mb], ie
- * usual Ethernet cables, and [dlt_linux_cooked] corresponding to a capture on the {e any}
+ * some captured packets were taken from. We support only the two most common: [Dlt.en10mb], ie
+ * usual Ethernet cables, and [Dlt.linux_cooked] corresponding to a capture on the {e any}
  * network device on Linux. *)
-(** BSD loopback encapsulation *)
-let dlt_null    = 0
-(** Ethernet (10Mb) *)
-let dlt_en10mb  = 1
-(** Experimental Ethernet (3Mb) *)
-let dlt_en3mb   = 2
-(** Amateur Radio AX.25 *)
-let dlt_ax25    = 3
-(** Proteon ProNET Token Ring *)
-let dlt_pronet  = 4
-(** Chaos *)
-let dlt_chaos   = 5
-(** 802.5 Token Ring *)
-let dlt_ieee802 = 6
-(** ARCNET, with BSD-style header *)
-let dlt_arcnet  = 7
-(** Serial Line IP *)
-let dlt_slip    = 8
-(** Point-to-point Protocol *)
-let dlt_ppp     = 9
-(** FDDI *)
-let dlt_fddi    = 10
-(** Linux SLL *)
-let dlt_linux_cooked = 113
+module Dlt = struct
+    include MakePrivate(struct
+        type t = int32
+        let to_string = function
+            |   0l -> "BSD loopback encapsulation"
+            |   1l -> "Ethernet (10Mb)"
+            |   2l -> "Experimental Ethernet (3Mb)"
+            |   3l -> "Amateur Radio AX.25"
+            |   4l -> "Proteon ProNET Token Ring"
+            |   5l -> "Chaos"
+            |   6l -> "802.5 Token Ring"
+            |   7l -> "ARCNET, with BSD-style header"
+            |   8l -> "Serial Line IP"
+            |   9l -> "Point-to-point Protocol"
+            |  10l -> "FDDI"
+            | 113l -> "Linux Cooked Capture"
+            |    x -> Printf.sprintf "dlt(%ld)" x
+        let is_valid _ = true
+        let repl_tag = "proto"
+    end)
+
+    (** Some well know DLT values. *)
+
+    (** BSD loopback encapsulation *)
+    let null    = o 0l
+    (** Ethernet (10Mb) *)
+    let en10mb  = o 1l
+    (** Experimental Ethernet (3Mb) *)
+    let en3mb   = o 2l
+    (** Amateur Radio AX.25 *)
+    let ax25    = o 3l
+    (** Proteon ProNET Token Ring *)
+    let pronet  = o 4l
+    (** Chaos *)
+    let chaos   = o 5l
+    (** 802.5 Token Ring *)
+    let ieee802 = o 6l
+    (** ARCNET, with BSD-style header *)
+    let arcnet  = o 7l
+    (** Serial Line IP *)
+    let slip    = o 8l
+    (** Point-to-point Protocol *)
+    let ppp     = o 9l
+    (** FDDI *)
+    let fddi    = o 10l
+    (** Linux SLL *)
+    let linux_cooked = o 113l
+
+    let random () = o (rand32 ())
+end
 
 (** The global header of a pcap file. *)
 type global_header = { name          : string ;
@@ -125,7 +151,7 @@ type global_header = { name          : string ;
                        this_zone     : int32 ;
                        sigfigs       : int32 ;
                        snaplen       : int32 ; (** Indicate that no caplen will be smaller. We don't use this. *)
-                       dlt           : int }
+                       dlt           : Dlt.t }
 
 (** {3 Pdu} *)
 
@@ -136,13 +162,15 @@ type global_header = { name          : string ;
  * afterward. *)
 module Pdu =
 struct
-    type t = { source_name : string ; caplen : int ; dlt : int ;
+    (** These informations are present as the first layer of every packet
+     * read from a pcap file. *)
+    type t = { source_name : string ; caplen : int ; dlt : Dlt.t ;
                ts : float ; payload : Payload.t }
 
-    let make source_name ?(caplen=65535) ?(dlt=dlt_en10mb) ts payload =
+    let make source_name ?(caplen=65535) ?(dlt=Dlt.en10mb) ts payload =
         { source_name ; caplen ; dlt ; ts ; payload }
 
-    (** Return the bitstring ready to be written into a pcap file. *)
+    (** Return the [bitstring] ready to be written into a pcap file (see {!Pcap.save}). *)
     let pack t =
         let sec      = Int32.of_float t.ts in
         let usec     = Int32.of_float ((t.ts -. (floor t.ts)) *. 1_000_000.) in
@@ -159,7 +187,7 @@ end
  * in ["file.pcap"] file.
  * @param caplen can be used to cap saved packet to a given number of bytes
  * @param dlt can be used to change the file's DLT (you probably do not want to do that) *)
-let save ?(caplen=65535) ?(dlt=dlt_en10mb) fname =
+let save ?(caplen=65535) ?(dlt=Dlt.en10mb) fname =
     let out_chan = open_out_bin fname
     and file_hdr = (BITSTRING {
         0xa1b2c3d4l : 32 : littleendian ;
@@ -168,7 +196,7 @@ let save ?(caplen=65535) ?(dlt=dlt_en10mb) fname =
         0l (* this TZ *) : 32 : littleendian ;
         0l : 32 : littleendian ;
         Int32.of_int caplen : 32 : littleendian ;
-        Int32.of_int dlt : 32 : littleendian }) in
+        (dlt :> int32) : 32 : littleendian }) in
     output_string out_chan (string_of_bitstring file_hdr) ;
     let f bits =
         let pdu = Pdu.make fname ~caplen ~dlt (Clock.now ()) bits in
@@ -194,7 +222,7 @@ let read_global_header fname =
         this_zone : 32 : endian (endianness) ; sigfigs : 32 : endian (endianness) ;
         snaplen : 32 : endian (endianness) ; dlt : 32 : endian (endianness) } ->
         { name = fname ; endianness ; version_major ; version_minor ;
-          this_zone ; sigfigs ; snaplen ; dlt = Int32.to_int dlt }, ic
+          this_zone ; sigfigs ; snaplen ; dlt = Dlt.o dlt }, ic
    | { _ } -> raise Not_a_pcap_file
 
 (** [read_next_pkt global_header ic] will return the next {!Pcap.Pdu.t} that's to
@@ -235,7 +263,7 @@ let enum_of fname =
 (** {2 Tools} *)
 
 (** Informations on a pcap file. *)
-type infos = { filename : string ; data_link_type : int ;
+type infos = { filename : string ; data_link_type : Dlt.t ;
                num_packets : int ; data_size : int64 ;
                start_time : float ; stop_time : float }
 
@@ -245,7 +273,7 @@ let infos_of filename =
     let pkts = enum_of filename in
     let min_ts = ref Float.max_num and max_ts = ref Float.min_num
     and num_packets = ref 0 and data_size = ref 0L in
-    let dlt = match Enum.peek pkts with Some p -> p.Pdu.dlt | None -> dlt_en10mb in
+    let dlt = match Enum.peek pkts with Some p -> p.Pdu.dlt | None -> Dlt.en10mb in
     Enum.iter (fun pdu ->
         incr num_packets ;
         data_size := Int64.add !data_size (Int64.of_int (Payload.length pdu.Pdu.payload)) ;
@@ -258,12 +286,12 @@ let infos_of filename =
 (* Check that we found the same values than capinfo *)
 (*$= infos_of & ~printer:BatPervasives.dump
     (infos_of "tests/someweb.pcap") ({ filename = "tests/someweb.pcap" ;\
-                                       data_link_type = dlt_en10mb ;\
+                                       data_link_type = Dlt.en10mb ;\
                                        num_packets = 173 ; data_size = 149461L ;\
                                        start_time = 1332451938.3774271 ;\
                                        stop_time = 1332451941.92178106 })
     (infos_of "tests/someweb_cut.pcap") ({ filename = "tests/someweb_cut.pcap" ;\
-                                           data_link_type = dlt_en10mb ;\
+                                           data_link_type = Dlt.en10mb ;\
                                            num_packets = 173 ; data_size = 149461L ;\
                                            start_time = 1332451938.3774271 ;\
                                            stop_time = 1332451941.92178106 })

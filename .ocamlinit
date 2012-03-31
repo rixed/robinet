@@ -41,4 +41,5 @@ let colorize =
 #install_printer Ip.Addr.print;;
 #install_printer Dhcp.MsgType.print;;
 #install_printer Dns.QType.print;;
+#install_printer Pcap.Dlt.print;;
 

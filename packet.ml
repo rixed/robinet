@@ -78,7 +78,8 @@ Let have a look at the first of them:
 Some
  [Packet.Pdu.Pcap
    {Pcap.Pdu.source_name = "big_one.pcap"; Pcap.Pdu.caplen = 78;
-    Pcap.Pdu.dlt = 1; Pcap.Pdu.ts = 1332451938.3774271;
+    Pcap.Pdu.dlt = Ethernet (10Mb);
+    Pcap.Pdu.ts = 1332451938.3774271;
     Pcap.Pdu.payload = 78 bytes};
   Packet.Pdu.Eth
    {Eth.Pdu.src = Cisco:1d:6d:01;
@@ -163,7 +164,7 @@ module Pdu = struct
 
     (** Convert a [bitstring] (from a Pcap.pdu) into a {!Packet.Pdu.t}.
      * @param dlt if the {e data link layer} is not Ethernet then you can change it here.
-     *            The only other known {e DLT} is {!Pcap.dlt_linux_cooked}, though. *)
+     *            The only other known {e DLT} is {!Pcap.Dlt.linux_cooked}, though. *)
     let unpack pcap =
         let unpack_raw bits =
             if bitstring_is_empty bits then [] else [ Raw bits ] in
@@ -205,7 +206,7 @@ module Pdu = struct
                       else if sll.Sll.Pdu.proto = Arp.HwProto.arp then unpack_arp
                       else unpack_raw) (sll.Sll.Pdu.payload :> bitstring)))
         in
-        Pcap pcap :: ((if pcap.Pcap.Pdu.dlt = Pcap.dlt_linux_cooked then unpack_sll
+        Pcap pcap :: ((if pcap.Pcap.Pdu.dlt = Pcap.Dlt.linux_cooked then unpack_sll
                       else unpack_eth) (pcap.Pcap.Pdu.payload :> bitstring))
 
 end
