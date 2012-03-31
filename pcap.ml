@@ -93,29 +93,67 @@ let sniffer iface rx =
  * usual Ethernet cables, and [dlt_linux_cooked] corresponding to a capture on the {e any}
  * network device on Linux. *)
 (** BSD loopback encapsulation *)
-let dlt_null    = 0l
+let dlt_null    = 0
 (** Ethernet (10Mb) *)
-let dlt_en10mb  = 1l
+let dlt_en10mb  = 1
 (** Experimental Ethernet (3Mb) *)
-let dlt_en3mb   = 2l
+let dlt_en3mb   = 2
 (** Amateur Radio AX.25 *)
-let dlt_ax25    = 3l
+let dlt_ax25    = 3
 (** Proteon ProNET Token Ring *)
-let dlt_pronet  = 4l
+let dlt_pronet  = 4
 (** Chaos *)
-let dlt_chaos   = 5l
+let dlt_chaos   = 5
 (** 802.5 Token Ring *)
-let dlt_ieee802 = 6l
+let dlt_ieee802 = 6
 (** ARCNET, with BSD-style header *)
-let dlt_arcnet  = 7l
+let dlt_arcnet  = 7
 (** Serial Line IP *)
-let dlt_slip    = 8l
+let dlt_slip    = 8
 (** Point-to-point Protocol *)
-let dlt_ppp     = 9l
+let dlt_ppp     = 9
 (** FDDI *)
-let dlt_fddi    = 10l
+let dlt_fddi    = 10
 (** Linux SLL *)
-let dlt_linux_cooked = 113l
+let dlt_linux_cooked = 113
+
+(** The global header of a pcap file. *)
+type global_header = { name          : string ;
+                       endianness    : endian ;
+                       version_major : int ;
+                       version_minor : int ;
+                       this_zone     : int32 ;
+                       sigfigs       : int32 ;
+                       snaplen       : int32 ; (** Indicate that no caplen will be smaller. We don't use this. *)
+                       dlt           : int }
+
+(** {3 Pdu} *)
+
+(** Packets harvested with libpcap will come with additional informations such
+ * as caplen, timestamp etc.
+ * This special PDU module make a pseudo-header out of those informations, so
+ * that we it's kept while we edit the packets and can be reused for saving
+ * afterward. *)
+module Pdu =
+struct
+    type t = { source_name : string ; caplen : int ; dlt : int ;
+               ts : float ; payload : Payload.t }
+
+    let make source_name ?(caplen=65535) ?(dlt=dlt_en10mb) ts payload =
+        { source_name ; caplen ; dlt ; ts ; payload }
+
+    (** Return the bitstring ready to be written into a pcap file. *)
+    let pack t =
+        let sec      = Int32.of_float t.ts in
+        let usec     = Int32.of_float ((t.ts -. (floor t.ts)) *. 1_000_000.) in
+        let wire_len = bytelength (t.payload :> bitstring) in
+        let pkt_hdr = (BITSTRING {
+            sec  : 32 : littleendian ;
+            usec : 32 : littleendian ;
+            Int32.of_int (min t.caplen wire_len) : 32 : littleendian ;
+            Int32.of_int wire_len : 32 : littleendian }) in
+        concat [ pkt_hdr ; (t.payload :> bitstring) ]
+end
 
 (** [save "file.pcap"] returns a function that will save passed packets (as [bitstring]s)
  * in ["file.pcap"] file.
@@ -130,35 +168,14 @@ let save ?(caplen=65535) ?(dlt=dlt_en10mb) fname =
         0l (* this TZ *) : 32 : littleendian ;
         0l : 32 : littleendian ;
         Int32.of_int caplen : 32 : littleendian ;
-        dlt : 32 : littleendian })
-    and write_pkt caplen bits =
-        let ts       = Clock.now () in
-        let sec      = Int32.of_float (ts) in
-        let usec     = Int32.of_float ((ts -. (floor ts)) *. 1_000_000.)
-        and wire_len = bytelength bits
-        in
-        let pkt_hdr = (BITSTRING {
-            sec  : 32 : littleendian ;
-            usec : 32 : littleendian ;
-            Int32.of_int (min caplen wire_len) : 32 : littleendian ;
-            Int32.of_int wire_len : 32 : littleendian }) in
-        concat [ pkt_hdr ; bits ] in
+        Int32.of_int dlt : 32 : littleendian }) in
     output_string out_chan (string_of_bitstring file_hdr) ;
     let f bits =
-        let p = write_pkt caplen bits in
-        output_string out_chan (string_of_bitstring p) in
+        let pdu = Pdu.make fname ~caplen ~dlt (Clock.now ()) bits in
+        let bytes = string_of_bitstring (Pdu.pack pdu) in
+        output_string out_chan bytes in
     Gc.finalise (fun _ -> close_out out_chan) f ;
     f
-
-(** The global header of a pcap file. *)
-type global_header = { name          : string ;
-                       endianness    : endian ;
-                       version_major : int ;
-                       version_minor : int ;
-                       this_zone     : int32 ;
-                       sigfigs       : int32 ;
-                       snaplen       : int32 ; (** Indicate that no caplen will be smaller. We don't use this. *)
-                       dlt           : int32 }
 
 (** When trying to read packets from a file that doesn't look like a pcap file. *)
 exception Not_a_pcap_file
@@ -177,11 +194,11 @@ let read_global_header fname =
         this_zone : 32 : endian (endianness) ; sigfigs : 32 : endian (endianness) ;
         snaplen : 32 : endian (endianness) ; dlt : 32 : endian (endianness) } ->
         { name = fname ; endianness ; version_major ; version_minor ;
-          this_zone ; sigfigs ; snaplen ; dlt }, ic
+          this_zone ; sigfigs ; snaplen ; dlt = Int32.to_int dlt }, ic
    | { _ } -> raise Not_a_pcap_file
 
-(** [read_next_pkt global_header ic] will return the next packet that's to be read from
- * the input stream [ic]. The {!Pcap.global_header} is used for the byte ordering. *)
+(** [read_next_pkt global_header ic] will return the next {!Pcap.Pdu.t} that's to
+ * be read from the input stream [ic]. *)
 let read_next_pkt global_header ic =
     let pkt_hdr = IO.really_nread ic 16 in
     bitmatch (bitstring_of_string pkt_hdr) with
@@ -200,48 +217,41 @@ let read_next_pkt global_header ic =
                        concat [ bits ; zeroes_bitstring (Int32.to_int (Int32.sub wire_len caplen)*8) ]
                    ) in
         let ts = Int32.to_float sec +. (Int32.to_float usec) *. 0.000001 in
-        ts, bits
+        Pdu.make global_header.name
+                 ~caplen:(Int32.to_int caplen)
+                 ~dlt:global_header.dlt
+                 ts (Payload.o bits)
     | { _ } -> should_not_happen ()
 
-(** [dlt_of "file.pcap"] will return the {!Pcap.global_header} of this pcap file. *)
-let dlt_of fname =
-    let ic = open_in_bin fname in
-    let global_header = read_global_header ic in
-    close_in ic ;
-    global_header.dlt
-
-(** from a pcap file, returns an [Enum.t] of timestamps and packets, and the
- * {!Pcap.global_header}. *)
-let load fname =
+(** from a pcap file, returns an [Enum.t] of {!Pcap.Pdu.t}. *)
+let enum_of fname =
     let global_header, ic = read_global_header fname in
     let rec next () =
         try read_next_pkt global_header ic
         with IO.No_more_input | IO.Input_closed ->
             raise Enum.No_more_elements in
-    Enum.from next, global_header
-
-(** Same than {!Pcap.load} but returns only the [Enum.t]. *)
-let enum_of fname = fst (load fname)
+    Enum.from next
 
 (** {2 Tools} *)
 
 (** Informations on a pcap file. *)
-type infos = { filename : string ; data_link_type : int32 ;
+type infos = { filename : string ; data_link_type : int ;
                num_packets : int ; data_size : int64 ;
                start_time : float ; stop_time : float }
 
 (** Return some informations about a pcap file (require to scan the whole file,
  * so depending on the file size it may take some time). *)
 let infos_of filename =
-    let pkts, global_header = load filename in
+    let pkts = enum_of filename in
     let min_ts = ref Float.max_num and max_ts = ref Float.min_num
     and num_packets = ref 0 and data_size = ref 0L in
-    Enum.iter (fun (ts, bits) ->
+    let dlt = match Enum.peek pkts with Some p -> p.Pdu.dlt | None -> dlt_en10mb in
+    Enum.iter (fun pdu ->
         incr num_packets ;
-        data_size := Int64.add !data_size (Int64.of_int (bytelength bits)) ;
-        min_ts := min !min_ts ts ;
-        max_ts := max !max_ts ts) pkts ;
-    { filename ; data_link_type = global_header.dlt ;
+        data_size := Int64.add !data_size (Int64.of_int (Payload.length pdu.Pdu.payload)) ;
+        min_ts := min !min_ts pdu.Pdu.ts ;
+        max_ts := max !max_ts pdu.Pdu.ts) pkts ;
+    { filename ; data_link_type = dlt ;
       num_packets = !num_packets ; data_size = !data_size ;
       start_time = !min_ts ; stop_time = !max_ts }
 
@@ -264,7 +274,7 @@ let infos_of filename =
 let rec merge = function
     | [] -> Enum.empty ()
     | a :: rest ->
-        let test_ts (ts_a, _) (ts_b, _) = ts_a <= ts_b in
+        let test_ts a b = a.Pdu.ts <= b.Pdu.ts in
         Enum.merge test_ts a (merge rest)
 (*$= merge & ~printer:BatPervasives.dump
     (merge [ (enum_of "tests/someweb.pcap" // \
@@ -297,11 +307,11 @@ let play tx fname =
     let rec read_next_pkt last_ts =
         match Enum.get packets with
             | None -> () (* pcap file is over *)
-            | Some (ts, bits) ->
-                let d = match last_ts with None -> 0. | Some lts -> ts -. lts in
+            | Some pdu ->
+                let d = match last_ts with None -> 0. | Some lts -> pdu.Pdu.ts -. lts in
                 Clock.delay d (fun () ->
-                    tx bits ;
-                    read_next_pkt (Some ts)) ()
+                    tx (pdu.Pdu.payload :> bitstring) ;
+                    read_next_pkt (Some pdu.Pdu.ts)) ()
     in
     Clock.delay 0. read_next_pkt None
 

@@ -58,15 +58,15 @@ Now we are interrested in all the packets attempting to connect port 80:
 {[
 # open Packet;;
 # let s80 = enum_of "big_one.pcap" //
-            function [_;_;_; Pdu.Tcp { Tcp.Pdu.dst_port = p ;
-                                       Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; _ } ;
-                                       _ }] -> p = Tcp.Port.o 80
+            function [_;_;_;_; Pdu.Tcp { Tcp.Pdu.dst_port = p ;
+                                         Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; _ } ;
+                                         _ }] -> p = Tcp.Port.o 80
                    | _ -> false;;
 val s80 : Packet.Pdu.layer list BatEnum.t = <abstr>
 ]}
 
 This will return surprisingly fast, due to the lazy nature of Enum.filter.
-Note that in this exemple, for brevety, I pattern match for Tcp in 4th
+Note that in this exemple, for brevety, I pattern match for Tcp in 5th
 position only (since my big_file.pcap have a 802.1q tunnel between Ethernet
 and IP).
 
@@ -76,7 +76,11 @@ Let have a look at the first of them:
 # Enum.peek s80;;]}
 {[- : Packet.Pdu.layer list option =
 Some
- [Packet.Pdu.Eth
+ [Packet.Pdu.Pcap
+   {Pcap.Pdu.source_name = "big_one.pcap"; Pcap.Pdu.caplen = 78;
+    Pcap.Pdu.dlt = 1; Pcap.Pdu.ts = 1332451938.3774271;
+    Pcap.Pdu.payload = 78 bytes};
+  Packet.Pdu.Eth
    {Eth.Pdu.src = Cisco:1d:6d:01;
     Eth.Pdu.dst = Cisco:4d:5c:01;
     Eth.Pdu.proto = Eth8021q;
@@ -123,6 +127,7 @@ module Pdu = struct
                | Dhcp of Dhcp.Pdu.t | Eth of Eth.Pdu.t | Arp  of Arp.Pdu.t
                | Ip   of Ip.Pdu.t   | Udp of Udp.Pdu.t | Tcp  of Tcp.Pdu.t
                | Dns  of Dns.Pdu.t  | Sll of Sll.Pdu.t | Vlan of Vlan.Pdu.t
+               | Pcap of Pcap.Pdu.t
     (** A Pdu.t is a list of {!Packet.Pdu.layer}s, with the outer layer first for
      * a more natural presentation when printed. *)
     type t = layer list
@@ -132,6 +137,7 @@ module Pdu = struct
         let new_payload bits = function
             | Raw _  -> Raw bits
             (* can you spot a pattern here? *)
+            | Pcap p -> Pcap { p with Pcap.Pdu.payload = Payload.o bits }
             | Eth  p -> Eth  { p with Eth.Pdu.payload = Payload.o bits }
             | Sll  p -> Sll  { p with Sll.Pdu.payload = Payload.o bits }
             | Vlan p -> Vlan { p with Vlan.Pdu.payload = Payload.o bits }
@@ -140,11 +146,12 @@ module Pdu = struct
             | Tcp  p -> Tcp  { p with Tcp.Pdu.payload = Payload.o bits }
             | x -> x in
         let pack_1 = function (* there ought to be a better way *)
-            | Dhcp t -> Dhcp.Pdu.pack t | Eth t -> Eth.Pdu.pack t
-            | Arp t  -> Arp.Pdu.pack t  | Ip t  -> Ip.Pdu.pack t
-            | Udp t  -> Udp.Pdu.pack t  | Tcp t -> Tcp.Pdu.pack t
-            | Dns t  -> Dns.Pdu.pack t  | Sll t -> Sll.Pdu.pack t
-            | Vlan t -> Vlan.Pdu.pack t | Raw t -> t in
+            | Dhcp t -> Dhcp.Pdu.pack t | Eth t  -> Eth.Pdu.pack t
+            | Arp t  -> Arp.Pdu.pack t  | Ip t   -> Ip.Pdu.pack t
+            | Udp t  -> Udp.Pdu.pack t  | Tcp t  -> Tcp.Pdu.pack t
+            | Dns t  -> Dns.Pdu.pack t  | Sll t  -> Sll.Pdu.pack t
+            | Vlan t -> Vlan.Pdu.pack t | Pcap t -> Pcap.Pdu.pack t
+            | Raw t -> t in
         let rec aux bits = function
             | [] -> Option.get bits
             | p :: ps ->
@@ -154,10 +161,10 @@ module Pdu = struct
         in
         aux None (List.rev t)
 
-    (** Convert a [bitstring] into a {!Packet.Pdu.t}.
+    (** Convert a [bitstring] (from a Pcap.pdu) into a {!Packet.Pdu.t}.
      * @param dlt if the {e data link layer} is not Ethernet then you can change it here.
      *            The only other known {e DLT} is {!Pcap.dlt_linux_cooked}, though. *)
-    let unpack ?(dlt=Pcap.dlt_en10mb) bs =
+    let unpack pcap =
         let unpack_raw bits =
             if bitstring_is_empty bits then [] else [ Raw bits ] in
         let try_unpack unp do_t bits =
@@ -198,38 +205,31 @@ module Pdu = struct
                       else if sll.Sll.Pdu.proto = Arp.HwProto.arp then unpack_arp
                       else unpack_raw) (sll.Sll.Pdu.payload :> bitstring)))
         in
-        if dlt = Pcap.dlt_linux_cooked then unpack_sll bs
-        else unpack_eth bs
+        Pcap pcap :: ((if pcap.Pcap.Pdu.dlt = Pcap.dlt_linux_cooked then unpack_sll
+                      else unpack_eth) (pcap.Pcap.Pdu.payload :> bitstring))
 
 end
 
 (** {1 Shorthands} *)
 
-(** [Packet.of_pcap pkt] converts a raw packet (as returned by {!Pcap.read_next_pkt}
- * or {!Pcap.enum_of}) into a printable/editable {!Packet.Pdu.t}. *)
-let of_pcap ?dlt (_ts, bits) =
-    Pdu.unpack ?dlt bits
-
 (** [Packet.enum_of filename] reads a pcap file and returns an [Enum.t] of {!Packet.Pdu.t}. *)
-let enum_of fname =
-    let dlt = Pcap.dlt_of fname in
-    Pcap.enum_of fname /@ of_pcap ~dlt
+let enum_of fname = Pcap.enum_of fname /@ Pdu.unpack
 
 (* Check that we manage to decode the actual content of the packets by counting the cnx establishments *)
 (*$= enum_of & ~printer:string_of_int
     (enum_of "tests/someweb.pcap" // \
-        (function _ :: _ :: Pdu.Tcp { Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; \
-                                                        Tcp.Pdu.ack = true ; _ } ; _ } :: _ -> true \
+        (function _ :: _ :: _ :: Pdu.Tcp { Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; \
+                                                             Tcp.Pdu.ack = true ; _ } ; _ } :: _ -> true \
                 | _ -> false) |> Enum.hard_count) 1
     (enum_of "tests/someweb_sll.pcap" // \
-        (function _ :: _ :: Pdu.Tcp { Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; \
-                                                        Tcp.Pdu.ack = true ; _ } ; _ } :: _ -> true \
+        (function _ :: _ :: _ :: Pdu.Tcp { Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; \
+                                                             Tcp.Pdu.ack = true ; _ } ; _ } :: _ -> true \
                 | _ -> false) |> Enum.hard_count) 1
  *)
 
 (* Check we manage to decode vlan tags *)
 (*$= enum_of & ~printer:(Printf.sprintf2 "%a" (List.print Int.print))
     ((enum_of "tests/various_vlans.pcap" //@ \
-        function _ :: Pdu.Vlan { Vlan.Pdu.id = id ; _ } :: _ -> Some id \
+        function _ :: _ :: Pdu.Vlan { Vlan.Pdu.id = id ; _ } :: _ -> Some id \
                | _ -> None) |> List.of_enum) [ 1 ; 2 ]
  *)
