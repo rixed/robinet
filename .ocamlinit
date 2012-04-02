@@ -16,7 +16,8 @@ let colorize =
     Format.set_mark_tags false ;
     let def_funs = Format.get_formatter_tag_functions () in
     let colorize = function
-        | "addr" | "time" | "proto" | "port" | "seqnum" | "code" -> Format.printf "\027[1;35m"
+        | "addr" | "proto" | "port" | "seqnum" | "code" -> Format.printf "\027[1;35m"
+        | "time" -> Format.printf "\027[1;33m"
         | "bits" | "flags" -> Format.printf "\027[1;34m"
         | x -> def_funs.Format.print_open_tag x
     and uncolorize = function
@@ -42,4 +43,6 @@ let colorize =
 #install_printer Dhcp.MsgType.print;;
 #install_printer Dns.QType.print;;
 #install_printer Pcap.Dlt.print;;
+#install_printer Clock.Time.print;;
+#install_printer Clock.Interval.print;;
 

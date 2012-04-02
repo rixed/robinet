@@ -257,7 +257,7 @@ let logs _mth _matches vars _qry_body resp_body =
     let print_queue oc q =
         Log.queue_iter (fun t str ->
                 Printf.fprintf oc "<tr><td class=\"time\">%a</td><td>%s</td></tr>\n"
-                Clock.print t str)
+                Clock.printer t str)
             q in
     page_head ~selected:"logs" resp_body ;
     let logger_name = try Hashtbl.find vars "logger" with Not_found -> "Host/localhost" in

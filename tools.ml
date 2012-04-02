@@ -202,21 +202,27 @@ let rand_hostname () =
      and can display them differently;
    - the programmer can't confuse the two either or will be told
      by the compiler. *)
-module MakePrivate (Inner : sig
+module type PRIVATE_TYPE =
+sig
+    type t
+    type outer_t
+    val to_string : t -> string
+    val print : Format.formatter -> t -> unit
+    val o : outer_t -> t
+end
+
+module MakePrivate (Outer : sig
     type t
     val to_string : t -> string
     val is_valid : t -> bool
     val repl_tag : string
-end) : sig
-    type t = private Inner.t
-    val to_string : t -> string
-    val print : Format.formatter -> t -> unit
-    val o : Inner.t -> t
-end = struct
-    type t = Inner.t
-    let to_string = Inner.to_string
-    let print fmt t = Format.fprintf fmt "@{<%s>%s@}" Inner.repl_tag (to_string t)
-    let o t = assert (Inner.is_valid t) ; t
+end) : PRIVATE_TYPE with type t = private Outer.t and type outer_t = Outer.t =
+struct
+    type t = Outer.t
+    type outer_t = Outer.t
+    let to_string = Outer.to_string
+    let print fmt t = Format.fprintf fmt "@{<%s>%s@}" Outer.repl_tag (to_string t)
+    let o t = assert (Outer.is_valid t) ; t
 end
 
 module Payload = struct

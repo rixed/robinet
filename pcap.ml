@@ -44,7 +44,7 @@ external inject : iface -> string -> unit = "wrap_pcap_inject"
 
 (** [sniff iface] will return the next available packet, as well as its capture
  * timestamp *)
-external sniff : iface -> (float * string) = "wrap_pcap_read"
+external sniff : iface -> (Clock.Time.t * string) = "wrap_pcap_read"
 
 (** {1 User functions} *)
 (** {2 Packet injection} *)
@@ -81,7 +81,7 @@ let sniffer iface rx =
         lwt ts, pkt = Lwt_preemptive.detach sniff iface in
         Metric.Atomic.fire packets_sniffed_ok ;
         Metric.Counter.increase bytes_in (Int64.of_int (String.length pkt)) ;
-        if debug then Printf.printf "Pcap: Got packet for ts %f\n%!" ts ;
+        if debug then Printf.printf "Pcap: Got packet for ts %s\n%!" (Clock.Time.to_string ts) ;
         Clock.at ts rx (bitstring_of_string pkt) ;
         loop ()
     in loop ()
@@ -165,19 +165,18 @@ struct
     (** These informations are present as the first layer of every packet
      * read from a pcap file. *)
     type t = { source_name : string ; caplen : int ; dlt : Dlt.t ;
-               ts : float ; payload : Payload.t }
+               ts : Clock.Time.t ; payload : Payload.t }
 
     let make source_name ?(caplen=65535) ?(dlt=Dlt.en10mb) ts payload =
         { source_name ; caplen ; dlt ; ts ; payload }
 
     (** Return the [bitstring] ready to be written into a pcap file (see {!Pcap.save}). *)
     let pack t =
-        let sec      = Int32.of_float t.ts in
-        let usec     = Int32.of_float ((t.ts -. (floor t.ts)) *. 1_000_000.) in
+        let sec,usec = Clock.Time.to_ints t.ts in
         let wire_len = bytelength (t.payload :> bitstring) in
         let pkt_hdr = (BITSTRING {
-            sec  : 32 : littleendian ;
-            usec : 32 : littleendian ;
+            Int32.of_int sec  : 32 : littleendian ;
+            Int32.of_int usec : 32 : littleendian ;
             Int32.of_int (min t.caplen wire_len) : 32 : littleendian ;
             Int32.of_int wire_len : 32 : littleendian }) in
         concat [ pkt_hdr ; (t.payload :> bitstring) ]
@@ -244,7 +243,7 @@ let read_next_pkt global_header ic =
                    else (
                        concat [ bits ; zeroes_bitstring (Int32.to_int (Int32.sub wire_len caplen)*8) ]
                    ) in
-        let ts = Int32.to_float sec +. (Int32.to_float usec) *. 0.000001 in
+        let ts = Clock.Time.o (Int32.to_float sec +. (Int32.to_float usec) *. 0.000001) in
         Pdu.make global_header.name
                  ~caplen:(Int32.to_int caplen)
                  ~dlt:global_header.dlt
@@ -265,7 +264,7 @@ let enum_of fname =
 (** Informations on a pcap file. *)
 type infos = { filename : string ; data_link_type : Dlt.t ;
                num_packets : int ; data_size : int64 ;
-               start_time : float ; stop_time : float }
+               start_time : Clock.Time.t ; stop_time : Clock.Time.t }
 
 (** Return some informations about a pcap file (require to scan the whole file,
  * so depending on the file size it may take some time). *)
@@ -277,24 +276,24 @@ let infos_of filename =
     Enum.iter (fun pdu ->
         incr num_packets ;
         data_size := Int64.add !data_size (Int64.of_int (Payload.length pdu.Pdu.payload)) ;
-        min_ts := min !min_ts pdu.Pdu.ts ;
-        max_ts := max !max_ts pdu.Pdu.ts) pkts ;
+        min_ts := min !min_ts (pdu.Pdu.ts :> float);
+        max_ts := max !max_ts (pdu.Pdu.ts :> float)) pkts ;
     { filename ; data_link_type = dlt ;
       num_packets = !num_packets ; data_size = !data_size ;
-      start_time = !min_ts ; stop_time = !max_ts }
+      start_time = Clock.Time.o !min_ts ; stop_time = Clock.Time.o !max_ts }
 
 (* Check that we found the same values than capinfo *)
 (*$= infos_of & ~printer:BatPervasives.dump
     (infos_of "tests/someweb.pcap") ({ filename = "tests/someweb.pcap" ;\
                                        data_link_type = Dlt.en10mb ;\
                                        num_packets = 173 ; data_size = 149461L ;\
-                                       start_time = 1332451938.3774271 ;\
-                                       stop_time = 1332451941.92178106 })
+                                       start_time = Clock.Time.o 1332451938.3774271 ;\
+                                       stop_time = Clock.Time.o 1332451941.92178106 })
     (infos_of "tests/someweb_cut.pcap") ({ filename = "tests/someweb_cut.pcap" ;\
                                            data_link_type = Dlt.en10mb ;\
                                            num_packets = 173 ; data_size = 149461L ;\
-                                           start_time = 1332451938.3774271 ;\
-                                           stop_time = 1332451941.92178106 })
+                                           start_time = Clock.Time.o 1332451938.3774271 ;\
+                                           stop_time = Clock.Time.o 1332451941.92178106 })
  *)
 
 (** [merge [e1 ; e2 ; e3]] will merge the three [Enumt.t] of packets in chronological
@@ -336,10 +335,11 @@ let play tx fname =
         match Enum.get packets with
             | None -> () (* pcap file is over *)
             | Some pdu ->
-                let d = match last_ts with None -> 0. | Some lts -> pdu.Pdu.ts -. lts in
+                let d = match last_ts with None     -> Clock.Interval.o 0.
+                                         | Some lts -> Clock.Time.sub pdu.Pdu.ts lts in
                 Clock.delay d (fun () ->
                     tx (pdu.Pdu.payload :> bitstring) ;
                     read_next_pkt (Some pdu.Pdu.ts)) ()
     in
-    Clock.delay 0. read_next_pkt None
+    Clock.delay (Clock.Interval.o 0.) read_next_pkt None
 

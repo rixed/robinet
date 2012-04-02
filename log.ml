@@ -26,7 +26,7 @@ open Tools
 
 (* Basically, Info is the lowest thing you want to see by default. *)
 type level  = Critical | Error | Warning | Info | Debug
-type msg    = Clock.time * (string Lazy.t)
+type msg    = Clock.Time.t * (string Lazy.t)
 type queue  = int * msg array
 type logger = { name : string ; queues : queue array }
 
@@ -39,7 +39,7 @@ let nb_levels = 5
 
 let console_lvl = int_of_level Debug
 let console_log name (t, lstr) =
-    Printf.printf "%a: %s: %s\n%!" Clock.print t name (Lazy.force lstr)
+    Printf.printf "%a: %s: %s\n%!" Clock.printer t name (Lazy.force lstr)
 
 (* queue management *)
 
@@ -67,7 +67,7 @@ let log logger level lstr =
 (* creation *)
 
 let make_queue size =
-    0, Array.create size (0., lazy "")
+    0, Array.create size (Clock.Time.o 0., lazy "")
 
 let loggers = Hashtbl.create 131
 

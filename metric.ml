@@ -55,7 +55,7 @@ struct
 
     type t = { name               : string ;
                mutable count      : int64 ;
-               mutable first_last : (float * float) option }
+               mutable first_last : (Clock.Time.t * Clock.Time.t) option }
 
     let all = Hashtbl.create 37
 
@@ -78,9 +78,9 @@ struct
     let print oc ev =
         Printf.fprintf oc "Metric: %s:\n\tcount: %Ld\n" ev.name ev.count ;
         match ev.first_last with None -> () | Some (first, last) ->
-            Printf.fprintf oc "\tfirst: %a\n\tlast: %a\n" Clock.print first Clock.print last ;
+            Printf.fprintf oc "\tfirst: %a\n\tlast: %a\n" Clock.printer first Clock.printer last ;
             if first <> last then
-                Printf.fprintf oc "\trate: %f Hz\n" (Int64.to_float ev.count /. (last -. first))
+                Printf.fprintf oc "\trate: %f Hz\n" (Int64.to_float ev.count /. ((Clock.Time.sub last first) :> float))
 end
 
 (* Counters are for counting bytes, etc *)
@@ -112,8 +112,8 @@ end
 module Timed =
 struct
 
-    type minmax = { mutable min : (float * string) ;
-                    mutable max : (float * string) }
+    type minmax = { mutable min : (Clock.Interval.t * string) ;
+                    mutable max : (Clock.Interval.t * string) }
 
     let make_minmax v id = { min = v, id ; max = v, id }
 
@@ -124,7 +124,7 @@ struct
     type t = { name                  : string ;
                start                 : Atomic.t ;
                stop                  : Atomic.t ;
-               mutable tot_duration  : float ;
+               mutable tot_duration  : Clock.Interval.t ;
                mutable minmax        : minmax option ;
                mutable simult        : int ;
                mutable max_simult    : int }
@@ -135,7 +135,7 @@ struct
         let ret = { name              = name ;
                     start             = Atomic.make (name^"/start") ;
                     stop              = Atomic.make (name^"/stop") ;
-                    tot_duration      = 0. ;
+                    tot_duration      = Clock.Interval.o 0. ;
                     minmax            = None ;
                     simult            = 0 ;
                     max_simult        = 0 } in
@@ -152,21 +152,22 @@ struct
         let now = Clock.now () in
         Atomic.fire ev.stop ;
         ev.simult <- ev.simult - 1 ;
-        let duration = now -. start_time in
-        ev.tot_duration <- ev.tot_duration +. duration ;
+        let duration = Clock.Time.sub now start_time in
+        ev.tot_duration <- Clock.Interval.add ev.tot_duration duration ;
         match ev.minmax with
             | None -> ev.minmax <- Some (make_minmax duration id)
             | Some mm -> update_minmax mm duration id
 
     let print oc ev =
-        Printf.fprintf oc "Metric: %s:\n\ttotal-duration: %fs\n\tsimultaneous: %d\n\tmax-simult: %d\n"
-            ev.name ev.tot_duration ev.simult ev.max_simult ;
+        Printf.fprintf oc "Metric: %s:\n\ttotal-duration: %s\n\tsimultaneous: %d\n\tmax-simult: %d\n"
+            ev.name (Clock.Interval.to_string ev.tot_duration) ev.simult ev.max_simult ;
         if ev.stop.Atomic.count <> 0L then
-            Printf.fprintf oc "\tavg-duration: %fs\n"
-                (ev.tot_duration /. Int64.to_float ev.stop.Atomic.count) ;
+            Printf.fprintf oc "\tavg-duration: %s\n"
+                (((ev.tot_duration :> float) /. Int64.to_float ev.stop.Atomic.count) |> Clock.Interval.o |> Clock.Interval.to_string) ;
         (match ev.minmax with None -> () | Some mm ->
-            Printf.fprintf oc "\tmin-duration: %f s (%s)\n\tmax-duration: %fs (%s)\n"
-                (fst mm.min) (snd mm.min) (fst mm.max) (snd mm.max))
+            Printf.fprintf oc "\tmin-duration: %s (%s)\n\tmax-duration: %s (%s)\n"
+                (Clock.Interval.to_string (fst mm.min)) (snd mm.min)
+                (Clock.Interval.to_string (fst mm.max)) (snd mm.max))
 end
 
 (* Report generation *)

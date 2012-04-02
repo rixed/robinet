@@ -359,12 +359,12 @@ end
  * Also, notice that you can use the same [limited x y] in both directions,
  * thus having something similar than a half-duplex cable ;-) *)
 let limited latency throughput =
-    let next_avlb = ref 0. in
+    let next_avlb = ref (Clock.Time.o 0.) in
     (fun emit bits ->
-        let min_start = Clock.now () +. latency in
+        let min_start = Clock.Time.add (Clock.now ()) latency in
         let start = max min_start !next_avlb
         and nb_bits = float_of_int (min (bitstring_length bits) 368) in
-        let duration = max (Clock.usec 1.) (nb_bits /. throughput) in
-        next_avlb := start +. duration ;
+        let duration = max (Clock.Interval.usec 1.) (Clock.Interval.o (nb_bits /. throughput)) in
+        next_avlb := Clock.Time.add start duration ;
         Clock.at start emit bits)
 

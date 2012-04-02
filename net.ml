@@ -311,7 +311,7 @@ let instanciate t =
             (* TODO: choose latency according to cable actual length *)
             (* TODO: choose throughput according to min of both adapters throughput *)
             (* TODO: add a flag for half/full duplex *)
-            let latency = 0.010 and throughput = 1_000_000_000. in
+            let latency = Clock.Interval.msec 10. and throughput = 1_000_000_000. in
             let half_dup = Eth.limited latency throughput in
             a_set_emit (half_dup b_rx) ;
             b_set_emit (half_dup a_rx)

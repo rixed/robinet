@@ -79,7 +79,7 @@ Some
  [Packet.Pdu.Pcap
    {Pcap.Pdu.source_name = "big_one.pcap"; Pcap.Pdu.caplen = 78;
     Pcap.Pdu.dlt = Ethernet (10Mb);
-    Pcap.Pdu.ts = 1332451938.3774271;
+    Pcap.Pdu.ts = 22:32:18.38;
     Pcap.Pdu.payload = 78 bytes};
   Packet.Pdu.Eth
    {Eth.Pdu.src = Cisco:1d:6d:01;

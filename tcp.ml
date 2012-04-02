@@ -317,7 +317,7 @@ struct
         ) ;
         t.rcvd_pkts <- Streambuf.add (offset, tcp) t.rcvd_pkts ;
         try_really_rx t ;
-        Clock.delay (Clock.msec 200.) delayed_ack t ;
+        Clock.delay (Clock.Interval.msec 200.) delayed_ack t ;
         try_really_tx t (* because the advertized window may have changed, we might want to send a FIN, etc *)
 
     and is_established t = t.sent_pld > 0 && t.rcvd_pld > 0
@@ -393,7 +393,7 @@ struct
         trx_of t
 
     let may_timeout t = if not (is_established t) then establish_cnx t false
-    let default_connect_timeout = Clock.sec 15.
+    let default_connect_timeout = Clock.Interval.sec 15.
     let connect ?(timeout=default_connect_timeout) ?isn ?mtu src dst =
         let t = make_ ?isn ?mtu src dst in
         let waiter, wakener = Lwt.wait () in

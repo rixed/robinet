@@ -65,7 +65,7 @@ type t = { mutable host_trx : host_trx ;
            search_sfx : string option ;
            nameserver : Ip.Addr.t option ;
            mutable resolv_trx : trx option ;
-           dns_queries : (string, (Ip.Addr.t list Lwt.u * Clock.time option)) Hashtbl.t ;
+           dns_queries : (string, (Ip.Addr.t list Lwt.u * Clock.Time.t option)) Hashtbl.t ;
            dns_cache   : (string, Ip.Addr.t list) Hashtbl.t }
 
 exception No_socket
@@ -184,7 +184,7 @@ let rec resolver t =
         Lwt.return resolv_trx
 
 and gethostbyname t name =
-    let dns_timeout_delay = Clock.sec 3. in
+    let dns_timeout_delay = Clock.Interval.sec 3. in
     let is_fqdn n = n.[String.length n - 1] = '.' in
     let is_complete n = is_fqdn n || String.exists n "." in
     let name = match t.search_sfx with
@@ -404,12 +404,12 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
             let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Payload.o (Dhcp.Pdu.pack pdu)) in
             let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Payload.o (Udp.Pdu.pack pdu)) in
             t.eth.Eth.TRX.trx.Tools.tx (Ip.Pdu.pack pdu) ;
-            Clock.delay (Clock.sec (5.+.(Random.float 3.))) send_discover ()
+            Clock.delay (Clock.Interval.sec (5.+.(Random.float 3.))) send_discover ()
         ) in
     t.eth.Eth.TRX.trx.set_recv dhcp_client ;
     (* The client should wait a random time between one and ten seconds to desynchronize
        the use of DHCP at startup - RFC 2131 *)
-    Clock.delay (Clock.sec (1.+.(Random.float 9.))) send_discover () ;
+    Clock.delay (Clock.Interval.sec (1.+.(Random.float 9.))) send_discover () ;
     send_discover () ;
     t.host_trx
 

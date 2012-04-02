@@ -17,8 +17,16 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(*
-   This module creates an alarm-clock that orders registered events.
+(**
+   This module creates an alarm-clock that schedule registered events.
+   There are two modes of operation: realtime and not realtime.
+
+   When in realtime mode (the default), the clock will merely follow
+   wall-clock. This is not very interesting but is required whenever you plan
+   to work with real network devices and outside world.  If your simulated
+   network does not communicates with the outside world, though, then you can
+   use not realtime mode and then play your simulation at full speed (and full
+   CPU).
 *)
 open Batteries
 open Bitstring
@@ -28,37 +36,84 @@ let debug = false
 
 let realtime = ref true
 
-type time = float
+(** {1 Private Types} *)
 
-let date_and_time = false
+(** Time.t represents a given timestamp. *)
+module rec Time : sig
+    val print_date : bool ref
+    include PRIVATE_TYPE with type t = private float and type outer_t = float
+    val add : t -> Interval.t -> t
+    val sub : t -> t -> Interval.t
+    val wall_clock : unit -> t
+    val to_ints : t -> int * int
+end = struct
+    (** When displaying a time, print also the corresponding date.
+     * Only useful if your simulation spans several days, which is uncommon. *)
+    let print_date = ref false
 
-let string_of_time t =
-    let open Unix in
-    let tm = localtime t in
-    let msec = Float.round_to_int (100. *. (fst (modf t))) in
-    if date_and_time then
-        Printf.sprintf "%d-%02d-%02d %02d:%02d:%02d.%02d"
-            (1900+tm.tm_year) (1+tm.tm_mon) tm.tm_mday tm.tm_hour tm.tm_min tm.tm_sec msec
-    else
-        Printf.sprintf "%02d:%02d:%02d.%02d"
-            tm.tm_hour tm.tm_min tm.tm_sec msec
+    include MakePrivate(struct
+        type t = float
+        let to_string t =
+            let open Unix in
+            let tm = localtime t in
+            let msec = Float.round_to_int (100. *. (fst (modf t))) in
+            if !print_date then
+                Printf.sprintf "%d-%02d-%02d %02d:%02d:%02d.%02d"
+                    (1900+tm.tm_year) (1+tm.tm_mon) tm.tm_mday tm.tm_hour tm.tm_min tm.tm_sec msec
+            else
+                Printf.sprintf "%02d:%02d:%02d.%02d"
+                    tm.tm_hour tm.tm_min tm.tm_sec msec
+        let is_valid _ = true
+        let repl_tag = "time"
+    end)
 
-let time_printer fmt (t : time) = (* for the toplevel *)
-    Format.fprintf fmt "@{<time>%s@}" (string_of_time t)
+    let add (t : t) (i : Interval.t) = o ((t :> float) +. (i :> float))
+    let sub (a : t) (b : t) = Interval.o ((a :> float) -. (b :> float))
+    let wall_clock () = o (Unix.gettimeofday ())
+    let to_ints (t : t) =
+        let t = (t :> float) in
+        let sec  = Int.of_float t in
+        let usec = Int.of_float ((t -. (floor t)) *. 1_000_000.) in
+        sec, usec
+end
+and Interval : sig
+    include PRIVATE_TYPE with type t = private float and type outer_t = float
+    val usec : float -> t
+    val msec : float -> t
+    val sec  : float -> t
+    val min  : float -> t
+    val hour : float -> t
+    val compare : t -> t -> int
+    val add : t -> t -> t
+end = struct
+    include MakePrivate(struct
+        type t = float
+        let to_string t =
+            Printf.sprintf "+%fs" t
+        let is_valid _ = true
+        let repl_tag = "time"
+    end)
+
+    let usec i = o (i *. 0.000001)
+    let msec i = o (i *. 0.001)
+    let sec i  = o i
+    let min i  = o (i *. 60.)
+    let hour i = o (i *. 3600.)
+
+    let compare (a : t) (b : t) = Float.compare (a :> float) (b :> float)
+    let add (a : t) (b : t) = o ((a :> float) +. (b :> float))
+end
 
 (* poor man's asctime *)
-let print oc t = BatIO.nwrite oc (string_of_time t)
+let printer oc t = BatIO.nwrite oc (Time.to_string t)
 
-let usec i = i *. 0.000001
-let msec i = i *. 0.001
-let sec i  = i
-let min i  = i *. 60.
-let hour i = i *. 3600.
+module Map = Map.Make (struct
+    type t = Time.t
+    let compare (a : t) (b : t) = Float.compare (a :> float) (b :> float)
+end)
 
-module Map = Map.Make (struct type t = time let compare = Float.compare end)
-
-type clock = { mutable now : time ; mutable events : (unit -> unit) Map.t }
-let current = { now = Unix.gettimeofday () ; events = Map.empty }
+type clock = { mutable now : Time.t ; mutable events : (unit -> unit) Map.t }
+let current = { now = Time.o (Unix.gettimeofday ()) ; events = Map.empty }
 
 let now () = current.now
 
@@ -71,24 +126,24 @@ let nextev_awake () = match !nextev_wakener with
         if debug then Printf.printf "Clock: waking waiter up\n%!" ;
         Lwt.wakeup w ()
 
-let at ts f x =
-    if debug then Printf.printf "Clock: add an event for time %f (%+fs)\n%!" ts (ts -. current.now) ;
+let at (ts : Time.t) f x =
+    if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.sub ts current.now)) ;
     current.events <- Map.add ts (fun () -> f x) current.events ;
     nextev_awake ()
 
 let next_event () =
     let ts, f = try Map.min_binding current.events
-                with Not_found -> max_float, (fun () -> ()) in
-    let wait_ts = if not !realtime then 0. else ts -. current.now in
-    if wait_ts > msec 10. then (
-        if debug then Printf.printf "Clock: next_event: waiting for %fs since we're too early\n%!" wait_ts ;
+                with Not_found -> Time.o max_float, (fun () -> ()) in
+    let wait_ts = if not !realtime then Interval.o 0. else (Time.sub ts current.now) in
+    if Interval.compare wait_ts (Interval.msec 10.) > 0 then (
+        if debug then Printf.printf "Clock: next_event: waiting for %s since we're too early\n%!" (Interval.to_string wait_ts) ;
         let waiter, wakener = Lwt.task () in
         nextev_wakener := Some wakener ;
-        lwt _ = Lwt.pick [ Lwt_unix.sleep wait_ts ; waiter ] in
+        lwt _ = Lwt.pick [ Lwt_unix.sleep (wait_ts :> float) ; waiter ] in
         nextev_wakener := None ;
         Lwt.return ()
     ) else (
-        if debug then Printf.printf "Clock: next_event: executing since it's time (%+fs)\n%!" wait_ts ;
+        if debug then Printf.printf "Clock: next_event: executing since it's time (%s)\n%!" (Interval.to_string wait_ts) ;
         current.events <- Map.remove ts current.events ;
         current.now <- ts ;
         Lwt.catch (fun () -> Lwt.return (f ())) (fun exn ->
@@ -97,7 +152,7 @@ let next_event () =
     )
 
 let delay d f x =
-    at (d +. current.now) f x
+    at (Time.add current.now d) f x
 
 (* We cannot allow our thread to sleep since we want to control the speed of time *)
 let sleep d =
@@ -116,5 +171,5 @@ let run () =
    Otherwise, time jumps from one registered event to the next. *)
 let synch () =
     ensure !realtime "Synch with real clock in non-realtime mode!?" ;
-    current.now <- Unix.gettimeofday ()
+    current.now <- Time.wall_clock ()
 

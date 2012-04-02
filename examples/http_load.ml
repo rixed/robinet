@@ -36,7 +36,7 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
     in
     (* Build the HUB and link it to hosts *)
     let hub     = Hub.Repeater.make (nb_srcs+1)
-    and gigabit = Eth.limited 0.010 1_000_000_000. in
+    and gigabit = Eth.limited (Clock.Interval.msec 10.) 1_000_000_000. in
     List.iteri (fun i h ->
         (* notice that the cable is not full duplex *)
         h.Host.set_emit (gigabit (Hub.Repeater.rx i hub)) ;
@@ -52,7 +52,7 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
         | Some pause -> Browser.user browser ~pause:pause max_depth (Url.of_string start_url)
         | None       -> Browser.spider browser max_depth (Url.of_string start_url)) hosts in
     (* Prepare a timeout in 15s *)
-    Clock.delay (Clock.sec 15.) failwith "timeout" ;
+    Clock.delay (Clock.Interval.sec 15.) failwith "timeout" ;
     (* Run everything *)
     Lwt.choose ([ Pcap.sniffer iface (Hub.Repeater.rx nb_srcs hub) ;
                   Clock.run () ] @ browsing_threads)

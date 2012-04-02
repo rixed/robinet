@@ -41,7 +41,7 @@ let run () =
                               (Ip.Addr.of_string "192.168.0.2")
     and hub = Hub.Repeater.make 3
     in
-    let gigabit = Eth.limited 0.01 1_000_000_000. in
+    let gigabit = Eth.limited (Clock.Interval.msec 1.) 1_000_000_000. in
     h1.Host.set_emit (gigabit (Hub.Repeater.rx 0 hub)) ;
     Hub.Repeater.set_emit 0 hub (gigabit h1.Host.rx) ;
     h2.Host.set_emit (gigabit (Hub.Repeater.rx 1 hub)) ;

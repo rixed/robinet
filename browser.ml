@@ -37,7 +37,7 @@ let debug = false
 
 type cookie = { name : string ; value : string ; domain : string ; path : string }
 
-type vacant_cnx = { trx : Tcp.TRX.tcp_trx ; last_used : float }
+type vacant_cnx = { trx : Tcp.TRX.tcp_trx ; last_used : Clock.Time.t }
 
 type t = { host : Host.host_trx ;
            user_agent : string ;
@@ -46,9 +46,9 @@ type t = { host : Host.host_trx ;
               we can reuse them if necessary. These are closed after some time,
               and we do not keep more than a given number (10, specifically) *)
            mutable vacant_cnxs : (Host.addr * Tcp.Port.t, vacant_cnx) Hashtbl.t ;
-           max_vacant_cnx : int ; max_idle_cnx : float }
+           max_vacant_cnx : int ; max_idle_cnx : Clock.Interval.t }
 
-let make ?(user_agent="RobiNet") ?(max_vacant_cnx=10) ?(max_idle_cnx=15.) host =
+let make ?(user_agent="RobiNet") ?(max_vacant_cnx=10) ?(max_idle_cnx=Clock.Interval.sec 15.) host =
     { host = host ;
       user_agent = user_agent ;
       cookies = [] ;
@@ -201,13 +201,13 @@ let find_vacant_cnx t addr port =
 let clean_vacant_cnxs t =
     let count = ref 0
     and now = Clock.now () in
-    let age t = now -. t in
+    let age t = Clock.Time.sub now t in
     t.vacant_cnxs <- Hashtbl.filter (fun v ->
         incr count ;
         if v.trx.Tcp.TRX.is_closed () then (
             if debug then Printf.printf "Browser: clean_vacant_cnxs: cleaning a closed trx\n" ;
             false
-        ) else if !count > t.max_vacant_cnx || age v.last_used > t.max_idle_cnx then (
+        ) else if !count > t.max_vacant_cnx || Clock.Interval.compare (age v.last_used) t.max_idle_cnx > 0 then (
             if debug then Printf.printf "Browser: clean_vacant_cnxs: making room\n" ;
             v.trx.Tcp.TRX.close () ;
             false
@@ -379,8 +379,8 @@ let user t ?pause max_depth start =
                         lwt () = match pause with
                             | None -> Lwt.return ()
                             | Some t ->
-                                let p = Random.float (2.*.t) in
-                                if debug then Printf.printf "Browser: Will pause for %fs\n%!" p ;
+                                let p = Clock.Interval.o (Random.float (2.*.t)) in
+                                if debug then Printf.printf "Browser: Will pause for %s\n%!" (Clock.Interval.to_string p) ;
                                 Clock.sleep p in
                         if debug then Printf.printf "Browser: spider: fetching %s after %s\n" (Url.to_string url') (Url.to_string url) ;
                         aux (max_depth-1) url') in
