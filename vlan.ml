@@ -42,12 +42,12 @@ module Pdu = struct
                payload : Payload.t }
 
     (** Build a [Vlan.Pdu.t] for the given [payload]. *)
-    let make ?(prio=0) ?(cfi=false) id proto payload =
-        { prio ; cfi ; id ; proto ; payload }
+    let make ?(prio=0) ?(cfi=false) id proto bits =
+        { prio ; cfi ; id ; proto ; payload = Payload.o bits }
 
     (** Returns a random [Vlan.Pdu.t]. *)
     let random () =
-        make ~prio:(randi 3) (randi 12) (Arp.HwProto.random ()) (Payload.random 30)
+        make ~prio:(randi 3) (randi 12) (Arp.HwProto.random ()) (randbs 30)
 
     (** Pack a [Vlan.Pdu.t] into its [bitstring] raw representation, ready for
      * encapsulation into a {!Eth.Pdu.t} (or anywhere you like). *)
@@ -90,7 +90,7 @@ struct
 
     (** Transmit function. [tx t payload] will tunnel the payload through this TRX. *)
     let tx t bits =
-        let pdu = Pdu.make ~prio:t.prio t.id t.proto (Payload.o bits) in
+        let pdu = Pdu.make ~prio:t.prio t.id t.proto bits in
         t.emit (Pdu.pack pdu)
 
     (** Receive function, called to output untaggd frames from the 802.1q tunnel. *)

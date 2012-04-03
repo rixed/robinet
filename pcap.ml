@@ -167,8 +167,8 @@ struct
     type t = { source_name : string ; caplen : int ; dlt : Dlt.t ;
                ts : Clock.Time.t ; payload : Payload.t }
 
-    let make source_name ?(caplen=65535) ?(dlt=Dlt.en10mb) ts payload =
-        { source_name ; caplen ; dlt ; ts ; payload }
+    let make source_name ?(caplen=65535) ?(dlt=Dlt.en10mb) ts bits =
+        { source_name ; caplen ; dlt ; ts ; payload = Payload.o bits }
 
     (** Return the [bitstring] ready to be written into a pcap file (see {!Pcap.save}). *)
     let pack t =
@@ -247,7 +247,7 @@ let read_next_pkt global_header ic =
         Pdu.make global_header.name
                  ~caplen:(Int32.to_int caplen)
                  ~dlt:global_header.dlt
-                 ts (Payload.o bits)
+                 ts bits
     | { _ } -> should_not_happen ()
 
 (** from a pcap file, returns an [Enum.t] of {!Pcap.Pdu.t}. *)

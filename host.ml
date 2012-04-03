@@ -387,8 +387,8 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
                             Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Got DHCP OFFER from %s" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
                             (* TODO: check the Xid? *)
                             let pdu = Dhcp.Pdu.make_request ~mac:my_mac ~xid:dhcp.Dhcp.Pdu.xid ~name dhcp.Dhcp.Pdu.yiaddr dhcp.Dhcp.Pdu.server_id in
-                            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Payload.o (Dhcp.Pdu.pack pdu)) in
-                            let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Payload.o (Udp.Pdu.pack pdu)) in
+                            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
+                            let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Udp.Pdu.pack pdu) in
                             t.eth.Eth.TRX.trx.Tools.tx (Ip.Pdu.pack pdu)
                         | Some ({ Dhcp.Pdu.msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.ack ->
                             Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
@@ -401,8 +401,8 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
         if t.my_ip = Ip.Addr.zero then (
             Log.(log t.host_trx.logger Info (lazy "Sending DHCP DISCOVER")) ;
             let pdu = Dhcp.Pdu.make_discover ~mac:my_mac ~name () in
-            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Payload.o (Dhcp.Pdu.pack pdu)) in
-            let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Payload.o (Udp.Pdu.pack pdu)) in
+            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
+            let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Udp.Pdu.pack pdu) in
             t.eth.Eth.TRX.trx.Tools.tx (Ip.Pdu.pack pdu) ;
             Clock.delay (Clock.Interval.sec (5.+.(Random.float 3.))) send_discover ()
         ) in

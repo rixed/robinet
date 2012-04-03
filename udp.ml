@@ -37,12 +37,12 @@ struct
         checksum : int option ; payload  : Payload.t }
 
     let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80)
-             ?checksum payload =
-        { src_port ; dst_port ; checksum ; payload }
+             ?checksum bits =
+        { src_port ; dst_port ; checksum ; payload = Payload.o bits }
 
     let random () =
         make ~src_port:(Port.o (randi 16)) ~dst_port:(Port.o (randi 16))
-             (Payload.o (randbs 64))
+             (randbs 64)
 
     let pack t =
         let length = Payload.length t.payload + 8 in
@@ -77,7 +77,7 @@ struct
 
     let tx t bits =
         let src_port = t.src and dst_port = Option.get t.dst in
-        let udp = Pdu.make ~src_port ~dst_port (Payload.o bits) in
+        let udp = Pdu.make ~src_port ~dst_port bits in
         if debug then Printf.printf "Udp: Emitting a packet from %s to %s\n%!" (Port.to_string src_port) (Port.to_string dst_port) ;
         t.emit (Pdu.pack udp)
 

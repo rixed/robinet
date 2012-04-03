@@ -193,19 +193,19 @@ module Pdu = struct
              ?id ?(dont_frag=false) ?(more_frags=false)
              ?(frag_offset=0) ?(ttl=64)
              ?(options=empty_bitstring)
-             proto src dst payload =
+             proto src dst bits =
         let hdr_len = 20 + bytelength options
         and id = may_default id next_id in
         let tot_len = match tot_len with Some v -> v | None ->
-            Payload.length payload + hdr_len in
+            bytelength bits + hdr_len in
         { tos ; tot_len ; id ; dont_frag ; more_frags ; frag_offset ;
-          ttl ; proto ; src ; dst ; options ; payload }
+          ttl ; proto ; src ; dst ; options ; payload = Payload.o bits }
 
     let random () =
         make ~tos:(randi 8) ~id:(randi 16) ~dont_frag:(randb ())
              ~more_frags:(randb ()) ~frag_offset:(randi 13)
              ~ttl:(randi 8) ~options:(randbs (4*(randi 3)))
-             (Proto.random ()) (Addr.random ()) (Addr.random ()) (Payload.random (Random.int 10 + 20))
+             (Proto.random ()) (Addr.random ()) (Addr.random ()) (randbs (Random.int 10 + 20))
 
     let sum bits =
         let rec aux s bits = bitmatch bits with
@@ -316,7 +316,7 @@ module TRX = struct
                                       else takebits (t.mtu*8) pld, true in
                 (* The frag_offset is given in unit of 8 bytes.
                    So the MTU is required to be a multiple of 8 bytes as well. *)
-                let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst (Payload.o pld) in
+                let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst pld in
                 if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (Addr.dotted_string_of_int32 (t.src :> int32)) (Addr.dotted_string_of_int32 (t.dst :> int32)) (bytelength pld) (string_of_bitstring bits);
                 t.emit (Pdu.pack pdu) ;
                 aux (bit_offset + bitstring_length pld)

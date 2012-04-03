@@ -86,13 +86,13 @@ struct
              ?(urg=false) ?(ack=false) ?(psh=false) ?(rst=false) ?(syn=false) ?(fin=false)
              ?(win_size=1024) ?checksum ?(urg_ptr=0)
              ?(options=empty_bitstring)
-             payload =
+             bits =
         { src_port ; dst_port ;
           seq_num  ; ack_num ;
           flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
           win_size ; checksum ;
           urg_ptr  ; options ;
-          payload }
+          payload = Payload.o bits }
 
     let random () =
         make ~src_port:(Port.o (randi 16)) ~dst_port:(Port.o (randi 16))
@@ -100,12 +100,12 @@ struct
              ~urg:(randb ()) ~ack:(randb ()) ~psh:(randb ()) ~rst:(randb ()) ~syn:(randb ()) ~fin:(randb ())
              ~win_size:(randi 16) ~urg_ptr:(if randb () then randi 16 else 0)
              ~options:(randbs 16)
-             (Payload.o (randbs 64))
+             (randbs 64)
 
     let make_reset_of pdu =
         make ~src_port:pdu.dst_port ~dst_port:pdu.src_port
              ~seq_num:pdu.ack_num ~ack_num:(SeqNum.o (Int32.succ (pdu.seq_num:>int32)))
-             ~ack:true ~rst:true Payload.empty
+             ~ack:true ~rst:true empty_bitstring
 
     let pack t =
         let hdr_len = 20 + bytelength t.options in
@@ -196,7 +196,7 @@ struct
         let ack = ack_num <> None in
         if ack || psh || rst || syn || fin || bitstring_length bits > 0 then (
             let tcp = Pdu.make ~src_port ~dst_port ~seq_num ?ack_num
-                               ~ack ~psh ~rst ~syn ~fin (Payload.o bits) in
+                               ~ack ~psh ~rst ~syn ~fin bits in
             if debug then Printf.printf "Tcp: Emitting a packet from %s to %s, seq %s, length %d, content '%s'\n%!" (Port.to_string src_port) (Port.to_string dst_port) (SeqNum.to_string seq_num) (bytelength bits) (string_of_bitstring bits) ;
             t.emit (Pdu.pack tcp) ;
             if ack then t.rcvd_acked <- t.rcvd_pld ;

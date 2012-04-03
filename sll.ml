@@ -54,13 +54,13 @@ module Pdu = struct
                payload      : Payload.t }
 
     (** Build a {!Sll.Pdu.t} for a given [payload]. *)
-    let make ?(ll_addr_type=1) pkt_type proto ll_addr payload =
-        { pkt_type ; ll_addr_type ; ll_addr ; proto ; payload }
+    let make ?(ll_addr_type=1) pkt_type proto ll_addr bits =
+        { pkt_type ; ll_addr_type ; ll_addr ; proto ; payload = Payload.o bits }
 
     (** Returns a random {!Sll.Pdu.t}. *)
     let random () =
         let pkt_type = pkt_type_of_int (Random.int 5) in
-        make pkt_type (Arp.HwProto.random ()) (Eth.Addr.random () :> bitstring) (Payload.random 30)
+        make pkt_type (Arp.HwProto.random ()) (Eth.Addr.random () :> bitstring) (randbs 30)
 
     (** Pack a {!Sll.Pdu.t} into its [bitstring] raw representation. *)
     let pack t =

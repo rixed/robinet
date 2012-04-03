@@ -150,12 +150,12 @@ module Pdu = struct
                payload : Payload.t }
 
     (** Build an {!Eth.Pdu.t} for the given [payload]. *)
-    let make proto src dst payload =
-        { src ; dst ; proto ; payload }
+    let make proto src dst bits =
+        { src ; dst ; proto ; payload = Payload.o bits }
 
     (** Returns a random {!Eth.Pdu.t}. *)
     let random () =
-        make (Arp.HwProto.random ()) (Addr.random ()) (Addr.random ()) (Payload.random 30)
+        make (Arp.HwProto.random ()) (Addr.random ()) (Addr.random ()) (randbs 30)
 
     (** Pack an {!Eth.Pdu.t} into its [bitstring] raw representation, ready for
      * injection onto the wire (via {!Pcap.inject_pdu} for instance). *)
@@ -215,7 +215,7 @@ struct
     (** Low level send fonction. Takes a {!Arp.HwProto.t} since it's used both
      * for the user payload protocol and ARP protocol. *)
     let send t proto dst bits =
-        let pdu = Pdu.make proto t.src dst (Payload.o bits) in
+        let pdu = Pdu.make proto t.src dst bits in
         if debug then Printf.printf "Eth: Emitting an Eth packet, proto %s, from %s to %s (content '%s')\n%!" (Arp.HwProto.to_string proto) (Addr.to_string t.src) (Addr.to_string dst) (string_of_bitstring bits) ;
         t.emit (Pdu.pack pdu)
 
