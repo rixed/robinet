@@ -74,7 +74,7 @@ let signal_err t str =
     (* later, change this into a nice log *)
     Printf.fprintf stderr "Host %s: %s\n%!" t.host_trx.name str
 
-let make_socks ip = { ip = ip ; 
+let make_socks ip = { ip = ip ;
                       tcps = Hashtbl.create 3 ;
                       udps = Hashtbl.create 3 }
 

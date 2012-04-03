@@ -36,7 +36,7 @@ let should_not_happen _ =
     error "Are you certain this really happened?"
 
 let todo what =
-    error ("I refuse to proceed without instructions for "^what) 
+    error ("I refuse to proceed without instructions for "^what)
 
 (* TODO: maintain a hash of error counts *)
 (* ou plutot, on prend un liste de string et on comptabilise dans un arbre *)

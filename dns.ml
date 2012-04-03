@@ -70,7 +70,7 @@ struct
                answer_rrs : rr list ;
                authority_rrs : rr list ;
                additional_rrs : rr list }
-    
+
     let make_query =
         let id = ref 0 in
         (fun name ->
@@ -86,7 +86,7 @@ struct
 
     let random () =
         make_query (rand_hostname () ^ ".")
-        
+
     let unpack_name pkt rest =
         let rec aux prevs o =
             if o >= String.length pkt then err "DNS: Cannot unpack_name" else
@@ -103,7 +103,7 @@ struct
         Option.Monad.bind (aux [] rest) (fun (parts, rest) ->
             let name = String.concat "." (List.rev parts) in
             Some (name, rest))
- 
+
     let read_n16 pkt o =
         ensure (o < String.length pkt - 1) "dns.ml: read_n16: offset greater then pkt length";
         ((Char.code pkt.[o]) lsl 8) + Char.code pkt.[o+1]

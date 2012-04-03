@@ -24,7 +24,7 @@ let debug = false
 
 (* A net is a graph of devices (with position on a 2d plane),
    connected with cables, with additional notes, easily serializable.
-   
+
    Nets are stored on disk in a file nets/net_name, in a csv format for
    easy edition.
 
@@ -263,7 +263,7 @@ let instanciate t =
     let switches = Hashtbl.create 11 in
     let hosts = Hashtbl.create 11 in
     let notes = Hashtbl.create 11 in
-    let create_node { node_name = name ; elmt ; _ } = match elmt with 
+    let create_node { node_name = name ; elmt ; _ } = match elmt with
         | Hub h ->
             Hashtbl.add hubs name
                 (Hub.Repeater.make h.hub_nb_ports)
@@ -293,7 +293,7 @@ let instanciate t =
         let rx_of_plug = function
             | HubPort (name, p) ->
                 Hashtbl.find_option hubs name |>
-                    Option.map (fun hub -> 
+                    Option.map (fun hub ->
                         Hub.Repeater.rx p hub, Hub.Repeater.set_emit p hub)
             | SwitchPort (name, p) ->
                 Hashtbl.find_option switches name |>

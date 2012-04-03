@@ -100,7 +100,7 @@ struct
             if frame.Pdu.proto = t.proto && Payload.bitlength frame.Pdu.payload > 0 then (
                 t.recv (frame.Pdu.payload :> bitstring)
             )
- 
+
     (** Creates a {!Vlan.TRX.t}.
      * @param prio the tunnel priority (0 = default = lowest, 7 = highest).
      * @param id then vlan tag.

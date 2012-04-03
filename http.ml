@@ -236,7 +236,7 @@ struct
                                 all ()))) in
                 map_filter body_parser (msg_of start hs)
             | _ -> should_not_happen () in
-        bind (seqf [ none (many (Peg.crlf ())) ; 
+        bind (seqf [ none (many (Peg.crlf ())) ;
                      some (start_line ()) ;
                      some (headers ());
                      none (Peg.crlf ()) ]) (body ())
@@ -246,7 +246,7 @@ struct
             (string_of_cmd cmd) ^ "\r\n" ^
             (string_of_headers headers) ^ "\r\n" ^
             body)
-    
+
     let unpack bits =
         let str = string_of_bitstring bits
         and p = parzer () in

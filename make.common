@@ -15,7 +15,7 @@ CFLAGS     += -std=c99 -W -Wall -D_GNU_SOURCE
 
 all:
 
-.PHONY: all opt clean clean-spec install uninstall reinstall doc test
+.PHONY: all opt clean clean-spec install uninstall reinstall doc test clear
 
 ifdef PKG_NAME
 OBJECTS  = $(SOURCES:.ml=.cmo)
@@ -86,5 +86,8 @@ clean: clean-spec
 doc: $(SOURCES)
 	mkdir -p $@
 	$(OCAMLDOC) $(SYNTAX) -package "$(REQUIRES)" -d $(DOCDIR) $^
+
+clear: $(SOURCES)
+	sed -i -e 's/[ 	]\+$$//' $^
 
 -include .depend

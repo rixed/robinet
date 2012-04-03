@@ -76,7 +76,7 @@ struct
             if t.arr.(n).next <> -1 then t.arr.(t.arr.(n).next).prev <- t.arr.(n).prev ;
             if t.first = n then t.first <- t.arr.(n).next ;
             if t.last = n then t.last <- t.arr.(n).prev
-        
+
         (* n was already removed! *)
         let add_head t n =
             t.arr.(n).prev <- -1 ;

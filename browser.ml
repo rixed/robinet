@@ -393,7 +393,7 @@ let user t ?pause max_depth start =
 module Plan =
 struct
     type form_input = { url : Str.regexp ; form : Str.regexp ; input : Str.regexp }
-    
+
     type t = { form_values : (form_input * string) array ;
                next_hop : (Str.regexp * (Str.regexp * float) array) array ;
                check_presence : (Str.regexp * (Str.regexp array)) array ;

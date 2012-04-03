@@ -156,7 +156,7 @@ struct
         end)
 
     type tcp_trx =
-        { trx : trx ; 
+        { trx : trx ;
           close : unit -> unit ; (* close the trx *)
           is_closed : unit -> bool }
     type t = {

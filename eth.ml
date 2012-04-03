@@ -47,7 +47,7 @@ module Addr = struct
      * {[- : unit = ()]}
      * {[# Eth.Addr.of_string "a4:ba:db:e6:15:fa";;]}
      * {[- : Eth.Addr.t = a4:ba:db:e6:15:fa]}
-     * 
+     *
      * This only affect the printing of Ethernet addresses in the toplevel and
      * {!Eth.Addr.to_string}. *)
     let print_with_vendor = ref true

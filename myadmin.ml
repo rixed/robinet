@@ -66,7 +66,7 @@ let print_tree vars oc tree =
         Printf.fprintf oc "<label><input type='checkbox' name='%s'%s/>%s</label>"
             n
             (if Hashtbl.mem vars n then " checked='checked'" else "")
-            (basename n) 
+            (basename n)
     and add_tree oc n t =
         Printf.fprintf oc "%s\n<ul>%a</ul>\n"
             n (List.print ~first:"<li>" ~last:"</li>" ~sep:"</li>\n<li>" add_item) t

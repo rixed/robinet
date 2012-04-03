@@ -39,7 +39,7 @@ let rec wait_answer target_ip_bits =
         (match Eth.Pdu.unpack (bitstring_of_string packet) with
         | None -> failwith "Cannot unpack Eth"
         | Some eth ->
-            if eth.Eth.Pdu.proto <> Arp.HwProto.arp then aux () else 
+            if eth.Eth.Pdu.proto <> Arp.HwProto.arp then aux () else
             (match Arp.Pdu.unpack (eth.Eth.Pdu.payload :> bitstring) with
             | None -> failwith "Cannot unpack ARP"
             | Some arp ->
