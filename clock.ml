@@ -38,7 +38,7 @@ let realtime = ref true
 
 (** {1 Private Types} *)
 
-(** Time.t represents a given timestamp. *)
+(** Time.t represents a given timestamp (ie. number of seconds since 1970-01-01 00:00:00 UTC. *)
 module rec Time : sig
     val print_date : bool ref
     include PRIVATE_TYPE with type t = private float and type outer_t = float
@@ -67,15 +67,21 @@ end = struct
         let repl_tag = "time"
     end)
 
+    (** Adds a time and an interval. *)
     let add (t : t) (i : Interval.t) = o ((t :> float) +. (i :> float))
+    (** Substract two time and returns an interval. *)
     let sub (a : t) (b : t) = Interval.o ((a :> float) -. (b :> float))
+    (** Get the current wall clock (through {Unix.gettimeofday}). *)
     let wall_clock () = o (Unix.gettimeofday ())
+    (** Convert a timestamp to a pair of ints with seconds, microseconds *)
     let to_ints (t : t) =
         let t = (t :> float) in
         let sec  = Int.of_float t in
         let usec = Int.of_float ((t -. (floor t)) *. 1_000_000.) in
         sec, usec
 end
+(** While Interval.t reprensents a time interval.
+ * Both are floats internaly to match OCaml stdlib. *)
 and Interval : sig
     include PRIVATE_TYPE with type t = private float and type outer_t = float
     val usec : float -> t
@@ -94,18 +100,24 @@ end = struct
         let repl_tag = "time"
     end)
 
+    (** Takes some microseconds, milliseconds, seconds, minutes or hour and return an [Interval.t]. *)
     let usec i = o (i *. 0.000001)
     let msec i = o (i *. 0.001)
     let sec i  = o i
     let min i  = o (i *. 60.)
     let hour i = o (i *. 3600.)
 
+    (** Custom comparison function so that we can change time representation
+     * more easily in the future. *)
     let compare (a : t) (b : t) = Float.compare (a :> float) (b :> float)
+    (** Adds two intervals. *)
     let add (a : t) (b : t) = o ((a :> float) +. (b :> float))
 end
 
 (* poor man's asctime *)
 let printer oc t = BatIO.nwrite oc (Time.to_string t)
+
+(** {1 Current running time} *)
 
 module Map = Map.Make (struct
     type t = Time.t
