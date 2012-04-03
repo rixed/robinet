@@ -255,7 +255,7 @@ let null_trx = { tx = ignore ;
 module type PDU = sig
     type t
     val pack   : t -> bitstring
-    val unpack : bitstring -> t
+    val unpack : bitstring -> t option
 end
 
 (*(* ?? *)
