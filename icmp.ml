@@ -24,7 +24,7 @@ open Batteries
 open Bitstring
 open Tools
 
-(** {1 Private types} *)
+(** {2 Private types} *)
 
 module MsgType =
 struct
@@ -91,7 +91,7 @@ struct
         if Outer.is_valid m then o m else random ()
 end
 
-(** {1 ICMP Messages} *)
+(** {2 ICMP Messages} *)
 
 (** This module handle ICMP messages (un)packing. *)
 module Pdu = struct

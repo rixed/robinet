@@ -29,7 +29,7 @@ open Batteries
 open Bitstring
 open Tools
 
-(** {1 (Un)Packing 802.1q frames} *)
+(** {2 802.1q frames} *)
 
 (** Pack/Unpack a 802.1q tunnel *)
 module Pdu = struct
@@ -73,7 +73,7 @@ module Pdu = struct
     (*$>*)
 end
 
-(** {1 Vlan Transceiver} *)
+(** {2 Transceiver} *)
 
 (** A Vlan TRX accepts raw packets (presumably from some {!Eth.TRX}), unpack them
  * and forward the payload to a callback; and it can be given some payload to

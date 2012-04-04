@@ -114,7 +114,7 @@ open Batteries
 open Bitstring
 open Tools
 
-(** {1 (Un)Packing any packet} *)
+(** {2 Captured packet} *)
 
 (** Pack/Unpack the whole protocol stack that fits entirely within a packet.
  *
@@ -213,7 +213,7 @@ module Pdu = struct
 
 end
 
-(** {1 Shorthands} *)
+(** {2 Shorthands} *)
 
 (** [Packet.enum_of filename] reads a pcap file and returns an [Enum.t] of {!Packet.Pdu.t}. *)
 let enum_of fname = Pcap.enum_of fname /@ Pdu.unpack

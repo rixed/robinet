@@ -86,7 +86,8 @@ clean: clean-spec
 doc: $(SOURCES)
 	mkdir -p $@
 	$(OCAMLDOC) $(SYNTAX) -package "$(REQUIRES)" -d $(DOCDIR) $^
-	sed -i -e '/^<head>/a<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">' doc/*.html
+	sed -i -e '/^<head>/a<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">' $(DOCDIR)/*.html
+	sed -i -e 's|<center><h1></h1></center>|<h1>$(PKG_NAME)</h1>|' $(DOCDIR)/index.html
 
 clear: $(SOURCES)
 	sed -i -e 's/[ 	]\+$$//' $^

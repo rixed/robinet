@@ -27,7 +27,7 @@ open Tools
 
 let debug = false
 
-(** {1 Libpcap low level wrappers} *)
+(** {2 Libpcap low level wrappers} *)
 
 (** A network device opened for sniffing or injection *)
 type iface
@@ -46,7 +46,6 @@ external inject : iface -> string -> unit = "wrap_pcap_inject"
  * timestamp *)
 external sniff : iface -> (Clock.Time.t * string) = "wrap_pcap_read"
 
-(** {1 User functions} *)
 (** {2 Packet injection} *)
 
 (** A counter for how many packets were injected successfully. *)
@@ -88,7 +87,7 @@ let sniffer iface rx =
 
 (** {2 Pcap files} *)
 
-(** {e Data Link Layers} are constant values indicating what protocol and hardware technology
+(** {e Data Link Types} are constant values indicating what protocol and hardware technology
  * some captured packets were taken from. We support only the two most common: [Dlt.en10mb], ie
  * usual Ethernet cables, and [Dlt.linux_cooked] corresponding to a capture on the {e any}
  * network device on Linux. *)
@@ -144,16 +143,16 @@ module Dlt = struct
 end
 
 (** The global header of a pcap file. *)
-type global_header = { name          : string ;
-                       endianness    : endian ;
-                       version_major : int ;
+type global_header = { name          : string ; (** The file name. *)
+                       endianness    : endian ; (** Endianess of the file. *)
+                       version_major : int ;    (** Libpcap version. *)
                        version_minor : int ;
-                       this_zone     : int32 ;
-                       sigfigs       : int32 ;
-                       snaplen       : int32 ; (** Indicate that no caplen will be smaller. We don't use this. *)
-                       dlt           : Dlt.t }
+                       this_zone     : int32 ;  (** Time zone (should be zero, unused). *)
+                       sigfigs       : int32 ;  (** unused. *)
+                       snaplen       : int32 ;  (** Indicate that no caplen will be smaller. We don't use this. *)
+                       dlt           : Dlt.t    (** The Data Link Type (see {!Pcap.Dlt}). *) }
 
-(** {3 Pdu} *)
+(** {3 Captured packet} *)
 
 (** Packets harvested with libpcap will come with additional informations such
  * as caplen, timestamp etc.

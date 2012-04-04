@@ -28,9 +28,9 @@ open Tools
 
 let debug = false
 
-(** {1 Private Types} *)
+(** {2 Private Types} *)
 
-(** {2 Ethernet addresses} *)
+(** {3 Ethernet addresses} *)
 
 (** Ethernet addresses are implemented as [bitstring] internally but
  * the abstract type Eth.Addr.t has a batter printer (which support
@@ -123,7 +123,7 @@ module Addr = struct
     (*$>*)
 end
 
-(** {2 Gateway specifications} *)
+(** {3 Gateway specifications} *)
 
 (** The address of a gateway, which can be given either as an Ethernet address
  * of as an IP address. *)
@@ -139,7 +139,7 @@ let gw_addr_of_string str =
     try Mac (Addr.of_string str)
     with _ -> IPv4 (Ip.Addr.of_string str)
 
-(** {1 (Un)Packing Ethernet frames} *)
+(** {2 Ethernet frames} *)
 
 (** Pack/Unpack an Ethernet frame.  *)
 module Pdu = struct
@@ -185,7 +185,7 @@ module Pdu = struct
     (*$>*)
 end
 
-(** {1 Ethernet Transceiver} *)
+(** {2 Transceiver} *)
 
 (** An Ethernet TRX accepts raw packets, unpack them and forward the payload
  * to a callback; and it can be given some payload to transmit and it will emit

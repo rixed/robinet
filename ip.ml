@@ -28,9 +28,9 @@ open Tools
 
 let debug = false
 
-(** {1 Private Types} *)
+(** {2 Private Types} *)
 
-(** {2 Protocols} *)
+(** {3 Protocols} *)
 
 (** Internet protocols, as in [/etc/protocols]. *)
 module Proto = struct
@@ -53,9 +53,9 @@ module Proto = struct
     let random () = o (randi 8)
 end
 
-(** {2 Addresses} *)
+(** {3 Addresses} *)
 
-(** {3 inet_addr}
+(** {4 inet_addr}
  *
  * Stdlib [Unix] module already have a type for IP addresses:
  * [Unix.inet_addr] (actually a [string]). Here are the functions
@@ -69,7 +69,7 @@ let int32_of_inet_addr a =
 let inet_addr_of_int32 i : Unix.inet_addr =
     Obj.magic (string_of_bitstring (BITSTRING { i : 32 }))
 
-(** {3 IP Addresses as int32} *)
+(** {4 IP Addresses as int32} *)
 
 (** We use a private type for IPv4 addresses so that we can have a
  * custom printer, but it's actually an [int32] and you can cast with:
@@ -143,7 +143,7 @@ module Addr = struct
 
 end
 
-(** {3 CIDR Addresses} *)
+(** {4 CIDR Addresses} *)
 
 type cidr = Addr.t * int
 (* TODO: printer, etc *)
@@ -175,7 +175,7 @@ let addrs_of_cidr ((ip : Addr.t), mask) =
 let random_addrs_of_cidr cidr n =
     addrs_of_cidr cidr |> List.enum |> Random.multi_choice n
 
-(** {1 IP packet} *)
+(** {2 IP packet} *)
 
 (** (Un)Packing an IP packet. *)
 module Pdu = struct
@@ -285,7 +285,7 @@ module Pdu = struct
     (*$>*)
 end
 
-(** {1 Transceiver} *)
+(** {2 Transceiver} *)
 
 module TRX = struct
 

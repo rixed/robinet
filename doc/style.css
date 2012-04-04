@@ -1,4 +1,5 @@
-/* vim:sw=4 ts=4 sts=4 expandtab */
+/* vim:sw=4 ts=4 sts=4 expandtab
+*/
 /* A style for ocamldoc, taken from Daniel C. Buenzli */
 
 /* Google WebFonts:
@@ -30,24 +31,16 @@ table {
 }
 
 /* Center body on page */
-html, body {
-    height: 100%;
-    margin: auto;
-}
-
-/*html {
-    font-size: 10pt;
-}*/
-
 body {
+    margin: auto;
     font-size: 1em;
     line-height: 1.39em; 
     font-family: "Rosarivo", helvetica, arial, sans-serif; 
     font-weight: 400;
     text-align: left;
-    padding: 1.375em 1.85em 1.85em 1.375em;
+    padding: 1.375em 1.85em 3em 1.375em;
     min-width: 20ex;
-    max-width: 70ex;
+    max-width: 90ex;
     color: black; 
 }
 
@@ -69,10 +62,10 @@ code {
 
 /* ocamldoc markup workaround hacks */
 
-/*hr, hr + br, div + br, center + br, span + br, ul + br, ol + br, pre + br
-{ display: none }*/ /* annoying */
+hr, hr + br, div + br, center + br, span + br, ul + br, ol + br, pre + br, h1 + br, h2 + br, h3 + br, h4 + br
+{ display: none; } /* annoying */
 
-/*code br { display: inline }*/ /* because of the above span + br rule */
+code br { display: inline } /* because of the above span + br rule */
 
 code { white-space: nowrap; }
 table.typetable {
@@ -81,9 +74,9 @@ table.typetable {
 table.typetable td code {
     line-height: 1.3em;
 }
-table.indextable td div.info {
-    padding-top: 0.5em;
-    padding-bottom: 0.5em;
+div.info {
+    padding-top: 0.4em;
+    padding-bottom: 0.8em;
 }
 
 /*center { text-align: left } 
@@ -92,23 +85,21 @@ center + br + pre { margin-bottom:1.375em}*/ /* Toplevel module description */
 /* Sections and document divisions */
 
 /* .navbar { margin-bottom: -1.375em } */
-h1 { font-weight: bold; font-size: 1.5em; /* margin-top:1.833em; */
-     margin-top:0.917em; padding-top:0.875em; 
-     border-top-style:solid; border-width:1px; border-color:#AAA; }
-h2 { font-weight: bold; font-size: 1.313em; margin-top: 1.048em }
-h3 { font-weight: bold; font-size: 1.125em; margin-top: 1.222em }
-h3 { font-weight: bold; font-size: 1em; margin-top: 1.375em}
-h4 { font-style: italic;  }
+h1 { font-size: 1.5em;   padding: 1.5em 0 1.5em 1.0em;
+     background-color: #EEE; border-style: solid; border-width: 1px 0 3px 0; border-color: #000;
+     text-align: center; text-transform: capitalize; }
+h2 { font-size: 1.313em; padding: 1.1em 0 1.1em 0.1em; }
+h3 { font-size: 1.125em; padding: 0.6em 0 0.6em 0.2em; }
+h3 { font-size: 1em;     padding: 0.4em 0 0.4em 0.3em; }
+h4 { font-size: 0.9em;   padding: 0.2em 0 0.2em 0.4em; }
 h1, h2, h3, h4 {
-  font-family: "Happy Monkey", sans-serif;
+    font-family: "Happy Monkey", sans-serif;
+    font-weight: bold;
 }
 
-/* Used by OCaml's own library documentation. */
- h6 { font-weight: bold; font-size: 1.125em; margin-top: 1.222em }
- .h7 { font-weight: bold; font-size: 1em; margin-top: 1.375em }
-
-p { margin-top: 1.375em }
-pre { margin-top: 1.375em }
+p { margin-top: 1.375em; padding-left: 0.5em; }
+pre { margin-top: 1.375em; }
+pre, code, table { padding-left: 0.4em; }
 .info { margin: 0.458em 0em -0.458em 2ex;}/* Description of types values etc. */
 td .info { margin:0; padding:0; margin-left: 2ex;} /* Description in indexes */
 

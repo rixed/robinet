@@ -24,7 +24,7 @@ open Tools
 
 let debug = false
 
-(** {1 Private Types} *)
+(** {2 Private Types} *)
 
 let show_ports_by_name = ref true
 module MakePort (Serv : sig val srv : string end) =
@@ -48,7 +48,7 @@ module SeqNum = MakePrivate(struct
     let repl_tag = "seqnum"
 end)
 
-(** {1 TCP segments} *)
+(** {2 TCP segments} *)
 
 module Pdu =
 struct
@@ -142,7 +142,7 @@ struct
     (*$>*)
 end
 
-(* Transceiver *)
+(** {2 Transceiver} *)
 
 (* This TRX encode a TCP socket. Create it with the local and remote ports (so
  * after you received the initial SYN if you want to simulate a listening host). *)

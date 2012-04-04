@@ -33,7 +33,7 @@ open Tools
 
 let debug = false
 
-(** {1 (Un)Packing Linux Cooked Capture frames} *)
+(** {2 Linux Cooked Capture frames} *)
 
 (** Pack/Unpack a SLL frame. *)
 module Pdu = struct

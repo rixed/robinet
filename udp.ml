@@ -24,11 +24,11 @@ open Tools
 
 let debug = false
 
-(** {1 Private Types} *)
+(** {2 Private Types} *)
 
 module Port = Tcp.MakePort (struct let srv = "udp" end)
 
-(** {1 UDP datagrams} *)
+(** {2 UDP datagrams} *)
 
 module Pdu =
 struct
@@ -68,7 +68,7 @@ struct
     (*$>*)
 end
 
-(* Transceiver *)
+(** {2 Transceiver} *)
 
 module TRX =
 struct

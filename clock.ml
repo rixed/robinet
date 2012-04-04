@@ -36,7 +36,7 @@ let debug = false
 
 let realtime = ref true
 
-(** {1 Private Types} *)
+(** {2 Private Types} *)
 
 (** Time.t represents a given timestamp (ie. number of seconds since 1970-01-01 00:00:00 UTC. *)
 module rec Time : sig
@@ -117,7 +117,7 @@ end
 (* poor man's asctime *)
 let printer oc t = BatIO.nwrite oc (Time.to_string t)
 
-(** {1 Current running time} *)
+(** {2 Current running time} *)
 
 module Map = Map.Make (struct
     type t = Time.t
