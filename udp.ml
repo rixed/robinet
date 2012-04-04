@@ -17,28 +17,31 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
+(** User Data Protocol (UDP) (un)packing. *)
 open Batteries
 open Bitstring
 open Tools
 
 let debug = false
 
-(* Private Types *)
+(** {1 Private Types} *)
 
 module Port = Tcp.MakePort (struct let srv = "udp" end)
 
-(* UDP datagrams *)
+(** {1 UDP datagrams} *)
 
 module Pdu =
 struct
     (*$< Pdu *)
+    (** An unpacked UDP datagram. Notice the absence of the checksum, which
+     * will be set to 0 by {!Udp.Pdu.pack}, and filled in by {!Ip.Pdu.pack},
+     * since it's computed over some IP fields. *)
     type t = {
         src_port : Port.t ; dst_port : Port.t ;
-        checksum : int option ; payload  : Payload.t }
+        payload  : Payload.t }
 
-    let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80)
-             ?checksum bits =
-        { src_port ; dst_port ; checksum ; payload = Payload.o bits }
+    let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80) bits =
+        { src_port ; dst_port ; payload = Payload.o bits }
 
     let random () =
         make ~src_port:(Port.o (randi 16)) ~dst_port:(Port.o (randi 16))
@@ -48,15 +51,14 @@ struct
         let length = Payload.length t.payload + 8 in
         concat [ (BITSTRING {
             (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
-            length : 16 ; (Option.default 0 t.checksum) : 16 }) ;
+            length : 16 ; 0 : 16 }) ;
             (t.payload :> bitstring) ]
 
     let unpack bits = bitmatch bits with
         | { src_port : 16 ; dst_port : 16 ;
-            length   : 16 ; checksum : 16 ;
+            length   : 16 ; _checksum : 16 ;
             payload  : (length-8) * 8 : bitstring } when length >= 8 ->
             Some { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
-                   checksum = Some checksum ;
                    payload  = Payload.o payload }
         | { _ } -> err "Not UDP"
 

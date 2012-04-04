@@ -17,13 +17,14 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
+(** Transmission Control Protocol (TCP) (un)packing. *)
 open Batteries
 open Bitstring
 open Tools
 
 let debug = false
 
-(* Private Types *)
+(** {1 Private Types} *)
 
 let show_ports_by_name = ref true
 module MakePort (Serv : sig val srv : string end) =
@@ -47,7 +48,7 @@ module SeqNum = MakePrivate(struct
     let repl_tag = "seqnum"
 end)
 
-(* TCP segments *)
+(** {1 TCP segments} *)
 
 module Pdu =
 struct
@@ -69,6 +70,9 @@ struct
             (if f.fin then "Fin" else "")
     let print_flags fmt f = Format.fprintf fmt "@{<flags>%s@}" (string_of_flags f)
 
+    (** An unpacked TCP segment. Notice the absence of the checksum, which
+     * will be set to 0 by {!Tcp.Pdu.pack}, and filled in by {!Ip.Pdu.pack},
+     * since it's computed over some IP fields. *)
     type t = {
         src_port : Port.t ;
         dst_port : Port.t ;
@@ -76,7 +80,6 @@ struct
         ack_num  : SeqNum.t ;
         win_size : int ;
         flags    : flags ;
-        checksum : int option ; (* If None, will be set by IP layer - if in IP *)
         urg_ptr  : int ;
         options  : bitstring ;
         payload  : Payload.t }
@@ -84,13 +87,13 @@ struct
     let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80)
              ?(seq_num = SeqNum.o 0l) ?(ack_num = SeqNum.o 0l)
              ?(urg=false) ?(ack=false) ?(psh=false) ?(rst=false) ?(syn=false) ?(fin=false)
-             ?(win_size=1024) ?checksum ?(urg_ptr=0)
+             ?(win_size=1024) ?(urg_ptr=0)
              ?(options=empty_bitstring)
              bits =
         { src_port ; dst_port ;
           seq_num  ; ack_num ;
           flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
-          win_size ; checksum ;
+          win_size ;
           urg_ptr  ; options ;
           payload = Payload.o bits }
 
@@ -115,7 +118,7 @@ struct
             hdr_len lsr 2 : 4 ; 0 : 6 ;
             t.flags.urg : 1 ; t.flags.ack : 1 ; t.flags.psh : 1 ;
             t.flags.rst : 1 ; t.flags.syn : 1 ; t.flags.fin : 1 ;
-            t.win_size : 16 ; (Option.default 0 t.checksum) : 16 ;
+            t.win_size : 16 ; 0 : 16 ;
             t.urg_ptr  : 16 ; t.options : -1 : bitstring }) ;
             (t.payload :> bitstring) ]
 
@@ -124,14 +127,13 @@ struct
             seq_num  : 32 ; ack_num  : 32 ;
             hdr_len  : 4  ; 0 : 6 ;
             urg : 1 ; ack : 1 ; psh : 1 ; rst : 1 ; syn : 1 ; fin : 1 ;
-            win_size : 16 ; checksum : 16 ; urg_ptr  : 16 ;
+            win_size : 16 ; _checksum : 16 ; urg_ptr  : 16 ;
             options : ((hdr_len lsl 2) - 20) * 8 : bitstring ;
             payload  : -1 : bitstring } ->
         Some { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
                seq_num  = SeqNum.o seq_num  ; ack_num  = SeqNum.o ack_num ;
                flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
-               win_size ; checksum = Some checksum ;
-               urg_ptr  ; options ; payload = Payload.o payload }
+               win_size ; urg_ptr  ; options ; payload = Payload.o payload }
         | { _ } -> err "Not TCP"
 
     (*$Q pack
