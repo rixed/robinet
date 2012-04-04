@@ -6,7 +6,7 @@ SOURCES  = \
 	fifo.ml metric.ml \
 	dns.ml url.ml http.ml \
 	tcp.ml udp.ml \
-	ip.ml arp.ml \
+	ip.ml icmp.ml arp.ml \
 	vlan.ml eth.ml dhcp.ml \
 	sll.ml \
 	pcap.ml packet.ml \

@@ -207,19 +207,6 @@ module Pdu = struct
              ~ttl:(randi 8) ~options:(randbs (4*(randi 3)))
              (Proto.random ()) (Addr.random ()) (Addr.random ()) (randbs (Random.int 10 + 20))
 
-    let sum bits =
-        let rec aux s bits = bitmatch bits with
-            | { w : 16 ; rest : -1 : bitstring } -> aux (s + w) rest
-            | { b : 8 } -> s + (b lsl 8)
-            | { _ } -> s in
-        let s = aux 0 (concat [ bits ; zeroes_bitstring 7 ]) in
-        let rec wrap s =
-            if s < 0x10000 then s else wrap ((s land 0xffff) + (s lsr 16)) in
-        (lnot (wrap s)) land 0xffff
-    (*$= sum & ~printer:(fun d -> Printf.sprintf "%x" d)
-      (sum (bitstring_of_string "\x45\x00\x00\xaa\x03\xa6\x00\x00\x40\x06\x00\x00\xc0\xa8\x01\x45\xd1\x55\xe3\x67")) 0xfffd
-    *)
-
     let patch_tcp_checksum t (pld : Payload.t) = bitmatch (pld :> bitstring) with
         | { head : 128 : bitstring ;
             chk  : 16  ;

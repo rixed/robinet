@@ -45,4 +45,5 @@ let colorize =
 #install_printer Pcap.Dlt.print;;
 #install_printer Clock.Time.print;;
 #install_printer Clock.Interval.print;;
+#install_printer Icmp.MsgType.print;;
 

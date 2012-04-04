@@ -128,7 +128,7 @@ module Pdu = struct
                | Dhcp of Dhcp.Pdu.t | Eth of Eth.Pdu.t | Arp  of Arp.Pdu.t
                | Ip   of Ip.Pdu.t   | Udp of Udp.Pdu.t | Tcp  of Tcp.Pdu.t
                | Dns  of Dns.Pdu.t  | Sll of Sll.Pdu.t | Vlan of Vlan.Pdu.t
-               | Pcap of Pcap.Pdu.t
+               | Icmp of Icmp.Pdu.t | Pcap of Pcap.Pdu.t
     (** A Pdu.t is a list of {!Packet.Pdu.layer}s, with the outer layer first for
      * a more natural presentation when printed. *)
     type t = layer list
@@ -152,7 +152,7 @@ module Pdu = struct
             | Udp t  -> Udp.Pdu.pack t  | Tcp t  -> Tcp.Pdu.pack t
             | Dns t  -> Dns.Pdu.pack t  | Sll t  -> Sll.Pdu.pack t
             | Vlan t -> Vlan.Pdu.pack t | Pcap t -> Pcap.Pdu.pack t
-            | Raw t -> t in
+            | Icmp t -> Icmp.Pdu.pack t | Raw t -> t in
         let rec aux bits = function
             | [] -> Option.get bits
             | p :: ps ->
@@ -173,6 +173,7 @@ module Pdu = struct
                               | Some x -> do_t x in
         let unpack_dhcp = try_unpack Dhcp.Pdu.unpack (fun x -> [ Dhcp x]) in
         let unpack_dns  = try_unpack Dns.Pdu.unpack  (fun x -> [ Dns x]) in
+        let unpack_icmp = try_unpack Icmp.Pdu.unpack (fun x -> [ Icmp x]) in
         let unpack_arp  = try_unpack Arp.Pdu.unpack  (fun x -> [ Arp x]) in
         let unpack_ports src dst = (match src, dst with
                 | 53, _ | _, 53 -> unpack_dns
@@ -191,6 +192,7 @@ module Pdu = struct
         let unpack_ip  = try_unpack Ip.Pdu.unpack (fun ip -> Ip ip ::
                     ((if ip.Ip.Pdu.proto = Ip.Proto.tcp then unpack_tcp
                       else if ip.Ip.Pdu.proto = Ip.Proto.udp then unpack_udp
+                      else if ip.Ip.Pdu.proto = Ip.Proto.icmp then unpack_icmp
                       else unpack_raw) (ip.Ip.Pdu.payload :> bitstring))) in
         let unpack_vlan = try_unpack Vlan.Pdu.unpack (fun vlan -> Vlan vlan ::
                     ((if vlan.Vlan.Pdu.proto = Arp.HwProto.ip4 then unpack_ip
