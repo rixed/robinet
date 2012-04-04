@@ -89,6 +89,9 @@ struct
     let rec random () =
         let m = Random.int 49, Random.int 15 in
         if Outer.is_valid m then o m else random ()
+
+    let type_of (t : t) = fst (t :> int*int)
+    let code_of (t : t) = snd (t :> int*int)
 end
 
 (** {2 ICMP Messages} *)
@@ -118,8 +121,19 @@ module Pdu = struct
 
     let random () =
         let msg_type = MsgType.random () in
-        { msg_type = msg_type ;
+        { msg_type ;
           payload  = random_payload (msg_type :> int*int) }
+
+    let make_echo_request id seq =
+        { msg_type = MsgType.o (8, 0) ;
+          payload  = Ids (id, seq, Payload.empty) }
+
+    let make_echo_reply id seq =
+        { msg_type = MsgType.o (0, 0) ;
+          payload  = Ids (id, seq, Payload.empty) }
+
+    let is_echo_request t =
+        MsgType.type_of t.msg_type = 8 && MsgType.code_of t.msg_type = 0
 
     let pack t =
         let pack_payload = function

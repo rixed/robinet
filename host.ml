@@ -42,22 +42,28 @@ type host_trx = {
     set_emit      : (bitstring -> unit) -> unit ;
     rx            : bitstring -> unit }
 
-type socks = { ip : trx ;
-               (* Available sockets per IP dest.
-                  The user of TCP does not remove these entries, so the TRX is still there
-                  for some time. We should probably "garbage collect" them once in a while,
-                  if they are closed for long enough.
-                  The user of UDP does not remove them neither, and we probably should have
-                  a "close" for UDP (since once closed all incoming packets must be rejected,
-                  contrary to TCP where we still want to handle incoming FIN).
-                  *)
-               tcps : (Tcp.Port.t * Tcp.Port.t (* local, remote *), Tcp.TRX.tcp_trx) Hashtbl.t ;
-               udps : (Udp.Port.t * Udp.Port.t (* local, remote *), trx) Hashtbl.t }
+type tcp_socks = { ip_4_tcp : trx ;
+                   (* Available sockets per IP dest.
+                      The user of TCP does not remove these entries, so the TRX is still there
+                      for some time. We should probably "garbage collect" them once in a while,
+                      if they are closed for long enough. *)
+                  tcps : (Tcp.Port.t * Tcp.Port.t (* local, remote *), Tcp.TRX.tcp_trx) Hashtbl.t }
+
+type udp_socks = { ip_4_udp : trx ;
+                   (* The user of UDP does not remove them neither, and we probably should have
+                      a "close" for UDP (since once closed all incoming packets must be rejected,
+                      contrary to TCP where we still want to handle incoming FIN). *)
+                   udps : (Udp.Port.t * Udp.Port.t (* local, remote *), trx) Hashtbl.t }
+
+let make_tcp_socks ip = { ip_4_tcp = ip ; tcps = Hashtbl.create 3 }
+let make_udp_socks ip = { ip_4_udp = ip ; udps = Hashtbl.create 3 }
 
 type t = { mutable host_trx : host_trx ;
            mutable my_ip : Ip.Addr.t ;
            eth : Eth.TRX.eth_trx ;
-           socks : (Ip.Addr.t, socks) Hashtbl.t ;
+           tcp_socks   : (Ip.Addr.t, tcp_socks) Hashtbl.t ;
+           udp_socks   : (Ip.Addr.t, udp_socks) Hashtbl.t ;
+           icmp_socks  : (Ip.Addr.t, trx) Hashtbl.t ;
            (* the listening servers *)
            tcp_servers : (Tcp.Port.t, (Tcp.TRX.tcp_trx -> unit)) Hashtbl.t ;
            udp_servers : (Udp.Port.t, (trx -> unit)) Hashtbl.t ;
@@ -74,13 +80,9 @@ let signal_err t str =
     (* later, change this into a nice log *)
     Printf.fprintf stderr "Host %s: %s\n%!" t.host_trx.name str
 
-let make_socks ip = { ip = ip ;
-                      tcps = Hashtbl.create 3 ;
-                      udps = Hashtbl.create 3 }
-
 (* Forward the payload to the socket function or to the server function *)
-let sock_rx t proto socks bits =
-    if proto = Ip.Proto.tcp then (match Tcp.Pdu.unpack bits with
+let tcp_sock_rx t socks bits =
+    match Tcp.Pdu.unpack bits with
         | None -> ()
         | Some tcp ->
             let key = tcp.Tcp.Pdu.dst_port, tcp.Tcp.Pdu.src_port in
@@ -91,15 +93,17 @@ let sock_rx t proto socks bits =
                             let server = try Hashtbl.find t.tcp_servers tcp.Tcp.Pdu.dst_port
                                          with Not_found -> raise No_socket in
                             let trx = Tcp.TRX.accept tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port in
-                            trx.Tcp.TRX.trx.Tools.set_emit socks.ip.tx ;
+                            trx.Tcp.TRX.trx.Tools.set_emit socks.ip_4_tcp.tx ;
                             server trx ; (* supposed to set the recver of this tcp trx *)
                             trx
                         ) else raise No_socket) in
                 trx.Tcp.TRX.trx.Tools.rx bits (* will reorder fragments and transmit the messages up to its emit function *)
             with No_socket ->
                 Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for TCP packet on port %s" (Tcp.Port.to_string tcp.Tcp.Pdu.dst_port)))) ;
-                Tcp.Pdu.make_reset_of tcp |> Tcp.Pdu.pack |> socks.ip.tx
-    ) else if proto = Ip.Proto.udp then (match Udp.Pdu.unpack bits with
+                Tcp.Pdu.make_reset_of tcp |> Tcp.Pdu.pack |> socks.ip_4_tcp.tx
+
+let udp_sock_rx t socks bits =
+    match Udp.Pdu.unpack bits with
         | None -> ()
         | Some udp ->
             let key = udp.Udp.Pdu.dst_port, udp.Udp.Pdu.src_port in
@@ -109,14 +113,24 @@ let sock_rx t proto socks bits =
                         let server = try Hashtbl.find t.udp_servers udp.Udp.Pdu.dst_port
                                      with Not_found -> raise No_socket in
                         let trx = Udp.TRX.make ~dst:udp.Udp.Pdu.src_port udp.Udp.Pdu.dst_port in
-                        trx.Tools.set_emit socks.ip.tx ;
+                        trx.Tools.set_emit socks.ip_4_udp.tx ;
                         server trx ; (* supposed to set the recver of this udp trx *)
                         trx) in
                 trx.Tools.rx bits
             with No_socket ->
-                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for UDP packet on port %s" (Udp.Port.to_string udp.Udp.Pdu.dst_port)))) ;
+                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for UDP packet on port %s" (Udp.Port.to_string udp.Udp.Pdu.dst_port))))
                 (* TODO: send ICMP error *)
-    ) else signal_err t "Sock is neither TCP nor UDP"
+
+let icmp_rx _t ip_trx bits =
+    match Icmp.Pdu.unpack bits with
+        | None -> ()
+        | Some icmp when Icmp.Pdu.is_echo_request icmp ->
+            (match icmp.Icmp.Pdu.payload with
+                | Icmp.Pdu.Ids (id, seq, _) ->
+                    let reply = Icmp.Pdu.make_echo_reply id seq in
+                    ip_trx.Tools.tx (Icmp.Pdu.pack reply)
+                | _ -> should_not_happen ())
+        | _ -> ()
 
 let rec find_alive_tcp tcps key =
     match Hashtbl.find_option tcps key with
@@ -229,11 +243,11 @@ and gethostbyname t name =
 and tcp_connect t dst ?src_port dst_port =
     let connect dst_ip =
         Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Connecting to %s" (Ip.Addr.to_string dst_ip)))) ;
-        let socks = hash_find_or_insert t.socks dst_ip (fun () ->
+        let socks = hash_find_or_insert t.tcp_socks dst_ip (fun () ->
             let trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.tcp in
-            let socks = make_socks trx in
+            let socks = make_tcp_socks trx in
             trx.Tools.set_emit t.eth.Eth.TRX.trx.tx ;
-            trx.set_recv (sock_rx t Ip.Proto.tcp socks) ;
+            trx.set_recv (tcp_sock_rx t socks) ;
             socks) in
         lwt src_port = match src_port with
             | None ->
@@ -259,7 +273,7 @@ and tcp_connect t dst ?src_port dst_port =
         match trx_opt with
         | Some trx ->
             (* connect this tcp to the underlaying ip *)
-            trx.Tcp.TRX.trx.Tools.set_emit socks.ip.tx ;
+            trx.Tcp.TRX.trx.Tools.set_emit socks.ip_4_tcp.tx ;
             Hashtbl.add socks.tcps (src_port, dst_port) trx ;
             Metric.Atomic.fire tcp_cnxs_ok ;
             Lwt.return trx
@@ -280,11 +294,11 @@ and tcp_connect t dst ?src_port dst_port =
 
 and udp_connect t dst ?src_port dst_port client_f =
     let connect dst_ip =
-        let socks = hash_find_or_insert t.socks dst_ip (fun () ->
+        let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
             let trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.udp in
-            let socks = make_socks trx in
+            let socks = make_udp_socks trx in
             trx.Tools.set_emit t.eth.Eth.TRX.trx.tx ;
-            trx.set_recv (sock_rx t Ip.Proto.udp socks) ;
+            trx.set_recv (udp_sock_rx t socks) ;
             socks) in
         let src_port = may_default src_port (fun () -> Udp.Port.o (Random.int 0x10000)) in
         let key = src_port, dst_port in
@@ -294,7 +308,7 @@ and udp_connect t dst ?src_port dst_port client_f =
         ) else
         let trx = Udp.TRX.make ~dst:dst_port src_port in
         (* connect this udp to the underlaying ip *)
-        trx.Tools.set_emit socks.ip.tx ;
+        trx.Tools.set_emit socks.ip_4_udp.tx ;
         trx.set_recv (client_f trx) ;
         Hashtbl.add socks.udps key trx ;
         Metric.Atomic.fire udp_cnxs_ok ;
@@ -311,28 +325,40 @@ let tcp_server t src_port server_f = Hashtbl.add t.tcp_servers src_port server_f
 let udp_server t src_port server_f = Hashtbl.add t.udp_servers src_port server_f
 
 (* the recv of the eth is responsible for handling the payload to the correct Ip.TRX *)
-let ip_recv t bits = (match Ip.Pdu.unpack bits with
+let ip_recv t bits = match Ip.Pdu.unpack bits with
     | None -> ()
-    | Some ip ->
-        if ip.Ip.Pdu.proto <> Ip.Proto.tcp &&
-           ip.Ip.Pdu.proto <> Ip.Proto.udp then
-            signal_err t (Printf.sprintf "Cannot handle socket for proto %s" (Ip.Proto.to_string ip.Ip.Pdu.proto))
-        else
-            let sock =
-                hash_find_or_insert t.socks ip.Ip.Pdu.src (fun () ->
-                    let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto in
-                    let socks = make_socks ip_trx in
-                    ip_trx.set_recv (sock_rx t ip.Ip.Pdu.proto socks) ;
-                    ip_trx.Tools.set_emit t.eth.Eth.TRX.trx.tx ;
-                    socks) in
-            sock.ip.Tools.rx bits (* will handle fragmentation then pass payload to its emit function *)
-    )
+    | Some ip when ip.Ip.Pdu.proto = Ip.Proto.tcp ->
+        let sock = hash_find_or_insert t.tcp_socks ip.Ip.Pdu.src (fun () ->
+            let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto in
+            let socks = make_tcp_socks ip_trx in
+            ip_trx.set_recv (tcp_sock_rx t socks) ;
+            ip_trx.Tools.set_emit t.eth.Eth.TRX.trx.tx ;
+            socks) in
+        sock.ip_4_tcp.Tools.rx bits (* will handle fragmentation then pass payload to its emit function *)
+    | Some ip when ip.Ip.Pdu.proto = Ip.Proto.udp ->
+        let sock = hash_find_or_insert t.udp_socks ip.Ip.Pdu.src (fun () ->
+            let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto in
+            let socks = make_udp_socks ip_trx in
+            ip_trx.set_recv (udp_sock_rx t socks) ;
+            ip_trx.Tools.set_emit t.eth.Eth.TRX.trx.tx ;
+            socks) in
+        sock.ip_4_udp.Tools.rx bits
+    | Some ip when ip.Ip.Pdu.proto = Ip.Proto.icmp ->
+        let ip_trx = hash_find_or_insert t.icmp_socks ip.Ip.Pdu.src (fun () ->
+            let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto in
+            ip_trx.set_recv (icmp_rx t ip_trx) ;
+            ip_trx.Tools.set_emit t.eth.Eth.TRX.trx.tx ;
+            ip_trx) in
+        ip_trx.Tools.rx bits
+    | _ -> ()
 
 let make name ?gw ?search_sfx ?nameserver my_mac =
     let rec t =
         { my_ip       = Ip.Addr.zero ;
           eth         = Eth.TRX.make my_mac ?gw:gw Arp.HwProto.ip4 [] ; (* FIXME: ne pas utiliser le gw systématiquement. Il faudrait vraissemblablement des routes, avec un eth par route ip *)
-          socks       = Hashtbl.create 11 ;
+          tcp_socks   = Hashtbl.create 11 ;
+          udp_socks   = Hashtbl.create 11 ;
+          icmp_socks  = Hashtbl.create 11 ;
           tcp_servers = Hashtbl.create 11 ;
           udp_servers = Hashtbl.create 11 ;
           nameserver  = nameserver ;
