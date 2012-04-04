@@ -65,9 +65,14 @@ end
 let int32_of_inet_addr a =
     bitmatch (bitstring_of_string (Obj.magic a)) with
     | { i : 32 } -> i
+
 (** ... and the other way around. *)
 let inet_addr_of_int32 i : Unix.inet_addr =
     Obj.magic (string_of_bitstring (BITSTRING { i : 32 }))
+
+(** Printer (in the sense of Batteries) for inet_addrs *)
+let inet_addr_print oc a =
+    Printf.fprintf oc "%s" (Unix.string_of_inet_addr a)
 
 (** {4 IP Addresses as int32} *)
 
@@ -134,13 +139,16 @@ module Addr = struct
 
     (** Returns a random {!Ip.Addr.t}. *)
     let random () = o (rand32 ())
-    (*$>*)
 
     (** This printer can be composed with others (for instance to print a list of ips.
      FIXME: always use batteries IO to print instead of Format printer? *)
     let print' oc ip =
         Printf.fprintf oc "%s" (to_string ip)
 
+    let of_inet_addr ip = o (int32_of_inet_addr ip)
+    let to_inet_addr (t : t) = inet_addr_of_int32 (t :> int32)
+
+    (*$>*)
 end
 
 (** {4 CIDR Addresses} *)
@@ -276,9 +284,10 @@ module Pdu = struct
                src = Addr.o src ; dst = Addr.o dst ; options ;
                payload = Payload.o payload }
         | { version : 4 } when version <> 4 ->
-            err "Ip: Bad version"
+            err (Printf.sprintf "Ip: Bad version (%d)" version)
         | { _ } ->
             err "Ip: Not IP"
+
     (*$Q pack
       ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
      *)

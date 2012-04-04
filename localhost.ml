@@ -103,21 +103,14 @@ let tcp_trx_of_socket sock =
       Tcp.TRX.close     = close t ;
       Tcp.TRX.is_closed = (fun () -> t.is_closed) }
 
-let ip_addr_of_inet_addr i =
-    Unix.string_of_inet_addr i |>
-    Ip.Addr.of_string
-
-let inet_addr_print oc a =
-    Printf.fprintf oc "%s" (Unix.string_of_inet_addr a)
-
 let gethostbyname name =
     lwt h_entry = Lwt_unix.gethostbyname name in
     Log.(log logger Debug (lazy (Printf.sprintf2 "Got these IPs for '%s': %a"
         name
-        (Array.print inet_addr_print)
+        (Array.print Ip.inet_addr_print)
         h_entry.Lwt_unix.h_addr_list))) ;
     Array.enum h_entry.Lwt_unix.h_addr_list /@
-        ip_addr_of_inet_addr |>
+        Ip.Addr.of_inet_addr |>
         List.of_enum |>
         Lwt.return
 
@@ -133,13 +126,13 @@ let tcp_connect dst ?src_port (dst_port : Tcp.Port.t) =
     in
     match dst with
         | Host.IPv4 dst_ip ->
-            connect_tcp_ (Unix.inet_addr_of_string (Ip.Addr.to_string dst_ip))
+            connect_tcp_ (Ip.Addr.to_inet_addr dst_ip)
         | Host.Name name ->
             lwt dst_ips =
                 lwt h_entry = Lwt_unix.gethostbyname name in
                 Log.(log logger Debug (lazy (Printf.sprintf2 "Got these IPs for '%s': %a"
                     name
-                    (Array.print inet_addr_print)
+                    (Array.print Ip.inet_addr_print)
                     h_entry.Lwt_unix.h_addr_list))) ;
                 Lwt.return (h_entry.Lwt_unix.h_addr_list) in
             connect_tcp_ dst_ips.(0)
