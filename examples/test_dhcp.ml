@@ -33,6 +33,6 @@ let main =
     Random.self_init () ;
     let iface = Pcap.openif "eth0" true "" 1500 in
     Lwt_main.run (
-        Lwt.join [ run iface ; Clock.run () ]
+        Lwt.join [ run iface ; Clock.run true ]
     )
 

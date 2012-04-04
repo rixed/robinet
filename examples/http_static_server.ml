@@ -31,7 +31,7 @@ let run port root =
         [ Str.regexp "/\\(.*\\)$", Opache.static_file_server root ] in
     Opache.serve host (Tcp.Port.o port) (Opache.multiplexer resources) ;
     (* Run everything *)
-    Lwt.join [ Clock.run () ]
+    Lwt.join [ Clock.run true ]
 
 let main =
     let port = ref 80 and root = ref "./" in

@@ -143,7 +143,12 @@ let at (ts : Time.t) f x =
     current.events <- Map.add ts (fun () -> f x) current.events ;
     nextev_awake ()
 
-let next_event () =
+(* returns true if more events are scheduled *)
+let next_event wait =
+    if not wait && Map.is_empty current.events then (
+        if debug then Printf.printf "Clock: no more events" ;
+        Lwt.return false
+    ) else
     let ts, f = try Map.min_binding current.events
                 with Not_found -> Time.o max_float, (fun () -> ()) in
     let wait_ts = if not !realtime then Interval.o 0. else (Time.sub ts current.now) in
@@ -153,14 +158,14 @@ let next_event () =
         nextev_wakener := Some wakener ;
         lwt _ = Lwt.pick [ Lwt_unix.sleep (wait_ts :> float) ; waiter ] in
         nextev_wakener := None ;
-        Lwt.return ()
+        Lwt.return true
     ) else (
         if debug then Printf.printf "Clock: next_event: executing since it's time (%s)\n%!" (Interval.to_string wait_ts) ;
         current.events <- Map.remove ts current.events ;
         current.now <- ts ;
-        Lwt.catch (fun () -> Lwt.return (f ())) (fun exn ->
+        Lwt.catch (fun () -> f () ; Lwt.return true) (fun exn ->
             Printf.printf "Clock: event handler triggered an exception : %a\n%!" Printexc.print exn ;
-            Lwt.return ())
+            Lwt.return true)
     )
 
 let delay d f x =
@@ -172,10 +177,12 @@ let sleep d =
     delay d (Lwt.wakeup wakener) () ;
     waiter
 
-let run () =
+(** [run true] will run forever while [run false] will return once no more events are waiting. *)
+let run wait =
     let rec aux () =
-        lwt _ = next_event () in
-        aux () in
+        lwt more = next_event wait in
+        if more then aux ()
+        else Lwt.return () in
     aux ()
 
 (* Synchronize internal clock with realtime clock.

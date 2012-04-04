@@ -73,7 +73,7 @@ let tunnel ifname tun_ip tun_mac gw search_sfx nameserver dst dst_port src_port 
     (* Run everything *)
     Lwt.join [ Pcap.sniffer iface host.Host.rx ;
                cli_srv_thread ;
-               Clock.run () ]
+               Clock.run true ]
 
 let main =
     let ifname      = ref "eth0"

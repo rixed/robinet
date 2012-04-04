@@ -42,7 +42,7 @@ let perform_get my_ip my_mac peer_ip ?nameserver ?gw ifname url =
         wait_close ()
     in
     Lwt.choose [ Pcap.sniffer iface host.Host.rx ;
-                 Clock.run () ;
+                 Clock.run true ;
                  run () ]
 
 let main =

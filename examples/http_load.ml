@@ -55,7 +55,7 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
     Clock.delay (Clock.Interval.sec 15.) failwith "timeout" ;
     (* Run everything *)
     Lwt.choose ([ Pcap.sniffer iface (Hub.Repeater.rx nb_srcs hub) ;
-                  Clock.run () ] @ browsing_threads)
+                  Clock.run true ] @ browsing_threads)
 
 let main =
     let ifname        = ref "eth0"
