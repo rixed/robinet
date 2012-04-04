@@ -14,7 +14,8 @@ gmon.out
 *.opt
 *.top
 _build
-doc
+doc/*.html
+doc/doc.txt
 persist
 TODO
 *.log
