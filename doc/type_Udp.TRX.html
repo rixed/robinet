@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -44,7 +45,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;emit&nbsp;:&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;recv&nbsp;:&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit;<br>
 &nbsp;&nbsp;}<br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;tx&nbsp;:&nbsp;<span class="constructor">Udp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
+&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;tx&nbsp;:&nbsp;<span class="constructor">Udp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tools</span>.<span class="constructor">Payload</span>.outer_t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;rx&nbsp;:&nbsp;<span class="constructor">Udp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;string&nbsp;*&nbsp;int&nbsp;*&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make&nbsp;:&nbsp;?dst:<span class="constructor">Udp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Udp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tools</span>.trx<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make_client&nbsp;:&nbsp;src:<span class="constructor">Udp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;dst:<span class="constructor">Udp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tools</span>.trx<br>

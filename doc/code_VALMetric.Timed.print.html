@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -38,11 +39,12 @@
 </head>
 <body>
 <code class="code"><span class="keyword">let</span>&nbsp;print&nbsp;oc&nbsp;ev&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"Metric:&nbsp;%s:\n\ttotal-duration:&nbsp;%fs\n\tsimultaneous:&nbsp;%d\n\tmax-simult:&nbsp;%d\n"</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ev.name&nbsp;ev.tot_duration&nbsp;ev.simult&nbsp;ev.max_simult&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"Metric:&nbsp;%s:\n\ttotal-duration:&nbsp;%s\n\tsimultaneous:&nbsp;%d\n\tmax-simult:&nbsp;%d\n"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ev.name&nbsp;(<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.to_string&nbsp;ev.tot_duration)&nbsp;ev.simult&nbsp;ev.max_simult&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;ev.stop.<span class="constructor">Atomic</span>.count&nbsp;&lt;&gt;&nbsp;0<span class="constructor">L</span>&nbsp;<span class="keyword">then</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"\tavg-duration:&nbsp;%fs\n"</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(ev.tot_duration&nbsp;/.&nbsp;<span class="constructor">Int64</span>.to_float&nbsp;ev.stop.<span class="constructor">Atomic</span>.count)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"\tavg-duration:&nbsp;%s\n"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(((ev.tot_duration&nbsp;:&gt;&nbsp;float)&nbsp;/.&nbsp;<span class="constructor">Int64</span>.to_float&nbsp;ev.stop.<span class="constructor">Atomic</span>.count)&nbsp;|&gt;&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.o&nbsp;|&gt;&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.to_string)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="keyword">match</span>&nbsp;ev.minmax&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">None</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;()&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Some</span>&nbsp;mm&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"\tmin-duration:&nbsp;%f&nbsp;s&nbsp;(%s)\n\tmax-duration:&nbsp;%fs&nbsp;(%s)\n"</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(fst&nbsp;mm.min)&nbsp;(snd&nbsp;mm.min)&nbsp;(fst&nbsp;mm.max)&nbsp;(snd&nbsp;mm.max))</code></body></html>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"\tmin-duration:&nbsp;%s&nbsp;(%s)\n\tmax-duration:&nbsp;%s&nbsp;(%s)\n"</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.to_string&nbsp;(fst&nbsp;mm.min))&nbsp;(snd&nbsp;mm.min)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.to_string&nbsp;(fst&nbsp;mm.max))&nbsp;(snd&nbsp;mm.max))</code></body></html>

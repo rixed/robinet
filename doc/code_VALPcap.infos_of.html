@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -38,14 +39,15 @@
 </head>
 <body>
 <code class="code"><span class="keyword">let</span>&nbsp;infos_of&nbsp;filename&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;pkts,&nbsp;global_header&nbsp;=&nbsp;load&nbsp;filename&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;pkts&nbsp;=&nbsp;enum_of&nbsp;filename&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;min_ts&nbsp;=&nbsp;ref&nbsp;<span class="constructor">Float</span>.max_num&nbsp;<span class="keyword">and</span>&nbsp;max_ts&nbsp;=&nbsp;ref&nbsp;<span class="constructor">Float</span>.min_num<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;num_packets&nbsp;=&nbsp;ref&nbsp;0&nbsp;<span class="keyword">and</span>&nbsp;data_size&nbsp;=&nbsp;ref&nbsp;0<span class="constructor">L</span>&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Enum</span>.iter&nbsp;(<span class="keyword">fun</span>&nbsp;(ts,&nbsp;bits)&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;dlt&nbsp;=&nbsp;<span class="keyword">match</span>&nbsp;<span class="constructor">Enum</span>.peek&nbsp;pkts&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">Some</span>&nbsp;p&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;p.<span class="constructor">Pdu</span>.dlt&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">None</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Dlt</span>.en10mb&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Enum</span>.iter&nbsp;(<span class="keyword">fun</span>&nbsp;pdu&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;incr&nbsp;num_packets&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data_size&nbsp;:=&nbsp;<span class="constructor">Int64</span>.add&nbsp;!data_size&nbsp;(<span class="constructor">Int64</span>.of_int&nbsp;(bytelength&nbsp;bits))&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;min_ts&nbsp;:=&nbsp;min&nbsp;!min_ts&nbsp;ts&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;max_ts&nbsp;:=&nbsp;max&nbsp;!max_ts&nbsp;ts)&nbsp;pkts&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;{&nbsp;filename&nbsp;;&nbsp;data_link_type&nbsp;=&nbsp;global_header.dlt&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data_size&nbsp;:=&nbsp;<span class="constructor">Int64</span>.add&nbsp;!data_size&nbsp;(<span class="constructor">Int64</span>.of_int&nbsp;(<span class="constructor">Payload</span>.length&nbsp;pdu.<span class="constructor">Pdu</span>.payload))&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;min_ts&nbsp;:=&nbsp;min&nbsp;!min_ts&nbsp;(pdu.<span class="constructor">Pdu</span>.ts&nbsp;:&gt;&nbsp;float);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;max_ts&nbsp;:=&nbsp;max&nbsp;!max_ts&nbsp;(pdu.<span class="constructor">Pdu</span>.ts&nbsp;:&gt;&nbsp;float))&nbsp;pkts&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;{&nbsp;filename&nbsp;;&nbsp;data_link_type&nbsp;=&nbsp;dlt&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;num_packets&nbsp;=&nbsp;!num_packets&nbsp;;&nbsp;data_size&nbsp;=&nbsp;!data_size&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;start_time&nbsp;=&nbsp;!min_ts&nbsp;;&nbsp;stop_time&nbsp;=&nbsp;!max_ts&nbsp;}</code></body></html>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;start_time&nbsp;=&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Time</span>.o&nbsp;!min_ts&nbsp;;&nbsp;stop_time&nbsp;=&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Time</span>.o&nbsp;!max_ts&nbsp;}</code></body></html>

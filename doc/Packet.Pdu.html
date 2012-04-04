@@ -21,6 +21,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -58,7 +59,7 @@
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
 <code><span class="constructor">Raw</span> <span class="keyword">of</span> <code class="type">Bitstring.bitstring</code></code></td>
-<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >the fallback when the actual protocol is not known</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+
 </tr>
 <tr>
 <td align="left" valign="top" >
@@ -121,12 +122,28 @@
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
 <code><span class="constructor">Vlan</span> <span class="keyword">of</span> <code class="type"><a href="Vlan.Pdu.html#TYPEt">Vlan.Pdu.t</a></code></code></td>
-<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >A Pdu.t is a list of <a href="Packet.Pdu.html#TYPElayer"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer</code></a>s, with the outer layer first for
- a more natural presentation when printed.</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code><span class="keyword">|</span></code></td>
+<td align="left" valign="top" >
+<code><span class="constructor">Icmp</span> <span class="keyword">of</span> <code class="type"><a href="Icmp.Pdu.html#TYPEt">Icmp.Pdu.t</a></code></code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code><span class="keyword">|</span></code></td>
+<td align="left" valign="top" >
+<code><span class="constructor">Pcap</span> <span class="keyword">of</span> <code class="type"><a href="Pcap.Pdu.html#TYPEt">Pcap.Pdu.t</a></code></code></td>
+
 </tr></table>
 
 <div class="info">
-Each layer can be of any one of these known protocol.<br>
+Each layer can be of any one of these known protocol.
+<p>
+A Pdu.t is a list of <a href="Packet.Pdu.html#TYPElayer"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer</code></a>s, with the outer layer first for
+ a more natural presentation when printed.<br>
 </div>
 
 <pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = <code class="type"><a href="Packet.Pdu.html#TYPElayer">layer</a> list</code> </pre>
@@ -134,10 +151,8 @@ Each layer can be of any one of these known protocol.<br>
 <pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALPacket.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Packet.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><div class="info">
 <code class="code">pack pdu</code> converts the layer list back to a <code class="code">bitstring</code>.<br>
 </div>
-<pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALPacket.Pdu.unpack.html">unpack</a></span> : <code class="type">?dlt:int32 -> Bitstring.bitstring -> <a href="Packet.Pdu.html#TYPElayer">layer</a> list</code></pre><div class="info">
-Convert a <code class="code">bitstring</code> into a <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.
+<pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALPacket.Pdu.unpack.html">unpack</a></span> : <code class="type"><a href="Pcap.Pdu.html#TYPEt">Pcap.Pdu.t</a> -> <a href="Packet.Pdu.html#TYPElayer">layer</a> list</code></pre><div class="info">
+Convert a <code class="code">bitstring</code> (from a Pcap.pdu) into a <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.
 <br>
 </div>
-<div class="param_info"><code class="code">dlt</code> : if the <em>data link layer</em> is not Ethernet then you can change it here.
-            The only other known <em>DLT</em> is <a href="Pcap.html#VALdlt_linux_cooked"><code class="code"><span class="constructor">Pcap</span>.dlt_linux_cooked</code></a>, though.</div>
 </body></html>

@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -37,4 +38,10 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Pcap.enum_of</title>
 </head>
 <body>
-<code class="code"><span class="keyword">let</span>&nbsp;enum_of&nbsp;fname&nbsp;=&nbsp;fst&nbsp;(load&nbsp;fname)</code></body></html>
+<code class="code"><span class="keyword">let</span>&nbsp;enum_of&nbsp;fname&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;global_header,&nbsp;ic&nbsp;=&nbsp;read_global_header&nbsp;fname&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;<span class="keyword">rec</span>&nbsp;next&nbsp;()&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">try</span>&nbsp;read_next_pkt&nbsp;global_header&nbsp;ic<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">IO</span>.<span class="constructor">No_more_input</span>&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">IO</span>.<span class="constructor">Input_closed</span>&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;raise&nbsp;<span class="constructor">Enum</span>.<span class="constructor">No_more_elements</span>&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Enum</span>.from&nbsp;next</code></body></html>

@@ -23,6 +23,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -44,6 +45,7 @@
 <link title="Packet injection" rel="Subsection" href="#2_Packetinjection">
 <link title="Packet sniffing" rel="Subsection" href="#2_Packetsniffing">
 <link title="Pcap files" rel="Subsection" href="#2_Pcapfiles">
+<link title="Tools" rel="Subsection" href="#2_Tools">
 <title>Pcap</title>
 </head>
 <body>
@@ -73,7 +75,7 @@ A network device opened for sniffing or injection<br>
 <pre><span id="VALinject"><span class="keyword">val</span> <a href="code_VALPcap.inject.html">inject</a></span> : <code class="type"><a href="Pcap.html#TYPEiface">iface</a> -> string -> unit</code></pre><div class="info">
 <code class="code">inject iface packet</code> inject this packet into this interface<br>
 </div>
-<pre><span id="VALsniff"><span class="keyword">val</span> <a href="code_VALPcap.sniff.html">sniff</a></span> : <code class="type"><a href="Pcap.html#TYPEiface">iface</a> -> float * string</code></pre><div class="info">
+<pre><span id="VALsniff"><span class="keyword">val</span> <a href="code_VALPcap.sniff.html">sniff</a></span> : <code class="type"><a href="Pcap.html#TYPEiface">iface</a> -> Clock.Time.t * string</code></pre><div class="info">
 <code class="code">sniff iface</code> will return the next available packet, as well as its capture
  timestamp<br>
 </div>
@@ -107,55 +109,18 @@ A counter for how many bytes were sniffed.<br>
 </div>
 <br>
 <span id="2_Pcapfiles"><h2>Pcap files</h2></span><br>
-<br>
+<pre><span class="keyword">module</span> <a href="Pcap.Dlt.html">Dlt</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Pcap.Dlt.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 <em>Data Link Layers</em> are constant values indicating what protocol and hardware technology
- some captured packets were taken from. We support only the two most common: <code class="code">dlt_en10mb</code>, ie
- usual Ethernet cables, and <code class="code">dlt_linux_cooked</code> corresponding to a capture on the <em>any</em>
- network device on Linux.<br>
-<pre><span id="VALdlt_null"><span class="keyword">val</span> <a href="code_VALPcap.dlt_null.html">dlt_null</a></span> : <code class="type">int32</code></pre><div class="info">
-BSD loopback encapsulation<br>
+ some captured packets were taken from.
 </div>
-<pre><span id="VALdlt_en10mb"><span class="keyword">val</span> <a href="code_VALPcap.dlt_en10mb.html">dlt_en10mb</a></span> : <code class="type">int32</code></pre><div class="info">
-Ethernet (10Mb)<br>
-</div>
-<pre><span id="VALdlt_en3mb"><span class="keyword">val</span> <a href="code_VALPcap.dlt_en3mb.html">dlt_en3mb</a></span> : <code class="type">int32</code></pre><div class="info">
-Experimental Ethernet (3Mb)<br>
-</div>
-<pre><span id="VALdlt_ax25"><span class="keyword">val</span> <a href="code_VALPcap.dlt_ax25.html">dlt_ax25</a></span> : <code class="type">int32</code></pre><div class="info">
-Amateur Radio AX.25<br>
-</div>
-<pre><span id="VALdlt_pronet"><span class="keyword">val</span> <a href="code_VALPcap.dlt_pronet.html">dlt_pronet</a></span> : <code class="type">int32</code></pre><div class="info">
-Proteon ProNET Token Ring<br>
-</div>
-<pre><span id="VALdlt_chaos"><span class="keyword">val</span> <a href="code_VALPcap.dlt_chaos.html">dlt_chaos</a></span> : <code class="type">int32</code></pre><div class="info">
-Chaos<br>
-</div>
-<pre><span id="VALdlt_ieee802"><span class="keyword">val</span> <a href="code_VALPcap.dlt_ieee802.html">dlt_ieee802</a></span> : <code class="type">int32</code></pre><div class="info">
-802.5 Token Ring<br>
-</div>
-<pre><span id="VALdlt_arcnet"><span class="keyword">val</span> <a href="code_VALPcap.dlt_arcnet.html">dlt_arcnet</a></span> : <code class="type">int32</code></pre><div class="info">
-ARCNET, with BSD-style header<br>
-</div>
-<pre><span id="VALdlt_slip"><span class="keyword">val</span> <a href="code_VALPcap.dlt_slip.html">dlt_slip</a></span> : <code class="type">int32</code></pre><div class="info">
-Serial Line IP<br>
-</div>
-<pre><span id="VALdlt_ppp"><span class="keyword">val</span> <a href="code_VALPcap.dlt_ppp.html">dlt_ppp</a></span> : <code class="type">int32</code></pre><div class="info">
-Point-to-point Protocol<br>
-</div>
-<pre><span id="VALdlt_fddi"><span class="keyword">val</span> <a href="code_VALPcap.dlt_fddi.html">dlt_fddi</a></span> : <code class="type">int32</code></pre><div class="info">
-FDDI<br>
-</div>
-<pre><span id="VALdlt_linux_cooked"><span class="keyword">val</span> <a href="code_VALPcap.dlt_linux_cooked.html">dlt_linux_cooked</a></span> : <code class="type">int32</code></pre><div class="info">
-Linux SLL<br>
-</div>
-<pre><span id="VALsave"><span class="keyword">val</span> <a href="code_VALPcap.save.html">save</a></span> : <code class="type">?caplen:int -> ?dlt:int32 -> string -> Bitstring.bitstring -> unit</code></pre><div class="info">
-<code class="code">save <span class="string">"file.pcap"</span></code> returns a function that will save passed packets (as <code class="code">bitstring</code>s)
- in <code class="code"><span class="string">"file.pcap"</span></code> file.
-<br>
-</div>
-<div class="param_info"><code class="code">caplen</code> : can be used to cap saved packet to a given number of bytes</div>
-<div class="param_info"><code class="code">dlt</code> : can be used to change the file's DLT (you probably do not want to do that)</div>
 <br><code><span id="TYPEglobal_header"><span class="keyword">type</span> <code class="type"></code>global_header</span> = {</code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>name&nbsp;: <code class="type">string</code>;</code></td>
+
+</tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
@@ -196,13 +161,13 @@ Linux SLL<br>
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
 <code>snaplen&nbsp;: <code class="type">int32</code>;</code></td>
-<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >Indicate that no caplen will be smaller. We don't use this.</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>dlt&nbsp;: <code class="type">int32</code>;</code></td>
+<code>dlt&nbsp;: <code class="type">Dlt.t</code>;</code></td>
 
 </tr></table>
 }
@@ -211,28 +176,36 @@ Linux SLL<br>
 The global header of a pcap file.<br>
 </div>
 
+<br>
+<span id="3_Pdu"><h3>Pdu</h3></span><br>
+<pre><span class="keyword">module</span> <a href="Pcap.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Pcap.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Packets harvested with libpcap will come with additional informations such
+ as caplen, timestamp etc.
+</div>
+<pre><span id="VALsave"><span class="keyword">val</span> <a href="code_VALPcap.save.html">save</a></span> : <code class="type">?caplen:int -> ?dlt:Dlt.t -> string -> Tools.Payload.outer_t -> unit</code></pre><div class="info">
+<code class="code">save <span class="string">"file.pcap"</span></code> returns a function that will save passed packets (as <code class="code">bitstring</code>s)
+ in <code class="code"><span class="string">"file.pcap"</span></code> file.
+<br>
+</div>
+<div class="param_info"><code class="code">caplen</code> : can be used to cap saved packet to a given number of bytes</div>
+<div class="param_info"><code class="code">dlt</code> : can be used to change the file's DLT (you probably do not want to do that)</div>
 <pre><span id="EXCEPTIONNot_a_pcap_file"><span class="keyword">exception</span> Not_a_pcap_file</span></pre>
 <div class="info">
 When trying to read packets from a file that doesn't look like a pcap file.<br>
 </div>
-<pre><span id="VALread_global_header"><span class="keyword">val</span> <a href="code_VALPcap.read_global_header.html">read_global_header</a></span> : <code class="type">Batteries.IO.input -> <a href="Pcap.html#TYPEglobal_header">global_header</a></code></pre><div class="info">
-<code class="code">read_global_header ic</code> reads the pcap global header from the input stream <code class="code">ic</code>
- and returns a <a href="Pcap.html#TYPEglobal_header"><code class="code"><span class="constructor">Pcap</span>.global_header</code></a>. The stream should point at the file beginning.<br>
+<pre><span id="VALread_global_header"><span class="keyword">val</span> <a href="code_VALPcap.read_global_header.html">read_global_header</a></span> : <code class="type">string -> <a href="Pcap.html#TYPEglobal_header">global_header</a> * BatIO.input</code></pre><div class="info">
+<code class="code">read_global_header filename</code> reads the pcap global header from the
+ fiven file, and returns both a <a href="Pcap.html#TYPEglobal_header"><code class="code"><span class="constructor">Pcap</span>.global_header</code></a> and the input channel.<br>
 </div>
-<pre><span id="VALread_next_pkt"><span class="keyword">val</span> <a href="code_VALPcap.read_next_pkt.html">read_next_pkt</a></span> : <code class="type"><a href="Pcap.html#TYPEglobal_header">global_header</a> -> Batteries.IO.input -> float * Bitstring.bitstring</code></pre><div class="info">
-<code class="code">read_next_pkt global_header ic</code> will return the next packet that's to be read from
- the input stream <code class="code">ic</code>. The <a href="Pcap.html#TYPEglobal_header"><code class="code"><span class="constructor">Pcap</span>.global_header</code></a> is used for the byte ordering.<br>
+<pre><span id="VALread_next_pkt"><span class="keyword">val</span> <a href="code_VALPcap.read_next_pkt.html">read_next_pkt</a></span> : <code class="type"><a href="Pcap.html#TYPEglobal_header">global_header</a> -> Batteries.IO.input -> <a href="Pcap.Pdu.html#TYPEt">Pdu.t</a></code></pre><div class="info">
+<code class="code">read_next_pkt global_header ic</code> will return the next <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a> that's to
+ be read from the input stream <code class="code">ic</code>.<br>
 </div>
-<pre><span id="VALdlt_of"><span class="keyword">val</span> <a href="code_VALPcap.dlt_of.html">dlt_of</a></span> : <code class="type">string -> int32</code></pre><div class="info">
-<code class="code">dlt_of <span class="string">"file.pcap"</span></code> will return the <a href="Pcap.html#TYPEglobal_header"><code class="code"><span class="constructor">Pcap</span>.global_header</code></a> of this pcap file.<br>
+<pre><span id="VALenum_of"><span class="keyword">val</span> <a href="code_VALPcap.enum_of.html">enum_of</a></span> : <code class="type">string -> <a href="Pcap.Pdu.html#TYPEt">Pdu.t</a> Batteries.Enum.t</code></pre><div class="info">
+from a pcap file, returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
 </div>
-<pre><span id="VALload"><span class="keyword">val</span> <a href="code_VALPcap.load.html">load</a></span> : <code class="type">string -> (float * Bitstring.bitstring) Batteries.Enum.t * <a href="Pcap.html#TYPEglobal_header">global_header</a></code></pre><div class="info">
-from a pcap file, returns an <code class="code"><span class="constructor">Enum</span>.t</code> of timestamps and packets, and the
- <a href="Pcap.html#TYPEglobal_header"><code class="code"><span class="constructor">Pcap</span>.global_header</code></a>.<br>
-</div>
-<pre><span id="VALenum_of"><span class="keyword">val</span> <a href="code_VALPcap.enum_of.html">enum_of</a></span> : <code class="type">string -> (float * Bitstring.bitstring) Batteries.Enum.t</code></pre><div class="info">
-Same than <a href="Pcap.html#VALload"><code class="code"><span class="constructor">Pcap</span>.load</code></a> but returns only the <code class="code"><span class="constructor">Enum</span>.t</code>.<br>
-</div>
+<br>
+<span id="2_Tools"><h2>Tools</h2></span><br>
 <br><code><span id="TYPEinfos"><span class="keyword">type</span> <code class="type"></code>infos</span> = {</code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
@@ -245,7 +218,7 @@ Same than <a href="Pcap.html#VALload"><code class="code"><span class="constructo
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>data_link_type&nbsp;: <code class="type">int32</code>;</code></td>
+<code>data_link_type&nbsp;: <code class="type">Dlt.t</code>;</code></td>
 
 </tr>
 <tr>
@@ -266,14 +239,14 @@ Same than <a href="Pcap.html#VALload"><code class="code"><span class="constructo
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>start_time&nbsp;: <code class="type">float</code>;</code></td>
+<code>start_time&nbsp;: <code class="type">Clock.Time.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>stop_time&nbsp;: <code class="type">float</code>;</code></td>
+<code>stop_time&nbsp;: <code class="type">Clock.Time.t</code>;</code></td>
 
 </tr></table>
 }
@@ -286,7 +259,7 @@ Informations on a pcap file.<br>
 Return some informations about a pcap file (require to scan the whole file,
  so depending on the file size it may take some time).<br>
 </div>
-<pre><span id="VALmerge"><span class="keyword">val</span> <a href="code_VALPcap.merge.html">merge</a></span> : <code class="type">('a * 'b) Batteries.Enum.t list -> ('a * 'b) Batteries.Enum.t</code></pre><div class="info">
+<pre><span id="VALmerge"><span class="keyword">val</span> <a href="code_VALPcap.merge.html">merge</a></span> : <code class="type"><a href="Pcap.Pdu.html#TYPEt">Pdu.t</a> Batteries.Enum.t list -> <a href="Pcap.Pdu.html#TYPEt">Pdu.t</a> Batteries.Enum.t</code></pre><div class="info">
 <code class="code">merge [e1 ; e2 ; e3]</code> will merge the three <code class="code"><span class="constructor">Enumt</span>.t</code> of packets in chronological
  order.<br>
 </div>

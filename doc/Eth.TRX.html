@@ -22,6 +22,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -155,7 +156,7 @@
 }
 
 
-<pre><span id="VALsend"><span class="keyword">val</span> <a href="code_VALEth.TRX.send.html">send</a></span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> Arp.HwProto.t -> Eth.Addr.t -> Bitstring.bitstring -> unit</code></pre><div class="info">
+<pre><span id="VALsend"><span class="keyword">val</span> <a href="code_VALEth.TRX.send.html">send</a></span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> Arp.HwProto.t -> Eth.Addr.t -> Tools.Payload.outer_t -> unit</code></pre><div class="info">
 Low level send fonction. Takes a <code class="code"><span class="constructor">Arp</span>.<span class="constructor">HwProto</span>.t</code> since it's used both
  for the user payload protocol and ARP protocol.<br>
 </div>

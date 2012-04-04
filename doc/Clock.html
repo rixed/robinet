@@ -23,6 +23,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -39,7 +40,9 @@
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
 <link title="Url" rel="Chapter" href="Url.html">
-<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Clock</title>
+<link title="Vlan" rel="Chapter" href="Vlan.html"><link title="Private Types" rel="Section" href="#1_PrivateTypes">
+<link title="Current running time" rel="Section" href="#1_Currentrunningtime">
+<title>Clock</title>
 </head>
 <body>
 <div class="navbar"><a href="Browser.html">Previous</a>
@@ -48,17 +51,35 @@
 </div>
 <center><h1>Module <a href="type_Clock.html">Clock</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Clock: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALClock.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span id="VALrealtime"><span class="keyword">val</span> <a href="code_VALClock.realtime.html">realtime</a></span> : <code class="type">bool Batteries.ref</code></pre><pre><span id="TYPEtime"><span class="keyword">type</span> <code class="type"></code>time</span> = <code class="type">float</code> </pre>
+<pre><span class="keyword">module</span> Clock: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>This module creates an alarm-clock that schedule registered events.
+   There are two modes of operation: realtime and not realtime.
+<p>
 
-<pre><span id="VALdate_and_time"><span class="keyword">val</span> <a href="code_VALClock.date_and_time.html">date_and_time</a></span> : <code class="type">bool</code></pre><pre><span id="VALstring_of_time"><span class="keyword">val</span> <a href="code_VALClock.string_of_time.html">string_of_time</a></span> : <code class="type">float -> string</code></pre><pre><span id="VALtime_printer"><span class="keyword">val</span> <a href="code_VALClock.time_printer.html">time_printer</a></span> : <code class="type">Batteries.Format.formatter -> <a href="Clock.html#TYPEtime">time</a> -> unit</code></pre><pre><span id="VALprint"><span class="keyword">val</span> <a href="code_VALClock.print.html">print</a></span> : <code class="type">'a BatIO.output -> float -> unit</code></pre><pre><span id="VALusec"><span class="keyword">val</span> <a href="code_VALClock.usec.html">usec</a></span> : <code class="type">float -> float</code></pre><pre><span id="VALmsec"><span class="keyword">val</span> <a href="code_VALClock.msec.html">msec</a></span> : <code class="type">float -> float</code></pre><pre><span id="VALsec"><span class="keyword">val</span> <a href="code_VALClock.sec.html">sec</a></span> : <code class="type">'a -> 'a</code></pre><pre><span id="VALmin"><span class="keyword">val</span> <a href="code_VALClock.min.html">min</a></span> : <code class="type">float -> float</code></pre><pre><span id="VALhour"><span class="keyword">val</span> <a href="code_VALClock.hour.html">hour</a></span> : <code class="type">float -> float</code></pre><pre><span class="keyword">module</span> <a href="Clock.Map.html">Map</a>: <code class="type">Batteries.Map.Make</code><code class="code">(</code><code class="code"><span class="keyword">sig</span></code><div class="sig_block"><pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = <code class="type"><a href="Clock.html#TYPEtime">Clock.time</a></code> </pre>
+   When in realtime mode (the default), the clock will merely follow
+   wall-clock. This is not very interesting but is required whenever you plan
+   to work with real network devices and outside world.  If your simulated
+   network does not communicates with the outside world, though, then you can
+   use not realtime mode and then play your simulation at full speed (and full
+   CPU).<br>
+<hr width="100%">
+<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALClock.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span id="VALrealtime"><span class="keyword">val</span> <a href="code_VALClock.realtime.html">realtime</a></span> : <code class="type">bool Batteries.ref</code></pre><br>
+<span id="1_PrivateTypes"><h1>Private Types</h1></span><br>
+<pre><span class="keyword">module</span> <a href="Clock.Time.html">Time</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.Time.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Time.t represents a given timestamp (ie.
+</div>
+<pre><span class="keyword">module</span> <a href="Clock.Interval.html">Interval</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.Interval.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+While Interval.t reprensents a time interval.
+</div>
+<pre><span id="VALprinter"><span class="keyword">val</span> <a href="code_VALClock.printer.html">printer</a></span> : <code class="type">'a BatIO.output -> Time.t -> unit</code></pre><br>
+<span id="1_Currentrunningtime"><h1>Current running time</h1></span><br>
+<pre><span class="keyword">module</span> <a href="Clock.Map.html">Map</a>: <code class="type">Batteries.Map.Make</code><code class="code">(</code><code class="code"><span class="keyword">sig</span></code><div class="sig_block"><pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = <code class="type">Clock.Time.t</code> </pre>
 
-<pre><span id="VALcompare"><span class="keyword">val</span> <a href="code_VALClock.Map.compare.html">compare</a></span> : <code class="type">float -> float -> int</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">)</code></pre><br><code><span id="TYPEclock"><span class="keyword">type</span> <code class="type"></code>clock</span> = {</code><table class="typetable">
+<pre><span id="VALcompare"><span class="keyword">val</span> <a href="code_VALClock.Map.compare.html">compare</a></span> : <code class="type">t -> t -> int</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">)</code></pre><br><code><span id="TYPEclock"><span class="keyword">type</span> <code class="type"></code>clock</span> = {</code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>now&nbsp;: <code class="type"><a href="Clock.html#TYPEtime">time</a></code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span>now&nbsp;: <code class="type">Time.t</code>;</code></td>
 
 </tr>
 <tr>
@@ -71,4 +92,4 @@
 }
 
 
-<pre><span id="VALcurrent"><span class="keyword">val</span> <a href="code_VALClock.current.html">current</a></span> : <code class="type"><a href="Clock.html#TYPEclock">clock</a></code></pre><pre><span id="VALnow"><span class="keyword">val</span> <a href="code_VALClock.now.html">now</a></span> : <code class="type">unit -> <a href="Clock.html#TYPEtime">time</a></code></pre><pre><span id="VALnextev_wakener"><span class="keyword">val</span> <a href="code_VALClock.nextev_wakener.html">nextev_wakener</a></span> : <code class="type">unit Lwt.u option Batteries.ref</code></pre><pre><span id="VALnextev_awake"><span class="keyword">val</span> <a href="code_VALClock.nextev_awake.html">nextev_awake</a></span> : <code class="type">unit -> unit</code></pre><pre><span id="VALat"><span class="keyword">val</span> <a href="code_VALClock.at.html">at</a></span> : <code class="type">Map.key -> ('a -> unit) -> 'a -> unit</code></pre><pre><span id="VALnext_event"><span class="keyword">val</span> <a href="code_VALClock.next_event.html">next_event</a></span> : <code class="type">unit -> unit Lwt.t</code></pre><pre><span id="VALdelay"><span class="keyword">val</span> <a href="code_VALClock.delay.html">delay</a></span> : <code class="type">float -> ('a -> unit) -> 'a -> unit</code></pre><pre><span id="VALsleep"><span class="keyword">val</span> <a href="code_VALClock.sleep.html">sleep</a></span> : <code class="type">float -> unit Lwt.t</code></pre><pre><span id="VALrun"><span class="keyword">val</span> <a href="code_VALClock.run.html">run</a></span> : <code class="type">unit -> 'a Lwt.t</code></pre><pre><span id="VALsynch"><span class="keyword">val</span> <a href="code_VALClock.synch.html">synch</a></span> : <code class="type">unit -> unit</code></pre></body></html>
+<pre><span id="VALcurrent"><span class="keyword">val</span> <a href="code_VALClock.current.html">current</a></span> : <code class="type"><a href="Clock.html#TYPEclock">clock</a></code></pre><pre><span id="VALnow"><span class="keyword">val</span> <a href="code_VALClock.now.html">now</a></span> : <code class="type">unit -> Time.t</code></pre><pre><span id="VALnextev_wakener"><span class="keyword">val</span> <a href="code_VALClock.nextev_wakener.html">nextev_wakener</a></span> : <code class="type">unit Lwt.u option Batteries.ref</code></pre><pre><span id="VALnextev_awake"><span class="keyword">val</span> <a href="code_VALClock.nextev_awake.html">nextev_awake</a></span> : <code class="type">unit -> unit</code></pre><pre><span id="VALat"><span class="keyword">val</span> <a href="code_VALClock.at.html">at</a></span> : <code class="type">Map.key -> ('a -> unit) -> 'a -> unit</code></pre><pre><span id="VALnext_event"><span class="keyword">val</span> <a href="code_VALClock.next_event.html">next_event</a></span> : <code class="type">unit -> unit Lwt.t</code></pre><pre><span id="VALdelay"><span class="keyword">val</span> <a href="code_VALClock.delay.html">delay</a></span> : <code class="type">Interval.t -> ('a -> unit) -> 'a -> unit</code></pre><pre><span id="VALsleep"><span class="keyword">val</span> <a href="code_VALClock.sleep.html">sleep</a></span> : <code class="type">Interval.t -> unit Lwt.t</code></pre><pre><span id="VALrun"><span class="keyword">val</span> <a href="code_VALClock.run.html">run</a></span> : <code class="type">unit -> 'a Lwt.t</code></pre><pre><span id="VALsynch"><span class="keyword">val</span> <a href="code_VALClock.synch.html">synch</a></span> : <code class="type">unit -> unit</code></pre></body></html>

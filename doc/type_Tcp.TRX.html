@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -153,9 +154,9 @@
 &nbsp;&nbsp;&nbsp;&nbsp;?isn:<span class="constructor">Tcp</span>.<span class="constructor">SeqNum</span>.t&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;?mtu:int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.tcp_trx<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;may_timeout&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;default_connect_timeout&nbsp;:&nbsp;float<br>
+&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;default_connect_timeout&nbsp;:&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.t<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;connect&nbsp;:<br>
-&nbsp;&nbsp;&nbsp;&nbsp;?timeout:float&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;?timeout:<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.t&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;?isn:<span class="constructor">Tcp</span>.<span class="constructor">SeqNum</span>.t&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;?mtu:int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.tcp_trx&nbsp;option&nbsp;<span class="constructor">Lwt</span>.t<br>
 <span class="keyword">end</span></code></body></html>

@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -37,7 +38,7 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Clock.at</title>
 </head>
 <body>
-<code class="code"><span class="keyword">let</span>&nbsp;at&nbsp;ts&nbsp;f&nbsp;x&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Clock:&nbsp;add&nbsp;an&nbsp;event&nbsp;for&nbsp;time&nbsp;%f&nbsp;(%+fs)\n%!"</span>&nbsp;ts&nbsp;(ts&nbsp;-.&nbsp;current.now)&nbsp;;<br>
+<code class="code"><span class="keyword">let</span>&nbsp;at&nbsp;(ts&nbsp;:&nbsp;<span class="constructor">Time</span>.t)&nbsp;f&nbsp;x&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Clock:&nbsp;add&nbsp;an&nbsp;event&nbsp;for&nbsp;time&nbsp;%s&nbsp;(%s)\n%!"</span>&nbsp;(<span class="constructor">Time</span>.to_string&nbsp;ts)&nbsp;(<span class="constructor">Interval</span>.to_string&nbsp;(<span class="constructor">Time</span>.sub&nbsp;ts&nbsp;current.now))&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;current.events&nbsp;&lt;-&nbsp;<span class="constructor">Map</span>.add&nbsp;ts&nbsp;(<span class="keyword">fun</span>&nbsp;()&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;f&nbsp;x)&nbsp;current.events&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;nextev_awake&nbsp;()</code></body></html>

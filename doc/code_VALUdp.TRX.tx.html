@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -39,6 +40,6 @@
 <body>
 <code class="code"><span class="keyword">let</span>&nbsp;tx&nbsp;t&nbsp;bits&nbsp;=<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;src_port&nbsp;=&nbsp;t.src&nbsp;<span class="keyword">and</span>&nbsp;dst_port&nbsp;=&nbsp;<span class="constructor">Option</span>.get&nbsp;t.dst&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;udp&nbsp;=&nbsp;<span class="constructor">Pdu</span>.make&nbsp;~src_port&nbsp;~dst_port&nbsp;(<span class="constructor">Payload</span>.o&nbsp;bits)&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;udp&nbsp;=&nbsp;<span class="constructor">Pdu</span>.make&nbsp;~src_port&nbsp;~dst_port&nbsp;bits&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Udp:&nbsp;Emitting&nbsp;a&nbsp;packet&nbsp;from&nbsp;%s&nbsp;to&nbsp;%s\n%!"</span>&nbsp;(<span class="constructor">Port</span>.to_string&nbsp;src_port)&nbsp;(<span class="constructor">Port</span>.to_string&nbsp;dst_port)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.emit&nbsp;(<span class="constructor">Pdu</span>.pack&nbsp;udp)</code></body></html>

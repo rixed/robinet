@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -37,6 +38,4 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Packet.enum_of</title>
 </head>
 <body>
-<code class="code"><span class="keyword">let</span>&nbsp;enum_of&nbsp;fname&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;dlt&nbsp;=&nbsp;<span class="constructor">Pcap</span>.dlt_of&nbsp;fname&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Pcap</span>.enum_of&nbsp;fname&nbsp;/@&nbsp;of_pcap&nbsp;~dlt</code></body></html>
+<code class="code"><span class="keyword">let</span>&nbsp;enum_of&nbsp;fname&nbsp;=&nbsp;<span class="constructor">Pcap</span>.enum_of&nbsp;fname&nbsp;/@&nbsp;<span class="constructor">Pdu</span>.unpack</code></body></html>

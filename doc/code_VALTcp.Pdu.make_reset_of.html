@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -40,4 +41,4 @@
 <code class="code"><span class="keyword">let</span>&nbsp;make_reset_of&nbsp;pdu&nbsp;=<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;make&nbsp;~src_port:pdu.dst_port&nbsp;~dst_port:pdu.src_port<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;~seq_num:pdu.ack_num&nbsp;~ack_num:(<span class="constructor">SeqNum</span>.o&nbsp;(<span class="constructor">Int32</span>.succ&nbsp;(pdu.seq_num:&gt;int32)))<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;~ack:<span class="keyword">true</span>&nbsp;~rst:<span class="keyword">true</span>&nbsp;<span class="constructor">Payload</span>.empty</code></body></html>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;~ack:<span class="keyword">true</span>&nbsp;~rst:<span class="keyword">true</span>&nbsp;empty_bitstring</code></body></html>

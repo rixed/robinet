@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -41,7 +42,7 @@
 &nbsp;&nbsp;<span class="keyword">type</span>&nbsp;t&nbsp;=&nbsp;{<br>
 &nbsp;&nbsp;&nbsp;&nbsp;name&nbsp;:&nbsp;string;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;count&nbsp;:&nbsp;int64;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;first_last&nbsp;:&nbsp;(float&nbsp;*&nbsp;float)&nbsp;option;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;first_last&nbsp;:&nbsp;(<span class="constructor">Clock</span>.<span class="constructor">Time</span>.t&nbsp;*&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Time</span>.t)&nbsp;option;<br>
 &nbsp;&nbsp;}<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;all&nbsp;:&nbsp;(string,&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Atomic</span>.t)&nbsp;<span class="constructor">Batteries</span>.<span class="constructor">Hashtbl</span>.t<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make&nbsp;:&nbsp;string&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Atomic</span>.t<br>

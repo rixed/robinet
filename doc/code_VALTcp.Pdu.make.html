@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -40,12 +41,12 @@
 <code class="code"><span class="keyword">let</span>&nbsp;make&nbsp;?(src_port&nbsp;=&nbsp;<span class="constructor">Port</span>.o&nbsp;1024)&nbsp;?(dst_port&nbsp;=&nbsp;<span class="constructor">Port</span>.o&nbsp;80)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;?(seq_num&nbsp;=&nbsp;<span class="constructor">SeqNum</span>.o&nbsp;0l)&nbsp;?(ack_num&nbsp;=&nbsp;<span class="constructor">SeqNum</span>.o&nbsp;0l)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;?(urg=<span class="keyword">false</span>)&nbsp;?(ack=<span class="keyword">false</span>)&nbsp;?(psh=<span class="keyword">false</span>)&nbsp;?(rst=<span class="keyword">false</span>)&nbsp;?(syn=<span class="keyword">false</span>)&nbsp;?(fin=<span class="keyword">false</span>)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;?(win_size=1024)&nbsp;?checksum&nbsp;?(urg_ptr=0)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;?(win_size=1024)&nbsp;?(urg_ptr=0)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;?(options=empty_bitstring)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;payload&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;bits&nbsp;=<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{&nbsp;src_port&nbsp;;&nbsp;dst_port&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;seq_num&nbsp;&nbsp;;&nbsp;ack_num&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;flags&nbsp;=&nbsp;{&nbsp;urg&nbsp;;&nbsp;ack&nbsp;;&nbsp;psh&nbsp;;&nbsp;rst&nbsp;;&nbsp;syn&nbsp;;&nbsp;fin&nbsp;}&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;win_size&nbsp;;&nbsp;checksum&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;win_size&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;urg_ptr&nbsp;&nbsp;;&nbsp;options&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;payload&nbsp;}</code></body></html>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;payload&nbsp;=&nbsp;<span class="constructor">Payload</span>.o&nbsp;bits&nbsp;}</code></body></html>

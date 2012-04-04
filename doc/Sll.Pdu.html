@@ -21,6 +21,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -44,7 +45,8 @@
 &nbsp;</div>
 <center><h1>Module <a href="type_Sll.Pdu.html">Sll.Pdu</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Sll.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
+<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Sll.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Pack/Unpack a SLL frame.<br>
+<hr width="100%">
 <br><code><span id="TYPEpkt_type"><span class="keyword">type</span> <code class="type"></code>pkt_type</span> = </code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
@@ -82,6 +84,9 @@
 
 </tr></table>
 
+<div class="info">
+The 5 possible directions of the frame<br>
+</div>
 
 <pre><span id="VALpkt_type_of_int"><span class="keyword">val</span> <a href="code_VALSll.Pdu.pkt_type_of_int.html">pkt_type_of_int</a></span> : <code class="type">int -> <a href="Sll.Pdu.html#TYPEpkt_type">pkt_type</a></code></pre><pre><span id="VALint_of_pkt_type"><span class="keyword">val</span> <a href="code_VALSll.Pdu.int_of_pkt_type.html">int_of_pkt_type</a></span> : <code class="type"><a href="Sll.Pdu.html#TYPEpkt_type">pkt_type</a> -> int</code></pre><br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
 <tr>
@@ -121,5 +126,21 @@
 </tr></table>
 }
 
+<div class="info">
+A SLL frame has an address (usually Ethernet), a direction, and a
+ protocol. Notice the absence of the local address.<br>
+</div>
 
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALSll.Pdu.make.html">make</a></span> : <code class="type">?ll_addr_type:int -><br>       <a href="Sll.Pdu.html#TYPEpkt_type">pkt_type</a> -><br>       Arp.HwProto.t -> Bitstring.bitstring -> Tools.Payload.t -> <a href="Sll.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALSll.Pdu.random.html">random</a></span> : <code class="type">unit -> <a href="Sll.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALSll.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Sll.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALSll.Pdu.unpack.html">unpack</a></span> : <code class="type">string * int * int -> <a href="Sll.Pdu.html#TYPEt">t</a> option</code></pre></body></html>
+<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALSll.Pdu.make.html">make</a></span> : <code class="type">?ll_addr_type:int -><br>       <a href="Sll.Pdu.html#TYPEpkt_type">pkt_type</a> -><br>       Arp.HwProto.t -> Bitstring.bitstring -> Tools.Payload.outer_t -> <a href="Sll.Pdu.html#TYPEt">t</a></code></pre><div class="info">
+Build a <a href="Sll.Pdu.html#TYPEt"><code class="code"><span class="constructor">Sll</span>.<span class="constructor">Pdu</span>.t</code></a> for a given <code class="code">payload</code>.<br>
+</div>
+<pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALSll.Pdu.random.html">random</a></span> : <code class="type">unit -> <a href="Sll.Pdu.html#TYPEt">t</a></code></pre><div class="info">
+Returns a random <a href="Sll.Pdu.html#TYPEt"><code class="code"><span class="constructor">Sll</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
+</div>
+<pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALSll.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Sll.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><div class="info">
+Pack a <a href="Sll.Pdu.html#TYPEt"><code class="code"><span class="constructor">Sll</span>.<span class="constructor">Pdu</span>.t</code></a> into its <code class="code">bitstring</code> raw representation.<br>
+</div>
+<pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALSll.Pdu.unpack.html">unpack</a></span> : <code class="type">string * int * int -> <a href="Sll.Pdu.html#TYPEt">t</a> option</code></pre><div class="info">
+Unpack a <code class="code">bitstring</code> into a <a href="Sll.Pdu.html#TYPEt"><code class="code"><span class="constructor">Sll</span>.<span class="constructor">Pdu</span>.t</code></a><br>
+</div>
+</body></html>

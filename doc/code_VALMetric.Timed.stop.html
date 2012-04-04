@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -41,8 +42,8 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;now&nbsp;=&nbsp;<span class="constructor">Clock</span>.now&nbsp;()&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Atomic</span>.fire&nbsp;ev.stop&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ev.simult&nbsp;&lt;-&nbsp;ev.simult&nbsp;-&nbsp;1&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;duration&nbsp;=&nbsp;now&nbsp;-.&nbsp;start_time&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ev.tot_duration&nbsp;&lt;-&nbsp;ev.tot_duration&nbsp;+.&nbsp;duration&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;duration&nbsp;=&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Time</span>.sub&nbsp;now&nbsp;start_time&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ev.tot_duration&nbsp;&lt;-&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.add&nbsp;ev.tot_duration&nbsp;duration&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">match</span>&nbsp;ev.minmax&nbsp;<span class="keyword">with</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">None</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;ev.minmax&nbsp;&lt;-&nbsp;<span class="constructor">Some</span>&nbsp;(make_minmax&nbsp;duration&nbsp;id)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Some</span>&nbsp;mm&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;update_minmax&nbsp;mm&nbsp;duration&nbsp;id</code></body></html>

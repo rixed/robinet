@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -38,11 +39,11 @@
 </head>
 <body>
 <code class="code"><span class="keyword">let</span>&nbsp;limited&nbsp;latency&nbsp;throughput&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;next_avlb&nbsp;=&nbsp;ref&nbsp;0.&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;next_avlb&nbsp;=&nbsp;ref&nbsp;(<span class="constructor">Clock</span>.<span class="constructor">Time</span>.o&nbsp;0.)&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;(<span class="keyword">fun</span>&nbsp;emit&nbsp;bits&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;min_start&nbsp;=&nbsp;<span class="constructor">Clock</span>.now&nbsp;()&nbsp;+.&nbsp;latency&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;min_start&nbsp;=&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Time</span>.add&nbsp;(<span class="constructor">Clock</span>.now&nbsp;())&nbsp;latency&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;start&nbsp;=&nbsp;max&nbsp;min_start&nbsp;!next_avlb<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;nb_bits&nbsp;=&nbsp;float_of_int&nbsp;(min&nbsp;(bitstring_length&nbsp;bits)&nbsp;368)&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;duration&nbsp;=&nbsp;max&nbsp;(<span class="constructor">Clock</span>.usec&nbsp;1.)&nbsp;(nb_bits&nbsp;/.&nbsp;throughput)&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;next_avlb&nbsp;:=&nbsp;start&nbsp;+.&nbsp;duration&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;duration&nbsp;=&nbsp;max&nbsp;(<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.usec&nbsp;1.)&nbsp;(<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.o&nbsp;(nb_bits&nbsp;/.&nbsp;throughput))&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;next_avlb&nbsp;:=&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Time</span>.add&nbsp;start&nbsp;duration&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Clock</span>.at&nbsp;start&nbsp;emit&nbsp;bits)</code></body></html>

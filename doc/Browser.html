@@ -23,6 +23,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -93,7 +94,7 @@
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>last_used&nbsp;: <code class="type">float</code>;</code></td>
+<code>last_used&nbsp;: <code class="type">Clock.Time.t</code>;</code></td>
 
 </tr></table>
 }
@@ -139,13 +140,13 @@
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>max_idle_cnx&nbsp;: <code class="type">float</code>;</code></td>
+<code>max_idle_cnx&nbsp;: <code class="type">Clock.Interval.t</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALBrowser.make.html">make</a></span> : <code class="type">?user_agent:string -><br>       ?max_vacant_cnx:int -> ?max_idle_cnx:float -> <a href="Host.html#TYPEhost_trx">Host.host_trx</a> -> <a href="Browser.html#TYPEt">t</a></code></pre><br><code><span id="TYPEpage"><span class="keyword">type</span> <code class="type"></code>page</span> = {</code><table class="typetable">
+<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALBrowser.make.html">make</a></span> : <code class="type">?user_agent:string -><br>       ?max_vacant_cnx:int -><br>       ?max_idle_cnx:Clock.Interval.t -> <a href="Host.html#TYPEhost_trx">Host.host_trx</a> -> <a href="Browser.html#TYPEt">t</a></code></pre><br><code><span id="TYPEpage"><span class="keyword">type</span> <code class="type"></code>page</span> = {</code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>

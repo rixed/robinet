@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -37,7 +38,8 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Pcap.read_global_header</title>
 </head>
 <body>
-<code class="code"><span class="keyword">let</span>&nbsp;read_global_header&nbsp;ic&nbsp;=<br>
+<code class="code"><span class="keyword">let</span>&nbsp;read_global_header&nbsp;fname&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;ic&nbsp;=&nbsp;open_in_bin&nbsp;fname&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;header&nbsp;=&nbsp;bitstring_of_string&nbsp;(<span class="constructor">IO</span>.really_nread&nbsp;ic&nbsp;24)&nbsp;;&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;endianness&nbsp;=&nbsp;bitmatch&nbsp;(takebits&nbsp;32&nbsp;header)&nbsp;<span class="keyword">with</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;0xa1b2c3d4l&nbsp;:&nbsp;32&nbsp;:&nbsp;bigendian&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">BigEndian</span><br>
@@ -47,6 +49,6 @@
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;version_major&nbsp;:&nbsp;16&nbsp;:&nbsp;endian&nbsp;(endianness)&nbsp;;&nbsp;version_minor&nbsp;:&nbsp;16&nbsp;:&nbsp;endian&nbsp;(endianness)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;this_zone&nbsp;:&nbsp;32&nbsp;:&nbsp;endian&nbsp;(endianness)&nbsp;;&nbsp;sigfigs&nbsp;:&nbsp;32&nbsp;:&nbsp;endian&nbsp;(endianness)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;snaplen&nbsp;:&nbsp;32&nbsp;:&nbsp;endian&nbsp;(endianness)&nbsp;;&nbsp;dlt&nbsp;:&nbsp;32&nbsp;:&nbsp;endian&nbsp;(endianness)&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{&nbsp;endianness&nbsp;;&nbsp;version_major&nbsp;;&nbsp;version_minor&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;this_zone&nbsp;;&nbsp;sigfigs&nbsp;;&nbsp;snaplen&nbsp;;&nbsp;dlt&nbsp;}<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{&nbsp;name&nbsp;=&nbsp;fname&nbsp;;&nbsp;endianness&nbsp;;&nbsp;version_major&nbsp;;&nbsp;version_minor&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;this_zone&nbsp;;&nbsp;sigfigs&nbsp;;&nbsp;snaplen&nbsp;;&nbsp;dlt&nbsp;=&nbsp;<span class="constructor">Dlt</span>.o&nbsp;dlt&nbsp;},&nbsp;ic<br>
 &nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;raise&nbsp;<span class="constructor">Not_a_pcap_file</span></code></body></html>

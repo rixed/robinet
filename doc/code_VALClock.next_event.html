@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -39,17 +40,17 @@
 <body>
 <code class="code"><span class="keyword">let</span>&nbsp;next_event&nbsp;()&nbsp;=<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;ts,&nbsp;f&nbsp;=&nbsp;<span class="keyword">try</span>&nbsp;<span class="constructor">Map</span>.min_binding&nbsp;current.events<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">Not_found</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;max_float,&nbsp;(<span class="keyword">fun</span>&nbsp;()&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;())&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;wait_ts&nbsp;=&nbsp;<span class="keyword">if</span>&nbsp;not&nbsp;!realtime&nbsp;<span class="keyword">then</span>&nbsp;0.&nbsp;<span class="keyword">else</span>&nbsp;ts&nbsp;-.&nbsp;current.now&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;wait_ts&nbsp;&gt;&nbsp;msec&nbsp;10.&nbsp;<span class="keyword">then</span>&nbsp;(<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Clock:&nbsp;next_event:&nbsp;waiting&nbsp;for&nbsp;%fs&nbsp;since&nbsp;we're&nbsp;too&nbsp;early\n%!"</span>&nbsp;wait_ts&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">Not_found</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Time</span>.o&nbsp;max_float,&nbsp;(<span class="keyword">fun</span>&nbsp;()&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;())&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;wait_ts&nbsp;=&nbsp;<span class="keyword">if</span>&nbsp;not&nbsp;!realtime&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Interval</span>.o&nbsp;0.&nbsp;<span class="keyword">else</span>&nbsp;(<span class="constructor">Time</span>.sub&nbsp;ts&nbsp;current.now)&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;<span class="constructor">Interval</span>.compare&nbsp;wait_ts&nbsp;(<span class="constructor">Interval</span>.msec&nbsp;10.)&nbsp;&gt;&nbsp;0&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Clock:&nbsp;next_event:&nbsp;waiting&nbsp;for&nbsp;%s&nbsp;since&nbsp;we're&nbsp;too&nbsp;early\n%!"</span>&nbsp;(<span class="constructor">Interval</span>.to_string&nbsp;wait_ts)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;waiter,&nbsp;wakener&nbsp;=&nbsp;<span class="constructor">Lwt</span>.task&nbsp;()&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;nextev_wakener&nbsp;:=&nbsp;<span class="constructor">Some</span>&nbsp;wakener&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;lwt&nbsp;_&nbsp;=&nbsp;<span class="constructor">Lwt</span>.pick&nbsp;[&nbsp;<span class="constructor">Lwt_unix</span>.sleep&nbsp;wait_ts&nbsp;;&nbsp;waiter&nbsp;]&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;lwt&nbsp;_&nbsp;=&nbsp;<span class="constructor">Lwt</span>.pick&nbsp;[&nbsp;<span class="constructor">Lwt_unix</span>.sleep&nbsp;(wait_ts&nbsp;:&gt;&nbsp;float)&nbsp;;&nbsp;waiter&nbsp;]&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;nextev_wakener&nbsp;:=&nbsp;<span class="constructor">None</span>&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Lwt</span>.return&nbsp;()<br>
 &nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;(<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Clock:&nbsp;next_event:&nbsp;executing&nbsp;since&nbsp;it's&nbsp;time&nbsp;(%+fs)\n%!"</span>&nbsp;wait_ts&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Clock:&nbsp;next_event:&nbsp;executing&nbsp;since&nbsp;it's&nbsp;time&nbsp;(%s)\n%!"</span>&nbsp;(<span class="constructor">Interval</span>.to_string&nbsp;wait_ts)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;current.events&nbsp;&lt;-&nbsp;<span class="constructor">Map</span>.remove&nbsp;ts&nbsp;current.events&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;current.now&nbsp;&lt;-&nbsp;ts&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Lwt</span>.catch&nbsp;(<span class="keyword">fun</span>&nbsp;()&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Lwt</span>.return&nbsp;(f&nbsp;()))&nbsp;(<span class="keyword">fun</span>&nbsp;exn&nbsp;<span class="keywordsign">-&gt;</span><br>

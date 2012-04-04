@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -43,7 +44,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;switches&nbsp;=&nbsp;<span class="constructor">Hashtbl</span>.create&nbsp;11&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;hosts&nbsp;=&nbsp;<span class="constructor">Hashtbl</span>.create&nbsp;11&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;notes&nbsp;=&nbsp;<span class="constructor">Hashtbl</span>.create&nbsp;11&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;create_node&nbsp;{&nbsp;node_name&nbsp;=&nbsp;name&nbsp;;&nbsp;elmt&nbsp;;&nbsp;_&nbsp;}&nbsp;=&nbsp;<span class="keyword">match</span>&nbsp;elmt&nbsp;<span class="keyword">with</span>&nbsp;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;create_node&nbsp;{&nbsp;node_name&nbsp;=&nbsp;name&nbsp;;&nbsp;elmt&nbsp;;&nbsp;_&nbsp;}&nbsp;=&nbsp;<span class="keyword">match</span>&nbsp;elmt&nbsp;<span class="keyword">with</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Hub</span>&nbsp;h&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Hashtbl</span>.add&nbsp;hubs&nbsp;name<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Hub</span>.<span class="constructor">Repeater</span>.make&nbsp;h.hub_nb_ports)<br>
@@ -73,7 +74,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;rx_of_plug&nbsp;=&nbsp;<span class="keyword">function</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">HubPort</span>&nbsp;(name,&nbsp;p)&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Hashtbl</span>.find_option&nbsp;hubs&nbsp;name&nbsp;|&gt;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Option</span>.map&nbsp;(<span class="keyword">fun</span>&nbsp;hub&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Option</span>.map&nbsp;(<span class="keyword">fun</span>&nbsp;hub&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Hub</span>.<span class="constructor">Repeater</span>.rx&nbsp;p&nbsp;hub,&nbsp;<span class="constructor">Hub</span>.<span class="constructor">Repeater</span>.set_emit&nbsp;p&nbsp;hub)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">SwitchPort</span>&nbsp;(name,&nbsp;p)&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Hashtbl</span>.find_option&nbsp;switches&nbsp;name&nbsp;|&gt;<br>
@@ -91,7 +92,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;TODO:&nbsp;choose&nbsp;latency&nbsp;according&nbsp;to&nbsp;cable&nbsp;actual&nbsp;length&nbsp;*)</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;TODO:&nbsp;choose&nbsp;throughput&nbsp;according&nbsp;to&nbsp;min&nbsp;of&nbsp;both&nbsp;adapters&nbsp;throughput&nbsp;*)</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;TODO:&nbsp;add&nbsp;a&nbsp;flag&nbsp;for&nbsp;half/full&nbsp;duplex&nbsp;*)</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;latency&nbsp;=&nbsp;0.010&nbsp;<span class="keyword">and</span>&nbsp;throughput&nbsp;=&nbsp;1_000_000_000.&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;latency&nbsp;=&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.msec&nbsp;10.&nbsp;<span class="keyword">and</span>&nbsp;throughput&nbsp;=&nbsp;1_000_000_000.&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;half_dup&nbsp;=&nbsp;<span class="constructor">Eth</span>.limited&nbsp;latency&nbsp;throughput&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;a_set_emit&nbsp;(half_dup&nbsp;b_rx)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;b_set_emit&nbsp;(half_dup&nbsp;a_rx)<br>

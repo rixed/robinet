@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -38,6 +39,6 @@
 </head>
 <body>
 <code class="code"><span class="keyword">let</span>&nbsp;send&nbsp;t&nbsp;proto&nbsp;dst&nbsp;bits&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;pdu&nbsp;=&nbsp;<span class="constructor">Pdu</span>.make&nbsp;proto&nbsp;t.src&nbsp;dst&nbsp;(<span class="constructor">Payload</span>.o&nbsp;bits)&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;pdu&nbsp;=&nbsp;<span class="constructor">Pdu</span>.make&nbsp;proto&nbsp;t.src&nbsp;dst&nbsp;bits&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Eth:&nbsp;Emitting&nbsp;an&nbsp;Eth&nbsp;packet,&nbsp;proto&nbsp;%s,&nbsp;from&nbsp;%s&nbsp;to&nbsp;%s&nbsp;(content&nbsp;'%s')\n%!"</span>&nbsp;(<span class="constructor">Arp</span>.<span class="constructor">HwProto</span>.to_string&nbsp;proto)&nbsp;(<span class="constructor">Addr</span>.to_string&nbsp;t.src)&nbsp;(<span class="constructor">Addr</span>.to_string&nbsp;dst)&nbsp;(string_of_bitstring&nbsp;bits)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.emit&nbsp;(<span class="constructor">Pdu</span>.pack&nbsp;pdu)</code></body></html>

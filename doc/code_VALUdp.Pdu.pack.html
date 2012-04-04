@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -41,5 +42,5 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;length&nbsp;=&nbsp;<span class="constructor">Payload</span>.length&nbsp;t.payload&nbsp;+&nbsp;8&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;concat&nbsp;[&nbsp;(<span class="constructor">BITSTRING</span>&nbsp;{<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(t.src_port&nbsp;:&gt;&nbsp;int)&nbsp;:&nbsp;16&nbsp;;&nbsp;(t.dst_port&nbsp;:&gt;&nbsp;int)&nbsp;:&nbsp;16&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;length&nbsp;:&nbsp;16&nbsp;;&nbsp;(<span class="constructor">Option</span>.default&nbsp;0&nbsp;t.checksum)&nbsp;:&nbsp;16&nbsp;})&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;length&nbsp;:&nbsp;16&nbsp;;&nbsp;0&nbsp;:&nbsp;16&nbsp;})&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(t.payload&nbsp;:&gt;&nbsp;bitstring)&nbsp;]</code></body></html>

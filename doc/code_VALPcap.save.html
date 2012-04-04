@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -37,7 +38,7 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Pcap.save</title>
 </head>
 <body>
-<code class="code"><span class="keyword">let</span>&nbsp;save&nbsp;?(caplen=65535)&nbsp;?(dlt=dlt_en10mb)&nbsp;fname&nbsp;=<br>
+<code class="code"><span class="keyword">let</span>&nbsp;save&nbsp;?(caplen=65535)&nbsp;?(dlt=<span class="constructor">Dlt</span>.en10mb)&nbsp;fname&nbsp;=<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;out_chan&nbsp;=&nbsp;open_out_bin&nbsp;fname<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;file_hdr&nbsp;=&nbsp;(<span class="constructor">BITSTRING</span>&nbsp;{<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0xa1b2c3d4l&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;;<br>
@@ -46,22 +47,11 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0l&nbsp;<span class="comment">(*&nbsp;this&nbsp;TZ&nbsp;*)</span>&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0l&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Int32</span>.of_int&nbsp;caplen&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;dlt&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;})<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;write_pkt&nbsp;caplen&nbsp;bits&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;ts&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;=&nbsp;<span class="constructor">Clock</span>.now&nbsp;()&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;sec&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;=&nbsp;<span class="constructor">Int32</span>.of_float&nbsp;(ts)&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;usec&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;=&nbsp;<span class="constructor">Int32</span>.of_float&nbsp;((ts&nbsp;-.&nbsp;(floor&nbsp;ts))&nbsp;*.&nbsp;1_000_000.)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;wire_len&nbsp;=&nbsp;bytelength&nbsp;bits<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;pkt_hdr&nbsp;=&nbsp;(<span class="constructor">BITSTRING</span>&nbsp;{<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sec&nbsp;&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;usec&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Int32</span>.of_int&nbsp;(min&nbsp;caplen&nbsp;wire_len)&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Int32</span>.of_int&nbsp;wire_len&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;})&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;concat&nbsp;[&nbsp;pkt_hdr&nbsp;;&nbsp;bits&nbsp;]&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(dlt&nbsp;:&gt;&nbsp;int32)&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;})&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;output_string&nbsp;out_chan&nbsp;(string_of_bitstring&nbsp;file_hdr)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;f&nbsp;bits&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;p&nbsp;=&nbsp;write_pkt&nbsp;caplen&nbsp;bits&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;output_string&nbsp;out_chan&nbsp;(string_of_bitstring&nbsp;p)&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;pdu&nbsp;=&nbsp;<span class="constructor">Pdu</span>.make&nbsp;fname&nbsp;~caplen&nbsp;~dlt&nbsp;(<span class="constructor">Clock</span>.now&nbsp;())&nbsp;bits&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;bytes&nbsp;=&nbsp;string_of_bitstring&nbsp;(<span class="constructor">Pdu</span>.pack&nbsp;pdu)&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;output_string&nbsp;out_chan&nbsp;bytes&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Gc</span>.finalise&nbsp;(<span class="keyword">fun</span>&nbsp;_&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;close_out&nbsp;out_chan)&nbsp;f&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;f</code></body></html>

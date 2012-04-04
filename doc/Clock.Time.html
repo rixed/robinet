@@ -1,0 +1,69 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link rel="next" href="Clock.Interval.html">
+<link rel="Up" href="Clock.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Fifo" rel="Chapter" href="Fifo.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html">
+<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Clock.Time</title>
+</head>
+<body>
+<div class="navbar">&nbsp;<a href="Clock.html">Up</a>
+&nbsp;<a href="Clock.Interval.html">Next</a>
+</div>
+<center><h1>Module <a href="type_Clock.Time.html">Clock.Time</a></h1></center>
+<br>
+<pre><span class="keyword">module</span> Time: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.Time.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Time.t represents a given timestamp (ie. number of seconds since 1970-01-01 00:00:00 UTC.<br>
+<hr width="100%">
+<pre><span id="VALprint_date"><span class="keyword">val</span> <a href="code_VALClock.Time.print_date.html">print_date</a></span> : <code class="type">bool Batteries.ref</code></pre><div class="info">
+When displaying a time, print also the corresponding date.
+ Only useful if your simulation spans several days, which is uncommon.<br>
+</div>
+<pre><span class="keyword">include</span> struct ... end</pre>
+<pre><span id="VALadd"><span class="keyword">val</span> <a href="code_VALClock.Time.add.html">add</a></span> : <code class="type">t -> Clock.Interval.t -> t</code></pre><div class="info">
+Adds a time and an interval.<br>
+</div>
+<pre><span id="VALsub"><span class="keyword">val</span> <a href="code_VALClock.Time.sub.html">sub</a></span> : <code class="type">t -> t -> Clock.Interval.t</code></pre><div class="info">
+Substract two time and returns an interval.<br>
+</div>
+<pre><span id="VALwall_clock"><span class="keyword">val</span> <a href="code_VALClock.Time.wall_clock.html">wall_clock</a></span> : <code class="type">unit -> t</code></pre><div class="info">
+Get the current wall clock (through ).<br>
+</div>
+<pre><span id="VALto_ints"><span class="keyword">val</span> <a href="code_VALClock.Time.to_ints.html">to_ints</a></span> : <code class="type">t -> int * int</code></pre><div class="info">
+Convert a timestamp to a pair of ints with seconds, microseconds<br>
+</div>
+</body></html>

@@ -22,6 +22,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -46,6 +47,9 @@
 </div>
 <center><h1>Module <a href="type_Ip.Proto.html">Ip.Proto</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Proto: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Proto.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
+<pre><span class="keyword">module</span> Proto: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Proto.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Internet protocols, as in <code class="code">/etc/protocols</code>.<br>
+<hr width="100%">
 <pre><span class="keyword">include</span> struct ... end</pre>
+<br>
+Some well know IP protocols.<br>
 <pre><span id="VALicmp"><span class="keyword">val</span> <a href="code_VALIp.Proto.icmp.html">icmp</a></span> : <code class="type">t</code></pre><pre><span id="VALtcp"><span class="keyword">val</span> <a href="code_VALIp.Proto.tcp.html">tcp</a></span> : <code class="type">t</code></pre><pre><span id="VALudp"><span class="keyword">val</span> <a href="code_VALIp.Proto.udp.html">udp</a></span> : <code class="type">t</code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALIp.Proto.random.html">random</a></span> : <code class="type">unit -> t</code></pre></body></html>

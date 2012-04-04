@@ -19,6 +19,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -42,7 +43,12 @@
 <table>
 <tr><td align="left"><br>A</td></tr>
 <tr><td><a href="Ip.Addr.html">Addr</a> [<a href="Ip.html">Ip</a>]</td>
-<td></td></tr>
+<td><div class="info">
+We use a private type for IPv4 addresses so that we can have a
+ custom printer, but it's actually an <code class="code">int32</code> and you can cast with:
+ <code class="code">(addr :&gt; int32)</code> in one direction and <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.o int</code> in the other.
+</div>
+</td></tr>
 <tr><td><a href="Eth.Addr.html">Addr</a> [<a href="Eth.html">Eth</a>]</td>
 <td><div class="info">
 Ethernet addresses are implemented as <code class="code">bitstring</code> internally but
@@ -61,12 +67,21 @@ Ethernet addresses are implemented as <code class="code">bitstring</code> intern
 <td></td></tr>
 <tr><td align="left"><br>C</td></tr>
 <tr><td><a href="Clock.html">Clock</a> </td>
-<td></td></tr>
+<td><div class="info">
+This module creates an alarm-clock that schedule registered events.
+</div>
+</td></tr>
 <tr><td><a href="Metric.Counter.html">Counter</a> [<a href="Metric.html">Metric</a>]</td>
 <td></td></tr>
 <tr><td align="left"><br>D</td></tr>
 <tr><td><a href="Dhcp.html">Dhcp</a> </td>
 <td></td></tr>
+<tr><td><a href="Pcap.Dlt.html">Dlt</a> [<a href="Pcap.html">Pcap</a>]</td>
+<td><div class="info">
+<em>Data Link Layers</em> are constant values indicating what protocol and hardware technology
+ some captured packets were taken from.
+</div>
+</td></tr>
 <tr><td><a href="Dns.html">Dns</a> </td>
 <td></td></tr>
 <tr><td align="left"><br>E</td></tr>
@@ -94,12 +109,25 @@ Ethernet addresses are implemented as <code class="code">bitstring</code> intern
 <tr><td><a href="Arp.HwType.html">HwType</a> [<a href="Arp.html">Arp</a>]</td>
 <td></td></tr>
 <tr><td align="left"><br>I</td></tr>
+<tr><td><a href="Icmp.html">Icmp</a> </td>
+<td><div class="info">
+ Internet Control Message Protocol (ICMP), (un)packing and tools.
+</div>
+</td></tr>
 <tr><td><a href="Dhcp.MsgType.Inner.html">Inner</a> [<a href="Dhcp.MsgType.html">Dhcp.MsgType</a>]</td>
 <td></td></tr>
 <tr><td><a href="Arp.HwType.Inner.html">Inner</a> [<a href="Arp.HwType.html">Arp.HwType</a>]</td>
 <td></td></tr>
+<tr><td><a href="Clock.Interval.html">Interval</a> [<a href="Clock.html">Clock</a>]</td>
+<td><div class="info">
+While Interval.t reprensents a time interval.
+</div>
+</td></tr>
 <tr><td><a href="Ip.html">Ip</a> </td>
-<td></td></tr>
+<td><div class="info">
+ Everything related to IPv4 packets: (un)packing, addresses, transceiver...
+</div>
+</td></tr>
 <tr><td align="left"><br>L</td></tr>
 <tr><td><a href="Localhost.html">Localhost</a> </td>
 <td></td></tr>
@@ -114,6 +142,8 @@ Ethernet addresses are implemented as <code class="code">bitstring</code> intern
 <td></td></tr>
 <tr><td><a href="Metric.html">Metric</a> </td>
 <td></td></tr>
+<tr><td><a href="Icmp.MsgType.html">MsgType</a> [<a href="Icmp.html">Icmp</a>]</td>
+<td></td></tr>
 <tr><td><a href="Dhcp.MsgType.html">MsgType</a> [<a href="Dhcp.html">Dhcp</a>]</td>
 <td></td></tr>
 <tr><td><a href="Myadmin.html">Myadmin</a> </td>
@@ -127,6 +157,8 @@ Ethernet addresses are implemented as <code class="code">bitstring</code> intern
 <tr><td><a href="Opache.html">Opache</a> </td>
 <td></td></tr>
 <tr><td><a href="Hub.Switch.OrdArray.html">OrdArray</a> [<a href="Hub.Switch.html">Hub.Switch</a>]</td>
+<td></td></tr>
+<tr><td><a href="Icmp.MsgType.Outer.html">Outer</a> [<a href="Icmp.MsgType.html">Icmp.MsgType</a>]</td>
 <td></td></tr>
 <tr><td align="left"><br>P</td></tr>
 <tr><td><a href="Packet.html">Packet</a> </td>
@@ -152,14 +184,31 @@ Pack/Unpack a 802.1q tunnel
 <tr><td><a href="Tcp.Pdu.html">Pdu</a> [<a href="Tcp.html">Tcp</a>]</td>
 <td></td></tr>
 <tr><td><a href="Sll.Pdu.html">Pdu</a> [<a href="Sll.html">Sll</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Pack/Unpack a SLL frame.
+</div>
+</td></tr>
+<tr><td><a href="Pcap.Pdu.html">Pdu</a> [<a href="Pcap.html">Pcap</a>]</td>
+<td><div class="info">
+Packets harvested with libpcap will come with additional informations such
+ as caplen, timestamp etc.
+</div>
+</td></tr>
 <tr><td><a href="Packet.Pdu.html">Pdu</a> [<a href="Packet.html">Packet</a>]</td>
 <td><div class="info">
 Pack/Unpack the whole protocol stack that fits entirely within a packet.
 </div>
 </td></tr>
 <tr><td><a href="Ip.Pdu.html">Pdu</a> [<a href="Ip.html">Ip</a>]</td>
-<td></td></tr>
+<td><div class="info">
+(Un)Packing an IP packet.
+</div>
+</td></tr>
+<tr><td><a href="Icmp.Pdu.html">Pdu</a> [<a href="Icmp.html">Icmp</a>]</td>
+<td><div class="info">
+This module handle ICMP messages (un)packing.
+</div>
+</td></tr>
 <tr><td><a href="Http.Pdu.html">Pdu</a> [<a href="Http.html">Http</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.Pdu.html">Pdu</a> [<a href="Eth.html">Eth</a>]</td>
@@ -184,7 +233,10 @@ Pack/Unpack an Ethernet frame.
 <tr><td><a href="Tcp.Port.html">Port</a> [<a href="Tcp.html">Tcp</a>]</td>
 <td></td></tr>
 <tr><td><a href="Ip.Proto.html">Proto</a> [<a href="Ip.html">Ip</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Internet protocols, as in <code class="code">/etc/protocols</code>.
+</div>
+</td></tr>
 <tr><td align="left"><br>Q</td></tr>
 <tr><td><a href="Dns.QType.html">QType</a> [<a href="Dns.html">Dns</a>]</td>
 <td></td></tr>
@@ -197,7 +249,10 @@ Pack/Unpack an Ethernet frame.
 <tr><td><a href="Tcp.SeqNum.html">SeqNum</a> [<a href="Tcp.html">Tcp</a>]</td>
 <td></td></tr>
 <tr><td><a href="Sll.html">Sll</a> </td>
-<td></td></tr>
+<td><div class="info">
+ Linux Cooked Capture (aka SLL)
+</div>
+</td></tr>
 <tr><td><a href="Tcp.TRX.Streambuf.html">Streambuf</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
 <tr><td><a href="Hub.Switch.html">Switch</a> [<a href="Hub.html">Hub</a>]</td>
@@ -228,14 +283,25 @@ An Ethernet TRX accepts raw packets, unpack them and forward the payload
 <tr><td><a href="Http.TRXtop.html">TRXtop</a> [<a href="Http.html">Http</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tcp.html">Tcp</a> </td>
-<td></td></tr>
+<td><div class="info">
+Transmission Control Protocol (TCP) (un)packing.
+</div>
+</td></tr>
+<tr><td><a href="Clock.Time.html">Time</a> [<a href="Clock.html">Clock</a>]</td>
+<td><div class="info">
+Time.t represents a given timestamp (ie.
+</div>
+</td></tr>
 <tr><td><a href="Metric.Timed.html">Timed</a> [<a href="Metric.html">Metric</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.html">Tools</a> </td>
 <td></td></tr>
 <tr><td align="left"><br>U</td></tr>
 <tr><td><a href="Udp.html">Udp</a> </td>
-<td></td></tr>
+<td><div class="info">
+User Data Protocol (UDP) (un)packing.
+</div>
+</td></tr>
 <tr><td><a href="Url.html">Url</a> </td>
 <td></td></tr>
 <tr><td align="left"><br>V</td></tr>

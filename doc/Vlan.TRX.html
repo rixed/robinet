@@ -22,6 +22,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -92,7 +93,7 @@
 }
 
 
-<pre><span id="VALtx"><span class="keyword">val</span> <a href="code_VALVlan.TRX.tx.html">tx</a></span> : <code class="type"><a href="Vlan.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><div class="info">
+<pre><span id="VALtx"><span class="keyword">val</span> <a href="code_VALVlan.TRX.tx.html">tx</a></span> : <code class="type"><a href="Vlan.TRX.html#TYPEt">t</a> -> Tools.Payload.outer_t -> unit</code></pre><div class="info">
 Transmit function. <code class="code">tx t payload</code> will tunnel the payload through this TRX.<br>
 </div>
 <pre><span id="VALrx"><span class="keyword">val</span> <a href="code_VALVlan.TRX.rx.html">rx</a></span> : <code class="type"><a href="Vlan.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre><div class="info">

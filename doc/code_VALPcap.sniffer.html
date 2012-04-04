@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -42,7 +43,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;lwt&nbsp;ts,&nbsp;pkt&nbsp;=&nbsp;<span class="constructor">Lwt_preemptive</span>.detach&nbsp;sniff&nbsp;iface&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Atomic</span>.fire&nbsp;packets_sniffed_ok&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Counter</span>.increase&nbsp;bytes_in&nbsp;(<span class="constructor">Int64</span>.of_int&nbsp;(<span class="constructor">String</span>.length&nbsp;pkt))&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Pcap:&nbsp;Got&nbsp;packet&nbsp;for&nbsp;ts&nbsp;%f\n%!"</span>&nbsp;ts&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Pcap:&nbsp;Got&nbsp;packet&nbsp;for&nbsp;ts&nbsp;%s\n%!"</span>&nbsp;(<span class="constructor">Clock</span>.<span class="constructor">Time</span>.to_string&nbsp;ts)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Clock</span>.at&nbsp;ts&nbsp;rx&nbsp;(bitstring_of_string&nbsp;pkt)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;loop&nbsp;()<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">in</span>&nbsp;loop&nbsp;()</code></body></html>

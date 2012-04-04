@@ -23,6 +23,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -39,7 +40,8 @@
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
 <link title="Url" rel="Chapter" href="Url.html">
-<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Sll</title>
+<link title="Vlan" rel="Chapter" href="Vlan.html"><link title="(Un)Packing Linux Cooked Capture frames" rel="Section" href="#1_UnPackingLinuxCookedCaptureframes">
+<title>Sll</title>
 </head>
 <body>
 <div class="navbar"><a href="Persist.html">Previous</a>
@@ -48,5 +50,20 @@
 </div>
 <center><h1>Module <a href="type_Sll.html">Sll</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Sll: <code class="code"><span class="keyword">sig</span></code> <a href="Sll.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALSll.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span class="keyword">module</span> <a href="Sll.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Sll.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre></body></html>
+<pre><span class="keyword">module</span> Sll: <code class="code"><span class="keyword">sig</span></code> <a href="Sll.html">..</a> <code class="code"><span class="keyword">end</span></code></pre> Linux Cooked Capture (aka SLL)
+<p>
+
+ When you capture traffic on the <em>any</em> interface on Linux, you end up with
+ a special frame header similar to ethernet but 2 bytes longer, with the
+ local hardware address missing but other informations instead.
+<p>
+
+ This fake protocol can only be seen when reading pcap file or sniffing
+ the <em>any</em> network interface. It is not used when simulating a network.<br>
+<hr width="100%">
+<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALSll.debug.html">debug</a></span> : <code class="type">bool</code></pre><br>
+<span id="1_UnPackingLinuxCookedCaptureframes"><h1>(Un)Packing Linux Cooked Capture frames</h1></span><br>
+<pre><span class="keyword">module</span> <a href="Sll.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Sll.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Pack/Unpack a SLL frame.
+</div>
+</body></html>

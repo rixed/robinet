@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -135,7 +136,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.rcvd_pkts&nbsp;&lt;-&nbsp;<span class="constructor">Streambuf</span>.add&nbsp;(offset,&nbsp;tcp)&nbsp;t.rcvd_pkts&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;try_really_rx&nbsp;t&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Clock</span>.delay&nbsp;(<span class="constructor">Clock</span>.msec&nbsp;200.)&nbsp;delayed_ack&nbsp;t&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Clock</span>.delay&nbsp;(<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.msec&nbsp;200.)&nbsp;delayed_ack&nbsp;t&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;try_really_tx&nbsp;t&nbsp;<span class="comment">(*&nbsp;because&nbsp;the&nbsp;advertized&nbsp;window&nbsp;may&nbsp;have&nbsp;changed,&nbsp;we&nbsp;might&nbsp;want&nbsp;to&nbsp;send&nbsp;a&nbsp;FIN,&nbsp;etc&nbsp;*)</span><br>
 <br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;is_established&nbsp;t&nbsp;=&nbsp;t.sent_pld&nbsp;&gt;&nbsp;0&nbsp;<span class="keywordsign">&amp;&amp;</span>&nbsp;t.rcvd_pld&nbsp;&gt;&nbsp;0<br>

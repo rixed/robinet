@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -41,4 +42,4 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;make&nbsp;~tos:(randi&nbsp;8)&nbsp;~id:(randi&nbsp;16)&nbsp;~dont_frag:(randb&nbsp;())<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;~more_frags:(randb&nbsp;())&nbsp;~frag_offset:(randi&nbsp;13)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;~ttl:(randi&nbsp;8)&nbsp;~options:(randbs&nbsp;(4*(randi&nbsp;3)))<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Proto</span>.random&nbsp;())&nbsp;(<span class="constructor">Addr</span>.random&nbsp;())&nbsp;(<span class="constructor">Addr</span>.random&nbsp;())&nbsp;(<span class="constructor">Payload</span>.random&nbsp;(<span class="constructor">Random</span>.int&nbsp;10&nbsp;+&nbsp;20))</code></body></html>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Proto</span>.random&nbsp;())&nbsp;(<span class="constructor">Addr</span>.random&nbsp;())&nbsp;(<span class="constructor">Addr</span>.random&nbsp;())&nbsp;(randbs&nbsp;(<span class="constructor">Random</span>.int&nbsp;10&nbsp;+&nbsp;20))</code></body></html>

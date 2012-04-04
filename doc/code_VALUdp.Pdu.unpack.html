@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -39,9 +40,8 @@
 <body>
 <code class="code"><span class="keyword">let</span>&nbsp;unpack&nbsp;bits&nbsp;=&nbsp;bitmatch&nbsp;bits&nbsp;<span class="keyword">with</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;src_port&nbsp;:&nbsp;16&nbsp;;&nbsp;dst_port&nbsp;:&nbsp;16&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;length&nbsp;&nbsp;&nbsp;:&nbsp;16&nbsp;;&nbsp;checksum&nbsp;:&nbsp;16&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;length&nbsp;&nbsp;&nbsp;:&nbsp;16&nbsp;;&nbsp;_checksum&nbsp;:&nbsp;16&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;payload&nbsp;&nbsp;:&nbsp;(length-8)&nbsp;*&nbsp;8&nbsp;:&nbsp;bitstring&nbsp;}&nbsp;<span class="keyword">when</span>&nbsp;length&nbsp;&gt;=&nbsp;8&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Some</span>&nbsp;{&nbsp;src_port&nbsp;=&nbsp;<span class="constructor">Port</span>.o&nbsp;src_port&nbsp;;&nbsp;dst_port&nbsp;=&nbsp;<span class="constructor">Port</span>.o&nbsp;dst_port&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;checksum&nbsp;=&nbsp;<span class="constructor">Some</span>&nbsp;checksum&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;payload&nbsp;&nbsp;=&nbsp;<span class="constructor">Payload</span>.o&nbsp;payload&nbsp;}<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;err&nbsp;<span class="string">"Not&nbsp;UDP"</span></code></body></html>

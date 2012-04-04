@@ -23,6 +23,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -48,6 +49,45 @@
 </div>
 <center><h1>Module <a href="type_Ip.Addr.html">Ip.Addr</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Addr: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<pre><span id="VALprint_as_names"><span class="keyword">val</span> <a href="code_VALIp.Addr.print_as_names.html">print_as_names</a></span> : <code class="type">bool Batteries.ref</code></pre><pre><span class="keyword">include</span> struct ... end</pre>
-<pre><span id="VALzero"><span class="keyword">val</span> <a href="code_VALIp.Addr.zero.html">zero</a></span> : <code class="type">t</code></pre><pre><span id="VALbroadcast"><span class="keyword">val</span> <a href="code_VALIp.Addr.broadcast.html">broadcast</a></span> : <code class="type">t</code></pre><pre><span id="VALto_dotted_string"><span class="keyword">val</span> <a href="code_VALIp.Addr.to_dotted_string.html">to_dotted_string</a></span> : <code class="type">t -> string</code></pre><pre><span id="VALto_bitstring"><span class="keyword">val</span> <a href="code_VALIp.Addr.to_bitstring.html">to_bitstring</a></span> : <code class="type">t -> Bitstring.bitstring</code></pre><pre><span id="VALof_bitstring"><span class="keyword">val</span> <a href="code_VALIp.Addr.of_bitstring.html">of_bitstring</a></span> : <code class="type">string * int * int -> t</code></pre><pre><span id="VALlist_of_string"><span class="keyword">val</span> <a href="code_VALIp.Addr.list_of_string.html">list_of_string</a></span> : <code class="type">string -> t list</code></pre><pre><span id="VALof_string"><span class="keyword">val</span> <a href="code_VALIp.Addr.of_string.html">of_string</a></span> : <code class="type">string -> t</code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALIp.Addr.random.html">random</a></span> : <code class="type">unit -> t</code></pre></body></html>
+<pre><span class="keyword">module</span> Addr: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>We use a private type for IPv4 addresses so that we can have a
+ custom printer, but it's actually an <code class="code">int32</code> and you can cast with:
+ <code class="code">(addr :&gt; int32)</code> in one direction and <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.o int</code> in the other.<br>
+<hr width="100%">
+<pre><span id="VALprint_as_names"><span class="keyword">val</span> <a href="code_VALIp.Addr.print_as_names.html">print_as_names</a></span> : <code class="type">bool Batteries.ref</code></pre><div class="info">
+If true, use the system's name resolver to find a name for each IP
+ addresses that are printed. This can be very slow so is disabled by
+ default, but you can change it to suit your taste:
+ <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="keyword">let</span>&nbsp;ip&nbsp;=&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.of_string&nbsp;<span class="string">"217.70.184.38"</span>;;</code><pre></pre>
+ <pre></pre><code class="code"><span class="keyword">val</span>&nbsp;ip&nbsp;:&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t&nbsp;=&nbsp;217.70.184.38</code><pre></pre>
+ <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.print_as_names&nbsp;:=&nbsp;<span class="keyword">true</span>;;</code><pre></pre>
+ <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;ip;;</code><pre></pre>
+ <pre></pre><code class="code">-&nbsp;:&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t&nbsp;=&nbsp;webredir.vip.gandi.net</code><pre></pre>
+<p>
+
+ This affects only printing of IP addresses, though, and thus is not
+ expected to impact a simulation.<br>
+</div>
+<pre><span id="VALdotted_string_of_int32"><span class="keyword">val</span> <a href="code_VALIp.Addr.dotted_string_of_int32.html">dotted_string_of_int32</a></span> : <code class="type">int32 -> string</code></pre><div class="info">
+Regardless of the above setting, return the dotted representation (a
+ <code class="code">string</code> of a given <code class="code">int32</code>.<br>
+</div>
+<pre><span class="keyword">include</span> struct ... end</pre>
+<br>
+Some predefined addresses<br>
+<pre><span id="VALzero"><span class="keyword">val</span> <a href="code_VALIp.Addr.zero.html">zero</a></span> : <code class="type">t</code></pre><pre><span id="VALbroadcast"><span class="keyword">val</span> <a href="code_VALIp.Addr.broadcast.html">broadcast</a></span> : <code class="type">t</code></pre><pre><span id="VALto_dotted_string"><span class="keyword">val</span> <a href="code_VALIp.Addr.to_dotted_string.html">to_dotted_string</a></span> : <code class="type">t -> string</code></pre><div class="info">
+Convert an <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t</code> to dotted representation.<br>
+</div>
+<pre><span id="VALto_bitstring"><span class="keyword">val</span> <a href="code_VALIp.Addr.to_bitstring.html">to_bitstring</a></span> : <code class="type">t -> Bitstring.bitstring</code></pre><div class="info">
+Convert an <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t</code> to a <code class="code">bitstring</code>.<br>
+</div>
+<pre><span id="VALof_bitstring"><span class="keyword">val</span> <a href="code_VALIp.Addr.of_bitstring.html">of_bitstring</a></span> : <code class="type">string * int * int -> t</code></pre><div class="info">
+Convert a <code class="code">bitstring</code> into an <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t</code>.<br>
+</div>
+<pre><span id="VALlist_of_string"><span class="keyword">val</span> <a href="code_VALIp.Addr.list_of_string.html">list_of_string</a></span> : <code class="type">string -> t list</code></pre><pre><span id="VALof_string"><span class="keyword">val</span> <a href="code_VALIp.Addr.of_string.html">of_string</a></span> : <code class="type">string -> t</code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALIp.Addr.random.html">random</a></span> : <code class="type">unit -> t</code></pre><div class="info">
+Returns a random <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t</code>.<br>
+</div>
+<pre><span id="VALprint'"><span class="keyword">val</span> <a href="code_VALIp.Addr.print'.html">print'</a></span> : <code class="type">'a BatInnerIO.output -> t -> unit</code></pre><div class="info">
+This printer can be composed with others (for instance to print a list of ips.
+     FIXME: always use batteries IO to print instead of Format printer?<br>
+</div>
+</body></html>

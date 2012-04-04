@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -38,4 +39,4 @@
 </head>
 <body>
 <code class="code"><span class="keyword">let</span>&nbsp;string_of_cidr&nbsp;((ip&nbsp;:&nbsp;<span class="constructor">Addr</span>.t),&nbsp;width)&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;(dotted_string_of_int32&nbsp;(ip&nbsp;:&gt;&nbsp;int32))&nbsp;^&nbsp;<span class="string">"/"</span>&nbsp;^&nbsp;(string_of_int&nbsp;width)</code></body></html>
+&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Addr</span>.dotted_string_of_int32&nbsp;(ip&nbsp;:&gt;&nbsp;int32))&nbsp;^&nbsp;<span class="string">"/"</span>&nbsp;^&nbsp;(string_of_int&nbsp;width)</code></body></html>

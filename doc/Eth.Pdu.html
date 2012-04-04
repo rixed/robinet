@@ -23,6 +23,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -85,17 +86,17 @@
 An Ethernet frame is made up from these constituents<br>
 </div>
 
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALEth.Pdu.make.html">make</a></span> : <code class="type">Arp.HwProto.t -> Eth.Addr.t -> Eth.Addr.t -> Tools.Payload.t -> <a href="Eth.Pdu.html#TYPEt">t</a></code></pre><div class="info">
-Build an <code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code> for the given <code class="code">payload</code>.<br>
+<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALEth.Pdu.make.html">make</a></span> : <code class="type">Arp.HwProto.t -><br>       Eth.Addr.t -> Eth.Addr.t -> Tools.Payload.outer_t -> <a href="Eth.Pdu.html#TYPEt">t</a></code></pre><div class="info">
+Build an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code></a> for the given <code class="code">payload</code>.<br>
 </div>
 <pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALEth.Pdu.random.html">random</a></span> : <code class="type">unit -> <a href="Eth.Pdu.html#TYPEt">t</a></code></pre><div class="info">
-Returns a random <code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code>.<br>
+Returns a random <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
 </div>
 <pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALEth.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Eth.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><div class="info">
-Pack an <code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code> into its <code class="code">bitstring</code> raw representation, ready for
+Pack an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code></a> into its <code class="code">bitstring</code> raw representation, ready for
  injection onto the wire (via <a href="Pcap.html#VALinject_pdu"><code class="code"><span class="constructor">Pcap</span>.inject_pdu</code></a> for instance).<br>
 </div>
 <pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALEth.Pdu.unpack.html">unpack</a></span> : <code class="type">string * int * int -> <a href="Eth.Pdu.html#TYPEt">t</a> option</code></pre><div class="info">
-Unpack a <code class="code">bitstring</code> into an <code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code><br>
+Unpack a <code class="code">bitstring</code> into an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code></a><br>
 </div>
 </body></html>

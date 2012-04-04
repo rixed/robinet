@@ -23,6 +23,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -142,13 +143,6 @@
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>checksum&nbsp;: <code class="type">int option</code>;</code></td>
-
-</tr>
-<tr>
-<td align="left" valign="top" >
-<code>&nbsp;&nbsp;</code></td>
-<td align="left" valign="top" >
 <code>urg_ptr&nbsp;: <code class="type">int</code>;</code></td>
 
 </tr>
@@ -168,5 +162,10 @@
 </tr></table>
 }
 
+<div class="info">
+An unpacked TCP segment. Notice the absence of the checksum, which
+ will be set to 0 by <a href="Tcp.Pdu.html#VALpack"><code class="code"><span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.pack</code></a>, and filled in by <a href="Ip.Pdu.html#VALpack"><code class="code"><span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.pack</code></a>,
+ since it's computed over some IP fields.<br>
+</div>
 
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.make.html">make</a></span> : <code class="type">?src_port:Tcp.Port.t -><br>       ?dst_port:Tcp.Port.t -><br>       ?seq_num:Tcp.SeqNum.t -><br>       ?ack_num:Tcp.SeqNum.t -><br>       ?urg:bool -><br>       ?ack:bool -><br>       ?psh:bool -><br>       ?rst:bool -><br>       ?syn:bool -><br>       ?fin:bool -><br>       ?win_size:int -><br>       ?checksum:int -><br>       ?urg_ptr:int -> ?options:Bitstring.bitstring -> Tools.Payload.t -> <a href="Tcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.random.html">random</a></span> : <code class="type">unit -> <a href="Tcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_reset_of"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.make_reset_of.html">make_reset_of</a></span> : <code class="type"><a href="Tcp.Pdu.html#TYPEt">t</a> -> <a href="Tcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Tcp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.unpack.html">unpack</a></span> : <code class="type">string * int * int -> <a href="Tcp.Pdu.html#TYPEt">t</a> option</code></pre></body></html>
+<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.make.html">make</a></span> : <code class="type">?src_port:Tcp.Port.t -><br>       ?dst_port:Tcp.Port.t -><br>       ?seq_num:Tcp.SeqNum.t -><br>       ?ack_num:Tcp.SeqNum.t -><br>       ?urg:bool -><br>       ?ack:bool -><br>       ?psh:bool -><br>       ?rst:bool -><br>       ?syn:bool -><br>       ?fin:bool -><br>       ?win_size:int -><br>       ?urg_ptr:int -><br>       ?options:Bitstring.bitstring -> Tools.Payload.outer_t -> <a href="Tcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.random.html">random</a></span> : <code class="type">unit -> <a href="Tcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_reset_of"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.make_reset_of.html">make_reset_of</a></span> : <code class="type"><a href="Tcp.Pdu.html#TYPEt">t</a> -> <a href="Tcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Tcp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.unpack.html">unpack</a></span> : <code class="type">string * int * int -> <a href="Tcp.Pdu.html#TYPEt">t</a> option</code></pre></body></html>

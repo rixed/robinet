@@ -19,6 +19,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -132,6 +133,10 @@ Each layer can be of any one of these known protocol.
 <tr><td align="left"><br>O</td></tr>
 <tr><td><a href="Dhcp.html#TYPEopcode">opcode</a> [<a href="Dhcp.html">Dhcp</a>]</td>
 <td></td></tr>
+<tr><td><a href="Tools.PRIVATE_TYPE.html#TYPEouter_t">outer_t</a> [<a href="Tools.PRIVATE_TYPE.html">Tools.PRIVATE_TYPE</a>]</td>
+<td></td></tr>
+<tr><td><a href="Tools.MakePrivate.html#TYPEouter_t">outer_t</a> [<a href="Tools.MakePrivate.html">Tools.MakePrivate</a>]</td>
+<td></td></tr>
 <tr><td align="left"><br>P</td></tr>
 <tr><td><a href="Browser.html#TYPEpage">page</a> [<a href="Browser.html">Browser</a>]</td>
 <td></td></tr>
@@ -143,8 +148,13 @@ Each layer can be of any one of these known protocol.
 <td></td></tr>
 <tr><td><a href="Peg.html#TYPEparzer_result">parzer_result</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
-<tr><td><a href="Sll.Pdu.html#TYPEpkt_type">pkt_type</a> [<a href="Sll.Pdu.html">Sll.Pdu</a>]</td>
+<tr><td><a href="Icmp.Pdu.html#TYPEpayload">payload</a> [<a href="Icmp.Pdu.html">Icmp.Pdu</a>]</td>
 <td></td></tr>
+<tr><td><a href="Sll.Pdu.html#TYPEpkt_type">pkt_type</a> [<a href="Sll.Pdu.html">Sll.Pdu</a>]</td>
+<td><div class="info">
+The 5 possible directions of the frame
+</div>
+</td></tr>
 <tr><td><a href="Net.html#TYPEplug">plug</a> [<a href="Net.html">Net</a>]</td>
 <td></td></tr>
 <tr><td><a href="Hub.Repeater.html#TYPEport">port</a> [<a href="Hub.Repeater.html">Hub.Repeater</a>]</td>
@@ -183,19 +193,37 @@ An 802.1q tunnel is very simple indeed
 <tr><td><a href="Udp.TRX.html#TYPEt">t</a> [<a href="Udp.TRX.html">Udp.TRX</a>]</td>
 <td></td></tr>
 <tr><td><a href="Udp.Pdu.html#TYPEt">t</a> [<a href="Udp.Pdu.html">Udp.Pdu</a>]</td>
-<td></td></tr>
+<td><div class="info">
+An unpacked UDP datagram.
+</div>
+</td></tr>
 <tr><td><a href="Tools.PDU.html#TYPEt">t</a> [<a href="Tools.PDU.html">Tools.PDU</a>]</td>
+<td></td></tr>
+<tr><td><a href="Tools.PRIVATE_TYPE.html#TYPEt">t</a> [<a href="Tools.PRIVATE_TYPE.html">Tools.PRIVATE_TYPE</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.HashedBits.html#TYPEt">t</a> [<a href="Tools.HashedBits.html">Tools.HashedBits</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tcp.TRX.html#TYPEt">t</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tcp.Pdu.html#TYPEt">t</a> [<a href="Tcp.Pdu.html">Tcp.Pdu</a>]</td>
-<td></td></tr>
+<td><div class="info">
+An unpacked TCP segment.
+</div>
+</td></tr>
 <tr><td><a href="Tools.MakePrivate.html#TYPEt">t</a> [<a href="Tools.MakePrivate.html">Tools.MakePrivate</a>]</td>
 <td></td></tr>
 <tr><td><a href="Sll.Pdu.html#TYPEt">t</a> [<a href="Sll.Pdu.html">Sll.Pdu</a>]</td>
-<td></td></tr>
+<td><div class="info">
+A SLL frame has an address (usually Ethernet), a direction, and a
+ protocol.
+</div>
+</td></tr>
+<tr><td><a href="Pcap.Pdu.html#TYPEt">t</a> [<a href="Pcap.Pdu.html">Pcap.Pdu</a>]</td>
+<td><div class="info">
+These informations are present as the first layer of every packet
+ read from a pcap file.
+</div>
+</td></tr>
 <tr><td><a href="Packet.Pdu.html#TYPEt">t</a> [<a href="Packet.Pdu.html">Packet.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Net.html#TYPEt">t</a> [<a href="Net.html">Net</a>]</td>
@@ -211,6 +239,13 @@ An 802.1q tunnel is very simple indeed
 <tr><td><a href="Ip.TRX.html#TYPEt">t</a> [<a href="Ip.TRX.html">Ip.TRX</a>]</td>
 <td></td></tr>
 <tr><td><a href="Ip.Pdu.html#TYPEt">t</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
+<td></td></tr>
+<tr><td><a href="Icmp.Pdu.html#TYPEt">t</a> [<a href="Icmp.Pdu.html">Icmp.Pdu</a>]</td>
+<td><div class="info">
+Unpacked ICMP message.
+</div>
+</td></tr>
+<tr><td><a href="Icmp.MsgType.Outer.html#TYPEt">t</a> [<a href="Icmp.MsgType.Outer.html">Icmp.MsgType.Outer</a>]</td>
 <td></td></tr>
 <tr><td><a href="Hub.Switch.OrdArray.html#TYPEt">t</a> [<a href="Hub.Switch.OrdArray.html">Hub.Switch.OrdArray</a>]</td>
 <td></td></tr>
@@ -250,8 +285,6 @@ An Ethernet frame is made up from these constituents
 <tr><td><a href="Arp.HwType.Inner.html#TYPEt">t</a> [<a href="Arp.HwType.Inner.html">Arp.HwType.Inner</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tcp.TRX.html#TYPEtcp_trx">tcp_trx</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
-<td></td></tr>
-<tr><td><a href="Clock.html#TYPEtime">time</a> [<a href="Clock.html">Clock</a>]</td>
 <td></td></tr>
 <tr><td><a href="Metric.html#TYPEtree">tree</a> [<a href="Metric.html">Metric</a>]</td>
 <td></td></tr>

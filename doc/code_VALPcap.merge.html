@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -40,5 +41,5 @@
 <code class="code"><span class="keyword">let</span>&nbsp;<span class="keyword">rec</span>&nbsp;merge&nbsp;=&nbsp;<span class="keyword">function</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;[]&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Enum</span>.empty&nbsp;()<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;a&nbsp;::&nbsp;rest&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;test_ts&nbsp;(ts_a,&nbsp;_)&nbsp;(ts_b,&nbsp;_)&nbsp;=&nbsp;ts_a&nbsp;&lt;=&nbsp;ts_b&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;test_ts&nbsp;a&nbsp;b&nbsp;=&nbsp;a.<span class="constructor">Pdu</span>.ts&nbsp;&lt;=&nbsp;b.<span class="constructor">Pdu</span>.ts&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Enum</span>.merge&nbsp;test_ts&nbsp;a&nbsp;(merge&nbsp;rest)</code></body></html>

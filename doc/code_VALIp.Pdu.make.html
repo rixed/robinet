@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -41,10 +42,10 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;?id&nbsp;?(dont_frag=<span class="keyword">false</span>)&nbsp;?(more_frags=<span class="keyword">false</span>)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;?(frag_offset=0)&nbsp;?(ttl=64)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;?(options=empty_bitstring)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;proto&nbsp;src&nbsp;dst&nbsp;payload&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;proto&nbsp;src&nbsp;dst&nbsp;bits&nbsp;=<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;hdr_len&nbsp;=&nbsp;20&nbsp;+&nbsp;bytelength&nbsp;options<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;id&nbsp;=&nbsp;may_default&nbsp;id&nbsp;next_id&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;tot_len&nbsp;=&nbsp;<span class="keyword">match</span>&nbsp;tot_len&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">Some</span>&nbsp;v&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;v&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">None</span>&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Payload</span>.length&nbsp;payload&nbsp;+&nbsp;hdr_len&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;bytelength&nbsp;bits&nbsp;+&nbsp;hdr_len&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{&nbsp;tos&nbsp;;&nbsp;tot_len&nbsp;;&nbsp;id&nbsp;;&nbsp;dont_frag&nbsp;;&nbsp;more_frags&nbsp;;&nbsp;frag_offset&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ttl&nbsp;;&nbsp;proto&nbsp;;&nbsp;src&nbsp;;&nbsp;dst&nbsp;;&nbsp;options&nbsp;;&nbsp;payload&nbsp;}</code></body></html>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ttl&nbsp;;&nbsp;proto&nbsp;;&nbsp;src&nbsp;;&nbsp;dst&nbsp;;&nbsp;options&nbsp;;&nbsp;payload&nbsp;=&nbsp;<span class="constructor">Payload</span>.o&nbsp;bits&nbsp;}</code></body></html>

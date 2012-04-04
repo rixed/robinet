@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -49,7 +50,9 @@
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Dns</span>&nbsp;<span class="keyword">of</span>&nbsp;<span class="constructor">Dns</span>.<span class="constructor">Pdu</span>.t<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Sll</span>&nbsp;<span class="keyword">of</span>&nbsp;<span class="constructor">Sll</span>.<span class="constructor">Pdu</span>.t<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Vlan</span>&nbsp;<span class="keyword">of</span>&nbsp;<span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.t<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Icmp</span>&nbsp;<span class="keyword">of</span>&nbsp;<span class="constructor">Icmp</span>.<span class="constructor">Pdu</span>.t<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Pcap</span>&nbsp;<span class="keyword">of</span>&nbsp;<span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t<br>
 &nbsp;&nbsp;<span class="keyword">type</span>&nbsp;t&nbsp;=&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer&nbsp;list<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;pack&nbsp;:&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring<br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;unpack&nbsp;:&nbsp;?dlt:int32&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer&nbsp;list<br>
+&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;unpack&nbsp;:&nbsp;<span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer&nbsp;list<br>
 <span class="keyword">end</span></code></body></html>

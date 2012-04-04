@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -40,6 +41,6 @@
 <code class="code"><span class="keyword">let</span>&nbsp;print&nbsp;oc&nbsp;ev&nbsp;=<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"Metric:&nbsp;%s:\n\tcount:&nbsp;%Ld\n"</span>&nbsp;ev.name&nbsp;ev.count&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">match</span>&nbsp;ev.first_last&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">None</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;()&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Some</span>&nbsp;(first,&nbsp;last)&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"\tfirst:&nbsp;%a\n\tlast:&nbsp;%a\n"</span>&nbsp;<span class="constructor">Clock</span>.print&nbsp;first&nbsp;<span class="constructor">Clock</span>.print&nbsp;last&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"\tfirst:&nbsp;%a\n\tlast:&nbsp;%a\n"</span>&nbsp;<span class="constructor">Clock</span>.printer&nbsp;first&nbsp;<span class="constructor">Clock</span>.printer&nbsp;last&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;first&nbsp;&lt;&gt;&nbsp;last&nbsp;<span class="keyword">then</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"\trate:&nbsp;%f&nbsp;Hz\n"</span>&nbsp;(<span class="constructor">Int64</span>.to_float&nbsp;ev.count&nbsp;/.&nbsp;(last&nbsp;-.&nbsp;first))</code></body></html>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"\trate:&nbsp;%f&nbsp;Hz\n"</span>&nbsp;(<span class="constructor">Int64</span>.to_float&nbsp;ev.count&nbsp;/.&nbsp;((<span class="constructor">Clock</span>.<span class="constructor">Time</span>.sub&nbsp;last&nbsp;first)&nbsp;:&gt;&nbsp;float))</code></body></html>

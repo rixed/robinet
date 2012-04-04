@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -37,7 +38,7 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Browser.make</title>
 </head>
 <body>
-<code class="code"><span class="keyword">let</span>&nbsp;make&nbsp;?(user_agent=<span class="string">"RobiNet"</span>)&nbsp;?(max_vacant_cnx=10)&nbsp;?(max_idle_cnx=15.)&nbsp;host&nbsp;=<br>
+<code class="code"><span class="keyword">let</span>&nbsp;make&nbsp;?(user_agent=<span class="string">"RobiNet"</span>)&nbsp;?(max_vacant_cnx=10)&nbsp;?(max_idle_cnx=<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.sec&nbsp;15.)&nbsp;host&nbsp;=<br>
 &nbsp;&nbsp;&nbsp;&nbsp;{&nbsp;host&nbsp;=&nbsp;host&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;user_agent&nbsp;=&nbsp;user_agent&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;cookies&nbsp;=&nbsp;[]&nbsp;;<br>

@@ -23,6 +23,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -51,6 +52,8 @@
 <pre><span class="keyword">module</span> SeqNum: <code class="type"><a href="Tools.MakePrivate.html">Tools.MakePrivate</a></code><code class="code">(</code><code class="code"><span class="keyword">sig</span></code><div class="sig_block"><pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = <code class="type">int32</code> </pre>
 
 <pre><span id="VALto_string"><span class="keyword">val</span> <a href="code_VALTcp.SeqNum.to_string.html">to_string</a></span> : <code class="type">int32 -> string</code></pre><pre><span id="VALis_valid"><span class="keyword">val</span> <a href="code_VALTcp.SeqNum.is_valid.html">is_valid</a></span> : <code class="type">'a -> bool</code></pre><pre><span id="VALrepl_tag"><span class="keyword">val</span> <a href="code_VALTcp.SeqNum.repl_tag.html">repl_tag</a></span> : <code class="type">string</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">)</code></pre><hr width="100%">
-<pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = <code class="type">Inner.t</code> </pre>
+<pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = <code class="type">Outer.t</code> </pre>
 
-<pre><span id="VALto_string"><span class="keyword">val</span> <a href="code_VALTools.MakePrivate.to_string.html">to_string</a></span> : <code class="type">Inner.t -> string</code></pre><pre><span id="VALprint"><span class="keyword">val</span> <a href="code_VALTools.MakePrivate.print.html">print</a></span> : <code class="type">Batteries.Format.formatter -> Inner.t -> unit</code></pre><pre><span id="VALo"><span class="keyword">val</span> <a href="code_VALTools.MakePrivate.o.html">o</a></span> : <code class="type">Inner.t -> Inner.t</code></pre></body></html>
+<pre><span id="TYPEouter_t"><span class="keyword">type</span> <code class="type"></code>outer_t</span> = <code class="type">Outer.t</code> </pre>
+
+<pre><span id="VALto_string"><span class="keyword">val</span> <a href="code_VALTools.MakePrivate.to_string.html">to_string</a></span> : <code class="type">Outer.t -> string</code></pre><pre><span id="VALprint"><span class="keyword">val</span> <a href="code_VALTools.MakePrivate.print.html">print</a></span> : <code class="type">Batteries.Format.formatter -> Outer.t -> unit</code></pre><pre><span id="VALo"><span class="keyword">val</span> <a href="code_VALTools.MakePrivate.o.html">o</a></span> : <code class="type">Outer.t -> Outer.t</code></pre></body></html>

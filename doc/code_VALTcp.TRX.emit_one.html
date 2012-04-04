@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -43,7 +44,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;ack&nbsp;=&nbsp;ack_num&nbsp;&lt;&gt;&nbsp;<span class="constructor">None</span>&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;ack&nbsp;<span class="keywordsign">||</span>&nbsp;psh&nbsp;<span class="keywordsign">||</span>&nbsp;rst&nbsp;<span class="keywordsign">||</span>&nbsp;syn&nbsp;<span class="keywordsign">||</span>&nbsp;fin&nbsp;<span class="keywordsign">||</span>&nbsp;bitstring_length&nbsp;bits&nbsp;&gt;&nbsp;0&nbsp;<span class="keyword">then</span>&nbsp;(<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;tcp&nbsp;=&nbsp;<span class="constructor">Pdu</span>.make&nbsp;~src_port&nbsp;~dst_port&nbsp;~seq_num&nbsp;?ack_num<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;~ack&nbsp;~psh&nbsp;~rst&nbsp;~syn&nbsp;~fin&nbsp;(<span class="constructor">Payload</span>.o&nbsp;bits)&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;~ack&nbsp;~psh&nbsp;~rst&nbsp;~syn&nbsp;~fin&nbsp;bits&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;Emitting&nbsp;a&nbsp;packet&nbsp;from&nbsp;%s&nbsp;to&nbsp;%s,&nbsp;seq&nbsp;%s,&nbsp;length&nbsp;%d,&nbsp;content&nbsp;'%s'\n%!"</span>&nbsp;(<span class="constructor">Port</span>.to_string&nbsp;src_port)&nbsp;(<span class="constructor">Port</span>.to_string&nbsp;dst_port)&nbsp;(<span class="constructor">SeqNum</span>.to_string&nbsp;seq_num)&nbsp;(bytelength&nbsp;bits)&nbsp;(string_of_bitstring&nbsp;bits)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.emit&nbsp;(<span class="constructor">Pdu</span>.pack&nbsp;tcp)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;ack&nbsp;<span class="keyword">then</span>&nbsp;t.rcvd_acked&nbsp;&lt;-&nbsp;t.rcvd_pld&nbsp;;<br>

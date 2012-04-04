@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -37,4 +38,4 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Clock.current</title>
 </head>
 <body>
-<code class="code"><span class="keyword">let</span>&nbsp;current&nbsp;=&nbsp;{&nbsp;now&nbsp;=&nbsp;<span class="constructor">Unix</span>.gettimeofday&nbsp;()&nbsp;;&nbsp;events&nbsp;=&nbsp;<span class="constructor">Map</span>.empty&nbsp;}</code></body></html>
+<code class="code"><span class="keyword">let</span>&nbsp;current&nbsp;=&nbsp;{&nbsp;now&nbsp;=&nbsp;<span class="constructor">Time</span>.o&nbsp;(<span class="constructor">Unix</span>.gettimeofday&nbsp;())&nbsp;;&nbsp;events&nbsp;=&nbsp;<span class="constructor">Map</span>.empty&nbsp;}</code></body></html>

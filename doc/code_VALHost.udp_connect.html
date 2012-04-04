@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -77,7 +78,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Lwt</span>.return&nbsp;resolv_trx<br>
 <br>
 <span class="keyword">and</span>&nbsp;gethostbyname&nbsp;t&nbsp;name&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;dns_timeout_delay&nbsp;=&nbsp;<span class="constructor">Clock</span>.sec&nbsp;3.&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;dns_timeout_delay&nbsp;=&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.sec&nbsp;3.&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;is_fqdn&nbsp;n&nbsp;=&nbsp;n.[<span class="constructor">String</span>.length&nbsp;n&nbsp;-&nbsp;1]&nbsp;=&nbsp;<span class="string">'.'</span>&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;is_complete&nbsp;n&nbsp;=&nbsp;is_fqdn&nbsp;n&nbsp;<span class="keywordsign">||</span>&nbsp;<span class="constructor">String</span>.exists&nbsp;n&nbsp;<span class="string">"."</span>&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;name&nbsp;=&nbsp;<span class="keyword">match</span>&nbsp;t.search_sfx&nbsp;<span class="keyword">with</span><br>
@@ -165,7 +166,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;connect&nbsp;dst_ip<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Name</span>&nbsp;name&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;lwt&nbsp;dst_ips&nbsp;=&nbsp;gethostbyname&nbsp;t&nbsp;name&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Log</span>.(log&nbsp;t.host_trx.logger&nbsp;<span class="constructor">Debug</span>&nbsp;(<span class="keyword">lazy</span>&nbsp;(<span class="constructor">Printf</span>.sprintf2&nbsp;<span class="string">"Got&nbsp;these&nbsp;IPs&nbsp;for&nbsp;'%s'&nbsp;:&nbsp;%a"</span>&nbsp;name&nbsp;(<span class="constructor">List</span>.print&nbsp;<span class="constructor">Ip</span>.print_addr')&nbsp;dst_ips)))&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Log</span>.(log&nbsp;t.host_trx.logger&nbsp;<span class="constructor">Debug</span>&nbsp;(<span class="keyword">lazy</span>&nbsp;(<span class="constructor">Printf</span>.sprintf2&nbsp;<span class="string">"Got&nbsp;these&nbsp;IPs&nbsp;for&nbsp;'%s'&nbsp;:&nbsp;%a"</span>&nbsp;name&nbsp;(<span class="constructor">List</span>.print&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.print')&nbsp;dst_ips)))&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;dst_ips&nbsp;&lt;&gt;&nbsp;[]&nbsp;<span class="keyword">then</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;connect&nbsp;(<span class="constructor">List</span>.hd&nbsp;dst_ips)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">else</span><br>

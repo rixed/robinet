@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -39,23 +40,24 @@
 <body>
 <code class="code"><span class="keyword">sig</span><br>
 &nbsp;&nbsp;<span class="keyword">type</span>&nbsp;minmax&nbsp;=&nbsp;{<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;min&nbsp;:&nbsp;float&nbsp;*&nbsp;string;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;max&nbsp;:&nbsp;float&nbsp;*&nbsp;string;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;min&nbsp;:&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.t&nbsp;*&nbsp;string;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;max&nbsp;:&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.t&nbsp;*&nbsp;string;<br>
 &nbsp;&nbsp;}<br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make_minmax&nbsp;:&nbsp;float&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;string&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Timed</span>.minmax<br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;update_minmax&nbsp;:&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Timed</span>.minmax&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;float&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;string&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
+&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make_minmax&nbsp;:&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;string&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Timed</span>.minmax<br>
+&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;update_minmax&nbsp;:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Timed</span>.minmax&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;string&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">type</span>&nbsp;t&nbsp;=&nbsp;{<br>
 &nbsp;&nbsp;&nbsp;&nbsp;name&nbsp;:&nbsp;string;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;start&nbsp;:&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Atomic</span>.t;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;stop&nbsp;:&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Atomic</span>.t;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;tot_duration&nbsp;:&nbsp;float;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;tot_duration&nbsp;:&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.t;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;minmax&nbsp;:&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Timed</span>.minmax&nbsp;option;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;simult&nbsp;:&nbsp;int;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;max_simult&nbsp;:&nbsp;int;<br>
 &nbsp;&nbsp;}<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;all&nbsp;:&nbsp;(string,&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Timed</span>.t)&nbsp;<span class="constructor">Batteries</span>.<span class="constructor">Hashtbl</span>.t<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make&nbsp;:&nbsp;string&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Timed</span>.t<br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;start&nbsp;:&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Timed</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Clock</span>.time<br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;stop&nbsp;:&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Timed</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;float&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;string&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
+&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;start&nbsp;:&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Timed</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Time</span>.t<br>
+&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;stop&nbsp;:&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Timed</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Time</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;string&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;print&nbsp;:&nbsp;<span class="keywordsign">'</span>a&nbsp;<span class="constructor">BatInnerIO</span>.output&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Metric</span>.<span class="constructor">Timed</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 <span class="keyword">end</span></code></body></html>

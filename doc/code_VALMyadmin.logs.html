@@ -18,6 +18,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -41,7 +42,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;print_queue&nbsp;oc&nbsp;q&nbsp;=<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Log</span>.queue_iter&nbsp;(<span class="keyword">fun</span>&nbsp;t&nbsp;str&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"&lt;tr&gt;&lt;td&nbsp;class=\"time\"&gt;%a&lt;/td&gt;&lt;td&gt;%s&lt;/td&gt;&lt;/tr&gt;\n"</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Clock</span>.print&nbsp;t&nbsp;str)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Clock</span>.printer&nbsp;t&nbsp;str)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;q&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;page_head&nbsp;~selected:<span class="string">"logs"</span>&nbsp;resp_body&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;logger_name&nbsp;=&nbsp;<span class="keyword">try</span>&nbsp;<span class="constructor">Hashtbl</span>.find&nbsp;vars&nbsp;<span class="string">"logger"</span>&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">Not_found</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="string">"Host/localhost"</span>&nbsp;<span class="keyword">in</span><br>

@@ -23,6 +23,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -98,16 +99,16 @@ Now we are interrested in all the packets attempting to connect port 80:
 
 <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="keyword">open</span>&nbsp;<span class="constructor">Packet</span>;;<br>
 <span class="keywordsign">#</span>&nbsp;<span class="keyword">let</span>&nbsp;s80&nbsp;=&nbsp;enum_of&nbsp;<span class="string">"big_one.pcap"</span>&nbsp;//<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">function</span>&nbsp;[_;_;_;&nbsp;<span class="constructor">Pdu</span>.<span class="constructor">Tcp</span>&nbsp;{&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.dst_port&nbsp;=&nbsp;p&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.flags&nbsp;=&nbsp;{&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.syn&nbsp;=&nbsp;<span class="keyword">true</span>&nbsp;;&nbsp;_&nbsp;}&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;_&nbsp;}]&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;p&nbsp;=&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.o&nbsp;80<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">function</span>&nbsp;[_;_;_;_;&nbsp;<span class="constructor">Pdu</span>.<span class="constructor">Tcp</span>&nbsp;{&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.dst_port&nbsp;=&nbsp;p&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.flags&nbsp;=&nbsp;{&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.syn&nbsp;=&nbsp;<span class="keyword">true</span>&nbsp;;&nbsp;_&nbsp;}&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;_&nbsp;}]&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;p&nbsp;=&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.o&nbsp;80<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;_&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keyword">false</span>;;<br>
 <span class="keyword">val</span>&nbsp;s80&nbsp;:&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer&nbsp;list&nbsp;<span class="constructor">BatEnum</span>.t&nbsp;=&nbsp;&lt;abstr&gt;<br>
 </code><pre></pre>
 <p>
 
 This will return surprisingly fast, due to the lazy nature of Enum.filter.
-Note that in this exemple, for brevety, I pattern match for Tcp in 4th
+Note that in this exemple, for brevety, I pattern match for Tcp in 5th
 position only (since my big_file.pcap have a 802.1q tunnel between Ethernet
 and IP).
 <p>
@@ -118,7 +119,12 @@ Let have a look at the first of them:
 <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Enum</span>.peek&nbsp;s80;;</code><pre></pre>
 <pre></pre><code class="code">-&nbsp;:&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer&nbsp;list&nbsp;option&nbsp;=<br>
 <span class="constructor">Some</span><br>
-&nbsp;[<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.<span class="constructor">Eth</span><br>
+&nbsp;[<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.<span class="constructor">Pcap</span><br>
+&nbsp;&nbsp;&nbsp;{<span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.source_name&nbsp;=&nbsp;<span class="string">"big_one.pcap"</span>;&nbsp;<span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.caplen&nbsp;=&nbsp;78;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.dlt&nbsp;=&nbsp;<span class="constructor">Ethernet</span>&nbsp;(10<span class="constructor">Mb</span>);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.ts&nbsp;=&nbsp;22:32:18.38;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.payload&nbsp;=&nbsp;78&nbsp;bytes};<br>
+&nbsp;&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.<span class="constructor">Eth</span><br>
 &nbsp;&nbsp;&nbsp;{<span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.src&nbsp;=&nbsp;<span class="constructor">Cisco</span>:1d:6d:01;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.dst&nbsp;=&nbsp;<span class="constructor">Cisco</span>:4d:5c:01;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.proto&nbsp;=&nbsp;<span class="constructor">Eth8021q</span>;<br>
@@ -153,10 +159,6 @@ Pack/Unpack the whole protocol stack that fits entirely within a packet.
 </div>
 <br>
 <span id="1_Shorthands"><h1>Shorthands</h1></span><br>
-<pre><span id="VALof_pcap"><span class="keyword">val</span> <a href="code_VALPacket.of_pcap.html">of_pcap</a></span> : <code class="type">?dlt:int32 -> 'a * Bitstring.bitstring -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list</code></pre><div class="info">
-<code class="code"><span class="constructor">Packet</span>.of_pcap pkt</code> converts a raw packet (as returned by <a href="Pcap.html#VALread_next_pkt"><code class="code"><span class="constructor">Pcap</span>.read_next_pkt</code></a>
- or <a href="Pcap.html#VALenum_of"><code class="code"><span class="constructor">Pcap</span>.enum_of</code></a>) into a printable/editable <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
-</div>
 <pre><span id="VALenum_of"><span class="keyword">val</span> <a href="code_VALPacket.enum_of.html">enum_of</a></span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list BatEnum.t</code></pre><div class="info">
 <code class="code"><span class="constructor">Packet</span>.enum_of filename</code> reads a pcap file and returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
 </div>

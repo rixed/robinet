@@ -4,7 +4,7 @@
 <link rel="stylesheet" href="style.css" type="text/css">
 <meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
 <link rel="Start" href="index.html">
-<link rel="previous" href="Hub.html">
+<link rel="previous" href="Icmp.html">
 <link rel="next" href="Localhost.html">
 <link rel="Up" href="index.html">
 <link title="Index of types" rel=Appendix href="index_types.html">
@@ -23,6 +23,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -39,16 +40,63 @@
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
 <link title="Url" rel="Chapter" href="Url.html">
-<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Ip</title>
+<link title="Vlan" rel="Chapter" href="Vlan.html"><link title="Private Types" rel="Section" href="#1_PrivateTypes">
+<link title="IP packet" rel="Section" href="#1_IPpacket">
+<link title="Transceiver" rel="Section" href="#1_Transceiver">
+<link title="Protocols" rel="Subsection" href="#2_Protocols">
+<link title="Addresses" rel="Subsection" href="#2_Addresses">
+<title>Ip</title>
 </head>
 <body>
-<div class="navbar"><a href="Hub.html">Previous</a>
+<div class="navbar"><a href="Icmp.html">Previous</a>
 &nbsp;<a href="index.html">Up</a>
 &nbsp;<a href="Localhost.html">Next</a>
 </div>
 <center><h1>Module <a href="type_Ip.html">Ip</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Ip: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALIp.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span class="keyword">module</span> <a href="Ip.Proto.html">Proto</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Proto.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span id="VALint32_of_inet_addr"><span class="keyword">val</span> <a href="code_VALIp.int32_of_inet_addr.html">int32_of_inet_addr</a></span> : <code class="type">'a -> int32</code></pre><pre><span id="VALinet_addr_of_int32"><span class="keyword">val</span> <a href="code_VALIp.inet_addr_of_int32.html">inet_addr_of_int32</a></span> : <code class="type">int32 -> Batteries.Unix.inet_addr</code></pre><pre><span id="VALdotted_string_of_int32"><span class="keyword">val</span> <a href="code_VALIp.dotted_string_of_int32.html">dotted_string_of_int32</a></span> : <code class="type">int32 -> string</code></pre><pre><span class="keyword">module</span> <a href="Ip.Addr.html">Addr</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span id="VALprint_addr'"><span class="keyword">val</span> <a href="code_VALIp.print_addr'.html">print_addr'</a></span> : <code class="type">'a BatInnerIO.output -> Addr.t -> unit</code></pre><pre><span id="TYPEcidr"><span class="keyword">type</span> <code class="type"></code>cidr</span> = <code class="type">Addr.t * int</code> </pre>
+<pre><span class="keyword">module</span> Ip: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.html">..</a> <code class="code"><span class="keyword">end</span></code></pre> Everything related to IPv4 packets: (un)packing, addresses, transceiver...
+<p>
 
-<pre><span id="VALcidr_of_string"><span class="keyword">val</span> <a href="code_VALIp.cidr_of_string.html">cidr_of_string</a></span> : <code class="type">string -> Addr.t * int</code></pre><pre><span id="VALstring_of_cidr"><span class="keyword">val</span> <a href="code_VALIp.string_of_cidr.html">string_of_cidr</a></span> : <code class="type">Addr.t * int -> string</code></pre><pre><span id="VALprint_cidr"><span class="keyword">val</span> <a href="code_VALIp.print_cidr.html">print_cidr</a></span> : <code class="type">Batteries.Format.formatter -> <a href="Ip.html#TYPEcidr">cidr</a> -> unit</code></pre><pre><span id="VALaddr_in_cidr"><span class="keyword">val</span> <a href="code_VALIp.addr_in_cidr.html">addr_in_cidr</a></span> : <code class="type">int32 * int -> int32 -> bool</code></pre><pre><span id="VALaddrs_of_cidr"><span class="keyword">val</span> <a href="code_VALIp.addrs_of_cidr.html">addrs_of_cidr</a></span> : <code class="type">Addr.t * int -> Addr.t list</code></pre><pre><span id="VALrandom_addrs_of_cidr"><span class="keyword">val</span> <a href="code_VALIp.random_addrs_of_cidr.html">random_addrs_of_cidr</a></span> : <code class="type">Addr.t * int -> int -> Addr.t BatEnum.t</code></pre><pre><span class="keyword">module</span> <a href="Ip.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Ip.TRX.html">TRX</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre></body></html>
+ TODO: Some usual IP options should be understood.<br>
+<hr width="100%">
+<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALIp.debug.html">debug</a></span> : <code class="type">bool</code></pre><br>
+<span id="1_PrivateTypes"><h1>Private Types</h1></span><br>
+<br>
+<span id="2_Protocols"><h2>Protocols</h2></span><br>
+<pre><span class="keyword">module</span> <a href="Ip.Proto.html">Proto</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Proto.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Internet protocols, as in <code class="code">/etc/protocols</code>.
+</div>
+<br>
+<span id="2_Addresses"><h2>Addresses</h2></span><br>
+<br>
+<span id="3_inetaddr"><h3>inet_addr</h3></span>
+<p>
+
+ Stdlib <code class="code"><span class="constructor">Unix</span></code> module already have a type for IP addresses:
+ <code class="code"><span class="constructor">Unix</span>.inet_addr</code> (actually a <code class="code">string</code>). Here are the functions
+ to convert our address (<code class="code">int32</code>) from/to <code class="code">inet_addr</code>.<br>
+<pre><span id="VALint32_of_inet_addr"><span class="keyword">val</span> <a href="code_VALIp.int32_of_inet_addr.html">int32_of_inet_addr</a></span> : <code class="type">'a -> int32</code></pre><div class="info">
+Convert an <code class="code">inet_addr</code> into an <code class="code">int32</code>...<br>
+</div>
+<pre><span id="VALinet_addr_of_int32"><span class="keyword">val</span> <a href="code_VALIp.inet_addr_of_int32.html">inet_addr_of_int32</a></span> : <code class="type">int32 -> Batteries.Unix.inet_addr</code></pre><div class="info">
+... and the other way around.<br>
+</div>
+<br>
+<span id="3_IPAddressesasint32"><h3>IP Addresses as int32</h3></span><br>
+<pre><span class="keyword">module</span> <a href="Ip.Addr.html">Addr</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+We use a private type for IPv4 addresses so that we can have a
+ custom printer, but it's actually an <code class="code">int32</code> and you can cast with:
+ <code class="code">(addr :&gt; int32)</code> in one direction and <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.o int</code> in the other.
+</div>
+<br>
+<span id="3_CIDRAddresses"><h3>CIDR Addresses</h3></span><br>
+<pre><span id="TYPEcidr"><span class="keyword">type</span> <code class="type"></code>cidr</span> = <code class="type">Addr.t * int</code> </pre>
+
+<pre><span id="VALcidr_of_string"><span class="keyword">val</span> <a href="code_VALIp.cidr_of_string.html">cidr_of_string</a></span> : <code class="type">string -> Addr.t * int</code></pre><pre><span id="VALstring_of_cidr"><span class="keyword">val</span> <a href="code_VALIp.string_of_cidr.html">string_of_cidr</a></span> : <code class="type">Addr.t * int -> string</code></pre><pre><span id="VALprint_cidr"><span class="keyword">val</span> <a href="code_VALIp.print_cidr.html">print_cidr</a></span> : <code class="type">Batteries.Format.formatter -> <a href="Ip.html#TYPEcidr">cidr</a> -> unit</code></pre><pre><span id="VALaddr_in_cidr"><span class="keyword">val</span> <a href="code_VALIp.addr_in_cidr.html">addr_in_cidr</a></span> : <code class="type">int32 * int -> int32 -> bool</code></pre><pre><span id="VALaddrs_of_cidr"><span class="keyword">val</span> <a href="code_VALIp.addrs_of_cidr.html">addrs_of_cidr</a></span> : <code class="type">Addr.t * int -> Addr.t list</code></pre><pre><span id="VALrandom_addrs_of_cidr"><span class="keyword">val</span> <a href="code_VALIp.random_addrs_of_cidr.html">random_addrs_of_cidr</a></span> : <code class="type">Addr.t * int -> int -> Addr.t BatEnum.t</code></pre><br>
+<span id="1_IPpacket"><h1>IP packet</h1></span><br>
+<pre><span class="keyword">module</span> <a href="Ip.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+(Un)Packing an IP packet.
+</div>
+<br>
+<span id="1_Transceiver"><h1>Transceiver</h1></span><br>
+<pre><span class="keyword">module</span> <a href="Ip.TRX.html">TRX</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre></body></html>

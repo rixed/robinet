@@ -22,6 +22,7 @@
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
@@ -52,20 +53,20 @@
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>min&nbsp;: <code class="type">float * string</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span>min&nbsp;: <code class="type">Clock.Interval.t * string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>max&nbsp;: <code class="type">float * string</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span>max&nbsp;: <code class="type">Clock.Interval.t * string</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALmake_minmax"><span class="keyword">val</span> <a href="code_VALMetric.Timed.make_minmax.html">make_minmax</a></span> : <code class="type">float -> string -> <a href="Metric.Timed.html#TYPEminmax">minmax</a></code></pre><pre><span id="VALupdate_minmax"><span class="keyword">val</span> <a href="code_VALMetric.Timed.update_minmax.html">update_minmax</a></span> : <code class="type"><a href="Metric.Timed.html#TYPEminmax">minmax</a> -> float -> string -> unit</code></pre><br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><span id="VALmake_minmax"><span class="keyword">val</span> <a href="code_VALMetric.Timed.make_minmax.html">make_minmax</a></span> : <code class="type">Clock.Interval.t -> string -> <a href="Metric.Timed.html#TYPEminmax">minmax</a></code></pre><pre><span id="VALupdate_minmax"><span class="keyword">val</span> <a href="code_VALMetric.Timed.update_minmax.html">update_minmax</a></span> : <code class="type"><a href="Metric.Timed.html#TYPEminmax">minmax</a> -> Clock.Interval.t -> string -> unit</code></pre><br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
@@ -91,7 +92,7 @@
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>tot_duration&nbsp;: <code class="type">float</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span>tot_duration&nbsp;: <code class="type">Clock.Interval.t</code>;</code></td>
 
 </tr>
 <tr>
@@ -118,4 +119,4 @@
 }
 
 
-<pre><span id="VALall"><span class="keyword">val</span> <a href="code_VALMetric.Timed.all.html">all</a></span> : <code class="type">(string, <a href="Metric.Timed.html#TYPEt">t</a>) Batteries.Hashtbl.t</code></pre><pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALMetric.Timed.make.html">make</a></span> : <code class="type">string -> <a href="Metric.Timed.html#TYPEt">t</a></code></pre><pre><span id="VALstart"><span class="keyword">val</span> <a href="code_VALMetric.Timed.start.html">start</a></span> : <code class="type"><a href="Metric.Timed.html#TYPEt">t</a> -> <a href="Clock.html#TYPEtime">Clock.time</a></code></pre><pre><span id="VALstop"><span class="keyword">val</span> <a href="code_VALMetric.Timed.stop.html">stop</a></span> : <code class="type"><a href="Metric.Timed.html#TYPEt">t</a> -> float -> string -> unit</code></pre><pre><span id="VALprint"><span class="keyword">val</span> <a href="code_VALMetric.Timed.print.html">print</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Metric.Timed.html#TYPEt">t</a> -> unit</code></pre></body></html>
+<pre><span id="VALall"><span class="keyword">val</span> <a href="code_VALMetric.Timed.all.html">all</a></span> : <code class="type">(string, <a href="Metric.Timed.html#TYPEt">t</a>) Batteries.Hashtbl.t</code></pre><pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALMetric.Timed.make.html">make</a></span> : <code class="type">string -> <a href="Metric.Timed.html#TYPEt">t</a></code></pre><pre><span id="VALstart"><span class="keyword">val</span> <a href="code_VALMetric.Timed.start.html">start</a></span> : <code class="type"><a href="Metric.Timed.html#TYPEt">t</a> -> Clock.Time.t</code></pre><pre><span id="VALstop"><span class="keyword">val</span> <a href="code_VALMetric.Timed.stop.html">stop</a></span> : <code class="type"><a href="Metric.Timed.html#TYPEt">t</a> -> Clock.Time.t -> string -> unit</code></pre><pre><span id="VALprint"><span class="keyword">val</span> <a href="code_VALMetric.Timed.print.html">print</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Metric.Timed.html#TYPEt">t</a> -> unit</code></pre></body></html>
