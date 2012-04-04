@@ -1,6 +1,7 @@
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
 <html>
 <head>
+<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">
 <link rel="stylesheet" href="style.css" type="text/css">
 <meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
 <link rel="Start" href="index.html">
@@ -40,8 +41,8 @@
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
 <link title="Url" rel="Chapter" href="Url.html">
-<link title="Vlan" rel="Chapter" href="Vlan.html"><link title="Private Types" rel="Section" href="#1_PrivateTypes">
-<link title="Current running time" rel="Section" href="#1_Currentrunningtime">
+<link title="Vlan" rel="Chapter" href="Vlan.html"><link title="Private Types" rel="Section" href="#2_PrivateTypes">
+<link title="Current running time" rel="Section" href="#2_Currentrunningtime">
 <title>Clock</title>
 </head>
 <body>
@@ -63,7 +64,7 @@
    CPU).<br>
 <hr width="100%">
 <pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALClock.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span id="VALrealtime"><span class="keyword">val</span> <a href="code_VALClock.realtime.html">realtime</a></span> : <code class="type">bool Batteries.ref</code></pre><br>
-<span id="1_PrivateTypes"><h1>Private Types</h1></span><br>
+<span id="2_PrivateTypes"><h2>Private Types</h2></span><br>
 <pre><span class="keyword">module</span> <a href="Clock.Time.html">Time</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.Time.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Time.t represents a given timestamp (ie.
 </div>
@@ -71,7 +72,7 @@ Time.t represents a given timestamp (ie.
 While Interval.t reprensents a time interval.
 </div>
 <pre><span id="VALprinter"><span class="keyword">val</span> <a href="code_VALClock.printer.html">printer</a></span> : <code class="type">'a BatIO.output -> Time.t -> unit</code></pre><br>
-<span id="1_Currentrunningtime"><h1>Current running time</h1></span><br>
+<span id="2_Currentrunningtime"><h2>Current running time</h2></span><br>
 <pre><span class="keyword">module</span> <a href="Clock.Map.html">Map</a>: <code class="type">Batteries.Map.Make</code><code class="code">(</code><code class="code"><span class="keyword">sig</span></code><div class="sig_block"><pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = <code class="type">Clock.Time.t</code> </pre>
 
 <pre><span id="VALcompare"><span class="keyword">val</span> <a href="code_VALClock.Map.compare.html">compare</a></span> : <code class="type">t -> t -> int</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">)</code></pre><br><code><span id="TYPEclock"><span class="keyword">type</span> <code class="type"></code>clock</span> = {</code><table class="typetable">

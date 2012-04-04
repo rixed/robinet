@@ -1,6 +1,7 @@
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
 <html>
 <head>
+<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">
 <link rel="stylesheet" href="style.css" type="text/css">
 <meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
 <link rel="Start" href="index.html">
@@ -40,12 +41,12 @@
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
 <link title="Url" rel="Chapter" href="Url.html">
-<link title="Vlan" rel="Chapter" href="Vlan.html"><link title="Libpcap low level wrappers" rel="Section" href="#1_Libpcaplowlevelwrappers">
-<link title="User functions" rel="Section" href="#1_Userfunctions">
-<link title="Packet injection" rel="Subsection" href="#2_Packetinjection">
-<link title="Packet sniffing" rel="Subsection" href="#2_Packetsniffing">
-<link title="Pcap files" rel="Subsection" href="#2_Pcapfiles">
-<link title="Tools" rel="Subsection" href="#2_Tools">
+<link title="Vlan" rel="Chapter" href="Vlan.html"><link title="Libpcap low level wrappers" rel="Section" href="#2_Libpcaplowlevelwrappers">
+<link title="Packet injection" rel="Section" href="#2_Packetinjection">
+<link title="Packet sniffing" rel="Section" href="#2_Packetsniffing">
+<link title="Pcap files" rel="Section" href="#2_Pcapfiles">
+<link title="Tools" rel="Section" href="#2_Tools">
+<link title="Captured packet" rel="Subsection" href="#3_Capturedpacket">
 <title>Pcap</title>
 </head>
 <body>
@@ -59,7 +60,7 @@
  packet injection, and pcap file reading and writing.<br>
 <hr width="100%">
 <pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALPcap.debug.html">debug</a></span> : <code class="type">bool</code></pre><br>
-<span id="1_Libpcaplowlevelwrappers"><h1>Libpcap low level wrappers</h1></span><br>
+<span id="2_Libpcaplowlevelwrappers"><h2>Libpcap low level wrappers</h2></span><br>
 <pre><span id="TYPEiface"><span class="keyword">type</span> <code class="type"></code>iface</span> </pre>
 <div class="info">
 A network device opened for sniffing or injection<br>
@@ -79,8 +80,6 @@ A network device opened for sniffing or injection<br>
 <code class="code">sniff iface</code> will return the next available packet, as well as its capture
  timestamp<br>
 </div>
-<br>
-<span id="1_Userfunctions"><h1>User functions</h1></span><br>
 <br>
 <span id="2_Packetinjection"><h2>Packet injection</h2></span><br>
 <pre><span id="VALpackets_injected_ok"><span class="keyword">val</span> <a href="code_VALPcap.packets_injected_ok.html">packets_injected_ok</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><div class="info">
@@ -110,7 +109,7 @@ A counter for how many bytes were sniffed.<br>
 <br>
 <span id="2_Pcapfiles"><h2>Pcap files</h2></span><br>
 <pre><span class="keyword">module</span> <a href="Pcap.Dlt.html">Dlt</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Pcap.Dlt.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
-<em>Data Link Layers</em> are constant values indicating what protocol and hardware technology
+<em>Data Link Types</em> are constant values indicating what protocol and hardware technology
  some captured packets were taken from.
 </div>
 <br><code><span id="TYPEglobal_header"><span class="keyword">type</span> <code class="type"></code>global_header</span> = {</code><table class="typetable">
@@ -119,21 +118,21 @@ A counter for how many bytes were sniffed.<br>
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
 <code>name&nbsp;: <code class="type">string</code>;</code></td>
-
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >The file name.</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
 <code>endianness&nbsp;: <code class="type">Bitstring.endian</code>;</code></td>
-
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >Endianess of the file.</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
 <code>version_major&nbsp;: <code class="type">int</code>;</code></td>
-
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >Libpcap version.</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
@@ -147,28 +146,28 @@ A counter for how many bytes were sniffed.<br>
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
 <code>this_zone&nbsp;: <code class="type">int32</code>;</code></td>
-
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >Time zone (should be zero, unused).</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
 <code>sigfigs&nbsp;: <code class="type">int32</code>;</code></td>
-
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >unused.</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
 <code>snaplen&nbsp;: <code class="type">int32</code>;</code></td>
-
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >Indicate that no caplen will be smaller. We don't use this.</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
 <code>dlt&nbsp;: <code class="type">Dlt.t</code>;</code></td>
-
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >The Data Link Type (see <a href="Pcap.Dlt.html"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Dlt</span></code></a>).</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr></table>
 }
 
@@ -177,7 +176,7 @@ The global header of a pcap file.<br>
 </div>
 
 <br>
-<span id="3_Pdu"><h3>Pdu</h3></span><br>
+<span id="3_Capturedpacket"><h3>Captured packet</h3></span><br>
 <pre><span class="keyword">module</span> <a href="Pcap.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Pcap.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Packets harvested with libpcap will come with additional informations such
  as caplen, timestamp etc.
