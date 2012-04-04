@@ -216,14 +216,15 @@ struct
      * for the user payload protocol and ARP protocol. *)
     let send t proto dst bits =
         let pdu = Pdu.make proto t.src dst bits in
-        if debug then Printf.printf "Eth: Emitting an Eth packet, proto %s, from %s to %s (content '%s')\n%!" (Arp.HwProto.to_string proto) (Addr.to_string t.src) (Addr.to_string dst) (string_of_bitstring bits) ;
+        if debug then Printf.printf "Eth: Emitting an Eth packet, proto %s, from %s to %s (content '%s')\n%!" (Arp.HwProto.to_string proto) (Addr.to_string t.src) (Addr.to_string dst) (hexstring_of_bitstring bits) ;
         t.emit (Pdu.pack pdu)
 
     let resolve_proto_addr t bits sender_proto_addr target_proto_addr =
-        let request = Arp.Pdu.make_request Arp.HwType.eth t.proto (t.src :> bitstring) sender_proto_addr target_proto_addr in
-        send t Arp.HwProto.arp Addr.broadcast (Arp.Pdu.pack request) ;
+        (* Add the msg to delayed messages _before_ sending the query *)
         if debug then Printf.printf "Eth: Delaying a msg for '%s'\n%!" (hexstring_of_bitstring target_proto_addr) ;
-        BitHash.add t.delayed target_proto_addr bits
+        BitHash.add t.delayed target_proto_addr bits ;
+        let request = Arp.Pdu.make_request Arp.HwType.eth t.proto (t.src :> bitstring) sender_proto_addr target_proto_addr in
+        send t Arp.HwProto.arp Addr.broadcast (Arp.Pdu.pack request)
 
     type dst = Delayed | Dst of Addr.t
     let arp_resolve_ipv4 t bits sender_ip target_ip =

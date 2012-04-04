@@ -29,7 +29,8 @@ EXAMPLES_BYTE = \
 	examples/wanaplay.byte \
 	examples/test_dhcp.byte \
 	examples/http_static_server.byte \
-	examples/beautify_mac.byte
+	examples/beautify_mac.byte \
+	examples/test_ping.byte
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
