@@ -254,15 +254,49 @@ module Payload = struct
     let random len = o (randbs len)
 end
 
-type trx = { tx : bitstring -> unit ; (* transmit this payload *)
-             rx : bitstring -> unit ; (* receive this payload *)
-             set_emit : (bitstring -> unit) -> unit ;
-             set_recv : (bitstring -> unit) -> unit  }
+(** A transmiter is something with a [tx] function taking a message and that
+ * will transmit some other bits (via an emiting funtion).  A receiver is
+ * something with a [rx] function taking bits and that will pass some received
+ * message (to a receiving function).  A transceiver (or [trx]) is something
+ * that can do both tx and rx.  Think of it as an oriented pipe, with some kind
+ * of messages entering and exiting at one end and some other kind of messages
+ * at the other end.
+ *
+ * You can of course combine transceivers in many ways but apart from chaining
+ * severaltransceivers most of these combinations make no sense.
+ *
+ * (note: we do not have a dedicated [tx] or [rx] type for devices that can
+ * only behave as a transmiter or an emiter since we have no such devices.) *)
+type trx = { tx       : bitstring -> unit ; (** transmit this payload *)
+             rx       : bitstring -> unit ; (** receive this payload (possibly another format) *)
+             set_emit : (bitstring -> unit) -> unit ; (** makes this function the emiter *)
+             set_recv : (bitstring -> unit) -> unit (** makes this function the receiver *) }
 
 let null_trx = { tx = ignore ;
                  rx = ignore ;
                  set_emit = ignore ;
                  set_recv = ignore }
+
+(** [f <-= trx] sets f as the receive function of this [trx]. *)
+let (<-=) f trx =
+    trx.set_recv f ;
+    trx
+
+(** [trx =-> f] sets [f] as the emiting function of this [trx]. *)
+let (=->) trx f =
+    trx.set_emit f
+
+(** [a ==> b] connects [a] to [b] such that [b] transmits what [a] emits. *)
+let (==>) trx1 trx2 =
+    trx1 =-> trx2.tx ;
+    trx1.rx <-= trx2
+
+(** [a <==> b] connects [a] to [b] such that [b] receives what [a] emits
+ * and [a] receives what [b] emits. *)
+let (<==>) trx1 trx2 =
+    trx1.set_emit trx2.rx ;
+    trx2.set_emit trx1.rx ;
+    trx2
 
 module type PDU = sig
     type t

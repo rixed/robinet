@@ -302,7 +302,7 @@ let instanciate t =
             | HostAdapter name ->
                 Hashtbl.find_option hosts name |>
                     Option.map (fun host ->
-                        host.Host.rx, host.Host.set_emit) in
+                        host.Host.trx.rx, host.Host.trx.set_emit) in
         let a_rx = rx_of_plug a and b_rx = rx_of_plug b in
         match a_rx, b_rx with
         | None, _ -> Print.printf p"Net: Cannot connect unknown node %{plug}\n%!" a

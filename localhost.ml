@@ -159,6 +159,8 @@ let make () =
       Host.tcp_server    = tcp_server ;
       Host.udp_server    = (fun _ _ -> todo "UDP server for localhost") ;
       Host.signal_err    = signal_err ;
-      Host.set_emit      = ignore ;
-      Host.rx            = ignore }
+      Host.trx           = { tx       = (fun _bits -> should_not_happen ()) ;
+                             set_recv = (fun _f -> should_not_happen ()) ;
+                             rx       = ignore ;
+                             set_emit = ignore } }
 

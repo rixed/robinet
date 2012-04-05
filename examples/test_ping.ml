@@ -13,15 +13,8 @@ let run () =
     let host = Host.make_static "test" (Eth.Addr.random ()) host_ip in
     let eth = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring my_ip ] in
     let ip  = Ip.TRX.make my_ip host_ip Ip.Proto.icmp in
-    (* save everything in a pcap *)
-    let save = Pcap.save "/tmp/test_ping.pcap" in
-    (* downlink *)
-    ip.set_emit eth.Eth.TRX.trx.tx ;
-    eth.Eth.TRX.trx.set_emit (fun bits -> save bits ; host.Host.rx bits) ;
-    (* uplink *)
-    host.Host.set_emit (fun bits -> save bits ; eth.Eth.TRX.trx.rx bits);
-    eth.Eth.TRX.trx.set_recv ip.rx ;
-    ip.set_recv (fun bits -> match Icmp.Pdu.unpack bits with
+    (* What to do when receiving an ip pck *)
+    let my_recv bits = match Icmp.Pdu.unpack bits with
         | None -> error "Cannot decode echo reply"
         | Some { Icmp.Pdu.msg_type = msg_type ; Icmp.Pdu.payload = payload } ->
             assert (Icmp.MsgType.type_of msg_type = 0) ;
@@ -30,7 +23,10 @@ let run () =
                 | Icmp.Pdu.Ids (id, seq, _) ->
                     Printf.printf "Got ICMP echo answer id=%d, seq=%d\n" id seq ;
                     assert (id = 42 && seq = 1)
-                | _ -> error "Bad msg payload")) ;
+                | _ -> error "Bad msg payload") in
+    (* Connect everything *)
+    my_recv <-= ip ==> eth.Eth.TRX.trx =-> host.Host.trx.rx ;
+    host.Host.trx =-> eth.Eth.TRX.trx.rx ;
     (* Send an echo request *)
     let req = Icmp.Pdu.make_echo_request 42 1 in
     ip.tx (Icmp.Pdu.pack req) ;

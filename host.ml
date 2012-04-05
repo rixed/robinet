@@ -39,8 +39,7 @@ type host_trx = {
     tcp_server    : Tcp.Port.t -> (Tcp.TRX.tcp_trx -> unit) -> unit ;
     udp_server    : Udp.Port.t -> (trx -> unit ) -> unit ;
     signal_err    : string -> unit ;
-    set_emit      : (bitstring -> unit) -> unit ;
-    rx            : bitstring -> unit }
+    trx           : trx }
 
 type tcp_socks = { ip_4_tcp : trx ;
                    (* Available sockets per IP dest.
@@ -376,8 +375,10 @@ let make name ?gw ?search_sfx ?nameserver my_mac =
           tcp_server    = (fun src_port server_f -> tcp_server t src_port server_f) ;
           udp_server    = (fun src_port server_f -> udp_server t src_port server_f) ;
           signal_err    = (fun str -> signal_err t str) ;
-          set_emit      = (fun f -> t.eth.Eth.TRX.trx.Tools.set_emit f) ;
-          rx            = (fun pld -> t.eth.Eth.TRX.trx.Tools.rx pld) } in
+          trx           = { tx       = (fun _bits -> should_not_happen ()) ;
+                            set_recv = (fun _f -> should_not_happen ()) ;
+                            rx       = (fun bits -> t.eth.Eth.TRX.trx.Tools.rx bits) ;
+                            set_emit = (fun f -> t.eth.Eth.TRX.trx.Tools.set_emit f) } } in
     Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "New host '%s'" name))) ;
     t
 

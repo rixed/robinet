@@ -39,8 +39,8 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
     and gigabit = Eth.limited (Clock.Interval.msec 10.) 1_000_000_000. in
     List.iteri (fun i h ->
         (* notice that the cable is not full duplex *)
-        h.Host.set_emit (gigabit (Hub.Repeater.rx i hub)) ;
-        Hub.Repeater.set_emit i hub (gigabit (h.Host.rx))
+        h.Host.trx.set_emit (gigabit (Hub.Repeater.rx i hub)) ;
+        Hub.Repeater.set_emit i hub (gigabit (h.Host.trx.rx))
     ) hosts ;
     (* Link all these to the real world *)
     let iface = Pcap.openif ifname true "" 1500 in

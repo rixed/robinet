@@ -29,7 +29,7 @@ let tunnel ifname tun_ip tun_mac gw search_sfx nameserver dst dst_port src_port 
     let iface = Pcap.openif ifname true "" 1800
     and host = Host.make_static "tun" ?gw ?search_sfx ?nameserver tun_mac tun_ip
     and http = Http.TRX.make [ "Content-Type", "tun/eth" ] in
-    host.Host.set_emit (Pcap.inject_pdu iface) ;
+    host.Host.trx.set_emit (Pcap.inject_pdu iface) ;
     let connect_tunnel tcp =
         Printf.printf "Tunnel: We are now connected!\n%!" ;
         http.set_emit tcp.Tcp.TRX.trx.tx ;
@@ -71,7 +71,7 @@ let tunnel ifname tun_ip tun_mac gw search_sfx nameserver dst dst_port src_port 
     in
     http.set_recv recv_http ;
     (* Run everything *)
-    Lwt.join [ Pcap.sniffer iface host.Host.rx ;
+    Lwt.join [ Pcap.sniffer iface host.Host.trx.rx ;
                cli_srv_thread ;
                Clock.run true ]
 
