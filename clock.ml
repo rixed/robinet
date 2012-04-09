@@ -22,11 +22,18 @@
    There are two modes of operation: realtime and not realtime.
 
    When in realtime mode (the default), the clock will merely follow
-   wall-clock. This is not very interesting but is required whenever you plan
-   to work with real network devices and outside world.  If your simulated
-   network does not communicates with the outside world, though, then you can
-   use not realtime mode and then play your simulation at full speed (and full
-   CPU).
+   wall-clock. Then, scheduling an event in the future is equivalent to
+   [Lwt_unix.sleep] for some time. This is not very interesting but is required
+   whenever you plan to work with real network devices and outside world.  On
+   the other hand, if your simulated network does not communicates with the
+   outside world, for instance because your objective is to build a pcap file,
+   then you can use not realtime mode and then play your simulation at full
+   speed (and full CPU), and produce a pcap file representing, say, the
+   workload of a day in minutes, or conversely a very busy hour in several
+   hours but with all packets and accurate timestamps.
+
+   Note: in any case Lwt is used and required. Clock handle time while Lwt
+   handle the several stacks that make programming easier.
 *)
 open Batteries
 open Bitstring
@@ -100,11 +107,15 @@ end = struct
         let repl_tag = "time"
     end)
 
-    (** Takes some microseconds, milliseconds, seconds, minutes or hour and return an [Interval.t]. *)
+    (** microseconds to {Interval.t}. *)
     let usec i = o (i *. 0.000001)
+    (** milliseconds to {Interval.t}. *)
     let msec i = o (i *. 0.001)
+    (** seconds to {Interval.t}. *)
     let sec i  = o i
+    (** minutes to {Interval.t}. *)
     let min i  = o (i *. 60.)
+    (** hours to {Interval.t}. *)
     let hour i = o (i *. 3600.)
 
     (** Custom comparison function so that we can change time representation
@@ -124,9 +135,13 @@ module Map = Map.Make (struct
     let compare (a : t) (b : t) = Float.compare (a :> float) (b :> float)
 end)
 
+(** A clock is a current timestamp and the set of future events. *)
 type clock = { mutable now : Time.t ; mutable events : (unit -> unit) Map.t }
+
+(** We have only one clock so can run only one simulation at the same time. *)
 let current = { now = Time.o (Unix.gettimeofday ()) ; events = Map.empty }
 
+(** Return the current simulation time. *)
 let now () = current.now
 
 let nextev_wakener = ref None
@@ -138,12 +153,17 @@ let nextev_awake () = match !nextev_wakener with
         if debug then Printf.printf "Clock: waking waiter up\n%!" ;
         Lwt.wakeup w ()
 
+(** [at t f x] will execute [f x] when simulation clock reachs time [t]. *)
 let at (ts : Time.t) f x =
     if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.sub ts current.now)) ;
     current.events <- Map.add ts (fun () -> f x) current.events ;
     nextev_awake ()
 
-(* returns true if more events are scheduled *)
+(** [delay d f x] will delay the execution of [f x] by the interval [d]. *)
+let delay d f x =
+    at (Time.add current.now d) f x
+
+(** Will process the next event and returns true if more events are scheduled *)
 let next_event wait =
     if not wait && Map.is_empty current.events then (
         if debug then Printf.printf "Clock: no more events" ;
@@ -168,10 +188,9 @@ let next_event wait =
             Lwt.return true)
     )
 
-let delay d f x =
-    at (Time.add current.now d) f x
-
-(* We cannot allow our thread to sleep since we want to control the speed of time *)
+(** We cannot allow our thread to sleep since we want to control the speed of time.
+ * So [sleep d] will return a thread that will be awakened by the schedule (ie. other
+ * registered events are still being processed) *)
 let sleep d =
     let waiter, wakener = Lwt.wait () in
     delay d (Lwt.wakeup wakener) () ;
@@ -185,9 +204,9 @@ let run wait =
         else Lwt.return () in
     aux ()
 
-(* Synchronize internal clock with realtime clock.
-   You must call this after real time passes (for instance after a blocking call).
-   Otherwise, time jumps from one registered event to the next. *)
+(** Synchronize internal clock with realtime clock.
+ * You must call this after real time passes (for instance after a blocking call).
+ * Otherwise, time jumps from one registered event to the next. *)
 let synch () =
     ensure !realtime "Synch with real clock in non-realtime mode!?" ;
     current.now <- Time.wall_clock ()
