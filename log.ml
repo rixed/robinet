@@ -21,7 +21,6 @@
   We keep lazyly the last N messages of every log levels.
 *)
 open Batteries
-open Bitstring
 open Tools
 
 (* Basically, Info is the lowest thing you want to see by default. *)
@@ -37,7 +36,7 @@ let nb_levels = 5
 
 (* output to console happen based on a constant current loglevel *)
 
-let console_lvl = int_of_level Debug
+let console_lvl = ref Warning
 let console_log name (t, lstr) =
     Printf.printf "%a: %s: %s\n%!" Clock.printer t name (Lazy.force lstr)
 
@@ -62,7 +61,7 @@ let log logger level lstr =
     let lvl = int_of_level level
     and msg = Clock.now (), lstr in
     logger.queues.(lvl) <- enqueue logger.queues.(lvl) msg ;
-    if lvl <= console_lvl then console_log logger.name msg
+    if lvl <= int_of_level !console_lvl then console_log logger.name msg
 
 (* creation *)
 
