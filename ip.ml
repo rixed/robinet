@@ -148,40 +148,90 @@ module Addr = struct
     let of_inet_addr ip = o (int32_of_inet_addr ip)
     let to_inet_addr (t : t) = inet_addr_of_int32 (t :> int32)
 
+    let higher_bits (ip : t) n =
+        if n >= 32 then ip else (* since Int32.shift_left is actually a rotation *)
+        o (Int32.logand (ip :> int32)
+                        (Int32.shift_left
+                              (Int32.pred (Int32.shift_left 1l n))
+                              (32-n)))
+    (*$= higher_bits & ~printer:to_string
+       (o 0x01000000l) (higher_bits (o 0x01020305l) 10)
+       (o 0x01020304l) (higher_bits (o 0x01020305l) 30)
+       (o 0x01020305l) (higher_bits (o 0x01020305l) 32)
+       (o 0x01020305l) (higher_bits (o 0x01020305l) 33)
+     *)
     (*$>*)
 end
 
 (** {4 CIDR Addresses} *)
 
-type cidr = Addr.t * int
-(* TODO: printer, etc *)
+(** CIDR addresses are a concise way to write network addresses,
+ * with network IP then netmask length, like: 192.168.0.0/16. *)
+module Cidr = struct
+    (*$< Cidr *)
+    include MakePrivate(struct
+        type t = Addr.t * int
+        (** Converts a CIDR to its string representation. *)
+        let to_string (ip, n) =
+            Addr.to_dotted_string ip ^ "/" ^ String.of_int n
+        let is_valid ((ip : Addr.t), n) =
+            Int32.logand (ip :> int32)
+                         (Int32.pred (Int32.shift_left 1l (32-n))) = 0l
+        let repl_tag = "addr"
+    end)
 
-let cidr_of_string str =
-    let ip_str, width_str =
-        try String.split str "/"
-        with Not_found -> error (Printf.sprintf "cidr_of_string %s" str)
-    in Addr.of_string ip_str, int_of_string width_str
+    let of_string str =
+        let ip_str, width_str =
+            try String.split str "/"
+            with Not_found -> error (Printf.sprintf "not a CIDR: %s" str) in
+        let ip, n = Addr.of_string ip_str, Int.of_string width_str in
+        (* mask off unsignificant bits of IP *)
+        o (Addr.higher_bits ip n, n)
+    (*$= of_string & ~printer:to_string
+      (o (Addr.o 0x01020380l, 25)) (of_string "1.2.3.128/25")
+      (o (Addr.o 0x01020380l, 25)) (of_string "1.2.3.142/25")
+     *)
 
-let string_of_cidr ((ip : Addr.t), width) =
-    (Addr.dotted_string_of_int32 (ip :> int32)) ^ "/" ^ (string_of_int width)
+    let random ?mask () =
+        let mask = Option.default (Random.int 32 + 1) mask in
+        let net = Addr.higher_bits (Addr.random ()) mask in
+        o (net, mask)
+    (*$Q of_string
+      ((random |- to_string), identity) (fun t -> t = to_string (of_string t))
+     *)
 
-let print_cidr fmt (cidr : cidr) =
-    Format.fprintf fmt "@{<addr>%s@}" (string_of_cidr cidr)
+    let mem (t : t) (ip : Addr.t) =
+        let net, width = (t :> Addr.t * int) in
+        let a = takebits width (BITSTRING { (net :> int32) : 32 })
+        and b = takebits width (BITSTRING { (ip  :> int32) : 32 }) in
+        Bitstring.equals a b
+    (*$= mem & ~printer:string_of_bool
+      true  (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.0"))
+      true  (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.1"))
+      true  (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.15"))
+      false (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.16"))
+      false (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.17"))
+     *)
 
-let addr_in_cidr (net, mask) ip =
-    let a = takebits mask (BITSTRING { net : 32 })
-    and b = takebits mask (BITSTRING { ip  : 32 }) in
-    a = b
+    let to_enum (t : t) =
+        let net, width = (t :> Addr.t * int) in
+        if width >= 32 then Enum.singleton net else
+        let prefix = takebits width (BITSTRING { (net :> int32) : 32 })
+        and l = 32 - width in
+        Enum.init (1 lsl l) (fun i ->
+            Addr.of_bitstring (BITSTRING { prefix : width : bitstring ;
+                                           Int64.of_int i : l }))
+    (*$= to_enum
+      [ "192.168.10.42" ] (to_enum (of_string "192.168.10.42/32") /@ \
+                           Addr.to_dotted_string |> \
+                           List.of_enum)
+     *)
 
-let addrs_of_cidr ((ip : Addr.t), mask) =
-    if mask >= 32 then [ ip ] else
-    let prefix = takebits mask (BITSTRING { (ip :> int32) : 32 })
-    and l = 32 - mask in
-    List.init (1 lsl l) (fun i ->
-        Addr.of_bitstring (BITSTRING { prefix : mask : bitstring ; Int64.of_int i : l }))
+    let random_addrs t n =
+        to_enum t |> Random.multi_choice n
 
-let random_addrs_of_cidr cidr n =
-    addrs_of_cidr cidr |> List.enum |> Random.multi_choice n
+    (*$>*)
+end
 
 (** {2 IP packet} *)
 

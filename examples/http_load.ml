@@ -32,7 +32,7 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
         Eth.Addr.o (BITSTRING { 0x1234 : 16 ; bs : 32 : bitstring }) in
     let host_of_ip ip =
         Host.make_static (Ip.Addr.to_dotted_string ip) ?gw ?search_sfx ?nameserver (mac_of_ip ip) ip in
-    let hosts = List.of_enum (Ip.random_addrs_of_cidr src_range nb_srcs /@ host_of_ip)
+    let hosts = List.of_enum (Ip.Cidr.random_addrs src_range nb_srcs /@ host_of_ip)
     in
     (* Build the HUB and link it to hosts *)
     let hub     = Hub.Repeater.make (nb_srcs+1)
@@ -85,7 +85,7 @@ let main =
         let gw  = Option.map (fun gw -> Eth.IPv4 (Ip.Addr.of_string gw)) !gw_str
         and nameserver = Option.map (fun ip -> Ip.Addr.of_string ip) !dns_str in
         Lwt.choose [
-            run !ifname (Ip.cidr_of_string !src_range_str) !nb_srcs
+            run !ifname (Ip.Cidr.of_string !src_range_str) !nb_srcs
                 ?gw ?search_sfx:!search_sfx ?nameserver ?pause:!pause !max_depth !start_url ;
             Metric.report_thread stdout 10.
         ]
