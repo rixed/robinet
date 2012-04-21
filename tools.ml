@@ -60,7 +60,7 @@ let bitstring_fuzz err_rate bits =
     if err_rate = 0. then bits else
     let noerr_len = 1. /. err_rate in (* average number of bits without errors *)
     let rec aux prevs rest =
-        let len = Int.of_float (Random.float (2. *. noerr_len)) in (* incorrect but fast *)
+        let len = 1 + Int.of_float (Random.float (2. *. noerr_len)) in (* incorrect but fast *)
         bitmatch rest with
         | { b1 : len-1 : bitstring ;
             b  : 1 ;
