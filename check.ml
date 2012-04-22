@@ -24,7 +24,6 @@ let _ =
         Tools.check () &&
         Http.check () &&
         Peg.check () &&
-        Fifo.check () &&
         Html.check () &&
         Url.check () &&
         Browser.check () in

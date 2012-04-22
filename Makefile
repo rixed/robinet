@@ -3,7 +3,7 @@ PKG_NAME = robinet
 SOURCES  = \
 	tools.ml clock.ml log.ml \
 	persist.ml peg.ml \
-	fifo.ml metric.ml \
+	metric.ml \
 	dns.ml url.ml http.ml \
 	tcp.ml udp.ml \
 	ip.ml icmp.ml arp.ml \
