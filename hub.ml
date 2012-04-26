@@ -23,8 +23,8 @@ open Tools
 
 let debug = false
 
-(* A HUB is a device that receives Eth frames and blindly mirrors them to several locations
-   (but the one from which the frame came from) *)
+(** A Repeater (or HUB) is a device that receives Eth frames and blindly mirrors them
+   to several locations (but the one from which the frame came from) *)
 module Repeater =
 struct
     type port = { mutable emit : bitstring -> unit }
@@ -52,42 +52,11 @@ struct
 
 end
 
+(** A Switch is a device that will forward Ethernet frames based on the observed
+  location of the destination. *)
 module Switch =
 struct
     module R = Repeater
-
-    module OrdArray =
-    struct
-        type entry = { mutable prev : int ; mutable next : int }
-        type t =
-            { arr   : entry array ;
-              mutable first : int ;
-              mutable last  : int }
-
-        let make s =
-            { arr = Array.init s (fun i ->
-                { prev = if i = 0 then -1 else i-1 ;
-                  next = if i = s-1 then -1 else i+1 }) ;
-              first = 0 ;
-              last = s-1 }
-
-        let remove t n =
-            if t.arr.(n).prev <> -1 then t.arr.(t.arr.(n).prev).next <- t.arr.(n).next ;
-            if t.arr.(n).next <> -1 then t.arr.(t.arr.(n).next).prev <- t.arr.(n).prev ;
-            if t.first = n then t.first <- t.arr.(n).next ;
-            if t.last = n then t.last <- t.arr.(n).prev
-
-        (* n was already removed! *)
-        let add_head t n =
-            t.arr.(n).prev <- -1 ;
-            t.arr.(n).next <- t.first ;
-            t.arr.(t.first).prev <- n ;
-            t.first <- n
-
-        let promote t n =
-            remove t n ;
-            add_head t n
-    end
 
     type mac_entry =
         { mutable addr : Eth.Addr.t option ;
@@ -95,14 +64,12 @@ struct
 
     type t =
         { hub  : R.t ;
-          macs : mac_entry array ;
-          last_used : OrdArray.t ;
+          macs : mac_entry OrdArray.t ;
           macs_h : int BitHash.t }
 
     let make nb_ports nb_macs =
         { hub = R.make nb_ports ;
-          macs = Array.init nb_macs (fun _ -> { addr = None ; port = 0 }) ;
-          last_used = OrdArray.make nb_macs ;
+          macs = OrdArray.init nb_macs (fun _ -> { addr = None ; port = 0 }) ;
           macs_h = BitHash.create (nb_macs/10) }
 
     let forward_from inp t bits = bitmatch bits with
@@ -115,27 +82,28 @@ struct
                     (Eth.Addr.to_string (Eth.Addr.o dst)) ;
                 R.forward_from inp t.hub bits
             | Some n ->
-                t.hub.Repeater.ports.(t.macs.(n).port).Repeater.emit bits ;
-                (* promote in last_used *)
-                OrdArray.promote t.last_used n) ;
+                t.hub.Repeater.ports.((OrdArray.get t.macs n).port).Repeater.emit bits ;
+                OrdArray.promote t.macs n) ;
             (* update mac table *)
             (match BitHash.find_option t.macs_h src with
             | None ->
                 if debug then Printf.printf "Switch: new mac %s\n%!" (Eth.Addr.to_string (Eth.Addr.o src)) ;
-                let last = t.last_used.OrdArray.last in
-                (match t.macs.(last).addr with None -> () | Some addr ->
+                let last_idx = OrdArray.last t.macs in
+                let last = OrdArray.get t.macs last_idx in
+                (match last.addr with None -> () | Some addr ->
                     BitHash.remove t.macs_h (addr :> bitstring)) ;
-                t.macs.(last).addr <- Some (Eth.Addr.o src) ;
-                t.macs.(last).port <- inp ;
-                BitHash.add t.macs_h src last ;
-                OrdArray.promote t.last_used last
+                last.addr <- Some (Eth.Addr.o src) ;
+                last.port <- inp ;
+                BitHash.add t.macs_h src last_idx ;
+                OrdArray.promote t.macs last_idx
             | Some n ->
-                if t.macs.(n).port <> inp then (
+                let mac = OrdArray.get t.macs n in
+                if mac.port <> inp then (
                     if debug then Printf.printf "Switch: host %s changed from port %d to %d\n"
                         (Eth.Addr.to_string (Eth.Addr.o src)) n inp ;
-                    t.macs.(n).port <- inp
+                    mac.port <- inp
                 ) ;
-                OrdArray.promote t.last_used n)
+                OrdArray.promote t.macs n)
         | { _ } ->
             if debug then Printf.printf "Switch: drop incoming frame without destonator\n%!"
 

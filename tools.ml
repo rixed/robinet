@@ -188,6 +188,53 @@ let hash_merge h h' =
 let file_content f =
     File.with_file_in f IO.read_all
 
+(** An OrdArray is a container for an ordered set of bounded size. *)
+module OrdArray =
+struct
+    type entry = { mutable prev : int ; mutable next : int }
+    type 'a t =
+        {     last_used : entry array ; (** The ordered list of indices. *)
+          mutable first : int ;         (** The indice of the first element. *)
+           mutable last : int ;         (** and the last one. *)
+                   data : 'a array }    (** User data *)
+
+    let make_from_data s data =
+        { last_used = Array.init s (fun i ->
+            { prev = if i = 0 then -1 else i-1 ;
+              next = if i = s-1 then -1 else i+1 }) ;
+          first = 0 ;
+          last = s-1 ;
+          data  }
+
+    let make s x = make_from_data s (Array.create s x)
+    let init s f = make_from_data s (Array.init s f)
+
+    let get t n = t.data.(n)
+    let set t n x = t.data.(n) <- x
+    let first t = t.first
+    let last t = t.last
+
+    let remove t n =
+        if t.last_used.(n).prev <> -1 then
+            t.last_used.(t.last_used.(n).prev).next <- t.last_used.(n).next ;
+        if t.last_used.(n).next <> -1 then
+            t.last_used.(t.last_used.(n).next).prev <- t.last_used.(n).prev ;
+        if t.first = n then t.first <- t.last_used.(n).next ;
+        if t.last = n then t.last <- t.last_used.(n).prev
+
+    (* n was already removed! *)
+    let add_head t n =
+        t.last_used.(n).prev <- -1 ;
+        t.last_used.(n).next <- t.first ;
+        t.last_used.(t.first).prev <- n ;
+        t.first <- n
+
+    let promote t n =
+        remove t n ;
+        add_head t n
+end
+
+
 (* Some random generators for tests *)
 let randi bits =
     let mask = (1 lsl bits) - 1 in
