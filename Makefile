@@ -12,7 +12,7 @@ SOURCES  = \
 	pcap.ml packet.ml \
 	host.ml localhost.ml \
 	html.ml browser.ml \
-	hub.ml net.ml \
+	hub.ml router.ml net.ml \
 	opache.ml myadmin.ml
 C_SOURCES = pcap_wrap.c eth_vendors.c
 CLIB = libpcapw.a

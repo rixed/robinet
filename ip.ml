@@ -160,6 +160,20 @@ module Addr = struct
        (o 0x01020305l) (higher_bits (o 0x01020305l) 32)
        (o 0x01020305l) (higher_bits (o 0x01020305l) 33)
      *)
+
+    type net = t * t (** Network addr and network mask *)
+
+    let in_net (ip : t) ((net : t), (mask : t)) =
+        let ip = (ip :> int32) and net = (net :> int32) and mask = (mask :> int32) in
+        (Int32.logand ip mask) = (Int32.logand net mask)
+
+    (*$T in_net
+        in_net (of_string "192.168.10.9") ((of_string "192.168.10.1"), \
+                                           (of_string "255.255.255.0"))
+        not (in_net (of_string "192.168.11.1") ((of_string "192.168.10.1"), \
+                                                (of_string "255.255.255.0")))
+     *)
+
     (*$>*)
 end
 
@@ -340,6 +354,34 @@ module Pdu = struct
 
     (*$Q pack
       ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+     *)
+
+    (** Unpack an ip packets and return the ip PDU, source port and dest port. *)
+    let unpack_with_ports bits =
+        unpack bits |> Option.bind (fun ip ->
+            if ip.proto = Proto.tcp then (
+                Tcp.Pdu.unpack (ip.payload :> bitstring) |>
+                Option.bind (fun tcp ->
+                    Some (ip,
+                          (tcp.Tcp.Pdu.src_port :> int),
+                          (tcp.Tcp.Pdu.dst_port :> int)))
+            ) else if ip.proto = Proto.udp then (
+                Udp.Pdu.unpack (ip.payload :> bitstring) |>
+                Option.bind (fun udp ->
+                    Some (ip,
+                          (udp.Udp.Pdu.src_port :> int),
+                          (udp.Udp.Pdu.dst_port :> int)))
+            ) else None)
+    (*$= unpack_with_ports & ~printer:dump
+        (Some (42, 12)) ( \
+            pack (make Proto.udp (Ip.Addr.random ()) (Ip.Addr.random ()) \
+                        (Udp.Pdu.make ~src_port:(Udp.Port.o 42) \
+                                      ~dst_port:(Udp.Port.o 12) \
+                                      (randbs 10) |> \
+                        Udp.Pdu.pack)) |> \
+            unpack_with_ports |> \
+            Option.bind (fun (_, src, dst) -> Some (src, dst)) \
+        )
      *)
     (*$>*)
 end
