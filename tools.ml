@@ -136,6 +136,11 @@ let int_of_hexstring s =
         Printf.fprintf stderr "Tools: Bad char in hexstring '%s'\n" (abbrev s) ;
         None
 
+(*$= int_of_hexstring & ~printer:dump
+    (Some 26) (int_of_hexstring "0000001A")
+    (Some 47) (int_of_hexstring "2F")
+*)
+
 let may_default v_opt f = match v_opt with Some v -> v | None -> f ()
 
 (* FIXME: use enums *)
@@ -153,6 +158,13 @@ let str_all_matches str =
         with Not_found -> aux (""::prevs) (n+1)
            | Invalid_argument _ -> List.rev prevs in
     aux [] 0
+
+(*$= str_all_matches & ~printer:dump
+    [ "foobaaaaa" ; "oo" ; "aaaaa" ] \
+        (let str = "foobaaaaar" in \
+         let _ = Str.string_match (Str.regexp "f\\(o+\\)b\\(a+\\)") str 0 in \
+         str_all_matches str)
+*)
 
 module HashedBits : Hashtbl.HashedType with type t = bitstring = struct
     type t = bitstring
@@ -266,7 +278,7 @@ end
  * severaltransceivers most of these combinations make no sense.
  *
  * (note: we do not have a dedicated [tx] or [rx] type for devices that can
- * only behave as a transmiter or an emiter since we have no such devices.) *)
+ * only behave as a transmiter or an emiter since we have very few such devices.) *)
 type trx = { tx       : bitstring -> unit ; (** transmit this payload *)
              rx       : bitstring -> unit ; (** receive this payload (possibly another format) *)
              set_emit : (bitstring -> unit) -> unit ; (** makes this function the emiter *)
@@ -311,9 +323,3 @@ module type TRANSPORT = sig
     val string_of_addr : addr -> string
 end*)
 
-let check () =
-    (int_of_hexstring "0000001A" = Some 26) &&
-    (int_of_hexstring "2F" = Some 47) &&
-    (let str = "foobaaaaar" in
-     Str.string_match (Str.regexp "f\\(o+\\)b\\(a+\\)") str 0 &&
-     str_all_matches str = [ "foobaaaaa" ; "oo" ; "aaaaa" ])

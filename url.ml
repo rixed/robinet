@@ -62,6 +62,10 @@ let decode s =
     if debug then Printf.printf "Url: decode: '%s' -> '%s'\n" s res ;
     res
 
+(*$= decode & ~printer:identity
+    "came_from=/" (decode "came_from=%2F")
+*)
+
 let char_encode c =
     let c = Char.code c in
     Printf.sprintf "%%%X%X" (c lsr 4) (c land 0xf)
@@ -73,6 +77,11 @@ let encode ?(reserved=true) s =
     let res = String.replace_chars rep s in
     if debug then Printf.printf "Url: encode: '%s' -> '%s'\n" s res ;
     res
+
+(*$= encode & ~printer:identity
+    "a%20%2B%20b%20%3D%3D%2013%25%21" (encode "a + b == 13%!")
+    "/glop/pas%20glop/" (encode ~reserved:false "/glop/pas glop/")
+*)
 
 let of_string ?(force_absolute=false) str =
     if debug then Printf.printf "Url: of_string: parse '%s'\n%!" str ;
@@ -126,6 +135,20 @@ let of_string ?(force_absolute=false) str =
       path    = path ;
       params  = params ;
       query   = query }
+
+(*$= of_string & ~printer:dump
+    { scheme = "http" ; net_loc = "www.google.com" ; path = "/search" ; params = "" ; query = "ocaml" } \
+        (of_string "http://www.google.com/search?ocaml")
+    { scheme = "" ; net_loc = "" ; path = "/search" ; params = "" ; query = "" } \
+        (of_string "/search?")
+    { scheme = "" ; net_loc = "" ; path = "../../rel" ; params = "" ; query = "yo" } \
+        (of_string "../../rel?yo#anchor")
+    { scheme = "http" ; net_loc = "bla.com" ; path = "" ; params = "" ; query = "" } \
+        (of_string ~force_absolute:true "bla.com")
+    { scheme = "http" ; net_loc = "www.google.com" ; path = "" ; params = "" ; query = "" } \
+        (of_string "http://www.google.com")
+*)
+(* Notice: on that last test we had no path. Thus absolute url will depend on the base *)
 
 let to_string url =
     Printf.sprintf "%s%s%s%s%s%s%s%s%s"
@@ -214,85 +237,77 @@ let resolve base url =
         (to_string url) (to_string base) (to_string res) ;
     res
 
-let check () =
-    (* encode *)
-    (encode "a + b == 13%!" = "a%20%2B%20b%20%3D%3D%2013%25%21") &&
-    (encode ~reserved:false "/glop/pas glop/" = "/glop/pas%20glop/") &&
-    (* decode *)
-    (decode "came_from=%2F" = "came_from=/") &&
-    (* url <-> string *)
-    let url1 = of_string "http://www.google.com/search?ocaml" in
-    (url1 = { scheme = "http" ; net_loc = "www.google.com" ; path = "/search" ; params = "" ; query = "ocaml" }) &&
-    let url2 = of_string "/search?" in
-    (url2 = { scheme = "" ; net_loc = "" ; path = "/search" ; params = "" ; query = "" }) &&
-    let url3 = of_string "../../rel?yo#anchor" in
-    (url3 = { scheme = "" ; net_loc = "" ; path = "../../rel" ; params = "" ; query = "yo" }) &&
-    (of_string ~force_absolute:true "bla.com" = { scheme = "http" ; net_loc = "bla.com" ; path = "" ; params = "" ; query = "" }) &&
-    (* emptyness *)
-    (not (is_empty url1)) &&
-    (not (is_empty url2)) &&
-    (not (is_empty url3)) &&
-    (* resolution *)
-    let url4 = of_string "try" in
-    (resolve url1 url4 = { scheme = "http" ; net_loc = "www.google.com" ; path = "/try" ; params = "" ; query = "" }) &&
-    (of_string "http://www.google.com" = { scheme = "http" ; net_loc = "www.google.com" ; path = "" ; params = "" ; query = "" }) && (* notice: no path here. absolute url will depend on the base *)
-    (resolve empty { scheme = "http" ; net_loc = "www.google.com" ; path = "" ; params = "" ; query = "" } = { scheme = "http" ; net_loc = "www.google.com" ; path = "/" ; params = "" ; query = "" }) && (* empty path is made absolute *)
-    (* useful case: net_loc carries a port information *)
-    let url5 = of_string "http://www.ex.com:8080/" in
-    (resolve url1 url5 = { scheme = "http" ; net_loc = "www.ex.com:8080" ; path = "/" ; params = "" ; query = "" }) &&
-    let url6 = of_string "http://www.amazon.ca?glop=pasglop" in
-    (resolve url1 url6 = { scheme = "http" ; net_loc = "www.amazon.ca" ; path = "" ; params = ""; query = "glop=pasglop" }) &&
-    let base = of_string "http://www.amazon.ca/somepage"
-    and url = of_string "?glop=pasglop" in
-    (resolve base url = { scheme = "http" ; net_loc = "www.amazon.ca" ; path = "/somepage" ; params = ""; query = "glop=pasglop" }) &&
-    let base = of_string "http://www.amazon.ca"
-    and url = of_string "?glop=pasglop" in
-    (resolve base url = { scheme = "http" ; net_loc = "www.amazon.ca" ; path = "" ; params = ""; query = "glop=pasglop" }) &&
-    (* from RFC 1808 *)
-    let base = of_string "http://a/b/c/d;p?q#f" in
-    let test url_ exp_ =
-        let url = resolve base (of_string url_) and exp = of_string exp_ in
-        if url <> exp then (
-            Printf.printf "Error: %s -> %s (expected: %s ie. %s)\n" url_ (to_string url) exp_ (to_string exp) ;
-            false
-        ) else (Printf.printf "Ok: %s -> %s\n" url_ exp_ ; true)
-    in
-    test "g:h" "g:h" &&
-    test "g" "http://a/b/c/g" &&
-    test "./g" "http://a/b/c/g" &&
-    test "g/" "http://a/b/c/g/" &&
-    test "/g" "http://a/g" &&
-    test "//g" "http://g" &&
-    test "?y" "http://a/b/c/d;p?y" &&
-    test "g?y" "http://a/b/c/g?y" &&
-    test "g?y/./x" "http://a/b/c/g?y/./x" &&
-    test "#s" "http://a/b/c/d;p?q#s" &&
-    test "g#s" "http://a/b/c/g#s" &&
-    test "g#s/./x" "http://a/b/c/g#s/./x" &&
-    test "g?y#s" "http://a/b/c/g?y#s" &&
-    test ";x" "http://a/b/c/d;x" &&
-    test "g;x" "http://a/b/c/g;x" &&
-    test "g;x?y#s" "http://a/b/c/g;x?y#s" &&
-    test "." "http://a/b/c/" &&
-    test "./" "http://a/b/c/" &&
-    test ".." "http://a/b/" &&
-    test "../" "http://a/b/" &&
-    test "../g" "http://a/b/g" &&
-    test "../.." "http://a/" &&
-    test "../../" "http://a/" &&
-    test "../../g" "http://a/g" &&
-    (* abnormal examples *)
-    test "" "http://a/b/c/d;p?q#f" &&
-    test "../../../g" "http://a/../g" &&
-    test "../../../../g" "http://a/../../g" &&
-    test "/./g" "http://a/./g" &&
-    test "/../g" "http://a/../g" &&
-    test "g." "http://a/b/c/g." &&
-    test ".g" "http://a/b/c/.g" &&
-    test "g.." "http://a/b/c/g.." &&
-    test "..g" "http://a/b/c/..g" &&
-    test "./../g" "http://a/b/g" &&
-    test "./g/." "http://a/b/c/g/" &&
-    test "g/./h" "http://a/b/c/g/h" &&
-    test "g/../h" "http://a/b/c/h"
+(*$= resolve & ~printer:dump
+    { scheme = "http" ; net_loc = "www.google.com" ; path = "/try" ; params = "" ; query = "" } \
+        (resolve (of_string "http://www.google.com/search?ocaml") \
+                 (of_string "try"))
 
+    { scheme = "http" ; net_loc = "www.google.com" ; path = "/" ; params = "" ; query = "" } \
+        ((* empty path is made absolute *) \
+         resolve empty { scheme = "http" ; net_loc = "www.google.com" ; path = "" ; params = "" ; query = "" })
+
+    { scheme = "http" ; net_loc = "www.ex.com:8080" ; path = "/" ; params = "" ; query = "" } \
+        (resolve (of_string "http://www.google.com/search?ocaml") \
+                 (of_string "http://www.ex.com:8080/"))
+
+    { scheme = "http" ; net_loc = "www.amazon.ca" ; path = "" ; params = ""; query = "glop=pasglop" } \
+        (resolve (of_string "http://www.google.com/search?ocaml") \
+                 (of_string "http://www.amazon.ca?glop=pasglop"))
+
+    { scheme = "http" ; net_loc = "www.amazon.ca" ; path = "/somepage" ; params = ""; query = "glop=pasglop" } \
+        (resolve (of_string "http://www.amazon.ca/somepage") \
+                 (of_string "?glop=pasglop"))
+
+    { scheme = "http" ; net_loc = "www.amazon.ca" ; path = "" ; params = ""; query = "glop=pasglop" } \
+        (resolve (of_string "http://www.amazon.ca") \
+                 (of_string "?glop=pasglop"))
+*)
+(*$T resolve
+    (* these tests are taken from RFC 1808 *) \
+    let base = of_string "http://a/b/c/d;p?q#f" in \
+    let test url_ exp_ = \
+        let url = resolve base (of_string url_) and exp = of_string exp_ in \
+        if url <> exp then ( \
+            Printf.printf "Error: %s -> %s (expected: %s ie. %s)\n" url_ (to_string url) exp_ (to_string exp) ; \
+            false \
+        ) else true \
+    in \
+    test "g:h" "g:h" && \
+    test "g" "http://a/b/c/g" && \
+    test "./g" "http://a/b/c/g" && \
+    test "g/" "http://a/b/c/g/" && \
+    test "/g" "http://a/g" && \
+    test "//g" "http://g" && \
+    test "?y" "http://a/b/c/d;p?y" && \
+    test "g?y" "http://a/b/c/g?y" && \
+    test "g?y/./x" "http://a/b/c/g?y/./x" && \
+    test "#s" "http://a/b/c/d;p?q#s" && \
+    test "g#s" "http://a/b/c/g#s" && \
+    test "g#s/./x" "http://a/b/c/g#s/./x" && \
+    test "g?y#s" "http://a/b/c/g?y#s" && \
+    test ";x" "http://a/b/c/d;x" && \
+    test "g;x" "http://a/b/c/g;x" && \
+    test "g;x?y#s" "http://a/b/c/g;x?y#s" && \
+    test "." "http://a/b/c/" && \
+    test "./" "http://a/b/c/" && \
+    test ".." "http://a/b/" && \
+    test "../" "http://a/b/" && \
+    test "../g" "http://a/b/g" && \
+    test "../.." "http://a/" && \
+    test "../../" "http://a/" && \
+    test "../../g" "http://a/g" && \
+    (* abnormal examples *) \
+    test "" "http://a/b/c/d;p?q#f" && \
+    test "../../../g" "http://a/../g" && \
+    test "../../../../g" "http://a/../../g" && \
+    test "/./g" "http://a/./g" && \
+    test "/../g" "http://a/../g" && \
+    test "g." "http://a/b/c/g." && \
+    test ".g" "http://a/b/c/.g" && \
+    test "g.." "http://a/b/c/g.." && \
+    test "..g" "http://a/b/c/..g" && \
+    test "./../g" "http://a/b/g" && \
+    test "./g/." "http://a/b/c/g/" && \
+    test "g/./h" "http://a/b/c/g/h" && \
+    test "g/../h" "http://a/b/c/h"
+*)

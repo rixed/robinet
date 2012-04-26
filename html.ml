@@ -28,6 +28,19 @@ open Peg
 
 let debug = false
 
+(** Used for tests only *)
+let check_results res_printer p bs m expected =
+    let print_res oc = function
+        | Wait -> Printf.fprintf oc "Wait"
+        | Fail -> Printf.fprintf oc "Fail"
+        | Res (res, rem) -> Printf.fprintf oc "Res (%a, \"%s\")"
+                                res_printer res (String.of_list rem) in
+    let res = p (String.to_list bs) m in
+    let ok = res = expected in
+    if not ok then Printf.printf "FAIL: \"%s\" -> %a (expecting %a)" bs print_res res print_res expected ;
+    ok
+
+
 (* From bytes (char) to characters (char) *)
 
 let bad_attr_chars = Metric.Atomic.make "Html/ParseError/attrChars"
@@ -41,10 +54,21 @@ let c2i c =
         int_of_char c - int_of_char 'A' + 10
     else error (Printf.sprintf "Cannot convert char '%c' to int" c)
 
+(*$= c2i & ~printer:string_of_int
+    5 (c2i '5')
+    15 (c2i 'f')
+    15 (c2i 'F')
+*)
+
 let i2c i =
     if i >= 0 && i <= 9 then char_of_int (int_of_char '0' + i)
     else if i >= 10 && i <= 35 then char_of_int (int_of_char 'a' + i - 10)
     else error (Printf.sprintf "Cannot convert int '%d' to digit" i)
+
+(*$= i2c & ~printer:string_of_char
+    '5' (i2c 5)
+    'f' (i2c 15)
+*)
 
 let digit base =
     map (cond (fun c ->
@@ -61,6 +85,11 @@ let number base =
             | d :: d' ->
                 aux (d + n*base) d' in
         aux 0 ds)
+
+(*$T number
+    let p = number 16 in \
+    check_results num_printer p "13ed0XY" false (Peg.Res (0x13ed0, ['X' ; 'Y']))
+*)
 
 let decimal_number () = number 10
 let hexadecimal_number () = number 16
@@ -83,12 +112,25 @@ let num_char_ref () =
         | [n] -> `CharRef n
         | _ -> should_not_happen ())
 
+(*$T num_char_ref
+    check_results var_printer (num_char_ref ()) "&#229;" true (Peg.Res (`CharRef 229, []))
+    check_results var_printer (num_char_ref ()) "&#xE5;" true (Peg.Res (`CharRef 0xe5, []))
+    check_results var_printer (num_char_ref ()) "&#Xe5;" true (Peg.Res (`CharRef 0xe5, []))
+    check_results var_printer (num_char_ref ()) "&#1048;" true (Peg.Res (`CharRef 1048, []))
+    check_results var_printer (num_char_ref ()) "&#x6C34;XY" false (Peg.Res (`CharRef 0x6c34, ['X' ; 'Y']))
+*)
+
 let char_entity_ref () =
     map (seqf [ none (item '&') ;
                 some (repeat ~min:2 ~max:9 (cond (fun c -> c <> ';'))) ;
                 none (item ';') ]) (function
         | [cs] -> `EntityRef (String.of_list cs)
         | _ -> should_not_happen ())
+
+(*$T char_entity_ref
+    let p = char_entity_ref () in \
+    check_results var_printer p "&lt;XY" false (Peg.Res (`EntityRef "lt", ['X' ; 'Y']))
+*)
 
 let num_printer oc d = Printf.fprintf oc "%d" d
 let rec var_printer oc = function
@@ -100,35 +142,6 @@ let rec var_printer oc = function
     | `CloseTag n         -> Printf.fprintf oc "CloseTag %s" n
     | `Blank              -> Printf.fprintf oc "Blank"
     | `Content            -> Printf.fprintf oc "Content"
-let check_results res_printer p bs m expected =
-    let print_res oc = function
-        | Wait -> Printf.fprintf oc "Wait"
-        | Fail -> Printf.fprintf oc "Fail"
-        | Res (res, rem) -> Printf.fprintf oc "Res (%a, \"%s\")"
-                                res_printer res (String.of_list rem) in
-    let res = p (String.to_list bs) m in
-    let ok = res = expected in
-    Printf.printf "Html: \"%s\" -> %a " bs print_res res ;
-    if ok then Printf.printf "OK\n"
-    else Printf.printf "FAIL! (expecting %a)\n" print_res expected ;
-    ok
-
-let check_chars () =
-    assert (c2i '5' = 5) ;
-    assert (i2c 5 = '5') ;
-    assert (c2i 'f' = 15) ;
-    assert (i2c 15 = 'f') ;
-    assert (c2i 'F' = 15) ;
-    let p = number 16 in
-    check_results num_printer p "13ed0XY" false (Res (0x13ed0, ['X' ; 'Y'])) &&
-    let p = num_char_ref () in
-    check_results var_printer p "&#229;" true (Res (`CharRef 229, [])) &&
-    check_results var_printer p "&#xE5;" true (Res (`CharRef 0xe5, [])) &&
-    check_results var_printer p "&#Xe5;" true (Res (`CharRef 0xe5, [])) &&
-    check_results var_printer p "&#1048;" true (Res (`CharRef 1048, [])) &&
-    check_results var_printer p "&#x6C34;XY" false (Res (`CharRef 0x6c34, ['X' ; 'Y'])) &&
-    let p = char_entity_ref () in
-    check_results var_printer p "&lt;XY" false (Res (`EntityRef "lt", ['X' ; 'Y']))
 
 let ext_alphabetic () =
     either [ item '_' ; item '-' ; item ':' ; item '.' ;
@@ -178,6 +191,11 @@ let attr_without_value () =
     map (name ()) (fun n -> `Attr (String.lowercase n, ""))
 let attr () =
     either [ attr_with_value () ; attr_without_value () ]
+
+(*$T attr
+    check_results var_printer (attr ()) "attr=\"value\"" false (Res (`Attr ("attr", "value"), []))
+    check_results var_printer (attr ()) "attr" false (Res (`Attr ("attr", ""), []))
+*)
 
 let attr_seq () =
     many (map (seqf [ none (many (blank ())) ;
@@ -234,6 +252,15 @@ let special_tag name =
 let tag () =
     either [ autoclose_tag () ; open_tag () ; close_tag () ]
 
+(*$T tag
+    check_results var_printer (tag ()) "<name attr1='val\"ue1' attr2 = \"val'ue2\" attr3 />" true \
+        (Res (`Tag ("name", [`Attr ("attr1", "val\"ue1") ; `Attr ("attr2", "val'ue2") ; `Attr ("attr3", "")]), []))
+    check_results var_printer (tag ()) "<NaMe attr1 attr2=value2>" true \
+        (Res (`OpenTag ("name", [`Attr ("attr1", "") ; `Attr ("attr2", "value2") ]), []))
+    check_results var_printer (tag ()) "</Name>XY" false \
+        (Res (`CloseTag "name", ['X'; 'Y']))
+*)
+
 let xml_decl () =
     map (seq [
         char_seq "<?xml" ;
@@ -267,19 +294,6 @@ let tag_seq () =
                        tag () ; content () ]) ]) (function
             | [ _decls ; doc ] -> doc
             | _ -> should_not_happen ())
-
-let check_parse () =
-    let p = attr () in
-    check_results var_printer p "attr=\"value\"" false (Res (`Attr ("attr", "value"), [])) &&
-    let p = attr () in
-    check_results var_printer p "attr" false (Res (`Attr ("attr", ""), [])) &&
-    let p = tag () in
-    check_results var_printer p "<name attr1='val\"ue1' attr2 = \"val'ue2\" attr3 />" true
-        (Res (`Tag ("name", [`Attr ("attr1", "val\"ue1") ; `Attr ("attr2", "val'ue2") ; `Attr ("attr3", "")]), [])) &&
-    check_results var_printer p "<NaMe attr1 attr2=value2>" true
-        (Res (`OpenTag ("name", [`Attr ("attr1", "") ; `Attr ("attr2", "value2") ]), [])) &&
-    check_results var_printer p "</Name>XY" false
-        (Res (`CloseTag "name", ['X'; 'Y']))
 
 let comply new_tag pending_tag =
     let constraints =
@@ -374,6 +388,7 @@ let autoclose l =
     in
     aux [] [] l
 
+(** Used for tests *)
 let check_varlist op str expected =
     match tag_seq () (String.to_list str) false with
         | Fail -> Printf.printf "Html: %s -> Fail?!\n" str ; false
@@ -391,19 +406,22 @@ let check_varlist op str expected =
         | Res (_, _::_) ->
             Printf.printf "Html: %s -> Res with some rest?!\n" str ; false
 
-let check_autoclose () =
-    let do_check = check_varlist autoclose in
-    do_check "<html>bla</html>" [ `OpenTag ("html", []) ; `Content ; `CloseTag ("html") ] &&
-    do_check "<br>bla<br>" [ `OpenTag ("br", []) ; `CloseTag "br"; `Content ;
-                                `OpenTag ("br", []) ; `CloseTag "br" ] &&
-    do_check "<p class=toto>bla<dd>burps</html>"
-        [ `OpenTag ("p", [`Attr ("class", "toto")]) ; `Content ; `CloseTag "p" ;
-          `OpenTag ("dd", []) ; `Content ; `CloseTag "dd" ; `CloseTag "html" ] &&
-    do_check "bla<br/>blop" [ `Content ; `Tag ("br", []) ; `Content ] &&
-    do_check "<html><head></head><title></title></html>"
-        [ `OpenTag ("html", []) ; `OpenTag ("head", []) ; `CloseTag "head" ;
-          (* The html tag is closed that early because title is not allowed within it *)
+(*$T autoclose
+    check_varlist autoclose "<html>bla</html>" \
+        [ `OpenTag ("html", []) ; `Content ; `CloseTag ("html") ]
+    check_varlist autoclose "<br>bla<br>" \
+        [ `OpenTag ("br", []) ; `CloseTag "br"; `Content ; \
+          `OpenTag ("br", []) ; `CloseTag "br" ]
+    check_varlist autoclose "<p class=toto>bla<dd>burps</html>" \
+        [ `OpenTag ("p", [`Attr ("class", "toto")]) ; `Content ; `CloseTag "p" ; \
+          `OpenTag ("dd", []) ; `Content ; `CloseTag "dd" ; `CloseTag "html" ]
+    check_varlist autoclose "bla<br/>blop" \
+        [ `Content ; `Tag ("br", []) ; `Content ]
+    check_varlist autoclose "<html><head></head><title></title></html>" \
+        [ `OpenTag ("html", []) ; `OpenTag ("head", []) ; `CloseTag "head" ; \
+          (* The html tag is closed that early because title is not allowed within it *) \
           `CloseTag "html" ; `OpenTag ("title", []) ; `CloseTag "title" ; `CloseTag "html" ]
+*)
 
 let reorder l =
     (* Some ending tags may be ordered eroneously (especially after autoclose was applied).
@@ -425,16 +443,18 @@ let reorder l =
             aux (new_tag::prev) open_stack next' in
     aux [] [] l
 
-let check_reorder () =
+(*$R reorder
     let do_check = check_varlist reorder in
     let res = [ `OpenTag ("a", []) ; `OpenTag ("b", []) ; `Content ;
                 `CloseTag "b" ; `CloseTag "a" ] in
-    do_check "<a><b>bla</a></b>" res &&
-    do_check "<a><b>bla</b></a>" res &&
-    do_check "bla<br/>blop" [ `Content ; `Tag ("br", []) ; `Content ] &&
-    do_check "<x><h></h><t></t></x>"
+    assert_bool "reorder simple" (do_check "<a><b>bla</a></b>" res) ;
+    assert_bool "reorder ok" (do_check "<a><b>bla</b></a>" res) ;
+    assert_bool "autoclosed" (do_check "bla<br/>blop"
+        [ `Content ; `Tag ("br", []) ; `Content ]) ;
+    assert_bool "any tag" (do_check "<x><h></h><t></t></x>"
         [ `OpenTag ("x", []) ; `OpenTag ("h", []) ; `CloseTag "h" ;
-          `OpenTag ("t", []) ; `CloseTag "t" ; `CloseTag "x" ]
+          `OpenTag ("t", []) ; `CloseTag "t" ; `CloseTag "x" ])
+*)
 
 type tree = Content | Node of node
 and node = { name : string ;
@@ -532,18 +552,19 @@ let check_tree op str expected =
         else Printf.printf "FAIL! (expected %a)\n" (print_trees ~level:0) expected ;
         ok
 
-let check_to_tree () =
+(*$R to_tree
     let do_check = check_tree (fun r ->
         let trees, rem = to_tree (reorder (autoclose r)) in
-        if rem <> [] then Printf.printf "Html: check_to_tree: some tags left?!\n" ;
+        if rem <> [] then Printf.printf "Html: check to_tree: some tags left?!\n" ;
         trees) in
-    do_check "<html><body>blabla</body></html>"
+    assert_bool "simple" (do_check "<html><body>blabla</body></html>"
         [ Node { name = "html" ; attrs = [] ; children =
-            [ Node { name = "body" ; attrs = [] ; children = [ Content ] } ] } ] &&
-    do_check "<html><head></head><body>bla</body></html>"
+            [ Node { name = "body" ; attrs = [] ; children = [ Content ] } ] } ]) ;
+    assert_bool "simple (2)" (do_check "<html><head></head><body>bla</body></html>"
         [ Node { name = "html" ; attrs = [] ; children =
             [ Node { name = "head" ; attrs = [] ; children = [] } ;
-              Node { name = "body"; attrs = [] ; children = [ Content ] } ] } ]
+              Node { name = "body"; attrs = [] ; children = [ Content ] } ] } ])
+*)
 
 (* No tag are allowed in another one when that goes against HTML rules.
    As a result, to_tree may return many small pieces that we must now reassemble
@@ -610,20 +631,21 @@ let unify trees =
     assert (List.length new_roots = 1) ;
     List.hd new_roots
 
-let check_unify () =
+(*$R unify
     let do_check = check_tree (fun r ->
         let trees, rem = to_tree (reorder (autoclose r)) in
-        if rem <> [] then Printf.printf "Html: check_to_tree: some tags left?!\n" ;
+        if rem <> [] then Printf.printf "Html: check unify: some tags left?!\n" ;
         [unify trees]) in
-    do_check "<html><head></head><title>bla</title></html>"
+    assert_bool "unify" (do_check "<html><head></head><title>bla</title></html>"
         [ Node { name = "html" ; attrs = [] ; children =
             [ Node { name = "head" ; attrs = [] ; children = [
-                  Node { name = "title"; attrs = [] ; children = [ Content ] } ] } ] } ]
+                  Node { name = "title"; attrs = [] ; children = [ Content ] } ] } ] } ])
+*)
 
 let parzer () =
     map (tag_seq ()) (fun r ->
         let trees, rem = to_tree (reorder (autoclose r)) in
-        if rem <> [] then Printf.fprintf stderr "Html: check_to_tree: some tags left?!\n" ;
+        if rem <> [] then Printf.fprintf stderr "Html: check parzer: some tags left?!\n" ;
         unify trees)
 
 let unparsable = Metric.Counter.make "Html/Unparseable" "bytes"
@@ -645,21 +667,22 @@ let parse str =
             ) ;
             Some res
 
-let check_parser () =
-    match parse (file_content "tests/basic.html") with
+(*$R parse
+    assert_bool "parse" (match parse (file_content "tests/basic.html") with
         | Some
             (Node { name = "html" ; attrs = [] ; children =
                 [ Node { name = "body" ; attrs = [ "onload", "blabla" ] ; children =
                     [ Node { name = "div" ; attrs = [ "fst", "" ] ; children = [ Content ] } ;
                       Node { name = "div" ; attrs = [ "snd", "" ] ; children = [ Content ] } ] } ] }) ->
-            Printf.printf "Html: check_parser: OK\n" ; true
+            true
         | Some tree ->
-            Printf.printf "Html: check_parser: FAIL (got %a)\n"
+            Printf.printf "Html: check parser: FAIL (got %a)\n"
                 (print_tree ~level:0) tree ;
             false
         | None ->
-            Printf.printf "Html: check_parser: FAIL (got nothing)\n" ;
-            false
+            Printf.printf "Html: check parser: FAIL (got nothing)\n" ;
+            false)
+*)
 
 (* TODO: a function to index a tree so that we can search the dom quickly by id? *)
 
@@ -701,6 +724,14 @@ let extract_links_simple ?same_page ?(default_base=Url.empty) headers body =
         else prev
         in
     List.fold_left links_of [] link_res |> List.enum
+
+(*$= extract_links_simple & ~printer:dump
+    [ "/glop1" ; "/glop2" ] \
+        (extract_links_simple [] "bla <a href=\"glop1\"> bla <src = 'glop2' >" /@ \
+            Url.to_string |> \
+            List.of_enum |> \
+            List.sort compare)
+*)
 
 let extract_links ?(default_base=Url.empty) headers tree =
     let base_href = (Option.Monad.bind (find_first_node (fun n -> n.name = "base") tree)
@@ -758,33 +789,14 @@ let extract_links ?(default_base=Url.empty) headers tree =
         | _ -> ()) tree ;
     List.enum !urls
 
-let check_extraction () =
-    Printf.printf "Html: check_extraction: test 1: %s\n"
-        (if extract_links_simple [] "bla <a href=\"glop1\"> bla <src = 'glop2' >" /@
-                Url.to_string |>
-                List.of_enum |>
-                List.sort compare = [ "/glop1" ; "/glop2" ] then "OK" else "FAIL!") ;
-    Printf.printf "Html: check_extraction: test 2: " ;
-    match parse (file_content "tests/simple.html") with
-    | None -> (Printf.printf "parse FAIL!\n" ; false)
-    | Some tree ->
-        let res = extract_links [] tree /@
-            Url.to_string |>
-            List.of_enum |>
-            List.sort compare in
-        if res = [ "http://rixed.free.fr/news.html" ;
-                   "http://rixed.free.fr/projects.html" ;
-                   "mailto:///rixed@free.fr" ]
-        then (Printf.printf "OK\n" ; true)
-        else (Printf.printf "FAIL! (got %a)" (List.print String.print) res ; false)
-
-let check () =
-    check_extraction () &&
-    check_chars () &&
-    check_parse () &&
-    check_autoclose () &&
-    check_reorder () &&
-    check_to_tree () &&
-    check_unify () &&
-    check_parser ()
-
+(*$= extract_links & ~printer:dump
+    [ "http://rixed.free.fr/news.html" ; \
+      "http://rixed.free.fr/projects.html" ; \
+      "mailto:///rixed@free.fr" ] \
+        (Option.get (parse (file_content "tests/simple.html")) |> \
+            (fun tree -> \
+                extract_links [] tree /@ \
+                Url.to_string |> \
+                List.of_enum |> \
+                List.sort compare in))
+*)

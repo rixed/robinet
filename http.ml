@@ -347,15 +347,9 @@ let post_encode body =
 
 (* Checks *)
 
-let check () =
-    let simple_msg = bitstring_of_string "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n12345"
-    and simple_msg2 = bitstring_of_string "GET /toto HTTP/1.1\r\n\r\n"
-    and complex_msg = bitstring_of_string (file_content "tests/http.real")
-    and chunked_msg = bitstring_of_string (file_content "tests/http.chunked")
-    and err403_msg = bitstring_of_string (file_content "tests/http.403")
-    and post_msg = bitstring_of_string (file_content "tests/http.post")
-    in
-    let r1 = match Pdu.unpack simple_msg with
+(*$R
+    let simple_msg = bitstring_of_string "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n12345" in
+    assert_bool "unpack simple msg" (match Pdu.unpack simple_msg with
         | Some { Pdu.cmd = Status 200 ;
                  Pdu.headers = [ "Content-Type", "text/plain" ] ;
                  Pdu.body = "12345" } -> true
@@ -365,8 +359,11 @@ let check () =
             false
         | None ->
             Printf.printf "Http: Fail: cannot Unpack\n" ;
-            false
-    and r2 = match Pdu.unpack simple_msg2 with
+            false) ;
+*)
+(*$R
+    let simple_msg2 = bitstring_of_string "GET /toto HTTP/1.1\r\n\r\n" in
+    assert_bool "unpack simple msg (2)" (match Pdu.unpack simple_msg2 with
         | Some { Pdu.cmd = Request ("GET", "/toto") ;
                  Pdu.headers = [] ;
                  Pdu.body = "" } -> true
@@ -376,8 +373,11 @@ let check () =
             false
         | None ->
             Printf.printf "Http: Fail: Cannot unpack simple_msg2\n" ;
-            false
-    and r3 = match Pdu.unpack complex_msg with
+            false) ;
+*)
+(*$R
+    let complex_msg = bitstring_of_string (file_content "tests/http.real") in
+    assert_bool "unpack complex msg" (match Pdu.unpack complex_msg with
         | Some { Pdu.cmd = Status 200 ;
                  Pdu.headers = hs ;
                  Pdu.body = body } ->
@@ -390,8 +390,11 @@ let check () =
             false
         | None ->
             Printf.printf "Http: Fail: Cannot unpack complex_msg\n" ;
-            false
-    and r4 = match Pdu.unpack chunked_msg with
+            false) ;
+*)
+(*$R
+    let chunked_msg = bitstring_of_string (file_content "tests/http.chunked") in
+    assert_bool "unpack chunked msg" (match Pdu.unpack chunked_msg with
         | Some { Pdu.cmd = Status 200 ;
                  Pdu.headers = hs ;
                  Pdu.body = body } ->
@@ -404,8 +407,11 @@ let check () =
             false
         | None ->
             Printf.printf "Http: Fail: Cannot unpack chunked_msg\n" ;
-            false
-    and r5 = match Pdu.unpack err403_msg with
+            false) ;
+*)
+(*$R
+    let err403_msg = bitstring_of_string (file_content "tests/http.403") in
+    assert_bool "unpack err 403" (match Pdu.unpack err403_msg with
         | Some { Pdu.cmd = Status 403 ;
                  Pdu.headers = hs ;
                  Pdu.body = body } ->
@@ -418,8 +424,11 @@ let check () =
             false
         | None ->
             Printf.printf "Http: Fail: Cannot unpack err403_msg\n" ;
-            false
-    and r6 = match Pdu.unpack post_msg with
+            false) ;
+*)
+(*$R
+    let post_msg = bitstring_of_string (file_content "tests/http.post") in
+    assert_bool "unpack POST" (match Pdu.unpack post_msg with
         | Some { Pdu.cmd = Request ("POST", "/nevrax/do_login.html") ;
                  Pdu.headers = hs ;
                  Pdu.body = "login=admin&password=admin&submit=Connexion&came_from=%2F" } ->
@@ -431,6 +440,5 @@ let check () =
             false
         | None ->
             Printf.printf "Http: Fail: Cannot unpack http.post\n" ;
-            false
-    in r1 && r2 && r3 && r4 && r5 && r6
-
+            false)
+*)

@@ -49,12 +49,6 @@ $(EXAMPLES_OPT): $(XARCHIVE)
 $(CLIB): $(C_SOURCES:.c=.o)
 	$(AR) rcs $@ $^
 
-check.byte: $(ARCHIVE)
-check.opt: $(XARCHIVE)
-check: check.byte check.opt
-	@./check.byte && ./check.opt && echo "OK"
-
-
 examples: $(EXAMPLES)
 
 robinet.top: $(ARCHIVE)
@@ -64,3 +58,4 @@ clean-spec:
 	rm -f *.pcap
 	rm -f examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
 
+check: test

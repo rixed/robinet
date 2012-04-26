@@ -39,6 +39,13 @@ let params_of_query q =
         List.iter (fun (name, value) -> Hashtbl.add vars name value) ;
     vars
 
+(*$= params_of_query & ~printer:dump
+    [ "foo", "bar" ] \
+        (params_of_query "foo=bar" |> Hashtbl.enum |> List.of_enum |> List.sort Pervasives.compare)
+    [ "bar", "baz" ; "foo", "bar" ] \
+        (params_of_query "foo=bar&bar=baz" |> Hashtbl.enum |> List.of_enum |> List.sort Pervasives.compare)
+*)
+
 let rec stripped url =
     if url = "" || url = "/" then "root"
     else
@@ -47,6 +54,18 @@ let rec stripped url =
         and stop = if url.[l-1] = '/' then l-1 else l in
         if start = 0 && stop = l then url
         else stripped (String.sub url start (stop-start))
+
+(*$= stripped & ~printer:identity
+    "foo" (stripped "foo")
+    "foo" (stripped "/foo")
+    "foo" (stripped "foo/")
+    "foo" (stripped "/foo/")
+    "foo" (stripped "///foo//")
+    "root" (stripped "")
+    "root" (stripped "/")
+    "root" (stripped "//")
+    "root" (stripped "////")
+*)
 
 (* Main entry point: build an HTTP TRX and pass incoming messages to a user supplied function *)
 let serve host port f =
@@ -193,20 +212,4 @@ let multiplexer (res:resource) http msg logger =
                          Pdu.headers = [ "Content-Length", Printf.sprintf "%d" (String.length body) ;
                                          "Content-Type", "text/plain" ] ;
                          Pdu.body = body }
-
-let check () =
-    (* test params extraction *)
-    let list_of_vars q =
-        params_of_query q |> Hashtbl.enum |> List.of_enum |> List.sort compare in
-    (list_of_vars "foo=bar" = [ "foo", "bar" ]) &&
-    (list_of_vars "foo=bar&bar=baz" = [ "bar", "baz" ; "foo", "bar" ]) &&
-    (stripped "foo" = "foo") &&
-    (stripped "/foo" = "foo") &&
-    (stripped "foo/" = "foo") &&
-    (stripped "/foo/" = "foo") &&
-    (stripped "///foo//" = "foo") &&
-    (stripped "" = "root") &&
-    (stripped "/" = "root") &&
-    (stripped "//" = "root") &&
-    (stripped "////" = "root")
 

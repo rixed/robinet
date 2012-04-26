@@ -88,10 +88,11 @@ let anything bs m = match bs with
     | [] -> if m then Wait else Fail
     | b :: bs' -> Res (b, bs')
 
-let check_return () =
-    let items = [ [1] ; [2] ]
-    and results = [ Res (5, [ 1 ]); Res (5, [ 1 ; 2 ]) ]
+(*$T return
+    let items = [ [1] ; [2] ] \
+    and results = [ Res (5, [ 1 ]); Res (5, [ 1 ; 2 ]) ] \
     in check_results "return" print_int (return 5) results items
+*)
 
 (* repeat the application of the add function on all items individualy
    until either we have no more (and this is a failure when we hit the
@@ -125,14 +126,13 @@ let upto delim =
             )
         ))
 
-let check_upto () =
-    let items = [ [1]; [2; 0]; [0; 5]; [0; 0]; [1] ]
-    and results = [
-        Wait; Wait; Res ([1; 2; 0; 0], [5]);
-        Res ([5; 0; 0], []);
-        Fail
-    ] in
+(*$T upto
+    let items = [ [1]; [2; 0]; [0; 5]; [0; 0]; [1] ] \
+    and results = [ Wait; Wait; Res ([1; 2; 0; 0], [5]); \
+                    Res ([5; 0; 0], []); \
+                    Fail ] in \
     check_results "upto" print_intlist (upto [0; 0]) results items
+*)
 
 let cond c =
     foreach_item (fun b _ ->
@@ -144,10 +144,11 @@ let cond c =
 
 let item i = cond ((=) i)
 
-let check_item () =
-    let items = [ [1]; [1; 2]; [2] ]
-    and results = [ Res (1, []); Res (1, [2]); Fail ] in
+(*$T item
+    let items = [ [1]; [1; 2]; [2] ] \
+    and results = [ Res (1, []); Res (1, [2]); Fail ] in \
     check_results "item" print_int (item 1) results items
+*)
 
 (* like item but restricted to string values, and the first element is required to match a regex
    and the returned value is the tuple of matching substrings *)
@@ -194,17 +195,16 @@ let take n =
             )
         ))
 
-let check_take () =
-    let items = [ [0]; [1; 2]; [3; 4; 5]; [6]; [7; 8]; [] ]
-    and results = [
-        Wait; Res ([0; 1], [2]); Res ([2; 3], [4; 5]);
-        Res ([4; 5], [6]); Res ([6; 7], [8]); Fail
-    ] in
-    let r1 = check_results "take(1)" print_intlist (take 2) results items in
-    let items = [ [1;2] ]
-    and results = [ Res ([], [1;2]) ] in
-    let r2 = check_results "take(2)" print_intlist (take 0) results items in
-    r1 && r2
+(*$T take
+    let items = [ [0]; [1; 2]; [3; 4; 5]; [6]; [7; 8]; [] ] \
+    and results = [ Wait; Res ([0; 1], [2]); Res ([2; 3], [4; 5]); \
+                    Res ([4; 5], [6]); Res ([6; 7], [8]); Fail ] in \
+    check_results "take(1)" print_intlist (take 2) results items
+
+    let items = [ [1;2] ] \
+    and results = [ Res ([], [1;2]) ] in \
+    check_results "take(2)" print_intlist (take 0) results items
+*)
 
 (* this is the only function which returns a result when there are no more items *)
 let all () =
@@ -214,10 +214,11 @@ let all () =
         prevs := bs :: !prevs ;
         if m then Wait else Res (flatten_rev !prevs, []))
 
-let check_all () =
-    let items = [ [1;2]; [3]; [4] ]
-    and results = [ Wait; Wait; Res ([1;2;3;4], []) ]
-    in check_results "all" print_intlist (all ()) results items
+(*$T all
+    let items = [ [1;2]; [3]; [4] ] \
+    and results = [ Wait; Wait; Res ([1;2;3;4], []) ] in \
+    check_results "all" print_intlist (all ()) results items
+*)
 
 (* Change every value returned by p through f *)
 let map p f =
@@ -258,12 +259,12 @@ let seq ps =
                 Fail)
     in aux
 
-let check_seq () =
-    let p = seq [ item 1 ; item 2 ; item 3 ]
-    and items = [ [1]; [2; 3; 1]; [2]; [3; 5] ]
-    and results = [ Wait; Res ([ 1; 2; 3 ], [1]); Wait; Res ([ 1; 2; 3 ], [5]) ]
-    in
+(*$T seq
+    let p = seq [ item 1 ; item 2 ; item 3 ] \
+    and items = [ [1]; [2; 3; 1]; [2]; [3; 5] ] \
+    and results = [ Wait; Res ([ 1; 2; 3 ], [1]); Wait; Res ([ 1; 2; 3 ], [5]) ] in \
     check_results "seq" print_intlist p results items
+*)
 
 (* Many times, some values are not interresting.
    This version of seq takes parsers thar return an optional value, and filter them *)
@@ -292,19 +293,18 @@ let either ps =
                     aux bs' m)
     in aux
 
-let check_either () =
-    let p = either [ item 1; item 2 ]
-    and items = [ [1]; [1]; [2]; [2; 3] ]
-    and results = [ Res (1, []); Res (1, []); Res (2, []); Res (2, [3]) ]
-    in
-    let r1 = check_results "either(1)" print_int p results items in
-    let p = either [ seq [ item 1; item 2; item 3 ] ;
-                     seq [ item 1; item 2; item 4 ] ]
-    and items = [ [1; 2]; [3]; [1]; [2]; [4]; [1]; [2]; [5] ]
-    and results = [ Wait; Res([1;2;3],[]); Wait; Wait; Res([1;2;4],[]); Wait; Wait; Fail ]
-    in
-    let r2 = check_results "either(2)" print_intlist p results items in
-    r1 && r2
+(*$T either
+    let p = either [ item 1; item 2 ] \
+    and items = [ [1]; [1]; [2]; [2; 3] ] \
+    and results = [ Res (1, []); Res (1, []); Res (2, []); Res (2, [3]) ] in \
+    check_results "either(1)" print_int p results items
+
+    let p = either [ seq [ item 1; item 2; item 3 ] ; \
+                     seq [ item 1; item 2; item 4 ] ] \
+    and items = [ [1; 2]; [3]; [1]; [2]; [4]; [1]; [2]; [5] ] \
+    and results = [ Wait; Res([1;2;3],[]); Wait; Wait; Res([1;2;4],[]); Wait; Wait; Fail ] in \
+    check_results "either(2)" print_intlist p results items
+*)
 
 let repeat ?min ?max p =
     let prev = ref []
@@ -337,55 +337,53 @@ let repeat ?min ?max p =
             res bs
     in aux
 
-let check_repeat () =
-    let p = repeat ~min:2 ~max:4 (item 1)
-    and items = [ [1; 1; 1]; [1; 2] ]
-    and results = [ Wait; Res([1; 1; 1; 1], [2]) ]
-    in
-    let r1 = check_results "repeat(1)" print_intlist p results items in
-    let items = [ [1; 1; 1]; [1; 1; 2] ]
-    and results = [ Wait; Res ([1; 1; 1; 1], [1; 2]) ]
-    in
-    let r2 = check_results "repeat(2)" print_intlist p results items in
-    let items = [ [1; 2; 1] ]
-    and results = [ Fail ]
-    in
-    let r3 = check_results "repeat(3)" print_intlist p results items in
-    r1 && r2 && r3
+(*$T repeat
+    let items = [ [1; 1; 1]; [1; 2] ] \
+    and results = [ Wait; Res([1; 1; 1; 1], [2]) ] in \
+    check_results "repeat(1)" print_intlist (repeat ~min:2 ~max:4 (item 1)) results items
+
+    let items = [ [1; 1; 1]; [1; 1; 2] ] \
+    and results = [ Wait; Res ([1; 1; 1; 1], [1; 2]) ] in \
+    check_results "repeat(2)" print_intlist (repeat ~min:2 ~max:4 (item 1)) results items
+
+    let items = [ [1; 2; 1] ] \
+    and results = [ Fail ] in \
+    check_results "repeat(3)" print_intlist (repeat ~min:2 ~max:4 (item 1)) results items
+*)
 
 let many p = repeat p
 
-let check_many () =
-    let p = many (item 1)
-    and items = [ [1; 1; 1]; [1; 2] ]
-    and results = [ Wait; Res([1; 1; 1; 1], [2]) ]
-    in
-    let r1 = check_results "many(1)" print_intlist p results items in
-    let p = many (map (seq [ item 1; item 2 ]) (fun _ -> 12))
-    and items = [ [1; 2; 1]; [2; 1]; [2; 3] ]
-    and results = [ Wait; Wait; Res ([12; 12; 12], [3]) ]
-    in
-    let r2 = check_results "many(2)" print_intlist p results items in
-    let items = [ [5] ] and results = [ Res([], [5]) ] in
-    let r3 = check_results "many(3)" print_intlist p results items in
-    r1 && r2 && r3
+(*$T many
+    let items = [ [1; 1; 1]; [1; 2] ] \
+    and results = [ Wait; Res([1; 1; 1; 1], [2]) ] in \
+    check_results "many(1)" print_intlist (many (item 1)) results items
+
+    let p = many (map (seq [ item 1; item 2 ]) (fun _ -> 12)) \
+    and items = [ [1; 2; 1]; [2; 1]; [2; 3] ] \
+    and results = [ Wait; Wait; Res ([12; 12; 12], [3]) ] in \
+    check_results "many(2)" print_intlist p results items
+
+    let p = many (map (seq [ item 1; item 2 ]) (fun _ -> 12)) \
+    and items = [ [5] ] and results = [ Res([], [5]) ] in \
+    check_results "many(3)" print_intlist p results items
+*)
 
 let several p = repeat ~min:1 p
 
-let check_several () =
-    let p = several (item 1)
-    and items = [ [1; 1; 1]; [1; 2] ]
-    and results = [ Wait; Res([1; 1; 1; 1], [2]) ]
-    in
-    let r1 = check_results "several(1)" print_intlist p results items in
-    let p = several (map (seq [ item 1; item 2 ]) (fun _ -> 12))
-    and items = [ [1; 2; 1]; [2; 1]; [2; 3] ]
-    and results = [ Wait; Wait; Res ([12; 12; 12], [3]) ]
-    in
-    let r2 = check_results "several(2)" print_intlist p results items in
-    let items = [ [5] ] and results = [ Fail ] in
-    let r3 = check_results "several(3)" print_intlist p results items in
-    r1 && r2 && r3
+(*$T several
+    let items = [ [1; 1; 1]; [1; 2] ] \
+    and results = [ Wait; Res([1; 1; 1; 1], [2]) ] in \
+    check_results "several(1)" print_intlist (several (item 1)) results items
+
+    let p = several (map (seq [ item 1; item 2 ]) (fun _ -> 12)) \
+    and items = [ [1; 2; 1]; [2; 1]; [2; 3] ] \
+    and results = [ Wait; Wait; Res ([12; 12; 12], [3]) ] in \
+    check_results "several(2)" print_intlist p results items
+
+    let p = several (map (seq [ item 1; item 2 ]) (fun _ -> 12)) \
+    and items = [ [5] ] and results = [ Fail ] in \
+    check_results "several(3)" print_intlist p results items
+*)
 
 (* returns either None or Some value *)
 let optional p = map (repeat ~max:1 p) (function
@@ -393,17 +391,17 @@ let optional p = map (repeat ~max:1 p) (function
     | [v] -> Some v
     | _   -> should_not_happen ())
 
-let check_optional () =
-    let p = optional (item 1)
-    and items = [ [1; 1; 2] ]
-    and results = [ Res (Some 1, [1; 2]) ]
-    in
-    let r1 = check_results "optional(1)" print_intopt p results items in
-    let p = optional (item 2)
-    and results = [ Res (None, [1; 1; 2]) ]
-    in
-    let r2 = check_results "optional(2)" print_intopt p results items in
-    r1 && r2
+(*$T optional
+    let p = optional (item 1) \
+    and items = [ [1; 1; 2] ] \
+    and results = [ Res (Some 1, [1; 2]) ] in \
+    check_results "optional(1)" print_intopt p results items
+
+    let p = optional (item 2) \
+    and items = [ [1; 1; 2] ] \
+    and results = [ Res (None, [1; 1; 2]) ] in \
+    check_results "optional(2)" print_intopt p results items
+*)
 
 let repeat_until f p =
     let prev = ref [] in
@@ -457,21 +455,20 @@ let bind p f =
                     res)
     in aux
 
-let check_bind () =
-    let positive = cond ((<=) 0) in
-    let p = bind (positive) (fun i ->
-        assert (i >= 0) ;
-        (* match a sequence of i zeros *)
-        let rec aux l i =
-            (* we should be able to reuse the same item 0 here but I dont feel like it *)
-            if i = 0 then l else aux ((item 0)::l) (i-1)
-        in seq (aux [] i))
-    and items = [[1]; [0; 2; 0]; [0]; [0]; [3; 0; 0]; [0; 5]]
-    and results = [
-        Wait; Res ([0], [2; 0]); Res ([0; 0], []);
-        Res ([], []); Wait; Res ([0; 0; 0], [5])
-    ] in
+(*$T bind
+    let positive = cond ((<=) 0) in \
+    let p = bind (positive) (fun i -> \
+        assert (i >= 0) ; \
+        (* match a sequence of i zeros *) \
+        let rec aux l i = \
+            (* we should be able to reuse the same item 0 here but I dont feel like it *) \
+            if i = 0 then l else aux ((item 0)::l) (i-1) \
+        in seq (aux [] i)) \
+    and items = [[1]; [0; 2; 0]; [0]; [0]; [3; 0; 0]; [0; 5]] \
+    and results = [ Wait; Res ([0], [2; 0]); Res ([0; 0], []); \
+                    Res ([], []); Wait; Res ([0; 0; 0], [5]) ] in \
     check_results "bind" print_intlist p results items
+*)
 
 (* Use the results of the first parser as the input elements of the second.
    Return the results of p2.
@@ -505,17 +502,17 @@ let pipe : 'a 'b 'c. ('a, 'b) parzer -> ('c, 'a) parzer -> ('c, 'b) parzer = fun
                     else Wait)
     in aux
 
-let check_pipe () =
-    (* first build list of ints (up to 0), then check these lists are [3;2;1;0] *)
-    let p = pipe (upto [0]) (item [3;2;1;0]) in
-    let items = [ [3]; [2; 1]; [0; 3]; [2; 1; 0]; [1; 0] ]
-    and results = [ Wait; Wait; Res ([3;2;1;0], [3]); Res ([3;2;1;0], []); Fail ] in
-    let r1 = check_results "pipe(1)" print_intlist p results items in
-(*    let items = [ [1] ; [0; 3; 2; 1] ; [0; 1] ] FIXME
+(*$T pipe
+    (* first build list of ints (up to 0), then check these lists are [3;2;1;0] *) \
+    let p = pipe (upto [0]) (item [3;2;1;0]) in \
+    let items = [ [3]; [2; 1]; [0; 3]; [2; 1; 0]; [1; 0] ] \
+    and results = [ Wait; Wait; Res ([3;2;1;0], [3]); Res ([3;2;1;0], []); Fail ] in \
+    check_results "pipe(1)" print_intlist p results items
+*)
+(*  let items = [ [1] ; [0; 3; 2; 1] ; [0; 1] ] FIXME
     and results = [ Wait; Fail; Res ([3;2;1;0], [1]) ] in
-    let r2 = check_results "pipe(2)" print_intlist p results items in
-    r1 && r2*)
-    r1
+    check_results "pipe(2)" print_intlist p results items in
+*)
 
 (* Various usefull parsers *)
 
@@ -540,16 +537,3 @@ let char_seq str =
 
 let crlf () = seq [ item '\r' ; item '\n' ]
 
-let check () =
-    (check_return ()) &&
-    (check_upto ()) &&
-    (check_item ()) &&
-    (check_take ()) &&
-    (check_all ()) &&
-    (check_seq ()) &&
-    (check_either ()) &&
-    (check_many ()) &&
-    (check_several ()) &&
-    (check_optional ()) &&
-    (check_bind ()) &&
-    (check_pipe ())

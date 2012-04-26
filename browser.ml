@@ -71,6 +71,14 @@ let domain_matches str domain =
     String.ends_with str domain &&
     str.[String.length str - len - 1] = '.' (* TODO: && str is not an IP address *)
 
+(*$T domain_matches
+    (domain_matches "foo.example.com" "example.com")
+    (domain_matches "example.com" "example.com")
+    (domain_matches ".example.com" "example.com")
+    (not (domain_matches "example.com" "foo.example.com"))
+    (not (domain_matches "foo.example.com" "foobar.com"))
+*)
+
 let path_matches request_path cookie_path =
     request_path = cookie_path ||
     let len = String.length cookie_path in
@@ -78,6 +86,17 @@ let path_matches request_path cookie_path =
         cookie_path.[len-1] = '/' ||
         request_path.[len] = '/'
     )
+
+(*$T path_matches
+    (path_matches "/foo/bar/" "/foo/bar/")
+    (path_matches "/foo/bar" "/foo/bar")
+    (path_matches "/foo/bar" "/foo/")
+    (path_matches "/foo/bar" "/foo")
+    (path_matches "/foo/bar" "/")
+    (path_matches "/" "/")
+    (not (path_matches "/" "foo"))
+    (not (path_matches "/foo/bar" "/baz"))
+*)
 
 let parse_cookie host path cookie_str : cookie option =
     let lchop_dot s = if String.starts_with s "." then String.lchop s else s in
@@ -101,12 +120,35 @@ let parse_cookie host path cookie_str : cookie option =
                 None
         | _ -> None
 
+(*$= parse_cookie & ~printer:dump
+    (Some { name = "SID" ; value = "31d4d96e407aad42" ; domain = "www.ex1.com" ; path = "/foo" }) \
+        (parse_cookie "www.ex1.com" "/foo" "SID=31d4d96e407aad42")
+    (Some { name = "SID" ; value = "31d4d96e407aad42" ; domain = "example.com" ; path = "/" }) \
+        (parse_cookie "www.ex1.com" "/foo" "SID=31d4d96e407aad42; Path=/; Domain=example.com")
+    (Some { name = "SID" ; value = "31d4d96e407aad42" ; domain = "www.ex1.com" ; path = "/" }) \
+        (parse_cookie "www.ex1.com" "/foo" "SID=31d4d96e407aad42; Path=/; Secure; HttpOnly")
+    (Some { name = "lang" ; value = "en-US" ; domain = "example.com" ; path = "/" }) \
+        (parse_cookie "www.ex1.com" "/foo" "lang=en-US; Path=/; Domain=example.com")
+    (Some { name = "lang" ; value = "en-US" ; domain = "www.ex1.com" ; path = "/foo" }) \
+        (parse_cookie "www.ex1.com" "/foo" "lang=en-US; Expires=Wed, 09 Jun 2021 10:18:14 GMT")
+    (Some { name = "lang" ; value = "" ; domain = "www.ex1.com" ; path = "/foo" }) \
+        (parse_cookie "www.ex1.com" "/foo" "lang=; Expires=Sun, 06 Nov 1994 08:49:37 GMT")
+*)
+
 let cookie_dirname path =
     let len = String.length path in
     if len = 0 || path.[0] <> '/' then "/" else
     let last_slash = String.rindex path '/' in
     if last_slash = 0 then "/" else
     String.sub path 0 last_slash
+
+(*$= cookie_dirname & ~printer:identity
+    "/" (cookie_dirname "")
+    "/" (cookie_dirname "/")
+    "/" (cookie_dirname "/foo")
+    "/foo" (cookie_dirname "/foo/")
+    "/foo" (cookie_dirname "/foo/bar")
+*)
 
 (* returns nothing but stores the cookies in t *)
 let store_cookies t host path headers =
@@ -136,56 +178,28 @@ let cookie_string t host path =
         Printf.sprintf "%s=%s" c.name c.value)
         (cookies_to_sent t host path))
 
-let cookie_check () =
-    (parse_cookie "www.ex1.com" "/foo" "SID=31d4d96e407aad42" =
-        Some { name = "SID" ; value = "31d4d96e407aad42" ; domain = "www.ex1.com" ; path = "/foo" }) &&
-    (parse_cookie "www.ex1.com" "/foo" "SID=31d4d96e407aad42; Path=/; Domain=example.com" =
-        Some { name = "SID" ; value = "31d4d96e407aad42" ; domain = "example.com" ; path = "/" }) &&
-    (parse_cookie "www.ex1.com" "/foo" "SID=31d4d96e407aad42; Path=/; Secure; HttpOnly" =
-        Some { name = "SID" ; value = "31d4d96e407aad42" ; domain = "www.ex1.com" ; path = "/" }) &&
-    (parse_cookie "www.ex1.com" "/foo" "lang=en-US; Path=/; Domain=example.com" =
-        Some { name = "lang" ; value = "en-US" ; domain = "example.com" ; path = "/" }) &&
-    (parse_cookie "www.ex1.com" "/foo" "lang=en-US; Expires=Wed, 09 Jun 2021 10:18:14 GMT" =
-        Some { name = "lang" ; value = "en-US" ; domain = "www.ex1.com" ; path = "/foo" }) &&
-    (parse_cookie "www.ex1.com" "/foo" "lang=; Expires=Sun, 06 Nov 1994 08:49:37 GMT" =
-        Some { name = "lang" ; value = "" ; domain = "www.ex1.com" ; path = "/foo" }) &&
-    (domain_matches "foo.example.com" "example.com") &&
-    (domain_matches "example.com" "example.com") &&
-    (domain_matches ".example.com" "example.com") &&
-    (not (domain_matches "example.com" "foo.example.com")) &&
-    (not (domain_matches "foo.example.com" "foobar.com")) &&
-    (path_matches "/foo/bar/" "/foo/bar/") &&
-    (path_matches "/foo/bar" "/foo/bar") &&
-    (path_matches "/foo/bar" "/foo/") &&
-    (path_matches "/foo/bar" "/foo") &&
-    (path_matches "/foo/bar" "/") &&
-    (path_matches "/" "/") &&
-    (not (path_matches "/" "foo")) &&
-    (not (path_matches "/foo/bar" "/baz")) &&
-    (cookie_dirname "" = "/") &&
-    (cookie_dirname "/" = "/") &&
-    (cookie_dirname "/foo" = "/") &&
-    (cookie_dirname "/foo/" = "/foo") &&
-    (cookie_dirname "/foo/bar" = "/foo") &&
+(*$R
     let host = Host.make_static "test"
                     (Eth.Addr.of_string "12:34:56:78:90:ab") (Ip.Addr.of_string "1.2.3.4") in
     let t = make host in
-    (store_cookies t "www.example.com" "/"
-        [ "Set-Cookie", "SID=31d4" ] ;
-    cookie_string t "www.example.com" "/" = "SID=31d4") &&
-    (store_cookies t "www.example2.com" "/"
-        [ "Set-Cookie", "SID=31d4; Path=/; Domain=example2.com" ] ;
-    cookie_string t "www.example2.com" "/" = "SID=31d4") &&
-    (store_cookies t "www.example3.com" "/"
-        [ "Set-Cookie", "SID=31d4; Path=/; Secure; HttpOnly" ;
-          "Set-Cookie", "lang=en-US; Path=/; Domain=example3.com" ] ;
-    let str = cookie_string t "www.example3.com" "/" in
-        str = "SID=31d4; lang=en-US" || str = "lang=en-US; SID=31d4"
-    ) &&
-    (store_cookies t "example3.com" "/"
-        [ "Set-Cookie", "lang=; Expires=Sun, 06 Nov 1994 08:49:37 GMT" ] ;
-    cookie_string t "www.example3.com" "/" = "SID=31d4")
+    store_cookies t "www.example.com" "/" [ "Set-Cookie", "SID=31d4" ] ;
+    assert_bool "retrieve cokie"
+        (cookie_string t "www.example.com" "/" = "SID=31d4") ;
 
+    store_cookies t "www.example2.com" "/" [ "Set-Cookie", "SID=31d4;Path=/; Domain=example2.com" ] ;
+    assert_bool "retrieve cookie within domain"
+        (cookie_string t "www.example2.com" "/" = "SID=31d4") ;
+
+    store_cookies t "www.example3.com" "/" [ "Set-Cookie", "SID=31d4; Path=/; Secure; HttpOnly" ;
+                                             "Set-Cookie", "lang=en-US; Path=/; Domain=example3.com" ] ;
+    let str = cookie_string t "www.example3.com" "/" in
+    assert_bool "retrieve cookie with params"
+        (str = "SID=31d4; lang=en-US" || str = "lang=en-US; SID=31d4") ;
+
+    store_cookies t "example3.com" "/" [ "Set-Cookie", "lang=; Expires=Sun, 06 Nov 1994 08:49:37 GMT" ] ;
+    assert_bool "retrieve cookie despite deleting in another domain"
+        (cookie_string t "www.example3.com" "/" = "SID=31d4")
+*)
 
 let message_get = Metric.Timed.make "Browser/Msg/Get" (* FIXME: instead of Get use request name *)
 let per_status  = Hashtbl.create 11
@@ -401,7 +415,4 @@ struct
                allowed_urls   : Str.regexp array ;
                forbidden_urls : Str.regexp array } (* checked only if not allowed *)
 end
-
-let check () =
-    cookie_check ()
 

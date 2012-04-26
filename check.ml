@@ -19,12 +19,5 @@
  *)
 
 let _ =
-    let ok =
-        Opache.check () &&
-        Tools.check () &&
-        Http.check () &&
-        Peg.check () &&
-        Html.check () &&
-        Url.check () &&
-        Browser.check () in
+    let ok = Html.check () in
     exit (if ok then 0 else 1)
