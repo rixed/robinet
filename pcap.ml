@@ -78,6 +78,7 @@ let bytes_in           = Metric.Counter.make "Pcap/Bytes/In" "bytes"
 let sniffer iface rx =
     let rec loop () =
         lwt ts, pkt = Lwt_preemptive.detach sniff iface in
+        Clock.synch () ;
         Metric.Atomic.fire packets_sniffed_ok ;
         Metric.Counter.increase bytes_in (Int64.of_int (String.length pkt)) ;
         if debug then Printf.printf "Pcap: Got packet for ts %s\n%!" (Clock.Time.to_string ts) ;

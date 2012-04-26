@@ -163,6 +163,13 @@ let at (ts : Time.t) f x =
 let delay d f x =
     at (Time.add current.now d) f x
 
+(** Synchronize internal clock with realtime clock.
+ * You must call this after real time passes (for instance after a blocking call).
+ * Otherwise, time jumps from one registered event to the next. *)
+let synch () =
+    ensure !realtime "Synch with real clock in non-realtime mode!?" ;
+    current.now <- Time.wall_clock ()
+
 (** Will process the next event and returns true if more events are scheduled *)
 let next_event wait =
     if not wait && Map.is_empty current.events then (
@@ -178,6 +185,7 @@ let next_event wait =
         nextev_wakener := Some wakener ;
         lwt _ = Lwt.pick [ Lwt_unix.sleep (wait_ts :> float) ; waiter ] in
         nextev_wakener := None ;
+        synch () ;
         Lwt.return true
     ) else (
         if debug then Printf.printf "Clock: next_event: executing since it's time (%s)\n%!" (Interval.to_string wait_ts) ;
@@ -185,7 +193,7 @@ let next_event wait =
         current.now <- ts ;
         Lwt.catch (fun () -> f () ; Lwt.return true) (fun exn ->
             Printf.printf "Clock: event handler triggered an exception : %a\n%!" Printexc.print exn ;
-            Lwt.return true)
+            Lwt.return false)
     )
 
 (** We cannot allow our thread to sleep since we want to control the speed of time.
@@ -203,11 +211,4 @@ let run wait =
         if more then aux ()
         else Lwt.return () in
     aux ()
-
-(** Synchronize internal clock with realtime clock.
- * You must call this after real time passes (for instance after a blocking call).
- * Otherwise, time jumps from one registered event to the next. *)
-let synch () =
-    ensure !realtime "Synch with real clock in non-realtime mode!?" ;
-    current.now <- Time.wall_clock ()
 
