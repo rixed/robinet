@@ -57,7 +57,7 @@ Now we are interrested in all the packets attempting to connect port 80:
 
 {[
 # open Packet;;
-# let s80 = enum_of "big_one.pcap" //
+# let s80 = enum_of_file "big_one.pcap" //
             function [_;_;_;_; Pdu.Tcp { Tcp.Pdu.dst_port = p ;
                                          Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; _ } ;
                                          _ }] -> p = Tcp.Port.o 80
@@ -215,24 +215,24 @@ end
 
 (** {2 Shorthands} *)
 
-(** [Packet.enum_of filename] reads a pcap file and returns an [Enum.t] of {!Packet.Pdu.t}. *)
-let enum_of fname = Pcap.enum_of fname /@ Pdu.unpack
+(** [Packet.enum_of_file filename] reads a pcap file and returns an [Enum.t] of {!Packet.Pdu.t}. *)
+let enum_of_file fname = Pcap.enum_of_file fname /@ Pdu.unpack
 
 (* Check that we manage to decode the actual content of the packets by counting the cnx establishments *)
-(*$= enum_of & ~printer:string_of_int
-    (enum_of "tests/someweb.pcap" // \
+(*$= enum_of_file & ~printer:string_of_int
+    (enum_of_file "tests/someweb.pcap" // \
         (function _ :: _ :: _ :: Pdu.Tcp { Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; \
                                                              Tcp.Pdu.ack = true ; _ } ; _ } :: _ -> true \
                 | _ -> false) |> Enum.hard_count) 1
-    (enum_of "tests/someweb_sll.pcap" // \
+    (enum_of_file "tests/someweb_sll.pcap" // \
         (function _ :: _ :: _ :: Pdu.Tcp { Tcp.Pdu.flags = { Tcp.Pdu.syn = true ; \
                                                              Tcp.Pdu.ack = true ; _ } ; _ } :: _ -> true \
                 | _ -> false) |> Enum.hard_count) 1
  *)
 
 (* Check we manage to decode vlan tags *)
-(*$= enum_of & ~printer:(Printf.sprintf2 "%a" (List.print Int.print))
-    ((enum_of "tests/various_vlans.pcap" //@ \
+(*$= enum_of_file & ~printer:(Printf.sprintf2 "%a" (List.print Int.print))
+    ((enum_of_file "tests/various_vlans.pcap" //@ \
         function _ :: _ :: Pdu.Vlan { Vlan.Pdu.id = id ; _ } :: _ -> Some id \
                | _ -> None) |> List.of_enum) [ 1 ; 2 ]
  *)

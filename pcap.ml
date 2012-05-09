@@ -172,7 +172,7 @@ struct
 
     (** Return the [bitstring] ready to be written into a pcap file (see {!Pcap.save}). *)
     let pack t =
-        let sec,usec = Clock.Time.to_ints t.ts in
+        let sec, usec = Clock.Time.to_ints t.ts in
         let wire_len = bytelength (t.payload :> bitstring) in
         let pkt_hdr = (BITSTRING {
             Int32.of_int sec  : 32 : littleendian ;
@@ -207,11 +207,17 @@ let save ?(caplen=65535) ?(dlt=Dlt.en10mb) fname =
 (** When trying to read packets from a file that doesn't look like a pcap file. *)
 exception Not_a_pcap_file
 
-(** [read_global_header filename] reads the pcap global header from the
- * fiven file, and returns both a {!Pcap.global_header} and the input channel. *)
-let read_global_header fname =
-    let ic = open_in_bin fname in
-    let header = bitstring_of_string (IO.really_nread ic 24) ; in
+let bitstring_of_global_header h =
+    (BITSTRING {
+        0xa1b2c3d4l : 32 : endian (h.endianness) ;
+        h.version_major : 16 : endian (h.endianness) ;
+        h.version_minor : 16 : endian (h.endianness) ;
+        h.this_zone : 32 : endian (h.endianness) ;
+        h.sigfigs : 32 : endian (h.endianness) ;
+        h.snaplen : 32 : endian (h.endianness) ;
+        (h.dlt :> int32) : 32 : endian (h.endianness) })
+
+let global_header_of_bitstring name header =
     let endianness = bitmatch (takebits 32 header) with
         | { 0xa1b2c3d4l : 32 : bigendian } -> BigEndian
         | { 0xa1b2c3d4l : 32 : littleendian } -> LittleEndian
@@ -220,9 +226,16 @@ let read_global_header fname =
     | { version_major : 16 : endian (endianness) ; version_minor : 16 : endian (endianness) ;
         this_zone : 32 : endian (endianness) ; sigfigs : 32 : endian (endianness) ;
         snaplen : 32 : endian (endianness) ; dlt : 32 : endian (endianness) } ->
-        { name = fname ; endianness ; version_major ; version_minor ;
-          this_zone ; sigfigs ; snaplen ; dlt = Dlt.o dlt }, ic
+        { name ; endianness ; version_major ; version_minor ;
+          this_zone ; sigfigs ; snaplen ; dlt = Dlt.o dlt }
    | { _ } -> raise Not_a_pcap_file
+
+(** [read_global_header filename] reads the pcap global header from the
+ * fiven file, and returns both a {!Pcap.global_header} and the input channel. *)
+let read_global_header fname =
+    let ic = open_in_bin fname in
+    let header = bitstring_of_string (IO.really_nread ic 24) ; in
+    global_header_of_bitstring fname header, ic
 
 (** [read_next_pkt global_header ic] will return the next {!Pcap.Pdu.t} that's to
  * be read from the input stream [ic]. *)
@@ -250,14 +263,39 @@ let read_next_pkt global_header ic =
                  ts bits
     | { _ } -> should_not_happen ()
 
-(** from a pcap file, returns an [Enum.t] of {!Pcap.Pdu.t}. *)
-let enum_of fname =
+(** From a pcap file, returns an [Enum.t] of {!Pcap.Pdu.t}. *)
+let enum_of_file fname =
     let global_header, ic = read_global_header fname in
     let rec next () =
         try read_next_pkt global_header ic
         with IO.No_more_input | IO.Input_closed ->
             raise Enum.No_more_elements in
     Enum.from next
+
+(** [write_global_header filename] write a 'generic' pcap global header and
+ * returns the output channel. *)
+let write_global_header fname gh =
+    let oc = open_out_bin fname
+    and header = bitstring_of_global_header gh in
+    IO.nwrite oc (string_of_bitstring header) ;
+    oc
+
+(** [write_next_pkt global_header ic] will return the next {!Pcap.Pdu.t} that's to
+ * be read from the input stream [ic]. *)
+let write_next_pkt oc pdu =
+    let bytes = string_of_bitstring (Pdu.pack pdu) in
+    output_string oc bytes
+
+(** [file_of_enum filename e] will save an [Enum.t] of {!Pcap.Pdu.t} into the file named [filename]. *)
+let file_of_enum fname ?(dlt=Dlt.en10mb) e =
+    let header = { name = fname ;
+                   endianness = LittleEndian ;
+                   version_major = 2 ; version_minor = 4 ;
+                   this_zone = 0l ; sigfigs = 0l ;
+                   snaplen = 65535l ; dlt } in
+    let oc = write_global_header fname header in
+    Enum.iter (write_next_pkt oc) e ;
+    close_out oc
 
 (** {2 Tools} *)
 
@@ -269,7 +307,7 @@ type infos = { filename : string ; data_link_type : Dlt.t ;
 (** Return some informations about a pcap file (require to scan the whole file,
  * so depending on the file size it may take some time). *)
 let infos_of filename =
-    let pkts = enum_of filename in
+    let pkts = enum_of_file filename in
     let min_ts = ref Float.max_num and max_ts = ref Float.min_num
     and num_packets = ref 0 and data_size = ref 0L in
     let dlt = match Enum.peek pkts with Some p -> p.Pdu.dlt | None -> Dlt.en10mb in
@@ -304,11 +342,11 @@ let rec merge = function
         let test_ts a b = a.Pdu.ts <= b.Pdu.ts in
         Enum.merge test_ts a (merge rest)
 (*$= merge & ~printer:BatPervasives.dump
-    (merge [ (enum_of "tests/someweb.pcap" // \
+    (merge [ (enum_of_file "tests/someweb.pcap" // \
         let r = ref true in fun _ -> r := not !r ; !r) ; \
-             (enum_of "tests/someweb.pcap" // \
+             (enum_of_file "tests/someweb.pcap" // \
         let r = ref false in fun _ -> r := not !r ; !r) ] |> List.of_enum) \
-                                    (enum_of "tests/someweb.pcap" |> List.of_enum)
+                                    (enum_of_file "tests/someweb.pcap" |> List.of_enum)
  *)
 
 (** Small utility that truncate a pcap file to the last valid packet.
@@ -328,7 +366,7 @@ let repair_file fname =
  * copying the pcap file frame rate. Notice that we use the internal {!Clock} for this,
  * so it's both very accurate or not accurate at all, depending on how you look at it. *)
 let play tx fname =
-    let packets = enum_of fname in
+    let packets = enum_of_file fname in
     (* With last_packet_timestamp (or None), schedule a function using the clock to read
        the next packet from the file. *)
     let rec read_next_pkt last_ts =
