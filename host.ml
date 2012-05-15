@@ -471,3 +471,6 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
     Clock.delay (Clock.Interval.sec (1.+.(Random.float 9.))) send_discover () ;
     t.host_trx
 
+let random_name () =
+    randstr ~charset:"abcdefghijklmnopqrstuvwxyz" (5 + (Random.int 25))
+

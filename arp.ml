@@ -40,7 +40,7 @@ module Op = struct
             |  9 -> "InARP reply"
             | 10 -> "NACK"
             |  x -> string_of_int x
-        let is_valid t = t >= 1 && t <= 0x10000
+        let is_valid t = t >= 1 && t < 0x10000
         let repl_tag = "code"
     end)
 

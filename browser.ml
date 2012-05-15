@@ -209,6 +209,7 @@ let find_vacant_cnx t addr port =
     match Hashtbl.find_option t.vacant_cnxs (addr, port) with
     | None -> None
     | Some cnx ->
+        if debug then Printf.printf "Browser: (re)use a vaccant cnx\n" ;
         Hashtbl.remove t.vacant_cnxs (addr, port) ;
         Some cnx.trx
 
@@ -242,8 +243,10 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url =
         (* connect *)
         (* Use a pool of tcp cnx already established _and_not_used_by_any_thread_ *)
         (* FIXME: this should be a pool of Http.TRXtop (optionaly with Tcp if we can't close the Tcp cnx in any other way) *)
+        if debug then Printf.printf "Browser: connecting to addr %s\n" (Host.string_of_addr addr) ;
         lwt tcp = match find_vacant_cnx t addr port with
             | None ->
+                if debug then Printf.printf "Browser: establishing new cnx\n" ;
                 t.host.Host.tcp_connect addr port
             | Some tcp ->
                 Lwt.return tcp in
@@ -362,7 +365,10 @@ let spider t max_depth start =
                     if debug then Printf.printf "Browser: Cannot parse HTML from %s\n" (Url.to_string url) ;
                     Lwt.return ()
             ) else return ()
-        ) else return () in
+        ) else (
+            if debug then Printf.printf "Browser: done spiding web\n" ;
+            return ()
+        ) in
     aux max_depth (Url.resolve Url.empty start)
 
 let user t ?pause max_depth start =
@@ -401,7 +407,10 @@ let user t ?pause max_depth start =
                 if debug then Printf.printf "Browser: done with %s\n" (Url.to_string url) ;
                 return ()
             ) else return ()
-        ) else return () in
+        ) else (
+            if debug then Printf.printf "Browser: done using browser.\n%!" ;
+            return ()
+        ) in
     aux max_depth (Url.resolve Url.empty start)
 
 module Plan =
