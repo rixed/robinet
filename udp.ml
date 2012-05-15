@@ -72,15 +72,16 @@ end
 
 module TRX =
 struct
+    type udp_trx = {       trx : trx ;
+                     get_ports : unit -> Port.t * Port.t }
     type t = {
-        mutable src : Port.t ; mutable dst : Port.t option ;
+        mutable src : Port.t ; mutable dst : Port.t ;
         mutable emit : bitstring -> unit ;
         mutable recv : bitstring -> unit }
 
     let tx t bits =
-        let src_port = t.src and dst_port = Option.get t.dst in
-        let udp = Pdu.make ~src_port ~dst_port bits in
-        if debug then Printf.printf "Udp: Emitting a packet from %s to %s\n%!" (Port.to_string src_port) (Port.to_string dst_port) ;
+        let udp = Pdu.make ~src_port:t.src ~dst_port:t.dst bits in
+        if debug then Printf.printf "Udp: Emitting a packet from %s to %s\n%!" (Port.to_string t.src) (Port.to_string t.dst) ;
         t.emit (Pdu.pack udp)
 
     (* TODO: check checksum *)
@@ -91,15 +92,15 @@ struct
             if debug then Printf.printf "Udp: Got a datagram with %d bytes\n%!" (Payload.length udp.Pdu.payload) ;
             if Payload.bitlength udp.Pdu.payload > 0 then t.recv (udp.Pdu.payload :> bitstring))
 
-    let make ?dst src =
+    let trx_of t =
+        { trx = { tx = tx t ;
+                  rx = rx t ;
+                  set_emit = (fun f -> t.emit <- f) ;
+                  set_recv = (fun f -> t.recv <- f) } ;
+          get_ports = (fun () -> t.src, t.dst) }
+
+    let make src dst =
         let t = { src = src ; dst = dst ;
                   emit = ignore ; recv = ignore } in
-        { tx = tx t ;
-          rx = rx t ;
-          set_emit = (fun f -> t.emit <- f) ;
-          set_recv = (fun f -> t.recv <- f) }
-
-    let make_client ~src ~dst = make ~dst src
-
-    let make_server src = make src
+        trx_of t
 end

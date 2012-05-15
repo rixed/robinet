@@ -210,7 +210,9 @@ struct
     type eth_trx =
         { trx : trx ;
           set_promiscuous : (bitstring -> unit) -> unit ;
-          set_addresses : bitstring list -> unit }
+          set_addresses : bitstring list -> unit ;
+          get_source : unit -> Addr.t ;
+          arp_set : bitstring -> Addr.t option -> unit }
 
     (** Low level send fonction. Takes a {!Arp.HwProto.t} since it's used both
      * for the user payload protocol and ARP protocol. *)
@@ -348,7 +350,17 @@ struct
                   set_emit = (fun f -> t.emit <- f) ;
                   set_recv = (fun f -> t.recv <- f) } ;
           set_promiscuous = (fun f -> t.promisc <- f) ;
-          set_addresses = (fun l -> t.my_addresses <- l) }
+          set_addresses = (fun l -> t.my_addresses <- l) ;
+          get_source = (fun () -> t.src) ;
+          arp_set = (fun iaddr -> function
+            | None      ->
+                if debug then Printf.printf "Eth: Removing entry for iaddr %s from ARP table\n" (string_of_bitstring iaddr) ;
+                BitHash.remove_all t.arp_cache iaddr
+            | haddr_opt ->
+                if debug then Printf.printf "Eth: Adding entry for iaddr %s to MAC %s from ARP table\n"
+                    (string_of_bitstring iaddr)
+                    (match haddr_opt with None -> "None" | Some haddr -> Addr.to_string haddr) ;
+                BitHash.replace t.arp_cache iaddr haddr_opt) }
 
 end
 

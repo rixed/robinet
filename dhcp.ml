@@ -186,7 +186,7 @@ struct
                     yiaddr = Ip.Addr.of_bitstring yiaddr ;
                     siaddr = Ip.Addr.of_bitstring siaddr ;
                     giaddr = Ip.Addr.of_bitstring giaddr ;
-                    chaddr ; sname ; file ;
+                    chaddr = takebytes hlen chaddr ; sname ; file ;
                     subnet_mask = None ;
                     router = None ;
                     ntp_server = None ;
@@ -248,13 +248,13 @@ struct
             Ip.Addr.to_bitstring t.yiaddr : -1 : bitstring ;
             Ip.Addr.to_bitstring t.siaddr : -1 : bitstring ;
             Ip.Addr.to_bitstring t.giaddr : -1 : bitstring ;
-            t.chaddr : -1 : bitstring ;
+            extendbytes 16 t.chaddr : -1 : bitstring ;
             string_extend t.sname 64 : 64*8 : string ;
             string_extend t.file 128 : 128*8 : string ;
             0x63825363l : 32 ;
             pack_options t : -1 : bitstring })
 
-    let make_base ?(mac=Eth.Addr.zero) ?xid ?name msg_type =
+    let make_base ?(mac=Eth.Addr.zero) ?xid ?name ?(yiaddr=Ip.Addr.zero) msg_type =
         let xid = may_default xid (fun () -> Random.int32 Int32.max_int) in
         { op = BootRequest ;
           htype = Arp.HwType.eth ;
@@ -262,10 +262,10 @@ struct
           xid ;
           secs = 0 ; broadcast = false ;
           ciaddr = Ip.Addr.zero ;
-          yiaddr = Ip.Addr.zero ;
+          yiaddr ;
           siaddr = Ip.Addr.zero ;
           giaddr = Ip.Addr.zero ;
-          chaddr = Bitstring.concat [ (mac :> bitstring) ; create_bitstring 80 ] ;
+          chaddr = extendbytes 16 (mac :> bitstring) ;
           sname = "" ; file = "" ;
           msg_type = Some msg_type ;
           subnet_mask = None ; router = None ;
@@ -284,6 +284,11 @@ struct
         t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
         t
 
+    let make_offer ?(mac=Eth.Addr.zero) ?xid yiaddr client_id =
+        let t = make_base ~mac ?xid ~yiaddr MsgType.offer in
+        t.client_id <- client_id ;
+        t
+
     let make_request ?(mac=Eth.Addr.zero) ?xid ?name yiaddr server_id =
         let t = make_base ~mac ?xid ?name MsgType.request in
         t.client_id <- Some (BITSTRING {
@@ -292,6 +297,11 @@ struct
         t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
         t.requested_ip <- Some yiaddr ;
         t.server_id <- server_id ;
+        t
+
+    let make_ack ?(mac=Eth.Addr.zero) ?xid yiaddr client_id =
+        let t = make_base ~mac ?xid ~yiaddr MsgType.ack in
+        t.client_id <- client_id ;
         t
 
     let random () =

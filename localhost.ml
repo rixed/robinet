@@ -155,12 +155,14 @@ let make () =
       Host.logger        = logger ;
       Host.tcp_connect   = tcp_connect ;
       Host.udp_connect   = (fun _ ?src_port _ _ -> ignore src_port ; todo "UDP connect for localhost") ;
+      Host.udp_send      = (fun _ ?src_port _ _ -> ignore src_port ; todo "UDP send for localhost") ;
       Host.gethostbyname = gethostbyname ;
       Host.tcp_server    = tcp_server ;
       Host.udp_server    = (fun _ _ -> todo "UDP server for localhost") ;
       Host.signal_err    = signal_err ;
-      Host.trx           = { tx       = (fun _bits -> should_not_happen ()) ;
-                             set_recv = (fun _f -> should_not_happen ()) ;
-                             rx       = ignore ;
-                             set_emit = ignore } }
+      Host.rx            = (fun _ _ -> ()) ;
+      Host.set_emit      = (fun _ _ -> ()) ;
+      Host.get_mac       = (fun () -> todo "get the Eth mac addr of localhost") ;
+      Host.get_ip        = (fun () -> todo "get the IP addr of localhost") ;
+      Host.arp_set       = (fun _ _ -> todo "set ARP table of localhost") }
 

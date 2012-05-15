@@ -46,6 +46,8 @@ let bytelength bs = (bitstring_length bs + 7) lsr 3
 
 let takebytes n bs = takebits (n lsl 3) bs
 
+let extendbytes n bs = concat [ bs ; create_bitstring ((n lsl 3) - bitstring_length bs) ]
+
 let bitstring_is_empty bs = bitstring_length bs = 0
 
 let dropbytes n bs = dropbits (n lsl 3) bs

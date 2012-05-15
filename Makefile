@@ -10,10 +10,14 @@ SOURCES  = \
 	vlan.ml eth.ml dhcp.ml \
 	sll.ml \
 	pcap.ml packet.ml \
+	hub.ml router.ml \
 	host.ml localhost.ml \
 	html.ml browser.ml \
-	hub.ml router.ml net.ml \
-	opache.ml myadmin.ml
+	net.ml \
+	dhcpd.ml \
+	opache.ml \
+	myadmin.ml \
+
 C_SOURCES = pcap_wrap.c eth_vendors.c
 CLIB = libpcapw.a
 LIBS = -cclib -lpcap
@@ -31,7 +35,8 @@ EXAMPLES_BYTE = \
 	examples/http_static_server.byte \
 	examples/beautify_mac.byte \
 	examples/test_ping.byte \
-	examples/capecho.byte
+	examples/capecho.byte \
+
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
