@@ -84,6 +84,7 @@ let serve ?(port=Udp.Port.o 67) host cidr =
                 Log.(log logger Debug (lazy "Ignoring DHCP message"))))
 
 (*$R serve
+    Clock.realtime := false ;
     Log.console_lvl := Log.Debug ;
     let srv = Host.make_static "server" (Eth.Addr.random ()) (Ip.Addr.random ()) in
     let my_net = Ip.Cidr.random () in
@@ -93,5 +94,6 @@ let serve ?(port=Udp.Port.o 67) host cidr =
     clt.Host.set_emit 0 (srv.Host.rx 0) ;
     Lwt_main.run (Clock.run false) ;
     assert_bool "Client got an IP" (clt.Host.get_ip () <> None) ;
-    assert_bool "IP is within net" (Ip.Cidr.mem my_net (Option.get (clt.Host.get_ip ())))
+    assert_bool "IP is within net" (Ip.Cidr.mem my_net (Option.get (clt.Host.get_ip ()))) ;
+    Clock.realtime := true
  *)
