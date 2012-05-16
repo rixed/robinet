@@ -176,8 +176,8 @@ struct
 
     (** A [route] is a set of optional tests. *)
     type route = { iface_num : int option ;         (** Test on incoming iface *)
-                    src_mask : Ip.Addr.net option ; (** Test on source IP *)
-                    dst_mask : Ip.Addr.net option ; (** Test on dest IP *)
+                    src_mask : Ip.Cidr.t option ;   (** Test on source IP *)
+                    dst_mask : Ip.Cidr.t option ;   (** Test on dest IP *)
                     ip_proto : Ip.Proto.t option ;  (** Test on IP protocol *)
                     src_port : port_range option ;  (** Test on source port *)
                     dst_port : port_range option }  (** Test on dest port *)
@@ -187,10 +187,11 @@ struct
         (* If the route test is set, then the value is required. *)
         let test_opt opt1 test opt2 = match opt2 with
             | Some opt -> Option.map_default (test opt) true opt1
-            | None     -> Option.is_none opt1 in
+            | None     -> Option.is_none opt1
+        and cidr_mem_rev ip cidr = Ip.Cidr.mem cidr ip in
         test_opt route.iface_num (=) (Some ifn) &&
-        test_opt route.src_mask Ip.Addr.in_net src_opt &&
-        test_opt route.dst_mask Ip.Addr.in_net dst_opt &&
+        test_opt route.src_mask cidr_mem_rev src_opt &&
+        test_opt route.dst_mask cidr_mem_rev dst_opt &&
         test_opt route.ip_proto (=) proto_opt &&
         test_opt route.src_port port_in_range src_port_opt &&
         test_opt route.dst_port port_in_range dst_port_opt
@@ -252,11 +253,11 @@ struct
                        Ip.Addr.of_string "192.168.2.254", Eth.Addr.random () ;
                        Ip.Addr.of_string "192.168.3.254", Eth.Addr.random () |] in
         (* With the obvious rules: *)
-        let route_tbl = [| { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Addr.of_string "192.168.1.0", Ip.Addr.of_string "255.255.255.0") ;
+        let route_tbl = [| { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Cidr.of_string "192.168.1.0/24") ;
                              ip_proto = None ; src_port = None ; dst_port = None }, 0 ;
-                           { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Addr.of_string "192.168.2.0", Ip.Addr.of_string "255.255.255.0") ;
+                           { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Cidr.of_string "192.168.2.0/24") ;
                              ip_proto = None ; src_port = None ; dst_port = None }, 1 ;
-                           { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Addr.of_string "192.168.3.0", Ip.Addr.of_string "255.255.255.0") ;
+                           { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Cidr.of_string "192.168.3.0/24") ;
                              ip_proto = None ; src_port = None ; dst_port = None }, 2 |] in
         let router = make_from_addrs (Array.enum addrs) route_tbl in
         

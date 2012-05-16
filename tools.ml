@@ -333,10 +333,12 @@ type trx = { tx       : bitstring -> unit ; (** transmit this payload *)
              set_emit : (bitstring -> unit) -> unit ; (** makes this function the emiter *)
              set_recv : (bitstring -> unit) -> unit (** makes this function the receiver *) }
 
-let null_trx = { tx = ignore ;
-                 rx = ignore ;
-                 set_emit = ignore ;
-                 set_recv = ignore }
+let null_trx () = {       tx = ignore ;
+                          rx = ignore ;
+                    set_emit = ignore ;
+                    set_recv = ignore }
+
+let inverse_trx t = { tx = t.rx ; rx = t.tx ; set_emit = t.set_recv ; set_recv = t.set_emit }
 
 (** [f <-= trx] sets f as the receive function of this [trx]. *)
 let (<-=) f trx =

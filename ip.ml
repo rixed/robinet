@@ -161,7 +161,7 @@ module Addr = struct
        (o 0x01020305l) (higher_bits (o 0x01020305l) 33)
      *)
 
-    type net = t * t (** Network addr and network mask *)
+(*    type net = t * t (** Network addr and network mask *)
 
     let in_net (ip : t) ((net : t), (mask : t)) =
         let ip = (ip :> int32) and net = (net :> int32) and mask = (mask :> int32) in
@@ -173,7 +173,7 @@ module Addr = struct
         not (in_net (of_string "192.168.11.1") ((of_string "192.168.10.1"), \
                                                 (of_string "255.255.255.0")))
      *)
-
+*)
     (*$>*)
 end
 
