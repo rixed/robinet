@@ -29,37 +29,37 @@ let min_port = 1024
 (** Network Address Translation (N.A.T.) is the process of replacing on the fly non routable
  * addresses used within a LAN by a unique routable address, so that hosts from the LAN
  * can communicate with the outside world by sharing the only routable IP address.
- * A [Nas.t] is a two sided device, with an inside and an outside, and an affected Ip address,
+ * A [Nat.t] is a two sided device, with an inside and an outside, and an affected Ip address,
  * that will translate outgoing source addresses with it's own and restore it in incoming
  * packets. To match these incoming packets with the outgoing one it must use the UDP or
  * TCP client port and an internal memory of currently forwarded connections. This memory
  * is of bounded size.
  * Note that any packet that reach it will be forwarded. *)
-module Nas =
+module Nat =
 struct
 
     (**
     Behavior on incomming packets:
 {v
-    [Nas] <----------------------------- [Outside host]
+    [Nat] <----------------------------- [Outside host]
               Src: outside_addr,
-              Dst: nas_addr
-            Ports: outside_port:nas_port
+              Dst: nat_addr
+            Ports: outside_port:nat_port
 v}
-    Lookup (outside_addr, outside_port, nas_port, proto) in in_cnxs_h.
-    If the cnx is found then replace the nas_addr:nas_port by cnx.in_addr:cnx.in_port.
+    Lookup (outside_addr, outside_port, nat_port, proto) in in_cnxs_h.
+    If the cnx is found then replace the nat_addr:nat_port by cnx.in_addr:cnx.in_port.
     If nothing is found, just ignore the packet (or forward it to the sink host
     without changing the dest port).
 
     Behavior on outgoing packets:
 {v
-    [Inside host] -----------------------------> [Nas]
+    [Inside host] -----------------------------> [Nat]
                       Src: inside_addr,
                       Dst: outside_addr,
                     Ports: inside_port:outside_port
 v}
-    Lookup (inside_addr, inside_port, nas_port, proto) in out_cnxs_h.
-    If the cnx is found then replace the inside_addr:inside_port by nas_addr:cnx.out_port.
+    Lookup (inside_addr, inside_port, nat_port, proto) in out_cnxs_h.
+    If the cnx is found then replace the inside_addr:inside_port by nat_addr:cnx.out_port.
     If nothing is found, create the cnx as:
     {[ { out_port=random_port; in_addr=inside_addr; in_port=inside_port } ]}
     and insert it with the above key in out_cnxs_h.
@@ -68,7 +68,7 @@ v}
     *)
 
     type socket = {       proto : Ip.Proto.t ;  (** the IP protocol *)
-                       nas_port : int ;         (** the Nas ports *)
+                       nat_port : int ;         (** the Nat ports *)
                     remote_addr : Ip.Addr.t ;   (** the other peer's address *)
                     remote_port : int }         (** the port used by the other peer *)
 
@@ -78,7 +78,7 @@ v}
 
     (* TODO: add an optional sink inside IP *)
     type t = {      addr : Ip.Addr.t ;                  (** our IP addr *)
-                    cnxs : cnx OrdArray.t ;       (** all the cnxs we remember *)
+                    cnxs : cnx OrdArray.t ;             (** all the cnxs we remember *)
                in_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets coming from the outside *)
               out_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets coming from the inside *)
             mutable emit : bitstring -> unit ;          (** the emit function (ie. carry packets to the outside *)
@@ -105,7 +105,7 @@ v}
         | Some (ip, src_port, dst_port) ->
             (* Do we already follow this socket? *)
             let out_sock = {       proto = ip.Ip.Pdu.proto ;
-                                nas_port = dst_port ;
+                                nat_port = dst_port ;
                              remote_addr = ip.Ip.Pdu.src ;
                              remote_port = src_port } in
             let n = hash_find_or_insert t.out_cnxs_h out_sock (fun () ->
@@ -117,7 +117,7 @@ v}
                       out_port = random_port } ;
                 (* replace also entry in in_cnxs_h *)
                 let in_sock = {       proto = ip.Ip.Pdu.proto ;
-                                   nas_port = random_port ;
+                                   nat_port = random_port ;
                                 remote_addr = ip.Ip.Pdu.dst ;
                                 remote_port = dst_port } in
                 Hashtbl.replace t.in_cnxs_h in_sock last_idx ;
@@ -135,7 +135,7 @@ v}
         Ip.Pdu.unpack_with_ports bits |>
         Option.bind (fun (ip, src_port, dst_port) ->
             let in_sock = {       proto = ip.Ip.Pdu.proto ;
-                               nas_port = dst_port ;
+                               nat_port = dst_port ;
                             remote_addr = ip.Ip.Pdu.src ;
                             remote_port = src_port } in
             Hashtbl.find_option t.in_cnxs_h in_sock |>
@@ -148,7 +148,7 @@ v}
                 Some (t.recv (Ip.Pdu.pack ip)))) |>
         ignore
 
-    (** [make ip n] returns a {!Tools.trx} corresponding to a NAT device (tx is for transmitting from the LAN to the outside). *)
+    (** [make ip n] returns a {!Tools.trx} corresponding to a NAT device (tx is for transmitting from the LAN to the outside) that can track [n] sockets. *)
     let make addr nb_max_cnxs =
         if debug then Printf.printf "router: Creating a NATer for IP %s, with %d cnxs max\n%!" (Ip.Addr.to_string addr) nb_max_cnxs ;
         let t = { addr ;
