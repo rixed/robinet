@@ -24,10 +24,10 @@ open Dhcp
 
 (** DHCP server *)
 
-(** [serve host cidr] listen on host DHCP port and allocate the
- * given ip range to any requester. *)
-let serve ?(port=Udp.Port.o 67) host cidr =
-    let rem_cidr = ref (Ip.Cidr.to_enum cidr) in
+(** [serve host ips] listen on host DHCP port and allocate the
+ * given ips to any requester. *)
+let serve ?(port=Udp.Port.o 67) host ips =
+    let rem_cidr = ref ips in
     let offers = BitHash.create 4 in
     let leases = BitHash.create 8 in
     let logger = Log.(make (Printf.sprintf "%s/Dhcpd" host.Host.logger.name) 50) in
@@ -88,7 +88,7 @@ let serve ?(port=Udp.Port.o 67) host cidr =
     Log.console_lvl := Log.Debug ;
     let srv = Host.make_static "server" (Eth.Addr.random ()) (Ip.Addr.random ()) in
     let my_net = Ip.Cidr.random () in
-    serve srv my_net ;
+    serve srv (Ip.Cidr.to_enum my_net) ;
     let clt = Host.make_dhcp "client" (Eth.Addr.random ()) in
     srv.Host.set_emit 0 (clt.Host.rx 0) ;
     clt.Host.set_emit 0 (srv.Host.rx 0) ;
