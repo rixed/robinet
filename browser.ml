@@ -37,7 +37,7 @@ let debug = false
 
 type cookie = { name : string ; value : string ; domain : string ; path : string }
 
-type vacant_cnx = { trx : Tcp.TRX.tcp_trx ; last_used : Clock.Time.t }
+type vacant_cnx = { tcp : Tcp.TRX.tcp_trx ; http : TRXtop.t ; last_used : Clock.Time.t }
 
 type t = { host : Host.host_trx ;
            user_agent : string ;
@@ -204,14 +204,14 @@ let cookie_string t host path =
 let message_get = Metric.Timed.make "Browser/Msg/Get" (* FIXME: instead of Get use request name *)
 let per_status  = Hashtbl.create 11
 
-(* Returns an unused tcp TRX (and removes it from the pool *)
+(* Returns an unused HTTP.TRXtop * tcp TRX (and removes it from the pool *)
 let find_vacant_cnx t addr port =
     match Hashtbl.find_option t.vacant_cnxs (addr, port) with
     | None -> None
-    | Some cnx ->
+    | Some x ->
         if debug then Printf.printf "Browser: (re)use a vaccant cnx\n" ;
         Hashtbl.remove t.vacant_cnxs (addr, port) ;
-        Some cnx.trx
+        Some x
 
 let clean_vacant_cnxs t =
     let count = ref 0
@@ -219,19 +219,19 @@ let clean_vacant_cnxs t =
     let age t = Clock.Time.sub now t in
     t.vacant_cnxs <- Hashtbl.filter (fun v ->
         incr count ;
-        if v.trx.Tcp.TRX.is_closed () then (
+        if v.tcp.Tcp.TRX.is_closed () then (
             if debug then Printf.printf "Browser: clean_vacant_cnxs: cleaning a closed trx\n" ;
             false
         ) else if !count > t.max_vacant_cnx || Clock.Interval.compare (age v.last_used) t.max_idle_cnx > 0 then (
             if debug then Printf.printf "Browser: clean_vacant_cnxs: making room\n" ;
-            v.trx.Tcp.TRX.close () ;
+            v.tcp.Tcp.TRX.close () ;
             false
         ) else true) t.vacant_cnxs
 
 (* Place this cnx into the pool of vacant cnx *)
-let make_vacant_cnx t tcp addr port =
+let make_vacant_cnx t tcp http addr port =
     clean_vacant_cnxs t ;
-    Hashtbl.add t.vacant_cnxs (addr, port) { trx = tcp ; last_used = Clock.now () }
+    Hashtbl.add t.vacant_cnxs (addr, port) { tcp ; http ; last_used = Clock.now () }
 
 (* Takes an URL and an optional body and return the associated optional document *)
 let rec request t ?(command="GET") ?(headers=[]) ?body url =
@@ -242,21 +242,22 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url =
     let get_msg addr port =
         (* connect *)
         (* Use a pool of tcp cnx already established _and_not_used_by_any_thread_ *)
-        (* FIXME: this should be a pool of Http.TRXtop (optionaly with Tcp if we can't close the Tcp cnx in any other way) *)
+        (* FIXME: this should be a pool of Http.TRXtop (optionaly with Tcp if we can't close the Tcp cnx in any other way) DONE? *)
         if debug then Printf.printf "Browser: connecting to addr %s\n" (Host.string_of_addr addr) ;
-        lwt tcp = match find_vacant_cnx t addr port with
+        lwt http, tcp = match find_vacant_cnx t addr port with
             | None ->
                 if debug then Printf.printf "Browser: establishing new cnx\n" ;
-                t.host.Host.tcp_connect addr port
-            | Some tcp ->
-                Lwt.return tcp in
-        let http = TRXtop.make () in
-        tcp.Tcp.TRX.trx.set_recv (TRXtop.rx http) ;
-        TRXtop.set_emit http tcp.Tcp.TRX.trx.tx ;
+                let http = TRXtop.make () in
+                lwt tcp = t.host.Host.tcp_connect addr port in
+                tcp.Tcp.TRX.trx.set_recv (TRXtop.rx http) in
+                TRXtop.set_emit http tcp.Tcp.TRX.trx.tx ;
+                Lwt.return (http, tcp)
+            | Some v ->
+                Lwt.return (v.http, v.tcp) in
         let waiter, wakener = wait () in
         TRXtop.set_recv http (fun msg ->
             TRXtop.set_recv http ignore ; (* we only want to trigger once *)
-            wakeup wakener (msg, tcp)) ;
+            wakeup wakener (msg, http, tcp)) ;
         (* send query *)
         let path = url.Url.path^url.Url.params^url.Url.query in
         let headers = [ "User-Agent", t.user_agent ;
@@ -284,7 +285,7 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url =
         let addr = Host.Name url.Url.net_loc
         and port = Tcp.Port.o 80 in
         Lwt.catch (fun () ->
-            lwt msg, tcp = get_msg addr port in
+            lwt msg, http, tcp = get_msg addr port in
             Metric.Timed.stop message_get get_start (Url.to_string url) ;
             (match msg with
                 | TRXtop.HttpError x ->
@@ -294,7 +295,7 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url =
                 | TRXtop.HttpMsg (pdu, opened) ->
                     (* Close the TCP cnx if we are done with it, or relieve it *)
                     if opened && not (must_close_cnx pdu.Pdu.headers) then (
-                        make_vacant_cnx t tcp addr port ;
+                        make_vacant_cnx t tcp http addr port ;
                     ) else (
                         if debug then Printf.printf "Browser: close the Tcp cnx\n%!" ;
                         tcp.Tcp.TRX.close ()
