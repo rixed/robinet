@@ -315,62 +315,47 @@ module Payload = struct
     let random len = o (randbs len)
 end
 
-(** A transmiter is something with a [tx] function taking a message and that
- * will transmit some other bits (via an emiting funtion).  A receiver is
- * something with a [rx] function taking bits and that will pass some received
- * message (to a receiving function).  A transceiver (or [trx]) is something
- * that can do both tx and rx.  Think of it as an oriented pipe, with some kind
- * of messages entering and exiting at one end and some other kind of messages
- * at the other end.
- *
- * You can of course combine transceivers in many ways but apart from chaining
- * severaltransceivers most of these combinations make no sense.
- *
- * (note: we do not have a dedicated [tx] or [rx] type for devices that can
- * only behave as a transmiter or an emiter since we have very few such devices.) *)
-type trx = { tx       : bitstring -> unit ; (** transmit this payload *)
-             rx       : bitstring -> unit ; (** receive this payload (possibly another format) *)
-             set_emit : (bitstring -> unit) -> unit ; (** makes this function the emiter *)
-             set_recv : (bitstring -> unit) -> unit (** makes this function the receiver *) }
+(** A device is something to which you can send packet and register a
+ * receiving function *)
+type dev = { write : bitstring -> unit ; set_read : (bitstring -> unit) -> unit }
 
-let null_trx () = {       tx = ignore ;
-                          rx = ignore ;
-                    set_emit = ignore ;
-                    set_recv = ignore }
+(** A transmiter is a kind of pipe with an input and an output device, is
+ * oriented from inside to outside (inside being le left operand for following
+ * functions), that transforms the writen payload before emitting it. *)
+type trx = { inp : dev ; out : dev }
 
-let inverse_trx t = { tx = t.rx ; rx = t.tx ; set_emit = t.set_recv ; set_recv = t.set_emit }
+let tx trx = trx.inp.write
+let rx trx = trx.out.write
+let set_emit trx = trx.out.set_read
+let set_recv trx = trx.inp.set_read
 
-(** [f <-= trx] sets f as the receive function of this [trx]. *)
+let inverse_trx trx = { inp = trx.out ; out = trx.inp }
+
+(** [f <-= trx] sets f as the receive function of this [trx].
+ * {b Note:} [trx] is returned so that you can write such things as:
+ * [f <-= a <==> b] or [f1 <-= a =-> f2] *)
 let (<-=) f trx =
-    trx.set_recv f ;
+    set_recv trx f ;
     trx
 
 (** [trx =-> f] sets [f] as the emiting function of this [trx]. *)
 let (=->) trx f =
-    trx.set_emit f
+    set_emit trx f
 
 (** [a ==> b] connects [a] to [b] such that [b] transmits what [a] emits. *)
 let (==>) trx1 trx2 =
-    trx1 =-> trx2.tx ;
-    trx1.rx <-= trx2
+    trx1 =-> trx2.inp.write ;
+    trx1.out.write <-= trx2
 
 (** [a <==> b] connects [a] to [b] such that [b] receives what [a] emits
  * and [a] receives what [b] emits. *)
 let (<==>) trx1 trx2 =
-    trx1.set_emit trx2.rx ;
-    trx2.set_emit trx1.rx ;
-    trx2
+    trx1 =-> trx2.out.write ;
+    trx2 =-> trx1.out.write
 
 module type PDU = sig
     type t
     val pack   : t -> bitstring
     val unpack : bitstring -> t option
 end
-
-(*(* ?? *)
-module type TRANSPORT = sig
-    type addr
-    val addr_of_string : string -> addr
-    val string_of_addr : addr -> string
-end*)
 

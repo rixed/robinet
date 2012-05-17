@@ -44,13 +44,13 @@ let main =
     Lwt_main.run (
         let emit bits = Pcap.inject iface (string_of_bitstring bits) in
         let host = Host.make_static "requester" ?gw:!gw_eth_str ~nameserver:(Ip.Addr.of_string !dst_ip_str) ~search_sfx:!search (Eth.Addr.of_string !src_eth_str) (Ip.Addr.of_string !src_ip_str) in
-        host.Host.trx.set_emit emit ;
+        host.Host.dev.set_read emit ;
         let query = Lwt_list.iter_p (fun name ->
             lwt ips = host.Host.gethostbyname name in
             List.print (fun oc ip -> Printf.fprintf oc "%s\n" (Ip.Addr.to_dotted_string ip)) stdout ips ;
             Lwt.return ()) !names in
         Lwt.choose [ query ;
-                     Pcap.sniffer iface host.Host.trx.rx ;
+                     Pcap.sniffer iface host.Host.dev.write ;
                      Clock.run true ]
     )
 

@@ -26,8 +26,8 @@ open Tools
 
 let run iface =
     let host = Host.make_dhcp "tester" (Eth.Addr.of_string "00:23:8b:5f:09:c1") in
-    host.Host.trx.set_emit (Pcap.inject_pdu iface) ;
-    Pcap.sniffer iface host.Host.trx.rx
+    host.Host.dev.set_read (Pcap.inject_pdu iface) ;
+    Pcap.sniffer iface host.Host.dev.write
 
 let main =
     Random.self_init () ;

@@ -29,19 +29,19 @@ let tunnel ifname tun_ip tun_mac gw search_sfx nameserver dst dst_port src_port 
     let iface = Pcap.openif ifname true "" 1800
     and host = Host.make_static "tun" ?gw ?search_sfx ?nameserver tun_mac tun_ip
     and http = Http.TRX.make [ "Content-Type", "tun/eth" ] in
-    host.Host.trx.set_emit (Pcap.inject_pdu iface) ;
+    host.Host.dev.set_read (Pcap.inject_pdu iface) ;
     let connect_tunnel tcp =
         Printf.printf "Tunnel: We are now connected!\n%!" ;
-        http.set_emit tcp.Tcp.TRX.trx.tx ;
-        tcp.Tcp.TRX.trx.set_recv (fun bits ->
+        http =-> (tx tcp.Tcp.TRX.trx) ;
+        tcp.Tcp.TRX.trx.inp.set_read (fun bits ->
             if bitstring_is_empty bits then (
                 (* close the socket *)
                 Printf.printf "Tunnel: The HTTP connection was closed\n%!" ;
-                http.set_emit ignore ;
-                http.rx bits ;    (* signal the end of the socket to http parser *)
+                http =-> ignore ;
+                rx http bits ;    (* signal the end of the socket to http parser *)
                 tcp.Tcp.TRX.close ()
                 (* TODO: if client, quit or reconnect *)
-            ) else http.rx bits) in
+            ) else rx http bits) in
     let cli_srv_thread = match dst with
         | Some addr ->
             lwt tcp = host.Host.tcp_connect addr ?src_port dst_port in
@@ -69,9 +69,9 @@ let tunnel ifname tun_ip tun_mac gw search_sfx nameserver dst dst_port src_port 
         (* to use our GW: Eth.TRX.tx host.Host.eth x *)
         Pcap.inject_pdu iface bits
     in
-    http.set_recv recv_http ;
+    ignore (recv_http <-= http) ;
     (* Run everything *)
-    Lwt.join [ Pcap.sniffer iface host.Host.trx.rx ;
+    Lwt.join [ Pcap.sniffer iface host.Host.dev.write ;
                cli_srv_thread ;
                Clock.run true ]
 

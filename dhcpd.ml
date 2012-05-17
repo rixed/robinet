@@ -32,7 +32,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
     let leases = BitHash.create 8 in
     let logger = Log.(make (Printf.sprintf "%s/Dhcpd" host.Host.logger.name) 50) in
     host.Host.udp_server port (fun udp ->
-        udp.Udp.TRX.trx.set_recv (fun bits ->
+        udp.Udp.TRX.trx.inp.set_read (fun bits ->
             let src_port, dst_port = udp.Udp.TRX.get_ports () in
             match Pdu.unpack bits with
             | None ->
@@ -90,8 +90,8 @@ let serve ?(port=Udp.Port.o 67) host ips =
     let my_net = Ip.Cidr.random () in
     serve srv (Ip.Cidr.to_enum my_net) ;
     let clt = Host.make_dhcp "client" (Eth.Addr.random ()) in
-    srv.Host.set_emit 0 (clt.Host.rx 0) ;
-    clt.Host.set_emit 0 (srv.Host.rx 0) ;
+    srv.Host.dev.set_read clt.Host.dev.write ;
+    clt.Host.dev.set_read srv.Host.dev.write ;
     Lwt_main.run (Clock.run false) ;
     assert_bool "Client got an IP" (clt.Host.get_ip () <> None) ;
     assert_bool "IP is within net" (Ip.Cidr.mem my_net (Option.get (clt.Host.get_ip ()))) ;

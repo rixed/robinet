@@ -249,8 +249,8 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url =
                 if debug then Printf.printf "Browser: establishing new cnx\n" ;
                 let http = TRXtop.make () in
                 lwt tcp = t.host.Host.tcp_connect addr port in
-                tcp.Tcp.TRX.trx.set_recv (TRXtop.rx http) in
-                TRXtop.set_emit http tcp.Tcp.TRX.trx.tx ;
+                ignore ((TRXtop.rx http) <-= tcp.Tcp.TRX.trx) ;
+                TRXtop.set_emit http (tx tcp.Tcp.TRX.trx) ;
                 Lwt.return (http, tcp)
             | Some v ->
                 Lwt.return (v.http, v.tcp) in

@@ -40,8 +40,7 @@ type host_trx = {
     tcp_server    : Tcp.Port.t -> (Tcp.TRX.tcp_trx -> unit) -> unit ;
     udp_server    : Udp.Port.t -> (Udp.TRX.udp_trx -> unit) -> unit ;
     signal_err    : string -> unit ;
-    rx            : int -> bitstring -> unit ;
-    set_emit      : int -> (bitstring -> unit) -> unit ;
+    dev           : dev ; (* as seen from the outside *)
     get_mac       : unit -> Eth.Addr.t (* FIXME: or just move t.eth up here? *) ;
     get_ip        : unit -> Ip.Addr.t option (* FIXME: or just...? *) ;
     arp_set       : Ip.Addr.t -> Eth.Addr.t option -> unit }
@@ -97,14 +96,14 @@ let tcp_sock_rx t socks bits =
                             let server = try Hashtbl.find t.tcp_servers tcp.Tcp.Pdu.dst_port
                                          with Not_found -> raise No_socket in
                             let trx = Tcp.TRX.accept tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port in
-                            trx.Tcp.TRX.trx.Tools.set_emit socks.ip_4_tcp.tx ;
+                            trx.Tcp.TRX.trx =-> socks.ip_4_tcp.inp.write ;
                             server trx ; (* supposed to set the recver of this tcp trx *)
                             trx
                         ) else raise No_socket) in
-                trx.Tcp.TRX.trx.Tools.rx bits (* will reorder fragments and transmit the messages up to its emit function *)
+                rx trx.Tcp.TRX.trx bits (* will reorder fragments and transmit the messages up to its emit function *)
             with No_socket ->
                 Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for TCP packet on port %s" (Tcp.Port.to_string tcp.Tcp.Pdu.dst_port)))) ;
-                Tcp.Pdu.make_reset_of tcp |> Tcp.Pdu.pack |> socks.ip_4_tcp.tx
+                Tcp.Pdu.make_reset_of tcp |> Tcp.Pdu.pack |> tx socks.ip_4_tcp
 
 let udp_sock_rx t socks bits =
     match Udp.Pdu.unpack bits with
@@ -117,10 +116,10 @@ let udp_sock_rx t socks bits =
                         let server = try Hashtbl.find t.udp_servers udp.Udp.Pdu.dst_port
                                      with Not_found -> raise No_socket in
                         let trx = Udp.TRX.make udp.Udp.Pdu.dst_port udp.Udp.Pdu.src_port in
-                        trx.Udp.TRX.trx.Tools.set_emit socks.ip_4_udp.tx ;
+                        trx.Udp.TRX.trx =-> socks.ip_4_udp.inp.write ;
                         server trx ; (* supposed to set the recver of this udp trx *)
                         trx) in
-                trx.Udp.TRX.trx.Tools.rx bits
+                rx trx.Udp.TRX.trx bits
             with No_socket ->
                 Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for UDP packet on port %s" (Udp.Port.to_string udp.Udp.Pdu.dst_port))))
                 (* TODO: send ICMP error *)
@@ -132,7 +131,7 @@ let icmp_rx _t ip_trx bits =
             (match icmp.Icmp.Pdu.payload with
                 | Icmp.Pdu.Ids (id, seq, _) ->
                     let reply = Icmp.Pdu.make_echo_reply id seq in
-                    ip_trx.tx (Icmp.Pdu.pack reply)
+                    tx ip_trx (Icmp.Pdu.pack reply)
                 | _ -> should_not_happen ())
         | _ -> ()
 
@@ -245,8 +244,7 @@ and gethostbyname t name =
                 (* Then actually sends the query *)
                 let start = Metric.Timed.start resolutions in
                 Hashtbl.add t.dns_queries name (wakener, Some start) ;
-                let pdu = Dns.Pdu.make_query name in
-                resolv_trx.tx (Dns.Pdu.pack pdu)
+                Dns.Pdu.make_query name |> Dns.Pdu.pack |> tx resolv_trx
             ) else (
                 Hashtbl.add t.dns_queries name (wakener, None)
             ) ;
@@ -258,8 +256,7 @@ and tcp_connect t dst ?src_port dst_port =
         let socks = hash_find_or_insert t.tcp_socks dst_ip (fun () ->
             let trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.tcp in
             let socks = make_tcp_socks trx in
-            trx.Tools.set_emit t.eth.Eth.TRX.trx.tx ;
-            trx.Tools.set_recv (tcp_sock_rx t socks) ;
+            (tcp_sock_rx t socks) <-= trx =-> t.eth.Eth.TRX.trx.inp.write ;
             socks) in
         lwt src_port = match src_port with
             | None ->
@@ -285,7 +282,7 @@ and tcp_connect t dst ?src_port dst_port =
         match trx_opt with
         | Some trx ->
             (* connect this tcp to the underlaying ip *)
-            trx.Tcp.TRX.trx.Tools.set_emit socks.ip_4_tcp.tx ;
+            trx.Tcp.TRX.trx =->  socks.ip_4_tcp.inp.write ;
             Hashtbl.add socks.tcps (src_port, dst_port) trx ;
             Metric.Atomic.fire tcp_cnxs_ok ;
             Lwt.return trx
@@ -309,8 +306,7 @@ and udp_connect t dst ?src_port dst_port client_f =
         let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
             let trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.udp in
             let socks = make_udp_socks trx in
-            trx.Tools.set_emit t.eth.Eth.TRX.trx.tx ;
-            trx.Tools.set_recv (udp_sock_rx t socks) ;
+            (udp_sock_rx t socks) <-= trx =-> t.eth.Eth.TRX.trx.inp.write ;
             socks) in
         let src_port = may_default src_port (fun () -> Udp.Port.o (Random.int 0x10000)) in
         let key = src_port, dst_port in
@@ -320,8 +316,7 @@ and udp_connect t dst ?src_port dst_port client_f =
         ) else
         let trx = Udp.TRX.make src_port dst_port in
         (* connect this udp to the underlaying ip *)
-        trx.Udp.TRX.trx.Tools.set_emit socks.ip_4_udp.tx ;
-        trx.Udp.TRX.trx.Tools.set_recv (client_f trx) ;
+        (client_f trx) <-= trx.Udp.TRX.trx =-> socks.ip_4_udp.inp.write ;
         Hashtbl.add socks.udps key trx ;
         Metric.Atomic.fire udp_cnxs_ok ;
         Lwt.return trx
@@ -338,10 +333,10 @@ let udp_send t dst ?src_port dst_port bits =
     let send dst_ip =
         Udp.Pdu.make ~src_port:(Option.default dst_port src_port)
                      ~dst_port bits |>
-        Udp.Pdu.pack |>
-        Ip.Pdu.make Ip.Proto.udp t.my_ip dst_ip |>
-        Ip.Pdu.pack |>
-        t.eth.Eth.TRX.trx.tx ;
+            Udp.Pdu.pack |>
+            Ip.Pdu.make Ip.Proto.udp t.my_ip dst_ip |>
+            Ip.Pdu.pack |>
+            tx t.eth.Eth.TRX.trx ;
         Lwt.return () in
     match dst with
         | IPv4 dst_ip -> send dst_ip
@@ -360,25 +355,22 @@ let ip_recv t bits = match Ip.Pdu.unpack bits with
         let sock = hash_find_or_insert t.tcp_socks ip.Ip.Pdu.src (fun () ->
             let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto in
             let socks = make_tcp_socks ip_trx in
-            ip_trx.Tools.set_recv (tcp_sock_rx t socks) ;
-            ip_trx.Tools.set_emit t.eth.Eth.TRX.trx.tx ;
+            (tcp_sock_rx t socks) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
             socks) in
-        sock.ip_4_tcp.Tools.rx bits (* will handle fragmentation then pass payload to its emit function *)
+        rx sock.ip_4_tcp bits (* will handle fragmentation then pass payload to its emit function *)
     | Some ip when ip.Ip.Pdu.proto = Ip.Proto.udp ->
         let sock = hash_find_or_insert t.udp_socks ip.Ip.Pdu.src (fun () ->
             let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto in
             let socks = make_udp_socks ip_trx in
-            ip_trx.Tools.set_recv (udp_sock_rx t socks) ;
-            ip_trx.Tools.set_emit t.eth.Eth.TRX.trx.tx ;
+            (udp_sock_rx t socks) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
             socks) in
-        sock.ip_4_udp.Tools.rx bits
+        rx sock.ip_4_udp bits
     | Some ip when ip.Ip.Pdu.proto = Ip.Proto.icmp ->
         let ip_trx = hash_find_or_insert t.icmp_socks ip.Ip.Pdu.src (fun () ->
             let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto in
-            ip_trx.Tools.set_recv (icmp_rx t ip_trx) ;
-            ip_trx.Tools.set_emit t.eth.Eth.TRX.trx.tx ;
+            (icmp_rx t ip_trx) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
             ip_trx) in
-        ip_trx.Tools.rx bits
+        rx ip_trx bits
     | _ -> ()
 
 let make name ?gw ?search_sfx ?nameserver my_mac =
@@ -406,8 +398,8 @@ let make name ?gw ?search_sfx ?nameserver my_mac =
           tcp_server    = (fun src_port server_f -> tcp_server t src_port server_f) ;
           udp_server    = (fun src_port server_f -> udp_server t src_port server_f) ;
           signal_err    = (fun str -> signal_err t str) ;
-          rx            = (fun _n bits -> t.eth.Eth.TRX.trx.Tools.rx bits) ;
-          set_emit      = (fun _n f -> t.eth.Eth.TRX.trx.Tools.set_emit f) ;
+          dev           = { write = (fun bits -> rx t.eth.Eth.TRX.trx bits) ;
+                            set_read = (fun f -> t.eth.Eth.TRX.trx =-> f) } ;
           get_mac       = (fun () -> t.eth.Eth.TRX.get_source ()) ;
           get_ip        = (fun () -> if t.my_ip = Ip.Addr.zero then None else Some t.my_ip) ;
           arp_set       = (fun ip haddr_opt -> t.eth.Eth.TRX.arp_set (Ip.Addr.to_bitstring ip) haddr_opt) } in
@@ -418,7 +410,7 @@ let set_ip t ip =
     Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Setting my IP to %s" (Ip.Addr.to_string ip)))) ;
     t.my_ip <- ip ;
     t.eth.Eth.TRX.set_addresses [ Ip.Addr.to_bitstring t.my_ip ] ;
-    t.eth.Eth.TRX.trx.set_recv (ip_recv t)
+    ignore ((ip_recv t) <-= t.eth.Eth.TRX.trx)
 
 let make_static name ?gw ?search_sfx ?nameserver my_mac my_ip =
     let t = make name ?gw ?search_sfx ?nameserver my_mac in
@@ -448,7 +440,7 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
                             let pdu = Dhcp.Pdu.make_request ~mac:my_mac ~xid:dhcp.Dhcp.Pdu.xid ~name dhcp.Dhcp.Pdu.yiaddr dhcp.Dhcp.Pdu.server_id in
                             let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
                             let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Udp.Pdu.pack pdu) in
-                            t.eth.Eth.TRX.trx.tx (Ip.Pdu.pack pdu)
+                            tx t.eth.Eth.TRX.trx (Ip.Pdu.pack pdu)
                         | Some ({ Dhcp.Pdu.msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.ack ->
                             Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
                             (* TODO: set other params than IP *)
@@ -459,13 +451,16 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
     let rec send_discover () =
         if t.my_ip = Ip.Addr.zero then (
             Log.(log t.host_trx.logger Info (lazy "Sending DHCP DISCOVER")) ;
-            let pdu = Dhcp.Pdu.make_discover ~mac:my_mac ~name () in
-            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
-            let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Udp.Pdu.pack pdu) in
-            t.eth.Eth.TRX.trx.tx (Ip.Pdu.pack pdu) ;
+            Dhcp.Pdu.make_discover ~mac:my_mac ~name () |>
+                Dhcp.Pdu.pack |>
+                Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) |>
+                Udp.Pdu.pack |>
+                Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast |>
+                Ip.Pdu.pack |>
+                tx t.eth.Eth.TRX.trx ;
             Clock.delay (Clock.Interval.sec (5.+.(Random.float 3.))) send_discover ()
         ) in
-    t.eth.Eth.TRX.trx.set_recv dhcp_client ;
+    ignore (dhcp_client <-= t.eth.Eth.TRX.trx) ;
     (* The client should wait a random time between one and ten seconds to desynchronize
        the use of DHCP at startup - RFC 2131 *)
     Clock.delay (Clock.Interval.sec (1.+.(Random.float 9.))) send_discover () ;

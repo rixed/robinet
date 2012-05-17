@@ -88,17 +88,16 @@ let tcp_trx_of_socket sock =
         is_closed = false ;
         reader_running = false } in
     let trx =
-        { tx = tx t ;
-          rx = should_not_happen ;
-          set_emit = should_not_happen ;
-          set_recv = (fun f ->
-            (* trick: only start reading the socket when the receiver is set! *)
-            Log.(log logger Debug (lazy (Printf.sprintf "Set recv function"))) ;
-            t.recv <- f ;
-            if not t.reader_running then (
-                t.reader_running <- true ;
-                Lwt.ignore_result (reader t)
-            )) } in
+        { inp = { write = tx t ;
+                  set_read = (fun f ->
+                    (* trick: only start reading the socket when the receiver is set! *)
+                    Log.(log logger Debug (lazy (Printf.sprintf "Set recv function"))) ;
+                    t.recv <- f ;
+                    if not t.reader_running then (
+                        t.reader_running <- true ;
+                        Lwt.ignore_result (reader t))) } ;
+          out = { write = should_not_happen ;
+                  set_read = should_not_happen } } in
     { Tcp.TRX.trx       = trx ;
       Tcp.TRX.close     = close t ;
       Tcp.TRX.is_closed = (fun () -> t.is_closed) }
@@ -160,8 +159,7 @@ let make () =
       Host.tcp_server    = tcp_server ;
       Host.udp_server    = (fun _ _ -> todo "UDP server for localhost") ;
       Host.signal_err    = signal_err ;
-      Host.rx            = (fun _ _ -> ()) ;
-      Host.set_emit      = (fun _ _ -> ()) ;
+      Host.dev           = { write = ignore ; set_read = ignore } ;
       Host.get_mac       = (fun () -> todo "get the Eth mac addr of localhost") ;
       Host.get_ip        = (fun () -> todo "get the IP addr of localhost") ;
       Host.arp_set       = (fun _ _ -> todo "set ARP table of localhost") }

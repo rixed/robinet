@@ -28,20 +28,20 @@ let perform_get my_ip my_mac peer_ip ?nameserver ?gw ifname url =
     let iface = Pcap.openif ifname true "" 1800 in
     let get   = Printf.sprintf "GET %s HTTP/1.0\r\n\r\n" url in
     let host  = Host.make_static "tester" ?nameserver ?gw my_mac my_ip in
-    host.Host.trx.set_emit (Pcap.inject_pdu iface) ;
+    host.Host.dev.set_read (Pcap.inject_pdu iface) ;
     let run () =
         lwt tcp = host.Host.tcp_connect (Host.IPv4 peer_ip) (Tcp.Port.o 80) in
-        tcp.Tcp.TRX.trx.set_recv (fun bits ->
+        tcp.Tcp.TRX.trx.inp.set_read (fun bits ->
             if bitstring_is_empty bits then tcp.Tcp.TRX.close ()) ;
         (* Send the get *)
-        tcp.Tcp.TRX.trx.tx (bitstring_of_string get) ;
+        tx tcp.Tcp.TRX.trx (bitstring_of_string get) ;
         let rec wait_close () =
             if tcp.Tcp.TRX.is_closed () then Lwt.return ()
             else
                 lwt _ = Lwt_main.yield () in wait_close () in
         wait_close ()
     in
-    Lwt.choose [ Pcap.sniffer iface host.Host.trx.rx ;
+    Lwt.choose [ Pcap.sniffer iface host.Host.dev.write ;
                  Clock.run true ;
                  run () ]
 

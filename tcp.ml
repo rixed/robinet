@@ -222,10 +222,10 @@ struct
         if t.rcvd_acked < t.rcvd_pld then emit_one t empty_bitstring
 
     let rec trx_of t =
-        { trx = { tx = tx t ;
-                  rx = rx t ;
-                  set_emit = (fun f -> t.emit <- f) ;
-                  set_recv = (fun f -> t.recv <- f) } ;
+        { trx = { inp = { write = tx t ;
+                          set_read = fun f -> t.recv <- f } ;
+                  out = { write = rx t ;
+                          set_read = fun f -> t.emit <- f } } ;
           close = close t ;
           is_closed = is_closed t }
 

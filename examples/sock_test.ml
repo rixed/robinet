@@ -26,7 +26,7 @@ open Tools
 let server_f _h tcp bits =
     Printf.printf "Server received '%s'\n" (string_of_bitstring bits) ;
     if bitstring_length bits > 0 then
-        tcp.Tcp.TRX.trx.tx bits  (* echo *)
+        tx tcp.Tcp.TRX.trx bits  (* echo *)
     else (
         Printf.printf "Closing\n" ;
         tcp.Tcp.TRX.close ()
@@ -42,14 +42,14 @@ let run () =
     and hub = Hub.Repeater.make 3
     in
     let gigabit = Eth.limited (Clock.Interval.msec 1.) 1_000_000_000. in
-    h1.Host.trx.set_emit (gigabit (Hub.Repeater.rx 0 hub)) ;
-    Hub.Repeater.set_emit 0 hub (gigabit h1.Host.trx.rx) ;
-    h2.Host.trx.set_emit (gigabit (Hub.Repeater.rx 1 hub)) ;
-    Hub.Repeater.set_emit 1 hub (gigabit h2.Host.trx.rx) ;
+    h1.Host.dev.set_read (gigabit (Hub.Repeater.rx 0 hub)) ;
+    Hub.Repeater.set_emit 0 hub (gigabit h1.Host.dev.write) ;
+    h2.Host.dev.set_read (gigabit (Hub.Repeater.rx 1 hub)) ;
+    Hub.Repeater.set_emit 1 hub (gigabit h2.Host.dev.write) ;
     (* Save everything into sock_test.pcap *)
     Hub.Repeater.set_emit 2 hub (Pcap.save "sock_test.pcap") ;
     (* Start a server on h1 *)
-    h1.Host.tcp_server (Tcp.Port.o 7) (fun tcp -> tcp.Tcp.TRX.trx.set_recv (server_f h1 tcp)) ;
+    h1.Host.tcp_server (Tcp.Port.o 7) (fun tcp -> tcp.Tcp.TRX.trx.inp.set_read (server_f h1 tcp)) ;
     (* Client connects and write a msg *)
     let client_f tcp bits =
         Printf.printf "Client received '%s'\n" (string_of_bitstring bits) ;
@@ -61,8 +61,8 @@ let run () =
         )
     in
     lwt tcp = h2.Host.tcp_connect (Host.IPv4 (Ip.Addr.of_string "192.168.0.1")) (Tcp.Port.o 7) in
-    tcp.Tcp.TRX.trx.set_recv (client_f tcp) ;
-    tcp.Tcp.TRX.trx.tx (bitstring_of_string "Hello world!") ;
+    tcp.Tcp.TRX.trx.inp.set_read (client_f tcp) ;
+    tx tcp.Tcp.TRX.trx (bitstring_of_string "Hello world!") ;
     Lwt.return ()
 
 let main =

@@ -158,10 +158,10 @@ v}
                   in_cnxs_h = Hashtbl.create nb_max_cnxs ;
                   out_cnxs_h = Hashtbl.create nb_max_cnxs ;
                   emit = ignore ; recv = ignore } in
-        { tx = tx t ;
-          rx = rx t ;
-          set_emit = (fun f -> t.emit <- f) ;
-          set_recv = (fun f -> t.recv <- f) }
+        { inp = { write = tx t ;
+                  set_read = fun f -> t.recv <- f } ;
+          out = { write = rx t ;
+                  set_read = fun f -> t.emit <- f } }
 end
 
 (** A router is a device with N IP transmitters and a routing
@@ -216,7 +216,7 @@ struct
                 t.route_tbl) in
             if o <> n then (
                 if debug then Printf.printf "Router: forwarding packet to port %d\n" o ;
-                t.trxs.(o).tx bits
+                tx t.trxs.(o) bits
             ) else (
                 if debug then Printf.printf "Router: dropping packet since dest = source\n" ;
             )
@@ -226,7 +226,7 @@ struct
     (** Change the emitter of port N. Note that the emitter may also be preset in the trx array given to [make]. *)
     let set_emit n t emit =
         if debug then Printf.printf "Router: setting emmitter for port %d\n" n ;
-        t.trxs.(n).set_emit emit
+        t.trxs.(n) =-> emit
 
     (** Build a [t] routing through these {!Tools.trx} according to the given routing table. *)
     let make trxs route_tbl =
@@ -237,7 +237,7 @@ struct
                 0 route_tbl in
         assert (max_used_port < Array.length trxs) ;
         let t = { trxs ; route_tbl } in
-        Array.iteri (fun i trx -> trx.set_recv (rx i t)) trxs ;
+        Array.iteri (fun i trx -> trx.inp.set_read (rx i t)) trxs ;
         t
 
     let make_from_addrs addrs route_tbl =

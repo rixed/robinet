@@ -80,7 +80,7 @@ let serve host port f =
         (* once we obtain the transport layer, build an http on top of it *)
         Log.(log logger Debug (lazy "Building a new HTTP.TRXtop")) ;
         let http = TRXtop.make () in
-        TRXtop.set_emit http tcp.Tcp.TRX.trx.tx ;
+        TRXtop.set_emit http (tx tcp.Tcp.TRX.trx) ;
         TRXtop.set_recv http (function
             | TRXtop.HttpError x ->
                 Log.(log logger Debug (lazy (Printf.sprintf "Got error %s" x))) ;
@@ -101,7 +101,7 @@ let serve host port f =
                     TRXtop.tx http { Pdu.cmd = Status 500 ; Pdu.headers = [] ; Pdu.body = "" } ;
                     tcp.Tcp.TRX.close ())) ;
         (* Only when everything's set up do we connect the tcp recv to http rx *)
-        tcp.Tcp.TRX.trx.set_recv (TRXtop.rx http))
+        ignore ((TRXtop.rx http) <-= tcp.Tcp.TRX.trx))
 
 let print_vars oc vars =
     Printf.fprintf oc "%a" (Hashtbl.print String.print String.print) vars

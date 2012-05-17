@@ -422,10 +422,10 @@ module TRX = struct
         ensure ((mtu mod 8) = 0) "Ip: MTU is required to be a multiple of 8 bytes" ;
         let t = { src ; dst ; proto ; mtu ;
                   emit = ignore ; recv = ignore } in
-        { tx = tx t ;
-          rx = rx t ;
-          set_emit = (fun f -> t.emit <- f) ;
-          set_recv = (fun f -> t.recv <- f) }
+        { inp = { write = tx t ;
+                  set_read = fun f -> t.recv <- f } ;
+          out = { write = rx t ;
+                  set_read = fun f -> t.emit <- f } }
 
 end
 

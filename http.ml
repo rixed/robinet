@@ -332,10 +332,10 @@ struct
                 if not opened then t.recv empty_bitstring
             | TRXtop.HttpError x ->
                     if debug then Printf.printf "Http: Error: %s\n" x) ;
-        { tx = tx t ;
-          rx = rx t ;
-          set_emit = (fun f -> TRXtop.set_emit t.top f) ;
-          set_recv = (fun f -> t.recv <- f) }
+        { inp = { write = tx t ;
+                  set_read = fun f -> t.recv <- f } ;
+          out = { write = rx t ;
+                  set_read = fun f -> TRXtop.set_emit t.top f } }
 
 end
 

@@ -25,11 +25,11 @@ let run () =
                     assert (id = 42 && seq = 1)
                 | _ -> error "Bad msg payload") in
     (* Connect everything *)
-    my_recv <-= ip ==> eth.Eth.TRX.trx =-> host.Host.trx.rx ;
-    host.Host.trx =-> eth.Eth.TRX.trx.rx ;
+    my_recv <-= ip ==> eth.Eth.TRX.trx =-> host.Host.dev.write ;
+    host.Host.dev.set_read (rx eth.Eth.TRX.trx) ;
     (* Send an echo request *)
     let req = Icmp.Pdu.make_echo_request 42 1 in
-    ip.tx (Icmp.Pdu.pack req) ;
+    tx ip (Icmp.Pdu.pack req) ;
     Lwt.join [ Clock.run false ]
 
 let main =

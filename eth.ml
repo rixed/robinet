@@ -345,10 +345,10 @@ struct
                   mtu ; promisc ; my_addresses ;
                   arp_cache = BitHash.create 3 ;
                   delayed = BitHash.create 3 } in
-        { trx = { tx = tx t ;
-                  rx = rx t ;
-                  set_emit = (fun f -> t.emit <- f) ;
-                  set_recv = (fun f -> t.recv <- f) } ;
+        { trx = { inp = { write = tx t ;
+                          set_read = fun f -> t.recv <- f } ;
+                  out = { write = rx t ;
+                          set_read = fun f -> t.emit <- f ; } } ;
           set_promiscuous = (fun f -> t.promisc <- f) ;
           set_addresses = (fun l -> t.my_addresses <- l) ;
           get_source = (fun () -> t.src) ;
