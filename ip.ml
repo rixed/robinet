@@ -214,6 +214,9 @@ module Cidr = struct
       ((random |- to_string), identity) (fun t -> t = to_string (of_string t))
      *)
 
+    (** Build a CIDR from a single address *)
+    let single ip = o (ip, 32)
+
     let mem (t : t) (ip : Addr.t) =
         let net, width = (t :> Addr.t * int) in
         let a = takebits width (BITSTRING { (net :> int32) : 32 })

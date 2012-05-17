@@ -319,6 +319,9 @@ end
  * receiving function *)
 type dev = { write : bitstring -> unit ; set_read : (bitstring -> unit) -> unit }
 
+(** For those cases when you want to build a [trx] from a single [dev] *)
+let null_dev = { write = ignore ; set_read = ignore }
+
 (** A transmiter is a kind of pipe with an input and an output device, is
  * oriented from inside to outside (inside being le left operand for following
  * functions), that transforms the writen payload before emitting it. *)

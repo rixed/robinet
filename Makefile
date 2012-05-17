@@ -1,20 +1,34 @@
 top_srcdir = ./
 PKG_NAME = robinet
 SOURCES  = \
-	tools.ml clock.ml log.ml \
-	persist.ml peg.ml \
+	tools.ml \
+	clock.ml \
+	log.ml \
+	persist.ml \
+	peg.ml \
 	metric.ml \
-	dns.ml url.ml http.ml \
-	tcp.ml udp.ml \
-	ip.ml icmp.ml arp.ml \
-	vlan.ml eth.ml dhcp.ml \
+	dns.ml \
+	url.ml \
+	http.ml \
+	tcp.ml \
+	udp.ml \
+	ip.ml \
+	icmp.ml \
+	arp.ml \
+	vlan.ml \
+	eth.ml \
+	dhcp.ml \
 	sll.ml \
-	pcap.ml packet.ml \
-	hub.ml router.ml \
-	host.ml localhost.ml \
-	html.ml browser.ml \
+	pcap.ml \
+	packet.ml \
+	hub.ml \
+	host.ml \
+	localhost.ml \
+	html.ml \
+	browser.ml \
 	net.ml \
 	dhcpd.ml \
+	router.ml \
 	opache.ml \
 	myadmin.ml \
 

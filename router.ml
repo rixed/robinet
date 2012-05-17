@@ -164,7 +164,7 @@ v}
                   set_read = fun f -> t.emit <- f } }
 end
 
-(** A router is a device with N IP transmitters and a routing
+(** A router is a device with N IP/Eth devices and a routing
  * table with rules on interface number, Ip addresses, proto, ports. *)
 module Router =
 struct
@@ -295,7 +295,33 @@ struct
     (*$>*)
 end
 
-(** A gateway is a host with 2 Eth interfaces, with a public IP address
+(** A gateway is a device with 2 Eth interfaces, with a public IP address
  * and a private network address, performing routing between these two,
- * NAT and DHCP for the LAN. *)
-(* TODO *)
+ * NAT and DHCP for the LAN. The returned TRX is seen from the LAN (ie, tx
+ * for going out) *)
+let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
+    let local_ips = Ip.Cidr.to_enum local_cidr in
+    let my_ip = Enum.get_exn local_ips in
+    let dhcpd = Host.make_static "gw" (Eth.Addr.random ()) my_ip in
+    let dhcpd_trx = { inp = dhcpd.Host.dev ;
+                      out = null_dev } in
+    let nat = Nat.make public_ip nb_max_cnxs in
+    let lan_if = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring my_ip ] in
+    let rec inp = { write = (fun bits -> Router.rx 0 router bits) ;
+                    set_read = (fun f -> Router.set_emit 0 router f) }
+    and out = { write = rx nat ;
+                set_read = nat.out.set_read }
+    and router =
+        Router.(make [| lan_if.Eth.TRX.trx ; dhcpd_trx ; nat |]
+                    [| (* route everything from anywhere to dhcpd is my_ip is dest *)
+                       { iface_num = None ; src_mask = None ;
+                         dst_mask = Some (Ip.Cidr.single my_ip) ;
+                         ip_proto = None ; src_port = None ; dst_port = None }, 1 ;
+                       (* route everything from anywhere to LAN if dest fit local_cidr *)
+                       { iface_num = None ; src_mask = None ; dst_mask = Some local_cidr ;
+                         ip_proto = None ; src_port = None ; dst_port = None }, 0 ;
+                       (* route everything else toward nat *)
+                       { iface_num = None ; src_mask = None ; dst_mask = None ;
+                         ip_proto = None ; src_port = None ; dst_port = None }, 2 |]) in
+    Dhcpd.serve dhcpd local_ips ;
+    { inp ; out }
