@@ -230,18 +230,15 @@ struct
 
     type dst = Delayed | Dst of Addr.t
     let arp_resolve_ipv4 t bits sender_ip target_ip =
-        if target_ip = (Ip.Addr.to_bitstring Ip.Addr.broadcast) then Dst Addr.broadcast
-        else (
-            try Dst (Option.get (BitHash.find t.arp_cache target_ip)) ;
-            with Not_found ->
-                if debug then Printf.printf "Eth: Cannot find HW addr for '%s' in ARP cache\n%!" (hexstring_of_bitstring target_ip) ;
-                BitHash.add t.arp_cache target_ip None ;
-                resolve_proto_addr t bits sender_ip target_ip ;
-                Delayed
-               | Invalid_argument _ ->
-                if debug then Printf.printf "Eth: HW addr for '%s' is still resolving\n%!" (hexstring_of_bitstring target_ip) ;
-                Delayed
-        )
+        try Dst (Option.get (BitHash.find t.arp_cache target_ip)) ;
+        with Not_found ->
+            if debug then Printf.printf "Eth: Cannot find HW addr for '%s' in ARP cache\n%!" (hexstring_of_bitstring target_ip) ;
+            BitHash.add t.arp_cache target_ip None ;
+            resolve_proto_addr t bits sender_ip target_ip ;
+            Delayed
+           | Invalid_argument _ ->
+            if debug then Printf.printf "Eth: HW addr for '%s' is still resolving\n%!" (hexstring_of_bitstring target_ip) ;
+            Delayed
 
     let dst_for t bits =
         let arp_resolve_ipv4_pld pld =
@@ -249,20 +246,45 @@ struct
                 let sender_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.src
                 and target_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.dst in
                 Some (arp_resolve_ipv4 t bits sender_ip target_ip)) in
-        match t.gw with
-        | None -> (* FIXME: or if the routes tells us that dest in on the same LAN than us *)
+        let arp_resolve_ieee8021q_pld pld =
+            Option.Monad.bind (Vlan.Pdu.unpack pld) (fun vlan ->
+                if vlan.Vlan.Pdu.proto = Arp.HwProto.ip4 then
+                    arp_resolve_ipv4_pld (vlan.Vlan.Pdu.payload :> bitstring)
+                else None) in
+        let arp_resolve_pld pld =
             if t.proto = Arp.HwProto.ip4 then (
-                arp_resolve_ipv4_pld bits
+                arp_resolve_ipv4_pld pld
             ) else if t.proto = Arp.HwProto.ieee8021q then (
-                Option.Monad.bind (Vlan.Pdu.unpack bits) (fun vlan ->
-                    if vlan.Vlan.Pdu.proto = Arp.HwProto.ip4 then
-                        arp_resolve_ipv4_pld (vlan.Vlan.Pdu.payload :> bitstring)
-                    else None)
+                arp_resolve_ieee8021q_pld pld
             ) else (
                 err "Don't know how to resolve address for this protocol"
-            )
-        | Some (Mac addr) -> Some (Dst addr)
-        | Some (IPv4 ip)  -> Some (arp_resolve_ipv4 t bits (List.hd t.my_addresses) (Ip.Addr.to_bitstring ip))
+            ) in
+        let target_ip_opt pld =
+            let target_ip_of pdu =
+                Option.Monad.bind (Ip.Pdu.unpack pdu) (fun ip ->
+                    Some ip.Ip.Pdu.dst) in
+            if t.proto = Arp.HwProto.ip4 then
+                target_ip_of pld
+            else if t.proto = Arp.HwProto.ieee8021q then
+                Option.Monad.bind (Vlan.Pdu.unpack pld) (fun vlan ->
+                    if vlan.Vlan.Pdu.proto = Arp.HwProto.ip4 then
+                        target_ip_of (vlan.Vlan.Pdu.payload :> bitstring)
+                    else None)
+            else None in
+        if target_ip_opt bits = Some Ip.Addr.broadcast then Some (Dst Addr.broadcast) else
+        match t.gw with
+        | None -> (* FIXME: or if our netmasks tell us that dest is on the same LAN than us *)
+            if debug then Printf.printf "No GW, resolving with ARP\n%!" ;
+            arp_resolve_pld bits
+        | Some (Mac addr) ->
+            if debug then Printf.printf "Using MAC of GW\n%!" ;
+            Some (Dst addr)
+        | Some (IPv4 ip)  ->
+            if debug then Printf.printf "Using GW which IP is %s\n%!" (Ip.Addr.to_string ip) ;
+            let sender_ip = match t.my_addresses with
+                | my_ip::_ -> my_ip
+                | []       -> Ip.Addr.zero |> Ip.Addr.to_bitstring (* maybe take the source IP from the payload? *) in
+            Some (arp_resolve_ipv4 t bits sender_ip (Ip.Addr.to_bitstring ip))
 
     (** Transmit function. [tx t payload] Will send the payload. *)
     let tx t bits =
