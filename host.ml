@@ -36,6 +36,7 @@ type host_trx = {
     tcp_connect   : addr -> ?src_port:Tcp.Port.t -> Tcp.Port.t -> Tcp.TRX.tcp_trx Lwt.t ;
     udp_connect   : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> (Udp.TRX.udp_trx -> bitstring -> unit) -> Udp.TRX.udp_trx Lwt.t ;
     udp_send      : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> bitstring -> unit Lwt.t ;
+    ping          : ?id:int -> ?seq:int -> addr -> unit Lwt.t ;
     gethostbyname : string -> Ip.Addr.t list Lwt.t ;
     tcp_server    : Tcp.Port.t -> (Tcp.TRX.tcp_trx -> unit) -> unit ;
     udp_server    : Udp.Port.t -> (Udp.TRX.udp_trx -> unit) -> unit ;
@@ -130,8 +131,9 @@ let icmp_rx _t ip_trx bits =
         | Some icmp when Icmp.Pdu.is_echo_request icmp ->
             (match icmp.Icmp.Pdu.payload with
                 | Icmp.Pdu.Ids (id, seq, _) ->
-                    let reply = Icmp.Pdu.make_echo_reply id seq in
-                    tx ip_trx (Icmp.Pdu.pack reply)
+                    Icmp.Pdu.make_echo_reply id seq |>
+                    Icmp.Pdu.pack |>
+                    tx ip_trx
                 | _ -> should_not_happen ())
         | _ -> ()
 
@@ -344,6 +346,24 @@ let udp_send t dst ?src_port dst_port bits =
             lwt dst_ips = gethostbyname t name in
             send (List.hd dst_ips)
 
+let ping t ?(id=1) ?(seq=1) dst =
+    let do_ping dst_ip =
+        Icmp.Pdu.make_echo_request id seq |>
+        Icmp.Pdu.pack |>
+        Ip.Pdu.make Ip.Proto.icmp t.my_ip dst_ip |>
+        Ip.Pdu.pack |>
+        tx t.eth.Eth.TRX.trx ;
+        Lwt.return () in
+    match dst with
+        | IPv4 dst_ip ->
+            do_ping dst_ip
+        | Name name ->
+            lwt dst_ips = gethostbyname t name in
+            if dst_ips <> [] then
+                do_ping (List.hd dst_ips)
+            else
+                Lwt.fail (Failure ("Cannot resolve "^name))
+
 
 let tcp_server t src_port server_f = Hashtbl.add t.tcp_servers src_port server_f
 let udp_server t src_port server_f = Hashtbl.add t.udp_servers src_port server_f
@@ -351,6 +371,7 @@ let udp_server t src_port server_f = Hashtbl.add t.udp_servers src_port server_f
 (* the recv of the eth is responsible for handling the payload to the correct Ip.TRX *)
 let ip_recv t bits = match Ip.Pdu.unpack bits with
     | None -> ()
+    (* Shouldn't we check first that the dest IP is my_ip? or broadcast? *)
     | Some ip when ip.Ip.Pdu.proto = Ip.Proto.tcp ->
         let sock = hash_find_or_insert t.tcp_socks ip.Ip.Pdu.src (fun () ->
             let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto in
@@ -376,7 +397,7 @@ let ip_recv t bits = match Ip.Pdu.unpack bits with
 let make name ?gw ?search_sfx ?nameserver my_mac =
     let rec t =
         { my_ip       = Ip.Addr.zero ;
-          eth         = Eth.TRX.make my_mac ?gw:gw Arp.HwProto.ip4 [] ; (* FIXME: ne pas utiliser le gw systématiquement. Il faudrait vraissemblablement des routes, avec un eth par route ip *)
+          eth         = Eth.TRX.make my_mac ?gw Arp.HwProto.ip4 [] ; (* FIXME: Don't use the GW for samenet IP! *)
           tcp_socks   = Hashtbl.create 11 ;
           udp_socks   = Hashtbl.create 11 ;
           icmp_socks  = Hashtbl.create 11 ;
@@ -394,6 +415,7 @@ let make name ?gw ?search_sfx ?nameserver my_mac =
           tcp_connect   = (fun addr ?src_port dst -> tcp_connect t addr ?src_port dst) ;
           udp_connect   = (fun dst ?src_port dst_port client_f -> udp_connect t dst ?src_port dst_port client_f) ;
           udp_send      = (fun dst ?src_port dst_port bits -> udp_send t dst ?src_port dst_port bits) ;
+          ping          = (fun ?id ?seq dst -> ping t ?id ?seq dst) ;
           gethostbyname = (fun name -> gethostbyname t name) ;
           tcp_server    = (fun src_port server_f -> tcp_server t src_port server_f) ;
           udp_server    = (fun src_port server_f -> udp_server t src_port server_f) ;
@@ -437,7 +459,7 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
                         | Some ({ Dhcp.Pdu.msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.offer ->
                             Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Got DHCP OFFER from %s" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
                             (* TODO: check the Xid? *)
-                            let pdu = Dhcp.Pdu.make_request ~mac:my_mac ~xid:dhcp.Dhcp.Pdu.xid ~name dhcp.Dhcp.Pdu.yiaddr dhcp.Dhcp.Pdu.server_id in
+                            let pdu = Dhcp.Pdu.make_request ~mac:(t.eth.Eth.TRX.get_source ()) ~xid:dhcp.Dhcp.Pdu.xid ~name dhcp.Dhcp.Pdu.yiaddr dhcp.Dhcp.Pdu.server_id in
                             let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
                             let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Udp.Pdu.pack pdu) in
                             tx t.eth.Eth.TRX.trx (Ip.Pdu.pack pdu)
@@ -451,7 +473,7 @@ let make_dhcp name ?gw ?search_sfx ?nameserver my_mac =
     let rec send_discover () =
         if t.my_ip = Ip.Addr.zero then (
             Log.(log t.host_trx.logger Info (lazy "Sending DHCP DISCOVER")) ;
-            Dhcp.Pdu.make_discover ~mac:my_mac ~name () |>
+            Dhcp.Pdu.make_discover ~mac:(t.eth.Eth.TRX.get_source ()) ~name () |>
                 Dhcp.Pdu.pack |>
                 Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) |>
                 Udp.Pdu.pack |>

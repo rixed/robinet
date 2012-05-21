@@ -155,6 +155,7 @@ let make () =
       Host.tcp_connect   = tcp_connect ;
       Host.udp_connect   = (fun _ ?src_port _ _ -> ignore src_port ; todo "UDP connect for localhost") ;
       Host.udp_send      = (fun _ ?src_port _ _ -> ignore src_port ; todo "UDP send for localhost") ;
+      Host.ping          = (fun ?id ?seq _ -> ignore id ; ignore seq ; todo "Ping from localhost") ;
       Host.gethostbyname = gethostbyname ;
       Host.tcp_server    = tcp_server ;
       Host.udp_server    = (fun _ _ -> todo "UDP server for localhost") ;
