@@ -75,16 +75,7 @@ struct
     let forward_from inp t bits = bitmatch bits with
         | { dst : 6*8 : bitstring ;
             src : 6*8 : bitstring } ->
-            (* forward *)
-            (match BitHash.find_option t.macs_h dst with
-            | None ->
-                if debug then Printf.printf "Switch: unknown dest %s, broadcasting\n%!"
-                    (Eth.Addr.to_string (Eth.Addr.o dst)) ;
-                R.forward_from inp t.hub bits
-            | Some n ->
-                t.hub.Repeater.ports.((OrdArray.get t.macs n).port).Repeater.emit bits ;
-                OrdArray.promote t.macs n) ;
-            (* update mac table *)
+            (* update mac table for source (before forwarding!) *)
             (match BitHash.find_option t.macs_h src with
             | None ->
                 if debug then Printf.printf "Switch: new mac %s\n%!" (Eth.Addr.to_string (Eth.Addr.o src)) ;
@@ -103,6 +94,15 @@ struct
                         (Eth.Addr.to_string (Eth.Addr.o src)) n inp ;
                     mac.port <- inp
                 ) ;
+                OrdArray.promote t.macs n) ;
+            (* now forward *)
+            (match BitHash.find_option t.macs_h dst with
+            | None ->
+                if debug then Printf.printf "Switch: unknown dest %s, broadcasting\n%!"
+                    (Eth.Addr.to_string (Eth.Addr.o dst)) ;
+                R.forward_from inp t.hub bits
+            | Some n ->
+                t.hub.Repeater.ports.((OrdArray.get t.macs n).port).Repeater.emit bits ;
                 OrdArray.promote t.macs n)
         | { _ } ->
             if debug then Printf.printf "Switch: drop incoming frame without destonator\n%!"
