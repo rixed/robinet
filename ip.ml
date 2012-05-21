@@ -238,11 +238,53 @@ module Cidr = struct
         Enum.init (1 lsl l) (fun i ->
             Addr.of_bitstring (BITSTRING { prefix : width : bitstring ;
                                            Int64.of_int i : l }))
-    (*$= to_enum
+    (*$= to_enum & ~printer:dump
       [ "192.168.10.42" ] (to_enum (of_string "192.168.10.42/32") /@ \
                            Addr.to_dotted_string |> \
                            List.of_enum)
      *)
+
+    (** Returns the subnet-zero address of a CIDR *)
+    let zero_addr (t : t) =
+        let net, width = (t :> Addr.t * int) in
+        let prefix = takebits width (BITSTRING { (net :> int32) : 32 }) in
+        Addr.of_bitstring (Bitstring.concat [ prefix ; zeroes_bitstring (if width >= 32 then 0 else 32 - width) ])
+    (*$= zero_addr & ~printer:identity
+      "192.168.1.0" (zero_addr (of_string "192.168.1.0/28") |> \
+                     Addr.to_dotted_string)
+     *)
+
+    (** Returns the all-ones address of a CIDR *)
+    let all1s_addr (t : t) =
+        let net, width = (t :> Addr.t * int) in
+        let prefix = takebits width (BITSTRING { (net :> int32) : 32 }) in
+        Addr.of_bitstring (Bitstring.concat [ prefix ; ones_bitstring (if width >= 32 then 0 else 32 - width) ])
+    (*$= all1s_addr & ~printer:identity
+      "192.168.1.15"  (all1s_addr (of_string "192.168.1.0/28") |> \
+                       Addr.to_dotted_string)
+      "192.168.2.255" (all1s_addr (of_string "192.168.2.0/24") |> \
+                       Addr.to_dotted_string)
+     *)
+
+    (** Returns the set (as an [Enum]) of all IP addresses in the given CIDR range (that is, all minus
+     * subnet zero and all-ones subnet). For /32, returns the /32 singleton. For /31, return the empty
+     * enum. *)
+    let local_addrs (t : t) =
+        let net, width = (t :> Addr.t * int) in
+        if width >= 32 then Enum.singleton net else
+        let zero = zero_addr t and all1s = all1s_addr t in
+        to_enum t // (fun ip -> ip <> zero && ip <> all1s)
+    (*$= local_addrs & ~printer:dump
+      [ "192.168.10.42" ] (local_addrs (of_string "192.168.10.42/32") /@ \
+                           Addr.to_dotted_string |> \
+                           List.of_enum)
+      []                  (local_addrs (of_string "192.168.10.42/31") \
+                           |> List.of_enum)
+      [ "192.168.0.1" ; "192.168.0.2" ] \
+                          (local_addrs (of_string "192.168.0.0/30") /@ \
+                           Addr.to_dotted_string |> \
+                           List.of_enum)
+    *)
 
     let random_addrs t n =
         to_enum t |> Random.multi_choice n
