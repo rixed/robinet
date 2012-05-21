@@ -43,7 +43,7 @@ let debug = false
        1) pipe sauve tous les inputs envoyés au premier parseur pour Failer avec ces imputs
        2) le premier parseur n'ai pas d'état interne. *)
 
-type ('a, 'b) parzer_result = Wait | Res of ('a * 'b list) | Fail
+type ('a, 'b) parzer_result = Wait | Res of 'a * 'b list | Fail
 type ('a, 'b) parzer = 'b list (* tokens to add *) -> bool (* more to come *) -> ('a, 'b) parzer_result
 
 let print_intlist oc l =
@@ -284,9 +284,9 @@ let either ps =
             (match p bs m with
                 | Wait ->
                     Wait
-                | Res x ->
+                | Res (x, y) ->
                     ps' := ps ; prev_bs := [] ;
-                    Res x
+                    Res (x, y)
                 | Fail -> (* start over with another parser *)
                     let bs' = !prev_bs in
                     ps' := ps'' ; prev_bs := [] ;

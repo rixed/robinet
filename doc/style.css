@@ -14,10 +14,10 @@ font-family: 'Electrolize', sans-serif; // for code
     padding: 0;
     border: 0 none;
     outline: 0;
-    font-size: 100%; 
+    font-size: 100%;
     font-weight: inherit;
     font-style: inherit;
-    font-family: inherit; 
+    font-family: inherit;
     line-height: inherit;
     vertical-align: baseline;
     text-align: inherit;
@@ -33,15 +33,15 @@ table {
 /* Center body on page */
 body {
     margin: auto;
-    font-size: 1em;
-    line-height: 1.39em; 
-    font-family: "Rosarivo", helvetica, arial, sans-serif; 
+    font-size: 100%;
+    line-height: 1.125em;
+    font-family: "Rosarivo", helvetica, arial, sans-serif;
     font-weight: 400;
     text-align: left;
     padding: 1.375em 1.85em 3em 1.375em;
-    min-width: 20ex;
-    max-width: 90ex;
-    color: black; 
+    min-width: 20em;
+    max-width: 50em;
+    color: black;
 }
 
 tt, code, pre {
@@ -55,7 +55,7 @@ code {
 .superscript, .subscript {
     font-size: 0.813em;
     line-height: 0;
-    margin-left: 0.4ex;
+    margin-left: 0.4em;
 }
 .superscript { vertical-align: super; }
 .subscript { vertical-align: sub; }
@@ -79,7 +79,7 @@ div.info {
     padding-bottom: 0.8em;
 }
 
-/*center { text-align: left } 
+/*center { text-align: left }
 center + br + pre { margin-bottom:1.375em}*/ /* Toplevel module description */
 
 /* Sections and document divisions */
@@ -98,12 +98,12 @@ h1, h2, h3, h4 {
 }
 
 p { margin-top: 1.375em; padding-left: 0.5em; }
-pre { margin-top: 1.375em; }
+/*pre { margin-top: 1.375em; }*/
 pre, code, table { padding-left: 0.4em; }
-.info { margin: 0.458em 0em -0.458em 2ex;}/* Description of types values etc. */
-td .info { margin:0; padding:0; margin-left: 2ex;} /* Description in indexes */
+.info { margin: 0.458em 0em -0.458em 2em;}/* Description of types values etc. */
+td .info { margin:0; padding:0; margin-left: 2em;} /* Description in indexes */
 
-ul, ol { margin-top:0.688em; padding-bottom:0.687em;  
+ul, ol { margin-top:0.688em; padding-bottom:0.687em;
      list-style-position:outside}
 ul + p, ol + p { margin-top: 0em }
 ul { list-style-type: square }
@@ -114,7 +114,7 @@ ul > li { margin-left: 1.375em; }
 ol > li { margin-left: 1.7em; }
 /* Links */
 
-a, a:link, a:visited, a:active, a:hover { color : #00B; text-decoration: none } 
+a, a:link, a:visited, a:active, a:hover { color : #00B; text-decoration: none }
 a:hover { text-decoration : underline }
 *:target {background-color: #FFFF99;} /* anchor highlight */
 
@@ -129,8 +129,8 @@ a:hover { text-decoration : underline }
 
 /* Functors */
 
-.paramstable { border-style : hidden ; padding-bottom:1.375em} 
-.paramstable code { margin-left: 1ex; margin-right: 1ex }
+.paramstable { border-style : hidden ; padding-bottom:1.375em}
+.paramstable code { margin-left: 1em; margin-right: 1em }
 .sig_block {margin-left: 1em}
 
 

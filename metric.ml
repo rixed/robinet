@@ -188,7 +188,7 @@ let rec report_thread oc period =
 type item = Atomic of Atomic.t
           | Counter of Counter.t
           | Timed of Timed.t
-          | Tree of (string * tree)
+          | Tree of string * tree
 and tree = item list
 
 let tree () =

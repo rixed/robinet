@@ -79,7 +79,7 @@ let make name nodes cables = { name ; nodes ; cables }
 
 let empty name = make name [] []
 
-exception Cannot_parse of (string * string)
+exception Cannot_parse of string * string
 
 let hub_of_csv str =
     let make_hub name x y nb_ports =

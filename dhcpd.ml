@@ -93,7 +93,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
     srv.Host.dev.set_read clt.Host.dev.write ;
     clt.Host.dev.set_read srv.Host.dev.write ;
     Lwt_main.run (Clock.run false) ;
+    Clock.realtime := true ;
     assert_bool "Client got an IP" (clt.Host.get_ip () <> None) ;
-    assert_bool "IP is within net" (Ip.Cidr.mem my_net (Option.get (clt.Host.get_ip ()))) ;
-    Clock.realtime := true
+    assert_bool "IP is within net" (Ip.Cidr.mem my_net (Option.get (clt.Host.get_ip ())))
  *)

@@ -96,7 +96,7 @@ let string_of_code (c : code) =
 let print_code fmt (c : code) =
     Format.fprintf fmt "@{<code>%s@}" (string_of_code c)
 
-type cmd = Status of code | Request of (string (* post, get... *) * string (* URL *))
+type cmd = Status of code | Request of string (* post, get... *) * string (* URL *)
 type header  = string * string
 
 let string_of_headers headers =
@@ -127,9 +127,9 @@ struct
 
     (* An HTTP parser *)
 
-    type parse_item = [ `HttpRequest of (string * string)
-                      | `HttpResponse of (int * string)
-                      | `HttpHeaders of (header list) ]
+    type parse_item = [ `HttpRequest of string * string
+                      | `HttpResponse of int * string
+                      | `HttpHeaders of header list ]
 
     let make_request req path ?(body="") headers =
         { cmd = Request (req, path) ;
@@ -265,7 +265,7 @@ module TRXtop =
 struct
     type result =
         | HttpError of string
-        | HttpMsg of (Pdu.t * bool (* tells weither the underlying transport is still open *))
+        | HttpMsg of Pdu.t * bool (* tells weither the underlying transport is still open *)
     type t = { parzer  : (Pdu.t, char) parzer ; (* The parser we use for reconstructing the PDU *)
                mutable emit : bitstring -> unit ;
                mutable recv : result -> unit }
