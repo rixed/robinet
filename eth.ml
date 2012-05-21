@@ -321,7 +321,7 @@ struct
                                 merge_flag := true ;
                                 BitHash.replace t.arp_cache arp.Arp.Pdu.sender_proto (Some sender_hw)
                             ) ;
-                            if debug then Printf.printf "Eth:...concerning '%s' (I'm '%s')\n" (hexstring_of_bitstring arp.Arp.Pdu.target_proto) (hexstring_of_bitstring (List.hd t.my_addresses)) ;
+                            if debug then Printf.printf "Eth:...concerning '%s' (I'm '%s')\n" (hexstring_of_bitstring arp.Arp.Pdu.target_proto) (if t.my_addresses <> [] then hexstring_of_bitstring (List.hd t.my_addresses) else "nobody") ;
                             if List.exists (Bitstring.equals arp.Arp.Pdu.target_proto) t.my_addresses then (
                                 if debug then Printf.printf "Eth:...It's about me!!\n%!" ;
                                 if not !merge_flag then (
