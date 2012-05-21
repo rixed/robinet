@@ -101,8 +101,10 @@ v}
     (** bits are flowing from LAN to outside world *)
     let tx t bits =
         match Ip.Pdu.unpack_with_ports bits with
-        | None -> ()
+        | None ->
+            if debug then Printf.printf "NAT: ignoring packet of %d bytes since it's not IP\n%!" (bytelength bits)
         | Some (ip, src_port, dst_port) ->
+            if debug then Printf.printf "NAT: transmitting packet of %d bytes from %s:%d to %s:%d\n%!" (bytelength bits) (Ip.Addr.to_string ip.Ip.Pdu.src) src_port (Ip.Addr.to_string ip.Ip.Pdu.dst) dst_port ;
             (* Do we already follow this socket? *)
             let out_sock = {       proto = ip.Ip.Pdu.proto ;
                                 nat_port = dst_port ;
@@ -132,6 +134,7 @@ v}
             t.emit (Ip.Pdu.pack ip)
 
     let rx t bits =
+        if debug then Printf.printf "NAT: Received %d bytes\n%!" (bytelength bits) ;
         Ip.Pdu.unpack_with_ports bits |>
         Option.bind (fun (ip, src_port, dst_port) ->
             let in_sock = {       proto = ip.Ip.Pdu.proto ;
@@ -150,7 +153,7 @@ v}
 
     (** [make ip n] returns a {!Tools.trx} corresponding to a NAT device (tx is for transmitting from the LAN to the outside) that can track [n] sockets. *)
     let make addr nb_max_cnxs =
-        if debug then Printf.printf "router: Creating a NATer for IP %s, with %d cnxs max\n%!" (Ip.Addr.to_string addr) nb_max_cnxs ;
+        if debug then Printf.printf "NAT: Creating a NATer for IP %s, with %d cnxs max\n%!" (Ip.Addr.to_string addr) nb_max_cnxs ;
         let t = { addr ;
                   cnxs = OrdArray.make nb_max_cnxs { in_addr = Ip.Addr.zero ;
                                                      in_port = 0 ;
@@ -199,7 +202,7 @@ struct
     (** A router is an array of trxs and a route table *)
     (* FIXME: add a logger *)
     type t = {      trxs : trx array ;
-               route_tbl : (route * int) array }    (** The route table is an array of route to output interface index. *)
+               route_tbl : (route * int array) array }    (** The route table is an array of route to output interface indices. *)
 
     (** Call [rx n t bits] when an IP packet ([bits]) is received on interface [n]. *)
     let rx n t bits =
@@ -211,15 +214,16 @@ struct
         and proto_opt = Option.map (fun ip -> ip.Ip.Pdu.proto) ip_opt
         and src_port_opt = Option.map Tuple3.second ip_ports_opt
         and dst_port_opt = Option.map Tuple3.second ip_ports_opt in
-        try let o = snd (Array.find (fun (r, _) ->
+        try snd (Array.find (fun (r, _) ->
                 test_route r n src_opt dst_opt proto_opt src_port_opt dst_port_opt)
-                t.route_tbl) in
+                t.route_tbl) |>
+        Array.iter (fun o ->
             if o <> n then (
                 if debug then Printf.printf "Router: forwarding packet to port %d\n" o ;
                 tx t.trxs.(o) bits
             ) else (
                 if debug then Printf.printf "Router: dropping packet since dest = source\n" ;
-            )
+            ))
         with Not_found ->
             if debug then Printf.printf "Router: dropping packet since no route match\n"
 
@@ -232,8 +236,10 @@ struct
     let make trxs route_tbl =
         (* Check we route only from/to the given ports *)
         let max_used_port =
-            Array.fold_left (fun prev (r, o) ->
-                max prev (max o (Option.default 0 r.iface_num)))
+            Array.fold_left (fun prev (r, outs) ->
+                Array.fold_left max 0 outs |>
+                max (Option.default 0 r.iface_num) |>
+                max prev)
                 0 route_tbl in
         assert (max_used_port < Array.length trxs) ;
         let t = { trxs ; route_tbl } in
@@ -254,11 +260,11 @@ struct
                        Ip.Addr.of_string "192.168.3.254", Eth.Addr.random () |] in
         (* With the obvious rules: *)
         let route_tbl = [| { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Cidr.of_string "192.168.1.0/24") ;
-                             ip_proto = None ; src_port = None ; dst_port = None }, 0 ;
+                             ip_proto = None ; src_port = None ; dst_port = None }, [|0|] ;
                            { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Cidr.of_string "192.168.2.0/24") ;
-                             ip_proto = None ; src_port = None ; dst_port = None }, 1 ;
+                             ip_proto = None ; src_port = None ; dst_port = None }, [|1|] ;
                            { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Cidr.of_string "192.168.3.0/24") ;
-                             ip_proto = None ; src_port = None ; dst_port = None }, 2 |] in
+                             ip_proto = None ; src_port = None ; dst_port = None }, [|2|] |] in
         let router = make_from_addrs (Array.enum addrs) route_tbl in
         
         (* Now we will count incoming packets from each port (ARP requests, actually) : *)
@@ -300,28 +306,54 @@ end
  * NAT and DHCP for the LAN. The returned TRX is seen from the LAN (ie, tx
  * for going out) *)
 let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
-    let local_ips = Ip.Cidr.to_enum local_cidr in
-    let my_ip = Enum.get_exn local_ips in
-    let dhcpd = Host.make_static "gw" (Eth.Addr.random ()) my_ip in
-    let dhcpd_trx = { inp = dhcpd.Host.dev ;
-                      out = null_dev } in
+    let local_ips = Ip.Cidr.local_addrs local_cidr in
+    let hub = Hub.Repeater.make 3 in
+    let gw_ip = Enum.get_exn local_ips in   (* first IP if the subnet is the GW *)
+    let dhcpd_ip = Enum.get_exn local_ips in
+    let dhcpd = Host.make_static "dhcpd" (Eth.Addr.random ()) dhcpd_ip in
+    Hub.Repeater.set_emit 1 hub dhcpd.Host.dev.write ;
+    dhcpd.Host.dev.set_read (Hub.Repeater.rx 1 hub) ;
+    let gw_eth = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring gw_ip ] in
+    Hub.Repeater.set_emit 2 hub gw_eth.Eth.TRX.trx.out.write ;
+    gw_eth.Eth.TRX.trx.out.set_read (Hub.Repeater.rx 2 hub) ;
     let nat = Nat.make public_ip nb_max_cnxs in
-    let lan_if = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring my_ip ] in
-    let rec inp = { write = (fun bits -> Router.rx 0 router bits) ;
-                    set_read = (fun f -> Router.set_emit 0 router f) }
-    and out = { write = rx nat ;
-                set_read = nat.out.set_read }
-    and router =
-        Router.(make [| lan_if.Eth.TRX.trx ; dhcpd_trx ; nat |]
-                    [| (* route everything from anywhere to dhcpd is my_ip is dest *)
-                       { iface_num = None ; src_mask = None ;
-                         dst_mask = Some (Ip.Cidr.single my_ip) ;
-                         ip_proto = None ; src_port = None ; dst_port = None }, 1 ;
-                       (* route everything from anywhere to LAN if dest fit local_cidr *)
+    let router = Router.(make [| gw_eth.Eth.TRX.trx ; nat |]
+                    [| (* route everything from anywhere to LAN if dest fits local_cidr *)
                        { iface_num = None ; src_mask = None ; dst_mask = Some local_cidr ;
-                         ip_proto = None ; src_port = None ; dst_port = None }, 0 ;
+                         ip_proto = None ; src_port = None ; dst_port = None }, [|0|] ;
+                       (* or zero IP address *)
+                       { iface_num = None ; src_mask = Some (Ip.Cidr.single Ip.Addr.zero) ; dst_mask = None ;
+                         ip_proto = None ; src_port = None ; dst_port = None }, [|0|] ;
                        (* route everything else toward nat *)
                        { iface_num = None ; src_mask = None ; dst_mask = None ;
-                         ip_proto = None ; src_port = None ; dst_port = None }, 2 |]) in
+                         ip_proto = None ; src_port = None ; dst_port = None }, [|1|] |]) in
+    nat.inp.set_read (Router.rx 1 router) ;
     Dhcpd.serve dhcpd local_ips ;
-    { inp ; out }
+    { inp = { write = (fun bits -> Hub.Repeater.rx 0 hub bits) ;
+              set_read = fun f -> Hub.Repeater.set_emit 0 hub f } ;
+      out = nat.out }
+(*$R make_gw
+    (*Log.console_lvl := Log.Debug ;*)
+    Clock.realtime := false ;
+    let public_ip = Ip.Addr.of_string "80.82.17.127" in
+    let gw = make_gw public_ip (Ip.Cidr.of_string "192.168.0.0/16") in
+    let desktop = Host.make_dhcp "desktop"
+                                 ~gw:(Eth.IPv4 (Ip.Addr.of_string "192.168.0.1"))
+                                 (Eth.Addr.random ()) in
+    desktop.Host.dev.set_read gw.inp.write ;
+    ignore (desktop.Host.dev.write <-= gw) ;
+    let output_if = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring public_ip ] in (* imagine we are connected to the outside world through ethernet *)
+    let server_ip = Ip.Addr.of_string "42.43.44.45" in
+    let server_eth = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring server_ip ] in
+    let src = ref None in
+    let server_recv bits = (* check source IP is the public one (NATed) *)
+        let ip = Ip.Pdu.unpack bits |> Option.get in
+        src := Some ip.Ip.Pdu.src in
+    ignore (server_recv <-= server_eth.Eth.TRX.trx) ;
+    gw ==> output_if.Eth.TRX.trx <==> server_eth.Eth.TRX.trx ;
+    Clock.delay (Clock.Interval.sec 10.) (fun () ->
+        Lwt.ignore_result (desktop.Host.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring)) () ;
+    Lwt_main.run (Clock.run false) ;
+    Clock.realtime := true ;
+    assert_bool "Desktop was NATed" (!src = Some public_ip)
+ *)
