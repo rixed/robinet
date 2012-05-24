@@ -322,17 +322,22 @@ type dev = { write : bitstring -> unit ; set_read : (bitstring -> unit) -> unit 
 (** For those cases when you want to build a [trx] from a single [dev] *)
 let null_dev = { write = ignore ; set_read = ignore }
 
-(** A transmiter is a kind of pipe with an input and an output device, is
- * oriented from inside to outside (inside being le left operand for following
- * functions), that transforms the writen payload before emitting it. *)
-type trx = { inp : dev ; out : dev }
+(** Connects two {!dev} together *)
+let (---) a b =
+    a.set_read b.write ;
+    b.set_read a.write
 
-let tx trx = trx.inp.write
+(** A transmiter is a kind of pipe with an inside and an outside device, is
+ * thus oriented (from inside to outside, inside being le left operand for following
+ * functions), that transforms the writen payload before emitting it. *)
+type trx = { ins : dev ; out : dev }
+
+let tx trx = trx.ins.write
 let rx trx = trx.out.write
 let set_emit trx = trx.out.set_read
-let set_recv trx = trx.inp.set_read
+let set_recv trx = trx.ins.set_read
 
-let inverse_trx trx = { inp = trx.out ; out = trx.inp }
+let inverse_trx trx = { ins = trx.out ; out = trx.ins }
 
 (** [f <-= trx] sets f as the receive function of this [trx].
  * {b Note:} [trx] is returned so that you can write such things as:
@@ -347,7 +352,7 @@ let (=->) trx f =
 
 (** [a ==> b] connects [a] to [b] such that [b] transmits what [a] emits. *)
 let (==>) trx1 trx2 =
-    trx1 =-> trx2.inp.write ;
+    trx1 =-> trx2.ins.write ;
     trx1.out.write <-= trx2
 
 (** [a <==> b] connects [a] to [b] such that [b] receives what [a] emits

@@ -31,7 +31,7 @@ let perform_get my_ip my_mac peer_ip ?nameserver ?gw ifname url =
     host.Host.dev.set_read (Pcap.inject_pdu iface) ;
     let run () =
         lwt tcp = host.Host.tcp_connect (Host.IPv4 peer_ip) (Tcp.Port.o 80) in
-        tcp.Tcp.TRX.trx.inp.set_read (fun bits ->
+        tcp.Tcp.TRX.trx.ins.set_read (fun bits ->
             if bitstring_is_empty bits then tcp.Tcp.TRX.close ()) ;
         (* Send the get *)
         tx tcp.Tcp.TRX.trx (bitstring_of_string get) ;

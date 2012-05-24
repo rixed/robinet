@@ -33,7 +33,7 @@ let tunnel ifname tun_ip tun_mac gw search_sfx nameserver dst dst_port src_port 
     let connect_tunnel tcp =
         Printf.printf "Tunnel: We are now connected!\n%!" ;
         http =-> (tx tcp.Tcp.TRX.trx) ;
-        tcp.Tcp.TRX.trx.inp.set_read (fun bits ->
+        tcp.Tcp.TRX.trx.ins.set_read (fun bits ->
             if bitstring_is_empty bits then (
                 (* close the socket *)
                 Printf.printf "Tunnel: The HTTP connection was closed\n%!" ;

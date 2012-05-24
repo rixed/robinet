@@ -161,7 +161,7 @@ v}
                   in_cnxs_h = Hashtbl.create nb_max_cnxs ;
                   out_cnxs_h = Hashtbl.create nb_max_cnxs ;
                   emit = ignore ; recv = ignore } in
-        { inp = { write = tx t ;
+        { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;
           out = { write = rx t ;
                   set_read = fun f -> t.emit <- f } }
@@ -243,7 +243,7 @@ struct
                 0 route_tbl in
         assert (max_used_port < Array.length trxs) ;
         let t = { trxs ; route_tbl } in
-        Array.iteri (fun i trx -> trx.inp.set_read (rx i t)) trxs ;
+        Array.iteri (fun i trx -> trx.ins.set_read (rx i t)) trxs ;
         t
 
     let make_from_addrs addrs route_tbl =
@@ -327,9 +327,9 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
                        (* route everything else toward nat *)
                        { iface_num = None ; src_mask = None ; dst_mask = None ;
                          ip_proto = None ; src_port = None ; dst_port = None }, [|1|] |]) in
-    nat.inp.set_read (Router.rx 1 router) ;
+    nat.ins.set_read (Router.rx 1 router) ;
     Dhcpd.serve dhcpd local_ips ;
-    { inp = { write = (fun bits -> Hub.Repeater.rx 0 hub bits) ;
+    { ins = { write = (fun bits -> Hub.Repeater.rx 0 hub bits) ;
               set_read = fun f -> Hub.Repeater.set_emit 0 hub f } ;
       out = nat.out }
 (*$R make_gw
@@ -340,7 +340,7 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
     let desktop = Host.make_dhcp "desktop"
                                  ~gw:(Eth.IPv4 (Ip.Addr.of_string "192.168.0.1"))
                                  (Eth.Addr.random ()) in
-    desktop.Host.dev.set_read gw.inp.write ;
+    desktop.Host.dev.set_read gw.ins.write ;
     ignore (desktop.Host.dev.write <-= gw) ;
     let output_if = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring public_ip ] in (* imagine we are connected to the outside world through ethernet *)
     let server_ip = Ip.Addr.of_string "42.43.44.45" in

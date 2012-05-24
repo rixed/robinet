@@ -32,7 +32,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
     let leases = BitHash.create 8 in
     let logger = Log.(make (Printf.sprintf "%s/Dhcpd" host.Host.logger.name) 50) in
     host.Host.udp_server port (fun udp ->
-        udp.Udp.TRX.trx.inp.set_read (fun bits ->
+        udp.Udp.TRX.trx.ins.set_read (fun bits ->
             let src_port, dst_port = udp.Udp.TRX.get_ports () in
             match Pdu.unpack bits with
             | None ->

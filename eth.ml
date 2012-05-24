@@ -187,14 +187,8 @@ end
 
 (** {2 Transceiver} *)
 
-(** An Ethernet TRX accepts raw packets, unpack them and forward the payload
- * to a callback; and it can be given some payload to transmit and it will emit
- * it as an Ethernet frame.
- *
- * Create it with an {!Arp.HwProto.t}, a source {!Eth.Addr.t} and a default
- * {!Eth.gw_addr},  and it will find the destination address itself using ARP.
- * So this requires to know the protocol in advance, and the TRX will be able
- * to resolve addr for this proto only. *)
+(** An Ethernet TRX will convert from payload to Ethernet frames (resolving
+ * destinators using ARP), for a single {!Arp.HwProto.t}. *)
 module TRX =
 struct
     type t =
@@ -367,7 +361,7 @@ struct
                   mtu ; promisc ; my_addresses ;
                   arp_cache = BitHash.create 3 ;
                   delayed = BitHash.create 3 } in
-        { trx = { inp = { write = tx t ;
+        { trx = { ins = { write = tx t ;
                           set_read = fun f -> t.recv <- f } ;
                   out = { write = rx t ;
                           set_read = fun f -> t.emit <- f ; } } ;

@@ -72,7 +72,7 @@ struct
           macs = OrdArray.init nb_macs (fun _ -> { addr = None ; port = 0 }) ;
           macs_h = BitHash.create (nb_macs/10) }
 
-    let forward_from inp t bits = bitmatch bits with
+    let forward_from ins t bits = bitmatch bits with
         | { dst : 6*8 : bitstring ;
             src : 6*8 : bitstring } ->
             (* update mac table for source (before forwarding!) *)
@@ -84,15 +84,15 @@ struct
                 (match last.addr with None -> () | Some addr ->
                     BitHash.remove t.macs_h (addr :> bitstring)) ;
                 last.addr <- Some (Eth.Addr.o src) ;
-                last.port <- inp ;
+                last.port <- ins ;
                 BitHash.add t.macs_h src last_idx ;
                 OrdArray.promote t.macs last_idx
             | Some n ->
                 let mac = OrdArray.get t.macs n in
-                if mac.port <> inp then (
+                if mac.port <> ins then (
                     if debug then Printf.printf "Switch: host %s changed from port %d to %d\n"
-                        (Eth.Addr.to_string (Eth.Addr.o src)) n inp ;
-                    mac.port <- inp
+                        (Eth.Addr.to_string (Eth.Addr.o src)) n ins ;
+                    mac.port <- ins
                 ) ;
                 OrdArray.promote t.macs n) ;
             (* now forward *)
@@ -100,7 +100,7 @@ struct
             | None ->
                 if debug then Printf.printf "Switch: unknown dest %s, broadcasting\n%!"
                     (Eth.Addr.to_string (Eth.Addr.o dst)) ;
-                R.forward_from inp t.hub bits
+                R.forward_from ins t.hub bits
             | Some n ->
                 t.hub.Repeater.ports.((OrdArray.get t.macs n).port).Repeater.emit bits ;
                 OrdArray.promote t.macs n)

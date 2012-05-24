@@ -222,7 +222,7 @@ struct
         if t.rcvd_acked < t.rcvd_pld then emit_one t empty_bitstring
 
     let rec trx_of t =
-        { trx = { inp = { write = tx t ;
+        { trx = { ins = { write = tx t ;
                           set_read = fun f -> t.recv <- f } ;
                   out = { write = rx t ;
                           set_read = fun f -> t.emit <- f } } ;

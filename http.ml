@@ -265,7 +265,7 @@ module TRXtop =
 struct
     type result =
         | HttpError of string
-        | HttpMsg of Pdu.t * bool (* tells weither the underlying transport is still open *)
+        | HttpMsg of Pdu.t * bool (* tells whether the underlying transport is still open *)
     type t = { parzer  : (Pdu.t, char) parzer ; (* The parser we use for reconstructing the PDU *)
                mutable emit : bitstring -> unit ;
                mutable recv : result -> unit }
@@ -332,7 +332,7 @@ struct
                 if not opened then t.recv empty_bitstring
             | TRXtop.HttpError x ->
                     if debug then Printf.printf "Http: Error: %s\n" x) ;
-        { inp = { write = tx t ;
+        { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;
           out = { write = rx t ;
                   set_read = fun f -> TRXtop.set_emit t.top f } }

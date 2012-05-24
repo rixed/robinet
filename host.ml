@@ -97,7 +97,7 @@ let tcp_sock_rx t socks bits =
                             let server = try Hashtbl.find t.tcp_servers tcp.Tcp.Pdu.dst_port
                                          with Not_found -> raise No_socket in
                             let trx = Tcp.TRX.accept tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port in
-                            trx.Tcp.TRX.trx =-> socks.ip_4_tcp.inp.write ;
+                            trx.Tcp.TRX.trx =-> socks.ip_4_tcp.ins.write ;
                             server trx ; (* supposed to set the recver of this tcp trx *)
                             trx
                         ) else raise No_socket) in
@@ -117,7 +117,7 @@ let udp_sock_rx t socks bits =
                         let server = try Hashtbl.find t.udp_servers udp.Udp.Pdu.dst_port
                                      with Not_found -> raise No_socket in
                         let trx = Udp.TRX.make udp.Udp.Pdu.dst_port udp.Udp.Pdu.src_port in
-                        trx.Udp.TRX.trx =-> socks.ip_4_udp.inp.write ;
+                        trx.Udp.TRX.trx =-> socks.ip_4_udp.ins.write ;
                         server trx ; (* supposed to set the recver of this udp trx *)
                         trx) in
                 rx trx.Udp.TRX.trx bits
@@ -258,7 +258,7 @@ and tcp_connect t dst ?src_port dst_port =
         let socks = hash_find_or_insert t.tcp_socks dst_ip (fun () ->
             let trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.tcp in
             let socks = make_tcp_socks trx in
-            (tcp_sock_rx t socks) <-= trx =-> t.eth.Eth.TRX.trx.inp.write ;
+            (tcp_sock_rx t socks) <-= trx =-> t.eth.Eth.TRX.trx.ins.write ;
             socks) in
         lwt src_port = match src_port with
             | None ->
@@ -284,7 +284,7 @@ and tcp_connect t dst ?src_port dst_port =
         match trx_opt with
         | Some trx ->
             (* connect this tcp to the underlaying ip *)
-            trx.Tcp.TRX.trx =->  socks.ip_4_tcp.inp.write ;
+            trx.Tcp.TRX.trx =->  socks.ip_4_tcp.ins.write ;
             Hashtbl.add socks.tcps (src_port, dst_port) trx ;
             Metric.Atomic.fire tcp_cnxs_ok ;
             Lwt.return trx
@@ -308,7 +308,7 @@ and udp_connect t dst ?src_port dst_port client_f =
         let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
             let trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.udp in
             let socks = make_udp_socks trx in
-            (udp_sock_rx t socks) <-= trx =-> t.eth.Eth.TRX.trx.inp.write ;
+            (udp_sock_rx t socks) <-= trx =-> t.eth.Eth.TRX.trx.ins.write ;
             socks) in
         let src_port = may_default src_port (fun () -> Udp.Port.o (Random.int 0x10000)) in
         let key = src_port, dst_port in
@@ -318,7 +318,7 @@ and udp_connect t dst ?src_port dst_port client_f =
         ) else
         let trx = Udp.TRX.make src_port dst_port in
         (* connect this udp to the underlaying ip *)
-        (client_f trx) <-= trx.Udp.TRX.trx =-> socks.ip_4_udp.inp.write ;
+        (client_f trx) <-= trx.Udp.TRX.trx =-> socks.ip_4_udp.ins.write ;
         Hashtbl.add socks.udps key trx ;
         Metric.Atomic.fire udp_cnxs_ok ;
         Lwt.return trx

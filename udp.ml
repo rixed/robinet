@@ -93,7 +93,7 @@ struct
             if Payload.bitlength udp.Pdu.payload > 0 then t.recv (udp.Pdu.payload :> bitstring))
 
     let trx_of t =
-        { trx = { inp = { write = tx t ;
+        { trx = { ins = { write = tx t ;
                           set_read = fun f -> t.recv <- f } ;
                   out = { write = rx t;
                           set_read = fun f -> t.emit <- f } } ;

@@ -109,7 +109,7 @@ struct
     let make prio id proto =
         let t = { prio ; id ; proto ;
                   emit = ignore ; recv = ignore } in
-        { inp = { write = tx t ;
+        { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;
           out = { write = rx t ;
                   set_read = fun f -> t.emit <- f } }

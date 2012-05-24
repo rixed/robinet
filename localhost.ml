@@ -88,7 +88,7 @@ let tcp_trx_of_socket sock =
         is_closed = false ;
         reader_running = false } in
     let trx =
-        { inp = { write = tx t ;
+        { ins = { write = tx t ;
                   set_read = (fun f ->
                     (* trick: only start reading the socket when the receiver is set! *)
                     Log.(log logger Debug (lazy (Printf.sprintf "Set recv function"))) ;
