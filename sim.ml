@@ -35,13 +35,12 @@ open Tools
  * use the [union] function which will return the union of the two nets. *)
 module Net =
 struct
-    (** A plug is a named gateway between two networks.
+    (** A plug is a named entry point to a networks.
      * The name is there to suggest an usage but is not used internally. *)
     module Plug = struct
         type t = {     name : string ; (** name *)
-                         rx : bitstring -> unit ; (** the rx function for incomming packets *)
-                   set_emit : (bitstring -> unit) -> unit } (** to set the emitting function for outgoing traffic *)
-        let make name rx set_emit = { name ; rx ; set_emit }
+                        dev : dev }
+        let make name dev = { name ; dev }
     end
 
     type equipment = Host of Host.host_trx
@@ -91,8 +90,7 @@ struct
     let connect ?plug1 t1 ?plug2 t2 = Result.Monad.(
         find_named_plug t1 plug1 >>= (fun p1 ->
             find_named_plug t2 plug2 >>= (fun p2 ->
-                p1.Plug.set_emit p2.Plug.rx ;
-                p2.Plug.set_emit p1.Plug.rx ;
+                p1.Plug.dev <--> p2.Plug.dev ;
                 Ok ())))
 
     (** Return a net representing the external network via the given interface,
@@ -101,7 +99,8 @@ struct
         let iface = Pcap.openif iface_name true "" 1800 in
         let emit = ref ignore in
         { equip = [] ;
-          plugs = [ Plug.make iface_name (Pcap.inject_pdu iface) (fun em -> emit := em) ] },
+          plugs = [ Plug.make iface_name { write = Pcap.inject_pdu iface ;
+                                           set_read = fun em -> emit := em} ] },
         Pcap.sniffer iface (fun bits -> !emit bits)
 
     (** Returns a net with an unlimited supply of plugs that performs as a router. *)
@@ -110,9 +109,7 @@ struct
         let nb_ports = 100 in
         let sw = Hub.Switch.make nb_ports 5000 in
         let plugs = List.init nb_ports (fun i ->
-            let rx = Hub.Switch.rx i sw
-            and set_emit = Hub.Switch.set_emit i sw in
-            Plug.make "" rx set_emit) in
+            Plug.make "" (Hub.Switch.to_dev i sw)) in
         { equip = [ Switch sw ] ; plugs }
 
     (** Returns a lan consisting of n hosts connected to a switch connected to a
@@ -121,20 +118,17 @@ struct
         let cidr = Ip.Cidr.of_string "192.168.0.0/16" in
         let gw = Router.make_gw public_ip cidr in
         let sw = Hub.Switch.make (n+1) (5*n) in
-        Hub.Switch.set_emit n sw gw.ins.write ;
-        gw.ins.set_read (Hub.Switch.rx n sw) ;
+        Hub.Switch.set_read n sw gw.ins.write ;
+        gw.ins.set_read (Hub.Switch.write n sw) ;
         let hosts = List.init n (fun i ->
             let h = Host.make_dhcp ("desktop_" ^ string_of_int i)
                                    ~gw:(Eth.IPv4 (Ip.Addr.of_string "192.168.0.1"))
                                    ?nameserver
                                    (Eth.Addr.random ()) in
-            h.Host.dev.set_read (Hub.Switch.rx i sw) ;
-            Hub.Switch.set_emit i sw h.Host.dev.write ;
+            h.Host.dev.set_read (Hub.Switch.write i sw) ;
+            Hub.Switch.set_read i sw h.Host.dev.write ;
             Host h) in
-        let plug =
-            Plug.make ""
-                (Hub.Switch.rx 0 sw)
-                (Hub.Switch.set_emit 0 sw) in
+        let plug = Plug.make "" (Hub.Switch.to_dev 0 sw) in
         { equip = (Switch sw) :: (Trx gw) :: hosts ; plugs = [ plug ] }
 
 end

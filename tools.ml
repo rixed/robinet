@@ -323,7 +323,7 @@ type dev = { write : bitstring -> unit ; set_read : (bitstring -> unit) -> unit 
 let null_dev = { write = ignore ; set_read = ignore }
 
 (** Connects two {!dev} together *)
-let (---) a b =
+let (<-->) a b =
     a.set_read b.write ;
     b.set_read a.write
 
@@ -334,8 +334,6 @@ type trx = { ins : dev ; out : dev }
 
 let tx trx = trx.ins.write
 let rx trx = trx.out.write
-let set_emit trx = trx.out.set_read
-let set_recv trx = trx.ins.set_read
 
 let inverse_trx trx = { ins = trx.out ; out = trx.ins }
 
@@ -343,12 +341,12 @@ let inverse_trx trx = { ins = trx.out ; out = trx.ins }
  * {b Note:} [trx] is returned so that you can write such things as:
  * [f <-= a <==> b] or [f1 <-= a =-> f2] *)
 let (<-=) f trx =
-    set_recv trx f ;
+    trx.ins.set_read f ;
     trx
 
 (** [trx =-> f] sets [f] as the emiting function of this [trx]. *)
 let (=->) trx f =
-    set_emit trx f
+    trx.out.set_read f
 
 (** [a ==> b] connects [a] to [b] such that [b] transmits what [a] emits. *)
 let (==>) trx1 trx2 =

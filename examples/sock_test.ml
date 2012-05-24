@@ -42,12 +42,12 @@ let run () =
     and hub = Hub.Repeater.make 3
     in
     let gigabit = Eth.limited (Clock.Interval.msec 1.) 1_000_000_000. in
-    h1.Host.dev.set_read (gigabit (Hub.Repeater.rx 0 hub)) ;
-    Hub.Repeater.set_emit 0 hub (gigabit h1.Host.dev.write) ;
-    h2.Host.dev.set_read (gigabit (Hub.Repeater.rx 1 hub)) ;
-    Hub.Repeater.set_emit 1 hub (gigabit h2.Host.dev.write) ;
+    h1.Host.dev.set_read (gigabit (Hub.Repeater.write 0 hub)) ;
+    Hub.Repeater.set_read 0 hub (gigabit h1.Host.dev.write) ;
+    h2.Host.dev.set_read (gigabit (Hub.Repeater.write 1 hub)) ;
+    Hub.Repeater.set_read 1 hub (gigabit h2.Host.dev.write) ;
     (* Save everything into sock_test.pcap *)
-    Hub.Repeater.set_emit 2 hub (Pcap.save "sock_test.pcap") ;
+    Hub.Repeater.set_read 2 hub (Pcap.save "sock_test.pcap") ;
     (* Start a server on h1 *)
     h1.Host.tcp_server (Tcp.Port.o 7) (fun tcp -> tcp.Tcp.TRX.trx.ins.set_read (server_f h1 tcp)) ;
     (* Client connects and write a msg *)

@@ -288,33 +288,33 @@ let instanciate t =
         | Note text ->
             Hashtbl.add notes name text in
     let connect_cable { plugs = a, b } =
-        (* return the rx function and set_emit function of the plug *)
+        (* return the write function and set_read function of the plug *)
         (* FIXME: handle when port number = -1 *)
-        let rx_of_plug = function
+        let dev_of_plug = function
             | HubPort (name, p) ->
                 Hashtbl.find_option hubs name |>
                     Option.map (fun hub ->
-                        Hub.Repeater.rx p hub, Hub.Repeater.set_emit p hub)
+                        Hub.Repeater.write p hub, Hub.Repeater.set_read p hub)
             | SwitchPort (name, p) ->
                 Hashtbl.find_option switches name |>
                     Option.map (fun sw ->
-                        Hub.Switch.rx p sw, Hub.Switch.set_emit p sw)
+                        Hub.Switch.write p sw, Hub.Switch.set_read p sw)
             | HostAdapter name ->
                 Hashtbl.find_option hosts name |>
                     Option.map (fun host ->
                         host.Host.dev.write, host.Host.dev.set_read) in
-        let a_rx = rx_of_plug a and b_rx = rx_of_plug b in
-        match a_rx, b_rx with
+        let a_dev = dev_of_plug a and b_dev = dev_of_plug b in
+        match a_dev, b_dev with
         | None, _ -> Print.printf p"Net: Cannot connect unknown node %{plug}\n%!" a
         | _, None -> Print.printf p"Net: Cannot connect unknown node %{plug}\n%!" b
-        | Some (a_rx, a_set_emit), Some (b_rx, b_set_emit) ->
+        | Some (a_dev, a_set_read), Some (b_dev, b_set_read) ->
             (* TODO: choose latency according to cable actual length *)
             (* TODO: choose throughput according to min of both adapters throughput *)
             (* TODO: add a flag for half/full duplex *)
             let latency = Clock.Interval.msec 10. and throughput = 1_000_000_000. in
             let half_dup = Eth.limited latency throughput in
-            a_set_emit (half_dup b_rx) ;
-            b_set_emit (half_dup a_rx)
+            a_set_read (half_dup b_dev) ;
+            b_set_read (half_dup a_dev)
     in
     List.iter create_node t.nodes ;
     List.iter connect_cable t.cables ;

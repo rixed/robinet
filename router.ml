@@ -204,8 +204,8 @@ struct
     type t = {      trxs : trx array ;
                route_tbl : (route * int array) array }    (** The route table is an array of route to output interface indices. *)
 
-    (** Call [rx n t bits] when an IP packet ([bits]) is received on interface [n]. *)
-    let rx n t bits =
+    (** Call [write n t bits] when an IP packet ([bits]) is received on interface [n]. *)
+    let write n t bits =
         if debug then Printf.printf "Router: rx from port %d\n" n ;
         let ip_opt = Ip.Pdu.unpack bits
         and ip_ports_opt = Ip.Pdu.unpack_with_ports bits in
@@ -228,9 +228,9 @@ struct
             if debug then Printf.printf "Router: dropping packet since no route match\n"
 
     (** Change the emitter of port N. Note that the emitter may also be preset in the trx array given to [make]. *)
-    let set_emit n t emit =
+    let set_read n t f =
         if debug then Printf.printf "Router: setting emmitter for port %d\n" n ;
-        t.trxs.(n) =-> emit
+        t.trxs.(n) =-> f
 
     (** Build a [t] routing through these {!Tools.trx} according to the given routing table. *)
     let make trxs route_tbl =
@@ -243,7 +243,7 @@ struct
                 0 route_tbl in
         assert (max_used_port < Array.length trxs) ;
         let t = { trxs ; route_tbl } in
-        Array.iteri (fun i trx -> trx.ins.set_read (rx i t)) trxs ;
+        Array.iteri (fun i trx -> trx.ins.set_read (write i t)) trxs ;
         t
 
     let make_from_addrs addrs route_tbl =
@@ -270,7 +270,7 @@ struct
         (* Now we will count incoming packets from each port (ARP requests, actually) : *)
         let counts = Array.create 3 0 in
         for i = 0 to Array.length counts - 1 do
-            set_emit i router (fun _ -> counts.(i) <- succ counts.(i))
+            set_read i router (fun _ -> counts.(i) <- succ counts.(i))
         done ;
         let tot_count () = Array.reduce (+) counts
         and reset_count () = Array.iteri (fun i _ -> counts.(i) <- 0) counts in
@@ -278,7 +278,7 @@ struct
         (* We are going to send some IP packets with a given destination: *)
         let easy_send n dst =
             let ip = { Ip.Pdu.random () with Ip.Pdu.dst = Ip.Addr.of_string dst } in
-            rx n router (Ip.Pdu.pack ip) in
+            write n router (Ip.Pdu.pack ip) in
 
         (* Let's play! *)
         easy_send 0 "1.2.3.4" ;
@@ -311,11 +311,11 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
     let gw_ip = Enum.get_exn local_ips in   (* first IP if the subnet is the GW *)
     let dhcpd_ip = Enum.get_exn local_ips in
     let dhcpd = Host.make_static "dhcpd" (Eth.Addr.random ()) dhcpd_ip in
-    Hub.Repeater.set_emit 1 hub dhcpd.Host.dev.write ;
-    dhcpd.Host.dev.set_read (Hub.Repeater.rx 1 hub) ;
+    Hub.Repeater.set_read 1 hub dhcpd.Host.dev.write ;
+    dhcpd.Host.dev.set_read (Hub.Repeater.write 1 hub) ;
     let gw_eth = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring gw_ip ] in
-    Hub.Repeater.set_emit 2 hub gw_eth.Eth.TRX.trx.out.write ;
-    gw_eth.Eth.TRX.trx.out.set_read (Hub.Repeater.rx 2 hub) ;
+    Hub.Repeater.set_read 2 hub gw_eth.Eth.TRX.trx.out.write ;
+    gw_eth.Eth.TRX.trx.out.set_read (Hub.Repeater.write 2 hub) ;
     let nat = Nat.make public_ip nb_max_cnxs in
     let router = Router.(make [| gw_eth.Eth.TRX.trx ; nat |]
                     [| (* route everything from anywhere to LAN if dest fits local_cidr *)
@@ -327,10 +327,10 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
                        (* route everything else toward nat *)
                        { iface_num = None ; src_mask = None ; dst_mask = None ;
                          ip_proto = None ; src_port = None ; dst_port = None }, [|1|] |]) in
-    nat.ins.set_read (Router.rx 1 router) ;
+    nat.ins.set_read (Router.write 1 router) ;
     Dhcpd.serve dhcpd local_ips ;
-    { ins = { write = (fun bits -> Hub.Repeater.rx 0 hub bits) ;
-              set_read = fun f -> Hub.Repeater.set_emit 0 hub f } ;
+    { ins = { write = (fun bits -> Hub.Repeater.write 0 hub bits) ;
+              set_read = fun f -> Hub.Repeater.set_read 0 hub f } ;
       out = nat.out }
 (*$R make_gw
     (*Log.console_lvl := Log.Debug ;*)

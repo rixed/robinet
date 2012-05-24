@@ -39,12 +39,12 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
     and gigabit = Eth.limited (Clock.Interval.msec 10.) 1_000_000_000. in
     List.iteri (fun i h ->
         (* notice that the cable is not full duplex *)
-        h.Host.dev.set_read (gigabit (Hub.Repeater.rx i hub)) ;
-        Hub.Repeater.set_emit i hub (gigabit h.Host.dev.write)
+        h.Host.dev.set_read (gigabit (Hub.Repeater.write i hub)) ;
+        Hub.Repeater.set_read i hub (gigabit h.Host.dev.write)
     ) hosts ;
     (* Link all these to the real world *)
     let iface = Pcap.openif ifname true "" 1500 in
-    Hub.Repeater.set_emit nb_srcs hub (Pcap.inject_pdu iface) ;
+    Hub.Repeater.set_read nb_srcs hub (Pcap.inject_pdu iface) ;
     (* Start the browsers *)
     let browsing_threads = List.map (fun h ->
         let browser = Browser.make h in
@@ -54,7 +54,7 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
     (* Prepare a timeout in 15s *)
     Clock.delay (Clock.Interval.sec 15.) failwith "timeout" ;
     (* Run everything *)
-    Lwt.choose ([ Pcap.sniffer iface (Hub.Repeater.rx nb_srcs hub) ;
+    Lwt.choose ([ Pcap.sniffer iface (Hub.Repeater.write nb_srcs hub) ;
                   Clock.run true ] @ browsing_threads)
 
 let main =

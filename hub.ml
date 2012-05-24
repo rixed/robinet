@@ -39,13 +39,17 @@ struct
                 port.emit pld
             )) t.ports
 
-    let rx n t pld =
+    let write n t pld =
         if debug then Printf.printf "Repeater: rx from port %d\n%!" n ;
         forward_from n t pld
 
-    let set_emit n t emit =
+    let set_read n t f =
         if debug then Printf.printf "Repeater: setting emitter for port %d\n%!" n ;
-        t.ports.(n).emit <- emit
+        t.ports.(n).emit <- f
+
+    (** Turns a port into a device *)
+    let to_dev n t =
+        { write = write n t ; set_read = set_read n t }
 
     let t_printer _paren oc t =
         Printf.fprintf oc "%d" (Array.length t.ports)
@@ -107,11 +111,16 @@ struct
         | { _ } ->
             if debug then Printf.printf "Switch: drop incoming frame without destonator\n%!"
 
-    let rx n t pld =
+    let write n t pld =
         if debug then Printf.printf "Switch: rx from port %d\n%!" n ;
         forward_from n t pld
 
-    let set_emit n t emit =
+    let set_read n t f =
         if debug then Printf.printf "Switch: setting emitter for port %d\n%!" n ;
-        Repeater.set_emit n t.hub emit
+        Repeater.set_read n t.hub f
+
+    (** Turns a port into a device *)
+    let to_dev n t =
+        { write = write n t ; set_read = set_read n t }
+
 end
