@@ -193,14 +193,17 @@ let file_content f =
 (** An OrdArray is a container for an ordered set of bounded size. *)
 module OrdArray =
 struct
-    type entry = { mutable prev : int ; mutable next : int }
+    (*$< OrdArray *)
+    type entry = { mutable prev : int ;
+                   mutable next : int }
     type 'a t =
         {     last_used : entry array ; (** The ordered list of indices. *)
           mutable first : int ;         (** The indice of the first element. *)
            mutable last : int ;         (** and the last one. *)
                    data : 'a array }    (** User data *)
 
-    let make_from_data s data =
+    let make_from_data data =
+        let s = Array.length data in
         { last_used = Array.init s (fun i ->
             { prev = if i = 0 then -1 else i-1 ;
               next = if i = s-1 then -1 else i+1 }) ;
@@ -208,8 +211,8 @@ struct
           last = s-1 ;
           data  }
 
-    let make s x = make_from_data s (Array.create s x)
-    let init s f = make_from_data s (Array.init s f)
+    let make s x = make_from_data (Array.create s x)
+    let init s f = make_from_data (Array.init s f)
 
     let get t n = t.data.(n)
     let set t n x = t.data.(n) <- x
@@ -234,6 +237,18 @@ struct
     let promote t n =
         remove t n ;
         add_head t n
+
+    (*$R promote
+        let oa = make_from_data [| 5;6;7 |] in
+        assert_equal ~printer:string_of_int ~msg:"order should be preserved at creation"
+            5 (get oa (first oa)) ;
+        promote oa 1 ;
+        assert_equal ~printer:string_of_int ~msg:"promoted item should come first"
+            6 (get oa (first oa)) ;
+        assert_equal ~printer:string_of_int ~msg:"but last one should not change"
+            7 (get oa (last oa))
+     *)
+    (*$>*)
 end
 
 
