@@ -31,6 +31,7 @@ SOURCES  = \
 	router.ml \
 	opache.ml \
 	myadmin.ml \
+	sim.ml \
 
 C_SOURCES = pcap_wrap.c eth_vendors.c
 CLIB = libpcapw.a
@@ -49,6 +50,7 @@ EXAMPLES_BYTE = \
 	examples/http_static_server.byte \
 	examples/beautify_mac.byte \
 	examples/test_ping.byte \
+	examples/simu_perfweb.byte \
 	examples/capecho.byte \
 
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
