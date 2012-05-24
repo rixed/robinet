@@ -118,8 +118,12 @@ module Addr = struct
     let eq (a : t) (b : t) =
         Bitstring.equals (a :> bitstring) (b :> bitstring)
 
-    (** Returns a random Ethernet address. *)
-    let random () = o (randbs 6) (* FIXME: avoir broadcast *)
+    (** Returns a random Ethernet address (but neither broadcast nor zero). *)
+    let rec random () =
+        let a = o (randbs 6) in
+        if eq a broadcast || eq a zero then random ()
+        else a
+
     (*$>*)
 end
 

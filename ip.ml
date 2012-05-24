@@ -137,8 +137,11 @@ module Addr = struct
         List.filter_map extract_addr (Unix.getaddrinfo str "" [])
     let of_string str = List.hd (list_of_string str)
 
-    (** Returns a random {!Ip.Addr.t}. *)
-    let random () = o (rand32 ())
+    (** Returns a random {!Ip.Addr.t} (apart from broadcast and zero). *)
+    let rec random () =
+        let a = o (rand32 ()) in
+        if a = broadcast || a = zero then random ()
+        else a
 
     (** This printer can be composed with others (for instance to print a list of ips.
      FIXME: always use batteries IO to print instead of Format printer? *)
