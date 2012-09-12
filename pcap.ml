@@ -366,7 +366,9 @@ let repair_file fname =
     let rec aux () =
         let ofs = counter () in
         let cont = try ignore (read_next_pkt global_header ic) ; true
-                   with IO.No_more_input | IO.Input_closed -> false in
+                   with IO.No_more_input
+                      | IO.Input_closed
+                      | Invalid_argument "BatIO.really_nread" -> false in
         if cont then aux () else ofs in
     Unix.truncate fname (24 (* global header *) + (aux ()))
 
