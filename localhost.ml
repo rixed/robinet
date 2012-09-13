@@ -30,55 +30,57 @@ let signal_err e =
     Printf.fprintf stderr "Localhost: %s\n%!" e
 
 type t =
-    { sock : Lwt_unix.file_descr ;
+    { sock : Unix.file_descr ;
       mutable recv : bitstring -> unit ;
       mutable is_closed : bool ;
-      mutable reader_running : bool }
+      mutable reader : Thread.t option }
 
 let tx t bits =
     let str = string_of_bitstring bits in
     Log.(log logger Debug (lazy (Printf.sprintf "Sending '%s'" (abbrev ~len:100 str)))) ;
     let rec aux o =
-        if o >= String.length str then Lwt.return ()
-        else (
-            lwt w = Lwt_unix.write t.sock str o ((String.length str)-o) in
+        if o < String.length str then (
+            let w = Unix.write t.sock str o ((String.length str)-o) in
             Log.(log logger Debug (lazy (Printf.sprintf "Just write %d bytes" w))) ;
             aux (o+w)
         ) in
-    Lwt.ignore_result (aux 0)   (* FIXME: if this actually blocks, we may end up writing things in mixed order. tx should enqueue the payload and another thread should perform the actual write. *)
+    ignore (aux 0)   (* FIXME: if this actually blocks, we may end up writing things in mixed order. tx should enqueue the payload and another thread should perform the actual write. *)
 
 let close t () =
     Log.(log logger Debug (lazy (Printf.sprintf "Closing socket"))) ;
     t.is_closed <- true ;
-    Lwt.ignore_result (Lwt_unix.close t.sock)
+    Unix.close t.sock ;
+    (* In case the closing of the fd is not enough: *)
+    match t.reader with
+    | None -> ()
+    | Some reader ->
+        Thread.kill reader ;
+        t.reader <- None
 
 let rec reader t =
-    if t.is_closed then Lwt.return () else
+    if not t.is_closed then
     let buf = String.create 1000 in
-    lwt r = Lwt.catch
-        (fun () ->
-            let r = Lwt_unix.read t.sock buf 0 (String.length buf) in
-            Clock.synch () ;
-            r)
-        (function
-            | Unix.Unix_error (error, func_name, _) ->
-                Clock.synch () ;
+    let r =
+        try Unix.read t.sock buf 0 (String.length buf)
+        with Unix.Unix_error (error, func_name, _) ->
                 Log.(log logger Info (lazy (Printf.sprintf "Unix_error: Cannot %s: %s" func_name (Unix.error_message error)))) ;
                 (* Can we get EINTR? I think not, so all errors are supposed fatal here *)
-                Lwt.return 0
-            | _ -> error "Cannot handle this exception in Unix.read") in
+                0
+            | _ -> 0 in
+    Clock.synch () ;
     Log.(log logger Debug (lazy (Printf.sprintf "Read %d bytes" r))) ;
-    if t.is_closed then Lwt.return () else (
+    if not t.is_closed then (
         if r > 0 then (
             let s = String.sub buf 0 r in
             Log.(log logger Debug (lazy (Printf.sprintf "Received '%s'" s))) ;
-            t.recv (bitstring_of_string s)
+            (* Use the Clock so that the recv function is called in main thread *)
+            Clock.asap t.recv (bitstring_of_string s) ;
+            reader t
         ) else if r = 0 then (
             Log.(log logger Debug (lazy (Printf.sprintf "Received EOF"))) ;
-            t.recv empty_bitstring ;
+            Clock.asap t.recv empty_bitstring ;
             t.is_closed <- true
-        ) ;
-        reader t
+        )
     )
 
 let tcp_trx_of_socket sock =
@@ -86,68 +88,71 @@ let tcp_trx_of_socket sock =
         sock = sock ;
         recv = ignore ;
         is_closed = false ;
-        reader_running = false } in
+        reader = None } in
     let trx =
         { ins = { write = tx t ;
                   set_read = (fun f ->
-                    (* trick: only start reading the socket when the receiver is set! *)
+                    (* trick: only start reading the socket when the receiver is set, so that buffering is handled by the kernel *)
                     Log.(log logger Debug (lazy (Printf.sprintf "Set recv function"))) ;
                     t.recv <- f ;
-                    if not t.reader_running then (
-                        t.reader_running <- true ;
-                        Lwt.ignore_result (reader t))) } ;
+                    if t.reader = None then t.reader <- Some (Thread.create reader t)) } ;
           out = { write = should_not_happen ;
                   set_read = should_not_happen } } in
     { Tcp.TRX.trx       = trx ;
       Tcp.TRX.close     = close t ;
       Tcp.TRX.is_closed = (fun () -> t.is_closed) }
 
-let gethostbyname name =
-    lwt h_entry = Lwt_unix.gethostbyname name in
+(* TODO: make use of another thread for an assynchronous gethostbyname *)
+let gethostbyname name cont =
+    let h_entry = Unix.gethostbyname name in
+    Clock.synch () ;
     Log.(log logger Debug (lazy (Printf.sprintf2 "Got these IPs for '%s': %a"
         name
         (Array.print Ip.inet_addr_print)
-        h_entry.Lwt_unix.h_addr_list))) ;
-    Array.enum h_entry.Lwt_unix.h_addr_list /@
+        h_entry.Unix.h_addr_list))) ;
+    let ips = Array.enum h_entry.Unix.h_addr_list /@
         Ip.Addr.of_inet_addr |>
-        List.of_enum |>
-        Lwt.return
+        List.of_enum in
+    cont (Some ips)
+    
 
-let tcp_connect dst ?src_port (dst_port : Tcp.Port.t) =
+let tcp_connect dst ?src_port (dst_port : Tcp.Port.t) cont =
     let connect_tcp_ inet_addr =
         Log.(log logger Debug (lazy (Printf.sprintf "Connecting to %s" (Unix.string_of_inet_addr inet_addr)))) ;
-        let sock = Lwt_unix.socket Lwt_unix.PF_INET Lwt_unix.SOCK_STREAM 0 in
+        let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
         Option.may (fun (port : Tcp.Port.t) ->
-            Lwt_unix.bind sock (Lwt_unix.ADDR_INET (Unix.inet_addr_any, (port :> int))))
+            Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_any, (port :> int))))
             src_port ;
-        lwt () = Lwt_unix.connect sock (Lwt_unix.ADDR_INET (inet_addr, (dst_port :> int))) in
-        Lwt.return (tcp_trx_of_socket sock)
+        Unix.connect sock (Unix.ADDR_INET (inet_addr, (dst_port :> int))) ;
+        cont (Some (tcp_trx_of_socket sock))
     in
     match dst with
         | Host.IPv4 dst_ip ->
             connect_tcp_ (Ip.Addr.to_inet_addr dst_ip)
         | Host.Name name ->
-            lwt dst_ips =
-                lwt h_entry = Lwt_unix.gethostbyname name in
+            let dst_ips =
+                (* FIXME: use Localhost.gethostbyname *)
+                let h_entry = Unix.gethostbyname name in
+                Clock.synch () ;
                 Log.(log logger Debug (lazy (Printf.sprintf2 "Got these IPs for '%s': %a"
                     name
                     (Array.print Ip.inet_addr_print)
-                    h_entry.Lwt_unix.h_addr_list))) ;
-                Lwt.return (h_entry.Lwt_unix.h_addr_list) in
+                    h_entry.Unix.h_addr_list))) ;
+                h_entry.Unix.h_addr_list in
             connect_tcp_ dst_ips.(0)
 
 let tcp_server src_port server_f =
     Log.(log logger Debug (lazy (Printf.sprintf "Establishing a server on port %s" (Tcp.Port.to_string src_port)))) ;
-    let sock = Lwt_unix.socket Lwt_unix.PF_INET Lwt_unix.SOCK_STREAM 0 in
-    Lwt_unix.setsockopt sock Lwt_unix.SO_REUSEADDR true ;
-    Lwt_unix.bind sock (Lwt_unix.ADDR_INET (Unix.inet_addr_any, (src_port :> int))) ;
-    Lwt_unix.listen sock 5 ;
+    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Unix.setsockopt sock Unix.SO_REUSEADDR true ;
+    Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_any, (src_port :> int))) ;
+    Unix.listen sock 5 ;
     let rec sock_server () =
-        lwt fd, _ = Lwt_unix.accept sock in
+        let fd, _ = Unix.accept sock in
         let trx = tcp_trx_of_socket fd in
         server_f trx ; (* supposed to set the recv of this trx *)
         sock_server () in (* accept next connection *)
-    Lwt.ignore_result (sock_server ())
+    sock_server ()
 
 let make () =
     { Host.name          = "localhost" ;

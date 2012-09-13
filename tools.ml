@@ -152,6 +152,8 @@ let rec remove_last_if cond = function
     | i :: l  -> i :: (remove_last_if cond l)
 
 let none_if_not_found f x = try Some (f x) with Not_found -> None
+let none_if_exception f x = try Some (f x) with _ -> None
+
 
 let str_all_matches str =
     let rec aux prevs n =

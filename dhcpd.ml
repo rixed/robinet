@@ -55,8 +55,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
                     (* We can't use 'udp.tx offer' since we have to force both IP and Eth dest addr *)
                     host.Host.udp_send (Host.IPv4 offered_ip)
                                        ~src_port
-                                       dst_port |>
-                    Lwt.ignore_result
+                                       dst_port
                 | None ->
                     Log.(log logger Debug (lazy "No more unused IP, cannot make offer")))
             | Some ({ Pdu.op = BootRequest ; Pdu.hlen = 6 ; _ } as dhcp)
@@ -74,8 +73,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
                     Pdu.pack |>
                     host.Host.udp_send (Host.IPv4 offered_ip)
                                        ~src_port
-                                       dst_port |>
-                    Lwt.ignore_result
+                                       dst_port
                 | None ->
                     Log.(log logger Warning (lazy (Printf.sprintf "I never offered anythin to %s (or I fogot about it)" (Eth.Addr.to_string (Eth.Addr.o dhcp.Pdu.chaddr))))) ;
                     (* ignore it *) ())
@@ -92,7 +90,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
     let clt = Host.make_dhcp "client" (Eth.Addr.random ()) in
     srv.Host.dev.set_read clt.Host.dev.write ;
     clt.Host.dev.set_read srv.Host.dev.write ;
-    Lwt_main.run (Clock.run false) ;
+    Clock.run false ;
     Clock.realtime := true ;
     assert_bool "Client got an IP" (clt.Host.get_ip () <> None) ;
     assert_bool "IP is within net" (Ip.Cidr.mem my_net (Option.get (clt.Host.get_ip ())))

@@ -133,15 +133,3 @@ struct
 
 end
 
-let run ?timeout threads =
-    (match timeout with
-        | None -> ()
-        | Some d -> Clock.delay d failwith "timeout") ;
-    let e_threads =
-        List.map (fun t ->
-            Lwt.catch (fun () -> t)
-                      (fun e ->
-                        Printf.fprintf stderr "Simul thread failed with: %a\n%!" Printexc.print e ;
-                        Lwt.return ())) threads in
-    Lwt.choose [ Clock.run true ; Lwt.join e_threads ]
-

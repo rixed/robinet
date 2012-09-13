@@ -74,7 +74,6 @@ let rec stripped url =
   The minimal server looks something like:
 
   {[
-    #require "lwt";;
     (* Server *)
     let server = Host.make_static "server" (Eth.Addr.random ()) (Ip.Addr.of_string "192.168.1.1");;
     Opache.serve server (Tcp.Port.o 8080) (fun trx _msg _log ->
@@ -86,10 +85,8 @@ let rec stripped url =
     let tap = Hub.Tap.make (Pcap.save "http.pcap");;
     client.Host.dev <--> tap.ins ; tap.out <--> server.Host.dev;;
     (* Send a request *)
-    Lwt_main.run (Lwt.choose [
-        Clock.run true ;
-        Lwt.bind (Browser.request browser (Url.of_string "http://192.168.1.1/")) (fun _ ->
-            Lwt.return ())]);;
+    Clock.run true ;;
+    Browser.request browser (Url.of_string "http://192.168.1.1/") ignore ;;
   ]}
 *)
 let serve host port f =

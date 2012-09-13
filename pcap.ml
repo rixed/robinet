@@ -73,18 +73,20 @@ let packets_sniffed_ok = Metric.Atomic.make "Pcap/Packets/Sniffed"
 (** A counter for how many bytes were sniffed. *)
 let bytes_in           = Metric.Counter.make "Pcap/Bytes/In" "bytes"
 
-(** [sniffer iface rx] return a Lwt thread that continuously sniff packets
- * and pass them to the [rx] function. *)
+(** [sniffer iface rx] returns a thread that continuously sniff packets
+ * and pass them to the [rx] function (via the Clock). *)
 let sniffer iface rx =
     let rec loop () =
-        lwt ts, pkt = Lwt_preemptive.detach sniff iface in
-        Clock.synch () ;
-        Metric.Atomic.fire packets_sniffed_ok ;
-        Metric.Counter.increase bytes_in (Int64.of_int (String.length pkt)) ;
-        if debug then Printf.printf "Pcap: Got packet for ts %s\n%!" (Clock.Time.to_string ts) ;
-        Clock.at ts rx (bitstring_of_string pkt) ;
-        loop ()
-    in loop ()
+        match none_if_exception sniff iface with
+        | None -> ()
+        | Some (ts, pkt) ->
+            Clock.synch () ;
+            Metric.Atomic.fire packets_sniffed_ok ;
+            Metric.Counter.increase bytes_in (Int64.of_int (String.length pkt)) ;
+            if debug then Printf.printf "Pcap: Got packet for ts %s\n%!" (Clock.Time.to_string ts) ;
+            Clock.at ts rx (bitstring_of_string pkt) ;
+            loop () in
+    Thread.create loop ()
 
 (** {2 Pcap files} *)
 
@@ -390,5 +392,5 @@ let play tx fname =
                     tx (pdu.Pdu.payload :> bitstring) ;
                     read_next_pkt (Some pdu.Pdu.ts)) ()
     in
-    Clock.delay (Clock.Interval.o 0.) read_next_pkt None
+    Clock.asap read_next_pkt None
 

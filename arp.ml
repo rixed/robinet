@@ -24,7 +24,7 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = false
+let debug = true
 
 (** {2 ARP messages} *)
 

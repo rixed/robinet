@@ -22,7 +22,7 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = false
+let debug = true
 
 (** {2 Private Types} *)
 
@@ -179,7 +179,7 @@ struct
         mutable to_send : bitstring list ; (* what we must send next *) (* FIXME: s/list/dequeue/ *)
         mutable unacked_tx : Streambuf.t ; (* previous packet we sent but that were not acked yet *)
         mutable rcvd_fin : bool ;   (* if we already passed the fin to the application *)
-        mutable cnx_wakener : tcp_trx option Lwt.u option (* the Lwt_t to wake up whenever the cnx is established *) }
+        mutable cnx_established_cont : (tcp_trx option -> unit) option (* what to do when the cnx is established *) }
 
     (* FIXME: ideally, wait 2 minutes after the complete close *)
     let is_closed t () = t.closed
@@ -232,10 +232,10 @@ struct
     (* The cnx is established (ie its behavior is driven by the rcvd and sent streambuf
      * whenever we had the two syns, not when they are acked. *)
     and establish_cnx t ok =
-        match t.cnx_wakener with
-            | Some w ->
-                if debug then Printf.printf "Tcp: waking up client for serving port %d\n%!" (t.src :> int) ;
-                Lwt.wakeup w (if ok then Some (trx_of t) else None)
+        match t.cnx_established_cont with
+            | Some f ->
+                if debug then Printf.printf "Tcp: calling continuation for serving new cnx on port %d\n%!" (t.src :> int) ;
+                f (if ok then Some (trx_of t) else None)
             | None -> if debug then Printf.printf "Tcp: no one was waiting\n%!"
 
     and try_really_rx t =
@@ -389,7 +389,7 @@ struct
           to_send = [] ;
           unacked_tx = Streambuf.empty ;
           rcvd_fin = false ;
-          cnx_wakener = None }
+          cnx_established_cont = None }
 
     let accept ?isn ?mtu src dst =
         let t = make_ ?isn ?mtu src dst in
@@ -397,12 +397,10 @@ struct
 
     let may_timeout t = if not (is_established t) then establish_cnx t false
     let default_connect_timeout = Clock.Interval.sec 15.
-    let connect ?(timeout=default_connect_timeout) ?isn ?mtu src dst =
+    let connect ?(timeout=default_connect_timeout) ?isn ?mtu src dst cont =
         let t = make_ ?isn ?mtu src dst in
-        let waiter, wakener = Lwt.wait () in
-        t.cnx_wakener <- Some wakener ;
+        t.cnx_established_cont <- Some cont ;
         Clock.delay timeout may_timeout t ;
-        emit_one t ~syn:true empty_bitstring ;
-        waiter
+        emit_one t ~syn:true empty_bitstring
 
 end

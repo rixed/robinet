@@ -33,11 +33,11 @@ type addr = IPv4 of Ip.Addr.t | Name of string
 type host_trx = {
     name          : string ;
     logger        : Log.logger ;
-    tcp_connect   : addr -> ?src_port:Tcp.Port.t -> Tcp.Port.t -> Tcp.TRX.tcp_trx Lwt.t ;
-    udp_connect   : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> (Udp.TRX.udp_trx -> bitstring -> unit) -> Udp.TRX.udp_trx Lwt.t ;
-    udp_send      : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> bitstring -> unit Lwt.t ;
-    ping          : ?id:int -> ?seq:int -> addr -> unit Lwt.t ;
-    gethostbyname : string -> Ip.Addr.t list Lwt.t ;
+    tcp_connect   : addr -> ?src_port:Tcp.Port.t -> Tcp.Port.t -> (Tcp.TRX.tcp_trx option -> unit) -> unit ;
+    udp_connect   : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> (Udp.TRX.udp_trx -> bitstring -> unit) -> (Udp.TRX.udp_trx option -> unit) -> unit ;
+    udp_send      : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> bitstring -> unit ;
+    ping          : ?id:int -> ?seq:int -> addr -> unit ;
+    gethostbyname : string -> (Ip.Addr.t list option -> unit) -> unit ;
     tcp_server    : Tcp.Port.t -> (Tcp.TRX.tcp_trx -> unit) -> unit ;
     udp_server    : Udp.Port.t -> (Udp.TRX.udp_trx -> unit) -> unit ;
     signal_err    : string -> unit ;
@@ -51,7 +51,7 @@ type tcp_socks = { ip_4_tcp : trx ;
                       The user of TCP does not remove these entries, so the TRX is still there
                       for some time. We should probably "garbage collect" them once in a while,
                       if they are closed for long enough. *)
-                  tcps : (Tcp.Port.t * Tcp.Port.t (* local, remote *), Tcp.TRX.tcp_trx) Hashtbl.t }
+                   tcps : (Tcp.Port.t * Tcp.Port.t (* local, remote *), Tcp.TRX.tcp_trx) Hashtbl.t }
 
 type udp_socks = { ip_4_udp : trx ;
                    (* The user of UDP does not remove them neither, and we probably should have
@@ -75,7 +75,7 @@ type t = { mutable host_trx : host_trx ;
            search_sfx : string option ;
            nameserver : Ip.Addr.t option ;
            mutable resolv_trx : trx option ;
-           dns_queries : (string, (Ip.Addr.t list Lwt.u * Clock.Time.t option)) Hashtbl.t ;
+           dns_queries : (string, ((Ip.Addr.t list option -> unit) * Clock.Time.t option)) Hashtbl.t ;
            dns_cache   : (string, Ip.Addr.t list) Hashtbl.t }
 
 exception No_socket
@@ -163,7 +163,7 @@ let resolution_timeouts  = Metric.Atomic.make "Host/Resolver/Timeouts"
 let resolution_cachehits = Metric.Atomic.make "Host/Resolver/CacheHits"
 let resolutions = Metric.Timed.make "Host/Resolver/Queries"
 
-let rec resolver t =
+let rec with_resolver_trx t cont =
     let dns_recv _trx bits = (match Dns.Pdu.unpack bits with
         | None -> ()
         | Some pdu ->
@@ -181,11 +181,11 @@ let rec resolver t =
                                 Some (Ip.Addr.of_bitstring (bitstring_of_string data))
                             else None
                         ) pdu.Dns.Pdu.answer_rrs in
-                    let waiters = Hashtbl.find_all t.dns_queries name in
-                    Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Awakening %d clients that were waiting for the address of '%s'" (List.length waiters) name))) ;
-                    List.iter (fun (waiter, start_opt) ->
+                    let conts = Hashtbl.find_all t.dns_queries name in
+                    Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Awakening %d clients that were waiting for the address of '%s'" (List.length conts) name))) ;
+                    List.iter (fun (cont, start_opt) ->
                         Option.may (fun start -> Metric.Timed.stop resolutions start name) start_opt ;
-                        Lwt.wakeup waiter ips) waiters ;
+                        cont (Some ips)) conts ;
                     Hashtbl.remove_all t.dns_queries name ;
                     (* cache the result *)
                     if Hashtbl.length t.dns_cache > 10 then Hashtbl.clear t.dns_cache ; (* FIXME *)
@@ -196,20 +196,22 @@ let rec resolver t =
     in
     match t.resolv_trx, t.nameserver with
     | Some trx, _    ->
-        Log.(log t.host_trx.logger Debug (lazy "Use previous resolver")) ;
-        Lwt.return trx
+        Log.(log t.host_trx.logger Debug (lazy "Use previous resolver trx")) ;
+        cont (Some trx)
     | None, None     ->
         Log.(log t.host_trx.logger Error (lazy (Printf.sprintf "Cannot resolve, no DNS"))) ;
-        Lwt.fail CannotResolveName
+        cont None
     | None, Some srv ->
         Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Connect to DNS %s" (Ip.Addr.to_string srv)))) ;
-        lwt trx = udp_connect t (IPv4 srv) (Udp.Port.o 53) ~src_port:(Udp.Port.o 53) dns_recv in
-        t.resolv_trx <- Some trx.Udp.TRX.trx ;
-        Lwt.return trx.Udp.TRX.trx
+        udp_connect t (IPv4 srv) (Udp.Port.o 53) ~src_port:(Udp.Port.o 53) dns_recv (function
+        | None -> cont None
+        | Some trx ->
+            t.resolv_trx <- Some trx.Udp.TRX.trx ;
+            cont (Some trx.Udp.TRX.trx))
 
-and gethostbyname t name =
+and gethostbyname t name cont =
     (* If the name is already an IP do not try to resolve it! *)
-    try Lwt.return (Ip.Addr.list_of_string name)
+    try cont (Some (Ip.Addr.list_of_string name))
     with Invalid_argument _ -> (
         (* Go for the resolver then *)
         Log.(log t.host_trx.logger Warning (lazy (Printf.sprintf "Resolving '%s'" name))) ;
@@ -223,54 +225,58 @@ and gethostbyname t name =
         | None -> name in
         let name = if is_fqdn name then name else name ^ "." in
         let dns_timeout () = (* use the name redefined above *)
-            let waiters = Hashtbl.find_all t.dns_queries name in
-            let nb_waiters = List.length waiters in
-            if nb_waiters > 0 then (
-                Log.(log t.host_trx.logger Warning (lazy (Printf.sprintf "Timeouting %d clients that were waiting for the address of '%s'" (List.length waiters) name))) ;
+            let conts = Hashtbl.find_all t.dns_queries name in
+            let nb_conts = List.length conts in
+            if nb_conts > 0 then (
+                Log.(log t.host_trx.logger Warning (lazy (Printf.sprintf "Timeouting %d clients that were waiting for the address of '%s'" nb_conts name))) ;
                 Metric.Atomic.fire resolution_timeouts ;
-                List.iter (fun (waiter, start_opt) ->
+                List.iter (fun (cont, start_opt) ->
                     Option.may (fun start -> Metric.Timed.stop resolutions start name) start_opt ;
-                    Lwt.wakeup_exn waiter DnsTimeout) waiters ;
+                    cont None) conts ;
                 Hashtbl.remove_all t.dns_queries name
             ) in
+        (* Try to find the IP in the cache *)
         match Hashtbl.find_option t.dns_cache name with
             | Some ips ->
                 Metric.Atomic.fire resolution_cachehits ;
-                Lwt.return ips
+                cont (Some ips)
             | None ->
-                let waiter, wakener = Lwt.wait () in
                 Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Start resolver..."))) ;
-                lwt resolv_trx = resolver t in
-                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "done"))) ;
-                let pending = Hashtbl.mem t.dns_queries name in
-                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Add a query for resolution of '%s' (%s)" name (if pending then "one was already pending" else "first one")))) ;
-                if not pending then (
-                    (* add a timeout event that will awake all waiters for this name after some time *)
-                    Clock.delay dns_timeout_delay dns_timeout () ;
-                    (* Then actually sends the query *)
-                    let start = Metric.Timed.start resolutions in
-                    Hashtbl.add t.dns_queries name (wakener, Some start) ;
-                    Dns.Pdu.make_query name |> Dns.Pdu.pack |> tx resolv_trx
-                ) else (
-                    Hashtbl.add t.dns_queries name (wakener, None)
-                ) ;
-                waiter
+                with_resolver_trx t (function
+                | None ->
+                    cont None
+                | Some resolv_trx ->
+                    Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "done"))) ;
+                    let pending = Hashtbl.mem t.dns_queries name in
+                    Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Add a query for resolution of '%s' (%s)" name (if pending then "one was already pending" else "first one")))) ;
+                    if not pending then (
+                        (* add a timeout event that will awake all waiters for this name after some time *)
+                        Clock.delay dns_timeout_delay dns_timeout () ;
+                        (* Then actually sends the query *)
+                        let start = Metric.Timed.start resolutions in
+                        Hashtbl.add t.dns_queries name (cont, Some start) ;
+                        Dns.Pdu.make_query name |> Dns.Pdu.pack |> tx resolv_trx
+                    ) else (
+                        Hashtbl.add t.dns_queries name (cont, None)
+                    )
+                )
     )
 
-and tcp_connect t dst ?src_port dst_port =
+and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
     let connect dst_ip =
-        Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Connecting to %s" (Ip.Addr.to_string dst_ip)))) ;
+        Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Connecting to %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
         let socks = hash_find_or_insert t.tcp_socks dst_ip (fun () ->
             let trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.tcp in
             let socks = make_tcp_socks trx in
             (tcp_sock_rx t socks) <-= trx =-> t.eth.Eth.TRX.trx.ins.write ;
             socks) in
-        lwt src_port = match src_port with
+        (* Try to find a unused port if none was given, or ensure the given one is free *)
+        let src_port = match src_port with
             | None ->
                 let start = Random.int (0x10000 - 1024) + 1024 in
                 let rec aux pnum =
                     if find_alive_tcp socks.tcps (Tcp.Port.o pnum, dst_port) = None then (
-                        Lwt.return (Tcp.Port.o pnum)
+                        Some (Tcp.Port.o pnum)
                     ) else (
                         let next = pnum + 1 in
                         let next = if next < 0x10000 then next else 1024 in
@@ -280,35 +286,44 @@ and tcp_connect t dst ?src_port dst_port =
                 aux start
             | Some src_port ->
                 if None = find_alive_tcp socks.tcps (src_port, dst_port) then (
-                    Lwt.return src_port
+                    Some src_port
                 ) else (
                     Metric.Atomic.fire tcp_cnxs_err ;
-                    Lwt.fail AlreadyConnected
+                    Log.(log t.host_trx.logger Error (lazy "Already connected")) ;
+                    None
                 ) in
-        lwt trx_opt = Tcp.TRX.connect src_port dst_port in
-        match trx_opt with
-        | Some trx ->
-            (* connect this tcp to the underlaying ip *)
-            trx.Tcp.TRX.trx =->  socks.ip_4_tcp.ins.write ;
-            Hashtbl.add socks.tcps (src_port, dst_port) trx ;
-            Metric.Atomic.fire tcp_cnxs_ok ;
-            Lwt.return trx
-        | None ->
-            Metric.Atomic.fire tcp_cnxs_err ;
-            Lwt.fail (Failure "Cannot connect")
+        (* Check we have a source port *)
+        match src_port with
+            | None ->
+                cont None
+            | Some src_port ->
+                Tcp.TRX.connect src_port dst_port (function
+                | Some trx ->
+                    (* connect this tcp to the underlaying ip *)
+                    trx.Tcp.TRX.trx =->  socks.ip_4_tcp.ins.write ;
+                    Hashtbl.add socks.tcps (src_port, dst_port) trx ;
+                    Metric.Atomic.fire tcp_cnxs_ok ;
+                    cont (Some trx)
+                | None ->
+                    Metric.Atomic.fire tcp_cnxs_err ;
+                    Log.(log t.host_trx.logger Error (lazy (Printf.sprintf2 "Cannot connect to %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
+                    cont None)
     in
     match dst with
         | IPv4 dst_ip ->
             connect dst_ip
         | Name name ->
-            lwt dst_ips = gethostbyname t name in
-            Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf2 "Got these IPs for '%s' : %a" name (List.print Ip.Addr.print') dst_ips))) ;
-            if dst_ips <> [] then
-                connect (List.hd dst_ips)
-            else
-                Lwt.fail (Failure ("Cannot resolve "^name))
+            gethostbyname t name (function
+            | None -> cont None
+            | Some dst_ips ->
+                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf2 "Got these IPs for '%s' : %a" name (List.print Ip.Addr.print') dst_ips))) ;
+                if dst_ips <> [] then
+                    connect (List.hd dst_ips)
+                else
+                    Log.(log t.host_trx.logger Error (lazy ("Cannot resolve "^name))) ;
+                    cont None)
 
-and udp_connect t dst ?src_port dst_port client_f =
+and udp_connect t dst ?src_port dst_port client_f cont =
     let connect dst_ip =
         let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
             let trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.udp in
@@ -319,21 +334,25 @@ and udp_connect t dst ?src_port dst_port client_f =
         let key = src_port, dst_port in
         if Hashtbl.mem socks.udps key then (
             Metric.Atomic.fire udp_cnxs_err ;
-            Lwt.fail AlreadyConnected
-        ) else
-        let trx = Udp.TRX.make src_port dst_port in
-        (* connect this udp to the underlaying ip *)
-        (client_f trx) <-= trx.Udp.TRX.trx =-> socks.ip_4_udp.ins.write ;
-        Hashtbl.add socks.udps key trx ;
-        Metric.Atomic.fire udp_cnxs_ok ;
-        Lwt.return trx
+            Log.(log t.host_trx.logger Error (lazy "Already connected")) ;
+            cont None
+        ) else (
+            let trx = Udp.TRX.make src_port dst_port in
+            (* connect this udp to the underlaying ip *)
+            (client_f trx) <-= trx.Udp.TRX.trx =-> socks.ip_4_udp.ins.write ;
+            Hashtbl.add socks.udps key trx ;
+            Metric.Atomic.fire udp_cnxs_ok ;
+            cont (Some trx)
+        )
     in
     match dst with
         | IPv4 dst_ip ->
             connect dst_ip
         | Name name ->
-            lwt dst_ips = gethostbyname t name in
-            connect (List.hd dst_ips)
+            gethostbyname t name (function
+            | None -> cont None
+            | Some dst_ips ->
+                connect (List.hd dst_ips))
 
 
 let udp_send t dst ?src_port dst_port bits =
@@ -343,13 +362,14 @@ let udp_send t dst ?src_port dst_port bits =
             Udp.Pdu.pack |>
             Ip.Pdu.make Ip.Proto.udp t.my_ip dst_ip |>
             Ip.Pdu.pack |>
-            tx t.eth.Eth.TRX.trx ;
-        Lwt.return () in
+            tx t.eth.Eth.TRX.trx in
     match dst with
         | IPv4 dst_ip -> send dst_ip
         | Name name   ->
-            lwt dst_ips = gethostbyname t name in
-            send (List.hd dst_ips)
+            gethostbyname t name (function
+            | None -> ()
+            | Some dst_ips ->
+                send (List.hd dst_ips))
 
 let ping t ?(id=1) ?(seq=1) dst =
     let do_ping dst_ip =
@@ -357,17 +377,16 @@ let ping t ?(id=1) ?(seq=1) dst =
         Icmp.Pdu.pack |>
         Ip.Pdu.make Ip.Proto.icmp t.my_ip dst_ip |>
         Ip.Pdu.pack |>
-        tx t.eth.Eth.TRX.trx ;
-        Lwt.return () in
+        tx t.eth.Eth.TRX.trx in
     match dst with
         | IPv4 dst_ip ->
             do_ping dst_ip
         | Name name ->
-            lwt dst_ips = gethostbyname t name in
-            if dst_ips <> [] then
-                do_ping (List.hd dst_ips)
-            else
-                Lwt.fail (Failure ("Cannot resolve "^name))
+            gethostbyname t name (function
+            | None -> ()
+            | Some dst_ips ->
+                if dst_ips <> [] then
+                    do_ping (List.hd dst_ips))
 
 
 let tcp_server t src_port server_f = Hashtbl.add t.tcp_servers src_port server_f
@@ -417,11 +436,11 @@ let make name ?gw ?search_sfx ?nameserver my_mac =
     and host_trx =
         { name          = name ;
           logger        = Log.make ("Host/" ^ name) 50 ;
-          tcp_connect   = (fun addr ?src_port dst -> tcp_connect t addr ?src_port dst) ;
-          udp_connect   = (fun dst ?src_port dst_port client_f -> udp_connect t dst ?src_port dst_port client_f) ;
+          tcp_connect   = (fun addr ?src_port dst cont -> tcp_connect t addr ?src_port dst cont) ;
+          udp_connect   = (fun dst ?src_port dst_port client_f cont -> udp_connect t dst ?src_port dst_port client_f cont) ;
           udp_send      = (fun dst ?src_port dst_port bits -> udp_send t dst ?src_port dst_port bits) ;
           ping          = (fun ?id ?seq dst -> ping t ?id ?seq dst) ;
-          gethostbyname = (fun name -> gethostbyname t name) ;
+          gethostbyname = (fun name cont -> gethostbyname t name cont) ;
           tcp_server    = (fun src_port server_f -> tcp_server t src_port server_f) ;
           udp_server    = (fun src_port server_f -> udp_server t src_port server_f) ;
           signal_err    = (fun str -> signal_err t str) ;
