@@ -19,7 +19,7 @@
  *)
 (**
  * This module holds all functions related to [libpcap], packet sniffing,
- * packet injection, and pcap file reading and writing.
+ * packet injection and pcap file reading and writing.
  *)
 open Batteries
 open Bitstring
@@ -202,7 +202,7 @@ struct
         f
 end
 
-(** [save "file.pcap" returns a function that will save passed bitstrings as packets in
+(** [save "file.pcap"] returns a function that will save passed bitstrings as packets in
  * ["file.pcap"].
  * @param caplen can be used to cap saved packet to a given number of bytes
  * @param dlt can be used to change the file's DLT (required if you do not write Ethernet packets) *)
@@ -373,8 +373,9 @@ let repair_file fname =
     Unix.truncate fname (24 (* global header *) + (aux ()))
 
 (** [play tx "file.pcap"] will read packets from ["file.pcap"] and send them to [tx]
- * copying the pcap file frame rate. Notice that we use the internal {!Clock} for this,
- * so it's both very accurate or not accurate at all, depending on how you look at it. *)
+ * copying the pcap file frame rate. Notice that we use the internal
+ * {!module:Clock} for this, so it's both very accurate or not accurate at all,
+ * depending on how you look at it. *)
 let play tx fname =
     let packets = enum_of_file fname in
     (* With last_packet_timestamp (or None), schedule a function using the clock to read

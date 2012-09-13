@@ -444,6 +444,7 @@ module TRX = struct
                mutable recv : bitstring -> unit }
 
     let tx t bits =
+        if debug then Printf.printf "Ip: Emitting a packet from %s to %s, length %d, content '%s'\n%!" (Addr.to_string t.src) (Addr.to_string t.dst) (bytelength bits) (string_of_bitstring bits) ;
         let id = Pdu.next_id () in
         let rec aux bit_offset =
             if bit_offset < bitstring_length bits then (

@@ -17,14 +17,18 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
+(**
+ * Address Resolution Protocol.
+ *)
 open Batteries
 open Bitstring
 open Tools
 
 let debug = false
 
-(* ARP messages *)
+(** {2 ARP messages} *)
 
+(** ARP Operations Codes *)
 module Op = struct
     include MakePrivate(struct
         type t = int
@@ -56,6 +60,8 @@ module Op = struct
     let arp_nack      = o 10
 end
 
+(** Arp identifiers for MAC types.
+ * These are used by DHCP as well. *)
 module HwType = struct
     module Inner = struct
         type t = int
@@ -85,6 +91,8 @@ module HwType = struct
         if Inner.is_valid p then o p else random ()
 end
 
+(** Arp Protocol Types.
+ * These are used in other places as well. *)
 module HwProto = struct
     include MakePrivate(struct
         type t = int
@@ -105,6 +113,7 @@ module HwProto = struct
     let random () = o (randi 16)
 end
 
+(** Pack/Unpack an ARP message *)
 module Pdu = struct
     (*$< Pdu *)
 

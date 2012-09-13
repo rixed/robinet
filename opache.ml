@@ -17,8 +17,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(*
-  A simple HTTP server
+(**
+  A simple HTTP server.
 *)
 open Batteries
 open Tools
@@ -67,7 +67,31 @@ let rec stripped url =
     "root" (stripped "////")
 *)
 
-(* Main entry point: build an HTTP TRX and pass incoming messages to a user supplied function *)
+(**
+  Listen HTTP connections arriving at [host] on given [port],
+  passing incoming messages to a user supplied function [f].
+
+  The minimal server looks something like:
+
+  {[
+    #require "lwt";;
+    (* Server *)
+    let server = Host.make_static "server" (Eth.Addr.random ()) (Ip.Addr.of_string "192.168.1.1");;
+    Opache.serve server (Tcp.Port.o 8080) (fun trx _msg _log ->
+        Http.TRXtop.tx trx (Http.Pdu.make_status 200 [] "Hi there!"));;
+    (* Our client *)
+    let client = Host.make_static "client" (Eth.Addr.random ()) (Ip.Addr.of_string "192.168.1.2");;
+    let browser = Browser.make client;;
+    (* Link with a tap in between *)
+    let tap = Hub.Tap.make (Pcap.save "http.pcap");;
+    client.Host.dev <--> tap.ins ; tap.out <--> server.Host.dev;;
+    (* Send a request *)
+    Lwt_main.run (Lwt.choose [
+        Clock.run true ;
+        Lwt.bind (Browser.request browser (Url.of_string "http://192.168.1.1/")) (fun _ ->
+            Lwt.return ())]);;
+  ]}
+*)
 let serve host port f =
     let logger = Log.(make (Printf.sprintf "%s/Httpd:%s" host.Host.logger.name (Tcp.Port.to_string port)) 50) in
     let count_queries_per_url = Hashtbl.create 11 in
@@ -102,6 +126,11 @@ let serve host port f =
                     tcp.Tcp.TRX.close ())) ;
         (* Only when everything's set up do we connect the tcp recv to http rx *)
         ignore ((TRXtop.rx http) <-= tcp.Tcp.TRX.trx))
+
+(** {2 HTTP servicing functions}
+  These functions build a function taking an {Http.TRXtop.t}, an incomming {Http.Pdu.t} and
+  responsible for sending the answer. They are mean to be used by [multiplexer].
+ *)
 
 let print_vars oc vars =
     Printf.fprintf oc "%a" (Hashtbl.print String.print String.print) vars

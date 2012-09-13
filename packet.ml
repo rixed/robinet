@@ -29,7 +29,7 @@ statistics on individual packets, search for some packets in a pcap file,
 etc...
 
 Due to the fact that every packet is considered in isolation, it can only
-decode the simpler protocols for which all required data fits within a
+decode the simplest protocols for which all required data fits within a
 single packet. In other words, it will not venture much deeper than TCP/UDP.
 
 
@@ -37,7 +37,7 @@ single packet. In other words, it will not venture much deeper than TCP/UDP.
 
 {2 Exploring a pcap file}
 
-This module is more usefull from the toplevel [robinet.top].
+This module is more useful from the toplevel [robinet.top].
 Suppose you have this huge {{:http://www.tcpdump.org}pcap} file
 of several tens of gigabyte, and we want to get some idea of what's
 in there. We start with the obvious:
@@ -47,7 +47,7 @@ in there. We start with the obvious:
 {[- : Pcap.infos =
 {Pcap.filename = "big_one.pcap"; Pcap.data_link_type = 1l;
  Pcap.num_packets = 53993956; Pcap.data_size = 40756596469L;
-  Pcap.start_time = 1323766040.99259496; Pcap.stop_time = 1323767137.688411}
+ Pcap.start_time = 1323766040.99259496; Pcap.stop_time = 1323767137.688411}
 ]}
 
 This will take a significant amount of time since the whole pcap file
@@ -70,7 +70,7 @@ Note that in this exemple, for brevety, I pattern match for Tcp in 5th
 position only (since my big_file.pcap have a 802.1q tunnel between Ethernet
 and IP).
 
-Let have a look at the first of them:
+Let us have a look at the first of them:
 
 {[
 # Enum.peek s80;;]}
@@ -162,9 +162,7 @@ module Pdu = struct
         in
         aux None (List.rev t)
 
-    (** Convert a [bitstring] (from a Pcap.pdu) into a {!Packet.Pdu.t}.
-     * @param dlt if the {e data link layer} is not Ethernet then you can change it here.
-     *            The only other known {e DLT} is {!Pcap.Dlt.linux_cooked}, though. *)
+    (** Convert a [bitstring] (from a Pcap.pdu) into a {!Packet.Pdu.t}. *)
     let unpack pcap =
         let unpack_raw bits =
             if bitstring_is_empty bits then [] else [ Raw bits ] in

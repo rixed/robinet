@@ -234,7 +234,7 @@ struct
     and establish_cnx t ok =
         match t.cnx_wakener with
             | Some w ->
-                if debug then Printf.printf "Tcp: waking up client\n%!" ;
+                if debug then Printf.printf "Tcp: waking up client for serving port %d\n%!" (t.src :> int) ;
                 Lwt.wakeup w (if ok then Some (trx_of t) else None)
             | None -> if debug then Printf.printf "Tcp: no one was waiting\n%!"
 
@@ -378,7 +378,8 @@ struct
     let make_ ?isn ?(mtu=1300) src dst =
         { src = src ;
           dst = dst ;
-          emit = ignore ; recv = ignore ;
+          emit = (fun _b -> if debug then Printf.printf "Tcp: Ignoring a packet\n") ;
+          recv = ignore ;
           mtu = mtu ;
           isn = may_default isn (fun () -> SeqNum.o 0l (*Random.int32 0x7FFFFFFFl*)) ;
           rcvd_isn = None ;

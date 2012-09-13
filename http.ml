@@ -258,7 +258,7 @@ struct
 end
 
 
-(* Special kind of transceiver, usefull when it's on top of a TRX stack, that
+(* Special kind of transceiver, useful when it's on top of a TRX stack, that
    receive and tx Pdu.t messages (instead of bitstring). *)
 
 module TRXtop =
@@ -304,7 +304,7 @@ end
 
 (* Transceiver. Once build (as a poster or server), handle the whole connection(s).
    used to tx a body (packed into a 200 Ok response or a post).
-   This is mostly usefull to use HTTP as a transport layer (for instance as a tunnel). *)
+   This is mostly useful to use HTTP as a transport layer (for instance as a tunnel). *)
 
 module TRX =
 struct

@@ -514,7 +514,7 @@ let pipe : 'a 'b 'c. ('a, 'b) parzer -> ('c, 'a) parzer -> ('c, 'b) parzer = fun
     check_results "pipe(2)" print_intlist p results items in
 *)
 
-(* Various usefull parsers *)
+(* Various useful parsers *)
 
 let blank () =
     either [ item ' ' ; item '\t' ; item '\r' ; item '\n' ]
