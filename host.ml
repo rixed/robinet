@@ -208,49 +208,54 @@ let rec resolver t =
         Lwt.return trx.Udp.TRX.trx
 
 and gethostbyname t name =
-    Log.(log t.host_trx.logger Warning (lazy (Printf.sprintf "Resolving '%s'" name))) ;
-    let dns_timeout_delay = Clock.Interval.sec 3. in
-    let is_fqdn n = n.[String.length n - 1] = '.' in
-    let is_complete n = is_fqdn n || String.exists n "." in
-    let name = match t.search_sfx with
-    | Some sfx ->
-        (* send the query using host IPv4 stack, with as recv a decoding function *)
-        if is_complete name then name else name ^ "." ^ sfx
-    | None -> name in
-    let name = if is_fqdn name then name else name ^ "." in
-    let dns_timeout () = (* use the name redefined above *)
-        let waiters = Hashtbl.find_all t.dns_queries name in
-        let nb_waiters = List.length waiters in
-        if nb_waiters > 0 then (
-            Log.(log t.host_trx.logger Warning (lazy (Printf.sprintf "Timeouting %d clients that were waiting for the address of '%s'" (List.length waiters) name))) ;
-            Metric.Atomic.fire resolution_timeouts ;
-            List.iter (fun (waiter, start_opt) ->
-                Option.may (fun start -> Metric.Timed.stop resolutions start name) start_opt ;
-                Lwt.wakeup_exn waiter DnsTimeout) waiters ;
-            Hashtbl.remove_all t.dns_queries name
-        ) in
-    match Hashtbl.find_option t.dns_cache name with
-        | Some ips ->
-            Metric.Atomic.fire resolution_cachehits ;
-            Lwt.return ips
-        | None ->
-            let waiter, wakener = Lwt.wait () in
-            Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Start resolver..."))) ;
-            lwt resolv_trx = resolver t in
-            Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "done"))) ;
-            let pending = Hashtbl.mem t.dns_queries name in
-            Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Add a query for resolution of '%s' (%s)" name (if pending then "one was already pending" else "first one")))) ;
-            if not pending then (
-                (* add a timeout event that will awake all waiters for this name after some time *)
-                Clock.delay dns_timeout_delay dns_timeout () ;
-                (* Then actually sends the query *)
-                let start = Metric.Timed.start resolutions in
-                Hashtbl.add t.dns_queries name (wakener, Some start) ;
-                Dns.Pdu.make_query name |> Dns.Pdu.pack |> tx resolv_trx
-            ) else (
-                Hashtbl.add t.dns_queries name (wakener, None)
-            ) ;
-            waiter
+    (* If the name is already an IP do not try to resolve it! *)
+    try Lwt.return (Ip.Addr.list_of_string name)
+    with Invalid_argument _ -> (
+        (* Go for the resolver then *)
+        Log.(log t.host_trx.logger Warning (lazy (Printf.sprintf "Resolving '%s'" name))) ;
+        let dns_timeout_delay = Clock.Interval.sec 3. in
+        let is_fqdn n = n.[String.length n - 1] = '.' in
+        let is_complete n = is_fqdn n || String.exists n "." in
+        let name = match t.search_sfx with
+        | Some sfx ->
+            (* send the query using host IPv4 stack, with as recv a decoding function *)
+            if is_complete name then name else name ^ "." ^ sfx
+        | None -> name in
+        let name = if is_fqdn name then name else name ^ "." in
+        let dns_timeout () = (* use the name redefined above *)
+            let waiters = Hashtbl.find_all t.dns_queries name in
+            let nb_waiters = List.length waiters in
+            if nb_waiters > 0 then (
+                Log.(log t.host_trx.logger Warning (lazy (Printf.sprintf "Timeouting %d clients that were waiting for the address of '%s'" (List.length waiters) name))) ;
+                Metric.Atomic.fire resolution_timeouts ;
+                List.iter (fun (waiter, start_opt) ->
+                    Option.may (fun start -> Metric.Timed.stop resolutions start name) start_opt ;
+                    Lwt.wakeup_exn waiter DnsTimeout) waiters ;
+                Hashtbl.remove_all t.dns_queries name
+            ) in
+        match Hashtbl.find_option t.dns_cache name with
+            | Some ips ->
+                Metric.Atomic.fire resolution_cachehits ;
+                Lwt.return ips
+            | None ->
+                let waiter, wakener = Lwt.wait () in
+                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Start resolver..."))) ;
+                lwt resolv_trx = resolver t in
+                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "done"))) ;
+                let pending = Hashtbl.mem t.dns_queries name in
+                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Add a query for resolution of '%s' (%s)" name (if pending then "one was already pending" else "first one")))) ;
+                if not pending then (
+                    (* add a timeout event that will awake all waiters for this name after some time *)
+                    Clock.delay dns_timeout_delay dns_timeout () ;
+                    (* Then actually sends the query *)
+                    let start = Metric.Timed.start resolutions in
+                    Hashtbl.add t.dns_queries name (wakener, Some start) ;
+                    Dns.Pdu.make_query name |> Dns.Pdu.pack |> tx resolv_trx
+                ) else (
+                    Hashtbl.add t.dns_queries name (wakener, None)
+                ) ;
+                waiter
+    )
 
 and tcp_connect t dst ?src_port dst_port =
     let connect dst_ip =

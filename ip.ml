@@ -135,7 +135,9 @@ module Addr = struct
             | Unix.ADDR_INET (addr, _) -> Some (o (int32_of_inet_addr addr))
             | _ -> None in
         List.filter_map extract_addr (Unix.getaddrinfo str "" [])
-    let of_string str = List.hd (list_of_string str)
+    let of_string str = match list_of_string str with
+        | [] -> invalid_arg str
+        | fst::_ -> fst
 
     (** Returns a random {!Ip.Addr.t} (apart from broadcast and zero). *)
     let rec random () =
