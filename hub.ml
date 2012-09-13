@@ -124,3 +124,18 @@ struct
         { write = write n t ; set_read = set_read n t }
 
 end
+
+(** A Tap is a 2 port repeater wich mirror each packet to a user function.
+  It can be used as a transparent TRX. *)
+module Tap =
+struct
+    type t = trx
+
+    let make mirror =
+        let emit_ins = ref ignore and emit_out = ref ignore in
+        { ins = { write = (fun bits -> mirror bits ; !emit_out bits) ;
+                  set_read = fun f -> emit_ins := f } ;
+          out = { write = (fun bits -> mirror bits ; !emit_ins bits) ;
+                  set_read = fun f -> emit_out := f } }
+
+end
