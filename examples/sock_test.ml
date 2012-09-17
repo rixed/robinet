@@ -60,10 +60,11 @@ let run () =
             assert false
         )
     in
-    lwt tcp = h2.Host.tcp_connect (Host.IPv4 (Ip.Addr.of_string "192.168.0.1")) (Tcp.Port.o 7) in
-    tcp.Tcp.TRX.trx.ins.set_read (client_f tcp) ;
-    tx tcp.Tcp.TRX.trx (bitstring_of_string "Hello world!") ;
-    Lwt.return ()
+    h2.Host.tcp_connect (Host.IPv4 (Ip.Addr.of_string "192.168.0.1")) (Tcp.Port.o 7) (function
+    | None -> ()
+    | Some tcp ->
+        tcp.Tcp.TRX.trx.ins.set_read (client_f tcp) ;
+        tx tcp.Tcp.TRX.trx (bitstring_of_string "Hello world!"))
 
 let main =
-    Lwt_main.run (run ())
+    run ()

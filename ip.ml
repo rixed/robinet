@@ -26,7 +26,7 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = true
+let debug = false
 
 (** {2 Private Types} *)
 
@@ -446,7 +446,6 @@ module TRX = struct
                mutable recv : bitstring -> unit }
 
     let tx t bits =
-        if debug then Printf.printf "Ip: Emitting a packet from %s to %s, length %d, content '%s'\n%!" (Addr.to_string t.src) (Addr.to_string t.dst) (bytelength bits) (string_of_bitstring bits) ;
         let id = Pdu.next_id () in
         let rec aux bit_offset =
             if bit_offset < bitstring_length bits then (
@@ -456,7 +455,7 @@ module TRX = struct
                 (* The frag_offset is given in unit of 8 bytes.
                    So the MTU is required to be a multiple of 8 bytes as well. *)
                 let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst pld in
-                if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (Addr.dotted_string_of_int32 (t.src :> int32)) (Addr.dotted_string_of_int32 (t.dst :> int32)) (bytelength pld) (string_of_bitstring bits);
+                if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (Addr.dotted_string_of_int32 (t.src :> int32)) (Addr.dotted_string_of_int32 (t.dst :> int32)) (bytelength pld) (hexstring_of_bitstring bits);
                 t.emit (Pdu.pack pdu) ;
                 aux (bit_offset + bitstring_length pld)
             ) in

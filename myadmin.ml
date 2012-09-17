@@ -50,7 +50,7 @@ let rec report_thread period =
         serie.past.(!serie_current_idx) <- ev.Metric.Atomic.count ;
         if serie.used < serie_size then serie.used <- serie.used + 1
     in
-    Unix.sleep period ;
+    Thread.delay period ;
     (* Save all the metrics *)
     if debug then Printf.printf "MyAdmin: updating stored metrics\n%!" ;
     serie_current_idx := if !serie_current_idx < serie_size-1 then !serie_current_idx+1 else 0 ;

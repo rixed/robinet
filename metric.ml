@@ -180,7 +180,7 @@ let print_report oc =
 
 let rec report_thread oc period =
     let rec loop () =
-        Unix.sleep period ;
+        Thread.delay period ;
         print_report oc ;
         loop () in
     Thread.create loop ()

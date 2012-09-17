@@ -56,7 +56,7 @@ let simul_webperf avg_group_size nb_groups duration ifname nameserver url =
     Log.(log logger Info (lazy "Starting browser on each host...")) ;
     let browsers = random_browsing net url in
     Log.(log logger Info (lazy "Running it all...")) ;
-    Sim.run ~timeout:duration (net_threads @ browsers)
+    Clock.run (net_threads @ browsers)
 
 let main =
     let url = ref "http://google.com"
@@ -75,10 +75,10 @@ let main =
               (fun _ -> raise (Arg.Bad "unknown parameter"))
               "Browse a web site from various locations" ;
     Log.console_lvl := Log.Debug ;
-    Lwt_main.run (simul_webperf !avg_grp_size
-                                !nb_groups
-                                (Clock.Interval.sec (float_of_int !duration))
-                                !ifname
-                                (Ip.Addr.of_string !nameserver)
-                                (Url.of_string !url))
+    simul_webperf !avg_grp_size
+                  !nb_groups
+                  (Clock.Interval.sec (float_of_int !duration))
+                  !ifname
+                  (Ip.Addr.of_string !nameserver)
+                  (Url.of_string !url)
 

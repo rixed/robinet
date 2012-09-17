@@ -53,8 +53,7 @@ let close t () =
     (* In case the closing of the fd is not enough: *)
     match t.reader with
     | None -> ()
-    | Some reader ->
-        Thread.kill reader ;
+    | Some _reader ->
         t.reader <- None
 
 let rec reader t =

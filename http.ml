@@ -22,7 +22,7 @@ open Bitstring
 open Tools
 open Peg
 
-let debug = true
+let debug = false
 
 (* Various HTTP Parameters *)
 

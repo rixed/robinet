@@ -32,7 +32,7 @@ open Tools
 open Http
 open Html
 
-let debug = true
+let debug = false
 
 type cookie = { name : string ; value : string ; domain : string ; path : string }
 

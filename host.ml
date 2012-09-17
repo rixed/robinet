@@ -95,15 +95,20 @@ let tcp_sock_rx t socks bits =
                     hash_find_or_insert socks.tcps key (fun () ->
                         if tcp.Tcp.Pdu.flags.Tcp.Pdu.syn then (
                             let server = try Hashtbl.find t.tcp_servers tcp.Tcp.Pdu.dst_port
-                                         with Not_found -> raise No_socket in
-                            let trx = Tcp.TRX.accept tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port in
-                            trx.Tcp.TRX.trx =-> socks.ip_4_tcp.ins.write ;
-                            server trx ; (* supposed to set the recver of this tcp trx *)
-                            trx
-                        ) else raise No_socket) in
+                                         with Not_found -> (
+                                            Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "We have no server listening on port %s" (Tcp.Port.to_string tcp.Tcp.Pdu.dst_port)))) ;
+                                            raise No_socket
+                                        ) in
+                            let tcp = Tcp.TRX.make tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port in
+                            tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx =-> socks.ip_4_tcp.ins.write ;
+                            server tcp.Tcp.TRX.tcp_trx ; (* supposed to set the recver of this tcp trx *)
+                            tcp.Tcp.TRX.tcp_trx
+                        ) else (
+                            Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "We have a server but so socket for ports %s:%s and TCP flags=%s" (Tcp.Port.to_string tcp.Tcp.Pdu.dst_port) (Tcp.Port.to_string tcp.Tcp.Pdu.src_port) (Tcp.Pdu.string_of_flags tcp.Tcp.Pdu.flags)))) ;
+                            raise No_socket
+                        )) in
                 rx trx.Tcp.TRX.trx bits (* will reorder fragments and transmit the messages up to its emit function *)
             with No_socket ->
-                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for TCP packet on port %s" (Tcp.Port.to_string tcp.Tcp.Pdu.dst_port)))) ;
                 Tcp.Pdu.make_reset_of tcp |> Tcp.Pdu.pack |> tx socks.ip_4_tcp
 
 let udp_sock_rx t socks bits =
@@ -210,57 +215,53 @@ let rec with_resolver_trx t cont =
             cont (Some trx.Udp.TRX.trx))
 
 and gethostbyname t name cont =
-    (* If the name is already an IP do not try to resolve it! *)
-    try cont (Some (Ip.Addr.list_of_string name))
-    with Invalid_argument _ -> (
-        (* Go for the resolver then *)
-        Log.(log t.host_trx.logger Warning (lazy (Printf.sprintf "Resolving '%s'" name))) ;
-        let dns_timeout_delay = Clock.Interval.sec 3. in
-        let is_fqdn n = n.[String.length n - 1] = '.' in
-        let is_complete n = is_fqdn n || String.exists n "." in
-        let name = match t.search_sfx with
-        | Some sfx ->
-            (* send the query using host IPv4 stack, with as recv a decoding function *)
-            if is_complete name then name else name ^ "." ^ sfx
-        | None -> name in
-        let name = if is_fqdn name then name else name ^ "." in
-        let dns_timeout () = (* use the name redefined above *)
-            let conts = Hashtbl.find_all t.dns_queries name in
-            let nb_conts = List.length conts in
-            if nb_conts > 0 then (
-                Log.(log t.host_trx.logger Warning (lazy (Printf.sprintf "Timeouting %d clients that were waiting for the address of '%s'" nb_conts name))) ;
-                Metric.Atomic.fire resolution_timeouts ;
-                List.iter (fun (cont, start_opt) ->
-                    Option.may (fun start -> Metric.Timed.stop resolutions start name) start_opt ;
-                    cont None) conts ;
-                Hashtbl.remove_all t.dns_queries name
-            ) in
-        (* Try to find the IP in the cache *)
-        match Hashtbl.find_option t.dns_cache name with
-            | Some ips ->
-                Metric.Atomic.fire resolution_cachehits ;
-                cont (Some ips)
+    (* FIXME: If the name is already an IP do not try to resolve it, otherwise host without DNS server cannot use IP addresses neither *)
+    Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Resolving '%s'" name))) ;
+    let dns_timeout_delay = Clock.Interval.sec 3. in
+    let is_fqdn n = n.[String.length n - 1] = '.' in
+    let is_complete n = is_fqdn n || String.exists n "." in
+    let name = match t.search_sfx with
+    | Some sfx ->
+        (* send the query using host IPv4 stack, with as recv a decoding function *)
+        if is_complete name then name else name ^ "." ^ sfx
+    | None -> name in
+    let name = if is_fqdn name then name else name ^ "." in
+    let dns_timeout () = (* use the name redefined above *)
+        let conts = Hashtbl.find_all t.dns_queries name in
+        let nb_conts = List.length conts in
+        if nb_conts > 0 then (
+            Log.(log t.host_trx.logger Warning (lazy (Printf.sprintf "Timeouting %d clients that were waiting for the address of '%s'" nb_conts name))) ;
+            Metric.Atomic.fire resolution_timeouts ;
+            List.iter (fun (cont, start_opt) ->
+                Option.may (fun start -> Metric.Timed.stop resolutions start name) start_opt ;
+                cont None) conts ;
+            Hashtbl.remove_all t.dns_queries name
+        ) in
+    (* Try to find the IP in the cache *)
+    match Hashtbl.find_option t.dns_cache name with
+        | Some ips ->
+            Metric.Atomic.fire resolution_cachehits ;
+            cont (Some ips)
+        | None ->
+            Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Start resolver..."))) ;
+            with_resolver_trx t (function
             | None ->
-                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Start resolver..."))) ;
-                with_resolver_trx t (function
-                | None ->
-                    cont None
-                | Some resolv_trx ->
-                    Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "done"))) ;
-                    let pending = Hashtbl.mem t.dns_queries name in
-                    Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Add a query for resolution of '%s' (%s)" name (if pending then "one was already pending" else "first one")))) ;
-                    if not pending then (
-                        (* add a timeout event that will awake all waiters for this name after some time *)
-                        Clock.delay dns_timeout_delay dns_timeout () ;
-                        (* Then actually sends the query *)
-                        let start = Metric.Timed.start resolutions in
-                        Hashtbl.add t.dns_queries name (cont, Some start) ;
-                        Dns.Pdu.make_query name |> Dns.Pdu.pack |> tx resolv_trx
-                    ) else (
-                        Hashtbl.add t.dns_queries name (cont, None)
-                    )
+                cont None
+            | Some resolv_trx ->
+                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "done"))) ;
+                let pending = Hashtbl.mem t.dns_queries name in
+                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Add a query for resolution of '%s' (%s)" name (if pending then "one was already pending" else "first one")))) ;
+                if not pending then (
+                    (* add a timeout event that will awake all waiters for this name after some time *)
+                    Clock.delay dns_timeout_delay dns_timeout () ;
+                    (* Then actually sends the query *)
+                    let start = Metric.Timed.start resolutions in
+                    Hashtbl.add t.dns_queries name (cont, Some start) ;
+                    Dns.Pdu.make_query name |> Dns.Pdu.pack |> tx resolv_trx
+                ) else (
+                    Hashtbl.add t.dns_queries name (cont, None)
                 )
-    )
+            )
 
 and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
     let connect dst_ip =
@@ -297,11 +298,12 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
             | None ->
                 cont None
             | Some src_port ->
-                Tcp.TRX.connect src_port dst_port (function
+                let tcp = Tcp.TRX.make src_port dst_port in
+                tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx.out.set_read socks.ip_4_tcp.ins.write ;
+                Hashtbl.add socks.tcps (src_port, dst_port) tcp.Tcp.TRX.tcp_trx ;
+                Tcp.TRX.connect tcp (function
                 | Some trx ->
-                    (* connect this tcp to the underlaying ip *)
-                    trx.Tcp.TRX.trx =->  socks.ip_4_tcp.ins.write ;
-                    Hashtbl.add socks.tcps (src_port, dst_port) trx ;
+                    Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf2 "Connection established with %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
                     Metric.Atomic.fire tcp_cnxs_ok ;
                     cont (Some trx)
                 | None ->

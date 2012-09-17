@@ -354,6 +354,8 @@ let rx trx = trx.out.write
 
 let inverse_trx trx = { ins = trx.out ; out = trx.ins }
 
+let null_trx = { ins = null_dev ; out = null_dev }
+
 (** [f <-= trx] sets f as the receive function of this [trx].
  * {b Note:} [trx] is returned so that you can write such things as:
  * [f <-= a <==> b] or [f1 <-= a =-> f2] *)

@@ -33,7 +33,7 @@ let run port =
     Opache.serve host (Tcp.Port.o port) (Opache.multiplexer resources) ;
     Myadmin.make host (Tcp.Port.o (port+1)) ;
     (* Run everything *)
-    Lwt.join [ Clock.run true ]
+   Clock.run true
 
 let main =
     let port = ref 80 in
@@ -41,10 +41,6 @@ let main =
               (fun _ -> raise (Arg.Bad "unknown parameter"))
               "Start a dummy http server" ;
     Random.self_init () ;
-    Lwt_main.run (
-        Lwt.choose [
-            run !port ;
-            Myadmin.report_thread 10.
-        ]
-    )
+    ignore (Myadmin.report_thread 10.) ;
+    run !port
 

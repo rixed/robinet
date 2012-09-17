@@ -30,9 +30,9 @@ let run () =
     (* Send an echo request *)
     let req = Icmp.Pdu.make_echo_request 42 1 in
     tx ip (Icmp.Pdu.pack req) ;
-    Lwt.join [ Clock.run false ]
+    Clock.run false
 
 let main =
     Random.self_init () ;
-    Lwt_main.run (Lwt.join [ run () ]) ;
+    run ()
 

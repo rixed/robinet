@@ -21,7 +21,7 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = true
+let debug = false
 
 (** the lowest port number used by the address translation *)
 let min_port = 1024

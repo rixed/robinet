@@ -150,30 +150,31 @@ let signal_me () = Condition.signal cond
 let epsilon = Interval.usec 1.
 
 (** [at t f x] will execute [f x] when simulation clock reachs time [t]. *)
-let rec at ?(signal=true) (ts : Time.t) f x =
+let rec at (ts : Time.t) f x =
     (* FIXME: since localhost.reader add events from other threads, use a mutex to protect current.events *)
     (* If ts was already bound in current.events, its previous binding disappears.
        Also, we do not like the idea of several sequencial events having the same TS. *)
     try Map.find ts current.events |> ignore ;
-        at ~signal (Time.add ts epsilon) f x
+        at (Time.add ts epsilon) f x
     with Not_found ->
         if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.sub ts current.now)) ;
         current.events <- Map.add ts (fun () -> f x) current.events ;
-        if signal then signal_me ()
+        signal_me ()
 
 (** [delay d f x] will delay the execution of [f x] by the interval [d]. *)
-let delay ?signal d f x =
-    at ?signal (Time.add current.now d) f x
+let delay d f x =
+    at (Time.add current.now d) f x
 
-let asap ?signal f x =
-    delay ?signal (Interval.o 0.) f x
+let asap f x =
+    delay (Interval.o 0.) f x
 
 (** Synchronize internal clock with realtime clock.
  * You must call this after real time passes (for instance after a blocking call).
  * Otherwise, time jumps from one registered event to the next. *)
 let synch () =
     ensure !realtime "Synch with real clock in non-realtime mode!?" ;
-    current.now <- Time.wall_clock ()
+    current.now <- Time.wall_clock () ;
+    if debug then Printf.printf "Clock: synch: set current time to %s\n%!" (Time.to_string current.now)
 
 (** Will process the next event *)
 let next_event () =
@@ -189,14 +190,19 @@ let next_event () =
                 wait_ts := Time.sub ts current.now ;
                 Interval.compare !wait_ts (Interval.msec 10.) > 0
             do
-                delay ~signal:false !wait_ts signal_me () ;
                 if debug then Printf.printf "Clock: next_event: waiting for %s since we're too early\n%!" (Interval.to_string !wait_ts) ;
-                Condition.wait cond cond_lock ;
+                (* fork a thread that will sleep then signal_me () *)
+                (* FIXME: since we cant Thread.kill this thread many can accumulate. *)
+                ignore (Thread.create (fun ts ->
+                    Thread.delay (min 1. ts) ;
+                    if debug then Printf.printf "Clock: waiker: time to waike up!\n" ;
+                    signal_me ()) (!wait_ts :> float)) ;
+                Condition.wait cond cond_lock ; (* zzz *)
                 synch ()
             done ;
             Mutex.unlock cond_lock ;
             true
-        ) else (
+        ) else ( (* not realtime *)
             if Map.is_empty current.events then (
                 if debug then Printf.printf "Clock: no more events" ;
                 false
@@ -214,8 +220,9 @@ let next_event () =
     )
 
 (** [run true] will run forever while [run false] will return once no more events are waiting. *)
-let run () =
-    while !realtime || not (Map.is_empty current.events) do
-        next_event ()
+let run wait =
+    while wait || not (Map.is_empty current.events) do
+        next_event () ;
+        Thread.yield ()
     done
 
