@@ -217,7 +217,7 @@ struct
     let send t proto dst bits =
         let pdu = Pdu.make proto t.src dst bits in
         if debug then Printf.printf "Eth: Emitting an Eth packet, proto %s, from %s to %s (content '%s')\n%!" (Arp.HwProto.to_string proto) (Addr.to_string t.src) (Addr.to_string dst) (hexstring_of_bitstring bits) ;
-        t.emit (Pdu.pack pdu)
+        Clock.asap t.emit (Pdu.pack pdu)
 
     let resolve_proto_addr t bits sender_proto_addr target_proto_addr =
         (* Add the msg to delayed messages _before_ sending the query *)
@@ -302,7 +302,7 @@ struct
             if frame.Pdu.proto = t.proto &&
                (Addr.eq frame.Pdu.dst t.src || Addr.eq frame.Pdu.dst Addr.broadcast) then (
                 if debug then Printf.printf "Eth:...for me!\n%!" ;
-                if Payload.bitlength frame.Pdu.payload > 0 then t.recv (frame.Pdu.payload :> bitstring)
+                if Payload.bitlength frame.Pdu.payload > 0 then Clock.asap t.recv (frame.Pdu.payload :> bitstring)
             ) else if frame.Pdu.proto = Arp.HwProto.arp then (
                 match Arp.Pdu.unpack (frame.Pdu.payload :> bitstring) with
                 | None -> ()

@@ -36,7 +36,7 @@ struct
         Array.iteri (fun i port ->
             if i <> n then (
                 if debug then Printf.printf "Repeater:...fwd to port %d\n%!" i ;
-                port.emit pld
+                Clock.asap port.emit pld
             )) t.ports
 
     let write n t pld =
@@ -106,7 +106,7 @@ struct
                     (Eth.Addr.to_string (Eth.Addr.o dst)) ;
                 R.forward_from ins t.hub bits
             | Some n ->
-                t.hub.Repeater.ports.((OrdArray.get t.macs n).port).Repeater.emit bits ;
+                Clock.asap t.hub.Repeater.ports.((OrdArray.get t.macs n).port).Repeater.emit bits ;
                 OrdArray.promote t.macs n)
         | { _ } ->
             if debug then Printf.printf "Switch: drop incoming frame without destonator\n%!"

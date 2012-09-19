@@ -131,25 +131,24 @@ v}
                                                     (ip.Ip.Pdu.payload :> bitstring)
                                                     new_src_port) in
             let ip = { ip with Ip.Pdu.src = t.addr ; payload } in
-            t.emit (Ip.Pdu.pack ip)
+            Clock.asap t.emit (Ip.Pdu.pack ip)
 
     let rx t bits =
         if debug then Printf.printf "NAT: Received %d bytes\n%!" (bytelength bits) ;
         Ip.Pdu.unpack_with_ports bits |>
-        Option.bind (fun (ip, src_port, dst_port) ->
+        Option.may (fun (ip, src_port, dst_port) ->
             let in_sock = {       proto = ip.Ip.Pdu.proto ;
                                nat_port = dst_port ;
                             remote_addr = ip.Ip.Pdu.src ;
                             remote_port = src_port } in
             Hashtbl.find_option t.in_cnxs_h in_sock |>
-            Option.bind (fun n ->
+            Option.may (fun n ->
                 let cnx = OrdArray.get t.cnxs n in
                 let payload = Payload.o (patch_dst_port ip.Ip.Pdu.proto
                                                         (ip.Ip.Pdu.payload :> bitstring)
                                                         cnx.in_port) in
                 let ip = { ip with Ip.Pdu.dst = cnx.in_addr ; payload } in
-                Some (t.recv (Ip.Pdu.pack ip)))) |>
-        ignore
+                Clock.asap t.recv (Ip.Pdu.pack ip)))
 
     (** [make ip n] returns a {!Tools.trx} corresponding to a NAT device (tx is for transmitting from the LAN to the outside) that can track [n] sockets. *)
     let make addr nb_max_cnxs =

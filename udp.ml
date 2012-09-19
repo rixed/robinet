@@ -82,7 +82,7 @@ struct
     let tx t bits =
         let udp = Pdu.make ~src_port:t.src ~dst_port:t.dst bits in
         if debug then Printf.printf "Udp: Emitting a packet from %s to %s\n%!" (Port.to_string t.src) (Port.to_string t.dst) ;
-        t.emit (Pdu.pack udp)
+        Clock.asap t.emit (Pdu.pack udp)
 
     (* TODO: check checksum *)
     let rx t bits = (match Pdu.unpack bits with
@@ -90,7 +90,7 @@ struct
         | Some udp ->
             if debug then Printf.printf "Udp: Received a datagram\n%!" ;
             if debug then Printf.printf "Udp: Got a datagram with %d bytes\n%!" (Payload.length udp.Pdu.payload) ;
-            if Payload.bitlength udp.Pdu.payload > 0 then t.recv (udp.Pdu.payload :> bitstring))
+            if Payload.bitlength udp.Pdu.payload > 0 then Clock.asap t.recv (udp.Pdu.payload :> bitstring))
 
     let trx_of t =
         { trx = { ins = { write = tx t ;

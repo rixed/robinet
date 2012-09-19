@@ -468,7 +468,7 @@ module TRX = struct
                    So the MTU is required to be a multiple of 8 bytes as well. *)
                 let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst pld in
                 if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (Addr.dotted_string_of_int32 (t.src :> int32)) (Addr.dotted_string_of_int32 (t.dst :> int32)) (bytelength pld) (hexstring_of_bitstring bits);
-                t.emit (Pdu.pack pdu) ;
+                Clock.asap t.emit (Pdu.pack pdu) ;
                 aux (bit_offset + bitstring_length pld)
             ) in
         aux 0
@@ -478,7 +478,7 @@ module TRX = struct
     let rx t bits = (match Pdu.unpack bits with
         | None -> ()
         | Some ip ->
-            if Payload.bitlength ip.Pdu.payload > 0 then t.recv (ip.Pdu.payload :> bitstring))
+            if Payload.bitlength ip.Pdu.payload > 0 then Clock.asap t.recv (ip.Pdu.payload :> bitstring))
 
     let make ?(mtu=1400) src dst proto =
         ensure ((mtu mod 8) = 0) "Ip: MTU is required to be a multiple of 8 bytes" ;

@@ -91,14 +91,14 @@ struct
     (** Transmit function. [tx t payload] will tunnel the payload through this TRX. *)
     let tx t bits =
         let pdu = Pdu.make ~prio:t.prio t.id t.proto bits in
-        t.emit (Pdu.pack pdu)
+        Clock.asap t.emit (Pdu.pack pdu)
 
     (** Receive function, called to output untaggd frames from the 802.1q tunnel. *)
     let rx t bits = match Pdu.unpack bits with
         | None -> ()
         | Some frame ->
             if frame.Pdu.proto = t.proto && Payload.bitlength frame.Pdu.payload > 0 then (
-                t.recv (frame.Pdu.payload :> bitstring)
+                Clock.asap t.recv (frame.Pdu.payload :> bitstring)
             )
 
     (** Creates a {!Vlan.TRX.t}.
