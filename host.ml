@@ -215,7 +215,12 @@ let rec with_resolver_trx t cont =
             cont (Some trx.Udp.TRX.trx))
 
 and gethostbyname t name cont =
-    (* FIXME: If the name is already an IP do not try to resolve it, otherwise host without DNS server cannot use IP addresses neither *)
+    (* If the name is already an IP do not try to resolve it, otherwise host without DNS server cannot use IP addresses neither *)
+    match Ip.Addr.of_dotted_string name with
+    | Some ip -> cont (Some [ip])
+    | None -> do_gethostbyname t name cont
+
+and do_gethostbyname t name cont =
     Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Resolving '%s'" name))) ;
     let dns_timeout_delay = Clock.Interval.sec 3. in
     let is_fqdn n = n.[String.length n - 1] = '.' in
@@ -319,11 +324,12 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
             | None -> cont None
             | Some dst_ips ->
                 Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf2 "Got these IPs for '%s' : %a" name (List.print Ip.Addr.print') dst_ips))) ;
-                if dst_ips <> [] then
+                if dst_ips <> [] then (
                     connect (List.hd dst_ips)
-                else
+                ) else (
                     Log.(log t.host_trx.logger Error (lazy ("Cannot resolve "^name))) ;
-                    cont None)
+                    cont None
+                ))
 
 and udp_connect t dst ?src_port dst_port client_f cont =
     let connect dst_ip =

@@ -76,8 +76,9 @@ let rec stripped url =
   {[
     (* Server *)
     let server = Host.make_static "server" (Eth.Addr.random ()) (Ip.Addr.of_string "192.168.1.1");;
+    let content_of file = File.lines_of file |> List.of_enum |> String.concat "";;
     Opache.serve server (Tcp.Port.o 8080) (fun trx _msg _log ->
-        Http.TRXtop.tx trx (Http.Pdu.make_status 200 [] "Hi there!"));;
+        Http.TRXtop.tx trx (Http.Pdu.make_status 200 ["Content-Type", "text/plain"] (content_of "test.ml")));;
     (* Our client *)
     let client = Host.make_static "client" (Eth.Addr.random ()) (Ip.Addr.of_string "192.168.1.2");;
     let browser = Browser.make client;;
@@ -85,8 +86,12 @@ let rec stripped url =
     let tap = Hub.Tap.make (Pcap.save "http.pcap");;
     client.Host.dev <--> tap.ins ; tap.out <--> server.Host.dev;;
     (* Send a request *)
-    Clock.run true ;;
-    Browser.request browser (Url.of_string "http://192.168.1.1/") ignore ;;
+    Browser.request browser ~headers:["Connection", "close"]
+                    (Url.of_string "http://192.168.1.1:8080/") (function
+        | None -> Printf.printf "fail\n"
+        | Some (headers, body) ->
+            Printf.printf "\nResult:\n%a\n\n%s\n" Http.print_headers headers body);;
+    Clock.run false;;
   ]}
 *)
 let serve host port f =
@@ -116,7 +121,9 @@ let serve host port f =
                 | { Pdu.cmd = Request (cmd, url) ; _ } ->
                     Log.(log logger Debug (lazy (Printf.sprintf "Http msg is a request for %s" url))) ;
                     count_query cmd url ;
-                    f http pdu logger
+                    f http pdu logger ;
+                    Log.(log logger Debug (lazy (Printf.sprintf "Headers were %s, so we must%s close" (string_of_headers pdu.Pdu.headers) (if must_close_cnx pdu.Pdu.headers then "" else " not")))) ;
+                    if must_close_cnx pdu.Pdu.headers then tcp.Tcp.TRX.close ()
                 | _ ->
                     Log.(log logger Debug (lazy (Printf.sprintf "Http msg is unknown"))) ;
                     TRXtop.tx http { Pdu.cmd = Status 500 ; Pdu.headers = [] ; Pdu.body = "" } ;

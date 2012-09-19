@@ -201,7 +201,7 @@ struct
             let tcp = Pdu.make ~src_port ~dst_port ~seq_num ?ack_num
                                ~ack ~psh ~rst ~syn ~fin bits in
             if debug then Printf.printf "Tcp: Emitting a packet from %s to %s, seq %s, length %d, content '%s'\n%!" (Port.to_string src_port) (Port.to_string dst_port) (SeqNum.to_string seq_num) (bytelength bits) (string_of_bitstring bits) ;
-            t.emit (Pdu.pack tcp) ;
+            Clock.asap t.emit (Pdu.pack tcp) ;
             if ack then t.rcvd_acked <- t.rcvd_pld ;
             if bitstring_length bits > 0 then
                 t.unacked_tx <- Streambuf.add (t.sent_pld, tcp) t.unacked_tx ;
@@ -250,18 +250,18 @@ struct
                     let pld = dropbytes skip (tcp.Pdu.payload :> bitstring) in
                     t.rcvd_pld <- t.rcvd_pld + (bytelength pld) ;
                     if debug then Printf.printf "Tcp: I have now read %d bytes\n%!" t.rcvd_pld ;
-                    if bitstring_length pld > 0 then t.recv pld ;
+                    if bitstring_length pld > 0 then Clock.asap t.recv pld ;
                     if tcp.Pdu.flags.Pdu.fin && not t.rcvd_fin then (
                         if debug then Printf.printf "Tcp: received a FIN\n%!" ;
                         t.rcvd_pld <- t.rcvd_pld + 1 ;
                         t.rcvd_fin <- true ;
                         t.closed <- true ;
-                        t.recv empty_bitstring (* signal the close *) (* FIXME: which is not very easy to use when the TRX is piped into another one. An Err would suit better *)
+                        Clock.asap t.recv empty_bitstring (* signal the close *) (* FIXME: which is not very easy to use when the TRX is piped into another one. An Err would suit better *)
                     ) else if tcp.Pdu.flags.Pdu.rst && not t.rcvd_fin then (
                         if debug then Printf.printf "Tcp: received a RST\n%!" ;
                         t.rcvd_fin <- true ;
                         t.closed <- true ;
-                        t.recv empty_bitstring (* signal the close *)
+                        Clock.asap t.recv empty_bitstring (* signal the close *)
                     )
                 ) else (
                     if debug then Printf.printf "Tcp:...obsolete packet\n%!"
@@ -352,7 +352,7 @@ struct
 
     and close t () =
         ensure (is_established t) "Tcp: Closing a cnx that's not established" ;
-        if debug then Printf.printf "Tcp: Closing cnx\n%!" ;
+        if debug then Printf.printf "Tcp: Will close the cnx\n%!" ;
         t.closed <- true ;
         try_really_tx t
 

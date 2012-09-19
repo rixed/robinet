@@ -234,10 +234,6 @@ let make_vacant_cnx t tcp http addr port =
 
 (* Takes an URL and an optional body and call the continuation with the obtained document *)
 let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
-    let must_close_cnx headers =
-        match headers_find "Connection" headers with
-        | Some str when String.icompare str "close" = 0 -> true
-        | _ -> false in
     let get_msg addr port cont =
         (* connect *)
         (* Use a pool of tcp cnx already established _and_not_used_by_any_thread_ *)
@@ -251,10 +247,11 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
                 cont (Some (msg, http, tcp))) ;
             (* now that the receive function is ready, send the query *)
             let path = url.Url.path^url.Url.params^url.Url.query in
-            let headers = [ "User-Agent", t.user_agent ;
-                            "Host", url.Url.net_loc ;
-                            "Connection", "Keep-Alive" ;
-                            "Accept", "*/*" ] @ headers in
+            let add_headers n v hs = if headers_find n headers = None then (n, v)::hs else hs in
+            let headers = add_headers "User-Agent" t.user_agent headers in
+            let headers = add_headers "Host" url.Url.net_loc headers in
+            let headers = add_headers "Connection" "Keep-Alive" headers in
+            let headers = add_headers "Accept" "*/*" headers in
             let headers =
                 let cookie_str = cookie_string t url.Url.net_loc url.Url.path in
                 if cookie_str <> "" then (
@@ -283,8 +280,14 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
         Printf.printf "Browser: bad scheme: %s" (Url.to_string url)
     ) else (
         let get_start = Metric.Timed.start message_get in
-        let addr = Host.Name url.Url.net_loc
-        and port = Tcp.Port.o 80 (* FIXME: use the one in URL! *) in
+        let addr, port =
+            (* Try to use the port present in the URL *)
+            try let n = String.index url.Url.net_loc ':' in
+                Host.Name (String.sub url.Url.net_loc 0 n),
+                String.lchop ~n:(n+1) url.Url.net_loc |>
+                int_of_string |> Tcp.Port.o
+            with _ ->
+                Host.Name url.Url.net_loc, Tcp.Port.o 80 in
         get_msg addr port (function
         | None -> cont None
         | Some (msg, http, tcp) ->

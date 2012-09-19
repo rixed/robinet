@@ -166,6 +166,7 @@ let delay d f x =
     at (Time.add current.now d) f x
 
 let asap f x =
+    (* FIXME: would be more precise and fast to have a dedicated list for asap events *)
     delay (Interval.o 0.) f x
 
 (** Synchronize internal clock with realtime clock.

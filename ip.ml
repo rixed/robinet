@@ -124,6 +124,18 @@ module Addr = struct
     (** Convert an {!Ip.Addr.t} to dotted representation. *)
     let to_dotted_string (t : t) = dotted_string_of_int32 (t :> int32)
 
+    (** And from dotted representation (usefull to allow DNS-less hosts to 'reolve' some name) *)
+    let of_dotted_string str =
+        let assemble a b c d =
+            if a <= 255l && b <= 255l && c <= 255l && d <= 255l then
+                let (<=) = Int32.shift_left and (||) = Int32.logor in
+                Some (o ((a <= 24) || (b <= 16) || (c <= 8) || d))
+            else
+                None
+        in
+        Scanf.sscanf str "%ld.%ld.%ld.%ld" assemble
+        (* FIXME: checkme! *)
+
     (** Convert an {!Ip.Addr.t} to a [bitstring]. *)
     let to_bitstring (t : t) = (BITSTRING { (t :> int32) : 32 })
     (** Convert a [bitstring] into an {!Ip.Addr.t}. *)

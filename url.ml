@@ -89,7 +89,7 @@ let of_string ?(force_absolute=false) str =
     (* If we insist this url must be absolute, then add the missing scheme *)
     let str =
         if force_absolute then (
-            try ignore (String.index str ':') ; str
+            try ignore (String.index str ':') ; str (* not enough when host:port syntax is used *)
             with Not_found -> "http://" ^ str
         ) else str in
     (* Parsing the Fragment Identifier *)

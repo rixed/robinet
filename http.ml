@@ -98,10 +98,11 @@ let print_code fmt (c : code) =
 
 type cmd = Status of code | Request of string (* post, get... *) * string (* URL *)
 type header  = string * string
-
+let string_of_header (n, v) = Printf.sprintf "%s: %s" n v
+let print_header oc h = Printf.fprintf oc "%s" (string_of_header h)
+let print_headers oc headers = List.print print_header oc headers
 let string_of_headers headers =
-    let make_h (n, v) = Printf.sprintf "%s: %s" n v in
-    (String.join "\r\n" (List.map make_h headers)) ^ "\r\n"
+    (String.join "\r\n" (List.map string_of_header headers)) ^ "\r\n"
 
 let header_content_length_re = Str.regexp_case_fold "^Content-Length: +\\(.+\\)$"
 let chunked_transfert_encoding_re = Str.regexp_case_fold "^Transfer-Encoding: +chunked"
@@ -114,6 +115,12 @@ let rec headers_find f = function
 let headers_find_all f hs =
     let matching_h = List.filter (fun (f', _) -> String.icompare f' f = 0) hs in
     List.map snd matching_h
+
+let header_present n v hs = match headers_find n hs with
+    | Some str when String.icompare str v = 0 -> true
+    | _ -> false
+
+let must_close_cnx = header_present "Connection" "close"
 
 (* HTTP Messages *)
 
