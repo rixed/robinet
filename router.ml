@@ -352,7 +352,7 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
     gw ==> output_if.Eth.TRX.trx <==> server_eth.Eth.TRX.trx ;
     Clock.delay (Clock.Interval.sec 10.) (fun () ->
         desktop.Host.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring) () ;
-    Clock.run () ;
+    Clock.run false ;
     Clock.realtime := true ;
     assert_bool "Desktop was NATed" (!src = Some public_ip)
  *)
