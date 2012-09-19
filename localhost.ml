@@ -17,8 +17,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(*
-   A special host that access the physical network through the OS network stack.
+(**
+  A special host that access the physical network through the OS network stack.
 *)
 open Batteries
 open Bitstring

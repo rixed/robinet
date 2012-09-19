@@ -17,6 +17,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
+(** HyperText Transfert Protocol *)
 open Batteries
 open Bitstring
 open Tools
@@ -24,7 +25,7 @@ open Peg
 
 let debug = false
 
-(* Various HTTP Parameters *)
+(** {2 HTTP Error codes} *)
 
 type code = int
 
@@ -96,6 +97,8 @@ let string_of_code (c : code) =
 let print_code fmt (c : code) =
     Format.fprintf fmt "@{<code>%s@}" (string_of_code c)
 
+(** {2 HTTP commands, headers... } *)
+
 type cmd = Status of code | Request of string (* post, get... *) * string (* URL *)
 type header  = string * string
 let string_of_header (n, v) = Printf.sprintf "%s: %s" n v
@@ -122,7 +125,7 @@ let header_present n v hs = match headers_find n hs with
 
 let must_close_cnx = header_present "Connection" "close"
 
-(* HTTP Messages *)
+(** {2 HTTP Messages} *)
 
 module Pdu =
 struct
@@ -265,9 +268,10 @@ struct
 end
 
 
-(* Special kind of transceiver, useful when it's on top of a TRX stack, that
-   receive and tx Pdu.t messages (instead of bitstring). *)
+(** {2 TRX for HTTP messages} *)
 
+(** Special kind of transceiver, useful when it's on top of a TRX stack, that
+    receive and tx Pdu.t messages (instead of bitstring). *)
 module TRXtop =
 struct
     type result =
@@ -309,10 +313,11 @@ struct
 end
 
 
-(* Transceiver. Once build (as a poster or server), handle the whole connection(s).
-   used to tx a body (packed into a 200 Ok response or a post).
-   This is mostly useful to use HTTP as a transport layer (for instance as a tunnel). *)
+(** {2 TRX for any payload} *)
 
+(** Once build (as a poster or server), the Http.TRX handle the whole connection(s).
+    Used to tx a body (packed into a 200 Ok response or a post).
+    This is mostly useful to use HTTP as a transport layer (for instance as a tunnel). *)
 module TRX =
 struct
     type t = { cmd : cmd ;

@@ -17,12 +17,10 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-open Batteries
-open Tools
+(**
+   Easily composable network library.
 
-let debug = false
-
-(* A net is a graph of devices (with position on a 2d plane),
+   A net is a graph of devices (with position on a 2d plane),
    connected with cables, with additional notes, easily serializable.
 
    Nets are stored on disk in a file nets/net_name, in a csv format for
@@ -33,6 +31,11 @@ let debug = false
    - or GET some parts from nets/net_name/part_name for an easier csv
    - PUT them into nets/net_name
    (for coherency reasons it's not possible to PUT only one part) *)
+
+open Batteries
+open Tools
+
+let debug = false
 
 type hub    = { hub_nb_ports : int }
 type switch = { switch_nb_ports : int ;

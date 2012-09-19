@@ -17,13 +17,14 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
+(** Domain Name System *)
 open Batteries
 open Bitstring
 open Tools
 
 let debug = false
 
-(* Opcodes, query types and classes *)
+(** {2 Opcodes, query types and classes} *)
 
 let std_query = 0
 let inv_query = 1
@@ -55,7 +56,7 @@ end
 
 let qclass_inet = 1
 
-(* DNS messages *)
+(** {2 DNS messages} *)
 
 module Pdu =
 struct

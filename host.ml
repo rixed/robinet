@@ -17,12 +17,17 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(*
-  Hosts are merely simple IP stacks with a eth device at the bottom and a name.
-  These makes the link between programs and links.
+(**
+  Simple hosts with a single Eth network interface with a full IP stack.
 
-  Hosts are also TRX: you tx to them higher level commands in a special host protocol, and read back
-  the result.
+  Hosts are merely simple IP stacks with a eth device at the bottom and a name.
+  These makes the link between the network and programs such as browsers or http
+  servers (see {!Browser} and {!Opache}).
+
+  Hosts also comes with a logger (see {!Log}).
+
+  See also {!Localhost} for a special kind of host that's running on top of
+  guest system real IP stack.
 *)
 open Batteries
 open Bitstring

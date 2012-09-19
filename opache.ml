@@ -71,7 +71,7 @@ let rec stripped url =
   Listen HTTP connections arriving at [host] on given [port],
   passing incoming messages to a user supplied function [f].
 
-  The minimal server looks something like:
+  A simple server may be used like:
 
   {[
     (* Server *)
@@ -93,6 +93,9 @@ let rec stripped url =
             Printf.printf "\nResult:\n%a\n\n%s\n" Http.print_headers headers body);;
     Clock.run false;;
   ]}
+
+  Notice that this example, if copied into test.ml, will generate a pcap containing the source code that
+  generates the pcap :-)
 *)
 let serve host port f =
     let logger = Log.(make (Printf.sprintf "%s/Httpd:%s" host.Host.logger.name (Tcp.Port.to_string port)) 50) in

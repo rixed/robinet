@@ -17,8 +17,11 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(*
-  We keep lazyly the last N messages of every log levels.
+(**
+  Logging facility
+
+  We keep lazily the last N messages of every log levels.
+  Additionally, messages of higher level than some threshold are copied onto stderr.
 *)
 open Batteries
 open Tools

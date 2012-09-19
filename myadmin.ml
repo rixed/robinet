@@ -17,8 +17,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(*
-  An HTTP server for monitoring/edition of the virtual network.
+(**
+  An HTTP server for monitoring/editing the virtual network.
 *)
 open Batteries
 open Tools

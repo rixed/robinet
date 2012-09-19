@@ -17,7 +17,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(*
+(** Uniform Resource Locator *)
+(**
   Most of this is taken from RFC1808.
   See: http://tools.ietf.org/html/rfc1808
 *)
@@ -26,6 +27,7 @@ open Tools
 
 let debug = false
 
+(** The type for a (parsed) URL *)
 type t = { scheme : string ; net_loc : string ; path : string ; params : string ; query : string }
 
 let empty = { scheme = "" ; net_loc = "" ; path = "" ; params = "" ; query = "" }
@@ -40,6 +42,7 @@ let unreseved_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01234
 let is_reserved = is_in_set reserved_chars
 let is_unreserved = is_in_set unreseved_chars
 
+(** [decode str] will decode every URL encoded char present in str *)
 let decode s =
     let len = String.length s in
     let s' = String.create len in
@@ -70,6 +73,7 @@ let char_encode c =
     let c = Char.code c in
     Printf.sprintf "%%%X%X" (c lsr 4) (c land 0xf)
 
+(** [encode str] will encode any reserved char present in str into the alternative %xx syntax. *)
 let encode ?(reserved=true) s =
     let rep c =
         if is_unreserved c || (not reserved && is_reserved c) then String.of_char c
@@ -83,6 +87,7 @@ let encode ?(reserved=true) s =
     "/glop/pas%20glop/" (encode ~reserved:false "/glop/pas glop/")
 *)
 
+(** [Url.of_string str] will return the {!Url.t} corresponding to the given [str] *)
 let of_string ?(force_absolute=false) str =
     if debug then Printf.printf "Url: of_string: parse '%s'\n%!" str ;
     let str = decode str in
@@ -150,6 +155,7 @@ let of_string ?(force_absolute=false) str =
 *)
 (* Notice: on that last test we had no path. Thus absolute url will depend on the base *)
 
+(** the opposite of of_string *)
 let to_string url =
     Printf.sprintf "%s%s%s%s%s%s%s%s%s"
         url.scheme (if url.scheme <> "" then "://" else "")
@@ -162,6 +168,7 @@ let to_string url =
 let dotslash_re = Str.regexp "\\(^\\|/\\)\\./"
 let updir_re = Str.regexp "\\(^\\|/\\)\\([^/]+\\)/\\.\\.\\/"
 
+(** [resolve base url] will return the absolute version of [url], given it's relative to [base]. *)
 let resolve base url =
     let aux base url =
         if is_empty base then (

@@ -17,13 +17,14 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
+(** Dynamic Host Configuration Protocol. *)
 open Batteries
 open Bitstring
 open Tools
 
 let debug = false
 
-(* Opcodes, types, etc *)
+(** {2 Opcodes, types, etc} *)
 
 let bootrequest = 1
 let bootreply = 2
@@ -61,7 +62,7 @@ module MsgType = struct
         if Inner.is_valid p then p else random ()
 end
 
-(* DHCP messages *)
+(** {2 DHCP messages} *)
 
 module Pdu =
 struct

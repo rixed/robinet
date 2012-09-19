@@ -17,7 +17,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(*
+(** A simple web browser.
 
  This simulates an HTTP browser, ie it can get pages (with all dependancies
  but without javascript execution of course), then return a list of available
@@ -34,10 +34,13 @@ open Html
 
 let debug = false
 
+(** {2 Browser} *)
+
 type cookie = { name : string ; value : string ; domain : string ; path : string }
 
 type vacant_cnx = { tcp : Tcp.TRX.tcp_trx ; http : TRXtop.t ; last_used : Clock.Time.t }
 
+(** A browser is build from a host, and has a set of cookies and of connections. *)
 type t = { host : Host.host_trx ;
            user_agent : string ;
            mutable cookies : cookie list ;
@@ -55,9 +58,9 @@ let make ?(user_agent="RobiNet") ?(max_vacant_cnx=10) ?(max_idle_cnx=Clock.Inter
       max_vacant_cnx = max_vacant_cnx ;
       max_idle_cnx = max_idle_cnx }
 
-type page = { links : string list ; total_size : int }
+(** {2 Cookies}
 
-(* Cookies (as of RFC 6265)
+   Cookies (as of RFC 6265).
    Note: all our cookies are "session cookies", ie we keep them only in the browser memory. *)
 
 let string_of_cookie { name = n ; value = v ; domain = d ; path = p } =

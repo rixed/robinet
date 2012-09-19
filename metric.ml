@@ -17,7 +17,9 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(*
+(**
+   Facility to count events/measure performances.
+
    Metrics for counting events, and generating realtime or final reports.
    Events may have a start and stop time or be atomic (no duration).
    In case of event with duration, two events are added: one for start and one for stop,

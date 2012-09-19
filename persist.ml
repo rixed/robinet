@@ -17,6 +17,11 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
+(**
+  Simple serialization module
+
+  Helps to keep an object state in a file in a friendly format (for instance javascript or csv)
+ *)
 open Batteries
 
 let debug = false
