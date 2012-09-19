@@ -11,9 +11,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -30,6 +30,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -44,11 +46,11 @@
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;age&nbsp;t&nbsp;=&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Time</span>.sub&nbsp;now&nbsp;t&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;t.vacant_cnxs&nbsp;&lt;-&nbsp;<span class="constructor">Hashtbl</span>.filter&nbsp;(<span class="keyword">fun</span>&nbsp;v&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;incr&nbsp;count&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;v.trx.<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.is_closed&nbsp;()&nbsp;<span class="keyword">then</span>&nbsp;(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;v.tcp.<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.is_closed&nbsp;()&nbsp;<span class="keyword">then</span>&nbsp;(<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Browser:&nbsp;clean_vacant_cnxs:&nbsp;cleaning&nbsp;a&nbsp;closed&nbsp;trx\n"</span>&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">false</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;!count&nbsp;&gt;&nbsp;t.max_vacant_cnx&nbsp;<span class="keywordsign">||</span>&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.compare&nbsp;(age&nbsp;v.last_used)&nbsp;t.max_idle_cnx&nbsp;&gt;&nbsp;0&nbsp;<span class="keyword">then</span>&nbsp;(<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Browser:&nbsp;clean_vacant_cnxs:&nbsp;making&nbsp;room\n"</span>&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;v.trx.<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.close&nbsp;()&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;v.tcp.<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.close&nbsp;()&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">false</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">true</span>)&nbsp;t.vacant_cnxs</code></body></html>

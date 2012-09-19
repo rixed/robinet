@@ -11,9 +11,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -30,6 +30,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -41,4 +43,9 @@
 <code class="code"><span class="keyword">let</span>&nbsp;close&nbsp;t&nbsp;()&nbsp;=<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Log</span>.(log&nbsp;logger&nbsp;<span class="constructor">Debug</span>&nbsp;(<span class="keyword">lazy</span>&nbsp;(<span class="constructor">Printf</span>.sprintf&nbsp;<span class="string">"Closing&nbsp;socket"</span>)))&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;t.is_closed&nbsp;&lt;-&nbsp;<span class="keyword">true</span>&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Lwt</span>.ignore_result&nbsp;(<span class="constructor">Lwt_unix</span>.close&nbsp;t.sock)</code></body></html>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Unix</span>.close&nbsp;t.sock&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;In&nbsp;case&nbsp;the&nbsp;closing&nbsp;of&nbsp;the&nbsp;fd&nbsp;is&nbsp;not&nbsp;enough:&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">match</span>&nbsp;t.reader&nbsp;<span class="keyword">with</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">None</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;()<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Some</span>&nbsp;_reader&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.reader&nbsp;&lt;-&nbsp;<span class="constructor">None</span></code></body></html>

@@ -16,9 +16,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -35,6 +35,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -48,7 +50,9 @@
 </div>
 <center><h1>Module <a href="type_Hub.Repeater.html">Hub.Repeater</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Repeater: <code class="code"><span class="keyword">sig</span></code> <a href="Hub.Repeater.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
+<pre><span class="keyword">module</span> Repeater: <code class="code"><span class="keyword">sig</span></code> <a href="Hub.Repeater.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>A Repeater (or HUB) is a device that receives Eth frames and blindly mirrors them
+   to several locations (but the one from which the frame came from)<br>
+<hr width="100%">
 <br><code><span id="TYPEport"><span class="keyword">type</span> <code class="type"></code>port</span> = {</code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
@@ -71,4 +75,7 @@
 }
 
 
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALHub.Repeater.make.html">make</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a></code></pre><pre><span id="VALforward_from"><span class="keyword">val</span> <a href="code_VALHub.Repeater.forward_from.html">forward_from</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALrx"><span class="keyword">val</span> <a href="code_VALHub.Repeater.rx.html">rx</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALset_emit"><span class="keyword">val</span> <a href="code_VALHub.Repeater.set_emit.html">set_emit</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> (Bitstring.bitstring -> unit) -> unit</code></pre><pre><span id="VALt_printer"><span class="keyword">val</span> <a href="code_VALHub.Repeater.t_printer.html">t_printer</a></span> : <code class="type">'a -> 'b BatInnerIO.output -> <a href="Hub.Repeater.html#TYPEt">t</a> -> unit</code></pre></body></html>
+<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALHub.Repeater.make.html">make</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a></code></pre><pre><span id="VALforward_from"><span class="keyword">val</span> <a href="code_VALHub.Repeater.forward_from.html">forward_from</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALwrite"><span class="keyword">val</span> <a href="code_VALHub.Repeater.write.html">write</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALset_read"><span class="keyword">val</span> <a href="code_VALHub.Repeater.set_read.html">set_read</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> (Bitstring.bitstring -> unit) -> unit</code></pre><pre><span id="VALto_dev"><span class="keyword">val</span> <a href="code_VALHub.Repeater.to_dev.html">to_dev</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> <a href="Tools.html#TYPEdev">Tools.dev</a></code></pre><div class="info">
+Turns a port into a device<br>
+</div>
+<pre><span id="VALt_printer"><span class="keyword">val</span> <a href="code_VALHub.Repeater.t_printer.html">t_printer</a></span> : <code class="type">'a -> 'b BatInnerIO.output -> <a href="Hub.Repeater.html#TYPEt">t</a> -> unit</code></pre></body></html>

@@ -11,9 +11,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -30,6 +30,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -38,7 +40,7 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Dhcp.Pdu.make_base</title>
 </head>
 <body>
-<code class="code"><span class="keyword">let</span>&nbsp;make_base&nbsp;?(mac=<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.zero)&nbsp;?xid&nbsp;?name&nbsp;msg_type&nbsp;=<br>
+<code class="code"><span class="keyword">let</span>&nbsp;make_base&nbsp;?(mac=<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.zero)&nbsp;?xid&nbsp;?name&nbsp;?(yiaddr=<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.zero)&nbsp;msg_type&nbsp;=<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;xid&nbsp;=&nbsp;may_default&nbsp;xid&nbsp;(<span class="keyword">fun</span>&nbsp;()&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Random</span>.int32&nbsp;<span class="constructor">Int32</span>.max_int)&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{&nbsp;op&nbsp;=&nbsp;<span class="constructor">BootRequest</span>&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;htype&nbsp;=&nbsp;<span class="constructor">Arp</span>.<span class="constructor">HwType</span>.eth&nbsp;;<br>
@@ -46,10 +48,10 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;xid&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;secs&nbsp;=&nbsp;0&nbsp;;&nbsp;broadcast&nbsp;=&nbsp;<span class="keyword">false</span>&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ciaddr&nbsp;=&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.zero&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;yiaddr&nbsp;=&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.zero&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;yiaddr&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;siaddr&nbsp;=&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.zero&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;giaddr&nbsp;=&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.zero&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;chaddr&nbsp;=&nbsp;<span class="constructor">Bitstring</span>.concat&nbsp;[&nbsp;(mac&nbsp;:&gt;&nbsp;bitstring)&nbsp;;&nbsp;create_bitstring&nbsp;80&nbsp;]&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;chaddr&nbsp;=&nbsp;extendbytes&nbsp;16&nbsp;(mac&nbsp;:&gt;&nbsp;bitstring)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sname&nbsp;=&nbsp;<span class="string">""</span>&nbsp;;&nbsp;file&nbsp;=&nbsp;<span class="string">""</span>&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;msg_type&nbsp;=&nbsp;<span class="constructor">Some</span>&nbsp;msg_type&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;subnet_mask&nbsp;=&nbsp;<span class="constructor">None</span>&nbsp;;&nbsp;router&nbsp;=&nbsp;<span class="constructor">None</span>&nbsp;;<br>

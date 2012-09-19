@@ -11,9 +11,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -30,6 +30,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -38,22 +40,12 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Tcp.TRX.rx</title>
 </head>
 <body>
-<code class="code"><span class="keyword">let</span>&nbsp;<span class="keyword">rec</span>&nbsp;trx_of&nbsp;t&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{&nbsp;trx&nbsp;=&nbsp;{&nbsp;tx&nbsp;=&nbsp;tx&nbsp;t&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;rx&nbsp;=&nbsp;rx&nbsp;t&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;set_emit&nbsp;=&nbsp;(<span class="keyword">fun</span>&nbsp;f&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;t.emit&nbsp;&lt;-&nbsp;f)&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;set_recv&nbsp;=&nbsp;(<span class="keyword">fun</span>&nbsp;f&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;t.recv&nbsp;&lt;-&nbsp;f)&nbsp;}&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;close&nbsp;=&nbsp;close&nbsp;t&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;is_closed&nbsp;=&nbsp;is_closed&nbsp;t&nbsp;}<br>
-<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;The&nbsp;cnx&nbsp;is&nbsp;established&nbsp;(ie&nbsp;its&nbsp;behavior&nbsp;is&nbsp;driven&nbsp;by&nbsp;the&nbsp;rcvd&nbsp;and&nbsp;sent&nbsp;streambuf<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;*&nbsp;whenever&nbsp;we&nbsp;had&nbsp;the&nbsp;two&nbsp;syns,&nbsp;not&nbsp;when&nbsp;they&nbsp;are&nbsp;acked.&nbsp;*)</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;establish_cnx&nbsp;t&nbsp;ok&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">match</span>&nbsp;t.cnx_wakener&nbsp;<span class="keyword">with</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Some</span>&nbsp;w&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;waking&nbsp;up&nbsp;client\n%!"</span>&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Lwt</span>.wakeup&nbsp;w&nbsp;(<span class="keyword">if</span>&nbsp;ok&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Some</span>&nbsp;(trx_of&nbsp;t)&nbsp;<span class="keyword">else</span>&nbsp;<span class="constructor">None</span>)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">None</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;no&nbsp;one&nbsp;was&nbsp;waiting\n%!"</span><br>
+<code class="code"><span class="keyword">let</span>&nbsp;<span class="keyword">rec</span>&nbsp;establish_cnx&nbsp;t&nbsp;ok&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">match</span>&nbsp;t.cnx_established_cont&nbsp;<span class="keyword">with</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Some</span>&nbsp;f&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;calling&nbsp;continuation&nbsp;for&nbsp;serving&nbsp;new&nbsp;cnx&nbsp;on&nbsp;port&nbsp;%d\n%!"</span>&nbsp;(t.src&nbsp;:&gt;&nbsp;int)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;f&nbsp;(<span class="keyword">if</span>&nbsp;ok&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Some</span>&nbsp;t.tcp_trx&nbsp;<span class="keyword">else</span>&nbsp;<span class="constructor">None</span>)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">None</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;no&nbsp;one&nbsp;was&nbsp;waiting\n%!"</span><br>
 <br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;try_really_rx&nbsp;t&nbsp;=<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;not&nbsp;(<span class="constructor">Streambuf</span>.is_empty&nbsp;t.rcvd_pkts)&nbsp;<span class="keyword">then</span>&nbsp;(<br>
@@ -74,18 +66,18 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;pld&nbsp;=&nbsp;dropbytes&nbsp;skip&nbsp;(tcp.<span class="constructor">Pdu</span>.payload&nbsp;:&gt;&nbsp;bitstring)&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.rcvd_pld&nbsp;&lt;-&nbsp;t.rcvd_pld&nbsp;+&nbsp;(bytelength&nbsp;pld)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;I&nbsp;have&nbsp;now&nbsp;read&nbsp;%d&nbsp;bytes\n%!"</span>&nbsp;t.rcvd_pld&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;bitstring_length&nbsp;pld&nbsp;&gt;&nbsp;0&nbsp;<span class="keyword">then</span>&nbsp;t.recv&nbsp;pld&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;bitstring_length&nbsp;pld&nbsp;&gt;&nbsp;0&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Clock</span>.asap&nbsp;t.recv&nbsp;pld&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;tcp.<span class="constructor">Pdu</span>.flags.<span class="constructor">Pdu</span>.fin&nbsp;<span class="keywordsign">&amp;&amp;</span>&nbsp;not&nbsp;t.rcvd_fin&nbsp;<span class="keyword">then</span>&nbsp;(<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;received&nbsp;a&nbsp;FIN\n%!"</span>&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.rcvd_pld&nbsp;&lt;-&nbsp;t.rcvd_pld&nbsp;+&nbsp;1&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.rcvd_fin&nbsp;&lt;-&nbsp;<span class="keyword">true</span>&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.closed&nbsp;&lt;-&nbsp;<span class="keyword">true</span>&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.recv&nbsp;empty_bitstring&nbsp;<span class="comment">(*&nbsp;signal&nbsp;the&nbsp;close&nbsp;*)</span>&nbsp;<span class="comment">(*&nbsp;FIXME:&nbsp;which&nbsp;is&nbsp;not&nbsp;very&nbsp;easy&nbsp;to&nbsp;use&nbsp;when&nbsp;the&nbsp;TRX&nbsp;is&nbsp;piped&nbsp;into&nbsp;another&nbsp;one.&nbsp;An&nbsp;Err&nbsp;would&nbsp;suit&nbsp;better&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Clock</span>.asap&nbsp;t.recv&nbsp;empty_bitstring&nbsp;<span class="comment">(*&nbsp;signal&nbsp;the&nbsp;close&nbsp;*)</span>&nbsp;<span class="comment">(*&nbsp;FIXME:&nbsp;which&nbsp;is&nbsp;not&nbsp;very&nbsp;easy&nbsp;to&nbsp;use&nbsp;when&nbsp;the&nbsp;TRX&nbsp;is&nbsp;piped&nbsp;into&nbsp;another&nbsp;one.&nbsp;An&nbsp;Err&nbsp;would&nbsp;suit&nbsp;better&nbsp;*)</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;<span class="keyword">if</span>&nbsp;tcp.<span class="constructor">Pdu</span>.flags.<span class="constructor">Pdu</span>.rst&nbsp;<span class="keywordsign">&amp;&amp;</span>&nbsp;not&nbsp;t.rcvd_fin&nbsp;<span class="keyword">then</span>&nbsp;(<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;received&nbsp;a&nbsp;RST\n%!"</span>&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.rcvd_fin&nbsp;&lt;-&nbsp;<span class="keyword">true</span>&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.closed&nbsp;&lt;-&nbsp;<span class="keyword">true</span>&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.recv&nbsp;empty_bitstring&nbsp;<span class="comment">(*&nbsp;signal&nbsp;the&nbsp;close&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Clock</span>.asap&nbsp;t.recv&nbsp;empty_bitstring&nbsp;<span class="comment">(*&nbsp;signal&nbsp;the&nbsp;close&nbsp;*)</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">else</span>&nbsp;(<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:...obsolete&nbsp;packet\n%!"</span><br>
@@ -176,7 +168,7 @@
 <br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;close&nbsp;t&nbsp;()&nbsp;=<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ensure&nbsp;(is_established&nbsp;t)&nbsp;<span class="string">"Tcp:&nbsp;Closing&nbsp;a&nbsp;cnx&nbsp;that's&nbsp;not&nbsp;established"</span>&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;Closing&nbsp;cnx\n%!"</span>&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Tcp:&nbsp;Will&nbsp;close&nbsp;the&nbsp;cnx\n%!"</span>&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.closed&nbsp;&lt;-&nbsp;<span class="keyword">true</span>&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;try_really_tx&nbsp;t<br>
 <br>

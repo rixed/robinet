@@ -11,9 +11,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -30,6 +30,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -50,7 +52,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;once&nbsp;we&nbsp;obtain&nbsp;the&nbsp;transport&nbsp;layer,&nbsp;build&nbsp;an&nbsp;http&nbsp;on&nbsp;top&nbsp;of&nbsp;it&nbsp;*)</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Log</span>.(log&nbsp;logger&nbsp;<span class="constructor">Debug</span>&nbsp;(<span class="keyword">lazy</span>&nbsp;<span class="string">"Building&nbsp;a&nbsp;new&nbsp;HTTP.TRXtop"</span>))&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;http&nbsp;=&nbsp;<span class="constructor">TRXtop</span>.make&nbsp;()&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">TRXtop</span>.set_emit&nbsp;http&nbsp;tcp.<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.trx.tx&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">TRXtop</span>.set_emit&nbsp;http&nbsp;(tx&nbsp;tcp.<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.trx)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">TRXtop</span>.set_recv&nbsp;http&nbsp;(<span class="keyword">function</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">TRXtop</span>.<span class="constructor">HttpError</span>&nbsp;x&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Log</span>.(log&nbsp;logger&nbsp;<span class="constructor">Debug</span>&nbsp;(<span class="keyword">lazy</span>&nbsp;(<span class="constructor">Printf</span>.sprintf&nbsp;<span class="string">"Got&nbsp;error&nbsp;%s"</span>&nbsp;x)))&nbsp;;<br>
@@ -65,10 +67,12 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;<span class="constructor">Pdu</span>.cmd&nbsp;=&nbsp;<span class="constructor">Request</span>&nbsp;(cmd,&nbsp;url)&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Log</span>.(log&nbsp;logger&nbsp;<span class="constructor">Debug</span>&nbsp;(<span class="keyword">lazy</span>&nbsp;(<span class="constructor">Printf</span>.sprintf&nbsp;<span class="string">"Http&nbsp;msg&nbsp;is&nbsp;a&nbsp;request&nbsp;for&nbsp;%s"</span>&nbsp;url)))&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;count_query&nbsp;cmd&nbsp;url&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;f&nbsp;http&nbsp;pdu&nbsp;logger<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;f&nbsp;http&nbsp;pdu&nbsp;logger&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Log</span>.(log&nbsp;logger&nbsp;<span class="constructor">Debug</span>&nbsp;(<span class="keyword">lazy</span>&nbsp;(<span class="constructor">Printf</span>.sprintf&nbsp;<span class="string">"Headers&nbsp;were&nbsp;%s,&nbsp;so&nbsp;we&nbsp;must%s&nbsp;close"</span>&nbsp;(string_of_headers&nbsp;pdu.<span class="constructor">Pdu</span>.headers)&nbsp;(<span class="keyword">if</span>&nbsp;must_close_cnx&nbsp;pdu.<span class="constructor">Pdu</span>.headers&nbsp;<span class="keyword">then</span>&nbsp;<span class="string">""</span>&nbsp;<span class="keyword">else</span>&nbsp;<span class="string">"&nbsp;not"</span>))))&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;must_close_cnx&nbsp;pdu.<span class="constructor">Pdu</span>.headers&nbsp;<span class="keyword">then</span>&nbsp;tcp.<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.close&nbsp;()<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;_&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Log</span>.(log&nbsp;logger&nbsp;<span class="constructor">Debug</span>&nbsp;(<span class="keyword">lazy</span>&nbsp;(<span class="constructor">Printf</span>.sprintf&nbsp;<span class="string">"Http&nbsp;msg&nbsp;is&nbsp;unknown"</span>)))&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">TRXtop</span>.tx&nbsp;http&nbsp;{&nbsp;<span class="constructor">Pdu</span>.cmd&nbsp;=&nbsp;<span class="constructor">Status</span>&nbsp;500&nbsp;;&nbsp;<span class="constructor">Pdu</span>.headers&nbsp;=&nbsp;[]&nbsp;;&nbsp;<span class="constructor">Pdu</span>.body&nbsp;=&nbsp;<span class="string">""</span>&nbsp;}&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;tcp.<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.close&nbsp;()))&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;Only&nbsp;when&nbsp;everything's&nbsp;set&nbsp;up&nbsp;do&nbsp;we&nbsp;connect&nbsp;the&nbsp;tcp&nbsp;recv&nbsp;to&nbsp;http&nbsp;rx&nbsp;*)</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;tcp.<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.trx.set_recv&nbsp;(<span class="constructor">TRXtop</span>.rx&nbsp;http))</code></body></html>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ignore&nbsp;((<span class="constructor">TRXtop</span>.rx&nbsp;http)&nbsp;&lt;-=&nbsp;tcp.<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.trx))</code></body></html>

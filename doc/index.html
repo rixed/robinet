@@ -14,9 +14,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -33,6 +33,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -49,23 +51,51 @@
 <a href="index_module_types.html">Index of module types</a><br>
 <br/><br>
 <table class="indextable">
-<tr><td><a href="Arp.html">Arp</a></td><td></td></tr>
-<tr><td><a href="Browser.html">Browser</a></td><td></td></tr>
+<tr><td><a href="Arp.html">Arp</a></td><td><div class="info">
+ Address Resolution Protocol.
+</div>
+</td></tr>
+<tr><td><a href="Browser.html">Browser</a></td><td><div class="info">
+A simple web browser.
+</div>
+</td></tr>
 <tr><td><a href="Clock.html">Clock</a></td><td><div class="info">
 This module creates an alarm-clock that schedule registered events.
 </div>
 </td></tr>
-<tr><td><a href="Dhcp.html">Dhcp</a></td><td></td></tr>
-<tr><td><a href="Dns.html">Dns</a></td><td></td></tr>
+<tr><td><a href="Dhcp.html">Dhcp</a></td><td><div class="info">
+Dynamic Host Configuration Protocol.
+</div>
+</td></tr>
+<tr><td><a href="Dhcpd.html">Dhcpd</a></td><td><div class="info">
+DHCP server
+</div>
+</td></tr>
+<tr><td><a href="Dns.html">Dns</a></td><td><div class="info">
+Domain Name System
+</div>
+</td></tr>
 <tr><td><a href="Eth.html">Eth</a></td><td><div class="info">
  Ethernet protocol implementation.
 </div>
 </td></tr>
-<tr><td><a href="Fifo.html">Fifo</a></td><td></td></tr>
-<tr><td><a href="Host.html">Host</a></td><td></td></tr>
-<tr><td><a href="Html.html">Html</a></td><td></td></tr>
-<tr><td><a href="Http.html">Http</a></td><td></td></tr>
-<tr><td><a href="Hub.html">Hub</a></td><td></td></tr>
+<tr><td><a href="Host.html">Host</a></td><td><div class="info">
+Simple hosts with a single Eth network interface with a full IP stack.
+</div>
+</td></tr>
+<tr><td><a href="Html.html">Html</a></td><td><div class="info">
+Used for tests only
+</div>
+</td></tr>
+<tr><td><a href="Http.html">Http</a></td><td><div class="info">
+HyperText Transfert Protocol
+</div>
+</td></tr>
+<tr><td><a href="Hub.html">Hub</a></td><td><div class="info">
+A Repeater (or HUB) is a device that receives Eth frames and blindly mirrors them
+   to several locations (but the one from which the frame came from)
+</div>
+</td></tr>
 <tr><td><a href="Icmp.html">Icmp</a></td><td><div class="info">
  Internet Control Message Protocol (ICMP), (un)packing and tools.
 </div>
@@ -74,23 +104,56 @@ This module creates an alarm-clock that schedule registered events.
  Everything related to IPv4 packets: (un)packing, addresses, transceiver...
 </div>
 </td></tr>
-<tr><td><a href="Localhost.html">Localhost</a></td><td></td></tr>
-<tr><td><a href="Log.html">Log</a></td><td></td></tr>
-<tr><td><a href="Metric.html">Metric</a></td><td></td></tr>
-<tr><td><a href="Myadmin.html">Myadmin</a></td><td></td></tr>
-<tr><td><a href="Net.html">Net</a></td><td></td></tr>
-<tr><td><a href="Opache.html">Opache</a></td><td></td></tr>
+<tr><td><a href="Localhost.html">Localhost</a></td><td><div class="info">
+A special host that access the physical network through the OS network stack.
+</div>
+</td></tr>
+<tr><td><a href="Log.html">Log</a></td><td><div class="info">
+Logging facility
+</div>
+</td></tr>
+<tr><td><a href="Metric.html">Metric</a></td><td><div class="info">
+Facility to count events/measure performances.
+</div>
+</td></tr>
+<tr><td><a href="Myadmin.html">Myadmin</a></td><td><div class="info">
+An HTTP server for monitoring/editing the virtual network.
+</div>
+</td></tr>
+<tr><td><a href="Net.html">Net</a></td><td><div class="info">
+Easily composable network library.
+</div>
+</td></tr>
+<tr><td><a href="Opache.html">Opache</a></td><td><div class="info">
+A simple HTTP server.
+</div>
+</td></tr>
 <tr><td><a href="Packet.html">Packet</a></td><td><div class="info">
 Packet scrutiny
 </div>
 </td></tr>
 <tr><td><a href="Pcap.html">Pcap</a></td><td><div class="info">
  This module holds all functions related to <code class="code">libpcap</code>, packet sniffing,
- packet injection, and pcap file reading and writing.
+ packet injection and pcap file reading and writing.
 </div>
 </td></tr>
-<tr><td><a href="Peg.html">Peg</a></td><td></td></tr>
-<tr><td><a href="Persist.html">Persist</a></td><td></td></tr>
+<tr><td><a href="Peg.html">Peg</a></td><td><div class="info">
+Simple Parsing Expression Grammar that allow restart.
+</div>
+</td></tr>
+<tr><td><a href="Persist.html">Persist</a></td><td><div class="info">
+Simple serialization module
+</div>
+</td></tr>
+<tr><td><a href="Router.html">Router</a></td><td><div class="info">
+the lowest port number used by the address translation
+</div>
+</td></tr>
+<tr><td><a href="Sim.html">Sim</a></td><td><div class="info">
+This module puts together all the modules required to build
+ networks and run a simulation.
+</div>
+</td></tr>
 <tr><td><a href="Sll.html">Sll</a></td><td><div class="info">
  Linux Cooked Capture (aka SLL)
 </div>
@@ -99,12 +162,18 @@ Packet scrutiny
 Transmission Control Protocol (TCP) (un)packing.
 </div>
 </td></tr>
-<tr><td><a href="Tools.html">Tools</a></td><td></td></tr>
+<tr><td><a href="Tools.html">Tools</a></td><td><div class="info">
+An OrdArray is a container for an ordered set of bounded size.
+</div>
+</td></tr>
 <tr><td><a href="Udp.html">Udp</a></td><td><div class="info">
 User Data Protocol (UDP) (un)packing.
 </div>
 </td></tr>
-<tr><td><a href="Url.html">Url</a></td><td></td></tr>
+<tr><td><a href="Url.html">Url</a></td><td><div class="info">
+Uniform Resource Locator
+</div>
+</td></tr>
 <tr><td><a href="Vlan.html">Vlan</a></td><td><div class="info">
  Ethernet 802.1q Virtual Lan implementation.
 </div>

@@ -11,9 +11,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -30,6 +30,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -57,7 +59,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;serie.past.(!serie_current_idx)&nbsp;&lt;-&nbsp;ev.<span class="constructor">Metric</span>.<span class="constructor">Atomic</span>.count&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;serie.used&nbsp;&lt;&nbsp;serie_size&nbsp;<span class="keyword">then</span>&nbsp;serie.used&nbsp;&lt;-&nbsp;serie.used&nbsp;+&nbsp;1<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;lwt&nbsp;()&nbsp;=&nbsp;<span class="constructor">Lwt_unix</span>.sleep&nbsp;period&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Thread</span>.delay&nbsp;period&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;Save&nbsp;all&nbsp;the&nbsp;metrics&nbsp;*)</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"MyAdmin:&nbsp;updating&nbsp;stored&nbsp;metrics\n%!"</span>&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;serie_current_idx&nbsp;:=&nbsp;<span class="keyword">if</span>&nbsp;!serie_current_idx&nbsp;&lt;&nbsp;serie_size-1&nbsp;<span class="keyword">then</span>&nbsp;!serie_current_idx+1&nbsp;<span class="keyword">else</span>&nbsp;0&nbsp;;<br>

@@ -17,9 +17,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -36,6 +36,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -50,8 +52,38 @@
 </div>
 <center><h1>Module <a href="type_Metric.html">Metric</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Metric: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALMetric.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span class="keyword">module</span> <a href="Metric.Atomic.html">Atomic</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Atomic.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Metric.Counter.html">Counter</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Counter.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Metric.Timed.html">Timed</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Timed.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span id="VALprint_report"><span class="keyword">val</span> <a href="code_VALMetric.print_report.html">print_report</a></span> : <code class="type">unit BatIO.output -> unit</code></pre><pre><span id="VALreport_thread"><span class="keyword">val</span> <a href="code_VALMetric.report_thread.html">report_thread</a></span> : <code class="type">unit BatIO.output -> float -> 'a Lwt.t</code></pre><br><code><span id="TYPEitem"><span class="keyword">type</span> <code class="type"></code>item</span> = </code><table class="typetable">
+<pre><span class="keyword">module</span> Metric: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Facility to count events/measure performances.
+<p>
+
+   Metrics for counting events, and generating realtime or final reports.
+   Events may have a start and stop time or be atomic (no duration).
+   In case of event with duration, two events are added: one for start and one for stop,
+   so that it's possible to have the rate(t) of starts and rate(t) of stops.
+<p>
+
+   These reports must provide:<ul>
+<li>total number of occurrences of a given event</li>
+<li>current/total rate of an event</li>
+<li>current/total min/max of this rate</li>
+<li>current/total mean rate of an event
+   For events with duration, in addition to the above for the start and end event:</li>
+<li>total duration of an event</li>
+<li>current/total mean duration of an event</li>
+</ul>
+
+   (note: "current" values can be obtained from a polling agent from the bare counters
+   offered here)
+<p>
+
+   Also, each event is given a name and is known to the module so that we can
+   build reports including all events without requiring much from the user.
+<p>
+
+   Also, events of the same kind may be grouped together to form a compound
+   event of this same type. Events are thus ordered in a tree. This need not to
+   be performed until creation of the report, though.<br>
+<hr width="100%">
+<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALMetric.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span class="keyword">module</span> <a href="Metric.Atomic.html">Atomic</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Atomic.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Metric.Counter.html">Counter</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Counter.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Metric.Timed.html">Timed</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Timed.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span id="VALprint_report"><span class="keyword">val</span> <a href="code_VALMetric.print_report.html">print_report</a></span> : <code class="type">unit BatIO.output -> unit</code></pre><pre><span id="VALreport_thread"><span class="keyword">val</span> <a href="code_VALMetric.report_thread.html">report_thread</a></span> : <code class="type">unit BatIO.output -> float -> Thread.t</code></pre><br><code><span id="TYPEitem"><span class="keyword">type</span> <code class="type"></code>item</span> = </code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
@@ -77,7 +109,7 @@
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Tree</span> <span class="keyword">of</span> <code class="type">(string * <a href="Metric.html#TYPEtree">tree</a>)</code></code></td>
+<code><span class="constructor">Tree</span> <span class="keyword">of</span> <code class="type">string * <a href="Metric.html#TYPEtree">tree</a></code></code></td>
 
 </tr></table>
 

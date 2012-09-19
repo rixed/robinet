@@ -13,9 +13,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -32,6 +32,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -47,16 +49,38 @@
 <td></td></tr>
 <tr><td><a href="Tcp.TRX.html#VAL(-/)">(-/)</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
+<tr><td><a href="Tools.html#VAL(<-->)">(&lt;--&gt;)</a> [<a href="Tools.html">Tools</a>]</td>
+<td><div class="info">
+Connects two <a href="Tools.html#TYPEdev"><code class="code"><span class="constructor">Tools</span>.dev</code></a> together
+</div>
+</td></tr>
+<tr><td><a href="Tools.html#VAL(<-=)">(&lt;-=)</a> [<a href="Tools.html">Tools</a>]</td>
+<td><div class="info">
+<code class="code">f &lt;-= trx</code> sets f as the receive function of this <code class="code">trx</code>.
+</div>
+</td></tr>
+<tr><td><a href="Tools.html#VAL(<==>)">(&lt;==&gt;)</a> [<a href="Tools.html">Tools</a>]</td>
+<td><div class="info">
+<code class="code">a &lt;==&gt; b</code> connects <code class="code">a</code> to <code class="code">b</code> such that <code class="code">b</code> receives what <code class="code">a</code> emits
+ and <code class="code">a</code> receives what <code class="code">b</code> emits.
+</div>
+</td></tr>
+<tr><td><a href="Tools.html#VAL(=->)">(=-&gt;)</a> [<a href="Tools.html">Tools</a>]</td>
+<td><div class="info">
+<code class="code">trx =-&gt; f</code> sets <code class="code">f</code> as the emiting function of this <code class="code">trx</code>.
+</div>
+</td></tr>
+<tr><td><a href="Tools.html#VAL(==>)">(==&gt;)</a> [<a href="Tools.html">Tools</a>]</td>
+<td><div class="info">
+<code class="code">a ==&gt; b</code> connects <code class="code">a</code> to <code class="code">b</code> such that <code class="code">b</code> transmits what <code class="code">a</code> emits.
+</div>
+</td></tr>
 <tr><td align="left"><br>A</td></tr>
 <tr><td><a href="Dns.QType.html#VALa">a</a> [<a href="Dns.QType.html">Dns.QType</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.html#VALabbrev">abbrev</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
-<tr><td><a href="Tcp.TRX.html#VALaccept">accept</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
-<td></td></tr>
 <tr><td><a href="Dhcp.MsgType.html#VALack">ack</a> [<a href="Dhcp.MsgType.html">Dhcp.MsgType</a>]</td>
-<td></td></tr>
-<tr><td><a href="Fifo.html#VALadd">add</a> [<a href="Fifo.html">Fifo</a>]</td>
 <td></td></tr>
 <tr><td><a href="Clock.Interval.html#VALadd">add</a> [<a href="Clock.Interval.html">Clock.Interval</a>]</td>
 <td><div class="info">
@@ -68,11 +92,7 @@ Adds two intervals.
 Adds a time and an interval.
 </div>
 </td></tr>
-<tr><td><a href="Hub.Switch.OrdArray.html#VALadd_head">add_head</a> [<a href="Hub.Switch.OrdArray.html">Hub.Switch.OrdArray</a>]</td>
-<td></td></tr>
-<tr><td><a href="Ip.html#VALaddr_in_cidr">addr_in_cidr</a> [<a href="Ip.html">Ip</a>]</td>
-<td></td></tr>
-<tr><td><a href="Ip.html#VALaddrs_of_cidr">addrs_of_cidr</a> [<a href="Ip.html">Ip</a>]</td>
+<tr><td><a href="Tools.OrdArray.html#VALadd_head">add_head</a> [<a href="Tools.OrdArray.html">Tools.OrdArray</a>]</td>
 <td></td></tr>
 <tr><td><a href="Peg.html#VALall">all</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
@@ -82,6 +102,11 @@ Adds a time and an interval.
 <td></td></tr>
 <tr><td><a href="Metric.Atomic.html#VALall">all</a> [<a href="Metric.Atomic.html">Metric.Atomic</a>]</td>
 <td></td></tr>
+<tr><td><a href="Ip.Cidr.html#VALall1s_addr">all1s_addr</a> [<a href="Ip.Cidr.html">Ip.Cidr</a>]</td>
+<td><div class="info">
+Returns the all-ones address of a CIDR
+</div>
+</td></tr>
 <tr><td><a href="Peg.html#VALalphabetic">alphabetic</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
 <tr><td><a href="Peg.html#VALalphanum">alphanum</a> [<a href="Peg.html">Peg</a>]</td>
@@ -101,8 +126,13 @@ ARCNET, with BSD-style header
 <td></td></tr>
 <tr><td><a href="Eth.TRX.html#VALarp_resolve_ipv4">arp_resolve_ipv4</a> [<a href="Eth.TRX.html">Eth.TRX</a>]</td>
 <td></td></tr>
-<tr><td><a href="Clock.html#VALat">at</a> [<a href="Clock.html">Clock</a>]</td>
+<tr><td><a href="Clock.html#VALasap">asap</a> [<a href="Clock.html">Clock</a>]</td>
 <td></td></tr>
+<tr><td><a href="Clock.html#VALat">at</a> [<a href="Clock.html">Clock</a>]</td>
+<td><div class="info">
+<code class="code">at t f x</code> will execute <code class="code">f x</code> when simulation clock reachs time <code class="code">t</code>.
+</div>
+</td></tr>
 <tr><td><a href="Html.html#VALattr">attr</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
 <tr><td><a href="Html.html#VALattr_seq">attr_seq</a> [<a href="Html.html">Html</a>]</td>
@@ -138,6 +168,8 @@ Amateur Radio AX.25
 <tr><td><a href="Tools.html#VALbitstring_fuzz">bitstring_fuzz</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.html#VALbitstring_is_empty">bitstring_is_empty</a> [<a href="Tools.html">Tools</a>]</td>
+<td></td></tr>
+<tr><td><a href="Pcap.html#VALbitstring_of_global_header">bitstring_of_global_header</a> [<a href="Pcap.html">Pcap</a>]</td>
 <td></td></tr>
 <tr><td><a href="Peg.html#VALblank">blank</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
@@ -184,77 +216,21 @@ Chaos
 <td></td></tr>
 <tr><td><a href="Peg.html#VALchar_seq">char_seq</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
-<tr><td><a href="Url.html#VALcheck">check</a> [<a href="Url.html">Url</a>]</td>
-<td></td></tr>
-<tr><td><a href="Tools.html#VALcheck">check</a> [<a href="Tools.html">Tools</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck">check</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
-<tr><td><a href="Opache.html#VALcheck">check</a> [<a href="Opache.html">Opache</a>]</td>
-<td></td></tr>
-<tr><td><a href="Http.html#VALcheck">check</a> [<a href="Http.html">Http</a>]</td>
-<td></td></tr>
-<tr><td><a href="Html.html#VALcheck">check</a> [<a href="Html.html">Html</a>]</td>
-<td></td></tr>
-<tr><td><a href="Fifo.html#VALcheck">check</a> [<a href="Fifo.html">Fifo</a>]</td>
-<td></td></tr>
-<tr><td><a href="Browser.html#VALcheck">check</a> [<a href="Browser.html">Browser</a>]</td>
-<td></td></tr>
-<tr><td><a href="Fifo.html#VALcheck1">check1</a> [<a href="Fifo.html">Fifo</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck_all">check_all</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
-<tr><td><a href="Html.html#VALcheck_autoclose">check_autoclose</a> [<a href="Html.html">Html</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck_bind">check_bind</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
-<tr><td><a href="Html.html#VALcheck_chars">check_chars</a> [<a href="Html.html">Html</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck_either">check_either</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
-<tr><td><a href="Html.html#VALcheck_extraction">check_extraction</a> [<a href="Html.html">Html</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck_item">check_item</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck_many">check_many</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck_optional">check_optional</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
-<tr><td><a href="Html.html#VALcheck_parse">check_parse</a> [<a href="Html.html">Html</a>]</td>
-<td></td></tr>
-<tr><td><a href="Html.html#VALcheck_parser">check_parser</a> [<a href="Html.html">Html</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck_pipe">check_pipe</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
-<tr><td><a href="Html.html#VALcheck_reorder">check_reorder</a> [<a href="Html.html">Html</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck_repeat">check_repeat</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
 <tr><td><a href="Peg.html#VALcheck_results">check_results</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
 <tr><td><a href="Html.html#VALcheck_results">check_results</a> [<a href="Html.html">Html</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck_return">check_return</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck_seq">check_seq</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck_several">check_several</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck_take">check_take</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
-<tr><td><a href="Html.html#VALcheck_to_tree">check_to_tree</a> [<a href="Html.html">Html</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Used for tests only
+</div>
+</td></tr>
 <tr><td><a href="Html.html#VALcheck_tree">check_tree</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
-<tr><td><a href="Html.html#VALcheck_unify">check_unify</a> [<a href="Html.html">Html</a>]</td>
-<td></td></tr>
-<tr><td><a href="Peg.html#VALcheck_upto">check_upto</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
 <tr><td><a href="Html.html#VALcheck_varlist">check_varlist</a> [<a href="Html.html">Html</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Used for tests
+</div>
+</td></tr>
 <tr><td><a href="Http.html#VALchunked_transfert_encoding_re">chunked_transfert_encoding_re</a> [<a href="Http.html">Http</a>]</td>
-<td></td></tr>
-<tr><td><a href="Ip.html#VALcidr_of_string">cidr_of_string</a> [<a href="Ip.html">Ip</a>]</td>
 <td></td></tr>
 <tr><td><a href="Browser.html#VALclean_vacant_cnxs">clean_vacant_cnxs</a> [<a href="Browser.html">Browser</a>]</td>
 <td></td></tr>
@@ -262,11 +238,11 @@ Chaos
 <td></td></tr>
 <tr><td><a href="Localhost.html#VALclose">close</a> [<a href="Localhost.html">Localhost</a>]</td>
 <td></td></tr>
-<tr><td><a href="Fifo.html#VALclose">close</a> [<a href="Fifo.html">Fifo</a>]</td>
-<td></td></tr>
 <tr><td><a href="Html.html#VALclose_tag">close_tag</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
 <tr><td><a href="Dns.QType.html#VALcname">cname</a> [<a href="Dns.QType.html">Dns.QType</a>]</td>
+<td></td></tr>
+<tr><td><a href="Icmp.MsgType.html#VALcode_of">code_of</a> [<a href="Icmp.MsgType.html">Icmp.MsgType</a>]</td>
 <td></td></tr>
 <tr><td><a href="Html.html#VALcomment">comment</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
@@ -280,8 +256,18 @@ Custom comparison function so that we can change time representation
 <td></td></tr>
 <tr><td><a href="Peg.html#VALcond">cond</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
+<tr><td><a href="Clock.html#VALcond">cond</a> [<a href="Clock.html">Clock</a>]</td>
+<td></td></tr>
+<tr><td><a href="Clock.html#VALcond_lock">cond_lock</a> [<a href="Clock.html">Clock</a>]</td>
+<td></td></tr>
 <tr><td><a href="Tcp.TRX.html#VALconnect">connect</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
+<tr><td><a href="Sim.Net.html#VALconnect">connect</a> [<a href="Sim.Net.html">Sim.Net</a>]</td>
+<td><div class="info">
+<code class="code">connect t1 ~name1:<span class="string">"plug1"</span> t2 ~name2:<span class="string">"plug2"</span></code> will change the plugs emiting
+ and receiving functions such that t1 and t2 start exchanging messages at this point.
+</div>
+</td></tr>
 <tr><td><a href="Log.html#VALconsole_log">console_log</a> [<a href="Log.html">Log</a>]</td>
 <td></td></tr>
 <tr><td><a href="Log.html#VALconsole_lvl">console_lvl</a> [<a href="Log.html">Log</a>]</td>
@@ -290,15 +276,11 @@ Custom comparison function so that we can change time representation
 <td></td></tr>
 <tr><td><a href="Opache.html#VALcontent_type_from_filename">content_type_from_filename</a> [<a href="Opache.html">Opache</a>]</td>
 <td></td></tr>
-<tr><td><a href="Browser.html#VALcookie_check">cookie_check</a> [<a href="Browser.html">Browser</a>]</td>
-<td></td></tr>
 <tr><td><a href="Browser.html#VALcookie_dirname">cookie_dirname</a> [<a href="Browser.html">Browser</a>]</td>
 <td></td></tr>
 <tr><td><a href="Browser.html#VALcookie_string">cookie_string</a> [<a href="Browser.html">Browser</a>]</td>
 <td></td></tr>
 <tr><td><a href="Browser.html#VALcookies_to_sent">cookies_to_sent</a> [<a href="Browser.html">Browser</a>]</td>
-<td></td></tr>
-<tr><td><a href="Fifo.html#VALcreate">create</a> [<a href="Fifo.html">Fifo</a>]</td>
 <td></td></tr>
 <tr><td><a href="Peg.html#VALcrlf">crlf</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
@@ -317,7 +299,10 @@ Custom comparison function so that we can change time representation
 <tr><td><a href="Net.html#VALcsv_for_switches">csv_for_switches</a> [<a href="Net.html">Net</a>]</td>
 <td></td></tr>
 <tr><td><a href="Clock.html#VALcurrent">current</a> [<a href="Clock.html">Clock</a>]</td>
-<td></td></tr>
+<td><div class="info">
+We have only one clock so can run only one simulation at the same time.
+</div>
+</td></tr>
 <tr><td align="left"><br>D</td></tr>
 <tr><td><a href="Url.html#VALdebug">debug</a> [<a href="Url.html">Url</a>]</td>
 <td></td></tr>
@@ -326,6 +311,8 @@ Custom comparison function so that we can change time representation
 <tr><td><a href="Tcp.html#VALdebug">debug</a> [<a href="Tcp.html">Tcp</a>]</td>
 <td></td></tr>
 <tr><td><a href="Sll.html#VALdebug">debug</a> [<a href="Sll.html">Sll</a>]</td>
+<td></td></tr>
+<tr><td><a href="Router.html#VALdebug">debug</a> [<a href="Router.html">Router</a>]</td>
 <td></td></tr>
 <tr><td><a href="Persist.html#VALdebug">debug</a> [<a href="Persist.html">Persist</a>]</td>
 <td></td></tr>
@@ -347,8 +334,6 @@ Custom comparison function so that we can change time representation
 <td></td></tr>
 <tr><td><a href="Html.html#VALdebug">debug</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
-<tr><td><a href="Fifo.html#VALdebug">debug</a> [<a href="Fifo.html">Fifo</a>]</td>
-<td></td></tr>
 <tr><td><a href="Eth.html#VALdebug">debug</a> [<a href="Eth.html">Eth</a>]</td>
 <td></td></tr>
 <tr><td><a href="Dns.html#VALdebug">debug</a> [<a href="Dns.html">Dns</a>]</td>
@@ -366,16 +351,24 @@ Custom comparison function so that we can change time representation
 <tr><td><a href="Dhcp.MsgType.html#VALdecline">decline</a> [<a href="Dhcp.MsgType.html">Dhcp.MsgType</a>]</td>
 <td></td></tr>
 <tr><td><a href="Url.html#VALdecode">decode</a> [<a href="Url.html">Url</a>]</td>
-<td></td></tr>
+<td><div class="info">
+<code class="code">decode str</code> will decode every URL encoded char present in str
+</div>
+</td></tr>
 <tr><td><a href="Tcp.TRX.html#VALdefault_connect_timeout">default_connect_timeout</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
 <tr><td><a href="Clock.html#VALdelay">delay</a> [<a href="Clock.html">Clock</a>]</td>
-<td></td></tr>
+<td><div class="info">
+<code class="code">delay d f x</code> will delay the execution of <code class="code">f x</code> by the interval <code class="code">d</code>.
+</div>
+</td></tr>
 <tr><td><a href="Tcp.TRX.html#VALdelayed_ack">delayed_ack</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
 <tr><td><a href="Html.html#VALdigit">digit</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
 <tr><td><a href="Dhcp.MsgType.html#VALdiscover">discover</a> [<a href="Dhcp.MsgType.html">Dhcp.MsgType</a>]</td>
+<td></td></tr>
+<tr><td><a href="Host.html#VALdo_gethostbyname">do_gethostbyname</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
 <tr><td><a href="Html.html#VALdoctype">doctype</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
@@ -425,23 +418,28 @@ Experimental Ethernet (3Mb)
 </div>
 </td></tr>
 <tr><td><a href="Url.html#VALencode">encode</a> [<a href="Url.html">Url</a>]</td>
-<td></td></tr>
+<td><div class="info">
+<code class="code">encode str</code> will encode any reserved char present in str into the alternative %xx syntax.
+</div>
+</td></tr>
 <tr><td><a href="Myadmin.html#VALengine">engine</a> [<a href="Myadmin.html">Myadmin</a>]</td>
 <td></td></tr>
 <tr><td><a href="Log.html#VALenqueue">enqueue</a> [<a href="Log.html">Log</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.html#VALensure">ensure</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
-<tr><td><a href="Pcap.html#VALenum_of">enum_of</a> [<a href="Pcap.html">Pcap</a>]</td>
+<tr><td><a href="Pcap.html#VALenum_of_file">enum_of_file</a> [<a href="Pcap.html">Pcap</a>]</td>
 <td><div class="info">
-from a pcap file, returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a>.
+From a pcap file, returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a>.
 </div>
 </td></tr>
-<tr><td><a href="Packet.html#VALenum_of">enum_of</a> [<a href="Packet.html">Packet</a>]</td>
+<tr><td><a href="Packet.html#VALenum_of_file">enum_of_file</a> [<a href="Packet.html">Packet</a>]</td>
 <td><div class="info">
-<code class="code"><span class="constructor">Packet</span>.enum_of filename</code> reads a pcap file and returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.
+<code class="code"><span class="constructor">Packet</span>.enum_of_file filename</code> reads a pcap file and returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.
 </div>
 </td></tr>
+<tr><td><a href="Clock.html#VALepsilon">epsilon</a> [<a href="Clock.html">Clock</a>]</td>
+<td></td></tr>
 <tr><td><a href="Eth.Addr.html#VALeq">eq</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
 <td><div class="info">
 Since Ethernet addresses are bitstrings, which cannot be compared
@@ -465,6 +463,8 @@ Since Ethernet addresses are bitstrings, which cannot be compared
 <td></td></tr>
 <tr><td><a href="Html.html#VALext_alphanum">ext_alphanum</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
+<tr><td><a href="Tools.html#VALextendbytes">extendbytes</a> [<a href="Tools.html">Tools</a>]</td>
+<td></td></tr>
 <tr><td><a href="Html.html#VALextract_links">extract_links</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
 <tr><td><a href="Html.html#VALextract_links_simple">extract_links_simple</a> [<a href="Html.html">Html</a>]</td>
@@ -479,6 +479,11 @@ FDDI
 </td></tr>
 <tr><td><a href="Tools.html#VALfile_content">file_content</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
+<tr><td><a href="Pcap.html#VALfile_of_enum">file_of_enum</a> [<a href="Pcap.html">Pcap</a>]</td>
+<td><div class="info">
+<code class="code">file_of_enum filename e</code> will save an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a> into the file named <code class="code">filename</code>.
+</div>
+</td></tr>
 <tr><td><a href="Html.html#VALfilter_map_node">filter_map_node</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
 <tr><td><a href="Host.html#VALfind_alive_tcp">find_alive_tcp</a> [<a href="Host.html">Host</a>]</td>
@@ -487,9 +492,16 @@ FDDI
 <td></td></tr>
 <tr><td><a href="Html.html#VALfind_first_node">find_first_node</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
+<tr><td><a href="Sim.Net.html#VALfind_named_plug">find_named_plug</a> [<a href="Sim.Net.html">Sim.Net</a>]</td>
+<td><div class="info">
+remove the matching plug and return it
+</div>
+</td></tr>
 <tr><td><a href="Browser.html#VALfind_vacant_cnx">find_vacant_cnx</a> [<a href="Browser.html">Browser</a>]</td>
 <td></td></tr>
 <tr><td><a href="Metric.Atomic.html#VALfire">fire</a> [<a href="Metric.Atomic.html">Metric.Atomic</a>]</td>
+<td></td></tr>
+<tr><td><a href="Tools.OrdArray.html#VALfirst">first</a> [<a href="Tools.OrdArray.html">Tools.OrdArray</a>]</td>
 <td></td></tr>
 <tr><td><a href="Html.html#VALfirst_char_name">first_char_name</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
@@ -504,11 +516,15 @@ FDDI
 <tr><td align="left"><br>G</td></tr>
 <tr><td><a href="Persist.html#VALgenname">genname</a> [<a href="Persist.html">Persist</a>]</td>
 <td></td></tr>
+<tr><td><a href="Tools.OrdArray.html#VALget">get</a> [<a href="Tools.OrdArray.html">Tools.OrdArray</a>]</td>
+<td></td></tr>
 <tr><td><a href="Browser.html#VALget">get</a> [<a href="Browser.html">Browser</a>]</td>
 <td></td></tr>
 <tr><td><a href="Localhost.html#VALgethostbyname">gethostbyname</a> [<a href="Localhost.html">Localhost</a>]</td>
 <td></td></tr>
 <tr><td><a href="Host.html#VALgethostbyname">gethostbyname</a> [<a href="Host.html">Host</a>]</td>
+<td></td></tr>
+<tr><td><a href="Pcap.html#VALglobal_header_of_bitstring">global_header_of_bitstring</a> [<a href="Pcap.html">Pcap</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.html#VALgw_addr_of_string">gw_addr_of_string</a> [<a href="Eth.html">Eth</a>]</td>
 <td><div class="info">
@@ -524,6 +540,8 @@ Converts the other way around.
 <td></td></tr>
 <tr><td><a href="Http.html#VALheader_content_length_re">header_content_length_re</a> [<a href="Http.html">Http</a>]</td>
 <td></td></tr>
+<tr><td><a href="Http.html#VALheader_present">header_present</a> [<a href="Http.html">Http</a>]</td>
+<td></td></tr>
 <tr><td><a href="Http.html#VALheaders_find">headers_find</a> [<a href="Http.html">Http</a>]</td>
 <td></td></tr>
 <tr><td><a href="Http.html#VALheaders_find_all">headers_find_all</a> [<a href="Http.html">Http</a>]</td>
@@ -532,6 +550,8 @@ Converts the other way around.
 <td></td></tr>
 <tr><td><a href="Tools.html#VALhexstring_of_bitstring">hexstring_of_bitstring</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
+<tr><td><a href="Ip.Addr.html#VALhigher_bits">higher_bits</a> [<a href="Ip.Addr.html">Ip.Addr</a>]</td>
+<td></td></tr>
 <tr><td><a href="Dns.QType.html#VALhinfo">hinfo</a> [<a href="Dns.QType.html">Dns.QType</a>]</td>
 <td></td></tr>
 <tr><td><a href="Myadmin.html#VALhome">home</a> [<a href="Myadmin.html">Myadmin</a>]</td>
@@ -539,13 +559,18 @@ Converts the other way around.
 <tr><td><a href="Net.html#VALhost_of_csv">host_of_csv</a> [<a href="Net.html">Net</a>]</td>
 <td></td></tr>
 <tr><td><a href="Clock.Interval.html#VALhour">hour</a> [<a href="Clock.Interval.html">Clock.Interval</a>]</td>
-<td></td></tr>
+<td><div class="info">
+hours to .
+</div>
+</td></tr>
 <tr><td><a href="Net.html#VALhub_of_csv">hub_of_csv</a> [<a href="Net.html">Net</a>]</td>
 <td></td></tr>
 <tr><td align="left"><br>I</td></tr>
 <tr><td><a href="Html.html#VALi2c">i2c</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
 <tr><td><a href="Ip.Proto.html#VALicmp">icmp</a> [<a href="Ip.Proto.html">Ip.Proto</a>]</td>
+<td></td></tr>
+<tr><td><a href="Host.html#VALicmp_rx">icmp_rx</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
 <tr><td><a href="Ip.Pdu.html#VALid_seq">id_seq</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
 <td></td></tr>
@@ -573,8 +598,11 @@ Converts the other way around.
 ...
 </div>
 </td></tr>
-<tr><td><a href="Localhost.html#VALinet_addr_print">inet_addr_print</a> [<a href="Localhost.html">Localhost</a>]</td>
-<td></td></tr>
+<tr><td><a href="Ip.html#VALinet_addr_print">inet_addr_print</a> [<a href="Ip.html">Ip</a>]</td>
+<td><div class="info">
+Printer (in the sense of Batteries) for inet_addrs
+</div>
+</td></tr>
 <tr><td><a href="Dhcp.MsgType.html#VALinform">inform</a> [<a href="Dhcp.MsgType.html">Dhcp.MsgType</a>]</td>
 <td></td></tr>
 <tr><td><a href="Pcap.html#VALinfos_of">infos_of</a> [<a href="Pcap.html">Pcap</a>]</td>
@@ -583,6 +611,8 @@ Return some informations about a pcap file (require to scan the whole file,
  so depending on the file size it may take some time).
 </div>
 </td></tr>
+<tr><td><a href="Tools.OrdArray.html#VALinit">init</a> [<a href="Tools.OrdArray.html">Tools.OrdArray</a>]</td>
+<td></td></tr>
 <tr><td><a href="Pcap.html#VALinject">inject</a> [<a href="Pcap.html">Pcap</a>]</td>
 <td><div class="info">
 <code class="code">inject iface packet</code> inject this packet into this interface
@@ -614,15 +644,17 @@ Convert an <code class="code">inet_addr</code> into an <code class="code">int32<
 <td></td></tr>
 <tr><td><a href="Dns.html#VALinv_query">inv_query</a> [<a href="Dns.html">Dns</a>]</td>
 <td></td></tr>
+<tr><td><a href="Tools.html#VALinverse_trx">inverse_trx</a> [<a href="Tools.html">Tools</a>]</td>
+<td></td></tr>
 <tr><td><a href="Arp.HwProto.html#VALip4">ip4</a> [<a href="Arp.HwProto.html">Arp.HwProto</a>]</td>
 <td></td></tr>
 <tr><td><a href="Arp.HwProto.html#VALip6">ip6</a> [<a href="Arp.HwProto.html">Arp.HwProto</a>]</td>
 <td></td></tr>
-<tr><td><a href="Localhost.html#VALip_addr_of_inet_addr">ip_addr_of_inet_addr</a> [<a href="Localhost.html">Localhost</a>]</td>
-<td></td></tr>
 <tr><td><a href="Host.html#VALip_recv">ip_recv</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tcp.TRX.html#VALis_closed">is_closed</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
+<td></td></tr>
+<tr><td><a href="Icmp.Pdu.html#VALis_echo_request">is_echo_request</a> [<a href="Icmp.Pdu.html">Icmp.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Url.html#VALis_empty">is_empty</a> [<a href="Url.html">Url</a>]</td>
 <td></td></tr>
@@ -649,6 +681,8 @@ Convert an <code class="code">inet_addr</code> into an <code class="code">int32<
 <tr><td><a href="Html.html#VALiter_nodes">iter_nodes</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
 <tr><td align="left"><br>L</td></tr>
+<tr><td><a href="Tools.OrdArray.html#VALlast">last</a> [<a href="Tools.OrdArray.html">Tools.OrdArray</a>]</td>
+<td></td></tr>
 <tr><td><a href="Tools.Payload.html#VALlength">length</a> [<a href="Tools.Payload.html">Tools.Payload</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.html#VALlimited">limited</a> [<a href="Eth.html">Eth</a>]</td>
@@ -662,6 +696,12 @@ Linux SLL
 <td></td></tr>
 <tr><td><a href="Net.html#VALload">load</a> [<a href="Net.html">Net</a>]</td>
 <td></td></tr>
+<tr><td><a href="Ip.Cidr.html#VALlocal_addrs">local_addrs</a> [<a href="Ip.Cidr.html">Ip.Cidr</a>]</td>
+<td><div class="info">
+Returns the set (as an <code class="code"><span class="constructor">Enum</span></code>) of all IP addresses in the given CIDR range (that is, all minus
+ subnet zero and all-ones subnet).
+</div>
+</td></tr>
 <tr><td><a href="Log.html#VALlog">log</a> [<a href="Log.html">Log</a>]</td>
 <td></td></tr>
 <tr><td><a href="Localhost.html#VALlogger">logger</a> [<a href="Localhost.html">Localhost</a>]</td>
@@ -685,11 +725,27 @@ Build a <code class="code"><span class="constructor">Vlan</span>.<span class="co
 <td></td></tr>
 <tr><td><a href="Udp.Pdu.html#VALmake">make</a> [<a href="Udp.Pdu.html">Udp.Pdu</a>]</td>
 <td></td></tr>
+<tr><td><a href="Tools.OrdArray.html#VALmake">make</a> [<a href="Tools.OrdArray.html">Tools.OrdArray</a>]</td>
+<td></td></tr>
+<tr><td><a href="Tcp.TRX.html#VALmake">make</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
+<td></td></tr>
 <tr><td><a href="Tcp.Pdu.html#VALmake">make</a> [<a href="Tcp.Pdu.html">Tcp.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Sll.Pdu.html#VALmake">make</a> [<a href="Sll.Pdu.html">Sll.Pdu</a>]</td>
 <td><div class="info">
 Build a <a href="Sll.Pdu.html#TYPEt"><code class="code"><span class="constructor">Sll</span>.<span class="constructor">Pdu</span>.t</code></a> for a given <code class="code">payload</code>.
+</div>
+</td></tr>
+<tr><td><a href="Sim.Net.Plug.html#VALmake">make</a> [<a href="Sim.Net.Plug.html">Sim.Net.Plug</a>]</td>
+<td></td></tr>
+<tr><td><a href="Router.Router.html#VALmake">make</a> [<a href="Router.Router.html">Router.Router</a>]</td>
+<td><div class="info">
+Build a <code class="code">t</code> routing through these <a href="Tools.html#TYPEtrx"><code class="code"><span class="constructor">Tools</span>.trx</code></a> according to the given routing table.
+</div>
+</td></tr>
+<tr><td><a href="Router.Nat.html#VALmake">make</a> [<a href="Router.Nat.html">Router.Nat</a>]</td>
+<td><div class="info">
+<code class="code">make ip n</code> returns a <a href="Tools.html#TYPEtrx"><code class="code"><span class="constructor">Tools</span>.trx</code></a> corresponding to a NAT device (tx is for transmitting from the LAN to the outside) that can track <code class="code">n</code> sockets.
 </div>
 </td></tr>
 <tr><td><a href="Pcap.Pdu.html#VALmake">make</a> [<a href="Pcap.Pdu.html">Pcap.Pdu</a>]</td>
@@ -712,7 +768,7 @@ Build a <a href="Sll.Pdu.html#TYPEt"><code class="code"><span class="constructor
 <td></td></tr>
 <tr><td><a href="Ip.Pdu.html#VALmake">make</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
 <td></td></tr>
-<tr><td><a href="Hub.Switch.OrdArray.html#VALmake">make</a> [<a href="Hub.Switch.OrdArray.html">Hub.Switch.OrdArray</a>]</td>
+<tr><td><a href="Hub.Tap.html#VALmake">make</a> [<a href="Hub.Tap.html">Hub.Tap</a>]</td>
 <td></td></tr>
 <tr><td><a href="Hub.Switch.html#VALmake">make</a> [<a href="Hub.Switch.html">Hub.Switch</a>]</td>
 <td></td></tr>
@@ -736,13 +792,11 @@ Build an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructo
 </td></tr>
 <tr><td><a href="Browser.html#VALmake">make</a> [<a href="Browser.html">Browser</a>]</td>
 <td></td></tr>
-<tr><td><a href="Tcp.TRX.html#VALmake_">make_</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
-<td></td></tr>
 <tr><td><a href="Persist.html#VALmake_abs">make_abs</a> [<a href="Persist.html">Persist</a>]</td>
 <td></td></tr>
-<tr><td><a href="Dhcp.Pdu.html#VALmake_base">make_base</a> [<a href="Dhcp.Pdu.html">Dhcp.Pdu</a>]</td>
+<tr><td><a href="Dhcp.Pdu.html#VALmake_ack">make_ack</a> [<a href="Dhcp.Pdu.html">Dhcp.Pdu</a>]</td>
 <td></td></tr>
-<tr><td><a href="Udp.TRX.html#VALmake_client">make_client</a> [<a href="Udp.TRX.html">Udp.TRX</a>]</td>
+<tr><td><a href="Dhcp.Pdu.html#VALmake_base">make_base</a> [<a href="Dhcp.Pdu.html">Dhcp.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Host.html#VALmake_dhcp">make_dhcp</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
@@ -752,7 +806,27 @@ Build an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructo
 <td></td></tr>
 <tr><td><a href="Icmp.Pdu.html#VALmake_echo_request">make_echo_request</a> [<a href="Icmp.Pdu.html">Icmp.Pdu</a>]</td>
 <td></td></tr>
+<tr><td><a href="Sim.Net.html#VALmake_empty">make_empty</a> [<a href="Sim.Net.html">Sim.Net</a>]</td>
+<td></td></tr>
+<tr><td><a href="Router.Router.html#VALmake_from_addrs">make_from_addrs</a> [<a href="Router.Router.html">Router.Router</a>]</td>
+<td></td></tr>
+<tr><td><a href="Tools.OrdArray.html#VALmake_from_data">make_from_data</a> [<a href="Tools.OrdArray.html">Tools.OrdArray</a>]</td>
+<td></td></tr>
+<tr><td><a href="Router.html#VALmake_gw">make_gw</a> [<a href="Router.html">Router</a>]</td>
+<td><div class="info">
+A gateway is a device with 2 Eth interfaces, with a public IP address
+ and a private network address, performing routing between these two,
+ NAT and DHCP for the LAN.
+</div>
+</td></tr>
+<tr><td><a href="Sim.Net.html#VALmake_internet">make_internet</a> [<a href="Sim.Net.html">Sim.Net</a>]</td>
+<td><div class="info">
+Returns a net with an unlimited supply of plugs that performs as a router.
+</div>
+</td></tr>
 <tr><td><a href="Metric.Timed.html#VALmake_minmax">make_minmax</a> [<a href="Metric.Timed.html">Metric.Timed</a>]</td>
+<td></td></tr>
+<tr><td><a href="Dhcp.Pdu.html#VALmake_offer">make_offer</a> [<a href="Dhcp.Pdu.html">Dhcp.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Dns.Pdu.html#VALmake_query">make_query</a> [<a href="Dns.Pdu.html">Dns.Pdu</a>]</td>
 <td></td></tr>
@@ -768,13 +842,25 @@ Build an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructo
 <td></td></tr>
 <tr><td><a href="Tcp.Pdu.html#VALmake_reset_of">make_reset_of</a> [<a href="Tcp.Pdu.html">Tcp.Pdu</a>]</td>
 <td></td></tr>
-<tr><td><a href="Udp.TRX.html#VALmake_server">make_server</a> [<a href="Udp.TRX.html">Udp.TRX</a>]</td>
-<td></td></tr>
-<tr><td><a href="Host.html#VALmake_socks">make_socks</a> [<a href="Host.html">Host</a>]</td>
-<td></td></tr>
+<tr><td><a href="Sim.Net.html#VALmake_simple_lan">make_simple_lan</a> [<a href="Sim.Net.html">Sim.Net</a>]</td>
+<td><div class="info">
+Returns a lan consisting of n hosts connected to a switch connected to a
+ router/dhcp server/nater with an "exit" plug.
+</div>
+</td></tr>
+<tr><td><a href="Sim.Net.html#VALmake_sink">make_sink</a> [<a href="Sim.Net.html">Sim.Net</a>]</td>
+<td><div class="info">
+Return a net representing the external network via the given interface,
+ and the thread that sniffs packets.
+</div>
+</td></tr>
 <tr><td><a href="Host.html#VALmake_static">make_static</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
 <tr><td><a href="Http.Pdu.html#VALmake_status">make_status</a> [<a href="Http.Pdu.html">Http.Pdu</a>]</td>
+<td></td></tr>
+<tr><td><a href="Host.html#VALmake_tcp_socks">make_tcp_socks</a> [<a href="Host.html">Host</a>]</td>
+<td></td></tr>
+<tr><td><a href="Host.html#VALmake_udp_socks">make_udp_socks</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
 <tr><td><a href="Browser.html#VALmake_vacant_cnx">make_vacant_cnx</a> [<a href="Browser.html">Browser</a>]</td>
 <td></td></tr>
@@ -788,6 +874,8 @@ Build an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructo
 <td></td></tr>
 <tr><td><a href="Tcp.TRX.html#VALmay_timeout">may_timeout</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
+<tr><td><a href="Ip.Cidr.html#VALmem">mem</a> [<a href="Ip.Cidr.html">Ip.Cidr</a>]</td>
+<td></td></tr>
 <tr><td><a href="Pcap.html#VALmerge">merge</a> [<a href="Pcap.html">Pcap</a>]</td>
 <td><div class="info">
 <code class="code">merge [e1 ; e2 ; e3]</code> will merge the three <code class="code"><span class="constructor">Enumt</span>.t</code> of packets in chronological
@@ -799,12 +887,25 @@ Build an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructo
 <tr><td><a href="Myadmin.html#VALmetrics">metrics</a> [<a href="Myadmin.html">Myadmin</a>]</td>
 <td></td></tr>
 <tr><td><a href="Clock.Interval.html#VALmin">min</a> [<a href="Clock.Interval.html">Clock.Interval</a>]</td>
-<td></td></tr>
+<td><div class="info">
+minutes to .
+</div>
+</td></tr>
+<tr><td><a href="Router.html#VALmin_port">min_port</a> [<a href="Router.html">Router</a>]</td>
+<td><div class="info">
+the lowest port number used by the address translation
+</div>
+</td></tr>
 <tr><td><a href="Persist.html#VALmkdir_all">mkdir_all</a> [<a href="Persist.html">Persist</a>]</td>
 <td></td></tr>
 <tr><td><a href="Clock.Interval.html#VALmsec">msec</a> [<a href="Clock.Interval.html">Clock.Interval</a>]</td>
-<td></td></tr>
+<td><div class="info">
+milliseconds to .
+</div>
+</td></tr>
 <tr><td><a href="Opache.html#VALmultiplexer">multiplexer</a> [<a href="Opache.html">Opache</a>]</td>
+<td></td></tr>
+<tr><td><a href="Http.html#VALmust_close_cnx">must_close_cnx</a> [<a href="Http.html">Http</a>]</td>
 <td></td></tr>
 <tr><td><a href="Dns.QType.html#VALmx">mx</a> [<a href="Dns.QType.html">Dns.QType</a>]</td>
 <td></td></tr>
@@ -824,30 +925,39 @@ Build an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructo
 <tr><td><a href="Tcp.TRX.html#VALnext_ack_num">next_ack_num</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
 <tr><td><a href="Clock.html#VALnext_event">next_event</a> [<a href="Clock.html">Clock</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Will process the next event
+</div>
+</td></tr>
 <tr><td><a href="Ip.Pdu.html#VALnext_id">next_id</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tcp.TRX.html#VALnext_seq_num">next_seq_num</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
-<tr><td><a href="Clock.html#VALnextev_awake">nextev_awake</a> [<a href="Clock.html">Clock</a>]</td>
-<td></td></tr>
-<tr><td><a href="Clock.html#VALnextev_wakener">nextev_wakener</a> [<a href="Clock.html">Clock</a>]</td>
-<td></td></tr>
 <tr><td><a href="Net.html#VALnode_of_csv">node_of_csv</a> [<a href="Net.html">Net</a>]</td>
 <td></td></tr>
 <tr><td><a href="Peg.html#VALnone">none</a> [<a href="Peg.html">Peg</a>]</td>
+<td></td></tr>
+<tr><td><a href="Tools.html#VALnone_if_exception">none_if_exception</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.html#VALnone_if_not_found">none_if_not_found</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
 <tr><td><a href="Net.html#VALnote_of_csv">note_of_csv</a> [<a href="Net.html">Net</a>]</td>
 <td></td></tr>
 <tr><td><a href="Clock.html#VALnow">now</a> [<a href="Clock.html">Clock</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Return the current simulation time.
+</div>
+</td></tr>
 <tr><td><a href="Dns.QType.html#VALns">ns</a> [<a href="Dns.QType.html">Dns.QType</a>]</td>
 <td></td></tr>
 <tr><td><a href="Pcap.Dlt.html#VALnull">null</a> [<a href="Pcap.Dlt.html">Pcap.Dlt</a>]</td>
 <td><div class="info">
 BSD loopback encapsulation
+</div>
+</td></tr>
+<tr><td><a href="Tools.html#VALnull_dev">null_dev</a> [<a href="Tools.html">Tools</a>]</td>
+<td><div class="info">
+For those cases when you want to build a <code class="code">trx</code> from a single <code class="code">dev</code>
 </div>
 </td></tr>
 <tr><td><a href="Tools.html#VALnull_trx">null_trx</a> [<a href="Tools.html">Tools</a>]</td>
@@ -878,7 +988,19 @@ Convert a <code class="code">bitstring</code> into an <code class="code"><span c
 <td></td></tr>
 <tr><td><a href="Net.html#VALof_csv_string">of_csv_string</a> [<a href="Net.html">Net</a>]</td>
 <td></td></tr>
+<tr><td><a href="Ip.Addr.html#VALof_dotted_string">of_dotted_string</a> [<a href="Ip.Addr.html">Ip.Addr</a>]</td>
+<td><div class="info">
+And from dotted representation (usefull to allow DNS-less hosts to 'reolve' some name)
+</div>
+</td></tr>
+<tr><td><a href="Ip.Addr.html#VALof_inet_addr">of_inet_addr</a> [<a href="Ip.Addr.html">Ip.Addr</a>]</td>
+<td></td></tr>
 <tr><td><a href="Url.html#VALof_string">of_string</a> [<a href="Url.html">Url</a>]</td>
+<td><div class="info">
+<code class="code"><span class="constructor">Url</span>.of_string str</code> will return the <a href="Url.html#TYPEt"><code class="code"><span class="constructor">Url</span>.t</code></a> corresponding to the given <code class="code">str</code>
+</div>
+</td></tr>
+<tr><td><a href="Ip.Cidr.html#VALof_string">of_string</a> [<a href="Ip.Cidr.html">Ip.Cidr</a>]</td>
 <td></td></tr>
 <tr><td><a href="Ip.Addr.html#VALof_string">of_string</a> [<a href="Ip.Addr.html">Ip.Addr</a>]</td>
 <td></td></tr>
@@ -887,8 +1009,6 @@ Convert a <code class="code">bitstring</code> into an <code class="code"><span c
 Converts a string to an address.
 </div>
 </td></tr>
-<tr><td><a href="Fifo.html#VALof_trx">of_trx</a> [<a href="Fifo.html">Fifo</a>]</td>
-<td></td></tr>
 <tr><td><a href="Dhcp.MsgType.html#VALoffer">offer</a> [<a href="Dhcp.MsgType.html">Dhcp.MsgType</a>]</td>
 <td></td></tr>
 <tr><td><a href="Html.html#VALopen_tag">open_tag</a> [<a href="Html.html">Html</a>]</td>
@@ -993,6 +1113,10 @@ A counter for how many packets were sniffed.
 <td></td></tr>
 <tr><td><a href="Html.html#VALparzer">parzer</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
+<tr><td><a href="Router.Nat.html#VALpatch_dst_port">patch_dst_port</a> [<a href="Router.Nat.html">Router.Nat</a>]</td>
+<td></td></tr>
+<tr><td><a href="Router.Nat.html#VALpatch_src_port">patch_src_port</a> [<a href="Router.Nat.html">Router.Nat</a>]</td>
+<td></td></tr>
 <tr><td><a href="Ip.Pdu.html#VALpatch_tcp_checksum">patch_tcp_checksum</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Ip.Pdu.html#VALpatch_udp_checksum">patch_udp_checksum</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
@@ -1000,6 +1124,8 @@ A counter for how many packets were sniffed.
 <tr><td><a href="Browser.html#VALpath_matches">path_matches</a> [<a href="Browser.html">Browser</a>]</td>
 <td></td></tr>
 <tr><td><a href="Browser.html#VALper_status">per_status</a> [<a href="Browser.html">Browser</a>]</td>
+<td></td></tr>
+<tr><td><a href="Host.html#VALping">ping</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
 <tr><td><a href="Peg.html#VALpipe">pipe</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
@@ -1012,6 +1138,8 @@ A counter for how many packets were sniffed.
 </div>
 </td></tr>
 <tr><td><a href="Net.html#VALplug_printer">plug_printer</a> [<a href="Net.html">Net</a>]</td>
+<td></td></tr>
+<tr><td><a href="Router.Router.html#VALport_in_range">port_in_range</a> [<a href="Router.Router.html">Router.Router</a>]</td>
 <td></td></tr>
 <tr><td><a href="Browser.html#VALpost">post</a> [<a href="Browser.html">Browser</a>]</td>
 <td></td></tr>
@@ -1049,8 +1177,6 @@ If true, use the system's name resolver to find a name for each IP
 <td></td></tr>
 <tr><td><a href="Tools.html#VALprint_bitstring">print_bitstring</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
-<tr><td><a href="Ip.html#VALprint_cidr">print_cidr</a> [<a href="Ip.html">Ip</a>]</td>
-<td></td></tr>
 <tr><td><a href="Http.html#VALprint_code">print_code</a> [<a href="Http.html">Http</a>]</td>
 <td></td></tr>
 <tr><td><a href="Clock.Time.html#VALprint_date">print_date</a> [<a href="Clock.Time.html">Clock.Time</a>]</td>
@@ -1059,6 +1185,10 @@ When displaying a time, print also the corresponding date.
 </div>
 </td></tr>
 <tr><td><a href="Tcp.Pdu.html#VALprint_flags">print_flags</a> [<a href="Tcp.Pdu.html">Tcp.Pdu</a>]</td>
+<td></td></tr>
+<tr><td><a href="Http.html#VALprint_header">print_header</a> [<a href="Http.html">Http</a>]</td>
+<td></td></tr>
+<tr><td><a href="Http.html#VALprint_headers">print_headers</a> [<a href="Http.html">Http</a>]</td>
 <td></td></tr>
 <tr><td><a href="Peg.html#VALprint_int">print_int</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
@@ -1091,7 +1221,7 @@ If true, use the vendor database to decode address names:
 <td></td></tr>
 <tr><td><a href="Clock.html#VALprinter">printer</a> [<a href="Clock.html">Clock</a>]</td>
 <td></td></tr>
-<tr><td><a href="Hub.Switch.OrdArray.html#VALpromote">promote</a> [<a href="Hub.Switch.OrdArray.html">Hub.Switch.OrdArray</a>]</td>
+<tr><td><a href="Tools.OrdArray.html#VALpromote">promote</a> [<a href="Tools.OrdArray.html">Tools.OrdArray</a>]</td>
 <td></td></tr>
 <tr><td><a href="Pcap.Dlt.html#VALpronet">pronet</a> [<a href="Pcap.Dlt.html">Pcap.Dlt</a>]</td>
 <td><div class="info">
@@ -1140,9 +1270,11 @@ Returns a random <a href="Sll.Pdu.html#TYPEt"><code class="code"><span class="co
 <td></td></tr>
 <tr><td><a href="Ip.Pdu.html#VALrandom">random</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
 <td></td></tr>
+<tr><td><a href="Ip.Cidr.html#VALrandom">random</a> [<a href="Ip.Cidr.html">Ip.Cidr</a>]</td>
+<td></td></tr>
 <tr><td><a href="Ip.Addr.html#VALrandom">random</a> [<a href="Ip.Addr.html">Ip.Addr</a>]</td>
 <td><div class="info">
-Returns a random <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t</code>.
+Returns a random <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t</code> (apart from broadcast and zero).
 </div>
 </td></tr>
 <tr><td><a href="Ip.Proto.html#VALrandom">random</a> [<a href="Ip.Proto.html">Ip.Proto</a>]</td>
@@ -1158,7 +1290,7 @@ Returns a random <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="co
 </td></tr>
 <tr><td><a href="Eth.Addr.html#VALrandom">random</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
 <td><div class="info">
-Returns a random Ethernet address.
+Returns a random Ethernet address (but neither broadcast nor zero).
 </div>
 </td></tr>
 <tr><td><a href="Dns.Pdu.html#VALrandom">random</a> [<a href="Dns.Pdu.html">Dns.Pdu</a>]</td>
@@ -1175,7 +1307,9 @@ Returns a random Ethernet address.
 <td></td></tr>
 <tr><td><a href="Arp.HwType.html#VALrandom">random</a> [<a href="Arp.HwType.html">Arp.HwType</a>]</td>
 <td></td></tr>
-<tr><td><a href="Ip.html#VALrandom_addrs_of_cidr">random_addrs_of_cidr</a> [<a href="Ip.html">Ip</a>]</td>
+<tr><td><a href="Ip.Cidr.html#VALrandom_addrs">random_addrs</a> [<a href="Ip.Cidr.html">Ip.Cidr</a>]</td>
+<td></td></tr>
+<tr><td><a href="Host.html#VALrandom_name">random_name</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
 <tr><td><a href="Icmp.Pdu.html#VALrandom_payload">random_payload</a> [<a href="Icmp.Pdu.html">Icmp.Pdu</a>]</td>
 <td></td></tr>
@@ -1205,7 +1339,7 @@ Returns a random Ethernet address.
 <td></td></tr>
 <tr><td><a href="Dhcp.MsgType.html#VALrelease">release</a> [<a href="Dhcp.MsgType.html">Dhcp.MsgType</a>]</td>
 <td></td></tr>
-<tr><td><a href="Hub.Switch.OrdArray.html#VALremove">remove</a> [<a href="Hub.Switch.OrdArray.html">Hub.Switch.OrdArray</a>]</td>
+<tr><td><a href="Tools.OrdArray.html#VALremove">remove</a> [<a href="Tools.OrdArray.html">Tools.OrdArray</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.html#VALremove_last_if">remove_last_if</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
@@ -1251,17 +1385,21 @@ Small utility that truncate a pcap file to the last valid packet.
 <tr><td><a href="Host.html#VALresolutions">resolutions</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
 <tr><td><a href="Url.html#VALresolve">resolve</a> [<a href="Url.html">Url</a>]</td>
-<td></td></tr>
+<td><div class="info">
+<code class="code">resolve base url</code> will return the absolute version of <code class="code">url</code>, given it's relative to <code class="code">base</code>.
+</div>
+</td></tr>
 <tr><td><a href="Eth.TRX.html#VALresolve_proto_addr">resolve_proto_addr</a> [<a href="Eth.TRX.html">Eth.TRX</a>]</td>
-<td></td></tr>
-<tr><td><a href="Host.html#VALresolver">resolver</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
 <tr><td><a href="Peg.html#VALreturn">return</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
 <tr><td><a href="Persist.html#VALrootdir">rootdir</a> [<a href="Persist.html">Persist</a>]</td>
 <td></td></tr>
 <tr><td><a href="Clock.html#VALrun">run</a> [<a href="Clock.html">Clock</a>]</td>
-<td></td></tr>
+<td><div class="info">
+<code class="code">run <span class="keyword">true</span></code> will run forever while <code class="code">run <span class="keyword">false</span></code> will return once no more events are waiting.
+</div>
+</td></tr>
 <tr><td><a href="Vlan.TRX.html#VALrx">rx</a> [<a href="Vlan.TRX.html">Vlan.TRX</a>]</td>
 <td><div class="info">
 Receive function, called to output untaggd frames from the 802.1q tunnel.
@@ -1269,13 +1407,13 @@ Receive function, called to output untaggd frames from the 802.1q tunnel.
 </td></tr>
 <tr><td><a href="Udp.TRX.html#VALrx">rx</a> [<a href="Udp.TRX.html">Udp.TRX</a>]</td>
 <td></td></tr>
+<tr><td><a href="Tools.html#VALrx">rx</a> [<a href="Tools.html">Tools</a>]</td>
+<td></td></tr>
 <tr><td><a href="Tcp.TRX.html#VALrx">rx</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
+<tr><td><a href="Router.Nat.html#VALrx">rx</a> [<a href="Router.Nat.html">Router.Nat</a>]</td>
+<td></td></tr>
 <tr><td><a href="Ip.TRX.html#VALrx">rx</a> [<a href="Ip.TRX.html">Ip.TRX</a>]</td>
-<td></td></tr>
-<tr><td><a href="Hub.Switch.html#VALrx">rx</a> [<a href="Hub.Switch.html">Hub.Switch</a>]</td>
-<td></td></tr>
-<tr><td><a href="Hub.Repeater.html#VALrx">rx</a> [<a href="Hub.Repeater.html">Hub.Repeater</a>]</td>
 <td></td></tr>
 <tr><td><a href="Http.TRX.html#VALrx">rx</a> [<a href="Http.TRX.html">Http.TRX</a>]</td>
 <td></td></tr>
@@ -1287,10 +1425,15 @@ Receive function, called to input an Ethernet frame into the TRX.
 </div>
 </td></tr>
 <tr><td align="left"><br>S</td></tr>
+<tr><td><a href="Pcap.Pdu.html#VALsave">save</a> [<a href="Pcap.Pdu.html">Pcap.Pdu</a>]</td>
+<td><div class="info">
+<code class="code">save <span class="string">"file.pcap"</span></code> returns a function that will save passed pdus in <code class="code"><span class="string">"file.pcap"</span></code>.
+</div>
+</td></tr>
 <tr><td><a href="Pcap.html#VALsave">save</a> [<a href="Pcap.html">Pcap</a>]</td>
 <td><div class="info">
-<code class="code">save <span class="string">"file.pcap"</span></code> returns a function that will save passed packets (as <code class="code">bitstring</code>s)
- in <code class="code"><span class="string">"file.pcap"</span></code> file.
+<code class="code">save <span class="string">"file.pcap"</span></code> returns a function that will save passed bitstrings as packets in
+ <code class="code"><span class="string">"file.pcap"</span></code>.
 </div>
 </td></tr>
 <tr><td><a href="Net.html#VALsave">save</a> [<a href="Net.html">Net</a>]</td>
@@ -1298,7 +1441,10 @@ Receive function, called to input an Ethernet frame into the TRX.
 <tr><td><a href="Myadmin.html#VALscenarii">scenarii</a> [<a href="Myadmin.html">Myadmin</a>]</td>
 <td></td></tr>
 <tr><td><a href="Clock.Interval.html#VALsec">sec</a> [<a href="Clock.Interval.html">Clock.Interval</a>]</td>
-<td></td></tr>
+<td><div class="info">
+seconds to .
+</div>
+</td></tr>
 <tr><td><a href="Eth.TRX.html#VALsend">send</a> [<a href="Eth.TRX.html">Eth.TRX</a>]</td>
 <td><div class="info">
 Low level send fonction.
@@ -1315,14 +1461,31 @@ Low level send fonction.
 <tr><td><a href="Myadmin.html#VALseries">series</a> [<a href="Myadmin.html">Myadmin</a>]</td>
 <td></td></tr>
 <tr><td><a href="Opache.html#VALserve">serve</a> [<a href="Opache.html">Opache</a>]</td>
-<td></td></tr>
-<tr><td><a href="Hub.Switch.html#VALset_emit">set_emit</a> [<a href="Hub.Switch.html">Hub.Switch</a>]</td>
-<td></td></tr>
-<tr><td><a href="Hub.Repeater.html#VALset_emit">set_emit</a> [<a href="Hub.Repeater.html">Hub.Repeater</a>]</td>
+<td><div class="info">
+Listen HTTP connections arriving at <code class="code">host</code> on given <code class="code">port</code>,
+  passing incoming messages to a user supplied function <code class="code">f</code>.
+</div>
+</td></tr>
+<tr><td><a href="Dhcpd.html#VALserve">serve</a> [<a href="Dhcpd.html">Dhcpd</a>]</td>
+<td><div class="info">
+<code class="code">serve host ips</code> listen on host DHCP port and allocate the
+ given ips to any requester.
+</div>
+</td></tr>
+<tr><td><a href="Tools.OrdArray.html#VALset">set</a> [<a href="Tools.OrdArray.html">Tools.OrdArray</a>]</td>
 <td></td></tr>
 <tr><td><a href="Http.TRXtop.html#VALset_emit">set_emit</a> [<a href="Http.TRXtop.html">Http.TRXtop</a>]</td>
 <td></td></tr>
 <tr><td><a href="Host.html#VALset_ip">set_ip</a> [<a href="Host.html">Host</a>]</td>
+<td></td></tr>
+<tr><td><a href="Router.Router.html#VALset_read">set_read</a> [<a href="Router.Router.html">Router.Router</a>]</td>
+<td><div class="info">
+Change the emitter of port N.
+</div>
+</td></tr>
+<tr><td><a href="Hub.Switch.html#VALset_read">set_read</a> [<a href="Hub.Switch.html">Hub.Switch</a>]</td>
+<td></td></tr>
+<tr><td><a href="Hub.Repeater.html#VALset_read">set_read</a> [<a href="Hub.Repeater.html">Hub.Repeater</a>]</td>
 <td></td></tr>
 <tr><td><a href="Http.TRXtop.html#VALset_recv">set_recv</a> [<a href="Http.TRXtop.html">Http.TRXtop</a>]</td>
 <td></td></tr>
@@ -1336,8 +1499,13 @@ Low level send fonction.
 <td></td></tr>
 <tr><td><a href="Host.html#VALsignal_err">signal_err</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
-<tr><td><a href="Clock.html#VALsleep">sleep</a> [<a href="Clock.html">Clock</a>]</td>
+<tr><td><a href="Clock.html#VALsignal_me">signal_me</a> [<a href="Clock.html">Clock</a>]</td>
 <td></td></tr>
+<tr><td><a href="Ip.Cidr.html#VALsingle">single</a> [<a href="Ip.Cidr.html">Ip.Cidr</a>]</td>
+<td><div class="info">
+Build a CIDR from a single address
+</div>
+</td></tr>
 <tr><td><a href="Pcap.Dlt.html#VALslip">slip</a> [<a href="Pcap.Dlt.html">Pcap.Dlt</a>]</td>
 <td><div class="info">
 Serial Line IP
@@ -1351,12 +1519,10 @@ Serial Line IP
 </td></tr>
 <tr><td><a href="Pcap.html#VALsniffer">sniffer</a> [<a href="Pcap.html">Pcap</a>]</td>
 <td><div class="info">
-<code class="code">sniffer iface rx</code> return a Lwt thread that continuously sniff packets
- and pass them to the <code class="code">rx</code> function.
+<code class="code">sniffer iface rx</code> returns a thread that continuously sniff packets
+ and pass them to the <code class="code">rx</code> function (via the Clock).
 </div>
 </td></tr>
-<tr><td><a href="Host.html#VALsock_rx">sock_rx</a> [<a href="Host.html">Host</a>]</td>
-<td></td></tr>
 <tr><td><a href="Peg.html#VALsome">some</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
 <tr><td><a href="Html.html#VALspecial_tag">special_tag</a> [<a href="Html.html">Html</a>]</td>
@@ -1383,8 +1549,6 @@ Serial Line IP
 <td></td></tr>
 <tr><td><a href="Host.html#VALstring_of_addr">string_of_addr</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
-<tr><td><a href="Ip.html#VALstring_of_cidr">string_of_cidr</a> [<a href="Ip.html">Ip</a>]</td>
-<td></td></tr>
 <tr><td><a href="Http.Pdu.html#VALstring_of_cmd">string_of_cmd</a> [<a href="Http.Pdu.html">Http.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Http.html#VALstring_of_code">string_of_code</a> [<a href="Http.html">Http</a>]</td>
@@ -1398,6 +1562,8 @@ Serial Line IP
 Converts a <a href="Eth.html#TYPEgw_addr"><code class="code"><span class="constructor">Eth</span>.gw_addr</code></a> to a string.
 </div>
 </td></tr>
+<tr><td><a href="Http.html#VALstring_of_header">string_of_header</a> [<a href="Http.html">Http</a>]</td>
+<td></td></tr>
 <tr><td><a href="Http.html#VALstring_of_headers">string_of_headers</a> [<a href="Http.html">Http</a>]</td>
 <td></td></tr>
 <tr><td><a href="Eth.Addr.html#VALstring_of_sfx">string_of_sfx</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
@@ -1414,7 +1580,10 @@ Substract two time and returns an interval.
 <tr><td><a href="Net.html#VALswitch_of_csv">switch_of_csv</a> [<a href="Net.html">Net</a>]</td>
 <td></td></tr>
 <tr><td><a href="Clock.html#VALsynch">synch</a> [<a href="Clock.html">Clock</a>]</td>
-<td></td></tr>
+<td><div class="info">
+Synchronize internal clock with realtime clock.
+</div>
+</td></tr>
 <tr><td align="left"><br>T</td></tr>
 <tr><td><a href="Hub.Repeater.html#VALt_printer">t_printer</a> [<a href="Hub.Repeater.html">Hub.Repeater</a>]</td>
 <td></td></tr>
@@ -1423,8 +1592,6 @@ Substract two time and returns an interval.
 <tr><td><a href="Html.html#VALtag_seq">tag_seq</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
 <tr><td><a href="Peg.html#VALtake">take</a> [<a href="Peg.html">Peg</a>]</td>
-<td></td></tr>
-<tr><td><a href="Fifo.html#VALtake">take</a> [<a href="Fifo.html">Fifo</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.html#VALtakebytes">takebytes</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
@@ -1442,8 +1609,15 @@ Substract two time and returns an interval.
 <td></td></tr>
 <tr><td><a href="Host.html#VALtcp_server">tcp_server</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
+<tr><td><a href="Host.html#VALtcp_sock_rx">tcp_sock_rx</a> [<a href="Host.html">Host</a>]</td>
+<td></td></tr>
 <tr><td><a href="Localhost.html#VALtcp_trx_of_socket">tcp_trx_of_socket</a> [<a href="Localhost.html">Localhost</a>]</td>
 <td></td></tr>
+<tr><td><a href="Router.Router.html#VALtest_route">test_route</a> [<a href="Router.Router.html">Router.Router</a>]</td>
+<td><div class="info">
+Test an incoming packet against a route.
+</div>
+</td></tr>
 <tr><td><a href="Http.html#VALtext_of_code">text_of_code</a> [<a href="Http.html">Http</a>]</td>
 <td></td></tr>
 <tr><td><a href="Ip.Addr.html#VALto_bitstring">to_bitstring</a> [<a href="Ip.Addr.html">Ip.Addr</a>]</td>
@@ -1453,20 +1627,35 @@ Convert an <code class="code"><span class="constructor">Ip</span>.<span class="c
 </td></tr>
 <tr><td><a href="Net.html#VALto_csv_file">to_csv_file</a> [<a href="Net.html">Net</a>]</td>
 <td></td></tr>
+<tr><td><a href="Hub.Switch.html#VALto_dev">to_dev</a> [<a href="Hub.Switch.html">Hub.Switch</a>]</td>
+<td><div class="info">
+Turns a port into a device
+</div>
+</td></tr>
+<tr><td><a href="Hub.Repeater.html#VALto_dev">to_dev</a> [<a href="Hub.Repeater.html">Hub.Repeater</a>]</td>
+<td><div class="info">
+Turns a port into a device
+</div>
+</td></tr>
 <tr><td><a href="Ip.Addr.html#VALto_dotted_string">to_dotted_string</a> [<a href="Ip.Addr.html">Ip.Addr</a>]</td>
 <td><div class="info">
 Convert an <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t</code> to dotted representation.
 </div>
 </td></tr>
+<tr><td><a href="Ip.Cidr.html#VALto_enum">to_enum</a> [<a href="Ip.Cidr.html">Ip.Cidr</a>]</td>
+<td></td></tr>
+<tr><td><a href="Ip.Addr.html#VALto_inet_addr">to_inet_addr</a> [<a href="Ip.Addr.html">Ip.Addr</a>]</td>
+<td></td></tr>
 <tr><td><a href="Clock.Time.html#VALto_ints">to_ints</a> [<a href="Clock.Time.html">Clock.Time</a>]</td>
 <td><div class="info">
 Convert a timestamp to a pair of ints with seconds, microseconds
 </div>
 </td></tr>
-<tr><td><a href="Fifo.html#VALto_stream">to_stream</a> [<a href="Fifo.html">Fifo</a>]</td>
-<td></td></tr>
 <tr><td><a href="Url.html#VALto_string">to_string</a> [<a href="Url.html">Url</a>]</td>
-<td></td></tr>
+<td><div class="info">
+the opposite of of_string
+</div>
+</td></tr>
 <tr><td><a href="Tools.PRIVATE_TYPE.html#VALto_string">to_string</a> [<a href="Tools.PRIVATE_TYPE.html">Tools.PRIVATE_TYPE</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.MakePrivate.html#VALto_string">to_string</a> [<a href="Tools.MakePrivate.html">Tools.MakePrivate</a>]</td>
@@ -1485,7 +1674,7 @@ Convert a timestamp to a pair of ints with seconds, microseconds
 <td></td></tr>
 <tr><td><a href="Metric.html#VALtree">tree</a> [<a href="Metric.html">Metric</a>]</td>
 <td></td></tr>
-<tr><td><a href="Tcp.TRX.html#VALtrx_of">trx_of</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
+<tr><td><a href="Udp.TRX.html#VALtrx_of">trx_of</a> [<a href="Udp.TRX.html">Udp.TRX</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tcp.TRX.html#VALtry_really_rx">try_really_rx</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
@@ -1498,8 +1687,15 @@ Transmit function.
 </td></tr>
 <tr><td><a href="Udp.TRX.html#VALtx">tx</a> [<a href="Udp.TRX.html">Udp.TRX</a>]</td>
 <td></td></tr>
+<tr><td><a href="Tools.html#VALtx">tx</a> [<a href="Tools.html">Tools</a>]</td>
+<td></td></tr>
 <tr><td><a href="Tcp.TRX.html#VALtx">tx</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
+<tr><td><a href="Router.Nat.html#VALtx">tx</a> [<a href="Router.Nat.html">Router.Nat</a>]</td>
+<td><div class="info">
+bits are flowing from LAN to outside world
+</div>
+</td></tr>
 <tr><td><a href="Localhost.html#VALtx">tx</a> [<a href="Localhost.html">Localhost</a>]</td>
 <td></td></tr>
 <tr><td><a href="Ip.TRX.html#VALtx">tx</a> [<a href="Ip.TRX.html">Ip.TRX</a>]</td>
@@ -1513,6 +1709,8 @@ Transmit function.
 Transmit function.
 </div>
 </td></tr>
+<tr><td><a href="Icmp.MsgType.html#VALtype_of">type_of</a> [<a href="Icmp.MsgType.html">Icmp.MsgType</a>]</td>
+<td></td></tr>
 <tr><td align="left"><br>U</td></tr>
 <tr><td><a href="Ip.Proto.html#VALudp">udp</a> [<a href="Ip.Proto.html">Ip.Proto</a>]</td>
 <td></td></tr>
@@ -1522,11 +1720,17 @@ Transmit function.
 <td></td></tr>
 <tr><td><a href="Host.html#VALudp_connect">udp_connect</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
+<tr><td><a href="Host.html#VALudp_send">udp_send</a> [<a href="Host.html">Host</a>]</td>
+<td></td></tr>
 <tr><td><a href="Host.html#VALudp_server">udp_server</a> [<a href="Host.html">Host</a>]</td>
+<td></td></tr>
+<tr><td><a href="Host.html#VALudp_sock_rx">udp_sock_rx</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
 <tr><td><a href="Html.html#VALuncloseds">uncloseds</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
 <tr><td><a href="Html.html#VALunify">unify</a> [<a href="Html.html">Html</a>]</td>
+<td></td></tr>
+<tr><td><a href="Sim.Net.html#VALunion">union</a> [<a href="Sim.Net.html">Sim.Net</a>]</td>
 <td></td></tr>
 <tr><td><a href="Vlan.Pdu.html#VALunpack">unpack</a> [<a href="Vlan.Pdu.html">Vlan.Pdu</a>]</td>
 <td><div class="info">
@@ -1574,6 +1778,11 @@ Unpack a <code class="code">bitstring</code> into an <a href="Eth.Pdu.html#TYPEt
 <td></td></tr>
 <tr><td><a href="Dns.Pdu.html#VALunpack_rrs">unpack_rrs</a> [<a href="Dns.Pdu.html">Dns.Pdu</a>]</td>
 <td></td></tr>
+<tr><td><a href="Ip.Pdu.html#VALunpack_with_ports">unpack_with_ports</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
+<td><div class="info">
+Unpack an ip packets and return the ip PDU, source port and dest port.
+</div>
+</td></tr>
 <tr><td><a href="Html.html#VALunparsable">unparsable</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
 <tr><td><a href="Html.html#VALunquoted_value">unquoted_value</a> [<a href="Html.html">Html</a>]</td>
@@ -1588,7 +1797,7 @@ Unpack a <code class="code">bitstring</code> into an <a href="Eth.Pdu.html#TYPEt
 <td></td></tr>
 <tr><td><a href="Clock.Interval.html#VALusec">usec</a> [<a href="Clock.Interval.html">Clock.Interval</a>]</td>
 <td><div class="info">
-Takes some microseconds, milliseconds, seconds, minutes or hour and return an <code class="code"><span class="constructor">Interval</span>.t</code>.
+microseconds to .
 </div>
 </td></tr>
 <tr><td><a href="Browser.html#VALuser">user</a> [<a href="Browser.html">Browser</a>]</td>
@@ -1613,6 +1822,29 @@ Get the current wall clock (through ).
 <td></td></tr>
 <tr><td><a href="Persist.html#VALwith_output_file">with_output_file</a> [<a href="Persist.html">Persist</a>]</td>
 <td></td></tr>
+<tr><td><a href="Host.html#VALwith_resolver_trx">with_resolver_trx</a> [<a href="Host.html">Host</a>]</td>
+<td></td></tr>
+<tr><td><a href="Router.Router.html#VALwrite">write</a> [<a href="Router.Router.html">Router.Router</a>]</td>
+<td><div class="info">
+Call <code class="code">write n t bits</code> when an IP packet (<code class="code">bits</code>) is received on interface <code class="code">n</code>.
+</div>
+</td></tr>
+<tr><td><a href="Hub.Switch.html#VALwrite">write</a> [<a href="Hub.Switch.html">Hub.Switch</a>]</td>
+<td></td></tr>
+<tr><td><a href="Hub.Repeater.html#VALwrite">write</a> [<a href="Hub.Repeater.html">Hub.Repeater</a>]</td>
+<td></td></tr>
+<tr><td><a href="Pcap.html#VALwrite_global_header">write_global_header</a> [<a href="Pcap.html">Pcap</a>]</td>
+<td><div class="info">
+<code class="code">write_global_header filename</code> write a 'generic' pcap global header and
+ returns the output channel.
+</div>
+</td></tr>
+<tr><td><a href="Pcap.html#VALwrite_next_pkt">write_next_pkt</a> [<a href="Pcap.html">Pcap</a>]</td>
+<td><div class="info">
+<code class="code">write_next_pkt global_header ic</code> will return the next <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a> that's to
+ be read from the input stream <code class="code">ic</code>.
+</div>
+</td></tr>
 <tr><td align="left"><br>X</td></tr>
 <tr><td><a href="Html.html#VALxml_decl">xml_decl</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
@@ -1622,6 +1854,11 @@ Get the current wall clock (through ).
 <tr><td><a href="Eth.Addr.html#VALzero">zero</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
 <td><div class="info">
 Constant for Ethernet all zeroes address.
+</div>
+</td></tr>
+<tr><td><a href="Ip.Cidr.html#VALzero_addr">zero_addr</a> [<a href="Ip.Cidr.html">Ip.Cidr</a>]</td>
+<td><div class="info">
+Returns the subnet-zero address of a CIDR
 </div>
 </td></tr>
 </table><br>

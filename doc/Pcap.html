@@ -17,9 +17,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -36,6 +36,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -57,7 +59,7 @@
 <center><h1>Module <a href="type_Pcap.html">Pcap</a></h1></center>
 <br>
 <pre><span class="keyword">module</span> Pcap: <code class="code"><span class="keyword">sig</span></code> <a href="Pcap.html">..</a> <code class="code"><span class="keyword">end</span></code></pre> This module holds all functions related to <code class="code">libpcap</code>, packet sniffing,
- packet injection, and pcap file reading and writing.<br>
+ packet injection and pcap file reading and writing.<br>
 <hr width="100%">
 <pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALPcap.debug.html">debug</a></span> : <code class="type">bool</code></pre><br>
 <span id="2_Libpcaplowlevelwrappers"><h2>Libpcap low level wrappers</h2></span><br>
@@ -102,9 +104,9 @@ A counter for how many packets were sniffed.<br>
 <pre><span id="VALbytes_in"><span class="keyword">val</span> <a href="code_VALPcap.bytes_in.html">bytes_in</a></span> : <code class="type"><a href="Metric.Counter.html#TYPEt">Metric.Counter.t</a></code></pre><div class="info">
 A counter for how many bytes were sniffed.<br>
 </div>
-<pre><span id="VALsniffer"><span class="keyword">val</span> <a href="code_VALPcap.sniffer.html">sniffer</a></span> : <code class="type"><a href="Pcap.html#TYPEiface">iface</a> -> (Bitstring.bitstring -> unit) -> 'a Lwt.t</code></pre><div class="info">
-<code class="code">sniffer iface rx</code> return a Lwt thread that continuously sniff packets
- and pass them to the <code class="code">rx</code> function.<br>
+<pre><span id="VALsniffer"><span class="keyword">val</span> <a href="code_VALPcap.sniffer.html">sniffer</a></span> : <code class="type"><a href="Pcap.html#TYPEiface">iface</a> -> (Bitstring.bitstring -> unit) -> Thread.t</code></pre><div class="info">
+<code class="code">sniffer iface rx</code> returns a thread that continuously sniff packets
+ and pass them to the <code class="code">rx</code> function (via the Clock).<br>
 </div>
 <br>
 <span id="2_Pcapfiles"><h2>Pcap files</h2></span><br>
@@ -182,17 +184,17 @@ Packets harvested with libpcap will come with additional informations such
  as caplen, timestamp etc.
 </div>
 <pre><span id="VALsave"><span class="keyword">val</span> <a href="code_VALPcap.save.html">save</a></span> : <code class="type">?caplen:int -> ?dlt:Dlt.t -> string -> Tools.Payload.outer_t -> unit</code></pre><div class="info">
-<code class="code">save <span class="string">"file.pcap"</span></code> returns a function that will save passed packets (as <code class="code">bitstring</code>s)
- in <code class="code"><span class="string">"file.pcap"</span></code> file.
+<code class="code">save <span class="string">"file.pcap"</span></code> returns a function that will save passed bitstrings as packets in
+ <code class="code"><span class="string">"file.pcap"</span></code>.
 <br>
 </div>
 <div class="param_info"><code class="code">caplen</code> : can be used to cap saved packet to a given number of bytes</div>
-<div class="param_info"><code class="code">dlt</code> : can be used to change the file's DLT (you probably do not want to do that)</div>
+<div class="param_info"><code class="code">dlt</code> : can be used to change the file's DLT (required if you do not write Ethernet packets)</div>
 <pre><span id="EXCEPTIONNot_a_pcap_file"><span class="keyword">exception</span> Not_a_pcap_file</span></pre>
 <div class="info">
 When trying to read packets from a file that doesn't look like a pcap file.<br>
 </div>
-<pre><span id="VALread_global_header"><span class="keyword">val</span> <a href="code_VALPcap.read_global_header.html">read_global_header</a></span> : <code class="type">string -> <a href="Pcap.html#TYPEglobal_header">global_header</a> * BatIO.input</code></pre><div class="info">
+<pre><span id="VALbitstring_of_global_header"><span class="keyword">val</span> <a href="code_VALPcap.bitstring_of_global_header.html">bitstring_of_global_header</a></span> : <code class="type"><a href="Pcap.html#TYPEglobal_header">global_header</a> -> Bitstring.bitstring</code></pre><pre><span id="VALglobal_header_of_bitstring"><span class="keyword">val</span> <a href="code_VALPcap.global_header_of_bitstring.html">global_header_of_bitstring</a></span> : <code class="type">string -> Bitstring.bitstring -> <a href="Pcap.html#TYPEglobal_header">global_header</a></code></pre><pre><span id="VALread_global_header"><span class="keyword">val</span> <a href="code_VALPcap.read_global_header.html">read_global_header</a></span> : <code class="type">string -> <a href="Pcap.html#TYPEglobal_header">global_header</a> * BatIO.input</code></pre><div class="info">
 <code class="code">read_global_header filename</code> reads the pcap global header from the
  fiven file, and returns both a <a href="Pcap.html#TYPEglobal_header"><code class="code"><span class="constructor">Pcap</span>.global_header</code></a> and the input channel.<br>
 </div>
@@ -200,8 +202,19 @@ When trying to read packets from a file that doesn't look like a pcap file.<br>
 <code class="code">read_next_pkt global_header ic</code> will return the next <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a> that's to
  be read from the input stream <code class="code">ic</code>.<br>
 </div>
-<pre><span id="VALenum_of"><span class="keyword">val</span> <a href="code_VALPcap.enum_of.html">enum_of</a></span> : <code class="type">string -> <a href="Pcap.Pdu.html#TYPEt">Pdu.t</a> Batteries.Enum.t</code></pre><div class="info">
-from a pcap file, returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
+<pre><span id="VALenum_of_file"><span class="keyword">val</span> <a href="code_VALPcap.enum_of_file.html">enum_of_file</a></span> : <code class="type">string -> <a href="Pcap.Pdu.html#TYPEt">Pdu.t</a> Batteries.Enum.t</code></pre><div class="info">
+From a pcap file, returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
+</div>
+<pre><span id="VALwrite_global_header"><span class="keyword">val</span> <a href="code_VALPcap.write_global_header.html">write_global_header</a></span> : <code class="type">string -> <a href="Pcap.html#TYPEglobal_header">global_header</a> -> unit BatIO.output</code></pre><div class="info">
+<code class="code">write_global_header filename</code> write a 'generic' pcap global header and
+ returns the output channel.<br>
+</div>
+<pre><span id="VALwrite_next_pkt"><span class="keyword">val</span> <a href="code_VALPcap.write_next_pkt.html">write_next_pkt</a></span> : <code class="type">unit BatIO.output -> <a href="Pcap.Pdu.html#TYPEt">Pdu.t</a> -> unit</code></pre><div class="info">
+<code class="code">write_next_pkt global_header ic</code> will return the next <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a> that's to
+ be read from the input stream <code class="code">ic</code>.<br>
+</div>
+<pre><span id="VALfile_of_enum"><span class="keyword">val</span> <a href="code_VALPcap.file_of_enum.html">file_of_enum</a></span> : <code class="type">string -> ?dlt:Dlt.t -> <a href="Pcap.Pdu.html#TYPEt">Pdu.t</a> Batteries.Enum.t -> unit</code></pre><div class="info">
+<code class="code">file_of_enum filename e</code> will save an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a> into the file named <code class="code">filename</code>.<br>
 </div>
 <br>
 <span id="2_Tools"><h2>Tools</h2></span><br>
@@ -269,7 +282,8 @@ Small utility that truncate a pcap file to the last valid packet.
 </div>
 <pre><span id="VALplay"><span class="keyword">val</span> <a href="code_VALPcap.play.html">play</a></span> : <code class="type">(Bitstring.bitstring -> 'a) -> string -> unit</code></pre><div class="info">
 <code class="code">play tx <span class="string">"file.pcap"</span></code> will read packets from <code class="code"><span class="string">"file.pcap"</span></code> and send them to <code class="code">tx</code>
- copying the pcap file frame rate. Notice that we use the internal <a href="Clock.html"><code class="code"><span class="constructor">Clock</span></code></a> for this,
- so it's both very accurate or not accurate at all, depending on how you look at it.<br>
+ copying the pcap file frame rate. Notice that we use the internal
+ <a href="Clock.html"><code class="code"><span class="constructor">Clock</span></code></a> for this, so it's both very accurate or not accurate at all,
+ depending on how you look at it.<br>
 </div>
 </body></html>

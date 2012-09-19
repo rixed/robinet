@@ -11,9 +11,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -30,6 +30,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -39,7 +41,8 @@
 </head>
 <body>
 <code class="code"><span class="keyword">let</span>&nbsp;resolve_proto_addr&nbsp;t&nbsp;bits&nbsp;sender_proto_addr&nbsp;target_proto_addr&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;request&nbsp;=&nbsp;<span class="constructor">Arp</span>.<span class="constructor">Pdu</span>.make_request&nbsp;<span class="constructor">Arp</span>.<span class="constructor">HwType</span>.eth&nbsp;t.proto&nbsp;(t.src&nbsp;:&gt;&nbsp;bitstring)&nbsp;sender_proto_addr&nbsp;target_proto_addr&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;send&nbsp;t&nbsp;<span class="constructor">Arp</span>.<span class="constructor">HwProto</span>.arp&nbsp;<span class="constructor">Addr</span>.broadcast&nbsp;(<span class="constructor">Arp</span>.<span class="constructor">Pdu</span>.pack&nbsp;request)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;Add&nbsp;the&nbsp;msg&nbsp;to&nbsp;delayed&nbsp;messages&nbsp;_before_&nbsp;sending&nbsp;the&nbsp;query&nbsp;*)</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Eth:&nbsp;Delaying&nbsp;a&nbsp;msg&nbsp;for&nbsp;'%s'\n%!"</span>&nbsp;(hexstring_of_bitstring&nbsp;target_proto_addr)&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">BitHash</span>.add&nbsp;t.delayed&nbsp;target_proto_addr&nbsp;bits</code></body></html>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">BitHash</span>.add&nbsp;t.delayed&nbsp;target_proto_addr&nbsp;bits&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;request&nbsp;=&nbsp;<span class="constructor">Arp</span>.<span class="constructor">Pdu</span>.make_request&nbsp;<span class="constructor">Arp</span>.<span class="constructor">HwType</span>.eth&nbsp;t.proto&nbsp;(t.src&nbsp;:&gt;&nbsp;bitstring)&nbsp;sender_proto_addr&nbsp;target_proto_addr&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;send&nbsp;t&nbsp;<span class="constructor">Arp</span>.<span class="constructor">HwProto</span>.arp&nbsp;<span class="constructor">Addr</span>.broadcast&nbsp;(<span class="constructor">Arp</span>.<span class="constructor">Pdu</span>.pack&nbsp;request)</code></body></html>

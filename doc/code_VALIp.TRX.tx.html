@@ -11,9 +11,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -30,6 +30,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -48,8 +50,8 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;The&nbsp;frag_offset&nbsp;is&nbsp;given&nbsp;in&nbsp;unit&nbsp;of&nbsp;8&nbsp;bytes.<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;So&nbsp;the&nbsp;MTU&nbsp;is&nbsp;required&nbsp;to&nbsp;be&nbsp;a&nbsp;multiple&nbsp;of&nbsp;8&nbsp;bytes&nbsp;as&nbsp;well.&nbsp;*)</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;pdu&nbsp;=&nbsp;<span class="constructor">Pdu</span>.make&nbsp;~id&nbsp;~more_frags&nbsp;~frag_offset:((bit_offset+7)&nbsp;<span class="keyword">lsr</span>&nbsp;6)&nbsp;t.proto&nbsp;t.src&nbsp;t.dst&nbsp;pld&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Ip:&nbsp;Emitting&nbsp;an&nbsp;IP&nbsp;packet&nbsp;from&nbsp;%s&nbsp;to&nbsp;%s&nbsp;of&nbsp;length&nbsp;%d&nbsp;(content&nbsp;'%s')\n%!"</span>&nbsp;(<span class="constructor">Addr</span>.dotted_string_of_int32&nbsp;(t.src&nbsp;:&gt;&nbsp;int32))&nbsp;(<span class="constructor">Addr</span>.dotted_string_of_int32&nbsp;(t.dst&nbsp;:&gt;&nbsp;int32))&nbsp;(bytelength&nbsp;pld)&nbsp;(string_of_bitstring&nbsp;bits);<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.emit&nbsp;(<span class="constructor">Pdu</span>.pack&nbsp;pdu)&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;debug&nbsp;<span class="keyword">then</span>&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"Ip:&nbsp;Emitting&nbsp;an&nbsp;IP&nbsp;packet&nbsp;from&nbsp;%s&nbsp;to&nbsp;%s&nbsp;of&nbsp;length&nbsp;%d&nbsp;(content&nbsp;'%s')\n%!"</span>&nbsp;(<span class="constructor">Addr</span>.dotted_string_of_int32&nbsp;(t.src&nbsp;:&gt;&nbsp;int32))&nbsp;(<span class="constructor">Addr</span>.dotted_string_of_int32&nbsp;(t.dst&nbsp;:&gt;&nbsp;int32))&nbsp;(bytelength&nbsp;pld)&nbsp;(hexstring_of_bitstring&nbsp;bits);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Clock</span>.asap&nbsp;t.emit&nbsp;(<span class="constructor">Pdu</span>.pack&nbsp;pdu)&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;aux&nbsp;(bit_offset&nbsp;+&nbsp;bitstring_length&nbsp;pld)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;aux&nbsp;0</code></body></html>

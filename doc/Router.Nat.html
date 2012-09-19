@@ -1,0 +1,204 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link rel="next" href="Router.Router.html">
+<link rel="Up" href="Router.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html">
+<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Router.Nat</title>
+</head>
+<body>
+<div class="navbar">&nbsp;<a href="Router.html">Up</a>
+&nbsp;<a href="Router.Router.html">Next</a>
+</div>
+<center><h1>Module <a href="type_Router.Nat.html">Router.Nat</a></h1></center>
+<br>
+<pre><span class="keyword">module</span> Nat: <code class="code"><span class="keyword">sig</span></code> <a href="Router.Nat.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Network Address Translation (N.A.T.) is the process of replacing on the fly non routable
+ addresses used within a LAN by a unique routable address, so that hosts from the LAN
+ can communicate with the outside world by sharing the only routable IP address.
+ A <code class="code"><span class="constructor">Nat</span>.t</code> is a two sided device, with an inside and an outside, and an affected Ip address,
+ that will translate outgoing source addresses with it's own and restore it in incoming
+ packets. To match these incoming packets with the outgoing one it must use the UDP or
+ TCP client port and an internal memory of currently forwarded connections. This memory
+ is of bounded size.
+ Note that any packet that reach it will be forwarded.<br>
+<hr width="100%">
+<br>
+Behavior on incomming packets:
+<pre>    [Nat] &lt;----------------------------- [Outside host]
+              Src: outside_addr,
+              Dst: nat_addr
+            Ports: outside_port:nat_port</pre>
+    Lookup (outside_addr, outside_port, nat_port, proto) in in_cnxs_h.
+    If the cnx is found then replace the nat_addr:nat_port by cnx.in_addr:cnx.in_port.
+    If nothing is found, just ignore the packet (or forward it to the sink host
+    without changing the dest port).
+<p>
+
+    Behavior on outgoing packets:
+<pre>    [Inside host] -----------------------------&gt; [Nat]
+                      Src: inside_addr,
+                      Dst: outside_addr,
+                    Ports: inside_port:outside_port</pre>
+    Lookup (inside_addr, inside_port, nat_port, proto) in out_cnxs_h.
+    If the cnx is found then replace the inside_addr:inside_port by nat_addr:cnx.out_port.
+    If nothing is found, create the cnx as:
+    <pre></pre><code class="code">&nbsp;{&nbsp;out_port=random_port;&nbsp;in_addr=inside_addr;&nbsp;in_port=inside_port&nbsp;}&nbsp;</code><pre></pre>
+    and insert it with the above key in out_cnxs_h.
+    Also, insert this cnx in in_cnxs_h with key (outside_addr, outside_port, random_port, proto).<br>
+<br><code><span id="TYPEsocket"><span class="keyword">type</span> <code class="type"></code>socket</span> = {</code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>proto&nbsp;: <code class="type">Ip.Proto.t</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >the IP protocol</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>nat_port&nbsp;: <code class="type">int</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >the Nat ports</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>remote_addr&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >the other peer's address</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>remote_port&nbsp;: <code class="type">int</code>;</code></td>
+
+</tr></table>
+}
+
+<div class="info">
+the port used by the other peer<br>
+</div>
+
+<br><code><span id="TYPEcnx"><span class="keyword">type</span> <code class="type"></code>cnx</span> = {</code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>in_addr&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >the inside lan's host IP</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>in_port&nbsp;: <code class="type">int</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >the origin port used by this host</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>out_port&nbsp;: <code class="type">int</code>;</code></td>
+
+</tr></table>
+}
+
+<div class="info">
+the random port used by NAS in the outside<br>
+</div>
+
+<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>addr&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >our IP addr</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>cnxs&nbsp;: <code class="type"><a href="Router.Nat.html#TYPEcnx">cnx</a> <a href="Tools.OrdArray.html#TYPEt">Tools.OrdArray.t</a></code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >all the cnxs we remember</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>in_cnxs_h&nbsp;: <code class="type">(<a href="Router.Nat.html#TYPEsocket">socket</a>, int) Batteries.Hashtbl.t</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >the hash to retrieve cnxs of packets coming from the outside</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>out_cnxs_h&nbsp;: <code class="type">(<a href="Router.Nat.html#TYPEsocket">socket</a>, int) Batteries.Hashtbl.t</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >the hash to retrieve cnxs of packets coming from the inside</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span class="keyword">mutable&nbsp;</span>emit&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >the emit function (ie. carry packets to the outside</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span class="keyword">mutable&nbsp;</span>recv&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+
+</tr></table>
+}
+
+<div class="info">
+the receive functon (ie. forward incoming packets from the outside<br>
+</div>
+
+<pre><span id="VALpatch_src_port"><span class="keyword">val</span> <a href="code_VALRouter.Nat.patch_src_port.html">patch_src_port</a></span> : <code class="type">Ip.Proto.t -> string * int * int -> Tcp.Port.outer_t -> Bitstring.bitstring</code></pre><pre><span id="VALpatch_dst_port"><span class="keyword">val</span> <a href="code_VALRouter.Nat.patch_dst_port.html">patch_dst_port</a></span> : <code class="type">Ip.Proto.t -> string * int * int -> Tcp.Port.outer_t -> Bitstring.bitstring</code></pre><pre><span id="VALtx"><span class="keyword">val</span> <a href="code_VALRouter.Nat.tx.html">tx</a></span> : <code class="type"><a href="Router.Nat.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><div class="info">
+bits are flowing from LAN to outside world<br>
+</div>
+<pre><span id="VALrx"><span class="keyword">val</span> <a href="code_VALRouter.Nat.rx.html">rx</a></span> : <code class="type"><a href="Router.Nat.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALRouter.Nat.make.html">make</a></span> : <code class="type">Ip.Addr.t -> int -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre><div class="info">
+<code class="code">make ip n</code> returns a <a href="Tools.html#TYPEtrx"><code class="code"><span class="constructor">Tools</span>.trx</code></a> corresponding to a NAT device (tx is for transmitting from the LAN to the outside) that can track <code class="code">n</code> sockets.<br>
+</div>
+</body></html>

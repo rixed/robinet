@@ -17,9 +17,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -36,6 +36,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -57,11 +59,15 @@
 <p>
 
    When in realtime mode (the default), the clock will merely follow
-   wall-clock. This is not very interesting but is required whenever you plan
-   to work with real network devices and outside world.  If your simulated
-   network does not communicates with the outside world, though, then you can
-   use not realtime mode and then play your simulation at full speed (and full
-   CPU).<br>
+   wall-clock. Then, scheduling an event in the future is equivalent to
+   <code class="code"><span class="constructor">Unix</span>.sleep</code> for some time. This is not very interesting but is required
+   whenever you plan to work with real network devices and outside world.  On
+   the other hand, if your simulated network does not communicates with the
+   outside world, for instance because your objective is to build a pcap file,
+   then you can use not realtime mode and then play your simulation at full
+   speed (and full CPU), and produce a pcap file representing, say, the
+   workload of a day in minutes, or conversely a very busy hour in several
+   hours but with all packets and accurate timestamps.<br>
 <hr width="100%">
 <pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALClock.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span id="VALrealtime"><span class="keyword">val</span> <a href="code_VALClock.realtime.html">realtime</a></span> : <code class="type">bool Batteries.ref</code></pre><br>
 <span id="2_PrivateTypes"><h2>Private Types</h2></span><br>
@@ -92,5 +98,31 @@ While Interval.t reprensents a time interval.
 </tr></table>
 }
 
+<div class="info">
+A clock is a current timestamp and the set of future events.<br>
+</div>
 
-<pre><span id="VALcurrent"><span class="keyword">val</span> <a href="code_VALClock.current.html">current</a></span> : <code class="type"><a href="Clock.html#TYPEclock">clock</a></code></pre><pre><span id="VALnow"><span class="keyword">val</span> <a href="code_VALClock.now.html">now</a></span> : <code class="type">unit -> Time.t</code></pre><pre><span id="VALnextev_wakener"><span class="keyword">val</span> <a href="code_VALClock.nextev_wakener.html">nextev_wakener</a></span> : <code class="type">unit Lwt.u option Batteries.ref</code></pre><pre><span id="VALnextev_awake"><span class="keyword">val</span> <a href="code_VALClock.nextev_awake.html">nextev_awake</a></span> : <code class="type">unit -> unit</code></pre><pre><span id="VALat"><span class="keyword">val</span> <a href="code_VALClock.at.html">at</a></span> : <code class="type">Map.key -> ('a -> unit) -> 'a -> unit</code></pre><pre><span id="VALnext_event"><span class="keyword">val</span> <a href="code_VALClock.next_event.html">next_event</a></span> : <code class="type">unit -> unit Lwt.t</code></pre><pre><span id="VALdelay"><span class="keyword">val</span> <a href="code_VALClock.delay.html">delay</a></span> : <code class="type">Interval.t -> ('a -> unit) -> 'a -> unit</code></pre><pre><span id="VALsleep"><span class="keyword">val</span> <a href="code_VALClock.sleep.html">sleep</a></span> : <code class="type">Interval.t -> unit Lwt.t</code></pre><pre><span id="VALrun"><span class="keyword">val</span> <a href="code_VALClock.run.html">run</a></span> : <code class="type">unit -> 'a Lwt.t</code></pre><pre><span id="VALsynch"><span class="keyword">val</span> <a href="code_VALClock.synch.html">synch</a></span> : <code class="type">unit -> unit</code></pre></body></html>
+<pre><span id="VALcurrent"><span class="keyword">val</span> <a href="code_VALClock.current.html">current</a></span> : <code class="type"><a href="Clock.html#TYPEclock">clock</a></code></pre><div class="info">
+We have only one clock so can run only one simulation at the same time.<br>
+</div>
+<pre><span id="VALnow"><span class="keyword">val</span> <a href="code_VALClock.now.html">now</a></span> : <code class="type">unit -> Time.t</code></pre><div class="info">
+Return the current simulation time.<br>
+</div>
+<pre><span id="VALcond_lock"><span class="keyword">val</span> <a href="code_VALClock.cond_lock.html">cond_lock</a></span> : <code class="type">Mutex.t</code></pre><pre><span id="VALcond"><span class="keyword">val</span> <a href="code_VALClock.cond.html">cond</a></span> : <code class="type">Condition.t</code></pre><pre><span id="VALsignal_me"><span class="keyword">val</span> <a href="code_VALClock.signal_me.html">signal_me</a></span> : <code class="type">unit -> unit</code></pre><pre><span id="VALepsilon"><span class="keyword">val</span> <a href="code_VALClock.epsilon.html">epsilon</a></span> : <code class="type">Interval.t</code></pre><pre><span id="VALat"><span class="keyword">val</span> <a href="code_VALClock.at.html">at</a></span> : <code class="type">Map.key -> ('a -> unit) -> 'a -> unit</code></pre><div class="info">
+<code class="code">at t f x</code> will execute <code class="code">f x</code> when simulation clock reachs time <code class="code">t</code>.<br>
+</div>
+<pre><span id="VALdelay"><span class="keyword">val</span> <a href="code_VALClock.delay.html">delay</a></span> : <code class="type">Interval.t -> ('a -> unit) -> 'a -> unit</code></pre><div class="info">
+<code class="code">delay d f x</code> will delay the execution of <code class="code">f x</code> by the interval <code class="code">d</code>.<br>
+</div>
+<pre><span id="VALasap"><span class="keyword">val</span> <a href="code_VALClock.asap.html">asap</a></span> : <code class="type">('a -> unit) -> 'a -> unit</code></pre><pre><span id="VALsynch"><span class="keyword">val</span> <a href="code_VALClock.synch.html">synch</a></span> : <code class="type">unit -> unit</code></pre><div class="info">
+Synchronize internal clock with realtime clock.
+ You must call this after real time passes (for instance after a blocking call).
+ Otherwise, time jumps from one registered event to the next.<br>
+</div>
+<pre><span id="VALnext_event"><span class="keyword">val</span> <a href="code_VALClock.next_event.html">next_event</a></span> : <code class="type">unit -> unit</code></pre><div class="info">
+Will process the next event<br>
+</div>
+<pre><span id="VALrun"><span class="keyword">val</span> <a href="code_VALClock.run.html">run</a></span> : <code class="type">bool -> unit</code></pre><div class="info">
+<code class="code">run <span class="keyword">true</span></code> will run forever while <code class="code">run <span class="keyword">false</span></code> will return once no more events are waiting.<br>
+</div>
+</body></html>

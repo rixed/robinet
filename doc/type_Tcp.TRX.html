@@ -11,9 +11,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -30,6 +30,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -107,6 +109,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;is_closed&nbsp;:&nbsp;unit&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;bool;<br>
 &nbsp;&nbsp;}<br>
 &nbsp;&nbsp;<span class="keyword">type</span>&nbsp;t&nbsp;=&nbsp;{<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;tcp_trx&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.tcp_trx;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;src&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;dst&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;emit&nbsp;:&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit;<br>
@@ -124,7 +127,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;to_send&nbsp;:&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;list;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;unacked_tx&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.<span class="constructor">Streambuf</span>.t;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;rcvd_fin&nbsp;:&nbsp;bool;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;cnx_wakener&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.tcp_trx&nbsp;option&nbsp;<span class="constructor">Lwt</span>.u&nbsp;option;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;cnx_established_cont&nbsp;:&nbsp;(<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.tcp_trx&nbsp;option&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit)&nbsp;option;<br>
 &nbsp;&nbsp;}<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;is_closed&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;bool<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;int_of_bool&nbsp;:&nbsp;bool&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;int<br>
@@ -138,25 +141,20 @@
 &nbsp;&nbsp;&nbsp;&nbsp;?rst:bool&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;?syn:bool&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;?fin:bool&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;emit_multi&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;delayed_ack&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;trx_of&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.tcp_trx<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;establish_cnx&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;bool&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;try_really_rx&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;drop_unacked_tx&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;inqueue_pkt&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;is_established&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;bool<br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;rx&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
+&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;rx&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;string&nbsp;*&nbsp;int&nbsp;*&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;try_really_tx&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;close&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;tx&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make_&nbsp;:<br>
+&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make&nbsp;:<br>
 &nbsp;&nbsp;&nbsp;&nbsp;?isn:<span class="constructor">Tcp</span>.<span class="constructor">SeqNum</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;?mtu:int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t<br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;accept&nbsp;:<br>
-&nbsp;&nbsp;&nbsp;&nbsp;?isn:<span class="constructor">Tcp</span>.<span class="constructor">SeqNum</span>.t&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;?mtu:int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.tcp_trx<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;may_timeout&nbsp;:&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;default_connect_timeout&nbsp;:&nbsp;<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.t<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;connect&nbsp;:<br>
 &nbsp;&nbsp;&nbsp;&nbsp;?timeout:<span class="constructor">Clock</span>.<span class="constructor">Interval</span>.t&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;?isn:<span class="constructor">Tcp</span>.<span class="constructor">SeqNum</span>.t&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;?mtu:int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.tcp_trx&nbsp;option&nbsp;<span class="constructor">Lwt</span>.t<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;(<span class="constructor">Tcp</span>.<span class="constructor">TRX</span>.tcp_trx&nbsp;option&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit)&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 <span class="keyword">end</span></code></body></html>

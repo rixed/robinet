@@ -11,9 +11,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -30,6 +30,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -38,20 +40,8 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Pcap.save</title>
 </head>
 <body>
-<code class="code"><span class="keyword">let</span>&nbsp;save&nbsp;?(caplen=65535)&nbsp;?(dlt=<span class="constructor">Dlt</span>.en10mb)&nbsp;fname&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;out_chan&nbsp;=&nbsp;open_out_bin&nbsp;fname<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">and</span>&nbsp;file_hdr&nbsp;=&nbsp;(<span class="constructor">BITSTRING</span>&nbsp;{<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0xa1b2c3d4l&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2&nbsp;<span class="comment">(*&nbsp;version&nbsp;major&nbsp;*)</span>&nbsp;:&nbsp;16&nbsp;:&nbsp;littleendian&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;4&nbsp;<span class="comment">(*&nbsp;version&nbsp;minor&nbsp;*)</span>&nbsp;:&nbsp;16&nbsp;:&nbsp;littleendian&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0l&nbsp;<span class="comment">(*&nbsp;this&nbsp;TZ&nbsp;*)</span>&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0l&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Int32</span>.of_int&nbsp;caplen&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(dlt&nbsp;:&gt;&nbsp;int32)&nbsp;:&nbsp;32&nbsp;:&nbsp;littleendian&nbsp;})&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;output_string&nbsp;out_chan&nbsp;(string_of_bitstring&nbsp;file_hdr)&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;f&nbsp;bits&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;pdu&nbsp;=&nbsp;<span class="constructor">Pdu</span>.make&nbsp;fname&nbsp;~caplen&nbsp;~dlt&nbsp;(<span class="constructor">Clock</span>.now&nbsp;())&nbsp;bits&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;bytes&nbsp;=&nbsp;string_of_bitstring&nbsp;(<span class="constructor">Pdu</span>.pack&nbsp;pdu)&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;output_string&nbsp;out_chan&nbsp;bytes&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Gc</span>.finalise&nbsp;(<span class="keyword">fun</span>&nbsp;_&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;close_out&nbsp;out_chan)&nbsp;f&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;f</code></body></html>
+<code class="code"><span class="keyword">let</span>&nbsp;save&nbsp;?caplen&nbsp;?(dlt=<span class="constructor">Dlt</span>.en10mb)&nbsp;fname&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;pdu_save&nbsp;=&nbsp;<span class="constructor">Pdu</span>.save&nbsp;?caplen&nbsp;~dlt&nbsp;fname&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;(<span class="keyword">fun</span>&nbsp;bits&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;pdu&nbsp;=&nbsp;<span class="constructor">Pdu</span>.make&nbsp;fname&nbsp;?caplen&nbsp;~dlt&nbsp;(<span class="constructor">Clock</span>.now&nbsp;())&nbsp;bits&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;pdu_save&nbsp;pdu)</code></body></html>

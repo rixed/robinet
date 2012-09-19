@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="style.css" type="text/css">
 <meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
 <link rel="Start" href="index.html">
-<link rel="previous" href="Fifo.html">
+<link rel="previous" href="Eth.html">
 <link rel="next" href="Html.html">
 <link rel="Up" href="index.html">
 <link title="Index of types" rel=Appendix href="index_types.html">
@@ -17,9 +17,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -36,6 +36,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -44,13 +46,26 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Host</title>
 </head>
 <body>
-<div class="navbar"><a href="Fifo.html">Previous</a>
+<div class="navbar"><a href="Eth.html">Previous</a>
 &nbsp;<a href="index.html">Up</a>
 &nbsp;<a href="Html.html">Next</a>
 </div>
 <center><h1>Module <a href="type_Host.html">Host</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Host: <code class="code"><span class="keyword">sig</span></code> <a href="Host.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
+<pre><span class="keyword">module</span> Host: <code class="code"><span class="keyword">sig</span></code> <a href="Host.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Simple hosts with a single Eth network interface with a full IP stack.
+<p>
+
+  Hosts are merely simple IP stacks with a eth device at the bottom and a name.
+  These makes the link between the network and programs such as browsers or http
+  servers (see <a href="Browser.html"><code class="code"><span class="constructor">Browser</span></code></a> and <a href="Opache.html"><code class="code"><span class="constructor">Opache</span></code></a>).
+<p>
+
+  Hosts also comes with a logger (see <a href="Log.html"><code class="code"><span class="constructor">Log</span></code></a>).
+<p>
+
+  See also <a href="Localhost.html"><code class="code"><span class="constructor">Localhost</span></code></a> for a special kind of host that's running on top of
+  guest system real IP stack.<br>
+<hr width="100%">
 <br><code><span id="TYPEaddr"><span class="keyword">type</span> <code class="type"></code>addr</span> = </code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
@@ -87,21 +102,35 @@
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>tcp_connect&nbsp;: <code class="type"><a href="Host.html#TYPEaddr">addr</a> -> ?src_port:Tcp.Port.t -> Tcp.Port.t -> <a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> Lwt.t</code>;</code></td>
+<code>tcp_connect&nbsp;: <code class="type"><a href="Host.html#TYPEaddr">addr</a> -><br>       ?src_port:Tcp.Port.t -><br>       Tcp.Port.t -> (<a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> option -> unit) -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>udp_connect&nbsp;: <code class="type"><a href="Host.html#TYPEaddr">addr</a> -><br>       ?src_port:Udp.Port.t -><br>       Udp.Port.t -> (<a href="Tools.html#TYPEtrx">Tools.trx</a> -> Bitstring.bitstring -> unit) -> <a href="Tools.html#TYPEtrx">Tools.trx</a> Lwt.t</code>;</code></td>
+<code>udp_connect&nbsp;: <code class="type"><a href="Host.html#TYPEaddr">addr</a> -><br>       ?src_port:Udp.Port.t -><br>       Udp.Port.t -><br>       (<a href="Udp.TRX.html#TYPEudp_trx">Udp.TRX.udp_trx</a> -> Bitstring.bitstring -> unit) -><br>       (<a href="Udp.TRX.html#TYPEudp_trx">Udp.TRX.udp_trx</a> option -> unit) -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>gethostbyname&nbsp;: <code class="type">string -> Ip.Addr.t list Lwt.t</code>;</code></td>
+<code>udp_send&nbsp;: <code class="type"><a href="Host.html#TYPEaddr">addr</a> -><br>       ?src_port:Udp.Port.t -> Udp.Port.t -> Bitstring.bitstring -> unit</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>ping&nbsp;: <code class="type">?id:int -> ?seq:int -> <a href="Host.html#TYPEaddr">addr</a> -> unit</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>gethostbyname&nbsp;: <code class="type">string -> (Ip.Addr.t list option -> unit) -> unit</code>;</code></td>
 
 </tr>
 <tr>
@@ -115,7 +144,7 @@
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>udp_server&nbsp;: <code class="type">Udp.Port.t -> (<a href="Tools.html#TYPEtrx">Tools.trx</a> -> unit) -> unit</code>;</code></td>
+<code>udp_server&nbsp;: <code class="type">Udp.Port.t -> (<a href="Udp.TRX.html#TYPEudp_trx">Udp.TRX.udp_trx</a> -> unit) -> unit</code>;</code></td>
 
 </tr>
 <tr>
@@ -129,25 +158,39 @@
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>set_emit&nbsp;: <code class="type">(Bitstring.bitstring -> unit) -> unit</code>;</code></td>
+<code>dev&nbsp;: <code class="type"><a href="Tools.html#TYPEdev">Tools.dev</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>rx&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code>get_mac&nbsp;: <code class="type">unit -> Eth.Addr.t</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>get_ip&nbsp;: <code class="type">unit -> Ip.Addr.t option</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>arp_set&nbsp;: <code class="type">Ip.Addr.t -> Eth.Addr.t option -> unit</code>;</code></td>
 
 </tr></table>
 }
 
 
-<br><code><span id="TYPEsocks"><span class="keyword">type</span> <code class="type"></code>socks</span> = {</code><table class="typetable">
+<br><code><span id="TYPEtcp_socks"><span class="keyword">type</span> <code class="type"></code>tcp_socks</span> = {</code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>ip&nbsp;: <code class="type"><a href="Tools.html#TYPEtrx">Tools.trx</a></code>;</code></td>
+<code>ip_4_tcp&nbsp;: <code class="type"><a href="Tools.html#TYPEtrx">Tools.trx</a></code>;</code></td>
 
 </tr>
 <tr>
@@ -156,18 +199,29 @@
 <td align="left" valign="top" >
 <code>tcps&nbsp;: <code class="type">(Tcp.Port.t * Tcp.Port.t, <a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a>) Batteries.Hashtbl.t</code>;</code></td>
 
+</tr></table>
+}
+
+
+<br><code><span id="TYPEudp_socks"><span class="keyword">type</span> <code class="type"></code>udp_socks</span> = {</code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>ip_4_udp&nbsp;: <code class="type"><a href="Tools.html#TYPEtrx">Tools.trx</a></code>;</code></td>
+
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>udps&nbsp;: <code class="type">(Udp.Port.t * Udp.Port.t, <a href="Tools.html#TYPEtrx">Tools.trx</a>) Batteries.Hashtbl.t</code>;</code></td>
+<code>udps&nbsp;: <code class="type">(Udp.Port.t * Udp.Port.t, <a href="Udp.TRX.html#TYPEudp_trx">Udp.TRX.udp_trx</a>) Batteries.Hashtbl.t</code>;</code></td>
 
 </tr></table>
 }
 
 
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><span id="VALmake_tcp_socks"><span class="keyword">val</span> <a href="code_VALHost.make_tcp_socks.html">make_tcp_socks</a></span> : <code class="type"><a href="Tools.html#TYPEtrx">Tools.trx</a> -> <a href="Host.html#TYPEtcp_socks">tcp_socks</a></code></pre><pre><span id="VALmake_udp_socks"><span class="keyword">val</span> <a href="code_VALHost.make_udp_socks.html">make_udp_socks</a></span> : <code class="type"><a href="Tools.html#TYPEtrx">Tools.trx</a> -> <a href="Host.html#TYPEudp_socks">udp_socks</a></code></pre><br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
@@ -193,7 +247,21 @@
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>socks&nbsp;: <code class="type">(Ip.Addr.t, <a href="Host.html#TYPEsocks">socks</a>) Batteries.Hashtbl.t</code>;</code></td>
+<code>tcp_socks&nbsp;: <code class="type">(Ip.Addr.t, <a href="Host.html#TYPEtcp_socks">tcp_socks</a>) Batteries.Hashtbl.t</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>udp_socks&nbsp;: <code class="type">(Ip.Addr.t, <a href="Host.html#TYPEudp_socks">udp_socks</a>) Batteries.Hashtbl.t</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>icmp_socks&nbsp;: <code class="type">(Ip.Addr.t, <a href="Tools.html#TYPEtrx">Tools.trx</a>) Batteries.Hashtbl.t</code>;</code></td>
 
 </tr>
 <tr>
@@ -207,7 +275,7 @@
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>udp_servers&nbsp;: <code class="type">(Udp.Port.t, <a href="Tools.html#TYPEtrx">Tools.trx</a> -> unit) Batteries.Hashtbl.t</code>;</code></td>
+<code>udp_servers&nbsp;: <code class="type">(Udp.Port.t, <a href="Udp.TRX.html#TYPEudp_trx">Udp.TRX.udp_trx</a> -> unit) Batteries.Hashtbl.t</code>;</code></td>
 
 </tr>
 <tr>
@@ -235,7 +303,7 @@
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>dns_queries&nbsp;: <code class="type">(string, Ip.Addr.t list Lwt.u * Clock.Time.t option) Batteries.Hashtbl.t</code>;</code></td>
+<code>dns_queries&nbsp;: <code class="type">(string, (Ip.Addr.t list option -> unit) * Clock.Time.t option)<br>       Batteries.Hashtbl.t</code>;</code></td>
 
 </tr>
 <tr>
@@ -249,8 +317,8 @@
 
 
 <pre><span id="EXCEPTIONNo_socket"><span class="keyword">exception</span> No_socket</span></pre>
-<pre><span id="VALsignal_err"><span class="keyword">val</span> <a href="code_VALHost.signal_err.html">signal_err</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> string -> unit</code></pre><pre><span id="VALmake_socks"><span class="keyword">val</span> <a href="code_VALHost.make_socks.html">make_socks</a></span> : <code class="type"><a href="Tools.html#TYPEtrx">Tools.trx</a> -> <a href="Host.html#TYPEsocks">socks</a></code></pre><pre><span id="VALsock_rx"><span class="keyword">val</span> <a href="code_VALHost.sock_rx.html">sock_rx</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> Ip.Proto.t -> <a href="Host.html#TYPEsocks">socks</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALfind_alive_tcp"><span class="keyword">val</span> <a href="code_VALHost.find_alive_tcp.html">find_alive_tcp</a></span> : <code class="type">('a, <a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a>) Batteries.Hashtbl.t -> 'a -> <a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> option</code></pre><pre><span id="EXCEPTIONAlreadyConnected"><span class="keyword">exception</span> AlreadyConnected</span></pre>
+<pre><span id="VALsignal_err"><span class="keyword">val</span> <a href="code_VALHost.signal_err.html">signal_err</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> string -> unit</code></pre><pre><span id="VALtcp_sock_rx"><span class="keyword">val</span> <a href="code_VALHost.tcp_sock_rx.html">tcp_sock_rx</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> <a href="Host.html#TYPEtcp_socks">tcp_socks</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALudp_sock_rx"><span class="keyword">val</span> <a href="code_VALHost.udp_sock_rx.html">udp_sock_rx</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> <a href="Host.html#TYPEudp_socks">udp_socks</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALicmp_rx"><span class="keyword">val</span> <a href="code_VALHost.icmp_rx.html">icmp_rx</a></span> : <code class="type">'a -> <a href="Tools.html#TYPEtrx">Tools.trx</a> -> string * int * int -> unit</code></pre><pre><span id="VALfind_alive_tcp"><span class="keyword">val</span> <a href="code_VALHost.find_alive_tcp.html">find_alive_tcp</a></span> : <code class="type">('a, <a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a>) Batteries.Hashtbl.t -> 'a -> <a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> option</code></pre><pre><span id="EXCEPTIONAlreadyConnected"><span class="keyword">exception</span> AlreadyConnected</span></pre>
 <pre><span id="EXCEPTIONNoIp"><span class="keyword">exception</span> NoIp</span></pre>
 <pre><span id="EXCEPTIONCannotResolveName"><span class="keyword">exception</span> CannotResolveName</span></pre>
 <pre><span id="EXCEPTIONDnsTimeout"><span class="keyword">exception</span> DnsTimeout</span></pre>
-<pre><span id="VALstring_of_addr"><span class="keyword">val</span> <a href="code_VALHost.string_of_addr.html">string_of_addr</a></span> : <code class="type"><a href="Host.html#TYPEaddr">addr</a> -> string</code></pre><pre><span id="VALtcp_cnxs_ok"><span class="keyword">val</span> <a href="code_VALHost.tcp_cnxs_ok.html">tcp_cnxs_ok</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><pre><span id="VALtcp_cnxs_err"><span class="keyword">val</span> <a href="code_VALHost.tcp_cnxs_err.html">tcp_cnxs_err</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><pre><span id="VALudp_cnxs_ok"><span class="keyword">val</span> <a href="code_VALHost.udp_cnxs_ok.html">udp_cnxs_ok</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><pre><span id="VALudp_cnxs_err"><span class="keyword">val</span> <a href="code_VALHost.udp_cnxs_err.html">udp_cnxs_err</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><pre><span id="VALresolution_timeouts"><span class="keyword">val</span> <a href="code_VALHost.resolution_timeouts.html">resolution_timeouts</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><pre><span id="VALresolution_cachehits"><span class="keyword">val</span> <a href="code_VALHost.resolution_cachehits.html">resolution_cachehits</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><pre><span id="VALresolutions"><span class="keyword">val</span> <a href="code_VALHost.resolutions.html">resolutions</a></span> : <code class="type"><a href="Metric.Timed.html#TYPEt">Metric.Timed.t</a></code></pre><pre><span id="VALresolver"><span class="keyword">val</span> <a href="code_VALHost.resolver.html">resolver</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> <a href="Tools.html#TYPEtrx">Tools.trx</a> Lwt.t</code></pre><pre><span id="VALgethostbyname"><span class="keyword">val</span> <a href="code_VALHost.gethostbyname.html">gethostbyname</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> string -> Ip.Addr.t list Lwt.t</code></pre><pre><span id="VALtcp_connect"><span class="keyword">val</span> <a href="code_VALHost.tcp_connect.html">tcp_connect</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -><br>       <a href="Host.html#TYPEaddr">addr</a> -> ?src_port:Tcp.Port.t -> Tcp.Port.t -> <a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> Lwt.t</code></pre><pre><span id="VALudp_connect"><span class="keyword">val</span> <a href="code_VALHost.udp_connect.html">udp_connect</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -><br>       <a href="Host.html#TYPEaddr">addr</a> -><br>       ?src_port:Udp.Port.t -><br>       Udp.Port.t -> (<a href="Tools.html#TYPEtrx">Tools.trx</a> -> Bitstring.bitstring -> unit) -> <a href="Tools.html#TYPEtrx">Tools.trx</a> Lwt.t</code></pre><pre><span id="VALtcp_server"><span class="keyword">val</span> <a href="code_VALHost.tcp_server.html">tcp_server</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> Tcp.Port.t -> (<a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> -> unit) -> unit</code></pre><pre><span id="VALudp_server"><span class="keyword">val</span> <a href="code_VALHost.udp_server.html">udp_server</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> Udp.Port.t -> (<a href="Tools.html#TYPEtrx">Tools.trx</a> -> unit) -> unit</code></pre><pre><span id="VALip_recv"><span class="keyword">val</span> <a href="code_VALHost.ip_recv.html">ip_recv</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALHost.make.html">make</a></span> : <code class="type">string -><br>       ?gw:<a href="Eth.html#TYPEgw_addr">Eth.gw_addr</a> -><br>       ?search_sfx:string -> ?nameserver:Ip.Addr.t -> Eth.Addr.t -> <a href="Host.html#TYPEt">t</a></code></pre><pre><span id="VALset_ip"><span class="keyword">val</span> <a href="code_VALHost.set_ip.html">set_ip</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> Ip.Addr.t -> unit</code></pre><pre><span id="VALmake_static"><span class="keyword">val</span> <a href="code_VALHost.make_static.html">make_static</a></span> : <code class="type">string -><br>       ?gw:<a href="Eth.html#TYPEgw_addr">Eth.gw_addr</a> -><br>       ?search_sfx:string -><br>       ?nameserver:Ip.Addr.t -> Eth.Addr.t -> Ip.Addr.t -> <a href="Host.html#TYPEhost_trx">host_trx</a></code></pre><pre><span id="VALmake_dhcp"><span class="keyword">val</span> <a href="code_VALHost.make_dhcp.html">make_dhcp</a></span> : <code class="type">string -><br>       ?gw:<a href="Eth.html#TYPEgw_addr">Eth.gw_addr</a> -><br>       ?search_sfx:string -> ?nameserver:Ip.Addr.t -> Eth.Addr.t -> <a href="Host.html#TYPEhost_trx">host_trx</a></code></pre></body></html>
+<pre><span id="VALstring_of_addr"><span class="keyword">val</span> <a href="code_VALHost.string_of_addr.html">string_of_addr</a></span> : <code class="type"><a href="Host.html#TYPEaddr">addr</a> -> string</code></pre><pre><span id="VALtcp_cnxs_ok"><span class="keyword">val</span> <a href="code_VALHost.tcp_cnxs_ok.html">tcp_cnxs_ok</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><pre><span id="VALtcp_cnxs_err"><span class="keyword">val</span> <a href="code_VALHost.tcp_cnxs_err.html">tcp_cnxs_err</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><pre><span id="VALudp_cnxs_ok"><span class="keyword">val</span> <a href="code_VALHost.udp_cnxs_ok.html">udp_cnxs_ok</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><pre><span id="VALudp_cnxs_err"><span class="keyword">val</span> <a href="code_VALHost.udp_cnxs_err.html">udp_cnxs_err</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><pre><span id="VALresolution_timeouts"><span class="keyword">val</span> <a href="code_VALHost.resolution_timeouts.html">resolution_timeouts</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><pre><span id="VALresolution_cachehits"><span class="keyword">val</span> <a href="code_VALHost.resolution_cachehits.html">resolution_cachehits</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><pre><span id="VALresolutions"><span class="keyword">val</span> <a href="code_VALHost.resolutions.html">resolutions</a></span> : <code class="type"><a href="Metric.Timed.html#TYPEt">Metric.Timed.t</a></code></pre><pre><span id="VALwith_resolver_trx"><span class="keyword">val</span> <a href="code_VALHost.with_resolver_trx.html">with_resolver_trx</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> (<a href="Tools.html#TYPEtrx">Tools.trx</a> option -> unit) -> unit</code></pre><pre><span id="VALgethostbyname"><span class="keyword">val</span> <a href="code_VALHost.gethostbyname.html">gethostbyname</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> string -> (Ip.Addr.t list option -> unit) -> unit</code></pre><pre><span id="VALdo_gethostbyname"><span class="keyword">val</span> <a href="code_VALHost.do_gethostbyname.html">do_gethostbyname</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> string -> (Ip.Addr.t list option -> unit) -> unit</code></pre><pre><span id="VALtcp_connect"><span class="keyword">val</span> <a href="code_VALHost.tcp_connect.html">tcp_connect</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -><br>       <a href="Host.html#TYPEaddr">addr</a> -><br>       ?src_port:Tcp.Port.t -><br>       Tcp.Port.t -> (<a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> option -> unit) -> unit</code></pre><pre><span id="VALudp_connect"><span class="keyword">val</span> <a href="code_VALHost.udp_connect.html">udp_connect</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -><br>       <a href="Host.html#TYPEaddr">addr</a> -><br>       ?src_port:Udp.Port.t -><br>       Udp.Port.t -><br>       (<a href="Udp.TRX.html#TYPEudp_trx">Udp.TRX.udp_trx</a> -> Bitstring.bitstring -> unit) -><br>       (<a href="Udp.TRX.html#TYPEudp_trx">Udp.TRX.udp_trx</a> option -> unit) -> unit</code></pre><pre><span id="VALudp_send"><span class="keyword">val</span> <a href="code_VALHost.udp_send.html">udp_send</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -><br>       <a href="Host.html#TYPEaddr">addr</a> -><br>       ?src_port:Udp.Port.t -> Udp.Port.t -> Tools.Payload.outer_t -> unit</code></pre><pre><span id="VALping"><span class="keyword">val</span> <a href="code_VALHost.ping.html">ping</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> ?id:int -> ?seq:int -> <a href="Host.html#TYPEaddr">addr</a> -> unit</code></pre><pre><span id="VALtcp_server"><span class="keyword">val</span> <a href="code_VALHost.tcp_server.html">tcp_server</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> Tcp.Port.t -> (<a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> -> unit) -> unit</code></pre><pre><span id="VALudp_server"><span class="keyword">val</span> <a href="code_VALHost.udp_server.html">udp_server</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> Udp.Port.t -> (<a href="Udp.TRX.html#TYPEudp_trx">Udp.TRX.udp_trx</a> -> unit) -> unit</code></pre><pre><span id="VALip_recv"><span class="keyword">val</span> <a href="code_VALHost.ip_recv.html">ip_recv</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALHost.make.html">make</a></span> : <code class="type">string -><br>       ?gw:<a href="Eth.html#TYPEgw_addr">Eth.gw_addr</a> -><br>       ?search_sfx:string -> ?nameserver:Ip.Addr.t -> Eth.Addr.t -> <a href="Host.html#TYPEt">t</a></code></pre><pre><span id="VALset_ip"><span class="keyword">val</span> <a href="code_VALHost.set_ip.html">set_ip</a></span> : <code class="type"><a href="Host.html#TYPEt">t</a> -> Ip.Addr.t -> unit</code></pre><pre><span id="VALmake_static"><span class="keyword">val</span> <a href="code_VALHost.make_static.html">make_static</a></span> : <code class="type">string -><br>       ?gw:<a href="Eth.html#TYPEgw_addr">Eth.gw_addr</a> -><br>       ?search_sfx:string -><br>       ?nameserver:Ip.Addr.t -> Eth.Addr.t -> Ip.Addr.t -> <a href="Host.html#TYPEhost_trx">host_trx</a></code></pre><pre><span id="VALmake_dhcp"><span class="keyword">val</span> <a href="code_VALHost.make_dhcp.html">make_dhcp</a></span> : <code class="type">string -><br>       ?gw:<a href="Eth.html#TYPEgw_addr">Eth.gw_addr</a> -><br>       ?search_sfx:string -> ?nameserver:Ip.Addr.t -> Eth.Addr.t -> <a href="Host.html#TYPEhost_trx">host_trx</a></code></pre><pre><span id="VALrandom_name"><span class="keyword">val</span> <a href="code_VALHost.random_name.html">random_name</a></span> : <code class="type">unit -> string</code></pre></body></html>

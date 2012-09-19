@@ -6,7 +6,7 @@
 <meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
 <link rel="Start" href="index.html">
 <link rel="previous" href="Clock.html">
-<link rel="next" href="Dns.html">
+<link rel="next" href="Dhcpd.html">
 <link rel="Up" href="index.html">
 <link title="Index of types" rel=Appendix href="index_types.html">
 <link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
@@ -17,9 +17,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -36,22 +36,29 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
 <link title="Url" rel="Chapter" href="Url.html">
-<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Dhcp</title>
+<link title="Vlan" rel="Chapter" href="Vlan.html"><link title="Opcodes, types, etc" rel="Section" href="#2_Opcodestypesetc">
+<link title="DHCP messages" rel="Section" href="#2_DHCPmessages">
+<title>Dhcp</title>
 </head>
 <body>
 <div class="navbar"><a href="Clock.html">Previous</a>
 &nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Dns.html">Next</a>
+&nbsp;<a href="Dhcpd.html">Next</a>
 </div>
 <center><h1>Module <a href="type_Dhcp.html">Dhcp</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Dhcp: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcp.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALDhcp.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span id="VALbootrequest"><span class="keyword">val</span> <a href="code_VALDhcp.bootrequest.html">bootrequest</a></span> : <code class="type">int</code></pre><pre><span id="VALbootreply"><span class="keyword">val</span> <a href="code_VALDhcp.bootreply.html">bootreply</a></span> : <code class="type">int</code></pre><br><code><span id="TYPEopcode"><span class="keyword">type</span> <code class="type"></code>opcode</span> = </code><table class="typetable">
+<pre><span class="keyword">module</span> Dhcp: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcp.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Dynamic Host Configuration Protocol.<br>
+<hr width="100%">
+<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALDhcp.debug.html">debug</a></span> : <code class="type">bool</code></pre><br>
+<span id="2_Opcodestypesetc"><h2>Opcodes, types, etc</h2></span><br>
+<pre><span id="VALbootrequest"><span class="keyword">val</span> <a href="code_VALDhcp.bootrequest.html">bootrequest</a></span> : <code class="type">int</code></pre><pre><span id="VALbootreply"><span class="keyword">val</span> <a href="code_VALDhcp.bootreply.html">bootreply</a></span> : <code class="type">int</code></pre><br><code><span id="TYPEopcode"><span class="keyword">type</span> <code class="type"></code>opcode</span> = </code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
@@ -68,4 +75,6 @@
 </tr></table>
 
 
-<pre><span class="keyword">module</span> <a href="Dhcp.MsgType.html">MsgType</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcp.MsgType.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Dhcp.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcp.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre></body></html>
+<pre><span class="keyword">module</span> <a href="Dhcp.MsgType.html">MsgType</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcp.MsgType.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><br>
+<span id="2_DHCPmessages"><h2>DHCP messages</h2></span><br>
+<pre><span class="keyword">module</span> <a href="Dhcp.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcp.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre></body></html>

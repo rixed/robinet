@@ -11,9 +11,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -30,6 +30,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -38,10 +40,7 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Tcp.TRX.connect</title>
 </head>
 <body>
-<code class="code"><span class="keyword">let</span>&nbsp;connect&nbsp;?(timeout=default_connect_timeout)&nbsp;?isn&nbsp;?mtu&nbsp;src&nbsp;dst&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;t&nbsp;=&nbsp;make_&nbsp;?isn&nbsp;?mtu&nbsp;src&nbsp;dst&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;waiter,&nbsp;wakener&nbsp;=&nbsp;<span class="constructor">Lwt</span>.wait&nbsp;()&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.cnx_wakener&nbsp;&lt;-&nbsp;<span class="constructor">Some</span>&nbsp;wakener&nbsp;;<br>
+<code class="code"><span class="keyword">let</span>&nbsp;connect&nbsp;?(timeout=default_connect_timeout)&nbsp;t&nbsp;cont&nbsp;=<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t.cnx_established_cont&nbsp;&lt;-&nbsp;<span class="constructor">Some</span>&nbsp;cont&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Clock</span>.delay&nbsp;timeout&nbsp;may_timeout&nbsp;t&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;emit_one&nbsp;t&nbsp;~syn:<span class="keyword">true</span>&nbsp;empty_bitstring&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;waiter</code></body></html>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;emit_one&nbsp;t&nbsp;~syn:<span class="keyword">true</span>&nbsp;empty_bitstring</code></body></html>

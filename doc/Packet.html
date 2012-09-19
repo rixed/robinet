@@ -17,9 +17,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -36,6 +36,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -67,7 +69,7 @@ etc...
 <p>
 
 Due to the fact that every packet is considered in isolation, it can only
-decode the simpler protocols for which all required data fits within a
+decode the simplest protocols for which all required data fits within a
 single packet. In other words, it will not venture much deeper than TCP/UDP.
 <p>
 
@@ -77,7 +79,7 @@ single packet. In other words, it will not venture much deeper than TCP/UDP.
 <span id="2_Exploringapcapfile"><h2>Exploring a pcap file</h2></span>
 <p>
 
-This module is more usefull from the toplevel <code class="code">robinet.top</code>.
+This module is more useful from the toplevel <code class="code">robinet.top</code>.
 Suppose you have this huge <a href="http://www.tcpdump.org">pcap</a> file
 of several tens of gigabyte, and we want to get some idea of what's
 in there. We start with the obvious:
@@ -87,7 +89,7 @@ in there. We start with the obvious:
 <pre></pre><code class="code">-&nbsp;:&nbsp;<span class="constructor">Pcap</span>.infos&nbsp;=<br>
 {<span class="constructor">Pcap</span>.filename&nbsp;=&nbsp;<span class="string">"big_one.pcap"</span>;&nbsp;<span class="constructor">Pcap</span>.data_link_type&nbsp;=&nbsp;1l;<br>
 &nbsp;<span class="constructor">Pcap</span>.num_packets&nbsp;=&nbsp;53993956;&nbsp;<span class="constructor">Pcap</span>.data_size&nbsp;=&nbsp;40756596469<span class="constructor">L</span>;<br>
-&nbsp;&nbsp;<span class="constructor">Pcap</span>.start_time&nbsp;=&nbsp;1323766040.99259496;&nbsp;<span class="constructor">Pcap</span>.stop_time&nbsp;=&nbsp;1323767137.688411}<br>
+&nbsp;<span class="constructor">Pcap</span>.start_time&nbsp;=&nbsp;1323766040.99259496;&nbsp;<span class="constructor">Pcap</span>.stop_time&nbsp;=&nbsp;1323767137.688411}<br>
 </code><pre></pre>
 <p>
 
@@ -99,7 +101,7 @@ Now we are interrested in all the packets attempting to connect port 80:
 <p>
 
 <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="keyword">open</span>&nbsp;<span class="constructor">Packet</span>;;<br>
-<span class="keywordsign">#</span>&nbsp;<span class="keyword">let</span>&nbsp;s80&nbsp;=&nbsp;enum_of&nbsp;<span class="string">"big_one.pcap"</span>&nbsp;//<br>
+<span class="keywordsign">#</span>&nbsp;<span class="keyword">let</span>&nbsp;s80&nbsp;=&nbsp;enum_of_file&nbsp;<span class="string">"big_one.pcap"</span>&nbsp;//<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">function</span>&nbsp;[_;_;_;_;&nbsp;<span class="constructor">Pdu</span>.<span class="constructor">Tcp</span>&nbsp;{&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.dst_port&nbsp;=&nbsp;p&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.flags&nbsp;=&nbsp;{&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.syn&nbsp;=&nbsp;<span class="keyword">true</span>&nbsp;;&nbsp;_&nbsp;}&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;_&nbsp;}]&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;p&nbsp;=&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.o&nbsp;80<br>
@@ -114,7 +116,7 @@ position only (since my big_file.pcap have a 802.1q tunnel between Ethernet
 and IP).
 <p>
 
-Let have a look at the first of them:
+Let us have a look at the first of them:
 <p>
 
 <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Enum</span>.peek&nbsp;s80;;</code><pre></pre>
@@ -160,7 +162,7 @@ Pack/Unpack the whole protocol stack that fits entirely within a packet.
 </div>
 <br>
 <span id="2_Shorthands"><h2>Shorthands</h2></span><br>
-<pre><span id="VALenum_of"><span class="keyword">val</span> <a href="code_VALPacket.enum_of.html">enum_of</a></span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list BatEnum.t</code></pre><div class="info">
-<code class="code"><span class="constructor">Packet</span>.enum_of filename</code> reads a pcap file and returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
+<pre><span id="VALenum_of_file"><span class="keyword">val</span> <a href="code_VALPacket.enum_of_file.html">enum_of_file</a></span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list BatEnum.t</code></pre><div class="info">
+<code class="code"><span class="constructor">Packet</span>.enum_of_file filename</code> reads a pcap file and returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
 </div>
 </body></html>

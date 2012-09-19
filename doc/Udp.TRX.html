@@ -16,9 +16,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -35,6 +35,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -49,6 +51,24 @@
 <center><h1>Module <a href="type_Udp.TRX.html">Udp.TRX</a></h1></center>
 <br>
 <pre><span class="keyword">module</span> TRX: <code class="code"><span class="keyword">sig</span></code> <a href="Udp.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
+<br><code><span id="TYPEudp_trx"><span class="keyword">type</span> <code class="type"></code>udp_trx</span> = {</code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>trx&nbsp;: <code class="type"><a href="Tools.html#TYPEtrx">Tools.trx</a></code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>get_ports&nbsp;: <code class="type">unit -> Udp.Port.t * Udp.Port.t</code>;</code></td>
+
+</tr></table>
+}
+
+
 <br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
@@ -61,7 +81,7 @@
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>dst&nbsp;: <code class="type">Udp.Port.t option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span>dst&nbsp;: <code class="type">Udp.Port.t</code>;</code></td>
 
 </tr>
 <tr>
@@ -81,4 +101,4 @@
 }
 
 
-<pre><span id="VALtx"><span class="keyword">val</span> <a href="code_VALUdp.TRX.tx.html">tx</a></span> : <code class="type"><a href="Udp.TRX.html#TYPEt">t</a> -> Tools.Payload.outer_t -> unit</code></pre><pre><span id="VALrx"><span class="keyword">val</span> <a href="code_VALUdp.TRX.rx.html">rx</a></span> : <code class="type"><a href="Udp.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre><pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALUdp.TRX.make.html">make</a></span> : <code class="type">?dst:Udp.Port.t -> Udp.Port.t -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre><pre><span id="VALmake_client"><span class="keyword">val</span> <a href="code_VALUdp.TRX.make_client.html">make_client</a></span> : <code class="type">src:Udp.Port.t -> dst:Udp.Port.t -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre><pre><span id="VALmake_server"><span class="keyword">val</span> <a href="code_VALUdp.TRX.make_server.html">make_server</a></span> : <code class="type">Udp.Port.t -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre></body></html>
+<pre><span id="VALtx"><span class="keyword">val</span> <a href="code_VALUdp.TRX.tx.html">tx</a></span> : <code class="type"><a href="Udp.TRX.html#TYPEt">t</a> -> Tools.Payload.outer_t -> unit</code></pre><pre><span id="VALrx"><span class="keyword">val</span> <a href="code_VALUdp.TRX.rx.html">rx</a></span> : <code class="type"><a href="Udp.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre><pre><span id="VALtrx_of"><span class="keyword">val</span> <a href="code_VALUdp.TRX.trx_of.html">trx_of</a></span> : <code class="type"><a href="Udp.TRX.html#TYPEt">t</a> -> <a href="Udp.TRX.html#TYPEudp_trx">udp_trx</a></code></pre><pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALUdp.TRX.make.html">make</a></span> : <code class="type">Udp.Port.t -> Udp.Port.t -> <a href="Udp.TRX.html#TYPEudp_trx">udp_trx</a></code></pre></body></html>

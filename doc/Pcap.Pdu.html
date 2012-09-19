@@ -16,9 +16,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -35,6 +35,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -100,4 +102,10 @@ These informations are present as the first layer of every packet
 <pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALPcap.Pdu.make.html">make</a></span> : <code class="type">string -><br>       ?caplen:int -><br>       ?dlt:Pcap.Dlt.t -> Clock.Time.t -> Tools.Payload.outer_t -> <a href="Pcap.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALPcap.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Pcap.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><div class="info">
 Return the <code class="code">bitstring</code> ready to be written into a pcap file (see <a href="Pcap.html#VALsave"><code class="code"><span class="constructor">Pcap</span>.save</code></a>).<br>
 </div>
+<pre><span id="VALsave"><span class="keyword">val</span> <a href="code_VALPcap.Pdu.save.html">save</a></span> : <code class="type">?caplen:int -> ?dlt:Pcap.Dlt.t -> string -> <a href="Pcap.Pdu.html#TYPEt">t</a> -> unit</code></pre><div class="info">
+<code class="code">save <span class="string">"file.pcap"</span></code> returns a function that will save passed pdus in <code class="code"><span class="string">"file.pcap"</span></code>.
+<br>
+</div>
+<div class="param_info"><code class="code">caplen</code> : can be used to cap saved packet to a given number of bytes</div>
+<div class="param_info"><code class="code">dlt</code> : can be used to change the file's DLT (you probably do not want to do that)</div>
 </body></html>

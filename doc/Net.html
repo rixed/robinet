@@ -17,9 +17,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -36,6 +36,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -50,7 +52,25 @@
 </div>
 <center><h1>Module <a href="type_Net.html">Net</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Net: <code class="code"><span class="keyword">sig</span></code> <a href="Net.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
+<pre><span class="keyword">module</span> Net: <code class="code"><span class="keyword">sig</span></code> <a href="Net.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Easily composable network library.
+<p>
+
+   A net is a graph of devices (with position on a 2d plane),
+   connected with cables, with additional notes, easily serializable.
+<p>
+
+   Nets are stored on disk in a file nets/net_name, in a csv format for
+   easy edition.
+<p>
+
+   Nets are also available via myadmin http server:<ul>
+<li>GET them from nets/net_name (for the whole file)</li>
+<li>or GET some parts from nets/net_name/part_name for an easier csv</li>
+<li>PUT them into nets/net_name
+   (for coherency reasons it's not possible to PUT only one part)</li>
+</ul>
+<br>
+<hr width="100%">
 <pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALNet.debug.html">debug</a></span> : <code class="type">bool</code></pre><br><code><span id="TYPEhub"><span class="keyword">type</span> <code class="type"></code>hub</span> = {</code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
@@ -237,5 +257,5 @@
 }
 
 
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALNet.make.html">make</a></span> : <code class="type">string -> <a href="Net.html#TYPEnode">node</a> list -> <a href="Net.html#TYPEcable">cable</a> list -> <a href="Net.html#TYPEt">t</a></code></pre><pre><span id="VALempty"><span class="keyword">val</span> <a href="code_VALNet.empty.html">empty</a></span> : <code class="type">string -> <a href="Net.html#TYPEt">t</a></code></pre><pre><span id="EXCEPTIONCannot_parse"><span class="keyword">exception</span> Cannot_parse</span> <span class="keyword">of</span> <code class="type">(string * string)</code></pre>
+<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALNet.make.html">make</a></span> : <code class="type">string -> <a href="Net.html#TYPEnode">node</a> list -> <a href="Net.html#TYPEcable">cable</a> list -> <a href="Net.html#TYPEt">t</a></code></pre><pre><span id="VALempty"><span class="keyword">val</span> <a href="code_VALNet.empty.html">empty</a></span> : <code class="type">string -> <a href="Net.html#TYPEt">t</a></code></pre><pre><span id="EXCEPTIONCannot_parse"><span class="keyword">exception</span> Cannot_parse</span> <span class="keyword">of</span> <code class="type">string * string</code></pre>
 <pre><span id="VALhub_of_csv"><span class="keyword">val</span> <a href="code_VALNet.hub_of_csv.html">hub_of_csv</a></span> : <code class="type">string -> <a href="Net.html#TYPEnode">node</a></code></pre><pre><span id="VALswitch_of_csv"><span class="keyword">val</span> <a href="code_VALNet.switch_of_csv.html">switch_of_csv</a></span> : <code class="type">string -> <a href="Net.html#TYPEnode">node</a></code></pre><pre><span id="VALhost_of_csv"><span class="keyword">val</span> <a href="code_VALNet.host_of_csv.html">host_of_csv</a></span> : <code class="type">string -> <a href="Net.html#TYPEnode">node</a></code></pre><pre><span id="VALnote_of_csv"><span class="keyword">val</span> <a href="code_VALNet.note_of_csv.html">note_of_csv</a></span> : <code class="type">string -> <a href="Net.html#TYPEnode">node</a></code></pre><pre><span id="VALnode_of_csv"><span class="keyword">val</span> <a href="code_VALNet.node_of_csv.html">node_of_csv</a></span> : <code class="type">string -> string -> <a href="Net.html#TYPEnode">node</a></code></pre><pre><span id="VALcable_of_csv"><span class="keyword">val</span> <a href="code_VALNet.cable_of_csv.html">cable_of_csv</a></span> : <code class="type">string -> <a href="Net.html#TYPEcable">cable</a></code></pre><pre><span id="VALof_csv_file"><span class="keyword">val</span> <a href="code_VALNet.of_csv_file.html">of_csv_file</a></span> : <code class="type">BatIO.input -> string -> <a href="Net.html#TYPEt">t</a></code></pre><pre><span id="VALof_csv_string"><span class="keyword">val</span> <a href="code_VALNet.of_csv_string.html">of_csv_string</a></span> : <code class="type">string -> string -> <a href="Net.html#TYPEt">t</a></code></pre><pre><span id="VALcsv_for_hosts"><span class="keyword">val</span> <a href="code_VALNet.csv_for_hosts.html">csv_for_hosts</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALcsv_for_switches"><span class="keyword">val</span> <a href="code_VALNet.csv_for_switches.html">csv_for_switches</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALcsv_for_hubs"><span class="keyword">val</span> <a href="code_VALNet.csv_for_hubs.html">csv_for_hubs</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALcsv_for_notes"><span class="keyword">val</span> <a href="code_VALNet.csv_for_notes.html">csv_for_notes</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALcsv_for_cables"><span class="keyword">val</span> <a href="code_VALNet.csv_for_cables.html">csv_for_cables</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALcsv_for_node"><span class="keyword">val</span> <a href="code_VALNet.csv_for_node.html">csv_for_node</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEnode">node</a> -> unit</code></pre><pre><span id="VALcsv_for_cable"><span class="keyword">val</span> <a href="code_VALNet.csv_for_cable.html">csv_for_cable</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEcable">cable</a> -> unit</code></pre><pre><span id="VALto_csv_file"><span class="keyword">val</span> <a href="code_VALNet.to_csv_file.html">to_csv_file</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALsave"><span class="keyword">val</span> <a href="code_VALNet.save.html">save</a></span> : <code class="type"><a href="Net.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALload"><span class="keyword">val</span> <a href="code_VALNet.load.html">load</a></span> : <code class="type">string -> <a href="Net.html#TYPEt">t</a></code></pre><pre><span id="VALinstanciate"><span class="keyword">val</span> <a href="code_VALNet.instanciate.html">instanciate</a></span> : <code class="type"><a href="Net.html#TYPEt">t</a> -><br>       (string, <a href="Hub.Repeater.html#TYPEt">Hub.Repeater.t</a>) Batteries.Hashtbl.t *<br>       (string, <a href="Hub.Switch.html#TYPEt">Hub.Switch.t</a>) Batteries.Hashtbl.t *<br>       (string, <a href="Host.html#TYPEhost_trx">Host.host_trx</a>) Batteries.Hashtbl.t *<br>       (string, <a href="Net.html#TYPEnote">note</a>) Batteries.Hashtbl.t</code></pre></body></html>

@@ -1,0 +1,73 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link rel="previous" href="Ip.Addr.html">
+<link rel="next" href="Ip.Pdu.html">
+<link rel="Up" href="Ip.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html">
+<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Ip.Cidr</title>
+</head>
+<body>
+<div class="navbar"><a href="Ip.Addr.html">Previous</a>
+&nbsp;<a href="Ip.html">Up</a>
+&nbsp;<a href="Ip.Pdu.html">Next</a>
+</div>
+<center><h1>Module <a href="type_Ip.Cidr.html">Ip.Cidr</a></h1></center>
+<br>
+<pre><span class="keyword">module</span> Cidr: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Cidr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>CIDR addresses are a concise way to write network addresses,
+ with network IP then netmask length, like: 192.168.0.0/16.<br>
+<hr width="100%">
+<pre><span class="keyword">include</span> struct ... end</pre>
+<pre><span id="VALof_string"><span class="keyword">val</span> <a href="code_VALIp.Cidr.of_string.html">of_string</a></span> : <code class="type">string -> t</code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALIp.Cidr.random.html">random</a></span> : <code class="type">?mask:int -> unit -> t</code></pre><pre><span id="VALsingle"><span class="keyword">val</span> <a href="code_VALIp.Cidr.single.html">single</a></span> : <code class="type">Ip.Addr.t -> t</code></pre><div class="info">
+Build a CIDR from a single address<br>
+</div>
+<pre><span id="VALmem"><span class="keyword">val</span> <a href="code_VALIp.Cidr.mem.html">mem</a></span> : <code class="type">t -> Ip.Addr.t -> bool</code></pre><pre><span id="VALto_enum"><span class="keyword">val</span> <a href="code_VALIp.Cidr.to_enum.html">to_enum</a></span> : <code class="type">t -> Ip.Addr.t Batteries.Enum.t</code></pre><pre><span id="VALzero_addr"><span class="keyword">val</span> <a href="code_VALIp.Cidr.zero_addr.html">zero_addr</a></span> : <code class="type">t -> Ip.Addr.t</code></pre><div class="info">
+Returns the subnet-zero address of a CIDR<br>
+</div>
+<pre><span id="VALall1s_addr"><span class="keyword">val</span> <a href="code_VALIp.Cidr.all1s_addr.html">all1s_addr</a></span> : <code class="type">t -> Ip.Addr.t</code></pre><div class="info">
+Returns the all-ones address of a CIDR<br>
+</div>
+<pre><span id="VALlocal_addrs"><span class="keyword">val</span> <a href="code_VALIp.Cidr.local_addrs.html">local_addrs</a></span> : <code class="type">t -> Ip.Addr.t Batteries.Enum.t</code></pre><div class="info">
+Returns the set (as an <code class="code"><span class="constructor">Enum</span></code>) of all IP addresses in the given CIDR range (that is, all minus
+ subnet zero and all-ones subnet). For /32, returns the /32 singleton. For /31, return the empty
+ enum.<br>
+</div>
+<pre><span id="VALrandom_addrs"><span class="keyword">val</span> <a href="code_VALIp.Cidr.random_addrs.html">random_addrs</a></span> : <code class="type">t -> int -> Ip.Addr.t BatEnum.t</code></pre></body></html>

@@ -17,9 +17,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -36,6 +36,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -55,9 +57,21 @@
 <hr width="100%">
 <pre><span class="keyword">include</span> struct ... end</pre>
 <pre><span id="VALusec"><span class="keyword">val</span> <a href="code_VALClock.Interval.usec.html">usec</a></span> : <code class="type">float -> t</code></pre><div class="info">
-Takes some microseconds, milliseconds, seconds, minutes or hour and return an <code class="code"><span class="constructor">Interval</span>.t</code>.<br>
+microseconds to .<br>
 </div>
-<pre><span id="VALmsec"><span class="keyword">val</span> <a href="code_VALClock.Interval.msec.html">msec</a></span> : <code class="type">float -> t</code></pre><pre><span id="VALsec"><span class="keyword">val</span> <a href="code_VALClock.Interval.sec.html">sec</a></span> : <code class="type">outer_t -> t</code></pre><pre><span id="VALmin"><span class="keyword">val</span> <a href="code_VALClock.Interval.min.html">min</a></span> : <code class="type">float -> t</code></pre><pre><span id="VALhour"><span class="keyword">val</span> <a href="code_VALClock.Interval.hour.html">hour</a></span> : <code class="type">float -> t</code></pre><pre><span id="VALcompare"><span class="keyword">val</span> <a href="code_VALClock.Interval.compare.html">compare</a></span> : <code class="type">t -> t -> int</code></pre><div class="info">
+<pre><span id="VALmsec"><span class="keyword">val</span> <a href="code_VALClock.Interval.msec.html">msec</a></span> : <code class="type">float -> t</code></pre><div class="info">
+milliseconds to .<br>
+</div>
+<pre><span id="VALsec"><span class="keyword">val</span> <a href="code_VALClock.Interval.sec.html">sec</a></span> : <code class="type">outer_t -> t</code></pre><div class="info">
+seconds to .<br>
+</div>
+<pre><span id="VALmin"><span class="keyword">val</span> <a href="code_VALClock.Interval.min.html">min</a></span> : <code class="type">float -> t</code></pre><div class="info">
+minutes to .<br>
+</div>
+<pre><span id="VALhour"><span class="keyword">val</span> <a href="code_VALClock.Interval.hour.html">hour</a></span> : <code class="type">float -> t</code></pre><div class="info">
+hours to .<br>
+</div>
+<pre><span id="VALcompare"><span class="keyword">val</span> <a href="code_VALClock.Interval.compare.html">compare</a></span> : <code class="type">t -> t -> int</code></pre><div class="info">
 Custom comparison function so that we can change time representation
  more easily in the future.<br>
 </div>

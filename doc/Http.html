@@ -17,9 +17,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -36,12 +36,19 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
 <link title="Url" rel="Chapter" href="Url.html">
-<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Http</title>
+<link title="Vlan" rel="Chapter" href="Vlan.html"><link title="HTTP Error codes" rel="Section" href="#2_HTTPErrorcodes">
+<link title="HTTP commands, headers... " rel="Section" href="#2_HTTPcommandsheaders">
+<link title="HTTP Messages" rel="Section" href="#2_HTTPMessages">
+<link title="TRX for HTTP messages" rel="Section" href="#2_TRXforHTTPmessages">
+<link title="TRX for any payload" rel="Section" href="#2_TRXforanypayload">
+<title>Http</title>
 </head>
 <body>
 <div class="navbar"><a href="Html.html">Previous</a>
@@ -50,10 +57,15 @@
 </div>
 <center><h1>Module <a href="type_Http.html">Http</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Http: <code class="code"><span class="keyword">sig</span></code> <a href="Http.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALHttp.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span id="TYPEcode"><span class="keyword">type</span> <code class="type"></code>code</span> = <code class="type">int</code> </pre>
+<pre><span class="keyword">module</span> Http: <code class="code"><span class="keyword">sig</span></code> <a href="Http.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>HyperText Transfert Protocol<br>
+<hr width="100%">
+<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALHttp.debug.html">debug</a></span> : <code class="type">bool</code></pre><br>
+<span id="2_HTTPErrorcodes"><h2>HTTP Error codes</h2></span><br>
+<pre><span id="TYPEcode"><span class="keyword">type</span> <code class="type"></code>code</span> = <code class="type">int</code> </pre>
 
-<pre><span id="VALtext_of_code"><span class="keyword">val</span> <a href="code_VALHttp.text_of_code.html">text_of_code</a></span> : <code class="type"><a href="Http.html#TYPEcode">code</a> -> string</code></pre><pre><span id="VALstring_of_code"><span class="keyword">val</span> <a href="code_VALHttp.string_of_code.html">string_of_code</a></span> : <code class="type"><a href="Http.html#TYPEcode">code</a> -> string</code></pre><pre><span id="VALprint_code"><span class="keyword">val</span> <a href="code_VALHttp.print_code.html">print_code</a></span> : <code class="type">Batteries.Format.formatter -> <a href="Http.html#TYPEcode">code</a> -> unit</code></pre><br><code><span id="TYPEcmd"><span class="keyword">type</span> <code class="type"></code>cmd</span> = </code><table class="typetable">
+<pre><span id="VALtext_of_code"><span class="keyword">val</span> <a href="code_VALHttp.text_of_code.html">text_of_code</a></span> : <code class="type"><a href="Http.html#TYPEcode">code</a> -> string</code></pre><pre><span id="VALstring_of_code"><span class="keyword">val</span> <a href="code_VALHttp.string_of_code.html">string_of_code</a></span> : <code class="type"><a href="Http.html#TYPEcode">code</a> -> string</code></pre><pre><span id="VALprint_code"><span class="keyword">val</span> <a href="code_VALHttp.print_code.html">print_code</a></span> : <code class="type">Batteries.Format.formatter -> <a href="Http.html#TYPEcode">code</a> -> unit</code></pre><br>
+<span id="2_HTTPcommandsheaders"><h2>HTTP commands, headers... </h2></span><br>
+<br><code><span id="TYPEcmd"><span class="keyword">type</span> <code class="type"></code>cmd</span> = </code><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
@@ -65,11 +77,24 @@
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Request</span> <span class="keyword">of</span> <code class="type">(string * string)</code></code></td>
+<code><span class="constructor">Request</span> <span class="keyword">of</span> <code class="type">string * string</code></code></td>
 
 </tr></table>
 
 
 <pre><span id="TYPEheader"><span class="keyword">type</span> <code class="type"></code>header</span> = <code class="type">string * string</code> </pre>
 
-<pre><span id="VALstring_of_headers"><span class="keyword">val</span> <a href="code_VALHttp.string_of_headers.html">string_of_headers</a></span> : <code class="type">(string * string) list -> string</code></pre><pre><span id="VALheader_content_length_re"><span class="keyword">val</span> <a href="code_VALHttp.header_content_length_re.html">header_content_length_re</a></span> : <code class="type">Str.regexp</code></pre><pre><span id="VALchunked_transfert_encoding_re"><span class="keyword">val</span> <a href="code_VALHttp.chunked_transfert_encoding_re.html">chunked_transfert_encoding_re</a></span> : <code class="type">Str.regexp</code></pre><pre><span id="VALheaders_find"><span class="keyword">val</span> <a href="code_VALHttp.headers_find.html">headers_find</a></span> : <code class="type">String.t -> (String.t * 'a) list -> 'a option</code></pre><pre><span id="VALheaders_find_all"><span class="keyword">val</span> <a href="code_VALHttp.headers_find_all.html">headers_find_all</a></span> : <code class="type">String.t -> (String.t * 'a) list -> 'a list</code></pre><pre><span class="keyword">module</span> <a href="Http.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Http.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Http.TRXtop.html">TRXtop</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Http.TRXtop.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Http.TRX.html">TRX</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Http.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span id="VALpost_decode"><span class="keyword">val</span> <a href="code_VALHttp.post_decode.html">post_decode</a></span> : <code class="type">string -> string</code></pre><pre><span id="VALpost_encode"><span class="keyword">val</span> <a href="code_VALHttp.post_encode.html">post_encode</a></span> : <code class="type">string -> string</code></pre><pre><span id="VALcheck"><span class="keyword">val</span> <a href="code_VALHttp.check.html">check</a></span> : <code class="type">unit -> bool</code></pre></body></html>
+<pre><span id="VALstring_of_header"><span class="keyword">val</span> <a href="code_VALHttp.string_of_header.html">string_of_header</a></span> : <code class="type">string * string -> string</code></pre><pre><span id="VALprint_header"><span class="keyword">val</span> <a href="code_VALHttp.print_header.html">print_header</a></span> : <code class="type">'a BatInnerIO.output -> string * string -> unit</code></pre><pre><span id="VALprint_headers"><span class="keyword">val</span> <a href="code_VALHttp.print_headers.html">print_headers</a></span> : <code class="type">'a BatInnerIO.output -> (string * string) list -> unit</code></pre><pre><span id="VALstring_of_headers"><span class="keyword">val</span> <a href="code_VALHttp.string_of_headers.html">string_of_headers</a></span> : <code class="type">(string * string) list -> string</code></pre><pre><span id="VALheader_content_length_re"><span class="keyword">val</span> <a href="code_VALHttp.header_content_length_re.html">header_content_length_re</a></span> : <code class="type">Str.regexp</code></pre><pre><span id="VALchunked_transfert_encoding_re"><span class="keyword">val</span> <a href="code_VALHttp.chunked_transfert_encoding_re.html">chunked_transfert_encoding_re</a></span> : <code class="type">Str.regexp</code></pre><pre><span id="VALheaders_find"><span class="keyword">val</span> <a href="code_VALHttp.headers_find.html">headers_find</a></span> : <code class="type">String.t -> (String.t * 'a) list -> 'a option</code></pre><pre><span id="VALheaders_find_all"><span class="keyword">val</span> <a href="code_VALHttp.headers_find_all.html">headers_find_all</a></span> : <code class="type">String.t -> (String.t * 'a) list -> 'a list</code></pre><pre><span id="VALheader_present"><span class="keyword">val</span> <a href="code_VALHttp.header_present.html">header_present</a></span> : <code class="type">String.t -> String.t -> (String.t * String.t) list -> bool</code></pre><pre><span id="VALmust_close_cnx"><span class="keyword">val</span> <a href="code_VALHttp.must_close_cnx.html">must_close_cnx</a></span> : <code class="type">(String.t * String.t) list -> bool</code></pre><br>
+<span id="2_HTTPMessages"><h2>HTTP Messages</h2></span><br>
+<pre><span class="keyword">module</span> <a href="Http.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Http.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><br>
+<span id="2_TRXforHTTPmessages"><h2>TRX for HTTP messages</h2></span><br>
+<pre><span class="keyword">module</span> <a href="Http.TRXtop.html">TRXtop</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Http.TRXtop.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Special kind of transceiver, useful when it's on top of a TRX stack, that
+    receive and tx Pdu.t messages (instead of bitstring).
+</div>
+<br>
+<span id="2_TRXforanypayload"><h2>TRX for any payload</h2></span><br>
+<pre><span class="keyword">module</span> <a href="Http.TRX.html">TRX</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Http.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Once build (as a poster or server), the Http.TRX handle the whole connection(s).
+</div>
+<pre><span id="VALpost_decode"><span class="keyword">val</span> <a href="code_VALHttp.post_decode.html">post_decode</a></span> : <code class="type">string -> string</code></pre><pre><span id="VALpost_encode"><span class="keyword">val</span> <a href="code_VALHttp.post_encode.html">post_encode</a></span> : <code class="type">string -> string</code></pre></body></html>

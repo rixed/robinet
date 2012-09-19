@@ -16,9 +16,9 @@
 <link title="Browser" rel="Chapter" href="Browser.html">
 <link title="Clock" rel="Chapter" href="Clock.html">
 <link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
 <link title="Dns" rel="Chapter" href="Dns.html">
 <link title="Eth" rel="Chapter" href="Eth.html">
-<link title="Fifo" rel="Chapter" href="Fifo.html">
 <link title="Host" rel="Chapter" href="Host.html">
 <link title="Html" rel="Chapter" href="Html.html">
 <link title="Http" rel="Chapter" href="Http.html">
@@ -35,6 +35,8 @@
 <link title="Pcap" rel="Chapter" href="Pcap.html">
 <link title="Peg" rel="Chapter" href="Peg.html">
 <link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
 <link title="Sll" rel="Chapter" href="Sll.html">
 <link title="Tcp" rel="Chapter" href="Tcp.html">
 <link title="Tools" rel="Chapter" href="Tools.html">
@@ -48,15 +50,8 @@
 &nbsp;</div>
 <center><h1>Module <a href="type_Eth.TRX.html">Eth.TRX</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> TRX: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>An Ethernet TRX accepts raw packets, unpack them and forward the payload
- to a callback; and it can be given some payload to transmit and it will emit
- it as an Ethernet frame.
-<p>
-
- Create it with an <code class="code"><span class="constructor">Arp</span>.<span class="constructor">HwProto</span>.t</code>, a source <code class="code"><span class="constructor">Eth</span>.<span class="constructor">Addr</span>.t</code> and a default
- <a href="Eth.html#TYPEgw_addr"><code class="code"><span class="constructor">Eth</span>.gw_addr</code></a>,  and it will find the destination address itself using ARP.
- So this requires to know the protocol in advance, and the TRX will be able
- to resolve addr for this proto only.<br>
+<pre><span class="keyword">module</span> TRX: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>An Ethernet TRX will convert from payload to Ethernet frames (resolving
+ destinators using ARP), for a single <code class="code"><span class="constructor">Arp</span>.<span class="constructor">HwProto</span>.t</code>.<br>
 <hr width="100%">
 <br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
 <tr>
@@ -153,6 +148,20 @@
 <td align="left" valign="top" >
 <code>set_addresses&nbsp;: <code class="type">Bitstring.bitstring list -> unit</code>;</code></td>
 
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>get_source&nbsp;: <code class="type">unit -> Eth.Addr.t</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>arp_set&nbsp;: <code class="type">Bitstring.bitstring -> Eth.Addr.t option -> unit</code>;</code></td>
+
 </tr></table>
 }
 
@@ -178,7 +187,7 @@ Low level send fonction. Takes a <code class="code"><span class="constructor">Ar
 </tr></table>
 
 
-<pre><span id="VALarp_resolve_ipv4"><span class="keyword">val</span> <a href="code_VALEth.TRX.arp_resolve_ipv4.html">arp_resolve_ipv4</a></span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -><br>       Bitstring.bitstring -><br>       Bitstring.bitstring -> Bitstring.bitstring -> <a href="Eth.TRX.html#TYPEdst">dst</a></code></pre><pre><span id="VALdst_for"><span class="keyword">val</span> <a href="code_VALEth.TRX.dst_for.html">dst_for</a></span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> <a href="Eth.TRX.html#TYPEdst">dst</a> Batteries.Option.Monad.m</code></pre><pre><span id="VALtx"><span class="keyword">val</span> <a href="code_VALEth.TRX.tx.html">tx</a></span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><div class="info">
+<pre><span id="VALarp_resolve_ipv4"><span class="keyword">val</span> <a href="code_VALEth.TRX.arp_resolve_ipv4.html">arp_resolve_ipv4</a></span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -><br>       Bitstring.bitstring -><br>       Bitstring.bitstring -> Tools.BitHash.key -> <a href="Eth.TRX.html#TYPEdst">dst</a></code></pre><pre><span id="VALdst_for"><span class="keyword">val</span> <a href="code_VALEth.TRX.dst_for.html">dst_for</a></span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> <a href="Eth.TRX.html#TYPEdst">dst</a> Batteries.Option.Monad.m</code></pre><pre><span id="VALtx"><span class="keyword">val</span> <a href="code_VALEth.TRX.tx.html">tx</a></span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><div class="info">
 Transmit function. <code class="code">tx t payload</code> Will send the payload.<br>
 </div>
 <pre><span id="VALrx"><span class="keyword">val</span> <a href="code_VALEth.TRX.rx.html">rx</a></span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre><div class="info">

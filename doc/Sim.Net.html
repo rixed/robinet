@@ -1,0 +1,140 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">
+<link rel="stylesheet" href="style.css" type="text/css">
+<meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+<link rel="Start" href="index.html">
+<link rel="Up" href="Sim.html">
+<link title="Index of types" rel=Appendix href="index_types.html">
+<link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
+<link title="Index of values" rel=Appendix href="index_values.html">
+<link title="Index of modules" rel=Appendix href="index_modules.html">
+<link title="Index of module types" rel=Appendix href="index_module_types.html">
+<link title="Arp" rel="Chapter" href="Arp.html">
+<link title="Browser" rel="Chapter" href="Browser.html">
+<link title="Clock" rel="Chapter" href="Clock.html">
+<link title="Dhcp" rel="Chapter" href="Dhcp.html">
+<link title="Dhcpd" rel="Chapter" href="Dhcpd.html">
+<link title="Dns" rel="Chapter" href="Dns.html">
+<link title="Eth" rel="Chapter" href="Eth.html">
+<link title="Host" rel="Chapter" href="Host.html">
+<link title="Html" rel="Chapter" href="Html.html">
+<link title="Http" rel="Chapter" href="Http.html">
+<link title="Hub" rel="Chapter" href="Hub.html">
+<link title="Icmp" rel="Chapter" href="Icmp.html">
+<link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Localhost" rel="Chapter" href="Localhost.html">
+<link title="Log" rel="Chapter" href="Log.html">
+<link title="Metric" rel="Chapter" href="Metric.html">
+<link title="Myadmin" rel="Chapter" href="Myadmin.html">
+<link title="Net" rel="Chapter" href="Net.html">
+<link title="Opache" rel="Chapter" href="Opache.html">
+<link title="Packet" rel="Chapter" href="Packet.html">
+<link title="Pcap" rel="Chapter" href="Pcap.html">
+<link title="Peg" rel="Chapter" href="Peg.html">
+<link title="Persist" rel="Chapter" href="Persist.html">
+<link title="Router" rel="Chapter" href="Router.html">
+<link title="Sim" rel="Chapter" href="Sim.html">
+<link title="Sll" rel="Chapter" href="Sll.html">
+<link title="Tcp" rel="Chapter" href="Tcp.html">
+<link title="Tools" rel="Chapter" href="Tools.html">
+<link title="Udp" rel="Chapter" href="Udp.html">
+<link title="Url" rel="Chapter" href="Url.html">
+<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Sim.Net</title>
+</head>
+<body>
+<div class="navbar">&nbsp;<a href="Sim.html">Up</a>
+&nbsp;</div>
+<center><h1>Module <a href="type_Sim.Net.html">Sim.Net</a></h1></center>
+<br>
+<pre><span class="keyword">module</span> Net: <code class="code"><span class="keyword">sig</span></code> <a href="Sim.Net.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>A network is a set of equipments, and some optionaly named "plugs"
+ where to attach another network to form a new one. We keep track of
+ the equipement because we want to be able to delete a whole network
+ at once, to iter on all hosts of a network, and so on.
+ The underlying connections are not materialized beyond the emit/recv
+ function pointers, so contrary to one would expect a net is not a
+ graph but a mere list of equipment (and available plugs).
+ Connecting two nets make the used plugs disapear, but other than that
+ the two nets stay the same. To group two nets (either connected or net)
+ use the <code class="code">union</code> function which will return the union of the two nets.<br>
+<hr width="100%">
+<pre><span class="keyword">module</span> <a href="Sim.Net.Plug.html">Plug</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Sim.Net.Plug.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+A plug is a named entry point to a networks.
+</div>
+<br><code><span id="TYPEequipment"><span class="keyword">type</span> <code class="type"></code>equipment</span> = </code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code><span class="keyword">|</span></code></td>
+<td align="left" valign="top" >
+<code><span class="constructor">Host</span> <span class="keyword">of</span> <code class="type"><a href="Host.html#TYPEhost_trx">Host.host_trx</a></code></code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code><span class="keyword">|</span></code></td>
+<td align="left" valign="top" >
+<code><span class="constructor">Hub</span> <span class="keyword">of</span> <code class="type"><a href="Hub.Repeater.html#TYPEt">Hub.Repeater.t</a></code></code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code><span class="keyword">|</span></code></td>
+<td align="left" valign="top" >
+<code><span class="constructor">Switch</span> <span class="keyword">of</span> <code class="type"><a href="Hub.Switch.html#TYPEt">Hub.Switch.t</a></code></code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code><span class="keyword">|</span></code></td>
+<td align="left" valign="top" >
+<code><span class="constructor">Trx</span> <span class="keyword">of</span> <code class="type"><a href="Tools.html#TYPEtrx">Tools.trx</a></code></code></td>
+
+</tr></table>
+
+
+<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code>equip&nbsp;: <code class="type"><a href="Sim.Net.html#TYPEequipment">equipment</a> list</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span class="keyword">mutable&nbsp;</span>plugs&nbsp;: <code class="type"><a href="Sim.Net.Plug.html#TYPEt">Plug.t</a> list</code>;</code></td>
+
+</tr></table>
+}
+
+<div class="info">
+A net is a mere list of equipment and another one for available plugs.
+ Plugs get consumed as they are used.<br>
+</div>
+
+<pre><span id="VALmake_empty"><span class="keyword">val</span> <a href="code_VALSim.Net.make_empty.html">make_empty</a></span> : <code class="type">unit -> <a href="Sim.Net.html#TYPEt">t</a></code></pre><pre><span id="VALunion"><span class="keyword">val</span> <a href="code_VALSim.Net.union.html">union</a></span> : <code class="type"><a href="Sim.Net.html#TYPEt">t</a> list -> <a href="Sim.Net.html#TYPEt">t</a></code></pre><pre><span id="VALfind_named_plug"><span class="keyword">val</span> <a href="code_VALSim.Net.find_named_plug.html">find_named_plug</a></span> : <code class="type"><a href="Sim.Net.html#TYPEt">t</a> -><br>       string option -><br>       (<a href="Sim.Net.Plug.html#TYPEt">Plug.t</a>, [> `Unknown_plug of string option ]) Batteries.Result.t</code></pre><div class="info">
+remove the matching plug and return it<br>
+</div>
+<pre><span id="VALconnect"><span class="keyword">val</span> <a href="code_VALSim.Net.connect.html">connect</a></span> : <code class="type">?plug1:string -><br>       <a href="Sim.Net.html#TYPEt">t</a> -><br>       ?plug2:string -><br>       <a href="Sim.Net.html#TYPEt">t</a> -> (unit, [> `Unknown_plug of string option ]) Batteries.Result.t</code></pre><div class="info">
+<code class="code">connect t1 ~name1:<span class="string">"plug1"</span> t2 ~name2:<span class="string">"plug2"</span></code> will change the plugs emiting
+ and receiving functions such that t1 and t2 start exchanging messages at this point.
+ Will return <code class="code"><span class="constructor">BatResult</span>.<span class="constructor">Bad</span> (<span class="keywordsign">`</span><span class="constructor">Unknown_plug</span> <span class="keyword">of</span> string)</code> if name1 or name2 can
+ not be found.
+ If a name for the plug is not given then anyone will do.
+ Notice that the used plugs are consumed (ie. removed from the passed nets).<br>
+</div>
+<pre><span id="VALmake_sink"><span class="keyword">val</span> <a href="code_VALSim.Net.make_sink.html">make_sink</a></span> : <code class="type">string -> <a href="Sim.Net.html#TYPEt">t</a> * Thread.t</code></pre><div class="info">
+Return a net representing the external network via the given interface,
+ and the thread that sniffs packets.<br>
+</div>
+<pre><span id="VALmake_internet"><span class="keyword">val</span> <a href="code_VALSim.Net.make_internet.html">make_internet</a></span> : <code class="type">unit -> <a href="Sim.Net.html#TYPEt">t</a></code></pre><div class="info">
+Returns a net with an unlimited supply of plugs that performs as a router.<br>
+</div>
+<pre><span id="VALmake_simple_lan"><span class="keyword">val</span> <a href="code_VALSim.Net.make_simple_lan.html">make_simple_lan</a></span> : <code class="type">?nameserver:Ip.Addr.t -> ?public_ip:Ip.Addr.t -> int -> <a href="Sim.Net.html#TYPEt">t</a></code></pre><div class="info">
+Returns a lan consisting of n hosts connected to a switch connected to a
+ router/dhcp server/nater with an "exit" plug.<br>
+</div>
+</body></html>
