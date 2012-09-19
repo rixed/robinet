@@ -109,6 +109,20 @@ Some
     Tcp.Pdu.payload = empty}]
 ]}
 
+Now imagine you want to edit a pcap to change the TCP source/dest port from 21 to 2121.
+
+{[
+# open Packet;;
+# enum_of_file "some.pcap" /@
+    (function cap::eth::ip::Pdu.Tcp ({ Tcp.Pdu.dst_port = port ; _ } as tcp)::rest when port = Tcp.Port.o 21 ->
+               cap::eth::ip::Pdu.Tcp { tcp with Tcp.Pdu.dst_port = Tcp.Port.o 2121 }::rest
+           | cap::eth::ip::Pdu.Tcp ({ Tcp.Pdu.src_port = port ; _ } as tcp)::rest when port = Tcp.Port.o 21 ->
+               cap::eth::ip::Pdu.Tcp { tcp with Tcp.Pdu.src_port = Tcp.Port.o 2121 }::rest
+           | x -> x) |>
+    to_file "changed.pcap" ;;
+]}
+
+
 *)
 open Batteries
 open Bitstring
@@ -133,7 +147,7 @@ module Pdu = struct
      * a more natural presentation when printed. *)
     type t = layer list
 
-    (** [pack pdu] converts the layer list back to a [bitstring]. *)
+    (** [pack pdu] converts the layer list back to a {!Pcap.Pdu.t} *)
     let pack (t:t) =
         let new_payload bits = function
             | Raw _  -> Raw bits
@@ -158,11 +172,14 @@ module Pdu = struct
             | p :: ps ->
                 (* bits, if set, is the new payload for p *)
                 let p' = match bits with None -> p | Some b -> new_payload b p in
-                aux (Some (pack_1 p')) ps
-        in
-        aux None (List.rev t)
+                aux (Some (pack_1 p')) ps in
+        match t with
+        | Pcap pcap :: rest ->
+            let pld = aux None (List.rev rest) in
+            { pcap with Pcap.Pdu.payload = Payload.o pld }
+        | _ -> should_not_happen ()
 
-    (** Convert a [bitstring] (from a Pcap.pdu) into a {!Packet.Pdu.t}. *)
+    (** Converts a {!Pcap.pdu.t} into a {!Packet.Pdu.t}. *)
     let unpack pcap =
         let unpack_raw bits =
             if bitstring_is_empty bits then [] else [ Raw bits ] in
@@ -234,3 +251,7 @@ let enum_of_file fname = Pcap.enum_of_file fname /@ Pdu.unpack
         function _ :: _ :: Pdu.Vlan { Vlan.Pdu.id = id ; _ } :: _ -> Some id \
                | _ -> None) |> List.of_enum) [ 1 ; 2 ]
  *)
+
+(** [Packet.to_file filename e] write the enumeration of {!Packet.Pdu.t} into the given file. *)
+let to_file fname e = Enum.map Pdu.pack e |> Pcap.file_of_enum fname
+
