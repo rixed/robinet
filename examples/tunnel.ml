@@ -42,16 +42,6 @@ let tunnel ifname tun_ip tun_mac gw search_sfx nameserver dst dst_port src_port 
                 tcp.Tcp.TRX.close ()
                 (* TODO: if client, quit or reconnect *)
             ) else rx http bits) in
-    let cli_srv_thread = match dst with
-        | Some addr ->
-            lwt tcp = host.Host.tcp_connect addr ?src_port dst_port in
-            connect_tunnel tcp ;
-            Lwt.return ()
-        | None ->
-            Printf.printf "Tunnel: Waiting for connections on port %s...\n%!" (Tcp.Port.to_string dst_port) ;
-            host.Host.tcp_server dst_port connect_tunnel ;
-            Lwt.return ()
-    in
     (* Eveything written to http will be sent to designated target,
        and eveything received for this host on http will be read from http.
        Now we need to put this host's eth device in promiscuous mode, and tunnel in
@@ -70,10 +60,17 @@ let tunnel ifname tun_ip tun_mac gw search_sfx nameserver dst dst_port src_port 
         Pcap.inject_pdu iface bits
     in
     ignore (recv_http <-= http) ;
-    (* Run everything *)
-    Lwt.join [ Pcap.sniffer iface host.Host.dev.write ;
-               cli_srv_thread ;
-               Clock.run true ]
+    ignore (Pcap.sniffer iface host.Host.dev.write) ;
+    (match dst with
+        | Some addr ->
+            host.Host.tcp_connect addr ?src_port dst_port (function
+            | None -> ()
+            | Some tcp ->
+                connect_tunnel tcp)
+        | None ->
+            Printf.printf "Tunnel: Waiting for connections on port %s...\n%!" (Tcp.Port.to_string dst_port) ;
+            host.Host.tcp_server dst_port connect_tunnel) ;
+    Clock.run true
 
 let main =
     let ifname      = ref "eth0"
@@ -102,15 +99,8 @@ let main =
                                                           "Source port (optional, default: random)" ]
               (fun _ -> raise (Arg.Bad "Unknown parameter"))
               "Tunnel traffic into HTTP" ;
-    Lwt_main.run (
-        Lwt.catch (fun () ->
-            tunnel !ifname
-                   (Ip.Addr.of_string  !tun_ip)
-                   (Eth.Addr.of_string !tun_mac)
-                   !gw  !search_sfx !nameserver
-                   !dst (Tcp.Port.o !http_port)  !src_port)
-            (fun exn ->
-                Printf.printf "Tunnel: We got an exception : %a\n%!" Printexc.print exn ;
-                Lwt.return ())
-    )
-
+    tunnel !ifname
+           (Ip.Addr.of_string  !tun_ip)
+           (Eth.Addr.of_string !tun_mac)
+           !gw  !search_sfx !nameserver
+           !dst (Tcp.Port.o !http_port)  !src_port

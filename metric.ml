@@ -179,9 +179,11 @@ let print_report oc =
     flush oc
 
 let rec report_thread oc period =
-    lwt () = Lwt_unix.sleep period in
-    print_report oc ;
-    report_thread oc period
+    let rec loop () =
+        Thread.delay period ;
+        print_report oc ;
+        loop () in
+    Thread.create loop ()
 
 (* Tools for building UI *)
 

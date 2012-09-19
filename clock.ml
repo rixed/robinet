@@ -23,7 +23,7 @@
 
    When in realtime mode (the default), the clock will merely follow
    wall-clock. Then, scheduling an event in the future is equivalent to
-   [Lwt_unix.sleep] for some time. This is not very interesting but is required
+   [Unix.sleep] for some time. This is not very interesting but is required
    whenever you plan to work with real network devices and outside world.  On
    the other hand, if your simulated network does not communicates with the
    outside world, for instance because your objective is to build a pcap file,
@@ -32,8 +32,6 @@
    workload of a day in minutes, or conversely a very busy hour in several
    hours but with all packets and accurate timestamps.
 
-   Note: in any case Lwt is used and required. Clock handle time while Lwt
-   handle the several stacks that make programming easier.
 *)
 open Batteries
 open Bitstring
@@ -144,71 +142,88 @@ let current = { now = Time.o (Unix.gettimeofday ()) ; events = Map.empty }
 (** Return the current simulation time. *)
 let now () = current.now
 
-let nextev_wakener = ref None
+let cond_lock = Mutex.create ()
+let cond = Condition.create ()
 
-let nextev_awake () = match !nextev_wakener with
-    | None -> ()
-    | Some w ->
-        nextev_wakener := None ;
-        if debug then Printf.printf "Clock: waking waiter up\n%!" ;
-        Lwt.wakeup w ()
+let signal_me () = Condition.signal cond
+
+let epsilon = Interval.usec 1.
 
 (** [at t f x] will execute [f x] when simulation clock reachs time [t]. *)
-let at (ts : Time.t) f x =
-    if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.sub ts current.now)) ;
-    current.events <- Map.add ts (fun () -> f x) current.events ;
-    nextev_awake ()
+let rec at (ts : Time.t) f x =
+    (* FIXME: since localhost.reader add events from other threads, use a mutex to protect current.events *)
+    (* If ts was already bound in current.events, its previous binding disappears.
+       Also, we do not like the idea of several sequencial events having the same TS. *)
+    try Map.find ts current.events |> ignore ;
+        at (Time.add ts epsilon) f x
+    with Not_found ->
+        if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.sub ts current.now)) ;
+        current.events <- Map.add ts (fun () -> f x) current.events ;
+        signal_me ()
 
 (** [delay d f x] will delay the execution of [f x] by the interval [d]. *)
 let delay d f x =
     at (Time.add current.now d) f x
+
+let asap f x =
+    (* FIXME: would be more precise and fast to have a dedicated list for asap events *)
+    delay (Interval.o 0.) f x
 
 (** Synchronize internal clock with realtime clock.
  * You must call this after real time passes (for instance after a blocking call).
  * Otherwise, time jumps from one registered event to the next. *)
 let synch () =
     ensure !realtime "Synch with real clock in non-realtime mode!?" ;
-    current.now <- Time.wall_clock ()
+    current.now <- Time.wall_clock () ;
+    if debug then Printf.printf "Clock: synch: set current time to %s\n%!" (Time.to_string current.now)
 
-(** Will process the next event and returns true if more events are scheduled *)
-let next_event wait =
-    if not wait && Map.is_empty current.events then (
-        if debug then Printf.printf "Clock: no more events" ;
-        Lwt.return false
-    ) else
-    let ts, f = try Map.min_binding current.events
-                with Not_found -> Time.o max_float, (fun () -> ()) in
-    let wait_ts = if not !realtime then Interval.o 0. else (Time.sub ts current.now) in
-    if Interval.compare wait_ts (Interval.msec 10.) > 0 then (
-        if debug then Printf.printf "Clock: next_event: waiting for %s since we're too early\n%!" (Interval.to_string wait_ts) ;
-        let waiter, wakener = Lwt.task () in
-        nextev_wakener := Some wakener ;
-        lwt _ = Lwt.pick [ Lwt_unix.sleep (wait_ts :> float) ; waiter ] in
-        nextev_wakener := None ;
-        synch () ;
-        Lwt.return true
-    ) else (
-        if debug then Printf.printf "Clock: next_event: executing since it's time (%s)\n%!" (Interval.to_string wait_ts) ;
+(** Will process the next event *)
+let next_event () =
+    let run_first =
+        if !realtime then (
+            (* Note: In realtime, other threads may add new events while we are sleeping.
+               So we use a condition variable (instead of a mere Unix.sleep) so that addition of event can awake us. *)
+            let wait_ts = ref (Interval.o 0.) in
+            Mutex.lock cond_lock ;
+            while
+                let ts, _ = try Map.min_binding current.events
+                            with Not_found -> Time.o max_float, (fun () -> ()) in
+                wait_ts := Time.sub ts current.now ;
+                Interval.compare !wait_ts (Interval.msec 10.) > 0
+            do
+                if debug then Printf.printf "Clock: next_event: waiting for %s since we're too early\n%!" (Interval.to_string !wait_ts) ;
+                (* fork a thread that will sleep then signal_me () *)
+                (* FIXME: since we cant Thread.kill this thread many can accumulate. *)
+                ignore (Thread.create (fun ts ->
+                    Thread.delay (min 1. ts) ;
+                    if debug then Printf.printf "Clock: waiker: time to waike up!\n" ;
+                    signal_me ()) (!wait_ts :> float)) ;
+                Condition.wait cond cond_lock ; (* zzz *)
+                synch ()
+            done ;
+            Mutex.unlock cond_lock ;
+            true
+        ) else ( (* not realtime *)
+            if Map.is_empty current.events then (
+                if debug then Printf.printf "Clock: no more events" ;
+                false
+            ) else true
+        ) in
+    if run_first then (
+        (* We have some work to do *)
+        let ts, f = Map.min_binding current.events in
+        if debug then Printf.printf "Clock: next_event: executing since it's %s\n%!" (Time.to_string ts) ;
         current.events <- Map.remove ts current.events ;
         current.now <- ts ;
-        Lwt.catch (fun () -> f () ; Lwt.return true) (fun exn ->
-            Printf.printf "Clock: event handler triggered an exception : %a\n%!" Printexc.print exn ;
-            Lwt.return false)
+        try f ()
+        with exn ->
+            Printf.printf "Clock: event handler triggered an exception : %a\n%!" Printexc.print exn
     )
-
-(** We cannot allow our thread to sleep since we want to control the speed of time.
- * So [sleep d] will return a thread that will be awakened by the schedule (ie. other
- * registered events are still being processed) *)
-let sleep d =
-    let waiter, wakener = Lwt.wait () in
-    delay d (Lwt.wakeup wakener) () ;
-    waiter
 
 (** [run true] will run forever while [run false] will return once no more events are waiting. *)
 let run wait =
-    let rec aux () =
-        lwt more = next_event wait in
-        if more then aux ()
-        else Lwt.return () in
-    aux ()
+    while wait || not (Map.is_empty current.events) do
+        next_event () ;
+        Thread.yield ()
+    done
 

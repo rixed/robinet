@@ -41,17 +41,17 @@ let main =
                 "-gw",      Arg.String (fun gw -> gw_eth_str := Some (Eth.Mac (Eth.Addr.of_string gw))), "Gateway MAC address" ]
               (fun name -> names := name :: !names)
               "Perform a DNS A query with faked addresses" ;
-    Lwt_main.run (
-        let emit bits = Pcap.inject iface (string_of_bitstring bits) in
-        let host = Host.make_static "requester" ?gw:!gw_eth_str ~nameserver:(Ip.Addr.of_string !dst_ip_str) ~search_sfx:!search (Eth.Addr.of_string !src_eth_str) (Ip.Addr.of_string !src_ip_str) in
-        host.Host.dev.set_read emit ;
-        let query = Lwt_list.iter_p (fun name ->
-            lwt ips = host.Host.gethostbyname name in
-            List.print (fun oc ip -> Printf.fprintf oc "%s\n" (Ip.Addr.to_dotted_string ip)) stdout ips ;
-            Lwt.return ()) !names in
-        Lwt.choose [ query ;
-                     Pcap.sniffer iface host.Host.dev.write ;
-                     Clock.run true ]
-    )
+    let emit bits =
+        hexstring_of_bitstring bits |> Printf.printf "Injecting '%s'\n" ;
+        Pcap.inject iface (string_of_bitstring bits) in
+    let host = Host.make_static "requester" ?gw:!gw_eth_str ~nameserver:(Ip.Addr.of_string !dst_ip_str) ~search_sfx:!search (Eth.Addr.of_string !src_eth_str) (Ip.Addr.of_string !src_ip_str) in
+    host.Host.dev.set_read emit ;
+    List.iter (Clock.asap (fun name ->
+        host.Host.gethostbyname name (function
+        | None -> ()
+        | Some ips ->
+            List.print (fun oc ip -> Printf.fprintf oc "%s\n" (Ip.Addr.to_dotted_string ip)) stdout ips))) !names ;
+    ignore (Pcap.sniffer iface host.Host.dev.write) ;
+    Clock.run false
 
 

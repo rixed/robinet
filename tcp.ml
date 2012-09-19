@@ -157,11 +157,12 @@ struct
             let compare (o1, _) (o2, _) = Int.compare o1 o2
         end)
 
-    type tcp_trx =
-        { trx : trx ;
-          close : unit -> unit ; (* close the trx *)
-          is_closed : unit -> bool }
+    type tcp_trx = {
+        trx : trx ;
+        close : unit -> unit ; (* close the trx *)
+        is_closed : unit -> bool }
     type t = {
+        mutable tcp_trx : tcp_trx ;
         mutable src : Port.t ;
         mutable dst : Port.t ;
         mutable emit : bitstring -> unit ;
@@ -179,7 +180,7 @@ struct
         mutable to_send : bitstring list ; (* what we must send next *) (* FIXME: s/list/dequeue/ *)
         mutable unacked_tx : Streambuf.t ; (* previous packet we sent but that were not acked yet *)
         mutable rcvd_fin : bool ;   (* if we already passed the fin to the application *)
-        mutable cnx_wakener : tcp_trx option Lwt.u option (* the Lwt_t to wake up whenever the cnx is established *) }
+        mutable cnx_established_cont : (tcp_trx option -> unit) option (* what to do when the cnx is established *) }
 
     (* FIXME: ideally, wait 2 minutes after the complete close *)
     let is_closed t () = t.closed
@@ -200,7 +201,7 @@ struct
             let tcp = Pdu.make ~src_port ~dst_port ~seq_num ?ack_num
                                ~ack ~psh ~rst ~syn ~fin bits in
             if debug then Printf.printf "Tcp: Emitting a packet from %s to %s, seq %s, length %d, content '%s'\n%!" (Port.to_string src_port) (Port.to_string dst_port) (SeqNum.to_string seq_num) (bytelength bits) (string_of_bitstring bits) ;
-            t.emit (Pdu.pack tcp) ;
+            Clock.asap t.emit (Pdu.pack tcp) ;
             if ack then t.rcvd_acked <- t.rcvd_pld ;
             if bitstring_length bits > 0 then
                 t.unacked_tx <- Streambuf.add (t.sent_pld, tcp) t.unacked_tx ;
@@ -221,22 +222,14 @@ struct
         if debug then Printf.printf "Tcp: I acked %d / %d received bytes\n%!" t.rcvd_acked t.rcvd_pld ;
         if t.rcvd_acked < t.rcvd_pld then emit_one t empty_bitstring
 
-    let rec trx_of t =
-        { trx = { ins = { write = tx t ;
-                          set_read = fun f -> t.recv <- f } ;
-                  out = { write = rx t ;
-                          set_read = fun f -> t.emit <- f } } ;
-          close = close t ;
-          is_closed = is_closed t }
-
     (* The cnx is established (ie its behavior is driven by the rcvd and sent streambuf
      * whenever we had the two syns, not when they are acked. *)
-    and establish_cnx t ok =
-        match t.cnx_wakener with
-            | Some w ->
-                if debug then Printf.printf "Tcp: waking up client for serving port %d\n%!" (t.src :> int) ;
-                Lwt.wakeup w (if ok then Some (trx_of t) else None)
-            | None -> if debug then Printf.printf "Tcp: no one was waiting\n%!"
+    let rec establish_cnx t ok =
+        match t.cnx_established_cont with
+        | Some f ->
+            if debug then Printf.printf "Tcp: calling continuation for serving new cnx on port %d\n%!" (t.src :> int) ;
+            f (if ok then Some t.tcp_trx else None)
+        | None -> if debug then Printf.printf "Tcp: no one was waiting\n%!"
 
     and try_really_rx t =
         if not (Streambuf.is_empty t.rcvd_pkts) then (
@@ -257,18 +250,18 @@ struct
                     let pld = dropbytes skip (tcp.Pdu.payload :> bitstring) in
                     t.rcvd_pld <- t.rcvd_pld + (bytelength pld) ;
                     if debug then Printf.printf "Tcp: I have now read %d bytes\n%!" t.rcvd_pld ;
-                    if bitstring_length pld > 0 then t.recv pld ;
+                    if bitstring_length pld > 0 then Clock.asap t.recv pld ;
                     if tcp.Pdu.flags.Pdu.fin && not t.rcvd_fin then (
                         if debug then Printf.printf "Tcp: received a FIN\n%!" ;
                         t.rcvd_pld <- t.rcvd_pld + 1 ;
                         t.rcvd_fin <- true ;
                         t.closed <- true ;
-                        t.recv empty_bitstring (* signal the close *) (* FIXME: which is not very easy to use when the TRX is piped into another one. An Err would suit better *)
+                        Clock.asap t.recv empty_bitstring (* signal the close *) (* FIXME: which is not very easy to use when the TRX is piped into another one. An Err would suit better *)
                     ) else if tcp.Pdu.flags.Pdu.rst && not t.rcvd_fin then (
                         if debug then Printf.printf "Tcp: received a RST\n%!" ;
                         t.rcvd_fin <- true ;
                         t.closed <- true ;
-                        t.recv empty_bitstring (* signal the close *)
+                        Clock.asap t.recv empty_bitstring (* signal the close *)
                     )
                 ) else (
                     if debug then Printf.printf "Tcp:...obsolete packet\n%!"
@@ -359,7 +352,7 @@ struct
 
     and close t () =
         ensure (is_established t) "Tcp: Closing a cnx that's not established" ;
-        if debug then Printf.printf "Tcp: Closing cnx\n%!" ;
+        if debug then Printf.printf "Tcp: Will close the cnx\n%!" ;
         t.closed <- true ;
         try_really_tx t
 
@@ -375,34 +368,37 @@ struct
             try_really_tx t
         )
 
-    let make_ ?isn ?(mtu=1300) src dst =
-        { src = src ;
-          dst = dst ;
-          emit = (fun _b -> if debug then Printf.printf "Tcp: Ignoring a packet\n") ;
-          recv = ignore ;
-          mtu = mtu ;
-          isn = may_default isn (fun () -> SeqNum.o 0l (*Random.int32 0x7FFFFFFFl*)) ;
-          rcvd_isn = None ;
-          closed = false ; sent_fin = false ;
-          sent_pld = 0 ; sent_acked = 0 ; rcvd_pld = 0 ; rcvd_acked = 0 ;
-          rcvd_pkts = Streambuf.empty ;
-          to_send = [] ;
-          unacked_tx = Streambuf.empty ;
-          rcvd_fin = false ;
-          cnx_wakener = None }
-
-    let accept ?isn ?mtu src dst =
-        let t = make_ ?isn ?mtu src dst in
-        trx_of t
+    let make ?isn ?(mtu=1300) src dst =
+        let t = { src = src ;
+                  dst = dst ;
+                  emit = (fun _b -> if debug then Printf.printf "Tcp: Ignoring a packet\n") ;
+                  recv = ignore ;
+                  mtu = mtu ;
+                  isn = may_default isn (fun () -> SeqNum.o 0l (*Random.int32 0x7FFFFFFFl*)) ;
+                  rcvd_isn = None ;
+                  closed = false ; sent_fin = false ;
+                  sent_pld = 0 ; sent_acked = 0 ; rcvd_pld = 0 ; rcvd_acked = 0 ;
+                  rcvd_pkts = Streambuf.empty ;
+                  to_send = [] ;
+                  unacked_tx = Streambuf.empty ;
+                  rcvd_fin = false ;
+                  cnx_established_cont = None ;
+                  tcp_trx = { trx = null_trx ;
+                              close = ignore ;
+                              is_closed = fun _ -> true } } in
+        t.tcp_trx <- { trx =  { ins = { write = tx t ;
+                                        set_read = fun f -> t.recv <- f } ;
+                                out = { write = rx t ;
+                                        set_read = fun f -> t.emit <- f } } ;
+                       close = close t ;
+                       is_closed = is_closed t } ;
+        t
 
     let may_timeout t = if not (is_established t) then establish_cnx t false
     let default_connect_timeout = Clock.Interval.sec 15.
-    let connect ?(timeout=default_connect_timeout) ?isn ?mtu src dst =
-        let t = make_ ?isn ?mtu src dst in
-        let waiter, wakener = Lwt.wait () in
-        t.cnx_wakener <- Some wakener ;
+    let connect ?(timeout=default_connect_timeout) t cont =
+        t.cnx_established_cont <- Some cont ;
         Clock.delay timeout may_timeout t ;
-        emit_one t ~syn:true empty_bitstring ;
-        waiter
+        emit_one t ~syn:true empty_bitstring
 
 end

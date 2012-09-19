@@ -124,6 +124,18 @@ module Addr = struct
     (** Convert an {!Ip.Addr.t} to dotted representation. *)
     let to_dotted_string (t : t) = dotted_string_of_int32 (t :> int32)
 
+    (** And from dotted representation (usefull to allow DNS-less hosts to 'reolve' some name) *)
+    let of_dotted_string str =
+        let assemble a b c d =
+            if a <= 255l && b <= 255l && c <= 255l && d <= 255l then
+                let (<=) = Int32.shift_left and (||) = Int32.logor in
+                Some (o ((a <= 24) || (b <= 16) || (c <= 8) || d))
+            else
+                None
+        in
+        Scanf.sscanf str "%ld.%ld.%ld.%ld" assemble
+        (* FIXME: checkme! *)
+
     (** Convert an {!Ip.Addr.t} to a [bitstring]. *)
     let to_bitstring (t : t) = (BITSTRING { (t :> int32) : 32 })
     (** Convert a [bitstring] into an {!Ip.Addr.t}. *)
@@ -446,7 +458,6 @@ module TRX = struct
                mutable recv : bitstring -> unit }
 
     let tx t bits =
-        if debug then Printf.printf "Ip: Emitting a packet from %s to %s, length %d, content '%s'\n%!" (Addr.to_string t.src) (Addr.to_string t.dst) (bytelength bits) (string_of_bitstring bits) ;
         let id = Pdu.next_id () in
         let rec aux bit_offset =
             if bit_offset < bitstring_length bits then (
@@ -456,7 +467,7 @@ module TRX = struct
                 (* The frag_offset is given in unit of 8 bytes.
                    So the MTU is required to be a multiple of 8 bytes as well. *)
                 let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst pld in
-                if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (Addr.dotted_string_of_int32 (t.src :> int32)) (Addr.dotted_string_of_int32 (t.dst :> int32)) (bytelength pld) (string_of_bitstring bits);
+                if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (Addr.dotted_string_of_int32 (t.src :> int32)) (Addr.dotted_string_of_int32 (t.dst :> int32)) (bytelength pld) (hexstring_of_bitstring bits);
                 t.emit (Pdu.pack pdu) ;
                 aux (bit_offset + bitstring_length pld)
             ) in

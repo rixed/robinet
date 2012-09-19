@@ -21,7 +21,7 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = true
+let debug = false
 
 (** the lowest port number used by the address translation *)
 let min_port = 1024
@@ -352,8 +352,8 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
     ignore (server_recv <-= server_eth.Eth.TRX.trx) ;
     gw ==> output_if.Eth.TRX.trx <==> server_eth.Eth.TRX.trx ;
     Clock.delay (Clock.Interval.sec 10.) (fun () ->
-        Lwt.ignore_result (desktop.Host.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring)) () ;
-    Lwt_main.run (Clock.run false) ;
+        desktop.Host.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring) () ;
+    Clock.run () ;
     Clock.realtime := true ;
     assert_bool "Desktop was NATed" (!src = Some public_ip)
  *)

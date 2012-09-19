@@ -50,13 +50,13 @@ EXAMPLES_BYTE = \
 	examples/http_static_server.byte \
 	examples/beautify_mac.byte \
 	examples/test_ping.byte \
-	examples/simu_perfweb.byte \
 	examples/capecho.byte \
+#	examples/simu_perfweb.byte
 
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
-REQUIRES = bitstring bitstring.syntax batteries batteries.pa_string.syntax lwt lwt.unix lwt.extra lwt.syntax
+REQUIRES = bitstring bitstring.syntax batteries batteries.pa_string.syntax
 SYNTAX=-syntax camlp4o
 
 include $(top_srcdir)make.common

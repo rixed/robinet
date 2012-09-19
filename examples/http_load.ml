@@ -46,16 +46,16 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
     let iface = Pcap.openif ifname true "" 1500 in
     Hub.Repeater.set_read nb_srcs hub (Pcap.inject_pdu iface) ;
     (* Start the browsers *)
-    let browsing_threads = List.map (fun h ->
+    List.iter (fun h ->
         let browser = Browser.make h in
         match pause with
         | Some pause -> Browser.user browser ~pause:pause max_depth (Url.of_string start_url)
-        | None       -> Browser.spider browser max_depth (Url.of_string start_url)) hosts in
+        | None       -> Browser.spider browser max_depth (Url.of_string start_url)) hosts ;
     (* Prepare a timeout in 15s *)
     Clock.delay (Clock.Interval.sec 15.) failwith "timeout" ;
     (* Run everything *)
-    Lwt.choose ([ Pcap.sniffer iface (Hub.Repeater.write nb_srcs hub) ;
-                  Clock.run true ] @ browsing_threads)
+    ignore (Pcap.sniffer iface (Hub.Repeater.write nb_srcs hub)) ;
+    Clock.run false
 
 let main =
     let ifname        = ref "eth0"
@@ -81,13 +81,9 @@ let main =
               "Load an HTTP server by simulating browsing" ;
     if !dns_str = None && !gw_str <> None then dns_str := !gw_str ;
     Random.self_init () ;
-    Lwt_main.run (
-        let gw  = Option.map (fun gw -> Eth.IPv4 (Ip.Addr.of_string gw)) !gw_str
-        and nameserver = Option.map (fun ip -> Ip.Addr.of_string ip) !dns_str in
-        Lwt.choose [
-            run !ifname (Ip.Cidr.of_string !src_range_str) !nb_srcs
-                ?gw ?search_sfx:!search_sfx ?nameserver ?pause:!pause !max_depth !start_url ;
-            Metric.report_thread stdout 10.
-        ]
-    )
+    let gw  = Option.map (fun gw -> Eth.IPv4 (Ip.Addr.of_string gw)) !gw_str
+    and nameserver = Option.map (fun ip -> Ip.Addr.of_string ip) !dns_str in
+    ignore (Metric.report_thread stdout 10.) ;
+    run !ifname (Ip.Cidr.of_string !src_range_str) !nb_srcs
+                ?gw ?search_sfx:!search_sfx ?nameserver ?pause:!pause !max_depth !start_url
 

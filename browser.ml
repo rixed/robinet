@@ -30,7 +30,6 @@ open Batteries
 open Bitstring
 open Tools
 open Http
-open Lwt
 open Html
 
 let debug = false
@@ -233,71 +232,77 @@ let make_vacant_cnx t tcp http addr port =
     clean_vacant_cnxs t ;
     Hashtbl.add t.vacant_cnxs (addr, port) { tcp ; http ; last_used = Clock.now () }
 
-(* Takes an URL and an optional body and return the associated optional document *)
-let rec request t ?(command="GET") ?(headers=[]) ?body url =
-    let must_close_cnx headers =
-        match headers_find "Connection" headers with
-        | Some str when String.icompare str "close" = 0 -> true
-        | _ -> false in
-    let get_msg addr port =
+(* Takes an URL and an optional body and call the continuation with the obtained document *)
+let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
+    let get_msg addr port cont =
         (* connect *)
         (* Use a pool of tcp cnx already established _and_not_used_by_any_thread_ *)
         (* FIXME: this should be a pool of Http.TRXtop (optionaly with Tcp if we can't close the Tcp cnx in any other way) DONE? *)
         if debug then Printf.printf "Browser: connecting to addr %s\n" (Host.string_of_addr addr) ;
-        lwt http, tcp = match find_vacant_cnx t addr port with
+        let with_http_cnx = function
+        | None -> cont None
+        | Some (http, tcp) ->
+            TRXtop.set_recv http (fun msg ->
+                TRXtop.set_recv http ignore ; (* we only want to trigger once *)
+                cont (Some (msg, http, tcp))) ;
+            (* now that the receive function is ready, send the query *)
+            let path = url.Url.path^url.Url.params^url.Url.query in
+            let add_headers n v hs = if headers_find n headers = None then (n, v)::hs else hs in
+            let headers = add_headers "User-Agent" t.user_agent headers in
+            let headers = add_headers "Host" url.Url.net_loc headers in
+            let headers = add_headers "Connection" "Keep-Alive" headers in
+            let headers = add_headers "Accept" "*/*" headers in
+            let headers =
+                let cookie_str = cookie_string t url.Url.net_loc url.Url.path in
+                if cookie_str <> "" then (
+                    if debug then Printf.printf "Browser: sent cookies: %s for get %s\n" cookie_str path ;
+                    ("Cookie", cookie_str)::headers
+                ) else headers in
+            let headers = match body with
+                | None -> headers
+                | Some b -> ["Content-Length", string_of_int (String.length b)] @ headers
+            in
+            Pdu.make_request command path ?body headers |>
+            TRXtop.tx http in
+        match find_vacant_cnx t addr port with
             | None ->
                 if debug then Printf.printf "Browser: establishing new cnx\n" ;
                 let http = TRXtop.make () in
-                lwt tcp = t.host.Host.tcp_connect addr port in
-                ignore ((TRXtop.rx http) <-= tcp.Tcp.TRX.trx) ;
-                TRXtop.set_emit http (tx tcp.Tcp.TRX.trx) ;
-                Lwt.return (http, tcp)
+                t.host.Host.tcp_connect addr port (function
+                | None -> cont None
+                | Some tcp ->
+                    ignore ((TRXtop.rx http) <-= tcp.Tcp.TRX.trx) ;
+                    TRXtop.set_emit http (tx tcp.Tcp.TRX.trx) ;
+                    with_http_cnx (Some (http, tcp)))
             | Some v ->
-                Lwt.return (v.http, v.tcp) in
-        let waiter, wakener = wait () in
-        TRXtop.set_recv http (fun msg ->
-            TRXtop.set_recv http ignore ; (* we only want to trigger once *)
-            wakeup wakener (msg, http, tcp)) ;
-        (* send query *)
-        let path = url.Url.path^url.Url.params^url.Url.query in
-        let headers = [ "User-Agent", t.user_agent ;
-                        "Host", url.Url.net_loc ;
-                        "Connection", "Keep-Alive" ;
-                        "Accept", "*/*" ] @ headers in
-        let headers =
-            let cookie_str = cookie_string t url.Url.net_loc url.Url.path in
-            if cookie_str <> "" then (
-                if debug then Printf.printf "Browser: sent cookies: %s for get %s\n" cookie_str path ;
-                ("Cookie", cookie_str)::headers
-            ) else headers in
-        let headers = match body with
-            | None -> headers
-            | Some b -> ["Content-Length", string_of_int (String.length b)] @ headers
-        in
-        let pdu = Pdu.make_request command path ?body headers in
-        TRXtop.tx http pdu ;
-        (* wait for response *)
-        waiter in
+                with_http_cnx (Some (v.http, v.tcp)) in
     if url.Url.scheme <> "http" then (
-        return (err (Printf.sprintf "Browser: bad scheme: %s" (Url.to_string url)))
+        Printf.printf "Browser: bad scheme: %s" (Url.to_string url)
     ) else (
         let get_start = Metric.Timed.start message_get in
-        let addr = Host.Name url.Url.net_loc
-        and port = Tcp.Port.o 80 in
-        Lwt.catch (fun () ->
-            lwt msg, http, tcp = get_msg addr port in
+        let addr, port =
+            (* Try to use the port present in the URL *)
+            try let n = String.index url.Url.net_loc ':' in
+                Host.Name (String.sub url.Url.net_loc 0 n),
+                String.lchop ~n:(n+1) url.Url.net_loc |>
+                int_of_string |> Tcp.Port.o
+            with _ ->
+                Host.Name url.Url.net_loc, Tcp.Port.o 80 in
+        get_msg addr port (function
+        | None -> cont None
+        | Some (msg, http, tcp) ->
             Metric.Timed.stop message_get get_start (Url.to_string url) ;
-            (match msg with
+            match msg with
                 | TRXtop.HttpError x ->
                     if debug then Printf.printf "Browser: got error %s\n%!" x ;
                     tcp.Tcp.TRX.close () ;
-                    return None
+                    cont None
                 | TRXtop.HttpMsg (pdu, opened) ->
                     (* Close the TCP cnx if we are done with it, or relieve it *)
                     if opened && not (must_close_cnx pdu.Pdu.headers) then (
                         make_vacant_cnx t tcp http addr port ;
                     ) else (
-                        if debug then Printf.printf "Browser: close the Tcp cnx\n%!" ;
+                        if debug then Printf.printf "Browser: closing the Tcp cnx\n%!" ;
                         tcp.Tcp.TRX.close ()
                     ) ;
                     (* update Get metric *)
@@ -320,99 +325,96 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url =
                             (match headers_find "Location" headers with
                                 | Some location ->
                                     let url' = Url.resolve url (Url.of_string location) in
-                                    if url' <> url then request t ~command:"GET" url' (* FIXME: better handling of redirection loops *) (* FIXME: check we are supposed to go from POST to GET *)
-                                    else return None
-                                | None -> return None)
+                                    if url' <> url then request t ~command:"GET" url' cont (* FIXME: better handling of redirection loops *) (* FIXME: check we are supposed to go from POST to GET *)
+                                    else cont None
+                                | None -> cont None)
                         | { Pdu.cmd = Status 200 ; Pdu.body = body ; Pdu.headers = headers } ->
                             if debug then Printf.printf "Browser: Got HTTP 200 Ok for %s\n%!" (Url.to_string url) ;
-                            return (Some (headers, body))
+                            cont (Some (headers, body))
                         | _ ->
                             if debug then Printf.printf "Browser: Cannot get %s\n%!" (Url.to_string url) ;
-                            return None)))
-            (fun _exn -> return None)
+                            cont None))
     )
 
 (* Takes an URL and returns headers and body *)
-let get t ?headers url =
+let get t ?headers url cont =
     if debug then Printf.printf "Browser: get %s\n%!" (Url.to_string url) ;
-    request t ?headers url
+    request t ?headers url cont
 
-let post t ?(headers=[]) url vars =
-    if debug then Printf.printf "Browser: get %s\n%!" (Url.to_string url) ;
+let post t ?(headers=[]) url vars cont =
+    if debug then Printf.printf "Browser: post %s\n%!" (Url.to_string url) ;
     let headers = [ "Content-Type", "application/x-www-form-urlencoded; charset=UTF-8" ] @ headers in
     let body = List.map (fun (n, v) ->
                             (Http.post_encode n)^"="^(Http.post_encode v))
                         vars |>
                String.concat "&" in
-    request t ~command:"POST" ~body ~headers url
+    request t ~command:"POST" ~body ~headers url cont
 
 let spider t max_depth start =
     let fetched = Hashtbl.create 100 in
     let rec aux max_depth url =
         if debug then Printf.printf "Browser: spider: fetching %s with max_depth %d\n%!" (Url.to_string url) max_depth ;
         Hashtbl.add fetched url true ;
-        lwt doc = get t url in
-        if max_depth > 1 && doc <> None then (
-            let headers, body = Option.get doc in
-            let content_type = headers_find "Content-type" headers in
-            if (match content_type with None -> true | Some str -> String.exists (String.lowercase str) "text/html") then (
-                match Html.parse body with
-                | Some tree ->
-                    extract_links ~default_base:url headers tree //
-                        (Hashtbl.mem fetched |- not) |>
-                        List.of_enum |>
-                        Lwt_list.iter_p (aux (max_depth-1))
-                | None ->
-                    if debug then Printf.printf "Browser: Cannot parse HTML from %s\n" (Url.to_string url) ;
-                    Lwt.return ()
-            ) else return ()
-        ) else (
-            if debug then Printf.printf "Browser: done spiding web\n" ;
-            return ()
+        get t url (function
+        | None -> ()
+        | Some (headers, body) ->
+            if max_depth > 1 then (
+                let content_type = headers_find "Content-type" headers in
+                if (match content_type with None -> true | Some str -> String.exists (String.lowercase str) "text/html") then (
+                    match Html.parse body with
+                    | Some tree ->
+                        extract_links ~default_base:url headers tree //
+                            (Hashtbl.mem fetched |- not) |>
+                            List.of_enum |>
+                            List.iter (fun url ->
+                                Clock.asap (aux (max_depth-1)) url)
+                    | None ->
+                        if debug then Printf.printf "Browser: Cannot parse HTML from %s\n" (Url.to_string url)
+                )
+            )
         ) in
-    aux max_depth (Url.resolve Url.empty start)
+    aux max_depth (Url.resolve Url.empty start) ;
+    if debug then Printf.printf "Browser: done spiding web\n"
 
 let user t ?pause max_depth start =
     let fetched = Hashtbl.create 100 in
     let rec aux max_depth url =
-        if debug then Printf.printf "Browser: spider: fetching %s with max_depth %d\n%!" (Url.to_string url) max_depth ;
+        if debug then Printf.printf "Browser: user: fetching %s with max_depth %d\n%!" (Url.to_string url) max_depth ;
         Hashtbl.add fetched url true ;
-        lwt doc = get t url in
-        if max_depth > 1 && doc <> None then (
-            let headers, body = Option.get doc in
-            let content_type = headers_find "Content-type" headers in
-            if (match content_type with None -> true | Some str -> String.exists (String.lowercase str) "text/html") then (
-                (* Fetch eveything a browser would fetch at once (images, etc) *)
-                lwt _ = extract_links_simple ~same_page:true ~default_base:url headers body //
-                    (Hashtbl.mem fetched |- not) |>
-                    List.of_enum |>
-                    tap (fun l -> if debug then Printf.printf "Browser: will iter_p on %d urls\n" (List.length l)) |>
-                    Lwt_list.iter_p (fun url' ->
-                        if debug then Printf.printf "Browser: spider: fetching %s for %s\n" (Url.to_string url') (Url.to_string url);
-                        lwt _ = get t url' in
-                        return ()) in
-                (* fetch sequentially, depth first, a links *)
-                lwt _ = extract_links_simple ~same_page:false ~default_base:url headers body //
-                    (Hashtbl.mem fetched |- not) |>
-                    List.of_enum |>
-                    tap (fun l -> if debug then Printf.printf "Browser: will iter_s on %d urls\n" (List.length l)) |>
-                    Lwt_list.iter_s (fun url' ->
-                        lwt () = match pause with
-                            | None -> Lwt.return ()
-                            | Some t ->
-                                let p = Clock.Interval.o (Random.float (2.*.t)) in
-                                if debug then Printf.printf "Browser: Will pause for %s\n%!" (Clock.Interval.to_string p) ;
-                                Clock.sleep p in
-                        if debug then Printf.printf "Browser: spider: fetching %s after %s\n" (Url.to_string url') (Url.to_string url) ;
-                        aux (max_depth-1) url') in
-                if debug then Printf.printf "Browser: done with %s\n" (Url.to_string url) ;
-                return ()
-            ) else return ()
-        ) else (
-            if debug then Printf.printf "Browser: done using browser.\n%!" ;
-            return ()
-        ) in
-    aux max_depth (Url.resolve Url.empty start)
+        get t url (function
+        | None -> ()
+        | Some (headers, body) ->
+            if max_depth > 1 then (
+                let content_type = headers_find "Content-type" headers in
+                if (match content_type with None -> true | Some str -> String.exists (String.lowercase str) "text/html") then (
+                    (* Fetch eveything a browser would fetch at once (images, etc) *)
+                    extract_links_simple ~same_page:true ~default_base:url headers body //
+                        (Hashtbl.mem fetched |- not) |>
+                        List.of_enum |>
+                        tap (fun l -> if debug then Printf.printf "Browser: will iter on %d urls\n" (List.length l)) |>
+                        List.iter (fun url' ->
+                            if debug then Printf.printf "Browser: user: fetching %s for %s\n" (Url.to_string url') (Url.to_string url) ;
+                            Clock.asap (aux (max_depth-1)) url') ;
+                    (* fetch sequentially, depth first, a links *)
+                    let urls = extract_links_simple ~same_page:false ~default_base:url headers body //
+                        (Hashtbl.mem fetched |- not) in
+                    let rec fetch_next () =
+                        match Enum.get urls with
+                        | None -> ()
+                        | Some url' ->
+                            let d = match pause with
+                                | None -> 0.
+                                | Some t -> Random.float (2.*.t) in
+                            Clock.delay (Clock.Interval.o d) (fun () ->
+                                if debug then Printf.printf "Browser: user: fetching %s after %s\n" (Url.to_string url') (Url.to_string url) ;
+                                aux (max_depth-1) url' ;
+                                fetch_next ()) () in
+                    fetch_next () ;
+                    if debug then Printf.printf "Browser: done with %s\n" (Url.to_string url)
+                )
+            )) in
+    aux max_depth (Url.resolve Url.empty start) ;
+    if debug then Printf.printf "Browser: done using browser.\n%!" ;
 
 module Plan =
 struct

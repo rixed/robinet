@@ -152,6 +152,8 @@ let rec remove_last_if cond = function
     | i :: l  -> i :: (remove_last_if cond l)
 
 let none_if_not_found f x = try Some (f x) with Not_found -> None
+let none_if_exception f x = try Some (f x) with _ -> None
+
 
 let str_all_matches str =
     let rec aux prevs n =
@@ -351,6 +353,8 @@ let tx trx = trx.ins.write
 let rx trx = trx.out.write
 
 let inverse_trx trx = { ins = trx.out ; out = trx.ins }
+
+let null_trx = { ins = null_dev ; out = null_dev }
 
 (** [f <-= trx] sets f as the receive function of this [trx].
  * {b Note:} [trx] is returned so that you can write such things as:

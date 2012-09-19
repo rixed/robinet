@@ -77,7 +77,7 @@ test: all_tests.byte all_tests.opt
 
 # Clean up
 clean: clean-spec
-	rm -f *.cm[ioxa] *.cmxa *.a *.s *.o *.byte *.opt *.top .depend all_tests.*
+	rm -f *.cm[ioxa] *.cmxa *.a *.s *.o *.byte *.opt *.top *.annot .depend all_tests.*
 
 # Dependencies
 .depend:
