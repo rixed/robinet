@@ -18,8 +18,21 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 (**
- * This module holds all functions related to [libpcap], packet sniffing,
- * packet injection and pcap file reading and writing.
+   This module holds all functions related to [libpcap], packet sniffing,
+   packet injection and pcap file reading and writing.
+
+   For instance, to create a small pcap file with a single packet:
+
+{[
+
+Tcp.Pdu.make ~dst_port:(Tcp.Port.o 5000) (bitstring_of_string "HTTP/1.2 pas glop") |>
+    Tcp.Pdu.pack |>
+    Ip.Pdu.make Ip.Proto.tcp (Ip.Addr.random ()) (Ip.Addr.random ()) |>
+    Ip.Pdu.pack |>
+    Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (Eth.Addr.random ()) |>
+    Eth.Pdu.pack |>
+    Pcap.save "/tmp/random.pcap";;
+]}
  *)
 open Batteries
 open Bitstring

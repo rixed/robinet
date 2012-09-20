@@ -40,7 +40,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
             | Some ({ Pdu.op = BootRequest ; Pdu.hlen = 6 ; _ } as dhcp)
               when dhcp.Pdu.htype = Arp.HwType.eth &&
                    dhcp.Pdu.msg_type = Some MsgType.discover ->
-                Log.(log logger Debug (lazy (Printf.sprintf "Received a DHCP Discover from %s" (string_of_bitstring dhcp.Pdu.chaddr)))) ;
+                Log.(log logger Debug (lazy (Printf.sprintf "Received a DHCP Discover from %s" (hexstring_of_bitstring dhcp.Pdu.chaddr)))) ;
                 (match Enum.get !rem_cidr with
                 | Some offered_ip ->
                     (* Add this entry to our ARP cache *)
@@ -61,7 +61,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
             | Some ({ Pdu.op = BootRequest ; Pdu.hlen = 6 ; _ } as dhcp)
               when dhcp.Pdu.htype = Arp.HwType.eth &&
                    dhcp.Pdu.msg_type = Some MsgType.request ->
-                Log.(log logger Debug (lazy (Printf.sprintf "Received a DHCP Request from %s" (string_of_bitstring dhcp.Pdu.chaddr)))) ;
+                Log.(log logger Debug (lazy (Printf.sprintf "Received a DHCP Request from %s" (hexstring_of_bitstring dhcp.Pdu.chaddr)))) ;
                 (* Look for previous offers *)
                 (match BitHash.find_option offers dhcp.Pdu.chaddr with
                 | Some offered_ip ->

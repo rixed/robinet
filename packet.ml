@@ -113,15 +113,15 @@ Now imagine you want to edit a pcap to change the TCP source/dest port from 21 t
 
 {[
 # open Packet;;
-# enum_of_file "some.pcap" /@
-    (function cap::eth::ip::Pdu.Tcp ({ Tcp.Pdu.dst_port = port ; _ } as tcp)::rest when port = Tcp.Port.o 21 ->
-               cap::eth::ip::Pdu.Tcp { tcp with Tcp.Pdu.dst_port = Tcp.Port.o 2121 }::rest
-           | cap::eth::ip::Pdu.Tcp ({ Tcp.Pdu.src_port = port ; _ } as tcp)::rest when port = Tcp.Port.o 21 ->
-               cap::eth::ip::Pdu.Tcp { tcp with Tcp.Pdu.src_port = Tcp.Port.o 2121 }::rest
+# let old = Tcp.Port.o 21 and newp = Tcp.Port.o 2121 in
+    enum_of_file "some.pcap" /@
+    (function cap::eth::ip::Pdu.Tcp ({ Tcp.Pdu.dst_port = port ; _ } as tcp)::rest when port = old ->
+               cap::eth::ip::Pdu.Tcp { tcp with Tcp.Pdu.dst_port = newp }::rest
+           | cap::eth::ip::Pdu.Tcp ({ Tcp.Pdu.src_port = port ; _ } as tcp)::rest when port = old ->
+               cap::eth::ip::Pdu.Tcp { tcp with Tcp.Pdu.src_port = newp }::rest
            | x -> x) |>
     to_file "changed.pcap" ;;
 ]}
-
 
 *)
 open Batteries

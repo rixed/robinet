@@ -61,7 +61,7 @@ SYNTAX=-syntax camlp4o
 
 include $(top_srcdir)make.common
 
-.PHONY: check examples
+.PHONY: examples
 
 all: robinet.top examples
 
@@ -80,4 +80,3 @@ clean-spec:
 	rm -f *.pcap
 	rm -f examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
 
-check: test

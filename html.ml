@@ -193,8 +193,8 @@ let attr () =
     either [ attr_with_value () ; attr_without_value () ]
 
 (*$T attr
-    check_results var_printer (attr ()) "attr=\"value\"" false (Res (`Attr ("attr", "value"), []))
-    check_results var_printer (attr ()) "attr" false (Res (`Attr ("attr", ""), []))
+    check_results var_printer (attr ()) "attr=\"value\"" false (Peg.Res (`Attr ("attr", "value"), []))
+    check_results var_printer (attr ()) "attr" false (Peg.Res (`Attr ("attr", ""), []))
 *)
 
 let attr_seq () =
@@ -254,11 +254,11 @@ let tag () =
 
 (*$T tag
     check_results var_printer (tag ()) "<name attr1='val\"ue1' attr2 = \"val'ue2\" attr3 />" true \
-        (Res (`Tag ("name", [`Attr ("attr1", "val\"ue1") ; `Attr ("attr2", "val'ue2") ; `Attr ("attr3", "")]), []))
+        (Peg.Res (`Tag ("name", [`Attr ("attr1", "val\"ue1") ; `Attr ("attr2", "val'ue2") ; `Attr ("attr3", "")]), []))
     check_results var_printer (tag ()) "<NaMe attr1 attr2=value2>" true \
-        (Res (`OpenTag ("name", [`Attr ("attr1", "") ; `Attr ("attr2", "value2") ]), []))
+        (Peg.Res (`OpenTag ("name", [`Attr ("attr1", "") ; `Attr ("attr2", "value2") ]), []))
     check_results var_printer (tag ()) "</Name>XY" false \
-        (Res (`CloseTag "name", ['X'; 'Y']))
+        (Peg.Res (`CloseTag "name", ['X'; 'Y']))
 *)
 
 let xml_decl () =
@@ -730,7 +730,7 @@ let extract_links_simple ?same_page ?(default_base=Url.empty) headers body =
         (extract_links_simple [] "bla <a href=\"glop1\"> bla <src = 'glop2' >" /@ \
             Url.to_string |> \
             List.of_enum |> \
-            List.sort compare)
+            List.sort Pervasives.compare)
 *)
 
 let extract_links ?(default_base=Url.empty) headers tree =
@@ -798,5 +798,5 @@ let extract_links ?(default_base=Url.empty) headers tree =
                 extract_links [] tree /@ \
                 Url.to_string |> \
                 List.of_enum |> \
-                List.sort compare in))
+                List.sort Pervasives.compare))
 *)
