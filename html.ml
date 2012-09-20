@@ -37,7 +37,7 @@ let check_results res_printer p bs m expected =
                                 res_printer res (String.of_list rem) in
     let res = p (String.to_list bs) m in
     let ok = res = expected in
-    if not ok then Printf.printf "FAIL: \"%s\" -> %a (expecting %a)" bs print_res res print_res expected ;
+    if debug && not ok then Printf.printf "FAIL: \"%s\" -> %a (expecting %a)" bs print_res res print_res expected ;
     ok
 
 
@@ -391,20 +391,19 @@ let autoclose l =
 (** Used for tests *)
 let check_varlist op str expected =
     match tag_seq () (String.to_list str) false with
-        | Fail -> Printf.printf "Html: %s -> Fail?!\n" str ; false
-        | Wait -> Printf.printf "Html: %s -> Wait?!\n" str ; false
+        | Fail -> if debug then Printf.printf "Html: %s -> Fail?!\n" str ; false
+        | Wait -> if debug then Printf.printf "Html: %s -> Wait?!\n" str ; false
         | Res (res, []) ->
             let closed = op res in
             let ok = closed = expected in
-            Printf.printf "Html: %s -> %a " str (List.print var_printer) closed ;
-            if ok then (
-                Printf.printf "OK\n"
-            ) else (
-                Printf.printf "FAIL! (expected %a)\n" (List.print var_printer) expected
+            if debug then (
+                Printf.printf "Html: %s -> %a " str (List.print var_printer) closed ;
+                if ok then Printf.printf "OK\n"
+                else Printf.printf "FAIL! (expected %a)\n" (List.print var_printer) expected
             ) ;
             ok
         | Res (_, _::_) ->
-            Printf.printf "Html: %s -> Res with some rest?!\n" str ; false
+            if debug then Printf.printf "Html: %s -> Res with some rest?!\n" str ; false
 
 (*$T autoclose
     check_varlist autoclose "<html>bla</html>" \
@@ -540,22 +539,24 @@ let rec to_tree ?up_to = function
 
 let check_tree op str expected =
     match tag_seq () (String.to_list str) false with
-    | Fail -> Printf.printf "Html: check_tree: %s -> Fail?!\n" str ; false
-    | Wait -> Printf.printf "Html: check_tree: %s -> Wait?!\n" str ; false
+    | Fail -> if debug then Printf.printf "Html: check_tree: %s -> Fail?!\n" str ; false
+    | Wait -> if debug then Printf.printf "Html: check_tree: %s -> Wait?!\n" str ; false
     | Res (_, _::_) ->
-        Printf.printf "Html: check_tree: %s -> Cannot parse entirely?!\n" str ; false
+        if debug then Printf.printf "Html: check_tree: %s -> Cannot parse entirely?!\n" str ; false
     | Res (res, []) ->
         let trees = op res in
         let ok = trees = expected in
-        Printf.printf "Html: check_tree: %s -> %a " str (print_trees ~level:0) trees ;
-        if ok then Printf.printf " OK\n"
-        else Printf.printf "FAIL! (expected %a)\n" (print_trees ~level:0) expected ;
+        if debug then (
+            Printf.printf "Html: check_tree: %s -> %a " str (print_trees ~level:0) trees ;
+            if ok then Printf.printf " OK\n"
+            else Printf.printf "FAIL! (expected %a)\n" (print_trees ~level:0) expected
+        ) ;
         ok
 
 (*$R to_tree
     let do_check = check_tree (fun r ->
-        let trees, rem = to_tree (reorder (autoclose r)) in
-        if rem <> [] then Printf.printf "Html: check to_tree: some tags left?!\n" ;
+        let trees, _rem = to_tree (reorder (autoclose r)) in
+        (*if rem <> [] then Printf.printf "Html: check to_tree: some tags left?!\n" ;*)
         trees) in
     assert_bool "simple" (do_check "<html><body>blabla</body></html>"
         [ Node { name = "html" ; attrs = [] ; children =

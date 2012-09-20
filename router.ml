@@ -131,7 +131,7 @@ v}
                                                     (ip.Ip.Pdu.payload :> bitstring)
                                                     new_src_port) in
             let ip = { ip with Ip.Pdu.src = t.addr ; payload } in
-            Clock.asap t.emit (Ip.Pdu.pack ip)
+            t.emit (Ip.Pdu.pack ip)
 
     let rx t bits =
         if debug then Printf.printf "NAT: Received %d bytes\n%!" (bytelength bits) ;
@@ -148,7 +148,7 @@ v}
                                                         (ip.Ip.Pdu.payload :> bitstring)
                                                         cnx.in_port) in
                 let ip = { ip with Ip.Pdu.dst = cnx.in_addr ; payload } in
-                Clock.asap t.recv (Ip.Pdu.pack ip)))
+                t.recv (Ip.Pdu.pack ip)))
 
     (** [make ip n] returns a {!Tools.trx} corresponding to a NAT device (tx is for transmitting from the LAN to the outside) that can track [n] sockets. *)
     let make addr nb_max_cnxs =
@@ -201,7 +201,7 @@ struct
     (** A router is an array of trxs and a route table *)
     (* FIXME: add a logger *)
     type t = {      trxs : trx array ;
-               route_tbl : (route * int array) array }    (** The route table is an array of route to output interface indices. *)
+               route_tbl : (route * int) array }    (** The route table is an array of route to output interface indices. *)
 
     (** Call [write n t bits] when an IP packet ([bits]) is received on interface [n]. *)
     let write n t bits =
@@ -213,16 +213,16 @@ struct
         and proto_opt = Option.map (fun ip -> ip.Ip.Pdu.proto) ip_opt
         and src_port_opt = Option.map Tuple3.second ip_ports_opt
         and dst_port_opt = Option.map Tuple3.second ip_ports_opt in
-        try snd (Array.find (fun (r, _) ->
-                test_route r n src_opt dst_opt proto_opt src_port_opt dst_port_opt)
-                t.route_tbl) |>
-        Array.iter (fun o ->
+        try let o = Array.find (fun (r, _) ->
+                        test_route r n src_opt dst_opt proto_opt src_port_opt dst_port_opt)
+                        t.route_tbl |> snd in
             if o <> n then (
-                if debug then Printf.printf "Router: forwarding packet to port %d\n" o ;
-                tx t.trxs.(o) bits
+                if debug then Printf.printf "Router: forwarding packet to port %d\n%!" o ;
+                tx t.trxs.(o) bits ;
+                if debug then Printf.printf "Router: Done\n%!"
             ) else (
                 if debug then Printf.printf "Router: dropping packet since dest = source\n" ;
-            ))
+            )
         with Not_found ->
             if debug then Printf.printf "Router: dropping packet since no route match\n"
 
@@ -235,9 +235,8 @@ struct
     let make trxs route_tbl =
         (* Check we route only from/to the given ports *)
         let max_used_port =
-            Array.fold_left (fun prev (r, outs) ->
-                Array.fold_left max 0 outs |>
-                max (Option.default 0 r.iface_num) |>
+            Array.fold_left (fun prev (r, out) ->
+                max out (Option.default 0 r.iface_num) |>
                 max prev)
                 0 route_tbl in
         assert (max_used_port < Array.length trxs) ;
@@ -252,50 +251,57 @@ struct
             Array.of_enum in
         make trxs route_tbl
 
-    (*$R
+    (*$R write
         (* Suppose we have a router for these 3 networks: *)
         let addrs = [| Ip.Addr.of_string "192.168.1.254", Eth.Addr.random () ;
                        Ip.Addr.of_string "192.168.2.254", Eth.Addr.random () ;
                        Ip.Addr.of_string "192.168.3.254", Eth.Addr.random () |] in
         (* With the obvious rules: *)
         let route_tbl = [| { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Cidr.of_string "192.168.1.0/24") ;
-                             ip_proto = None ; src_port = None ; dst_port = None }, [|0|] ;
+                             ip_proto = None ; src_port = None ; dst_port = None }, 0 ;
                            { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Cidr.of_string "192.168.2.0/24") ;
-                             ip_proto = None ; src_port = None ; dst_port = None }, [|1|] ;
+                             ip_proto = None ; src_port = None ; dst_port = None }, 1 ;
                            { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Cidr.of_string "192.168.3.0/24") ;
-                             ip_proto = None ; src_port = None ; dst_port = None }, [|2|] |] in
+                             ip_proto = None ; src_port = None ; dst_port = None }, 2 |] in
         let router = make_from_addrs (Array.enum addrs) route_tbl in
         
         (* Now we will count incoming packets from each port (ARP requests, actually) : *)
         let counts = Array.create 3 0 in
         for i = 0 to Array.length counts - 1 do
-            set_read i router (fun _ -> counts.(i) <- succ counts.(i))
+            set_read i router (fun _ ->
+                Printf.printf "Router: got a packet on port %d\n%!" i ;
+                counts.(i) <- succ counts.(i))
         done ;
         let tot_count () = Array.reduce (+) counts
         and reset_count () = Array.iteri (fun i _ -> counts.(i) <- 0) counts in
 
         (* We are going to send some IP packets with a given destination: *)
         let easy_send n dst =
-            let ip = { Ip.Pdu.random () with Ip.Pdu.dst = Ip.Addr.of_string dst } in
-            write n router (Ip.Pdu.pack ip) in
+            { Ip.Pdu.random () with Ip.Pdu.dst = Ip.Addr.of_string dst } |>
+            Ip.Pdu.pack |>
+            write n router in
 
         (* Let's play! *)
         easy_send 0 "1.2.3.4" ;
         easy_send 1 "1.2.3.4" ;
+        Clock.run false ;
         "no match means dropped" @? (tot_count () = 0) ;
 
         reset_count () ;
         easy_send 0 "192.168.3.42" ;
+        Clock.run false ;
         "route from 0 to 2" @? (tot_count () = 1 && counts.(2) = 1) ;
 
         reset_count () ;
         easy_send 2 "192.168.2.42" ;
+        Clock.run false ;
         "route from 2 to 1" @? (tot_count () = 1 && counts.(1) = 1) ;
 
         reset_count () ;
         easy_send 0 "192.168.1.42" ;
+        Clock.run false ;
         "no revert" @? (tot_count () = 0) ;
-     *)
+    *)
 
     (*$>*)
 end
@@ -319,13 +325,13 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
     let router = Router.(make [| gw_eth.Eth.TRX.trx ; nat |]
                     [| (* route everything from anywhere to LAN if dest fits local_cidr *)
                        { iface_num = None ; src_mask = None ; dst_mask = Some local_cidr ;
-                         ip_proto = None ; src_port = None ; dst_port = None }, [|0|] ;
+                         ip_proto = None ; src_port = None ; dst_port = None }, 0 ;
                        (* or zero IP address *)
                        { iface_num = None ; src_mask = Some (Ip.Cidr.single Ip.Addr.zero) ; dst_mask = None ;
-                         ip_proto = None ; src_port = None ; dst_port = None }, [|0|] ;
+                         ip_proto = None ; src_port = None ; dst_port = None }, 0 ;
                        (* route everything else toward nat *)
                        { iface_num = None ; src_mask = None ; dst_mask = None ;
-                         ip_proto = None ; src_port = None ; dst_port = None }, [|1|] |]) in
+                         ip_proto = None ; src_port = None ; dst_port = None }, 1 |]) in
     nat.ins.set_read (Router.write 1 router) ;
     Dhcpd.serve dhcpd local_ips ;
     { ins = { write = (fun bits -> Hub.Repeater.write 0 hub bits) ;
