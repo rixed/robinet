@@ -17,9 +17,10 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(*
-  This handles html documents.
-  For instance it can parse a body, compose a POST, etc...
+(**
+  HyperText Markup Language.
+
+  Useful to parse a body, compose a POST, etc...
 *)
 open Batteries
 open Tools

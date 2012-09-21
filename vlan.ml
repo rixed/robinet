@@ -18,7 +18,7 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 (**
- * Ethernet 802.1q Virtual Lan implementation.
+ * Ethernet 802.1q Virtual Lan.
  * We decode/encode it for the purpose of manipulating pcap files,
  * but it's currently unused in the network simulator.
  *

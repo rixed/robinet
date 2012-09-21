@@ -17,6 +17,9 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
+(**
+  Equipment for routing/nating traffic
+ *)
 open Batteries
 open Bitstring
 open Tools

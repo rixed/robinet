@@ -17,7 +17,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(** User Data Protocol (UDP) (un)packing. *)
+(** User Data Protocol. *)
 open Batteries
 open Bitstring
 open Tools
