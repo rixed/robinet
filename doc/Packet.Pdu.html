@@ -149,10 +149,10 @@ Each layer can be of any one of these known protocol.<br>
 
 <pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = <code class="type"><a href="Packet.Pdu.html#TYPElayer">layer</a> list</code> </pre>
 
-<pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALPacket.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Packet.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><div class="info">
-<code class="code">pack pdu</code> converts the layer list back to a <code class="code">bitstring</code>.<br>
+<pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALPacket.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Packet.Pdu.html#TYPEt">t</a> -> <a href="Pcap.Pdu.html#TYPEt">Pcap.Pdu.t</a></code></pre><div class="info">
+<code class="code">pack pdu</code> converts the layer list back to a <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a><br>
 </div>
 <pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALPacket.Pdu.unpack.html">unpack</a></span> : <code class="type"><a href="Pcap.Pdu.html#TYPEt">Pcap.Pdu.t</a> -> <a href="Packet.Pdu.html#TYPElayer">layer</a> list</code></pre><div class="info">
-Convert a <code class="code">bitstring</code> (from a Pcap.pdu) into a <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
+Converts a <code class="code"><span class="constructor">Pcap</span>.pdu.t</code> into a <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
 </div>
 </body></html>

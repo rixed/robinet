@@ -37,17 +37,7 @@
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
 <link title="Url" rel="Chapter" href="Url.html">
-<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Router.Router.make</title>
+<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Packet.to_file</title>
 </head>
 <body>
-<code class="code"><span class="keyword">let</span>&nbsp;make&nbsp;trxs&nbsp;route_tbl&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;Check&nbsp;we&nbsp;route&nbsp;only&nbsp;from/to&nbsp;the&nbsp;given&nbsp;ports&nbsp;*)</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;max_used_port&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Array</span>.fold_left&nbsp;(<span class="keyword">fun</span>&nbsp;prev&nbsp;(r,&nbsp;out)&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;max&nbsp;out&nbsp;(<span class="constructor">Option</span>.default&nbsp;0&nbsp;r.iface_num)&nbsp;|&gt;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;max&nbsp;prev)<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0&nbsp;route_tbl&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">assert</span>&nbsp;(max_used_port&nbsp;&lt;&nbsp;<span class="constructor">Array</span>.length&nbsp;trxs)&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;t&nbsp;=&nbsp;{&nbsp;trxs&nbsp;;&nbsp;route_tbl&nbsp;}&nbsp;<span class="keyword">in</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Array</span>.iteri&nbsp;(<span class="keyword">fun</span>&nbsp;i&nbsp;trx&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;trx.ins.set_read&nbsp;(write&nbsp;i&nbsp;t))&nbsp;trxs&nbsp;;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;t</code></body></html>
+<code class="code"><span class="keyword">let</span>&nbsp;to_file&nbsp;fname&nbsp;e&nbsp;=&nbsp;<span class="constructor">Enum</span>.map&nbsp;<span class="constructor">Pdu</span>.pack&nbsp;e&nbsp;|&gt;&nbsp;<span class="constructor">Pcap</span>.file_of_enum&nbsp;fname</code></body></html>

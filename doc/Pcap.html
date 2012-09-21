@@ -58,8 +58,21 @@
 </div>
 <center><h1>Module <a href="type_Pcap.html">Pcap</a></h1></center>
 <br>
-<pre><span class="keyword">module</span> Pcap: <code class="code"><span class="keyword">sig</span></code> <a href="Pcap.html">..</a> <code class="code"><span class="keyword">end</span></code></pre> This module holds all functions related to <code class="code">libpcap</code>, packet sniffing,
- packet injection and pcap file reading and writing.<br>
+<pre><span class="keyword">module</span> Pcap: <code class="code"><span class="keyword">sig</span></code> <a href="Pcap.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>This module holds all functions related to <code class="code">libpcap</code>, packet sniffing,
+   packet injection and pcap file reading and writing.
+<p>
+
+   For instance, to create a small pcap file with a single packet:
+<p>
+
+<pre></pre><code class="code"><span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.make&nbsp;~dst_port:(<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.o&nbsp;5000)&nbsp;(bitstring_of_string&nbsp;<span class="string">"HTTP/1.2&nbsp;pas&nbsp;glop"</span>)&nbsp;|&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.pack&nbsp;|&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.make&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Proto</span>.tcp&nbsp;(<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.random&nbsp;())&nbsp;(<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.random&nbsp;())&nbsp;|&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.pack&nbsp;|&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.make&nbsp;<span class="constructor">Arp</span>.<span class="constructor">HwProto</span>.ip4&nbsp;(<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.random&nbsp;())&nbsp;(<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.random&nbsp;())&nbsp;|&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.pack&nbsp;|&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Pcap</span>.save&nbsp;<span class="string">"/tmp/random.pcap"</span>;;<br>
+</code><pre></pre><br>
 <hr width="100%">
 <pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALPcap.debug.html">debug</a></span> : <code class="type">bool</code></pre><br>
 <span id="2_Libpcaplowlevelwrappers"><h2>Libpcap low level wrappers</h2></span><br>

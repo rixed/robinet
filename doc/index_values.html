@@ -1047,7 +1047,7 @@ Return the <code class="code">bitstring</code> ready to be written into a pcap f
 </td></tr>
 <tr><td><a href="Packet.Pdu.html#VALpack">pack</a> [<a href="Packet.Pdu.html">Packet.Pdu</a>]</td>
 <td><div class="info">
-<code class="code">pack pdu</code> converts the layer list back to a <code class="code">bitstring</code>.
+<code class="code">pack pdu</code> converts the layer list back to a <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a>
 </div>
 </td></tr>
 <tr><td><a href="Ip.Pdu.html#VALpack">pack</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
@@ -1644,6 +1644,11 @@ Convert an <code class="code"><span class="constructor">Ip</span>.<span class="c
 </td></tr>
 <tr><td><a href="Ip.Cidr.html#VALto_enum">to_enum</a> [<a href="Ip.Cidr.html">Ip.Cidr</a>]</td>
 <td></td></tr>
+<tr><td><a href="Packet.html#VALto_file">to_file</a> [<a href="Packet.html">Packet</a>]</td>
+<td><div class="info">
+<code class="code"><span class="constructor">Packet</span>.to_file filename e</code> write the enumeration of <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a> into the given file.
+</div>
+</td></tr>
 <tr><td><a href="Ip.Addr.html#VALto_inet_addr">to_inet_addr</a> [<a href="Ip.Addr.html">Ip.Addr</a>]</td>
 <td></td></tr>
 <tr><td><a href="Clock.Time.html#VALto_ints">to_ints</a> [<a href="Clock.Time.html">Clock.Time</a>]</td>
@@ -1750,7 +1755,7 @@ Unpack a <code class="code">bitstring</code> into a <a href="Sll.Pdu.html#TYPEt"
 </td></tr>
 <tr><td><a href="Packet.Pdu.html#VALunpack">unpack</a> [<a href="Packet.Pdu.html">Packet.Pdu</a>]</td>
 <td><div class="info">
-Convert a <code class="code">bitstring</code> (from a Pcap.pdu) into a <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.
+Converts a <code class="code"><span class="constructor">Pcap</span>.pdu.t</code> into a <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.
 </div>
 </td></tr>
 <tr><td><a href="Ip.Pdu.html#VALunpack">unpack</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>

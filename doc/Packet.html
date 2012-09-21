@@ -153,6 +153,21 @@ Let us have a look at the first of them:
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;01&nbsp;03&nbsp;03&nbsp;07&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;....<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.payload&nbsp;=&nbsp;empty}]<br>
+</code><pre></pre>
+<p>
+
+Now imagine you want to edit a pcap to change the TCP source/dest port from 21 to 2121.
+<p>
+
+<pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="keyword">open</span>&nbsp;<span class="constructor">Packet</span>;;<br>
+<span class="keywordsign">#</span>&nbsp;<span class="keyword">let</span>&nbsp;old&nbsp;=&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.o&nbsp;21&nbsp;<span class="keyword">and</span>&nbsp;newp&nbsp;=&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.o&nbsp;2121&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;enum_of_file&nbsp;<span class="string">"some.pcap"</span>&nbsp;/@<br>
+&nbsp;&nbsp;&nbsp;&nbsp;(<span class="keyword">function</span>&nbsp;cap::eth::ip::<span class="constructor">Pdu</span>.<span class="constructor">Tcp</span>&nbsp;({&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.dst_port&nbsp;=&nbsp;port&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keyword">as</span>&nbsp;tcp)::rest&nbsp;<span class="keyword">when</span>&nbsp;port&nbsp;=&nbsp;old&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;cap::eth::ip::<span class="constructor">Pdu</span>.<span class="constructor">Tcp</span>&nbsp;{&nbsp;tcp&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.dst_port&nbsp;=&nbsp;newp&nbsp;}::rest<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;cap::eth::ip::<span class="constructor">Pdu</span>.<span class="constructor">Tcp</span>&nbsp;({&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.src_port&nbsp;=&nbsp;port&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keyword">as</span>&nbsp;tcp)::rest&nbsp;<span class="keyword">when</span>&nbsp;port&nbsp;=&nbsp;old&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;cap::eth::ip::<span class="constructor">Pdu</span>.<span class="constructor">Tcp</span>&nbsp;{&nbsp;tcp&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.src_port&nbsp;=&nbsp;newp&nbsp;}::rest<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;x&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;x)&nbsp;|&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;to_file&nbsp;<span class="string">"changed.pcap"</span>&nbsp;;;<br>
 </code><pre></pre><br>
 <hr width="100%">
 <br>
@@ -164,5 +179,8 @@ Pack/Unpack the whole protocol stack that fits entirely within a packet.
 <span id="2_Shorthands"><h2>Shorthands</h2></span><br>
 <pre><span id="VALenum_of_file"><span class="keyword">val</span> <a href="code_VALPacket.enum_of_file.html">enum_of_file</a></span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list BatEnum.t</code></pre><div class="info">
 <code class="code"><span class="constructor">Packet</span>.enum_of_file filename</code> reads a pcap file and returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
+</div>
+<pre><span id="VALto_file"><span class="keyword">val</span> <a href="code_VALPacket.to_file.html">to_file</a></span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPEt">Pdu.t</a> Batteries.Enum.t -> unit</code></pre><div class="info">
+<code class="code"><span class="constructor">Packet</span>.to_file filename e</code> write the enumeration of <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a> into the given file.<br>
 </div>
 </body></html>

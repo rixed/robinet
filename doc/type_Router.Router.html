@@ -58,15 +58,14 @@
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t&nbsp;option&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Proto</span>.t&nbsp;option&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;int&nbsp;option&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;int&nbsp;option&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;bool<br>
 &nbsp;&nbsp;<span class="keyword">type</span>&nbsp;t&nbsp;=&nbsp;{<br>
 &nbsp;&nbsp;&nbsp;&nbsp;trxs&nbsp;:&nbsp;<span class="constructor">Tools</span>.trx&nbsp;array;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;route_tbl&nbsp;:&nbsp;(<span class="constructor">Router</span>.<span class="constructor">Router</span>.route&nbsp;*&nbsp;int&nbsp;array)&nbsp;array;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;route_tbl&nbsp;:&nbsp;(<span class="constructor">Router</span>.<span class="constructor">Router</span>.route&nbsp;*&nbsp;int)&nbsp;array;<br>
 &nbsp;&nbsp;}<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;write&nbsp;:&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Router</span>.<span class="constructor">Router</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;set_read&nbsp;:<br>
 &nbsp;&nbsp;&nbsp;&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Router</span>.<span class="constructor">Router</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;(<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit)&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make&nbsp;:<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tools</span>.trx&nbsp;array&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Router</span>.<span class="constructor">Router</span>.route&nbsp;*&nbsp;int&nbsp;array)&nbsp;array&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Router</span>.<span class="constructor">Router</span>.t<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tools</span>.trx&nbsp;array&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;(<span class="constructor">Router</span>.<span class="constructor">Router</span>.route&nbsp;*&nbsp;int)&nbsp;array&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Router</span>.<span class="constructor">Router</span>.t<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make_from_addrs&nbsp;:<br>
 &nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t&nbsp;*&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.t)&nbsp;<span class="constructor">BatEnum</span>.t&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Router</span>.<span class="constructor">Router</span>.route&nbsp;*&nbsp;int&nbsp;array)&nbsp;array&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Router</span>.<span class="constructor">Router</span>.t<br>
+&nbsp;&nbsp;&nbsp;&nbsp;(<span class="constructor">Router</span>.<span class="constructor">Router</span>.route&nbsp;*&nbsp;int)&nbsp;array&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Router</span>.<span class="constructor">Router</span>.t<br>
 <span class="keyword">end</span></code></body></html>
