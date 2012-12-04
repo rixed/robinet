@@ -16633,7 +16633,7 @@ static struct eth_vendor {
     { 0x0180C2000003ULL, 0xffffffffffffULL, "Nearest customer bridge" },
     { 0x0180C200000EULL, 0xffffffffffffULL, "LLDP_Multicast" },
     { 0x0180C200000FULL, 0xffffffffffffULL, "Nearest non-TPMR bridge" },
-    { 0x0180C200000ULL, 44, "Spanning-tree-(for-bridges)" },
+    { 0x0180C2000000ULL, 0xfffffffffff0ULL, "Spanning-tree-(for-bridges)" },
     { 0x0180C2000010ULL, 0xffffffffffffULL, "Bridge-Management" },
     { 0x0180C2000011ULL, 0xffffffffffffULL, "Load-Server" },
     { 0x0180C2000012ULL, 0xffffffffffffULL, "Loadable-Device" },
