@@ -64,7 +64,7 @@ let genname =
     let seq = ref (with_input_file "system" seqfile "0\n" (fun ic ->
         Scanf.bscanf (Scanf.Scanning.from_input ic) "%d" identity)) in
     let save_seq () = with_output_file "system" seqfile (fun oc ->
-        Print.fprintf oc p"%d\n" !seq) in
+        Printf.fprintf oc "%d\n" !seq) in
     at_exit save_seq ;
     fun pref ->
         incr seq ;

@@ -54,7 +54,7 @@ type cable  = { plugs : plug * plug
                 (* later: add a category, that will generate errors depending on the
                    throughput and length *) }
 
-let plug_printer _paren oc = function
+let plug_print oc = function
     | HubPort (name, p) ->
         Printf.fprintf oc "Hub %s#%d" name p
     | SwitchPort (name, p) ->
@@ -308,8 +308,8 @@ let instanciate t =
                         host.Host.dev.write, host.Host.dev.set_read) in
         let a_dev = dev_of_plug a and b_dev = dev_of_plug b in
         match a_dev, b_dev with
-        | None, _ -> Print.printf p"Net: Cannot connect unknown node %{plug}\n%!" a
-        | _, None -> Print.printf p"Net: Cannot connect unknown node %{plug}\n%!" b
+        | None, _ -> Printf.printf "Net: Cannot connect unknown node %a\n%!" plug_print a
+        | _, None -> Printf.printf "Net: Cannot connect unknown node %a\n%!" plug_print b
         | Some (a_dev, a_set_read), Some (b_dev, b_set_read) ->
             (* TODO: choose latency according to cable actual length *)
             (* TODO: choose throughput according to min of both adapters throughput *)

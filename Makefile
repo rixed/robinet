@@ -56,7 +56,7 @@ EXAMPLES_BYTE = \
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
-REQUIRES = bitstring bitstring.syntax batteries batteries.pa_string.syntax
+REQUIRES = bitstring bitstring.syntax batteries
 SYNTAX=-syntax camlp4o
 
 include $(top_srcdir)make.common
