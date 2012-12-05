@@ -39,7 +39,7 @@ let nb_levels = 5
 
 (* output to console happen based on a constant current loglevel *)
 
-let console_lvl = ref Info
+let console_lvl = ref Error
 let console_log name (t, lstr) =
     Printf.printf "%a: %s: %s\n%!" Clock.printer t name (Lazy.force lstr)
 

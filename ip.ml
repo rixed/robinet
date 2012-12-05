@@ -403,14 +403,16 @@ module Pdu = struct
             options : (hdr_len-5)*32 : bitstring ;
             payload : (tot_len - hdr_len*4)*8 : bitstring ;
             _padding : -1 : bitstring } ->
-        (* TODO: control the checksum ? *)
-        Some { tos ; tot_len ;
+            (* TODO: control the checksum ? *)
+            Some { tos ; tot_len ;
                id ; dont_frag ; more_frags ; frag_offset ;
                ttl ; proto = Proto.o proto ;
                src = Addr.o src ; dst = Addr.o dst ; options ;
                payload = Payload.o payload }
         | { version : 4 } when version <> 4 ->
-            err (Printf.sprintf "Ip: Bad version (%d)" version)
+            if version <> 6 then
+                err (Printf.sprintf "Ip: Bad version (%d)" version)
+            else None
         | { _ } ->
             err "Ip: Not IP"
 
@@ -420,16 +422,16 @@ module Pdu = struct
 
     (** Unpack an ip packets and return the ip PDU, source port and dest port. *)
     let unpack_with_ports bits =
-        unpack bits |> Option.bind (fun ip ->
+        Option.bind (unpack bits) (fun ip ->
             if ip.proto = Proto.tcp then (
-                Tcp.Pdu.unpack (ip.payload :> bitstring) |>
-                Option.bind (fun tcp ->
+                Option.bind (Tcp.Pdu.unpack (ip.payload :> bitstring))
+                (fun tcp ->
                     Some (ip,
                           (tcp.Tcp.Pdu.src_port :> int),
                           (tcp.Tcp.Pdu.dst_port :> int)))
             ) else if ip.proto = Proto.udp then (
-                Udp.Pdu.unpack (ip.payload :> bitstring) |>
-                Option.bind (fun udp ->
+                Option.bind (Udp.Pdu.unpack (ip.payload :> bitstring))
+                (fun udp ->
                     Some (ip,
                           (udp.Udp.Pdu.src_port :> int),
                           (udp.Udp.Pdu.dst_port :> int)))
@@ -442,7 +444,8 @@ module Pdu = struct
                                       (randbs 10) |> \
                         Udp.Pdu.pack)) |> \
             unpack_with_ports |> \
-            Option.bind (fun (_, src, dst) -> Some (src, dst)) \
+            flip Option.bind \
+                (fun (_, src, dst) -> Some (src, dst)) \
         )
      *)
     (*$>*)

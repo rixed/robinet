@@ -83,7 +83,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
 
 (*$R serve
     Clock.realtime := false ;
-    Log.console_lvl := Log.Debug ;
+    (*Log.console_lvl := Log.Debug ;*)
     let srv = Host.make_static "server" (Eth.Addr.random ()) (Ip.Addr.random ()) in
     let my_net = Ip.Cidr.random () in
     serve srv (Ip.Cidr.to_enum my_net) ;

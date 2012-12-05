@@ -4,7 +4,7 @@ OCAMLOPT   = ocamlfind ocamlopt -thread
 OCAMLDEP   = ocamlfind ocamldep
 OCAMLDOC   = ocamlfind ocamldoc -html -colorize-code -thread -sort -stars
 OCAMLMKTOP = ocamlfind ocamlmktop -thread -g
-QTEST      = ocamlfind batteries/qtest
+QTEST      = qtest
 DOCDIR    ?= doc/
 override OCAMLOPTFLAGS += $(INCS) -w Ael -g -annot
 override OCAMLFLAGS    += $(INCS) -w Ael -g -annot
@@ -55,21 +55,21 @@ endif
 # Tests with qtest
 
 all_tests.byte: all_tests.cmo $(ARCHIVE)
-	$(OCAMLC)   -o $@ $(SYNTAX) -package "$(REQUIRES) batteries.qtest" $(ARCHIVE) -linkpkg $(OCAMLFLAGS) $<
+	$(OCAMLC)   -o $@ $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(ARCHIVE) -linkpkg $(OCAMLFLAGS) $<
 
 all_tests.cmo: all_tests.ml $(OBJECTS)
-	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES) batteries.qtest" $(OCAMLFLAGS) -c -impl $<
+	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(OCAMLFLAGS) -c -impl $<
 
 all_tests.opt: all_tests.cmx $(XARCHIVE)
-	$(OCAMLOPT) -o $@ $(SYNTAX) -package "$(REQUIRES) batteries.qtest" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
+	$(OCAMLOPT) -o $@ $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
 
 all_tests.cmx: all_tests.ml $(XOBJECTS)
-	$(OCAMLOPT) $(SYNTAX) -package "$(REQUIRES) batteries.qtest" $(OCAMLOPTFLAGS) -c -impl $<
+	$(OCAMLOPT) $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(OCAMLOPTFLAGS) -c -impl $<
 
 all_tests.ml: $(SOURCES)
 	$(QTEST) --preamble 'open Batteries;; open Bitstring;; open Tools' -o $@ extract $^
 
-check: all_tests.byte all_tests.opt
+check: all_tests.opt
 	@for t in $^; do \
 		echo "Running $$t" ;\
 		./$$t --shuffle ;\

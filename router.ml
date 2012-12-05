@@ -272,7 +272,6 @@ struct
         let counts = Array.create 3 0 in
         for i = 0 to Array.length counts - 1 do
             set_read i router (fun _ ->
-                Printf.printf "Router: got a packet on port %d\n%!" i ;
                 counts.(i) <- succ counts.(i))
         done ;
         let tot_count () = Array.reduce (+) counts
