@@ -55,7 +55,7 @@ let c2i c =
         int_of_char c - int_of_char 'A' + 10
     else error (Printf.sprintf "Cannot convert char '%c' to int" c)
 
-(*$= c2i & ~printer:string_of_int
+(*$= c2i & ~printer:String.of_int
     5 (c2i '5')
     15 (c2i 'f')
     15 (c2i 'F')
@@ -66,7 +66,7 @@ let i2c i =
     else if i >= 10 && i <= 35 then char_of_int (int_of_char 'a' + i - 10)
     else error (Printf.sprintf "Cannot convert int '%d' to digit" i)
 
-(*$= i2c & ~printer:string_of_char
+(*$= i2c & ~printer:String.of_char
     '5' (i2c 5)
     'f' (i2c 15)
 *)
