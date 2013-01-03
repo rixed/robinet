@@ -45,7 +45,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;seq&nbsp;=&nbsp;ref&nbsp;(with_input_file&nbsp;<span class="string">"system"</span>&nbsp;seqfile&nbsp;<span class="string">"0\n"</span>&nbsp;(<span class="keyword">fun</span>&nbsp;ic&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Scanf</span>.bscanf&nbsp;(<span class="constructor">Scanf</span>.<span class="constructor">Scanning</span>.from_input&nbsp;ic)&nbsp;<span class="string">"%d"</span>&nbsp;identity))&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;save_seq&nbsp;()&nbsp;=&nbsp;with_output_file&nbsp;<span class="string">"system"</span>&nbsp;seqfile&nbsp;(<span class="keyword">fun</span>&nbsp;oc&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Print</span>.fprintf&nbsp;oc&nbsp;p<span class="string">"%d\n"</span>&nbsp;!seq)&nbsp;<span class="keyword">in</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"%d\n"</span>&nbsp;!seq)&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;at_exit&nbsp;save_seq&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">fun</span>&nbsp;pref&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;incr&nbsp;seq&nbsp;;<br>

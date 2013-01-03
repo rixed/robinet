@@ -37,7 +37,13 @@
 <link title="Tools" rel="Chapter" href="Tools.html">
 <link title="Udp" rel="Chapter" href="Udp.html">
 <link title="Url" rel="Chapter" href="Url.html">
-<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Log.console_lvl</title>
+<link title="Vlan" rel="Chapter" href="Vlan.html"><title>Net.plug_print</title>
 </head>
 <body>
-<code class="code"><span class="keyword">let</span>&nbsp;console_lvl&nbsp;=&nbsp;ref&nbsp;<span class="constructor">Error</span></code></body></html>
+<code class="code"><span class="keyword">let</span>&nbsp;plug_print&nbsp;oc&nbsp;=&nbsp;<span class="keyword">function</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">HubPort</span>&nbsp;(name,&nbsp;p)&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"Hub&nbsp;%s#%d"</span>&nbsp;name&nbsp;p<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">SwitchPort</span>&nbsp;(name,&nbsp;p)&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"Switch&nbsp;%s#%d"</span>&nbsp;name&nbsp;p<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">HostAdapter</span>&nbsp;name&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.fprintf&nbsp;oc&nbsp;<span class="string">"Host&nbsp;%s"</span>&nbsp;name</code></body></html>

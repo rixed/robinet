@@ -49,13 +49,15 @@
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;options&nbsp;:&nbsp;(hdr_len-5)*32&nbsp;:&nbsp;bitstring&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;payload&nbsp;:&nbsp;(tot_len&nbsp;-&nbsp;hdr_len*4)*8&nbsp;:&nbsp;bitstring&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;_padding&nbsp;:&nbsp;-1&nbsp;:&nbsp;bitstring&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;TODO:&nbsp;control&nbsp;the&nbsp;checksum&nbsp;?&nbsp;*)</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Some</span>&nbsp;{&nbsp;tos&nbsp;;&nbsp;tot_len&nbsp;;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;TODO:&nbsp;control&nbsp;the&nbsp;checksum&nbsp;?&nbsp;*)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Some</span>&nbsp;{&nbsp;tos&nbsp;;&nbsp;tot_len&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;id&nbsp;;&nbsp;dont_frag&nbsp;;&nbsp;more_frags&nbsp;;&nbsp;frag_offset&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ttl&nbsp;;&nbsp;proto&nbsp;=&nbsp;<span class="constructor">Proto</span>.o&nbsp;proto&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;src&nbsp;=&nbsp;<span class="constructor">Addr</span>.o&nbsp;src&nbsp;;&nbsp;dst&nbsp;=&nbsp;<span class="constructor">Addr</span>.o&nbsp;dst&nbsp;;&nbsp;options&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;payload&nbsp;=&nbsp;<span class="constructor">Payload</span>.o&nbsp;payload&nbsp;}<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;version&nbsp;:&nbsp;4&nbsp;}&nbsp;<span class="keyword">when</span>&nbsp;version&nbsp;&lt;&gt;&nbsp;4&nbsp;<span class="keywordsign">-&gt;</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;err&nbsp;(<span class="constructor">Printf</span>.sprintf&nbsp;<span class="string">"Ip:&nbsp;Bad&nbsp;version&nbsp;(%d)"</span>&nbsp;version)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span>&nbsp;version&nbsp;&lt;&gt;&nbsp;6&nbsp;<span class="keyword">then</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;err&nbsp;(<span class="constructor">Printf</span>.sprintf&nbsp;<span class="string">"Ip:&nbsp;Bad&nbsp;version&nbsp;(%d)"</span>&nbsp;version)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">else</span>&nbsp;<span class="constructor">None</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;{&nbsp;_&nbsp;}&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;err&nbsp;<span class="string">"Ip:&nbsp;Not&nbsp;IP"</span></code></body></html>
