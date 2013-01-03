@@ -313,7 +313,7 @@ struct
             make_request ~xid ~name (Ip.Addr.random ()) (if randb () then Some (Ip.Addr.random ()) else None)
 
     (*$Q pack
-      ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 

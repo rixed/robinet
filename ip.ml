@@ -228,7 +228,7 @@ module Cidr = struct
         let net = Addr.higher_bits (Addr.random ()) mask in
         o (net, mask)
     (*$Q of_string
-      ((random |- to_string), identity) (fun t -> t = to_string (of_string t))
+      ((random %> to_string), identity) (fun t -> t = to_string (of_string t))
      *)
 
     (** Build a CIDR from a single address *)
@@ -417,7 +417,7 @@ module Pdu = struct
             err "Ip: Not IP"
 
     (*$Q pack
-      ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
      *)
 
     (** Unpack an ip packets and return the ip PDU, source port and dest port. *)

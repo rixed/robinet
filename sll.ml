@@ -89,7 +89,7 @@ module Pdu = struct
             err "Not SLL"
 
     (*$Q pack
-      ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 end

@@ -63,7 +63,7 @@ struct
         | { _ } -> err "Not UDP"
 
     (*$Q pack
-      ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 end

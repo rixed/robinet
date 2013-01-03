@@ -367,7 +367,7 @@ let spider t max_depth start =
                     match Html.parse body with
                     | Some tree ->
                         extract_links ~default_base:url headers tree //
-                            (Hashtbl.mem fetched |- not) |>
+                            (Hashtbl.mem fetched %> not) |>
                             List.of_enum |>
                             List.iter (fun url ->
                                 Clock.asap (aux (max_depth-1)) url)
@@ -392,7 +392,7 @@ let user t ?pause max_depth start =
                 if (match content_type with None -> true | Some str -> String.exists (String.lowercase str) "text/html") then (
                     (* Fetch eveything a browser would fetch at once (images, etc) *)
                     extract_links_simple ~same_page:true ~default_base:url headers body //
-                        (Hashtbl.mem fetched |- not) |>
+                        (Hashtbl.mem fetched %> not) |>
                         List.of_enum |>
                         tap (fun l -> if debug then Printf.printf "Browser: will iter on %d urls\n" (List.length l)) |>
                         List.iter (fun url' ->
@@ -400,7 +400,7 @@ let user t ?pause max_depth start =
                             Clock.asap (aux (max_depth-1)) url') ;
                     (* fetch sequentially, depth first, a links *)
                     let urls = extract_links_simple ~same_page:false ~default_base:url headers body //
-                        (Hashtbl.mem fetched |- not) in
+                        (Hashtbl.mem fetched %> not) in
                     let rec fetch_next () =
                         match Enum.get urls with
                         | None -> ()

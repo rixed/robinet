@@ -239,7 +239,7 @@ struct
                  bitstring_of_string additional ]
 
     (*$Q pack
-      ((random |- pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 end
