@@ -272,9 +272,9 @@ let read_next_pkt global_header ic =
         caplen   : 32 : endian (global_header.endianness) ;
         wire_len : 32 : endian (global_header.endianness) } ->
         if debug then Printf.printf "Pcap: reading a packet (wire_len=%ld)\n%!" wire_len ;
-        if caplen > global_header.snaplen then (
+        if debug && caplen > global_header.snaplen then (
             (* We don't really care but the user might *)
-            Printf.printf "caplen > snaplen!\n%!"
+            Printf.printf "Pcap: caplen > snaplen!\n%!"
         ) ;
         let pkt = IO.really_nread ic (Int32.to_int caplen) in
         let bits = bitstring_of_string pkt in

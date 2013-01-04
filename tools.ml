@@ -80,6 +80,27 @@ let bitstring_fuzz err_rate bits =
   string_of_bitstring (bitstring_fuzz 0.1 (bitstring_of_string str)) <> str
 *)
 
+let bitstring_add i b =
+    let len = bitstring_length b in
+    if len > 31 then (
+        bitmatch b with
+        | { pref : len - 31 : bitstring ;
+            n : 31 } ->
+            (BITSTRING {
+                pref : len - 31 : bitstring ;
+                n + i : 31 })
+    ) else (
+        bitmatch b with
+        | { n : len : int } ->
+            (BITSTRING {
+                Int64.add n (Int64.of_int i) : len })
+    )
+(*$= bitstring_add
+    (bitstring_of_string "\000" |> bitstring_add 42) (bitstring_of_string "\042")
+    (bitstring_of_string "\042" |> bitstring_add 42) (bitstring_of_string "\084")
+ *)
+
+
 let hexstring_of_bitstring bs =
     let s = string_of_bitstring bs in
     let hexify c = Printf.sprintf "%02x" (Char.code c) in

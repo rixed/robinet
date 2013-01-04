@@ -51,6 +51,7 @@ EXAMPLES_BYTE = \
 	examples/beautify_mac.byte \
 	examples/test_ping.byte \
 	examples/capecho.byte \
+	examples/load_tester.byte \
 #	examples/simu_perfweb.byte
 
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
