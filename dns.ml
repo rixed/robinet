@@ -135,7 +135,6 @@ struct
                         let ttl = read_n32 pkt rest in
                         if debug then Printf.printf "Dns: Decoded RR %d name '%s', qtype=%s, qclass=%d, ttl=%ld\n%!" nb_rrs name (QType.to_string qtype) qclass ttl ;
                         let res_data_len = read_n16 pkt (rest+4) in
-                        (* FIXME: catch String.sub errors *)
                         let res_data = String.sub pkt (rest+6) res_data_len in
                         aux ((name, qtype, qclass, ttl, res_data) :: rrs) (rest+4+2+res_data_len) (nb_rrs-1)
                     | _ -> err "Should not happen")
@@ -149,20 +148,22 @@ struct
             nb_authority_rrs : 16 ; nb_additional_rrs : 16 } ->
             let pkt = string_of_bitstring bits
             and rest = 12 (* offset of the rest of the pkt *)
-            in
-            Option.Monad.bind (unpack_questions pkt rest nb_questions) (fun (questions, rest) ->
-            Option.Monad.bind (unpack_rrs pkt rest nb_answer_rrs) (fun (answer_rrs, rest) ->
-            Option.Monad.bind (unpack_rrs pkt rest nb_authority_rrs) (fun (authority_rrs, rest) ->
-            Option.Monad.bind (unpack_rrs pkt rest nb_additional_rrs) (fun (additional_rrs, rest) ->
-            if String.length pkt > rest then err "Dns: Trailing datas in msg" else
-            Some { id = id ; is_query = not qr ; opcode = opcode ;
-                   is_auth = aa ; truncated = tc ;
-                   rec_desired = rd ; rec_avlb = ra ;
-                   status = rcode ;
-                   questions = questions ;
-                   answer_rrs = answer_rrs ;
-                   authority_rrs = authority_rrs ;
-                   additional_rrs = additional_rrs }))))
+            in (
+            try Option.Monad.bind (unpack_questions pkt rest nb_questions) (fun (questions, rest) ->
+                Option.Monad.bind (unpack_rrs pkt rest nb_answer_rrs) (fun (answer_rrs, rest) ->
+                Option.Monad.bind (unpack_rrs pkt rest nb_authority_rrs) (fun (authority_rrs, rest) ->
+                Option.Monad.bind (unpack_rrs pkt rest nb_additional_rrs) (fun (additional_rrs, rest) ->
+                if debug && String.length pkt > rest then err "Dns: Trailing datas in msg" else
+                Some { id = id ; is_query = not qr ; opcode = opcode ;
+                       is_auth = aa ; truncated = tc ;
+                       rec_desired = rd ; rec_avlb = ra ;
+                       status = rcode ;
+                       questions = questions ;
+                       answer_rrs = answer_rrs ;
+                       authority_rrs = authority_rrs ;
+                       additional_rrs = additional_rrs }))))
+            with Invalid_argument _ -> (* One of our String.sub went wrong *)
+                err "Cannot decode names")
         | { _ } -> err "Not DNS"
 
     let pack_n16 v str o =
