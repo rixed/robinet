@@ -194,8 +194,8 @@ struct
 
     let pack_question (name, (qtype : QType.t), qclass) =
         let len = String.length name in
-        if len = 0 || name.[0] = '.' || name.[len-1] <> '.' then (
-            err "Dns: Bad name"
+        if len <> 0 && (name.[0] = '.' || name.[len-1] <> '.') then (
+            err (Printf.sprintf "Dns: Bad qname '%s'" name)
         ) else (
             let str = String.create (len + 1 + 4) in
             Option.Monad.bind (pack_name name 0 str 0) (fun o ->
