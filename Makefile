@@ -72,9 +72,13 @@ $(CLIB): $(C_SOURCES:.c=.o)
 	$(AR) rcs $@ $^
 
 examples: $(EXAMPLES)
+	@for f in $(EXAMPLES); do \
+		sudo setcap cap_net_raw,cap_net_admin=eip $$f ;\
+	 done
 
 robinet.top: $(ARCHIVE)
 	$(OCAMLMKTOP) -o $@ -package "findlib,$(REQUIRES)" -linkpkg $(ARCHIVE)
+	sudo setcap cap_net_raw,cap_net_admin=eip $@
 
 clean-spec:
 	rm -f *.pcap
