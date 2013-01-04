@@ -196,9 +196,7 @@ module Pdu = struct
                 | _ -> unpack_raw) in
         let unpack_tcp = try_unpack Tcp.Pdu.unpack (fun tcp -> Tcp tcp ::
                         (if Payload.length tcp.Tcp.Pdu.payload > 0 then
-                            (unpack_ports (tcp.Tcp.Pdu.src_port :> int)
-                                          (tcp.Tcp.Pdu.dst_port :> int)
-                                          (tcp.Tcp.Pdu.payload :> bitstring))
+                             unpack_raw (tcp.Tcp.Pdu.payload :> bitstring)
                         else [])) in
         let unpack_udp = try_unpack Udp.Pdu.unpack (fun udp -> Udp udp ::
                         (unpack_ports (udp.Udp.Pdu.src_port :> int)
