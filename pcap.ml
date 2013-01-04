@@ -70,9 +70,10 @@ let bytes_out            = Metric.Counter.make "Pcap/Bytes/Out" "bytes"
 
 (** [inject_pdu iface bits] inject the packet [bits] into interface [iface]. *)
 let inject_pdu iface bits =
-    if debug then Printf.printf "Pcap: injecting a packet (%s)...\n%!" (string_of_bitstring bits);
     (try
-        inject iface (string_of_bitstring bits) ;
+        let str = string_of_bitstring bits in
+        if debug then Printf.printf "Pcap: injecting a packet (%d bytes)...\n%!" (String.length str);
+        inject iface str ;
         Metric.Atomic.fire packets_injected_ok ;
         Metric.Counter.increase bytes_out (Int64.of_int (bytelength bits))
     with _ ->
@@ -211,8 +212,9 @@ struct
             (dlt :> int32) : 32 : littleendian }) in
         output_string out_chan (string_of_bitstring file_hdr) ;
         let f pdu =
-            let bytes = string_of_bitstring (pack pdu) in
-            output_string out_chan bytes in
+            pack pdu |>
+            string_of_bitstring |>
+            output_string out_chan in
         Gc.finalise (fun _ -> close_out out_chan) f ;
         f
 end
@@ -269,6 +271,7 @@ let read_next_pkt global_header ic =
         usec     : 32 : endian (global_header.endianness) ;
         caplen   : 32 : endian (global_header.endianness) ;
         wire_len : 32 : endian (global_header.endianness) } ->
+        if debug then Printf.printf "Pcap: reading a packet (wire_len=%ld)\n%!" wire_len ;
         if caplen > global_header.snaplen then (
             (* We don't really care but the user might *)
             Printf.printf "caplen > snaplen!\n%!"

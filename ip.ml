@@ -316,7 +316,7 @@ module Pdu = struct
     (*$< Pdu *)
 
     let id_seq = ref 0
-    let next_id () = id_seq := (!id_seq + 1) mod 0xffff ; !id_seq
+    let next_id () = id_seq := (!id_seq + 1) land 0xffff ; !id_seq
 
     type t = { tos : int ; tot_len : int ;
                id : int ; dont_frag : bool ; more_frags : bool ; frag_offset : int ;
@@ -343,7 +343,7 @@ module Pdu = struct
 
     let patch_tcp_checksum t (pld : Payload.t) = bitmatch (pld :> bitstring) with
         | { head : 128 : bitstring ;
-            chk  : 16  ;
+            chk  : 16 ;
             tail : -1 : bitstring (* FIXME: force urgent pointer at 0 if the urgent flag is unset *) (* FIXME: remove tcp payload? *) } ->
             if chk = 0 then (
                 let chk = sum (BITSTRING {
@@ -375,6 +375,12 @@ module Pdu = struct
     let pack t =
         let header =
             let hdr_len = 20 + bytelength t.options in
+            assert (hdr_len < 64) ;
+            assert (t.tot_len < 65536) ;
+            assert (t.id < 65536) ;
+            assert (t.frag_offset < 8192) ;
+            assert (t.ttl < 256) ;
+            assert ((t.proto :> int) < 256) ;
             concat [ (BITSTRING {
                 4 : 4 ; hdr_len/4 : 4 ; t.tos : 8 ;
                 t.tot_len : 16 ;
