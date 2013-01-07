@@ -296,7 +296,7 @@ let rand_hostname () =
         randstr ~charset:"abcdefghijklmnopqrstuvwxyz-" (3 + randi 4)) in
     String.join "." parts
 
-let sum bits =
+let do_sum bits =
     let rec aux s bits = bitmatch bits with
         | { w : 16 ; rest : -1 : bitstring } -> aux (s + w) rest
         | { b : 8 } -> s + (b lsl 8)
@@ -305,9 +305,17 @@ let sum bits =
     let rec wrap s =
         if s < 0x10000 then s else wrap ((s land 0xffff) + (s lsr 16)) in
     (lnot (wrap s)) land 0xffff
-(*$= sum & ~printer:(fun d -> Printf.sprintf "%x" d)
-  (sum (bitstring_of_string "\x45\x00\x00\xaa\x03\xa6\x00\x00\x40\x06\x00\x00\xc0\xa8\x01\x45\xd1\x55\xe3\x67")) 0xfffd
+(*$= do_sum & ~printer:(fun d -> Printf.sprintf "%x" d)
+  (do_sum (bitstring_of_string "\x45\x00\x00\xaa\x03\xa6\x00\x00\x40\x06\x00\x00\xc0\xa8\x01\x45\xd1\x55\xe3\x67")) 0xfffd
 *)
+
+(* As computing checksum was found to consume 30% of CPU (yes, the above function)
+ * then here is a simple way to disable this *)
+let do_compute_checksum = ref true
+let sum bits =
+    if !do_compute_checksum then
+        do_sum bits
+    else 0
 
 (* A Module with a private int type and custom printer, used
    to constomize printing of various protocolar fields such as

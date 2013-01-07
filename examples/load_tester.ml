@@ -87,6 +87,7 @@ let main =
     and add_pcap l s  = l := File s :: !l in
     Random.self_init () ;
     Arg.parse [ "-n", Arg.Set_int growth, "How many times should the input be duplicated (default: 1)" ;
+                "-c", Arg.Unit (fun () -> do_compute_checksum := false), "Disable checkums" ;
                 "-i", Arg.String (add_iface input),  "Where to sniff packets from" ;
                 "-r", Arg.String (add_pcap input),   "Where to read packet from" ;
                 "-I", Arg.String (add_iface output), "Where to inject generated traffic" ;
