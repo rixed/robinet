@@ -106,7 +106,7 @@ struct
             Some (name, rest))
 
     let read_n16 pkt o =
-        ensure (o < String.length pkt - 1) "dns.ml: read_n16: offset greater then pkt length";
+        if o >= String.length pkt - 1 then invalid_arg "packet too short" ;
         ((Char.code pkt.[o]) lsl 8) + Char.code pkt.[o+1]
     let read_n32 pkt o =
         let hi = Int32.of_int (read_n16 pkt o)
