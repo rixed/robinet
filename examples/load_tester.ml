@@ -63,15 +63,10 @@ let replay n inps outs =
             let alter_ip i (ip : Ip.Addr.t) =
                 Ip.Addr.o (Int32.add (ip :> int32) (Int32.of_int i)) in
             Pdu.Ip { p with src = alter_ip i p.src ; dst = alter_ip i p.dst ; id = (p.id + i) land 0xffff }
-(*
-        | Arp p ->
-        | Pdu.Udp p ->
-        | Pdu.Tcp p ->
-        | Pdu.Dns p ->
-        | Pdu.Sll p ->
         | Pdu.Vlan p ->
-        | Pdu.Icmp p ->
-        | Pdu.Pcap p ->*)
+            let open Vlan.Pdu in
+            Pdu.Vlan { p with id = (p.id + i) land 0xfff }
+(*      | Pdu.Arp p -> change addresses ? *)
         | x -> x in
     let alter_packet i l =
         List.map (alter_layer i) l in
