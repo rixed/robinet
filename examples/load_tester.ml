@@ -49,7 +49,7 @@ let sink_to = function
         let inject_f pdu = Pcap.inject_pdu iface (pdu.Pcap.Pdu.payload :> bitstring) in
         Enum.iter inject_f
 
-let replay n inps outs =
+let replay offset n inps outs =
     (* TODO: use several inputs *)
     let inp = List.hd inps and out = List.hd outs in
     let open Packet in
@@ -74,19 +74,21 @@ let replay n inps outs =
     (fun p ->
         let packet = Packet.Pdu.unpack p in
         Enum.init n (fun i ->
-            alter_packet i packet |>
+            alter_packet (offset+i) packet |>
             Packet.Pdu.pack)) |>
     Enum.flatten |>
     sink_to out
 
 let main =
     let growth        = ref 1 (* TODO: a number of simultaneous flows *)
+    and offset        = ref 0
     and input         = ref []
     and output        = ref []
     and add_iface l s = l := Iface s :: !l
     and add_pcap l s  = l := File s :: !l in
     Random.self_init () ;
     Arg.parse [ "-n", Arg.Set_int growth, "How many times should the input be duplicated (default: 1)" ;
+                "-o", Arg.Set_int offset, "Initial offset to apply to traffic - useful when running several replay simultaneously (default: 0)" ;
                 "-c", Arg.Unit (fun () -> do_compute_checksum := false), "Disable checkums" ;
                 "-i", Arg.String (add_iface input),  "Where to sniff packets from" ;
                 "-r", Arg.String (add_pcap input),   "Where to read packet from" ;
@@ -100,6 +102,6 @@ let main =
     ) else if !output = [] then (
         Printf.printf "No output?\n"
     ) else (
-        replay !growth !input !output
+        replay !offset !growth !input !output
     )
 
