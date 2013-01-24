@@ -52,6 +52,7 @@ EXAMPLES_BYTE = \
 	examples/test_ping.byte \
 	examples/capecho.byte \
 	examples/load_tester.byte \
+	examples/pcap_reorder.byte \
 #	examples/simu_perfweb.byte
 
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)

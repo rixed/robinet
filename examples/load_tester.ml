@@ -69,6 +69,7 @@ let replay offset n inps outs =
 (*      | Pdu.Arp p -> change addresses ? *)
         | x -> x in
     let alter_packet i l =
+        if i = 0 then l else
         List.map (alter_layer i) l in
     input_of inp /@
     (fun p ->
@@ -84,12 +85,14 @@ let main =
     and offset        = ref 0
     and input         = ref []
     and output        = ref []
+    and loop          = ref false
     and add_iface l s = l := Iface s :: !l
     and add_pcap l s  = l := File s :: !l in
     Random.self_init () ;
     Arg.parse [ "-n", Arg.Set_int growth, "How many times should the input be duplicated (default: 1)" ;
                 "-o", Arg.Set_int offset, "Initial offset to apply to traffic - useful when running several replay simultaneously (default: 0)" ;
                 "-c", Arg.Unit (fun () -> do_compute_checksum := false), "Disable checkums" ;
+                "-l", Arg.Set loop, "Loop forever" ;
                 "-i", Arg.String (add_iface input),  "Where to sniff packets from" ;
                 "-r", Arg.String (add_pcap input),   "Where to read packet from" ;
                 "-I", Arg.String (add_iface output), "Where to inject generated traffic" ;
@@ -102,6 +105,9 @@ let main =
     ) else if !output = [] then (
         Printf.printf "No output?\n"
     ) else (
-        replay !offset !growth !input !output
+        let rec aux () =
+            replay !offset !growth !input !output ;
+            if !loop then aux () in
+        aux ()
     )
 
