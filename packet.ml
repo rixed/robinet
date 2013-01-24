@@ -148,17 +148,17 @@ module Pdu = struct
     type t = layer list
 
     (** [pack pdu] converts the layer list back to a {!Pcap.Pdu.t} *)
-    let pack (t:t) =
+    let pack t =
         let new_payload bits = function
             | Raw _  -> Raw bits
             (* can you spot a pattern here? *)
             | Pcap p -> Pcap { p with Pcap.Pdu.payload = Payload.o bits }
-            | Eth  p -> Eth  { p with Eth.Pdu.payload = Payload.o bits }
-            | Sll  p -> Sll  { p with Sll.Pdu.payload = Payload.o bits }
+            | Eth  p -> Eth  { p with Eth.Pdu.payload  = Payload.o bits }
+            | Sll  p -> Sll  { p with Sll.Pdu.payload  = Payload.o bits }
             | Vlan p -> Vlan { p with Vlan.Pdu.payload = Payload.o bits }
-            | Ip   p -> Ip   { p with Ip.Pdu.payload = Payload.o bits }
-            | Udp  p -> Udp  { p with Udp.Pdu.payload = Payload.o bits }
-            | Tcp  p -> Tcp  { p with Tcp.Pdu.payload = Payload.o bits }
+            | Ip   p -> Ip   { p with Ip.Pdu.payload   = Payload.o bits }
+            | Udp  p -> Udp  { p with Udp.Pdu.payload  = Payload.o bits }
+            | Tcp  p -> Tcp  { p with Tcp.Pdu.payload  = Payload.o bits }
             | x -> x in
         let pack_1 = function (* there ought to be a better way *)
             | Dhcp t -> Dhcp.Pdu.pack t | Eth t  -> Eth.Pdu.pack t
@@ -166,7 +166,7 @@ module Pdu = struct
             | Udp t  -> Udp.Pdu.pack t  | Tcp t  -> Tcp.Pdu.pack t
             | Dns t  -> Dns.Pdu.pack t  | Sll t  -> Sll.Pdu.pack t
             | Vlan t -> Vlan.Pdu.pack t | Pcap t -> Pcap.Pdu.pack t
-            | Icmp t -> Icmp.Pdu.pack t | Raw t -> t in
+            | Icmp t -> Icmp.Pdu.pack t | Raw t  -> t in
         let rec aux bits = function
             | [] -> Option.get bits
             | p :: ps ->

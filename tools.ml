@@ -315,7 +315,7 @@ let do_compute_checksum = ref true
 let sum bits =
     if !do_compute_checksum then
         do_sum bits
-    else 0
+    else Random.int 65536
 
 (* A Module with a private int type and custom printer, used
    to constomize printing of various protocolar fields such as
