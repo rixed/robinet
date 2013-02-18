@@ -33,6 +33,17 @@ Tcp.Pdu.make ~dst_port:(Tcp.Port.o 5000) (bitstring_of_string "HTTP/1.2 pas glop
     Eth.Pdu.pack |>
     Pcap.save "/tmp/random.pcap";;
 ]}
+
+   To grep a string into a pcap file and obtain another pcap file with matching
+   packets only:
+
+{[
+
+Pcap.enum_of_file "input.pcap" |>
+    Enum.filter (fun pdu -> grep "needle" (string_of_bitstring (pdu.Pcap.Pdu.payload :> bitstring))) |>
+    Pcap.file_of_enum "output.pcap";;
+]}
+
  *)
 open Batteries
 open Bitstring
