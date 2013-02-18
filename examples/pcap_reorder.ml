@@ -42,7 +42,7 @@ let reorder limit inp out =
             | p1::rest as lst ->
                 if p.Pcap.Pdu.ts < p1.Pcap.Pdu.ts then (
                     incr nb_reorders ;
-                    if prevs = [] then need_more_pass := true ;
+                    if prevs = [] && !nb_tot > 0 then need_more_pass := true ;
                     List.rev_append prevs (p::lst)
                 ) else (
                     aux (p1::prevs) rest
