@@ -46,55 +46,56 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Http.TRXtop</title>
 </head>
 <body>
-<div class="navbar"><a href="Http.Pdu.html">Previous</a>
-&nbsp;<a href="Http.html">Up</a>
-&nbsp;<a href="Http.TRX.html">Next</a>
+<div class="navbar"><a class="pre" href="Http.Pdu.html" title="Http.Pdu">Previous</a>
+&nbsp;<a class="up" href="Http.html" title="Http">Up</a>
+&nbsp;<a class="post" href="Http.TRX.html" title="Http.TRX">Next</a>
 </div>
-<center><h1>Module <a href="type_Http.TRXtop.html">Http.TRXtop</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> TRXtop: <code class="code"><span class="keyword">sig</span></code> <a href="Http.TRXtop.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Special kind of transceiver, useful when it's on top of a TRX stack, that
+<h1>Module <a href="type_Http.TRXtop.html">Http.TRXtop</a></h1>
+<pre><span class="keyword">module</span> TRXtop: <code class="code"><span class="keyword">sig</span></code> <a href="Http.TRXtop.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Special kind of transceiver, useful when it's on top of a TRX stack, that
     receive and tx Pdu.t messages (instead of bitstring).<br>
+</div>
 <hr width="100%">
-<br><code><span id="TYPEresult"><span class="keyword">type</span> <code class="type"></code>result</span> = </code><table class="typetable">
+<pre><code><span id="TYPEresult"><span class="keyword">type</span> <code class="type"></code>result</span> = </code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">HttpError</span> <span class="keyword">of</span> <code class="type">string</code></code></td>
+<code><span id="TYPEELTresult.HttpError"><span class="constructor">HttpError</span></span> <span class="keyword">of</span> <code class="type">string</code></code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">HttpMsg</span> <span class="keyword">of</span> <code class="type"><a href="Http.Pdu.html#TYPEt">Http.Pdu.t</a> * bool</code></code></td>
+<code><span id="TYPEELTresult.HttpMsg"><span class="constructor">HttpMsg</span></span> <span class="keyword">of</span> <code class="type"><a href="Http.Pdu.html#TYPEt">Http.Pdu.t</a> * bool</code></code></td>
 
 </tr></table>
 
 
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>parzer&nbsp;: <code class="type">(<a href="Http.Pdu.html#TYPEt">Http.Pdu.t</a>, char) <a href="Peg.html#TYPEparzer">Peg.parzer</a></code>;</code></td>
+<code><span id="TYPEELTt.parzer">parzer</span>&nbsp;:<code class="type">(<a href="Http.Pdu.html#TYPEt">Http.Pdu.t</a>, char) <a href="Peg.html#TYPEparzer">Peg.parzer</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>emit&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.emit">emit</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>recv&nbsp;: <code class="type"><a href="Http.TRXtop.html#TYPEresult">result</a> -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.recv">recv</span>&nbsp;:<code class="type"><a href="Http.TRXtop.html#TYPEresult">result</a> -> unit</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALset_emit"><span class="keyword">val</span> <a href="code_VALHttp.TRXtop.set_emit.html">set_emit</a></span> : <code class="type"><a href="Http.TRXtop.html#TYPEt">t</a> -> (Bitstring.bitstring -> unit) -> unit</code></pre><pre><span id="VALset_recv"><span class="keyword">val</span> <a href="code_VALHttp.TRXtop.set_recv.html">set_recv</a></span> : <code class="type"><a href="Http.TRXtop.html#TYPEt">t</a> -> (<a href="Http.TRXtop.html#TYPEresult">result</a> -> unit) -> unit</code></pre><pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALHttp.TRXtop.make.html">make</a></span> : <code class="type">unit -> <a href="Http.TRXtop.html#TYPEt">t</a></code></pre><pre><span id="VALtx"><span class="keyword">val</span> <a href="code_VALHttp.TRXtop.tx.html">tx</a></span> : <code class="type"><a href="Http.TRXtop.html#TYPEt">t</a> -> <a href="Http.Pdu.html#TYPEt">Http.Pdu.t</a> -> unit</code></pre><pre><span id="VALrx"><span class="keyword">val</span> <a href="code_VALHttp.TRXtop.rx.html">rx</a></span> : <code class="type"><a href="Http.TRXtop.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre></body></html>
+<pre><span id="VALset_emit"><span class="keyword">val</span> set_emit</span> : <code class="type"><a href="Http.TRXtop.html#TYPEt">t</a> -> (Bitstring.bitstring -> unit) -> unit</code></pre><pre><span id="VALset_recv"><span class="keyword">val</span> set_recv</span> : <code class="type"><a href="Http.TRXtop.html#TYPEt">t</a> -> (<a href="Http.TRXtop.html#TYPEresult">result</a> -> unit) -> unit</code></pre><pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">unit -> <a href="Http.TRXtop.html#TYPEt">t</a></code></pre><pre><span id="VALtx"><span class="keyword">val</span> tx</span> : <code class="type"><a href="Http.TRXtop.html#TYPEt">t</a> -> <a href="Http.Pdu.html#TYPEt">Http.Pdu.t</a> -> unit</code></pre><pre><span id="VALrx"><span class="keyword">val</span> rx</span> : <code class="type"><a href="Http.TRXtop.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre></body></html>

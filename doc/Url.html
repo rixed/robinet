@@ -46,51 +46,52 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Url</title>
 </head>
 <body>
-<div class="navbar"><a href="Udp.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Vlan.html">Next</a>
+<div class="navbar"><a class="pre" href="Udp.html" title="Udp">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Vlan.html" title="Vlan">Next</a>
 </div>
-<center><h1>Module <a href="type_Url.html">Url</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Url: <code class="code"><span class="keyword">sig</span></code> <a href="Url.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Uniform Resource Locator<br>
+<h1>Module <a href="type_Url.html">Url</a></h1>
+<pre><span class="keyword">module</span> Url: <code class="code"><span class="keyword">sig</span></code> <a href="Url.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Uniform Resource Locator<br>
+</div>
 <hr width="100%">
 <br>
 Most of this is taken from RFC1808.
   See: http://tools.ietf.org/html/rfc1808<br>
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALUrl.debug.html">debug</a></span> : <code class="type">bool</code></pre><br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>scheme&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.scheme">scheme</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>net_loc&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.net_loc">net_loc</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>path&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.path">path</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>params&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.params">params</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>query&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.query">query</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr></table>
 }
@@ -99,19 +100,19 @@ Most of this is taken from RFC1808.
 The type for a (parsed) URL<br>
 </div>
 
-<pre><span id="VALempty"><span class="keyword">val</span> <a href="code_VALUrl.empty.html">empty</a></span> : <code class="type"><a href="Url.html#TYPEt">t</a></code></pre><pre><span id="VALis_empty"><span class="keyword">val</span> <a href="code_VALUrl.is_empty.html">is_empty</a></span> : <code class="type"><a href="Url.html#TYPEt">t</a> -> bool</code></pre><pre><span id="VALis_in_set"><span class="keyword">val</span> <a href="code_VALUrl.is_in_set.html">is_in_set</a></span> : <code class="type">string -> char -> bool</code></pre><pre><span id="VALreserved_chars"><span class="keyword">val</span> <a href="code_VALUrl.reserved_chars.html">reserved_chars</a></span> : <code class="type">string</code></pre><pre><span id="VALunreseved_chars"><span class="keyword">val</span> <a href="code_VALUrl.unreseved_chars.html">unreseved_chars</a></span> : <code class="type">string</code></pre><pre><span id="VALis_reserved"><span class="keyword">val</span> <a href="code_VALUrl.is_reserved.html">is_reserved</a></span> : <code class="type">char -> bool</code></pre><pre><span id="VALis_unreserved"><span class="keyword">val</span> <a href="code_VALUrl.is_unreserved.html">is_unreserved</a></span> : <code class="type">char -> bool</code></pre><pre><span id="VALdecode"><span class="keyword">val</span> <a href="code_VALUrl.decode.html">decode</a></span> : <code class="type">string -> string</code></pre><div class="info">
+<pre><span id="VALempty"><span class="keyword">val</span> empty</span> : <code class="type"><a href="Url.html#TYPEt">t</a></code></pre><pre><span id="VALis_empty"><span class="keyword">val</span> is_empty</span> : <code class="type"><a href="Url.html#TYPEt">t</a> -> bool</code></pre><pre><span id="VALis_in_set"><span class="keyword">val</span> is_in_set</span> : <code class="type">string -> char -> bool</code></pre><pre><span id="VALreserved_chars"><span class="keyword">val</span> reserved_chars</span> : <code class="type">string</code></pre><pre><span id="VALunreseved_chars"><span class="keyword">val</span> unreseved_chars</span> : <code class="type">string</code></pre><pre><span id="VALis_reserved"><span class="keyword">val</span> is_reserved</span> : <code class="type">char -> bool</code></pre><pre><span id="VALis_unreserved"><span class="keyword">val</span> is_unreserved</span> : <code class="type">char -> bool</code></pre><pre><span id="VALdecode"><span class="keyword">val</span> decode</span> : <code class="type">string -> string</code></pre><div class="info">
 <code class="code">decode str</code> will decode every URL encoded char present in str<br>
 </div>
-<pre><span id="VALchar_encode"><span class="keyword">val</span> <a href="code_VALUrl.char_encode.html">char_encode</a></span> : <code class="type">char -> string</code></pre><pre><span id="VALencode"><span class="keyword">val</span> <a href="code_VALUrl.encode.html">encode</a></span> : <code class="type">?reserved:bool -> string -> string</code></pre><div class="info">
+<pre><span id="VALchar_encode"><span class="keyword">val</span> char_encode</span> : <code class="type">char -> string</code></pre><pre><span id="VALencode"><span class="keyword">val</span> encode</span> : <code class="type">?reserved:bool -> string -> string</code></pre><div class="info">
 <code class="code">encode str</code> will encode any reserved char present in str into the alternative %xx syntax.<br>
 </div>
-<pre><span id="VALof_string"><span class="keyword">val</span> <a href="code_VALUrl.of_string.html">of_string</a></span> : <code class="type">?force_absolute:bool -> string -> <a href="Url.html#TYPEt">t</a></code></pre><div class="info">
+<pre><span id="VALof_string"><span class="keyword">val</span> of_string</span> : <code class="type">?force_absolute:bool -> string -> <a href="Url.html#TYPEt">t</a></code></pre><div class="info">
 <code class="code"><span class="constructor">Url</span>.of_string str</code> will return the <a href="Url.html#TYPEt"><code class="code"><span class="constructor">Url</span>.t</code></a> corresponding to the given <code class="code">str</code><br>
 </div>
-<pre><span id="VALto_string"><span class="keyword">val</span> <a href="code_VALUrl.to_string.html">to_string</a></span> : <code class="type"><a href="Url.html#TYPEt">t</a> -> string</code></pre><div class="info">
+<pre><span id="VALto_string"><span class="keyword">val</span> to_string</span> : <code class="type"><a href="Url.html#TYPEt">t</a> -> string</code></pre><div class="info">
 the opposite of of_string<br>
 </div>
-<pre><span id="VALdotslash_re"><span class="keyword">val</span> <a href="code_VALUrl.dotslash_re.html">dotslash_re</a></span> : <code class="type">Str.regexp</code></pre><pre><span id="VALupdir_re"><span class="keyword">val</span> <a href="code_VALUrl.updir_re.html">updir_re</a></span> : <code class="type">Str.regexp</code></pre><pre><span id="VALresolve"><span class="keyword">val</span> <a href="code_VALUrl.resolve.html">resolve</a></span> : <code class="type"><a href="Url.html#TYPEt">t</a> -> <a href="Url.html#TYPEt">t</a> -> <a href="Url.html#TYPEt">t</a></code></pre><div class="info">
+<pre><span id="VALdotslash_re"><span class="keyword">val</span> dotslash_re</span> : <code class="type">Str.regexp</code></pre><pre><span id="VALupdir_re"><span class="keyword">val</span> updir_re</span> : <code class="type">Str.regexp</code></pre><pre><span id="VALresolve"><span class="keyword">val</span> resolve</span> : <code class="type"><a href="Url.html#TYPEt">t</a> -> <a href="Url.html#TYPEt">t</a> -> <a href="Url.html#TYPEt">t</a></code></pre><div class="info">
 <code class="code">resolve base url</code> will return the absolute version of <code class="code">url</code>, given it's relative to <code class="code">base</code>.<br>
 </div>
 </body></html>

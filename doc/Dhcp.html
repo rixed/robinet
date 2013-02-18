@@ -48,33 +48,34 @@
 <title>Dhcp</title>
 </head>
 <body>
-<div class="navbar"><a href="Clock.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Dhcpd.html">Next</a>
+<div class="navbar"><a class="pre" href="Clock.html" title="Clock">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Dhcpd.html" title="Dhcpd">Next</a>
 </div>
-<center><h1>Module <a href="type_Dhcp.html">Dhcp</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Dhcp: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcp.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Dynamic Host Configuration Protocol.<br>
+<h1>Module <a href="type_Dhcp.html">Dhcp</a></h1>
+<pre><span class="keyword">module</span> Dhcp: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcp.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Dynamic Host Configuration Protocol.<br>
+</div>
 <hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALDhcp.debug.html">debug</a></span> : <code class="type">bool</code></pre><br>
-<span id="2_Opcodestypesetc"><h2>Opcodes, types, etc</h2></span><br>
-<pre><span id="VALbootrequest"><span class="keyword">val</span> <a href="code_VALDhcp.bootrequest.html">bootrequest</a></span> : <code class="type">int</code></pre><pre><span id="VALbootreply"><span class="keyword">val</span> <a href="code_VALDhcp.bootreply.html">bootreply</a></span> : <code class="type">int</code></pre><br><code><span id="TYPEopcode"><span class="keyword">type</span> <code class="type"></code>opcode</span> = </code><table class="typetable">
+<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><br>
+<h2 id="2_Opcodestypesetc">Opcodes, types, etc</h2><br>
+<pre><span id="VALbootrequest"><span class="keyword">val</span> bootrequest</span> : <code class="type">int</code></pre><pre><span id="VALbootreply"><span class="keyword">val</span> bootreply</span> : <code class="type">int</code></pre><pre><code><span id="TYPEopcode"><span class="keyword">type</span> <code class="type"></code>opcode</span> = </code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">BootRequest</span></code></td>
+<code><span id="TYPEELTopcode.BootRequest"><span class="constructor">BootRequest</span></span></code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">BootReply</span></code></td>
+<code><span id="TYPEELTopcode.BootReply"><span class="constructor">BootReply</span></span></code></td>
 
 </tr></table>
 
 
 <pre><span class="keyword">module</span> <a href="Dhcp.MsgType.html">MsgType</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcp.MsgType.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><br>
-<span id="2_DHCPmessages"><h2>DHCP messages</h2></span><br>
+<h2 id="2_DHCPmessages">DHCP messages</h2><br>
 <pre><span class="keyword">module</span> <a href="Dhcp.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcp.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre></body></html>

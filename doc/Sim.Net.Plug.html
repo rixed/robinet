@@ -44,29 +44,30 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Sim.Net.Plug</title>
 </head>
 <body>
-<div class="navbar">&nbsp;<a href="Sim.Net.html">Up</a>
+<div class="navbar">&nbsp;<a class="up" href="Sim.Net.html" title="Sim.Net">Up</a>
 &nbsp;</div>
-<center><h1>Module <a href="type_Sim.Net.Plug.html">Sim.Net.Plug</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Plug: <code class="code"><span class="keyword">sig</span></code> <a href="Sim.Net.Plug.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>A plug is a named entry point to a networks.
+<h1>Module <a href="type_Sim.Net.Plug.html">Sim.Net.Plug</a></h1>
+<pre><span class="keyword">module</span> Plug: <code class="code"><span class="keyword">sig</span></code> <a href="Sim.Net.Plug.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+A plug is a named entry point to a networks.
  The name is there to suggest an usage but is not used internally.<br>
+</div>
 <hr width="100%">
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>name&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.name">name</span>&nbsp;:<code class="type">string</code>;</code></td>
 <td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >name</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>dev&nbsp;: <code class="type"><a href="Tools.html#TYPEdev">Tools.dev</a></code>;</code></td>
+<code><span id="TYPEELTt.dev">dev</span>&nbsp;:<code class="type"><a href="Tools.html#TYPEdev">Tools.dev</a></code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALSim.Net.Plug.make.html">make</a></span> : <code class="type">string -> <a href="Tools.html#TYPEdev">Tools.dev</a> -> <a href="Sim.Net.Plug.html#TYPEt">t</a></code></pre></body></html>
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">string -> <a href="Tools.html#TYPEdev">Tools.dev</a> -> <a href="Sim.Net.Plug.html#TYPEt">t</a></code></pre></body></html>

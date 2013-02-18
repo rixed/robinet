@@ -44,77 +44,76 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Browser.Plan</title>
 </head>
 <body>
-<div class="navbar">&nbsp;<a href="Browser.html">Up</a>
+<div class="navbar">&nbsp;<a class="up" href="Browser.html" title="Browser">Up</a>
 &nbsp;</div>
-<center><h1>Module <a href="type_Browser.Plan.html">Browser.Plan</a></h1></center>
-<br>
+<h1>Module <a href="type_Browser.Plan.html">Browser.Plan</a></h1>
 <pre><span class="keyword">module</span> Plan: <code class="code"><span class="keyword">sig</span></code> <a href="Browser.Plan.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<br><code><span id="TYPEform_input"><span class="keyword">type</span> <code class="type"></code>form_input</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEform_input"><span class="keyword">type</span> <code class="type"></code>form_input</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>url&nbsp;: <code class="type">Str.regexp</code>;</code></td>
+<code><span id="TYPEELTform_input.url">url</span>&nbsp;:<code class="type">Str.regexp</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>form&nbsp;: <code class="type">Str.regexp</code>;</code></td>
+<code><span id="TYPEELTform_input.form">form</span>&nbsp;:<code class="type">Str.regexp</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>input&nbsp;: <code class="type">Str.regexp</code>;</code></td>
+<code><span id="TYPEELTform_input.input">input</span>&nbsp;:<code class="type">Str.regexp</code>;</code></td>
 
 </tr></table>
 }
 
 
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>form_values&nbsp;: <code class="type">(<a href="Browser.Plan.html#TYPEform_input">form_input</a> * string) array</code>;</code></td>
+<code><span id="TYPEELTt.form_values">form_values</span>&nbsp;:<code class="type">(<a href="Browser.Plan.html#TYPEform_input">form_input</a> * string) array</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>next_hop&nbsp;: <code class="type">(Str.regexp * (Str.regexp * float) array) array</code>;</code></td>
+<code><span id="TYPEELTt.next_hop">next_hop</span>&nbsp;:<code class="type">(Str.regexp * (Str.regexp * float) array) array</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>check_presence&nbsp;: <code class="type">(Str.regexp * Str.regexp array) array</code>;</code></td>
+<code><span id="TYPEELTt.check_presence">check_presence</span>&nbsp;:<code class="type">(Str.regexp * Str.regexp array) array</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>check_absence&nbsp;: <code class="type">(Str.regexp * Str.regexp array) array</code>;</code></td>
+<code><span id="TYPEELTt.check_absence">check_absence</span>&nbsp;:<code class="type">(Str.regexp * Str.regexp array) array</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>allowed_urls&nbsp;: <code class="type">Str.regexp array</code>;</code></td>
+<code><span id="TYPEELTt.allowed_urls">allowed_urls</span>&nbsp;:<code class="type">Str.regexp array</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>forbidden_urls&nbsp;: <code class="type">Str.regexp array</code>;</code></td>
+<code><span id="TYPEELTt.forbidden_urls">forbidden_urls</span>&nbsp;:<code class="type">Str.regexp array</code>;</code></td>
 
 </tr></table>
 }

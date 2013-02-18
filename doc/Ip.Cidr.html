@@ -46,28 +46,29 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Ip.Cidr</title>
 </head>
 <body>
-<div class="navbar"><a href="Ip.Addr.html">Previous</a>
-&nbsp;<a href="Ip.html">Up</a>
-&nbsp;<a href="Ip.Pdu.html">Next</a>
+<div class="navbar"><a class="pre" href="Ip.Addr.html" title="Ip.Addr">Previous</a>
+&nbsp;<a class="up" href="Ip.html" title="Ip">Up</a>
+&nbsp;<a class="post" href="Ip.Pdu.html" title="Ip.Pdu">Next</a>
 </div>
-<center><h1>Module <a href="type_Ip.Cidr.html">Ip.Cidr</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Cidr: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Cidr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>CIDR addresses are a concise way to write network addresses,
+<h1>Module <a href="type_Ip.Cidr.html">Ip.Cidr</a></h1>
+<pre><span class="keyword">module</span> Cidr: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Cidr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+CIDR addresses are a concise way to write network addresses,
  with network IP then netmask length, like: 192.168.0.0/16.<br>
+</div>
 <hr width="100%">
 <pre><span class="keyword">include</span> struct ... end</pre>
-<pre><span id="VALof_string"><span class="keyword">val</span> <a href="code_VALIp.Cidr.of_string.html">of_string</a></span> : <code class="type">string -> t</code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALIp.Cidr.random.html">random</a></span> : <code class="type">?mask:int -> unit -> t</code></pre><pre><span id="VALsingle"><span class="keyword">val</span> <a href="code_VALIp.Cidr.single.html">single</a></span> : <code class="type">Ip.Addr.t -> t</code></pre><div class="info">
+<pre><span id="VALof_string"><span class="keyword">val</span> of_string</span> : <code class="type">string -> t</code></pre><pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">?mask:int -> unit -> t</code></pre><pre><span id="VALsingle"><span class="keyword">val</span> single</span> : <code class="type">Ip.Addr.t -> t</code></pre><div class="info">
 Build a CIDR from a single address<br>
 </div>
-<pre><span id="VALmem"><span class="keyword">val</span> <a href="code_VALIp.Cidr.mem.html">mem</a></span> : <code class="type">t -> Ip.Addr.t -> bool</code></pre><pre><span id="VALto_enum"><span class="keyword">val</span> <a href="code_VALIp.Cidr.to_enum.html">to_enum</a></span> : <code class="type">t -> Ip.Addr.t Batteries.Enum.t</code></pre><pre><span id="VALzero_addr"><span class="keyword">val</span> <a href="code_VALIp.Cidr.zero_addr.html">zero_addr</a></span> : <code class="type">t -> Ip.Addr.t</code></pre><div class="info">
+<pre><span id="VALmem"><span class="keyword">val</span> mem</span> : <code class="type">t -> Ip.Addr.t -> bool</code></pre><pre><span id="VALto_enum"><span class="keyword">val</span> to_enum</span> : <code class="type">t -> Ip.Addr.t Batteries.Enum.t</code></pre><pre><span id="VALzero_addr"><span class="keyword">val</span> zero_addr</span> : <code class="type">t -> Ip.Addr.t</code></pre><div class="info">
 Returns the subnet-zero address of a CIDR<br>
 </div>
-<pre><span id="VALall1s_addr"><span class="keyword">val</span> <a href="code_VALIp.Cidr.all1s_addr.html">all1s_addr</a></span> : <code class="type">t -> Ip.Addr.t</code></pre><div class="info">
+<pre><span id="VALall1s_addr"><span class="keyword">val</span> all1s_addr</span> : <code class="type">t -> Ip.Addr.t</code></pre><div class="info">
 Returns the all-ones address of a CIDR<br>
 </div>
-<pre><span id="VALlocal_addrs"><span class="keyword">val</span> <a href="code_VALIp.Cidr.local_addrs.html">local_addrs</a></span> : <code class="type">t -> Ip.Addr.t Batteries.Enum.t</code></pre><div class="info">
+<pre><span id="VALlocal_addrs"><span class="keyword">val</span> local_addrs</span> : <code class="type">t -> Ip.Addr.t Batteries.Enum.t</code></pre><div class="info">
 Returns the set (as an <code class="code"><span class="constructor">Enum</span></code>) of all IP addresses in the given CIDR range (that is, all minus
  subnet zero and all-ones subnet). For /32, returns the /32 singleton. For /31, return the empty
  enum.<br>
 </div>
-<pre><span id="VALrandom_addrs"><span class="keyword">val</span> <a href="code_VALIp.Cidr.random_addrs.html">random_addrs</a></span> : <code class="type">t -> int -> Ip.Addr.t BatEnum.t</code></pre></body></html>
+<pre><span id="VALrandom_addrs"><span class="keyword">val</span> random_addrs</span> : <code class="type">t -> int -> Ip.Addr.t BatEnum.t</code></pre></body></html>

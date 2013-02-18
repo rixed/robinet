@@ -45,51 +45,52 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Pcap.Pdu</title>
 </head>
 <body>
-<div class="navbar"><a href="Pcap.Dlt.html">Previous</a>
-&nbsp;<a href="Pcap.html">Up</a>
+<div class="navbar"><a class="pre" href="Pcap.Dlt.html" title="Pcap.Dlt">Previous</a>
+&nbsp;<a class="up" href="Pcap.html" title="Pcap">Up</a>
 &nbsp;</div>
-<center><h1>Module <a href="type_Pcap.Pdu.html">Pcap.Pdu</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Pcap.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Packets harvested with libpcap will come with additional informations such
+<h1>Module <a href="type_Pcap.Pdu.html">Pcap.Pdu</a></h1>
+<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Pcap.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Packets harvested with libpcap will come with additional informations such
  as caplen, timestamp etc.
  This special PDU module make a pseudo-header out of those informations, so
  that we it's kept while we edit the packets and can be reused for saving
  afterward.<br>
+</div>
 <hr width="100%">
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>source_name&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.source_name">source_name</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>caplen&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.caplen">caplen</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>dlt&nbsp;: <code class="type">Pcap.Dlt.t</code>;</code></td>
+<code><span id="TYPEELTt.dlt">dlt</span>&nbsp;:<code class="type">Pcap.Dlt.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>ts&nbsp;: <code class="type">Clock.Time.t</code>;</code></td>
+<code><span id="TYPEELTt.ts">ts</span>&nbsp;:<code class="type">Clock.Time.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>payload&nbsp;: <code class="type">Tools.Payload.t</code>;</code></td>
+<code><span id="TYPEELTt.payload">payload</span>&nbsp;:<code class="type">Tools.Payload.t</code>;</code></td>
 
 </tr></table>
 }
@@ -99,10 +100,10 @@ These informations are present as the first layer of every packet
  read from a pcap file.<br>
 </div>
 
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALPcap.Pdu.make.html">make</a></span> : <code class="type">string -><br>       ?caplen:int -><br>       ?dlt:Pcap.Dlt.t -> Clock.Time.t -> Tools.Payload.outer_t -> <a href="Pcap.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALPcap.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Pcap.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><div class="info">
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">string -><br>       ?caplen:int -><br>       ?dlt:Pcap.Dlt.t -> Clock.Time.t -> Tools.Payload.outer_t -> <a href="Pcap.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Pcap.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><div class="info">
 Return the <code class="code">bitstring</code> ready to be written into a pcap file (see <a href="Pcap.html#VALsave"><code class="code"><span class="constructor">Pcap</span>.save</code></a>).<br>
 </div>
-<pre><span id="VALsave"><span class="keyword">val</span> <a href="code_VALPcap.Pdu.save.html">save</a></span> : <code class="type">?caplen:int -> ?dlt:Pcap.Dlt.t -> string -> <a href="Pcap.Pdu.html#TYPEt">t</a> -> unit</code></pre><div class="info">
+<pre><span id="VALsave"><span class="keyword">val</span> save</span> : <code class="type">?caplen:int -> ?dlt:Pcap.Dlt.t -> string -> <a href="Pcap.Pdu.html#TYPEt">t</a> -> unit</code></pre><div class="info">
 <code class="code">save <span class="string">"file.pcap"</span></code> returns a function that will save passed pdus in <code class="code"><span class="string">"file.pcap"</span></code>.
 <br>
 </div>

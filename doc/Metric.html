@@ -46,13 +46,13 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Metric</title>
 </head>
 <body>
-<div class="navbar"><a href="Log.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Myadmin.html">Next</a>
+<div class="navbar"><a class="pre" href="Log.html" title="Log">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Myadmin.html" title="Myadmin">Next</a>
 </div>
-<center><h1>Module <a href="type_Metric.html">Metric</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Metric: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Facility to count events/measure performances.
+<h1>Module <a href="type_Metric.html">Metric</a></h1>
+<pre><span class="keyword">module</span> Metric: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Facility to count events/measure performances.
 <p>
 
    Metrics for counting events, and generating realtime or final reports.
@@ -82,38 +82,39 @@
    Also, events of the same kind may be grouped together to form a compound
    event of this same type. Events are thus ordered in a tree. This need not to
    be performed until creation of the report, though.<br>
+</div>
 <hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALMetric.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span class="keyword">module</span> <a href="Metric.Atomic.html">Atomic</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Atomic.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Metric.Counter.html">Counter</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Counter.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Metric.Timed.html">Timed</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Timed.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span id="VALprint_report"><span class="keyword">val</span> <a href="code_VALMetric.print_report.html">print_report</a></span> : <code class="type">unit BatIO.output -> unit</code></pre><pre><span id="VALreport_thread"><span class="keyword">val</span> <a href="code_VALMetric.report_thread.html">report_thread</a></span> : <code class="type">unit BatIO.output -> float -> Thread.t</code></pre><br><code><span id="TYPEitem"><span class="keyword">type</span> <code class="type"></code>item</span> = </code><table class="typetable">
+<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><pre><span class="keyword">module</span> <a href="Metric.Atomic.html">Atomic</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Atomic.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Metric.Counter.html">Counter</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Counter.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Metric.Timed.html">Timed</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Timed.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span id="VALprint_report"><span class="keyword">val</span> print_report</span> : <code class="type">unit BatIO.output -> unit</code></pre><pre><span id="VALreport_thread"><span class="keyword">val</span> report_thread</span> : <code class="type">unit BatIO.output -> float -> Thread.t</code></pre><pre><code><span id="TYPEitem"><span class="keyword">type</span> <code class="type"></code>item</span> = </code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Atomic</span> <span class="keyword">of</span> <code class="type"><a href="Metric.Atomic.html#TYPEt">Atomic.t</a></code></code></td>
+<code><span id="TYPEELTitem.Atomic"><span class="constructor">Atomic</span></span> <span class="keyword">of</span> <code class="type"><a href="Metric.Atomic.html#TYPEt">Atomic.t</a></code></code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Counter</span> <span class="keyword">of</span> <code class="type"><a href="Metric.Counter.html#TYPEt">Counter.t</a></code></code></td>
+<code><span id="TYPEELTitem.Counter"><span class="constructor">Counter</span></span> <span class="keyword">of</span> <code class="type"><a href="Metric.Counter.html#TYPEt">Counter.t</a></code></code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Timed</span> <span class="keyword">of</span> <code class="type"><a href="Metric.Timed.html#TYPEt">Timed.t</a></code></code></td>
+<code><span id="TYPEELTitem.Timed"><span class="constructor">Timed</span></span> <span class="keyword">of</span> <code class="type"><a href="Metric.Timed.html#TYPEt">Timed.t</a></code></code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Tree</span> <span class="keyword">of</span> <code class="type">string * <a href="Metric.html#TYPEtree">tree</a></code></code></td>
+<code><span id="TYPEELTitem.Tree"><span class="constructor">Tree</span></span> <span class="keyword">of</span> <code class="type">string * <a href="Metric.html#TYPEtree">tree</a></code></code></td>
 
 </tr></table>
 
 
 <pre><span id="TYPEtree"><span class="keyword">type</span> <code class="type"></code>tree</span> = <code class="type"><a href="Metric.html#TYPEitem">item</a> list</code> </pre>
 
-<pre><span id="VALtree"><span class="keyword">val</span> <a href="code_VALMetric.tree.html">tree</a></span> : <code class="type">unit -> <a href="Metric.html#TYPEtree">tree</a></code></pre></body></html>
+<pre><span id="VALtree"><span class="keyword">val</span> tree</span> : <code class="type">unit -> <a href="Metric.html#TYPEtree">tree</a></code></pre></body></html>

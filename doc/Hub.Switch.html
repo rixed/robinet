@@ -46,59 +46,60 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Hub.Switch</title>
 </head>
 <body>
-<div class="navbar"><a href="Hub.Repeater.html">Previous</a>
-&nbsp;<a href="Hub.html">Up</a>
-&nbsp;<a href="Hub.Tap.html">Next</a>
+<div class="navbar"><a class="pre" href="Hub.Repeater.html" title="Hub.Repeater">Previous</a>
+&nbsp;<a class="up" href="Hub.html" title="Hub">Up</a>
+&nbsp;<a class="post" href="Hub.Tap.html" title="Hub.Tap">Next</a>
 </div>
-<center><h1>Module <a href="type_Hub.Switch.html">Hub.Switch</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Switch: <code class="code"><span class="keyword">sig</span></code> <a href="Hub.Switch.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>A Switch is a device that will forward Ethernet frames based on the observed
+<h1>Module <a href="type_Hub.Switch.html">Hub.Switch</a></h1>
+<pre><span class="keyword">module</span> Switch: <code class="code"><span class="keyword">sig</span></code> <a href="Hub.Switch.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+A Switch is a device that will forward Ethernet frames based on the observed
   location of the destination.<br>
+</div>
 <hr width="100%">
-<pre><span class="keyword">module</span> <a href="Hub.Switch.R.html">R</a>: <code class="type"><a href="Hub.Repeater.html">Hub.Repeater</a></code></pre><br><code><span id="TYPEmac_entry"><span class="keyword">type</span> <code class="type"></code>mac_entry</span> = {</code><table class="typetable">
+<pre><span class="keyword">module</span> <a href="Hub.Switch.R.html">R</a>: <code class="type"><a href="Hub.Repeater.html">Hub.Repeater</a></code></pre><pre><code><span id="TYPEmac_entry"><span class="keyword">type</span> <code class="type"></code>mac_entry</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>addr&nbsp;: <code class="type">Eth.Addr.t option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTmac_entry.addr">addr</span>&nbsp;:<code class="type">Eth.Addr.t option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>port&nbsp;: <code class="type">int</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTmac_entry.port">port</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr></table>
 }
 
 
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>hub&nbsp;: <code class="type">R.t</code>;</code></td>
+<code><span id="TYPEELTt.hub">hub</span>&nbsp;:<code class="type">R.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>macs&nbsp;: <code class="type"><a href="Hub.Switch.html#TYPEmac_entry">mac_entry</a> <a href="Tools.OrdArray.html#TYPEt">Tools.OrdArray.t</a></code>;</code></td>
+<code><span id="TYPEELTt.macs">macs</span>&nbsp;:<code class="type"><a href="Hub.Switch.html#TYPEmac_entry">mac_entry</a> <a href="Tools.OrdArray.html#TYPEt">Tools.OrdArray.t</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>macs_h&nbsp;: <code class="type">int Tools.BitHash.t</code>;</code></td>
+<code><span id="TYPEELTt.macs_h">macs_h</span>&nbsp;:<code class="type">int Tools.BitHash.t</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALHub.Switch.make.html">make</a></span> : <code class="type">int -> int -> <a href="Hub.Switch.html#TYPEt">t</a></code></pre><pre><span id="VALforward_from"><span class="keyword">val</span> <a href="code_VALHub.Switch.forward_from.html">forward_from</a></span> : <code class="type">int -> <a href="Hub.Switch.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALwrite"><span class="keyword">val</span> <a href="code_VALHub.Switch.write.html">write</a></span> : <code class="type">int -> <a href="Hub.Switch.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALset_read"><span class="keyword">val</span> <a href="code_VALHub.Switch.set_read.html">set_read</a></span> : <code class="type">int -> <a href="Hub.Switch.html#TYPEt">t</a> -> (Bitstring.bitstring -> unit) -> unit</code></pre><pre><span id="VALto_dev"><span class="keyword">val</span> <a href="code_VALHub.Switch.to_dev.html">to_dev</a></span> : <code class="type">int -> <a href="Hub.Switch.html#TYPEt">t</a> -> <a href="Tools.html#TYPEdev">Tools.dev</a></code></pre><div class="info">
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">int -> int -> <a href="Hub.Switch.html#TYPEt">t</a></code></pre><pre><span id="VALforward_from"><span class="keyword">val</span> forward_from</span> : <code class="type">int -> <a href="Hub.Switch.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALwrite"><span class="keyword">val</span> write</span> : <code class="type">int -> <a href="Hub.Switch.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALset_read"><span class="keyword">val</span> set_read</span> : <code class="type">int -> <a href="Hub.Switch.html#TYPEt">t</a> -> (Bitstring.bitstring -> unit) -> unit</code></pre><pre><span id="VALto_dev"><span class="keyword">val</span> to_dev</span> : <code class="type">int -> <a href="Hub.Switch.html#TYPEt">t</a> -> <a href="Tools.html#TYPEdev">Tools.dev</a></code></pre><div class="info">
 Turns a port into a device<br>
 </div>
 </body></html>

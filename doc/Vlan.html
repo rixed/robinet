@@ -47,26 +47,27 @@
 <title>Vlan</title>
 </head>
 <body>
-<div class="navbar"><a href="Url.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
+<div class="navbar"><a class="pre" href="Url.html" title="Url">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
 &nbsp;</div>
-<center><h1>Module <a href="type_Vlan.html">Vlan</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Vlan: <code class="code"><span class="keyword">sig</span></code> <a href="Vlan.html">..</a> <code class="code"><span class="keyword">end</span></code></pre> Ethernet 802.1q Virtual Lan.
+<h1>Module <a href="type_Vlan.html">Vlan</a></h1>
+<pre><span class="keyword">module</span> Vlan: <code class="code"><span class="keyword">sig</span></code> <a href="Vlan.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+ Ethernet 802.1q Virtual Lan.
  We decode/encode it for the purpose of manipulating pcap files,
  but it's currently unused in the network simulator.
 <p>
 
  For more informations see for instance
  <a href="http://en.wikipedia.org/wiki/IEEE_802.1Q"> Wikipedia</a>.<br>
+</div>
 <hr width="100%">
 <br>
-<span id="2_8021qframes"><h2>802.1q frames</h2></span><br>
+<h2 id="2_8021qframes">802.1q frames</h2><br>
 <pre><span class="keyword">module</span> <a href="Vlan.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Vlan.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Pack/Unpack a 802.1q tunnel
 </div>
 <br>
-<span id="2_Transceiver"><h2>Transceiver</h2></span><br>
+<h2 id="2_Transceiver">Transceiver</h2><br>
 <pre><span class="keyword">module</span> <a href="Vlan.TRX.html">TRX</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Vlan.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 A Vlan TRX accepts raw packets (presumably from some <a href="Eth.TRX.html"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">TRX</span></code></a>), unpack them
  and forward the payload to a callback; and it can be given some payload to

@@ -45,217 +45,216 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Dhcp.Pdu</title>
 </head>
 <body>
-<div class="navbar"><a href="Dhcp.MsgType.html">Previous</a>
-&nbsp;<a href="Dhcp.html">Up</a>
+<div class="navbar"><a class="pre" href="Dhcp.MsgType.html" title="Dhcp.MsgType">Previous</a>
+&nbsp;<a class="up" href="Dhcp.html" title="Dhcp">Up</a>
 &nbsp;</div>
-<center><h1>Module <a href="type_Dhcp.Pdu.html">Dhcp.Pdu</a></h1></center>
-<br>
+<h1>Module <a href="type_Dhcp.Pdu.html">Dhcp.Pdu</a></h1>
 <pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcp.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>op&nbsp;: <code class="type"><a href="Dhcp.html#TYPEopcode">Dhcp.opcode</a></code>;</code></td>
+<code><span id="TYPEELTt.op">op</span>&nbsp;:<code class="type"><a href="Dhcp.html#TYPEopcode">Dhcp.opcode</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>htype&nbsp;: <code class="type">Arp.HwType.t</code>;</code></td>
+<code><span id="TYPEELTt.htype">htype</span>&nbsp;:<code class="type">Arp.HwType.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>hlen&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.hlen">hlen</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>hops&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.hops">hops</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>xid&nbsp;: <code class="type">int32</code>;</code></td>
+<code><span id="TYPEELTt.xid">xid</span>&nbsp;:<code class="type">int32</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>secs&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.secs">secs</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>broadcast&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span id="TYPEELTt.broadcast">broadcast</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>ciaddr&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
+<code><span id="TYPEELTt.ciaddr">ciaddr</span>&nbsp;:<code class="type">Ip.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>yiaddr&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
+<code><span id="TYPEELTt.yiaddr">yiaddr</span>&nbsp;:<code class="type">Ip.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>siaddr&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
+<code><span id="TYPEELTt.siaddr">siaddr</span>&nbsp;:<code class="type">Ip.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>giaddr&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
+<code><span id="TYPEELTt.giaddr">giaddr</span>&nbsp;:<code class="type">Ip.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>chaddr&nbsp;: <code class="type">Bitstring.bitstring</code>;</code></td>
+<code><span id="TYPEELTt.chaddr">chaddr</span>&nbsp;:<code class="type">Bitstring.bitstring</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>sname&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.sname">sname</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>file&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.file">file</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>msg_type&nbsp;: <code class="type">Dhcp.MsgType.t option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.msg_type">msg_type</span>&nbsp;:<code class="type">Dhcp.MsgType.t option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>subnet_mask&nbsp;: <code class="type">Ip.Addr.t option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.subnet_mask">subnet_mask</span>&nbsp;:<code class="type">Ip.Addr.t option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>router&nbsp;: <code class="type">Ip.Addr.t option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.router">router</span>&nbsp;:<code class="type">Ip.Addr.t option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>ntp_server&nbsp;: <code class="type">Ip.Addr.t option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.ntp_server">ntp_server</span>&nbsp;:<code class="type">Ip.Addr.t option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>smtp_server&nbsp;: <code class="type">Ip.Addr.t option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.smtp_server">smtp_server</span>&nbsp;:<code class="type">Ip.Addr.t option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>pop3_server&nbsp;: <code class="type">Ip.Addr.t option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.pop3_server">pop3_server</span>&nbsp;:<code class="type">Ip.Addr.t option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>name_server&nbsp;: <code class="type">Ip.Addr.t option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.name_server">name_server</span>&nbsp;:<code class="type">Ip.Addr.t option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>client_name&nbsp;: <code class="type">string option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.client_name">client_name</span>&nbsp;:<code class="type">string option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>search_sfx&nbsp;: <code class="type">string option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.search_sfx">search_sfx</span>&nbsp;:<code class="type">string option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>lease_time&nbsp;: <code class="type">int32 option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.lease_time">lease_time</span>&nbsp;:<code class="type">int32 option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>server_id&nbsp;: <code class="type">Ip.Addr.t option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.server_id">server_id</span>&nbsp;:<code class="type">Ip.Addr.t option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>requested_ip&nbsp;: <code class="type">Ip.Addr.t option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.requested_ip">requested_ip</span>&nbsp;:<code class="type">Ip.Addr.t option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>message&nbsp;: <code class="type">string option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.message">message</span>&nbsp;:<code class="type">string option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>client_id&nbsp;: <code class="type">Bitstring.bitstring option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.client_id">client_id</span>&nbsp;:<code class="type">Bitstring.bitstring option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>request_list&nbsp;: <code class="type">string option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.request_list">request_list</span>&nbsp;:<code class="type">string option</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALunpack_options"><span class="keyword">val</span> <a href="code_VALDhcp.Pdu.unpack_options.html">unpack_options</a></span> : <code class="type"><a href="Dhcp.Pdu.html#TYPEt">t</a> -> string * int * int -> bool</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALDhcp.Pdu.unpack.html">unpack</a></span> : <code class="type">string * int * int -> <a href="Dhcp.Pdu.html#TYPEt">t</a> option</code></pre><pre><span id="VALpack_options"><span class="keyword">val</span> <a href="code_VALDhcp.Pdu.pack_options.html">pack_options</a></span> : <code class="type"><a href="Dhcp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALDhcp.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Dhcp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALmake_base"><span class="keyword">val</span> <a href="code_VALDhcp.Pdu.make_base.html">make_base</a></span> : <code class="type">?mac:Eth.Addr.t -><br>       ?xid:Int32.t -><br>       ?name:string -> ?yiaddr:Ip.Addr.t -> Dhcp.MsgType.t -> <a href="Dhcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_discover"><span class="keyword">val</span> <a href="code_VALDhcp.Pdu.make_discover.html">make_discover</a></span> : <code class="type">?mac:Eth.Addr.t -> ?xid:Int32.t -> ?name:string -> unit -> <a href="Dhcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_offer"><span class="keyword">val</span> <a href="code_VALDhcp.Pdu.make_offer.html">make_offer</a></span> : <code class="type">?mac:Eth.Addr.t -><br>       ?xid:Int32.t -> Ip.Addr.t -> Bitstring.bitstring option -> <a href="Dhcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_request"><span class="keyword">val</span> <a href="code_VALDhcp.Pdu.make_request.html">make_request</a></span> : <code class="type">?mac:Eth.Addr.t -><br>       ?xid:Int32.t -> ?name:string -> Ip.Addr.t -> Ip.Addr.t option -> <a href="Dhcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_ack"><span class="keyword">val</span> <a href="code_VALDhcp.Pdu.make_ack.html">make_ack</a></span> : <code class="type">?mac:Eth.Addr.t -><br>       ?xid:Int32.t -> Ip.Addr.t -> Bitstring.bitstring option -> <a href="Dhcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALDhcp.Pdu.random.html">random</a></span> : <code class="type">unit -> <a href="Dhcp.Pdu.html#TYPEt">t</a></code></pre></body></html>
+<pre><span id="VALunpack_options"><span class="keyword">val</span> unpack_options</span> : <code class="type"><a href="Dhcp.Pdu.html#TYPEt">t</a> -> string * int * int -> bool</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">string * int * int -> <a href="Dhcp.Pdu.html#TYPEt">t</a> option</code></pre><pre><span id="VALpack_options"><span class="keyword">val</span> pack_options</span> : <code class="type"><a href="Dhcp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Dhcp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALmake_base"><span class="keyword">val</span> make_base</span> : <code class="type">?mac:Eth.Addr.t -><br>       ?xid:Int32.t -><br>       ?name:string -> ?yiaddr:Ip.Addr.t -> Dhcp.MsgType.t -> <a href="Dhcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_discover"><span class="keyword">val</span> make_discover</span> : <code class="type">?mac:Eth.Addr.t -> ?xid:Int32.t -> ?name:string -> unit -> <a href="Dhcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_offer"><span class="keyword">val</span> make_offer</span> : <code class="type">?mac:Eth.Addr.t -><br>       ?xid:Int32.t -> Ip.Addr.t -> Bitstring.bitstring option -> <a href="Dhcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_request"><span class="keyword">val</span> make_request</span> : <code class="type">?mac:Eth.Addr.t -><br>       ?xid:Int32.t -> ?name:string -> Ip.Addr.t -> Ip.Addr.t option -> <a href="Dhcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_ack"><span class="keyword">val</span> make_ack</span> : <code class="type">?mac:Eth.Addr.t -><br>       ?xid:Int32.t -> Ip.Addr.t -> Bitstring.bitstring option -> <a href="Dhcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Dhcp.Pdu.html#TYPEt">t</a></code></pre></body></html>

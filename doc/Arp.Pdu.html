@@ -45,64 +45,65 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Arp.Pdu</title>
 </head>
 <body>
-<div class="navbar"><a href="Arp.HwProto.html">Previous</a>
-&nbsp;<a href="Arp.html">Up</a>
+<div class="navbar"><a class="pre" href="Arp.HwProto.html" title="Arp.HwProto">Previous</a>
+&nbsp;<a class="up" href="Arp.html" title="Arp">Up</a>
 &nbsp;</div>
-<center><h1>Module <a href="type_Arp.Pdu.html">Arp.Pdu</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Arp.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Pack/Unpack an ARP message<br>
+<h1>Module <a href="type_Arp.Pdu.html">Arp.Pdu</a></h1>
+<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Arp.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Pack/Unpack an ARP message<br>
+</div>
 <hr width="100%">
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>hw_type&nbsp;: <code class="type">Arp.HwType.t</code>;</code></td>
+<code><span id="TYPEELTt.hw_type">hw_type</span>&nbsp;:<code class="type">Arp.HwType.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>proto_type&nbsp;: <code class="type">Arp.HwProto.t</code>;</code></td>
+<code><span id="TYPEELTt.proto_type">proto_type</span>&nbsp;:<code class="type">Arp.HwProto.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>operation&nbsp;: <code class="type">Arp.Op.t</code>;</code></td>
+<code><span id="TYPEELTt.operation">operation</span>&nbsp;:<code class="type">Arp.Op.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>sender_hw&nbsp;: <code class="type">Bitstring.bitstring</code>;</code></td>
+<code><span id="TYPEELTt.sender_hw">sender_hw</span>&nbsp;:<code class="type">Bitstring.bitstring</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>sender_proto&nbsp;: <code class="type">Bitstring.bitstring</code>;</code></td>
+<code><span id="TYPEELTt.sender_proto">sender_proto</span>&nbsp;:<code class="type">Bitstring.bitstring</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>target_hw&nbsp;: <code class="type">Bitstring.bitstring</code>;</code></td>
+<code><span id="TYPEELTt.target_hw">target_hw</span>&nbsp;:<code class="type">Bitstring.bitstring</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>target_proto&nbsp;: <code class="type">Bitstring.bitstring</code>;</code></td>
+<code><span id="TYPEELTt.target_proto">target_proto</span>&nbsp;:<code class="type">Bitstring.bitstring</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALmake_request"><span class="keyword">val</span> <a href="code_VALArp.Pdu.make_request.html">make_request</a></span> : <code class="type">Arp.HwType.t -><br>       Arp.HwProto.t -><br>       Bitstring.bitstring -><br>       Bitstring.bitstring -> Bitstring.bitstring -> <a href="Arp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_reply"><span class="keyword">val</span> <a href="code_VALArp.Pdu.make_reply.html">make_reply</a></span> : <code class="type">Arp.HwType.t -><br>       Arp.HwProto.t -><br>       Bitstring.bitstring -><br>       Bitstring.bitstring -><br>       Bitstring.bitstring -> Bitstring.bitstring -> <a href="Arp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALArp.Pdu.random.html">random</a></span> : <code class="type">unit -> <a href="Arp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALArp.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Arp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALArp.Pdu.unpack.html">unpack</a></span> : <code class="type">string * int * int -> <a href="Arp.Pdu.html#TYPEt">t</a> option</code></pre></body></html>
+<pre><span id="VALmake_request"><span class="keyword">val</span> make_request</span> : <code class="type">Arp.HwType.t -><br>       Arp.HwProto.t -><br>       Bitstring.bitstring -><br>       Bitstring.bitstring -> Bitstring.bitstring -> <a href="Arp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_reply"><span class="keyword">val</span> make_reply</span> : <code class="type">Arp.HwType.t -><br>       Arp.HwProto.t -><br>       Bitstring.bitstring -><br>       Bitstring.bitstring -><br>       Bitstring.bitstring -> Bitstring.bitstring -> <a href="Arp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Arp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Arp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">string * int * int -> <a href="Arp.Pdu.html#TYPEt">t</a> option</code></pre></body></html>

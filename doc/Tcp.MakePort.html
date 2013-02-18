@@ -45,14 +45,13 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Tcp.MakePort</title>
 </head>
 <body>
-<div class="navbar">&nbsp;<a href="Tcp.html">Up</a>
-&nbsp;<a href="Tcp.Port.html">Next</a>
+<div class="navbar">&nbsp;<a class="up" href="Tcp.html" title="Tcp">Up</a>
+&nbsp;<a class="post" href="Tcp.Port.html" title="Tcp.Port">Next</a>
 </div>
-<center><h1>Functor <a href="type_Tcp.MakePort.html">Tcp.MakePort</a></h1></center>
-<br>
+<h1>Functor <a href="type_Tcp.MakePort.html">Tcp.MakePort</a></h1>
 <pre><span class="keyword">module</span> MakePort: <div class="sig_block"><code class="code"><span class="keyword">functor</span> (</code><code class="code"><span class="constructor">Serv</span></code><code class="code"> : </code><code class="code"><span class="keyword">sig</span></code><div class="sig_block"><pre><span id="VALsrv"><span class="keyword">val</span> srv</span> : <code class="type">string</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">) <span class="keywordsign">-&gt;</span> </code><code class="type"><a href="Tools.MakePrivate.html">Tools.MakePrivate</a></code><code class="code">(</code><code class="code"><span class="keyword">sig</span></code><div class="sig_block"><pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = <code class="type">int</code> </pre>
 
-<pre><span id="VALto_string"><span class="keyword">val</span> <a href="code_VALTcp.MakePort.to_string.html">to_string</a></span> : <code class="type">int -> string</code></pre><pre><span id="VALis_valid"><span class="keyword">val</span> <a href="code_VALTcp.MakePort.is_valid.html">is_valid</a></span> : <code class="type">int -> bool</code></pre><pre><span id="VALrepl_tag"><span class="keyword">val</span> <a href="code_VALTcp.MakePort.repl_tag.html">repl_tag</a></span> : <code class="type">string</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">)</code></div></pre><table border="0" cellpadding="3" width="100%">
+<pre><span id="VALto_string"><span class="keyword">val</span> to_string</span> : <code class="type">int -> string</code></pre><pre><span id="VALis_valid"><span class="keyword">val</span> is_valid</span> : <code class="type">int -> bool</code></pre><pre><span id="VALrepl_tag"><span class="keyword">val</span> repl_tag</span> : <code class="type">string</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">)</code></div></pre><table border="0" cellpadding="3" width="100%">
 <tr>
 <td align="left" valign="top" width="1%%"><b>Parameters: </b></td>
 <td>
@@ -71,4 +70,4 @@
 
 <pre><span id="TYPEouter_t"><span class="keyword">type</span> <code class="type"></code>outer_t</span> = <code class="type">Outer.t</code> </pre>
 
-<pre><span id="VALto_string"><span class="keyword">val</span> <a href="code_VALTools.MakePrivate.to_string.html">to_string</a></span> : <code class="type">Outer.t -> string</code></pre><pre><span id="VALprint"><span class="keyword">val</span> <a href="code_VALTools.MakePrivate.print.html">print</a></span> : <code class="type">Batteries.Format.formatter -> Outer.t -> unit</code></pre><pre><span id="VALo"><span class="keyword">val</span> <a href="code_VALTools.MakePrivate.o.html">o</a></span> : <code class="type">Outer.t -> Outer.t</code></pre></body></html>
+<pre><span id="VALto_string"><span class="keyword">val</span> to_string</span> : <code class="type">Outer.t -> string</code></pre><pre><span id="VALprint"><span class="keyword">val</span> print</span> : <code class="type">Batteries.Format.formatter -> Outer.t -> unit</code></pre><pre><span id="VALo"><span class="keyword">val</span> o</span> : <code class="type">Outer.t -> Outer.t</code></pre></body></html>

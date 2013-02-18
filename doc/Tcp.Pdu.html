@@ -46,121 +46,120 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Tcp.Pdu</title>
 </head>
 <body>
-<div class="navbar"><a href="Tcp.SeqNum.html">Previous</a>
-&nbsp;<a href="Tcp.html">Up</a>
-&nbsp;<a href="Tcp.TRX.html">Next</a>
+<div class="navbar"><a class="pre" href="Tcp.SeqNum.html" title="Tcp.SeqNum">Previous</a>
+&nbsp;<a class="up" href="Tcp.html" title="Tcp">Up</a>
+&nbsp;<a class="post" href="Tcp.TRX.html" title="Tcp.TRX">Next</a>
 </div>
-<center><h1>Module <a href="type_Tcp.Pdu.html">Tcp.Pdu</a></h1></center>
-<br>
+<h1>Module <a href="type_Tcp.Pdu.html">Tcp.Pdu</a></h1>
 <pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Tcp.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<br><code><span id="TYPEflags"><span class="keyword">type</span> <code class="type"></code>flags</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEflags"><span class="keyword">type</span> <code class="type"></code>flags</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>urg&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span id="TYPEELTflags.urg">urg</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>ack&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span id="TYPEELTflags.ack">ack</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>psh&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span id="TYPEELTflags.psh">psh</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>rst&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span id="TYPEELTflags.rst">rst</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>syn&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span id="TYPEELTflags.syn">syn</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>fin&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span id="TYPEELTflags.fin">fin</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALstring_of_flags"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.string_of_flags.html">string_of_flags</a></span> : <code class="type"><a href="Tcp.Pdu.html#TYPEflags">flags</a> -> string</code></pre><pre><span id="VALprint_flags"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.print_flags.html">print_flags</a></span> : <code class="type">Batteries.Format.formatter -> <a href="Tcp.Pdu.html#TYPEflags">flags</a> -> unit</code></pre><br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><span id="VALstring_of_flags"><span class="keyword">val</span> string_of_flags</span> : <code class="type"><a href="Tcp.Pdu.html#TYPEflags">flags</a> -> string</code></pre><pre><span id="VALprint_flags"><span class="keyword">val</span> print_flags</span> : <code class="type">Batteries.Format.formatter -> <a href="Tcp.Pdu.html#TYPEflags">flags</a> -> unit</code></pre><pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>src_port&nbsp;: <code class="type">Tcp.Port.t</code>;</code></td>
+<code><span id="TYPEELTt.src_port">src_port</span>&nbsp;:<code class="type">Tcp.Port.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>dst_port&nbsp;: <code class="type">Tcp.Port.t</code>;</code></td>
+<code><span id="TYPEELTt.dst_port">dst_port</span>&nbsp;:<code class="type">Tcp.Port.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>seq_num&nbsp;: <code class="type">Tcp.SeqNum.t</code>;</code></td>
+<code><span id="TYPEELTt.seq_num">seq_num</span>&nbsp;:<code class="type">Tcp.SeqNum.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>ack_num&nbsp;: <code class="type">Tcp.SeqNum.t</code>;</code></td>
+<code><span id="TYPEELTt.ack_num">ack_num</span>&nbsp;:<code class="type">Tcp.SeqNum.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>win_size&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.win_size">win_size</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>flags&nbsp;: <code class="type"><a href="Tcp.Pdu.html#TYPEflags">flags</a></code>;</code></td>
+<code><span id="TYPEELTt.flags">flags</span>&nbsp;:<code class="type"><a href="Tcp.Pdu.html#TYPEflags">flags</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>urg_ptr&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.urg_ptr">urg_ptr</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>options&nbsp;: <code class="type">Bitstring.bitstring</code>;</code></td>
+<code><span id="TYPEELTt.options">options</span>&nbsp;:<code class="type">Bitstring.bitstring</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>payload&nbsp;: <code class="type">Tools.Payload.t</code>;</code></td>
+<code><span id="TYPEELTt.payload">payload</span>&nbsp;:<code class="type">Tools.Payload.t</code>;</code></td>
 
 </tr></table>
 }
@@ -171,4 +170,4 @@ An unpacked TCP segment. Notice the absence of the checksum, which
  since it's computed over some IP fields.<br>
 </div>
 
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.make.html">make</a></span> : <code class="type">?src_port:Tcp.Port.t -><br>       ?dst_port:Tcp.Port.t -><br>       ?seq_num:Tcp.SeqNum.t -><br>       ?ack_num:Tcp.SeqNum.t -><br>       ?urg:bool -><br>       ?ack:bool -><br>       ?psh:bool -><br>       ?rst:bool -><br>       ?syn:bool -><br>       ?fin:bool -><br>       ?win_size:int -><br>       ?urg_ptr:int -><br>       ?options:Bitstring.bitstring -> Tools.Payload.outer_t -> <a href="Tcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.random.html">random</a></span> : <code class="type">unit -> <a href="Tcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_reset_of"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.make_reset_of.html">make_reset_of</a></span> : <code class="type"><a href="Tcp.Pdu.html#TYPEt">t</a> -> <a href="Tcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Tcp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALTcp.Pdu.unpack.html">unpack</a></span> : <code class="type">string * int * int -> <a href="Tcp.Pdu.html#TYPEt">t</a> option</code></pre></body></html>
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">?src_port:Tcp.Port.t -><br>       ?dst_port:Tcp.Port.t -><br>       ?seq_num:Tcp.SeqNum.t -><br>       ?ack_num:Tcp.SeqNum.t -><br>       ?urg:bool -><br>       ?ack:bool -><br>       ?psh:bool -><br>       ?rst:bool -><br>       ?syn:bool -><br>       ?fin:bool -><br>       ?win_size:int -><br>       ?urg_ptr:int -><br>       ?options:Bitstring.bitstring -> Tools.Payload.outer_t -> <a href="Tcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Tcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_reset_of"><span class="keyword">val</span> make_reset_of</span> : <code class="type"><a href="Tcp.Pdu.html#TYPEt">t</a> -> <a href="Tcp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Tcp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">string * int * int -> <a href="Tcp.Pdu.html#TYPEt">t</a> option</code></pre></body></html>

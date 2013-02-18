@@ -42,7 +42,9 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Index of values</title>
 </head>
 <body>
-<center><h1>Index of values</h1></center>
+<div class="navbar">&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;</div>
+<h1>Index of values</h1>
 <table>
 <tr><td align="left"><br></td></tr>
 <tr><td><a href="Tcp.TRX.html#VAL(+/)">(+/)</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
@@ -164,6 +166,8 @@ Amateur Radio AX.25
 <tr><td><a href="Peg.html#VALbind">bind</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.Payload.html#VALbitlength">bitlength</a> [<a href="Tools.Payload.html">Tools.Payload</a>]</td>
+<td></td></tr>
+<tr><td><a href="Tools.html#VALbitstring_add">bitstring_add</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
 <tr><td><a href="Tools.html#VALbitstring_fuzz">bitstring_fuzz</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
@@ -368,7 +372,11 @@ We have only one clock so can run only one simulation at the same time.
 <td></td></tr>
 <tr><td><a href="Dhcp.MsgType.html#VALdiscover">discover</a> [<a href="Dhcp.MsgType.html">Dhcp.MsgType</a>]</td>
 <td></td></tr>
+<tr><td><a href="Tools.html#VALdo_compute_checksum">do_compute_checksum</a> [<a href="Tools.html">Tools</a>]</td>
+<td></td></tr>
 <tr><td><a href="Host.html#VALdo_gethostbyname">do_gethostbyname</a> [<a href="Host.html">Host</a>]</td>
+<td></td></tr>
+<tr><td><a href="Tools.html#VALdo_sum">do_sum</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
 <tr><td><a href="Html.html#VALdoctype">doctype</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
@@ -1209,12 +1217,12 @@ When displaying a time, print also the corresponding date.
 <tr><td><a href="Eth.Addr.html#VALprint_with_vendor">print_with_vendor</a> [<a href="Eth.Addr.html">Eth.Addr</a>]</td>
 <td><div class="info">
 If true, use the vendor database to decode address names:
- <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.of_string&nbsp;<span class="string">"a4:ba:db:e6:15:fa"</span>;;</code><pre></pre>
- <pre></pre><code class="code">-&nbsp;:&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.t&nbsp;=&nbsp;<span class="constructor">Dell</span>:e6:15:fa</code><pre></pre>
- <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.print_with_vendor&nbsp;:=&nbsp;<span class="keyword">false</span>;;</code><pre></pre>
- <pre></pre><code class="code">-&nbsp;:&nbsp;unit&nbsp;=&nbsp;()</code><pre></pre>
- <pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.of_string&nbsp;<span class="string">"a4:ba:db:e6:15:fa"</span>;;</code><pre></pre>
- <pre></pre><code class="code">-&nbsp;:&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.t&nbsp;=&nbsp;a4:ba:db:e6:15:fa</code><pre></pre>
+ <pre class="codepre"><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.of_string&nbsp;<span class="string">"a4:ba:db:e6:15:fa"</span>;;</code></pre>
+ <pre class="codepre"><code class="code">-&nbsp;:&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.t&nbsp;=&nbsp;<span class="constructor">Dell</span>:e6:15:fa</code></pre>
+ <pre class="codepre"><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.print_with_vendor&nbsp;:=&nbsp;<span class="keyword">false</span>;;</code></pre>
+ <pre class="codepre"><code class="code">-&nbsp;:&nbsp;unit&nbsp;=&nbsp;()</code></pre>
+ <pre class="codepre"><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.of_string&nbsp;<span class="string">"a4:ba:db:e6:15:fa"</span>;;</code></pre>
+ <pre class="codepre"><code class="code">-&nbsp;:&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.t&nbsp;=&nbsp;a4:ba:db:e6:15:fa</code></pre>
 </div>
 </td></tr>
 <tr><td><a href="Tools.html#VALprintable">printable</a> [<a href="Tools.html">Tools</a>]</td>
@@ -1866,6 +1874,6 @@ Constant for Ethernet all zeroes address.
 Returns the subnet-zero address of a CIDR
 </div>
 </td></tr>
-</table><br>
+</table>
 </body>
 </html>

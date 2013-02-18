@@ -46,33 +46,32 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Udp.Pdu</title>
 </head>
 <body>
-<div class="navbar"><a href="Udp.Port.html">Previous</a>
-&nbsp;<a href="Udp.html">Up</a>
-&nbsp;<a href="Udp.TRX.html">Next</a>
+<div class="navbar"><a class="pre" href="Udp.Port.html" title="Udp.Port">Previous</a>
+&nbsp;<a class="up" href="Udp.html" title="Udp">Up</a>
+&nbsp;<a class="post" href="Udp.TRX.html" title="Udp.TRX">Next</a>
 </div>
-<center><h1>Module <a href="type_Udp.Pdu.html">Udp.Pdu</a></h1></center>
-<br>
+<h1>Module <a href="type_Udp.Pdu.html">Udp.Pdu</a></h1>
 <pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Udp.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>src_port&nbsp;: <code class="type">Udp.Port.t</code>;</code></td>
+<code><span id="TYPEELTt.src_port">src_port</span>&nbsp;:<code class="type">Udp.Port.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>dst_port&nbsp;: <code class="type">Udp.Port.t</code>;</code></td>
+<code><span id="TYPEELTt.dst_port">dst_port</span>&nbsp;:<code class="type">Udp.Port.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>payload&nbsp;: <code class="type">Tools.Payload.t</code>;</code></td>
+<code><span id="TYPEELTt.payload">payload</span>&nbsp;:<code class="type">Tools.Payload.t</code>;</code></td>
 
 </tr></table>
 }
@@ -83,4 +82,4 @@ An unpacked UDP datagram. Notice the absence of the checksum, which
  since it's computed over some IP fields.<br>
 </div>
 
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALUdp.Pdu.make.html">make</a></span> : <code class="type">?src_port:Udp.Port.t -><br>       ?dst_port:Udp.Port.t -> Tools.Payload.outer_t -> <a href="Udp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALUdp.Pdu.random.html">random</a></span> : <code class="type">unit -> <a href="Udp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALUdp.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Udp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALUdp.Pdu.unpack.html">unpack</a></span> : <code class="type">string * int * int -> <a href="Udp.Pdu.html#TYPEt">t</a> option</code></pre></body></html>
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">?src_port:Udp.Port.t -><br>       ?dst_port:Udp.Port.t -> Tools.Payload.outer_t -> <a href="Udp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Udp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Udp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">string * int * int -> <a href="Udp.Pdu.html#TYPEt">t</a> option</code></pre></body></html>

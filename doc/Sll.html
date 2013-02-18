@@ -47,13 +47,13 @@
 <title>Sll</title>
 </head>
 <body>
-<div class="navbar"><a href="Sim.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Tcp.html">Next</a>
+<div class="navbar"><a class="pre" href="Sim.html" title="Sim">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Tcp.html" title="Tcp">Next</a>
 </div>
-<center><h1>Module <a href="type_Sll.html">Sll</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Sll: <code class="code"><span class="keyword">sig</span></code> <a href="Sll.html">..</a> <code class="code"><span class="keyword">end</span></code></pre> Linux Cooked Capture (aka SLL)
+<h1>Module <a href="type_Sll.html">Sll</a></h1>
+<pre><span class="keyword">module</span> Sll: <code class="code"><span class="keyword">sig</span></code> <a href="Sll.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+ Linux Cooked Capture (aka SLL)
 <p>
 
  When you capture traffic on the <em>any</em> interface on Linux, you end up with
@@ -63,9 +63,10 @@
 
  This fake protocol can only be seen when reading pcap file or sniffing
  the <em>any</em> network interface. It is not used when simulating a network.<br>
+</div>
 <hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALSll.debug.html">debug</a></span> : <code class="type">bool</code></pre><br>
-<span id="2_LinuxCookedCaptureframes"><h2>Linux Cooked Capture frames</h2></span><br>
+<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><br>
+<h2 id="2_LinuxCookedCaptureframes">Linux Cooked Capture frames</h2><br>
 <pre><span class="keyword">module</span> <a href="Sll.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Sll.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Pack/Unpack a SLL frame.
 </div>

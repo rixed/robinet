@@ -45,50 +45,51 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Icmp.Pdu</title>
 </head>
 <body>
-<div class="navbar"><a href="Icmp.MsgType.html">Previous</a>
-&nbsp;<a href="Icmp.html">Up</a>
+<div class="navbar"><a class="pre" href="Icmp.MsgType.html" title="Icmp.MsgType">Previous</a>
+&nbsp;<a class="up" href="Icmp.html" title="Icmp">Up</a>
 &nbsp;</div>
-<center><h1>Module <a href="type_Icmp.Pdu.html">Icmp.Pdu</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Icmp.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>This module handle ICMP messages (un)packing.<br>
+<h1>Module <a href="type_Icmp.Pdu.html">Icmp.Pdu</a></h1>
+<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Icmp.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+This module handle ICMP messages (un)packing.<br>
+</div>
 <hr width="100%">
-<br><code><span id="TYPEpayload"><span class="keyword">type</span> <code class="type"></code>payload</span> = </code><table class="typetable">
+<pre><code><span id="TYPEpayload"><span class="keyword">type</span> <code class="type"></code>payload</span> = </code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Ids</span> <span class="keyword">of</span> <code class="type">int * int * Tools.Payload.t</code></code></td>
+<code><span id="TYPEELTpayload.Ids"><span class="constructor">Ids</span></span> <span class="keyword">of</span> <code class="type">int * int * Tools.Payload.t</code></code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Redirect</span> <span class="keyword">of</span> <code class="type">Ip.Addr.t * Tools.Payload.t</code></code></td>
+<code><span id="TYPEELTpayload.Redirect"><span class="constructor">Redirect</span></span> <span class="keyword">of</span> <code class="type">Ip.Addr.t * Tools.Payload.t</code></code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Header</span> <span class="keyword">of</span> <code class="type">int * Tools.Payload.t</code></code></td>
+<code><span id="TYPEELTpayload.Header"><span class="constructor">Header</span></span> <span class="keyword">of</span> <code class="type">int * Tools.Payload.t</code></code></td>
 
 </tr></table>
 
 
-<pre><span id="VALrandom_payload"><span class="keyword">val</span> <a href="code_VALIcmp.Pdu.random_payload.html">random_payload</a></span> : <code class="type">int * 'a -> <a href="Icmp.Pdu.html#TYPEpayload">payload</a></code></pre><br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><span id="VALrandom_payload"><span class="keyword">val</span> random_payload</span> : <code class="type">int * 'a -> <a href="Icmp.Pdu.html#TYPEpayload">payload</a></code></pre><pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>msg_type&nbsp;: <code class="type">Icmp.MsgType.t</code>;</code></td>
+<code><span id="TYPEELTt.msg_type">msg_type</span>&nbsp;:<code class="type">Icmp.MsgType.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>payload&nbsp;: <code class="type"><a href="Icmp.Pdu.html#TYPEpayload">payload</a></code>;</code></td>
+<code><span id="TYPEELTt.payload">payload</span>&nbsp;:<code class="type"><a href="Icmp.Pdu.html#TYPEpayload">payload</a></code>;</code></td>
 
 </tr></table>
 }
@@ -97,4 +98,4 @@
 Unpacked ICMP message.<br>
 </div>
 
-<pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALIcmp.Pdu.random.html">random</a></span> : <code class="type">unit -> <a href="Icmp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_echo_request"><span class="keyword">val</span> <a href="code_VALIcmp.Pdu.make_echo_request.html">make_echo_request</a></span> : <code class="type">int -> int -> <a href="Icmp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_echo_reply"><span class="keyword">val</span> <a href="code_VALIcmp.Pdu.make_echo_reply.html">make_echo_reply</a></span> : <code class="type">int -> int -> <a href="Icmp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALis_echo_request"><span class="keyword">val</span> <a href="code_VALIcmp.Pdu.is_echo_request.html">is_echo_request</a></span> : <code class="type"><a href="Icmp.Pdu.html#TYPEt">t</a> -> bool</code></pre><pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALIcmp.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Icmp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALIcmp.Pdu.unpack.html">unpack</a></span> : <code class="type">string * int * int -> <a href="Icmp.Pdu.html#TYPEt">t</a> option</code></pre></body></html>
+<pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Icmp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_echo_request"><span class="keyword">val</span> make_echo_request</span> : <code class="type">int -> int -> <a href="Icmp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_echo_reply"><span class="keyword">val</span> make_echo_reply</span> : <code class="type">int -> int -> <a href="Icmp.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALis_echo_request"><span class="keyword">val</span> is_echo_request</span> : <code class="type"><a href="Icmp.Pdu.html#TYPEt">t</a> -> bool</code></pre><pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Icmp.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">string * int * int -> <a href="Icmp.Pdu.html#TYPEt">t</a> option</code></pre></body></html>

@@ -48,13 +48,13 @@
 <title>Packet</title>
 </head>
 <body>
-<div class="navbar"><a href="Opache.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Pcap.html">Next</a>
+<div class="navbar"><a class="pre" href="Opache.html" title="Opache">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Pcap.html" title="Pcap">Next</a>
 </div>
-<center><h1>Module <a href="type_Packet.html">Packet</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Packet: <code class="code"><span class="keyword">sig</span></code> <a href="Packet.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Packet scrutiny
+<h1>Module <a href="type_Packet.html">Packet</a></h1>
+<pre><span class="keyword">module</span> Packet: <code class="code"><span class="keyword">sig</span></code> <a href="Packet.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Packet scrutiny
 <p>
 
 The purpose of this module is to help individual packet inquiry and
@@ -73,10 +73,10 @@ decode the simplest protocols for which all required data fits within a
 single packet. In other words, it will not venture much deeper than TCP/UDP.
 <p>
 
-<span id="1_Examples"><h1>Examples</h1></span>
+<h1 id="1_Examples">Examples</h1>
 <p>
 
-<span id="2_Exploringapcapfile"><h2>Exploring a pcap file</h2></span>
+<h2 id="2_Exploringapcapfile">Exploring a pcap file</h2>
 <p>
 
 This module is more useful from the toplevel <code class="code">robinet.top</code>.
@@ -85,12 +85,12 @@ of several tens of gigabyte, and we want to get some idea of what's
 in there. We start with the obvious:
 <p>
 
-<pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Pcap</span>.infos_of&nbsp;<span class="string">"big_one.pcap"</span>;;</code><pre></pre>
-<pre></pre><code class="code">-&nbsp;:&nbsp;<span class="constructor">Pcap</span>.infos&nbsp;=<br>
+<pre class="codepre"><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Pcap</span>.infos_of&nbsp;<span class="string">"big_one.pcap"</span>;;</code></pre>
+<pre class="codepre"><code class="code">-&nbsp;:&nbsp;<span class="constructor">Pcap</span>.infos&nbsp;=<br>
 {<span class="constructor">Pcap</span>.filename&nbsp;=&nbsp;<span class="string">"big_one.pcap"</span>;&nbsp;<span class="constructor">Pcap</span>.data_link_type&nbsp;=&nbsp;1l;<br>
 &nbsp;<span class="constructor">Pcap</span>.num_packets&nbsp;=&nbsp;53993956;&nbsp;<span class="constructor">Pcap</span>.data_size&nbsp;=&nbsp;40756596469<span class="constructor">L</span>;<br>
 &nbsp;<span class="constructor">Pcap</span>.start_time&nbsp;=&nbsp;1323766040.99259496;&nbsp;<span class="constructor">Pcap</span>.stop_time&nbsp;=&nbsp;1323767137.688411}<br>
-</code><pre></pre>
+</code></pre>
 <p>
 
 This will take a significant amount of time since the whole pcap file
@@ -100,14 +100,14 @@ must be scanned.
 Now we are interrested in all the packets attempting to connect port 80:
 <p>
 
-<pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="keyword">open</span>&nbsp;<span class="constructor">Packet</span>;;<br>
+<pre class="codepre"><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="keyword">open</span>&nbsp;<span class="constructor">Packet</span>;;<br>
 <span class="keywordsign">#</span>&nbsp;<span class="keyword">let</span>&nbsp;s80&nbsp;=&nbsp;enum_of_file&nbsp;<span class="string">"big_one.pcap"</span>&nbsp;//<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">function</span>&nbsp;[_;_;_;_;&nbsp;<span class="constructor">Pdu</span>.<span class="constructor">Tcp</span>&nbsp;{&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.dst_port&nbsp;=&nbsp;p&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.flags&nbsp;=&nbsp;{&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.syn&nbsp;=&nbsp;<span class="keyword">true</span>&nbsp;;&nbsp;_&nbsp;}&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;_&nbsp;}]&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;p&nbsp;=&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.o&nbsp;80<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;_&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keyword">false</span>;;<br>
 <span class="keyword">val</span>&nbsp;s80&nbsp;:&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer&nbsp;list&nbsp;<span class="constructor">BatEnum</span>.t&nbsp;=&nbsp;&lt;abstr&gt;<br>
-</code><pre></pre>
+</code></pre>
 <p>
 
 This will return surprisingly fast, due to the lazy nature of Enum.filter.
@@ -119,8 +119,8 @@ and IP).
 Let us have a look at the first of them:
 <p>
 
-<pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Enum</span>.peek&nbsp;s80;;</code><pre></pre>
-<pre></pre><code class="code">-&nbsp;:&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer&nbsp;list&nbsp;option&nbsp;=<br>
+<pre class="codepre"><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="constructor">Enum</span>.peek&nbsp;s80;;</code></pre>
+<pre class="codepre"><code class="code">-&nbsp;:&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer&nbsp;list&nbsp;option&nbsp;=<br>
 <span class="constructor">Some</span><br>
 &nbsp;[<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.<span class="constructor">Pcap</span><br>
 &nbsp;&nbsp;&nbsp;{<span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.source_name&nbsp;=&nbsp;<span class="string">"big_one.pcap"</span>;&nbsp;<span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.caplen&nbsp;=&nbsp;78;<br>
@@ -153,13 +153,13 @@ Let us have a look at the first of them:
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;01&nbsp;03&nbsp;03&nbsp;07&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;....<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.payload&nbsp;=&nbsp;empty}]<br>
-</code><pre></pre>
+</code></pre>
 <p>
 
 Now imagine you want to edit a pcap to change the TCP source/dest port from 21 to 2121.
 <p>
 
-<pre></pre><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="keyword">open</span>&nbsp;<span class="constructor">Packet</span>;;<br>
+<pre class="codepre"><code class="code"><span class="keywordsign">#</span>&nbsp;<span class="keyword">open</span>&nbsp;<span class="constructor">Packet</span>;;<br>
 <span class="keywordsign">#</span>&nbsp;<span class="keyword">let</span>&nbsp;old&nbsp;=&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.o&nbsp;21&nbsp;<span class="keyword">and</span>&nbsp;newp&nbsp;=&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.o&nbsp;2121&nbsp;<span class="keyword">in</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;enum_of_file&nbsp;<span class="string">"some.pcap"</span>&nbsp;/@<br>
 &nbsp;&nbsp;&nbsp;&nbsp;(<span class="keyword">function</span>&nbsp;cap::eth::ip::<span class="constructor">Pdu</span>.<span class="constructor">Tcp</span>&nbsp;({&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.dst_port&nbsp;=&nbsp;port&nbsp;;&nbsp;_&nbsp;}&nbsp;<span class="keyword">as</span>&nbsp;tcp)::rest&nbsp;<span class="keyword">when</span>&nbsp;port&nbsp;=&nbsp;old&nbsp;<span class="keywordsign">-&gt;</span><br>
@@ -168,19 +168,20 @@ Now imagine you want to edit a pcap to change the TCP source/dest port from 21 t
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;cap::eth::ip::<span class="constructor">Pdu</span>.<span class="constructor">Tcp</span>&nbsp;{&nbsp;tcp&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.src_port&nbsp;=&nbsp;newp&nbsp;}::rest<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;x&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;x)&nbsp;|&gt;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;to_file&nbsp;<span class="string">"changed.pcap"</span>&nbsp;;;<br>
-</code><pre></pre><br>
+</code></pre><br>
+</div>
 <hr width="100%">
 <br>
-<span id="2_Capturedpacket"><h2>Captured packet</h2></span><br>
+<h2 id="2_Capturedpacket">Captured packet</h2><br>
 <pre><span class="keyword">module</span> <a href="Packet.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Packet.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Pack/Unpack the whole protocol stack that fits entirely within a packet.
 </div>
 <br>
-<span id="2_Shorthands"><h2>Shorthands</h2></span><br>
-<pre><span id="VALenum_of_file"><span class="keyword">val</span> <a href="code_VALPacket.enum_of_file.html">enum_of_file</a></span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list BatEnum.t</code></pre><div class="info">
+<h2 id="2_Shorthands">Shorthands</h2><br>
+<pre><span id="VALenum_of_file"><span class="keyword">val</span> enum_of_file</span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list BatEnum.t</code></pre><div class="info">
 <code class="code"><span class="constructor">Packet</span>.enum_of_file filename</code> reads a pcap file and returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
 </div>
-<pre><span id="VALto_file"><span class="keyword">val</span> <a href="code_VALPacket.to_file.html">to_file</a></span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPEt">Pdu.t</a> Batteries.Enum.t -> unit</code></pre><div class="info">
+<pre><span id="VALto_file"><span class="keyword">val</span> to_file</span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list Batteries.Enum.t -> unit</code></pre><div class="info">
 <code class="code"><span class="constructor">Packet</span>.to_file filename e</code> write the enumeration of <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a> into the given file.<br>
 </div>
 </body></html>

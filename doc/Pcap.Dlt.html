@@ -45,53 +45,54 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Pcap.Dlt</title>
 </head>
 <body>
-<div class="navbar">&nbsp;<a href="Pcap.html">Up</a>
-&nbsp;<a href="Pcap.Pdu.html">Next</a>
+<div class="navbar">&nbsp;<a class="up" href="Pcap.html" title="Pcap">Up</a>
+&nbsp;<a class="post" href="Pcap.Pdu.html" title="Pcap.Pdu">Next</a>
 </div>
-<center><h1>Module <a href="type_Pcap.Dlt.html">Pcap.Dlt</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Dlt: <code class="code"><span class="keyword">sig</span></code> <a href="Pcap.Dlt.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><em>Data Link Types</em> are constant values indicating what protocol and hardware technology
+<h1>Module <a href="type_Pcap.Dlt.html">Pcap.Dlt</a></h1>
+<pre><span class="keyword">module</span> Dlt: <code class="code"><span class="keyword">sig</span></code> <a href="Pcap.Dlt.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+<em>Data Link Types</em> are constant values indicating what protocol and hardware technology
  some captured packets were taken from. We support only the two most common: <code class="code"><span class="constructor">Dlt</span>.en10mb</code>, ie
  usual Ethernet cables, and <code class="code"><span class="constructor">Dlt</span>.linux_cooked</code> corresponding to a capture on the <em>any</em>
  network device on Linux.<br>
+</div>
 <hr width="100%">
 <pre><span class="keyword">include</span> struct ... end</pre>
 <br>
 Some well know DLT values.<br>
-<pre><span id="VALnull"><span class="keyword">val</span> <a href="code_VALPcap.Dlt.null.html">null</a></span> : <code class="type">t</code></pre><div class="info">
+<pre><span id="VALnull"><span class="keyword">val</span> null</span> : <code class="type">t</code></pre><div class="info">
 BSD loopback encapsulation<br>
 </div>
-<pre><span id="VALen10mb"><span class="keyword">val</span> <a href="code_VALPcap.Dlt.en10mb.html">en10mb</a></span> : <code class="type">t</code></pre><div class="info">
+<pre><span id="VALen10mb"><span class="keyword">val</span> en10mb</span> : <code class="type">t</code></pre><div class="info">
 Ethernet (10Mb)<br>
 </div>
-<pre><span id="VALen3mb"><span class="keyword">val</span> <a href="code_VALPcap.Dlt.en3mb.html">en3mb</a></span> : <code class="type">t</code></pre><div class="info">
+<pre><span id="VALen3mb"><span class="keyword">val</span> en3mb</span> : <code class="type">t</code></pre><div class="info">
 Experimental Ethernet (3Mb)<br>
 </div>
-<pre><span id="VALax25"><span class="keyword">val</span> <a href="code_VALPcap.Dlt.ax25.html">ax25</a></span> : <code class="type">t</code></pre><div class="info">
+<pre><span id="VALax25"><span class="keyword">val</span> ax25</span> : <code class="type">t</code></pre><div class="info">
 Amateur Radio AX.25<br>
 </div>
-<pre><span id="VALpronet"><span class="keyword">val</span> <a href="code_VALPcap.Dlt.pronet.html">pronet</a></span> : <code class="type">t</code></pre><div class="info">
+<pre><span id="VALpronet"><span class="keyword">val</span> pronet</span> : <code class="type">t</code></pre><div class="info">
 Proteon ProNET Token Ring<br>
 </div>
-<pre><span id="VALchaos"><span class="keyword">val</span> <a href="code_VALPcap.Dlt.chaos.html">chaos</a></span> : <code class="type">t</code></pre><div class="info">
+<pre><span id="VALchaos"><span class="keyword">val</span> chaos</span> : <code class="type">t</code></pre><div class="info">
 Chaos<br>
 </div>
-<pre><span id="VALieee802"><span class="keyword">val</span> <a href="code_VALPcap.Dlt.ieee802.html">ieee802</a></span> : <code class="type">t</code></pre><div class="info">
+<pre><span id="VALieee802"><span class="keyword">val</span> ieee802</span> : <code class="type">t</code></pre><div class="info">
 802.5 Token Ring<br>
 </div>
-<pre><span id="VALarcnet"><span class="keyword">val</span> <a href="code_VALPcap.Dlt.arcnet.html">arcnet</a></span> : <code class="type">t</code></pre><div class="info">
+<pre><span id="VALarcnet"><span class="keyword">val</span> arcnet</span> : <code class="type">t</code></pre><div class="info">
 ARCNET, with BSD-style header<br>
 </div>
-<pre><span id="VALslip"><span class="keyword">val</span> <a href="code_VALPcap.Dlt.slip.html">slip</a></span> : <code class="type">t</code></pre><div class="info">
+<pre><span id="VALslip"><span class="keyword">val</span> slip</span> : <code class="type">t</code></pre><div class="info">
 Serial Line IP<br>
 </div>
-<pre><span id="VALppp"><span class="keyword">val</span> <a href="code_VALPcap.Dlt.ppp.html">ppp</a></span> : <code class="type">t</code></pre><div class="info">
+<pre><span id="VALppp"><span class="keyword">val</span> ppp</span> : <code class="type">t</code></pre><div class="info">
 Point-to-point Protocol<br>
 </div>
-<pre><span id="VALfddi"><span class="keyword">val</span> <a href="code_VALPcap.Dlt.fddi.html">fddi</a></span> : <code class="type">t</code></pre><div class="info">
+<pre><span id="VALfddi"><span class="keyword">val</span> fddi</span> : <code class="type">t</code></pre><div class="info">
 FDDI<br>
 </div>
-<pre><span id="VALlinux_cooked"><span class="keyword">val</span> <a href="code_VALPcap.Dlt.linux_cooked.html">linux_cooked</a></span> : <code class="type">t</code></pre><div class="info">
+<pre><span id="VALlinux_cooked"><span class="keyword">val</span> linux_cooked</span> : <code class="type">t</code></pre><div class="info">
 Linux SLL<br>
 </div>
-<pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALPcap.Dlt.random.html">random</a></span> : <code class="type">unit -> t</code></pre></body></html>
+<pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> t</code></pre></body></html>

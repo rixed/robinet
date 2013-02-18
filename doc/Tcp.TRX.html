@@ -45,176 +45,175 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Tcp.TRX</title>
 </head>
 <body>
-<div class="navbar"><a href="Tcp.Pdu.html">Previous</a>
-&nbsp;<a href="Tcp.html">Up</a>
+<div class="navbar"><a class="pre" href="Tcp.Pdu.html" title="Tcp.Pdu">Previous</a>
+&nbsp;<a class="up" href="Tcp.html" title="Tcp">Up</a>
 &nbsp;</div>
-<center><h1>Module <a href="type_Tcp.TRX.html">Tcp.TRX</a></h1></center>
-<br>
+<h1>Module <a href="type_Tcp.TRX.html">Tcp.TRX</a></h1>
 <pre><span class="keyword">module</span> TRX: <code class="code"><span class="keyword">sig</span></code> <a href="Tcp.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
 <pre><span id="TYPErcvd_pkt"><span class="keyword">type</span> <code class="type"></code>rcvd_pkt</span> = <code class="type">int * <a href="Tcp.Pdu.html#TYPEt">Tcp.Pdu.t</a></code> </pre>
 
 <pre><span class="keyword">module</span> <a href="Tcp.TRX.Streambuf.html">Streambuf</a>: <code class="type">Batteries.Set.Make</code><code class="code">(</code><code class="code"><span class="keyword">sig</span></code><div class="sig_block"><pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = <code class="type"><a href="Tcp.TRX.html#TYPErcvd_pkt">Tcp.TRX.rcvd_pkt</a></code> </pre>
 
-<pre><span id="VALcompare"><span class="keyword">val</span> <a href="code_VALTcp.TRX.Streambuf.compare.html">compare</a></span> : <code class="type">Batteries.Int.t * 'a -> Batteries.Int.t * 'b -> int</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">)</code></pre><br><code><span id="TYPEtcp_trx"><span class="keyword">type</span> <code class="type"></code>tcp_trx</span> = {</code><table class="typetable">
+<pre><span id="VALcompare"><span class="keyword">val</span> compare</span> : <code class="type">Batteries.Int.t * 'a -> Batteries.Int.t * 'b -> int</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">)</code></pre><pre><code><span id="TYPEtcp_trx"><span class="keyword">type</span> <code class="type"></code>tcp_trx</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>trx&nbsp;: <code class="type"><a href="Tools.html#TYPEtrx">Tools.trx</a></code>;</code></td>
+<code><span id="TYPEELTtcp_trx.trx">trx</span>&nbsp;:<code class="type"><a href="Tools.html#TYPEtrx">Tools.trx</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>close&nbsp;: <code class="type">unit -> unit</code>;</code></td>
+<code><span id="TYPEELTtcp_trx.close">close</span>&nbsp;:<code class="type">unit -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>is_closed&nbsp;: <code class="type">unit -> bool</code>;</code></td>
+<code><span id="TYPEELTtcp_trx.is_closed">is_closed</span>&nbsp;:<code class="type">unit -> bool</code>;</code></td>
 
 </tr></table>
 }
 
 
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>tcp_trx&nbsp;: <code class="type"><a href="Tcp.TRX.html#TYPEtcp_trx">tcp_trx</a></code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.tcp_trx">tcp_trx</span>&nbsp;:<code class="type"><a href="Tcp.TRX.html#TYPEtcp_trx">tcp_trx</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>src&nbsp;: <code class="type">Tcp.Port.t</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.src">src</span>&nbsp;:<code class="type">Tcp.Port.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>dst&nbsp;: <code class="type">Tcp.Port.t</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.dst">dst</span>&nbsp;:<code class="type">Tcp.Port.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>emit&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.emit">emit</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>recv&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.recv">recv</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>mtu&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.mtu">mtu</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>isn&nbsp;: <code class="type">Tcp.SeqNum.t</code>;</code></td>
+<code><span id="TYPEELTt.isn">isn</span>&nbsp;:<code class="type">Tcp.SeqNum.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>rcvd_isn&nbsp;: <code class="type">Tcp.SeqNum.t option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.rcvd_isn">rcvd_isn</span>&nbsp;:<code class="type">Tcp.SeqNum.t option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>closed&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.closed">closed</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>sent_fin&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.sent_fin">sent_fin</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>sent_pld&nbsp;: <code class="type">int</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.sent_pld">sent_pld</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>sent_acked&nbsp;: <code class="type">int</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.sent_acked">sent_acked</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>rcvd_pld&nbsp;: <code class="type">int</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.rcvd_pld">rcvd_pld</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>rcvd_acked&nbsp;: <code class="type">int</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.rcvd_acked">rcvd_acked</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>rcvd_pkts&nbsp;: <code class="type">Streambuf.t</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.rcvd_pkts">rcvd_pkts</span>&nbsp;:<code class="type">Streambuf.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>to_send&nbsp;: <code class="type">Bitstring.bitstring list</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.to_send">to_send</span>&nbsp;:<code class="type">Bitstring.bitstring list</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>unacked_tx&nbsp;: <code class="type">Streambuf.t</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.unacked_tx">unacked_tx</span>&nbsp;:<code class="type">Streambuf.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>rcvd_fin&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.rcvd_fin">rcvd_fin</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>cnx_established_cont&nbsp;: <code class="type">(<a href="Tcp.TRX.html#TYPEtcp_trx">tcp_trx</a> option -> unit) option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.cnx_established_cont">cnx_established_cont</span>&nbsp;:<code class="type">(<a href="Tcp.TRX.html#TYPEtcp_trx">tcp_trx</a> option -> unit) option</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALis_closed"><span class="keyword">val</span> <a href="code_VALTcp.TRX.is_closed.html">is_closed</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit -> bool</code></pre><pre><span id="VALint_of_bool"><span class="keyword">val</span> <a href="code_VALTcp.TRX.int_of_bool.html">int_of_bool</a></span> : <code class="type">bool -> int</code></pre><pre><span id="VAL(+/)"><span class="keyword">val</span> <a href="code_VALTcp.TRX.(_plus__slash_).html">(+/)</a></span> : <code class="type">int32 -> int32 -> int32</code></pre><pre><span id="VAL(-/)"><span class="keyword">val</span> <a href="code_VALTcp.TRX.(_minus__slash_).html">(-/)</a></span> : <code class="type">int32 -> int32 -> int32</code></pre><pre><span id="VALnext_seq_num"><span class="keyword">val</span> <a href="code_VALTcp.TRX.next_seq_num.html">next_seq_num</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> Tcp.SeqNum.t</code></pre><pre><span id="VALnext_ack_num"><span class="keyword">val</span> <a href="code_VALTcp.TRX.next_ack_num.html">next_ack_num</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> Tcp.SeqNum.t option</code></pre><pre><span id="VALemit_one"><span class="keyword">val</span> <a href="code_VALTcp.TRX.emit_one.html">emit_one</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -><br>       ?psh:bool -><br>       ?rst:bool -> ?syn:bool -> ?fin:bool -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALemit_multi"><span class="keyword">val</span> <a href="code_VALTcp.TRX.emit_multi.html">emit_multi</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALdelayed_ack"><span class="keyword">val</span> <a href="code_VALTcp.TRX.delayed_ack.html">delayed_ack</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALestablish_cnx"><span class="keyword">val</span> <a href="code_VALTcp.TRX.establish_cnx.html">establish_cnx</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> bool -> unit</code></pre><pre><span id="VALtry_really_rx"><span class="keyword">val</span> <a href="code_VALTcp.TRX.try_really_rx.html">try_really_rx</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALdrop_unacked_tx"><span class="keyword">val</span> <a href="code_VALTcp.TRX.drop_unacked_tx.html">drop_unacked_tx</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALinqueue_pkt"><span class="keyword">val</span> <a href="code_VALTcp.TRX.inqueue_pkt.html">inqueue_pkt</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> <a href="Tcp.Pdu.html#TYPEt">Tcp.Pdu.t</a> -> unit</code></pre><pre><span id="VALis_established"><span class="keyword">val</span> <a href="code_VALTcp.TRX.is_established.html">is_established</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> bool</code></pre><pre><span id="VALrx"><span class="keyword">val</span> <a href="code_VALTcp.TRX.rx.html">rx</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre><pre><span id="VALtry_really_tx"><span class="keyword">val</span> <a href="code_VALTcp.TRX.try_really_tx.html">try_really_tx</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALclose"><span class="keyword">val</span> <a href="code_VALTcp.TRX.close.html">close</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit -> unit</code></pre><pre><span id="VALtx"><span class="keyword">val</span> <a href="code_VALTcp.TRX.tx.html">tx</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALTcp.TRX.make.html">make</a></span> : <code class="type">?isn:Tcp.SeqNum.t -> ?mtu:int -> Tcp.Port.t -> Tcp.Port.t -> <a href="Tcp.TRX.html#TYPEt">t</a></code></pre><pre><span id="VALmay_timeout"><span class="keyword">val</span> <a href="code_VALTcp.TRX.may_timeout.html">may_timeout</a></span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALdefault_connect_timeout"><span class="keyword">val</span> <a href="code_VALTcp.TRX.default_connect_timeout.html">default_connect_timeout</a></span> : <code class="type">Clock.Interval.t</code></pre><pre><span id="VALconnect"><span class="keyword">val</span> <a href="code_VALTcp.TRX.connect.html">connect</a></span> : <code class="type">?timeout:Clock.Interval.t -><br>       <a href="Tcp.TRX.html#TYPEt">t</a> -> (<a href="Tcp.TRX.html#TYPEtcp_trx">tcp_trx</a> option -> unit) -> unit</code></pre></body></html>
+<pre><span id="VALis_closed"><span class="keyword">val</span> is_closed</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit -> bool</code></pre><pre><span id="VALint_of_bool"><span class="keyword">val</span> int_of_bool</span> : <code class="type">bool -> int</code></pre><pre><span id="VAL(+/)"><span class="keyword">val</span> (+/)</span> : <code class="type">int32 -> int32 -> int32</code></pre><pre><span id="VAL(-/)"><span class="keyword">val</span> (-/)</span> : <code class="type">int32 -> int32 -> int32</code></pre><pre><span id="VALnext_seq_num"><span class="keyword">val</span> next_seq_num</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> Tcp.SeqNum.t</code></pre><pre><span id="VALnext_ack_num"><span class="keyword">val</span> next_ack_num</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> Tcp.SeqNum.t option</code></pre><pre><span id="VALemit_one"><span class="keyword">val</span> emit_one</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -><br>       ?psh:bool -><br>       ?rst:bool -> ?syn:bool -> ?fin:bool -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALemit_multi"><span class="keyword">val</span> emit_multi</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALdelayed_ack"><span class="keyword">val</span> delayed_ack</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALestablish_cnx"><span class="keyword">val</span> establish_cnx</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> bool -> unit</code></pre><pre><span id="VALtry_really_rx"><span class="keyword">val</span> try_really_rx</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALdrop_unacked_tx"><span class="keyword">val</span> drop_unacked_tx</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALinqueue_pkt"><span class="keyword">val</span> inqueue_pkt</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> <a href="Tcp.Pdu.html#TYPEt">Tcp.Pdu.t</a> -> unit</code></pre><pre><span id="VALis_established"><span class="keyword">val</span> is_established</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> bool</code></pre><pre><span id="VALrx"><span class="keyword">val</span> rx</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre><pre><span id="VALtry_really_tx"><span class="keyword">val</span> try_really_tx</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALclose"><span class="keyword">val</span> close</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit -> unit</code></pre><pre><span id="VALtx"><span class="keyword">val</span> tx</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">?isn:Tcp.SeqNum.t -> ?mtu:int -> Tcp.Port.t -> Tcp.Port.t -> <a href="Tcp.TRX.html#TYPEt">t</a></code></pre><pre><span id="VALmay_timeout"><span class="keyword">val</span> may_timeout</span> : <code class="type"><a href="Tcp.TRX.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALdefault_connect_timeout"><span class="keyword">val</span> default_connect_timeout</span> : <code class="type">Clock.Interval.t</code></pre><pre><span id="VALconnect"><span class="keyword">val</span> connect</span> : <code class="type">?timeout:Clock.Interval.t -><br>       <a href="Tcp.TRX.html#TYPEt">t</a> -> (<a href="Tcp.TRX.html#TYPEtcp_trx">tcp_trx</a> option -> unit) -> unit</code></pre></body></html>

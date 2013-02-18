@@ -51,60 +51,61 @@
 <title>Ip</title>
 </head>
 <body>
-<div class="navbar"><a href="Icmp.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Localhost.html">Next</a>
+<div class="navbar"><a class="pre" href="Icmp.html" title="Icmp">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Localhost.html" title="Localhost">Next</a>
 </div>
-<center><h1>Module <a href="type_Ip.html">Ip</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Ip: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.html">..</a> <code class="code"><span class="keyword">end</span></code></pre> Everything related to IPv4 packets: (un)packing, addresses, transceiver...
+<h1>Module <a href="type_Ip.html">Ip</a></h1>
+<pre><span class="keyword">module</span> Ip: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+ Everything related to IPv4 packets: (un)packing, addresses, transceiver...
 <p>
 
  TODO: Some usual IP options should be understood.<br>
+</div>
 <hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALIp.debug.html">debug</a></span> : <code class="type">bool</code></pre><br>
-<span id="2_PrivateTypes"><h2>Private Types</h2></span><br>
+<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><br>
+<h2 id="2_PrivateTypes">Private Types</h2><br>
 <br>
-<span id="3_Protocols"><h3>Protocols</h3></span><br>
+<h3 id="3_Protocols">Protocols</h3><br>
 <pre><span class="keyword">module</span> <a href="Ip.Proto.html">Proto</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Proto.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Internet protocols, as in <code class="code">/etc/protocols</code>.
 </div>
 <br>
-<span id="3_Addresses"><h3>Addresses</h3></span><br>
+<h3 id="3_Addresses">Addresses</h3><br>
 <br>
-<span id="4_inetaddr"><h4>inet_addr</h4></span>
+<h4 id="4_inetaddr">inet_addr</h4>
 <p>
 
  Stdlib <code class="code"><span class="constructor">Unix</span></code> module already have a type for IP addresses:
  <code class="code"><span class="constructor">Unix</span>.inet_addr</code> (actually a <code class="code">string</code>). Here are the functions
  to convert our address (<code class="code">int32</code>) from/to <code class="code">inet_addr</code>.<br>
-<pre><span id="VALint32_of_inet_addr"><span class="keyword">val</span> <a href="code_VALIp.int32_of_inet_addr.html">int32_of_inet_addr</a></span> : <code class="type">'a -> int32</code></pre><div class="info">
+<pre><span id="VALint32_of_inet_addr"><span class="keyword">val</span> int32_of_inet_addr</span> : <code class="type">'a -> int32</code></pre><div class="info">
 Convert an <code class="code">inet_addr</code> into an <code class="code">int32</code>...<br>
 </div>
-<pre><span id="VALinet_addr_of_int32"><span class="keyword">val</span> <a href="code_VALIp.inet_addr_of_int32.html">inet_addr_of_int32</a></span> : <code class="type">int32 -> Batteries.Unix.inet_addr</code></pre><div class="info">
+<pre><span id="VALinet_addr_of_int32"><span class="keyword">val</span> inet_addr_of_int32</span> : <code class="type">int32 -> Batteries.Unix.inet_addr</code></pre><div class="info">
 ... and the other way around.<br>
 </div>
-<pre><span id="VALinet_addr_print"><span class="keyword">val</span> <a href="code_VALIp.inet_addr_print.html">inet_addr_print</a></span> : <code class="type">'a BatInnerIO.output -> Batteries.Unix.inet_addr -> unit</code></pre><div class="info">
+<pre><span id="VALinet_addr_print"><span class="keyword">val</span> inet_addr_print</span> : <code class="type">'a BatInnerIO.output -> Batteries.Unix.inet_addr -> unit</code></pre><div class="info">
 Printer (in the sense of Batteries) for inet_addrs<br>
 </div>
 <br>
-<span id="4_IPAddressesasint32"><h4>IP Addresses as int32</h4></span><br>
+<h4 id="4_IPAddressesasint32">IP Addresses as int32</h4><br>
 <pre><span class="keyword">module</span> <a href="Ip.Addr.html">Addr</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 We use a private type for IPv4 addresses so that we can have a
  custom printer, but it's actually an <code class="code">int32</code> and you can cast with:
  <code class="code">(addr :&gt; int32)</code> in one direction and <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.o int</code> in the other.
 </div>
 <br>
-<span id="4_CIDRAddresses"><h4>CIDR Addresses</h4></span><br>
+<h4 id="4_CIDRAddresses">CIDR Addresses</h4><br>
 <pre><span class="keyword">module</span> <a href="Ip.Cidr.html">Cidr</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Cidr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 CIDR addresses are a concise way to write network addresses,
  with network IP then netmask length, like: 192.168.0.0/16.
 </div>
 <br>
-<span id="2_IPpacket"><h2>IP packet</h2></span><br>
+<h2 id="2_IPpacket">IP packet</h2><br>
 <pre><span class="keyword">module</span> <a href="Ip.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 (Un)Packing an IP packet.
 </div>
 <br>
-<span id="2_Transceiver"><h2>Transceiver</h2></span><br>
+<h2 id="2_Transceiver">Transceiver</h2><br>
 <pre><span class="keyword">module</span> <a href="Ip.TRX.html">TRX</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre></body></html>

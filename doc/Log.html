@@ -46,52 +46,53 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Log</title>
 </head>
 <body>
-<div class="navbar"><a href="Localhost.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Metric.html">Next</a>
+<div class="navbar"><a class="pre" href="Localhost.html" title="Localhost">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Metric.html" title="Metric">Next</a>
 </div>
-<center><h1>Module <a href="type_Log.html">Log</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Log: <code class="code"><span class="keyword">sig</span></code> <a href="Log.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Logging facility
+<h1>Module <a href="type_Log.html">Log</a></h1>
+<pre><span class="keyword">module</span> Log: <code class="code"><span class="keyword">sig</span></code> <a href="Log.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Logging facility
 <p>
 
   We keep lazily the last N messages of every log levels.
   Additionally, messages of higher level than some threshold are copied onto stderr.<br>
+</div>
 <hr width="100%">
-<br><code><span id="TYPElevel"><span class="keyword">type</span> <code class="type"></code>level</span> = </code><table class="typetable">
+<pre><code><span id="TYPElevel"><span class="keyword">type</span> <code class="type"></code>level</span> = </code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Critical</span></code></td>
+<code><span id="TYPEELTlevel.Critical"><span class="constructor">Critical</span></span></code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Error</span></code></td>
+<code><span id="TYPEELTlevel.Error"><span class="constructor">Error</span></span></code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Warning</span></code></td>
+<code><span id="TYPEELTlevel.Warning"><span class="constructor">Warning</span></span></code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Info</span></code></td>
+<code><span id="TYPEELTlevel.Info"><span class="constructor">Info</span></span></code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
-<code><span class="constructor">Debug</span></code></td>
+<code><span id="TYPEELTlevel.Debug"><span class="constructor">Debug</span></span></code></td>
 
 </tr></table>
 
@@ -100,22 +101,22 @@
 
 <pre><span id="TYPEqueue"><span class="keyword">type</span> <code class="type"></code>queue</span> = <code class="type">int * <a href="Log.html#TYPEmsg">msg</a> array</code> </pre>
 
-<br><code><span id="TYPElogger"><span class="keyword">type</span> <code class="type"></code>logger</span> = {</code><table class="typetable">
+<pre><code><span id="TYPElogger"><span class="keyword">type</span> <code class="type"></code>logger</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>name&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTlogger.name">name</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>queues&nbsp;: <code class="type"><a href="Log.html#TYPEqueue">queue</a> array</code>;</code></td>
+<code><span id="TYPEELTlogger.queues">queues</span>&nbsp;:<code class="type"><a href="Log.html#TYPEqueue">queue</a> array</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALint_of_level"><span class="keyword">val</span> <a href="code_VALLog.int_of_level.html">int_of_level</a></span> : <code class="type"><a href="Log.html#TYPElevel">level</a> -> int</code></pre><pre><span id="VALnb_levels"><span class="keyword">val</span> <a href="code_VALLog.nb_levels.html">nb_levels</a></span> : <code class="type">int</code></pre><pre><span id="VALconsole_lvl"><span class="keyword">val</span> <a href="code_VALLog.console_lvl.html">console_lvl</a></span> : <code class="type"><a href="Log.html#TYPElevel">level</a> Batteries.ref</code></pre><pre><span id="VALconsole_log"><span class="keyword">val</span> <a href="code_VALLog.console_log.html">console_log</a></span> : <code class="type">string -> Clock.Time.t * string Lazy.t -> unit</code></pre><pre><span id="VALenqueue"><span class="keyword">val</span> <a href="code_VALLog.enqueue.html">enqueue</a></span> : <code class="type">int * 'a array -> 'a -> int * 'a array</code></pre><pre><span id="VALqueue_iter"><span class="keyword">val</span> <a href="code_VALLog.queue_iter.html">queue_iter</a></span> : <code class="type">('a -> string -> unit) -> int * ('a * string Lazy.t) array -> unit</code></pre><pre><span id="VALlog"><span class="keyword">val</span> <a href="code_VALLog.log.html">log</a></span> : <code class="type"><a href="Log.html#TYPElogger">logger</a> -> <a href="Log.html#TYPElevel">level</a> -> string Lazy.t -> unit</code></pre><pre><span id="VALmake_queue"><span class="keyword">val</span> <a href="code_VALLog.make_queue.html">make_queue</a></span> : <code class="type">int -> int * (Clock.Time.t * string lazy_t) array</code></pre><pre><span id="VALloggers"><span class="keyword">val</span> <a href="code_VALLog.loggers.html">loggers</a></span> : <code class="type">(string, <a href="Log.html#TYPElogger">logger</a>) Batteries.Hashtbl.t</code></pre><pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALLog.make.html">make</a></span> : <code class="type">string -> int -> <a href="Log.html#TYPElogger">logger</a></code></pre></body></html>
+<pre><span id="VALint_of_level"><span class="keyword">val</span> int_of_level</span> : <code class="type"><a href="Log.html#TYPElevel">level</a> -> int</code></pre><pre><span id="VALnb_levels"><span class="keyword">val</span> nb_levels</span> : <code class="type">int</code></pre><pre><span id="VALconsole_lvl"><span class="keyword">val</span> console_lvl</span> : <code class="type"><a href="Log.html#TYPElevel">level</a> Batteries.ref</code></pre><pre><span id="VALconsole_log"><span class="keyword">val</span> console_log</span> : <code class="type">string -> Clock.Time.t * string Lazy.t -> unit</code></pre><pre><span id="VALenqueue"><span class="keyword">val</span> enqueue</span> : <code class="type">int * 'a array -> 'a -> int * 'a array</code></pre><pre><span id="VALqueue_iter"><span class="keyword">val</span> queue_iter</span> : <code class="type">('a -> string -> unit) -> int * ('a * string Lazy.t) array -> unit</code></pre><pre><span id="VALlog"><span class="keyword">val</span> log</span> : <code class="type"><a href="Log.html#TYPElogger">logger</a> -> <a href="Log.html#TYPElevel">level</a> -> string Lazy.t -> unit</code></pre><pre><span id="VALmake_queue"><span class="keyword">val</span> make_queue</span> : <code class="type">int -> int * (Clock.Time.t * string lazy_t) array</code></pre><pre><span id="VALloggers"><span class="keyword">val</span> loggers</span> : <code class="type">(string, <a href="Log.html#TYPElogger">logger</a>) Batteries.Hashtbl.t</code></pre><pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">string -> int -> <a href="Log.html#TYPElogger">logger</a></code></pre></body></html>

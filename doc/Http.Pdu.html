@@ -45,37 +45,36 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Http.Pdu</title>
 </head>
 <body>
-<div class="navbar">&nbsp;<a href="Http.html">Up</a>
-&nbsp;<a href="Http.TRXtop.html">Next</a>
+<div class="navbar">&nbsp;<a class="up" href="Http.html" title="Http">Up</a>
+&nbsp;<a class="post" href="Http.TRXtop.html" title="Http.TRXtop">Next</a>
 </div>
-<center><h1>Module <a href="type_Http.Pdu.html">Http.Pdu</a></h1></center>
-<br>
+<h1>Module <a href="type_Http.Pdu.html">Http.Pdu</a></h1>
 <pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Http.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>cmd&nbsp;: <code class="type"><a href="Http.html#TYPEcmd">Http.cmd</a></code>;</code></td>
+<code><span id="TYPEELTt.cmd">cmd</span>&nbsp;:<code class="type"><a href="Http.html#TYPEcmd">Http.cmd</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>headers&nbsp;: <code class="type"><a href="Http.html#TYPEheader">Http.header</a> list</code>;</code></td>
+<code><span id="TYPEELTt.headers">headers</span>&nbsp;:<code class="type"><a href="Http.html#TYPEheader">Http.header</a> list</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>body&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.body">body</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALstring_of_cmd"><span class="keyword">val</span> <a href="code_VALHttp.Pdu.string_of_cmd.html">string_of_cmd</a></span> : <code class="type"><a href="Http.html#TYPEcmd">Http.cmd</a> -> string</code></pre><pre><span id="TYPEparse_item"><span class="keyword">type</span> <code class="type"></code>parse_item</span> = <code class="type">[ `HttpHeaders of <a href="Http.html#TYPEheader">Http.header</a> list<br>       | `HttpRequest of string * string<br>       | `HttpResponse of int * string ]</code> </pre>
+<pre><span id="VALstring_of_cmd"><span class="keyword">val</span> string_of_cmd</span> : <code class="type"><a href="Http.html#TYPEcmd">Http.cmd</a> -> string</code></pre><pre><span id="TYPEparse_item"><span class="keyword">type</span> <code class="type"></code>parse_item</span> = <code class="type">[ `HttpHeaders of <a href="Http.html#TYPEheader">Http.header</a> list<br>       | `HttpRequest of string * string<br>       | `HttpResponse of int * string ]</code> </pre>
 
-<pre><span id="VALmake_request"><span class="keyword">val</span> <a href="code_VALHttp.Pdu.make_request.html">make_request</a></span> : <code class="type">string -> string -> ?body:string -> <a href="Http.html#TYPEheader">Http.header</a> list -> <a href="Http.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_status"><span class="keyword">val</span> <a href="code_VALHttp.Pdu.make_status.html">make_status</a></span> : <code class="type"><a href="Http.html#TYPEcode">Http.code</a> -> <a href="Http.html#TYPEheader">Http.header</a> list -> string -> <a href="Http.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALparzer"><span class="keyword">val</span> <a href="code_VALHttp.Pdu.parzer.html">parzer</a></span> : <code class="type">unit -> char list -> bool -> (<a href="Http.Pdu.html#TYPEt">t</a>, char) <a href="Peg.html#TYPEparzer_result">Peg.parzer_result</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALHttp.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Http.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALHttp.Pdu.unpack.html">unpack</a></span> : <code class="type">Bitstring.bitstring -> <a href="Http.Pdu.html#TYPEt">t</a> option</code></pre></body></html>
+<pre><span id="VALmake_request"><span class="keyword">val</span> make_request</span> : <code class="type">string -> string -> ?body:string -> <a href="Http.html#TYPEheader">Http.header</a> list -> <a href="Http.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_status"><span class="keyword">val</span> make_status</span> : <code class="type"><a href="Http.html#TYPEcode">Http.code</a> -> <a href="Http.html#TYPEheader">Http.header</a> list -> string -> <a href="Http.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALparzer"><span class="keyword">val</span> parzer</span> : <code class="type">unit -> char list -> bool -> (<a href="Http.Pdu.html#TYPEt">t</a>, char) <a href="Peg.html#TYPEparzer_result">Peg.parzer_result</a></code></pre><pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Http.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">Bitstring.bitstring -> <a href="Http.Pdu.html#TYPEt">t</a> option</code></pre></body></html>

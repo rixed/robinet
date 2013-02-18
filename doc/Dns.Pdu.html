@@ -45,102 +45,101 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Dns.Pdu</title>
 </head>
 <body>
-<div class="navbar"><a href="Dns.QType.html">Previous</a>
-&nbsp;<a href="Dns.html">Up</a>
+<div class="navbar"><a class="pre" href="Dns.QType.html" title="Dns.QType">Previous</a>
+&nbsp;<a class="up" href="Dns.html" title="Dns">Up</a>
 &nbsp;</div>
-<center><h1>Module <a href="type_Dns.Pdu.html">Dns.Pdu</a></h1></center>
-<br>
+<h1>Module <a href="type_Dns.Pdu.html">Dns.Pdu</a></h1>
 <pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Dns.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
 <pre><span id="TYPEquestion"><span class="keyword">type</span> <code class="type"></code>question</span> = <code class="type">string * Dns.QType.t * int</code> </pre>
 
 <pre><span id="TYPErr"><span class="keyword">type</span> <code class="type"></code>rr</span> = <code class="type">string * Dns.QType.t * int * int32 * string</code> </pre>
 
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>id&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.id">id</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>is_query&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span id="TYPEELTt.is_query">is_query</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>opcode&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.opcode">opcode</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>is_auth&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span id="TYPEELTt.is_auth">is_auth</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>truncated&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span id="TYPEELTt.truncated">truncated</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>rec_desired&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span id="TYPEELTt.rec_desired">rec_desired</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>rec_avlb&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span id="TYPEELTt.rec_avlb">rec_avlb</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>status&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.status">status</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>questions&nbsp;: <code class="type"><a href="Dns.Pdu.html#TYPEquestion">question</a> list</code>;</code></td>
+<code><span id="TYPEELTt.questions">questions</span>&nbsp;:<code class="type"><a href="Dns.Pdu.html#TYPEquestion">question</a> list</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>answer_rrs&nbsp;: <code class="type"><a href="Dns.Pdu.html#TYPErr">rr</a> list</code>;</code></td>
+<code><span id="TYPEELTt.answer_rrs">answer_rrs</span>&nbsp;:<code class="type"><a href="Dns.Pdu.html#TYPErr">rr</a> list</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>authority_rrs&nbsp;: <code class="type"><a href="Dns.Pdu.html#TYPErr">rr</a> list</code>;</code></td>
+<code><span id="TYPEELTt.authority_rrs">authority_rrs</span>&nbsp;:<code class="type"><a href="Dns.Pdu.html#TYPErr">rr</a> list</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>additional_rrs&nbsp;: <code class="type"><a href="Dns.Pdu.html#TYPErr">rr</a> list</code>;</code></td>
+<code><span id="TYPEELTt.additional_rrs">additional_rrs</span>&nbsp;:<code class="type"><a href="Dns.Pdu.html#TYPErr">rr</a> list</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALmake_query"><span class="keyword">val</span> <a href="code_VALDns.Pdu.make_query.html">make_query</a></span> : <code class="type">string -> <a href="Dns.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALDns.Pdu.random.html">random</a></span> : <code class="type">unit -> <a href="Dns.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALunpack_name"><span class="keyword">val</span> <a href="code_VALDns.Pdu.unpack_name.html">unpack_name</a></span> : <code class="type">string -> int -> (string * int) Batteries.Option.Monad.m</code></pre><pre><span id="VALread_n16"><span class="keyword">val</span> <a href="code_VALDns.Pdu.read_n16.html">read_n16</a></span> : <code class="type">string -> int -> int</code></pre><pre><span id="VALread_n32"><span class="keyword">val</span> <a href="code_VALDns.Pdu.read_n32.html">read_n32</a></span> : <code class="type">string -> int -> int32</code></pre><pre><span id="VALunpack_questions"><span class="keyword">val</span> <a href="code_VALDns.Pdu.unpack_questions.html">unpack_questions</a></span> : <code class="type">string -><br>       int -><br>       int -> ((string * Dns.QType.t * int) list * int) Batteries.Option.Monad.m</code></pre><pre><span id="VALunpack_rrs"><span class="keyword">val</span> <a href="code_VALDns.Pdu.unpack_rrs.html">unpack_rrs</a></span> : <code class="type">string -><br>       int -><br>       int -><br>       ((string * Dns.QType.t * int * int32 * string) list * int)<br>       Batteries.Option.Monad.m</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> <a href="code_VALDns.Pdu.unpack.html">unpack</a></span> : <code class="type">Bitstring.bitstring -> <a href="Dns.Pdu.html#TYPEt">t</a> Batteries.Option.Monad.m</code></pre><pre><span id="VALpack_n16"><span class="keyword">val</span> <a href="code_VALDns.Pdu.pack_n16.html">pack_n16</a></span> : <code class="type">int -> string -> int -> unit</code></pre><pre><span id="VALpack_n32"><span class="keyword">val</span> <a href="code_VALDns.Pdu.pack_n32.html">pack_n32</a></span> : <code class="type">int32 -> string -> int -> unit</code></pre><pre><span id="VALpack_name"><span class="keyword">val</span> <a href="code_VALDns.Pdu.pack_name.html">pack_name</a></span> : <code class="type">string -> int -> string -> int -> int option</code></pre><pre><span id="VALpack_question"><span class="keyword">val</span> <a href="code_VALDns.Pdu.pack_question.html">pack_question</a></span> : <code class="type">string * Dns.QType.t * int -> string Batteries.Option.Monad.m</code></pre><pre><span id="VALpack_questions"><span class="keyword">val</span> <a href="code_VALDns.Pdu.pack_questions.html">pack_questions</a></span> : <code class="type">(string * Dns.QType.t * int) list -> string</code></pre><pre><span id="VALpack_rr"><span class="keyword">val</span> <a href="code_VALDns.Pdu.pack_rr.html">pack_rr</a></span> : <code class="type">string * Dns.QType.t * int * int32 * string -><br>       string Batteries.Option.Monad.m</code></pre><pre><span id="VALpack_rrs"><span class="keyword">val</span> <a href="code_VALDns.Pdu.pack_rrs.html">pack_rrs</a></span> : <code class="type">(string * Dns.QType.t * int * int32 * string) list -> string</code></pre><pre><span id="VALpack"><span class="keyword">val</span> <a href="code_VALDns.Pdu.pack.html">pack</a></span> : <code class="type"><a href="Dns.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre></body></html>
+<pre><span id="VALmake_query"><span class="keyword">val</span> make_query</span> : <code class="type">string -> <a href="Dns.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Dns.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALunpack_name"><span class="keyword">val</span> unpack_name</span> : <code class="type">string -> int -> (string * int) Batteries.Option.Monad.m</code></pre><pre><span id="VALread_n16"><span class="keyword">val</span> read_n16</span> : <code class="type">string -> int -> int</code></pre><pre><span id="VALread_n32"><span class="keyword">val</span> read_n32</span> : <code class="type">string -> int -> int32</code></pre><pre><span id="VALunpack_questions"><span class="keyword">val</span> unpack_questions</span> : <code class="type">string -><br>       int -><br>       int -> ((string * Dns.QType.t * int) list * int) Batteries.Option.Monad.m</code></pre><pre><span id="VALunpack_rrs"><span class="keyword">val</span> unpack_rrs</span> : <code class="type">string -><br>       int -><br>       int -><br>       ((string * Dns.QType.t * int * int32 * string) list * int)<br>       Batteries.Option.Monad.m</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">Bitstring.bitstring -> <a href="Dns.Pdu.html#TYPEt">t</a> Batteries.Option.Monad.m</code></pre><pre><span id="VALpack_n16"><span class="keyword">val</span> pack_n16</span> : <code class="type">int -> string -> int -> unit</code></pre><pre><span id="VALpack_n32"><span class="keyword">val</span> pack_n32</span> : <code class="type">int32 -> string -> int -> unit</code></pre><pre><span id="VALpack_name"><span class="keyword">val</span> pack_name</span> : <code class="type">string -> int -> string -> int -> int option</code></pre><pre><span id="VALpack_question"><span class="keyword">val</span> pack_question</span> : <code class="type">string * Dns.QType.t * int -> string Batteries.Option.Monad.m</code></pre><pre><span id="VALpack_questions"><span class="keyword">val</span> pack_questions</span> : <code class="type">(string * Dns.QType.t * int) list -> string</code></pre><pre><span id="VALpack_rr"><span class="keyword">val</span> pack_rr</span> : <code class="type">string * Dns.QType.t * int * int32 * string -><br>       string Batteries.Option.Monad.m</code></pre><pre><span id="VALpack_rrs"><span class="keyword">val</span> pack_rrs</span> : <code class="type">(string * Dns.QType.t * int * int32 * string) list -> string</code></pre><pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Dns.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre></body></html>

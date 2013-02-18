@@ -45,35 +45,34 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Metric.Atomic</title>
 </head>
 <body>
-<div class="navbar">&nbsp;<a href="Metric.html">Up</a>
-&nbsp;<a href="Metric.Counter.html">Next</a>
+<div class="navbar">&nbsp;<a class="up" href="Metric.html" title="Metric">Up</a>
+&nbsp;<a class="post" href="Metric.Counter.html" title="Metric.Counter">Next</a>
 </div>
-<center><h1>Module <a href="type_Metric.Atomic.html">Metric.Atomic</a></h1></center>
-<br>
+<h1>Module <a href="type_Metric.Atomic.html">Metric.Atomic</a></h1>
 <pre><span class="keyword">module</span> Atomic: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Atomic.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>name&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.name">name</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>count&nbsp;: <code class="type">int64</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.count">count</span>&nbsp;:<code class="type">int64</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>first_last&nbsp;: <code class="type">(Clock.Time.t * Clock.Time.t) option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.first_last">first_last</span>&nbsp;:<code class="type">(Clock.Time.t * Clock.Time.t) option</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALall"><span class="keyword">val</span> <a href="code_VALMetric.Atomic.all.html">all</a></span> : <code class="type">(string, <a href="Metric.Atomic.html#TYPEt">t</a>) Batteries.Hashtbl.t</code></pre><pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALMetric.Atomic.make.html">make</a></span> : <code class="type">string -> <a href="Metric.Atomic.html#TYPEt">t</a></code></pre><pre><span id="VALfire"><span class="keyword">val</span> <a href="code_VALMetric.Atomic.fire.html">fire</a></span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALprint"><span class="keyword">val</span> <a href="code_VALMetric.Atomic.print.html">print</a></span> : <code class="type">'a BatInnerIO.output -> <a href="Metric.Atomic.html#TYPEt">t</a> -> unit</code></pre></body></html>
+<pre><span id="VALall"><span class="keyword">val</span> all</span> : <code class="type">(string, <a href="Metric.Atomic.html#TYPEt">t</a>) Batteries.Hashtbl.t</code></pre><pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">string -> <a href="Metric.Atomic.html#TYPEt">t</a></code></pre><pre><span id="VALfire"><span class="keyword">val</span> fire</span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALprint"><span class="keyword">val</span> print</span> : <code class="type">'a BatInnerIO.output -> <a href="Metric.Atomic.html#TYPEt">t</a> -> unit</code></pre></body></html>

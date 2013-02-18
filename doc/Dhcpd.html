@@ -46,17 +46,18 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Dhcpd</title>
 </head>
 <body>
-<div class="navbar"><a href="Dhcp.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Dns.html">Next</a>
+<div class="navbar"><a class="pre" href="Dhcp.html" title="Dhcp">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Dns.html" title="Dns">Next</a>
 </div>
-<center><h1>Module <a href="type_Dhcpd.html">Dhcpd</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Dhcpd: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcpd.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>DHCP server<br>
+<h1>Module <a href="type_Dhcpd.html">Dhcpd</a></h1>
+<pre><span class="keyword">module</span> Dhcpd: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcpd.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+DHCP server<br>
+</div>
 <hr width="100%">
 <br>
 DHCP server<br>
-<pre><span id="VALserve"><span class="keyword">val</span> <a href="code_VALDhcpd.serve.html">serve</a></span> : <code class="type">?port:Udp.Port.t -> <a href="Host.html#TYPEhost_trx">Host.host_trx</a> -> Ip.Addr.t Batteries.Enum.t -> unit</code></pre><div class="info">
+<pre><span id="VALserve"><span class="keyword">val</span> serve</span> : <code class="type">?port:Udp.Port.t -> <a href="Host.html#TYPEhost_trx">Host.host_trx</a> -> Ip.Addr.t Batteries.Enum.t -> unit</code></pre><div class="info">
 <code class="code">serve host ips</code> listen on host DHCP port and allocate the
  given ips to any requester.<br>
 </div>

@@ -46,36 +46,37 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Clock.Interval</title>
 </head>
 <body>
-<div class="navbar"><a href="Clock.Time.html">Previous</a>
-&nbsp;<a href="Clock.html">Up</a>
-&nbsp;<a href="Clock.Map.html">Next</a>
+<div class="navbar"><a class="pre" href="Clock.Time.html" title="Clock.Time">Previous</a>
+&nbsp;<a class="up" href="Clock.html" title="Clock">Up</a>
+&nbsp;<a class="post" href="Clock.Map.html" title="Clock.Map">Next</a>
 </div>
-<center><h1>Module <a href="type_Clock.Interval.html">Clock.Interval</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Interval: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.Interval.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>While Interval.t reprensents a time interval.
+<h1>Module <a href="type_Clock.Interval.html">Clock.Interval</a></h1>
+<pre><span class="keyword">module</span> Interval: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.Interval.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+While Interval.t reprensents a time interval.
  Both are floats internaly to match OCaml stdlib.<br>
+</div>
 <hr width="100%">
 <pre><span class="keyword">include</span> struct ... end</pre>
-<pre><span id="VALusec"><span class="keyword">val</span> <a href="code_VALClock.Interval.usec.html">usec</a></span> : <code class="type">float -> t</code></pre><div class="info">
+<pre><span id="VALusec"><span class="keyword">val</span> usec</span> : <code class="type">float -> t</code></pre><div class="info">
 microseconds to .<br>
 </div>
-<pre><span id="VALmsec"><span class="keyword">val</span> <a href="code_VALClock.Interval.msec.html">msec</a></span> : <code class="type">float -> t</code></pre><div class="info">
+<pre><span id="VALmsec"><span class="keyword">val</span> msec</span> : <code class="type">float -> t</code></pre><div class="info">
 milliseconds to .<br>
 </div>
-<pre><span id="VALsec"><span class="keyword">val</span> <a href="code_VALClock.Interval.sec.html">sec</a></span> : <code class="type">outer_t -> t</code></pre><div class="info">
+<pre><span id="VALsec"><span class="keyword">val</span> sec</span> : <code class="type">outer_t -> t</code></pre><div class="info">
 seconds to .<br>
 </div>
-<pre><span id="VALmin"><span class="keyword">val</span> <a href="code_VALClock.Interval.min.html">min</a></span> : <code class="type">float -> t</code></pre><div class="info">
+<pre><span id="VALmin"><span class="keyword">val</span> min</span> : <code class="type">float -> t</code></pre><div class="info">
 minutes to .<br>
 </div>
-<pre><span id="VALhour"><span class="keyword">val</span> <a href="code_VALClock.Interval.hour.html">hour</a></span> : <code class="type">float -> t</code></pre><div class="info">
+<pre><span id="VALhour"><span class="keyword">val</span> hour</span> : <code class="type">float -> t</code></pre><div class="info">
 hours to .<br>
 </div>
-<pre><span id="VALcompare"><span class="keyword">val</span> <a href="code_VALClock.Interval.compare.html">compare</a></span> : <code class="type">t -> t -> int</code></pre><div class="info">
+<pre><span id="VALcompare"><span class="keyword">val</span> compare</span> : <code class="type">t -> t -> int</code></pre><div class="info">
 Custom comparison function so that we can change time representation
  more easily in the future.<br>
 </div>
-<pre><span id="VALadd"><span class="keyword">val</span> <a href="code_VALClock.Interval.add.html">add</a></span> : <code class="type">t -> t -> t</code></pre><div class="info">
+<pre><span id="VALadd"><span class="keyword">val</span> add</span> : <code class="type">t -> t -> t</code></pre><div class="info">
 Adds two intervals.<br>
 </div>
 </body></html>

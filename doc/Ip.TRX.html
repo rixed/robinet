@@ -45,56 +45,55 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Ip.TRX</title>
 </head>
 <body>
-<div class="navbar"><a href="Ip.Pdu.html">Previous</a>
-&nbsp;<a href="Ip.html">Up</a>
+<div class="navbar"><a class="pre" href="Ip.Pdu.html" title="Ip.Pdu">Previous</a>
+&nbsp;<a class="up" href="Ip.html" title="Ip">Up</a>
 &nbsp;</div>
-<center><h1>Module <a href="type_Ip.TRX.html">Ip.TRX</a></h1></center>
-<br>
+<h1>Module <a href="type_Ip.TRX.html">Ip.TRX</a></h1>
 <pre><span class="keyword">module</span> TRX: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>src&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
+<code><span id="TYPEELTt.src">src</span>&nbsp;:<code class="type">Ip.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>dst&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
+<code><span id="TYPEELTt.dst">dst</span>&nbsp;:<code class="type">Ip.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>proto&nbsp;: <code class="type">Ip.Proto.t</code>;</code></td>
+<code><span id="TYPEELTt.proto">proto</span>&nbsp;:<code class="type">Ip.Proto.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>mtu&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.mtu">mtu</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>emit&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.emit">emit</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>recv&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.recv">recv</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALtx"><span class="keyword">val</span> <a href="code_VALIp.TRX.tx.html">tx</a></span> : <code class="type"><a href="Ip.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALrx"><span class="keyword">val</span> <a href="code_VALIp.TRX.rx.html">rx</a></span> : <code class="type"><a href="Ip.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre><pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALIp.TRX.make.html">make</a></span> : <code class="type">?mtu:int -> Ip.Addr.t -> Ip.Addr.t -> Ip.Proto.t -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre></body></html>
+<pre><span id="VALtx"><span class="keyword">val</span> tx</span> : <code class="type"><a href="Ip.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALrx"><span class="keyword">val</span> rx</span> : <code class="type"><a href="Ip.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre><pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">?mtu:int -> Ip.Addr.t -> Ip.Addr.t -> Ip.Proto.t -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre></body></html>

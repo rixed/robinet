@@ -48,13 +48,13 @@
 <title>Browser</title>
 </head>
 <body>
-<div class="navbar"><a href="Arp.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Clock.html">Next</a>
+<div class="navbar"><a class="pre" href="Arp.html" title="Arp">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Clock.html" title="Clock">Next</a>
 </div>
-<center><h1>Module <a href="type_Browser.html">Browser</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Browser: <code class="code"><span class="keyword">sig</span></code> <a href="Browser.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>A simple web browser.
+<h1>Module <a href="type_Browser.html">Browser</a></h1>
+<pre><span class="keyword">module</span> Browser: <code class="code"><span class="keyword">sig</span></code> <a href="Browser.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+A simple web browser.
 <p>
 
  This simulates an HTTP browser, ie it can get pages (with all dependancies
@@ -62,107 +62,108 @@
  links from this page, and a dom-like representation so that the programmer can
  easily extract some informations (such as session ids) to forge next gets of
  a test plan (or use regex on content?).<br>
+</div>
 <hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALBrowser.debug.html">debug</a></span> : <code class="type">bool</code></pre><br>
-<span id="2_Browser"><h2>Browser</h2></span><br>
-<br><code><span id="TYPEcookie"><span class="keyword">type</span> <code class="type"></code>cookie</span> = {</code><table class="typetable">
+<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><br>
+<h2 id="2_Browser">Browser</h2><br>
+<pre><code><span id="TYPEcookie"><span class="keyword">type</span> <code class="type"></code>cookie</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>name&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTcookie.name">name</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>value&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTcookie.value">value</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>domain&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTcookie.domain">domain</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>path&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTcookie.path">path</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr></table>
 }
 
 
-<br><code><span id="TYPEvacant_cnx"><span class="keyword">type</span> <code class="type"></code>vacant_cnx</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEvacant_cnx"><span class="keyword">type</span> <code class="type"></code>vacant_cnx</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>tcp&nbsp;: <code class="type"><a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a></code>;</code></td>
+<code><span id="TYPEELTvacant_cnx.tcp">tcp</span>&nbsp;:<code class="type"><a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>http&nbsp;: <code class="type"><a href="Http.TRXtop.html#TYPEt">Http.TRXtop.t</a></code>;</code></td>
+<code><span id="TYPEELTvacant_cnx.http">http</span>&nbsp;:<code class="type"><a href="Http.TRXtop.html#TYPEt">Http.TRXtop.t</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>last_used&nbsp;: <code class="type">Clock.Time.t</code>;</code></td>
+<code><span id="TYPEELTvacant_cnx.last_used">last_used</span>&nbsp;:<code class="type">Clock.Time.t</code>;</code></td>
 
 </tr></table>
 }
 
 
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>host&nbsp;: <code class="type"><a href="Host.html#TYPEhost_trx">Host.host_trx</a></code>;</code></td>
+<code><span id="TYPEELTt.host">host</span>&nbsp;:<code class="type"><a href="Host.html#TYPEhost_trx">Host.host_trx</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>user_agent&nbsp;: <code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.user_agent">user_agent</span>&nbsp;:<code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>cookies&nbsp;: <code class="type"><a href="Browser.html#TYPEcookie">cookie</a> list</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.cookies">cookies</span>&nbsp;:<code class="type"><a href="Browser.html#TYPEcookie">cookie</a> list</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>vacant_cnxs&nbsp;: <code class="type">(<a href="Host.html#TYPEaddr">Host.addr</a> * Tcp.Port.t, <a href="Browser.html#TYPEvacant_cnx">vacant_cnx</a>) Batteries.Hashtbl.t</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.vacant_cnxs">vacant_cnxs</span>&nbsp;:<code class="type">(<a href="Host.html#TYPEaddr">Host.addr</a> * Tcp.Port.t, <a href="Browser.html#TYPEvacant_cnx">vacant_cnx</a>) Batteries.Hashtbl.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>max_vacant_cnx&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.max_vacant_cnx">max_vacant_cnx</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>max_idle_cnx&nbsp;: <code class="type">Clock.Interval.t</code>;</code></td>
+<code><span id="TYPEELTt.max_idle_cnx">max_idle_cnx</span>&nbsp;:<code class="type">Clock.Interval.t</code>;</code></td>
 
 </tr></table>
 }
@@ -171,10 +172,10 @@
 A browser is build from a host, and has a set of cookies and of connections.<br>
 </div>
 
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALBrowser.make.html">make</a></span> : <code class="type">?user_agent:string -><br>       ?max_vacant_cnx:int -><br>       ?max_idle_cnx:Clock.Interval.t -> <a href="Host.html#TYPEhost_trx">Host.host_trx</a> -> <a href="Browser.html#TYPEt">t</a></code></pre><br>
-<span id="2_Cookies"><h2>Cookies</h2></span>
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">?user_agent:string -><br>       ?max_vacant_cnx:int -><br>       ?max_idle_cnx:Clock.Interval.t -> <a href="Host.html#TYPEhost_trx">Host.host_trx</a> -> <a href="Browser.html#TYPEt">t</a></code></pre><br>
+<h2 id="2_Cookies">Cookies</h2>
 <p>
 
    Cookies (as of RFC 6265).
    Note: all our cookies are "session cookies", ie we keep them only in the browser memory.<br>
-<pre><span id="VALstring_of_cookie"><span class="keyword">val</span> <a href="code_VALBrowser.string_of_cookie.html">string_of_cookie</a></span> : <code class="type"><a href="Browser.html#TYPEcookie">cookie</a> -> string</code></pre><pre><span id="VALdomain_matches"><span class="keyword">val</span> <a href="code_VALBrowser.domain_matches.html">domain_matches</a></span> : <code class="type">string -> string -> bool</code></pre><pre><span id="VALpath_matches"><span class="keyword">val</span> <a href="code_VALBrowser.path_matches.html">path_matches</a></span> : <code class="type">string -> string -> bool</code></pre><pre><span id="VALparse_cookie"><span class="keyword">val</span> <a href="code_VALBrowser.parse_cookie.html">parse_cookie</a></span> : <code class="type">string -> string -> string -> <a href="Browser.html#TYPEcookie">cookie</a> option</code></pre><pre><span id="VALcookie_dirname"><span class="keyword">val</span> <a href="code_VALBrowser.cookie_dirname.html">cookie_dirname</a></span> : <code class="type">string -> string</code></pre><pre><span id="VALstore_cookies"><span class="keyword">val</span> <a href="code_VALBrowser.store_cookies.html">store_cookies</a></span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> string -> string -> (Batteries.String.t * string) list -> unit</code></pre><pre><span id="VALcookies_to_sent"><span class="keyword">val</span> <a href="code_VALBrowser.cookies_to_sent.html">cookies_to_sent</a></span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> string -> string -> <a href="Browser.html#TYPEcookie">cookie</a> list</code></pre><pre><span id="VALcookie_string"><span class="keyword">val</span> <a href="code_VALBrowser.cookie_string.html">cookie_string</a></span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> string -> string -> string</code></pre><pre><span id="VALmessage_get"><span class="keyword">val</span> <a href="code_VALBrowser.message_get.html">message_get</a></span> : <code class="type"><a href="Metric.Timed.html#TYPEt">Metric.Timed.t</a></code></pre><pre><span id="VALper_status"><span class="keyword">val</span> <a href="code_VALBrowser.per_status.html">per_status</a></span> : <code class="type">(<a href="Http.html#TYPEcode">Http.code</a>, <a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a>) Batteries.Hashtbl.t</code></pre><pre><span id="VALfind_vacant_cnx"><span class="keyword">val</span> <a href="code_VALBrowser.find_vacant_cnx.html">find_vacant_cnx</a></span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> <a href="Host.html#TYPEaddr">Host.addr</a> -> Tcp.Port.t -> <a href="Browser.html#TYPEvacant_cnx">vacant_cnx</a> option</code></pre><pre><span id="VALclean_vacant_cnxs"><span class="keyword">val</span> <a href="code_VALBrowser.clean_vacant_cnxs.html">clean_vacant_cnxs</a></span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALmake_vacant_cnx"><span class="keyword">val</span> <a href="code_VALBrowser.make_vacant_cnx.html">make_vacant_cnx</a></span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -><br>       <a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> -> <a href="Http.TRXtop.html#TYPEt">Http.TRXtop.t</a> -> <a href="Host.html#TYPEaddr">Host.addr</a> -> Tcp.Port.t -> unit</code></pre><pre><span id="VALrequest"><span class="keyword">val</span> <a href="code_VALBrowser.request.html">request</a></span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -><br>       ?command:string -><br>       ?headers:<a href="Http.html#TYPEheader">Http.header</a> list -><br>       ?body:string -> <a href="Url.html#TYPEt">Url.t</a> -> ((<a href="Http.html#TYPEheader">Http.header</a> list * string) option -> unit) -> unit</code></pre><pre><span id="VALget"><span class="keyword">val</span> <a href="code_VALBrowser.get.html">get</a></span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -><br>       ?headers:<a href="Http.html#TYPEheader">Http.header</a> list -><br>       <a href="Url.html#TYPEt">Url.t</a> -> ((<a href="Http.html#TYPEheader">Http.header</a> list * string) option -> unit) -> unit</code></pre><pre><span id="VALpost"><span class="keyword">val</span> <a href="code_VALBrowser.post.html">post</a></span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -><br>       ?headers:<a href="Http.html#TYPEheader">Http.header</a> list -><br>       <a href="Url.html#TYPEt">Url.t</a> -><br>       (string * string) list -><br>       ((<a href="Http.html#TYPEheader">Http.header</a> list * string) option -> unit) -> unit</code></pre><pre><span id="VALspider"><span class="keyword">val</span> <a href="code_VALBrowser.spider.html">spider</a></span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> int -> <a href="Url.html#TYPEt">Url.t</a> -> unit</code></pre><pre><span id="VALuser"><span class="keyword">val</span> <a href="code_VALBrowser.user.html">user</a></span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> ?pause:float -> int -> <a href="Url.html#TYPEt">Url.t</a> -> unit</code></pre><pre><span class="keyword">module</span> <a href="Browser.Plan.html">Plan</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Browser.Plan.html">..</a> <code class="code"><span class="keyword">end</span></code></pre></body></html>
+<pre><span id="VALstring_of_cookie"><span class="keyword">val</span> string_of_cookie</span> : <code class="type"><a href="Browser.html#TYPEcookie">cookie</a> -> string</code></pre><pre><span id="VALdomain_matches"><span class="keyword">val</span> domain_matches</span> : <code class="type">string -> string -> bool</code></pre><pre><span id="VALpath_matches"><span class="keyword">val</span> path_matches</span> : <code class="type">string -> string -> bool</code></pre><pre><span id="VALparse_cookie"><span class="keyword">val</span> parse_cookie</span> : <code class="type">string -> string -> string -> <a href="Browser.html#TYPEcookie">cookie</a> option</code></pre><pre><span id="VALcookie_dirname"><span class="keyword">val</span> cookie_dirname</span> : <code class="type">string -> string</code></pre><pre><span id="VALstore_cookies"><span class="keyword">val</span> store_cookies</span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> string -> string -> (Batteries.String.t * string) list -> unit</code></pre><pre><span id="VALcookies_to_sent"><span class="keyword">val</span> cookies_to_sent</span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> string -> string -> <a href="Browser.html#TYPEcookie">cookie</a> list</code></pre><pre><span id="VALcookie_string"><span class="keyword">val</span> cookie_string</span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> string -> string -> string</code></pre><pre><span id="VALmessage_get"><span class="keyword">val</span> message_get</span> : <code class="type"><a href="Metric.Timed.html#TYPEt">Metric.Timed.t</a></code></pre><pre><span id="VALper_status"><span class="keyword">val</span> per_status</span> : <code class="type">(<a href="Http.html#TYPEcode">Http.code</a>, <a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a>) Batteries.Hashtbl.t</code></pre><pre><span id="VALfind_vacant_cnx"><span class="keyword">val</span> find_vacant_cnx</span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> <a href="Host.html#TYPEaddr">Host.addr</a> -> Tcp.Port.t -> <a href="Browser.html#TYPEvacant_cnx">vacant_cnx</a> option</code></pre><pre><span id="VALclean_vacant_cnxs"><span class="keyword">val</span> clean_vacant_cnxs</span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALmake_vacant_cnx"><span class="keyword">val</span> make_vacant_cnx</span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -><br>       <a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> -> <a href="Http.TRXtop.html#TYPEt">Http.TRXtop.t</a> -> <a href="Host.html#TYPEaddr">Host.addr</a> -> Tcp.Port.t -> unit</code></pre><pre><span id="VALrequest"><span class="keyword">val</span> request</span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -><br>       ?command:string -><br>       ?headers:<a href="Http.html#TYPEheader">Http.header</a> list -><br>       ?body:string -> <a href="Url.html#TYPEt">Url.t</a> -> ((<a href="Http.html#TYPEheader">Http.header</a> list * string) option -> unit) -> unit</code></pre><pre><span id="VALget"><span class="keyword">val</span> get</span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -><br>       ?headers:<a href="Http.html#TYPEheader">Http.header</a> list -><br>       <a href="Url.html#TYPEt">Url.t</a> -> ((<a href="Http.html#TYPEheader">Http.header</a> list * string) option -> unit) -> unit</code></pre><pre><span id="VALpost"><span class="keyword">val</span> post</span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -><br>       ?headers:<a href="Http.html#TYPEheader">Http.header</a> list -><br>       <a href="Url.html#TYPEt">Url.t</a> -><br>       (string * string) list -><br>       ((<a href="Http.html#TYPEheader">Http.header</a> list * string) option -> unit) -> unit</code></pre><pre><span id="VALspider"><span class="keyword">val</span> spider</span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> int -> <a href="Url.html#TYPEt">Url.t</a> -> unit</code></pre><pre><span id="VALuser"><span class="keyword">val</span> user</span> : <code class="type"><a href="Browser.html#TYPEt">t</a> -> ?pause:float -> int -> <a href="Url.html#TYPEt">Url.t</a> -> unit</code></pre><pre><span class="keyword">module</span> <a href="Browser.Plan.html">Plan</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Browser.Plan.html">..</a> <code class="code"><span class="keyword">end</span></code></pre></body></html>

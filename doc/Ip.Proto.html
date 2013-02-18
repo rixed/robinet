@@ -45,14 +45,15 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Ip.Proto</title>
 </head>
 <body>
-<div class="navbar">&nbsp;<a href="Ip.html">Up</a>
-&nbsp;<a href="Ip.Addr.html">Next</a>
+<div class="navbar">&nbsp;<a class="up" href="Ip.html" title="Ip">Up</a>
+&nbsp;<a class="post" href="Ip.Addr.html" title="Ip.Addr">Next</a>
 </div>
-<center><h1>Module <a href="type_Ip.Proto.html">Ip.Proto</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Proto: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Proto.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Internet protocols, as in <code class="code">/etc/protocols</code>.<br>
+<h1>Module <a href="type_Ip.Proto.html">Ip.Proto</a></h1>
+<pre><span class="keyword">module</span> Proto: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Proto.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Internet protocols, as in <code class="code">/etc/protocols</code>.<br>
+</div>
 <hr width="100%">
 <pre><span class="keyword">include</span> struct ... end</pre>
 <br>
 Some well know IP protocols.<br>
-<pre><span id="VALicmp"><span class="keyword">val</span> <a href="code_VALIp.Proto.icmp.html">icmp</a></span> : <code class="type">t</code></pre><pre><span id="VALtcp"><span class="keyword">val</span> <a href="code_VALIp.Proto.tcp.html">tcp</a></span> : <code class="type">t</code></pre><pre><span id="VALudp"><span class="keyword">val</span> <a href="code_VALIp.Proto.udp.html">udp</a></span> : <code class="type">t</code></pre><pre><span id="VALrandom"><span class="keyword">val</span> <a href="code_VALIp.Proto.random.html">random</a></span> : <code class="type">unit -> t</code></pre></body></html>
+<pre><span id="VALicmp"><span class="keyword">val</span> icmp</span> : <code class="type">t</code></pre><pre><span id="VALtcp"><span class="keyword">val</span> tcp</span> : <code class="type">t</code></pre><pre><span id="VALudp"><span class="keyword">val</span> udp</span> : <code class="type">t</code></pre><pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> t</code></pre></body></html>

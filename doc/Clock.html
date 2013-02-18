@@ -48,13 +48,13 @@
 <title>Clock</title>
 </head>
 <body>
-<div class="navbar"><a href="Browser.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Dhcp.html">Next</a>
+<div class="navbar"><a class="pre" href="Browser.html" title="Browser">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Dhcp.html" title="Dhcp">Next</a>
 </div>
-<center><h1>Module <a href="type_Clock.html">Clock</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Clock: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>This module creates an alarm-clock that schedule registered events.
+<h1>Module <a href="type_Clock.html">Clock</a></h1>
+<pre><span class="keyword">module</span> Clock: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+This module creates an alarm-clock that schedule registered events.
    There are two modes of operation: realtime and not realtime.
 <p>
 
@@ -68,32 +68,33 @@
    speed (and full CPU), and produce a pcap file representing, say, the
    workload of a day in minutes, or conversely a very busy hour in several
    hours but with all packets and accurate timestamps.<br>
+</div>
 <hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALClock.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span id="VALrealtime"><span class="keyword">val</span> <a href="code_VALClock.realtime.html">realtime</a></span> : <code class="type">bool Batteries.ref</code></pre><br>
-<span id="2_PrivateTypes"><h2>Private Types</h2></span><br>
+<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><pre><span id="VALrealtime"><span class="keyword">val</span> realtime</span> : <code class="type">bool Batteries.ref</code></pre><br>
+<h2 id="2_PrivateTypes">Private Types</h2><br>
 <pre><span class="keyword">module</span> <a href="Clock.Time.html">Time</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.Time.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Time.t represents a given timestamp (ie.
 </div>
 <pre><span class="keyword">module</span> <a href="Clock.Interval.html">Interval</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.Interval.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 While Interval.t reprensents a time interval.
 </div>
-<pre><span id="VALprinter"><span class="keyword">val</span> <a href="code_VALClock.printer.html">printer</a></span> : <code class="type">'a BatIO.output -> Time.t -> unit</code></pre><br>
-<span id="2_Currentrunningtime"><h2>Current running time</h2></span><br>
+<pre><span id="VALprinter"><span class="keyword">val</span> printer</span> : <code class="type">'a BatIO.output -> Time.t -> unit</code></pre><br>
+<h2 id="2_Currentrunningtime">Current running time</h2><br>
 <pre><span class="keyword">module</span> <a href="Clock.Map.html">Map</a>: <code class="type">Batteries.Map.Make</code><code class="code">(</code><code class="code"><span class="keyword">sig</span></code><div class="sig_block"><pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = <code class="type">Clock.Time.t</code> </pre>
 
-<pre><span id="VALcompare"><span class="keyword">val</span> <a href="code_VALClock.Map.compare.html">compare</a></span> : <code class="type">t -> t -> int</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">)</code></pre><br><code><span id="TYPEclock"><span class="keyword">type</span> <code class="type"></code>clock</span> = {</code><table class="typetable">
+<pre><span id="VALcompare"><span class="keyword">val</span> compare</span> : <code class="type">t -> t -> int</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">)</code></pre><pre><code><span id="TYPEclock"><span class="keyword">type</span> <code class="type"></code>clock</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>now&nbsp;: <code class="type">Time.t</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTclock.now">now</span>&nbsp;:<code class="type">Time.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>events&nbsp;: <code class="type">(unit -> unit) Map.t</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTclock.events">events</span>&nbsp;:<code class="type">(unit -> unit) Map.t</code>;</code></td>
 
 </tr></table>
 }
@@ -102,27 +103,27 @@ While Interval.t reprensents a time interval.
 A clock is a current timestamp and the set of future events.<br>
 </div>
 
-<pre><span id="VALcurrent"><span class="keyword">val</span> <a href="code_VALClock.current.html">current</a></span> : <code class="type"><a href="Clock.html#TYPEclock">clock</a></code></pre><div class="info">
+<pre><span id="VALcurrent"><span class="keyword">val</span> current</span> : <code class="type"><a href="Clock.html#TYPEclock">clock</a></code></pre><div class="info">
 We have only one clock so can run only one simulation at the same time.<br>
 </div>
-<pre><span id="VALnow"><span class="keyword">val</span> <a href="code_VALClock.now.html">now</a></span> : <code class="type">unit -> Time.t</code></pre><div class="info">
+<pre><span id="VALnow"><span class="keyword">val</span> now</span> : <code class="type">unit -> Time.t</code></pre><div class="info">
 Return the current simulation time.<br>
 </div>
-<pre><span id="VALcond_lock"><span class="keyword">val</span> <a href="code_VALClock.cond_lock.html">cond_lock</a></span> : <code class="type">Mutex.t</code></pre><pre><span id="VALcond"><span class="keyword">val</span> <a href="code_VALClock.cond.html">cond</a></span> : <code class="type">Condition.t</code></pre><pre><span id="VALsignal_me"><span class="keyword">val</span> <a href="code_VALClock.signal_me.html">signal_me</a></span> : <code class="type">unit -> unit</code></pre><pre><span id="VALepsilon"><span class="keyword">val</span> <a href="code_VALClock.epsilon.html">epsilon</a></span> : <code class="type">Interval.t</code></pre><pre><span id="VALat"><span class="keyword">val</span> <a href="code_VALClock.at.html">at</a></span> : <code class="type">Map.key -> ('a -> unit) -> 'a -> unit</code></pre><div class="info">
+<pre><span id="VALcond_lock"><span class="keyword">val</span> cond_lock</span> : <code class="type">Mutex.t</code></pre><pre><span id="VALcond"><span class="keyword">val</span> cond</span> : <code class="type">Condition.t</code></pre><pre><span id="VALsignal_me"><span class="keyword">val</span> signal_me</span> : <code class="type">unit -> unit</code></pre><pre><span id="VALepsilon"><span class="keyword">val</span> epsilon</span> : <code class="type">Interval.t</code></pre><pre><span id="VALat"><span class="keyword">val</span> at</span> : <code class="type">Time.t -> ('a -> unit) -> 'a -> unit</code></pre><div class="info">
 <code class="code">at t f x</code> will execute <code class="code">f x</code> when simulation clock reachs time <code class="code">t</code>.<br>
 </div>
-<pre><span id="VALdelay"><span class="keyword">val</span> <a href="code_VALClock.delay.html">delay</a></span> : <code class="type">Interval.t -> ('a -> unit) -> 'a -> unit</code></pre><div class="info">
+<pre><span id="VALdelay"><span class="keyword">val</span> delay</span> : <code class="type">Interval.t -> ('a -> unit) -> 'a -> unit</code></pre><div class="info">
 <code class="code">delay d f x</code> will delay the execution of <code class="code">f x</code> by the interval <code class="code">d</code>.<br>
 </div>
-<pre><span id="VALasap"><span class="keyword">val</span> <a href="code_VALClock.asap.html">asap</a></span> : <code class="type">('a -> unit) -> 'a -> unit</code></pre><pre><span id="VALsynch"><span class="keyword">val</span> <a href="code_VALClock.synch.html">synch</a></span> : <code class="type">unit -> unit</code></pre><div class="info">
+<pre><span id="VALasap"><span class="keyword">val</span> asap</span> : <code class="type">('a -> unit) -> 'a -> unit</code></pre><pre><span id="VALsynch"><span class="keyword">val</span> synch</span> : <code class="type">unit -> unit</code></pre><div class="info">
 Synchronize internal clock with realtime clock.
  You must call this after real time passes (for instance after a blocking call).
  Otherwise, time jumps from one registered event to the next.<br>
 </div>
-<pre><span id="VALnext_event"><span class="keyword">val</span> <a href="code_VALClock.next_event.html">next_event</a></span> : <code class="type">unit -> unit</code></pre><div class="info">
+<pre><span id="VALnext_event"><span class="keyword">val</span> next_event</span> : <code class="type">unit -> unit</code></pre><div class="info">
 Will process the next event<br>
 </div>
-<pre><span id="VALrun"><span class="keyword">val</span> <a href="code_VALClock.run.html">run</a></span> : <code class="type">bool -> unit</code></pre><div class="info">
+<pre><span id="VALrun"><span class="keyword">val</span> run</span> : <code class="type">bool -> unit</code></pre><div class="info">
 <code class="code">run <span class="keyword">true</span></code> will run forever while <code class="code">run <span class="keyword">false</span></code> will return once no more events are waiting.<br>
 </div>
 </body></html>

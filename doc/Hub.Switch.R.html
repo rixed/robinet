@@ -44,34 +44,33 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Hub.Switch.R</title>
 </head>
 <body>
-<div class="navbar">&nbsp;<a href="Hub.Switch.html">Up</a>
+<div class="navbar">&nbsp;<a class="up" href="Hub.Switch.html" title="Hub.Switch">Up</a>
 &nbsp;</div>
-<center><h1>Module <a href="type_Hub.Switch.R.html">Hub.Switch.R</a></h1></center>
-<br>
+<h1>Module <a href="type_Hub.Switch.R.html">Hub.Switch.R</a></h1>
 <pre><span class="keyword">module</span> R: <code class="type"><a href="Hub.Repeater.html">Hub.Repeater</a></code></pre><hr width="100%">
-<br><code><span id="TYPEport"><span class="keyword">type</span> <code class="type"></code>port</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEport"><span class="keyword">type</span> <code class="type"></code>port</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>emit&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTport.emit">emit</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr></table>
 }
 
 
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>ports&nbsp;: <code class="type"><a href="Hub.Repeater.html#TYPEport">port</a> array</code>;</code></td>
+<code><span id="TYPEELTt.ports">ports</span>&nbsp;:<code class="type"><a href="Hub.Repeater.html#TYPEport">port</a> array</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALHub.Repeater.make.html">make</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a></code></pre><pre><span id="VALforward_from"><span class="keyword">val</span> <a href="code_VALHub.Repeater.forward_from.html">forward_from</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALwrite"><span class="keyword">val</span> <a href="code_VALHub.Repeater.write.html">write</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALset_read"><span class="keyword">val</span> <a href="code_VALHub.Repeater.set_read.html">set_read</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> (Bitstring.bitstring -> unit) -> unit</code></pre><pre><span id="VALto_dev"><span class="keyword">val</span> <a href="code_VALHub.Repeater.to_dev.html">to_dev</a></span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> <a href="Tools.html#TYPEdev">Tools.dev</a></code></pre><div class="info">
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a></code></pre><pre><span id="VALforward_from"><span class="keyword">val</span> forward_from</span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALwrite"><span class="keyword">val</span> write</span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALset_read"><span class="keyword">val</span> set_read</span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> (Bitstring.bitstring -> unit) -> unit</code></pre><pre><span id="VALto_dev"><span class="keyword">val</span> to_dev</span> : <code class="type">int -> <a href="Hub.Repeater.html#TYPEt">t</a> -> <a href="Tools.html#TYPEdev">Tools.dev</a></code></pre><div class="info">
 Turns a port into a device<br>
 </div>
-<pre><span id="VALt_printer"><span class="keyword">val</span> <a href="code_VALHub.Repeater.t_printer.html">t_printer</a></span> : <code class="type">'a -> 'b BatInnerIO.output -> <a href="Hub.Repeater.html#TYPEt">t</a> -> unit</code></pre></body></html>
+<pre><span id="VALt_printer"><span class="keyword">val</span> t_printer</span> : <code class="type">'a -> 'b BatInnerIO.output -> <a href="Hub.Repeater.html#TYPEt">t</a> -> unit</code></pre></body></html>

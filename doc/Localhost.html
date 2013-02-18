@@ -46,44 +46,45 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Localhost</title>
 </head>
 <body>
-<div class="navbar"><a href="Ip.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Log.html">Next</a>
+<div class="navbar"><a class="pre" href="Ip.html" title="Ip">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Log.html" title="Log">Next</a>
 </div>
-<center><h1>Module <a href="type_Localhost.html">Localhost</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Localhost: <code class="code"><span class="keyword">sig</span></code> <a href="Localhost.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>A special host that access the physical network through the OS network stack.<br>
+<h1>Module <a href="type_Localhost.html">Localhost</a></h1>
+<pre><span class="keyword">module</span> Localhost: <code class="code"><span class="keyword">sig</span></code> <a href="Localhost.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+A special host that access the physical network through the OS network stack.<br>
+</div>
 <hr width="100%">
-<pre><span id="VALlogger"><span class="keyword">val</span> <a href="code_VALLocalhost.logger.html">logger</a></span> : <code class="type"><a href="Log.html#TYPElogger">Log.logger</a></code></pre><pre><span id="VALsignal_err"><span class="keyword">val</span> <a href="code_VALLocalhost.signal_err.html">signal_err</a></span> : <code class="type">string -> unit</code></pre><br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><span id="VALlogger"><span class="keyword">val</span> logger</span> : <code class="type"><a href="Log.html#TYPElogger">Log.logger</a></code></pre><pre><span id="VALsignal_err"><span class="keyword">val</span> signal_err</span> : <code class="type">string -> unit</code></pre><pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>sock&nbsp;: <code class="type">Batteries.Unix.file_descr</code>;</code></td>
+<code><span id="TYPEELTt.sock">sock</span>&nbsp;:<code class="type">Batteries.Unix.file_descr</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>recv&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.recv">recv</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>is_closed&nbsp;: <code class="type">bool</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.is_closed">is_closed</span>&nbsp;:<code class="type">bool</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>reader&nbsp;: <code class="type">Thread.t option</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.reader">reader</span>&nbsp;:<code class="type">Thread.t option</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALtx"><span class="keyword">val</span> <a href="code_VALLocalhost.tx.html">tx</a></span> : <code class="type"><a href="Localhost.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALclose"><span class="keyword">val</span> <a href="code_VALLocalhost.close.html">close</a></span> : <code class="type"><a href="Localhost.html#TYPEt">t</a> -> unit -> unit</code></pre><pre><span id="VALreader"><span class="keyword">val</span> <a href="code_VALLocalhost.reader.html">reader</a></span> : <code class="type"><a href="Localhost.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALtcp_trx_of_socket"><span class="keyword">val</span> <a href="code_VALLocalhost.tcp_trx_of_socket.html">tcp_trx_of_socket</a></span> : <code class="type">Batteries.Unix.file_descr -> <a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a></code></pre><pre><span id="VALgethostbyname"><span class="keyword">val</span> <a href="code_VALLocalhost.gethostbyname.html">gethostbyname</a></span> : <code class="type">string -> (Ip.Addr.t list option -> 'a) -> 'a</code></pre><pre><span id="VALtcp_connect"><span class="keyword">val</span> <a href="code_VALLocalhost.tcp_connect.html">tcp_connect</a></span> : <code class="type"><a href="Host.html#TYPEaddr">Host.addr</a> -><br>       ?src_port:Tcp.Port.t -> Tcp.Port.t -> (<a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> option -> 'a) -> 'a</code></pre><pre><span id="VALtcp_server"><span class="keyword">val</span> <a href="code_VALLocalhost.tcp_server.html">tcp_server</a></span> : <code class="type">Tcp.Port.t -> (<a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> -> 'a) -> 'b</code></pre><pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALLocalhost.make.html">make</a></span> : <code class="type">unit -> <a href="Host.html#TYPEhost_trx">Host.host_trx</a></code></pre></body></html>
+<pre><span id="VALtx"><span class="keyword">val</span> tx</span> : <code class="type"><a href="Localhost.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALclose"><span class="keyword">val</span> close</span> : <code class="type"><a href="Localhost.html#TYPEt">t</a> -> unit -> unit</code></pre><pre><span id="VALreader"><span class="keyword">val</span> reader</span> : <code class="type"><a href="Localhost.html#TYPEt">t</a> -> unit</code></pre><pre><span id="VALtcp_trx_of_socket"><span class="keyword">val</span> tcp_trx_of_socket</span> : <code class="type">Batteries.Unix.file_descr -> <a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a></code></pre><pre><span id="VALgethostbyname"><span class="keyword">val</span> gethostbyname</span> : <code class="type">string -> (Ip.Addr.t list option -> 'a) -> 'a</code></pre><pre><span id="VALtcp_connect"><span class="keyword">val</span> tcp_connect</span> : <code class="type"><a href="Host.html#TYPEaddr">Host.addr</a> -><br>       ?src_port:Tcp.Port.t -> Tcp.Port.t -> (<a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> option -> 'a) -> 'a</code></pre><pre><span id="VALtcp_server"><span class="keyword">val</span> tcp_server</span> : <code class="type">Tcp.Port.t -> (<a href="Tcp.TRX.html#TYPEtcp_trx">Tcp.TRX.tcp_trx</a> -> 'a) -> 'b</code></pre><pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">unit -> <a href="Host.html#TYPEhost_trx">Host.host_trx</a></code></pre></body></html>

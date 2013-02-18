@@ -46,15 +46,16 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Router</title>
 </head>
 <body>
-<div class="navbar"><a href="Persist.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Sim.html">Next</a>
+<div class="navbar"><a class="pre" href="Persist.html" title="Persist">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Sim.html" title="Sim">Next</a>
 </div>
-<center><h1>Module <a href="type_Router.html">Router</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Router: <code class="code"><span class="keyword">sig</span></code> <a href="Router.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Equipment for routing/nating traffic<br>
+<h1>Module <a href="type_Router.html">Router</a></h1>
+<pre><span class="keyword">module</span> Router: <code class="code"><span class="keyword">sig</span></code> <a href="Router.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Equipment for routing/nating traffic<br>
+</div>
 <hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALRouter.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span id="VALmin_port"><span class="keyword">val</span> <a href="code_VALRouter.min_port.html">min_port</a></span> : <code class="type">int</code></pre><div class="info">
+<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><pre><span id="VALmin_port"><span class="keyword">val</span> min_port</span> : <code class="type">int</code></pre><div class="info">
 the lowest port number used by the address translation<br>
 </div>
 <pre><span class="keyword">module</span> <a href="Router.Nat.html">Nat</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Router.Nat.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
@@ -66,7 +67,7 @@ Network Address Translation (N.A.T.) is the process of replacing on the fly non 
 A router is a device with N IP/Eth devices and a routing
  table with rules on interface number, Ip addresses, proto, ports.
 </div>
-<pre><span id="VALmake_gw"><span class="keyword">val</span> <a href="code_VALRouter.make_gw.html">make_gw</a></span> : <code class="type">?nb_max_cnxs:int -> Ip.Addr.t -> Ip.Cidr.t -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre><div class="info">
+<pre><span id="VALmake_gw"><span class="keyword">val</span> make_gw</span> : <code class="type">?nb_max_cnxs:int -> Ip.Addr.t -> Ip.Cidr.t -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre><div class="info">
 A gateway is a device with 2 Eth interfaces, with a public IP address
  and a private network address, performing routing between these two,
  NAT and DHCP for the LAN. The returned TRX is seen from the LAN (ie, tx

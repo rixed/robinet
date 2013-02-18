@@ -46,15 +46,16 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Persist</title>
 </head>
 <body>
-<div class="navbar"><a href="Peg.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Router.html">Next</a>
+<div class="navbar"><a class="pre" href="Peg.html" title="Peg">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Router.html" title="Router">Next</a>
 </div>
-<center><h1>Module <a href="type_Persist.html">Persist</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Persist: <code class="code"><span class="keyword">sig</span></code> <a href="Persist.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Simple serialization module
+<h1>Module <a href="type_Persist.html">Persist</a></h1>
+<pre><span class="keyword">module</span> Persist: <code class="code"><span class="keyword">sig</span></code> <a href="Persist.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Simple serialization module
 <p>
 
   Helps to keep an object state in a file in a friendly format (for instance javascript or csv)<br>
+</div>
 <hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> <a href="code_VALPersist.debug.html">debug</a></span> : <code class="type">bool</code></pre><pre><span id="VALrootdir"><span class="keyword">val</span> <a href="code_VALPersist.rootdir.html">rootdir</a></span> : <code class="type">string</code></pre><pre><span id="VALmkdir_all"><span class="keyword">val</span> <a href="code_VALPersist.mkdir_all.html">mkdir_all</a></span> : <code class="type">?is_file:bool -> string -> unit</code></pre><pre><span id="VALmake_abs"><span class="keyword">val</span> <a href="code_VALPersist.make_abs.html">make_abs</a></span> : <code class="type">string -> string -> string</code></pre><pre><span id="VALwith_input_file"><span class="keyword">val</span> <a href="code_VALPersist.with_input_file.html">with_input_file</a></span> : <code class="type">string -> string -> string -> (BatIO.input -> 'a) -> 'a</code></pre><pre><span id="VALwith_output_file"><span class="keyword">val</span> <a href="code_VALPersist.with_output_file.html">with_output_file</a></span> : <code class="type">string -> string -> (unit BatInnerIO.output -> 'a) -> 'a</code></pre><pre><span id="VALgenname"><span class="keyword">val</span> <a href="code_VALPersist.genname.html">genname</a></span> : <code class="type">string -> string</code></pre></body></html>
+<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><pre><span id="VALrootdir"><span class="keyword">val</span> rootdir</span> : <code class="type">string</code></pre><pre><span id="VALmkdir_all"><span class="keyword">val</span> mkdir_all</span> : <code class="type">?is_file:bool -> string -> unit</code></pre><pre><span id="VALmake_abs"><span class="keyword">val</span> make_abs</span> : <code class="type">string -> string -> string</code></pre><pre><span id="VALwith_input_file"><span class="keyword">val</span> with_input_file</span> : <code class="type">string -> string -> string -> (BatIO.input -> 'a) -> 'a</code></pre><pre><span id="VALwith_output_file"><span class="keyword">val</span> with_output_file</span> : <code class="type">string -> string -> (unit BatInnerIO.output -> 'a) -> 'a</code></pre><pre><span id="VALgenname"><span class="keyword">val</span> genname</span> : <code class="type">string -> string</code></pre></body></html>

@@ -47,15 +47,16 @@
 <title>Opache</title>
 </head>
 <body>
-<div class="navbar"><a href="Net.html">Previous</a>
-&nbsp;<a href="index.html">Up</a>
-&nbsp;<a href="Packet.html">Next</a>
+<div class="navbar"><a class="pre" href="Net.html" title="Net">Previous</a>
+&nbsp;<a class="up" href="index.html" title="Index">Up</a>
+&nbsp;<a class="post" href="Packet.html" title="Packet">Next</a>
 </div>
-<center><h1>Module <a href="type_Opache.html">Opache</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Opache: <code class="code"><span class="keyword">sig</span></code> <a href="Opache.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>A simple HTTP server.<br>
+<h1>Module <a href="type_Opache.html">Opache</a></h1>
+<pre><span class="keyword">module</span> Opache: <code class="code"><span class="keyword">sig</span></code> <a href="Opache.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+A simple HTTP server.<br>
+</div>
 <hr width="100%">
-<pre><span id="VALparams_of_query"><span class="keyword">val</span> <a href="code_VALOpache.params_of_query.html">params_of_query</a></span> : <code class="type">string -> (string, string) Batteries.Hashtbl.t</code></pre><pre><span id="VALstripped"><span class="keyword">val</span> <a href="code_VALOpache.stripped.html">stripped</a></span> : <code class="type">string -> string</code></pre><pre><span id="VALserve"><span class="keyword">val</span> <a href="code_VALOpache.serve.html">serve</a></span> : <code class="type"><a href="Host.html#TYPEhost_trx">Host.host_trx</a> -><br>       Tcp.Port.t -> (<a href="Http.TRXtop.html#TYPEt">Http.TRXtop.t</a> -> <a href="Http.Pdu.html#TYPEt">Http.Pdu.t</a> -> <a href="Log.html#TYPElogger">Log.logger</a> -> 'a) -> unit</code></pre><div class="info">
+<pre><span id="VALparams_of_query"><span class="keyword">val</span> params_of_query</span> : <code class="type">string -> (string, string) Batteries.Hashtbl.t</code></pre><pre><span id="VALstripped"><span class="keyword">val</span> stripped</span> : <code class="type">string -> string</code></pre><pre><span id="VALserve"><span class="keyword">val</span> serve</span> : <code class="type"><a href="Host.html#TYPEhost_trx">Host.host_trx</a> -><br>       Tcp.Port.t -> (<a href="Http.TRXtop.html#TYPEt">Http.TRXtop.t</a> -> <a href="Http.Pdu.html#TYPEt">Http.Pdu.t</a> -> <a href="Log.html#TYPElogger">Log.logger</a> -> 'a) -> unit</code></pre><div class="info">
 Listen HTTP connections arriving at <code class="code">host</code> on given <code class="code">port</code>,
   passing incoming messages to a user supplied function <code class="code">f</code>.
 <p>
@@ -63,7 +64,7 @@ Listen HTTP connections arriving at <code class="code">host</code> on given <cod
   A simple server may be used like:
 <p>
 
-  <pre></pre><code class="code">&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;Server&nbsp;*)</span><br>
+  <pre class="codepre"><code class="code">&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">(*&nbsp;Server&nbsp;*)</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;server&nbsp;=&nbsp;<span class="constructor">Host</span>.make_static&nbsp;<span class="string">"server"</span>&nbsp;(<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.random&nbsp;())&nbsp;(<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.of_string&nbsp;<span class="string">"192.168.1.1"</span>);;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">let</span>&nbsp;content_of&nbsp;file&nbsp;=&nbsp;<span class="constructor">File</span>.lines_of&nbsp;file&nbsp;|&gt;&nbsp;<span class="constructor">List</span>.of_enum&nbsp;|&gt;&nbsp;<span class="constructor">String</span>.concat&nbsp;<span class="string">""</span>;;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Opache</span>.serve&nbsp;server&nbsp;(<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.o&nbsp;8080)&nbsp;(<span class="keyword">fun</span>&nbsp;trx&nbsp;_msg&nbsp;_log&nbsp;<span class="keywordsign">-&gt;</span><br>
@@ -81,19 +82,19 @@ Listen HTTP connections arriving at <code class="code">host</code> on given <cod
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keywordsign">|</span>&nbsp;<span class="constructor">Some</span>&nbsp;(headers,&nbsp;body)&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Printf</span>.printf&nbsp;<span class="string">"\nResult:\n%a\n\n%s\n"</span>&nbsp;<span class="constructor">Http</span>.print_headers&nbsp;headers&nbsp;body);;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Clock</span>.run&nbsp;<span class="keyword">false</span>;;<br>
-&nbsp;&nbsp;</code><pre></pre>
+&nbsp;&nbsp;</code></pre>
 <p>
 
   Notice that this example, if copied into test.ml, will generate a pcap containing the source code that
   generates the pcap :-)<br>
 </div>
 <br>
-<span id="2_HTTPservicingfunctions"><h2>HTTP servicing functions</h2></span>
+<h2 id="2_HTTPservicingfunctions">HTTP servicing functions</h2>
   These functions build a function taking an , an incomming  and
   responsible for sending the answer. They are mean to be used by <code class="code">multiplexer</code>.<br>
-<pre><span id="VALprint_vars"><span class="keyword">val</span> <a href="code_VALOpache.print_vars.html">print_vars</a></span> : <code class="type">'a BatInnerIO.output -> (string, string) Batteries.Hashtbl.t -> unit</code></pre><pre><span id="EXCEPTIONResourceError"><span class="keyword">exception</span> ResourceError</span> <span class="keyword">of</span> <code class="type">int * string</code></pre>
-<pre><span id="VALcontent_type_from_filename"><span class="keyword">val</span> <a href="code_VALOpache.content_type_from_filename.html">content_type_from_filename</a></span> : <code class="type">string -> string</code></pre><pre><span id="VALstatic_file_server"><span class="keyword">val</span> <a href="code_VALOpache.static_file_server.html">static_file_server</a></span> : <code class="type">string -><br>       'a -> string list -> 'b -> 'c -> 'd BatIO.output -> (string * string) list</code></pre><pre><span id="VALit_works"><span class="keyword">val</span> <a href="code_VALOpache.it_works.html">it_works</a></span> : <code class="type">'a -><br>       string list -> 'b -> 'c -> 'd BatInnerIO.output -> (string * string) list</code></pre><pre><span id="TYPEparams"><span class="keyword">type</span> <code class="type"></code>params</span> = <code class="type">(string, string) Batteries.Hashtbl.t</code> </pre>
+<pre><span id="VALprint_vars"><span class="keyword">val</span> print_vars</span> : <code class="type">'a BatInnerIO.output -> (string, string) Batteries.Hashtbl.t -> unit</code></pre><pre><span id="EXCEPTIONResourceError"><span class="keyword">exception</span> ResourceError</span> <span class="keyword">of</span> <code class="type">int * string</code></pre>
+<pre><span id="VALcontent_type_from_filename"><span class="keyword">val</span> content_type_from_filename</span> : <code class="type">string -> string</code></pre><pre><span id="VALstatic_file_server"><span class="keyword">val</span> static_file_server</span> : <code class="type">string -><br>       'a -> string list -> 'b -> 'c -> 'd BatIO.output -> (string * string) list</code></pre><pre><span id="VALit_works"><span class="keyword">val</span> it_works</span> : <code class="type">'a -><br>       string list -> 'b -> 'c -> 'd BatInnerIO.output -> (string * string) list</code></pre><pre><span id="TYPEparams"><span class="keyword">type</span> <code class="type"></code>params</span> = <code class="type">(string, string) Batteries.Hashtbl.t</code> </pre>
 
 <pre><span id="TYPEresource"><span class="keyword">type</span> <code class="type"></code>resource</span> = <code class="type">(Str.regexp *<br>        (string -><br>         string list -><br>         <a href="Opache.html#TYPEparams">params</a> -> string -> string BatIO.output -> <a href="Http.html#TYPEheader">Http.header</a> list))<br>       list</code> </pre>
 
-<pre><span id="VALmultiplexer"><span class="keyword">val</span> <a href="code_VALOpache.multiplexer.html">multiplexer</a></span> : <code class="type"><a href="Opache.html#TYPEresource">resource</a> -> <a href="Http.TRXtop.html#TYPEt">Http.TRXtop.t</a> -> <a href="Http.Pdu.html#TYPEt">Http.Pdu.t</a> -> <a href="Log.html#TYPElogger">Log.logger</a> -> unit</code></pre></body></html>
+<pre><span id="VALmultiplexer"><span class="keyword">val</span> multiplexer</span> : <code class="type"><a href="Opache.html#TYPEresource">resource</a> -> <a href="Http.TRXtop.html#TYPEt">Http.TRXtop.t</a> -> <a href="Http.Pdu.html#TYPEt">Http.Pdu.t</a> -> <a href="Log.html#TYPElogger">Log.logger</a> -> unit</code></pre></body></html>

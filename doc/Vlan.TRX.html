@@ -45,64 +45,65 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Vlan.TRX</title>
 </head>
 <body>
-<div class="navbar"><a href="Vlan.Pdu.html">Previous</a>
-&nbsp;<a href="Vlan.html">Up</a>
+<div class="navbar"><a class="pre" href="Vlan.Pdu.html" title="Vlan.Pdu">Previous</a>
+&nbsp;<a class="up" href="Vlan.html" title="Vlan">Up</a>
 &nbsp;</div>
-<center><h1>Module <a href="type_Vlan.TRX.html">Vlan.TRX</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> TRX: <code class="code"><span class="keyword">sig</span></code> <a href="Vlan.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>A Vlan TRX accepts raw packets (presumably from some <a href="Eth.TRX.html"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">TRX</span></code></a>), unpack them
+<h1>Module <a href="type_Vlan.TRX.html">Vlan.TRX</a></h1>
+<pre><span class="keyword">module</span> TRX: <code class="code"><span class="keyword">sig</span></code> <a href="Vlan.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+A Vlan TRX accepts raw packets (presumably from some <a href="Eth.TRX.html"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">TRX</span></code></a>), unpack them
  and forward the payload to a callback; and it can be given some payload to
  tunnel and it will tag it and pass it presumably to an <a href="Eth.TRX.html"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">TRX</span></code></a>.
 <p>
 
  Create it with an <code class="code"><span class="constructor">Arp</span>.<span class="constructor">HwProto</span>.t</code>, a prio and vlan id.<br>
+</div>
 <hr width="100%">
-<br><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code><table class="typetable">
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>prio&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.prio">prio</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>id&nbsp;: <code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.id">id</span>&nbsp;:<code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code>proto&nbsp;: <code class="type">Arp.HwProto.t</code>;</code></td>
+<code><span id="TYPEELTt.proto">proto</span>&nbsp;:<code class="type">Arp.HwProto.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>emit&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.emit">emit</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span>recv&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.recv">recv</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALtx"><span class="keyword">val</span> <a href="code_VALVlan.TRX.tx.html">tx</a></span> : <code class="type"><a href="Vlan.TRX.html#TYPEt">t</a> -> Tools.Payload.outer_t -> unit</code></pre><div class="info">
+<pre><span id="VALtx"><span class="keyword">val</span> tx</span> : <code class="type"><a href="Vlan.TRX.html#TYPEt">t</a> -> Tools.Payload.outer_t -> unit</code></pre><div class="info">
 Transmit function. <code class="code">tx t payload</code> will tunnel the payload through this TRX.<br>
 </div>
-<pre><span id="VALrx"><span class="keyword">val</span> <a href="code_VALVlan.TRX.rx.html">rx</a></span> : <code class="type"><a href="Vlan.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre><div class="info">
+<pre><span id="VALrx"><span class="keyword">val</span> rx</span> : <code class="type"><a href="Vlan.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre><div class="info">
 Receive function, called to output untaggd frames from the 802.1q tunnel.<br>
 </div>
-<pre><span id="VALmake"><span class="keyword">val</span> <a href="code_VALVlan.TRX.make.html">make</a></span> : <code class="type">int -> int -> Arp.HwProto.t -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre><div class="info">
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">int -> int -> Arp.HwProto.t -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre><div class="info">
 Creates a <a href="Vlan.TRX.html#TYPEt"><code class="code"><span class="constructor">Vlan</span>.<span class="constructor">TRX</span>.t</code></a>.
 <br>
 </div>

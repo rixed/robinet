@@ -45,28 +45,29 @@
 <link title="Vlan" rel="Chapter" href="Vlan.html"><title>Clock.Time</title>
 </head>
 <body>
-<div class="navbar">&nbsp;<a href="Clock.html">Up</a>
-&nbsp;<a href="Clock.Interval.html">Next</a>
+<div class="navbar">&nbsp;<a class="up" href="Clock.html" title="Clock">Up</a>
+&nbsp;<a class="post" href="Clock.Interval.html" title="Clock.Interval">Next</a>
 </div>
-<center><h1>Module <a href="type_Clock.Time.html">Clock.Time</a></h1></center>
-<br>
-<pre><span class="keyword">module</span> Time: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.Time.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>Time.t represents a given timestamp (ie. number of seconds since 1970-01-01 00:00:00 UTC.<br>
+<h1>Module <a href="type_Clock.Time.html">Clock.Time</a></h1>
+<pre><span class="keyword">module</span> Time: <code class="code"><span class="keyword">sig</span></code> <a href="Clock.Time.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+Time.t represents a given timestamp (ie. number of seconds since 1970-01-01 00:00:00 UTC.<br>
+</div>
 <hr width="100%">
-<pre><span id="VALprint_date"><span class="keyword">val</span> <a href="code_VALClock.Time.print_date.html">print_date</a></span> : <code class="type">bool Batteries.ref</code></pre><div class="info">
+<pre><span id="VALprint_date"><span class="keyword">val</span> print_date</span> : <code class="type">bool Batteries.ref</code></pre><div class="info">
 When displaying a time, print also the corresponding date.
  Only useful if your simulation spans several days, which is uncommon.<br>
 </div>
 <pre><span class="keyword">include</span> struct ... end</pre>
-<pre><span id="VALadd"><span class="keyword">val</span> <a href="code_VALClock.Time.add.html">add</a></span> : <code class="type">t -> Clock.Interval.t -> t</code></pre><div class="info">
+<pre><span id="VALadd"><span class="keyword">val</span> add</span> : <code class="type">t -> Clock.Interval.t -> t</code></pre><div class="info">
 Adds a time and an interval.<br>
 </div>
-<pre><span id="VALsub"><span class="keyword">val</span> <a href="code_VALClock.Time.sub.html">sub</a></span> : <code class="type">t -> t -> Clock.Interval.t</code></pre><div class="info">
+<pre><span id="VALsub"><span class="keyword">val</span> sub</span> : <code class="type">t -> t -> Clock.Interval.t</code></pre><div class="info">
 Substract two time and returns an interval.<br>
 </div>
-<pre><span id="VALwall_clock"><span class="keyword">val</span> <a href="code_VALClock.Time.wall_clock.html">wall_clock</a></span> : <code class="type">unit -> t</code></pre><div class="info">
+<pre><span id="VALwall_clock"><span class="keyword">val</span> wall_clock</span> : <code class="type">unit -> t</code></pre><div class="info">
 Get the current wall clock (through ).<br>
 </div>
-<pre><span id="VALto_ints"><span class="keyword">val</span> <a href="code_VALClock.Time.to_ints.html">to_ints</a></span> : <code class="type">t -> int * int</code></pre><div class="info">
+<pre><span id="VALto_ints"><span class="keyword">val</span> to_ints</span> : <code class="type">t -> int * int</code></pre><div class="info">
 Convert a timestamp to a pair of ints with seconds, microseconds<br>
 </div>
 </body></html>
