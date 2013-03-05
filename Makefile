@@ -83,6 +83,5 @@ robinet.top: $(ARCHIVE)
 	sudo setcap cap_net_raw,cap_net_admin=eip $@
 
 clean-spec:
-	rm -f *.pcap
 	rm -f examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
 
