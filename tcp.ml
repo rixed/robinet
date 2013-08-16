@@ -28,7 +28,8 @@ let debug = false
 
 let show_ports_by_name = ref true
 module MakePort (Serv : sig val srv : string end) =
-    MakePrivate(struct
+struct
+    include MakePrivate(struct
         type t = int
         let to_string p =
             if !show_ports_by_name then (
@@ -38,6 +39,9 @@ module MakePort (Serv : sig val srv : string end) =
         let is_valid p = p < 0x10000
         let repl_tag = "port"
     end)
+
+    let random () = o (Random.int 0x10000)
+end
 
 module Port = MakePort (struct let srv = "tcp" end)
 

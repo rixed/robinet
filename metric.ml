@@ -46,7 +46,6 @@
 *)
 
 open Batteries
-open Bitstring
 open Tools
 
 let debug = false
@@ -180,7 +179,7 @@ let print_report oc =
     Hashtbl.iter (fun _ ev -> Timed.print oc ev) Timed.all ;
     flush oc
 
-let rec report_thread oc period =
+let report_thread oc period =
     let rec loop () =
         Thread.delay period ;
         print_report oc ;

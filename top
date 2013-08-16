@@ -1,0 +1,4 @@
+#!/bin/sh
+
+make robinet.top
+OCAMLPATH=../ exec rlwrap ./robinet.top -rectypes -init robinet.init

@@ -206,8 +206,7 @@ struct
     type t = {      trxs : trx array ;
                route_tbl : (route * int) array }    (** The route table is an array of route to output interface indices. *)
 
-    (** Call [write n t bits] when an IP packet ([bits]) is received on interface [n]. *)
-    let write n t bits =
+    let route n t bits =
         if debug then Printf.printf "Router: rx from port %d\n" n ;
         let ip_opt = Ip.Pdu.unpack bits
         and ip_ports_opt = Ip.Pdu.unpack_with_ports bits in
@@ -234,6 +233,8 @@ struct
         if debug then Printf.printf "Router: setting emmitter for port %d\n" n ;
         t.trxs.(n) =-> f
 
+    (* TODO: similarly, a write n b = t.trxs.(n).write b *)
+
     (** Build a [t] routing through these {!Tools.trx} according to the given routing table. *)
     let make trxs route_tbl =
         (* Check we route only from/to the given ports *)
@@ -244,17 +245,18 @@ struct
                 0 route_tbl in
         assert (max_used_port < Array.length trxs) ;
         let t = { trxs ; route_tbl } in
-        Array.iteri (fun i trx -> trx.ins.set_read (write i t)) trxs ;
+        Array.iteri (fun i trx -> trx.ins.set_read (route i t)) trxs ;
         t
 
+    (* returns both the router and the eth trxs (ins is inside router) created for you *)
     let make_from_addrs addrs route_tbl =
         let trxs = addrs /@ (fun (ip, mac) ->
             let eth = Eth.TRX.make mac Arp.HwProto.ip4 [ Ip.Addr.to_bitstring ip ] in
             eth.Eth.TRX.trx) |>
             Array.of_enum in
-        make trxs route_tbl
+        make trxs route_tbl, trxs
 
-    (*$R write
+    (*$R route
         (* Suppose we have a router for these 3 networks: *)
         let addrs = [| Ip.Addr.of_string "192.168.1.254", Eth.Addr.random () ;
                        Ip.Addr.of_string "192.168.2.254", Eth.Addr.random () ;
@@ -266,8 +268,8 @@ struct
                              ip_proto = None ; src_port = None ; dst_port = None }, 1 ;
                            { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Cidr.of_string "192.168.3.0/24") ;
                              ip_proto = None ; src_port = None ; dst_port = None }, 2 |] in
-        let router = make_from_addrs (Array.enum addrs) route_tbl in
-        
+        let router, trxs = make_from_addrs (Array.enum addrs) route_tbl in
+
         (* Now we will count incoming packets from each port (ARP requests, actually) : *)
         let counts = Array.create 3 0 in
         for i = 0 to Array.length counts - 1 do
@@ -281,7 +283,9 @@ struct
         let easy_send n dst =
             { Ip.Pdu.random () with Ip.Pdu.dst = Ip.Addr.of_string dst } |>
             Ip.Pdu.pack |>
-            write n router in
+            Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (snd addrs.(n)) |>
+            Eth.Pdu.pack |>
+            trxs.(n).out.write in
 
         (* Let's play! *)
         easy_send 0 "1.2.3.4" ;
@@ -315,16 +319,19 @@ end
 let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let hub = Hub.Repeater.make 3 in
-    let gw_ip = Enum.get_exn local_ips in   (* first IP if the subnet is the GW *)
-    let dhcpd_ip = Enum.get_exn local_ips in
+    let gw_ip = Enum.get_exn local_ips in   (* first IP of the subnet is the GW *)
+    let dhcpd_ip = Enum.get_exn local_ips in    (* second the dhcp server *)
     let dhcpd = Host.make_static "dhcpd" (Eth.Addr.random ()) dhcpd_ip in
     Hub.Repeater.set_read 1 hub dhcpd.Host.dev.write ;
     dhcpd.Host.dev.set_read (Hub.Repeater.write 1 hub) ;
+    (* Create and connect the first port of our router *)
     let gw_eth = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring gw_ip ] in
     Hub.Repeater.set_read 2 hub gw_eth.Eth.TRX.trx.out.write ;
     gw_eth.Eth.TRX.trx.out.set_read (Hub.Repeater.write 2 hub) ;
+    (* The second port of our router (facing intgernet) is the NAT *)
     let nat = Nat.make public_ip nb_max_cnxs in
-    let router = Router.(make [| gw_eth.Eth.TRX.trx ; nat |]
+    (* Build this router then *)
+    let _router = Router.(make [| gw_eth.Eth.TRX.trx ; nat |]
                     [| (* route everything from anywhere to LAN if dest fits local_cidr *)
                        { iface_num = None ; src_mask = None ; dst_mask = Some local_cidr ;
                          ip_proto = None ; src_port = None ; dst_port = None }, 0 ;
@@ -334,7 +341,6 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
                        (* route everything else toward nat *)
                        { iface_num = None ; src_mask = None ; dst_mask = None ;
                          ip_proto = None ; src_port = None ; dst_port = None }, 1 |]) in
-    nat.ins.set_read (Router.write 1 router) ;
     Dhcpd.serve dhcpd local_ips ;
     { ins = { write = (fun bits -> Hub.Repeater.write 0 hub bits) ;
               set_read = fun f -> Hub.Repeater.set_read 0 hub f } ;

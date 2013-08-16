@@ -6,8 +6,8 @@ OCAMLDOC   = ocamlfind ocamldoc -html -colorize-code -thread -sort -stars
 OCAMLMKTOP = ocamlfind ocamlmktop -thread -g
 QTEST      = qtest
 DOCDIR    ?= doc/
-override OCAMLOPTFLAGS += $(INCS) -w Ael -g -annot
-override OCAMLFLAGS    += $(INCS) -w Ael -g -annot
+override OCAMLOPTFLAGS += $(INCS) -w Ael-31 -g -annot
+override OCAMLFLAGS    += $(INCS) -w Ael-31 -g -annot
 
 CAMLINCLUDE = $(shell ocamlfind printconf stdlib)
 CPPFLAGS   += -I $(CAMLINCLUDE) -I .

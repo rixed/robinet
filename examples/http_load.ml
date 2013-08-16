@@ -22,7 +22,6 @@
    from a given URL.
 *)
 open Batteries
-open Bitstring
 open Tools
 
 let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth start_url =

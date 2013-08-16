@@ -1,10 +1,16 @@
+(* from OPAM. *)
+let () =
+  try Topdirs.dir_directory (Sys.getenv "OCAML_TOPLEVEL_PATH")
+  with Not_found -> ()
+;;
+
 (*
 #require "findlib";;
 Toploop.use_silently
 	Format.err_formatter (Filename.concat (Findlib.package_directory "batteries") "battop.ml");;
 *)
 #require "bitstring";;
-#require "batteries.pa_string.syntax";;
+#require "batteries";;
 #camlp4o;;
 
 open Batteries;;

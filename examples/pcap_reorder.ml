@@ -23,8 +23,6 @@
 *)
    
 open Batteries
-open Bitstring
-open Tools
 
 let input_of name =
     Pcap.enum_of_file name

@@ -366,6 +366,7 @@ end
 
 (** A device is something to which you can send packet and register a
  * receiving function *)
+(* FIXME: a better name which makes apparent that a trx is actually 2 devs *)
 type dev = { write : bitstring -> unit ; set_read : (bitstring -> unit) -> unit }
 
 (** For those cases when you want to build a [trx] from a single [dev] *)
@@ -377,7 +378,7 @@ let (<-->) a b =
     b.set_read a.write
 
 (** A transmiter is a kind of pipe with an inside and an outside device, is
- * thus oriented (from inside to outside, inside being le left operand for following
+ * thus oriented (from inside to outside, inside being left operand for following
  * functions), that transforms the writen payload before emitting it. *)
 type trx = { ins : dev ; out : dev }
 

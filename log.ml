@@ -24,7 +24,6 @@
   Additionally, messages of higher level than some threshold are copied onto stderr.
 *)
 open Batteries
-open Tools
 
 (* Basically, Info is the lowest thing you want to see by default. *)
 type level  = Critical | Error | Warning | Info | Debug

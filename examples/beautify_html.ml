@@ -21,7 +21,6 @@
    Display the HTML structure of a file containing HTML.
 *)
 open Batteries
-open Bitstring
 open Tools
 
 let main =

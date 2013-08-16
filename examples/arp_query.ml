@@ -18,7 +18,6 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 open Bitstring
-open Tools
 
 (* TODO: make this a parameter.
          make eth0 a command line arg *)
@@ -32,7 +31,7 @@ let arp_query (src_eth : Eth.Addr.t) src_ip target_ip =
     let eth = Eth.Pdu.make Arp.HwProto.arp src_eth Eth.Addr.broadcast (Arp.Pdu.pack arp) in
     Pcap.inject iface (string_of_bitstring (Eth.Pdu.pack eth))
 
-let rec wait_answer target_ip_bits =
+let wait_answer target_ip_bits =
     (* TODO: times out *)
     let rec aux () =
         let _ts, packet = Pcap.sniff iface in

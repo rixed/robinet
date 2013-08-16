@@ -39,6 +39,7 @@ Tcp.Pdu.make ~dst_port:(Tcp.Port.o 5000) (bitstring_of_string "HTTP/1.2 pas glop
 
 {[
 
+let grep needle haystack = try String.find haystack needle ; true with Not_found -> false in
 Pcap.enum_of_file "input.pcap" |>
     Enum.filter (fun pdu -> grep "needle" (string_of_bitstring (pdu.Pcap.Pdu.payload :> bitstring))) |>
     Pcap.file_of_enum "output.pcap";;
@@ -303,7 +304,7 @@ let read_next_pkt global_header ic =
 (** From a pcap file, returns an [Enum.t] of {!Pcap.Pdu.t}. *)
 let enum_of_file fname =
     let global_header, ic = read_global_header fname in
-    let rec next () =
+    let next () =
         try read_next_pkt global_header ic
         with IO.No_more_input | IO.Input_closed ->
             raise Enum.No_more_elements in

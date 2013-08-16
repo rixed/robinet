@@ -495,7 +495,7 @@ let rec iter_nodes f = function
 let iter_node f tree = iter_nodes f [tree]
 
 exception Found_node of node
-let rec find_first_node f tree =
+let find_first_node f tree =
     try
         iter_node (fun n -> if f n then raise (Found_node n)) tree ;
         None
@@ -512,7 +512,7 @@ let filter_map_node f tree =
             aux l n.children in
     aux [] [tree]
 
-let rec attrs_of l =
+let attrs_of l =
     let rec aux prev = function
         | [] -> prev
         | `Attr x :: l' -> aux (x::prev) l'

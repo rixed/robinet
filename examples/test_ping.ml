@@ -4,7 +4,6 @@
    Test that a host answer a ping
 *)
 open Batteries
-open Bitstring
 open Tools
 
 let run () =

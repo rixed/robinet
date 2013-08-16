@@ -113,7 +113,7 @@ let gethostbyname name cont =
         Ip.Addr.of_inet_addr |>
         List.of_enum in
     cont (Some ips)
-    
+
 
 let tcp_connect dst ?src_port (dst_port : Tcp.Port.t) cont =
     let connect_tcp_ inet_addr =

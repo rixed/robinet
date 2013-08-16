@@ -22,6 +22,7 @@ let make_net avg_group_size nb_groups ifname nameserver =
          * server and a switch, with a free port for external connectivity. *)
         let nb_hosts = avg_group_size in
         Log.(log logger Info (lazy (Printf.sprintf "Create group %d with %d hosts" i nb_hosts))) ;
+        (* FIXME: nameserver should be nothing but a fence in our virtual internet *)
         let group = Sim.Net.make_simple_lan ~nameserver nb_hosts in
         Log.(log logger Info (lazy "Connect it...")) ;
         (* Sim.Net.connect takes two nets and connect them the obvious way *)
@@ -29,34 +30,33 @@ let make_net avg_group_size nb_groups ifname nameserver =
             should_not_happen () ;
         group) in
     Log.(log logger Info (lazy ("Connecting "^ifname))) ;
-    let sink, sniff_thread = Sim.Net.make_sink ifname in
+    let sink, _sniff_thread = Sim.Net.make_sink ifname in
     if Result.is_bad (Sim.Net.connect inet sink) then
         should_not_happen () ;
-    Sim.Net.union (inet :: sink :: groups), [ sniff_thread ]
+    Sim.Net.union (inet :: sink :: groups)
 
 (** Spawn a browser thread in all hosts of the given network, that will browse
  * at random in a human like fashion from the root url *)
+(* FIXME: Would be easier if we could give to make_net a sort of 'init' function for each host *)
 let random_browsing net url =
-    List.filter_map (function
+    List.iter (function
         | Sim.Net.Host host ->
             Log.(log logger Info (lazy (Printf.sprintf "Starting a new web browser on %s" host.Host.name))) ;
             let browser = Browser.make host in
-            Some (Browser.user browser ~pause:5. 1000 url)
-        | _ -> None)
+            Browser.user browser ~pause:5. 1000 url
+        | _ -> ())
         net.Sim.Net.equip
 
 
 (** {1 Main function} *)
 
-(** A simulation is basically a function returning the threads. *)
-let simul_webperf avg_group_size nb_groups duration ifname nameserver url =
+(** This will creates the objects and queue the first callbacks but does not start the clock *)
+let simul_webperf avg_group_size nb_groups _duration ifname nameserver url =
     Log.(log logger Info (lazy (Printf.sprintf "Starting webperf simulation with %d groups of %d users (avg) for base url %s"
         nb_groups avg_group_size (Url.to_string url)))) ;
-    let net, net_threads = make_net avg_group_size nb_groups ifname nameserver in
+    let net = make_net avg_group_size nb_groups ifname nameserver in
     Log.(log logger Info (lazy "Starting browser on each host...")) ;
-    let browsers = random_browsing net url in
-    Log.(log logger Info (lazy "Running it all...")) ;
-    Clock.run (net_threads @ browsers)
+    random_browsing net url
 
 let main =
     let url = ref "http://google.com"
@@ -80,5 +80,7 @@ let main =
                   (Clock.Interval.sec (float_of_int !duration))
                   !ifname
                   (Ip.Addr.of_string !nameserver)
-                  (Url.of_string !url)
+                  (Url.of_string !url) ;
+    Log.(log logger Info (lazy "Running it all...")) ;
+    Clock.run true
 

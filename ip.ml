@@ -133,8 +133,8 @@ module Addr = struct
             else
                 None
         in
-        Scanf.sscanf str "%ld.%ld.%ld.%ld" assemble
-        (* FIXME: checkme! *)
+        try Scanf.sscanf str "%ld.%ld.%ld.%ld" assemble
+        with Scanf.Scan_failure _ -> None
 
     (** Convert an {!Ip.Addr.t} to a [bitstring]. *)
     let to_bitstring (t : t) = (BITSTRING { (t :> int32) : 32 })

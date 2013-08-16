@@ -21,8 +21,6 @@
    Small HTTP server for tests
 *)
 open Batteries
-open Bitstring
-open Tools
 
 let run port =
     let host = Localhost.make () in

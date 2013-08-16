@@ -268,6 +268,9 @@ let resolve base url =
     { scheme = "http" ; net_loc = "www.amazon.ca" ; path = "" ; params = ""; query = "glop=pasglop" } \
         (resolve (of_string "http://www.amazon.ca") \
                  (of_string "?glop=pasglop"))
+
+    { scheme = "http" ; net_loc = "google.com" ; path = "/" ; params = "" ; query = "" } \
+        (resolve empty (of_string "http://google.com"))
 *)
 (*$T resolve
     (* these tests are taken from RFC 1808 *) \

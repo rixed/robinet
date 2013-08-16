@@ -27,7 +27,6 @@
 
 *)
 open Batteries
-open Bitstring
 open Tools
 open Http
 open Html
@@ -269,7 +268,7 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
             TRXtop.tx http in
         match find_vacant_cnx t addr port with
             | None ->
-                if debug then Printf.printf "Browser: establishing new cnx\n" ;
+                if debug then Printf.printf "Browser: establishing new cnx to %s\n" (Host.string_of_addr addr) ;
                 let http = TRXtop.make () in
                 t.host.Host.tcp_connect addr port (function
                 | None -> cont None

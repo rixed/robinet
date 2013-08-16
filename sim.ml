@@ -20,7 +20,6 @@
 (** This module puts together all the modules required to build
  * networks and run a simulation. *)
 open Batteries
-open Bitstring
 open Tools
 
 (** A network is a set of equipments, and some optionaly named "plugs"
@@ -31,11 +30,11 @@ open Tools
  * function pointers, so contrary to one would expect a net is not a
  * graph but a mere list of equipment (and available plugs).
  * Connecting two nets make the used plugs disapear, but other than that
- * the two nets stay the same. To group two nets (either connected or net)
+ * the two nets stay the same. To group two nets (either connected or not)
  * use the [union] function which will return the union of the two nets. *)
 module Net =
 struct
-    (** A plug is a named entry point to a networks.
+    (** A plug is a named entry/exit point to a networks.
      * The name is there to suggest an usage but is not used internally. *)
     module Plug = struct
         type t = {     name : string ; (** name *)
@@ -114,7 +113,7 @@ struct
 
     (** Returns a lan consisting of n hosts connected to a switch connected to a
      * router/dhcp server/nater with an "exit" plug. *)
-    let make_simple_lan ?nameserver ?(public_ip=Ip.Addr.random ()) n =
+    let make_simple_lan ?(name="homelan") ?nameserver ?(public_ip=Ip.Addr.random ()) n =
         let cidr = Ip.Cidr.of_string "192.168.0.0/16" in
         let gw = Router.make_gw public_ip cidr in
         let sw = Hub.Switch.make (n+1) (5*n) in
@@ -128,7 +127,7 @@ struct
             h.Host.dev.set_read (Hub.Switch.write i sw) ;
             Hub.Switch.set_read i sw h.Host.dev.write ;
             Host h) in
-        let plug = Plug.make "" (Hub.Switch.to_dev 0 sw) in
+        let plug = Plug.make name gw.out in
         { equip = (Switch sw) :: (Trx gw) :: hosts ; plugs = [ plug ] }
 
 end

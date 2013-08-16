@@ -23,7 +23,6 @@
  a reservation at a decent time. Many hours of sleep saved thanks to RobiNet! ;->)
 *)
 open Batteries
-open Bitstring
 open Tools
 
 (* At each step, we:

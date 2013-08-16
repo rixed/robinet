@@ -21,8 +21,6 @@
    This will open a pcap file and add duplicates (with a given delay)
 *)
 open Batteries
-open Bitstring
-open Tools
 open Pcap
 
 let handle_file delay ifile ofile =

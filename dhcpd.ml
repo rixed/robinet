@@ -18,7 +18,6 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 open Batteries
-open Bitstring
 open Tools
 open Dhcp
 
@@ -48,6 +47,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
                     (* Store the offer *before* spawning the responding thread *)
                     BitHash.replace offers dhcp.Pdu.chaddr offered_ip ;
                     (* Send the offer *)
+                    Log.(log logger Debug (lazy (Printf.sprintf "Offering IP %s to %s" (Ip.Addr.to_string offered_ip) (hexstring_of_bitstring dhcp.Pdu.chaddr)))) ;
                     Pdu.make_offer ~mac:(host.Host.get_mac ())
                                    ~xid:dhcp.Pdu.xid offered_ip
                                    dhcp.Pdu.client_id |>

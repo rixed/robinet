@@ -34,7 +34,6 @@
 
 *)
 open Batteries
-open Bitstring
 open Tools
 
 let debug = false

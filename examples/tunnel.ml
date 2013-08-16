@@ -22,7 +22,6 @@
    to a given destination.
 *)
 open Batteries
-open Bitstring
 open Tools
 
 let tunnel ifname tun_ip tun_mac gw search_sfx nameserver dst dst_port src_port =
