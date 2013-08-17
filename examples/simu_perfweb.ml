@@ -22,17 +22,14 @@ let make_net avg_group_size nb_groups ifname nameserver =
          * server and a switch, with a free port for external connectivity. *)
         let nb_hosts = avg_group_size in
         Log.(log logger Info (lazy (Printf.sprintf "Create group %d with %d hosts" i nb_hosts))) ;
-        (* FIXME: nameserver should be nothing but a fence in our virtual internet *)
         let group = Sim.Net.make_simple_lan ~nameserver nb_hosts in
         Log.(log logger Info (lazy "Connect it...")) ;
         (* Sim.Net.connect takes two nets and connect them the obvious way *)
-        if Result.is_bad (Sim.Net.connect inet group) then
-            should_not_happen () ;
+        assert_ok (Sim.Net.connect inet group) ;
         group) in
     Log.(log logger Info (lazy ("Connecting "^ifname))) ;
     let sink, _sniff_thread = Sim.Net.make_sink ifname in
-    if Result.is_bad (Sim.Net.connect inet sink) then
-        should_not_happen () ;
+    assert_ok (Sim.Net.connect inet sink) ;
     Sim.Net.union (inet :: sink :: groups)
 
 (** Spawn a browser thread in all hosts of the given network, that will browse
@@ -43,7 +40,15 @@ let random_browsing net url =
         | Sim.Net.Host host ->
             Log.(log logger Info (lazy (Printf.sprintf "Starting a new web browser on %s" host.Host.name))) ;
             let browser = Browser.make host in
-            Browser.user browser ~pause:5. 1000 url
+            (* FIXME: better have a browser.at_init register function *)
+            let rec start_browsing () =
+                if host.Host.get_ip () <> None then (
+                    Browser.user browser ~pause:5. 1000 url
+                ) else (
+                    Log.(log logger Info (lazy (Printf.sprintf "IP not initialized, wait"))) ;
+                    Clock.(delay (Interval.sec 1.) start_browsing ())
+                ) in
+            start_browsing ();
         | _ -> ())
         net.Sim.Net.equip
 

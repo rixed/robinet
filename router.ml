@@ -37,7 +37,8 @@ let min_port = 1024
  * packets. To match these incoming packets with the outgoing one it must use the UDP or
  * TCP client port and an internal memory of currently forwarded connections. This memory
  * is of bounded size.
- * Note that any packet that reach it will be forwarded. *)
+ * Note that any packet that reach it will be forwarded.
+ * A Nat.t is a TRX at IP level (it expects Ip packets). *)
 module Nat =
 struct
 
@@ -330,8 +331,12 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
     gw_eth.Eth.TRX.trx.out.set_read (Hub.Repeater.write 2 hub) ;
     (* The second port of our router (facing intgernet) is the NAT *)
     let nat = Nat.make public_ip nb_max_cnxs in
+    (* Which we equip with an Eth TRX on the outside *)
+    let nat_eth =
+        let eth = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring public_ip ] in
+        pipe nat eth.Eth.TRX.trx in
     (* Build this router then *)
-    let _router = Router.(make [| gw_eth.Eth.TRX.trx ; nat |]
+    let _router = Router.(make [| gw_eth.Eth.TRX.trx ; nat_eth |]
                     [| (* route everything from anywhere to LAN if dest fits local_cidr *)
                        { iface_num = None ; src_mask = None ; dst_mask = Some local_cidr ;
                          ip_proto = None ; src_port = None ; dst_port = None }, 0 ;
@@ -344,7 +349,7 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
     Dhcpd.serve dhcpd local_ips ;
     { ins = { write = (fun bits -> Hub.Repeater.write 0 hub bits) ;
               set_read = fun f -> Hub.Repeater.set_read 0 hub f } ;
-      out = nat.out }
+      out = nat_eth.out }
 (*$R make_gw
     (*Log.console_lvl := Log.Debug ;*)
     Clock.realtime := false ;
@@ -355,7 +360,6 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
                                  (Eth.Addr.random ()) in
     desktop.Host.dev.set_read gw.ins.write ;
     ignore (desktop.Host.dev.write <-= gw) ;
-    let output_if = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring public_ip ] in (* imagine we are connected to the outside world through ethernet *)
     let server_ip = Ip.Addr.of_string "42.43.44.45" in
     let server_eth = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring server_ip ] in
     let src = ref None in
@@ -363,7 +367,7 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr =
         let ip = Ip.Pdu.unpack bits |> Option.get in
         src := Some ip.Ip.Pdu.src in
     ignore (server_recv <-= server_eth.Eth.TRX.trx) ;
-    gw ==> output_if.Eth.TRX.trx <==> server_eth.Eth.TRX.trx ;
+    gw <==> server_eth.Eth.TRX.trx ;
     Clock.delay (Clock.Interval.sec 10.) (fun () ->
         desktop.Host.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring) () ;
     Clock.run false ;

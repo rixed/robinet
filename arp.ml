@@ -101,7 +101,7 @@ module HwProto = struct
             | 0x86DD -> "IPv6"
             | 0x0806 -> "ARP"
             | 0x8100 -> "Eth8021q"
-            |      x -> Printf.sprintf "Protocol(%X)" x
+            |      x -> Printf.sprintf "Protocol(0x%X)" x
         let is_valid x = x < 0x10000
         let repl_tag = "proto"
     end)

@@ -173,6 +173,9 @@ let resolution_timeouts  = Metric.Atomic.make "Host/Resolver/Timeouts"
 let resolution_cachehits = Metric.Atomic.make "Host/Resolver/CacheHits"
 let resolutions = Metric.Timed.make "Host/Resolver/Queries"
 
+let ip_is_set t =
+    t.my_ip <> Ip.Addr.zero
+
 let rec with_resolver_trx t cont =
     let dns_recv _trx bits = (match Dns.Pdu.unpack bits with
         | None -> ()
@@ -212,7 +215,7 @@ let rec with_resolver_trx t cont =
         Log.(log t.host_trx.logger Error (lazy (Printf.sprintf "Cannot resolve, no DNS"))) ;
         cont None
     | None, Some srv ->
-        Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Connect to DNS %s" (Ip.Addr.to_string srv)))) ;
+        Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Create a resolving TRX to DNS %s" (Ip.Addr.to_string srv)))) ;
         udp_connect t (IPv4 srv) (Udp.Port.o 53) ~src_port:(Udp.Port.o 53) dns_recv (function
         | None -> cont None
         | Some trx ->
@@ -258,7 +261,6 @@ and do_gethostbyname t name cont =
             | None ->
                 cont None
             | Some resolv_trx ->
-                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "done"))) ;
                 let pending = Hashtbl.mem t.dns_queries name in
                 Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Add a query for resolution of '%s' (%s)" name (if pending then "one was already pending" else "first one")))) ;
                 if not pending then (
@@ -274,6 +276,8 @@ and do_gethostbyname t name cont =
             )
 
 and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
+    (* Fail if we do not have an IP yet *)
+    if not (ip_is_set t) then cont None else
     let connect dst_ip =
         Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Connecting to %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
         let socks = hash_find_or_insert t.tcp_socks dst_ip (fun () ->
@@ -337,6 +341,8 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
                 ))
 
 and udp_connect t dst ?src_port dst_port client_f cont =
+    (* Fail if we do not have an IP yet *)
+    if not (ip_is_set t) then cont None else
     let connect dst_ip =
         let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
             let trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.udp in
@@ -460,7 +466,7 @@ let make name ?gw ?search_sfx ?nameserver my_mac =
           dev           = { write = (fun bits -> rx t.eth.Eth.TRX.trx bits) ;
                             set_read = (fun f -> t.eth.Eth.TRX.trx =-> f) } ;
           get_mac       = (fun () -> t.eth.Eth.TRX.get_source ()) ;
-          get_ip        = (fun () -> if t.my_ip = Ip.Addr.zero then None else Some t.my_ip) ;
+          get_ip        = (fun () -> if ip_is_set t then Some t.my_ip else None) ;
           arp_set       = (fun ip haddr_opt -> t.eth.Eth.TRX.arp_set (Ip.Addr.to_bitstring ip) haddr_opt) } in
     Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "New host '%s'" name))) ;
     t

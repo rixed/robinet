@@ -177,7 +177,7 @@ let rec remove_last_if cond = function
 
 let none_if_not_found f x = try Some (f x) with Not_found -> None
 let none_if_exception f x = try Some (f x) with _ -> None
-
+let assert_ok x = if Result.is_bad x then should_not_happen ()
 
 let str_all_matches str =
     let rec aux prevs n =
@@ -410,6 +410,13 @@ let (==>) trx1 trx2 =
 let (<==>) trx1 trx2 =
     trx1 =-> trx2.out.write ;
     trx2 =-> trx1.out.write
+
+(** [pipe trx1 trx2] connects trx1 and trx2 so that trx1 output is sent through trx2,
+ * and returns a trx with trx1 as the inside and trx2 as the outside. *)
+let pipe trx1 trx2 =
+    trx1.out.set_read trx2.ins.write ;
+    trx2.ins.set_read trx1.out.write ;
+    { ins = trx1.ins ; out = trx2.out }
 
 module type PDU = sig
     type t

@@ -489,6 +489,10 @@ module TRX = struct
         | Some ip ->
             if Payload.bitlength ip.Pdu.payload > 0 then Clock.asap t.recv (ip.Pdu.payload :> bitstring))
 
+    (* Note: In Eth we do not require dst addr since the trx know (using ARP) how to get dest addr itself.
+     *       IP cannot do this since the application layer won't tell him the destination hostname. Or
+     *       we must add the destination to any tx call, making host layer simpler only at the expense of
+     *       this layer. *)
     let make ?(mtu=1400) src dst proto =
         ensure ((mtu mod 8) = 0) "Ip: MTU is required to be a multiple of 8 bytes" ;
         let t = { src ; dst ; proto ; mtu ;
