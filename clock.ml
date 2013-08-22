@@ -219,7 +219,10 @@ let next_event () =
             Printf.printf "Clock: event handler triggered an exception : %a\n%!" Printexc.print exn
     )
 
-(** [run true] will run forever while [run false] will return once no more events are waiting. *)
+(** [run true] will run forever while [run false] will return once no more
+ * events are waiting.  If you chose no to run forever, beware that waiting for
+ * an answer from the outside world is _not_ a clock event. You should probably
+ * run forever whenever you communicate with the outside. *)
 let run wait =
     while wait || not (Map.is_empty current.events) do
         next_event () ;

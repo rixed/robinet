@@ -95,7 +95,8 @@ let reserve date time login pwd =
                   "nb_participants", "1" (* not a typo, at least not in _this_ program *) ;
                   "commit", "Confirmer" ])
              (function _ ->
-        Printf.printf "Do not forget your reservation, %s at %s\n" date time)
+        Printf.printf "Do not forget your reservation, %s at %s\n" date time) ;
+        exit 0
     ) else (
         error "No match for this time :-(\n";
     )))))
@@ -107,4 +108,6 @@ let main =
         reserve Sys.argv.(1)    (* date *)
                 Sys.argv.(2)    (* time *)
                 Sys.argv.(3)    (* login *)
-                Sys.argv.(4))   (* passwd *)
+                Sys.argv.(4)    (* passwd *)
+    ) ;
+    Clock.run true
