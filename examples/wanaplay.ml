@@ -95,15 +95,15 @@ let reserve date time login pwd =
                   "nb_participants", "1" (* not a typo, at least not in _this_ program *) ;
                   "commit", "Confirmer" ])
              (function _ ->
-        Printf.printf "Do not forget your reservation, %s at %s\n" date time) ;
-        exit 0
+                Printf.printf "Do not forget your reservation, %s at %s\n%!" date time ;
+                exit 0)
     ) else (
         error "No match for this time :-(\n";
     )))))
 
 let main =
     if Array.length Sys.argv <> 5 then (
-        Printf.printf "wanaplay YYYY-MM-DD HH:MM login passwd\n(note: time is actualy used in a regexp)\n" ;
+        Printf.printf "wanaplay YYYY-MM-DD HH:MM login passwd\n(note: time is actually used in a regexp)\n" ;
     ) else (
         reserve Sys.argv.(1)    (* date *)
                 Sys.argv.(2)    (* time *)

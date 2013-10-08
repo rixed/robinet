@@ -148,11 +148,11 @@ let signal_me () = Condition.signal cond
 
 let epsilon = Interval.usec 1.
 
-(** [at t f x] will execute [f x] when simulation clock reachs time [t]. *)
+(** [at t f x] will execute [f x] when simulation clock reaches time [t]. *)
 let rec at (ts : Time.t) f x =
     (* FIXME: since localhost.reader add events from other threads, use a mutex to protect current.events *)
     (* If ts was already bound in current.events, its previous binding disappears.
-       Also, we do not like the idea of several sequencial events having the same TS. *)
+       Also, we do not like the idea of several sequential events having the same TS. *)
     try Map.find ts current.events |> ignore ;
         at (Time.add ts epsilon) f x
     with Not_found ->

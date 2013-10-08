@@ -257,7 +257,7 @@ struct
             Array.of_enum in
         make trxs route_tbl, trxs
 
-    (*$R route
+    (*$R make_from_addrs
         (* Suppose we have a router for these 3 networks: *)
         let addrs = [| Ip.Addr.of_string "192.168.1.254", Eth.Addr.random () ;
                        Ip.Addr.of_string "192.168.2.254", Eth.Addr.random () ;

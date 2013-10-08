@@ -58,13 +58,13 @@ all_tests.byte: all_tests.cmo $(ARCHIVE)
 	$(OCAMLC)   -o $@ $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(ARCHIVE) -linkpkg $(OCAMLFLAGS) $<
 
 all_tests.cmo: all_tests.ml $(OBJECTS)
-	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(OCAMLFLAGS) -c -impl $<
+	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(OCAMLFLAGS) -w -33 -c -impl $<
 
 all_tests.opt: all_tests.cmx $(XARCHIVE)
 	$(OCAMLOPT) -o $@ $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
 
 all_tests.cmx: all_tests.ml $(XOBJECTS)
-	$(OCAMLOPT) $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(OCAMLOPTFLAGS) -c -impl $<
+	$(OCAMLOPT) $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(OCAMLOPTFLAGS) -w -33 -c -impl $<
 
 all_tests.ml: $(SOURCES)
 	$(QTEST) --preamble 'open Batteries;; open Bitstring;; open Tools' -o $@ extract $^
