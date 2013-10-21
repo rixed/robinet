@@ -29,6 +29,8 @@
 
    It's ordered by address. Lookup is a mere dichotomic search (15 iterations)
 */
+// 01:80:c2:00:00:0f VLACP Point-to-Point links
+// 01:80:c2:00:11:00 VLACP End-to-End connnections
 
 static struct eth_vendor {
     uint_least64_t prefix;

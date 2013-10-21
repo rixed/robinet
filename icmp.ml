@@ -137,7 +137,7 @@ module Pdu = struct
         let pack_payload = function
             | Ids (id, seq, pld) -> (BITSTRING { id : 16 ; seq : 16 ;
                                                  (pld :> bitstring) : -1 : bitstring })
-            | Redirect (ip, pld) -> (BITSTRING { (ip :> int32) : 32 ;
+            | Redirect (ip, pld) -> (BITSTRING { (Ip.Addr.to_int32 ip) : 32 ;
                                                  (pld :> bitstring) : -1 : bitstring })
             | Header (ptr, pld)  -> (BITSTRING { ptr : 8 ; 0 : 24 ;
                                                  (pld :> bitstring) : -1 : bitstring }) in
@@ -151,7 +151,7 @@ module Pdu = struct
         | { 5 : 8 ; cod : 8 ; _checksum : 16 ;
             ip : 32 ; pld : -1 : bitstring } ->
             Some { msg_type = MsgType.o (5, cod) ;
-                   payload = Redirect (Ip.Addr.o ip, Payload.o pld) }
+                   payload = Redirect (Ip.Addr.o32 ip, Payload.o pld) }
         | { typ : 8 ; cod : 8 ; _checksum : 16 ;
             id : 16 ; seq : 16 ; pld : -1 : bitstring }
             when typ = 0 || typ = 8 || (typ >= 13 && typ <= 16) ->

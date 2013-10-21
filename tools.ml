@@ -28,7 +28,7 @@ let ensure cond msg =
         flush stdout ;
         Printf.fprintf stderr "ERROR: %s\n%s\n%!"
             msg (Printexc.get_backtrace ()) ;
-        exit 1 ;
+        assert false
     )
 
 let error msg =
@@ -100,7 +100,6 @@ let bitstring_add i b =
     (bitstring_of_string "\042" |> bitstring_add 42) (bitstring_of_string "\084")
  *)
 
-
 let hexstring_of_bitstring bs =
     let s = string_of_bitstring bs in
     let hexify c = Printf.sprintf "%02x" (Char.code c) in
@@ -132,6 +131,57 @@ let print_bitstring fmt bits =
     Format.open_vbox 0 ; (* if not 0 then the first line is less indented than the others *)
     aux bits ;
     Format.close_box ()
+
+(* Simple convertion from bitstrings to int (when the bitstring is small enough to fit
+ * in an int). Used for tests only. *)
+let int_of_bitstring bs =
+    let l = bitstring_length bs in
+    (* bitstring fills bytes from high to low bits but we'd like out int to be the lower bits *)
+    let bs = if l < 8 then Bitstring.concat [create_bitstring (8-l) ; bs] else bs in
+    bitmatch bs with
+    | { n : 8 ;
+        _ : -1 : bitstring } -> n
+(*$= int_of_bitstring & ~printer:dump
+    0 (int_of_bitstring (BITSTRING { 0 : 3  : littleendian }))
+    1 (int_of_bitstring (BITSTRING { 1 : 3  : littleendian }))
+    2 (int_of_bitstring (BITSTRING { 2 : 3  : littleendian }))
+    3 (int_of_bitstring (BITSTRING { 3 : 3  : littleendian }))
+    2 (int_of_bitstring (BITSTRING { 2 : 30 : littleendian }))
+*)
+
+let bitstring_copy bs =
+    string_of_bitstring bs |>
+    String.copy |>
+    bitstring_of_string |>
+    takebits (bitstring_length bs)
+
+(* [all bits n] returns all bitstrings of n bits (as an enum) *)
+let all_bits n =
+    let succ bs = (* interpreting bs as little endian *)
+        let bs = bitstring_copy bs in (* we are going to modify it inplace *)
+        let rec aux i =
+            if i < 0 then None else
+            if Bitstring.is_set bs i then (
+                Bitstring.clear bs i ;
+                aux (i-1)
+            ) else (
+                Bitstring.set bs i ;
+                Some bs
+            ) in
+        aux (n-1) in
+    let bs = ref (Some (create_bitstring n)) in
+    Enum.from (fun () ->
+        match !bs with
+        | Some v ->
+            bs := succ v ;
+            v
+        | None -> raise Enum.No_more_elements)
+(*$= all_bits & ~printer:(IO.to_string (List.print Int.print))
+  [ 0 ; 1 ; 2 ; 3 ] (all_bits 2 /@ int_of_bitstring |> List.of_enum)
+  [ 2 ; 2 ; 2 ; 2 ] (all_bits 2 /@ bitstring_length |> List.of_enum)
+  [ 0 ; 1 ]         (all_bits 1 /@ int_of_bitstring |> List.of_enum)
+  [ 1 ; 1 ]         (all_bits 1 /@ bitstring_length |> List.of_enum)
+*)
 
 let abbrev ?(len=25) str =
     let tot_len = String.length str in

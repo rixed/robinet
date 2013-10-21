@@ -58,27 +58,15 @@ end
 (** {4 inet_addr}
  *
  * Stdlib [Unix] module already have a type for IP addresses:
- * [Unix.inet_addr] (actually a [string]). Here are the functions
- * to convert our address ([int32]) from/to [inet_addr]. *)
-
-(** Convert an [inet_addr] into an [int32]... *)
-let int32_of_inet_addr a =
-    bitmatch (bitstring_of_string (Obj.magic a)) with
-    | { i : 32 } -> i
-
-(** ... and the other way around. *)
-let inet_addr_of_int32 i : Unix.inet_addr =
-    Obj.magic (string_of_bitstring (BITSTRING { i : 32 }))
+ * [Unix.inet_addr] (actually a [string]). We use a private type
+ * nonetheless so that we can have a custom printer. *)
 
 (** Printer (in the sense of Batteries) for inet_addrs *)
 let inet_addr_print oc a =
     Printf.fprintf oc "%s" (Unix.string_of_inet_addr a)
 
-(** {4 IP Addresses as int32} *)
+(** {4 IP Addresses as Unix.inet_addr (ie. strings)} *)
 
-(** We use a private type for IPv4 addresses so that we can have a
- * custom printer, but it's actually an [int32] and you can cast with:
- * [(addr :> int32)] in one direction and [Ip.Addr.o int] in the other. *)
 module Addr = struct
     (*$< Addr *)
     (** If true, use the system's name resolver to find a name for each IP
@@ -94,57 +82,62 @@ module Addr = struct
      * expected to impact a simulation. *)
     let print_as_names = ref false
 
-    (** Regardless of the above setting, return the dotted representation (a
-     * [string] of a given [int32]. *)
-    let dotted_string_of_int32 i = bitmatch (BITSTRING { i : 32 }) with
-        { a : 8 ; b : 8 ; c : 8 ; d : 8 } -> Printf.sprintf "%d.%d.%d.%d" a b c d
-    (*$= dotted_string_of_int32 & ~printer:identity
-      (dotted_string_of_int32 ((Addr.of_string "1.2.3.4") :> int32)) "1.2.3.4"
-    *)
-
     include MakePrivate(struct
-        type t = int32
+        type t = Unix.inet_addr
         (** Converts an address to it's string representation. *)
         let to_string t =
             if !print_as_names then
-                try (Unix.gethostbyaddr (inet_addr_of_int32 t)).Unix.h_name
+                try (Unix.gethostbyaddr t).Unix.h_name
                 with Not_found ->
-                    dotted_string_of_int32 t
+                    Unix.string_of_inet_addr (t :> Unix.inet_addr)
             else
-                dotted_string_of_int32 t
+                Unix.string_of_inet_addr (t :> Unix.inet_addr)
         let is_valid _ = true
         let repl_tag = "addr"
     end)
 
+    let length (t : t) =
+        let str : string = Obj.magic (t :> Unix.inet_addr) in
+        8 * String.length str
+    (*$= length & ~printer:dump
+         32 (length (of_string "1.2.3.4"))
+         128 (length (of_string "3ffe:507:0:1:8c2:b0ff:feab:d5d9"))
+    *)
+
+    (** Regardless of the above setting, return the dotted representation (a
+     * [string]) of a given address. *)
+    let to_dotted_string (t : t) = Unix.string_of_inet_addr (t :> Unix.inet_addr)
+    (*$= to_dotted_string & ~printer:identity
+      (to_dotted_string (Addr.of_string "1.2.3.4")) "1.2.3.4"
+    *)
+
+    (** Convert from dotted representation (useful to allow DNS-less hosts to 'resolve' some name) *)
+    let of_dotted_string str =
+        try Some (o (Unix.inet_addr_of_string str))
+        with Failure _ -> None
+
     (** Some predefined addresses *)
 
-    let zero = o 0l
-    let broadcast = o 0xffffffffl
-
-    (** Convert an {!Ip.Addr.t} to dotted representation. *)
-    let to_dotted_string (t : t) = dotted_string_of_int32 (t :> int32)
-
-    (** And from dotted representation (usefull to allow DNS-less hosts to 'reolve' some name) *)
-    let of_dotted_string str =
-        let assemble a b c d =
-            if a <= 255l && b <= 255l && c <= 255l && d <= 255l then
-                let (<=) = Int32.shift_left and (||) = Int32.logor in
-                Some (o ((a <= 24) || (b <= 16) || (c <= 8) || d))
-            else
-                None
-        in
-        try Scanf.sscanf str "%ld.%ld.%ld.%ld" assemble
-        with Scanf.Scan_failure _ -> None
+    (* FIXME: take bitlength in parameter *)
+    let zero = o (Unix.inet_addr_of_string "0.0.0.0")
+    let broadcast = o (Unix.inet_addr_of_string "255.255.255.255")
 
     (** Convert an {!Ip.Addr.t} to a [bitstring]. *)
-    let to_bitstring (t : t) = (BITSTRING { (t :> int32) : 32 })
+    let to_bitstring (t : t) =
+        let str : string = Obj.magic t  in
+        bitstring_of_string str
+
     (** Convert a [bitstring] into an {!Ip.Addr.t}. *)
-    let of_bitstring bits = bitmatch bits with
-        | { ip : 32 } -> o ip
-        | { _ } -> should_not_happen ()
+    let of_bitstring bits =
+        match bitstring_length bits with
+        | 32 | 128 ->
+            let str = string_of_bitstring bits in
+            o (Obj.magic str)
+        | x -> error ("IP addr must be 32 or 128 bits length not "^ string_of_int x)
+
     let list_of_string str =
         let extract_addr info = match info.Unix.ai_addr with
-            | Unix.ADDR_INET (addr, _) -> Some (o (int32_of_inet_addr addr))
+            | Unix.ADDR_INET (addr, _) -> Some (o addr)
             | _ -> None in
         List.filter_map extract_addr (Unix.getaddrinfo str "" [])
     let of_string str = match list_of_string str with
@@ -152,45 +145,46 @@ module Addr = struct
         | fst::_ -> fst
 
     (** Returns a random {!Ip.Addr.t} (apart from broadcast and zero). *)
-    let rec random () =
-        let a = o (rand32 ()) in
-        if a = broadcast || a = zero then random ()
-        else a
+    let rec random ?(v4=true) () =
+        let str = randstr (if v4 then 4 else 16) in
+        let t : Unix.inet_addr = Obj.magic str in
+        let ip = o t in
+        if ip = broadcast || ip = zero then random ()
+        else ip
 
     (** This printer can be composed with others (for instance to print a list of ips.
      FIXME: always use batteries IO to print instead of Format printer? *)
     let print' oc ip =
         Printf.fprintf oc "%s" (to_string ip)
 
-    let of_inet_addr ip = o (int32_of_inet_addr ip)
-    let to_inet_addr (t : t) = inet_addr_of_int32 (t :> int32)
+    let of_inet_addr ip = o ip
+    let to_inet_addr (t : t) = (t :> Unix.inet_addr)
+
+    (* make an Addr.t from a int32 *)
+    let o32 i32 : t =
+        let bs = (BITSTRING { i32 : 32 }) in
+        let str = string_of_bitstring bs in
+        Obj.magic str
+
+    (* The other way around *)
+    let to_int32 (t : t) =
+        bitmatch (to_bitstring t) with
+        | { n : 32 } -> n
+        | { _ } -> should_not_happen ()
 
     let higher_bits (ip : t) n =
-        if n >= 32 then ip else (* since Int32.shift_left is actually a rotation *)
-        o (Int32.logand (ip :> int32)
-                        (Int32.shift_left
-                              (Int32.pred (Int32.shift_left 1l n))
-                              (32-n)))
+        let bs = to_bitstring ip in
+        let l = bitstring_length bs in
+        if n >= l then ip else
+        Bitstring.concat [ takebits n bs ; create_bitstring (l-n) ] |>
+        of_bitstring
     (*$= higher_bits & ~printer:to_string
-       (o 0x01000000l) (higher_bits (o 0x01020305l) 10)
-       (o 0x01020304l) (higher_bits (o 0x01020305l) 30)
-       (o 0x01020305l) (higher_bits (o 0x01020305l) 32)
-       (o 0x01020305l) (higher_bits (o 0x01020305l) 33)
+       (o32 0x01000000l) (higher_bits (o32 0x01020305l) 10)
+       (o32 0x01020304l) (higher_bits (o32 0x01020305l) 30)
+       (o32 0x01020305l) (higher_bits (o32 0x01020305l) 32)
+       (o32 0x01020305l) (higher_bits (o32 0x01020305l) 33)
      *)
 
-(*    type net = t * t (** Network addr and network mask *)
-
-    let in_net (ip : t) ((net : t), (mask : t)) =
-        let ip = (ip :> int32) and net = (net :> int32) and mask = (mask :> int32) in
-        (Int32.logand ip mask) = (Int32.logand net mask)
-
-    (*$T in_net
-        in_net (of_string "192.168.10.9") ((of_string "192.168.10.1"), \
-                                           (of_string "255.255.255.0"))
-        not (in_net (of_string "192.168.11.1") ((of_string "192.168.10.1"), \
-                                                (of_string "255.255.255.0")))
-     *)
-*)
     (*$>*)
 end
 
@@ -203,11 +197,10 @@ module Cidr = struct
     include MakePrivate(struct
         type t = Addr.t * int
         (** Converts a CIDR to its string representation. *)
-        let to_string (ip, n) =
+        let to_string ((ip : Addr.t), n) =
             Addr.to_dotted_string ip ^ "/" ^ String.of_int n
         let is_valid ((ip : Addr.t), n) =
-            Int32.logand (ip :> int32)
-                         (Int32.pred (Int32.shift_left 1l (32-n))) = 0l
+            Addr.higher_bits ip n = ip
         let repl_tag = "addr"
     end)
 
@@ -219,8 +212,8 @@ module Cidr = struct
         (* mask off unsignificant bits of IP *)
         o (Addr.higher_bits ip n, n)
     (*$= of_string & ~printer:to_string
-      (o (Addr.o 0x01020380l, 25)) (of_string "1.2.3.128/25")
-      (o (Addr.o 0x01020380l, 25)) (of_string "1.2.3.142/25")
+      (o (Addr.o32 0x01020380l, 25)) (of_string "1.2.3.128/25")
+      (o (Addr.o32 0x01020380l, 25)) (of_string "1.2.3.142/25")
      *)
 
     let random ?mask () =
@@ -236,9 +229,8 @@ module Cidr = struct
 
     let mem (t : t) (ip : Addr.t) =
         let net, width = (t :> Addr.t * int) in
-        let a = takebits width (BITSTRING { (net :> int32) : 32 })
-        and b = takebits width (BITSTRING { (ip  :> int32) : 32 }) in
-        Bitstring.equals a b
+        let hb = Addr.higher_bits ip width in
+        hb = net
     (*$= mem & ~printer:string_of_bool
       true  (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.0"))
       true  (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.1"))
@@ -249,23 +241,27 @@ module Cidr = struct
 
     let to_enum (t : t) =
         let net, width = (t :> Addr.t * int) in
-        if width >= 32 then Enum.singleton net else
-        let prefix = takebits width (BITSTRING { (net :> int32) : 32 })
-        and l = 32 - width in
-        Enum.init (1 lsl l) (fun i ->
-            Addr.of_bitstring (BITSTRING { prefix : width : bitstring ;
-                                           Int64.of_int i : l }))
-    (*$= to_enum & ~printer:dump
+        let net = Addr.to_bitstring net in
+        let prefix = takebits width net
+        and l = bitstring_length net - width in
+        all_bits l /@
+        (fun suffix ->
+            Bitstring.concat [ prefix ; suffix ] |>
+            Addr.of_bitstring)
+    (*$= to_enum & ~printer:(IO.to_string (List.print String.print))
       [ "192.168.10.42" ] (to_enum (of_string "192.168.10.42/32") /@ \
+                           Addr.to_dotted_string |> \
+                           List.of_enum)
+      [ "192.168.10.42" ; "192.168.10.43" ] \
+                           (to_enum (of_string "192.168.10.42/31") /@ \
                            Addr.to_dotted_string |> \
                            List.of_enum)
      *)
 
     (** Returns the subnet-zero address of a CIDR *)
     let zero_addr (t : t) =
-        let net, width = (t :> Addr.t * int) in
-        let prefix = takebits width (BITSTRING { (net :> int32) : 32 }) in
-        Addr.of_bitstring (Bitstring.concat [ prefix ; zeroes_bitstring (if width >= 32 then 0 else 32 - width) ])
+        let net, _width = (t :> Addr.t * int) in
+        net (* Cf is_valid *)
     (*$= zero_addr & ~printer:identity
       "192.168.1.0" (zero_addr (of_string "192.168.1.0/28") |> \
                      Addr.to_dotted_string)
@@ -274,7 +270,7 @@ module Cidr = struct
     (** Returns the all-ones address of a CIDR *)
     let all1s_addr (t : t) =
         let net, width = (t :> Addr.t * int) in
-        let prefix = takebits width (BITSTRING { (net :> int32) : 32 }) in
+        let prefix = takebits width (Addr.to_bitstring net) in
         Addr.of_bitstring (Bitstring.concat [ prefix ; ones_bitstring (if width >= 32 then 0 else 32 - width) ])
     (*$= all1s_addr & ~printer:identity
       "192.168.1.15"  (all1s_addr (of_string "192.168.1.0/28") |> \
@@ -288,7 +284,7 @@ module Cidr = struct
      * enum. *)
     let local_addrs (t : t) =
         let net, width = (t :> Addr.t * int) in
-        if width >= 32 then Enum.singleton net else
+        if width >= Addr.length net then Enum.singleton net else
         let zero = zero_addr t and all1s = all1s_addr t in
         to_enum t // (fun ip -> ip <> zero && ip <> all1s)
     (*$= local_addrs & ~printer:dump
@@ -347,7 +343,7 @@ module Pdu = struct
             tail : -1 : bitstring (* FIXME: force urgent pointer at 0 if the urgent flag is unset *) (* FIXME: remove tcp payload? *) } ->
             if chk = 0 then (
                 let chk = sum (BITSTRING {
-                    (t.src :> int32) : 32 ; (t.dst :> int32) : 32 ;
+                    (Addr.to_int32 t.src) : 32 ; (Addr.to_int32 t.dst) : 32 ;
                     0 : 8 ; (t.proto :> int) : 8 ; Payload.length pld : 16 ;
                     head : 128 : bitstring ; 0 : 16 ; tail : -1 : bitstring (* all tail?? *)}) in
                 Payload.o (BITSTRING { head : 128 : bitstring ; chk : 16 ; tail : -1 : bitstring })
@@ -362,7 +358,7 @@ module Pdu = struct
             tail : -1 : bitstring } ->
             if chk = 0 then (
                 let chk = sum (BITSTRING {
-                    (t.src :> int32) : 32 ; (t.dst :> int32) : 32 ;
+                    (Addr.to_int32 t.src) : 32 ; (Addr.to_int32 t.dst) : 32 ;
                     0 : 8 ; (t.proto :> int) : 8 ; Payload.length pld : 16 ;
                     head : 48 : bitstring ; 0 : 16 ;
                     tail : -1 : bitstring }) in
@@ -386,7 +382,7 @@ module Pdu = struct
                 t.tot_len : 16 ;
                 t.id : 16 ; false : 1 ; t.dont_frag : 1 ; t.more_frags : 1 ; t.frag_offset : 13 ;
                 t.ttl : 8 ; (t.proto :> int) : 8 ; 0 : 16 ;
-                (t.src :> int32) : 32 ; (t.dst :> int32) : 32 }) ;
+                (Addr.to_int32 t.src) : 32 ; (Addr.to_int32 t.dst) : 32 }) ;
             t.options ]
             in
         let header = (* patch actual IP checksum *)
@@ -413,7 +409,7 @@ module Pdu = struct
             Some { tos ; tot_len ;
                id ; dont_frag ; more_frags ; frag_offset ;
                ttl ; proto = Proto.o proto ;
-               src = Addr.o src ; dst = Addr.o dst ; options ;
+               src = Addr.o32 src ; dst = Addr.o32 dst ; options ;
                payload = Payload.o payload }
         | { version : 4 } when version <> 4 ->
             if version <> 6 then
@@ -476,7 +472,7 @@ module TRX = struct
                 (* The frag_offset is given in unit of 8 bytes.
                    So the MTU is required to be a multiple of 8 bytes as well. *)
                 let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst pld in
-                if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (Addr.dotted_string_of_int32 (t.src :> int32)) (Addr.dotted_string_of_int32 (t.dst :> int32)) (bytelength pld) (hexstring_of_bitstring bits);
+                if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (bytelength pld) (hexstring_of_bitstring bits);
                 Clock.asap t.emit (Pdu.pack pdu) ;
                 aux (bit_offset + bitstring_length pld)
             ) in

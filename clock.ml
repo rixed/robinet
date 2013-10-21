@@ -216,7 +216,9 @@ let next_event () =
         current.now <- ts ;
         try f ()
         with exn ->
-            Printf.printf "Clock: event handler triggered an exception : %a\n%!" Printexc.print exn
+            Printf.printf "Clock: event handler triggered an exception : %a\n%s%!"
+                Printexc.print exn
+                (Printexc.get_backtrace ())
     )
 
 (** [run true] will run forever while [run false] will return once no more

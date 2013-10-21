@@ -61,7 +61,7 @@ let replay offset n inps outs =
         | Pdu.Ip p ->
             let open Ip.Pdu in
             let alter_ip i (ip : Ip.Addr.t) =
-                Ip.Addr.o (Int32.add (ip :> int32) (Int32.of_int i)) in
+                Ip.Addr.o32 (Int32.add (Ip.Addr.to_int32 ip) (Int32.of_int i)) in
             Pdu.Ip { p with src = alter_ip i p.src ; dst = alter_ip i p.dst ; id = (p.id + i) land 0xffff }
         | Pdu.Vlan p ->
             let open Vlan.Pdu in

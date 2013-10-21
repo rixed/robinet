@@ -101,7 +101,7 @@ struct
         | { 255 : 8 } -> true
         | { 1 : 8 ; 4 : 8 ; subnet_mask : 32 ;
             rest : -1 : bitstring } ->
-            t.subnet_mask <- Some (Ip.Addr.o subnet_mask) ;
+            t.subnet_mask <- Some (Ip.Addr.o32 subnet_mask) ;
             unpack_options t rest
         | { 3 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
             rest : -1 : bitstring } ->
@@ -133,7 +133,7 @@ struct
             unpack_options t rest
         | { 50 : 8 ; 4 : 8 ; req_ip : 32 ;
             rest : -1 : bitstring } ->
-            t.requested_ip <- Some (Ip.Addr.o req_ip) ;
+            t.requested_ip <- Some (Ip.Addr.o32 req_ip) ;
             unpack_options t rest
         | { 51 : 8 ; 4 : 8 ; lease : 32 ;
             rest : -1 : bitstring } ->
@@ -145,7 +145,7 @@ struct
             unpack_options t rest
         | { 54 : 8 ; 4 : 8 ; ip : 32 ;
             rest : -1 : bitstring } ->
-            t.server_id <- Some (Ip.Addr.o ip) ;
+            t.server_id <- Some (Ip.Addr.o32 ip) ;
             unpack_options t rest
         | { 55 : 8 ; len : 8 : check (len > 0) ; params : 8*len : string ;
             rest : -1 : bitstring } ->
@@ -210,7 +210,7 @@ struct
     let pack_options t =
         let may_pack_msgtyp t v = Option.map (fun (v : MsgType.t) -> (BITSTRING { t : 8 ; 1 : 8 ; (v :> int) : 8 })) v
         and may_pack_int32  t v = Option.map (fun v -> (BITSTRING { t : 8 ; 4 : 8 ; v : 32 })) v
-        and may_pack_ip     t v = Option.map (fun (v : Ip.Addr.t) -> (BITSTRING { t : 8 ; 4 : 8 ; (v :> int32) : 32 })) v
+        and may_pack_ip     t v = Option.map (fun (v : Ip.Addr.t) -> (BITSTRING { t : 8 ; 4 : 8 ; (Ip.Addr.to_int32 v) : 32 })) v
         and may_pack_string t v = Option.map (fun v -> (BITSTRING { t : 8 ; String.length v : 8 ; v : -1 : string })) v
         and may_pack_bits   t v = Option.map (fun v -> (BITSTRING { t : 8 ; bytelength v : 8 ; v : -1 : bitstring })) v
         in
