@@ -1,4 +1,4 @@
-(* vim:sw=4 ts=4 sts=4 expandtab
+(* vim:sw=4 ts=4 sts=4 expandtab spell spelllang=en
 *)
 (* Copyright 2012, Cedric Cellier
  *

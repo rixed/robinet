@@ -1,4 +1,4 @@
-(* vim:sw=4 ts=4 sts=4 expandtab
+(* vim:sw=4 ts=4 sts=4 expandtab spell spelllang=en
 *)
 (* Copyright 2012, Cedric Cellier
  *
@@ -108,11 +108,9 @@ module Pdu = struct
         let random_redirect () = Redirect (Ip.Addr.random(), Payload.random (20*8 + 64))
         and random_id () = Ids (randi 8, randi 8, Payload.empty)
         and random_header () = Header (randi 8, Payload.random (20*8 + 64)) in
-        match msg_type with
-            | 5, _ -> random_redirect ()
-            | typ, _
-              when typ = 0 || typ = 8 || (typ >= 13 && typ <= 16) ->
-                random_id ()
+        match MsgType.type_of msg_type with
+            | 5 -> random_redirect ()
+            | 0 | 8 | 13 | 14 | 15 | 16 -> random_id ()
             | _ -> random_header ()
 
     (** Unpacked ICMP message. *)
@@ -122,7 +120,7 @@ module Pdu = struct
     let random () =
         let msg_type = MsgType.random () in
         { msg_type ;
-          payload  = random_payload (msg_type :> int*int) }
+          payload  = random_payload msg_type }
 
     let make_echo_request id seq =
         { msg_type = MsgType.o (8, 0) ;
