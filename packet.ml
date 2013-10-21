@@ -138,10 +138,11 @@ open Tools
  * Typically you want to unpack then update, then pack back to [bitstring]. *)
 module Pdu = struct
     (** Each layer can be of any one of these known protocol. *)
-    type layer = Raw of bitstring (** the fallback when the actual protocol is not known *)
-               | Dhcp of Dhcp.Pdu.t | Eth of Eth.Pdu.t | Arp  of Arp.Pdu.t
-               | Ip   of Ip.Pdu.t   | Udp of Udp.Pdu.t | Tcp  of Tcp.Pdu.t
-               | Dns  of Dns.Pdu.t  | Sll of Sll.Pdu.t | Vlan of Vlan.Pdu.t
+    type layer = Raw  of bitstring (** the fallback when the actual protocol is not known *)
+               | Dhcp of Dhcp.Pdu.t | Eth  of Eth.Pdu.t | Arp  of Arp.Pdu.t
+               | Ip   of Ip.Pdu.t   | Ip6  of Ip6.Pdu.t
+               | Udp  of Udp.Pdu.t  | Tcp  of Tcp.Pdu.t
+               | Dns  of Dns.Pdu.t  | Sll  of Sll.Pdu.t | Vlan of Vlan.Pdu.t
                | Icmp of Icmp.Pdu.t | Pcap of Pcap.Pdu.t
     (** A Pdu.t is a list of {!Packet.Pdu.layer}s, with the outer layer first for
      * a more natural presentation when printed. *)
@@ -157,12 +158,14 @@ module Pdu = struct
             | Sll  p -> Sll  { p with Sll.Pdu.payload  = Payload.o bits }
             | Vlan p -> Vlan { p with Vlan.Pdu.payload = Payload.o bits }
             | Ip   p -> Ip   { p with Ip.Pdu.payload   = Payload.o bits }
+            | Ip6  p -> Ip6  { p with Ip6.Pdu.payload  = Payload.o bits }
             | Udp  p -> Udp  { p with Udp.Pdu.payload  = Payload.o bits }
             | Tcp  p -> Tcp  { p with Tcp.Pdu.payload  = Payload.o bits }
             | x -> x in
         let pack_1 = function (* there ought to be a better way *)
             | Dhcp t -> Dhcp.Pdu.pack t | Eth t  -> Eth.Pdu.pack t
             | Arp t  -> Arp.Pdu.pack t  | Ip t   -> Ip.Pdu.pack t
+            | Ip6 t  -> Ip6.Pdu.pack t
             | Udp t  -> Udp.Pdu.pack t  | Tcp t  -> Tcp.Pdu.pack t
             | Dns t  -> Dns.Pdu.pack t  | Sll t  -> Sll.Pdu.pack t
             | Vlan t -> Vlan.Pdu.pack t | Pcap t -> Pcap.Pdu.pack t
@@ -202,10 +205,16 @@ module Pdu = struct
                         (unpack_ports (udp.Udp.Pdu.src_port :> int)
                                       (udp.Udp.Pdu.dst_port :> int)
                                       (udp.Udp.Pdu.payload :> bitstring))) in
-        let unpack_ip  = try_unpack Ip.Pdu.unpack (fun ip -> Ip ip ::
+        let unpack_ip6 = try_unpack Ip6.Pdu.unpack (fun ip -> Ip6 ip ::
+                    ((if ip.Ip6.Pdu.proto = Ip.Proto.tcp then unpack_tcp
+                      else if ip.Ip6.Pdu.proto = Ip.Proto.udp then unpack_udp
+                      else if ip.Ip6.Pdu.proto = Ip.Proto.icmp then unpack_icmp
+                      else unpack_raw) (ip.Ip6.Pdu.payload :> bitstring))) in
+        let unpack_ip = try_unpack Ip.Pdu.unpack (fun ip -> Ip ip ::
                     ((if ip.Ip.Pdu.proto = Ip.Proto.tcp then unpack_tcp
                       else if ip.Ip.Pdu.proto = Ip.Proto.udp then unpack_udp
                       else if ip.Ip.Pdu.proto = Ip.Proto.icmp then unpack_icmp
+                      else if ip.Ip.Pdu.proto = Ip.Proto.ipv6 then unpack_ip6
                       else unpack_raw) (ip.Ip.Pdu.payload :> bitstring))) in
         let unpack_vlan = try_unpack Vlan.Pdu.unpack (fun vlan -> Vlan vlan ::
                     ((if vlan.Vlan.Pdu.proto = Arp.HwProto.ip4 then unpack_ip
@@ -213,6 +222,7 @@ module Pdu = struct
                       else unpack_raw) (vlan.Vlan.Pdu.payload :> bitstring))) in
         let unpack_eth = try_unpack Eth.Pdu.unpack (fun eth -> Eth eth ::
                     ((if eth.Eth.Pdu.proto = Arp.HwProto.ip4 then unpack_ip
+                      else if eth.Eth.Pdu.proto = Arp.HwProto.ip6 then unpack_ip6
                       else if eth.Eth.Pdu.proto = Arp.HwProto.arp then unpack_arp
                       else if eth.Eth.Pdu.proto = Arp.HwProto.ieee8021q then unpack_vlan
                       else unpack_raw) (eth.Eth.Pdu.payload :> bitstring))) in

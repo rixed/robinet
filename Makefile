@@ -13,6 +13,7 @@ SOURCES  = \
 	tcp.ml \
 	udp.ml \
 	ip.ml \
+	ip6.ml \
 	icmp.ml \
 	arp.ml \
 	vlan.ml \
@@ -63,9 +64,12 @@ SYNTAX=-syntax camlp4o
 
 include $(top_srcdir)make.common
 
-.PHONY: examples
+.PHONY: examples run
 
 all: robinet.top examples
+
+run: robinet.top
+	rlwrap ./robinet.top -init robinet.init
 
 $(EXAMPLES): $(ARCHIVE)
 $(EXAMPLES_OPT): $(XARCHIVE)

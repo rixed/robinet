@@ -49,6 +49,7 @@ module Proto = struct
     let icmp = o 1
     let tcp  = o 6
     let udp  = o 17
+    let ipv6 = o 41
 
     let random () = o (randi 8)
 end
@@ -472,7 +473,7 @@ module TRX = struct
                 (* The frag_offset is given in unit of 8 bytes.
                    So the MTU is required to be a multiple of 8 bytes as well. *)
                 let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst pld in
-                if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (bytelength pld) (hexstring_of_bitstring bits);
+                if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (bytelength pld) (hexstring_of_bitstring bits) ;
                 Clock.asap t.emit (Pdu.pack pdu) ;
                 aux (bit_offset + bitstring_length pld)
             ) in
