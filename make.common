@@ -67,12 +67,12 @@ all_tests.cmx: all_tests.ml $(XOBJECTS)
 	$(OCAMLOPT) $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(OCAMLOPTFLAGS) -w -33 -c -impl $<
 
 all_tests.ml: $(SOURCES)
-	$(QTEST) --preamble 'open Batteries;; open Bitstring;; open Tools' -o $@ extract $^
+	$(QTEST) --shuffle --preamble 'open Batteries;; open Bitstring;; open Tools' -o $@ extract $^
 
 check: all_tests.opt
 	@for t in $^; do \
 		echo "Running $$t" ;\
-		./$$t --shuffle ;\
+		./$$t ;\
 	done
 
 # Clean up
