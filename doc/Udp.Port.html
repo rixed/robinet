@@ -25,6 +25,7 @@
 <link title="Hub" rel="Chapter" href="Hub.html">
 <link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Ip6" rel="Chapter" href="Ip6.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
 <link title="Metric" rel="Chapter" href="Metric.html">
@@ -50,8 +51,5 @@
 </div>
 <h1>Module <a href="type_Udp.Port.html">Udp.Port</a></h1>
 <pre><span class="keyword">module</span> Port: <code class="type"><a href="Tcp.MakePort.html">Tcp.MakePort</a></code><code class="code">(</code><code class="code"><span class="keyword">sig</span></code><div class="sig_block"><pre><span id="VALsrv"><span class="keyword">val</span> srv</span> : <code class="type">string</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">)</code></pre><hr width="100%">
-<pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = <code class="type">Outer.t</code> </pre>
-
-<pre><span id="TYPEouter_t"><span class="keyword">type</span> <code class="type"></code>outer_t</span> = <code class="type">Outer.t</code> </pre>
-
-<pre><span id="VALto_string"><span class="keyword">val</span> to_string</span> : <code class="type">Outer.t -> string</code></pre><pre><span id="VALprint"><span class="keyword">val</span> print</span> : <code class="type">Batteries.Format.formatter -> Outer.t -> unit</code></pre><pre><span id="VALo"><span class="keyword">val</span> o</span> : <code class="type">Outer.t -> Outer.t</code></pre></body></html>
+<pre><span class="keyword">include</span> struct ... end</pre>
+<pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> t</code></pre></body></html>

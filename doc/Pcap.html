@@ -26,6 +26,7 @@
 <link title="Hub" rel="Chapter" href="Hub.html">
 <link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Ip6" rel="Chapter" href="Ip6.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
 <link title="Metric" rel="Chapter" href="Metric.html">
@@ -79,7 +80,8 @@ This module holds all functions related to <code class="code">libpcap</code>, pa
    packets only:
 <p>
 
-<pre class="codepre"><code class="code"><span class="constructor">Pcap</span>.enum_of_file&nbsp;<span class="string">"input.pcap"</span>&nbsp;|&gt;<br>
+<pre class="codepre"><code class="code"><span class="keyword">let</span>&nbsp;grep&nbsp;needle&nbsp;haystack&nbsp;=&nbsp;<span class="keyword">try</span>&nbsp;<span class="constructor">String</span>.find&nbsp;haystack&nbsp;needle&nbsp;;&nbsp;<span class="keyword">true</span>&nbsp;<span class="keyword">with</span>&nbsp;<span class="constructor">Not_found</span>&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keyword">false</span>&nbsp;<span class="keyword">in</span><br>
+<span class="constructor">Pcap</span>.enum_of_file&nbsp;<span class="string">"input.pcap"</span>&nbsp;|&gt;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Enum</span>.filter&nbsp;(<span class="keyword">fun</span>&nbsp;pdu&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;grep&nbsp;<span class="string">"needle"</span>&nbsp;(string_of_bitstring&nbsp;(pdu.<span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.payload&nbsp;:&gt;&nbsp;bitstring)))&nbsp;|&gt;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Pcap</span>.file_of_enum&nbsp;<span class="string">"output.pcap"</span>;;<br>
 </code></pre><br>

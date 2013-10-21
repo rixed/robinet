@@ -25,6 +25,7 @@
 <link title="Hub" rel="Chapter" href="Hub.html">
 <link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Ip6" rel="Chapter" href="Ip6.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
 <link title="Metric" rel="Chapter" href="Metric.html">
@@ -136,13 +137,10 @@ A router is an array of trxs and a route table
 The route table is an array of route to output interface indices.<br>
 </div>
 
-<pre><span id="VALwrite"><span class="keyword">val</span> write</span> : <code class="type">int -> <a href="Router.Router.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><div class="info">
-Call <code class="code">write n t bits</code> when an IP packet (<code class="code">bits</code>) is received on interface <code class="code">n</code>.<br>
-</div>
-<pre><span id="VALset_read"><span class="keyword">val</span> set_read</span> : <code class="type">int -> <a href="Router.Router.html#TYPEt">t</a> -> (Bitstring.bitstring -> unit) -> unit</code></pre><div class="info">
+<pre><span id="VALroute"><span class="keyword">val</span> route</span> : <code class="type">int -> <a href="Router.Router.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALset_read"><span class="keyword">val</span> set_read</span> : <code class="type">int -> <a href="Router.Router.html#TYPEt">t</a> -> (Bitstring.bitstring -> unit) -> unit</code></pre><div class="info">
 Change the emitter of port N. Note that the emitter may also be preset in the trx array given to <code class="code">make</code>.<br>
 </div>
 <pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type"><a href="Tools.html#TYPEtrx">Tools.trx</a> array -> (<a href="Router.Router.html#TYPEroute">route</a> * int) array -> <a href="Router.Router.html#TYPEt">t</a></code></pre><div class="info">
 Build a <code class="code">t</code> routing through these <a href="Tools.html#TYPEtrx"><code class="code"><span class="constructor">Tools</span>.trx</code></a> according to the given routing table.<br>
 </div>
-<pre><span id="VALmake_from_addrs"><span class="keyword">val</span> make_from_addrs</span> : <code class="type">(Ip.Addr.t * Eth.Addr.t) BatEnum.t -><br>       (<a href="Router.Router.html#TYPEroute">route</a> * int) array -> <a href="Router.Router.html#TYPEt">t</a></code></pre></body></html>
+<pre><span id="VALmake_from_addrs"><span class="keyword">val</span> make_from_addrs</span> : <code class="type">(Ip.Addr.t * Eth.Addr.t) BatEnum.t -><br>       (<a href="Router.Router.html#TYPEroute">route</a> * int) array -> <a href="Router.Router.html#TYPEt">t</a> * <a href="Tools.html#TYPEtrx">Tools.trx</a> array</code></pre></body></html>

@@ -6,7 +6,7 @@
 <meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
 <link rel="Start" href="index.html">
 <link rel="previous" href="Icmp.html">
-<link rel="next" href="Localhost.html">
+<link rel="next" href="Ip6.html">
 <link rel="Up" href="index.html">
 <link title="Index of types" rel=Appendix href="index_types.html">
 <link title="Index of exceptions" rel=Appendix href="index_exceptions.html">
@@ -26,6 +26,7 @@
 <link title="Hub" rel="Chapter" href="Hub.html">
 <link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Ip6" rel="Chapter" href="Ip6.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
 <link title="Metric" rel="Chapter" href="Metric.html">
@@ -53,7 +54,7 @@
 <body>
 <div class="navbar"><a class="pre" href="Icmp.html" title="Icmp">Previous</a>
 &nbsp;<a class="up" href="index.html" title="Index">Up</a>
-&nbsp;<a class="post" href="Localhost.html" title="Localhost">Next</a>
+&nbsp;<a class="post" href="Ip6.html" title="Ip6">Next</a>
 </div>
 <h1>Module <a href="type_Ip.html">Ip</a></h1>
 <pre><span class="keyword">module</span> Ip: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
@@ -77,25 +78,14 @@ Internet protocols, as in <code class="code">/etc/protocols</code>.
 <p>
 
  Stdlib <code class="code"><span class="constructor">Unix</span></code> module already have a type for IP addresses:
- <code class="code"><span class="constructor">Unix</span>.inet_addr</code> (actually a <code class="code">string</code>). Here are the functions
- to convert our address (<code class="code">int32</code>) from/to <code class="code">inet_addr</code>.<br>
-<pre><span id="VALint32_of_inet_addr"><span class="keyword">val</span> int32_of_inet_addr</span> : <code class="type">'a -> int32</code></pre><div class="info">
-Convert an <code class="code">inet_addr</code> into an <code class="code">int32</code>...<br>
-</div>
-<pre><span id="VALinet_addr_of_int32"><span class="keyword">val</span> inet_addr_of_int32</span> : <code class="type">int32 -> Batteries.Unix.inet_addr</code></pre><div class="info">
-... and the other way around.<br>
-</div>
+ <code class="code"><span class="constructor">Unix</span>.inet_addr</code> (actually a <code class="code">string</code>). We use a private type
+ nonetheless so that we can have a custom printer.<br>
 <pre><span id="VALinet_addr_print"><span class="keyword">val</span> inet_addr_print</span> : <code class="type">'a BatInnerIO.output -> Batteries.Unix.inet_addr -> unit</code></pre><div class="info">
 Printer (in the sense of Batteries) for inet_addrs<br>
 </div>
 <br>
-<h4 id="4_IPAddressesasint32">IP Addresses as int32</h4><br>
-<pre><span class="keyword">module</span> <a href="Ip.Addr.html">Addr</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
-We use a private type for IPv4 addresses so that we can have a
- custom printer, but it's actually an <code class="code">int32</code> and you can cast with:
- <code class="code">(addr :&gt; int32)</code> in one direction and <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.o int</code> in the other.
-</div>
-<br>
+<h4 id="4_IPAddressesasUnixinetaddrie">IP Addresses as Unix.inet_addr (ie. strings)</h4><br>
+<pre><span class="keyword">module</span> <a href="Ip.Addr.html">Addr</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><br>
 <h4 id="4_CIDRAddresses">CIDR Addresses</h4><br>
 <pre><span class="keyword">module</span> <a href="Ip.Cidr.html">Cidr</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Cidr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 CIDR addresses are a concise way to write network addresses,

@@ -26,6 +26,7 @@
 <link title="Hub" rel="Chapter" href="Hub.html">
 <link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Ip6" rel="Chapter" href="Ip6.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
 <link title="Metric" rel="Chapter" href="Metric.html">
@@ -110,7 +111,7 @@ We have only one clock so can run only one simulation at the same time.<br>
 Return the current simulation time.<br>
 </div>
 <pre><span id="VALcond_lock"><span class="keyword">val</span> cond_lock</span> : <code class="type">Mutex.t</code></pre><pre><span id="VALcond"><span class="keyword">val</span> cond</span> : <code class="type">Condition.t</code></pre><pre><span id="VALsignal_me"><span class="keyword">val</span> signal_me</span> : <code class="type">unit -> unit</code></pre><pre><span id="VALepsilon"><span class="keyword">val</span> epsilon</span> : <code class="type">Interval.t</code></pre><pre><span id="VALat"><span class="keyword">val</span> at</span> : <code class="type">Time.t -> ('a -> unit) -> 'a -> unit</code></pre><div class="info">
-<code class="code">at t f x</code> will execute <code class="code">f x</code> when simulation clock reachs time <code class="code">t</code>.<br>
+<code class="code">at t f x</code> will execute <code class="code">f x</code> when simulation clock reaches time <code class="code">t</code>.<br>
 </div>
 <pre><span id="VALdelay"><span class="keyword">val</span> delay</span> : <code class="type">Interval.t -> ('a -> unit) -> 'a -> unit</code></pre><div class="info">
 <code class="code">delay d f x</code> will delay the execution of <code class="code">f x</code> by the interval <code class="code">d</code>.<br>
@@ -124,6 +125,9 @@ Synchronize internal clock with realtime clock.
 Will process the next event<br>
 </div>
 <pre><span id="VALrun"><span class="keyword">val</span> run</span> : <code class="type">bool -> unit</code></pre><div class="info">
-<code class="code">run <span class="keyword">true</span></code> will run forever while <code class="code">run <span class="keyword">false</span></code> will return once no more events are waiting.<br>
+<code class="code">run <span class="keyword">true</span></code> will run forever while <code class="code">run <span class="keyword">false</span></code> will return once no more
+ events are waiting.  If you chose no to run forever, beware that waiting for
+ an answer from the outside world is _not_ a clock event. You should probably
+ run forever whenever you communicate with the outside.<br>
 </div>
 </body></html>

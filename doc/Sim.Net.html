@@ -24,6 +24,7 @@
 <link title="Hub" rel="Chapter" href="Hub.html">
 <link title="Icmp" rel="Chapter" href="Icmp.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
+<link title="Ip6" rel="Chapter" href="Ip6.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
 <link title="Log" rel="Chapter" href="Log.html">
 <link title="Metric" rel="Chapter" href="Metric.html">
@@ -56,12 +57,12 @@ A network is a set of equipments, and some optionaly named "plugs"
  function pointers, so contrary to one would expect a net is not a
  graph but a mere list of equipment (and available plugs).
  Connecting two nets make the used plugs disapear, but other than that
- the two nets stay the same. To group two nets (either connected or net)
+ the two nets stay the same. To group two nets (either connected or not)
  use the <code class="code">union</code> function which will return the union of the two nets.<br>
 </div>
 <hr width="100%">
 <pre><span class="keyword">module</span> <a href="Sim.Net.Plug.html">Plug</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Sim.Net.Plug.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
-A plug is a named entry point to a networks.
+A plug is a named entry/exit point to a networks.
 </div>
 <pre><code><span id="TYPEequipment"><span class="keyword">type</span> <code class="type"></code>equipment</span> = </code></pre><table class="typetable">
 <tr>
@@ -134,7 +135,7 @@ Return a net representing the external network via the given interface,
 <pre><span id="VALmake_internet"><span class="keyword">val</span> make_internet</span> : <code class="type">unit -> <a href="Sim.Net.html#TYPEt">t</a></code></pre><div class="info">
 Returns a net with an unlimited supply of plugs that performs as a router.<br>
 </div>
-<pre><span id="VALmake_simple_lan"><span class="keyword">val</span> make_simple_lan</span> : <code class="type">?nameserver:Ip.Addr.t -> ?public_ip:Ip.Addr.t -> int -> <a href="Sim.Net.html#TYPEt">t</a></code></pre><div class="info">
+<pre><span id="VALmake_simple_lan"><span class="keyword">val</span> make_simple_lan</span> : <code class="type">?name:string -><br>       ?nameserver:Ip.Addr.t -> ?public_ip:Ip.Addr.t -> int -> <a href="Sim.Net.html#TYPEt">t</a></code></pre><div class="info">
 Returns a lan consisting of n hosts connected to a switch connected to a
  router/dhcp server/nater with an "exit" plug.<br>
 </div>
