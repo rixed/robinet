@@ -19,6 +19,7 @@
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
 <link title="Icmp" rel="Chapter" href="Icmp.html">
+<link title="Icmp6" rel="Chapter" href="Icmp6.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Ip6" rel="Chapter" href="Ip6.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
@@ -69,8 +70,11 @@
 &nbsp;&nbsp;&nbsp;&nbsp;?options:<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Proto</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.t<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;random&nbsp;:&nbsp;unit&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.t<br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;patch_tcp_checksum&nbsp;:&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tools</span>.<span class="constructor">Payload</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tools</span>.<span class="constructor">Payload</span>.t<br>
-&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;patch_udp_checksum&nbsp;:&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tools</span>.<span class="constructor">Payload</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tools</span>.<span class="constructor">Payload</span>.t<br>
+&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;pseudo_header&nbsp;:&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring<br>
+&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;patch_checksum&nbsp;:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;?fixit:(int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;int)&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;(unit&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring)&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tools</span>.<span class="constructor">Payload</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tools</span>.<span class="constructor">Payload</span>.t<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;pack&nbsp;:&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;unpack&nbsp;:&nbsp;string&nbsp;*&nbsp;int&nbsp;*&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.t&nbsp;option<br>
 &nbsp;&nbsp;<span class="keyword">val</span>&nbsp;unpack_with_ports&nbsp;:&nbsp;string&nbsp;*&nbsp;int&nbsp;*&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;(<span class="constructor">Ip</span>.<span class="constructor">Pdu</span>.t&nbsp;*&nbsp;int&nbsp;*&nbsp;int)&nbsp;option<br>

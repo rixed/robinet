@@ -21,6 +21,7 @@
 <link title="Http" rel="Chapter" href="Http.html">
 <link title="Hub" rel="Chapter" href="Hub.html">
 <link title="Icmp" rel="Chapter" href="Icmp.html">
+<link title="Icmp6" rel="Chapter" href="Icmp6.html">
 <link title="Ip" rel="Chapter" href="Ip.html">
 <link title="Ip6" rel="Chapter" href="Ip6.html">
 <link title="Localhost" rel="Chapter" href="Localhost.html">
@@ -252,6 +253,8 @@ Used for tests
 <tr><td><a href="Html.html#VALclose_tag">close_tag</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
 <tr><td><a href="Dns.QType.html#VALcname">cname</a> [<a href="Dns.QType.html">Dns.QType</a>]</td>
+<td></td></tr>
+<tr><td><a href="Icmp6.MsgType.html#VALcode_of">code_of</a> [<a href="Icmp6.MsgType.html">Icmp6.MsgType</a>]</td>
 <td></td></tr>
 <tr><td><a href="Icmp.MsgType.html#VALcode_of">code_of</a> [<a href="Icmp.MsgType.html">Icmp.MsgType</a>]</td>
 <td></td></tr>
@@ -583,6 +586,8 @@ hours to .
 <td></td></tr>
 <tr><td><a href="Host.html#VALicmp_rx">icmp_rx</a> [<a href="Host.html">Host</a>]</td>
 <td></td></tr>
+<tr><td><a href="Ip.Proto.html#VALicmpv6">icmpv6</a> [<a href="Ip.Proto.html">Ip.Proto</a>]</td>
+<td></td></tr>
 <tr><td><a href="Ip.Pdu.html#VALid_seq">id_seq</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Pcap.Dlt.html#VALieee802">ieee802</a> [<a href="Pcap.Dlt.html">Pcap.Dlt</a>]</td>
@@ -661,6 +666,8 @@ Return some informations about a pcap file (require to scan the whole file,
 <td></td></tr>
 <tr><td><a href="Tcp.TRX.html#VALis_closed">is_closed</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
 <td></td></tr>
+<tr><td><a href="Icmp6.Pdu.html#VALis_echo_request">is_echo_request</a> [<a href="Icmp6.Pdu.html">Icmp6.Pdu</a>]</td>
+<td></td></tr>
 <tr><td><a href="Icmp.Pdu.html#VALis_echo_request">is_echo_request</a> [<a href="Icmp.Pdu.html">Icmp.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Url.html#VALis_empty">is_empty</a> [<a href="Url.html">Url</a>]</td>
@@ -672,6 +679,8 @@ Return some informations about a pcap file (require to scan the whole file,
 <tr><td><a href="Url.html#VALis_reserved">is_reserved</a> [<a href="Url.html">Url</a>]</td>
 <td></td></tr>
 <tr><td><a href="Url.html#VALis_unreserved">is_unreserved</a> [<a href="Url.html">Url</a>]</td>
+<td></td></tr>
+<tr><td><a href="Icmp6.MsgType.Outer.html#VALis_valid">is_valid</a> [<a href="Icmp6.MsgType.Outer.html">Icmp6.MsgType.Outer</a>]</td>
 <td></td></tr>
 <tr><td><a href="Icmp.MsgType.Outer.html#VALis_valid">is_valid</a> [<a href="Icmp.MsgType.Outer.html">Icmp.MsgType.Outer</a>]</td>
 <td></td></tr>
@@ -815,7 +824,11 @@ Build an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructo
 <td></td></tr>
 <tr><td><a href="Dhcp.Pdu.html#VALmake_discover">make_discover</a> [<a href="Dhcp.Pdu.html">Dhcp.Pdu</a>]</td>
 <td></td></tr>
+<tr><td><a href="Icmp6.Pdu.html#VALmake_echo_reply">make_echo_reply</a> [<a href="Icmp6.Pdu.html">Icmp6.Pdu</a>]</td>
+<td></td></tr>
 <tr><td><a href="Icmp.Pdu.html#VALmake_echo_reply">make_echo_reply</a> [<a href="Icmp.Pdu.html">Icmp.Pdu</a>]</td>
+<td></td></tr>
+<tr><td><a href="Icmp6.Pdu.html#VALmake_echo_request">make_echo_request</a> [<a href="Icmp6.Pdu.html">Icmp6.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Icmp.Pdu.html#VALmake_echo_request">make_echo_request</a> [<a href="Icmp.Pdu.html">Icmp.Pdu</a>]</td>
 <td></td></tr>
@@ -1069,6 +1082,8 @@ Return the <code class="code">bitstring</code> ready to be written into a pcap f
 <td></td></tr>
 <tr><td><a href="Ip.Pdu.html#VALpack">pack</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
 <td></td></tr>
+<tr><td><a href="Icmp6.Pdu.html#VALpack">pack</a> [<a href="Icmp6.Pdu.html">Icmp6.Pdu</a>]</td>
+<td></td></tr>
 <tr><td><a href="Icmp.Pdu.html#VALpack">pack</a> [<a href="Icmp.Pdu.html">Icmp.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Http.Pdu.html#VALpack">pack</a> [<a href="Http.Pdu.html">Http.Pdu</a>]</td>
@@ -1130,13 +1145,11 @@ A counter for how many packets were sniffed.
 <td></td></tr>
 <tr><td><a href="Html.html#VALparzer">parzer</a> [<a href="Html.html">Html</a>]</td>
 <td></td></tr>
+<tr><td><a href="Ip.Pdu.html#VALpatch_checksum">patch_checksum</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
+<td></td></tr>
 <tr><td><a href="Router.Nat.html#VALpatch_dst_port">patch_dst_port</a> [<a href="Router.Nat.html">Router.Nat</a>]</td>
 <td></td></tr>
 <tr><td><a href="Router.Nat.html#VALpatch_src_port">patch_src_port</a> [<a href="Router.Nat.html">Router.Nat</a>]</td>
-<td></td></tr>
-<tr><td><a href="Ip.Pdu.html#VALpatch_tcp_checksum">patch_tcp_checksum</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
-<td></td></tr>
-<tr><td><a href="Ip.Pdu.html#VALpatch_udp_checksum">patch_udp_checksum</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Browser.html#VALpath_matches">path_matches</a> [<a href="Browser.html">Browser</a>]</td>
 <td></td></tr>
@@ -1251,6 +1264,10 @@ If true, use the vendor database to decode address names:
 Proteon ProNET Token Ring
 </div>
 </td></tr>
+<tr><td><a href="Ip6.Pdu.html#VALpseudo_header">pseudo_header</a> [<a href="Ip6.Pdu.html">Ip6.Pdu</a>]</td>
+<td></td></tr>
+<tr><td><a href="Ip.Pdu.html#VALpseudo_header">pseudo_header</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
+<td></td></tr>
 <tr><td><a href="Dns.QType.html#VALptr">ptr</a> [<a href="Dns.QType.html">Dns.QType</a>]</td>
 <td></td></tr>
 <tr><td align="left"><br>Q</td></tr>
@@ -1306,6 +1323,10 @@ Returns a random <code class="code"><span class="constructor">Ip</span>.<span cl
 </td></tr>
 <tr><td><a href="Ip.Proto.html#VALrandom">random</a> [<a href="Ip.Proto.html">Ip.Proto</a>]</td>
 <td></td></tr>
+<tr><td><a href="Icmp6.Pdu.html#VALrandom">random</a> [<a href="Icmp6.Pdu.html">Icmp6.Pdu</a>]</td>
+<td></td></tr>
+<tr><td><a href="Icmp6.MsgType.html#VALrandom">random</a> [<a href="Icmp6.MsgType.html">Icmp6.MsgType</a>]</td>
+<td></td></tr>
 <tr><td><a href="Icmp.Pdu.html#VALrandom">random</a> [<a href="Icmp.Pdu.html">Icmp.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Icmp.MsgType.html#VALrandom">random</a> [<a href="Icmp.MsgType.html">Icmp.MsgType</a>]</td>
@@ -1337,6 +1358,8 @@ Returns a random Ethernet address (but neither broadcast nor zero).
 <tr><td><a href="Ip.Cidr.html#VALrandom_addrs">random_addrs</a> [<a href="Ip.Cidr.html">Ip.Cidr</a>]</td>
 <td></td></tr>
 <tr><td><a href="Host.html#VALrandom_name">random_name</a> [<a href="Host.html">Host</a>]</td>
+<td></td></tr>
+<tr><td><a href="Icmp6.Pdu.html#VALrandom_payload">random_payload</a> [<a href="Icmp6.Pdu.html">Icmp6.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Icmp.Pdu.html#VALrandom_payload">random_payload</a> [<a href="Icmp.Pdu.html">Icmp.Pdu</a>]</td>
 <td></td></tr>
@@ -1380,6 +1403,8 @@ Small utility that truncate a pcap file to the last valid packet.
 <tr><td><a href="Peg.html#VALrepeat">repeat</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
 <tr><td><a href="Peg.html#VALrepeat_until">repeat_until</a> [<a href="Peg.html">Peg</a>]</td>
+<td></td></tr>
+<tr><td><a href="Icmp6.MsgType.Outer.html#VALrepl_tag">repl_tag</a> [<a href="Icmp6.MsgType.Outer.html">Icmp6.MsgType.Outer</a>]</td>
 <td></td></tr>
 <tr><td><a href="Icmp.MsgType.Outer.html#VALrepl_tag">repl_tag</a> [<a href="Icmp.MsgType.Outer.html">Icmp.MsgType.Outer</a>]</td>
 <td></td></tr>
@@ -1700,6 +1725,8 @@ the opposite of of_string
 <td></td></tr>
 <tr><td><a href="Tools.MakePrivate.html#VALto_string">to_string</a> [<a href="Tools.MakePrivate.html">Tools.MakePrivate</a>]</td>
 <td></td></tr>
+<tr><td><a href="Icmp6.MsgType.Outer.html#VALto_string">to_string</a> [<a href="Icmp6.MsgType.Outer.html">Icmp6.MsgType.Outer</a>]</td>
+<td></td></tr>
 <tr><td><a href="Icmp.MsgType.Outer.html#VALto_string">to_string</a> [<a href="Icmp.MsgType.Outer.html">Icmp.MsgType.Outer</a>]</td>
 <td></td></tr>
 <tr><td><a href="Dhcp.MsgType.Inner.html#VALto_string">to_string</a> [<a href="Dhcp.MsgType.Inner.html">Dhcp.MsgType.Inner</a>]</td>
@@ -1751,6 +1778,8 @@ bits are flowing from LAN to outside world
 Transmit function.
 </div>
 </td></tr>
+<tr><td><a href="Icmp6.MsgType.html#VALtype_of">type_of</a> [<a href="Icmp6.MsgType.html">Icmp6.MsgType</a>]</td>
+<td></td></tr>
 <tr><td><a href="Icmp.MsgType.html#VALtype_of">type_of</a> [<a href="Icmp.MsgType.html">Icmp.MsgType</a>]</td>
 <td></td></tr>
 <tr><td align="left"><br>U</td></tr>
@@ -1798,6 +1827,8 @@ Converts a <code class="code"><span class="constructor">Pcap</span>.pdu.t</code>
 <tr><td><a href="Ip6.Pdu.html#VALunpack">unpack</a> [<a href="Ip6.Pdu.html">Ip6.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Ip.Pdu.html#VALunpack">unpack</a> [<a href="Ip.Pdu.html">Ip.Pdu</a>]</td>
+<td></td></tr>
+<tr><td><a href="Icmp6.Pdu.html#VALunpack">unpack</a> [<a href="Icmp6.Pdu.html">Icmp6.Pdu</a>]</td>
 <td></td></tr>
 <tr><td><a href="Icmp.Pdu.html#VALunpack">unpack</a> [<a href="Icmp.Pdu.html">Icmp.Pdu</a>]</td>
 <td></td></tr>
