@@ -51,14 +51,29 @@ module Pdu = struct
              (Ip.Addr.random ~v4:false ())
              (randbs (Random.int 10 + 20))
 
+    let pseudo_header t () =
+        (BITSTRING {
+            Ip.Addr.to_bitstring t.src : 128 : bitstring ;
+            Ip.Addr.to_bitstring t.dst : 128 : bitstring ;
+            bytelength (t.payload :> bitstring) : 16 ;
+            0 : 24 ;
+            (t.proto :> int) : 8 })
+
     let pack t =
-        concat [ (BITSTRING {
+        let header = (BITSTRING {
             6 : 4 ; t.diff_serv : 6 ; t.ecn : 2 ; t.flow_label : 20 ; 
             bytelength (t.payload :> bitstring) : 16 ;
             (t.proto :> int) : 8 ; t.ttl : 8 ;
             Ip.Addr.to_bitstring t.src : 128 : bitstring ;
-            Ip.Addr.to_bitstring t.dst : 128 : bitstring }) ;
-            (t.payload :> bitstring) ]
+            Ip.Addr.to_bitstring t.dst : 128 : bitstring })
+        (* must we patch some checksum? *)
+        and payload =
+            let fix_udp_checksum = function 0 -> 0xffff | x -> x in (* As per rfc2460, 8.1 *)
+            if t.proto = Ip.Proto.tcp then Ip.Pdu.patch_checksum 128 (pseudo_header t) t.payload
+            else if t.proto = Ip.Proto.udp then Ip.Pdu.patch_checksum 48 (pseudo_header t) ~fixit:fix_udp_checksum t.payload
+            else if t.proto = Ip.Proto.icmpv6 then Ip.Pdu.patch_checksum 16 (pseudo_header t) t.payload
+            else t.payload in
+        concat [ header ; (payload :> bitstring) ]
 
     let unpack bits = bitmatch bits with
         | { 6 : 4 ; diff_serv : 6 ; ecn : 2 ; flow_label : 20 ;

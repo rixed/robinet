@@ -50,6 +50,7 @@ module Proto = struct
     let tcp  = o 6
     let udp  = o 17
     let ipv6 = o 41
+    let icmpv6 = o 58
 
     let random () = o (randi 8)
 end
@@ -338,35 +339,22 @@ module Pdu = struct
              ~ttl:(randi 8) ~options:(randbs (4*(randi 3)))
              (Proto.random ()) (Addr.random ()) (Addr.random ()) (randbs (Random.int 10 + 20))
 
-    let patch_tcp_checksum t (pld : Payload.t) = bitmatch (pld :> bitstring) with
-        | { head : 128 : bitstring ;
-            chk  : 16 ;
-            tail : -1 : bitstring (* FIXME: force urgent pointer at 0 if the urgent flag is unset *) (* FIXME: remove tcp payload? *) } ->
-            if chk = 0 then (
-                let chk = sum (BITSTRING {
-                    (Addr.to_int32 t.src) : 32 ; (Addr.to_int32 t.dst) : 32 ;
-                    0 : 8 ; (t.proto :> int) : 8 ; Payload.length pld : 16 ;
-                    head : 128 : bitstring ; 0 : 16 ; tail : -1 : bitstring (* all tail?? *)}) in
-                Payload.o (BITSTRING { head : 128 : bitstring ; chk : 16 ; tail : -1 : bitstring })
-            ) else pld
-        | { _ } ->
-            Printf.fprintf stderr "Ip: Cannot patch checksum in TCP packet\n" ;
-            pld
+    let pseudo_header t () =
+        (BITSTRING {
+            (Addr.to_int32 t.src) : 32 ; (Addr.to_int32 t.dst) : 32 ;
+            0 : 8 ; (t.proto :> int) : 8 ; Payload.length (t.payload) : 16 })
 
-    let patch_udp_checksum t (pld : Payload.t) = bitmatch (pld :> bitstring) with
-        | { head : 48 : bitstring ;
-            chk  : 16  ;
-            tail : -1 : bitstring } ->
+    let patch_checksum ?(fixit=identity) offset pseudo_header (pld : Payload.t) = bitmatch (pld :> bitstring) with
+        | { head : offset : bitstring ;
+            chk  : 16 ;
+            tail : -1 : bitstring (* FIXME: for TCP, force urgent pointer at 0 if the urgent flag is unset *) } ->
             if chk = 0 then (
-                let chk = sum (BITSTRING {
-                    (Addr.to_int32 t.src) : 32 ; (Addr.to_int32 t.dst) : 32 ;
-                    0 : 8 ; (t.proto :> int) : 8 ; Payload.length pld : 16 ;
-                    head : 48 : bitstring ; 0 : 16 ;
-                    tail : -1 : bitstring }) in
-                Payload.o (BITSTRING { head : 48 : bitstring ; chk : 16 ; tail : -1 : bitstring })
+                let chk = sum (concat [ pseudo_header () ; head ; zeroes_bitstring 16 ; tail ]) |>
+                          fixit in
+                Payload.o (BITSTRING { head : offset : bitstring ; chk : 16 ; tail : -1 : bitstring })
             ) else pld
         | { _ } ->
-            Printf.fprintf stderr "Ip: Cannot patch checksum in UDP packet\n" ;
+            Printf.fprintf stderr "Ip: Cannot patch checksum at offset %d\n" offset ;
             pld
 
     let pack t =
@@ -392,8 +380,8 @@ module Pdu = struct
                      (BITSTRING { s : 16 }) ;
                      dropbits 96 header ]
         and payload = (* and actual TCP/UDP checksums as well since they use some fields of the IP header *)
-            if t.proto = Proto.tcp then patch_tcp_checksum t t.payload
-            else if t.proto = Proto.udp then patch_udp_checksum t t.payload
+            if t.proto = Proto.tcp then patch_checksum 128 (pseudo_header t) t.payload
+            else if t.proto = Proto.udp then patch_checksum 48 (pseudo_header t) t.payload
             else t.payload in
         concat [ header ; (payload :> bitstring) ]
 

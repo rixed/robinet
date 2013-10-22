@@ -15,6 +15,7 @@ SOURCES  = \
 	ip.ml \
 	ip6.ml \
 	icmp.ml \
+	icmp6.ml \
 	arp.ml \
 	vlan.ml \
 	eth.ml \
