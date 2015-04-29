@@ -254,7 +254,7 @@ let enum_of_file fname = Pcap.enum_of_file fname /@ Pdu.unpack
  *)
 
 (* Check we manage to decode vlan tags *)
-(*$= enum_of_file & ~printer:(Printf.sprintf2 "%a" (List.print Int.print))
+(*$= enum_of_file & ~printer:(IO.to_string (List.print Int.print))
     ((enum_of_file "tests/various_vlans.pcap" //@ \
         function _ :: _ :: Pdu.Vlan { Vlan.Pdu.id = id ; _ } :: _ -> Some id \
                | _ -> None) |> List.of_enum) [ 1 ; 2 ]
