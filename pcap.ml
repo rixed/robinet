@@ -62,6 +62,9 @@ val pkt : Pcap.Pdu.t =
    Following packets can be dumped easily with just {[Pcap.sniff itf |> Packet.Pdu.unpack]}
    ("|>" is like the UNIX pipe).
 
+   An easier way to capture traffic is to use {[let packets = capture "em1";;]} and press
+   CTRL+C to terminate the capture and return to the toplevel.
+
    All I want is editing pcap files:
 
    To create a small pcap file with a single packet:
@@ -113,6 +116,7 @@ external sniff_ : iface_handler -> (Clock.Time.t * string) = "wrap_pcap_read"
  * of 65535 will be chosen, which is probably not what you want. You should set
  * [caplen] = your {e MTU} size. *)
 external openif_ : string -> bool -> string -> int -> iface_handler = "wrap_pcap_make"
+
 
 (** {2 Pcap files} *)
 
@@ -448,6 +452,24 @@ let openif ?(promisc=true) ?(filter="") ?caplen ifname =
 let sniff iface =
     let ts, bytes = sniff_ iface.handler in
     Pdu.make iface.name ~caplen:iface.caplen ts (bitstring_of_string bytes)
+
+let capture ?promisc ?filter ifname =
+    let iface = openif ?promisc ?filter ifname in
+    let pkts = ref [] in
+    let continue = ref true in
+    let rec aux () =
+        if not !continue then List.rev !pkts else
+        let pkt = sniff iface in
+        pkts := pkt :: !pkts ;
+        Printf.printf ".%!" ;
+        aux () in
+    let prev_sigint = Sys.(
+        signal sigint (Signal_handle (fun _n ->
+            Printf.printf "Stop!\n" ;
+            continue := false))) in
+    let res = aux () in
+    Sys.(set_signal sigint prev_sigint) ;
+    res
 
 (** {2 Packet injection} *)
 
