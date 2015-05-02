@@ -30,7 +30,7 @@ let run iface =
 
 let main =
     Random.self_init () ;
-    let iface = Pcap.openif "eth0" true "" 1500 in
+    let iface = Pcap.openif "eth0" in
     ignore (run iface) ;
     Clock.run true
 

@@ -61,7 +61,7 @@ module Pdu = struct
 
     let pack t =
         let header = (BITSTRING {
-            6 : 4 ; t.diff_serv : 6 ; t.ecn : 2 ; t.flow_label : 20 ; 
+            6 : 4 ; t.diff_serv : 6 ; t.ecn : 2 ; t.flow_label : 20 ;
             bytelength (t.payload :> bitstring) : 16 ;
             (t.proto :> int) : 8 ; t.ttl : 8 ;
             Ip.Addr.to_bitstring t.src : 128 : bitstring ;

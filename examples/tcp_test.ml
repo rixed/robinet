@@ -25,7 +25,7 @@ open Bitstring
 open Tools
 
 let perform_get my_ip my_mac peer_ip ?nameserver ?gw ifname url =
-    let iface = Pcap.openif ifname true "" 1800 in
+    let iface = Pcap.openif ifname in
     let get   = Printf.sprintf "GET %s HTTP/1.0\r\n\r\n" url in
     let host  = Host.make_static "tester" ?nameserver ?gw my_mac my_ip in
     host.Host.dev.set_read (Pcap.inject_pdu iface) ;

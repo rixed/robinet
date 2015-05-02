@@ -95,7 +95,7 @@ struct
     (** Return a net representing the external network via the given interface,
      * and the thread that sniffs packets. *)
     let make_sink iface_name =
-        let iface = Pcap.openif iface_name true "" 1800 in
+        let iface = Pcap.openif ~caplen:1800 iface_name in
         let emit = ref ignore in
         { equip = [] ;
           plugs = [ Plug.make iface_name { write = Pcap.inject_pdu iface ;

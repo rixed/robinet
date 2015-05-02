@@ -99,6 +99,7 @@ struct
                     mac.port <- ins
                 ) ;
                 OrdArray.promote t.macs n) ;
+            (* TODO: addresses reserved by 802.1d should not be forwarded. *)
             (* now forward *)
             (match BitHash.find_option t.macs_h dst with
             | None ->
@@ -109,7 +110,7 @@ struct
                 Clock.asap t.hub.Repeater.ports.((OrdArray.get t.macs n).port).Repeater.emit bits ;
                 OrdArray.promote t.macs n)
         | { _ } ->
-            if debug then Printf.printf "Switch: drop incoming frame without destonator\n%!"
+            if debug then Printf.printf "Switch: drop incoming frame without destination\n%!"
 
     let write n t pld =
         if debug then Printf.printf "Switch: rx from port %d\n%!" n ;

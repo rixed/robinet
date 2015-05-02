@@ -42,7 +42,7 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
         Hub.Repeater.set_read i hub (gigabit h.Host.dev.write)
     ) hosts ;
     (* Link all these to the real world *)
-    let iface = Pcap.openif ifname true "" 1500 in
+    let iface = Pcap.openif ifname in
     Hub.Repeater.set_read nb_srcs hub (Pcap.inject_pdu iface) ;
     (* Start the browsers *)
     List.iter (fun h ->

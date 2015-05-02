@@ -6,12 +6,13 @@ OCAMLDOC   = ocamlfind ocamldoc -html -colorize-code -thread -sort -stars
 OCAMLMKTOP = ocamlfind ocamlmktop -thread -g
 QTEST      = qtest
 DOCDIR    ?= doc/
-override OCAMLOPTFLAGS += $(INCS) -w Ael-31 -g -annot
-override OCAMLFLAGS    += $(INCS) -w Ael-31 -g -annot
+WARNS      = Ael-31-41-44-45-48
+override OCAMLOPTFLAGS += $(INCS) -w $(WARNS) -g -annot
+override OCAMLFLAGS    += $(INCS) -w $(WARNS) -g -annot
 
 CAMLINCLUDE = $(shell ocamlfind printconf stdlib)
 CPPFLAGS   += -I $(CAMLINCLUDE) -I .
-CFLAGS     += -std=c99 -W -Wall -D_GNU_SOURCE
+CFLAGS     += -O2 -std=c99 -W -Wall -D_GNU_SOURCE
 
 all:
 
@@ -84,7 +85,8 @@ clean: clean-spec
 	$(OCAMLDEP) $(SYNTAX) -package "$(REQUIRES)" -I .. *.ml *.mli */*.ml > $@
 
 doc: $(SOURCES)
-	mkdir -p $@
+	@echo "Building doc in $(DOCDIR)..."
+	mkdir -p $(DOCDIR)
 	$(OCAMLDOC) $(SYNTAX) -package "$(REQUIRES)" -d $(DOCDIR) $^
 	sed -i -e '/^<head>/a<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">' $(DOCDIR)/*.html
 	sed -i -e 's|<center><h1></h1></center>|<h1>$(PKG_NAME)</h1>|' $(DOCDIR)/index.html

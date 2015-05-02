@@ -57,18 +57,31 @@ let debug = false
 (** A network device opened for sniffing or injection *)
 type iface
 
-(** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
+(** [openif_ "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is set to 0 then a "default" value
  * of 65535 will be chosen, which is probably not what you want. You should set
  * [caplen] = your {e MTU} size. *)
-external openif : string -> bool -> string -> int -> iface = "wrap_pcap_make"
+external openif_ : string -> bool -> string -> int -> iface = "wrap_pcap_make"
+
+(** Get the MTU of a device (on Linux). May raise all kind of exceptions. *)
+let mtu ifname =
+    let fname = Printf.sprintf "/sys/class/net/%s/mtu" ifname in
+    File.lines_of fname |> Enum.get_exn |> int_of_string
+
+(** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
+ * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
+ * of each packets. Notice that if [caplen] is not set then {e MTU} for the
+ * device will be chosen. *)
+let openif ?(promisc=true) ?(filter="") ?caplen ifname =
+    let caplen = Option.default_delayed (fun () -> mtu ifname) caplen in
+    openif_ ifname promisc filter caplen
 
 (** [inject iface packet] inject this packet into this interface *)
 external inject : iface -> string -> unit = "wrap_pcap_inject"
 
 (** [sniff iface] will return the next available packet, as well as its capture
- * timestamp *)
+ * timestamp. Suitable for interactive use. *)
 external sniff : iface -> (Clock.Time.t * string) = "wrap_pcap_read"
 
 (** {2 Packet injection} *)
@@ -268,7 +281,7 @@ let global_header_of_bitstring name header =
    | { _ } -> raise Not_a_pcap_file
 
 (** [read_global_header filename] reads the pcap global header from the
- * fiven file, and returns both a {!Pcap.global_header} and the input channel. *)
+ * given file, and returns both a {!Pcap.global_header} and the input channel. *)
 let read_global_header fname =
     let ic = open_in_bin fname in
     let header = bitstring_of_string (IO.really_nread ic 24) ; in

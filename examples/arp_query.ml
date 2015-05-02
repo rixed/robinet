@@ -21,7 +21,7 @@ open Bitstring
 
 (* TODO: make this a parameter.
          make eth0 a command line arg *)
-let iface = Pcap.openif "eth0" true "" 1800
+let iface = Pcap.openif "eth0"
 
 let arp_query (src_eth : Eth.Addr.t) src_ip target_ip =
     let arp = Arp.Pdu.make_request Arp.HwType.eth Arp.HwProto.ip4

@@ -25,7 +25,7 @@ open Batteries
 open Bitstring
 open Tools
 
-let iface = Pcap.openif "eth0" true "" 1800
+let iface = Pcap.openif "eth0"
 
 let main =
     let src_ip_str  = ref "192.168.1.66"

@@ -192,7 +192,7 @@ end
 (** {2 Transceiver} *)
 
 (** An Ethernet TRX will convert from payload to Ethernet frames (resolving
- * destinators using ARP), for a single {!Arp.HwProto.t}. *)
+ * destinations using ARP), for a single {!Arp.HwProto.t}. *)
 module TRX =
 struct
     type t =
