@@ -35,6 +35,18 @@ single packet. In other words, it will not venture much deeper than TCP/UDP.
 
 {1 Examples}
 
+{2 Capturing local traffic}
+
+Although you can manipulate the pcap interface directly and receive or inject
+packets individually, it is often easier to just capture the whole stream of
+packets for some time and then study them or save them in a pcap file.
+
+An easy way to capture traffic is to use {[let packets = capture "em1";;]} and press
+CTRL+C to terminate the capture and return to the toplevel with a list of
+packets. During the capture a dot will be printed to the screen each time a packet
+is captured.
+
+
 {2 Exploring a pcap file}
 
 This module is more useful from the toplevel [robinet.top].
@@ -263,3 +275,20 @@ let enum_of_file fname = Pcap.enum_of_file fname /@ Pdu.unpack
 (** [Packet.to_file filename e] write the enumeration of {!Packet.Pdu.t} into the given file. *)
 let to_file fname e = Enum.map Pdu.pack e |> Pcap.file_of_enum fname
 
+let capture ?promisc ?filter ifname =
+    let iface = Pcap.openif ?promisc ?filter ifname in
+    let pkts = ref [] in
+    let continue = ref true in
+    let rec aux () =
+        if not !continue then List.rev !pkts else
+        let pkt = Pcap.sniff iface in
+        pkts := pkt :: !pkts ;
+        Printf.printf ".%!" ;
+        aux () in
+    let prev_sigint = Sys.(
+        signal sigint (Signal_handle (fun _n ->
+            Printf.printf "Stop!\n" ;
+            continue := false))) in
+    let res = aux () in
+    Sys.(set_signal sigint prev_sigint) ;
+    res
