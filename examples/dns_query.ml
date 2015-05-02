@@ -22,7 +22,6 @@
   which is correct enough to get an actual response from the server.
 *)
 open Batteries
-open Bitstring
 open Tools
 
 let iface = Pcap.openif "eth0"
@@ -43,7 +42,7 @@ let main =
               "Perform a DNS A query with faked addresses" ;
     let emit bits =
         hexstring_of_bitstring bits |> Printf.printf "Injecting '%s'\n" ;
-        Pcap.inject iface (string_of_bitstring bits) in
+        Pcap.inject iface bits in
     let host = Host.make_static "requester" ?gw:!gw_eth_str ~nameserver:(Ip.Addr.of_string !dst_ip_str) ~search_sfx:!search (Eth.Addr.of_string !src_eth_str) (Ip.Addr.of_string !src_ip_str) in
     host.Host.dev.set_read emit ;
     List.iter (Clock.asap (fun name ->

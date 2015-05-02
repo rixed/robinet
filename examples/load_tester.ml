@@ -63,9 +63,7 @@ let input_of = function
         Pcap.enum_of_file name
     | Iface name ->
         let iface = Pcap.openif name in
-        Enum.from (fun () ->
-            let ts, pkt = Pcap.sniff iface in
-            Pcap.Pdu.make name ts (bitstring_of_string pkt))
+        Enum.from (fun () -> Pcap.sniff iface)
     | Tcps _n ->
         assert false
         (*random_tcp_streams n 100*)
@@ -76,7 +74,7 @@ let sink_to = function
         Enum.iter (Pcap.Pdu.save name)
     | Iface name ->
         let iface = Pcap.openif ~promisc:false name in
-        let inject_f pdu = Pcap.inject_pdu iface (pdu.Pcap.Pdu.payload :> bitstring) in
+        let inject_f pdu = Pcap.inject iface (pdu.Pcap.Pdu.payload :> bitstring) in
         Enum.iter inject_f
     | Tcps _n ->
         assert false

@@ -105,6 +105,15 @@ let hexstring_of_bitstring bs =
     let hexify c = Printf.sprintf "%02x" (Char.code c) in
     String.enum s /@ hexify |> List.of_enum |> String.join " "
 
+let hexstring_of_bitstring_abbrev bs =
+    if bitstring_length bs <= 64 then hexstring_of_bitstring bs
+    else hexstring_of_bitstring (takebits (64-8) bs) ^ "..."
+(*$= hexstring_of_bitstring_abbrev & ~printer:identity
+     (hexstring_of_bitstring_abbrev (bitstring_of_string "\x42")) "42"
+     (hexstring_of_bitstring_abbrev (bitstring_of_string "abcdefgh"))  "61 62 63 64 65 66 67 68"
+     (hexstring_of_bitstring_abbrev (bitstring_of_string "abcdefghi")) "61 62 63 64 65 66 67..."
+ *)
+
 let printable str =
     let is_printable c = Char.is_latin1 c || Char.is_digit c || Char.is_symbol c || c = ' ' in
     String.map (fun c -> if is_printable c then c else '.') str
@@ -402,8 +411,9 @@ module Payload = struct
         type t = bitstring
         let to_string t =
             let bytes = bytelength t in
-            if bytes > 0 then Printf.sprintf "%d bytes" bytes
-            else "empty"
+            if bytes > 0 then (
+                Printf.sprintf "%d bytes (%s)" bytes (hexstring_of_bitstring_abbrev t)
+            ) else "empty"
         let is_valid _ = true
         let repl_tag = "bits"
     end)

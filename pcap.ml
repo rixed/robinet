@@ -21,7 +21,50 @@
    This module holds all functions related to [libpcap], packet sniffing,
    packet injection and pcap file reading and writing.
 
-   For instance, to create a small pcap file with a single packet:
+   All I want is sniffing packets:
+
+   To grab the first packet from "em1" interface and display it:
+
+{[
+
+# let itf = Pcap.openif "em1";;
+val itf : Pcap.iface = {Pcap.handler = <abstr>; name = "em1"; caplen = 1500}
+# let pkt = Pcap.sniff itf;;
+val pkt : Pcap.Pdu.t =
+ {Pcap.Pdu.source_name = "em1"; caplen = 1500;
+   dlt = Ethernet (10Mb); ts = 15:09:49.81;
+   payload = 66 bytes (74 46 a0 a1 28 8e 00...)}
+# Packet.Pdu.unpack pkt;;
+- : Packet.Pdu.layer list =
+ [Packet.Pdu.Pcap
+   {Pcap.Pdu.source_name = "em1"; caplen = 1500;
+    dlt = Ethernet (10Mb); ts = 15:09:49.81;
+    payload = 66 bytes (74 46 a2 a1 28 8e 00...)};
+  Packet.Pdu.Eth
+   {Eth.Pdu.src = Cisco:25:ac:42;
+    dst = 74:46:a2:a1:28:8e; proto = IP;
+    payload = 52 bytes (45 20 00 34 86 aa 40...)};
+  Packet.Pdu.Ip
+   {Ip.Pdu.tos = 32; tot_len = 52; id = 34474; dont_frag = true;
+    more_frags = false; frag_offset = 0; ttl = 58; proto = tcp;
+    src = 172.16.255.194; dst = 172.28.11.20;
+    options = ; payload = 32 bytes (02 02 bc c8 a2 6c d0...)};
+  Packet.Pdu.Tcp
+   {Tcp.Pdu.src_port = shell; dst_port = 48328;
+    seq_num = 0xA26CD0EB; ack_num = 0x304E4FC3;
+    win_size = 501; flags = Ack; urg_ptr = 0;
+    options = 01 01 08 0a 28 f5 dd 89 - 57 c2 c6 25              .....��.W��%
+    ;
+    payload = empty}]
+
+]}
+
+   Following packets can be dumped easily with just {[Pcap.sniff itf |> Packet.Pdu.unpack]}
+   ("|>" is like the UNIX pipe).
+
+   All I want is editing pcap files:
+
+   To create a small pcap file with a single packet:
 
 {[
 
@@ -54,78 +97,22 @@ let debug = false
 
 (** {2 Libpcap low level wrappers} *)
 
-(** A network device opened for sniffing or injection *)
-type iface
+(** Libpcap network interface handler. *)
+type iface_handler
+
+(** [inject_ iface_handler packet] inject this packet into this interface *)
+external inject_ : iface_handler -> string -> unit = "wrap_pcap_inject"
+
+(** [sniff_ iface_handler] will return the next available packet as a string,
+ * as well as its capture timestamp. *)
+external sniff_ : iface_handler -> (Clock.Time.t * string) = "wrap_pcap_read"
 
 (** [openif_ "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is set to 0 then a "default" value
  * of 65535 will be chosen, which is probably not what you want. You should set
  * [caplen] = your {e MTU} size. *)
-external openif_ : string -> bool -> string -> int -> iface = "wrap_pcap_make"
-
-(** Get the MTU of a device (on Linux). May raise all kind of exceptions. *)
-let mtu ifname =
-    let fname = Printf.sprintf "/sys/class/net/%s/mtu" ifname in
-    File.lines_of fname |> Enum.get_exn |> int_of_string
-
-(** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
- * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
- * of each packets. Notice that if [caplen] is not set then {e MTU} for the
- * device will be chosen. *)
-let openif ?(promisc=true) ?(filter="") ?caplen ifname =
-    let caplen = Option.default_delayed (fun () -> mtu ifname) caplen in
-    openif_ ifname promisc filter caplen
-
-(** [inject iface packet] inject this packet into this interface *)
-external inject : iface -> string -> unit = "wrap_pcap_inject"
-
-(** [sniff iface] will return the next available packet, as well as its capture
- * timestamp. Suitable for interactive use. *)
-external sniff : iface -> (Clock.Time.t * string) = "wrap_pcap_read"
-
-(** {2 Packet injection} *)
-
-(** A counter for how many packets were injected successfully. *)
-let packets_injected_ok  = Metric.Atomic.make "Pcap/Packets/Injected/Ok"
-(** A counter for how many packets we failed to inject. *)
-let packets_injected_err = Metric.Atomic.make "Pcap/Packets/Injected/Err"
-(** A counter for how many bytes were injected successfully. *)
-let bytes_out            = Metric.Counter.make "Pcap/Bytes/Out" "bytes"
-
-(** [inject_pdu iface bits] inject the packet [bits] into interface [iface]. *)
-let inject_pdu iface bits =
-    (try
-        let str = string_of_bitstring bits in
-        if debug then Printf.printf "Pcap: injecting a packet (%d bytes)...\n%!" (String.length str);
-        inject iface str ;
-        Metric.Atomic.fire packets_injected_ok ;
-        Metric.Counter.increase bytes_out (Int64.of_int (bytelength bits))
-    with _ ->
-        if debug then Printf.printf "Pcap: Cannot inject a packet\n" ;
-        Metric.Atomic.fire packets_injected_err)
-
-(** {2 Packet sniffing} *)
-
-(** A counter for how many packets were sniffed. *)
-let packets_sniffed_ok = Metric.Atomic.make "Pcap/Packets/Sniffed"
-(** A counter for how many bytes were sniffed. *)
-let bytes_in           = Metric.Counter.make "Pcap/Bytes/In" "bytes"
-
-(** [sniffer iface rx] returns a thread that continuously sniff packets
- * and pass them to the [rx] function (via the Clock). *)
-let sniffer iface rx =
-    let rec loop () =
-        match none_if_exception sniff iface with
-        | None -> ()
-        | Some (ts, pkt) ->
-            Clock.synch () ;
-            Metric.Atomic.fire packets_sniffed_ok ;
-            Metric.Counter.increase bytes_in (Int64.of_int (String.length pkt)) ;
-            if debug then Printf.printf "Pcap: Got packet for ts %s\n%!" (Clock.Time.to_string ts) ;
-            Clock.at ts rx (bitstring_of_string pkt) ;
-            loop () in
-    Thread.create loop ()
+external openif_ : string -> bool -> string -> int -> iface_handler = "wrap_pcap_make"
 
 (** {2 Pcap files} *)
 
@@ -434,4 +421,74 @@ let play tx fname =
                     read_next_pkt (Some pdu.Pdu.ts)) ()
     in
     Clock.asap read_next_pkt None
+
+(** {2 User friendly functions for capturing/injecting packets} *)
+
+(** A network device opened for sniffing or injection *)
+type iface = { handler : iface_handler ;
+               name : string ;
+               caplen : int }
+
+(** Get the MTU of a device (on Linux). May raise all kind of exceptions. *)
+let mtu ifname =
+    let fname = Printf.sprintf "/sys/class/net/%s/mtu" ifname in
+    File.lines_of fname |> Enum.get_exn |> int_of_string
+
+(** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
+ * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
+ * of each packets. Notice that if [caplen] is not set then {e MTU} for the
+ * device will be chosen. *)
+let openif ?(promisc=true) ?(filter="") ?caplen ifname =
+    let caplen = Option.default_delayed (fun () -> mtu ifname) caplen in
+    { handler = openif_ ifname promisc filter caplen ;
+      name = ifname ;
+      caplen = caplen }
+
+(** [sniff iface] will return the next available packet as a Pcap.Pdu.t. *)
+let sniff iface =
+    let ts, bytes = sniff_ iface.handler in
+    Pdu.make iface.name ~caplen:iface.caplen ts (bitstring_of_string bytes)
+
+(** {2 Packet injection} *)
+
+(** A counter for how many packets were injected successfully. *)
+let packets_injected_ok  = Metric.Atomic.make "Pcap/Packets/Injected/Ok"
+(** A counter for how many packets we failed to inject. *)
+let packets_injected_err = Metric.Atomic.make "Pcap/Packets/Injected/Err"
+(** A counter for how many bytes were injected successfully. *)
+let bytes_out            = Metric.Counter.make "Pcap/Bytes/Out" "bytes"
+
+(** [inject iface bits] inject the packet [bits] into interface [iface]. *)
+let inject iface bits =
+    (try
+        let str = string_of_bitstring bits in
+        if debug then Printf.printf "Pcap: injecting a packet (%d bytes)...\n%!" (String.length str);
+        inject_ iface.handler str ;
+        Metric.Atomic.fire packets_injected_ok ;
+        Metric.Counter.increase bytes_out (Int64.of_int (bytelength bits))
+    with _ ->
+        if debug then Printf.printf "Pcap: Cannot inject a packet\n" ;
+        Metric.Atomic.fire packets_injected_err)
+
+(** {2 Packet sniffing} *)
+
+(** A counter for how many packets were sniffed. *)
+let packets_sniffed_ok = Metric.Atomic.make "Pcap/Packets/Sniffed"
+(** A counter for how many bytes were sniffed. *)
+let bytes_in           = Metric.Counter.make "Pcap/Bytes/In" "bytes"
+
+(** [sniffer iface rx] returns a thread that continuously sniff packets
+ * and pass them to the [rx] function (via the Clock). *)
+let sniffer iface rx =
+    let rec loop () =
+        match none_if_exception sniff iface with
+        | None -> ()
+        | Some pdu ->
+            Clock.synch () ;
+            Metric.Atomic.fire packets_sniffed_ok ;
+            Metric.Counter.increase bytes_in (Int64.of_int (Payload.length pdu.Pdu.payload)) ;
+            if debug then Printf.printf "Pcap: Got packet for ts %s\n%!" (Clock.Time.to_string pdu.Pdu.ts) ;
+            Clock.at pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
+            loop () in
+    Thread.create loop ()
 

@@ -98,7 +98,7 @@ struct
         let iface = Pcap.openif ~caplen:1800 iface_name in
         let emit = ref ignore in
         { equip = [] ;
-          plugs = [ Plug.make iface_name { write = Pcap.inject_pdu iface ;
+          plugs = [ Plug.make iface_name { write = Pcap.inject iface ;
                                            set_read = fun em -> emit := em} ] },
         Pcap.sniffer iface (fun bits -> !emit bits)
 

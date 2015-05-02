@@ -29,13 +29,13 @@ let arp_query (src_eth : Eth.Addr.t) src_ip target_ip =
                                    ( Ip.Addr.to_bitstring src_ip)
                                    ( Ip.Addr.to_bitstring target_ip) in
     let eth = Eth.Pdu.make Arp.HwProto.arp src_eth Eth.Addr.broadcast (Arp.Pdu.pack arp) in
-    Pcap.inject iface (string_of_bitstring (Eth.Pdu.pack eth))
+    Pcap.inject iface (Eth.Pdu.pack eth)
 
 let wait_answer target_ip_bits =
     (* TODO: times out *)
     let rec aux () =
-        let _ts, packet = Pcap.sniff iface in
-        (match Eth.Pdu.unpack (bitstring_of_string packet) with
+        let pdu = Pcap.sniff iface in
+        (match Eth.Pdu.unpack (pdu.Pcap.Pdu.payload :> bitstring) with
         | None -> failwith "Cannot unpack Eth"
         | Some eth ->
             if eth.Eth.Pdu.proto <> Arp.HwProto.arp then aux () else

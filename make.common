@@ -6,7 +6,7 @@ OCAMLDOC   = ocamlfind ocamldoc -html -colorize-code -thread -sort -stars
 OCAMLMKTOP = ocamlfind ocamlmktop -thread -g
 QTEST      = qtest
 DOCDIR    ?= doc/
-WARNS      = Ael-31-41-44-45-48
+WARNS      = Ael-31-41-44-45-48-18
 override OCAMLOPTFLAGS += $(INCS) -w $(WARNS) -g -annot
 override OCAMLFLAGS    += $(INCS) -w $(WARNS) -g -annot
 

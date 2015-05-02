@@ -43,7 +43,7 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
     ) hosts ;
     (* Link all these to the real world *)
     let iface = Pcap.openif ifname in
-    Hub.Repeater.set_read nb_srcs hub (Pcap.inject_pdu iface) ;
+    Hub.Repeater.set_read nb_srcs hub (Pcap.inject iface) ;
     (* Start the browsers *)
     List.iter (fun h ->
         let browser = Browser.make h in

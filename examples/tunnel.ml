@@ -28,7 +28,7 @@ let tunnel ifname tun_ip tun_mac gw search_sfx nameserver dst dst_port src_port 
     let iface = Pcap.openif ifname
     and host = Host.make_static "tun" ?gw ?search_sfx ?nameserver tun_mac tun_ip
     and http = Http.TRX.make [ "Content-Type", "tun/eth" ] in
-    host.Host.dev.set_read (Pcap.inject_pdu iface) ;
+    host.Host.dev.set_read (Pcap.inject iface) ;
     let connect_tunnel tcp =
         Printf.printf "Tunnel: We are now connected!\n%!" ;
         http =-> (tx tcp.Tcp.TRX.trx) ;
@@ -56,7 +56,7 @@ let tunnel ifname tun_ip tun_mac gw search_sfx nameserver dst dst_port src_port 
     let recv_http bits =
         Printf.printf "Tunnel: Received an eth frame from the HTTP tunnel, injecting\n%!" ;
         (* to use our GW: Eth.TRX.tx host.Host.eth x *)
-        Pcap.inject_pdu iface bits
+        Pcap.inject iface bits
     in
     ignore (recv_http <-= http) ;
     ignore (Pcap.sniffer iface host.Host.dev.write) ;
