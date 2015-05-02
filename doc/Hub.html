@@ -53,19 +53,24 @@
 &nbsp;<a class="post" href="Icmp.html" title="Icmp">Next</a>
 </div>
 <h1>Module <a href="type_Hub.html">Hub</a></h1>
-<pre><span class="keyword">module</span> Hub: <code class="code"><span class="keyword">sig</span></code> <a href="Hub.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Hub: <code class="code"><span class="keyword">sig</span></code> <a href="Hub.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 A Repeater (or HUB) is a device that receives Eth frames and blindly mirrors them
    to several locations (but the one from which the frame came from)<br>
 </div>
 <hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><pre><span class="keyword">module</span> <a href="Hub.Repeater.html">Repeater</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Hub.Repeater.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre>
+<pre><span class="keyword">module</span> <a href="Hub.Repeater.html">Repeater</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Hub.Repeater.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 A Repeater (or HUB) is a device that receives Eth frames and blindly mirrors them
    to several locations (but the one from which the frame came from)
 </div>
+
 <pre><span class="keyword">module</span> <a href="Hub.Switch.html">Switch</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Hub.Switch.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 A Switch is a device that will forward Ethernet frames based on the observed
   location of the destination.
 </div>
+
 <pre><span class="keyword">module</span> <a href="Hub.Tap.html">Tap</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Hub.Tap.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 A Tap is a 2 port repeater wich mirror each packet to a user function.
 </div>

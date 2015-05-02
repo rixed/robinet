@@ -53,26 +53,29 @@
 &nbsp;<a class="post" href="Tools.MakePrivate.html" title="Tools.MakePrivate">Next</a>
 </div>
 <h1>Module <a href="type_Tools.OrdArray.html">Tools.OrdArray</a></h1>
-<pre><span class="keyword">module</span> OrdArray: <code class="code"><span class="keyword">sig</span></code> <a href="Tools.OrdArray.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> OrdArray: <code class="code"><span class="keyword">sig</span></code> <a href="Tools.OrdArray.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 An OrdArray is a container for an ordered set of bounded size.<br>
 </div>
 <hr width="100%">
+
 <pre><code><span id="TYPEentry"><span class="keyword">type</span> <code class="type"></code>entry</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTentry.prev">prev</span>&nbsp;:<code class="type">int</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTentry.prev">prev</span>&nbsp;: <code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTentry.next">next</span>&nbsp;:<code class="type">int</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTentry.next">next</span>&nbsp;: <code class="type">int</code>;</code></td>
 
 </tr></table>
 }
+
 
 
 <pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type">'a</code> t</span> = {</code></pre><table class="typetable">
@@ -80,34 +83,53 @@ An OrdArray is a container for an ordered set of bounded size.<br>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.last_used">last_used</span>&nbsp;:<code class="type"><a href="Tools.OrdArray.html#TYPEentry">entry</a> array</code>;</code></td>
-<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >The ordered list of indices.</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+<code><span id="TYPEELTt.last_used">last_used</span>&nbsp;: <code class="type"><a href="Tools.OrdArray.html#TYPEentry">entry</a> array</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" ><div class="info ">
+The ordered list of indices.<br>
+</div>
+</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.first">first</span>&nbsp;:<code class="type">int</code>;</code></td>
-<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >The indice of the first element.</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.first">first</span>&nbsp;: <code class="type">int</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" ><div class="info ">
+The indice of the first element.<br>
+</div>
+</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.last">last</span>&nbsp;:<code class="type">int</code>;</code></td>
-<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >and the last one.</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.last">last</span>&nbsp;: <code class="type">int</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" ><div class="info ">
+and the last one.<br>
+</div>
+</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.data">data</span>&nbsp;:<code class="type">'a array</code>;</code></td>
+<code><span id="TYPEELTt.data">data</span>&nbsp;: <code class="type">'a array</code>;</code></td>
 
 </tr></table>
 }
 
-<div class="info">
+<div class="info ">
 User data<br>
 </div>
 
-<pre><span id="VALmake_from_data"><span class="keyword">val</span> make_from_data</span> : <code class="type">'a array -> 'a <a href="Tools.OrdArray.html#TYPEt">t</a></code></pre><pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">int -> 'a -> 'a <a href="Tools.OrdArray.html#TYPEt">t</a></code></pre><pre><span id="VALinit"><span class="keyword">val</span> init</span> : <code class="type">int -> (int -> 'a) -> 'a <a href="Tools.OrdArray.html#TYPEt">t</a></code></pre><pre><span id="VALget"><span class="keyword">val</span> get</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int -> 'a</code></pre><pre><span id="VALset"><span class="keyword">val</span> set</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int -> 'a -> unit</code></pre><pre><span id="VALfirst"><span class="keyword">val</span> first</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int</code></pre><pre><span id="VALlast"><span class="keyword">val</span> last</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int</code></pre><pre><span id="VALremove"><span class="keyword">val</span> remove</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int -> unit</code></pre><pre><span id="VALadd_head"><span class="keyword">val</span> add_head</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int -> unit</code></pre><pre><span id="VALpromote"><span class="keyword">val</span> promote</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int -> unit</code></pre></body></html>
+
+<pre><span id="VALmake_from_data"><span class="keyword">val</span> make_from_data</span> : <code class="type">'a array -> 'a <a href="Tools.OrdArray.html#TYPEt">t</a></code></pre>
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">int -> 'a -> 'a <a href="Tools.OrdArray.html#TYPEt">t</a></code></pre>
+<pre><span id="VALinit"><span class="keyword">val</span> init</span> : <code class="type">int -> (int -> 'a) -> 'a <a href="Tools.OrdArray.html#TYPEt">t</a></code></pre>
+<pre><span id="VALget"><span class="keyword">val</span> get</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int -> 'a</code></pre>
+<pre><span id="VALset"><span class="keyword">val</span> set</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int -> 'a -> unit</code></pre>
+<pre><span id="VALfirst"><span class="keyword">val</span> first</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int</code></pre>
+<pre><span id="VALlast"><span class="keyword">val</span> last</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int</code></pre>
+<pre><span id="VALremove"><span class="keyword">val</span> remove</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int -> unit</code></pre>
+<pre><span id="VALadd_head"><span class="keyword">val</span> add_head</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int -> unit</code></pre>
+<pre><span id="VALpromote"><span class="keyword">val</span> promote</span> : <code class="type">'a <a href="Tools.OrdArray.html#TYPEt">t</a> -> int -> unit</code></pre></body></html>

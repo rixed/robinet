@@ -51,42 +51,47 @@
 &nbsp;<a class="up" href="Http.html" title="Http">Up</a>
 &nbsp;</div>
 <h1>Module <a href="type_Http.TRX.html">Http.TRX</a></h1>
-<pre><span class="keyword">module</span> TRX: <code class="code"><span class="keyword">sig</span></code> <a href="Http.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> TRX: <code class="code"><span class="keyword">sig</span></code> <a href="Http.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 Once build (as a poster or server), the Http.TRX handle the whole connection(s).
     Used to tx a body (packed into a 200 Ok response or a post).
     This is mostly useful to use HTTP as a transport layer (for instance as a tunnel).<br>
 </div>
 <hr width="100%">
+
 <pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.cmd">cmd</span>&nbsp;:<code class="type"><a href="Http.html#TYPEcmd">Http.cmd</a></code>;</code></td>
+<code><span id="TYPEELTt.cmd">cmd</span>&nbsp;: <code class="type"><a href="Http.html#TYPEcmd">Http.cmd</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.headers">headers</span>&nbsp;:<code class="type"><a href="Http.html#TYPEheader">Http.header</a> list</code>;</code></td>
+<code><span id="TYPEELTt.headers">headers</span>&nbsp;: <code class="type"><a href="Http.html#TYPEheader">Http.header</a> list</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.recv">recv</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.recv">recv</span>&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.top">top</span>&nbsp;:<code class="type"><a href="Http.TRXtop.html#TYPEt">Http.TRXtop.t</a></code>;</code></td>
+<code><span id="TYPEELTt.top">top</span>&nbsp;: <code class="type"><a href="Http.TRXtop.html#TYPEt">Http.TRXtop.t</a></code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALtx"><span class="keyword">val</span> tx</span> : <code class="type"><a href="Http.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALrx"><span class="keyword">val</span> rx</span> : <code class="type"><a href="Http.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">?cmd:<a href="Http.html#TYPEcmd">Http.cmd</a> -> <a href="Http.html#TYPEheader">Http.header</a> list -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre></body></html>
+
+<pre><span id="VALtx"><span class="keyword">val</span> tx</span> : <code class="type"><a href="Http.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre>
+<pre><span id="VALrx"><span class="keyword">val</span> rx</span> : <code class="type"><a href="Http.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre>
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">?cmd:<a href="Http.html#TYPEcmd">Http.cmd</a> -> <a href="Http.html#TYPEheader">Http.header</a> list -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre></body></html>

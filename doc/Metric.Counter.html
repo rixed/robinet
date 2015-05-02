@@ -53,37 +53,43 @@
 &nbsp;<a class="post" href="Metric.Timed.html" title="Metric.Timed">Next</a>
 </div>
 <h1>Module <a href="type_Metric.Counter.html">Metric.Counter</a></h1>
+
 <pre><span class="keyword">module</span> Counter: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Counter.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
+
 <pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.name">name</span>&nbsp;:<code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.name">name</span>&nbsp;: <code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.unit_str">unit_str</span>&nbsp;:<code class="type">string</code>;</code></td>
+<code><span id="TYPEELTt.unit_str">unit_str</span>&nbsp;: <code class="type">string</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.value">value</span>&nbsp;:<code class="type">int64</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.value">value</span>&nbsp;: <code class="type">int64</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.events">events</span>&nbsp;:<code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code>;</code></td>
+<code><span id="TYPEELTt.events">events</span>&nbsp;: <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALall"><span class="keyword">val</span> all</span> : <code class="type">(string, <a href="Metric.Counter.html#TYPEt">t</a>) Batteries.Hashtbl.t</code></pre><pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">string -> string -> <a href="Metric.Counter.html#TYPEt">t</a></code></pre><pre><span id="VALincrease"><span class="keyword">val</span> increase</span> : <code class="type"><a href="Metric.Counter.html#TYPEt">t</a> -> int64 -> unit</code></pre><pre><span id="VALprint"><span class="keyword">val</span> print</span> : <code class="type">'a BatInnerIO.output -> <a href="Metric.Counter.html#TYPEt">t</a> -> unit</code></pre></body></html>
+
+<pre><span id="VALall"><span class="keyword">val</span> all</span> : <code class="type">(string, <a href="Metric.Counter.html#TYPEt">t</a>) Batteries.Hashtbl.t</code></pre>
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">string -> string -> <a href="Metric.Counter.html#TYPEt">t</a></code></pre>
+<pre><span id="VALincrease"><span class="keyword">val</span> increase</span> : <code class="type"><a href="Metric.Counter.html#TYPEt">t</a> -> int64 -> unit</code></pre>
+<pre><span id="VALprint"><span class="keyword">val</span> print</span> : <code class="type">'a BatInnerIO.output -> <a href="Metric.Counter.html#TYPEt">t</a> -> unit</code></pre></body></html>

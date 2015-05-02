@@ -58,16 +58,23 @@
 &nbsp;<a class="post" href="Hub.html" title="Hub">Next</a>
 </div>
 <h1>Module <a href="type_Http.html">Http</a></h1>
-<pre><span class="keyword">module</span> Http: <code class="code"><span class="keyword">sig</span></code> <a href="Http.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Http: <code class="code"><span class="keyword">sig</span></code> <a href="Http.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 HyperText Transfert Protocol<br>
 </div>
 <hr width="100%">
+
 <pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><br>
 <h2 id="2_HTTPErrorcodes">HTTP Error codes</h2><br>
+
 <pre><span id="TYPEcode"><span class="keyword">type</span> <code class="type"></code>code</span> = <code class="type">int</code> </pre>
 
-<pre><span id="VALtext_of_code"><span class="keyword">val</span> text_of_code</span> : <code class="type"><a href="Http.html#TYPEcode">code</a> -> string</code></pre><pre><span id="VALstring_of_code"><span class="keyword">val</span> string_of_code</span> : <code class="type"><a href="Http.html#TYPEcode">code</a> -> string</code></pre><pre><span id="VALprint_code"><span class="keyword">val</span> print_code</span> : <code class="type">Batteries.Format.formatter -> <a href="Http.html#TYPEcode">code</a> -> unit</code></pre><br>
+
+<pre><span id="VALtext_of_code"><span class="keyword">val</span> text_of_code</span> : <code class="type"><a href="Http.html#TYPEcode">code</a> -> string</code></pre>
+<pre><span id="VALstring_of_code"><span class="keyword">val</span> string_of_code</span> : <code class="type"><a href="Http.html#TYPEcode">code</a> -> string</code></pre>
+<pre><span id="VALprint_code"><span class="keyword">val</span> print_code</span> : <code class="type">Batteries.Format.formatter -> <a href="Http.html#TYPEcode">code</a> -> unit</code></pre><br>
 <h2 id="2_HTTPcommandsheaders">HTTP commands, headers... </h2><br>
+
 <pre><code><span id="TYPEcmd"><span class="keyword">type</span> <code class="type"></code>cmd</span> = </code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
@@ -85,19 +92,35 @@ HyperText Transfert Protocol<br>
 </tr></table>
 
 
+
 <pre><span id="TYPEheader"><span class="keyword">type</span> <code class="type"></code>header</span> = <code class="type">string * string</code> </pre>
 
-<pre><span id="VALstring_of_header"><span class="keyword">val</span> string_of_header</span> : <code class="type">string * string -> string</code></pre><pre><span id="VALprint_header"><span class="keyword">val</span> print_header</span> : <code class="type">'a BatInnerIO.output -> string * string -> unit</code></pre><pre><span id="VALprint_headers"><span class="keyword">val</span> print_headers</span> : <code class="type">'a BatInnerIO.output -> (string * string) list -> unit</code></pre><pre><span id="VALstring_of_headers"><span class="keyword">val</span> string_of_headers</span> : <code class="type">(string * string) list -> string</code></pre><pre><span id="VALheader_content_length_re"><span class="keyword">val</span> header_content_length_re</span> : <code class="type">Str.regexp</code></pre><pre><span id="VALchunked_transfert_encoding_re"><span class="keyword">val</span> chunked_transfert_encoding_re</span> : <code class="type">Str.regexp</code></pre><pre><span id="VALheaders_find"><span class="keyword">val</span> headers_find</span> : <code class="type">Batteries.String.t -> (Batteries.String.t * 'a) list -> 'a option</code></pre><pre><span id="VALheaders_find_all"><span class="keyword">val</span> headers_find_all</span> : <code class="type">Batteries.String.t -> (Batteries.String.t * 'a) list -> 'a list</code></pre><pre><span id="VALheader_present"><span class="keyword">val</span> header_present</span> : <code class="type">Batteries.String.t -><br>       Batteries.String.t -> (Batteries.String.t * Batteries.String.t) list -> bool</code></pre><pre><span id="VALmust_close_cnx"><span class="keyword">val</span> must_close_cnx</span> : <code class="type">(Batteries.String.t * Batteries.String.t) list -> bool</code></pre><br>
+
+<pre><span id="VALstring_of_header"><span class="keyword">val</span> string_of_header</span> : <code class="type">string * string -> string</code></pre>
+<pre><span id="VALprint_header"><span class="keyword">val</span> print_header</span> : <code class="type">'a BatInnerIO.output -> string * string -> unit</code></pre>
+<pre><span id="VALprint_headers"><span class="keyword">val</span> print_headers</span> : <code class="type">'a BatInnerIO.output -> (string * string) list -> unit</code></pre>
+<pre><span id="VALstring_of_headers"><span class="keyword">val</span> string_of_headers</span> : <code class="type">(string * string) list -> string</code></pre>
+<pre><span id="VALheader_content_length_re"><span class="keyword">val</span> header_content_length_re</span> : <code class="type">Str.regexp</code></pre>
+<pre><span id="VALchunked_transfert_encoding_re"><span class="keyword">val</span> chunked_transfert_encoding_re</span> : <code class="type">Str.regexp</code></pre>
+<pre><span id="VALheaders_find"><span class="keyword">val</span> headers_find</span> : <code class="type">Batteries.String.t -> (Batteries.String.t * 'a) list -> 'a option</code></pre>
+<pre><span id="VALheaders_find_all"><span class="keyword">val</span> headers_find_all</span> : <code class="type">Batteries.String.t -> (Batteries.String.t * 'a) list -> 'a list</code></pre>
+<pre><span id="VALheader_present"><span class="keyword">val</span> header_present</span> : <code class="type">Batteries.String.t -><br>       Batteries.String.t -> (Batteries.String.t * Batteries.String.t) list -> bool</code></pre>
+<pre><span id="VALmust_close_cnx"><span class="keyword">val</span> must_close_cnx</span> : <code class="type">(Batteries.String.t * Batteries.String.t) list -> bool</code></pre><br>
 <h2 id="2_HTTPMessages">HTTP Messages</h2><br>
+
 <pre><span class="keyword">module</span> <a href="Http.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Http.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><br>
 <h2 id="2_TRXforHTTPmessages">TRX for HTTP messages</h2><br>
+
 <pre><span class="keyword">module</span> <a href="Http.TRXtop.html">TRXtop</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Http.TRXtop.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Special kind of transceiver, useful when it's on top of a TRX stack, that
     receive and tx Pdu.t messages (instead of bitstring).
 </div>
 <br>
 <h2 id="2_TRXforanypayload">TRX for any payload</h2><br>
+
 <pre><span class="keyword">module</span> <a href="Http.TRX.html">TRX</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Http.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Once build (as a poster or server), the Http.TRX handle the whole connection(s).
 </div>
-<pre><span id="VALpost_decode"><span class="keyword">val</span> post_decode</span> : <code class="type">string -> string</code></pre><pre><span id="VALpost_encode"><span class="keyword">val</span> post_encode</span> : <code class="type">string -> string</code></pre></body></html>
+
+<pre><span id="VALpost_decode"><span class="keyword">val</span> post_decode</span> : <code class="type">string -> string</code></pre>
+<pre><span id="VALpost_encode"><span class="keyword">val</span> post_encode</span> : <code class="type">string -> string</code></pre></body></html>

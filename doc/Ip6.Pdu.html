@@ -51,65 +51,72 @@
 &nbsp;<a class="post" href="Ip6.TRX.html" title="Ip6.TRX">Next</a>
 </div>
 <h1>Module <a href="type_Ip6.Pdu.html">Ip6.Pdu</a></h1>
+
 <pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Ip6.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
+
 <pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.ttl">ttl</span>&nbsp;:<code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.ttl">ttl</span>&nbsp;: <code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.proto">proto</span>&nbsp;:<code class="type">Ip.Proto.t</code>;</code></td>
+<code><span id="TYPEELTt.proto">proto</span>&nbsp;: <code class="type">Ip.Proto.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.diff_serv">diff_serv</span>&nbsp;:<code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.diff_serv">diff_serv</span>&nbsp;: <code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.ecn">ecn</span>&nbsp;:<code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.ecn">ecn</span>&nbsp;: <code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.flow_label">flow_label</span>&nbsp;:<code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.flow_label">flow_label</span>&nbsp;: <code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.src">src</span>&nbsp;:<code class="type">Ip.Addr.t</code>;</code></td>
+<code><span id="TYPEELTt.src">src</span>&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.dst">dst</span>&nbsp;:<code class="type">Ip.Addr.t</code>;</code></td>
+<code><span id="TYPEELTt.dst">dst</span>&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.payload">payload</span>&nbsp;:<code class="type">Tools.Payload.t</code>;</code></td>
+<code><span id="TYPEELTt.payload">payload</span>&nbsp;: <code class="type">Tools.Payload.t</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">?ttl:int -><br>       ?diff_serv:int -><br>       ?ecn:int -><br>       ?flow_label:int -><br>       Ip.Proto.t -> Ip.Addr.t -> Ip.Addr.t -> Tools.Payload.outer_t -> <a href="Ip6.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Ip6.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALpseudo_header"><span class="keyword">val</span> pseudo_header</span> : <code class="type"><a href="Ip6.Pdu.html#TYPEt">t</a> -> unit -> Bitstring.bitstring</code></pre><pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Ip6.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">string * int * int -> <a href="Ip6.Pdu.html#TYPEt">t</a> option</code></pre></body></html>
+
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">?ttl:int -><br>       ?diff_serv:int -><br>       ?ecn:int -><br>       ?flow_label:int -><br>       Ip.Proto.t -> Ip.Addr.t -> Ip.Addr.t -> Tools.Payload.outer_t -> <a href="Ip6.Pdu.html#TYPEt">t</a></code></pre>
+<pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Ip6.Pdu.html#TYPEt">t</a></code></pre>
+<pre><span id="VALpseudo_header"><span class="keyword">val</span> pseudo_header</span> : <code class="type"><a href="Ip6.Pdu.html#TYPEt">t</a> -> unit -> Bitstring.bitstring</code></pre>
+<pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Ip6.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre>
+<pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">string * int * int -> <a href="Ip6.Pdu.html#TYPEt">t</a> option</code></pre></body></html>

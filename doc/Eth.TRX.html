@@ -51,83 +51,86 @@
 &nbsp;<a class="up" href="Eth.html" title="Eth">Up</a>
 &nbsp;</div>
 <h1>Module <a href="type_Eth.TRX.html">Eth.TRX</a></h1>
-<pre><span class="keyword">module</span> TRX: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> TRX: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 An Ethernet TRX will convert from payload to Ethernet frames (resolving
- destinators using ARP), for a single <code class="code"><span class="constructor">Arp</span>.<span class="constructor">HwProto</span>.t</code>.<br>
+ destinations using ARP), for a single <code class="code"><span class="constructor">Arp</span>.<span class="constructor">HwProto</span>.t</code>.<br>
 </div>
 <hr width="100%">
+
 <pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.src">src</span>&nbsp;:<code class="type">Eth.Addr.t</code>;</code></td>
+<code><span id="TYPEELTt.src">src</span>&nbsp;: <code class="type">Eth.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.gw">gw</span>&nbsp;:<code class="type"><a href="Eth.html#TYPEgw_addr">Eth.gw_addr</a> option</code>;</code></td>
+<code><span id="TYPEELTt.gw">gw</span>&nbsp;: <code class="type"><a href="Eth.html#TYPEgw_addr">Eth.gw_addr</a> option</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.proto">proto</span>&nbsp;:<code class="type">Arp.HwProto.t</code>;</code></td>
+<code><span id="TYPEELTt.proto">proto</span>&nbsp;: <code class="type">Arp.HwProto.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.mtu">mtu</span>&nbsp;:<code class="type">int</code>;</code></td>
+<code><span id="TYPEELTt.mtu">mtu</span>&nbsp;: <code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.my_addresses">my_addresses</span>&nbsp;:<code class="type">Bitstring.bitstring list</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.my_addresses">my_addresses</span>&nbsp;: <code class="type">Bitstring.bitstring list</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.emit">emit</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.emit">emit</span>&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.recv">recv</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.recv">recv</span>&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.promisc">promisc</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.promisc">promisc</span>&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.arp_cache">arp_cache</span>&nbsp;:<code class="type">Eth.Addr.t option Tools.BitHash.t</code>;</code></td>
+<code><span id="TYPEELTt.arp_cache">arp_cache</span>&nbsp;: <code class="type">Eth.Addr.t option Tools.BitHash.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.delayed">delayed</span>&nbsp;:<code class="type">Bitstring.bitstring Tools.BitHash.t</code>;</code></td>
+<code><span id="TYPEELTt.delayed">delayed</span>&nbsp;: <code class="type">Bitstring.bitstring Tools.BitHash.t</code>;</code></td>
 
 </tr></table>
 }
+
 
 
 <pre><code><span id="TYPEeth_trx"><span class="keyword">type</span> <code class="type"></code>eth_trx</span> = {</code></pre><table class="typetable">
@@ -135,45 +138,48 @@ An Ethernet TRX will convert from payload to Ethernet frames (resolving
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTeth_trx.trx">trx</span>&nbsp;:<code class="type"><a href="Tools.html#TYPEtrx">Tools.trx</a></code>;</code></td>
+<code><span id="TYPEELTeth_trx.trx">trx</span>&nbsp;: <code class="type"><a href="Tools.html#TYPEtrx">Tools.trx</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTeth_trx.set_promiscuous">set_promiscuous</span>&nbsp;:<code class="type">(Bitstring.bitstring -> unit) -> unit</code>;</code></td>
+<code><span id="TYPEELTeth_trx.set_promiscuous">set_promiscuous</span>&nbsp;: <code class="type">(Bitstring.bitstring -> unit) -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTeth_trx.set_addresses">set_addresses</span>&nbsp;:<code class="type">Bitstring.bitstring list -> unit</code>;</code></td>
+<code><span id="TYPEELTeth_trx.set_addresses">set_addresses</span>&nbsp;: <code class="type">Bitstring.bitstring list -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTeth_trx.get_source">get_source</span>&nbsp;:<code class="type">unit -> Eth.Addr.t</code>;</code></td>
+<code><span id="TYPEELTeth_trx.get_source">get_source</span>&nbsp;: <code class="type">unit -> Eth.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTeth_trx.arp_set">arp_set</span>&nbsp;:<code class="type">Bitstring.bitstring -> Eth.Addr.t option -> unit</code>;</code></td>
+<code><span id="TYPEELTeth_trx.arp_set">arp_set</span>&nbsp;: <code class="type">Bitstring.bitstring -> Eth.Addr.t option -> unit</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALsend"><span class="keyword">val</span> send</span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> Arp.HwProto.t -> Eth.Addr.t -> Tools.Payload.outer_t -> unit</code></pre><div class="info">
+
+<pre><span id="VALsend"><span class="keyword">val</span> send</span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> Arp.HwProto.t -> Eth.Addr.t -> Tools.Payload.outer_t -> unit</code></pre><div class="info ">
 Low level send fonction. Takes a <code class="code"><span class="constructor">Arp</span>.<span class="constructor">HwProto</span>.t</code> since it's used both
  for the user payload protocol and ARP protocol.<br>
 </div>
-<pre><span id="VALresolve_proto_addr"><span class="keyword">val</span> resolve_proto_addr</span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -><br>       Bitstring.bitstring -> Bitstring.bitstring -> Bitstring.bitstring -> unit</code></pre><pre><code><span id="TYPEdst"><span class="keyword">type</span> <code class="type"></code>dst</span> = </code></pre><table class="typetable">
+
+<pre><span id="VALresolve_proto_addr"><span class="keyword">val</span> resolve_proto_addr</span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -><br>       Bitstring.bitstring -> Bitstring.bitstring -> Bitstring.bitstring -> unit</code></pre>
+<pre><code><span id="TYPEdst"><span class="keyword">type</span> <code class="type"></code>dst</span> = </code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
@@ -190,13 +196,18 @@ Low level send fonction. Takes a <code class="code"><span class="constructor">Ar
 </tr></table>
 
 
-<pre><span id="VALarp_resolve_ipv4"><span class="keyword">val</span> arp_resolve_ipv4</span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -><br>       Bitstring.bitstring -><br>       Bitstring.bitstring -> Tools.BitHash.key -> <a href="Eth.TRX.html#TYPEdst">dst</a></code></pre><pre><span id="VALdst_for"><span class="keyword">val</span> dst_for</span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> <a href="Eth.TRX.html#TYPEdst">dst</a> Batteries.Option.Monad.m</code></pre><pre><span id="VALtx"><span class="keyword">val</span> tx</span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><div class="info">
+
+<pre><span id="VALarp_resolve_ipv4"><span class="keyword">val</span> arp_resolve_ipv4</span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -><br>       Bitstring.bitstring -><br>       Bitstring.bitstring -> Tools.BitHash.key -> <a href="Eth.TRX.html#TYPEdst">dst</a></code></pre>
+<pre><span id="VALdst_for"><span class="keyword">val</span> dst_for</span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> <a href="Eth.TRX.html#TYPEdst">dst</a> Batteries.Option.Monad.m</code></pre>
+<pre><span id="VALtx"><span class="keyword">val</span> tx</span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> Bitstring.bitstring -> unit</code></pre><div class="info ">
 Transmit function. <code class="code">tx t payload</code> Will send the payload.<br>
 </div>
-<pre><span id="VALrx"><span class="keyword">val</span> rx</span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre><div class="info">
+
+<pre><span id="VALrx"><span class="keyword">val</span> rx</span> : <code class="type"><a href="Eth.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre><div class="info ">
 Receive function, called to input an Ethernet frame into the TRX.<br>
 </div>
-<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">?mtu:int -><br>       Eth.Addr.t -><br>       ?gw:<a href="Eth.html#TYPEgw_addr">Eth.gw_addr</a> -><br>       ?promisc:(Bitstring.bitstring -> unit) -><br>       Arp.HwProto.t -> Bitstring.bitstring list -> <a href="Eth.TRX.html#TYPEeth_trx">eth_trx</a></code></pre><div class="info">
+
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">?mtu:int -><br>       Eth.Addr.t -><br>       ?gw:<a href="Eth.html#TYPEgw_addr">Eth.gw_addr</a> -><br>       ?promisc:(Bitstring.bitstring -> unit) -><br>       Arp.HwProto.t -> Bitstring.bitstring list -> <a href="Eth.TRX.html#TYPEeth_trx">eth_trx</a></code></pre><div class="info ">
 Creates an <a href="Eth.TRX.html#TYPEt"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">TRX</span>.t</code></a>.
 <br>
 </div>

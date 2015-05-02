@@ -49,7 +49,8 @@
 <div class="navbar">&nbsp;<a class="up" href="Packet.html" title="Packet">Up</a>
 &nbsp;</div>
 <h1>Module <a href="type_Packet.Pdu.html">Packet.Pdu</a></h1>
-<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Packet.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Packet.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 Pack/Unpack the whole protocol stack that fits entirely within a packet.
 <p>
 
@@ -59,13 +60,17 @@ Pack/Unpack the whole protocol stack that fits entirely within a packet.
  Typically you want to unpack then update, then pack back to <code class="code">bitstring</code>.<br>
 </div>
 <hr width="100%">
+
 <pre><code><span id="TYPElayer"><span class="keyword">type</span> <code class="type"></code>layer</span> = </code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
 <code><span id="TYPEELTlayer.Raw"><span class="constructor">Raw</span></span> <span class="keyword">of</span> <code class="type">Bitstring.bitstring</code></code></td>
-<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >the fallback when the actual protocol is not known</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" ><div class="info ">
+the fallback when the actual protocol is not known<br>
+</div>
+</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
@@ -149,20 +154,26 @@ Pack/Unpack the whole protocol stack that fits entirely within a packet.
 <code><span class="keyword">|</span></code></td>
 <td align="left" valign="top" >
 <code><span id="TYPEELTlayer.Pcap"><span class="constructor">Pcap</span></span> <span class="keyword">of</span> <code class="type"><a href="Pcap.Pdu.html#TYPEt">Pcap.Pdu.t</a></code></code></td>
-<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >A Pdu.t is a list of <a href="Packet.Pdu.html#TYPElayer"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer</code></a>s, with the outer layer first for
- a more natural presentation when printed.</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" ><div class="info ">
+A Pdu.t is a list of <a href="Packet.Pdu.html#TYPElayer"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.layer</code></a>s, with the outer layer first for
+ a more natural presentation when printed.<br>
+</div>
+</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr></table>
 
-<div class="info">
+<div class="info ">
 Each layer can be of any one of these known protocol.<br>
 </div>
 
+
 <pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = <code class="type"><a href="Packet.Pdu.html#TYPElayer">layer</a> list</code> </pre>
 
-<pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Packet.Pdu.html#TYPElayer">layer</a> list -> <a href="Pcap.Pdu.html#TYPEt">Pcap.Pdu.t</a></code></pre><div class="info">
+
+<pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Packet.Pdu.html#TYPElayer">layer</a> list -> <a href="Pcap.Pdu.html#TYPEt">Pcap.Pdu.t</a></code></pre><div class="info ">
 <code class="code">pack pdu</code> converts the layer list back to a <a href="Pcap.Pdu.html#TYPEt"><code class="code"><span class="constructor">Pcap</span>.<span class="constructor">Pdu</span>.t</code></a><br>
 </div>
-<pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type"><a href="Pcap.Pdu.html#TYPEt">Pcap.Pdu.t</a> -> <a href="Packet.Pdu.html#TYPElayer">layer</a> list</code></pre><div class="info">
+
+<pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type"><a href="Pcap.Pdu.html#TYPEt">Pcap.Pdu.t</a> -> <a href="Packet.Pdu.html#TYPElayer">layer</a> list</code></pre><div class="info ">
 Converts a <code class="code"><span class="constructor">Pcap</span>.pdu.t</code> into a <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
 </div>
 </body></html>

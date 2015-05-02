@@ -51,44 +51,49 @@
 &nbsp;<a class="up" href="Ip6.html" title="Ip6">Up</a>
 &nbsp;</div>
 <h1>Module <a href="type_Ip6.TRX.html">Ip6.TRX</a></h1>
+
 <pre><span class="keyword">module</span> TRX: <code class="code"><span class="keyword">sig</span></code> <a href="Ip6.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
+
 <pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.src">src</span>&nbsp;:<code class="type">Ip.Addr.t</code>;</code></td>
+<code><span id="TYPEELTt.src">src</span>&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.dst">dst</span>&nbsp;:<code class="type">Ip.Addr.t</code>;</code></td>
+<code><span id="TYPEELTt.dst">dst</span>&nbsp;: <code class="type">Ip.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.proto">proto</span>&nbsp;:<code class="type">Ip.Proto.t</code>;</code></td>
+<code><span id="TYPEELTt.proto">proto</span>&nbsp;: <code class="type">Ip.Proto.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.emit">emit</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.emit">emit</span>&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.recv">recv</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTt.recv">recv</span>&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALtx"><span class="keyword">val</span> tx</span> : <code class="type"><a href="Ip6.TRX.html#TYPEt">t</a> -> Tools.Payload.outer_t -> unit</code></pre><pre><span id="VALrx"><span class="keyword">val</span> rx</span> : <code class="type"><a href="Ip6.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre><pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">Ip.Addr.t -> Ip.Addr.t -> Ip.Proto.t -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre></body></html>
+
+<pre><span id="VALtx"><span class="keyword">val</span> tx</span> : <code class="type"><a href="Ip6.TRX.html#TYPEt">t</a> -> Tools.Payload.outer_t -> unit</code></pre>
+<pre><span id="VALrx"><span class="keyword">val</span> rx</span> : <code class="type"><a href="Ip6.TRX.html#TYPEt">t</a> -> string * int * int -> unit</code></pre>
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">Ip.Addr.t -> Ip.Addr.t -> Ip.Proto.t -> <a href="Tools.html#TYPEtrx">Tools.trx</a></code></pre></body></html>

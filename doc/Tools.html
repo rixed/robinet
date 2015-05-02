@@ -53,83 +53,149 @@
 &nbsp;<a class="post" href="Udp.html" title="Udp">Next</a>
 </div>
 <h1>Module <a href="type_Tools.html">Tools</a></h1>
-<pre><span class="keyword">module</span> Tools: <code class="code"><span class="keyword">sig</span></code> <a href="Tools.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Tools: <code class="code"><span class="keyword">sig</span></code> <a href="Tools.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 Various functions/types prevalent in the library.<br>
 </div>
 <hr width="100%">
-<pre><span id="VALensure"><span class="keyword">val</span> ensure</span> : <code class="type">bool -> string -> unit</code></pre><pre><span id="VALerror"><span class="keyword">val</span> error</span> : <code class="type">string -> 'a</code></pre><pre><span id="VALshould_not_happen"><span class="keyword">val</span> should_not_happen</span> : <code class="type">'a -> 'b</code></pre><pre><span id="VALtodo"><span class="keyword">val</span> todo</span> : <code class="type">string -> 'a</code></pre><pre><span id="VALerr"><span class="keyword">val</span> err</span> : <code class="type">string -> 'a option</code></pre><pre><span id="VALbytelength"><span class="keyword">val</span> bytelength</span> : <code class="type">Bitstring.bitstring -> int</code></pre><pre><span id="VALtakebytes"><span class="keyword">val</span> takebytes</span> : <code class="type">int -> Bitstring.bitstring -> Bitstring.bitstring</code></pre><pre><span id="VALextendbytes"><span class="keyword">val</span> extendbytes</span> : <code class="type">int -> Bitstring.bitstring -> Bitstring.bitstring</code></pre><pre><span id="VALbitstring_is_empty"><span class="keyword">val</span> bitstring_is_empty</span> : <code class="type">Bitstring.bitstring -> bool</code></pre><pre><span id="VALdropbytes"><span class="keyword">val</span> dropbytes</span> : <code class="type">int -> Bitstring.bitstring -> Bitstring.bitstring</code></pre><pre><span id="VALfixedbits"><span class="keyword">val</span> fixedbits</span> : <code class="type">int -> Bitstring.bitstring -> Bitstring.bitstring</code></pre><pre><span id="VALbitstring_fuzz"><span class="keyword">val</span> bitstring_fuzz</span> : <code class="type">float -> Bitstring.bitstring -> Bitstring.bitstring</code></pre><pre><span id="VALbitstring_add"><span class="keyword">val</span> bitstring_add</span> : <code class="type">int -> Bitstring.bitstring -> Bitstring.bitstring</code></pre><pre><span id="VALhexstring_of_bitstring"><span class="keyword">val</span> hexstring_of_bitstring</span> : <code class="type">Bitstring.bitstring -> string</code></pre><pre><span id="VALprintable"><span class="keyword">val</span> printable</span> : <code class="type">string -> string</code></pre><pre><span id="VALprint_bitstring"><span class="keyword">val</span> print_bitstring</span> : <code class="type">Batteries.Format.formatter -> string * int * int -> unit</code></pre><pre><span id="VALint_of_bitstring"><span class="keyword">val</span> int_of_bitstring</span> : <code class="type">Bitstring.bitstring -> int</code></pre><pre><span id="VALbitstring_copy"><span class="keyword">val</span> bitstring_copy</span> : <code class="type">Bitstring.bitstring -> Bitstring.bitstring</code></pre><pre><span id="VALall_bits"><span class="keyword">val</span> all_bits</span> : <code class="type">int -> Bitstring.bitstring Batteries.Enum.t</code></pre><pre><span id="VALabbrev"><span class="keyword">val</span> abbrev</span> : <code class="type">?len:int -> string -> string</code></pre><pre><span id="VALstring_find_first"><span class="keyword">val</span> string_find_first</span> : <code class="type">?from:int -> (char -> bool) -> string -> int</code></pre><pre><span id="VALint_of_hexchar"><span class="keyword">val</span> int_of_hexchar</span> : <code class="type">char -> int</code></pre><pre><span id="VALint_of_hexstring"><span class="keyword">val</span> int_of_hexstring</span> : <code class="type">string -> int option</code></pre><pre><span id="VALmay_default"><span class="keyword">val</span> may_default</span> : <code class="type">'a option -> (unit -> 'a) -> 'a</code></pre><pre><span id="VALremove_last_if"><span class="keyword">val</span> remove_last_if</span> : <code class="type">('a -> bool) -> 'a list -> 'a list</code></pre><pre><span id="VALnone_if_not_found"><span class="keyword">val</span> none_if_not_found</span> : <code class="type">('a -> 'b) -> 'a -> 'b option</code></pre><pre><span id="VALnone_if_exception"><span class="keyword">val</span> none_if_exception</span> : <code class="type">('a -> 'b) -> 'a -> 'b option</code></pre><pre><span id="VALassert_ok"><span class="keyword">val</span> assert_ok</span> : <code class="type">('a, 'b) Batteries.Result.t -> unit</code></pre><pre><span id="VALstr_all_matches"><span class="keyword">val</span> str_all_matches</span> : <code class="type">string -> string list</code></pre><pre><span class="keyword">module</span> <a href="Tools.HashedBits.html">HashedBits</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Tools.HashedBits.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Tools.BitHash.html">BitHash</a>: <code class="type">Batteries.Hashtbl.Make</code><code class="code">(</code><code class="type"><a href="Tools.HashedBits.html">HashedBits</a></code><code class="code">)</code></pre><pre><span id="VALhash_find_or_insert"><span class="keyword">val</span> hash_find_or_insert</span> : <code class="type">('a, 'b) Batteries.Hashtbl.t -> 'a -> (unit -> 'b) -> 'b</code></pre><pre><span id="VALhash_merge"><span class="keyword">val</span> hash_merge</span> : <code class="type">('a, 'b) Batteries.Hashtbl.t -> ('a, 'b) Batteries.Hashtbl.t -> unit</code></pre><pre><span id="VALfile_content"><span class="keyword">val</span> file_content</span> : <code class="type">string -> string</code></pre><pre><span class="keyword">module</span> <a href="Tools.OrdArray.html">OrdArray</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Tools.OrdArray.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span id="VALensure"><span class="keyword">val</span> ensure</span> : <code class="type">bool -> string -> unit</code></pre>
+<pre><span id="VALerror"><span class="keyword">val</span> error</span> : <code class="type">string -> 'a</code></pre>
+<pre><span id="VALshould_not_happen"><span class="keyword">val</span> should_not_happen</span> : <code class="type">'a -> 'b</code></pre>
+<pre><span id="VALtodo"><span class="keyword">val</span> todo</span> : <code class="type">string -> 'a</code></pre>
+<pre><span id="VALerr"><span class="keyword">val</span> err</span> : <code class="type">string -> 'a option</code></pre>
+<pre><span id="VALbytelength"><span class="keyword">val</span> bytelength</span> : <code class="type">Bitstring.bitstring -> int</code></pre>
+<pre><span id="VALtakebytes"><span class="keyword">val</span> takebytes</span> : <code class="type">int -> Bitstring.bitstring -> Bitstring.bitstring</code></pre>
+<pre><span id="VALextendbytes"><span class="keyword">val</span> extendbytes</span> : <code class="type">int -> Bitstring.bitstring -> Bitstring.bitstring</code></pre>
+<pre><span id="VALbitstring_is_empty"><span class="keyword">val</span> bitstring_is_empty</span> : <code class="type">Bitstring.bitstring -> bool</code></pre>
+<pre><span id="VALdropbytes"><span class="keyword">val</span> dropbytes</span> : <code class="type">int -> Bitstring.bitstring -> Bitstring.bitstring</code></pre>
+<pre><span id="VALfixedbits"><span class="keyword">val</span> fixedbits</span> : <code class="type">int -> Bitstring.bitstring -> Bitstring.bitstring</code></pre>
+<pre><span id="VALbitstring_fuzz"><span class="keyword">val</span> bitstring_fuzz</span> : <code class="type">float -> Bitstring.bitstring -> Bitstring.bitstring</code></pre>
+<pre><span id="VALbitstring_add"><span class="keyword">val</span> bitstring_add</span> : <code class="type">int -> Bitstring.bitstring -> Bitstring.bitstring</code></pre>
+<pre><span id="VALhexstring_of_bitstring"><span class="keyword">val</span> hexstring_of_bitstring</span> : <code class="type">Bitstring.bitstring -> string</code></pre>
+<pre><span id="VALprintable"><span class="keyword">val</span> printable</span> : <code class="type">string -> string</code></pre>
+<pre><span id="VALprint_bitstring"><span class="keyword">val</span> print_bitstring</span> : <code class="type">Batteries.Format.formatter -> string * int * int -> unit</code></pre>
+<pre><span id="VALint_of_bitstring"><span class="keyword">val</span> int_of_bitstring</span> : <code class="type">Bitstring.bitstring -> int</code></pre>
+<pre><span id="VALbitstring_copy"><span class="keyword">val</span> bitstring_copy</span> : <code class="type">Bitstring.bitstring -> Bitstring.bitstring</code></pre>
+<pre><span id="VALall_bits"><span class="keyword">val</span> all_bits</span> : <code class="type">int -> Bitstring.bitstring Batteries.Enum.t</code></pre>
+<pre><span id="VALabbrev"><span class="keyword">val</span> abbrev</span> : <code class="type">?len:int -> string -> string</code></pre>
+<pre><span id="VALstring_find_first"><span class="keyword">val</span> string_find_first</span> : <code class="type">?from:int -> (char -> bool) -> string -> int</code></pre>
+<pre><span id="VALint_of_hexchar"><span class="keyword">val</span> int_of_hexchar</span> : <code class="type">char -> int</code></pre>
+<pre><span id="VALint_of_hexstring"><span class="keyword">val</span> int_of_hexstring</span> : <code class="type">string -> int option</code></pre>
+<pre><span id="VALmay_default"><span class="keyword">val</span> may_default</span> : <code class="type">'a option -> (unit -> 'a) -> 'a</code></pre>
+<pre><span id="VALremove_last_if"><span class="keyword">val</span> remove_last_if</span> : <code class="type">('a -> bool) -> 'a list -> 'a list</code></pre>
+<pre><span id="VALnone_if_not_found"><span class="keyword">val</span> none_if_not_found</span> : <code class="type">('a -> 'b) -> 'a -> 'b option</code></pre>
+<pre><span id="VALnone_if_exception"><span class="keyword">val</span> none_if_exception</span> : <code class="type">('a -> 'b) -> 'a -> 'b option</code></pre>
+<pre><span id="VALassert_ok"><span class="keyword">val</span> assert_ok</span> : <code class="type">('a, 'b) Batteries.Result.t -> unit</code></pre>
+<pre><span id="VALstr_all_matches"><span class="keyword">val</span> str_all_matches</span> : <code class="type">string -> string list</code></pre>
+<pre><span class="keyword">module</span> <a href="Tools.HashedBits.html">HashedBits</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Tools.HashedBits.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>
+<pre><span class="keyword">module</span> <a href="Tools.BitHash.html">BitHash</a>: <code class="type">Batteries.Hashtbl.Make</code><code class="code">(</code><code class="type"><a href="Tools.HashedBits.html">HashedBits</a></code><code class="code">)</code></pre>
+<pre><span id="VALhash_find_or_insert"><span class="keyword">val</span> hash_find_or_insert</span> : <code class="type">('a, 'b) Batteries.Hashtbl.t -> 'a -> (unit -> 'b) -> 'b</code></pre>
+<pre><span id="VALhash_merge"><span class="keyword">val</span> hash_merge</span> : <code class="type">('a, 'b) Batteries.Hashtbl.t -> ('a, 'b) Batteries.Hashtbl.t -> unit</code></pre>
+<pre><span id="VALfile_content"><span class="keyword">val</span> file_content</span> : <code class="type">string -> string</code></pre>
+<pre><span class="keyword">module</span> <a href="Tools.OrdArray.html">OrdArray</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Tools.OrdArray.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 An OrdArray is a container for an ordered set of bounded size.
 </div>
-<pre><span id="VALrandi"><span class="keyword">val</span> randi</span> : <code class="type">int -> int</code></pre><pre><span id="VALrand32"><span class="keyword">val</span> rand32</span> : <code class="type">unit -> int32</code></pre><pre><span id="VALrandb"><span class="keyword">val</span> randb</span> : <code class="type">unit -> bool</code></pre><pre><span id="VALrandstr"><span class="keyword">val</span> randstr</span> : <code class="type">?charset:string -> int -> string</code></pre><pre><span id="VALrandbs"><span class="keyword">val</span> randbs</span> : <code class="type">int -> Bitstring.bitstring</code></pre><pre><span id="VALrand_hostname"><span class="keyword">val</span> rand_hostname</span> : <code class="type">unit -> string</code></pre><pre><span id="VALdo_sum"><span class="keyword">val</span> do_sum</span> : <code class="type">Bitstring.bitstring -> int</code></pre><pre><span id="VALdo_compute_checksum"><span class="keyword">val</span> do_compute_checksum</span> : <code class="type">bool Batteries.ref</code></pre><pre><span id="VALsum"><span class="keyword">val</span> sum</span> : <code class="type">Bitstring.bitstring -> int</code></pre><pre><span class="keyword">module type</span> <a href="Tools.PRIVATE_TYPE.html">PRIVATE_TYPE</a> = <code class="code"><span class="keyword">sig</span></code> <a href="Tools.PRIVATE_TYPE.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Tools.MakePrivate.html">MakePrivate</a>: <div class="sig_block"><code class="code"><span class="keyword">functor</span> (</code><code class="code"><span class="constructor">Outer</span></code><code class="code"> : </code><code class="code"><span class="keyword">sig</span></code><div class="sig_block"><pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> </pre>
 
-<pre><span id="VALto_string"><span class="keyword">val</span> to_string</span> : <code class="type">t -> string</code></pre><pre><span id="VALis_valid"><span class="keyword">val</span> is_valid</span> : <code class="type">t -> bool</code></pre><pre><span id="VALrepl_tag"><span class="keyword">val</span> repl_tag</span> : <code class="type">string</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">) <span class="keywordsign">-&gt;</span> </code><code class="code"><span class="keyword">sig</span></code> <a href="Tools.MakePrivate.html">..</a> <code class="code"><span class="keyword">end</span></code></div></pre><pre><span class="keyword">module</span> <a href="Tools.Payload.html">Payload</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Tools.Payload.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><code><span id="TYPEdev"><span class="keyword">type</span> <code class="type"></code>dev</span> = {</code></pre><table class="typetable">
+<pre><span id="VALrandi"><span class="keyword">val</span> randi</span> : <code class="type">int -> int</code></pre>
+<pre><span id="VALrand32"><span class="keyword">val</span> rand32</span> : <code class="type">unit -> int32</code></pre>
+<pre><span id="VALrandb"><span class="keyword">val</span> randb</span> : <code class="type">unit -> bool</code></pre>
+<pre><span id="VALrandstr"><span class="keyword">val</span> randstr</span> : <code class="type">?charset:string -> int -> string</code></pre>
+<pre><span id="VALrandbs"><span class="keyword">val</span> randbs</span> : <code class="type">int -> Bitstring.bitstring</code></pre>
+<pre><span id="VALrand_hostname"><span class="keyword">val</span> rand_hostname</span> : <code class="type">unit -> string</code></pre>
+<pre><span id="VALdo_sum"><span class="keyword">val</span> do_sum</span> : <code class="type">Bitstring.bitstring -> int</code></pre>
+<pre><span id="VALdo_compute_checksum"><span class="keyword">val</span> do_compute_checksum</span> : <code class="type">bool Batteries.ref</code></pre>
+<pre><span id="VALsum"><span class="keyword">val</span> sum</span> : <code class="type">Bitstring.bitstring -> int</code></pre>
+<pre><span class="keyword">module type</span> <a href="Tools.PRIVATE_TYPE.html">PRIVATE_TYPE</a> = <code class="code"><span class="keyword">sig</span></code> <a href="Tools.PRIVATE_TYPE.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>
+<pre><span class="keyword">module</span> <a href="Tools.MakePrivate.html">MakePrivate</a>: <div class="sig_block"><code class="code"><span class="keyword">functor</span> (</code><code class="code"><span class="constructor">Outer</span></code><code class="code"> : </code><code class="code"><span class="keyword">sig</span></code><div class="sig_block">
+<pre><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> </pre>
+
+
+<pre><span id="VALto_string"><span class="keyword">val</span> to_string</span> : <code class="type">t -> string</code></pre>
+<pre><span id="VALis_valid"><span class="keyword">val</span> is_valid</span> : <code class="type">t -> bool</code></pre>
+<pre><span id="VALrepl_tag"><span class="keyword">val</span> repl_tag</span> : <code class="type">string</code></pre></div><code class="code"><span class="keyword">end</span></code><code class="code">) <span class="keywordsign">-&gt;</span> </code><code class="code"><span class="keyword">sig</span></code> <a href="Tools.MakePrivate.html">..</a> <code class="code"><span class="keyword">end</span></code></div></pre>
+<pre><span class="keyword">module</span> <a href="Tools.Payload.html">Payload</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Tools.Payload.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>
+<pre><code><span id="TYPEdev"><span class="keyword">type</span> <code class="type"></code>dev</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTdev.write">write</span>&nbsp;:<code class="type">Bitstring.bitstring -> unit</code>;</code></td>
+<code><span id="TYPEELTdev.write">write</span>&nbsp;: <code class="type">Bitstring.bitstring -> unit</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTdev.set_read">set_read</span>&nbsp;:<code class="type">(Bitstring.bitstring -> unit) -> unit</code>;</code></td>
+<code><span id="TYPEELTdev.set_read">set_read</span>&nbsp;: <code class="type">(Bitstring.bitstring -> unit) -> unit</code>;</code></td>
 
 </tr></table>
 }
 
-<div class="info">
+<div class="info ">
 A device is something to which you can send packet and register a
  receiving function<br>
 </div>
 
-<pre><span id="VALnull_dev"><span class="keyword">val</span> null_dev</span> : <code class="type"><a href="Tools.html#TYPEdev">dev</a></code></pre><div class="info">
+
+<pre><span id="VALnull_dev"><span class="keyword">val</span> null_dev</span> : <code class="type"><a href="Tools.html#TYPEdev">dev</a></code></pre><div class="info ">
 For those cases when you want to build a <code class="code">trx</code> from a single <code class="code">dev</code><br>
 </div>
-<pre><span id="VAL(<-->)"><span class="keyword">val</span> (&lt;--&gt;)</span> : <code class="type"><a href="Tools.html#TYPEdev">dev</a> -> <a href="Tools.html#TYPEdev">dev</a> -> unit</code></pre><div class="info">
+
+<pre><span id="VAL(<-->)"><span class="keyword">val</span> (&lt;--&gt;)</span> : <code class="type"><a href="Tools.html#TYPEdev">dev</a> -> <a href="Tools.html#TYPEdev">dev</a> -> unit</code></pre><div class="info ">
 Connects two <a href="Tools.html#TYPEdev"><code class="code"><span class="constructor">Tools</span>.dev</code></a> together<br>
 </div>
+
 <pre><code><span id="TYPEtrx"><span class="keyword">type</span> <code class="type"></code>trx</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTtrx.ins">ins</span>&nbsp;:<code class="type"><a href="Tools.html#TYPEdev">dev</a></code>;</code></td>
+<code><span id="TYPEELTtrx.ins">ins</span>&nbsp;: <code class="type"><a href="Tools.html#TYPEdev">dev</a></code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTtrx.out">out</span>&nbsp;:<code class="type"><a href="Tools.html#TYPEdev">dev</a></code>;</code></td>
+<code><span id="TYPEELTtrx.out">out</span>&nbsp;: <code class="type"><a href="Tools.html#TYPEdev">dev</a></code>;</code></td>
 
 </tr></table>
 }
 
-<div class="info">
+<div class="info ">
 A transmiter is a kind of pipe with an inside and an outside device, is
  thus oriented (from inside to outside, inside being left operand for following
  functions), that transforms the writen payload before emitting it.<br>
 </div>
 
-<pre><span id="VALtx"><span class="keyword">val</span> tx</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALrx"><span class="keyword">val</span> rx</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> Bitstring.bitstring -> unit</code></pre><pre><span id="VALinverse_trx"><span class="keyword">val</span> inverse_trx</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a></code></pre><pre><span id="VALnull_trx"><span class="keyword">val</span> null_trx</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a></code></pre><pre><span id="VAL(<-=)"><span class="keyword">val</span> (&lt;-=)</span> : <code class="type">(Bitstring.bitstring -> unit) -> <a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a></code></pre><div class="info">
+
+<pre><span id="VALtx"><span class="keyword">val</span> tx</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> Bitstring.bitstring -> unit</code></pre>
+<pre><span id="VALrx"><span class="keyword">val</span> rx</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> Bitstring.bitstring -> unit</code></pre>
+<pre><span id="VALinverse_trx"><span class="keyword">val</span> inverse_trx</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a></code></pre>
+<pre><span id="VALnull_trx"><span class="keyword">val</span> null_trx</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a></code></pre>
+<pre><span id="VAL(<-=)"><span class="keyword">val</span> (&lt;-=)</span> : <code class="type">(Bitstring.bitstring -> unit) -> <a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a></code></pre><div class="info ">
 <code class="code">f &lt;-= trx</code> sets f as the receive function of this <code class="code">trx</code>.
  <b>Note:</b> <code class="code">trx</code> is returned so that you can write such things as:
  <code class="code">f &lt;-= a &lt;==&gt; b</code> or <code class="code">f1 &lt;-= a =-&gt; f2</code><br>
 </div>
-<pre><span id="VAL(=->)"><span class="keyword">val</span> (=-&gt;)</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> (Bitstring.bitstring -> unit) -> unit</code></pre><div class="info">
+
+<pre><span id="VAL(=->)"><span class="keyword">val</span> (=-&gt;)</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> (Bitstring.bitstring -> unit) -> unit</code></pre><div class="info ">
 <code class="code">trx =-&gt; f</code> sets <code class="code">f</code> as the emiting function of this <code class="code">trx</code>.<br>
 </div>
-<pre><span id="VAL(==>)"><span class="keyword">val</span> (==&gt;)</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a></code></pre><div class="info">
+
+<pre><span id="VAL(==>)"><span class="keyword">val</span> (==&gt;)</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a></code></pre><div class="info ">
 <code class="code">a ==&gt; b</code> connects <code class="code">a</code> to <code class="code">b</code> such that <code class="code">b</code> transmits what <code class="code">a</code> emits.<br>
 </div>
-<pre><span id="VAL(<==>)"><span class="keyword">val</span> (&lt;==&gt;)</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a> -> unit</code></pre><div class="info">
+
+<pre><span id="VAL(<==>)"><span class="keyword">val</span> (&lt;==&gt;)</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a> -> unit</code></pre><div class="info ">
 <code class="code">a &lt;==&gt; b</code> connects <code class="code">a</code> to <code class="code">b</code> such that <code class="code">b</code> receives what <code class="code">a</code> emits
  and <code class="code">a</code> receives what <code class="code">b</code> emits.<br>
 </div>
-<pre><span id="VALpipe"><span class="keyword">val</span> pipe</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a></code></pre><div class="info">
+
+<pre><span id="VALpipe"><span class="keyword">val</span> pipe</span> : <code class="type"><a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a> -> <a href="Tools.html#TYPEtrx">trx</a></code></pre><div class="info ">
 <code class="code">pipe trx1 trx2</code> connects trx1 and trx2 so that trx1 output is sent through trx2,
  and returns a trx with trx1 as the inside and trx2 as the outside.<br>
 </div>
+
 <pre><span class="keyword">module type</span> <a href="Tools.PDU.html">PDU</a> = <code class="code"><span class="keyword">sig</span></code> <a href="Tools.PDU.html">..</a> <code class="code"><span class="keyword">end</span></code></pre></body></html>

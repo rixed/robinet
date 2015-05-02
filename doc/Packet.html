@@ -55,7 +55,8 @@
 &nbsp;<a class="post" href="Pcap.html" title="Pcap">Next</a>
 </div>
 <h1>Module <a href="type_Packet.html">Packet</a></h1>
-<pre><span class="keyword">module</span> Packet: <code class="code"><span class="keyword">sig</span></code> <a href="Packet.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Packet: <code class="code"><span class="keyword">sig</span></code> <a href="Packet.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 Packet scrutiny
 <p>
 
@@ -175,15 +176,18 @@ Now imagine you want to edit a pcap to change the TCP source/dest port from 21 t
 <hr width="100%">
 <br>
 <h2 id="2_Capturedpacket">Captured packet</h2><br>
+
 <pre><span class="keyword">module</span> <a href="Packet.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Packet.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Pack/Unpack the whole protocol stack that fits entirely within a packet.
 </div>
 <br>
 <h2 id="2_Shorthands">Shorthands</h2><br>
-<pre><span id="VALenum_of_file"><span class="keyword">val</span> enum_of_file</span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list BatEnum.t</code></pre><div class="info">
+
+<pre><span id="VALenum_of_file"><span class="keyword">val</span> enum_of_file</span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list BatEnum.t</code></pre><div class="info ">
 <code class="code"><span class="constructor">Packet</span>.enum_of_file filename</code> reads a pcap file and returns an <code class="code"><span class="constructor">Enum</span>.t</code> of <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
 </div>
-<pre><span id="VALto_file"><span class="keyword">val</span> to_file</span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list Batteries.Enum.t -> unit</code></pre><div class="info">
+
+<pre><span id="VALto_file"><span class="keyword">val</span> to_file</span> : <code class="type">string -> <a href="Packet.Pdu.html#TYPElayer">Pdu.layer</a> list Batteries.Enum.t -> unit</code></pre><div class="info ">
 <code class="code"><span class="constructor">Packet</span>.to_file filename e</code> write the enumeration of <a href="Packet.Pdu.html#TYPEt"><code class="code"><span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.t</code></a> into the given file.<br>
 </div>
 </body></html>

@@ -53,7 +53,8 @@
 &nbsp;<a class="post" href="Myadmin.html" title="Myadmin">Next</a>
 </div>
 <h1>Module <a href="type_Metric.html">Metric</a></h1>
-<pre><span class="keyword">module</span> Metric: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Metric: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 Facility to count events/measure performances.
 <p>
 
@@ -86,7 +87,14 @@ Facility to count events/measure performances.
    be performed until creation of the report, though.<br>
 </div>
 <hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><pre><span class="keyword">module</span> <a href="Metric.Atomic.html">Atomic</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Atomic.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Metric.Counter.html">Counter</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Counter.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span class="keyword">module</span> <a href="Metric.Timed.html">Timed</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Timed.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><pre><span id="VALprint_report"><span class="keyword">val</span> print_report</span> : <code class="type">unit BatIO.output -> unit</code></pre><pre><span id="VALreport_thread"><span class="keyword">val</span> report_thread</span> : <code class="type">unit BatIO.output -> float -> Thread.t</code></pre><pre><code><span id="TYPEitem"><span class="keyword">type</span> <code class="type"></code>item</span> = </code></pre><table class="typetable">
+
+<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre>
+<pre><span class="keyword">module</span> <a href="Metric.Atomic.html">Atomic</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Atomic.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>
+<pre><span class="keyword">module</span> <a href="Metric.Counter.html">Counter</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Counter.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>
+<pre><span class="keyword">module</span> <a href="Metric.Timed.html">Timed</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Metric.Timed.html">..</a> <code class="code"><span class="keyword">end</span></code></pre>
+<pre><span id="VALprint_report"><span class="keyword">val</span> print_report</span> : <code class="type">unit BatIO.output -> unit</code></pre>
+<pre><span id="VALreport_thread"><span class="keyword">val</span> report_thread</span> : <code class="type">unit BatIO.output -> float -> Thread.t</code></pre>
+<pre><code><span id="TYPEitem"><span class="keyword">type</span> <code class="type"></code>item</span> = </code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code><span class="keyword">|</span></code></td>
@@ -117,6 +125,8 @@ Facility to count events/measure performances.
 </tr></table>
 
 
+
 <pre><span id="TYPEtree"><span class="keyword">type</span> <code class="type"></code>tree</span> = <code class="type"><a href="Metric.html#TYPEitem">item</a> list</code> </pre>
+
 
 <pre><span id="VALtree"><span class="keyword">val</span> tree</span> : <code class="type">unit -> <a href="Metric.html#TYPEtree">tree</a></code></pre></body></html>

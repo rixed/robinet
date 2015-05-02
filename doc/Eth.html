@@ -58,17 +58,20 @@
 &nbsp;<a class="post" href="Host.html" title="Host">Next</a>
 </div>
 <h1>Module <a href="type_Eth.html">Eth</a></h1>
-<pre><span class="keyword">module</span> Eth: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Eth: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
  Ethernet protocol implementation.
 <p>
 
  TODO: (r)STP, optional padding<br>
 </div>
 <hr width="100%">
+
 <pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><br>
 <h2 id="2_PrivateTypes">Private Types</h2><br>
 <br>
 <h3 id="3_Ethernetaddresses">Ethernet addresses</h3><br>
+
 <pre><span class="keyword">module</span> <a href="Eth.Addr.html">Addr</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Ethernet addresses are implemented as <code class="code">bitstring</code> internally but
  the abstract type Eth.Addr.t has a batter printer (which support
@@ -76,6 +79,7 @@ Ethernet addresses are implemented as <code class="code">bitstring</code> intern
 </div>
 <br>
 <h3 id="3_Gatewayspecifications">Gateway specifications</h3><br>
+
 <pre><code><span id="TYPEgw_addr"><span class="keyword">type</span> <code class="type"></code>gw_addr</span> = </code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
@@ -92,26 +96,31 @@ Ethernet addresses are implemented as <code class="code">bitstring</code> intern
 
 </tr></table>
 
-<div class="info">
+<div class="info ">
 The address of a gateway, which can be given either as an Ethernet address
  of as an IP address.<br>
 </div>
 
-<pre><span id="VALstring_of_gw_addr"><span class="keyword">val</span> string_of_gw_addr</span> : <code class="type"><a href="Eth.html#TYPEgw_addr">gw_addr</a> -> string</code></pre><div class="info">
+
+<pre><span id="VALstring_of_gw_addr"><span class="keyword">val</span> string_of_gw_addr</span> : <code class="type"><a href="Eth.html#TYPEgw_addr">gw_addr</a> -> string</code></pre><div class="info ">
 Converts a <a href="Eth.html#TYPEgw_addr"><code class="code"><span class="constructor">Eth</span>.gw_addr</code></a> to a string.<br>
 </div>
-<pre><span id="VALgw_addr_of_string"><span class="keyword">val</span> gw_addr_of_string</span> : <code class="type">string -> <a href="Eth.html#TYPEgw_addr">gw_addr</a></code></pre><div class="info">
+
+<pre><span id="VALgw_addr_of_string"><span class="keyword">val</span> gw_addr_of_string</span> : <code class="type">string -> <a href="Eth.html#TYPEgw_addr">gw_addr</a></code></pre><div class="info ">
 Converts the other way around.<br>
 </div>
 <br>
 <h2 id="2_Ethernetframes">Ethernet frames</h2><br>
+
 <pre><span class="keyword">module</span> <a href="Eth.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Pack/Unpack an Ethernet frame.
 </div>
 <br>
 <h2 id="2_Transceiver">Transceiver</h2><br>
+
 <pre><span class="keyword">module</span> <a href="Eth.TRX.html">TRX</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 An Ethernet TRX will convert from payload to Ethernet frames (resolving
- destinators using ARP), for a single <code class="code"><span class="constructor">Arp</span>.<span class="constructor">HwProto</span>.t</code>.
+ destinations using ARP), for a single <code class="code"><span class="constructor">Arp</span>.<span class="constructor">HwProto</span>.t</code>.
 </div>
+
 <pre><span id="VALlimited"><span class="keyword">val</span> limited</span> : <code class="type">Clock.Interval.t -><br>       float -> (Bitstring.bitstring -> unit) -> Bitstring.bitstring -> unit</code></pre></body></html>

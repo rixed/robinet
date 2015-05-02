@@ -53,8 +53,10 @@
 &nbsp;<a class="post" href="Ip.Cidr.html" title="Ip.Cidr">Next</a>
 </div>
 <h1>Module <a href="type_Ip.Addr.html">Ip.Addr</a></h1>
+
 <pre><span class="keyword">module</span> Addr: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><hr width="100%">
-<pre><span id="VALprint_as_names"><span class="keyword">val</span> print_as_names</span> : <code class="type">bool Batteries.ref</code></pre><div class="info">
+
+<pre><span id="VALprint_as_names"><span class="keyword">val</span> print_as_names</span> : <code class="type">bool Batteries.ref</code></pre><div class="info ">
 If true, use the system's name resolver to find a name for each IP
  addresses that are printed. This can be very slow so is disabled by
  default, but you can change it to suit your taste:
@@ -68,27 +70,44 @@ If true, use the system's name resolver to find a name for each IP
  This affects only printing of IP addresses, though, and thus is not
  expected to impact a simulation.<br>
 </div>
+
 <pre><span class="keyword">include</span> struct ... end</pre>
-<pre><span id="VALlength"><span class="keyword">val</span> length</span> : <code class="type">t -> int</code></pre><pre><span id="VALto_dotted_string"><span class="keyword">val</span> to_dotted_string</span> : <code class="type">t -> string</code></pre><div class="info">
+
+<pre><span id="VALlength"><span class="keyword">val</span> length</span> : <code class="type">t -> int</code></pre>
+<pre><span id="VALto_dotted_string"><span class="keyword">val</span> to_dotted_string</span> : <code class="type">t -> string</code></pre><div class="info ">
 Regardless of the above setting, return the dotted representation (a
  <code class="code">string</code>) of a given address.<br>
 </div>
-<pre><span id="VALof_dotted_string"><span class="keyword">val</span> of_dotted_string</span> : <code class="type">string -> t option</code></pre><div class="info">
+
+<pre><span id="VALof_dotted_string"><span class="keyword">val</span> of_dotted_string</span> : <code class="type">string -> t option</code></pre><div class="info ">
 Convert from dotted representation (useful to allow DNS-less hosts to 'resolve' some name)<br>
 </div>
 <br>
 Some predefined addresses<br>
-<pre><span id="VALzero"><span class="keyword">val</span> zero</span> : <code class="type">t</code></pre><pre><span id="VALbroadcast"><span class="keyword">val</span> broadcast</span> : <code class="type">t</code></pre><pre><span id="VALto_bitstring"><span class="keyword">val</span> to_bitstring</span> : <code class="type">t -> Bitstring.bitstring</code></pre><div class="info">
+
+<pre><span id="VALzero"><span class="keyword">val</span> zero</span> : <code class="type">t</code></pre>
+<pre><span id="VALbroadcast"><span class="keyword">val</span> broadcast</span> : <code class="type">t</code></pre>
+<pre><span id="VALto_bitstring"><span class="keyword">val</span> to_bitstring</span> : <code class="type">t -> Bitstring.bitstring</code></pre><div class="info ">
 Convert an <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t</code> to a <code class="code">bitstring</code>.<br>
 </div>
-<pre><span id="VALof_bitstring"><span class="keyword">val</span> of_bitstring</span> : <code class="type">Bitstring.bitstring -> t</code></pre><div class="info">
+
+<pre><span id="VALof_bitstring"><span class="keyword">val</span> of_bitstring</span> : <code class="type">Bitstring.bitstring -> t</code></pre><div class="info ">
 Convert a <code class="code">bitstring</code> into an <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t</code>.<br>
 </div>
-<pre><span id="VALlist_of_string"><span class="keyword">val</span> list_of_string</span> : <code class="type">string -> t list</code></pre><pre><span id="VALof_string"><span class="keyword">val</span> of_string</span> : <code class="type">string -> t</code></pre><pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">?v4:bool -> unit -> t</code></pre><div class="info">
+
+<pre><span id="VALlist_of_string"><span class="keyword">val</span> list_of_string</span> : <code class="type">string -> t list</code></pre>
+<pre><span id="VALof_string"><span class="keyword">val</span> of_string</span> : <code class="type">string -> t</code></pre>
+<pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">?v4:bool -> unit -> t</code></pre><div class="info ">
 Returns a random <code class="code"><span class="constructor">Ip</span>.<span class="constructor">Addr</span>.t</code> (apart from broadcast and zero).<br>
 </div>
-<pre><span id="VALprint'"><span class="keyword">val</span> print'</span> : <code class="type">'a BatInnerIO.output -> t -> unit</code></pre><div class="info">
+
+<pre><span id="VALprint'"><span class="keyword">val</span> print'</span> : <code class="type">'a BatInnerIO.output -> t -> unit</code></pre><div class="info ">
 This printer can be composed with others (for instance to print a list of ips.
      FIXME: always use batteries IO to print instead of Format printer?<br>
 </div>
-<pre><span id="VALof_inet_addr"><span class="keyword">val</span> of_inet_addr</span> : <code class="type">outer_t -> t</code></pre><pre><span id="VALto_inet_addr"><span class="keyword">val</span> to_inet_addr</span> : <code class="type">t -> Batteries.Unix.inet_addr</code></pre><pre><span id="VALo32"><span class="keyword">val</span> o32</span> : <code class="type">int32 -> t</code></pre><pre><span id="VALto_int32"><span class="keyword">val</span> to_int32</span> : <code class="type">t -> int32</code></pre><pre><span id="VALhigher_bits"><span class="keyword">val</span> higher_bits</span> : <code class="type">t -> int -> t</code></pre></body></html>
+
+<pre><span id="VALof_inet_addr"><span class="keyword">val</span> of_inet_addr</span> : <code class="type">outer_t -> t</code></pre>
+<pre><span id="VALto_inet_addr"><span class="keyword">val</span> to_inet_addr</span> : <code class="type">t -> Batteries.Unix.inet_addr</code></pre>
+<pre><span id="VALo32"><span class="keyword">val</span> o32</span> : <code class="type">int32 -> t</code></pre>
+<pre><span id="VALto_int32"><span class="keyword">val</span> to_int32</span> : <code class="type">t -> int32</code></pre>
+<pre><span id="VALhigher_bits"><span class="keyword">val</span> higher_bits</span> : <code class="type">t -> int -> t</code></pre></body></html>

@@ -53,11 +53,19 @@
 &nbsp;<a class="post" href="Router.html" title="Router">Next</a>
 </div>
 <h1>Module <a href="type_Persist.html">Persist</a></h1>
-<pre><span class="keyword">module</span> Persist: <code class="code"><span class="keyword">sig</span></code> <a href="Persist.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Persist: <code class="code"><span class="keyword">sig</span></code> <a href="Persist.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 Simple serialization module
 <p>
 
   Helps to keep an object state in a file in a friendly format (for instance javascript or csv)<br>
 </div>
 <hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><pre><span id="VALrootdir"><span class="keyword">val</span> rootdir</span> : <code class="type">string</code></pre><pre><span id="VALmkdir_all"><span class="keyword">val</span> mkdir_all</span> : <code class="type">?is_file:bool -> string -> unit</code></pre><pre><span id="VALmake_abs"><span class="keyword">val</span> make_abs</span> : <code class="type">string -> string -> string</code></pre><pre><span id="VALwith_input_file"><span class="keyword">val</span> with_input_file</span> : <code class="type">string -> string -> string -> (BatIO.input -> 'a) -> 'a</code></pre><pre><span id="VALwith_output_file"><span class="keyword">val</span> with_output_file</span> : <code class="type">string -> string -> (unit BatInnerIO.output -> 'a) -> 'a</code></pre><pre><span id="VALgenname"><span class="keyword">val</span> genname</span> : <code class="type">string -> string</code></pre></body></html>
+
+<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre>
+<pre><span id="VALrootdir"><span class="keyword">val</span> rootdir</span> : <code class="type">string</code></pre>
+<pre><span id="VALmkdir_all"><span class="keyword">val</span> mkdir_all</span> : <code class="type">?is_file:bool -> string -> unit</code></pre>
+<pre><span id="VALmake_abs"><span class="keyword">val</span> make_abs</span> : <code class="type">string -> string -> string</code></pre>
+<pre><span id="VALwith_input_file"><span class="keyword">val</span> with_input_file</span> : <code class="type">string -> string -> string -> (BatIO.input -> 'a) -> 'a</code></pre>
+<pre><span id="VALwith_output_file"><span class="keyword">val</span> with_output_file</span> : <code class="type">string -> string -> (unit BatInnerIO.output -> 'a) -> 'a</code></pre>
+<pre><span id="VALgenname"><span class="keyword">val</span> genname</span> : <code class="type">string -> string</code></pre></body></html>

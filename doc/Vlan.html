@@ -53,7 +53,8 @@
 &nbsp;<a class="up" href="index.html" title="Index">Up</a>
 &nbsp;</div>
 <h1>Module <a href="type_Vlan.html">Vlan</a></h1>
-<pre><span class="keyword">module</span> Vlan: <code class="code"><span class="keyword">sig</span></code> <a href="Vlan.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Vlan: <code class="code"><span class="keyword">sig</span></code> <a href="Vlan.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
  Ethernet 802.1q Virtual Lan.
  We decode/encode it for the purpose of manipulating pcap files,
  but it's currently unused in the network simulator.
@@ -65,11 +66,13 @@
 <hr width="100%">
 <br>
 <h2 id="2_8021qframes">802.1q frames</h2><br>
+
 <pre><span class="keyword">module</span> <a href="Vlan.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Vlan.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Pack/Unpack a 802.1q tunnel
 </div>
 <br>
 <h2 id="2_Transceiver">Transceiver</h2><br>
+
 <pre><span class="keyword">module</span> <a href="Vlan.TRX.html">TRX</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Vlan.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 A Vlan TRX accepts raw packets (presumably from some <a href="Eth.TRX.html"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">TRX</span></code></a>), unpack them
  and forward the payload to a callback; and it can be given some payload to

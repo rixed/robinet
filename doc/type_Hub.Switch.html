@@ -43,24 +43,10 @@
 </head>
 <body>
 <code class="code"><span class="keyword">sig</span><br>
-&nbsp;&nbsp;<span class="keyword">module</span>&nbsp;<span class="constructor">R</span>&nbsp;:<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">sig</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">type</span>&nbsp;port&nbsp;=<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="constructor">Repeater</span>.port&nbsp;=&nbsp;{<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">mutable</span>&nbsp;emit&nbsp;:&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit;<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">type</span>&nbsp;t&nbsp;=&nbsp;<span class="constructor">Repeater</span>.t&nbsp;=&nbsp;{&nbsp;ports&nbsp;:&nbsp;<span class="constructor">Hub</span>.<span class="constructor">Repeater</span>.port&nbsp;array;&nbsp;}<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;make&nbsp;:&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Hub</span>.<span class="constructor">Repeater</span>.t<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;forward_from&nbsp;:&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Hub</span>.<span class="constructor">Repeater</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;write&nbsp;:&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Hub</span>.<span class="constructor">Repeater</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;set_read&nbsp;:<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Hub</span>.<span class="constructor">Repeater</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;(<span class="constructor">Bitstring</span>.bitstring&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit)&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;to_dev&nbsp;:&nbsp;int&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Hub</span>.<span class="constructor">Repeater</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Tools</span>.dev<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">val</span>&nbsp;t_printer&nbsp;:&nbsp;<span class="keywordsign">'</span>a&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="keywordsign">'</span>b&nbsp;<span class="constructor">BatInnerIO</span>.output&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;<span class="constructor">Hub</span>.<span class="constructor">Repeater</span>.t&nbsp;<span class="keywordsign">-&gt;</span>&nbsp;unit<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">end</span><br>
+&nbsp;&nbsp;<span class="keyword">module</span>&nbsp;<span class="constructor">R</span>&nbsp;=&nbsp;<span class="constructor">Repeater</span><br>
 &nbsp;&nbsp;<span class="keyword">type</span>&nbsp;mac_entry&nbsp;=&nbsp;{&nbsp;<span class="keyword">mutable</span>&nbsp;addr&nbsp;:&nbsp;<span class="constructor">Eth</span>.<span class="constructor">Addr</span>.t&nbsp;option;&nbsp;<span class="keyword">mutable</span>&nbsp;port&nbsp;:&nbsp;int;&nbsp;}<br>
 &nbsp;&nbsp;<span class="keyword">type</span>&nbsp;t&nbsp;=&nbsp;{<br>
-&nbsp;&nbsp;&nbsp;&nbsp;hub&nbsp;:&nbsp;<span class="constructor">Hub</span>.<span class="constructor">Switch</span>.<span class="constructor">R</span>.t;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;hub&nbsp;:&nbsp;<span class="constructor">R</span>.t;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;macs&nbsp;:&nbsp;<span class="constructor">Hub</span>.<span class="constructor">Switch</span>.mac_entry&nbsp;<span class="constructor">Tools</span>.<span class="constructor">OrdArray</span>.t;<br>
 &nbsp;&nbsp;&nbsp;&nbsp;macs_h&nbsp;:&nbsp;int&nbsp;<span class="constructor">Tools</span>.<span class="constructor">BitHash</span>.t;<br>
 &nbsp;&nbsp;}<br>

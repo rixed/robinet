@@ -51,63 +51,81 @@
 &nbsp;<a class="post" href="Vlan.TRX.html" title="Vlan.TRX">Next</a>
 </div>
 <h1>Module <a href="type_Vlan.Pdu.html">Vlan.Pdu</a></h1>
-<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Vlan.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Vlan.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 Pack/Unpack a 802.1q tunnel<br>
 </div>
 <hr width="100%">
+
 <pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.prio">prio</span>&nbsp;:<code class="type">int</code>;</code></td>
-<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >Priority from 0 - best effot - to 7 - highest</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+<code><span id="TYPEELTt.prio">prio</span>&nbsp;: <code class="type">int</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" ><div class="info ">
+Priority from 0 - best effot - to 7 - highest<br>
+</div>
+</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.cfi">cfi</span>&nbsp;:<code class="type">bool</code>;</code></td>
-<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >Should be zero if you live after 1990</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+<code><span id="TYPEELTt.cfi">cfi</span>&nbsp;: <code class="type">bool</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" ><div class="info ">
+Should be zero if you live after 1990<br>
+</div>
+</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.id">id</span>&nbsp;:<code class="type">int</code>;</code></td>
-<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >The vlan trag itself</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+<code><span id="TYPEELTt.id">id</span>&nbsp;: <code class="type">int</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" ><div class="info ">
+The vlan trag itself<br>
+</div>
+</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.proto">proto</span>&nbsp;:<code class="type">Arp.HwProto.t</code>;</code></td>
-<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" >What's the payload</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
+<code><span id="TYPEELTt.proto">proto</span>&nbsp;: <code class="type">Arp.HwProto.t</code>;</code></td>
+<td class="typefieldcomment" align="left" valign="top" ><code>(*</code></td><td class="typefieldcomment" align="left" valign="top" ><div class="info ">
+What's the payload<br>
+</div>
+</td><td class="typefieldcomment" align="left" valign="bottom" ><code>*)</code></td>
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.payload">payload</span>&nbsp;:<code class="type">Tools.Payload.t</code>;</code></td>
+<code><span id="TYPEELTt.payload">payload</span>&nbsp;: <code class="type">Tools.Payload.t</code>;</code></td>
 
 </tr></table>
 }
 
-<div class="info">
+<div class="info ">
 An 802.1q tunnel is very simple indeed<br>
 </div>
 
-<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">?prio:int -><br>       ?cfi:bool -> int -> Arp.HwProto.t -> Tools.Payload.outer_t -> <a href="Vlan.Pdu.html#TYPEt">t</a></code></pre><div class="info">
+
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">?prio:int -><br>       ?cfi:bool -> int -> Arp.HwProto.t -> Tools.Payload.outer_t -> <a href="Vlan.Pdu.html#TYPEt">t</a></code></pre><div class="info ">
 Build a <code class="code"><span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.t</code> for the given <code class="code">payload</code>.<br>
 </div>
-<pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Vlan.Pdu.html#TYPEt">t</a></code></pre><div class="info">
+
+<pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Vlan.Pdu.html#TYPEt">t</a></code></pre><div class="info ">
 Returns a random <code class="code"><span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.t</code>.<br>
 </div>
-<pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Vlan.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><div class="info">
+
+<pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Vlan.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><div class="info ">
 Pack a <code class="code"><span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.t</code> into its <code class="code">bitstring</code> raw representation, ready for
  encapsulation into a <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code></a> (or anywhere you like).<br>
 </div>
-<pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">string * int * int -> <a href="Vlan.Pdu.html#TYPEt">t</a> option</code></pre><div class="info">
+
+<pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">string * int * int -> <a href="Vlan.Pdu.html#TYPEt">t</a> option</code></pre><div class="info ">
 Unpack a <code class="code">bitstring</code> into a <code class="code"><span class="constructor">Vlan</span>.<span class="constructor">Pdu</span>.t</code><br>
 </div>
 </body></html>

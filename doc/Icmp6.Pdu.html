@@ -51,10 +51,12 @@
 &nbsp;<a class="up" href="Icmp6.html" title="Icmp6">Up</a>
 &nbsp;</div>
 <h1>Module <a href="type_Icmp6.Pdu.html">Icmp6.Pdu</a></h1>
-<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Icmp6.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Icmp6.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 This module handle ICMPv6 messages (un)packing.<br>
 </div>
 <hr width="100%">
+
 <pre><code><span id="TYPEpayload"><span class="keyword">type</span> <code class="type"></code>payload</span> = </code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
@@ -72,25 +74,33 @@ This module handle ICMPv6 messages (un)packing.<br>
 </tr></table>
 
 
-<pre><span id="VALrandom_payload"><span class="keyword">val</span> random_payload</span> : <code class="type">Icmp6.MsgType.t -> <a href="Icmp6.Pdu.html#TYPEpayload">payload</a></code></pre><pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
+
+<pre><span id="VALrandom_payload"><span class="keyword">val</span> random_payload</span> : <code class="type">Icmp6.MsgType.t -> <a href="Icmp6.Pdu.html#TYPEpayload">payload</a></code></pre>
+<pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.msg_type">msg_type</span>&nbsp;:<code class="type">Icmp6.MsgType.t</code>;</code></td>
+<code><span id="TYPEELTt.msg_type">msg_type</span>&nbsp;: <code class="type">Icmp6.MsgType.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.payload">payload</span>&nbsp;:<code class="type"><a href="Icmp6.Pdu.html#TYPEpayload">payload</a></code>;</code></td>
+<code><span id="TYPEELTt.payload">payload</span>&nbsp;: <code class="type"><a href="Icmp6.Pdu.html#TYPEpayload">payload</a></code>;</code></td>
 
 </tr></table>
 }
 
-<div class="info">
+<div class="info ">
 Unpacked ICMP message.<br>
 </div>
 
-<pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Icmp6.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_echo_request"><span class="keyword">val</span> make_echo_request</span> : <code class="type">int -> int -> <a href="Icmp6.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALmake_echo_reply"><span class="keyword">val</span> make_echo_reply</span> : <code class="type">int -> int -> <a href="Icmp6.Pdu.html#TYPEt">t</a></code></pre><pre><span id="VALis_echo_request"><span class="keyword">val</span> is_echo_request</span> : <code class="type"><a href="Icmp6.Pdu.html#TYPEt">t</a> -> bool</code></pre><pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Icmp6.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">string * int * int -> <a href="Icmp6.Pdu.html#TYPEt">t</a> option</code></pre></body></html>
+
+<pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Icmp6.Pdu.html#TYPEt">t</a></code></pre>
+<pre><span id="VALmake_echo_request"><span class="keyword">val</span> make_echo_request</span> : <code class="type">int -> int -> <a href="Icmp6.Pdu.html#TYPEt">t</a></code></pre>
+<pre><span id="VALmake_echo_reply"><span class="keyword">val</span> make_echo_reply</span> : <code class="type">int -> int -> <a href="Icmp6.Pdu.html#TYPEt">t</a></code></pre>
+<pre><span id="VALis_echo_request"><span class="keyword">val</span> is_echo_request</span> : <code class="type"><a href="Icmp6.Pdu.html#TYPEt">t</a> -> bool</code></pre>
+<pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Icmp6.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre>
+<pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">string * int * int -> <a href="Icmp6.Pdu.html#TYPEt">t</a> option</code></pre></body></html>

@@ -53,13 +53,15 @@
 &nbsp;<a class="post" href="Dns.html" title="Dns">Next</a>
 </div>
 <h1>Module <a href="type_Dhcpd.html">Dhcpd</a></h1>
-<pre><span class="keyword">module</span> Dhcpd: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcpd.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Dhcpd: <code class="code"><span class="keyword">sig</span></code> <a href="Dhcpd.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 DHCP server<br>
 </div>
 <hr width="100%">
 <br>
 DHCP server<br>
-<pre><span id="VALserve"><span class="keyword">val</span> serve</span> : <code class="type">?port:Udp.Port.t -> <a href="Host.html#TYPEhost_trx">Host.host_trx</a> -> Ip.Addr.t Batteries.Enum.t -> unit</code></pre><div class="info">
+
+<pre><span id="VALserve"><span class="keyword">val</span> serve</span> : <code class="type">?port:Udp.Port.t -> <a href="Host.html#TYPEhost_trx">Host.host_trx</a> -> Ip.Addr.t Batteries.Enum.t -> unit</code></pre><div class="info ">
 <code class="code">serve host ips</code> listen on host DHCP port and allocate the
  given ips to any requester.<br>
 </div>

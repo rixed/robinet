@@ -58,17 +58,20 @@
 &nbsp;<a class="post" href="Ip6.html" title="Ip6">Next</a>
 </div>
 <h1>Module <a href="type_Ip.html">Ip</a></h1>
-<pre><span class="keyword">module</span> Ip: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Ip: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
  Everything related to IPv4 packets: (un)packing, addresses, transceiver...
 <p>
 
  TODO: Some usual IP options should be understood.<br>
 </div>
 <hr width="100%">
+
 <pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><br>
 <h2 id="2_PrivateTypes">Private Types</h2><br>
 <br>
 <h3 id="3_Protocols">Protocols</h3><br>
+
 <pre><span class="keyword">module</span> <a href="Ip.Proto.html">Proto</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Proto.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 Internet protocols, as in <code class="code">/etc/protocols</code>.
 </div>
@@ -81,22 +84,27 @@ Internet protocols, as in <code class="code">/etc/protocols</code>.
  Stdlib <code class="code"><span class="constructor">Unix</span></code> module already have a type for IP addresses:
  <code class="code"><span class="constructor">Unix</span>.inet_addr</code> (actually a <code class="code">string</code>). We use a private type
  nonetheless so that we can have a custom printer.<br>
-<pre><span id="VALinet_addr_print"><span class="keyword">val</span> inet_addr_print</span> : <code class="type">'a BatInnerIO.output -> Batteries.Unix.inet_addr -> unit</code></pre><div class="info">
+
+<pre><span id="VALinet_addr_print"><span class="keyword">val</span> inet_addr_print</span> : <code class="type">'a BatInnerIO.output -> Batteries.Unix.inet_addr -> unit</code></pre><div class="info ">
 Printer (in the sense of Batteries) for inet_addrs<br>
 </div>
 <br>
 <h4 id="4_IPAddressesasUnixinetaddrie">IP Addresses as Unix.inet_addr (ie. strings)</h4><br>
+
 <pre><span class="keyword">module</span> <a href="Ip.Addr.html">Addr</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Addr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><br>
 <h4 id="4_CIDRAddresses">CIDR Addresses</h4><br>
+
 <pre><span class="keyword">module</span> <a href="Ip.Cidr.html">Cidr</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Cidr.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 CIDR addresses are a concise way to write network addresses,
  with network IP then netmask length, like: 192.168.0.0/16.
 </div>
 <br>
 <h2 id="2_IPpacket">IP packet</h2><br>
+
 <pre><span class="keyword">module</span> <a href="Ip.Pdu.html">Pdu</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
 (Un)Packing an IP packet.
 </div>
 <br>
 <h2 id="2_Transceiver">Transceiver</h2><br>
+
 <pre><span class="keyword">module</span> <a href="Ip.TRX.html">TRX</a>: <code class="code"><span class="keyword">sig</span></code> <a href="Ip.TRX.html">..</a> <code class="code"><span class="keyword">end</span></code></pre></body></html>

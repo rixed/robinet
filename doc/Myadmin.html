@@ -53,33 +53,53 @@
 &nbsp;<a class="post" href="Net.html" title="Net">Next</a>
 </div>
 <h1>Module <a href="type_Myadmin.html">Myadmin</a></h1>
-<pre><span class="keyword">module</span> Myadmin: <code class="code"><span class="keyword">sig</span></code> <a href="Myadmin.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Myadmin: <code class="code"><span class="keyword">sig</span></code> <a href="Myadmin.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 An HTTP server for monitoring/editing the virtual network.<br>
 </div>
 <hr width="100%">
-<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><pre><span id="VALserie_size"><span class="keyword">val</span> serie_size</span> : <code class="type">int</code></pre><pre><code><span id="TYPEserie"><span class="keyword">type</span> <code class="type"></code>serie</span> = {</code></pre><table class="typetable">
+
+<pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre>
+<pre><span id="VALserie_size"><span class="keyword">val</span> serie_size</span> : <code class="type">int</code></pre>
+<pre><code><span id="TYPEserie"><span class="keyword">type</span> <code class="type"></code>serie</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTserie.used">used</span>&nbsp;:<code class="type">int</code>;</code></td>
+<code><span class="keyword">mutable&nbsp;</span><span id="TYPEELTserie.used">used</span>&nbsp;: <code class="type">int</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTserie.past">past</span>&nbsp;:<code class="type">int64 array</code>;</code></td>
+<code><span id="TYPEELTserie.past">past</span>&nbsp;: <code class="type">int64 array</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTserie.color">color</span>&nbsp;:<code class="type">int32</code>;</code></td>
+<code><span id="TYPEELTserie.color">color</span>&nbsp;: <code class="type">int32</code>;</code></td>
 
 </tr></table>
 }
 
 
-<pre><span id="VALseries"><span class="keyword">val</span> series</span> : <code class="type">(string, <a href="Myadmin.html#TYPEserie">serie</a>) Batteries.Hashtbl.t</code></pre><pre><span id="VALserie_current_idx"><span class="keyword">val</span> serie_current_idx</span> : <code class="type">int Batteries.ref</code></pre><pre><span id="VALreport_thread"><span class="keyword">val</span> report_thread</span> : <code class="type">float -> 'a</code></pre><pre><span id="VALbasename"><span class="keyword">val</span> basename</span> : <code class="type">string -> string</code></pre><pre><span id="VALprint_tree"><span class="keyword">val</span> print_tree</span> : <code class="type">(string, 'a) Batteries.Hashtbl.t -><br>       'b BatInnerIO.output -> <a href="Metric.html#TYPEtree">Metric.tree</a> -> unit</code></pre><pre><span id="VALpage_head"><span class="keyword">val</span> page_head</span> : <code class="type">?selected:string -> 'a BatInnerIO.output -> unit</code></pre><pre><span id="VALpage_foot"><span class="keyword">val</span> page_foot</span> : <code class="type">'a BatInnerIO.output -> unit</code></pre><pre><span id="VALhome"><span class="keyword">val</span> home</span> : <code class="type">'a -> 'b -> 'c -> 'd -> 'e BatInnerIO.output -> (string * string) list</code></pre><pre><span id="VALnet"><span class="keyword">val</span> net</span> : <code class="type">'a -> 'b -> 'c -> 'd -> 'e BatInnerIO.output -> (string * string) list</code></pre><pre><span id="VALnetpart_csv"><span class="keyword">val</span> netpart_csv</span> : <code class="type">'a -><br>       string list -> 'b -> 'c -> 'd BatInnerIO.output -> (string * string) list</code></pre><pre><span id="VALnet_csv"><span class="keyword">val</span> net_csv</span> : <code class="type">string -><br>       string list -> 'a -> string -> 'b BatInnerIO.output -> (string * string) list</code></pre><pre><span id="VALscenarii"><span class="keyword">val</span> scenarii</span> : <code class="type">'a -> 'b -> 'c -> 'd -> 'e BatInnerIO.output -> (string * string) list</code></pre><pre><span id="VALengine"><span class="keyword">val</span> engine</span> : <code class="type">'a -> 'b -> 'c -> 'd -> 'e BatInnerIO.output -> (string * string) list</code></pre><pre><span id="VALmetrics"><span class="keyword">val</span> metrics</span> : <code class="type">'a -><br>       'b -><br>       (string, string) Batteries.Hashtbl.t -><br>       'c -> 'd BatInnerIO.output -> (string * string) list</code></pre><pre><span id="VALlogs"><span class="keyword">val</span> logs</span> : <code class="type">'a -><br>       'b -><br>       (string, string) Batteries.Hashtbl.t -><br>       'c -> 'd BatInnerIO.output -> (string * string) list</code></pre><pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type"><a href="Host.html#TYPEhost_trx">Host.host_trx</a> -> Tcp.Port.t -> unit</code></pre></body></html>
+
+<pre><span id="VALseries"><span class="keyword">val</span> series</span> : <code class="type">(string, <a href="Myadmin.html#TYPEserie">serie</a>) Batteries.Hashtbl.t</code></pre>
+<pre><span id="VALserie_current_idx"><span class="keyword">val</span> serie_current_idx</span> : <code class="type">int Batteries.ref</code></pre>
+<pre><span id="VALreport_thread"><span class="keyword">val</span> report_thread</span> : <code class="type">float -> 'a</code></pre>
+<pre><span id="VALbasename"><span class="keyword">val</span> basename</span> : <code class="type">string -> string</code></pre>
+<pre><span id="VALprint_tree"><span class="keyword">val</span> print_tree</span> : <code class="type">(string, 'a) Batteries.Hashtbl.t -><br>       'b BatInnerIO.output -> <a href="Metric.html#TYPEtree">Metric.tree</a> -> unit</code></pre>
+<pre><span id="VALpage_head"><span class="keyword">val</span> page_head</span> : <code class="type">?selected:string -> 'a BatInnerIO.output -> unit</code></pre>
+<pre><span id="VALpage_foot"><span class="keyword">val</span> page_foot</span> : <code class="type">'a BatInnerIO.output -> unit</code></pre>
+<pre><span id="VALhome"><span class="keyword">val</span> home</span> : <code class="type">'a -> 'b -> 'c -> 'd -> 'e BatInnerIO.output -> (string * string) list</code></pre>
+<pre><span id="VALnet"><span class="keyword">val</span> net</span> : <code class="type">'a -> 'b -> 'c -> 'd -> 'e BatInnerIO.output -> (string * string) list</code></pre>
+<pre><span id="VALnetpart_csv"><span class="keyword">val</span> netpart_csv</span> : <code class="type">'a -><br>       string list -> 'b -> 'c -> 'd BatInnerIO.output -> (string * string) list</code></pre>
+<pre><span id="VALnet_csv"><span class="keyword">val</span> net_csv</span> : <code class="type">string -><br>       string list -> 'a -> string -> 'b BatInnerIO.output -> (string * string) list</code></pre>
+<pre><span id="VALscenarii"><span class="keyword">val</span> scenarii</span> : <code class="type">'a -> 'b -> 'c -> 'd -> 'e BatInnerIO.output -> (string * string) list</code></pre>
+<pre><span id="VALengine"><span class="keyword">val</span> engine</span> : <code class="type">'a -> 'b -> 'c -> 'd -> 'e BatInnerIO.output -> (string * string) list</code></pre>
+<pre><span id="VALmetrics"><span class="keyword">val</span> metrics</span> : <code class="type">'a -><br>       'b -><br>       (string, string) Batteries.Hashtbl.t -><br>       'c -> 'd BatInnerIO.output -> (string * string) list</code></pre>
+<pre><span id="VALlogs"><span class="keyword">val</span> logs</span> : <code class="type">'a -><br>       'b -><br>       (string, string) Batteries.Hashtbl.t -><br>       'c -> 'd BatInnerIO.output -> (string * string) list</code></pre>
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type"><a href="Host.html#TYPEhost_trx">Host.host_trx</a> -> Tcp.Port.t -> unit</code></pre></body></html>

@@ -15,7 +15,7 @@
 			<a href="packets.html" id="packets_link">Packets</a>
 			<a href="hosts.html" id="hosts_link">Fake Hosts</a>
 			<a href="nets.html" id="nets_link">Fake Networks</a>
-			<a href="scenarii.html" id="scenarii_link">Scneriarii</a>
+			<a href="scenarii.html" id="scenarii_link">Scenarii</a>
 			<a href="metrics.html" id="metrics_link">Metrics</a>
 		</div>
 

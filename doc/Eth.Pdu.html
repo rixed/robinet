@@ -53,56 +53,62 @@
 &nbsp;<a class="post" href="Eth.TRX.html" title="Eth.TRX">Next</a>
 </div>
 <h1>Module <a href="type_Eth.Pdu.html">Eth.Pdu</a></h1>
-<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info">
+
+<pre><span class="keyword">module</span> Pdu: <code class="code"><span class="keyword">sig</span></code> <a href="Eth.Pdu.html">..</a> <code class="code"><span class="keyword">end</span></code></pre><div class="info module top">
 Pack/Unpack an Ethernet frame.<br>
 </div>
 <hr width="100%">
+
 <pre><code><span id="TYPEt"><span class="keyword">type</span> <code class="type"></code>t</span> = {</code></pre><table class="typetable">
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.src">src</span>&nbsp;:<code class="type">Eth.Addr.t</code>;</code></td>
+<code><span id="TYPEELTt.src">src</span>&nbsp;: <code class="type">Eth.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.dst">dst</span>&nbsp;:<code class="type">Eth.Addr.t</code>;</code></td>
+<code><span id="TYPEELTt.dst">dst</span>&nbsp;: <code class="type">Eth.Addr.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.proto">proto</span>&nbsp;:<code class="type">Arp.HwProto.t</code>;</code></td>
+<code><span id="TYPEELTt.proto">proto</span>&nbsp;: <code class="type">Arp.HwProto.t</code>;</code></td>
 
 </tr>
 <tr>
 <td align="left" valign="top" >
 <code>&nbsp;&nbsp;</code></td>
 <td align="left" valign="top" >
-<code><span id="TYPEELTt.payload">payload</span>&nbsp;:<code class="type">Tools.Payload.t</code>;</code></td>
+<code><span id="TYPEELTt.payload">payload</span>&nbsp;: <code class="type">Tools.Payload.t</code>;</code></td>
 
 </tr></table>
 }
 
-<div class="info">
+<div class="info ">
 An Ethernet frame is made up from these constituents<br>
 </div>
 
-<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">Arp.HwProto.t -><br>       Eth.Addr.t -> Eth.Addr.t -> Tools.Payload.outer_t -> <a href="Eth.Pdu.html#TYPEt">t</a></code></pre><div class="info">
+
+<pre><span id="VALmake"><span class="keyword">val</span> make</span> : <code class="type">Arp.HwProto.t -><br>       Eth.Addr.t -> Eth.Addr.t -> Tools.Payload.outer_t -> <a href="Eth.Pdu.html#TYPEt">t</a></code></pre><div class="info ">
 Build an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code></a> for the given <code class="code">payload</code>.<br>
 </div>
-<pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Eth.Pdu.html#TYPEt">t</a></code></pre><div class="info">
+
+<pre><span id="VALrandom"><span class="keyword">val</span> random</span> : <code class="type">unit -> <a href="Eth.Pdu.html#TYPEt">t</a></code></pre><div class="info ">
 Returns a random <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code></a>.<br>
 </div>
-<pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Eth.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><div class="info">
+
+<pre><span id="VALpack"><span class="keyword">val</span> pack</span> : <code class="type"><a href="Eth.Pdu.html#TYPEt">t</a> -> Bitstring.bitstring</code></pre><div class="info ">
 Pack an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code></a> into its <code class="code">bitstring</code> raw representation, ready for
  injection onto the wire (via <a href="Pcap.html#VALinject_pdu"><code class="code"><span class="constructor">Pcap</span>.inject_pdu</code></a> for instance).<br>
 </div>
-<pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">string * int * int -> <a href="Eth.Pdu.html#TYPEt">t</a> option</code></pre><div class="info">
+
+<pre><span id="VALunpack"><span class="keyword">val</span> unpack</span> : <code class="type">string * int * int -> <a href="Eth.Pdu.html#TYPEt">t</a> option</code></pre><div class="info ">
 Unpack a <code class="code">bitstring</code> into an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code></a><br>
 </div>
 </body></html>
