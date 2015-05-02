@@ -564,6 +564,8 @@ Converts the other way around.
 <td></td></tr>
 <tr><td><a href="Tools.html#VALhexstring_of_bitstring">hexstring_of_bitstring</a> [<a href="Tools.html">Tools</a>]</td>
 <td></td></tr>
+<tr><td><a href="Tools.html#VALhexstring_of_bitstring_abbrev">hexstring_of_bitstring_abbrev</a> [<a href="Tools.html">Tools</a>]</td>
+<td></td></tr>
 <tr><td><a href="Ip.Addr.html#VALhigher_bits">higher_bits</a> [<a href="Ip.Addr.html">Ip.Addr</a>]</td>
 <td></td></tr>
 <tr><td><a href="Dns.QType.html#VALhinfo">hinfo</a> [<a href="Dns.QType.html">Dns.QType</a>]</td>
@@ -626,12 +628,12 @@ Return some informations about a pcap file (require to scan the whole file,
 <td></td></tr>
 <tr><td><a href="Pcap.html#VALinject">inject</a> [<a href="Pcap.html">Pcap</a>]</td>
 <td><div class="info">
-<code class="code">inject iface packet</code> inject this packet into this interface
+<code class="code">inject iface bits</code> inject the packet <code class="code">bits</code> into interface <code class="code">iface</code>.
 </div>
 </td></tr>
-<tr><td><a href="Pcap.html#VALinject_pdu">inject_pdu</a> [<a href="Pcap.html">Pcap</a>]</td>
+<tr><td><a href="Pcap.html#VALinject_">inject_</a> [<a href="Pcap.html">Pcap</a>]</td>
 <td><div class="info">
-<code class="code">inject_pdu iface bits</code> inject the packet <code class="code">bits</code> into interface <code class="code">iface</code>.
+<code class="code">inject_ iface_handler packet</code> inject this packet into this interface
 </div>
 </td></tr>
 <tr><td><a href="Tcp.TRX.html#VALinqueue_pkt">inqueue_pkt</a> [<a href="Tcp.TRX.html">Tcp.TRX</a>]</td>
@@ -929,6 +931,11 @@ the lowest port number used by the address translation
 milliseconds to .
 </div>
 </td></tr>
+<tr><td><a href="Pcap.html#VALmtu">mtu</a> [<a href="Pcap.html">Pcap</a>]</td>
+<td><div class="info">
+Get the MTU of a device (on Linux).
+</div>
+</td></tr>
 <tr><td><a href="Opache.html#VALmultiplexer">multiplexer</a> [<a href="Opache.html">Opache</a>]</td>
 <td></td></tr>
 <tr><td><a href="Http.html#VALmust_close_cnx">must_close_cnx</a> [<a href="Http.html">Http</a>]</td>
@@ -1048,6 +1055,13 @@ Converts a string to an address.
  of each packets.
 </div>
 </td></tr>
+<tr><td><a href="Pcap.html#VALopenif_">openif_</a> [<a href="Pcap.html">Pcap</a>]</td>
+<td><div class="info">
+<code class="code">openif_ <span class="string">"eth0"</span> <span class="keyword">true</span> <span class="string">"port 80"</span> 96</code> returns the iface representing eth0,
+ in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
+ of each packets.
+</div>
+</td></tr>
 <tr><td><a href="Peg.html#VALoptional">optional</a> [<a href="Peg.html">Peg</a>]</td>
 <td></td></tr>
 <tr><td align="left"><br>P</td></tr>
@@ -1091,7 +1105,7 @@ Return the <code class="code">bitstring</code> ready to be written into a pcap f
 <tr><td><a href="Eth.Pdu.html#VALpack">pack</a> [<a href="Eth.Pdu.html">Eth.Pdu</a>]</td>
 <td><div class="info">
 Pack an <a href="Eth.Pdu.html#TYPEt"><code class="code"><span class="constructor">Eth</span>.<span class="constructor">Pdu</span>.t</code></a> into its <code class="code">bitstring</code> raw representation, ready for
- injection onto the wire (via <a href="Pcap.html#VALinject_pdu"><code class="code"><span class="constructor">Pcap</span>.inject_pdu</code></a> for instance).
+ injection onto the wire (via <code class="code"><span class="constructor">Pcap</span>.inject_pdu</code> for instance).
 </div>
 </td></tr>
 <tr><td><a href="Dns.Pdu.html#VALpack">pack</a> [<a href="Dns.Pdu.html">Dns.Pdu</a>]</td>
@@ -1368,7 +1382,7 @@ Returns a random Ethernet address (but neither broadcast nor zero).
 <tr><td><a href="Pcap.html#VALread_global_header">read_global_header</a> [<a href="Pcap.html">Pcap</a>]</td>
 <td><div class="info">
 <code class="code">read_global_header filename</code> reads the pcap global header from the
- fiven file, and returns both a <a href="Pcap.html#TYPEglobal_header"><code class="code"><span class="constructor">Pcap</span>.global_header</code></a> and the input channel.
+ given file, and returns both a <a href="Pcap.html#TYPEglobal_header"><code class="code"><span class="constructor">Pcap</span>.global_header</code></a> and the input channel.
 </div>
 </td></tr>
 <tr><td><a href="Dns.Pdu.html#VALread_n16">read_n16</a> [<a href="Dns.Pdu.html">Dns.Pdu</a>]</td>
@@ -1570,8 +1584,13 @@ Serial Line IP
 </td></tr>
 <tr><td><a href="Pcap.html#VALsniff">sniff</a> [<a href="Pcap.html">Pcap</a>]</td>
 <td><div class="info">
-<code class="code">sniff iface</code> will return the next available packet, as well as its capture
- timestamp
+<code class="code">sniff iface</code> will return the next available packet as a Pcap.Pdu.t.
+</div>
+</td></tr>
+<tr><td><a href="Pcap.html#VALsniff_">sniff_</a> [<a href="Pcap.html">Pcap</a>]</td>
+<td><div class="info">
+<code class="code">sniff_ iface_handler</code> will return the next available packet as a string,
+ as well as its capture timestamp.
 </div>
 </td></tr>
 <tr><td><a href="Pcap.html#VALsniffer">sniffer</a> [<a href="Pcap.html">Pcap</a>]</td>

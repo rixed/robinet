@@ -46,10 +46,11 @@
 <link title="Udp" rel="Chapter" href="Udp.html">
 <link title="Url" rel="Chapter" href="Url.html">
 <link title="Vlan" rel="Chapter" href="Vlan.html"><link title="Libpcap low level wrappers" rel="Section" href="#2_Libpcaplowlevelwrappers">
-<link title="Packet injection" rel="Section" href="#2_Packetinjection">
-<link title="Packet sniffing" rel="Section" href="#2_Packetsniffing">
 <link title="Pcap files" rel="Section" href="#2_Pcapfiles">
 <link title="Tools" rel="Section" href="#2_Tools">
+<link title="User friendly functions for capturing/injecting packets" rel="Section" href="#2_Userfriendlyfunctionsforcapturinginjectingpackets">
+<link title="Packet injection" rel="Section" href="#2_Packetinjection">
+<link title="Packet sniffing" rel="Section" href="#2_Packetsniffing">
 <link title="Captured packet" rel="Subsection" href="#3_Capturedpacket">
 <title>Pcap</title>
 </head>
@@ -65,7 +66,53 @@ This module holds all functions related to <code class="code">libpcap</code>, pa
    packet injection and pcap file reading and writing.
 <p>
 
-   For instance, to create a small pcap file with a single packet:
+   All I want is sniffing packets:
+<p>
+
+   To grab the first packet from "em1" interface and display it:
+<p>
+
+<pre class="codepre"><code class="code"># let itf = Pcap.openif "em1";;
+val itf : Pcap.iface = {Pcap.handler = <abstr>; name = "em1"; caplen = 1500}
+# let pkt = Pcap.sniff itf;;
+val pkt : Pcap.Pdu.t =
+ {Pcap.Pdu.source_name = "em1"; caplen = 1500;
+   dlt = Ethernet (10Mb); ts = 15:09:49.81;
+   payload = 66 bytes (74 46 a0 a1 28 8e 00...)}
+# Packet.Pdu.unpack pkt;;
+- : Packet.Pdu.layer list =
+ [Packet.Pdu.Pcap
+   {Pcap.Pdu.source_name = "em1"; caplen = 1500;
+    dlt = Ethernet (10Mb); ts = 15:09:49.81;
+    payload = 66 bytes (74 46 a2 a1 28 8e 00...)};
+  Packet.Pdu.Eth
+   {Eth.Pdu.src = Cisco:25:ac:42;
+    dst = 74:46:a2:a1:28:8e; proto = IP;
+    payload = 52 bytes (45 20 00 34 86 aa 40...)};
+  Packet.Pdu.Ip
+   {Ip.Pdu.tos = 32; tot_len = 52; id = 34474; dont_frag = true;
+    more_frags = false; frag_offset = 0; ttl = 58; proto = tcp;
+    src = 172.16.255.194; dst = 172.28.11.20;
+    options = ; payload = 32 bytes (02 02 bc c8 a2 6c d0...)};
+  Packet.Pdu.Tcp
+   {Tcp.Pdu.src_port = shell; dst_port = 48328;
+    seq_num = 0xA26CD0EB; ack_num = 0x304E4FC3;
+    win_size = 501; flags = Ack; urg_ptr = 0;
+    options = 01 01 08 0a 28 f5 dd 89 - 57 c2 c6 25              .....��.W��%
+    ;
+    payload = empty}]
+
+</code></pre>
+<p>
+
+   Following packets can be dumped easily with just <pre class="codepre"><code class="code"><span class="constructor">Pcap</span>.sniff&nbsp;itf&nbsp;|&gt;&nbsp;<span class="constructor">Packet</span>.<span class="constructor">Pdu</span>.unpack</code></pre>
+   ("|&gt;" is like the UNIX pipe).
+<p>
+
+   All I want is editing pcap files:
+<p>
+
+   To create a small pcap file with a single packet:
 <p>
 
 <pre class="codepre"><code class="code"><span class="constructor">Tcp</span>.<span class="constructor">Pdu</span>.make&nbsp;~dst_port:(<span class="constructor">Tcp</span>.<span class="constructor">Port</span>.o&nbsp;5000)&nbsp;(bitstring_of_string&nbsp;<span class="string">"HTTP/1.2&nbsp;pas&nbsp;glop"</span>)&nbsp;|&gt;<br>
@@ -93,60 +140,27 @@ This module holds all functions related to <code class="code">libpcap</code>, pa
 <pre><span id="VALdebug"><span class="keyword">val</span> debug</span> : <code class="type">bool</code></pre><br>
 <h2 id="2_Libpcaplowlevelwrappers">Libpcap low level wrappers</h2><br>
 
-<pre><span id="TYPEiface"><span class="keyword">type</span> <code class="type"></code>iface</span> </pre>
+<pre><span id="TYPEiface_handler"><span class="keyword">type</span> <code class="type"></code>iface_handler</span> </pre>
 <div class="info ">
-A network device opened for sniffing or injection<br>
+Libpcap network interface handler.<br>
 </div>
 
 
-<pre><span id="VALopenif"><span class="keyword">val</span> openif</span> : <code class="type">string -> bool -> string -> int -> <a href="Pcap.html#TYPEiface">iface</a></code></pre><div class="info ">
-<code class="code">openif <span class="string">"eth0"</span> <span class="keyword">true</span> <span class="string">"port 80"</span> 96</code> returns the iface representing eth0,
+<pre><span id="VALinject_"><span class="keyword">val</span> inject_</span> : <code class="type"><a href="Pcap.html#TYPEiface_handler">iface_handler</a> -> string -> unit</code></pre><div class="info ">
+<code class="code">inject_ iface_handler packet</code> inject this packet into this interface<br>
+</div>
+
+<pre><span id="VALsniff_"><span class="keyword">val</span> sniff_</span> : <code class="type"><a href="Pcap.html#TYPEiface_handler">iface_handler</a> -> Clock.Time.t * string</code></pre><div class="info ">
+<code class="code">sniff_ iface_handler</code> will return the next available packet as a string,
+ as well as its capture timestamp.<br>
+</div>
+
+<pre><span id="VALopenif_"><span class="keyword">val</span> openif_</span> : <code class="type">string -> bool -> string -> int -> <a href="Pcap.html#TYPEiface_handler">iface_handler</a></code></pre><div class="info ">
+<code class="code">openif_ <span class="string">"eth0"</span> <span class="keyword">true</span> <span class="string">"port 80"</span> 96</code> returns the iface representing eth0,
  in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  of each packets. Notice that if <code class="code">caplen</code> is set to 0 then a "default" value
  of 65535 will be chosen, which is probably not what you want. You should set
  <code class="code">caplen</code> = your <em>MTU</em> size.<br>
-</div>
-
-<pre><span id="VALinject"><span class="keyword">val</span> inject</span> : <code class="type"><a href="Pcap.html#TYPEiface">iface</a> -> string -> unit</code></pre><div class="info ">
-<code class="code">inject iface packet</code> inject this packet into this interface<br>
-</div>
-
-<pre><span id="VALsniff"><span class="keyword">val</span> sniff</span> : <code class="type"><a href="Pcap.html#TYPEiface">iface</a> -> Clock.Time.t * string</code></pre><div class="info ">
-<code class="code">sniff iface</code> will return the next available packet, as well as its capture
- timestamp<br>
-</div>
-<br>
-<h2 id="2_Packetinjection">Packet injection</h2><br>
-
-<pre><span id="VALpackets_injected_ok"><span class="keyword">val</span> packets_injected_ok</span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><div class="info ">
-A counter for how many packets were injected successfully.<br>
-</div>
-
-<pre><span id="VALpackets_injected_err"><span class="keyword">val</span> packets_injected_err</span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><div class="info ">
-A counter for how many packets we failed to inject.<br>
-</div>
-
-<pre><span id="VALbytes_out"><span class="keyword">val</span> bytes_out</span> : <code class="type"><a href="Metric.Counter.html#TYPEt">Metric.Counter.t</a></code></pre><div class="info ">
-A counter for how many bytes were injected successfully.<br>
-</div>
-
-<pre><span id="VALinject_pdu"><span class="keyword">val</span> inject_pdu</span> : <code class="type"><a href="Pcap.html#TYPEiface">iface</a> -> Bitstring.bitstring -> unit</code></pre><div class="info ">
-<code class="code">inject_pdu iface bits</code> inject the packet <code class="code">bits</code> into interface <code class="code">iface</code>.<br>
-</div>
-<br>
-<h2 id="2_Packetsniffing">Packet sniffing</h2><br>
-
-<pre><span id="VALpackets_sniffed_ok"><span class="keyword">val</span> packets_sniffed_ok</span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><div class="info ">
-A counter for how many packets were sniffed.<br>
-</div>
-
-<pre><span id="VALbytes_in"><span class="keyword">val</span> bytes_in</span> : <code class="type"><a href="Metric.Counter.html#TYPEt">Metric.Counter.t</a></code></pre><div class="info ">
-A counter for how many bytes were sniffed.<br>
-</div>
-
-<pre><span id="VALsniffer"><span class="keyword">val</span> sniffer</span> : <code class="type"><a href="Pcap.html#TYPEiface">iface</a> -> (Bitstring.bitstring -> unit) -> Thread.t</code></pre><div class="info ">
-<code class="code">sniffer iface rx</code> returns a thread that continuously sniff packets
- and pass them to the <code class="code">rx</code> function (via the Clock).<br>
 </div>
 <br>
 <h2 id="2_Pcapfiles">Pcap files</h2><br>
@@ -265,7 +279,7 @@ When trying to read packets from a file that doesn't look like a pcap file.<br>
 <pre><span id="VALglobal_header_of_bitstring"><span class="keyword">val</span> global_header_of_bitstring</span> : <code class="type">string -> Bitstring.bitstring -> <a href="Pcap.html#TYPEglobal_header">global_header</a></code></pre>
 <pre><span id="VALread_global_header"><span class="keyword">val</span> read_global_header</span> : <code class="type">string -> <a href="Pcap.html#TYPEglobal_header">global_header</a> * BatIO.input</code></pre><div class="info ">
 <code class="code">read_global_header filename</code> reads the pcap global header from the
- fiven file, and returns both a <a href="Pcap.html#TYPEglobal_header"><code class="code"><span class="constructor">Pcap</span>.global_header</code></a> and the input channel.<br>
+ given file, and returns both a <a href="Pcap.html#TYPEglobal_header"><code class="code"><span class="constructor">Pcap</span>.global_header</code></a> and the input channel.<br>
 </div>
 
 <pre><span id="VALread_next_pkt"><span class="keyword">val</span> read_next_pkt</span> : <code class="type"><a href="Pcap.html#TYPEglobal_header">global_header</a> -> Batteries.IO.input -> <a href="Pcap.Pdu.html#TYPEt">Pdu.t</a></code></pre><div class="info ">
@@ -364,5 +378,84 @@ Small utility that truncate a pcap file to the last valid packet.
  copying the pcap file frame rate. Notice that we use the internal
  <a href="Clock.html"><code class="code"><span class="constructor">Clock</span></code></a> for this, so it's both very accurate or not accurate at all,
  depending on how you look at it.<br>
+</div>
+<br>
+<h2 id="2_Userfriendlyfunctionsforcapturinginjectingpackets">User friendly functions for capturing/injecting packets</h2><br>
+
+<pre><code><span id="TYPEiface"><span class="keyword">type</span> <code class="type"></code>iface</span> = {</code></pre><table class="typetable">
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span id="TYPEELTiface.handler">handler</span>&nbsp;: <code class="type"><a href="Pcap.html#TYPEiface_handler">iface_handler</a></code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span id="TYPEELTiface.name">name</span>&nbsp;: <code class="type">string</code>;</code></td>
+
+</tr>
+<tr>
+<td align="left" valign="top" >
+<code>&nbsp;&nbsp;</code></td>
+<td align="left" valign="top" >
+<code><span id="TYPEELTiface.caplen">caplen</span>&nbsp;: <code class="type">int</code>;</code></td>
+
+</tr></table>
+}
+
+<div class="info ">
+A network device opened for sniffing or injection<br>
+</div>
+
+
+<pre><span id="VALmtu"><span class="keyword">val</span> mtu</span> : <code class="type">string -> int</code></pre><div class="info ">
+Get the MTU of a device (on Linux). May raise all kind of exceptions.<br>
+</div>
+
+<pre><span id="VALopenif"><span class="keyword">val</span> openif</span> : <code class="type">?promisc:bool -> ?filter:string -> ?caplen:int -> string -> <a href="Pcap.html#TYPEiface">iface</a></code></pre><div class="info ">
+<code class="code">openif <span class="string">"eth0"</span> <span class="keyword">true</span> <span class="string">"port 80"</span> 96</code> returns the iface representing eth0,
+ in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
+ of each packets. Notice that if <code class="code">caplen</code> is not set then <em>MTU</em> for the
+ device will be chosen.<br>
+</div>
+
+<pre><span id="VALsniff"><span class="keyword">val</span> sniff</span> : <code class="type"><a href="Pcap.html#TYPEiface">iface</a> -> <a href="Pcap.Pdu.html#TYPEt">Pdu.t</a></code></pre><div class="info ">
+<code class="code">sniff iface</code> will return the next available packet as a Pcap.Pdu.t.<br>
+</div>
+<br>
+<h2 id="2_Packetinjection">Packet injection</h2><br>
+
+<pre><span id="VALpackets_injected_ok"><span class="keyword">val</span> packets_injected_ok</span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><div class="info ">
+A counter for how many packets were injected successfully.<br>
+</div>
+
+<pre><span id="VALpackets_injected_err"><span class="keyword">val</span> packets_injected_err</span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><div class="info ">
+A counter for how many packets we failed to inject.<br>
+</div>
+
+<pre><span id="VALbytes_out"><span class="keyword">val</span> bytes_out</span> : <code class="type"><a href="Metric.Counter.html#TYPEt">Metric.Counter.t</a></code></pre><div class="info ">
+A counter for how many bytes were injected successfully.<br>
+</div>
+
+<pre><span id="VALinject"><span class="keyword">val</span> inject</span> : <code class="type"><a href="Pcap.html#TYPEiface">iface</a> -> Bitstring.bitstring -> unit</code></pre><div class="info ">
+<code class="code">inject iface bits</code> inject the packet <code class="code">bits</code> into interface <code class="code">iface</code>.<br>
+</div>
+<br>
+<h2 id="2_Packetsniffing">Packet sniffing</h2><br>
+
+<pre><span id="VALpackets_sniffed_ok"><span class="keyword">val</span> packets_sniffed_ok</span> : <code class="type"><a href="Metric.Atomic.html#TYPEt">Metric.Atomic.t</a></code></pre><div class="info ">
+A counter for how many packets were sniffed.<br>
+</div>
+
+<pre><span id="VALbytes_in"><span class="keyword">val</span> bytes_in</span> : <code class="type"><a href="Metric.Counter.html#TYPEt">Metric.Counter.t</a></code></pre><div class="info ">
+A counter for how many bytes were sniffed.<br>
+</div>
+
+<pre><span id="VALsniffer"><span class="keyword">val</span> sniffer</span> : <code class="type"><a href="Pcap.html#TYPEiface">iface</a> -> (Bitstring.bitstring -> unit) -> Thread.t</code></pre><div class="info ">
+<code class="code">sniffer iface rx</code> returns a thread that continuously sniff packets
+ and pass them to the <code class="code">rx</code> function (via the Clock).<br>
 </div>
 </body></html>
