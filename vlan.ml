@@ -52,23 +52,23 @@ module Pdu = struct
     (** Pack a [Vlan.Pdu.t] into its [bitstring] raw representation, ready for
      * encapsulation into a {!Eth.Pdu.t} (or anywhere you like). *)
     let pack t =
-        concat [ (BITSTRING { t.prio : 3 ; t.cfi : 1 ; t.id : 12 ;
-                              (t.proto :> int) : 16 }) ;
-                 (t.payload :> bitstring) ]
+        let%bitstring hdr = {| t.prio : 3 ; t.cfi : 1 ; t.id : 12 ;
+                               (t.proto :> int) : 16 |} in
+        concat [ hdr ; (t.payload :> bitstring) ]
 
     (** Unpack a [bitstring] into a [Vlan.Pdu.t] *)
-    let unpack bits = bitmatch bits with
-        | { prio : 3 ; cfi : 1 ; id : 12 ;
-            proto : 16 ;
-            payload : -1 : bitstring } ->
+    let unpack bits = match%bitstring bits with
+        | {| prio : 3 ; cfi : 1 ; id : 12 ;
+             proto : 16 ;
+             payload : -1 : bitstring |} ->
             Some { prio ; cfi ; id ;
                    proto = Arp.HwProto.o proto ;
                    payload = Payload.o payload }
-        | { _ } ->
+        | {| _ |} ->
             err "Not 802.1q"
 
     (*$Q pack
-      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 end
@@ -114,4 +114,3 @@ struct
           out = { write = rx t ;
                   set_read = fun f -> t.emit <- f } }
 end
-

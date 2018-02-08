@@ -95,79 +95,79 @@ struct
           mutable client_id : bitstring option ;
           mutable request_list : string option }
 
-    let rec unpack_options t bits = bitmatch bits with
-        | { 0 : 8 ;
-            rest : -1 : bitstring } -> unpack_options t rest
-        | { 255 : 8 } -> true
-        | { 1 : 8 ; 4 : 8 ; subnet_mask : 32 ;
-            rest : -1 : bitstring } ->
+    let rec unpack_options t bits = match%bitstring bits with
+        | {| 0 : 8 ;
+             rest : -1 : bitstring |} -> unpack_options t rest
+        | {| 255 : 8 |} -> true
+        | {| 1 : 8 ; 4 : 8 ; subnet_mask : 32 ;
+            rest : -1 : bitstring |} ->
             t.subnet_mask <- Some (Ip.Addr.o32 subnet_mask) ;
             unpack_options t rest
-        | { 3 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
-            rest : -1 : bitstring } ->
+        | {| 3 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
+            rest : -1 : bitstring |} ->
             t.router <- Some (Ip.Addr.of_bitstring (takebits 32 ips)) ;
             unpack_options t rest
-        | { 42 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
-            rest : -1 : bitstring } ->
+        | {| 42 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
+            rest : -1 : bitstring |} ->
             t.ntp_server <- Some (Ip.Addr.of_bitstring (takebits 32 ips)) ;
             unpack_options t rest
-        | { 69 : 8 ; len : 8 : check (len >= 4 && len land 3 = 0) ; ips : 8*len : bitstring ;
-            rest : -1 : bitstring } ->
+        | {| 69 : 8 ; len : 8 : check (len >= 4 && len land 3 = 0) ; ips : 8*len : bitstring ;
+            rest : -1 : bitstring |} ->
             t.smtp_server <- Some (Ip.Addr.of_bitstring (takebits 32 ips)) ;
             unpack_options t rest
-        | { 70 : 8 ; len : 8 : check (len >= 4 && len land 3 = 0) ; ips : 8*len : bitstring ;
-            rest : -1 : bitstring } ->
+        | {| 70 : 8 ; len : 8 : check (len >= 4 && len land 3 = 0) ; ips : 8*len : bitstring ;
+            rest : -1 : bitstring |} ->
             t.pop3_server <- Some (Ip.Addr.of_bitstring (takebits 32 ips)) ;
             unpack_options t rest
-        | { 6 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
-            rest : -1 : bitstring } ->
+        | {| 6 : 8 ; len : 8 : check (len >= 4) ; ips : 8*len : bitstring ;
+            rest : -1 : bitstring |} ->
             t.name_server <- Some (Ip.Addr.of_bitstring (takebits 32 ips)) ;
             unpack_options t rest
-        | { 12 : 8 ; len : 8 : check (len >= 1) ; name : 8*len : string ;
-            rest : -1 : bitstring } ->
+        | {| 12 : 8 ; len : 8 : check (len >= 1) ; name : 8*len : string ;
+            rest : -1 : bitstring |} ->
             t.client_name <- Some name ;
             unpack_options t rest
-        | { 15 : 8 ; len : 8 : check (len >= 1) ; sfx : 8*len : string ;
-            rest : -1 : bitstring } ->
+        | {| 15 : 8 ; len : 8 : check (len >= 1) ; sfx : 8*len : string ;
+            rest : -1 : bitstring |} ->
             t.search_sfx <- Some sfx ;
             unpack_options t rest
-        | { 50 : 8 ; 4 : 8 ; req_ip : 32 ;
-            rest : -1 : bitstring } ->
+        | {| 50 : 8 ; 4 : 8 ; req_ip : 32 ;
+            rest : -1 : bitstring |} ->
             t.requested_ip <- Some (Ip.Addr.o32 req_ip) ;
             unpack_options t rest
-        | { 51 : 8 ; 4 : 8 ; lease : 32 ;
-            rest : -1 : bitstring } ->
+        | {| 51 : 8 ; 4 : 8 ; lease : 32 ;
+            rest : -1 : bitstring |} ->
             t.lease_time <- Some lease ;
             unpack_options t rest
-        | { 53 : 8 ; 1 : 8 ; msg_type : 8 : check (msg_type > 0 && msg_type < 9) ;
-            rest : -1 : bitstring } ->
+        | {| 53 : 8 ; 1 : 8 ; msg_type : 8 : check (msg_type > 0 && msg_type < 9) ;
+            rest : -1 : bitstring |} ->
             t.msg_type <- Some (MsgType.o msg_type) ;
             unpack_options t rest
-        | { 54 : 8 ; 4 : 8 ; ip : 32 ;
-            rest : -1 : bitstring } ->
+        | {| 54 : 8 ; 4 : 8 ; ip : 32 ;
+            rest : -1 : bitstring |} ->
             t.server_id <- Some (Ip.Addr.o32 ip) ;
             unpack_options t rest
-        | { 55 : 8 ; len : 8 : check (len > 0) ; params : 8*len : string ;
-            rest : -1 : bitstring } ->
+        | {| 55 : 8 ; len : 8 : check (len > 0) ; params : 8*len : string ;
+            rest : -1 : bitstring |} ->
             t.request_list <- Some params ;
             unpack_options t rest
-        | { 56 : 8 ; len : 8 : check (len > 0) ; msg : 8*len : string ;
-            rest : -1 : bitstring } ->
+        | {| 56 : 8 ; len : 8 : check (len > 0) ; msg : 8*len : string ;
+            rest : -1 : bitstring |} ->
             t.message <- Some msg ;
             unpack_options t rest
-        | { 61 : 8 ; len : 8 : check (len >= 2) ; id : 8*len : bitstring ;
-            rest : -1 : bitstring } ->
+        | {| 61 : 8 ; len : 8 : check (len >= 2) ; id : 8*len : bitstring ;
+            rest : -1 : bitstring |} ->
             t.client_id <- Some id ;
             unpack_options t rest
-        (* FIXME: IP Layer parameters setting could be interresting to get/set via DHCP.
+        (* FIXME: IP Layer parameters setting could be interesting to get/set via DHCP.
            At least netmask *)
         (* FIXME: handle option overload of file/sname fields with more options *)
-        | { _ : 8 ; len : 8 ; _ : 8*len ; rest : -1 : bitstring } ->
+        | {| _ : 8 ; len : 8 ; _ : 8*len ; rest : -1 : bitstring |} ->
             unpack_options t rest
-        | { _ } -> false
+        | {| _ |} -> false
 
-    let unpack bits = bitmatch bits with
-        | { op : 8 : check (op = bootrequest || op = bootreply) ;
+    let unpack bits = match%bitstring bits with
+        | {| op : 8 : check (op = bootrequest || op = bootreply) ;
             htype : 8 ; hlen : 8 ; hops : 8 ;
             xid : 32 ; secs : 16 ;
             flags : 16 : check (flags land 0x7fff = 0) ;
@@ -179,7 +179,7 @@ struct
             sname : 64*8 : string ;
             file : 128*8 : string ;
             0x63825363l : 32 ;
-            options : -1 : bitstring } ->
+            options : -1 : bitstring |} ->
           let t = { op = if op = bootrequest then BootRequest else BootReply ;
                     htype = Arp.HwType.o htype ; hlen ; hops ; xid ;
                     secs ; broadcast = flags land 0x8000 = 0x8000 ;
@@ -205,17 +205,17 @@ struct
                     request_list = None } in
           if unpack_options t options then Some t
           else err "Dhcp: Cannot decode options"
-        | { _ } -> err "Dhcp: Not DHCP"
+        | {| _ |} -> err "Dhcp: Not DHCP"
 
     let pack_options t =
-        let may_pack_msgtyp t v = Option.map (fun (v : MsgType.t) -> (BITSTRING { t : 8 ; 1 : 8 ; (v :> int) : 8 })) v
-        and may_pack_int32  t v = Option.map (fun v -> (BITSTRING { t : 8 ; 4 : 8 ; v : 32 })) v
-        and may_pack_ip     t v = Option.map (fun (v : Ip.Addr.t) -> (BITSTRING { t : 8 ; 4 : 8 ; (Ip.Addr.to_int32 v) : 32 })) v
-        and may_pack_string t v = Option.map (fun v -> (BITSTRING { t : 8 ; String.length v : 8 ; v : -1 : string })) v
-        and may_pack_bits   t v = Option.map (fun v -> (BITSTRING { t : 8 ; bytelength v : 8 ; v : -1 : bitstring })) v
+        let may_pack_msgtyp t v = Option.map (fun (v : MsgType.t) -> let%bitstring b = {| t : 8 ; 1 : 8 ; (v :> int) : 8 |} in b) v
+        and may_pack_int32  t v = Option.map (fun v -> let%bitstring b = {| t : 8 ; 4 : 8 ; v : 32 |} in b) v
+        and may_pack_ip     t v = Option.map (fun (v : Ip.Addr.t) -> let%bitstring b = {| t : 8 ; 4 : 8 ; (Ip.Addr.to_int32 v) : 32 |} in b) v
+        and may_pack_string t v = Option.map (fun v -> let%bitstring b = {| t : 8 ; String.length v : 8 ; v : -1 : string |} in b) v
+        and may_pack_bits   t v = Option.map (fun v -> let%bitstring b = {| t : 8 ; bytelength v : 8 ; v : -1 : bitstring |} in b) v
         in
         List.enum [ may_pack_msgtyp 53 t.msg_type ;
-                    may_pack_ip 1 t.subnet_mask ; (* must apear before router *)
+                    may_pack_ip 1 t.subnet_mask ; (* must appear before router *)
                     may_pack_ip 3 t.router ;
                     may_pack_ip 42 t.ntp_server ;
                     may_pack_ip 69 t.smtp_server ;
@@ -229,7 +229,7 @@ struct
                     may_pack_string 56 t.message ;
                     may_pack_bits 61 t.client_id ;
                     may_pack_string 55 t.request_list ;
-                    Some (BITSTRING { 255 : 8 }) ] //@
+                    Some (let%bitstring b = {| 255 : 8 |} in b) ] //@
             identity |>
             List.of_enum |>
             Bitstring.concat
@@ -240,7 +240,7 @@ struct
             if l >= len then String.sub str 0 len
             else str ^ (String.make (len-l) (Char.chr 0))
         in
-        (BITSTRING {
+        let%bitstring b = {|
             match t.op with BootRequest -> 1 | BootReply -> 2 : 8 ;
             (t.htype :> int) : 8 ; t.hlen : 8 ; t.hops : 8 ;
             t.xid : 32 ;
@@ -253,7 +253,7 @@ struct
             string_extend t.sname 64 : 64*8 : string ;
             string_extend t.file 128 : 128*8 : string ;
             0x63825363l : 32 ;
-            pack_options t : -1 : bitstring })
+            pack_options t : -1 : bitstring |} in b
 
     let make_base ?(mac=Eth.Addr.zero) ?xid ?name ?(yiaddr=Ip.Addr.zero) msg_type =
         let xid = may_default xid (fun () -> Random.int32 Int32.max_int) in
@@ -279,9 +279,10 @@ struct
 
     let make_discover ?(mac=Eth.Addr.zero) ?xid ?name () =
         let t = make_base ~mac ?xid ?name MsgType.discover in
-        t.client_id <- Some (BITSTRING {
+        let%bitstring id = {|
             (Arp.HwType.eth :> int) : 8 ;
-            (mac :> bitstring) : 6*8 : bitstring }) ;
+            (mac :> bitstring) : 6*8 : bitstring |} in
+        t.client_id <- Some id ;
         t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
         t
 
@@ -292,9 +293,10 @@ struct
 
     let make_request ?(mac=Eth.Addr.zero) ?xid ?name yiaddr server_id =
         let t = make_base ~mac ?xid ?name MsgType.request in
-        t.client_id <- Some (BITSTRING {
+        let%bitstring id = {|
             (Arp.HwType.eth :> int) : 8 ;
-            (mac :> bitstring) : 6*8 : bitstring }) ;
+            (mac :> bitstring) : 6*8 : bitstring |} in
+        t.client_id <- Some id ;
         t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
         t.requested_ip <- Some yiaddr ;
         t.server_id <- server_id ;
@@ -313,7 +315,7 @@ struct
             make_request ~xid ~name (Ip.Addr.random ()) (if randb () then Some (Ip.Addr.random ()) else None)
 
     (*$Q pack
-      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 

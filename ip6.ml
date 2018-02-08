@@ -18,7 +18,7 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 (**
- * Everything related to IPv4 packets: (un)packing, addresses, transceiver...
+ * Everything related to IPv6 packets: (un)packing, addresses, transceiver...
  *
  * TODO: Some usual IP options should be understood.
  *)
@@ -52,22 +52,23 @@ module Pdu = struct
              (randbs (Random.int 10 + 20))
 
     let pseudo_header t () =
-        (BITSTRING {
+        let%bitstring hdr = {|
             Ip.Addr.to_bitstring t.src : 128 : bitstring ;
             Ip.Addr.to_bitstring t.dst : 128 : bitstring ;
             bytelength (t.payload :> bitstring) : 16 ;
             0 : 24 ;
-            (t.proto :> int) : 8 })
+            (t.proto :> int) : 8 |} in
+        hdr
 
     let pack t =
-        let header = (BITSTRING {
+        let%bitstring header = {|
             6 : 4 ; t.diff_serv : 6 ; t.ecn : 2 ; t.flow_label : 20 ;
             bytelength (t.payload :> bitstring) : 16 ;
             (t.proto :> int) : 8 ; t.ttl : 8 ;
             Ip.Addr.to_bitstring t.src : 128 : bitstring ;
-            Ip.Addr.to_bitstring t.dst : 128 : bitstring })
+            Ip.Addr.to_bitstring t.dst : 128 : bitstring |} in
         (* must we patch some checksum? *)
-        and payload =
+        let payload =
             let fix_udp_checksum = function 0 -> 0xffff | x -> x in (* As per rfc2460, 8.1 *)
             if t.proto = Ip.Proto.tcp then Ip.Pdu.patch_checksum 128 (pseudo_header t) t.payload
             else if t.proto = Ip.Proto.udp then Ip.Pdu.patch_checksum 48 (pseudo_header t) ~fixit:fix_udp_checksum t.payload
@@ -75,25 +76,25 @@ module Pdu = struct
             else t.payload in
         concat [ header ; (payload :> bitstring) ]
 
-    let unpack bits = bitmatch bits with
-        | { 6 : 4 ; diff_serv : 6 ; ecn : 2 ; flow_label : 20 ;
-            payload_len : 16 ; proto : 8 ; ttl : 8 ;
-            src : 128 : bitstring ; dst : 128 : bitstring ;
-            payload : payload_len*8 : bitstring } ->
+    let unpack bits = match%bitstring bits with
+        | {| 6 : 4 ; diff_serv : 6 ; ecn : 2 ; flow_label : 20 ;
+             payload_len : 16 ; proto : 8 ; ttl : 8 ;
+             src : 128 : bitstring ; dst : 128 : bitstring ;
+             payload : payload_len*8 : bitstring |} ->
             Some { diff_serv ; ecn ; flow_label ;
                    proto = Ip.Proto.o proto ; ttl ;
                    src = Ip.Addr.of_bitstring src ;
                    dst = Ip.Addr.of_bitstring dst ;
                    payload = Payload.o payload }
-        | { version : 4 } when version <> 6 ->
+        | {| version : 4 |} when version <> 6 ->
             if version <> 4 then
                 err (Printf.sprintf "Ip6: Bad version (%d)" version)
             else None
-        | { _ } ->
+        | {| _ |} ->
             err "Ip6: Not IPv6"
 
     (*$Q pack
-      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
 
     (* TODO: unpack with ports a la ip.ml? *)
@@ -120,7 +121,7 @@ module TRX = struct
         | Some ip ->
             if Payload.bitlength ip.Pdu.payload > 0 then Clock.asap t.recv (ip.Pdu.payload :> bitstring))
 
-    (* Note: In Eth we do not require dst addr since the trx know (using ARP) how to get dest addr itself.
+    (* Note: In Eth we do not require dst addr since the trx knows (using ARP) how to get dest addr itself.
      *       IP cannot do this since the application layer won't tell him the destination hostname. Or
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)

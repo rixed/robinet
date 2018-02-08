@@ -116,32 +116,32 @@ struct
 
     let pack t =
         let hdr_len = 20 + bytelength t.options in
-        concat [ (BITSTRING {
+        let%bitstring hdr = {|
             (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
             (t.seq_num :> int32)  : 32 ; (t.ack_num :> int32)  : 32 ;
             hdr_len lsr 2 : 4 ; 0 : 6 ;
             t.flags.urg : 1 ; t.flags.ack : 1 ; t.flags.psh : 1 ;
             t.flags.rst : 1 ; t.flags.syn : 1 ; t.flags.fin : 1 ;
             t.win_size : 16 ; 0 : 16 ;
-            t.urg_ptr  : 16 ; t.options : -1 : bitstring }) ;
-            (t.payload :> bitstring) ]
+            t.urg_ptr  : 16 ; t.options : -1 : bitstring |} in
+        concat [ hdr ; (t.payload :> bitstring) ]
 
-    let unpack bits = bitmatch bits with
-        | { src_port : 16 ; dst_port : 16 ;
-            seq_num  : 32 ; ack_num  : 32 ;
-            hdr_len  : 4  ; 0 : 6 ;
-            urg : 1 ; ack : 1 ; psh : 1 ; rst : 1 ; syn : 1 ; fin : 1 ;
-            win_size : 16 ; _checksum : 16 ; urg_ptr  : 16 ;
-            options : ((hdr_len lsl 2) - 20) * 8 : bitstring ;
-            payload  : -1 : bitstring } ->
+    let unpack bits = match%bitstring bits with
+        | {| src_port : 16 ; dst_port : 16 ;
+             seq_num  : 32 ; ack_num  : 32 ;
+             hdr_len  : 4  ; 0 : 6 ;
+             urg : 1 ; ack : 1 ; psh : 1 ; rst : 1 ; syn : 1 ; fin : 1 ;
+             win_size : 16 ; _checksum : 16 ; urg_ptr  : 16 ;
+             options : ((hdr_len lsl 2) - 20) * 8 : bitstring ;
+             payload  : -1 : bitstring |} ->
         Some { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
                seq_num  = SeqNum.o seq_num  ; ack_num  = SeqNum.o ack_num ;
                flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
                win_size ; urg_ptr  ; options ; payload = Payload.o payload }
-        | { _ } -> err "Not TCP"
+        | {| _ |} -> err "Not TCP"
 
     (*$Q pack
-      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 end

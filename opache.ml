@@ -181,11 +181,11 @@ let static_file_server root _mth path_matches _params _qry_body resp_body =
             raise (ResourceError (400, "Bad path"))
 
 let it_works _mth path_matches _params _qry_body resp_body =
-    Printf.fprintf resp_body "
+    Printf.fprintf resp_body {|
 <html><head><title>It Works!</title></head>
 <body><h1>It works, too!</h1>
 Your requested: '%s'<br/>
-</body></html>"
+</body></html>|}
         (List.first path_matches) ;
     [ "Content-Type", "text/html" ]
 

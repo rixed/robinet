@@ -85,7 +85,7 @@ let reserve date time login pwd =
                 [ "idTspl", idTspl ;
                   "date", date ;
                   "time", time^":00" ;
-                  "resource_name", "Court 1" (* huhu, is that usefull? *) ;
+                  "resource_name", "Court 1" (* huhu, is that useful? *) ;
                   "duration", "40" ;
                   "nb_consecutive_reservations", "1" ;
                   "tab_users_id_0", "8d123ae11f94d8b3c1d566cbf32ec70d" ;

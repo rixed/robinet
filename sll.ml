@@ -45,6 +45,7 @@ module Pdu = struct
         | _ -> error "Invalid SLL packet type"
     let int_of_pkt_type = function
         | UnicastIn -> 0 | BroadcastIn -> 1 | MulticastIn -> 2 | OutToOut -> 3 | SentByUs -> 4
+
     (** A SLL frame has an address (usually Ethernet), a direction, and a
      * protocol. Notice the absence of the local address. *)
     type t = { pkt_type     : pkt_type ;
@@ -64,33 +65,32 @@ module Pdu = struct
 
     (** Pack a {!Sll.Pdu.t} into its [bitstring] raw representation. *)
     let pack t =
-        concat [ (BITSTRING {
-                    int_of_pkt_type t.pkt_type : 16 ;
-                    t.ll_addr_type : 16 ;
-                    bytelength t.ll_addr : 16 ;
-                    fixedbits 64 t.ll_addr : 64 : bitstring ;
-                    (t.proto :> int) : 16 }) ;
-                 (t.payload :> bitstring) ]
+        let%bitstring hdr = {|
+            int_of_pkt_type t.pkt_type : 16 ;
+            t.ll_addr_type : 16 ;
+            bytelength t.ll_addr : 16 ;
+            fixedbits 64 t.ll_addr : 64 : bitstring ;
+            (t.proto :> int) : 16 |} in
+        concat [ hdr ; (t.payload :> bitstring) ]
 
     (** Unpack a [bitstring] into a {!Sll.Pdu.t} *)
-    let unpack bits = bitmatch bits with
-        | { pkt_type : 16 ;
-            ll_addr_type : 16 ;
-            ll_addr_len : 16 ;
-            ll_addr : min 64 (ll_addr_len*8) : bitstring ;
-            _zeroes : if ll_addr_len*8 >= 64 then 0 else 64-ll_addr_len*8 : bitstring ;
-            proto : 16 ;
-            payload : -1 : bitstring } when pkt_type >= 0 && pkt_type <= 4 ->
+    let unpack bits = match%bitstring bits with
+        | {| pkt_type : 16 ;
+             ll_addr_type : 16 ;
+             ll_addr_len : 16 ;
+             ll_addr : min 64 (ll_addr_len*8) : bitstring ;
+             _zeroes : if ll_addr_len*8 >= 64 then 0 else 64-ll_addr_len*8 : bitstring ;
+             proto : 16 ;
+             payload : -1 : bitstring |} when pkt_type >= 0 && pkt_type <= 4 ->
             Some { pkt_type = pkt_type_of_int pkt_type ;
                    ll_addr_type ; ll_addr ;
                    proto = Arp.HwProto.o proto ;
                    payload = Payload.o payload }
-        | { _ } ->
+        | {| _ |} ->
             err "Not SLL"
 
     (*$Q pack
-      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 end
-

@@ -191,7 +191,7 @@ let rec with_resolver_trx t cont =
                     let ips =
                         List.filter_map (fun (_name, qtype, qclass, _ttl, data) ->
                             if qclass = Dns.qclass_inet && qtype = Dns.QType.a then
-                                Some (Ip.Addr.of_bitstring (bitstring_of_string data))
+                                Some (Ip.Addr.of_bitstring (bitstring_of_bytes data))
                             else None
                         ) pdu.Dns.Pdu.answer_rrs in
                     let conts = Hashtbl.find_all t.dns_queries name in

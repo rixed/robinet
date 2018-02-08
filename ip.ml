@@ -86,6 +86,7 @@ module Addr = struct
 
     include MakePrivate(struct
         type t = Unix.inet_addr
+
         (** Converts an address to it's string representation. *)
         let to_string t =
             if !print_as_names then
@@ -164,15 +165,15 @@ module Addr = struct
 
     (* make an Addr.t from a int32 *)
     let o32 i32 : t =
-        let bs = (BITSTRING { i32 : 32 }) in
+        let%bitstring bs = {| i32 : 32 |} in
         let str = string_of_bitstring bs in
         Obj.magic str
 
     (* The other way around *)
     let to_int32 (t : t) =
-        bitmatch (to_bitstring t) with
-        | { n : 32 } -> n
-        | { _ } -> should_not_happen ()
+        match%bitstring (to_bitstring t) with
+        | {| n : 32 |} -> n
+        | {| _ |} -> should_not_happen ()
 
     let higher_bits (ip : t) n =
         let bs = to_bitstring ip in
@@ -198,6 +199,7 @@ module Cidr = struct
     (*$< Cidr *)
     include MakePrivate(struct
         type t = Addr.t * int
+
         (** Converts a CIDR to its string representation. *)
         let to_string ((ip : Addr.t), n) =
             Addr.to_dotted_string ip ^ "/" ^ String.of_int n
@@ -223,7 +225,7 @@ module Cidr = struct
         let net = Addr.higher_bits (Addr.random ()) mask in
         o (net, mask)
     (*$Q of_string
-      ((random %> to_string), identity) (fun t -> t = to_string (of_string t))
+      (Q.make (fun _ -> random () |> to_string)) (fun t -> t = to_string (of_string t))
      *)
 
     (** Build a CIDR from a single address *)
@@ -340,20 +342,23 @@ module Pdu = struct
              (Proto.random ()) (Addr.random ()) (Addr.random ()) (randbs (Random.int 10 + 20))
 
     let pseudo_header t () =
-        (BITSTRING {
+        let%bitstring r = {|
             (Addr.to_int32 t.src) : 32 ; (Addr.to_int32 t.dst) : 32 ;
-            0 : 8 ; (t.proto :> int) : 8 ; Payload.length (t.payload) : 16 })
+            0 : 8 ; (t.proto :> int) : 8 ; Payload.length (t.payload) : 16 |} in
+        r
 
-    let patch_checksum ?(fixit=identity) offset pseudo_header (pld : Payload.t) = bitmatch (pld :> bitstring) with
-        | { head : offset : bitstring ;
-            chk  : 16 ;
-            tail : -1 : bitstring (* FIXME: for TCP, force urgent pointer at 0 if the urgent flag is unset *) } ->
+    let patch_checksum ?(fixit=identity) offset pseudo_header (pld : Payload.t) =
+        match%bitstring (pld :> bitstring) with
+        | {| head : offset : bitstring ;
+             chk  : 16 ;
+             tail : -1 : bitstring |} (* FIXME: for TCP, force urgent pointer at 0 if the urgent flag is unset *) ->
             if chk = 0 then (
                 let chk = sum (concat [ pseudo_header () ; head ; zeroes_bitstring 16 ; tail ]) |>
                           fixit in
-                Payload.o (BITSTRING { head : offset : bitstring ; chk : 16 ; tail : -1 : bitstring })
+                let%bitstring pld = {| head : offset : bitstring ; chk : 16 ; tail : -1 : bitstring |} in
+                Payload.o pld
             ) else pld
-        | { _ } ->
+        | {| _ |} ->
             Printf.fprintf stderr "Ip: Cannot patch checksum at offset %d\n" offset ;
             pld
 
@@ -366,49 +371,47 @@ module Pdu = struct
             assert (t.frag_offset < 8192) ;
             assert (t.ttl < 256) ;
             assert ((t.proto :> int) < 256) ;
-            concat [ (BITSTRING {
+            let%bitstring hdr = {|
                 4 : 4 ; hdr_len/4 : 4 ; t.tos : 8 ;
                 t.tot_len : 16 ;
                 t.id : 16 ; false : 1 ; t.dont_frag : 1 ; t.more_frags : 1 ; t.frag_offset : 13 ;
                 t.ttl : 8 ; (t.proto :> int) : 8 ; 0 : 16 ;
-                (Addr.to_int32 t.src) : 32 ; (Addr.to_int32 t.dst) : 32 }) ;
-            t.options ]
+                (Addr.to_int32 t.src) : 32 ; (Addr.to_int32 t.dst) : 32 |} in
+            concat [ hdr ; t.options ]
             in
         let header = (* patch actual IP checksum *)
-            let s = sum header in
-            concat [ takebits 80 header ;
-                     (BITSTRING { s : 16 }) ;
-                     dropbits 96 header ]
+            let%bitstring s = {| sum header : 16 |} in
+            concat [ takebits 80 header ; s ; dropbits 96 header ]
         and payload = (* and actual TCP/UDP checksums as well since they use some fields of the IP header *)
             if t.proto = Proto.tcp then patch_checksum 128 (pseudo_header t) t.payload
             else if t.proto = Proto.udp then patch_checksum 48 (pseudo_header t) t.payload
             else t.payload in
         concat [ header ; (payload :> bitstring) ]
 
-    let unpack bits = bitmatch bits with
-        | { 4 : 4 ; hdr_len : 4 ; tos : 8 ; tot_len : 16 ;
-            id : 16 ; false : 1 ; dont_frag : 1 ; more_frags : 1 ; frag_offset : 13 ;
-            ttl : 8 ; proto : 8 ; _checksum : 16 ;
-            src : 32 ;
-            dst : 32 ;
-            options : (hdr_len-5)*32 : bitstring ;
-            payload : (tot_len - hdr_len*4)*8 : bitstring ;
-            _padding : -1 : bitstring } ->
+    let unpack bits = match%bitstring bits with
+        | {| 4 : 4 ; hdr_len : 4 ; tos : 8 ; tot_len : 16 ;
+             id : 16 ; false : 1 ; dont_frag : 1 ; more_frags : 1 ; frag_offset : 13 ;
+             ttl : 8 ; proto : 8 ; _checksum : 16 ;
+             src : 32 ;
+             dst : 32 ;
+             options : (hdr_len-5)*32 : bitstring ;
+             payload : (tot_len - hdr_len*4)*8 : bitstring ;
+             _padding : -1 : bitstring |} ->
             (* TODO: control the checksum ? *)
             Some { tos ; tot_len ;
                id ; dont_frag ; more_frags ; frag_offset ;
                ttl ; proto = Proto.o proto ;
                src = Addr.o32 src ; dst = Addr.o32 dst ; options ;
                payload = Payload.o payload }
-        | { version : 4 } when version <> 4 ->
+        | {| version : 4 |} when version <> 4 ->
             if version <> 6 then
                 err (Printf.sprintf "Ip: Bad version (%d)" version)
             else None
-        | { _ } ->
+        | {| _ |} ->
             err "Ip: Not IP"
 
     (*$Q pack
-      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
 
     (** Unpack an ip packets and return the ip PDU, source port and dest port. *)

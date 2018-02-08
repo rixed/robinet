@@ -90,16 +90,20 @@ v}
 
     let patch_src_port proto bits port =
         if proto = Ip.Proto.tcp then (
-            Tcp.Pdu.pack { Option.get (Tcp.Pdu.unpack bits) with Tcp.Pdu.src_port = Tcp.Port.o port }
+            let pdu = Option.get (Tcp.Pdu.unpack bits) in
+            Tcp.Pdu.pack { pdu with Tcp.Pdu.src_port = Tcp.Port.o port }
         ) else if proto = Ip.Proto.udp then (
-            Udp.Pdu.pack { Option.get (Udp.Pdu.unpack bits) with Udp.Pdu.src_port = Udp.Port.o port }
+            let pdu = Option.get (Udp.Pdu.unpack bits) in
+            Udp.Pdu.pack { pdu with Udp.Pdu.src_port = Udp.Port.o port }
         ) else should_not_happen ()
 
     let patch_dst_port proto bits port =
         if proto = Ip.Proto.tcp then (
-            Tcp.Pdu.pack { Option.get (Tcp.Pdu.unpack bits) with Tcp.Pdu.dst_port = Tcp.Port.o port }
+            let pdu = Option.get (Tcp.Pdu.unpack bits) in
+            Tcp.Pdu.pack { pdu with Tcp.Pdu.dst_port = Tcp.Port.o port }
         ) else if proto = Ip.Proto.udp then (
-            Udp.Pdu.pack { Option.get (Udp.Pdu.unpack bits) with Udp.Pdu.dst_port = Udp.Port.o port }
+            let pdu = Option.get (Udp.Pdu.unpack bits) in
+            Udp.Pdu.pack { pdu with Udp.Pdu.dst_port = Udp.Port.o port }
         ) else should_not_happen ()
 
     (** bits are flowing from LAN to outside world *)
@@ -178,6 +182,7 @@ struct
 
     (* If we had a generic port module, this would go there *)
     type port_range = int * int (** Inclusive port range *)
+
     let port_in_range p (min, max) = p >= min && p <= max
 
     (** A [route] is a set of optional tests. *)
@@ -282,7 +287,7 @@ struct
 
         (* We are going to send some IP packets with a given destination: *)
         let easy_send n dst =
-            { Ip.Pdu.random () with Ip.Pdu.dst = Ip.Addr.of_string dst } |>
+            { (Ip.Pdu.random ()) with Ip.Pdu.dst = Ip.Addr.of_string dst } |>
             Ip.Pdu.pack |>
             Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (snd addrs.(n)) |>
             Eth.Pdu.pack |>

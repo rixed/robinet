@@ -60,8 +60,7 @@ EXAMPLES_BYTE = \
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
-REQUIRES = bitstring bitstring.syntax batteries
-SYNTAX=-syntax camlp4o
+REQUIRES = bitstring bitstring.ppx batteries
 
 include $(top_srcdir)make.common
 
@@ -72,21 +71,24 @@ all: robinet.top examples
 run: robinet.top
 	rlwrap ./robinet.top -init robinet.init
 
-$(EXAMPLES): $(ARCHIVE)
+$(EXAMPLES_BYTE): $(ARCHIVE)
 $(EXAMPLES_OPT): $(XARCHIVE)
 
 $(CLIB): $(C_SOURCES:.c=.o)
 	$(AR) rcs $@ $^
 
 examples: $(EXAMPLES)
-	@for f in $(EXAMPLES); do \
-		sudo setcap cap_net_raw,cap_net_admin=eip $$f ;\
-	 done
+	@if which setcap >& /dev/null ; then \
+	   for f in $(EXAMPLES); do \
+	     sudo setcap cap_net_raw,cap_net_admin=eip $$f ;\
+	   done ;\
+	 fi
 
 robinet.top: $(ARCHIVE)
-	$(OCAMLMKTOP) -o $@ -package "findlib,$(REQUIRES)" -linkpkg $(ARCHIVE)
-	sudo setcap cap_net_raw,cap_net_admin=eip $@
+	$(OCAMLMKTOP) -o $@ -package "findlib $(REQUIRES)" $(ARCHIVE)
+	@if which setcap >& /dev/null ; then \
+	   sudo setcap cap_net_raw,cap_net_admin=eip $@ ;\
+	 fi
 
 clean-spec:
 	rm -f examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
-

@@ -73,10 +73,13 @@ end = struct
 
     (** Adds a time and an interval. *)
     let add (t : t) (i : Interval.t) = o ((t :> float) +. (i :> float))
+
     (** Substract two time and returns an interval. *)
     let sub (a : t) (b : t) = Interval.o ((a :> float) -. (b :> float))
+
     (** Get the current wall clock (through {Unix.gettimeofday}). *)
     let wall_clock () = o (Unix.gettimeofday ())
+
     (** Convert a timestamp to a pair of ints with seconds, microseconds *)
     let to_ints (t : t) =
         let t = (t :> float) in
@@ -84,8 +87,9 @@ end = struct
         let usec = Int.of_float ((t -. (floor t)) *. 1_000_000.) in
         sec, usec
 end
-(** While Interval.t reprensents a time interval.
- * Both are floats internaly to match OCaml stdlib. *)
+
+(** While Interval.t represents a time interval.
+ * Both are floats internally to match OCaml stdlib. *)
 and Interval : sig
     include PRIVATE_TYPE with type t = private float and type outer_t = float
     val usec : float -> t
@@ -106,23 +110,28 @@ end = struct
 
     (** microseconds to {Interval.t}. *)
     let usec i = o (i *. 0.000001)
+
     (** milliseconds to {Interval.t}. *)
     let msec i = o (i *. 0.001)
+
     (** seconds to {Interval.t}. *)
     let sec i  = o i
+
     (** minutes to {Interval.t}. *)
     let min i  = o (i *. 60.)
+
     (** hours to {Interval.t}. *)
     let hour i = o (i *. 3600.)
 
     (** Custom comparison function so that we can change time representation
      * more easily in the future. *)
     let compare (a : t) (b : t) = Float.compare (a :> float) (b :> float)
+
     (** Adds two intervals. *)
     let add (a : t) (b : t) = o ((a :> float) +. (b :> float))
 end
 
-(* poor man's asctime *)
+(* Poor man's asctime *)
 let printer oc t = BatIO.nwrite oc (Time.to_string t)
 
 (** {2 Current running time} *)

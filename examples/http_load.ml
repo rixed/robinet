@@ -28,7 +28,8 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
     (* Build the hosts *)
     let mac_of_ip ip = (*Eth.addr_of_string "00:26:5e:0a:d2:b9" in*)
         let bs = Ip.Addr.to_bitstring ip in
-        Eth.Addr.o (BITSTRING { 0x1234 : 16 ; bs : 32 : bitstring }) in
+        let%bitstring b = {| 0x1234 : 16 ; bs : 32 : bitstring |} in
+        Eth.Addr.o b in
     let host_of_ip ip =
         Host.make_static (Ip.Addr.to_dotted_string ip) ?gw ?search_sfx ?nameserver (mac_of_ip ip) ip in
     let hosts = List.of_enum (Ip.Cidr.random_addrs src_range nb_srcs /@ host_of_ip)

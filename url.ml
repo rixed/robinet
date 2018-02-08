@@ -17,8 +17,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(** Uniform Resource Locator *)
-(**
+(** Uniform Resource Locator.
+
   Most of this is taken from RFC1808.
   See: http://tools.ietf.org/html/rfc1808
 *)
@@ -45,7 +45,7 @@ let is_unreserved = is_in_set unreseved_chars
 (** [decode str] will decode every URL encoded char present in str *)
 let decode s =
     let len = String.length s in
-    let s' = String.create len in
+    let s' = Bytes.create len in
     let rec aux o o' =
         if o < len then (
             let skip = ref 1 in
@@ -61,7 +61,7 @@ let decode s =
             aux (o + !skip) (o'+1)
         ) else o' in
     let len' = aux 0 0 in
-    let res = String.sub s' 0 len' in
+    let res = Bytes.sub s' 0 len' |> Bytes.to_string in
     if debug then Printf.printf "Url: decode: '%s' -> '%s'\n" s res ;
     res
 

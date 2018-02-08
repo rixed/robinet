@@ -143,7 +143,7 @@ module Pdu = struct
             make_reply hw_type proto_type sender_hw sender_proto (randbs 6) target_proto
 
     let pack t =
-        (BITSTRING {
+        let%bitstring b = {|
             (t.hw_type :> int) : 16 ;
             (t.proto_type :> int) : 16 ;
             (bitstring_length t.sender_hw)/8 : 8 ;
@@ -152,27 +152,28 @@ module Pdu = struct
             t.sender_hw : -1 : bitstring ;
             t.sender_proto : -1 : bitstring ;
             t.target_hw : -1 : bitstring ;
-            t.target_proto : -1 : bitstring })
+            t.target_proto : -1 : bitstring |}
+        in b
 
-    let unpack bits = bitmatch bits with
-        | { hw_type : 16 ;
-            proto_type : 16 ;
-            hw_len : 8 ;
-            proto_len : 8 ;
-            operation : 16 ;
-            sender_hw : hw_len*8 : bitstring ;
-            sender_proto : proto_len*8 : bitstring ;
-            target_hw : hw_len*8 : bitstring ;
-            target_proto : proto_len*8 : bitstring } ->
+    let unpack bits = match%bitstring bits with
+        | {| hw_type : 16 ;
+             proto_type : 16 ;
+             hw_len : 8 ;
+             proto_len : 8 ;
+             operation : 16 ;
+             sender_hw : hw_len*8 : bitstring ;
+             sender_proto : proto_len*8 : bitstring ;
+             target_hw : hw_len*8 : bitstring ;
+             target_proto : proto_len*8 : bitstring |} ->
             Some { hw_type = HwType.o hw_type ;
                    proto_type = HwProto.o proto_type ;
                    operation = Op.o operation ;
                    sender_hw ; sender_proto ;
                    target_hw ; target_proto }
-        | { _ } ->
+        | {| _ |} ->
             err "Not ARP"
     (*$Q pack
-      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 end

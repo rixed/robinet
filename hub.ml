@@ -76,9 +76,9 @@ struct
           macs = OrdArray.init nb_macs (fun _ -> { addr = None ; port = 0 }) ;
           macs_h = BitHash.create (nb_macs/10) }
 
-    let forward_from ins t bits = bitmatch bits with
-        | { dst : 6*8 : bitstring ;
-            src : 6*8 : bitstring } ->
+    let forward_from ins t bits = match%bitstring bits with
+        | {| dst : 6*8 : bitstring ;
+            src : 6*8 : bitstring |} ->
             (* update mac table for source (before forwarding!) *)
             (match BitHash.find_option t.macs_h src with
             | None ->
@@ -109,7 +109,7 @@ struct
             | Some n ->
                 Clock.asap t.hub.Repeater.ports.((OrdArray.get t.macs n).port).Repeater.emit bits ;
                 OrdArray.promote t.macs n)
-        | { _ } ->
+        | {| _ |} ->
             if debug then Printf.printf "Switch: drop incoming frame without destination\n%!"
 
     let write n t pld =

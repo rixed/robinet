@@ -66,13 +66,13 @@ let bitstring_fuzz err_rate bits =
     let noerr_len = 1. /. err_rate in (* average number of bits without errors *)
     let rec aux prevs rest =
         let len = 1 + Int.of_float (Random.float (2. *. noerr_len)) in (* incorrect but fast *)
-        bitmatch rest with
-        | { b1 : len-1 : bitstring ;
-            b  : 1 ;
-            b2 : -1 : bitstring } ->
+        match%bitstring rest with
+        | {| b1 : len-1 : bitstring ;
+             b  : 1 ;
+             b2 : -1 : bitstring |} ->
             let b = (if b then zeroes_bitstring else ones_bitstring) 1 in
             aux (b :: b1 :: prevs) b2
-        | { rest : -1 : bitstring } ->
+        | {| rest : -1 : bitstring |} ->
             concat (List.rev (rest :: prevs)) in
     aux [] bits
 (*$T bitstring_fuzz
@@ -80,20 +80,24 @@ let bitstring_fuzz err_rate bits =
   string_of_bitstring (bitstring_fuzz 0.1 (bitstring_of_string str)) <> str
 *)
 
+let bitstring_of_bytes b =
+    Bytes.to_string b |> bitstring_of_string
+let bytes_of_bitstring b =
+    string_of_bitstring b |> Bytes.of_string
+
 let bitstring_add i b =
     let len = bitstring_length b in
     if len > 31 then (
-        bitmatch b with
-        | { pref : len - 31 : bitstring ;
-            n : 31 } ->
-            (BITSTRING {
+        match%bitstring b with
+        | {| pref : len - 31 : bitstring ;
+             n : 31 |} ->
+            let%bitstring b = {|
                 pref : len - 31 : bitstring ;
-                n + i : 31 })
+                n + i : 31 |} in b
     ) else (
-        bitmatch b with
-        | { n : len : int } ->
-            (BITSTRING {
-                Int64.add n (Int64.of_int i) : len })
+        match%bitstring b with
+        | {| n : len : int |} ->
+            let%bitstring b = {| Int64.add n (Int64.of_int i) : len |} in b
     )
 (*$= bitstring_add
     (bitstring_of_string "\000" |> bitstring_add 42) (bitstring_of_string "\042")
@@ -120,20 +124,20 @@ let printable str =
 
 let print_bitstring fmt bits =
     let rec aux bits =
-        bitmatch bits with
-        | { a : 64 : bitstring ;
-            b : 64 : bitstring ;
-            rest : -1 : bitstring } ->
+        match%bitstring bits with
+        | {| a : 64 : bitstring ;
+             b : 64 : bitstring ;
+             rest : -1 : bitstring |} ->
             Format.fprintf fmt "%s - %s  %s%s@\n"
                 (hexstring_of_bitstring a) (hexstring_of_bitstring b)
                 (printable (string_of_bitstring a)) (printable (string_of_bitstring b)) ;
             aux rest
-        | { a : 64 : bitstring ;
-            b : -1 : bitstring } when not (bitstring_is_empty b) ->
+        | {| a : 64 : bitstring ;
+             b : -1 : bitstring |} when not (bitstring_is_empty b) ->
             Format.fprintf fmt "%s - %-23s  %s%s@\n"
                 (hexstring_of_bitstring a) (hexstring_of_bitstring b)
                 (printable (string_of_bitstring a)) (printable (string_of_bitstring b))
-        | { a : -1 : bitstring } ->
+        | {| a : -1 : bitstring |} ->
             if not (bitstring_is_empty a) then
             Format.fprintf fmt "%-23s                            %s@\n"
                 (hexstring_of_bitstring a) (printable (string_of_bitstring a)) in
@@ -147,15 +151,15 @@ let int_of_bitstring bs =
     let l = bitstring_length bs in
     (* bitstring fills bytes from high to low bits but we'd like out int to be the lower bits *)
     let bs = if l < 8 then Bitstring.concat [create_bitstring (8-l) ; bs] else bs in
-    bitmatch bs with
-    | { n : 8 ;
-        _ : -1 : bitstring } -> n
+    match%bitstring bs with
+    | {| n : 8 ;
+         _ : -1 : bitstring |} -> n
 (*$= int_of_bitstring & ~printer:dump
-    0 (int_of_bitstring (BITSTRING { 0 : 3  : littleendian }))
-    1 (int_of_bitstring (BITSTRING { 1 : 3  : littleendian }))
-    2 (int_of_bitstring (BITSTRING { 2 : 3  : littleendian }))
-    3 (int_of_bitstring (BITSTRING { 3 : 3  : littleendian }))
-    2 (int_of_bitstring (BITSTRING { 2 : 30 : littleendian }))
+    0 (int_of_bitstring (let%bitstring b = {| 0 : 3  : littleendian |} in b))
+    1 (int_of_bitstring (let%bitstring b = {| 1 : 3  : littleendian |} in b))
+    2 (int_of_bitstring (let%bitstring b = {| 2 : 3  : littleendian |} in b))
+    3 (int_of_bitstring (let%bitstring b = {| 3 : 3  : littleendian |} in b))
+    2 (int_of_bitstring (let%bitstring b = {| 2 : 30 : littleendian |} in b))
 *)
 
 let bitstring_copy bs =
@@ -356,10 +360,10 @@ let rand_hostname () =
     String.join "." parts
 
 let do_sum bits =
-    let rec aux s bits = bitmatch bits with
-        | { w : 16 ; rest : -1 : bitstring } -> aux (s + w) rest
-        | { b : 8 } -> s + (b lsl 8)
-        | { _ } -> s in
+    let rec aux s bits = match%bitstring bits with
+        | {| w : 16 ; rest : -1 : bitstring |} -> aux (s + w) rest
+        | {| b : 8 |} -> s + (b lsl 8)
+        | {| _ |} -> s in
     let s = aux 0 (concat [ bits ; zeroes_bitstring 7 ]) in
     let rec wrap s =
         if s < 0x10000 then s else wrap ((s land 0xffff) + (s lsr 16)) in

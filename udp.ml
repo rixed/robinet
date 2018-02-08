@@ -49,21 +49,21 @@ struct
 
     let pack t =
         let length = Payload.length t.payload + 8 in
-        concat [ (BITSTRING {
+        let%bitstring hdr = {|
             (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
-            length : 16 ; 0 : 16 }) ;
-            (t.payload :> bitstring) ]
+            length : 16 ; 0 : 16 |} in
+        concat [ hdr ; (t.payload :> bitstring) ]
 
-    let unpack bits = bitmatch bits with
-        | { src_port : 16 ; dst_port : 16 ;
-            length   : 16 ; _checksum : 16 ;
-            payload  : (length-8) * 8 : bitstring } when length >= 8 ->
+    let unpack bits = match%bitstring bits with
+        | {| src_port : 16 ; dst_port : 16 ;
+             length   : 16 ; _checksum : 16 ;
+             payload  : (length-8) * 8 : bitstring |} when length >= 8 ->
             Some { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
                    payload  = Payload.o payload }
-        | { _ } -> err "Not UDP"
+        | {| _ |} -> err "Not UDP"
 
     (*$Q pack
-      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 end

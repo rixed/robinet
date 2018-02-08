@@ -139,28 +139,29 @@ module Pdu = struct
 
     let pack t =
         let pack_payload = function
-            | Ids (id, seq, pld) -> (BITSTRING { id : 16 ; seq : 16 ;
-                                                 (pld :> bitstring) : -1 : bitstring })
+            | Ids (id, seq, pld) ->
+                let%bitstring b = {| id : 16 ; seq : 16 ;
+                                     (pld :> bitstring) : -1 : bitstring |} in b
             | Unknown pld -> (pld :> bitstring) in
         let typ, cod = (t.msg_type :> int*int) in
         let pld = pack_payload t.payload in
         (* Checksum will be patched later when IP addresses are known *)
-        concat [(BITSTRING { typ : 8 ; cod : 8 ; 0 : 16 }) ; pld ]
+        let%bitstring hdr = {| typ : 8 ; cod : 8 ; 0 : 16 |} in
+        concat [ hdr ; pld ]
 
-    let unpack bits = bitmatch bits with
-        | { (128|129) as typ : 8 ; 0 : 8 ; _checksum : 16 ;
-            id : 16 ; seq : 16 ; pld : -1 : bitstring } ->
+    let unpack bits = match%bitstring bits with
+        | {| (128|129) as typ : 8 ; 0 : 8 ; _checksum : 16 ;
+             id : 16 ; seq : 16 ; pld : -1 : bitstring |} ->
             Some { msg_type = MsgType.o (typ, 0) ;
                    payload = Ids (id, seq, Payload.o pld) }
-        | { typ : 8 ; cod : 8 ; _checksum : 16 ;
-            pld : -1 : bitstring } ->
+        | {| typ : 8 ; cod : 8 ; _checksum : 16 ;
+             pld : -1 : bitstring |} ->
             Some { msg_type = MsgType.o (typ, cod) ;
                    payload = Unknown (Payload.o pld) }
-        | { _ } ->
+        | {| _ |} ->
             err "Not ICMP"
     (*$Q pack
-      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 end
-

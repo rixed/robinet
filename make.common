@@ -1,4 +1,4 @@
-# vim:syntax=make
+# vim:ft=make
 OCAMLC     = ocamlfind ocamlc -thread
 OCAMLOPT   = ocamlfind ocamlopt -thread
 OCAMLDEP   = ocamlfind ocamldep
@@ -6,9 +6,9 @@ OCAMLDOC   = ocamlfind ocamldoc -html -colorize-code -thread -sort -stars
 OCAMLMKTOP = ocamlfind ocamlmktop -thread -g
 QTEST      = qtest
 DOCDIR    ?= doc/
-WARNS      = Ael-31-41-44-45-48-18
-override OCAMLOPTFLAGS += $(INCS) -w $(WARNS) -g -annot
-override OCAMLFLAGS    += $(INCS) -w $(WARNS) -g -annot
+WARNS      = -w -44
+override OCAMLOPTFLAGS += $(INCS) $(WARNS) -g -annot
+override OCAMLFLAGS    += $(INCS) $(WARNS) -g -annot
 
 CAMLINCLUDE = $(shell ocamlfind printconf stdlib)
 CPPFLAGS   += -I $(CAMLINCLUDE) -I .
@@ -16,7 +16,7 @@ CFLAGS     += -O2 -std=c99 -W -Wall -D_GNU_SOURCE
 
 all:
 
-.PHONY: all opt clean clean-spec install uninstall reinstall doc check clear
+.PHONY: all clean clean-spec install uninstall reinstall doc check clear
 
 ifdef PKG_NAME
 OBJECTS  = $(SOURCES:.ml=.cmo)
@@ -24,9 +24,9 @@ XOBJECTS = $(OBJECTS:.cmo=.cmx)
 ARCHIVE  = $(PKG_NAME).cma
 XARCHIVE = $(ARCHIVE:.cma=.cmxa)
 $(ARCHIVE): $(OBJECTS) $(CLIB)
-	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES)" -custom -linkpkg $(OCAMLFLAGS) $(OBJECTS) $(CLIB) $(LIBS) -a -o $@
+	$(OCAMLC) -package "$(REQUIRES)" -custom -linkpkg $(OCAMLFLAGS) $(OBJECTS) $(CLIB) $(LIBS) -a -o $@
 $(XARCHIVE): $(XOBJECTS) $(CLIB)
-	$(OCAMLOPT) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $(XOBJECTS) $(CLIB) $(LIBS) -a -o $@
+	$(OCAMLOPT) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $(XOBJECTS) $(CLIB) $(LIBS) -a -o $@
 install: $(ARCHIVE)
 	if test -f "$(XARCHIVE)" ; then extra="$(XARCHIVE) "`basename "$(XARCHIVE)" .cmxa`.a ; fi ; \
 	ocamlfind install "$(PKG_NAME)" *.cmi "$(ARCHIVE)" META $$extra
@@ -38,34 +38,34 @@ endif
 # Common rules
 .SUFFIXES: .ml .mli .cmo .cmi .cmx .opt .byte .ml_test .cmo_test .cmx_test .byte_test .opt_test
 
-.cmo.byte: $(ARCHIVE)
-	$(OCAMLC)   -o $@ $(SYNTAX) -package "$(REQUIRES)" $(ARCHIVE) -linkpkg $(OCAMLFLAGS) $<
+%.byte: $(ARCHIVE) %.cmo
+	$(OCAMLC) -o $@ -package "$(REQUIRES)" $(OCAMLFLAGS) $^
 
-.cmx.opt: $(XARCHIVE)
-	$(OCAMLOPT) -o $@ $(SYNTAX) -package "$(REQUIRES)" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
+%.opt: $(XARCHIVE) %.cmx
+	$(OCAMLOPT) -o $@ -linkpkg -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $^
 
-.ml.cmo:
-	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLFLAGS) -c -impl $<
+%.cmo %.annot: %.ml
+	$(OCAMLC) -package "$(REQUIRES)" $(OCAMLFLAGS) -c $<
 
-.mli.cmi:
-	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLFLAGS) -c -intf $<
+%.cmi: %.mli
+	$(OCAMLC) -package "$(REQUIRES)" $(OCAMLFLAGS) -c $<
 
-.ml.cmx:
-	$(OCAMLOPT) $(SYNTAX) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) -c -impl $<
+%.cmx: %.ml
+	$(OCAMLOPT) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) -c $<
 
 # Tests with qtest
 
 all_tests.byte: all_tests.cmo $(ARCHIVE)
-	$(OCAMLC)   -o $@ $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(ARCHIVE) -linkpkg $(OCAMLFLAGS) $<
+	$(OCAMLC)   -o $@ -package "$(REQUIRES) qcheck" $(ARCHIVE) -linkpkg $(OCAMLFLAGS) $<
 
 all_tests.cmo: all_tests.ml $(OBJECTS)
-	$(OCAMLC) $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(OCAMLFLAGS) -w -33 -c -impl $<
+	$(OCAMLC) -package "$(REQUIRES) qcheck" $(OCAMLFLAGS) -w -33 -c -impl $<
 
 all_tests.opt: all_tests.cmx $(XARCHIVE)
-	$(OCAMLOPT) -o $@ $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
+	$(OCAMLOPT) -o $@ -package "$(REQUIRES) qcheck" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
 
 all_tests.cmx: all_tests.ml $(XOBJECTS)
-	$(OCAMLOPT) $(SYNTAX) -package "$(REQUIRES) QTest2Lib" $(OCAMLOPTFLAGS) -w -33 -c -impl $<
+	$(OCAMLOPT) -package "$(REQUIRES) qcheck" $(OCAMLOPTFLAGS) -w -33 -c -impl $<
 
 all_tests.ml: $(SOURCES)
 	$(QTEST) --shuffle --preamble 'open Batteries;; open Bitstring;; open Tools' -o $@ extract $^
@@ -78,16 +78,16 @@ check: all_tests.opt
 
 # Clean up
 clean: clean-spec
-	rm -f *.cm[ioxa] *.cmxa *.a *.s *.o *.byte *.opt *.top *.annot .depend all_tests.*
+	rm -f *.cm[ioxa] *.cmxa *.a *.s *.o *.byte *.opt *.top *.annot .depend all_tests.* *.cache *.log
 
 # Dependencies
 .depend:
-	$(OCAMLDEP) $(SYNTAX) -package "$(REQUIRES)" -I .. *.ml *.mli */*.ml > $@
+	$(OCAMLDEP) -package "$(REQUIRES)" -I .. *.ml *.mli */*.ml > $@
 
 doc: $(SOURCES)
 	@echo "Building doc in $(DOCDIR)..."
 	mkdir -p $(DOCDIR)
-	$(OCAMLDOC) $(SYNTAX) -package "$(REQUIRES)" -d $(DOCDIR) $^
+	$(OCAMLDOC) -package "$(REQUIRES)" -d $(DOCDIR) $^
 	sed -i -e '/^<head>/a<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">' $(DOCDIR)/*.html
 	sed -i -e 's|<center><h1></h1></center>|<h1>$(PKG_NAME)</h1>|' $(DOCDIR)/index.html
 

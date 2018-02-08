@@ -40,7 +40,7 @@ let tx t bits =
     Log.(log logger Debug (lazy (Printf.sprintf "Sending '%s'" (abbrev ~len:100 str)))) ;
     let rec aux o =
         if o < String.length str then (
-            let w = Unix.write t.sock str o ((String.length str)-o) in
+            let w = Unix.write_substring t.sock str o ((String.length str)-o) in
             Log.(log logger Debug (lazy (Printf.sprintf "Just write %d bytes" w))) ;
             aux (o+w)
         ) in
@@ -58,9 +58,9 @@ let close t () =
 
 let rec reader t =
     if not t.is_closed then
-    let buf = String.create 1000 in
+    let buf = Bytes.create 1000 in
     let r =
-        try Unix.read t.sock buf 0 (String.length buf)
+        try Unix.read t.sock buf 0 (Bytes.length buf)
         with Unix.Unix_error (error, func_name, _) ->
                 Log.(log logger Info (lazy (Printf.sprintf "Unix_error: Cannot %s: %s" func_name (Unix.error_message error)))) ;
                 (* Can we get EINTR? I think not, so all errors are supposed fatal here *)
@@ -70,7 +70,7 @@ let rec reader t =
     Log.(log logger Debug (lazy (Printf.sprintf "Read %d bytes" r))) ;
     if not t.is_closed then (
         if r > 0 then (
-            let s = String.sub buf 0 r in
+            let s = Bytes.sub buf 0 r |> Bytes.to_string in
             Log.(log logger Debug (lazy (Printf.sprintf "Received '%s'" s))) ;
             (* Use the Clock so that the recv function is called in main thread *)
             Clock.asap t.recv (bitstring_of_string s) ;

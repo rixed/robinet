@@ -62,7 +62,7 @@ module Pdu =
 struct
     (*$< Pdu *)
     type question = string * QType.t * int
-    type rr = string * QType.t * int * int32 * string
+    type rr = string * QType.t * int * int32 * bytes
     type t = { id : int ; is_query : bool ; opcode : int ;
                is_auth : bool ; truncated : bool ;
                rec_desired : bool ; rec_avlb : bool ;
@@ -90,14 +90,14 @@ struct
 
     let unpack_name pkt rest =
         let rec aux prevs o =
-            if o >= String.length pkt then err "DNS: Cannot unpack_name" else
-            let count = Char.code pkt.[o] in
+            if o >= Bytes.length pkt then err "DNS: Cannot unpack_name" else
+            let count = Char.code (Bytes.get pkt o) in
             if count = 0 then Some (""::prevs, o+1) else
             if count < 0xC0 then (
-                let part = String.sub pkt (o+1) count in
+                let part = Bytes.sub pkt (o+1) count |> Bytes.to_string in
                 aux (part :: prevs) (o+1+count)
             ) else (
-                let offset = ((count land 0x3F) lsl 8) lor Char.code pkt.[o+1] in
+                let offset = ((count land 0x3F) lsl 8) lor Char.code (Bytes.get pkt (o+1)) in
                 Option.Monad.bind (aux prevs offset) (fun (parts, _) ->
                     Some (parts, o+2))
             ) in
@@ -106,8 +106,8 @@ struct
             Some (name, rest))
 
     let read_n16 pkt o =
-        if o >= String.length pkt - 1 then invalid_arg "packet too short" ;
-        ((Char.code pkt.[o]) lsl 8) + Char.code pkt.[o+1]
+        if o >= Bytes.length pkt - 1 then invalid_arg "packet too short" ;
+        ((Char.code (Bytes.get pkt o)) lsl 8) + Char.code (Bytes.get pkt (o+1))
     let read_n32 pkt o =
         let hi = Int32.of_int (read_n16 pkt o)
         and lo = Int32.of_int (read_n16 pkt (o+2)) in
@@ -135,40 +135,40 @@ struct
                         let ttl = read_n32 pkt rest in
                         if debug then Printf.printf "Dns: Decoded RR %d name '%s', qtype=%s, qclass=%d, ttl=%ld\n%!" nb_rrs name (QType.to_string qtype) qclass ttl ;
                         let res_data_len = read_n16 pkt (rest+4) in
-                        let res_data = String.sub pkt (rest+6) res_data_len in
+                        let res_data = Bytes.sub pkt (rest+6) res_data_len in
                         aux ((name, qtype, qclass, ttl, res_data) :: rrs) (rest+4+2+res_data_len) (nb_rrs-1)
                     | _ -> err "Should not happen")
             ) in
         aux [] rest nb_rrs
 
-    let unpack bits = bitmatch bits with
-        | { id : 16 ;
-            qr : 1 ; opcode : 4 ; aa : 1 ; tc : 1 ; rd : 1 ; ra : 1 ; 0 : 3 ; rcode : 4 ;
-            nb_questions : 16 ; nb_answer_rrs : 16 ;
-            nb_authority_rrs : 16 ; nb_additional_rrs : 16 } ->
-            let pkt = string_of_bitstring bits
+    let unpack bits = match%bitstring bits with
+        | {| id : 16 ;
+             qr : 1 ; opcode : 4 ; aa : 1 ; tc : 1 ; rd : 1 ; ra : 1 ; 0 : 3 ; rcode : 4 ;
+             nb_questions : 16 ; nb_answer_rrs : 16 ;
+             nb_authority_rrs : 16 ; nb_additional_rrs : 16 |} ->
+            let pkt = bytes_of_bitstring bits
             and rest = 12 (* offset of the rest of the pkt *)
             in (
             try Option.Monad.bind (unpack_questions pkt rest nb_questions) (fun (questions, rest) ->
                 Option.Monad.bind (unpack_rrs pkt rest nb_answer_rrs) (fun (answer_rrs, rest) ->
                 Option.Monad.bind (unpack_rrs pkt rest nb_authority_rrs) (fun (authority_rrs, rest) ->
                 Option.Monad.bind (unpack_rrs pkt rest nb_additional_rrs) (fun (additional_rrs, rest) ->
-                if debug && String.length pkt > rest then err "Dns: Trailing datas in msg" else
+                if debug && Bytes.length pkt > rest then err "Dns: Trailing datas in msg" else
                 Some { id = id ; is_query = not qr ; opcode = opcode ;
                        is_auth = aa ; truncated = tc ;
                        rec_desired = rd ; rec_avlb = ra ;
                        status = rcode ;
-                       questions = questions ;
-                       answer_rrs = answer_rrs ;
-                       authority_rrs = authority_rrs ;
-                       additional_rrs = additional_rrs }))))
-            with Invalid_argument _ -> (* One of our String.sub went wrong *)
+                       questions ;
+                       answer_rrs ;
+                       authority_rrs ;
+                       additional_rrs }))))
+            with Invalid_argument _ -> (* One of our Bytes.sub went wrong *)
                 err "Cannot decode names")
-        | { _ } -> err "Not DNS"
+        | {| _ |} -> err "Not DNS"
 
     let pack_n16 v str o =
-        str.[o]   <- Char.chr ((v lsr 8) land 0xff) ;
-        str.[o+1] <- Char.chr (v land 0xff)
+        Bytes.set str o (Char.chr ((v lsr 8) land 0xff)) ;
+        Bytes.set str (o+1) (Char.chr (v land 0xff))
 
     let pack_n32 v str o =
         let lo = Int32.to_int (Int32.logand v 0xffffl)
@@ -179,7 +179,7 @@ struct
     let rec pack_name name s str d =
         let len = String.length name - s in
         if len = 0 then (
-            str.[d] <- Char.chr 0 ;
+            Bytes.set str d (Char.chr 0) ;
             Some (d+1)
         ) else (
             let e = String.index_from name s '.' in
@@ -187,8 +187,8 @@ struct
             if c > 63 then (
                 err (Printf.sprintf "Dns: Bad name '%s'" name)
             ) else (
-                str.[d] <- Char.chr c ;
-                String.blit name s str (d+1) c ;
+                Bytes.set str d (Char.chr c) ;
+                Bytes.blit (Bytes.of_string name) s str (d+1) c ;
                 pack_name name (e+1) str (d+1+c)
             )
         )
@@ -198,7 +198,7 @@ struct
         if len <> 0 && (name.[0] = '.' || name.[len-1] <> '.') then (
             err (Printf.sprintf "Dns: Bad qname '%s'" name)
         ) else (
-            let str = String.create (len + 1 + 4) in
+            let str = Bytes.create (len + 1 + 4) in
             Option.Monad.bind (pack_name name 0 str 0) (fun o ->
                 pack_n16 (qtype :> int) str o ;
                 pack_n16 qclass str (o + 2) ;
@@ -206,41 +206,41 @@ struct
         )
 
     let pack_questions qs =
-        String.concat "" (List.filter_map pack_question qs)
+        Bytes.concat Bytes.empty (List.filter_map pack_question qs)
 
     let pack_rr (name, rtype, rclass, ttl, data) =
         Option.Monad.bind (pack_question (name, rtype, rclass)) (fun q ->
-            let datalen = String.length data in
-            let str = String.create (6 + datalen) in
+            let datalen = Bytes.length data in
+            let str = Bytes.create (6 + datalen) in
             pack_n32 ttl str 0 ;
             pack_n16 datalen str 4 ;
-            String.blit data 0 str 6 datalen ;
-            Some (q ^ str))
+            Bytes.blit data 0 str 6 datalen ;
+            Some (Bytes.cat q str))
 
     let pack_rrs rrs =
-        String.concat "" (List.filter_map pack_rr rrs)
+        Bytes.concat Bytes.empty (List.filter_map pack_rr rrs)
 
     let pack t =
-        let header = (BITSTRING {
+        let%bitstring header = {|
             t.id : 16 ;
             not t.is_query : 1 ; t.opcode : 4 ; t.is_auth : 1 ; t.truncated : 1 ;
             t.rec_desired : 1 ; t.rec_avlb : 1 ; 0 : 3 ; t.status : 4 ;
             List.length t.questions : 16 ;
             List.length t.answer_rrs : 16 ;
             List.length t.authority_rrs : 16 ;
-            List.length t.additional_rrs : 16 }) in
+            List.length t.additional_rrs : 16 |} in
         let questions  = pack_questions t.questions
         and answers    = pack_rrs t.answer_rrs
         and authority  = pack_rrs t.authority_rrs
         and additional = pack_rrs t.additional_rrs in
         concat [ header ;
-                 bitstring_of_string questions ;
-                 bitstring_of_string answers ;
-                 bitstring_of_string authority ;
-                 bitstring_of_string additional ]
+                 bitstring_of_bytes questions ;
+                 bitstring_of_bytes answers ;
+                 bitstring_of_bytes authority ;
+                 bitstring_of_bytes additional ]
 
     (*$Q pack
-      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 end

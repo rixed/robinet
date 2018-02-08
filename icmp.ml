@@ -135,36 +135,42 @@ module Pdu = struct
 
     let pack t =
         let pack_payload = function
-            | Ids (id, seq, pld) -> (BITSTRING { id : 16 ; seq : 16 ;
-                                                 (pld :> bitstring) : -1 : bitstring })
-            | Redirect (ip, pld) -> (BITSTRING { (Ip.Addr.to_int32 ip) : 32 ;
-                                                 (pld :> bitstring) : -1 : bitstring })
-            | Header (ptr, pld)  -> (BITSTRING { ptr : 8 ; 0 : 24 ;
-                                                 (pld :> bitstring) : -1 : bitstring }) in
+            | Ids (id, seq, pld) ->
+                let%bitstring b = {| id : 16 ; seq : 16 ;
+                                     (pld :> bitstring) : -1 : bitstring |} in b
+            | Redirect (ip, pld) ->
+                let%bitstring b = {| (Ip.Addr.to_int32 ip) : 32 ;
+                                     (pld :> bitstring) : -1 : bitstring |} in b
+            | Header (ptr, pld)  ->
+                let%bitstring b = {| ptr : 8 ; 0 : 24 ;
+                                     (pld :> bitstring) : -1 : bitstring |} in b
+        in
         let typ, cod = (t.msg_type :> int*int) in
         let pld = pack_payload t.payload in
-        let pck = concat [(BITSTRING { typ : 8 ; cod : 8 ; 0 : 16 }) ; pld ] in
+        let%bitstring hdr = {| typ : 8 ; cod : 8 ; 0 : 16 |} in
+        let pck = concat [ hdr ; pld ] in
         let chk = sum pck in
-        concat [(BITSTRING { typ : 8 ; cod : 8 ; chk : 16 }) ; pld ]
+        let%bitstring hdr = {| typ : 8 ; cod : 8 ; chk : 16 |} in
+        concat [ hdr ; pld ]
 
-    let unpack bits = bitmatch bits with
-        | { 5 : 8 ; cod : 8 ; _checksum : 16 ;
-            ip : 32 ; pld : -1 : bitstring } ->
+    let unpack bits = match%bitstring bits with
+        | {| 5 : 8 ; cod : 8 ; _checksum : 16 ;
+             ip : 32 ; pld : -1 : bitstring |} ->
             Some { msg_type = MsgType.o (5, cod) ;
                    payload = Redirect (Ip.Addr.o32 ip, Payload.o pld) }
-        | { typ : 8 ; cod : 8 ; _checksum : 16 ;
-            id : 16 ; seq : 16 ; pld : -1 : bitstring }
+        | {| typ : 8 ; cod : 8 ; _checksum : 16 ;
+             id : 16 ; seq : 16 ; pld : -1 : bitstring |}
             when typ = 0 || typ = 8 || (typ >= 13 && typ <= 16) ->
             Some { msg_type = MsgType.o (typ, cod) ;
                    payload = Ids (id, seq, Payload.o pld) }
-        | { typ : 8 ; cod : 8 ; _checksum : 16 ;
-            ptr : 8 ; _ : 24 ; pld : -1 : bitstring } ->
+        | {| typ : 8 ; cod : 8 ; _checksum : 16 ;
+            ptr : 8 ; _ : 24 ; pld : -1 : bitstring |} ->
             Some { msg_type = MsgType.o (typ, cod) ;
                    payload = Header (ptr, Payload.o pld) }
-        | { _ } ->
+        | {| _ |} ->
             err "Not ICMP"
     (*$Q pack
-      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 end

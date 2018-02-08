@@ -71,12 +71,13 @@ module Addr = struct
 
     include MakePrivate(struct
         type t = bitstring
+
         (** Converts an address to it's string representation. *)
         let to_string mac =
             let simple_name mac64 =
                 String.lchop (string_of_sfx 48 mac64) in
-            bitmatch mac with
-                | { mac64 : 48 } ->
+            match%bitstring mac with
+                | {| mac64 : 48 |} ->
                     if !print_with_vendor then (
                         match vendor_lookup mac64 with
                             | None -> simple_name mac64
@@ -87,7 +88,7 @@ module Addr = struct
                     ) else (
                         simple_name mac64
                     )
-                | { _ } -> should_not_happen ()
+                | {| _ |} -> should_not_happen ()
         (*$= to_string & ~printer:identity
           (to_string (of_string "00:23:8b:5f:09:ce")) "QuantaCo:5f:09:ce"
           (to_string (of_string "80:ee:73:07:76:f1")) "Shuttle:07:76:f1"
@@ -105,13 +106,16 @@ module Addr = struct
      * will {e not} work if {!Eth.Addr.print_with_vendor} is true! *)
     let of_string str =
         let pack_addr a b c d e f =
-            o (BITSTRING { a : 8 ; b : 8 ; c : 8 ; d : 8 ; e : 8 ; f : 8 }) in
+            let%bitstring addr = {| a : 8 ; b : 8 ; c : 8 ; d : 8 ; e : 8 ; f : 8 |} in
+            o addr in
         Scanf.sscanf str "%x:%x:%x:%x:%x:%x" pack_addr
 
     (** Constant for Ethernet broadcast address. *)
     let broadcast = of_string "FF:FF:FF:FF:FF:FF"
+
     (** Constant for Ethernet all zeroes address. *)
     let zero = of_string "00:00:00:00:00:00"
+
     (** Since Ethernet addresses are bitstrings, which cannot be compared
      * using the built-in [=] operator, here is a dedicated comparison
      * operator for addresses. *)
@@ -165,26 +169,26 @@ module Pdu = struct
      * injection onto the wire (via {!Pcap.inject_pdu} for instance). *)
     let pack t =
         (* TODO: pad into minimal (64bytes) size? *)
-        concat [ (BITSTRING {
-                     (t.dst :> bitstring) : 6*8 : bitstring ;
-                     (t.src :> bitstring) : 6*8 : bitstring ;
-                     (t.proto :> int) : 16 }) ;
-                 (t.payload :> bitstring) ]
+        let%bitstring hdr = {|
+             (t.dst :> bitstring) : 6*8 : bitstring ;
+             (t.src :> bitstring) : 6*8 : bitstring ;
+             (t.proto :> int) : 16 |} in
+        concat [ hdr ; (t.payload :> bitstring) ]
 
     (** Unpack a [bitstring] into an {!Eth.Pdu.t} *)
-    let unpack bits = bitmatch bits with
-        | { dst : 6*8 : bitstring ;
-            src : 6*8 : bitstring ;
-            proto : 16 ;    (* FIXME: might not be a proto if < 1500 *)
-            payload : -1 : bitstring } ->
+    let unpack bits = match%bitstring bits with
+        | {| dst : 6*8 : bitstring ;
+             src : 6*8 : bitstring ;
+             proto : 16 ;
+             payload : -1 : bitstring |} (* FIXME: might not be a proto if < 1500 *) ->
             Some { src = Addr.o src ; dst = Addr.o dst ;
                    proto = Arp.HwProto.o proto ;
                    payload = Payload.o payload }
-        | { _ } ->
+        | {| _ |} ->
             err "Not Eth"
 
     (*$Q pack
-      ((random %> pack), dump) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 end
@@ -385,12 +389,12 @@ struct
 end
 
 (* for throughput, remember the timestamp where the link will be available again *)
-(* It may seams bogus to have throughput as a cable caracteristic instead of
- * device caracteristic, but it acknoledges the fact that both ends of a same
- * cable must agree on throughput. In other words, throughput negociation
+(* It may seams bogus to have throughput as a cable characteristic instead of
+ * device characteristic, but it acknowledges the fact that both ends of a same
+ * cable must agree on throughput. In other words, throughput negotiation
  * already happened and you pass the resulting throughput here.
  * Also, notice that you can use the same [limited x y] in both directions,
- * thus having something similar than a half-duplex cable ;-) *)
+ * thus having something similar to a half-duplex cable ;-) *)
 let limited latency throughput =
     let next_avlb = ref (Clock.Time.o 0.) in
     (fun emit bits ->
@@ -400,4 +404,3 @@ let limited latency throughput =
         let duration = max (Clock.Interval.usec 1.) (Clock.Interval.o (nb_bits /. throughput)) in
         next_avlb := Clock.Time.add start duration ;
         Clock.at start emit bits)
-

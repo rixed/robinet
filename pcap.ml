@@ -146,26 +146,37 @@ module Dlt = struct
 
     (** BSD loopback encapsulation *)
     let null    = o 0l
+
     (** Ethernet (10Mb) *)
     let en10mb  = o 1l
+
     (** Experimental Ethernet (3Mb) *)
     let en3mb   = o 2l
+
     (** Amateur Radio AX.25 *)
     let ax25    = o 3l
+
     (** Proteon ProNET Token Ring *)
     let pronet  = o 4l
+
     (** Chaos *)
     let chaos   = o 5l
+
     (** 802.5 Token Ring *)
     let ieee802 = o 6l
+
     (** ARCNET, with BSD-style header *)
     let arcnet  = o 7l
+
     (** Serial Line IP *)
     let slip    = o 8l
+
     (** Point-to-point Protocol *)
     let ppp     = o 9l
+
     (** FDDI *)
     let fddi    = o 10l
+
     (** Linux SLL *)
     let linux_cooked = o 113l
 
@@ -203,26 +214,26 @@ struct
     let pack t =
         let sec, usec = Clock.Time.to_ints t.ts in
         let wire_len = bytelength (t.payload :> bitstring) in
-        let pkt_hdr = (BITSTRING {
+        let%bitstring pkt_hdr = {|
             Int32.of_int sec  : 32 : littleendian ;
             Int32.of_int usec : 32 : littleendian ;
             Int32.of_int (min t.caplen wire_len) : 32 : littleendian ;
-            Int32.of_int wire_len : 32 : littleendian }) in
+            Int32.of_int wire_len : 32 : littleendian |} in
         concat [ pkt_hdr ; (t.payload :> bitstring) ]
 
     (** [save "file.pcap"] returns a function that will save passed pdus in ["file.pcap"].
      * @param caplen can be used to cap saved packet to a given number of bytes
      * @param dlt can be used to change the file's DLT (you probably do not want to do that) *)
     let save ?(caplen=65535) ?(dlt=Dlt.en10mb) fname =
-        let out_chan = open_out_bin fname
-        and file_hdr = (BITSTRING {
+        let out_chan = open_out_bin fname in
+        let%bitstring file_hdr = {|
             0xa1b2c3d4l : 32 : littleendian ;
             2 (* version major *) : 16 : littleendian ;
             4 (* version minor *) : 16 : littleendian ;
             0l (* this TZ *) : 32 : littleendian ;
             0l : 32 : littleendian ;
             Int32.of_int caplen : 32 : littleendian ;
-            (dlt :> int32) : 32 : littleendian }) in
+            (dlt :> int32) : 32 : littleendian |} in
         output_string out_chan (string_of_bitstring file_hdr) ;
         let f pdu =
             pack pdu |>
@@ -246,27 +257,27 @@ let save ?caplen ?(dlt=Dlt.en10mb) fname =
 exception Not_a_pcap_file
 
 let bitstring_of_global_header h =
-    (BITSTRING {
+    let%bitstring hdr = {|
         0xa1b2c3d4l : 32 : endian (h.endianness) ;
         h.version_major : 16 : endian (h.endianness) ;
         h.version_minor : 16 : endian (h.endianness) ;
         h.this_zone : 32 : endian (h.endianness) ;
         h.sigfigs : 32 : endian (h.endianness) ;
         h.snaplen : 32 : endian (h.endianness) ;
-        (h.dlt :> int32) : 32 : endian (h.endianness) })
+        (h.dlt :> int32) : 32 : endian (h.endianness) |} in hdr
 
 let global_header_of_bitstring name header =
-    let endianness = bitmatch (takebits 32 header) with
-        | { 0xa1b2c3d4l : 32 : bigendian } -> BigEndian
-        | { 0xa1b2c3d4l : 32 : littleendian } -> LittleEndian
-        | { _ } -> raise Not_a_pcap_file in
-    bitmatch (dropbits 32 header) with
-    | { version_major : 16 : endian (endianness) ; version_minor : 16 : endian (endianness) ;
+    let endianness = match%bitstring (takebits 32 header) with
+        | {| 0xa1b2c3d4l : 32 : bigendian |} -> BigEndian
+        | {| 0xa1b2c3d4l : 32 : littleendian |} -> LittleEndian
+        | {| _ |} -> raise Not_a_pcap_file in
+    match%bitstring (dropbits 32 header) with
+    | {| version_major : 16 : endian (endianness) ; version_minor : 16 : endian (endianness) ;
         this_zone : 32 : endian (endianness) ; sigfigs : 32 : endian (endianness) ;
-        snaplen : 32 : endian (endianness) ; dlt : 32 : endian (endianness) } ->
+        snaplen : 32 : endian (endianness) ; dlt : 32 : endian (endianness) |} ->
         { name ; endianness ; version_major ; version_minor ;
           this_zone ; sigfigs ; snaplen ; dlt = Dlt.o dlt }
-   | { _ } -> raise Not_a_pcap_file
+   | {| _ |} -> raise Not_a_pcap_file
 
 (** [read_global_header filename] reads the pcap global header from the
  * given file, and returns both a {!Pcap.global_header} and the input channel. *)
@@ -279,11 +290,11 @@ let read_global_header fname =
  * be read from the input stream [ic]. *)
 let read_next_pkt global_header ic =
     let pkt_hdr = IO.really_nread ic 16 in
-    bitmatch (bitstring_of_string pkt_hdr) with
-    | { sec      : 32 : endian (global_header.endianness) ;
-        usec     : 32 : endian (global_header.endianness) ;
-        caplen   : 32 : endian (global_header.endianness) ;
-        wire_len : 32 : endian (global_header.endianness) } ->
+    match%bitstring (bitstring_of_string pkt_hdr) with
+    | {| sec      : 32 : endian (global_header.endianness) ;
+         usec     : 32 : endian (global_header.endianness) ;
+         caplen   : 32 : endian (global_header.endianness) ;
+         wire_len : 32 : endian (global_header.endianness) |} ->
         if debug then Printf.printf "Pcap: reading a packet (wire_len=%ld)\n%!" wire_len ;
         if debug && caplen > global_header.snaplen then (
             (* We don't really care but the user might *)
@@ -300,7 +311,7 @@ let read_next_pkt global_header ic =
                  ~caplen:(Int32.to_int caplen)
                  ~dlt:global_header.dlt
                  ts bits
-    | { _ } -> should_not_happen ()
+    | {| _ |} -> should_not_happen ()
 
 (** From a pcap file, returns an [Enum.t] of {!Pcap.Pdu.t}. *)
 let enum_of_file fname =
@@ -326,7 +337,7 @@ let write_next_pkt oc pdu =
     output_string oc bytes
 
 (** [file_of_enum filename e] will save an [Enum.t] of {!Pcap.Pdu.t} into the file named [filename]. *)
-let file_of_enum fname ?(dlt=Dlt.en10mb) e =
+let file_of_enum ?(dlt=Dlt.en10mb) fname e =
     let header = { name = fname ;
                    endianness = LittleEndian ;
                    version_major = 2 ; version_minor = 4 ;
@@ -399,7 +410,8 @@ let repair_file fname =
         let cont = try ignore (read_next_pkt global_header ic) ; true
                    with IO.No_more_input
                       | IO.Input_closed
-                      | Invalid_argument "BatIO.really_nread" -> false in
+                      | Invalid_argument _ (*"BatIO.really_nread"*) ->
+                            false in
         if cont then aux () else ofs in
     Unix.truncate fname (24 (* global header *) + (aux ()))
 
@@ -454,8 +466,10 @@ let sniff iface =
 
 (** A counter for how many packets were injected successfully. *)
 let packets_injected_ok  = Metric.Atomic.make "Pcap/Packets/Injected/Ok"
+
 (** A counter for how many packets we failed to inject. *)
 let packets_injected_err = Metric.Atomic.make "Pcap/Packets/Injected/Err"
+
 (** A counter for how many bytes were injected successfully. *)
 let bytes_out            = Metric.Counter.make "Pcap/Bytes/Out" "bytes"
 
@@ -475,6 +489,7 @@ let inject iface bits =
 
 (** A counter for how many packets were sniffed. *)
 let packets_sniffed_ok = Metric.Atomic.make "Pcap/Packets/Sniffed"
+
 (** A counter for how many bytes were sniffed. *)
 let bytes_in           = Metric.Counter.make "Pcap/Bytes/In" "bytes"
 

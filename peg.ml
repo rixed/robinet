@@ -97,7 +97,7 @@ let anything bs m = match bs with
     in check_results "return" print_int (return 5) results items
 *)
 
-(* repeat the application of the add function on all items individualy
+(* repeat the application of the add function on all items individually
    until either we have no more (and this is a failure when we hit the
    end of items list) or we have a result or a failure *)
 let rec foreach_item add bs m = match bs with
@@ -269,8 +269,8 @@ let seq ps =
     check_results "seq" print_intlist p results items
 *)
 
-(* Many times, some values are not interresting.
-   This version of seq takes parsers thar return an optional value, and filter them *)
+(* Many times, some values are not interesting.
+   This version of seq takes parsers that return an optional value, and filter them *)
 let seqf ps =
     map (seq ps) (List.filter_map identity)
 

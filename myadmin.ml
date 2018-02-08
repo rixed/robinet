@@ -79,31 +79,33 @@ let print_tree vars oc tree =
 
 let page_head ?(selected="home") resp_body =
     Printf.fprintf resp_body
-        "<?xml version=\"1.0\"?>
-<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">
-<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\" xml:lang=\"en\">
+        {|<?xml version="1.0"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
 <head>
     <title>RobiNet: Network Simulator</title>
-    <link rel=\"stylesheet\" type=\"text/css\" media=\"screen\" href=\"fonts.css\" />
-    <link rel=\"stylesheet\" type=\"text/css\" media=\"screen\" href=\"colors.css\" />
-    <link rel=\"stylesheet\" type=\"text/css\" media=\"screen\" href=\"layout.css\" />
-    <link rel=\"stylesheet\" type=\"text/css\" media=\"screen\" href=\"svg.css\" />
-    <script type=\"text/javascript\" src=\"d3.js\"></script>
-    <script type=\"text/javascript\" src=\"d3.csv.js\"></script>
-    <script type=\"text/javascript\" src=\"gge.js\"></script>
-    <script type=\"text/javascript\" src=\"myfuncs.js\"></script>
+    <link rel="stylesheet" type="text/css" media="screen" href="fonts.css" />
+    <link rel="stylesheet" type="text/css" media="screen" href="colors.css" />
+    <link rel="stylesheet" type="text/css" media="screen" href="layout.css" />
+    <link rel="stylesheet" type="text/css" media="screen" href="svg.css" />
+    <script type="text/javascript" src="d3.js"></script>
+    <script type="text/javascript" src="d3.csv.js"></script>
+    <script type="text/javascript" src="gge.js"></script>
+    <script type="text/javascript" src="myfuncs.js"></script>
 </head>
-<body onload='load_menu(\"%s\")'>
-<div id=\"menu\"></div>
-<div id=\"page\">\n"
+<body onload='load_menu("%s")'>
+<div id="menu"></div>
+<div id="page">
+|}
         selected
 
 let page_foot resp_body =
-    Printf.fprintf resp_body "</div>
-<div id=\"foot\">
+    Printf.fprintf resp_body {|</div>
+<div id="foot">
     <p>footer</p>
 </div>
-</body>\n"
+</body>
+|}
 
 let home _mth _matches _vars _qry_body resp_body =
     page_head ~selected:"home" resp_body ;
@@ -112,43 +114,44 @@ let home _mth _matches _vars _qry_body resp_body =
 
 let net _mth _matches _vars _qry_body resp_body =
     page_head ~selected:"net editor" resp_body ;
-    Printf.fprintf resp_body "
-<div id=\"controls\">
-    <form action=\"javascript: false;\">
+    Printf.fprintf resp_body {|
+<div id="controls">
+    <form action="javascript: false;">
         <!-- a select to choose the net to edit? -->
-        <div id=\"dyncontrols\">
+        <div id="dyncontrols">
             Select an item to edit.
         </div>
-        <span class=\"buttons\">
-            <span class=\"grouped\">
-                <input type=\"button\" value=\"Add:\" onclick='javascript: new_net_item();'/>
-                <select name=\"what\">
-                    <option value=\"\">New...</option>
-                    <option value=\"host\">host (static)</option>
-                    <option value=\"dynhost\">host (dhcp)</option>
-                    <option value=\"hub\">hub</option>
-                    <option value=\"switch\">switch</option>
-                    <option value=\"tap\">tap</option>
-                    <option value=\"note\">note</option>
+        <span class="buttons">
+            <span class="grouped">
+                <input type="button" value="Add:" onclick='javascript: new_net_item();'/>
+                <select name="what">
+                    <option value="">New...</option>
+                    <option value="host">host (static)</option>
+                    <option value="dynhost">host (dhcp)</option>
+                    <option value="hub">hub</option>
+                    <option value="switch">switch</option>
+                    <option value="tap">tap</option>
+                    <option value="note">note</option>
                     <!-- where the user can plug another net, a pcap file, a pcap dev... -->
-                    <option value=\"anchor\">anchor</option>
+                    <option value="anchor">anchor</option>
                 </select>
-                <input type=\"button\" id=\"netlink\" value=\"Link to...\" onclick='javascript: new_net_link();'/>
-                <input type=\"button\" id=\"netunlink\" value=\"Unlink from...\" onclick='javascript: del_net_link();'/>
-                <input type=\"button\" value=\"Save\" onclick='javascript: save_net();'/>
+                <input type="button" id="netlink" value="Link to..." onclick='javascript: new_net_link();'/>
+                <input type="button" id="netunlink" value="Unlink from..." onclick='javascript: del_net_link();'/>
+                <input type="button" value="Save" onclick='javascript: save_net();'/>
             </span>
-            <span class=\"away\">
-                <input type=\"submit\" value=\"Delete\" onclick='javascript: del_net_item();'/>
+            <span class="away">
+                <input type="submit" value="Delete" onclick='javascript: del_net_item();'/>
             </span>
         </span>
     </form>
 </div>
-<div id=\"view\">
-    <svg id=\"net\" />
+<div id="view">
+    <svg id="net" />
 </div>
-<script type=\"text/javascript\">
-    load_net_editor(\"demonet\", \"net\");
-</script>\n";
+<script type="text/javascript">
+    load_net_editor("demonet", "net");
+</script>
+|};
     page_foot resp_body ;
     [ "Content-Type", "text/html" ]
 
@@ -235,18 +238,19 @@ let metrics _mth _matches vars _qry_body resp_body =
     and width, height = 640, 460
     in
     page_head ~selected:"metrics" resp_body ;
-    Printf.fprintf resp_body "
-<div id=\"controls\">
+    Printf.fprintf resp_body {|
+<div id="controls">
     <form id='metric' method='post'>
         %a
         <input type='submit' name='redraw' value='redraw'/>
     </form>
 </div>
-<div id=\"view\">
+<div id="view">
     <img width='%d' height='%d' class='chart'
      src='https://chart.googleapis.com/chart?chs=%dx%d&amp;cht=lc&amp;chd=%s&amp;chdl=%s&amp;chdlp=b&amp;chco=%s&amp;chxt=x,y&amp;chxl=0:|Past|Now&amp;chxr=1,%Ld,%Ld&amp;chds=%Ld,%Ld'
      alt='Metrics'/>
-</div>\n"
+</div>
+|}
         (print_tree vars) (Metric.tree ())
         width height width height
         chd chdl chco !chds_min !chds_max !chds_min !chds_max ;
@@ -262,15 +266,15 @@ let logs _mth _matches vars _qry_body resp_body =
     page_head ~selected:"logs" resp_body ;
     let logger_name = try Hashtbl.find vars "logger" with Not_found -> "Host/localhost" in
     let logger = Hashtbl.find Log.loggers logger_name in
-    Printf.fprintf resp_body "
-<div id=\"controls\">
+    Printf.fprintf resp_body {|
+<div id="controls">
     <form id='logger' method='post'>
         %a
         <input type='submit' name='show' value='show'/>
     </form>
 </div>
-<div id=\"view\" class=\"logs\">
-    <table class=\"log\">
+<div id="view" class="logs">
+    <table class="log">
     <caption>%s</caption>
     <thead>
         <tr><th>Time</th><th>Message</th></tr>
@@ -282,7 +286,8 @@ let logs _mth _matches vars _qry_body resp_body =
     %a
     </tbody>
     </table>
-</div>\n"
+</div>
+|}
         (Hashtbl.print ~first:"<select name='logger'>\n" ~last:"</select>\n" ~sep:"" ~kvsep:""
             (fun _ _ -> ())
             (fun oc v ->
