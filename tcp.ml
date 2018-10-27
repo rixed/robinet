@@ -22,14 +22,12 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = false
-
 (** {2 Private Types} *)
 
 let show_ports_by_name = ref true
 module MakePort (Serv : sig val srv : string end) =
 struct
-    include MakePrivate(struct
+    include Private.Make (struct
         type t = int
         let to_string p =
             if !show_ports_by_name then (
@@ -45,7 +43,7 @@ end
 
 module Port = MakePort (struct let srv = "tcp" end)
 
-module SeqNum = MakePrivate(struct
+module SeqNum = Private.Make (struct
     type t = int32
     let to_string t = Printf.sprintf "0x%08lX" t
     let is_valid _ = true
@@ -166,6 +164,7 @@ struct
         close : unit -> unit ; (* close the trx *)
         is_closed : unit -> bool }
     type t = {
+        logger : Log.logger ;
         mutable tcp_trx : tcp_trx ;
         mutable src : Port.t ;
         mutable dst : Port.t ;
@@ -204,7 +203,7 @@ struct
         if ack || psh || rst || syn || fin || bitstring_length bits > 0 then (
             let tcp = Pdu.make ~src_port ~dst_port ~seq_num ?ack_num
                                ~ack ~psh ~rst ~syn ~fin bits in
-            if debug then Printf.printf "Tcp: Emitting a packet from %s to %s, seq %s, length %d, content '%s'\n%!" (Port.to_string src_port) (Port.to_string dst_port) (SeqNum.to_string seq_num) (bytelength bits) (string_of_bitstring bits) ;
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Emitting a packet from %s to %s, seq %s, length %d, content '%s'" (Port.to_string src_port) (Port.to_string dst_port) (SeqNum.to_string seq_num) (bytelength bits) (string_of_bitstring bits)))) ;
             Clock.asap t.emit (Pdu.pack tcp) ;
             if ack then t.rcvd_acked <- t.rcvd_pld ;
             if bitstring_length bits > 0 then
@@ -223,7 +222,7 @@ struct
         aux 0 bits
 
     let delayed_ack t =
-        if debug then Printf.printf "Tcp: I acked %d / %d received bytes\n%!" t.rcvd_acked t.rcvd_pld ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: I acked %d / %d received bytes" t.rcvd_acked t.rcvd_pld))) ;
         if t.rcvd_acked < t.rcvd_pld then emit_one t empty_bitstring
 
     (* The cnx is established (ie its behavior is driven by the rcvd and sent streambuf
@@ -231,16 +230,16 @@ struct
     let rec establish_cnx t ok =
         match t.cnx_established_cont with
         | Some f ->
-            if debug then Printf.printf "Tcp: calling continuation for serving new cnx on port %d\n%!" (t.src :> int) ;
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: calling continuation for serving new cnx on port %d" (t.src :> int)))) ;
             f (if ok then Some t.tcp_trx else None)
-        | None -> if debug then Printf.printf "Tcp: no one was waiting\n%!"
+        | None -> Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: no one was waiting")))
 
     and try_really_rx t =
         if not (Streambuf.is_empty t.rcvd_pkts) then (
             let (o, tcp) as first = Streambuf.min_elt t.rcvd_pkts in
-            if debug then Printf.printf "Tcp: First of incoming waiting pkts starts at offset %d (while I've received up to %d)\n%!" o t.rcvd_pld ;
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: First of incoming waiting pkts starts at offset %d (while I've received up to %d)" o t.rcvd_pld))) ;
             if o > t.rcvd_pld then (
-                if debug then Printf.printf "Tcp:...keep it for later\n%!"
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp:...keep it for later")))
             ) else ( (* recv now *)
                 let skip = t.rcvd_pld - o in
                 if skip <= Payload.length tcp.Pdu.payload then (
@@ -253,22 +252,22 @@ struct
                     ) ;
                     let pld = dropbytes skip (tcp.Pdu.payload :> bitstring) in
                     t.rcvd_pld <- t.rcvd_pld + (bytelength pld) ;
-                    if debug then Printf.printf "Tcp: I have now read %d bytes\n%!" t.rcvd_pld ;
+                    Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: I have now read %d bytes" t.rcvd_pld))) ;
                     if bitstring_length pld > 0 then Clock.asap t.recv pld ;
                     if tcp.Pdu.flags.Pdu.fin && not t.rcvd_fin then (
-                        if debug then Printf.printf "Tcp: received a FIN\n%!" ;
+                        Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: received a FIN"))) ;
                         t.rcvd_pld <- t.rcvd_pld + 1 ;
                         t.rcvd_fin <- true ;
                         t.closed <- true ;
                         Clock.asap t.recv empty_bitstring (* signal the close *) (* FIXME: which is not very easy to use when the TRX is piped into another one. An Err would suit better *)
                     ) else if tcp.Pdu.flags.Pdu.rst && not t.rcvd_fin then (
-                        if debug then Printf.printf "Tcp: received a RST\n%!" ;
+                        Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: received a RST"))) ;
                         t.rcvd_fin <- true ;
                         t.closed <- true ;
                         Clock.asap t.recv empty_bitstring (* signal the close *)
                     )
                 ) else (
-                    if debug then Printf.printf "Tcp:...obsolete packet\n%!"
+                    Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp:...obsolete packet")))
                 ) ;
                 t.rcvd_pkts <- Streambuf.remove first t.rcvd_pkts ;
                 try_really_rx t
@@ -289,21 +288,20 @@ struct
 
     and inqueue_pkt t tcp =
         let offset = Int32.to_int ((tcp.Pdu.seq_num :> int32) -/ ((Option.get t.rcvd_isn) :> int32)) in
-        if debug then Printf.printf "Tcp: Got a packet with %d bytes, %spush\n%!"
-            (Payload.length tcp.Pdu.payload) (if tcp.Pdu.flags.Pdu.psh then "" else "don't ") ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Got a packet with %d bytes, %spush" (Payload.length tcp.Pdu.payload) (if tcp.Pdu.flags.Pdu.psh then "" else "don't ")))) ;
         if tcp.Pdu.flags.Pdu.ack then (
             let acked = Int32.to_int ((tcp.Pdu.ack_num :> int32) -/ (t.isn :> int32)) in
             if acked > t.sent_acked then (
                 if acked > t.sent_pld then (
-                    if debug then Printf.printf "Tcp: Acking %d while we only sent %d bytes\n%!" acked t.sent_pld
+                    Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Acking %d while we only sent %d bytes" acked t.sent_pld)))
                     (* FIXME: raise an error? *)
                 ) else (
-                    if debug then Printf.printf "Tcp: Acked %d/%d\n%!" acked t.sent_pld ;
+                    Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Acked %d/%d" acked t.sent_pld))) ;
                     t.sent_acked <- acked ;
                     drop_unacked_tx t ;
                 )
             ) else if acked = t.sent_acked && not (Streambuf.is_empty t.unacked_tx) then (
-                if debug then Printf.printf "Tcp: Retransmiting eveything from %d\n%!" acked ;
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Retransmiting eveything from %d" acked))) ;
                 let retr = ref [] and retr_pld = ref 0 in
                 Streambuf.iter (fun (_, tcp) ->
                     retr := (tcp.Pdu.payload :> bitstring) :: !retr ;
@@ -324,11 +322,11 @@ struct
     and rx t bits = (match Pdu.unpack bits with (* If rx were receiving unpacked PDUs then we could bind unpack to rx *)
         | None -> ()
         | Some tcp ->
-            if debug then Printf.printf "Tcp: Received a segment!\n" ;
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Received a segment!"))) ;
             (* TODO: check checksum *)
             if tcp.Pdu.flags.Pdu.syn then (
                 if t.rcvd_pld > 0 then (
-                    if debug then Printf.printf "Tcp: ignoring Syn while inbound cnx is established\n" ;
+                    Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: ignoring Syn while inbound cnx is established"))) ;
                     if t.rcvd_isn = Some tcp.Pdu.seq_num then (
                         (* retransmission of the syn, we may want to act on the ack (ie. retransmit something) *)
                         inqueue_pkt t tcp
@@ -338,7 +336,7 @@ struct
                     inqueue_pkt t tcp
                 )
             ) else if not (is_established t) then (
-                if debug then Printf.printf "Tcp: ignoring recvd packet while cnx is not establised\n"
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: ignoring recvd packet while cnx is not established")))
             ) else inqueue_pkt t tcp)
 
     and try_really_tx t = match t.to_send with
@@ -348,7 +346,7 @@ struct
             try_really_tx t
         | [] ->
             if t.closed && not t.sent_fin then (
-                if debug then Printf.printf "Tcp: sending FIN\n%!" ;
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: sending FIN"))) ;
                 t.sent_fin <- true ;
                 emit_one t ~fin:true empty_bitstring (* TODO: pack the FIN into the last payload? *)
             ) else ( (* maybe we should ack something ? *)
@@ -356,7 +354,7 @@ struct
 
     and close t () =
         ensure (is_established t) "Tcp: Closing a cnx that's not established" ;
-        if debug then Printf.printf "Tcp: Will close the cnx\n%!" ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Will close the cnx"))) ;
         t.closed <- true ;
         try_really_tx t
 
@@ -364,18 +362,19 @@ struct
         (* TODO (in try_really_tx): Nagle algorithm: keep the data to send in a buffer
          * if it's smaller than a segment and we have sent unacked data *)
         if t.closed then (
-            Printf.fprintf stderr "Tcp: writing to a closed TRX!\n%!"
+            Printf.fprintf stderr "Tcp: writing to a closed TRX!"
         ) else if not (is_established t) then (
-            Printf.fprintf stderr "Tcp: writing to a non-established TRX!\n%!"
+            Printf.fprintf stderr "Tcp: writing to a non-established TRX!"
         ) else (
             t.to_send <- t.to_send @ [ bits ] ;
             try_really_tx t
         )
 
-    let make ?isn ?(mtu=1300) src dst =
-        let t = { src = src ;
+    let make ?isn ?(mtu=1300) src dst logger =
+        let t = { logger ;
+                  src = src ;
                   dst = dst ;
-                  emit = (fun _b -> if debug then Printf.printf "Tcp: Ignoring a packet\n") ;
+                  emit = (fun _b -> Log.(log logger Debug (lazy (Printf.sprintf "Tcp: Ignoring a packet")))) ;
                   recv = ignore ;
                   mtu = mtu ;
                   isn = may_default isn (fun () -> SeqNum.o 0l (*Random.int32 0x7FFFFFFFl*)) ;
@@ -387,7 +386,7 @@ struct
                   unacked_tx = Streambuf.empty ;
                   rcvd_fin = false ;
                   cnx_established_cont = None ;
-                  tcp_trx = { trx = null_trx ;
+                  tcp_trx = { trx = null_trx logger ;
                               close = ignore ;
                               is_closed = fun _ -> true } } in
         t.tcp_trx <- { trx =  { ins = { write = tx t ;

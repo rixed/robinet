@@ -6,7 +6,7 @@ OCAMLDOC   = ocamlfind ocamldoc -html -colorize-code -thread -sort -stars
 OCAMLMKTOP = ocamlfind ocamlmktop -thread -g
 QTEST      = qtest
 DOCDIR    ?= doc/
-WARNS      = -w -44
+WARNS      = -w -40-31+27
 override OCAMLOPTFLAGS += $(INCS) $(WARNS) -g -annot
 override OCAMLFLAGS    += $(INCS) $(WARNS) -g -annot
 
@@ -24,9 +24,9 @@ XOBJECTS = $(OBJECTS:.cmo=.cmx)
 ARCHIVE  = $(PKG_NAME).cma
 XARCHIVE = $(ARCHIVE:.cma=.cmxa)
 $(ARCHIVE): $(OBJECTS) $(CLIB)
-	$(OCAMLC) -package "$(REQUIRES)" -custom -linkpkg $(OCAMLFLAGS) $(OBJECTS) $(CLIB) $(LIBS) -a -o $@
+	$(OCAMLC) $(CLIB) -package "$(REQUIRES)" -custom -linkpkg $(OCAMLFLAGS) $(OBJECTS) $(LIBS) -a -o $@
 $(XARCHIVE): $(XOBJECTS) $(CLIB)
-	$(OCAMLOPT) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $(XOBJECTS) $(CLIB) $(LIBS) -a -o $@
+	$(OCAMLOPT) $(CLIB) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $(XOBJECTS) $(LIBS) -a -o $@
 install: $(ARCHIVE)
 	if test -f "$(XARCHIVE)" ; then extra="$(XARCHIVE) "`basename "$(XARCHIVE)" .cmxa`.a ; fi ; \
 	ocamlfind install "$(PKG_NAME)" *.cmi "$(ARCHIVE)" META $$extra

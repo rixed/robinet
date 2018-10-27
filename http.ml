@@ -146,7 +146,7 @@ struct
           headers = headers ;
           body = body }
 
-    let make_status code headers body =
+    let make_response ?(headers=[]) ?(body="") code =
         let content_length = "Content-Length", string_of_int (String.length body) in
         { cmd = Status code ;
           headers = content_length :: headers ;

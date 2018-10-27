@@ -27,7 +27,7 @@ open Tools
 let perform_get my_ip my_mac peer_ip ?nameserver ?gw ifname url =
     let iface = Pcap.openif ifname in
     let get   = Printf.sprintf "GET %s HTTP/1.0\r\n\r\n" url in
-    let host  = Host.make_static "tester" ?nameserver ?gw my_mac my_ip in
+    let host  = Host.make_static ~on:true "tester" ?nameserver ?gw ~netmask:Ip.Addr.all_ones my_mac my_ip in
     host.Host.dev.set_read (Pcap.inject iface) ;
     ignore (Pcap.sniffer iface host.Host.dev.write) ;
     host.Host.tcp_connect (Host.IPv4 peer_ip) (Tcp.Port.o 80) (function

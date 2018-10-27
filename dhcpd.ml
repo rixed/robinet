@@ -29,25 +29,28 @@ let serve ?(port=Udp.Port.o 67) host ips =
     let rem_cidr = ref ips in
     let offers = BitHash.create 4 in
     let leases = BitHash.create 8 in
-    let logger = Log.(make (Printf.sprintf "%s/Dhcpd" host.Host.logger.name) 50) in
+    let logger = host.Host.logger in
+    Log.(log logger Debug (lazy "dhcpd: Listening for requests...")) ;
     host.Host.udp_server port (fun udp ->
         udp.Udp.TRX.trx.ins.set_read (fun bits ->
+            Log.(log logger Debug (lazy "dhcpd: Received an UDP packet...")) ;
             let src_port, dst_port = udp.Udp.TRX.get_ports () in
             match Pdu.unpack bits with
             | None ->
-                Log.(log logger Debug (lazy "Not a DHCP message, ignoring"))
+                Log.(log logger Debug (lazy "dhcpd: Not a DHCP message, ignoring"))
             | Some ({ Pdu.op = BootRequest ; Pdu.hlen = 6 ; _ } as dhcp)
               when dhcp.Pdu.htype = Arp.HwType.eth &&
                    dhcp.Pdu.msg_type = Some MsgType.discover ->
-                Log.(log logger Debug (lazy (Printf.sprintf "Received a DHCP Discover from %s" (hexstring_of_bitstring dhcp.Pdu.chaddr)))) ;
+                Log.(log logger Debug (lazy (Printf.sprintf "dhcpd: Received a DHCP Discover from %s" (hexstring_of_bitstring dhcp.Pdu.chaddr)))) ;
                 (match Enum.get !rem_cidr with
                 | Some offered_ip ->
-                    (* Add this entry to our ARP cache *)
+                    (* Add this entry to our ARP cache.
+                     * FIXME: actually, shouldn't we wait for the ack, in case the offer is rejected!? *)
                     host.Host.arp_set offered_ip (Some (Eth.Addr.o dhcp.Pdu.chaddr)) ;
                     (* Store the offer *before* spawning the responding thread *)
                     BitHash.replace offers dhcp.Pdu.chaddr offered_ip ;
                     (* Send the offer *)
-                    Log.(log logger Debug (lazy (Printf.sprintf "Offering IP %s to %s" (Ip.Addr.to_string offered_ip) (hexstring_of_bitstring dhcp.Pdu.chaddr)))) ;
+                    Log.(log logger Debug (lazy (Printf.sprintf "dhcpd: Offering IP %s to %s" (Ip.Addr.to_string offered_ip) (hexstring_of_bitstring dhcp.Pdu.chaddr)))) ;
                     Pdu.make_offer ~mac:(host.Host.get_mac ())
                                    ~xid:dhcp.Pdu.xid offered_ip
                                    dhcp.Pdu.client_id |>
@@ -57,16 +60,17 @@ let serve ?(port=Udp.Port.o 67) host ips =
                                        ~src_port
                                        dst_port
                 | None ->
-                    Log.(log logger Debug (lazy "No more unused IP, cannot make offer")))
+                    Log.(log logger Debug (lazy "dhcpd: No more unused IP, cannot make offer")))
             | Some ({ Pdu.op = BootRequest ; Pdu.hlen = 6 ; _ } as dhcp)
               when dhcp.Pdu.htype = Arp.HwType.eth &&
                    dhcp.Pdu.msg_type = Some MsgType.request ->
-                Log.(log logger Debug (lazy (Printf.sprintf "Received a DHCP Request from %s" (hexstring_of_bitstring dhcp.Pdu.chaddr)))) ;
+                Log.(log logger Debug (lazy (Printf.sprintf "dhcpd: Received a DHCP Request from %s" (hexstring_of_bitstring dhcp.Pdu.chaddr)))) ;
                 (* Look for previous offers *)
                 (match BitHash.find_option offers dhcp.Pdu.chaddr with
                 | Some offered_ip ->
                     BitHash.remove offers dhcp.Pdu.chaddr ;
                     BitHash.replace leases dhcp.Pdu.chaddr offered_ip ;
+                    Log.(log logger Debug (lazy "dhcpd: acking it")) ;
                     Pdu.make_ack ~mac:(host.Host.get_mac ())
                                  ~xid:dhcp.Pdu.xid
                                  offered_ip dhcp.Pdu.client_id |>
@@ -75,11 +79,11 @@ let serve ?(port=Udp.Port.o 67) host ips =
                                        ~src_port
                                        dst_port
                 | None ->
-                    Log.(log logger Warning (lazy (Printf.sprintf "I never offered anythin to %s (or I fogot about it)" (Eth.Addr.to_string (Eth.Addr.o dhcp.Pdu.chaddr))))) ;
+                    Log.(log logger Warning (lazy (Printf.sprintf "dhcpd: I never offered anything to %s (or I fogot about it)" (Eth.Addr.to_string (Eth.Addr.o dhcp.Pdu.chaddr))))) ;
                     (* ignore it *) ())
             (* TODO: handle release & decline *)
             | _ ->
-                Log.(log logger Debug (lazy "Ignoring DHCP message"))))
+                Log.(log logger Debug (lazy "dhcpd: Ignoring DHCP message"))))
 
 (*$R serve
     Clock.realtime := false ;

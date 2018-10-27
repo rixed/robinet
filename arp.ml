@@ -24,13 +24,13 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = false
+let debug = true
 
 (** {2 ARP messages} *)
 
 (** ARP Operations Codes *)
 module Op = struct
-    include MakePrivate(struct
+    include Private.Make (struct
         type t = int
         let to_string = function
             |  1 -> "request"
@@ -77,7 +77,7 @@ module HwType = struct
         let is_valid x = x >= 1
         let repl_tag = "code"
     end
-    include MakePrivate(Inner)
+    include Private.Make (Inner)
     let eth      = o 1
     let expe_eth = o 2
     let ax25     = o 3
@@ -94,7 +94,7 @@ end
 (** Arp Protocol Types.
  * These are used in other places as well. *)
 module HwProto = struct
-    include MakePrivate(struct
+    include Private.Make (struct
         type t = int
         let to_string = function
             | 0x0800 -> "IP"

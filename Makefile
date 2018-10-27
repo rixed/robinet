@@ -1,13 +1,14 @@
 top_srcdir = ./
 PKG_NAME = robinet
 SOURCES  = \
-	tools.ml \
+	distribution.ml \
+	private.ml \
 	clock.ml \
 	log.ml \
+	tools.ml \
 	persist.ml \
 	peg.ml \
 	metric.ml \
-	dns.ml \
 	url.ml \
 	http.ml \
 	tcp.ml \
@@ -16,6 +17,8 @@ SOURCES  = \
 	ip6.ml \
 	icmp.ml \
 	icmp6.ml \
+	dns.ml \
+	named.ml \
 	arp.ml \
 	vlan.ml \
 	eth.ml \
@@ -37,7 +40,9 @@ SOURCES  = \
 
 C_SOURCES = pcap_wrap.c eth_vendors.c
 CLIB = libpcapw.a
-LIBS = -cclib -lpcap
+# libpcap elsewhere? Call make with:
+# LIBS="-cclib -L/usr/local/lib -cclib -lpcap"
+LIBS += -cclib -lpcap
 EXAMPLES_BYTE = \
 	examples/arp_query.byte \
 	examples/tcp_test.byte \
@@ -55,7 +60,8 @@ EXAMPLES_BYTE = \
 	examples/capecho.byte \
 	examples/load_tester.byte \
 	examples/pcap_reorder.byte \
-	examples/simu_perfweb.byte
+	examples/simu_perfweb.byte \
+	examples/simu_dc_mirroring.byte
 
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
@@ -85,7 +91,7 @@ examples: $(EXAMPLES)
 	 fi
 
 robinet.top: $(ARCHIVE)
-	$(OCAMLMKTOP) -o $@ -package "findlib $(REQUIRES)" $(ARCHIVE)
+	$(OCAMLMKTOP) $(WARNS) -o $@ -package "findlib $(REQUIRES)" $(ARCHIVE)
 	@if which setcap >& /dev/null ; then \
 	   sudo setcap cap_net_raw,cap_net_admin=eip $@ ;\
 	 fi

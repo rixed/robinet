@@ -93,7 +93,7 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = false
+let debug = true
 
 (** {2 Libpcap low level wrappers} *)
 
@@ -122,7 +122,7 @@ external openif_ : string -> bool -> string -> int -> iface_handler = "wrap_pcap
  * usual Ethernet cables, and [Dlt.linux_cooked] corresponding to a capture on the {e any}
  * network device on Linux. *)
 module Dlt = struct
-    include MakePrivate(struct
+    include Private.Make (struct
         type t = int32
         let to_string = function
             |   0l -> "BSD loopback encapsulation"
@@ -481,8 +481,9 @@ let inject iface bits =
         inject_ iface.handler str ;
         Metric.Atomic.fire packets_injected_ok ;
         Metric.Counter.increase bytes_out (Int64.of_int (bytelength bits))
-    with _ ->
-        if debug then Printf.printf "Pcap: Cannot inject a packet\n" ;
+    with e ->
+        Printf.printf "Pcap: Cannot inject a packet: %s\n%!"
+            (Printexc.to_string e) ;
         Metric.Atomic.fire packets_injected_err)
 
 (** {2 Packet sniffing} *)

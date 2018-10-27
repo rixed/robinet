@@ -135,6 +135,7 @@ let of_string ?(force_absolute=false) str =
         with Not_found -> "", str in
     (* Parsing the Path *)
     let path = str in
+    (* FIXME See net_codecs CodecUrl.ml *)
     { scheme  = String.lowercase scheme ;
       net_loc = String.lowercase net_loc ;
       path    = path ;

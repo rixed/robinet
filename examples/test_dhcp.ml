@@ -24,7 +24,7 @@ open Batteries
 open Tools
 
 let run iface =
-    let host = Host.make_dhcp "tester" (Eth.Addr.of_string "00:23:8b:5f:09:c1") in
+    let host = Host.make_dhcp ~on:true "tester" ~netmask:Ip.Addr.all_ones (Eth.Addr.of_string "00:23:8b:5f:09:c1") in
     host.Host.dev.set_read (Pcap.inject iface) ;
     Pcap.sniffer iface host.Host.dev.write
 

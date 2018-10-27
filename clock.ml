@@ -34,7 +34,6 @@
 
 *)
 open Batteries
-open Tools
 
 let debug = false
 
@@ -45,7 +44,7 @@ let realtime = ref true
 (** Time.t represents a given timestamp (ie. number of seconds since 1970-01-01 00:00:00 UTC. *)
 module rec Time : sig
     val print_date : bool ref
-    include PRIVATE_TYPE with type t = private float and type outer_t = float
+    include Private.S with type t = private float and type outer_t = float
     val add : t -> Interval.t -> t
     val sub : t -> t -> Interval.t
     val wall_clock : unit -> t
@@ -55,7 +54,7 @@ end = struct
      * Only useful if your simulation spans several days, which is uncommon. *)
     let print_date = ref false
 
-    include MakePrivate(struct
+    include Private.Make(struct
         type t = float
         let to_string t =
             let open Unix in
@@ -91,7 +90,7 @@ end
 (** While Interval.t represents a time interval.
  * Both are floats internally to match OCaml stdlib. *)
 and Interval : sig
-    include PRIVATE_TYPE with type t = private float and type outer_t = float
+    include Private.S with type t = private float and type outer_t = float
     val usec : float -> t
     val msec : float -> t
     val sec  : float -> t
@@ -100,7 +99,7 @@ and Interval : sig
     val compare : t -> t -> int
     val add : t -> t -> t
 end = struct
-    include MakePrivate(struct
+    include Private.Make(struct
         type t = float
         let to_string t =
             Printf.sprintf "+%fs" t
@@ -181,7 +180,7 @@ let asap f x =
  * You must call this after real time passes (for instance after a blocking call).
  * Otherwise, time jumps from one registered event to the next. *)
 let synch () =
-    ensure !realtime "Synch with real clock in non-realtime mode!?" ;
+    assert !realtime (* Synch with real clock in non-realtime mode!? *) ;
     current.now <- Time.wall_clock () ;
     if debug then Printf.printf "Clock: synch: set current time to %s\n%!" (Time.to_string current.now)
 
@@ -235,6 +234,7 @@ let next_event () =
  * an answer from the outside world is _not_ a clock event. You should probably
  * run forever whenever you communicate with the outside. *)
 let run wait =
+    if debug then Printf.printf "clock: running the clock!\n%!" ;
     while wait || not (Map.is_empty current.events) do
         next_event () ;
         Thread.yield ()

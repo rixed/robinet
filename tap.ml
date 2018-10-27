@@ -1,4 +1,4 @@
-(* vim:sw=4 ts=4 sts=4 expandtab
+(* vim:sw=4 ts=4 sts=4 expandtab spell spelllang=en
 *)
 (* Copyright 2012, Cedric Cellier
  *
@@ -17,26 +17,22 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(*
-   Small HTTP server for tests
-*)
+(**
+  This module can set-up a tap interface and use it to send/receive traffic.
+  It does this without libpcap.
+ *)
 open Batteries
+open Bitstring
+open Tools
 
-let run port root =
-    let host = Localhost.make () in
-    (* Start server *)
-    let resources =
-        [ Str.regexp "/\\(.*\\)$", Opache.static_file_server root ] in
-    Opache.serve host ~port:(Tcp.Port.o port) (Opache.multiplexer resources) ;
-    (* Run everything *)
-    Clock.run true
+let debug = true
 
-let main =
-    let port = ref 80 and root = ref "./" in
-    Arg.parse [ "-port", Arg.Set_int port,    "TCP port to listen to (default: 80)" ;
-                "-root", Arg.Set_string root, "Root directory (default: ./)" ]
-              (fun _ -> raise (Arg.Bad "unknown parameter"))
-              "Start a static file http server" ;
-    Random.self_init () ;
-    run !port !root
+let make n =
+    let fname = "/dev/tap" ^ string_of_int n in
+    let open Legacy.Unix in
+    if debug then Printf.printf "Tap: Opening %s" fname ;
+    let fd = openfile fname [O_RDWR; O_CLOEXEC] 0o640 in
+    Printf.sprintf "ifconfig tap%d up" n |>
+    Sys.command |> ignore ; (* TODO: check err code *)
+    last_tap := fd
 

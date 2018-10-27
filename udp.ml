@@ -22,8 +22,6 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = false
-
 (** {2 Private Types} *)
 
 module Port = Tcp.MakePort (struct let srv = "udp" end)
@@ -75,21 +73,22 @@ struct
     type udp_trx = {       trx : trx ;
                      get_ports : unit -> Port.t * Port.t }
     type t = {
+        logger : Log.logger ;
         mutable src : Port.t ; mutable dst : Port.t ;
         mutable emit : bitstring -> unit ;
         mutable recv : bitstring -> unit }
 
     let tx t bits =
         let udp = Pdu.make ~src_port:t.src ~dst_port:t.dst bits in
-        if debug then Printf.printf "Udp: Emitting a packet from %s to %s\n%!" (Port.to_string t.src) (Port.to_string t.dst) ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Udp: Emitting a packet from %s to %s" (Port.to_string t.src) (Port.to_string t.dst)))) ;
         Clock.asap t.emit (Pdu.pack udp)
 
     (* TODO: check checksum *)
     let rx t bits = (match Pdu.unpack bits with
         | None -> ()
         | Some udp ->
-            if debug then Printf.printf "Udp: Received a datagram\n%!" ;
-            if debug then Printf.printf "Udp: Got a datagram with %d bytes\n%!" (Payload.length udp.Pdu.payload) ;
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Udp: Received a datagram"))) ;
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Udp: Got a datagram with %d bytes" (Payload.length udp.Pdu.payload)))) ;
             if Payload.bitlength udp.Pdu.payload > 0 then Clock.asap t.recv (udp.Pdu.payload :> bitstring))
 
     let trx_of t =
@@ -99,8 +98,10 @@ struct
                           set_read = fun f -> t.emit <- f } } ;
           get_ports = (fun () -> t.src, t.dst) }
 
-    let make src dst =
+    let make src dst logger =
         let t = { src = src ; dst = dst ;
-                  emit = ignore ; recv = ignore } in
+                  emit = ignore_bits logger ;
+                  recv = ignore_bits logger ;
+                  logger } in
         trx_of t
 end

@@ -22,7 +22,7 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = false
+let debug = true
 
 (** {2 Opcodes, types, etc} *)
 
@@ -46,7 +46,7 @@ module MsgType = struct
         let is_valid x = x >= 1 && x <= 8
         let repl_tag = "code"
     end
-    include MakePrivate(Inner)
+    include Private.Make (Inner)
 
     let discover = o 1
     let offer    = o 2

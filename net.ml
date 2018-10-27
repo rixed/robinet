@@ -35,7 +35,7 @@
 open Batteries
 open Tools
 
-let debug = false
+let debug = true
 
 type hub    = { hub_nb_ports : int }
 type switch = { switch_nb_ports : int ;
@@ -44,6 +44,7 @@ type host   = { host_gw : Eth.gw_addr ;
                 host_search_sfx : string ;
                 host_nameserver : Ip.Addr.t ;
                 host_mac : Eth.Addr.t ;
+                host_netmask : Ip.Addr.t ;
                 host_ip : Ip.Addr.t option }
                 (* Also: net, tap... *)
 type note   = string
@@ -102,16 +103,17 @@ let switch_of_csv str =
     with _ -> raise (Cannot_parse ("switch", str))
 
 let host_of_csv str =
-    let make_host name x y gw search_sfx nameserver mac ip =
+    let make_host name x y gw search_sfx nameserver mac netmask ip =
         { elmt = Host { host_gw = Eth.gw_addr_of_string gw ;
                         host_search_sfx = search_sfx ;
                         host_nameserver = Ip.Addr.of_string nameserver ;
                         host_mac = Eth.Addr.of_string mac ;
+                        host_netmask = Ip.Addr.of_string netmask ;
                         host_ip = if String.length ip > 0 then Some (Ip.Addr.of_string ip)
                                   else None } ;
           pos = x, y ;
           node_name = name } in
-    try Scanf.sscanf str "%S,%f,%f,%s@,%s@,%s@,%s@,%s" make_host
+    try Scanf.sscanf str "%S,%f,%f,%s@,%s@,%s@,%s@,%s@,%s" make_host
     with _ -> raise (Cannot_parse ("host", str))
 
 let note_of_csv str =
@@ -220,12 +222,13 @@ let csv_for_cables oc t =
 
 let csv_for_node oc = function
     | { elmt = Host h ; pos = x,y ; node_name } ->
-        Printf.fprintf oc "host,%S,%f,%f,%s,%s,%s,%s,%s\n"
+        Printf.fprintf oc "host,%S,%f,%f,%s,%s,%s,%s,%s,%s\n"
             node_name x y
             (Eth.string_of_gw_addr h.host_gw)
             h.host_search_sfx
             (Ip.Addr.to_dotted_string h.host_nameserver)
             (Eth.Addr.to_string h.host_mac)
+            (Ip.Addr.to_dotted_string h.host_netmask)
             (match h.host_ip with
                 | Some ip -> Ip.Addr.to_dotted_string ip
                 | _ -> "")
@@ -269,10 +272,10 @@ let instanciate t =
     let create_node { node_name = name ; elmt ; _ } = match elmt with
         | Hub h ->
             Hashtbl.add hubs name
-                (Hub.Repeater.make h.hub_nb_ports)
+                (Hub.Repeater.make h.hub_nb_ports name)
         | Switch s ->
             Hashtbl.add switches name
-                (Hub.Switch.make s.switch_nb_ports s.switch_nb_macs)
+                (Hub.Switch.make s.switch_nb_ports s.switch_nb_macs name)
         | Host h ->
             Hashtbl.add hosts name
                 (match h.host_ip with
@@ -281,12 +284,16 @@ let instanciate t =
                                    ~gw:h.host_gw
                                    ~search_sfx:h.host_search_sfx
                                    ~nameserver:h.host_nameserver
+                                   ~on:true
+                                   ~netmask:h.host_netmask
                                    h.host_mac
                 | Some ip ->
                     Host.make_static name
                                    ~gw:h.host_gw
                                    ~search_sfx:h.host_search_sfx
                                    ~nameserver:h.host_nameserver
+                                   ~on:true
+                                   ~netmask:h.host_netmask
                                    h.host_mac ip)
         | Note text ->
             Hashtbl.add notes name text in

@@ -47,7 +47,10 @@ type t = { host : Host.host_trx ;
               we can reuse them if necessary. These are closed after some time,
               and we do not keep more than a given number (10, specifically) *)
            mutable vacant_cnxs : (Host.addr * Tcp.Port.t, vacant_cnx) Hashtbl.t ;
-           max_vacant_cnx : int ; max_idle_cnx : Clock.Interval.t }
+           max_vacant_cnx : int ;
+           max_idle_cnx : Clock.Interval.t ;
+           (* When it has been ordered to stop: *)
+           mutable killed : bool }
 
 let make ?(user_agent="RobiNet") ?(max_vacant_cnx=10) ?(max_idle_cnx=Clock.Interval.sec 15.) host =
     { host = host ;
@@ -55,7 +58,8 @@ let make ?(user_agent="RobiNet") ?(max_vacant_cnx=10) ?(max_idle_cnx=Clock.Inter
       cookies = [] ;
       vacant_cnxs = Hashtbl.create 7 ;
       max_vacant_cnx = max_vacant_cnx ;
-      max_idle_cnx = max_idle_cnx }
+      max_idle_cnx = max_idle_cnx ;
+      killed = false }
 
 (** {2 Cookies}
 
@@ -355,23 +359,25 @@ let post t ?(headers=[]) url vars cont =
 let spider t max_depth start =
     let fetched = Hashtbl.create 100 in
     let rec aux max_depth url =
-        if debug then Printf.printf "Browser: spider: fetching %s with max_depth %d\n%!" (Url.to_string url) max_depth ;
-        Hashtbl.add fetched url true ;
-        get t url (function
-        | None -> ()
-        | Some (headers, body) ->
-            if max_depth > 1 then (
-                let content_type = headers_find "Content-type" headers in
-                if (match content_type with None -> true | Some str -> String.exists (String.lowercase str) "text/html") then (
-                    match Html.parse body with
-                    | Some tree ->
-                        extract_links ~default_base:url headers tree //
-                            (Hashtbl.mem fetched %> not) |>
-                            List.of_enum |>
-                            List.iter (fun url ->
-                                Clock.asap (aux (max_depth-1)) url)
-                    | None ->
-                        if debug then Printf.printf "Browser: Cannot parse HTML from %s\n" (Url.to_string url)
+        if not t.killed then (
+            if debug then Printf.printf "Browser: spider: fetching %s with max_depth %d\n%!" (Url.to_string url) max_depth ;
+            Hashtbl.add fetched url true ;
+            get t url (function
+            | None -> ()
+            | Some (headers, body) ->
+                if max_depth > 1 then (
+                    let content_type = headers_find "Content-type" headers in
+                    if (match content_type with None -> true | Some str -> String.exists (String.lowercase str) "text/html") then (
+                        match Html.parse body with
+                        | Some tree ->
+                            extract_links ~default_base:url headers tree //
+                                (Hashtbl.mem fetched %> not) |>
+                                List.of_enum |>
+                                List.iter (fun url ->
+                                    Clock.asap (aux (max_depth-1)) url)
+                        | None ->
+                            if debug then Printf.printf "Browser: Cannot parse HTML from %s\n" (Url.to_string url)
+                    )
                 )
             )
         ) in
@@ -381,42 +387,54 @@ let spider t max_depth start =
 let user t ?pause max_depth start =
     let fetched = Hashtbl.create 100 in
     let rec aux max_depth url =
-        if debug then Printf.printf "Browser: user: fetching %s with max_depth %d\n%!" (Url.to_string url) max_depth ;
-        Hashtbl.add fetched url true ;
-        get t url (function
-        | None -> ()
-        | Some (headers, body) ->
-            if max_depth > 1 then (
-                let content_type = headers_find "Content-type" headers in
-                if (match content_type with None -> true | Some str -> String.exists (String.lowercase str) "text/html") then (
-                    (* Fetch eveything a browser would fetch at once (images, etc) *)
-                    extract_links_simple ~same_page:true ~default_base:url headers body //
-                        (Hashtbl.mem fetched %> not) |>
-                        List.of_enum |>
-                        tap (fun l -> if debug then Printf.printf "Browser: will iter on %d urls\n" (List.length l)) |>
-                        List.iter (fun url' ->
-                            if debug then Printf.printf "Browser: user: fetching %s for %s\n" (Url.to_string url') (Url.to_string url) ;
-                            Clock.asap (aux (max_depth-1)) url') ;
-                    (* fetch sequentially, depth first, a links *)
-                    let urls = extract_links_simple ~same_page:false ~default_base:url headers body //
-                        (Hashtbl.mem fetched %> not) in
-                    let rec fetch_next () =
-                        match Enum.get urls with
-                        | None -> ()
-                        | Some url' ->
-                            let d = match pause with
-                                | None -> 0.
-                                | Some t -> Random.float (2.*.t) in
-                            Clock.delay (Clock.Interval.o d) (fun () ->
-                                if debug then Printf.printf "Browser: user: fetching %s after %s\n" (Url.to_string url') (Url.to_string url) ;
-                                aux (max_depth-1) url' ;
-                                fetch_next ()) () in
-                    fetch_next () ;
-                    if debug then Printf.printf "Browser: done with %s\n" (Url.to_string url)
+        if not t.killed then (
+            if debug then Printf.printf "Browser: user: fetching %s with max_depth %d\n%!" (Url.to_string url) max_depth ;
+            Hashtbl.add fetched url true ;
+            get t url (function
+            | None -> ()
+            | Some (headers, body) ->
+                if max_depth > 1 then (
+                    let content_type = headers_find "Content-type" headers in
+                    if (match content_type with None -> true | Some str -> String.exists (String.lowercase str) "text/html") then (
+                        (* Fetch eveything a browser would fetch at once (images, etc) *)
+                        extract_links_simple ~same_page:true ~default_base:url headers body //
+                            (Hashtbl.mem fetched %> not) |>
+                            List.of_enum |>
+                            tap (fun l -> if debug then Printf.printf "Browser: will iter on %d urls\n" (List.length l)) |>
+                            List.iter (fun url' ->
+                                if debug then Printf.printf "Browser: user: fetching %s for %s\n" (Url.to_string url') (Url.to_string url) ;
+                                Clock.asap (aux (max_depth-1)) url') ;
+                        (* fetch sequentially, depth first, a links *)
+                        (* TODO: get only one URL amongst the possible links but keep all
+                         * encountered URL in this set of possible next links. Also,
+                         * sleep in between 2 clicks according to the read_time
+                         * distribution. *)
+                        let urls = extract_links_simple ~same_page:false ~default_base:url headers body //
+                            (Hashtbl.mem fetched %> not) in
+                        let rec fetch_next () =
+                            match Enum.get urls with
+                            | None -> ()
+                            | Some url' ->
+                                let d = match pause with
+                                    | None -> 0.
+                                    | Some t -> Random.float (2.*.t) in
+                                Clock.delay (Clock.Interval.o d) (fun () ->
+                                    if debug then Printf.printf "Browser: user: fetching %s after %s\n" (Url.to_string url') (Url.to_string url) ;
+                                    aux (max_depth-1) url' ;
+                                    fetch_next ()) () in
+                        fetch_next () ;
+                        if debug then Printf.printf "Browser: done with %s\n" (Url.to_string url)
+                    )
                 )
-            )) in
+            )
+        ) in
     aux max_depth (Url.resolve Url.empty start) ;
-    if debug then Printf.printf "Browser: done using browser.\n%!" ;
+    if debug then Printf.printf "Browser: done using browser.\n%!"
+
+let kill t k =
+    t.killed <- true ;
+    (* effective immediately: *)
+    k ()
 
 module Plan =
 struct
@@ -429,4 +447,3 @@ struct
                allowed_urls   : Str.regexp array ;
                forbidden_urls : Str.regexp array } (* checked only if not allowed *)
 end
-

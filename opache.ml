@@ -78,7 +78,7 @@ let rec stripped url =
     let server = Host.make_static "server" (Eth.Addr.random ()) (Ip.Addr.of_string "192.168.1.1");;
     let content_of file = File.lines_of file |> List.of_enum |> String.concat "";;
     Opache.serve server (Tcp.Port.o 8080) (fun trx _msg _log ->
-        Http.TRXtop.tx trx (Http.Pdu.make_status 200 ["Content-Type", "text/plain"] (content_of "test.ml")));;
+        Http.TRXtop.tx trx (Http.Pdu.make_response 200 ["Content-Type", "text/plain"] (content_of "test.ml")));;
     (* Our client *)
     let client = Host.make_static "client" (Eth.Addr.random ()) (Ip.Addr.of_string "192.168.1.2");;
     let browser = Browser.make client;;
@@ -97,7 +97,8 @@ let rec stripped url =
   Notice that this example, if copied into test.ml, will generate a pcap containing the source code that
   generates the pcap :-)
 *)
-let serve host port f =
+(* Note: we force [f] to return unit so that callers get useful diagnostics *)
+let serve host ?(port=Tcp.Port.o 80) (f : TRXtop.t -> Pdu.t -> Log.logger -> unit) =
     let logger = Log.(make (Printf.sprintf "%s/Httpd:%s" host.Host.logger.name (Tcp.Port.to_string port)) 50) in
     let count_queries_per_url = Hashtbl.create 11 in
     let count_query cmd url =
@@ -129,7 +130,7 @@ let serve host port f =
                     if must_close_cnx pdu.Pdu.headers then tcp.Tcp.TRX.close ()
                 | _ ->
                     Log.(log logger Debug (lazy (Printf.sprintf "Http msg is unknown"))) ;
-                    TRXtop.tx http { Pdu.cmd = Status 500 ; Pdu.headers = [] ; Pdu.body = "" } ;
+                    Pdu.make_response 500 |> TRXtop.tx http ;
                     tcp.Tcp.TRX.close ())) ;
         (* Only when everything's set up do we connect the tcp recv to http rx *)
         ignore ((TRXtop.rx http) <-= tcp.Tcp.TRX.trx))
@@ -248,4 +249,3 @@ let multiplexer (res:resource) http msg logger =
                          Pdu.headers = [ "Content-Length", Printf.sprintf "%d" (String.length body) ;
                                          "Content-Type", "text/plain" ] ;
                          Pdu.body = body }
-

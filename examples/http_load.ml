@@ -30,12 +30,13 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
         let bs = Ip.Addr.to_bitstring ip in
         let%bitstring b = {| 0x1234 : 16 ; bs : 32 : bitstring |} in
         Eth.Addr.o b in
+    let netmask = Ip.Cidr.to_netmask src_range in
     let host_of_ip ip =
-        Host.make_static (Ip.Addr.to_dotted_string ip) ?gw ?search_sfx ?nameserver (mac_of_ip ip) ip in
+        Host.make_static ~on:true (Ip.Addr.to_dotted_string ip) ?gw ?search_sfx ?nameserver ~netmask (mac_of_ip ip) ip in
     let hosts = List.of_enum (Ip.Cidr.random_addrs src_range nb_srcs /@ host_of_ip)
     in
     (* Build the HUB and link it to hosts *)
-    let hub     = Hub.Repeater.make (nb_srcs+1)
+    let hub     = Hub.Repeater.make (nb_srcs+1) "hub"
     and gigabit = Eth.limited (Clock.Interval.msec 10.) 1_000_000_000. in
     List.iteri (fun i h ->
         (* notice that the cable is not full duplex *)

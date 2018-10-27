@@ -26,8 +26,6 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = false
-
 (** {2 Private Types} *)
 
 (** {3 Ethernet addresses} *)
@@ -69,7 +67,7 @@ module Addr = struct
     (** Low level wrapper around the C vendor database. *)
     external vendor_lookup : int64 -> (string * int) option = "wrap_eth_vendor_lookup"
 
-    include MakePrivate(struct
+    include Private.Make (struct
         type t = bitstring
 
         (** Converts an address to it's string representation. *)
@@ -121,6 +119,8 @@ module Addr = struct
      * operator for addresses. *)
     let eq (a : t) (b : t) =
         Bitstring.equals (a :> bitstring) (b :> bitstring)
+
+    let is_broadcast = eq broadcast
 
     (** Returns a random Ethernet address (but neither broadcast nor zero). *)
     let rec random () =
@@ -200,46 +200,60 @@ end
 module TRX =
 struct
     type t =
-        { src : Addr.t ; gw : gw_addr option ;
-          proto : Arp.HwProto.t ; mtu : int ;
-          mutable my_addresses : bitstring list ;
+        { logger : Log.logger ;
+          src : Addr.t ;
+          gw : gw_addr option ;
+          proto : Arp.HwProto.t ;
+          mtu : int ;
+          mutable my_addresses : my_address list ;
           mutable emit : bitstring -> unit ;
           mutable recv : bitstring -> unit ;
           mutable promisc : bitstring -> unit ;
           (* TODO: these two should be timeouted, requiring a clock *)
           arp_cache : Addr.t option BitHash.t ;     (* proto_addr -> hw_addr option (None when resolving) *)
           delayed : bitstring BitHash.t }  (* dest_proto_addr -> msg *)
+    and my_address =
+        { addr : bitstring ; netmask : bitstring }
+
+    let print_my_address oc my_addr =
+        Printf.fprintf oc "%s (netmask %s)"
+            (hexstring_of_bitstring my_addr.addr)
+            (hexstring_of_bitstring my_addr.netmask)
+
     type eth_trx =
         { trx : trx ;
           set_promiscuous : (bitstring -> unit) -> unit ;
-          set_addresses : bitstring list -> unit ;
+          set_addresses : my_address list -> unit ;
           get_source : unit -> Addr.t ;
           arp_set : bitstring -> Addr.t option -> unit }
 
-    (** Low level send fonction. Takes a {!Arp.HwProto.t} since it's used both
+    (** Low level send function. Takes a {!Arp.HwProto.t} since it's used both
      * for the user payload protocol and ARP protocol. *)
     let send t proto dst bits =
         let pdu = Pdu.make proto t.src dst bits in
-        if debug then Printf.printf "Eth: Emitting an Eth packet, proto %s, from %s to %s (content '%s')\n%!" (Arp.HwProto.to_string proto) (Addr.to_string t.src) (Addr.to_string dst) (hexstring_of_bitstring bits) ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: Emitting an Eth packet, proto %s, from %s to %s (content '%s')" (Arp.HwProto.to_string proto) (Addr.to_string t.src) (Addr.to_string dst) (hexstring_of_bitstring bits)))) ;
         Clock.asap t.emit (Pdu.pack pdu)
 
     let resolve_proto_addr t bits sender_proto_addr target_proto_addr =
         (* Add the msg to delayed messages _before_ sending the query *)
-        if debug then Printf.printf "Eth: Delaying a msg for '%s'\n%!" (hexstring_of_bitstring target_proto_addr) ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: Delaying a msg for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
         BitHash.add t.delayed target_proto_addr bits ;
         let request = Arp.Pdu.make_request Arp.HwType.eth t.proto (t.src :> bitstring) sender_proto_addr target_proto_addr in
         send t Arp.HwProto.arp Addr.broadcast (Arp.Pdu.pack request)
 
     type dst = Delayed | Dst of Addr.t
     let arp_resolve_ipv4 t bits sender_ip target_ip =
-        try Dst (Option.get (BitHash.find t.arp_cache target_ip)) ;
-        with Not_found ->
-            if debug then Printf.printf "Eth: Cannot find HW addr for '%s' in ARP cache\n%!" (hexstring_of_bitstring target_ip) ;
+        match Option.get (BitHash.find t.arp_cache target_ip) with
+        | dst ->
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: found HW addr for '%s' in the ARP cache" (hexstring_of_bitstring target_ip)))) ;
+            Dst dst
+        | exception Not_found ->
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: Cannot find HW addr for '%s' in ARP cache" (hexstring_of_bitstring target_ip)))) ;
             BitHash.add t.arp_cache target_ip None ;
             resolve_proto_addr t bits sender_ip target_ip ;
             Delayed
-           | Invalid_argument _ ->
-            if debug then Printf.printf "Eth: HW addr for '%s' is still resolving\n%!" (hexstring_of_bitstring target_ip) ;
+        | exception Invalid_argument _ ->
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: HW addr for '%s' is still resolving" (hexstring_of_bitstring target_ip)))) ;
             Delayed
 
     let dst_for t bits =
@@ -273,65 +287,76 @@ struct
                         target_ip_of (vlan.Vlan.Pdu.payload :> bitstring)
                     else None)
             else None in
-        if target_ip_opt bits = Some Ip.Addr.broadcast then Some (Dst Addr.broadcast) else
-        match t.gw with
-        | None -> (* FIXME: or if our netmasks tell us that dest is on the same LAN than us *)
-            if debug then Printf.printf "No GW, resolving with ARP\n%!" ;
-            arp_resolve_pld bits
-        | Some (Mac addr) ->
-            if debug then Printf.printf "Using MAC of GW\n%!" ;
-            Some (Dst addr)
-        | Some (IPv4 ip)  ->
-            if debug then Printf.printf "Using GW which IP is %s\n%!" (Ip.Addr.to_string ip) ;
-            let sender_ip = match t.my_addresses with
-                | my_ip::_ -> my_ip
-                | []       -> Ip.Addr.zero |> Ip.Addr.to_bitstring (* maybe take the source IP from the payload? *) in
-            Some (arp_resolve_ipv4 t bits sender_ip (Ip.Addr.to_bitstring ip))
+        let same_net my_addresses bits =
+            List.exists (fun my_addr ->
+                match_mask my_addr.netmask my_addr.addr bits
+            ) my_addresses in
+        match target_ip_opt bits with
+        | Some dst_ip when dst_ip = Ip.Addr.broadcast ->
+            Some (Dst Addr.broadcast)
+        | Some dst_ip when same_net t.my_addresses (Ip.Addr.to_bitstring dst_ip) ->
+            Log.(log t.logger Debug (lazy "Same network as me, sending directly")) ;
+            arp_resolve_pld bits (* FIXME: should also tell us which source address to use *)
+        | _ ->
+            Log.(log t.logger Debug (lazy (Printf.sprintf2 "Not on my LAN (my addresses = %a)" (List.print print_my_address) t.my_addresses))) ;
+            (match t.gw with
+            | None ->
+                Log.(log t.logger Debug (lazy (Printf.sprintf "No GW, resolving with ARP"))) ;
+                arp_resolve_pld bits
+            | Some (Mac addr) ->
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Using MAC of GW"))) ;
+                Some (Dst addr)
+            | Some (IPv4 ip)  ->
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Using GW which IP is %s" (Ip.Addr.to_string ip)))) ;
+                let sender_ip = match t.my_addresses with
+                    | my_ip::_ -> my_ip.addr
+                    | []       -> Ip.Addr.zero |> Ip.Addr.to_bitstring (* maybe take the source IP from the payload? *) in
+                Some (arp_resolve_ipv4 t bits sender_ip (Ip.Addr.to_bitstring ip)))
 
     (** Transmit function. [tx t payload] Will send the payload. *)
     let tx t bits =
-        if debug then Printf.printf "Eth: TX a payload of %d bytes (while MTU=%d)\n" (bytelength bits) t.mtu ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: TX a payload of %d bytes (while MTU=%d)" (bytelength bits) t.mtu))) ;
         if bytelength bits <= t.mtu then (
             match dst_for t bits with
             | Some (Dst dst) -> send t t.proto dst bits
-            | Some Delayed -> if debug then Printf.printf "Eth:...delayed\n"
-            | None -> if debug then Printf.printf "Eth:...no destination?!\n"
+            | Some Delayed -> Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...delayed")))
+            | None -> Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...no destination?!")))
         )
 
     (** Receive function, called to input an Ethernet frame into the TRX. *)
     let rx t bits = (match Pdu.unpack bits with
         | None -> ()
         | Some frame ->
-            if debug then Printf.printf "Eth: Got an eth frame of proto %s for %s\n%!" (Arp.HwProto.to_string frame.Pdu.proto) (Addr.to_string frame.Pdu.dst) ;
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: Got an eth frame of proto %s for %s" (Arp.HwProto.to_string frame.Pdu.proto) (Addr.to_string frame.Pdu.dst)))) ;
             if frame.Pdu.proto = t.proto &&
                (Addr.eq frame.Pdu.dst t.src || Addr.eq frame.Pdu.dst Addr.broadcast) then (
-                if debug then Printf.printf "Eth:...for me!\n%!" ;
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...that's me!"))) ;
                 if Payload.bitlength frame.Pdu.payload > 0 then Clock.asap t.recv (frame.Pdu.payload :> bitstring)
             ) else if frame.Pdu.proto = Arp.HwProto.arp then (
                 match Arp.Pdu.unpack (frame.Pdu.payload :> bitstring) with
                 | None -> ()
                 | Some arp ->
-                    if debug then Printf.printf "Eth:...an ARP of opcode %s\n%!" (Arp.Op.to_string arp.Arp.Pdu.operation) ;
+                    Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...an ARP of opcode %s" (Arp.Op.to_string arp.Arp.Pdu.operation)))) ;
                     if arp.Arp.Pdu.hw_type = Arp.HwType.eth then (
-                        if debug then Printf.printf "Eth:...regarding an ethernet device!\n%!" ;
+                        Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...regarding an ethernet device!"))) ;
                         let sender_hw = Addr.o arp.Arp.Pdu.sender_hw (* will raise if not of the advertised type *)
                         and merge_flag = ref false in
                         if arp.Arp.Pdu.proto_type = t.proto then (
-                            if debug then Printf.printf "Eth:...transporting same proto than me!\n%!" ;
+                            Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...transporting same proto than me!"))) ;
                             if BitHash.mem t.arp_cache arp.Arp.Pdu.sender_proto then (
-                                if debug then Printf.printf "Eth:...updating entry %s->%s in ARP cache\n%!" (hexstring_of_bitstring arp.Arp.Pdu.sender_proto) (Addr.to_string sender_hw) ;
+                                Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...updating entry %s->%s in ARP cache" (hexstring_of_bitstring arp.Arp.Pdu.sender_proto) (Addr.to_string sender_hw)))) ;
                                 merge_flag := true ;
                                 BitHash.replace t.arp_cache arp.Arp.Pdu.sender_proto (Some sender_hw)
                             ) ;
-                            if debug then Printf.printf "Eth:...concerning '%s' (I'm '%s')\n" (hexstring_of_bitstring arp.Arp.Pdu.target_proto) (if t.my_addresses <> [] then hexstring_of_bitstring (List.hd t.my_addresses) else "nobody") ;
-                            if List.exists (Bitstring.equals arp.Arp.Pdu.target_proto) t.my_addresses then (
-                                if debug then Printf.printf "Eth:...It's about me!!\n%!" ;
+                            Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...concerning '%s' (I'm '%s')" (hexstring_of_bitstring arp.Arp.Pdu.target_proto) (if t.my_addresses <> [] then hexstring_of_bitstring (List.hd t.my_addresses).addr else "nobody")))) ;
+                            if List.exists (fun my_addr -> Bitstring.equals arp.Arp.Pdu.target_proto my_addr.addr) t.my_addresses then (
+                                Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...It's about me!!"))) ;
                                 if not !merge_flag then (
                                     BitHash.add t.arp_cache arp.Arp.Pdu.sender_proto (Some sender_hw) ;
-                                    if debug then Printf.printf "Eth:...adding %s->%s in ARP cache\n%!" (hexstring_of_bitstring arp.Arp.Pdu.sender_proto) (Addr.to_string sender_hw) ;
+                                    Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...adding %s->%s in ARP cache" (hexstring_of_bitstring arp.Arp.Pdu.sender_proto) (Addr.to_string sender_hw)))) ;
                                 ) ;
                                 if arp.Arp.Pdu.operation = Arp.Op.request then (
-                                    if debug then Printf.printf "Eth:...It's a request, let's reply!\n%!" ;
+                                    Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...It's a request, let's reply!"))) ;
                                     let reply = Arp.Pdu.make_reply arp.Arp.Pdu.hw_type arp.Arp.Pdu.proto_type
                                                                    (t.src :> bitstring) arp.Arp.Pdu.target_proto
                                                                    arp.Arp.Pdu.sender_hw arp.Arp.Pdu.sender_proto in
@@ -340,9 +365,9 @@ struct
                             ) ;
                             (* Now that we may have gained knowledge, try to send the msg in waiting queue *)
                             (* TODO: timeout some? *)
-                            if debug then Printf.printf "Eth:...Do I have a msg waiting for '%s'?\n%!" (hexstring_of_bitstring arp.Arp.Pdu.sender_proto) ;
+                            Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...Do I have a msg waiting for '%s'?" (hexstring_of_bitstring arp.Arp.Pdu.sender_proto)))) ;
                             while BitHash.mem t.delayed arp.Arp.Pdu.sender_proto do
-                                if debug then Printf.printf "Eth:...Yes!! Let's send it!\n%!" ;
+                                Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...Yes!! Let's send it!"))) ;
                                 let msg = BitHash.find t.delayed arp.Arp.Pdu.sender_proto in
                                 send t t.proto sender_hw msg ;
                                 BitHash.remove t.delayed arp.Arp.Pdu.sender_proto
@@ -350,7 +375,7 @@ struct
                         )
                     )
             ) else ( (* not for me, send to promisc function *)
-                if debug then Printf.printf "Eth:...not for me!\n%!" ;
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...not for me!"))) ;
                 if Payload.bitlength frame.Pdu.payload > 0 then t.promisc (frame.Pdu.payload :> bitstring)
             ))
 
@@ -362,10 +387,11 @@ struct
      * @param proto the {!Arp.HwProto.t} we want to transmit/receive.
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
-    let make ?(mtu=1500) src ?gw ?(promisc=ignore) proto my_addresses =
-        if debug then Printf.printf "Eth: Creating an eth TRX with %d addresses\n%!" (List.length my_addresses) ;
-        let t = { src ; gw ; proto ;
-                  emit = ignore ; recv = ignore ;
+    let make ?(mtu=1500) src ?gw ?(promisc=ignore) proto my_addresses logger =
+        Log.(log logger Debug (lazy (Printf.sprintf "Eth: Creating an eth TRX with %d addresses" (List.length my_addresses)))) ;
+        let t = { logger ; src ; gw ; proto ;
+                  emit = ignore_bits logger ;
+                  recv = ignore_bits logger ;
                   mtu ; promisc ; my_addresses ;
                   arp_cache = BitHash.create 3 ;
                   delayed = BitHash.create 3 } in
@@ -378,12 +404,10 @@ struct
           get_source = (fun () -> t.src) ;
           arp_set = (fun iaddr -> function
             | None      ->
-                if debug then Printf.printf "Eth: Removing entry for iaddr %s from ARP table\n" (string_of_bitstring iaddr) ;
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: Removing entry for iaddr %s from ARP table" (hexstring_of_bitstring iaddr)))) ;
                 BitHash.remove_all t.arp_cache iaddr
             | haddr_opt ->
-                if debug then Printf.printf "Eth: Adding entry for iaddr %s to MAC %s from ARP table\n"
-                    (string_of_bitstring iaddr)
-                    (match haddr_opt with None -> "None" | Some haddr -> Addr.to_string haddr) ;
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: Adding entry for iaddr %s to MAC %s from ARP table" (hexstring_of_bitstring iaddr) (match haddr_opt with None -> "None" | Some haddr -> Addr.to_string haddr)))) ;
                 BitHash.replace t.arp_cache iaddr haddr_opt) }
 
 end

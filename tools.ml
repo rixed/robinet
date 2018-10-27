@@ -105,6 +105,7 @@ let bitstring_add i b =
  *)
 
 let hexstring_of_bitstring bs =
+    (* FIXME: make use of hexdump_bitstring *)
     let s = string_of_bitstring bs in
     let hexify c = Printf.sprintf "%02x" (Char.code c) in
     String.enum s /@ hexify |> List.of_enum |> String.join " "
@@ -145,7 +146,7 @@ let print_bitstring fmt bits =
     aux bits ;
     Format.close_box ()
 
-(* Simple convertion from bitstrings to int (when the bitstring is small enough to fit
+(* Simple conversion from bitstrings to int (when the bitstring is small enough to fit
  * in an int). Used for tests only. *)
 let int_of_bitstring bs =
     let l = bitstring_length bs in
@@ -161,6 +162,10 @@ let int_of_bitstring bs =
     3 (int_of_bitstring (let%bitstring b = {| 3 : 3  : littleendian |} in b))
     2 (int_of_bitstring (let%bitstring b = {| 2 : 30 : littleendian |} in b))
 *)
+
+let bitstring_of_int n =
+    let%bitstring s = {| n : 32 |} in
+    s
 
 let bitstring_copy bs =
     string_of_bitstring bs |>
@@ -194,6 +199,28 @@ let all_bits n =
   [ 2 ; 2 ; 2 ; 2 ] (all_bits 2 /@ bitstring_length |> List.of_enum)
   [ 0 ; 1 ]         (all_bits 1 /@ int_of_bitstring |> List.of_enum)
   [ 1 ; 1 ]         (all_bits 1 /@ bitstring_length |> List.of_enum)
+*)
+
+(* Check if a & mask = b & mask *)
+let match_mask mask a b =
+    let len = bitstring_length mask in
+    bitstring_length a = len &&
+    bitstring_length b = len &&
+    let a = string_of_bitstring a
+    and b = string_of_bitstring b
+    and m = string_of_bitstring mask in
+    try
+        for i = 0 to String.length m - 1 do
+            let c s = Char.code s.[i] in
+            let a = c a and b = c b and m = c m in
+            if a land m <> b land m then raise Exit
+        done ;
+        true
+    with Exit -> false
+
+(*$T match_mask
+  match_mask (bitstring_of_int 0xfff0) (bitstring_of_int 0x1234) (bitstring_of_int 0x1239)
+  not (match_mask (bitstring_of_int 0xfff0) (bitstring_of_int 0x1234) (bitstring_of_int 0x5234))
 *)
 
 let abbrev ?(len=25) str =
@@ -380,38 +407,8 @@ let sum bits =
         do_sum bits
     else Random.int 65536
 
-(* A Module with a private int type and custom printer, used
-   to constomize printing of various protocolar fields such as
-   TCP ports and so on. A little convoluted but we gain:
-   - the toplevel don't mix TCP ports with ETH protocol fields
-     and can display them differently;
-   - the programmer can't confuse the two either or will be told
-     by the compiler. *)
-module type PRIVATE_TYPE =
-sig
-    type t
-    type outer_t
-    val to_string : t -> string
-    val print : Format.formatter -> t -> unit
-    val o : outer_t -> t
-end
-
-module MakePrivate (Outer : sig
-    type t
-    val to_string : t -> string
-    val is_valid : t -> bool
-    val repl_tag : string
-end) : PRIVATE_TYPE with type t = private Outer.t and type outer_t = Outer.t =
-struct
-    type t = Outer.t
-    type outer_t = Outer.t
-    let to_string = Outer.to_string
-    let print fmt t = Format.fprintf fmt "@{<%s>%s@}" Outer.repl_tag (to_string t)
-    let o t = assert (Outer.is_valid t) ; t
-end
-
 module Payload = struct
-    include MakePrivate(struct
+    include Private.Make(struct
         type t = bitstring
         let to_string t =
             let bytes = bytelength t in
@@ -433,8 +430,14 @@ end
 (* FIXME: a better name which makes apparent that a trx is actually 2 devs *)
 type dev = { write : bitstring -> unit ; set_read : (bitstring -> unit) -> unit }
 
+(** Obituary for ignored bits: *)
+let ignore_bits logger bits =
+    Log.(log logger Debug (lazy
+        (Printf.sprintf "Ignoring %d bits" (bitstring_length bits))))
+
 (** For those cases when you want to build a [trx] from a single [dev] *)
-let null_dev = { write = ignore ; set_read = ignore }
+let null_dev logger =
+    { write = ignore_bits logger ; set_read = ignore }
 
 (** Connects two {!dev} together *)
 let (<-->) a b =
@@ -451,7 +454,7 @@ let rx trx = trx.out.write
 
 let inverse_trx trx = { ins = trx.out ; out = trx.ins }
 
-let null_trx = { ins = null_dev ; out = null_dev }
+let null_trx logger = { ins = null_dev logger ; out = null_dev logger }
 
 (** [f <-= trx] sets f as the receive function of this [trx].
  * {b Note:} [trx] is returned so that you can write such things as:

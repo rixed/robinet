@@ -22,7 +22,7 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = false
+let debug = true
 
 (** {2 Opcodes, query types and classes} *)
 
@@ -31,7 +31,7 @@ let inv_query = 1
 let srv_status_request = 2
 
 module QType = struct
-    include MakePrivate(struct
+    include Private.Make (struct
         type t = int
         let to_string = function
             |  1 -> "A"
@@ -62,7 +62,7 @@ module Pdu =
 struct
     (*$< Pdu *)
     type question = string * QType.t * int
-    type rr = string * QType.t * int * int32 * bytes
+    type rr = string * QType.t * int * int32 (* TTL *) * bytes
     type t = { id : int ; is_query : bool ; opcode : int ;
                is_auth : bool ; truncated : bool ;
                rec_desired : bool ; rec_avlb : bool ;
@@ -82,6 +82,12 @@ struct
               status = 0 ;
               questions = [ name, QType.a, qclass_inet ] ;
               answer_rrs = [] ; authority_rrs = [] ; additional_rrs = [] })
+
+    let make_answer id questions answer_rrs =
+        { id ; is_query = false ; opcode = std_query ; is_auth = true ;
+          truncated = false ; rec_desired = true ; rec_avlb = false ;
+          status = 0 ; questions ;
+          answer_rrs ; authority_rrs = [] ; additional_rrs = [] }
 
     (* TODO: make_answer *)
 
@@ -244,4 +250,3 @@ struct
      *)
     (*$>*)
 end
-

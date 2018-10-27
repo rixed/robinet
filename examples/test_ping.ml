@@ -9,9 +9,9 @@ open Tools
 let run () =
     let host_ip = Ip.Addr.random () and my_ip = Ip.Addr.random () in
     (* Build the stack *)
-    let host = Host.make_static "test" (Eth.Addr.random ()) host_ip in
-    let eth = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring my_ip ] in
-    let ip  = Ip.TRX.make my_ip host_ip Ip.Proto.icmp in
+    let host = Host.make_static ~on:true ~netmask:Ip.Addr.all_ones "test" (Eth.Addr.random ()) host_ip in
+    let eth = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Eth.{ addr= Ip.Addr.to_bitstring my_ip ; netmask = Ip.Addr.to_bitstring Ip.Addr.all_ones } ] host.Host.logger in
+    let ip  = Ip.TRX.make my_ip host_ip Ip.Proto.icmp host.Host.logger in
     (* What to do when receiving an ip pck *)
     let my_recv bits = match Icmp.Pdu.unpack bits with
         | None -> error "Cannot decode echo reply"

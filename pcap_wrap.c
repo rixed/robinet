@@ -120,8 +120,9 @@ CAMLprim value wrap_pcap_inject(value handle_, value str_)
     size_t size = caml_string_length(str_); // believed to be faster than strlen()
     char const *str = String_val(str_);
 
-    if (-1 == pcap_inject(handle, str, size)) {
-        caml_failwith("Cannot inject packet");
+    if (PCAP_ERROR == pcap_inject(handle, str, size)) {
+        char *err_msg = pcap_geterr(handle);
+        caml_failwith(err_msg);
     }
 
     CAMLreturn(Val_unit);

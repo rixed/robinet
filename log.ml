@@ -79,4 +79,3 @@ let make name size =
     } in
     Hashtbl.add loggers name logger ;
     logger
-

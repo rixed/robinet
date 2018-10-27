@@ -91,7 +91,7 @@ struct
         let is_valid (x, y) = x < 256 && y < 256
         let repl_tag = "code"
     end
-    include MakePrivate(Outer)
+    include Private.Make (Outer)
 
     let rec random () =
         let m = Random.int 155, Random.int 7 in

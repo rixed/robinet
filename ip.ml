@@ -26,15 +26,13 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = false
-
 (** {2 Private Types} *)
 
 (** {3 Protocols} *)
 
 (** Internet protocols, as in [/etc/protocols]. *)
 module Proto = struct
-    include MakePrivate(struct
+    include Private.Make (struct
         type t = int
         let to_string t =
             try (Unix.getprotobynumber t).Unix.p_name
@@ -84,7 +82,7 @@ module Addr = struct
      * expected to impact a simulation. *)
     let print_as_names = ref false
 
-    include MakePrivate(struct
+    include Private.Make (struct
         type t = Unix.inet_addr
 
         (** Converts an address to it's string representation. *)
@@ -123,12 +121,16 @@ module Addr = struct
 
     (* FIXME: take bitlength in parameter *)
     let zero = o (Unix.inet_addr_of_string "0.0.0.0")
-    let broadcast = o (Unix.inet_addr_of_string "255.255.255.255")
+    let all_ones = o (Unix.inet_addr_of_string "255.255.255.255")
+    let broadcast = all_ones
 
     (** Convert an {!Ip.Addr.t} to a [bitstring]. *)
     let to_bitstring (t : t) =
-        let str : string = Obj.magic t  in
+        let str : string = Obj.magic t in
         bitstring_of_string str
+
+    let to_bytes (t : t) =
+        Obj.magic t
 
     (** Convert a [bitstring] into an {!Ip.Addr.t}. *)
     let of_bitstring bits =
@@ -197,7 +199,7 @@ end
  * with network IP then netmask length, like: 192.168.0.0/16. *)
 module Cidr = struct
     (*$< Cidr *)
-    include MakePrivate(struct
+    include Private.Make (struct
         type t = Addr.t * int
 
         (** Converts a CIDR to its string representation. *)
@@ -306,6 +308,17 @@ module Cidr = struct
     let random_addrs t n =
         to_enum t |> Random.multi_choice n
 
+    let to_netmask (t : t) =
+        let net, width = (t :> Addr.t * int) in
+        let tot_width = Addr.to_bitstring net |> bitstring_length in
+        Bitstring.concat [ ones_bitstring width ;
+                           zeroes_bitstring (tot_width - width) ] |>
+        Addr.of_bitstring
+
+    (*$= to_netmask
+      "255.255.255.0" (Ip.Addr.to_string (to_netmask (of_string "192.168.0.0/24")))
+     *)
+
     (*$>*)
 end
 
@@ -359,7 +372,7 @@ module Pdu = struct
                 Payload.o pld
             ) else pld
         | {| _ |} ->
-            Printf.fprintf stderr "Ip: Cannot patch checksum at offset %d\n" offset ;
+            Printf.fprintf stderr "Ip: Cannot patch checksum at offset %d" offset ;
             pld
 
     let pack t =
@@ -449,10 +462,12 @@ end
 
 module TRX = struct
 
-    type t = { src : Addr.t ; dst : Addr.t ;
-               proto : Proto.t ; mtu : int ;
-               mutable emit : bitstring -> unit ;
-               mutable recv : bitstring -> unit }
+    type t = {
+        logger : Log.logger ;
+        src : Addr.t ; dst : Addr.t ;
+        proto : Proto.t ; mtu : int ;
+        mutable emit : bitstring -> unit ;
+        mutable recv : bitstring -> unit }
 
     let tx t bits =
         let id = Pdu.next_id () in
@@ -464,7 +479,7 @@ module TRX = struct
                 (* The frag_offset is given in unit of 8 bytes.
                    So the MTU is required to be a multiple of 8 bytes as well. *)
                 let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst pld in
-                if debug then Printf.printf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')\n%!" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (bytelength pld) (hexstring_of_bitstring bits) ;
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (bytelength pld) (hexstring_of_bitstring bits)))) ;
                 Clock.asap t.emit (Pdu.pack pdu) ;
                 aux (bit_offset + bitstring_length pld)
             ) in
@@ -481,10 +496,10 @@ module TRX = struct
      *       IP cannot do this since the application layer won't tell him the destination hostname. Or
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)
-    let make ?(mtu=1400) src dst proto =
+    let make ?(mtu=1400) src dst proto logger =
         ensure ((mtu mod 8) = 0) "Ip: MTU is required to be a multiple of 8 bytes" ;
-        let t = { src ; dst ; proto ; mtu ;
-                  emit = ignore ; recv = ignore } in
+        let t = { logger ; src ; dst ; proto ; mtu ;
+                  emit = ignore_bits logger ; recv = ignore_bits logger } in
         { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;
           out = { write = rx t ;

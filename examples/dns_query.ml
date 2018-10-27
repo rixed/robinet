@@ -43,7 +43,7 @@ let main =
     let emit bits =
         hexstring_of_bitstring bits |> Printf.printf "Injecting '%s'\n" ;
         Pcap.inject iface bits in
-    let host = Host.make_static "requester" ?gw:!gw_eth_str ~nameserver:(Ip.Addr.of_string !dst_ip_str) ~search_sfx:!search (Eth.Addr.of_string !src_eth_str) (Ip.Addr.of_string !src_ip_str) in
+    let host = Host.make_static ~on:true "requester" ?gw:!gw_eth_str ~nameserver:(Ip.Addr.of_string !dst_ip_str) ~search_sfx:!search ~netmask:Ip.Addr.all_ones (Eth.Addr.of_string !src_eth_str) (Ip.Addr.of_string !src_ip_str) in
     host.Host.dev.set_read emit ;
     List.iter (Clock.asap (fun name ->
         host.Host.gethostbyname name (function
