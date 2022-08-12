@@ -29,7 +29,7 @@ let params_of_query q =
     let vars = Hashtbl.create 7 in
     let q = if String.length q > 0 && q.[0] = '?' then String.lchop q else q in
     (* get variables *)
-    String.nsplit q "&" |>
+    String.split_on_char '&' q |>
         List.filter_map (fun q ->
             try
                 let eq = String.index_from q 1 '=' in
@@ -41,9 +41,9 @@ let params_of_query q =
 
 (*$= params_of_query & ~printer:dump
     [ "foo", "bar" ] \
-        (params_of_query "foo=bar" |> Hashtbl.enum |> List.of_enum |> List.sort Pervasives.compare)
+        (params_of_query "foo=bar" |> Hashtbl.enum |> List.of_enum |> List.sort Stdlib.compare)
     [ "bar", "baz" ; "foo", "bar" ] \
-        (params_of_query "foo=bar&bar=baz" |> Hashtbl.enum |> List.of_enum |> List.sort Pervasives.compare)
+        (params_of_query "foo=bar&bar=baz" |> Hashtbl.enum |> List.of_enum |> List.sort Stdlib.compare)
 *)
 
 let rec stripped url =

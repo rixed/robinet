@@ -86,9 +86,9 @@ let serve ?(port=Udp.Port.o 53) host lookup =
 (*$R serve
     Clock.realtime := false ;
     (*Log.console_lvl := Log.Debug ;*)
-    let srv = Host.make_static "server" (Eth.Addr.random ()) (Ip.Addr.o "1.1.1.1") in
-    serve srv (function "popo" -> Some "1.1.1.1" | _ -> None) ;
-    let clt = Host.make_static "client" ~nameserver:(Ip.Addr.o "1.1.1.1") (Eth.Addr.random ()) (Ip.Addr.random ()) in
+    let srv = Host.make_static "server" ~on:true ~netmask:Ip.Addr.all_ones (Eth.Addr.random ()) (Ip.Addr.of_dotted_string "1.1.1.1" |> Option.get) in
+    serve srv (function "popo" -> Some (Ip.Addr.of_dotted_string "1.1.1.1" |> Option.get) | _ -> None) ;
+    let clt = Host.make_static "client" ~nameserver:(Ip.Addr.of_dotted_string "1.1.1.1" |> Option.get) (Eth.Addr.random ()) (Ip.Addr.random ()) in
     srv.Host.dev.set_read clt.Host.dev.write ;
     clt.Host.dev.set_read srv.Host.dev.write ;
     let got_ip = ref false in

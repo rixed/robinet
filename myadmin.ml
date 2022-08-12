@@ -60,7 +60,7 @@ let rec report_thread period =
 let basename s =
     try snd (String.rsplit s "/") with Not_found -> s
 
-(* Must be englobed within a FORM *)
+(* Must be placed within a FORM *)
 let print_tree vars oc tree =
     let rec add_ev oc n =
         Printf.fprintf oc "<label><input type='checkbox' name='%s'%s/>%s</label>"

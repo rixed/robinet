@@ -111,7 +111,7 @@ let parse_cookie host path cookie_str : cookie option =
             Some (String.trim (String.sub s 0 eq), String.trim (String.lchop ~n:(eq+1) s))
         with Not_found | Invalid_argument _ ->
             None)
-        (String.nsplit cookie_str ";") in
+        (String.split_on_char ';' cookie_str) in
     match parts with
         | (name, value)::rest when name <> "" ->
             let domain = Option.default host (headers_find "Domain" rest)
@@ -184,7 +184,7 @@ let cookie_string t host path =
         (cookies_to_sent t host path))
 
 (*$R
-    let host = Host.make_static "test"
+    let host = Host.make_static "test" ~on:true ~netmask:Ip.Addr.all_ones
                     (Eth.Addr.of_string "12:34:56:78:90:ab") (Ip.Addr.of_string "1.2.3.4") in
     let t = make host in
     store_cookies t "www.example.com" "/" [ "Set-Cookie", "SID=31d4" ] ;

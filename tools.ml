@@ -164,6 +164,7 @@ let int_of_bitstring bs =
 *)
 
 let bitstring_of_int n =
+    let n = int32_of_int n in
     let%bitstring s = {| n : 32 |} in
     s
 

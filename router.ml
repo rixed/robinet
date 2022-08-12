@@ -291,7 +291,7 @@ struct
         let easy_send n dst =
             { (Ip.Pdu.random ()) with Ip.Pdu.dst = Ip.Addr.of_string dst } |>
             Ip.Pdu.pack |>
-            Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (snd addrs.(n)) |>
+            Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (Tuple3.third addrs.(n)) |>
             Eth.Pdu.pack |>
             trxs.(n).out.write in
 
@@ -335,7 +335,7 @@ end
  *                 |
  *            dhcpd/named (192.168.0.2)
  *)
-let make_gw ?(nb_max_cnxs=500) public_ip local_cidr nameserver name =
+let make_gw ?(nb_max_cnxs=500) ?nameserver ?(name="gw") public_ip local_cidr =
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let hub = Hub.Repeater.make 3 (name^"/hub") in
@@ -343,7 +343,7 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr nameserver name =
     let gw_ip = Enum.get_exn local_ips in   (* first IP of the subnet is the GW *)
     let srv_ip = Enum.get_exn local_ips in    (* second the dhcp/name servers *)
     (* Always on as there is no way to turn it on later: *)
-    let h = Host.make_static ~nameserver ~gw:(Mac gw_mac) ~on:true (name^"/srv") (Eth.Addr.random ()) ~netmask srv_ip in
+    let h = Host.make_static ?nameserver ~gw:(Mac gw_mac) ~on:true (name^"/srv") (Eth.Addr.random ()) ~netmask srv_ip in
     Hub.Repeater.set_read 1 hub h.Host.dev.write ;
     h.Host.dev.set_read (Hub.Repeater.write 1 hub) ;
     (* Create and connect the first port of our router *)
@@ -380,13 +380,14 @@ let make_gw ?(nb_max_cnxs=500) public_ip local_cidr nameserver name =
     Clock.realtime := false ;
     let public_ip = Ip.Addr.of_string "80.82.17.127" in
     let gw = make_gw public_ip (Ip.Cidr.of_string "192.168.0.0/16") in
-    let desktop = Host.make_dhcp "desktop"
+    let desktop = Host.make_dhcp "desktop" ~on:true ~netmask:Ip.Addr.all_ones
                                  ~gw:(Eth.IPv4 (Ip.Addr.of_string "192.168.0.1"))
                                  (Eth.Addr.random ()) in
     desktop.Host.dev.set_read gw.ins.write ;
     ignore (desktop.Host.dev.write <-= gw) ;
+    let logger = Log.make "test" 100 in
     let server_ip = Ip.Addr.of_string "42.43.44.45" in
-    let server_eth = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Ip.Addr.to_bitstring server_ip ] in
+    let server_eth = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Eth.TRX.make_my_address (Ip.Addr.to_bitstring server_ip) ] logger in
     let src = ref None in
     let server_recv bits = (* check source IP is the public one (NATed) *)
         let ip = Ip.Pdu.unpack bits |> Option.get in

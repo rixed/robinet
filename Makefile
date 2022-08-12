@@ -66,7 +66,7 @@ EXAMPLES_BYTE = \
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
-REQUIRES = bitstring bitstring.ppx batteries
+REQUIRES = bitstring ppx_bitstring batteries
 
 include $(top_srcdir)make.common
 
@@ -84,7 +84,7 @@ $(CLIB): $(C_SOURCES:.c=.o)
 	$(AR) rcs $@ $^
 
 examples: $(EXAMPLES)
-	@if which setcap >& /dev/null ; then \
+	@if which setcap > /dev/null 2>&1 ; then \
 	   for f in $(EXAMPLES); do \
 	     sudo setcap cap_net_raw,cap_net_admin=eip $$f ;\
 	   done ;\
@@ -92,7 +92,7 @@ examples: $(EXAMPLES)
 
 robinet.top: $(ARCHIVE)
 	$(OCAMLMKTOP) $(WARNS) -o $@ -package "findlib $(REQUIRES)" $(ARCHIVE)
-	@if which setcap >& /dev/null ; then \
+	@if which setcap > /dev/null 2>&1 ; then \
 	   sudo setcap cap_net_raw,cap_net_admin=eip $@ ;\
 	 fi
 

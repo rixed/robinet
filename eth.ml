@@ -215,6 +215,9 @@ struct
     and my_address =
         { addr : bitstring ; netmask : bitstring }
 
+    let make_my_address ?(netmask = Ip.Addr.(to_bitstring all_ones)) addr =
+        { addr ; netmask }
+
     let print_my_address oc my_addr =
         Printf.fprintf oc "%s (netmask %s)"
             (hexstring_of_bitstring my_addr.addr)

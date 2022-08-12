@@ -103,13 +103,13 @@ struct
                 Printf.printf "Consume plug %S of %a\n%!" p.name print (Simple t) ;
                 Result.Ok p
             with Not_found ->
-                Result.Bad (`Unknown_plug name)
+                Result.Error (`Unknown_plug name)
         in
         let rec loop = function
             | Simple t -> find_in_simple t
             | Union ts -> find_in_union ts
         and find_in_union = function
-            | [] -> Result.Bad (`Unknown_plug name)
+            | [] -> Result.Error (`Unknown_plug name)
             | x::rest ->
                 let r = loop x in
                 if Result.is_ok r then r
@@ -118,7 +118,7 @@ struct
 
     (** [connect t1 ~name1:"plug1" t2 ~name2:"plug2"] will change the plugs emitting
      * and receiving functions such that t1 and t2 start exchanging messages at this point.
-     * Will return [BatResult.Bad (`Unknown_plug of string)] if name1 or name2 can
+     * Will return [BatResult.Error (`Unknown_plug of string)] if name1 or name2 can
      * not be found.
      * If a name for the plug is not given then anyone will do.
      * Notice that the used plugs are consumed (ie. removed from the passed nets). *)
@@ -180,7 +180,7 @@ struct
      * See make_lan_host to add a host in this LAN. *)
     let make_lan ?(lan_name="homelan") ?(public_ip=Ip.Addr.random ()) nameserver n =
         let cidr = Ip.Cidr.of_string "192.168.0.0/16" in
-        let gw = Router.make_gw public_ip cidr nameserver ("gw."^lan_name) in
+        let gw = Router.make_gw public_ip cidr ~nameserver ~name:("gw."^lan_name) in
         let sw = Hub.Switch.make (n+1) (5*n) ("switch."^lan_name) in
         Hub.Switch.set_read n sw gw.ins.write ;
         gw.ins.set_read (Hub.Switch.write n sw) ;

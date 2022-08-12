@@ -732,7 +732,7 @@ let extract_links_simple ?same_page ?(default_base=Url.empty) headers body =
         (extract_links_simple [] "bla <a href=\"glop1\"> bla <src = 'glop2' >" /@ \
             Url.to_string |> \
             List.of_enum |> \
-            List.sort Pervasives.compare)
+            List.sort Stdlib.compare)
 *)
 
 let extract_links ?(default_base=Url.empty) headers tree =
@@ -800,5 +800,5 @@ let extract_links ?(default_base=Url.empty) headers tree =
                 extract_links [] tree /@ \
                 Url.to_string |> \
                 List.of_enum |> \
-                List.sort Pervasives.compare))
+                List.sort Stdlib.compare))
 *)

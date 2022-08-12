@@ -487,7 +487,7 @@ let power_off ?timeout t =
     ) t.killers ;
     t.killers <- []
 
-let make name ?gw ?search_sfx ?nameserver ~on ~(init : ?on_ip:(t -> unit) -> t -> unit) my_mac =
+let make name ?gw ?search_sfx ?nameserver ?(on=true) ~(init : ?on_ip:(t -> unit) -> t -> unit) my_mac =
     let logger = Log.make name 50 in
     let if_on t what f x =
         if t.on then f x else Log.(log logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
@@ -541,13 +541,13 @@ let set_ip t ip netmask =
     t.eth.Eth.TRX.set_addresses Eth.[ { addr = Ip.Addr.to_bitstring ip ; netmask = Ip.Addr.to_bitstring netmask } ] ;
     ignore ((ip_recv t) <-= t.eth.Eth.TRX.trx)
 
-let make_static name ?gw ?search_sfx ?nameserver ~on my_mac ~netmask my_ip =
+let make_static name ?gw ?search_sfx ?nameserver ?on my_mac ?(netmask=Ip.Addr.all_ones) my_ip =
     let init ?on_ip t =
         set_ip t my_ip netmask ;
         (* TODO: Send a gratuitous ARP request? *)
         Option.may (fun on_ip -> Clock.asap on_ip t) on_ip
     in
-    let t = make name ?gw ?search_sfx ?nameserver ~on ~init my_mac in
+    let t = make name ?gw ?search_sfx ?nameserver ?on ~init my_mac in
     t.host_trx
 
 let make_dhcp name ?gw ?search_sfx ?nameserver ~on ~netmask my_mac =

@@ -88,10 +88,10 @@ let serve ?(port=Udp.Port.o 67) host ips =
 (*$R serve
     Clock.realtime := false ;
     (*Log.console_lvl := Log.Debug ;*)
-    let srv = Host.make_static "server" (Eth.Addr.random ()) (Ip.Addr.random ()) in
+    let srv = Host.make_static "server" (Eth.Addr.random ()) (Ip.Addr.random ()) ~on:true ~netmask:Ip.Addr.all_ones in
     let my_net = Ip.Cidr.random () in
     serve srv (Ip.Cidr.to_enum my_net) ;
-    let clt = Host.make_dhcp "client" (Eth.Addr.random ()) in
+    let clt = Host.make_dhcp "client" (Eth.Addr.random ()) ~on:true ~netmask:Ip.Addr.all_ones in
     srv.Host.dev.set_read clt.Host.dev.write ;
     clt.Host.dev.set_read srv.Host.dev.write ;
     Clock.run false ;

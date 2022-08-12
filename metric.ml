@@ -209,12 +209,12 @@ let tree () =
                 i :: tree_add t' path item) in
     let tree = Hashtbl.fold (fun n ev tree ->
         if debug then Printf.printf "Merging %s into the tree\n" n ;
-        tree_add tree (String.nsplit n "/") (Atomic ev)) Atomic.all empty in
+        tree_add tree (String.split_on_char '/' n) (Atomic ev)) Atomic.all empty in
     let tree = Hashtbl.fold (fun n ev tree ->
         if debug then Printf.printf "Merging %s into the tree\n" n ;
-        tree_add tree (String.nsplit n "/") (Counter ev)) Counter.all tree in
+        tree_add tree (String.split_on_char '/' n) (Counter ev)) Counter.all tree in
     let tree = Hashtbl.fold (fun n ev tree ->
         if debug then Printf.printf "Merging %s into the tree\n" n ;
-        tree_add tree (String.nsplit n "/") (Timed ev)) Timed.all tree in
+        tree_add tree (String.split_on_char '/' n) (Timed ev)) Timed.all tree in
     tree
 
