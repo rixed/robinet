@@ -427,22 +427,25 @@ module Pdu = struct
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
 
+    (* Returns the source/dest ports from an IP PDU: *)
+    let get_ports ip =
+        if ip.proto = Proto.tcp then (
+            Option.bind (Tcp.Pdu.unpack (ip.payload :> bitstring))
+            (fun tcp ->
+                Some ((tcp.Tcp.Pdu.src_port :> int),
+                      (tcp.Tcp.Pdu.dst_port :> int)))
+        ) else if ip.proto = Proto.udp then (
+            Option.bind (Udp.Pdu.unpack (ip.payload :> bitstring))
+            (fun udp ->
+                Some ((udp.Udp.Pdu.src_port :> int),
+                      (udp.Udp.Pdu.dst_port :> int)))
+        ) else None
+
     (** Unpack an ip packets and return the ip PDU, source port and dest port. *)
     let unpack_with_ports bits =
         Option.bind (unpack bits) (fun ip ->
-            if ip.proto = Proto.tcp then (
-                Option.bind (Tcp.Pdu.unpack (ip.payload :> bitstring))
-                (fun tcp ->
-                    Some (ip,
-                          (tcp.Tcp.Pdu.src_port :> int),
-                          (tcp.Tcp.Pdu.dst_port :> int)))
-            ) else if ip.proto = Proto.udp then (
-                Option.bind (Udp.Pdu.unpack (ip.payload :> bitstring))
-                (fun udp ->
-                    Some (ip,
-                          (udp.Udp.Pdu.src_port :> int),
-                          (udp.Udp.Pdu.dst_port :> int)))
-            ) else None)
+            Option.bind (get_ports ip) (fun (src_port, dst_port) ->
+                Some (ip, src_port, dst_port)))
     (*$= unpack_with_ports & ~printer:dump
         (Some (42, 12)) ( \
             pack (make Proto.udp (Ip.Addr.random ()) (Ip.Addr.random ()) \

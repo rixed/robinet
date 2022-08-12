@@ -176,7 +176,9 @@ v}
 end
 
 (** A router is a device with N IP/Eth devices and a routing
- * table with rules on interface number, Ip addresses, proto, ports. *)
+ * table with rules on interface number, Ip addresses, proto, ports.
+ * IP packets TTL is decremented and expired with optional support for ICMP
+ * expiration error messages. *)
 module Router =
 struct
     (*$< Router *)
@@ -215,20 +217,35 @@ struct
 
     let route n t bits =
         Log.(log t.logger Debug (lazy (Printf.sprintf "rx from port %d" n))) ;
-        let ip_opt = Ip.Pdu.unpack bits
-        and ip_ports_opt = Ip.Pdu.unpack_with_ports bits in
-        let src_opt = Option.map (fun ip -> ip.Ip.Pdu.src) ip_opt
-        and dst_opt = Option.map (fun ip -> ip.Ip.Pdu.dst) ip_opt
-        and proto_opt = Option.map (fun ip -> ip.Ip.Pdu.proto) ip_opt
-        and src_port_opt = Option.map Tuple3.second ip_ports_opt
-        and dst_port_opt = Option.map Tuple3.second ip_ports_opt in
+        let ip_opt, src_opt, dst_opt, ttl_opt, proto_opt =
+            match Ip.Pdu.unpack bits with
+            | Some ip ->
+                Some ip, Some ip.Ip.Pdu.src, Some ip.dst, Some ip.ttl, Some ip.proto
+            | None ->
+                None, None, None, None, None in
+        let src_port_opt, dst_port_opt =
+            match Option.bind ip_opt Ip.Pdu.get_ports with
+            | Some (src_port, dst_port) -> Some src_port, Some dst_port
+            | None -> None, None in
         try let o = Array.find (fun (r, _) ->
                         test_route r n src_opt dst_opt proto_opt src_port_opt dst_port_opt)
                         t.route_tbl |> snd in
             if o <> n then (
-                Log.(log t.logger Debug (lazy (Printf.sprintf "forwarding packet to port %d" o))) ;
-                tx t.trxs.(o) bits ;
-                Log.(log t.logger Debug (lazy "Done"))
+                let forward bits =
+                    Log.(log t.logger Debug (lazy (Printf.sprintf "forwarding packet to port %d" o))) ;
+                    tx t.trxs.(o) bits ;
+                    Log.(log t.logger Debug (lazy "Done")) in
+                match ttl_opt with
+                | Some 0 ->
+                        Log.(log t.logger Debug (lazy (Printf.sprintf "expiring packet from %d" n))) ;
+                        (* TODO: send ICMP expiration error if configured *)
+                | Some ttl ->
+                        let ip = Option.get ip_opt in
+                        let ip = Ip.Pdu.{ ip with ttl = ttl - 1 } in
+                        let bits = Ip.Pdu.pack ip in
+                        forward bits
+                | None ->
+                        forward bits
             ) else (
                 Log.(log t.logger Debug (lazy (Printf.sprintf "dropping packet since port dest (%d) = source" o))) ;
             )
@@ -289,7 +306,7 @@ struct
 
         (* We are going to send some IP packets with a given destination: *)
         let easy_send n dst =
-            { (Ip.Pdu.random ()) with Ip.Pdu.dst = Ip.Addr.of_string dst } |>
+            { (Ip.Pdu.random ()) with Ip.Pdu.dst = Ip.Addr.of_string dst ; ttl = 9 } |>
             Ip.Pdu.pack |>
             Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (Tuple3.third addrs.(n)) |>
             Eth.Pdu.pack |>
