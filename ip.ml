@@ -375,30 +375,33 @@ module Pdu = struct
             Printf.fprintf stderr "Ip: Cannot patch checksum at offset %d" offset ;
             pld
 
+    let pack_header t =
+        let hdr_len = 20 + bytelength t.options in
+        assert (hdr_len < 64) ;
+        assert (t.tot_len < 65536) ;
+        assert (t.id < 65536) ;
+        assert (t.frag_offset < 8192) ;
+        assert (t.ttl < 256) ;
+        assert ((t.proto :> int) < 256) ;
+        let%bitstring hdr = {|
+            4 : 4 ; hdr_len/4 : 4 ; t.tos : 8 ;
+            t.tot_len : 16 ;
+            t.id : 16 ; false : 1 ; t.dont_frag : 1 ; t.more_frags : 1 ; t.frag_offset : 13 ;
+            t.ttl : 8 ; (t.proto :> int) : 8 ; 0 : 16 ;
+            (Addr.to_int32 t.src) : 32 ; (Addr.to_int32 t.dst) : 32 |} in
+        let header = concat [ hdr ; t.options ] in
+        let%bitstring s = {| sum header : 16 |} in
+        concat [ takebits 80 header ; s ; dropbits 96 header ]
+
+    let pack_payload t =
+        (* Patch TCP/UDP checksums since they use some fields of the IP header *)
+        if t.proto = Proto.tcp then patch_checksum 128 (pseudo_header t) t.payload
+        else if t.proto = Proto.udp then patch_checksum 48 (pseudo_header t) t.payload
+        else t.payload
+
     let pack t =
-        let header =
-            let hdr_len = 20 + bytelength t.options in
-            assert (hdr_len < 64) ;
-            assert (t.tot_len < 65536) ;
-            assert (t.id < 65536) ;
-            assert (t.frag_offset < 8192) ;
-            assert (t.ttl < 256) ;
-            assert ((t.proto :> int) < 256) ;
-            let%bitstring hdr = {|
-                4 : 4 ; hdr_len/4 : 4 ; t.tos : 8 ;
-                t.tot_len : 16 ;
-                t.id : 16 ; false : 1 ; t.dont_frag : 1 ; t.more_frags : 1 ; t.frag_offset : 13 ;
-                t.ttl : 8 ; (t.proto :> int) : 8 ; 0 : 16 ;
-                (Addr.to_int32 t.src) : 32 ; (Addr.to_int32 t.dst) : 32 |} in
-            concat [ hdr ; t.options ]
-            in
-        let header = (* patch actual IP checksum *)
-            let%bitstring s = {| sum header : 16 |} in
-            concat [ takebits 80 header ; s ; dropbits 96 header ]
-        and payload = (* and actual TCP/UDP checksums as well since they use some fields of the IP header *)
-            if t.proto = Proto.tcp then patch_checksum 128 (pseudo_header t) t.payload
-            else if t.proto = Proto.udp then patch_checksum 48 (pseudo_header t) t.payload
-            else t.payload in
+        let header = pack_header t
+        and payload = pack_payload t in
         concat [ header ; (payload :> bitstring) ]
 
     let unpack bits = match%bitstring bits with

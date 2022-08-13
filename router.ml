@@ -211,9 +211,18 @@ struct
         test_opt route.dst_port port_in_range dst_port_opt
 
     (** A router is an array of trxs and a route table *)
-    type t = {      trxs : trx array ;
-               route_tbl : (route * int) array ;  (** The route table is an array of route to output interface indices. *)
-                  logger : Log.logger }
+    type t = {          trxs : (trx * Ip.Addr.t) array ;
+                   route_tbl : (route * int) array ;  (** The route table is an array of route to output interface indices. *)
+               notify_expiry : bool ; (* whether to send ICMP expiry messages *)
+                      logger : Log.logger }
+
+    let send_icmp_expiry t n ip =
+        let icmp = Icmp.Pdu.make_ttl_expired_in_transit ip in
+        let ip_pld = Icmp.Pdu.pack icmp in
+        let ip_src = snd t.trxs.(n) in
+        let pkt = Ip.Pdu.make Ip.Proto.icmp ip_src ip.Ip.Pdu.src ip_pld in
+        let bits = Ip.Pdu.pack pkt in
+        tx (fst t.trxs.(n)) bits
 
     let route n t bits =
         Log.(log t.logger Debug (lazy (Printf.sprintf "rx from port %d" n))) ;
@@ -233,12 +242,14 @@ struct
             if o <> n then (
                 let forward bits =
                     Log.(log t.logger Debug (lazy (Printf.sprintf "forwarding packet to port %d" o))) ;
-                    tx t.trxs.(o) bits ;
+                    tx (fst t.trxs.(o)) bits ;
                     Log.(log t.logger Debug (lazy "Done")) in
                 match ttl_opt with
-                | Some 0 ->
+                | Some (0 | 1) ->
                         Log.(log t.logger Debug (lazy (Printf.sprintf "expiring packet from %d" n))) ;
-                        (* TODO: send ICMP expiration error if configured *)
+                        if t.notify_expiry then
+                            let ip = Option.get ip_opt in
+                            send_icmp_expiry t n ip
                 | Some ttl ->
                         let ip = Option.get ip_opt in
                         let ip = Ip.Pdu.{ ip with ttl = ttl - 1 } in
@@ -255,12 +266,12 @@ struct
     (** Change the emitter of port N. Note that the emitter may also be preset in the trx array given to [make]. *)
     let set_read n t f =
         Log.(log t.logger Debug (lazy (Printf.sprintf "setting emitter for port %d" n))) ;
-        t.trxs.(n) =-> f
+        fst t.trxs.(n) =-> f
 
     (* TODO: similarly, a write n b = t.trxs.(n).write b *)
 
     (** Build a [t] routing through these {!Tools.trx} according to the given routing table. *)
-    let make trxs route_tbl logger =
+    let make ?(notify_expiry=true) trxs route_tbl logger =
         (* Check we route only from/to the given ports *)
         let max_used_port =
             Array.fold_left (fun prev (r, out) ->
@@ -268,17 +279,17 @@ struct
                 max prev)
                 0 route_tbl in
         assert (max_used_port < Array.length trxs) ;
-        let t = { trxs ; route_tbl ; logger } in
-        Array.iteri (fun i trx -> trx.ins.set_read (route i t)) trxs ;
+        let t = { trxs ; route_tbl ; logger ; notify_expiry } in
+        Array.iteri (fun i (trx, _) -> trx.ins.set_read (route i t)) trxs ;
         t
 
     (* returns both the router and the eth trxs (ins is inside router) created for you *)
-    let make_from_addrs addrs route_tbl logger =
+    let make_from_addrs ?notify_expiry addrs route_tbl logger =
         let trxs = addrs /@ (fun (ip, netmask, mac) ->
             let eth = Eth.TRX.make mac Arp.HwProto.ip4 [ Eth.{ addr = Ip.Addr.to_bitstring ip ; netmask = Ip.Addr.to_bitstring netmask } ] logger in
-            eth.Eth.TRX.trx) |>
+            eth.Eth.TRX.trx, ip) |>
             Array.of_enum in
-        make trxs route_tbl logger, trxs
+        make ?notify_expiry trxs route_tbl logger, trxs
 
     (*$R make_from_addrs
         (* Suppose we have a router for these 3 networks: *)
@@ -310,7 +321,7 @@ struct
             Ip.Pdu.pack |>
             Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (Tuple3.third addrs.(n)) |>
             Eth.Pdu.pack |>
-            trxs.(n).out.write in
+            (fst trxs.(n)).out.write in
 
         (* Let's play! *)
         easy_send 0 "1.2.3.4" ;
@@ -352,7 +363,7 @@ end
  *                 |
  *            dhcpd/named (192.168.0.2)
  *)
-let make_gw ?(nb_max_cnxs=500) ?nameserver ?(name="gw") public_ip local_cidr =
+let make_gw ?(nb_max_cnxs=500) ?nameserver ?(name="gw") ?notify_expiry public_ip local_cidr =
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let hub = Hub.Repeater.make 3 (name^"/hub") in
@@ -375,8 +386,9 @@ let make_gw ?(nb_max_cnxs=500) ?nameserver ?(name="gw") public_ip local_cidr =
         pipe nat eth.Eth.TRX.trx in
     (* Build this router then *)
     let _router =
-        Router.(make
-            [| gw_eth.Eth.TRX.trx ; nat_eth |]
+        Router.(make ?notify_expiry
+            [| gw_eth.Eth.TRX.trx, gw_ip ;
+               nat_eth, public_ip |]
             [| (* route everything from anywhere to LAN if dest fits local_cidr *)
                { iface_num = None ; src_mask = None ; dst_mask = Some local_cidr ;
                  ip_proto = None ; src_port = None ; dst_port = None }, 0 ;

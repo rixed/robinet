@@ -130,6 +130,16 @@ module Pdu = struct
         { msg_type = MsgType.o (0, 0) ;
           payload  = Ids (id, seq, Payload.empty) }
 
+    let make_ttl_expired code ip =
+        let ip_hdr = Ip.Pdu.pack_header ip
+        and ip_pld = Ip.Pdu.pack_payload ip in
+        let ip_start = concat [ ip_hdr ; takebits 64 (ip_pld :> bitstring) ] in
+        { msg_type = MsgType.o (11, code) ;
+          payload = Header (0, Payload.o ip_start) }
+
+    let make_ttl_expired_in_transit = make_ttl_expired 0
+    let make_ttl_expired_during_reassembly = make_ttl_expired 1
+
     let is_echo_request t =
         MsgType.type_of t.msg_type = 8 && MsgType.code_of t.msg_type = 0
 
@@ -174,4 +184,3 @@ module Pdu = struct
      *)
     (*$>*)
 end
-
