@@ -442,17 +442,12 @@ type iface = { handler : iface_handler ;
                name : string ;
                caplen : int }
 
-(** Get the MTU of a device (on Linux). May raise all kind of exceptions. *)
-let mtu ifname =
-    let fname = Printf.sprintf "/sys/class/net/%s/mtu" ifname in
-    File.lines_of fname |> Enum.get_exn |> int_of_string
-
 (** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is not set then {e MTU} for the
  * device will be chosen. *)
 let openif ?(promisc=true) ?(filter="") ?caplen ifname =
-    let caplen = Option.default_delayed (fun () -> mtu ifname) caplen in
+    let caplen = Option.default_delayed (fun () -> mtu_of_iface ifname) caplen in
     { handler = openif_ ifname promisc filter caplen ;
       name = ifname ;
       caplen = caplen }
@@ -508,4 +503,3 @@ let sniffer iface rx =
             Clock.at pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
             loop () in
     Thread.create loop ()
-

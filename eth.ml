@@ -128,6 +128,10 @@ module Addr = struct
         if eq a broadcast || eq a zero then random ()
         else a
 
+    (* Get the Eth address of a device (on Linux). *)
+    let of_iface ifname =
+        info_of_iface ifname "address" |> of_string
+
     (*$>*)
 end
 

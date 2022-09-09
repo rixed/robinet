@@ -283,28 +283,42 @@ struct
         Array.iteri (fun i (trx, _) -> trx.ins.set_read (route i t)) trxs ;
         t
 
-    (* returns both the router and the eth trxs (ins is inside router) created for you *)
-    let make_from_addrs ?notify_expiry addrs route_tbl logger =
-        let trxs = addrs /@ (fun (ip, netmask, mac) ->
-            let eth = Eth.TRX.make mac Arp.HwProto.ip4 [ Eth.{ addr = Ip.Addr.to_bitstring ip ; netmask = Ip.Addr.to_bitstring netmask } ] logger in
-            eth.Eth.TRX.trx, ip) |>
-            Array.of_enum in
-        make ?notify_expiry trxs route_tbl logger, trxs
+    (* Returns both the router and the eth trxs (ins is inside router) created for you *)
+
+    (* Assuming the network addresses are reachable from different ports of a
+     * switch, output a trivial routing table that selects the output according
+     * to the destination IP only: *)
+    let route_tbl_of_addrs addrs =
+        Array.mapi (fun i (ip, netmask, _mac) ->
+            { iface_num = None ;
+              src_mask = None ;
+              dst_mask = Some (Ip.Cidr.of_netmask ip netmask) ;
+              ip_proto = None ;
+              src_port = None ;
+              dst_port = None },
+            i
+        ) addrs
+
+    let make_from_addrs ?notify_expiry addrs logger =
+        let route_tbl = route_tbl_of_addrs addrs in
+        let trxs =
+            Array.map (fun (ip, netmask, mac) ->
+                let eth =
+                    Eth.TRX.make mac Arp.HwProto.ip4 [
+                            Eth.{ addr = Ip.Addr.to_bitstring ip ;
+                                  netmask = Ip.Addr.to_bitstring netmask }
+                        ] logger in
+                eth.Eth.TRX.trx, ip
+            ) addrs in
+        make ?notify_expiry trxs route_tbl logger
 
     (*$R make_from_addrs
         (* Suppose we have a router for these 3 networks: *)
         let addrs = [| Ip.Addr.of_string "192.168.1.254", Ip.Addr.of_string "255.255.255.0", Eth.Addr.random () ;
                        Ip.Addr.of_string "192.168.2.254", Ip.Addr.of_string "255.255.255.0", Eth.Addr.random () ;
                        Ip.Addr.of_string "192.168.3.254", Ip.Addr.of_string "255.255.255.0", Eth.Addr.random () |] in
-        (* With the obvious rules: *)
-        let route_tbl = [| { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Cidr.of_string "192.168.1.0/24") ;
-                             ip_proto = None ; src_port = None ; dst_port = None }, 0 ;
-                           { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Cidr.of_string "192.168.2.0/24") ;
-                             ip_proto = None ; src_port = None ; dst_port = None }, 1 ;
-                           { iface_num = None ; src_mask = None ; dst_mask = Some (Ip.Cidr.of_string "192.168.3.0/24") ;
-                             ip_proto = None ; src_port = None ; dst_port = None }, 2 |] in
         let logger = Log.make "test" 100 in
-        let router, trxs = make_from_addrs (Array.enum addrs) route_tbl logger in
+        let router, trxs = make_from_addrs addrs logger in
 
         (* Now we will count incoming packets from each port (ARP requests, actually) : *)
         let counts = Array.create 3 0 in

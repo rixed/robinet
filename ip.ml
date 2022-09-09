@@ -206,7 +206,11 @@ module Cidr = struct
         let to_string ((ip : Addr.t), n) =
             Addr.to_dotted_string ip ^ "/" ^ String.of_int n
         let is_valid ((ip : Addr.t), n) =
-            Addr.higher_bits ip n = ip
+            let ok = Addr.higher_bits ip n = ip in
+            if not ok then
+                Printf.eprintf "Invalid CIDR: %s/%d\n%!"
+                    (Addr.to_string ip) n ;
+            ok
         let repl_tag = "addr"
     end)
 
@@ -221,6 +225,29 @@ module Cidr = struct
       (o (Addr.o32 0x01020380l, 25)) (of_string "1.2.3.128/25")
       (o (Addr.o32 0x01020380l, 25)) (of_string "1.2.3.142/25")
      *)
+
+    (* Will assume [ip] has all high bits at 1 and low bits at 0 *)
+    let width_of_netmask ip =
+        let ip = Addr.to_bitstring ip in
+        let len = bitstring_length ip in
+        let rec loop n =
+            if n >= len then n else
+            (* [is_set] count bits from the highest one: *)
+            if Bitstring.is_set ip n then loop (n + 1) else
+            n in
+        loop 0
+    (*$= width_of_netmask & ~printer:string_of_int
+       0 (width_of_netmask (Addr.of_string "0.0.0.0"))
+       1 (width_of_netmask (Addr.of_string "128.0.0.0"))
+       8 (width_of_netmask (Addr.of_string "255.0.0.0"))
+       5 (width_of_netmask (Addr.of_string "F800::"))
+     *)
+
+    (* Fail if [netmask] is not made of 1s and then 0s: *)
+    let of_netmask ip netmask =
+        let n = width_of_netmask netmask in
+        let net = Addr.higher_bits ip n in
+        o (net, n)
 
     let random ?mask () =
         let mask = Option.default (Random.int 32 + 1) mask in
@@ -304,6 +331,15 @@ module Cidr = struct
                            Addr.to_dotted_string |> \
                            List.of_enum)
     *)
+
+    (* Returns the first routable address of a CIDR, or fail if the Cidr is empty
+     * (handy for a router own address for instance) *)
+    let first_addr (t : t) =
+        local_addrs t |> Enum.peek |> Option.get
+
+    (* Also useful: the second routable address: *)
+    let second_addr (t : t) =
+        local_addrs t |> Enum.skip 1 |> Enum.peek |> Option.get
 
     let random_addrs t n =
         to_enum t |> Random.multi_choice n

@@ -307,6 +307,15 @@ let hash_merge h h' =
 let file_content f =
     File.with_file_in f IO.read_all
 
+(* Get some information about a HW device (on Linux). *)
+let info_of_iface ifname what =
+    let fname = Printf.sprintf "/sys/class/net/%s/%s" ifname what in
+    File.lines_of fname |> Enum.get_exn
+
+(** Get the MTU of a device (on Linux). May raise all kind of exceptions. *)
+let mtu_of_iface ifname =
+    info_of_iface ifname "mtu" |> int_of_string
+
 (** An OrdArray is a container for an ordered set of bounded size. *)
 module OrdArray =
 struct
@@ -445,9 +454,9 @@ let (<-->) a b =
     a.set_read b.write ;
     b.set_read a.write
 
-(** A transmiter is a kind of pipe with an inside and an outside device, is
+(** A transmitter is a kind of pipe with an inside and an outside device, and is
  * thus oriented (from inside to outside, inside being left operand for following
- * functions), that transforms the writen payload before emitting it. *)
+ * functions), that transforms the written payload before emitting it. *)
 type trx = { ins : dev ; out : dev }
 
 let tx trx = trx.ins.write
@@ -458,17 +467,20 @@ let inverse_trx trx = { ins = trx.out ; out = trx.ins }
 let null_trx logger = { ins = null_dev logger ; out = null_dev logger }
 
 (** [f <-= trx] sets f as the receive function of this [trx].
+ * Previous receive function, if any, is lost.
  * {b Note:} [trx] is returned so that you can write such things as:
  * [f <-= a <==> b] or [f1 <-= a =-> f2] *)
 let (<-=) f trx =
     trx.ins.set_read f ;
     trx
 
-(** [trx =-> f] sets [f] as the emiting function of this [trx]. *)
+(** [trx =-> f] sets [f] as the emitting function of this [trx].
+ * Previous emitting function, if any, is lost. *)
 let (=->) trx f =
     trx.out.set_read f
 
-(** [a ==> b] connects [a] to [b] such that [b] transmits what [a] emits. *)
+(** [a ==> b] connects [a] to [b] such that [b] transmits what [a] emits.
+ * Previous connection from [a], if any, is overridden. *)
 let (==>) trx1 trx2 =
     trx1 =-> trx2.ins.write ;
     trx1.out.write <-= trx2

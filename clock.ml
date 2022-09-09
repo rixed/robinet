@@ -54,7 +54,7 @@ end = struct
      * Only useful if your simulation spans several days, which is uncommon. *)
     let print_date = ref false
 
-    include Private.Make(struct
+    include Private.Make (struct
         type t = float
         let to_string t =
             let open Unix in
@@ -230,9 +230,9 @@ let next_event () =
     )
 
 (** [run true] will run forever while [run false] will return once no more
- * events are waiting.  If you chose no to run forever, beware that waiting for
- * an answer from the outside world is _not_ a clock event. You should probably
- * run forever whenever you communicate with the outside. *)
+ * events are waiting.  If you choose to not run forever, beware that waiting
+ * for an answer from the outside world is _not_ a clock event. You should
+ * probably run forever whenever you communicate with the outside. *)
 let run wait =
     if debug then Printf.printf "clock: running the clock!\n%!" ;
     while wait || not (Map.is_empty current.events) do

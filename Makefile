@@ -18,7 +18,6 @@ SOURCES  = \
 	icmp.ml \
 	icmp6.ml \
 	dns.ml \
-	named.ml \
 	arp.ml \
 	vlan.ml \
 	eth.ml \
@@ -28,6 +27,7 @@ SOURCES  = \
 	packet.ml \
 	hub.ml \
 	host.ml \
+	named.ml \
 	localhost.ml \
 	html.ml \
 	browser.ml \
@@ -44,6 +44,7 @@ CLIB = libpcapw.a
 # LIBS="-cclib -L/usr/local/lib -cclib -lpcap"
 LIBS += -cclib -lpcap
 EXAMPLES_BYTE = \
+	examples/router_frenzy.byte \
 	examples/arp_query.byte \
 	examples/tcp_test.byte \
 	examples/dns_query.byte \

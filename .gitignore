@@ -2,6 +2,7 @@
 *.cmi
 *.cmo
 *.cmx
+*.cmt
 *.o
 .depend
 gmon.out

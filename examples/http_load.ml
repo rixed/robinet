@@ -18,7 +18,7 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 (*
-   Small tool to load a web server by creating a hurd of virtual hosts browsing randomly
+   Small tool to load a web server by creating a herd of virtual hosts browsing randomly
    from a given URL.
 *)
 open Batteries
