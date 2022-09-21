@@ -28,13 +28,13 @@
 #include <caml/memory.h>
 #include <caml/alloc.h>
 
-#if CAML_VERSION > 31200 
-#   include <caml/threads.h> 
-#else 
-#   include <caml/signals.h> 
-#   define caml_release_runtime_system caml_enter_blocking_section 
-#   define caml_acquire_runtime_system caml_leave_blocking_section 
-#endif 
+#if CAML_VERSION > 31200
+#   include <caml/threads.h>
+#else
+#   include <caml/signals.h>
+#   define caml_release_runtime_system caml_enter_blocking_section
+#   define caml_acquire_runtime_system caml_leave_blocking_section
+#endif
 
 /*
  * Custom ops on pcap handles
@@ -81,6 +81,9 @@ static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, s
 
     if (0 != pcap_set_promisc(handle, promisc)) goto err;
     if (0 != pcap_set_snaplen(handle, snaplen)) goto err;
+    /* In recent kernels packets are buffered before being sent to userland in
+     * batches. We don;'t want this to delay sniffing by more than 0.01s: */
+    if (0 != pcap_set_timeout(handle, 10)) goto err;
     if (0 != pcap_activate(handle)) goto err;
     if (0 != set_filter(handle, filter)) goto err;
 
@@ -139,6 +142,7 @@ CAMLprim value wrap_pcap_read(value handle_)
 retry:
     switch (pcap_next_ex(handle, &hdr, &bytes)) {
         case 1: // Ok
+            caml_acquire_runtime_system();
             break;
         case 0: // timeout
             goto retry;
@@ -151,7 +155,6 @@ retry:
             caml_failwith("Hit end of savefile on device?");
             break;
     }
-    caml_acquire_runtime_system();
 
     CAMLlocal3(result, ts, pkt);
     pkt = caml_alloc_string(hdr->caplen);
