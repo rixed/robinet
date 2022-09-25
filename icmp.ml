@@ -122,13 +122,13 @@ module Pdu = struct
         { msg_type ;
           payload  = random_payload msg_type }
 
-    let make_echo_request id seq =
+    let make_echo_request ?(pld=Payload.empty) id seq =
         { msg_type = MsgType.o (8, 0) ;
-          payload  = Ids (id, seq, Payload.empty) }
+          payload  = Ids (id, seq, pld) }
 
-    let make_echo_reply id seq =
+    let make_echo_reply ?(pld=Payload.empty) id seq =
         { msg_type = MsgType.o (0, 0) ;
-          payload  = Ids (id, seq, Payload.empty) }
+          payload  = Ids (id, seq, pld) }
 
     let make_ttl_expired code ip =
         let ip_hdr = Ip.Pdu.pack_header ip

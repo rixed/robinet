@@ -163,8 +163,8 @@ let icmp_rx _t ip_trx bits =
         | None -> ()
         | Some icmp when Icmp.Pdu.is_echo_request icmp ->
             (match icmp.Icmp.Pdu.payload with
-                | Icmp.Pdu.Ids (id, seq, _) ->
-                    Icmp.Pdu.make_echo_reply id seq |>
+                | Icmp.Pdu.Ids (id, seq, pld) ->
+                    Icmp.Pdu.make_echo_reply id seq ~pld |>
                     Icmp.Pdu.pack |>
                     tx ip_trx
                 | _ -> should_not_happen ())

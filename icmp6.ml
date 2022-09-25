@@ -126,13 +126,13 @@ module Pdu = struct
         { msg_type ;
           payload  = random_payload msg_type }
 
-    let make_echo_request id seq =
+    let make_echo_request ?(pld=Payload.empty) id seq =
         { msg_type = MsgType.o (128, 0) ;
-          payload  = Ids (id, seq, Payload.empty) }
+          payload  = Ids (id, seq, pld) }
 
-    let make_echo_reply id seq =
+    let make_echo_reply ?(pld=Payload.empty) id seq =
         { msg_type = MsgType.o (129, 0) ;
-          payload  = Ids (id, seq, Payload.empty) }
+          payload  = Ids (id, seq, pld) }
 
     let is_echo_request t =
         MsgType.type_of t.msg_type = 128 && MsgType.code_of t.msg_type = 0
