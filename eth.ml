@@ -191,6 +191,27 @@ module Pdu = struct
         | {| _ |} ->
             err "Not Eth"
 
+    let extract_proto do_extract proto pld =
+        if proto = Arp.HwProto.ip4 then
+            do_extract pld
+        else if proto = Arp.HwProto.ieee8021q then
+            Option.Monad.bind (Vlan.Pdu.unpack pld) (fun vlan ->
+                if vlan.Vlan.Pdu.proto = Arp.HwProto.ip4 then
+                    do_extract (vlan.Vlan.Pdu.payload :> bitstring)
+                else None)
+        else None
+
+    (* Actually only extract IP addresses *)
+    let extract_src_proto =
+        extract_proto (fun pdu ->
+            Option.Monad.bind (Ip.Pdu.unpack pdu) (fun ip ->
+                Some ip.Ip.Pdu.src))
+
+    let extract_dst_proto =
+        extract_proto (fun pdu ->
+            Option.Monad.bind (Ip.Pdu.unpack pdu) (fun ip ->
+                Some ip.Ip.Pdu.dst))
+
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
@@ -249,6 +270,7 @@ struct
         send t Arp.HwProto.arp Addr.broadcast (Arp.Pdu.pack request)
 
     type dst = Delayed | Dst of Addr.t
+
     let arp_resolve_ipv4 t bits sender_ip target_ip =
         match Option.get (BitHash.find t.arp_cache target_ip) with
         | dst ->
@@ -264,41 +286,35 @@ struct
             Delayed
 
     let dst_for t bits =
-        let arp_resolve_ipv4_pld pld =
+        let arp_resolve_ipv4_pld sender_ip pld =
             Option.Monad.bind (Ip.Pdu.unpack pld) (fun ip ->
-                let sender_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.src
-                and target_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.dst in
+                (* Note: we might be a router forwarding a packet. In that case,
+                 * ip.src is that of the original packet, yet the ARP sender addr
+                 * is that of the emitting device, aka the router: *)
+                let target_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.dst in
                 Some (arp_resolve_ipv4 t bits sender_ip target_ip)) in
-        let arp_resolve_ieee8021q_pld pld =
+        let arp_resolve_ieee8021q_pld sender_ip pld =
             Option.Monad.bind (Vlan.Pdu.unpack pld) (fun vlan ->
                 if vlan.Vlan.Pdu.proto = Arp.HwProto.ip4 then
-                    arp_resolve_ipv4_pld (vlan.Vlan.Pdu.payload :> bitstring)
+                    arp_resolve_ipv4_pld sender_ip (vlan.Vlan.Pdu.payload :> bitstring)
                 else None) in
         let arp_resolve_pld pld =
+            let my_addr =
+                match t.my_addresses with
+                | [] -> failwith "No adress to use as sender proto addr for ARP"
+                | a :: _ -> a.addr in
             if t.proto = Arp.HwProto.ip4 then (
-                arp_resolve_ipv4_pld pld
+                arp_resolve_ipv4_pld my_addr pld
             ) else if t.proto = Arp.HwProto.ieee8021q then (
-                arp_resolve_ieee8021q_pld pld
+                arp_resolve_ieee8021q_pld my_addr pld
             ) else (
                 err "Don't know how to resolve address for this protocol"
             ) in
-        let target_ip_opt pld =
-            let target_ip_of pdu =
-                Option.Monad.bind (Ip.Pdu.unpack pdu) (fun ip ->
-                    Some ip.Ip.Pdu.dst) in
-            if t.proto = Arp.HwProto.ip4 then
-                target_ip_of pld
-            else if t.proto = Arp.HwProto.ieee8021q then
-                Option.Monad.bind (Vlan.Pdu.unpack pld) (fun vlan ->
-                    if vlan.Vlan.Pdu.proto = Arp.HwProto.ip4 then
-                        target_ip_of (vlan.Vlan.Pdu.payload :> bitstring)
-                    else None)
-            else None in
         let same_net my_addresses bits =
             List.exists (fun my_addr ->
                 match_mask my_addr.netmask my_addr.addr bits
             ) my_addresses in
-        match target_ip_opt bits with
+        match Pdu.extract_dst_proto t.proto bits with
         | Some dst_ip when dst_ip = Ip.Addr.broadcast ->
             Some (Dst Addr.broadcast)
         | Some dst_ip when same_net t.my_addresses (Ip.Addr.to_bitstring dst_ip) ->
@@ -338,7 +354,14 @@ struct
             if frame.Pdu.proto = t.proto &&
                (Addr.eq frame.Pdu.dst t.src || Addr.eq frame.Pdu.dst Addr.broadcast) then (
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...that's me!"))) ;
-                if Payload.bitlength frame.Pdu.payload > 0 then Clock.asap t.recv (frame.Pdu.payload :> bitstring)
+                if Payload.bitlength frame.Pdu.payload > 0 then (
+                    (* Take note of the MAC/IP pair of the sender (TODO: with a short timeout) : *)
+                    Pdu.extract_src_proto frame.proto (frame.payload :> bitstring) |>
+                    Option.may (fun ip_src ->
+                        let src_proto_addr = Ip.Addr.to_bitstring ip_src in
+                        BitHash.replace t.arp_cache src_proto_addr (Some frame.src)) ;
+                    Clock.asap t.recv (frame.Pdu.payload :> bitstring)
+                )
             ) else if frame.Pdu.proto = Arp.HwProto.arp then (
                 match Arp.Pdu.unpack (frame.Pdu.payload :> bitstring) with
                 | None -> ()

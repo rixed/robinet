@@ -24,6 +24,7 @@ SOURCES  = \
 	dhcp.ml \
 	sll.ml \
 	pcap.ml \
+	tap.ml \
 	packet.ml \
 	hub.ml \
 	host.ml \
@@ -38,8 +39,8 @@ SOURCES  = \
 	myadmin.ml \
 	sim.ml \
 
-C_SOURCES = pcap_wrap.c eth_vendors.c
-CLIB = libpcapw.a
+C_SOURCES = pcap_wrap.c eth_vendors.c tap_wrap.c
+CLIB = librobinetext.a
 # libpcap elsewhere? Call make with:
 # LIBS="-cclib -L/usr/local/lib -cclib -lpcap"
 LIBS += -cclib -lpcap

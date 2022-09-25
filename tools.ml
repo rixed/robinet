@@ -504,3 +504,6 @@ module type PDU = sig
     val unpack : bitstring -> t option
 end
 
+let int_of_fd (fd : Unix.file_descr) : int = Obj.magic fd
+
+let fd_of_int : int -> Unix.file_descr = Obj.magic

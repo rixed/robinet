@@ -31,13 +31,13 @@ let forward_traffic logger ifname input_dev =
     let log_paquet what to_string f b =
         Log.(log logger Debug (lazy (Printf.sprintf "%s: %s" what (to_string b)))) ;
         f b in
-    let iface = Pcap.openif ifname in
+    let iface = Tap.openif ifname in
     let pcap_to_string b =
         let len = Bitstring.bitstring_length b / 8 in
         Printf.sprintf "packet of %d byte(s)" len in
     input_dev.set_read
-        (log_paquet "spitting" pcap_to_string (fun b -> Pcap.inject iface b)) ;
-    Pcap.sniffer iface
+        (log_paquet "spitting" pcap_to_string (fun b -> Tap.inject iface b)) ;
+    Tap.sniffer iface
         (log_paquet "swallowing" pcap_to_string input_dev.write) |> ignore ;
     Log.(log logger Info (lazy (Printf.sprintf "You can send traffic to %s now" ifname))) ;
     Clock.run true
@@ -128,9 +128,9 @@ let build_network router_specs =
 (* We need the name of the interface we are going to read from, and the IP
  * addresses of the routers will later come from the configuration file: *)
 let main =
-    let ifname = ref "br0" in
+    let ifname = ref "tap0" in
     let in_cidr = ref "192.168.0.0/24" in
-    let in_mac = ref (Eth.Addr.of_iface !ifname) in
+    let in_mac = ref (*(Eth.Addr.random ()) in*) (Eth.Addr.of_iface !ifname) in
     let routers = ref [
         "router0", [| !in_mac, !in_cidr (* TODO: patcher apres *), [] ;
 (*                      "192.168.1.0/24", [ "router1" ] |] ;
