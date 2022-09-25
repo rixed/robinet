@@ -378,7 +378,7 @@ struct
                                 merge_flag := true ;
                                 BitHash.replace t.arp_cache arp.Arp.Pdu.sender_proto (Some sender_hw)
                             ) ;
-                            Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...concerning '%s' (I'm '%s')" (hexstring_of_bitstring arp.Arp.Pdu.target_proto) (if t.my_addresses <> [] then hexstring_of_bitstring (List.hd t.my_addresses).addr else "nobody")))) ;
+                            Log.(log t.logger Debug (lazy (Printf.sprintf2 "Eth:...concerning '%s' (I'm %a)" (hexstring_of_bitstring arp.Arp.Pdu.target_proto) (List.print (fun oc a -> String.print oc (hexstring_of_bitstring a.addr))) t.my_addresses))) ;
                             if List.exists (fun my_addr -> Bitstring.equals arp.Arp.Pdu.target_proto my_addr.addr) t.my_addresses then (
                                 Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...It's about me!!"))) ;
                                 if not !merge_flag then (
@@ -418,7 +418,7 @@ struct
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
     let make ?(mtu=1500) src ?gw ?(promisc=ignore) proto my_addresses logger =
-        Log.(log logger Debug (lazy (Printf.sprintf "Eth: Creating an eth TRX with %d addresses" (List.length my_addresses)))) ;
+        Log.(log logger Debug (lazy (Printf.sprintf2 "Eth: Creating an eth TRX with addresses %a" (List.print print_my_address) my_addresses))) ;
         let t = { logger ; src ; gw ; proto ;
                   emit = ignore_bits logger ;
                   recv = ignore_bits logger ;

@@ -318,7 +318,7 @@ struct
                        Ip.Addr.of_string "192.168.2.254", Ip.Addr.of_string "255.255.255.0", Eth.Addr.random () ;
                        Ip.Addr.of_string "192.168.3.254", Ip.Addr.of_string "255.255.255.0", Eth.Addr.random () |] in
         let logger = Log.make "test" 100 in
-        let router, trxs = make_from_addrs addrs logger in
+        let router = make_from_addrs addrs logger in
 
         (* Now we will count incoming packets from each port (ARP requests, actually) : *)
         let counts = Array.create 3 0 in
@@ -335,7 +335,7 @@ struct
             Ip.Pdu.pack |>
             Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (Tuple3.third addrs.(n)) |>
             Eth.Pdu.pack |>
-            (fst trxs.(n)).out.write in
+            (fst router.trxs.(n)).out.write in
 
         (* Let's play! *)
         easy_send 0 "1.2.3.4" ;

@@ -49,7 +49,8 @@ let bytelength bs = (bitstring_length bs + 7) lsr 3
 
 let takebytes n bs = takebits (n lsl 3) bs
 
-let extendbytes n bs = concat [ bs ; create_bitstring ((n lsl 3) - bitstring_length bs) ]
+let extendbytes n bs =
+    concat [ bs ; create_bitstring ((n lsl 3) - bitstring_length bs) ]
 
 let bitstring_is_empty bs = bitstring_length bs = 0
 
@@ -82,6 +83,7 @@ let bitstring_fuzz err_rate bits =
 
 let bitstring_of_bytes b =
     Bytes.to_string b |> bitstring_of_string
+
 let bytes_of_bitstring b =
     string_of_bitstring b |> Bytes.of_string
 
@@ -120,7 +122,8 @@ let hexstring_of_bitstring_abbrev bs =
  *)
 
 let printable str =
-    let is_printable c = Char.is_latin1 c || Char.is_digit c || Char.is_symbol c || c = ' ' in
+    let is_printable c =
+        Char.is_latin1 c || Char.is_digit c || Char.is_symbol c || c = ' ' in
     String.map (fun c -> if is_printable c then c else '.') str
 
 let print_bitstring fmt bits =
@@ -382,14 +385,19 @@ end
 let randi bits =
     let mask = (1 lsl bits) - 1 in
     Random.bits () land mask
+
 let rand32 () = Int32.of_int64 (Random.int64 0x100000000L)
+
 let randb = Random.bool
+
 let randstr ?charset len =
     let rc _i = Random.char ()
     and sc s _s = s.[Random.int (String.length s)] in
     String.init len (match charset with None -> rc | Some s -> sc s)
+
 let randbs len (* in bytes! *)=
     randstr len |> bitstring_of_string
+
 let rand_hostname () =
     let nb_parts = 1 + randi 3 in
     let parts = List.init nb_parts (fun _i ->
@@ -460,6 +468,7 @@ let (<-->) a b =
 type trx = { ins : dev ; out : dev }
 
 let tx trx = trx.ins.write
+
 let rx trx = trx.out.write
 
 let inverse_trx trx = { ins = trx.out ; out = trx.ins }

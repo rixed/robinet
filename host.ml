@@ -435,7 +435,7 @@ let ping t ?(id=1) ?(seq=1) dst =
 let tcp_server t src_port server_f = Hashtbl.add t.tcp_servers src_port server_f
 let udp_server t src_port server_f = Hashtbl.add t.udp_servers src_port server_f
 
-(* the recv of the eth is responsible for handling the payload to the correct Ip.TRX *)
+(* The recv of the eth is responsible for handling the payload to the correct Ip.TRX *)
 let ip_recv t bits = match Ip.Pdu.unpack bits with
     | None -> ()
     (* Shouldn't we check first that the dest IP is my_ip? or broadcast? *)

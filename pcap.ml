@@ -470,16 +470,16 @@ let bytes_out            = Metric.Counter.make "Pcap/Bytes/Out" "bytes"
 
 (** [inject iface bits] inject the packet [bits] into interface [iface]. *)
 let inject iface bits =
-    (try
+    try
         let str = string_of_bitstring bits in
-        if debug then Printf.printf "Pcap: injecting a packet (%d bytes)...\n%!" (String.length str);
+        if debug then Printf.printf "Pcap: injecting a packet (%d bytes)...\n%!" (String.length str) ;
         inject_ iface.handler str ;
         Metric.Atomic.fire packets_injected_ok ;
         Metric.Counter.increase bytes_out (Int64.of_int (bytelength bits))
     with e ->
         Printf.printf "Pcap: Cannot inject a packet: %s\n%!"
             (Printexc.to_string e) ;
-        Metric.Atomic.fire packets_injected_err)
+        Metric.Atomic.fire packets_injected_err
 
 (** {2 Packet sniffing} *)
 
