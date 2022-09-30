@@ -100,7 +100,10 @@ and t = { mutable host_trx : host_trx ;
           nameserver : Ip.Addr.t option ;
           mutable resolv_trx : trx option ;
           dns_queries : (string, ((Ip.Addr.t list option -> unit) * Clock.Time.t option)) Hashtbl.t ;
-          dns_cache   : (string, Ip.Addr.t list) Hashtbl.t }
+          dns_cache   : (string, Ip.Addr.t list) Hashtbl.t ;
+          (* ICMP errors want to embed the first 8 bytes of the IP packet so we save
+           * it here: *)
+          mutable last_ip_packet : Ip.Pdu.t option }
 
 let print oc trx = String.print oc trx.name
 let make_tcp_socks ip = { ip_4_tcp = ip ; tcps = Hashtbl.create 3 }
@@ -139,7 +142,7 @@ let tcp_sock_rx t socks bits =
             with No_socket ->
                 Tcp.Pdu.make_reset_of tcp |> Tcp.Pdu.pack |> tx socks.ip_4_tcp
 
-let udp_sock_rx t socks bits =
+let udp_sock_rx t socks icmp_trx bits =
     match Udp.Pdu.unpack bits with
         | None -> ()
         | Some udp ->
@@ -155,8 +158,16 @@ let udp_sock_rx t socks bits =
                         trx) in
                 rx trx.Udp.TRX.trx bits
             with No_socket ->
-                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for UDP packet on port %s" (Udp.Port.to_string udp.Udp.Pdu.dst_port))))
-                (* TODO: send ICMP error *)
+                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for UDP packet on port %s" (Udp.Port.to_string udp.Udp.Pdu.dst_port)))) ;
+                (* Send ICMP error *)
+                match t.last_ip_packet with
+                | None ->
+                    Printf.eprintf "No last IP packet!?\n%!" ;
+                    assert false
+                | Some last_ip_packet ->
+                    let icmp_err = Icmp.Pdu.make_port_unreachable last_ip_packet in
+                    let icmp_bits = Icmp.Pdu.pack icmp_err in
+                    tx icmp_trx icmp_bits
 
 let icmp_rx _t ip_trx bits =
     match Icmp.Pdu.unpack bits with
@@ -368,9 +379,11 @@ and udp_connect t dst ?src_port dst_port client_f cont =
     if not (ip_is_set t) then cont None else
     let connect dst_ip =
         let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
-            let trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.udp t.host_trx.logger in
-            let socks = make_udp_socks trx in
-            (udp_sock_rx t socks) <-= trx =-> t.eth.Eth.TRX.trx.ins.write ;
+            let icmp_trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.icmp t.host_trx.logger in
+            icmp_trx =-> (tx t.eth.Eth.TRX.trx) ;
+            let ip_trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.udp t.host_trx.logger in
+            let socks = make_udp_socks ip_trx in
+            (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
             socks) in
         let src_port = may_default src_port (fun () -> Udp.Port.o (Random.int 0x10000)) in
         let key = src_port, dst_port in
@@ -439,27 +452,32 @@ let udp_server t src_port server_f = Hashtbl.add t.udp_servers src_port server_f
 let ip_recv t bits = match Ip.Pdu.unpack bits with
     | None -> ()
     (* Shouldn't we check first that the dest IP is my_ip? or broadcast? *)
-    | Some ip when ip.Ip.Pdu.proto = Ip.Proto.tcp ->
-        let sock = hash_find_or_insert t.tcp_socks ip.Ip.Pdu.src (fun () ->
-            let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.host_trx.logger in
-            let socks = make_tcp_socks ip_trx in
-            (tcp_sock_rx t socks) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
-            socks) in
-        rx sock.ip_4_tcp bits (* will handle fragmentation then pass payload to its emit function *)
-    | Some ip when ip.Ip.Pdu.proto = Ip.Proto.udp ->
-        let sock = hash_find_or_insert t.udp_socks ip.Ip.Pdu.src (fun () ->
-            let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.host_trx.logger in
-            let socks = make_udp_socks ip_trx in
-            (udp_sock_rx t socks) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
-            socks) in
-        rx sock.ip_4_udp bits
-    | Some ip when ip.Ip.Pdu.proto = Ip.Proto.icmp ->
-        let ip_trx = hash_find_or_insert t.icmp_socks ip.Ip.Pdu.src (fun () ->
-            let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.host_trx.logger in
-            (icmp_rx t ip_trx) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
-            ip_trx) in
-        rx ip_trx bits
-    | _ -> ()
+    | Some ip ->
+        Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Received an IP packet."))) ;
+        t.last_ip_packet <- Some ip ;
+        if ip.Ip.Pdu.proto = Ip.Proto.tcp then (
+            let sock = hash_find_or_insert t.tcp_socks ip.Ip.Pdu.src (fun () ->
+                let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.host_trx.logger in
+                let socks = make_tcp_socks ip_trx in
+                (tcp_sock_rx t socks) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
+                socks) in
+            rx sock.ip_4_tcp bits (* will handle fragmentation then pass payload to its emit function *)
+        ) else if ip.Ip.Pdu.proto = Ip.Proto.udp then (
+            let sock = hash_find_or_insert t.udp_socks ip.Ip.Pdu.src (fun () ->
+                let icmp_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src Ip.Proto.icmp t.host_trx.logger in
+                icmp_trx =-> (tx t.eth.Eth.TRX.trx) ;
+                let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.host_trx.logger in
+                let socks = make_udp_socks ip_trx in
+                (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
+                socks) in
+            rx sock.ip_4_udp bits
+        ) else if ip.Ip.Pdu.proto = Ip.Proto.icmp then (
+            let ip_trx = hash_find_or_insert t.icmp_socks ip.Ip.Pdu.src (fun () ->
+                let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.host_trx.logger in
+                (icmp_rx t ip_trx) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
+                ip_trx) in
+            rx ip_trx bits
+        )
 
 let power_off ?timeout t =
     let to_kill = ref (List.length t.killers) in
@@ -492,21 +510,22 @@ let make name ?gw ?search_sfx ?nameserver ?(on=true) ~(init : ?on_ip:(t -> unit)
     let if_on t what f x =
         if t.on then f x else Log.(log logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
     let rec t =
-        { my_ip       = Ip.Addr.zero ;
-          on          = on ;
-          killers     = [] ;
-          eth         = Eth.TRX.make my_mac ?gw Arp.HwProto.ip4 [] logger ; (* FIXME: Don't use the GW for same net IP! *)
-          tcp_socks   = Hashtbl.create 11 ;
-          udp_socks   = Hashtbl.create 11 ;
-          icmp_socks  = Hashtbl.create 11 ;
-          tcp_servers = Hashtbl.create 11 ;
-          udp_servers = Hashtbl.create 11 ;
-          nameserver  = nameserver ;
-          resolv_trx  = None ;
-          search_sfx  = search_sfx ;
-          dns_queries = Hashtbl.create 3 ;
-          dns_cache   = Hashtbl.create 3 ;
-          host_trx    = host_trx }
+        { my_ip         = Ip.Addr.zero ;
+          on            = on ;
+          killers       = [] ;
+          eth           = Eth.TRX.make my_mac ?gw Arp.HwProto.ip4 [] logger ; (* FIXME: Don't use the GW for same net IP! *)
+          tcp_socks     = Hashtbl.create 11 ;
+          udp_socks     = Hashtbl.create 11 ;
+          icmp_socks    = Hashtbl.create 11 ;
+          tcp_servers   = Hashtbl.create 11 ;
+          udp_servers   = Hashtbl.create 11 ;
+          nameserver    = nameserver ;
+          resolv_trx    = None ;
+          search_sfx    = search_sfx ;
+          dns_queries   = Hashtbl.create 3 ;
+          dns_cache     = Hashtbl.create 3 ;
+          host_trx      = host_trx ;
+          last_ip_packet = None }
     and host_trx =
         { name ; logger ;
           dev           = { write = (fun bits ->

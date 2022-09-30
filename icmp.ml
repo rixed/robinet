@@ -103,12 +103,17 @@ module Pdu = struct
     type payload = Ids of int * int * Payload.t
                  | Redirect of Ip.Addr.t * Payload.t
                  | Header of int * Payload.t (* with optional pointer *)
+                 | DestUnreachable of int (* next hop MTU *) * Payload.t
 
     let random_payload msg_type =
         let random_redirect () = Redirect (Ip.Addr.random(), Payload.random (20*8 + 64))
         and random_id () = Ids (randi 8, randi 8, Payload.empty)
-        and random_header () = Header (randi 8, Payload.random (20*8 + 64)) in
+        and random_header () = Header (randi 8, Payload.random (20*8 + 64))
+        and random_dest_unreach code =
+            let next_hop_mtu = if code = 4 then randi 16 else 0 in
+            DestUnreachable (next_hop_mtu, Payload.random ((20 + 8)*8)) in
         match MsgType.type_of msg_type with
+            | 3 -> random_dest_unreach (randi 4)
             | 5 -> random_redirect ()
             | 0 | 8 | 13 | 14 | 15 | 16 -> random_id ()
             | _ -> random_header ()
@@ -140,6 +145,17 @@ module Pdu = struct
     let make_ttl_expired_in_transit = make_ttl_expired 0
     let make_ttl_expired_during_reassembly = make_ttl_expired 1
 
+    let make_destination_unreachable ?(next_hop_mtu=0) code ip =
+        let hdr_len = 20 + bytelength ip.Ip.Pdu.options in
+        let ip_start =
+            let ip_bits = Ip.Pdu.pack ip in
+            try takebits ((hdr_len + 8) * 8) ip_bits
+            with Invalid_argument _ -> ip_bits in
+        { msg_type = MsgType.o (3, code) ;
+          payload = DestUnreachable (next_hop_mtu, Payload.o ip_start) }
+
+    let make_port_unreachable = make_destination_unreachable 3
+
     let is_echo_request t =
         MsgType.type_of t.msg_type = 8 && MsgType.code_of t.msg_type = 0
 
@@ -151,8 +167,11 @@ module Pdu = struct
             | Redirect (ip, pld) ->
                 let%bitstring b = {| (Ip.Addr.to_int32 ip) : 32 ;
                                      (pld :> bitstring) : -1 : bitstring |} in b
-            | Header (ptr, pld)  ->
+            | Header (ptr, pld) ->
                 let%bitstring b = {| ptr : 8 ; 0 : 24 ;
+                                     (pld :> bitstring) : -1 : bitstring |} in b
+            | DestUnreachable (next_hop_mtu, pld) ->
+                let%bitstring b = {| 0 : 16 ; next_hop_mtu : 16 ;
                                      (pld :> bitstring) : -1 : bitstring |} in b
         in
         let typ, cod = (t.msg_type :> int*int) in
