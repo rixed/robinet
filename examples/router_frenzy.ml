@@ -105,7 +105,7 @@ let build_network router_specs =
                         error "Bad input data"
                     | i' ->
                         let trx = fst dest_router.Router.trxs.(i') in
-                        trx.ins) in
+                        trx.out) in
             let connected_devs = List.map dev_of_receiver receivers in
             let emit bits =
                 List.iter (fun dest_dev ->
