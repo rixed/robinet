@@ -529,10 +529,12 @@ module TRX = struct
 
     (* TODO: check checksum? *)
     (* TODO: handle fragmentation *)
-    let rx t bits = (match Pdu.unpack bits with
+    let rx t bits =
+        match Pdu.unpack bits with
         | None -> ()
         | Some ip ->
-            if Payload.bitlength ip.Pdu.payload > 0 then Clock.asap t.recv (ip.Pdu.payload :> bitstring))
+            if Payload.bitlength ip.Pdu.payload > 0 then
+                Clock.asap t.recv (ip.Pdu.payload :> bitstring)
 
     (* Note: In Eth we do not require dst addr since the trx know (using ARP) how to get dest addr itself.
      *       IP cannot do this since the application layer won't tell him the destination hostname. Or
@@ -541,11 +543,10 @@ module TRX = struct
     let make ?(mtu=1400) src dst proto logger =
         ensure ((mtu mod 8) = 0) "Ip: MTU is required to be a multiple of 8 bytes" ;
         let t = { logger ; src ; dst ; proto ; mtu ;
-                  emit = ignore_bits logger ; recv = ignore_bits logger } in
+                  emit = ignore_bits logger ;
+                  recv = ignore_bits logger } in
         { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;
           out = { write = rx t ;
                   set_read = fun f -> t.emit <- f } }
-
 end
-

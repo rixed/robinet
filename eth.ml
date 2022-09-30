@@ -264,12 +264,12 @@ struct
 
     let resolve_proto_addr t bits sender_proto_addr target_proto_addr =
         (* Add the msg to delayed messages _before_ sending the query *)
-        Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: Delaying a msg for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: Postponing a msg for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
         BitHash.add t.delayed target_proto_addr bits ;
         let request = Arp.Pdu.make_request Arp.HwType.eth t.proto (t.src :> bitstring) sender_proto_addr target_proto_addr in
         send t Arp.HwProto.arp Addr.broadcast (Arp.Pdu.pack request)
 
-    type dst = Delayed | Dst of Addr.t
+    type dst = Postponed | Dst of Addr.t
 
     let arp_resolve_ipv4 t bits sender_ip target_ip =
         match Option.get (BitHash.find t.arp_cache target_ip) with
@@ -280,10 +280,10 @@ struct
             Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: Cannot find HW addr for '%s' in ARP cache" (hexstring_of_bitstring target_ip)))) ;
             BitHash.add t.arp_cache target_ip None ;
             resolve_proto_addr t bits sender_ip target_ip ;
-            Delayed
+            Postponed
         | exception Invalid_argument _ ->
             Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: HW addr for '%s' is still resolving" (hexstring_of_bitstring target_ip)))) ;
-            Delayed
+            Postponed
 
     let dst_for t bits =
         let arp_resolve_ipv4_pld sender_ip pld =
@@ -342,7 +342,7 @@ struct
         if bytelength bits <= t.mtu then (
             match dst_for t bits with
             | Some (Dst dst) -> send t t.proto dst bits
-            | Some Delayed -> Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...delayed")))
+            | Some Postponed -> Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...postponed")))
             | None -> Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...no destination?!")))
         )
 
