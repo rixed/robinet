@@ -129,7 +129,8 @@ let build_network router_specs =
                     let gw = [ Ip.Addr.zero, Ip.Addr.zero, Some (Eth.IPv4 port_ip) ]
                     and netmask = Ip.Cidr.to_netmask cidr
                     and mac = Eth.Addr.random ()
-                    and ip = Ip.Cidr.second_addr cidr in
+                    and ip = try Ip.Addr.of_string dest_name
+                             with Invalid_argument _ -> Ip.Cidr.second_addr cidr in
                     Host.(make_static dest_name ~gw ~on:true mac ~netmask ip).dev
                 | dest_router ->
                     (* For each of connected routers, look for their corresponding
@@ -175,7 +176,7 @@ let main =
         "router1", [| Eth.Addr.random (), "192.168.1.0/24", [ "router0" ] ;
                       Eth.Addr.random (), "192.168.2.0/24", [ "router2" ] |] ;
         "router2", [| Eth.Addr.random (), "192.168.2.0/24", [ "router1" ] ;
-                      Eth.Addr.random (), "192.168.3.0/24", [ "target" ] |] ]
+                      Eth.Addr.random (), "192.168.3.0/24", [ "192.168.3.2" ; "192.168.3.3" ] |] ]
     in
     Arg.parse [
         "-i", Arg.Set_string ifname,
