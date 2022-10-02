@@ -405,7 +405,8 @@ struct
                         )
                     )
             ) else ( (* not for me, send to promisc function *)
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...not for me!"))) ;
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...not for me (for %s but I'm %s)!"
+                    (Addr.to_string frame.Pdu.dst) (Addr.to_string t.src)))) ;
                 if Payload.bitlength frame.Pdu.payload > 0 then t.promisc (frame.Pdu.payload :> bitstring)
             ))
 

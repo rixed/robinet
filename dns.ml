@@ -22,7 +22,7 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = true
+let debug = false
 
 (** {2 Opcodes, query types and classes} *)
 
