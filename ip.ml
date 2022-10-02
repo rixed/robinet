@@ -190,6 +190,19 @@ module Addr = struct
        (o32 0x01020305l) (higher_bits (o32 0x01020305l) 33)
      *)
 
+    (* FIXME: duplicate with match_mask? *)
+    let in_mask ip ip_mask mask =
+        let ip = to_int32 ip
+        and ip_mask = to_int32 ip_mask
+        and mask = to_int32 mask in
+        Int32.logand ip mask = Int32.logand ip_mask mask
+
+    (*$T in_mask
+       in_mask (of_string "192.168.1.42") (of_string "192.168.0.0") (of_string "255.255.0.0")
+       not (in_mask (of_string "192.168.1.42") (of_string "192.168.0.0") (of_string "255.255.255.0"))
+       not (in_mask (of_string "192.168.1.42") (of_string "192.168.0.0") (of_string "255.255.255.254"))
+     *)
+
     (*$>*)
 end
 

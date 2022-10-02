@@ -51,14 +51,52 @@ let forward_traffic logger ifname input_dev =
  * otherwise the port is left unconnected.
  * Hosts must have been created beforehand with as many interfaces as
  * required. *)
-let make_router logger interfaces =
-    (* TODO: trxs, route_tbl, logger *)
+let make_router logger interfaces router_specs =
+    let addr_of_interface ?via cidr =
+        (* [make_from_addrs] wants ip address, ip mask and MAC: *)
+        let cidr = Ip.Cidr.of_string cidr in
+        Ip.Cidr.first_addr cidr,
+        Ip.Cidr.to_netmask cidr,
+        via in
     let addrs =
-        Array.map (fun (mac, cidr, _) ->
-            (* [make_from_addrs] wants ip address, ip mask and MAC: *)
-            let cidr = Ip.Cidr.of_string cidr in
-            Ip.Cidr.first_addr cidr,
-            Ip.Cidr.to_netmask cidr,
+        Array.map (fun (mac, lan_cidr, peer_routers) ->
+            let lan = addr_of_interface lan_cidr in
+            (* Then for each peer routers, add all reachable networks from them with
+             * that peer as a gateway: *)
+            let rec find_routes res lan_cidr via interfaces =
+                (* For all ports but the one with the same subnet as
+                 * [lan_cidr], add a route via this router: *)
+                Array.fold_left (fun res (_mac, cidr, peer_routers) ->
+                    if cidr = lan_cidr then res else
+                    let res = addr_of_interface ~via cidr :: res in
+                    List.fold_left (fun res peer_router ->
+                        match List.assoc peer_router router_specs with
+                        | exception Not_found ->
+                            (* This must be a host then *)
+                            res
+                        | interfaces ->
+                            find_routes res cidr via interfaces
+                    ) res peer_routers
+                ) res interfaces in
+            List.fold_left (fun res peer_router ->
+                (* First of all, the gateway to use is always going to be
+                 * the port of [peer_router] on the common subnet (the one
+                 * we are connected to): *)
+                match List.assoc peer_router router_specs with
+                | exception Not_found ->
+                    (* This must be a host then *)
+                    res
+                | interfaces ->
+                    (match
+                        Array.find_map (fun (mac, cidr, _) ->
+                                          if cidr = lan_cidr then Some mac else None) interfaces
+                    with
+                    | None ->
+                        failwith "Bad input: no common subnet between connected routers"
+                    | Some gw ->
+                        let via = Eth.Mac gw in
+                        find_routes res lan_cidr via interfaces)
+            ) [lan] peer_routers,
             mac
         ) interfaces in
     Router.make_from_addrs addrs logger
@@ -71,7 +109,7 @@ let build_network router_specs =
     let routers = Hashtbl.create 10 in
     List.iter (fun (name, interfaces) ->
         let logger = Log.make name 50 in
-        let router = make_router logger interfaces in
+        let router = make_router logger interfaces router_specs in
         Hashtbl.add routers name router
     ) router_specs ;
     (* Connect all routers together.
@@ -79,16 +117,16 @@ let build_network router_specs =
      * a router directly to the input of another: *)
     List.iter (fun (name, interfaces) ->
         let emitter = Hashtbl.find routers name in
-        Array.iteri (fun i (_mac, subnet, receivers) ->
+        Array.iteri (fun i (_mac, cidr, receivers) ->
             (* Build an emitting function for this port that just writes into
              * each of the connected routers: *)
-            let port_trx, subnet_ip = emitter.Router.trxs.(i) in
+            let port_trx, _port_mac, port_ip = emitter.Router.trxs.(i) in
             let dev_of_receiver dest_name =
                 match Hashtbl.find routers dest_name with
                 | exception Not_found ->
                     (* If not a router, then create a host *)
-                    let cidr = Ip.Cidr.of_string subnet in
-                    let gw = Eth.IPv4 subnet_ip
+                    let cidr = Ip.Cidr.of_string cidr in
+                    let gw = [ Ip.Addr.zero, Ip.Addr.zero, Some (Eth.IPv4 port_ip) ]
                     and netmask = Ip.Cidr.to_netmask cidr
                     and mac = Eth.Addr.random ()
                     and ip = Ip.Cidr.second_addr cidr in
@@ -98,13 +136,13 @@ let build_network router_specs =
                      * interface by subnet name: *)
                     let dest_ports = List.assoc dest_name router_specs in
                     (match
-                        Array.findi (fun (_, subnet', _) ->
-                            subnet = subnet'
+                        Array.findi (fun (_, cidr', _) ->
+                            cidr' = cidr
                         ) dest_ports with
                     | exception Not_found ->
                         error "Bad input data"
                     | i' ->
-                        let trx = fst dest_router.Router.trxs.(i') in
+                        let trx, _, _ = dest_router.Router.trxs.(i') in
                         trx.out) in
             let connected_devs = List.map dev_of_receiver receivers in
             let emit bits =
@@ -122,7 +160,7 @@ let build_network router_specs =
     (* Return the input device for the first port of the first router: *)
     let fst_router_name = List.hd router_specs |> fst in
     let fst_router = Hashtbl.find routers fst_router_name in
-    let fst_trx = fst fst_router.Router.trxs.(0) in
+    let fst_trx, _, _ = fst_router.Router.trxs.(0) in
     fst_trx.out
 
 (* We need the name of the interface we are going to read from, and the IP
@@ -133,10 +171,10 @@ let main =
     let in_mac = ref (*(Eth.Addr.random ()) in*) (Eth.Addr.of_iface !ifname) in
     let routers = ref [
         "router0", [| !in_mac, !in_cidr (* TODO: patcher apres *), [] ;
-(*                      "192.168.1.0/24", [ "router1" ] |] ;
+                      Eth.Addr.random (), "192.168.1.0/24", [ "router1" ] |] ;
         "router1", [| Eth.Addr.random (), "192.168.1.0/24", [ "router0" ] ;
                       Eth.Addr.random (), "192.168.2.0/24", [ "router2" ] |] ;
-        "router2", [| Eth.Addr.random (), "192.168.2.0/24", [ "router1" ] ;*)
+        "router2", [| Eth.Addr.random (), "192.168.2.0/24", [ "router1" ] ;
                       Eth.Addr.random (), "192.168.3.0/24", [ "target" ] |] ]
     in
     Arg.parse [

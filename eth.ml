@@ -227,7 +227,7 @@ struct
     type t =
         { logger : Log.logger ;
           src : Addr.t ;
-          gw : gw_addr option ;
+          gw : (Ip.Addr.t * Ip.Addr.t * gw_addr option) list ;  (** IP, mask, GW *)
           proto : Arp.HwProto.t ;
           mtu : int ;
           mutable my_addresses : my_address list ;
@@ -239,6 +239,14 @@ struct
           delayed : bitstring BitHash.t }  (* dest_proto_addr -> msg *)
     and my_address =
         { addr : bitstring ; netmask : bitstring }
+
+    let gw_for_ip ip gws =
+        let rec loop = function
+            | [] -> None
+            | (ip', mask, gw) :: rest ->
+                if Ip.Addr.in_mask ip ip' mask then gw
+                else loop rest in
+        loop gws
 
     let make_my_address ?(netmask = Ip.Addr.(to_bitstring all_ones)) addr =
         { addr ; netmask }
@@ -320,21 +328,24 @@ struct
         | Some dst_ip when same_net t.my_addresses (Ip.Addr.to_bitstring dst_ip) ->
             Log.(log t.logger Debug (lazy "Same network as me, sending directly")) ;
             arp_resolve_pld bits (* FIXME: should also tell us which source address to use *)
-        | _ ->
+        | Some dst_ip ->
             Log.(log t.logger Debug (lazy (Printf.sprintf2 "Not on my LAN (my addresses = %a)" (List.print print_my_address) t.my_addresses))) ;
-            (match t.gw with
+            (match gw_for_ip dst_ip t.gw with
             | None ->
                 Log.(log t.logger Debug (lazy (Printf.sprintf "No GW, resolving with ARP"))) ;
                 arp_resolve_pld bits
             | Some (Mac addr) ->
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Using MAC of GW"))) ;
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Using GW MAC %s" (Addr.to_string addr)))) ;
                 Some (Dst addr)
             | Some (IPv4 ip)  ->
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Using GW which IP is %s" (Ip.Addr.to_string ip)))) ;
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Using GW IP %s" (Ip.Addr.to_string ip)))) ;
                 let sender_ip = match t.my_addresses with
                     | my_ip::_ -> my_ip.addr
                     | []       -> Ip.Addr.zero |> Ip.Addr.to_bitstring (* maybe take the source IP from the payload? *) in
                 Some (arp_resolve_ipv4 t bits sender_ip (Ip.Addr.to_bitstring ip)))
+        | None ->
+            Log.(log t.logger Warning (lazy (Printf.sprintf2 "Cannot extract dest IP"))) ;
+            None
 
     (** Transmit function. [tx t payload] Will send the payload. *)
     let tx t bits =
@@ -418,8 +429,10 @@ struct
      * @param proto the {!Arp.HwProto.t} we want to transmit/receive.
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
-    let make ?(mtu=1500) src ?gw ?(promisc=ignore) proto my_addresses logger =
-        Log.(log logger Debug (lazy (Printf.sprintf2 "Eth: Creating an eth TRX with addresses %a" (List.print print_my_address) my_addresses))) ;
+    let make ?(mtu=1500) src ?(gw=[]) ?(promisc=ignore) proto my_addresses logger =
+        Log.(log logger Debug (lazy (Printf.sprintf2 "Eth: Creating an eth TRX with addresses mac: %s and IP: %a"
+            (Addr.to_string src)
+            (List.print print_my_address) my_addresses))) ;
         let t = { logger ; src ; gw ; proto ;
                   emit = ignore_bits logger ;
                   recv = ignore_bits logger ;

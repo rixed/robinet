@@ -277,11 +277,12 @@ let instanciate t =
             Hashtbl.add switches name
                 (Hub.Switch.make s.switch_nb_ports s.switch_nb_macs name)
         | Host h ->
+            let gw = [ Ip.Addr.zero, Ip.Addr.zero, Some h.host_gw ] in
             Hashtbl.add hosts name
                 (match h.host_ip with
                 | None ->
                     Host.make_dhcp name
-                                   ~gw:h.host_gw
+                                   ~gw
                                    ~search_sfx:h.host_search_sfx
                                    ~nameserver:h.host_nameserver
                                    ~on:true
@@ -289,7 +290,7 @@ let instanciate t =
                                    h.host_mac
                 | Some ip ->
                     Host.make_static name
-                                   ~gw:h.host_gw
+                                   ~gw
                                    ~search_sfx:h.host_search_sfx
                                    ~nameserver:h.host_nameserver
                                    ~on:true
