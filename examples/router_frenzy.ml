@@ -114,6 +114,8 @@ let make_router logger interfaces router_specs =
  * representing the entry point of the network: *)
 let build_network logger router_specs =
     ensure (router_specs <> []) "Invalid router specifications" ;
+    let connections = Hashtbl.create 40 in
+    let devices = Hashtbl.create 40 in
     (* Build all routers *)
     let routers = Hashtbl.create 10 in
     List.iter (fun (name, interfaces) ->
@@ -138,6 +140,7 @@ let build_network logger router_specs =
                     and mac = Eth.Addr.random ()
                     and ip = try Ip.Addr.of_string dest_name
                              with Invalid_argument _ -> Ip.Cidr.second_addr cidr in
+                    dest_name,
                     Host.(make_static dest_name ~gw ~on:true mac ~netmask ip).dev
                 | dest_router ->
                     (* For each of connected routers, look for their corresponding
@@ -152,23 +155,38 @@ let build_network logger router_specs =
                         error "Bad input data"
                     | i' ->
                         let trx, _, _ = dest_router.Router.trxs.(i') in
+                        dest_name ^"#"^ string_of_int i',
                         trx.out) in
-            let connected_devs =
-                List.map (fun name -> name, dev_of_receiver name) receivers in
-            Log.(log logger Info (lazy (Printf.sprintf2 "emit function for port %s to %a" (Ip.Addr.to_string port_ip) (List.print (fun oc (name, _) -> String.print oc name)) connected_devs))) ;
-            let emit bits =
-                List.iter (fun (name, dest_dev) ->
-                    Log.(log logger Info (lazy (Printf.sprintf "Writing packet to %s" name))) ;
-                    dest_dev.write bits
-                ) connected_devs in
-            (* make that [emit] function the emitter for port [i] of [emitter]: *)
-            port_trx =-> emit ;
-            (* Also connect all output from those hosts to the router input port: *)
-            List.iter (fun (_name, dest_dev) ->
-                dest_dev.set_read port_trx.out.write
-            ) connected_devs
+            (* Register all those connections: *)
+            List.iter (fun dest_name ->
+                let add_once connections k v =
+                    let vs = Hashtbl.find_all connections k in
+                    if not (List.mem v vs) then Hashtbl.add connections k v in
+                let dst_name, dst_dev = dev_of_receiver dest_name
+                and src_name = name ^"#"^ string_of_int i in
+                (* Record the device for this name: *)
+                add_once devices src_name port_trx.out ;
+                add_once devices dst_name dst_dev ;
+                add_once connections src_name dst_name ;
+                add_once connections dst_name src_name
+            ) receivers
         ) interfaces
     ) router_specs ;
+    (* Actually connect the devices: *)
+    Hashtbl.keys connections |>
+    Enum.uniq |> (* Filter out duplicate names *)
+    Enum.iter (fun src_name ->
+        let dests = Hashtbl.find_all connections src_name in
+        Log.(log logger Info (lazy (Printf.sprintf2 "%s --> %a" src_name (List.print String.print) dests))) ;
+        let emit bits =
+            List.iter (fun dst_name ->
+                Log.(log logger Info (lazy (Printf.sprintf "Writing packet to %s" dst_name))) ;
+                let dst_dev = Hashtbl.find devices dst_name in
+                dst_dev.write bits
+            ) dests in
+        (* make that [emit] function the emitter for port [i] of [emitter]: *)
+        let src_dev = Hashtbl.find devices src_name in
+        src_dev.set_read emit) ;
     (* Return the input device for the first port of the first router: *)
     let fst_router_name = List.hd router_specs |> fst in
     let fst_router = Hashtbl.find routers fst_router_name in
@@ -184,7 +202,7 @@ let main =
     let routers = ref [
         "router0", [| !in_mac, !in_cidr (* TODO: patcher apres *), [] ;
                       Eth.Addr.random (), "192.168.1.1/24", [ "192.168.1.3" ; "router1" ] |] ;
-        "router1", [| Eth.Addr.random (), "192.168.1.2/24", [ "router0" (* Do not repeat 192.168.1.3 here! *) ] ;
+        "router1", [| Eth.Addr.random (), "192.168.1.2/24", [ "router0" (* Do not repeat 192.168.1.3 here or it will be created twice! *) ] ;
                       Eth.Addr.random (), "192.168.2.1/24", [ "router2" ; "192.168.2.3" ] |] ;
         "router2", [| Eth.Addr.random (), "192.168.2.2/24", [ "router1" ] ;
                       Eth.Addr.random (), "192.168.3.1/24", [ "192.168.3.2" ; "192.168.3.3" ] |] ]
