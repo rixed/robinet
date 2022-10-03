@@ -307,6 +307,7 @@ struct
                 let route =
                     { iface_num = None ;
                       src_mask = None ;
+                      (* [of_netmask] will clear non masked bits: *)
                       dst_mask = Some (Ip.Cidr.of_netmask ip netmask) ;
                       ip_proto = None ;
                       src_port = None ;
@@ -320,8 +321,8 @@ struct
 
     (* [addrs] is an array (one entry for each port of the router) of list of
      * networks reachable via this port (with optional gateway for each of them).
-     * The router address on each port is taken to be the address of the first
-     * network with no gateway defined. *)
+     * The router address on each port is given by the subnet address itself
+     * (lan address must clear the non masked bits) *)
     let make_from_addrs ?notify_expiry addrs logger =
         let route_tbl = route_tbl_of_addrs addrs in
         let rec my_address n = function
@@ -341,8 +342,6 @@ struct
                 let gw = my_gateways [] ip_netmask_vias in
                 let addr = Ip.Addr.to_bitstring ip
                 and netmask = Ip.Addr.to_bitstring netmask in
-                (* TODO: Eth.TRX.make should not take a fixed gateway. Instead, it
-                 * should take a map from network to gateway *)
                 let eth = Eth.TRX.make ~gw mac Arp.HwProto.ip4 [ Eth.{ addr ; netmask } ] logger in
                 eth.Eth.TRX.trx, mac, ip
             ) addrs in
