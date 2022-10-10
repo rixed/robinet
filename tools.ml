@@ -41,6 +41,15 @@ let should_not_happen _ =
 let todo what =
     error ("I refuse to proceed without instructions for "^what)
 
+(* [jitter r v] returns a random value between v-r% and v+r%, where r is
+ * supposed to be a ratio from 0 to 1. *)
+let jitter r v =
+    v +. (Random.float 2. -. 1.) *. r *. abs_float v
+
+(*$Q jitter
+   Q.float (fun v -> let v' = jitter 0.1 v in abs_float (v'-.v) <= abs_float (v *. 0.1))
+ *)
+
 (* TODO: maintain a hash of error counts *)
 (* ou plutot, on prend un liste de string et on comptabilise dans un arbre *)
 let err str = Printf.fprintf stderr "ERROR: %s\n%!" str ; None

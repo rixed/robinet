@@ -236,7 +236,11 @@ struct
           mutable promisc : bitstring -> unit ;
           (* TODO: these two should be timeouted, requiring a clock *)
           arp_cache : Addr.t option BitHash.t ;     (* proto_addr -> hw_addr option (None when resolving) *)
-          delayed : bitstring BitHash.t }  (* dest_proto_addr -> msg *)
+          (* Hash of messages waiting for an ARP resolution.
+           * dest_proto_addr -> msg *)
+          postponed : bitstring BitHash.t ;
+          (* Optional average delay to add to transmissions: *)
+          delay : float option }
     and my_address =
         { addr : bitstring ; netmask : bitstring }
 
@@ -268,12 +272,18 @@ struct
     let send t proto dst bits =
         let pdu = Pdu.make proto t.src dst bits in
         Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: Emitting an Eth packet, proto %s, from %s to %s (content '%s')" (Arp.HwProto.to_string proto) (Addr.to_string t.src) (Addr.to_string dst) (hexstring_of_bitstring bits)))) ;
-        Clock.asap t.emit (Pdu.pack pdu)
+        let delay =
+            match proto, t.delay with
+            | p, Some d when p <> Arp.HwProto.arp ->
+                jitter 0.1 d
+            | _ ->
+                0. in
+        Clock.delay (Clock.Interval.o delay) t.emit (Pdu.pack pdu)
 
     let resolve_proto_addr t bits sender_proto_addr target_proto_addr =
-        (* Add the msg to delayed messages _before_ sending the query *)
+        (* Add the msg to postponed messages _before_ sending the query *)
         Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: Postponing a msg for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
-        BitHash.add t.delayed target_proto_addr bits ;
+        BitHash.add t.postponed target_proto_addr bits ;
         let request = Arp.Pdu.make_request Arp.HwType.eth t.proto (t.src :> bitstring) sender_proto_addr target_proto_addr in
         send t Arp.HwProto.arp Addr.broadcast (Arp.Pdu.pack request)
 
@@ -407,11 +417,11 @@ struct
                             (* Now that we may have gained knowledge, try to send the msg in waiting queue *)
                             (* TODO: timeout some? *)
                             Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...Do I have a msg waiting for '%s'?" (hexstring_of_bitstring arp.Arp.Pdu.sender_proto)))) ;
-                            while BitHash.mem t.delayed arp.Arp.Pdu.sender_proto do
+                            while BitHash.mem t.postponed arp.Arp.Pdu.sender_proto do
                                 Log.(log t.logger Debug (lazy (Printf.sprintf "Eth:...Yes!! Let's send it!"))) ;
-                                let msg = BitHash.find t.delayed arp.Arp.Pdu.sender_proto in
+                                let msg = BitHash.find t.postponed arp.Arp.Pdu.sender_proto in
                                 send t t.proto sender_hw msg ;
-                                BitHash.remove t.delayed arp.Arp.Pdu.sender_proto
+                                BitHash.remove t.postponed arp.Arp.Pdu.sender_proto
                             done
                         )
                     )
@@ -429,7 +439,7 @@ struct
      * @param proto the {!Arp.HwProto.t} we want to transmit/receive.
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
-    let make ?(mtu=1500) src ?(gw=[]) ?(promisc=ignore) proto my_addresses logger =
+    let make ?(mtu=1500) ?delay src ?(gw=[]) ?(promisc=ignore) proto my_addresses logger =
         Log.(log logger Debug (lazy (Printf.sprintf2 "Eth: Creating an eth TRX with addresses mac: %s and IP: %a"
             (Addr.to_string src)
             (List.print print_my_address) my_addresses))) ;
@@ -438,7 +448,8 @@ struct
                   recv = ignore_bits logger ;
                   mtu ; promisc ; my_addresses ;
                   arp_cache = BitHash.create 3 ;
-                  delayed = BitHash.create 3 } in
+                  postponed = BitHash.create 3 ;
+                  delay } in
         { trx = { ins = { write = tx t ;
                           set_read = fun f -> t.recv <- f } ;
                   out = { write = rx t ;
