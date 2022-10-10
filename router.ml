@@ -24,8 +24,11 @@ open Batteries
 open Bitstring
 open Tools
 
-(** the lowest port number used by the address translation *)
+(** The lowest port number used by the address translation *)
 let min_port = 1024
+
+(** How many bytes to consider when hashing the packet prefix for load-balancing *)
+let lb_prefix_length = ref 5
 
 (** Network Address Translation (N.A.T.) is the process of replacing on the fly non routable
  * addresses used within a LAN by a unique routable address, so that hosts from the LAN
@@ -220,7 +223,9 @@ struct
     type t = {          trxs : (trx * Eth.Addr.t * Ip.Addr.t) array ;
                    route_tbl : route list ;
                notify_expiry : bool ; (* whether to send ICMP expiry messages *)
-                      logger : Log.logger }  (* TODO: load_balancing flag *)
+                      logger : Log.logger ;
+              load_balancing : load_balancing }
+    and load_balancing = NoLoadBalancing | Random | PrefixHash
 
     let send_icmp_expiry t n ip =
         let icmp = Icmp.Pdu.make_ttl_expired_in_transit ip in
@@ -249,10 +254,9 @@ struct
               ) t.route_tbl with
         | [] ->
             Log.(log t.logger Debug (lazy "dropping packet since no route match"))
-        | r :: _ -> (* TODO: load balancing *)
-            if r.out_port = n then (
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Dropping packet since port dest (%d) = source" r.out_port))) ;
-            ) else (
+        | out_ports ->
+            (* Forward the packet to port [r]: *)
+            let forward r =
                 let forward bits =
                     let trx, _, _ = t.trxs.(r.out_port) in
                     Log.(log t.logger Debug (lazy (Printf.sprintf "forwarding packet to port %d" r.out_port))) ;
@@ -271,7 +275,25 @@ struct
                         forward bits
                 | None ->
                         forward bits
-            )
+            and lb_port = function
+                | NoLoadBalancing ->
+                    0
+                | Random ->
+                    Random.bits ()
+                | PrefixHash ->
+                    let bits =
+                        try takebytes !lb_prefix_length bits
+                        with Invalid_argument _ -> bits in
+                    do_sum bits
+            in
+            let rs = List.enum out_ports // (fun r -> r.out_port <> n) |> Array.of_enum in
+            let rs_len = Array.length rs in
+            if rs_len = 0 then
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Dropping packet since port dest (%d) = source" (List.at out_ports 0).out_port)))
+            else if rs_len = 1 then
+                forward rs.(0)
+            else
+                forward rs.(lb_port t.load_balancing mod rs_len)
 
     (** Change the emitter of port N. Note that the emitter may also be preset in the trx array given to [make]. *)
     let set_read n t f =
@@ -282,7 +304,7 @@ struct
     (* TODO: similarly, a write n b = t.trxs.(n).write b *)
 
     (** Build a [t] routing through these {!Tools.trx} according to the given routing table. *)
-    let make ?(notify_expiry=true) trxs route_tbl logger =
+    let make ?(notify_expiry=true) ?(load_balancing=NoLoadBalancing) trxs route_tbl logger =
         (* Check we route only from/to the given ports *)
         let max_used_port =
             List.fold_left (fun prev r ->
@@ -290,7 +312,7 @@ struct
                 max prev)
                 0 route_tbl in
         assert (max_used_port < Array.length trxs) ;
-        let t = { trxs ; route_tbl ; logger ; notify_expiry } in
+        let t = { trxs ; route_tbl ; logger ; notify_expiry ; load_balancing } in
         Array.iteri (fun i (trx, _, _) -> trx.ins.set_read (route i t)) trxs ;
         t
 
@@ -323,7 +345,7 @@ struct
      * networks reachable via this port (with optional gateway for each of them).
      * The router address on each port is given by the subnet address itself
      * (lan address must clear the non masked bits) *)
-    let make_from_addrs ?notify_expiry ?delay ?loss addrs logger =
+    let make_from_addrs ?notify_expiry ?delay ?loss ?load_balancing addrs logger =
         let route_tbl = route_tbl_of_addrs addrs in
         let rec my_address n = function
             | [] ->
@@ -345,7 +367,7 @@ struct
                 let eth = Eth.TRX.make ?delay ?loss ~gw mac Arp.HwProto.ip4 [ Eth.{ addr ; netmask } ] logger in
                 eth.Eth.TRX.trx, mac, ip
             ) addrs in
-        make ?notify_expiry trxs route_tbl logger
+        make ?notify_expiry ?load_balancing trxs route_tbl logger
 
     (*$R make_from_addrs
         (* Suppose we have a router for these 3 networks: *)
