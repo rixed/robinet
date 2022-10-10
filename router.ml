@@ -323,7 +323,7 @@ struct
      * networks reachable via this port (with optional gateway for each of them).
      * The router address on each port is given by the subnet address itself
      * (lan address must clear the non masked bits) *)
-    let make_from_addrs ?notify_expiry ?delay addrs logger =
+    let make_from_addrs ?notify_expiry ?delay ?loss addrs logger =
         let route_tbl = route_tbl_of_addrs addrs in
         let rec my_address n = function
             | [] ->
@@ -342,7 +342,7 @@ struct
                 let gw = my_gateways [] ip_netmask_vias in
                 let addr = Ip.Addr.to_bitstring ip
                 and netmask = Ip.Addr.to_bitstring netmask in
-                let eth = Eth.TRX.make ?delay ~gw mac Arp.HwProto.ip4 [ Eth.{ addr ; netmask } ] logger in
+                let eth = Eth.TRX.make ?delay ?loss ~gw mac Arp.HwProto.ip4 [ Eth.{ addr ; netmask } ] logger in
                 eth.Eth.TRX.trx, mac, ip
             ) addrs in
         make ?notify_expiry trxs route_tbl logger
@@ -413,7 +413,7 @@ end
  *                 |
  *            dhcpd/named (192.168.0.2)
  *)
-let make_gw ?delay ?(nb_max_cnxs=500) ?nameserver ?(name="gw") ?notify_expiry public_ip local_cidr =
+let make_gw ?delay ?loss ?(nb_max_cnxs=500) ?nameserver ?(name="gw") ?notify_expiry public_ip local_cidr =
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let hub = Hub.Repeater.make 3 (name^"/hub") in
@@ -426,7 +426,7 @@ let make_gw ?delay ?(nb_max_cnxs=500) ?nameserver ?(name="gw") ?notify_expiry pu
     Hub.Repeater.set_read 1 hub h.Host.dev.write ;
     h.Host.dev.set_read (Hub.Repeater.write 1 hub) ;
     (* Create and connect the first port of our router *)
-    let gw_eth = Eth.TRX.make ?delay gw_mac Arp.HwProto.ip4 [ Eth.{ addr = Ip.Addr.to_bitstring gw_ip ; netmask = Ip.Addr.to_bitstring netmask } ] h.Host.logger in
+    let gw_eth = Eth.TRX.make ?delay ?loss gw_mac Arp.HwProto.ip4 [ Eth.{ addr = Ip.Addr.to_bitstring gw_ip ; netmask = Ip.Addr.to_bitstring netmask } ] h.Host.logger in
     Hub.Repeater.set_read 2 hub gw_eth.Eth.TRX.trx.out.write ;
     gw_eth.Eth.TRX.trx.out.set_read (Hub.Repeater.write 2 hub) ;
     (* The second port of our router (facing internet) is the NAT *)

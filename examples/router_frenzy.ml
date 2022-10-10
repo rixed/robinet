@@ -50,7 +50,7 @@ let forward_traffic logger ifname input_dev =
  * otherwise the port is left unconnected.
  * Hosts must have been created beforehand with as many interfaces as
  * required. *)
-let make_router name logger interfaces router_specs router_delays =
+let make_router name logger interfaces router_specs delays losses =
     let addr_of_interface ?via cidr =
         (* [make_from_addrs] wants ip address, ip mask and MAC: *)
         match String.split ~by:"/" cidr with
@@ -108,12 +108,13 @@ let make_router name logger interfaces router_specs router_delays =
             ) [lan] peer_routers,
             mac
         ) interfaces in
-    let delay = List.assoc_opt name router_delays in
-    Router.make_from_addrs ?delay addrs logger
+    let delay = List.assoc_opt name delays
+    and loss = List.assoc_opt name losses in
+    Router.make_from_addrs ?delay ?loss addrs logger
 
 (* Build the network described in the [routers] hash and returns the device
  * representing the entry point of the network: *)
-let build_network logger router_specs router_delays =
+let build_network logger router_specs delays losses =
     ensure (router_specs <> []) "Invalid router specifications" ;
     let connections = Hashtbl.create 40 in
     let devices = Hashtbl.create 40 in
@@ -121,7 +122,7 @@ let build_network logger router_specs router_delays =
     let routers = Hashtbl.create 10 in
     List.iter (fun (name, interfaces) ->
         let logger = Log.make name 50 in
-        let router = make_router name logger interfaces router_specs router_delays in
+        let router = make_router name logger interfaces router_specs delays losses in
         Hashtbl.add routers name router
     ) router_specs ;
     (* Connect all routers together. *)
@@ -207,9 +208,8 @@ let main =
                       Eth.Addr.random (), "192.168.2.1/24", [ "router2" ; "192.168.2.3" ] |] ;
         "router2", [| Eth.Addr.random (), "192.168.2.2/24", [ "router1" ] ;
                       Eth.Addr.random (), "192.168.3.1/24", [ "192.168.3.2" ; "192.168.3.3" ] |] ]
-    and router_delays = ref [
-        "router1", 0.5
-    ]
+    and delays = ref [ "router1", 0.01 ]
+    and losses = ref [ "router2", 0.1 ]
     in
     Arg.parse [
         "-i", Arg.Set_string ifname,
@@ -219,6 +219,6 @@ let main =
     let logger = Log.make "routerz" 1000 in
     Log.console_lvl := Log.Debug ;
     Log.(log logger Info (lazy "Building network...")) ;
-    let input_dev = build_network logger !routers !router_delays in
+    let input_dev = build_network logger !routers !delays !losses in
     Log.(log logger Info (lazy "Forwarding traffic...")) ;
     forward_traffic logger !ifname input_dev

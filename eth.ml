@@ -240,7 +240,9 @@ struct
            * dest_proto_addr -> msg *)
           postponed : bitstring BitHash.t ;
           (* Optional average delay to add to transmissions: *)
-          delay : float option }
+          delay : float option ;
+          (* Optional packet loss ratio: *)
+          loss : float option }
     and my_address =
         { addr : bitstring ; netmask : bitstring }
 
@@ -269,7 +271,7 @@ struct
 
     (** Low level send function. Takes a {!Arp.HwProto.t} since it's used both
      * for the user payload protocol and ARP protocol. *)
-    let send t proto dst bits =
+    let really_send t proto dst bits =
         let pdu = Pdu.make proto t.src dst bits in
         Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: Emitting an Eth packet, proto %s, from %s to %s (content '%s')" (Arp.HwProto.to_string proto) (Addr.to_string t.src) (Addr.to_string dst) (hexstring_of_bitstring bits)))) ;
         let delay =
@@ -279,6 +281,13 @@ struct
             | _ ->
                 0. in
         Clock.delay (Clock.Interval.o delay) t.emit (Pdu.pack pdu)
+
+    let send t proto dst bits =
+        let loss = t.loss |? 0. in
+        if t.proto = Arp.HwProto.arp || loss = 0. || Random.float 1. >= loss then
+            really_send t proto dst bits
+        else
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Eth: Dropping packet of proto %s from %s" (Arp.HwProto.to_string proto) (Addr.to_string t.src))))
 
     let resolve_proto_addr t bits sender_proto_addr target_proto_addr =
         (* Add the msg to postponed messages _before_ sending the query *)
@@ -439,7 +448,7 @@ struct
      * @param proto the {!Arp.HwProto.t} we want to transmit/receive.
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
-    let make ?(mtu=1500) ?delay src ?(gw=[]) ?(promisc=ignore) proto my_addresses logger =
+    let make ?(mtu=1500) ?delay ?loss src ?(gw=[]) ?(promisc=ignore) proto my_addresses logger =
         Log.(log logger Debug (lazy (Printf.sprintf2 "Eth: Creating an eth TRX with addresses mac: %s and IP: %a"
             (Addr.to_string src)
             (List.print print_my_address) my_addresses))) ;
@@ -449,7 +458,8 @@ struct
                   mtu ; promisc ; my_addresses ;
                   arp_cache = BitHash.create 3 ;
                   postponed = BitHash.create 3 ;
-                  delay } in
+                  delay ;
+                  loss } in
         { trx = { ins = { write = tx t ;
                           set_read = fun f -> t.recv <- f } ;
                   out = { write = rx t ;
