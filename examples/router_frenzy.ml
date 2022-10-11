@@ -63,7 +63,8 @@ let make_router name logger interfaces router_specs delays losses lb_configs =
             Ip.Cidr.to_netmask cidr,
             via in
     let addrs =
-        Array.map (fun (mac, lan_cidr, peer_routers) ->
+        List.enum interfaces |>
+        Enum.map (fun (mac, lan_cidr, peer_routers) ->
             let lan = addr_of_interface lan_cidr in
             (* Then for each peer routers, add all reachable networks from them with
              * that peer as a gateway: *)
@@ -71,17 +72,17 @@ let make_router name logger interfaces router_specs delays losses lb_configs =
                 (* For all ports but the one with the same subnet as
                  * [lan_cidr], add a route via this router: *)
                 let lan_cidr' = Ip.Cidr.of_string lan_cidr in
-                Array.fold_left (fun res (_mac, cidr, peer_routers) ->
+                List.fold_left (fun res (_mac, cidr, peer_routers) ->
                     let cidr' = Ip.Cidr.of_string cidr in
                     if cidr' = lan_cidr' then res else
                     let res = addr_of_interface ~via cidr :: res in
                     List.fold_left (fun res peer_router ->
-                        match List.assoc peer_router router_specs with
+                        match Hashtbl.find router_specs peer_router with
                         | exception Not_found ->
                             (* This must be a host then *)
                             res
-                        | interfaces ->
-                            find_routes res cidr via interfaces
+                        | ports ->
+                            find_routes res cidr via ports
                     ) res peer_routers
                 ) res interfaces in
             let lan_cidr' = Ip.Cidr.of_string lan_cidr in
@@ -89,25 +90,26 @@ let make_router name logger interfaces router_specs delays losses lb_configs =
                 (* First of all, the gateway to use is always going to be
                  * the port of [peer_router] on the common subnet (the one
                  * we are connected to): *)
-                match List.assoc peer_router router_specs with
+                match Hashtbl.find router_specs peer_router with
                 | exception Not_found ->
                     (* This must be a host then *)
                     res
-                | interfaces ->
+                | ports ->
                     (match
-                        Array.find_map (fun (mac, cidr, _) ->
+                        List.find_map (fun (mac, cidr, _) ->
                                           let cidr' = Ip.Cidr.of_string cidr in
                                           if cidr' = lan_cidr' then Some mac else None
-                        ) interfaces
+                        ) ports
                     with
-                    | None ->
+                    | exception Not_found ->
                         failwith "Bad input: no common subnet between connected routers"
-                    | Some gw ->
+                    | gw ->
                         let via = Eth.Mac gw in
-                        find_routes res lan_cidr via interfaces)
+                        find_routes res lan_cidr via ports)
             ) [lan] peer_routers,
             mac
-        ) interfaces in
+        ) |>
+        Array.of_enum  in
     let delay = List.assoc_opt name delays
     and loss = List.assoc_opt name losses
     and load_balancing = List.assoc_opt name lb_configs in
@@ -115,21 +117,20 @@ let make_router name logger interfaces router_specs delays losses lb_configs =
 
 (* Build the network described in the [routers] hash and returns the device
  * representing the entry point of the network: *)
-let build_network logger router_specs delays losses lb_configs =
-    ensure (router_specs <> []) "Invalid router specifications" ;
+let build_network logger router_specs fst_router_name delays losses lb_configs =
+    ensure (Hashtbl.length router_specs > 0) "Invalid router specifications" ;
     let connections = Hashtbl.create 40 in
     let devices = Hashtbl.create 40 in
     (* Build all routers *)
-    let routers = Hashtbl.create 10 in
-    List.iter (fun (name, interfaces) ->
-        let logger = Log.make name 50 in
-        let router = make_router name logger interfaces router_specs delays losses lb_configs in
-        Hashtbl.add routers name router
-    ) router_specs ;
+    let routers =
+        Hashtbl.map (fun name ports ->
+            let logger = Log.make name 50 in
+            make_router name logger ports router_specs delays losses lb_configs
+        ) router_specs in
     (* Connect all routers together. *)
-    List.iter (fun (name, interfaces) ->
+    Hashtbl.iter (fun name ports ->
         let emitter = Hashtbl.find routers name in
-        Array.iteri (fun i (_mac, cidr, receivers) ->
+        List.iteri (fun i (_mac, cidr, receivers) ->
             (* Build an emitting function for this port that just writes into
              * each of the connected routers/hosts: *)
             let cidr = Ip.Cidr.of_string cidr in
@@ -148,15 +149,15 @@ let build_network logger router_specs delays losses lb_configs =
                 | dest_router ->
                     (* For each of connected routers, look for their corresponding
                      * interface by subnet name: *)
-                    let dest_ports = List.assoc dest_name router_specs in
+                    let dest_ports = Hashtbl.find router_specs dest_name in
                     (match
-                        Array.findi (fun (_, cidr', _) ->
+                        List.findi (fun _i (_, cidr', _) ->
                             let cidr' = Ip.Cidr.of_string cidr' in
                             cidr' = cidr
                         ) dest_ports with
                     | exception Not_found ->
                         error "Bad input data"
-                    | i' ->
+                    | i', _ ->
                         let trx, _, _ = dest_router.Router.trxs.(i') in
                         dest_name ^"#"^ string_of_int i',
                         trx.out) in
@@ -173,7 +174,7 @@ let build_network logger router_specs delays losses lb_configs =
                 add_once connections src_name dst_name ;
                 add_once connections dst_name src_name
             ) receivers
-        ) interfaces
+        ) ports
     ) router_specs ;
     (* Actually connect the devices: *)
     Hashtbl.keys connections |>
@@ -191,7 +192,6 @@ let build_network logger router_specs delays losses lb_configs =
         let src_dev = Hashtbl.find devices src_name in
         src_dev.set_read emit) ;
     (* Return the input device for the first port of the first router: *)
-    let fst_router_name = List.hd router_specs |> fst in
     let fst_router = Hashtbl.find routers fst_router_name in
     let fst_trx, _, _ = fst_router.Router.trxs.(0) in
     fst_trx.out
@@ -200,27 +200,127 @@ let build_network logger router_specs delays losses lb_configs =
  * addresses of the routers will later come from the configuration file: *)
 let main =
     let ifname = ref "veth1" in
-    let in_cidr = ref "192.168.0.1/24" in
-    let in_mac = ref (*(Eth.Addr.random ()) in*) (Eth.Addr.of_iface !ifname) in
-    let routers = ref [
-        "router0", [| !in_mac, !in_cidr (* TODO: patcher apres *), [] ;
-                      Eth.Addr.random (), "192.168.1.1/24", [ "192.168.1.3" ; "router1" ] |] ;
-        "router1", [| Eth.Addr.random (), "192.168.1.2/24", [ "router0" (* Do not repeat 192.168.1.3 here or it will be created twice! *) ] ;
-                      Eth.Addr.random (), "192.168.2.1/24", [ "router2" ; "192.168.2.3" ] |] ;
-        "router2", [| Eth.Addr.random (), "192.168.2.2/24", [ "router1" ] ;
-                      Eth.Addr.random (), "192.168.3.1/24", [ "192.168.3.2" ; "192.168.3.3" ] |] ]
-    and delays = ref [ "router1", 0.01 ]
-    and losses = ref [ "router2", 0.1 ]
-    and lb_configs = ref [ "router0", Router.PrefixHash ]
+    let subnet_seq = ref 0 in
+    let subnet_size = Hashtbl.create 10 in  (* seq -> num of IPs *)
+    let input_subnet = ref "" in
+    let routers = Hashtbl.create 10
+    and delays = ref []
+    and losses = ref []
+    and lb_configs = ref []
+    and fst_router_name = ref ""
+    and lst_router_name = ref ""
     in
+    let next_ip_of_subnet s =
+        let n = Hashtbl.find subnet_size s + 1 in
+        Hashtbl.replace subnet_size s n ;
+        "192.168."^ string_of_int s ^"."^ string_of_int n in
+    let next_cidr_of_subnet s =
+        next_ip_of_subnet s ^"/24" in
+    let next_subnet () =
+        let s = !subnet_seq in
+        incr subnet_seq ;
+        Hashtbl.add subnet_size s 0 ;
+        s in
+    let set_subnet_seq n =
+        if Hashtbl.length routers <> 0 then
+            failwith "-s option must come before -l options!" ;
+        subnet_seq := n ;
+        input_subnet := next_cidr_of_subnet (next_subnet ()) in
+    let add_port router_name cidr targets =
+        match Hashtbl.find routers router_name with
+        | exception Not_found ->
+            Hashtbl.add routers router_name [ Eth.Addr.random (), cidr, targets ]
+        | ports ->
+            Hashtbl.replace routers router_name
+                (ports @ [ Eth.Addr.random (), cidr, targets ]) in
+    let add_router s =
+        if !input_subnet = "" then set_subnet_seq 0 ;
+        match String.split ~by:":" s with
+        | exception Not_found ->
+            failwith "should be: -l R1:R2"
+        | r1, r2 ->
+            let s = next_subnet () in
+            add_port r1 (next_cidr_of_subnet s) [ r2 ] ;
+            add_port r2 (next_cidr_of_subnet s) [ r1 ] in
+    let print_port oc (mac, net, targets) =
+        Printf.fprintf oc "eth:%s, net:%s, %a"
+            (Eth.Addr.to_string mac)
+            net
+            (List.print String.print) targets in
+    let add_delay s =
+        match String.split ~by:":" s with
+        | exception Not_found ->
+            failwith "should be: -d ROUTER:DELAY"
+        | r, d ->
+            delays := (r, float_of_string d) :: !delays in
+    let add_loss s =
+        match String.split ~by:":" s with
+        | exception Not_found ->
+            failwith "should be: -d ROUTER:LOSS"
+        | r, l ->
+            let l = float_of_string l in
+            if l < 0. || l > 1. then
+                failwith "loss should be between 0 and 1" ;
+            losses := (r, l) :: !losses in
+    let add_lb lb s =
+        lb_configs := (s, lb) :: !lb_configs in
     Arg.parse [
         "-i", Arg.Set_string ifname,
-              "Input interface name (optional, default br0)" ]
+                "Input interface name (optional, default br0)" ;
+        "-s", Arg.Int set_subnet_seq,
+                "Starting number for 192.168.X.0 subnet \
+                 (must come before -l options!)" ;
+        "-l", Arg.String add_router,
+                "Add a link between two routers (first router mentioned is \
+                 the input router and last the exit router)" ;
+        "-first", Arg.Set_string fst_router_name,
+                    "Name of the input router" ;
+        "-last", Arg.Set_string lst_router_name,
+                   "Name of the last router before the target" ;
+        "-delay", Arg.String add_delay,
+                    "Set delay for specified router" ;
+        "-loss", Arg.String add_loss,
+                   "Set loss for specified router" ;
+        "-lb-random", Arg.String (add_lb Router.Random),
+                        "configure load balancer for this router \
+                         (random port method)" ;
+        "-lb-prefix", Arg.String (add_lb Router.PrefixHash),
+                        "configure load balancer for this router \
+                         (hash of prefix method)" ]
         (fun _ -> raise (Arg.Bad "Unknown parameter"))
         "Hide a host behind routers" ;
+    if Hashtbl.length routers = 0 then (
+        Printf.printf "Example:\n\
+            router_frenzy -l router0:router1 -l router1:router2 -first router0 -last router2\n\n" ;
+        exit 0) ;
+    (* Add a port for entry, with input mac address. Must be the first port
+     * of that router: *)
+    if !fst_router_name = "" then
+        failwith "Must specify the name of the input router" ;
+    (match Hashtbl.find routers !fst_router_name with
+    | exception Not_found ->
+        failwith "Cannot find first router in the specifications"
+    | [] ->
+        assert false (* because we push at least one port per router *)
+    | ports ->
+        let ports = (Eth.Addr.of_iface !ifname, !input_subnet, []) :: ports in
+        Hashtbl.replace routers !fst_router_name ports) ;
+    (* Add target: *)
+    if !lst_router_name = "" then
+        failwith "Must set name of last router" ;
+    if not (Hashtbl.mem routers !lst_router_name) then
+        failwith "Cannot find last router in the specifications" ;
+    let s = next_subnet () in
+    let cidr = next_cidr_of_subnet s in
+    let targets = [ next_ip_of_subnet s ] in
+    add_port !lst_router_name cidr targets ;
+    (* Start the simulation *)
     let logger = Log.make "routerz" 1000 in
     Log.console_lvl := Log.Debug ;
-    Log.(log logger Info (lazy "Building network...")) ;
-    let input_dev = build_network logger !routers !delays !losses !lb_configs in
+    Log.(log logger Info (lazy
+        (Printf.sprintf2 "Building network with:\n%a\n"
+            (Hashtbl.print String.print (List.print print_port)) routers))) ;
+    let input_dev =
+        build_network logger routers !fst_router_name !delays !losses !lb_configs in
     Log.(log logger Info (lazy "Forwarding traffic...")) ;
     forward_traffic logger !ifname input_dev

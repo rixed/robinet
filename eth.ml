@@ -151,6 +151,10 @@ let gw_addr_of_string str =
     try Mac (Addr.of_string str)
     with _ -> IPv4 (Ip.Addr.of_string str)
 
+(** And print. *)
+let gw_addr_print oc a =
+    String.print oc (string_of_gw_addr a)
+
 (** {2 Ethernet frames} *)
 
 (** Pack/Unpack an Ethernet frame.  *)

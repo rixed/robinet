@@ -204,6 +204,14 @@ struct
                     out_port : int ;                (** Output port *)
                          via : Eth.gw_addr option } (** Optional gateway *)
 
+    let print_route oc r =
+        Printf.fprintf oc "in_port:%a, src_mask:%a, dst_mask:%a -> out_port:%d, via:%a"
+            (Option.print Int.print) r.iface_num
+            (Option.print Ip.Cidr.printf) r.src_mask
+            (Option.print Ip.Cidr.printf) r.dst_mask
+            r.out_port
+            (Option.print Eth.gw_addr_print) r.via
+
     (** Test an incoming packet against a route. *)
     let test_route route ifn src_opt dst_opt proto_opt src_port_opt dst_port_opt =
         (* If the route test is set, then the value is required. *)
@@ -305,6 +313,10 @@ struct
 
     (** Build a [t] routing through these {!Tools.trx} according to the given routing table. *)
     let make ?(notify_expiry=true) ?(load_balancing=NoLoadBalancing) trxs route_tbl logger =
+        (* Display the routing table (debug) *)
+        Log.(log logger Debug (lazy
+            (Printf.sprintf2 "Creating a router with routing table %a"
+                (List.print print_route) route_tbl))) ;
         (* Check we route only from/to the given ports *)
         let max_used_port =
             List.fold_left (fun prev r ->
