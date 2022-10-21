@@ -230,18 +230,19 @@ struct
     (** A router is an array of trxs and a route table *)
     type t = {          trxs : (trx * Eth.Addr.t * Ip.Addr.t) array ;
                    route_tbl : route list ;
-               notify_expiry : bool ; (* whether to send ICMP expiry messages *)
+               (* whether to send ICMP expiry messages, after which delay *)
+               notify_expiry : float option ;
                       logger : Log.logger ;
               load_balancing : load_balancing }
     and load_balancing = NoLoadBalancing | Random | PrefixHash
 
-    let send_icmp_expiry t n ip =
+    let send_icmp_expiry t n ip delay =
         let icmp = Icmp.Pdu.make_ttl_expired_in_transit ip in
         let ip_pld = Icmp.Pdu.pack icmp in
         let trx, _, ip_src = t.trxs.(n) in
         let ip_pkt = Ip.Pdu.make Ip.Proto.icmp ip_src ip.Ip.Pdu.src ip_pld in
         let bits = Ip.Pdu.pack ip_pkt in
-        tx trx bits
+        Clock.delay (Clock.Interval.o delay) (tx trx) bits
 
     (* The [route] function receives the IP packets from the Eth trx. The integer
      * [n] is the input interface number. *)
@@ -273,9 +274,11 @@ struct
                 match ttl_opt with
                 | Some (0 | 1) ->
                         Log.(log t.logger Debug (lazy (Printf.sprintf "expiring packet from %d" n))) ;
-                        if t.notify_expiry then
+                        Option.may (fun d ->
+                            let delay = jitter 0.1 d in
                             let ip = Option.get ip_opt in
-                            send_icmp_expiry t n ip
+                            send_icmp_expiry t n ip delay
+                        ) t.notify_expiry
                 | Some ttl ->
                         let ip = Option.get ip_opt in
                         let ip = Ip.Pdu.{ ip with ttl = ttl - 1 } in
@@ -312,7 +315,7 @@ struct
     (* TODO: similarly, a write n b = t.trxs.(n).write b *)
 
     (** Build a [t] routing through these {!Tools.trx} according to the given routing table. *)
-    let make ?(notify_expiry=true) ?(load_balancing=NoLoadBalancing) trxs route_tbl logger =
+    let make ?notify_expiry ?(load_balancing=NoLoadBalancing) trxs route_tbl logger =
         (* Display the routing table (debug) *)
         Log.(log logger Debug (lazy
             (Printf.sprintf2 "Creating a router with routing table %a"

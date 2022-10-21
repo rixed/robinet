@@ -50,7 +50,7 @@ let forward_traffic logger ifname input_dev =
  * otherwise the port is left unconnected.
  * Hosts must have been created beforehand with as many interfaces as
  * required. *)
-let make_router name logger interfaces router_specs delays losses lb_configs =
+let make_router name logger interfaces router_specs delays losses lb_configs icmp_delays =
     let addr_of_interface ?via cidr =
         (* [make_from_addrs] wants ip address, ip mask and MAC: *)
         match String.split ~by:"/" cidr with
@@ -112,12 +112,13 @@ let make_router name logger interfaces router_specs delays losses lb_configs =
         Array.of_enum  in
     let delay = List.assoc_opt name delays
     and loss = List.assoc_opt name losses
-    and load_balancing = List.assoc_opt name lb_configs in
-    Router.make_from_addrs ?delay ?loss ?load_balancing addrs logger
+    and load_balancing = List.assoc_opt name lb_configs
+    and notify_expiry = List.assoc_opt name icmp_delays |? 0. in
+    Router.make_from_addrs ~notify_expiry ?delay ?loss ?load_balancing addrs logger
 
 (* Build the network described in the [routers] hash and returns the device
  * representing the entry point of the network: *)
-let build_network logger router_specs fst_router_name delays losses lb_configs =
+let build_network logger router_specs fst_router_name delays losses lb_configs icmp_delays =
     ensure (Hashtbl.length router_specs > 0) "Invalid router specifications" ;
     let connections = Hashtbl.create 40 in
     let devices = Hashtbl.create 40 in
@@ -125,7 +126,7 @@ let build_network logger router_specs fst_router_name delays losses lb_configs =
     let routers =
         Hashtbl.map (fun name ports ->
             let logger = Log.make name 50 in
-            make_router name logger ports router_specs delays losses lb_configs
+            make_router name logger ports router_specs delays losses lb_configs icmp_delays
         ) router_specs in
     (* Connect all routers together. *)
     Hashtbl.iter (fun name ports ->
@@ -207,6 +208,7 @@ let main =
     and delays = ref []
     and losses = ref []
     and lb_configs = ref []
+    and icmp_delays = ref []
     and fst_router_name = ref ""
     and lst_router_name = ref ""
     and targets = ref []
@@ -248,21 +250,23 @@ let main =
             (Eth.Addr.to_string mac)
             net
             (List.print String.print) targets in
-    let add_delay s =
+    let add_param ?(is_rate=false) opt_name param_name lst s =
         match String.split ~by:":" s with
         | exception Not_found ->
-            failwith "should be: -d ROUTER:DELAY"
+            failwith ("should be: -"^ opt_name ^" ROUTER:"^ param_name)
         | r, d ->
-            delays := (r, float_of_string d) :: !delays in
+            let d = float_of_string d in
+            if is_rate && (d < 0. || d > 1.) then
+                failwith (opt_name ^" should be between 0 and 1")
+            else if d < 0. then
+                failwith (opt_name ^" should be greater then 0") ;
+            lst := (r, d) :: !lst in
+    let add_delay s =
+        add_param "delay" "DELAY" delays s in
     let add_loss s =
-        match String.split ~by:":" s with
-        | exception Not_found ->
-            failwith "should be: -d ROUTER:LOSS"
-        | r, l ->
-            let l = float_of_string l in
-            if l < 0. || l > 1. then
-                failwith "loss should be between 0 and 1" ;
-            losses := (r, l) :: !losses in
+        add_param ~is_rate:true "loss" "LOSS" losses s in
+    let add_icmp_delay s =
+        add_param "icmp-delay" "DELAY" icmp_delays s in
     let add_lb lb s =
         lb_configs := (s, lb) :: !lb_configs in
     let add_target s =
@@ -284,6 +288,8 @@ let main =
                   "Set delay for specified router" ;
         "-loss", Arg.String add_loss,
                  "Set loss for specified router" ;
+        "-icmp", Arg.String add_icmp_delay,
+                 "Set ICMP error delay" ;
         "-lb-random", Arg.String (add_lb Router.Random),
                       "Configure load balancer for this router \
                        (random port method)" ;
@@ -335,6 +341,18 @@ let main =
             [ next_ip_of_subnet s ], cidr
         ) in
     add_port !lst_router_name target_cidr targets ;
+    (* Print the configuration: *)
+    Hashtbl.iter (fun name ports ->
+        Printf.printf "Router %s has IP %a\n"
+            name
+            (List.print ~first:"" ~last:"" ~sep:", "
+                (fun oc (_mac, net, _targets) ->
+                    String.print oc net)) ports
+    ) routers ;
+    List.iter (fun target ->
+        Printf.printf "Target IP is %s\n"
+            target
+    ) targets ;
     (* Start the simulation *)
     let logger = Log.make "routerz" 1000 in
     Log.console_lvl := Log.Debug ;
@@ -344,6 +362,6 @@ let main =
             (Hashtbl.print String.print (List.print print_port)) routers
             (List.print String.print) targets))) ;
     let input_dev =
-        build_network logger routers !fst_router_name !delays !losses !lb_configs in
-    Log.(log logger Info (lazy "Forwarding traffic...")) ;
+        build_network logger routers !fst_router_name !delays !losses !lb_configs !icmp_delays in
+    Printf.printf "Forwarding traffic...\n" ;
     forward_traffic logger !ifname input_dev
