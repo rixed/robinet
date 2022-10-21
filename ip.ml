@@ -285,6 +285,14 @@ module Cidr = struct
       false (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.17"))
      *)
 
+    let width (t : t) =
+        let _, width = (t :> Addr.t * int) in
+        width
+
+    let enlarge (t : t) n =
+        let net, width = (t :> Addr.t * int) in
+        o (net, width + n)
+
     let to_enum (t : t) =
         let net, width = (t :> Addr.t * int) in
         let net = Addr.to_bitstring net in
@@ -367,6 +375,25 @@ module Cidr = struct
     (*$= to_netmask
       "255.255.255.0" (Ip.Addr.to_string (to_netmask (of_string "192.168.0.0/24")))
      *)
+
+    (* Returns the smallest CIDR encompassing all passed IP addresses *)
+    let smallest e =
+        let ip_n =
+            Enum.fold (fun ip_n ip' ->
+                let ip' = Addr.to_bitstring ip' in
+                match ip_n with
+                | None ->
+                    Some (ip', 32)
+                | Some (ip, n) ->
+                    let n' = bitstring_common_prefix_length ip ip' in
+                    Some (ip, min n n')
+            ) None e in
+        match ip_n with
+        | None ->
+            invalid_arg "smallest"
+        | Some (ip, n) ->
+            let ip = Addr.higher_bits (Addr.of_bitstring ip) n in
+            o (ip, n)
 
     (*$>*)
 end

@@ -209,6 +209,7 @@ let main =
     and lb_configs = ref []
     and fst_router_name = ref ""
     and lst_router_name = ref ""
+    and targets = ref []
     in
     let next_ip_of_subnet s =
         let n = Hashtbl.find subnet_size s + 1 in
@@ -264,29 +265,34 @@ let main =
             losses := (r, l) :: !losses in
     let add_lb lb s =
         lb_configs := (s, lb) :: !lb_configs in
+    let add_target s =
+        targets := s :: !targets in
     Arg.parse [
         "-i", Arg.Set_string ifname,
-                "Input interface name (optional, default br0)" ;
+              "Input interface name (optional, default br0)" ;
         "-s", Arg.Int set_subnet_seq,
-                "Starting number for 192.168.X.0 subnet \
-                 (must come before -l options!)" ;
+              "Starting number for 192.168.X.0 subnet \
+               (must come before -l options!)" ;
         "-l", Arg.String add_router,
-                "Add a link between two routers (first router mentioned is \
-                 the input router and last the exit router)" ;
+              "Add a link between two routers (first router mentioned is \
+               the input router and last the exit router)" ;
         "-first", Arg.Set_string fst_router_name,
-                    "Name of the input router" ;
+                  "Name of the input router" ;
         "-last", Arg.Set_string lst_router_name,
-                   "Name of the last router before the target" ;
+                 "Name of the last router before the target" ;
         "-delay", Arg.String add_delay,
-                    "Set delay for specified router" ;
+                  "Set delay for specified router" ;
         "-loss", Arg.String add_loss,
-                   "Set loss for specified router" ;
+                 "Set loss for specified router" ;
         "-lb-random", Arg.String (add_lb Router.Random),
-                        "configure load balancer for this router \
-                         (random port method)" ;
+                      "Configure load balancer for this router \
+                       (random port method)" ;
         "-lb-prefix", Arg.String (add_lb Router.PrefixHash),
-                        "configure load balancer for this router \
-                         (hash of prefix method)" ]
+                      "Configure load balancer for this router \
+                       (hash of prefix method)" ;
+        "-target", Arg.String add_target,
+                   "Attach this target to the last router \
+                    (random single target by default)" ]
         (fun _ -> raise (Arg.Bad "Unknown parameter"))
         "Hide a host behind routers" ;
     if Hashtbl.length routers = 0 then (
@@ -310,16 +316,33 @@ let main =
         failwith "Must set name of last router" ;
     if not (Hashtbl.mem routers !lst_router_name) then
         failwith "Cannot find last router in the specifications" ;
-    let s = next_subnet () in
-    let cidr = next_cidr_of_subnet s in
-    let targets = [ next_ip_of_subnet s ] in
-    add_port !lst_router_name cidr targets ;
+    let targets, target_cidr =
+        if !targets <> [] then (
+            let target_ips = List.map Ip.Addr.of_string !targets in
+            let cidr = Ip.Cidr.smallest (List.enum target_ips) in
+            (* We need an IP for the router itself on that CIDR: *)
+            let cidr = Ip.Cidr.enlarge cidr 1 in
+            let next_ip =
+                Ip.Cidr.to_enum cidr |>
+                Enum.find (fun ip -> not (List.mem ip target_ips)) in
+            let cidr = Ip.Addr.to_string next_ip ^"/"^
+                       string_of_int (Ip.Cidr.width cidr) in
+            !targets, cidr
+        ) else (
+            (* Random target *)
+            let s = next_subnet () in
+            let cidr = next_cidr_of_subnet s in
+            [ next_ip_of_subnet s ], cidr
+        ) in
+    add_port !lst_router_name target_cidr targets ;
     (* Start the simulation *)
     let logger = Log.make "routerz" 1000 in
     Log.console_lvl := Log.Debug ;
     Log.(log logger Info (lazy
-        (Printf.sprintf2 "Building network with:\n%a\n"
-            (Hashtbl.print String.print (List.print print_port)) routers))) ;
+        (Printf.sprintf2 "Building network with:\n%a\n\
+                          Try to hit targets:\n%a\n"
+            (Hashtbl.print String.print (List.print print_port)) routers
+            (List.print String.print) targets))) ;
     let input_dev =
         build_network logger routers !fst_router_name !delays !losses !lb_configs in
     Log.(log logger Info (lazy "Forwarding traffic...")) ;

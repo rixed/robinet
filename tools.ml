@@ -130,6 +130,30 @@ let hexstring_of_bitstring_abbrev bs =
      (hexstring_of_bitstring_abbrev (bitstring_of_string "abcdefghi")) "61 62 63 64 65 66 67..."
  *)
 
+(* Starting comparing from high bits: *)
+let bitstring_common_prefix_length bs1 bs2 =
+    let rec loop n =
+        try
+            if Bitstring.is_set bs1 n = Bitstring.is_set bs2 n then
+                loop (n + 1)
+            else
+                n
+        with Invalid_argument _ ->
+            n
+    in
+    loop 0
+
+(*$= bitstring_common_prefix_length & ~printer:string_of_int
+  3 (bitstring_common_prefix_length (bitstring_of_int 0x8000_0000) \
+                                    (bitstring_of_int 0x9000_0000))
+  4 (bitstring_common_prefix_length (bitstring_of_int 0x8000_0000) \
+                                    (bitstring_of_int 0x8800_0000))
+  8 (bitstring_common_prefix_length (bitstring_of_int 0x8000_0000) \
+                                    (bitstring_of_int 0x8080_0000))
+  8 (bitstring_common_prefix_length (bitstring_of_int 0x8000_0000) \
+                                    (bitstring_of_int 0x80))
+ *)
+
 let printable str =
     let is_printable c =
         Char.is_latin1 c || Char.is_digit c || Char.is_symbol c || c = ' ' in
