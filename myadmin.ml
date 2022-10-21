@@ -58,7 +58,7 @@ let rec report_thread period =
     report_thread period
 
 let basename s =
-    try snd (String.rsplit s "/") with Not_found -> s
+    try snd (String.rsplit ~by:"/" s) with Not_found -> s
 
 (* Must be placed within a FORM *)
 let print_tree vars oc tree =

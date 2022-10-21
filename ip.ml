@@ -229,7 +229,7 @@ module Cidr = struct
 
     let of_string str =
         let ip_str, width_str =
-            try String.split str "/"
+            try String.split ~by:"/" str
             with Not_found -> error (Printf.sprintf "not a CIDR: %s" str) in
         let ip, n = Addr.of_string ip_str, Int.of_string width_str in
         (* mask off unsignificant bits of IP *)

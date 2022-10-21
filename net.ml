@@ -154,7 +154,7 @@ let of_csv_file ic name =
         ) in
     Enum.iter
         (fun str ->
-            let t, rest = String.split str "," in
+            let t, rest = String.split ~by:"," str in
             make_thing t rest)
         (BatIO.lines_of ic) ;
     make name !nodes !cables
