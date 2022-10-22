@@ -62,54 +62,87 @@ let make_router name logger interfaces router_specs delays losses lb_configs icm
             my_ip,
             Ip.Cidr.to_netmask cidr,
             via in
-    let addrs =
-        List.enum interfaces |>
-        Enum.map (fun (mac, lan_cidr, peer_routers) ->
-            let lan = addr_of_interface lan_cidr in
-            (* Then for each peer routers, add all reachable networks from them with
-             * that peer as a gateway: *)
-            let rec find_routes res lan_cidr via interfaces =
-                (* For all ports but the one with the same subnet as
-                 * [lan_cidr], add a route via this router: *)
-                let lan_cidr' = Ip.Cidr.of_string lan_cidr in
-                List.fold_left (fun res (_mac, cidr, peer_routers) ->
-                    let cidr' = Ip.Cidr.of_string cidr in
-                    if cidr' = lan_cidr' then res else
-                    let res = addr_of_interface ~via cidr :: res in
-                    List.fold_left (fun res peer_router ->
-                        match Hashtbl.find router_specs peer_router with
-                        | exception Not_found ->
-                            (* This must be a host then *)
-                            res
-                        | ports ->
-                            find_routes res cidr via ports
-                    ) res peer_routers
-                ) res interfaces in
+    (* Store all routes in a hash indexed by destination CIDR (as a string), with
+     * values = the output MAC (aka port of that router, the depth of that route,
+     * then the route itself.
+     * Later this hash is going to be converted into the array of lists as required
+     * by [Router.make_from_addrs]. *)
+    let tbl = Hashtbl.create 10 in
+    List.iter (fun (mac, lan_cidr, peer_routers) ->
+        let depth = 1 in
+        let lan_cidr' = Ip.Cidr.of_string lan_cidr in
+        Hashtbl.replace tbl lan_cidr' (mac, depth, addr_of_interface lan_cidr) ;
+        (* Then for each peer routers, add all reachable networks from them with
+         * that peer as a gateway: *)
+        let rec find_routes depth lan_cidr via interfaces =
+            (* For all ports but the one with the same subnet as
+             * [lan_cidr], add a route via this router: *)
             let lan_cidr' = Ip.Cidr.of_string lan_cidr in
-            List.fold_left (fun res peer_router ->
-                (* First of all, the gateway to use is always going to be
-                 * the port of [peer_router] on the common subnet (the one
-                 * we are connected to): *)
-                match Hashtbl.find router_specs peer_router with
+            List.iter (fun (_mac, cidr, peer_routers) ->
+                let cidr' = Ip.Cidr.of_string cidr in
+                if cidr' <> lan_cidr' then (
+                    (* Look for previous route in [tbl] and if new one is better
+                     * then replace, or stop: *)
+                    let todo, replace =
+                        match Hashtbl.find tbl cidr' with
+                        | exception Not_found ->
+                            true, false (* Add it *)
+                        | _mac, depth', _addr ->
+                            (* Add or replace depending on depths*)
+                            depth <= depth', depth < depth' in
+                    if todo then (
+                        (if replace then Hashtbl.replace else Hashtbl.add)
+                            tbl cidr' (mac, depth, addr_of_interface ~via cidr) ;
+                        List.iter (fun peer_router ->
+                            match Hashtbl.find router_specs peer_router with
+                            | exception Not_found ->
+                                () (* This must be a host then *)
+                            | ports ->
+                                find_routes (depth + 1) cidr via ports
+                        ) peer_routers
+                    )
+                )
+            ) interfaces in
+        List.iter (fun peer_router ->
+            (* First of all, the gateway to use is always going to be
+             * the port of [peer_router] on the common subnet (the one
+             * we are connected to): *)
+            match Hashtbl.find router_specs peer_router with
+            | exception Not_found ->
+                (* This must be a host then *)
+                ()
+            | ports ->
+                (match
+                    List.find_map (fun (mac, cidr, _) ->
+                                      let cidr' = Ip.Cidr.of_string cidr in
+                                      if cidr' = lan_cidr' then Some mac else None
+                    ) ports
+                with
                 | exception Not_found ->
-                    (* This must be a host then *)
-                    res
-                | ports ->
-                    (match
-                        List.find_map (fun (mac, cidr, _) ->
-                                          let cidr' = Ip.Cidr.of_string cidr in
-                                          if cidr' = lan_cidr' then Some mac else None
-                        ) ports
-                    with
-                    | exception Not_found ->
-                        failwith "Bad input: no common subnet between connected routers"
-                    | gw ->
-                        let via = Eth.Mac gw in
-                        find_routes res lan_cidr via ports)
-            ) [lan] peer_routers,
+                    failwith "Bad input: no common subnet between connected routers"
+                | gw ->
+                    let via = Eth.Mac gw in
+                    find_routes (depth + 1) lan_cidr via ports)
+        ) peer_routers ;
+    ) interfaces ;
+    Printf.printf "tbl=\n%a\n%!"
+        (Hashtbl.print
+            Ip.Cidr.printf
+            (fun oc (mac, depth, (net, mask, gw_opt)) ->
+                Printf.fprintf oc "mac=%a, depth=%d, dest %a/%a via %a"
+                    Eth.Addr.printf mac
+                    depth
+                    Ip.Addr.printf net
+                    Ip.Addr.printf mask
+                    (Option.print Eth.gw_addr_print) gw_opt)) tbl ;
+    let lst =
+        List.map (fun (mac, _lan_cidr, _peer_routers) ->
+            Hashtbl.fold (fun _cidr (mac', _depth, addr) lst ->
+                if mac = mac' then addr :: lst else lst
+            ) tbl [],
             mac
-        ) |>
-        Array.of_enum  in
+        ) interfaces in
+    let addrs = Array.of_list lst in
     let delay = List.assoc_opt name delays
     and loss = List.assoc_opt name losses
     and load_balancing = List.assoc_opt name lb_configs
@@ -126,12 +159,15 @@ let build_network logger router_specs fst_router_name delays losses lb_configs i
     let routers =
         Hashtbl.map (fun name ports ->
             let logger = Log.make name 50 in
+            if debug then Printf.printf "Build router %s\n%!" name ;
             make_router name logger ports router_specs delays losses lb_configs icmp_delays
         ) router_specs in
     (* Connect all routers together. *)
     Hashtbl.iter (fun name ports ->
+        if debug then Printf.printf "Connecting router %s\n%!" name ;
         let emitter = Hashtbl.find routers name in
         List.iteri (fun i (_mac, cidr, receivers) ->
+            if debug then Printf.printf "\tport %d...\n%!" i ;
             (* Build an emitting function for this port that just writes into
              * each of the connected routers/hosts: *)
             let cidr = Ip.Cidr.of_string cidr in
@@ -139,6 +175,7 @@ let build_network logger router_specs fst_router_name delays losses lb_configs i
             let dev_of_receiver dest_name =
                 match Hashtbl.find routers dest_name with
                 | exception Not_found ->
+                    if debug then Printf.printf "\tBuild host %s\n%!" dest_name ;
                     (* If not a router, then create a host *)
                     let gw = [ Ip.Addr.zero, Ip.Addr.zero, Some (Eth.IPv4 port_ip) ]
                     and netmask = Ip.Cidr.to_netmask cidr
@@ -164,6 +201,7 @@ let build_network logger router_specs fst_router_name delays losses lb_configs i
                         trx.out) in
             (* Register all those connections: *)
             List.iter (fun dest_name ->
+                if debug then Printf.printf "\tRegistering connection %s\n%!" dest_name ;
                 let add_once connections k v =
                     let vs = Hashtbl.find_all connections k in
                     if not (List.mem v vs) then Hashtbl.add connections k v in
@@ -178,6 +216,7 @@ let build_network logger router_specs fst_router_name delays losses lb_configs i
         ) ports
     ) router_specs ;
     (* Actually connect the devices: *)
+    if debug then Printf.printf "Actually connect the devices...\n%!" ;
     Hashtbl.keys connections |>
     Enum.uniq |> (* Filter out duplicate names *)
     Enum.iter (fun src_name ->

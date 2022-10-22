@@ -318,8 +318,8 @@ struct
     let make ?notify_expiry ?(load_balancing=NoLoadBalancing) trxs route_tbl logger =
         (* Display the routing table (debug) *)
         Log.(log logger Debug (lazy
-            (Printf.sprintf2 "Creating a router with routing table %a"
-                (List.print print_route) route_tbl))) ;
+            (Printf.sprintf2 "Creating a router with routing table:%a"
+                (List.print ~first:"\n\t" ~sep:"\n\t" ~last:"" print_route) route_tbl))) ;
         (* Check we route only from/to the given ports *)
         let max_used_port =
             List.fold_left (fun prev r ->
