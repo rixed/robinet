@@ -348,9 +348,20 @@ let main =
         (fun _ -> raise (Arg.Bad "Unknown parameter"))
         "Hide a host behind routers" ;
     if Hashtbl.length routers = 0 then (
-        Printf.printf "Example:\n\
-            router_frenzy -l router0:router1 -l router1:router2 -first router0 -last router2\n\n" ;
-        exit 0) ;
+        (* We might still have a single router mentioned in [fst_router_name]
+         * and [lst_router_name]: *)
+        if !fst_router_name <> "" then (
+            if !lst_router_name = "" then
+                lst_router_name := !fst_router_name ;
+            if !input_subnet = "" then set_subnet_seq 0 ;
+            let s = next_subnet () in
+            add_port !fst_router_name (next_cidr_of_subnet s) []
+        ) else (
+            Printf.printf "Example:\n\
+                router_frenzy -l router0:router1 -l router1:router2 -first router0 -last router2\n\n" ;
+            exit 0
+        )
+    ) ;
     (* Add a port for entry, with input mac address. Must be the first port
      * of that router: *)
     if !fst_router_name = "" then
