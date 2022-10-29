@@ -230,8 +230,9 @@ struct
     (** A router is an array of trxs and a route table *)
     type t = {          trxs : (trx * Eth.Addr.t * Ip.Addr.t) array ;
                    route_tbl : route list ;
-               (* whether to send ICMP expiry messages, after which delay *)
-               notify_expiry : float option ;
+               (* Whether to send ICMP expiry messages, after which delay
+                * and which packet loss probability: *)
+                      notify : (float * float) option ;
                       logger : Log.logger ;
               load_balancing : load_balancing }
     and load_balancing = NoLoadBalancing | Random | PrefixHash
@@ -274,11 +275,12 @@ struct
                 match ttl_opt with
                 | Some (0 | 1) ->
                         Log.(log t.logger Debug (lazy (Printf.sprintf "expiring packet from %d" n))) ;
-                        Option.may (fun d ->
-                            let delay = jitter 0.1 d in
-                            let ip = Option.get ip_opt in
-                            send_icmp_expiry t n ip delay
-                        ) t.notify_expiry
+                        Option.may (fun (delay, loss) ->
+                            if Random.float 1. > loss then
+                                let delay = jitter 0.1 delay in
+                                let ip = Option.get ip_opt in
+                                send_icmp_expiry t n ip delay
+                        ) t.notify
                 | Some ttl ->
                         let ip = Option.get ip_opt in
                         let ip = Ip.Pdu.{ ip with ttl = ttl - 1 } in
@@ -315,7 +317,7 @@ struct
     (* TODO: similarly, a write n b = t.trxs.(n).write b *)
 
     (** Build a [t] routing through these {!Tools.trx} according to the given routing table. *)
-    let make ?notify_expiry ?(load_balancing=NoLoadBalancing) trxs route_tbl logger =
+    let make ?notify ?(load_balancing=NoLoadBalancing) trxs route_tbl logger =
         (* Display the routing table (debug) *)
         Log.(log logger Debug (lazy
             (Printf.sprintf2 "Creating a router with routing table:%a"
@@ -327,7 +329,7 @@ struct
                 max prev)
                 0 route_tbl in
         assert (max_used_port < Array.length trxs) ;
-        let t = { trxs ; route_tbl ; logger ; notify_expiry ; load_balancing } in
+        let t = { trxs ; route_tbl ; logger ; notify ; load_balancing } in
         Array.iteri (fun i (trx, _, _) -> trx.ins.set_read (route i t)) trxs ;
         t
 
@@ -360,7 +362,7 @@ struct
      * networks reachable via this port (with optional gateway for each of them).
      * The router address on each port is given by the subnet address itself
      * (lan address must clear the non masked bits) *)
-    let make_from_addrs ?notify_expiry ?delay ?loss ?load_balancing addrs logger =
+    let make_from_addrs ?notify ?delay ?loss ?load_balancing addrs logger =
         let route_tbl = route_tbl_of_addrs addrs in
         let rec my_address n = function
             | [] ->
@@ -382,7 +384,7 @@ struct
                 let eth = Eth.TRX.make ?delay ?loss ~gw mac Arp.HwProto.ip4 [ Eth.{ addr ; netmask } ] logger in
                 eth.Eth.TRX.trx, mac, ip
             ) addrs in
-        make ?notify_expiry ?load_balancing trxs route_tbl logger
+        make ?notify ?load_balancing trxs route_tbl logger
 
     (*$R make_from_addrs
         (* Suppose we have a router for these 3 networks: *)
@@ -450,7 +452,7 @@ end
  *                 |
  *            dhcpd/named (192.168.0.2)
  *)
-let make_gw ?delay ?loss ?(nb_max_cnxs=500) ?nameserver ?(name="gw") ?notify_expiry public_ip local_cidr =
+let make_gw ?delay ?loss ?(nb_max_cnxs=500) ?nameserver ?(name="gw") ?notify public_ip local_cidr =
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let hub = Hub.Repeater.make 3 (name^"/hub") in
@@ -475,7 +477,7 @@ let make_gw ?delay ?loss ?(nb_max_cnxs=500) ?nameserver ?(name="gw") ?notify_exp
         pipe nat eth.Eth.TRX.trx in
     (* Build this router then *)
     let _router =
-        Router.(make ?notify_expiry
+        Router.(make ?notify
             [| gw_eth.Eth.TRX.trx, gw_mac, gw_ip ;
                nat_eth, nat_mac, public_ip |]
             [   (* route everything from anywhere to LAN if dest fits local_cidr *)
