@@ -96,8 +96,10 @@ and Interval : sig
     val sec  : float -> t
     val min  : float -> t
     val hour : float -> t
+    val zero : t
     val compare : t -> t -> int
     val add : t -> t -> t
+    val sub : t -> t -> t
 end = struct
     include Private.Make(struct
         type t = float
@@ -122,12 +124,18 @@ end = struct
     (** hours to {Interval.t}. *)
     let hour i = o (i *. 3600.)
 
+    (** Empty interval *)
+    let zero = o 0.
+
     (** Custom comparison function so that we can change time representation
      * more easily in the future. *)
     let compare (a : t) (b : t) = Float.compare (a :> float) (b :> float)
 
     (** Adds two intervals. *)
     let add (a : t) (b : t) = o ((a :> float) +. (b :> float))
+
+    (** Subtract two intervals. *)
+    let sub (a : t) (b : t) = o ((a :> float) -. (b :> float))
 end
 
 (* Poor man's asctime *)
@@ -186,6 +194,7 @@ let synch () =
 
 (** Will process the next event *)
 let next_event () =
+    let min_ts_for_sleep = Interval.msec 10. in
     let run_first =
         if !realtime then (
             (* Note: In realtime, other threads may add new events while we are sleeping.
@@ -196,15 +205,24 @@ let next_event () =
                 let ts, _ = try Map.min_binding current.events
                             with Not_found -> Time.o max_float, (fun () -> ()) in
                 wait_ts := Time.sub ts current.now ;
-                Interval.compare !wait_ts (Interval.msec 10.) > 0
+                Interval.compare !wait_ts min_ts_for_sleep > 0
             do
                 if debug then Printf.printf "Clock: next_event: waiting for %s since we're too early\n%!" (Interval.to_string !wait_ts) ;
                 (* fork a thread that will sleep then signal_me () *)
-                (* FIXME: since we cant Thread.kill this thread many can accumulate. *)
-                ignore (Thread.create (fun ts ->
-                    Thread.delay (min 1. ts) ;
+                (* FIXME: since we cannot Thread.kill this thread many can accumulate. *)
+                Thread.create (fun ts ->
+                    (* We already know that the sleeping time is greater than [min_ts_for_sleep],
+                     * so we can trigger the GC: *)
+                    let t0 = Time.wall_clock () in
+                    Gc.major () ;
+                    let t1 = Time.wall_clock () in
+                    let gc_time = Time.sub t1 t0 in
+                    let ts = Interval.sub ts gc_time in
+                    if Interval.compare ts Interval.zero > 0 then
+                        Thread.delay (min 1. (ts :> float)) ;
                     if debug then Printf.printf "Clock: waiker: time to waike up!\n" ;
-                    signal_me ()) (!wait_ts :> float)) ;
+                    signal_me ()
+                ) !wait_ts |> ignore ;
                 Condition.wait cond cond_lock ; (* zzz *)
                 synch ()
             done ;
