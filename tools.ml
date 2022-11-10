@@ -150,8 +150,6 @@ let bitstring_common_prefix_length bs1 bs2 =
                                     (bitstring_of_int 0x8800_0000))
   8 (bitstring_common_prefix_length (bitstring_of_int 0x8000_0000) \
                                     (bitstring_of_int 0x8080_0000))
-  8 (bitstring_common_prefix_length (bitstring_of_int 0x8000_0000) \
-                                    (bitstring_of_int 0x80))
  *)
 
 let printable str =
@@ -203,6 +201,14 @@ let bitstring_of_int n =
     let n = int32_of_int n in
     let%bitstring s = {| n : 32 |} in
     s
+
+(* bitstring_of_int always returns a 32bits string, and bits are counted from
+ * the highest bit: *)
+(*$T
+  Bitstring.is_set (bitstring_of_int 0x80) (31 - 7)
+  not (Bitstring.is_set (bitstring_of_int 0x80) 0)
+  not (Bitstring.is_set (bitstring_of_int 0x80) 31)
+*)
 
 let bitstring_copy bs =
     string_of_bitstring bs |>
