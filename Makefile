@@ -100,3 +100,10 @@ robinet.top: $(ARCHIVE)
 
 clean-spec:
 	rm -f examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
+
+install:
+	ocamlfind install robinet *.cmi robinet.cmxa robinet.cma META
+
+uninstall:
+	ocamlfind remove robinet
+
