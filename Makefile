@@ -87,23 +87,18 @@ $(CLIB): $(C_SOURCES:.c=.o)
 
 examples: $(EXAMPLES)
 	@if which setcap > /dev/null 2>&1 ; then \
+	   echo "You should run:" ;\
 	   for f in $(EXAMPLES); do \
-	     sudo setcap cap_net_raw,cap_net_admin=eip $$f ;\
+	     echo "sudo setcap cap_net_raw,cap_net_admin=eip $$f" ;\
 	   done ;\
 	 fi
 
 robinet.top: $(ARCHIVE)
 	$(OCAMLMKTOP) $(WARNS) -o $@ -package "findlib $(REQUIRES)" $(ARCHIVE)
 	@if which setcap > /dev/null 2>&1 ; then \
-	   sudo setcap cap_net_raw,cap_net_admin=eip $@ ;\
+	   echo "You should run:" ;\
+	   echo "sudo setcap cap_net_raw,cap_net_admin=eip $@" ;\
 	 fi
 
 clean-spec:
 	rm -f examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
-
-install:
-	ocamlfind install robinet *.cmi robinet.cmxa robinet.cma META
-
-uninstall:
-	ocamlfind remove robinet
-
