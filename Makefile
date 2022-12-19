@@ -38,6 +38,7 @@ SOURCES  = \
 	opache.ml \
 	myadmin.ml \
 	sim.ml \
+	wrapper.ml
 
 C_SOURCES = pcap_wrap.c eth_vendors.c tap_wrap.c
 CLIB = librobinetext.a
@@ -68,7 +69,7 @@ EXAMPLES_BYTE = \
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
-REQUIRES = bitstring ppx_bitstring batteries
+REQUIRES = bitstring cmdliner ppx_bitstring batteries
 
 include $(top_srcdir)make.common
 
@@ -101,4 +102,4 @@ robinet.top: $(ARCHIVE)
 	 fi
 
 clean-spec:
-	rm -f examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
+	$(RM) examples/*.cm[ioxa] examples/*.o $(EXAMPLES)

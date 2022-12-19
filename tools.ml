@@ -302,6 +302,12 @@ let int_of_hexstring s =
 
 let may_default v_opt f = match v_opt with Some v -> v | None -> f ()
 
+let max_opt a b =
+    match a, b with
+    | None, _ -> b
+    | _, None -> a
+    | Some a, Some b -> Some (max a b)
+
 (* FIXME: use enums *)
 let rec remove_last_if cond = function
     | [] -> []

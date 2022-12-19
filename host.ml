@@ -199,6 +199,10 @@ let string_of_addr = function
     | IPv4 ip  -> Ip.Addr.to_string ip
     | Name str -> str
 
+let addr_of_string s =
+   try IPv4 (Ip.Addr.of_string s)
+   with _ -> Name s
+
 let tcp_cnxs_ok  = Metric.Atomic.make "Host/Tcp/Connect/Ok"
 let tcp_cnxs_err = Metric.Atomic.make "Host/Tcp/Connect/Err"
 let udp_cnxs_ok  = Metric.Atomic.make "Host/Udp/Connect/Ok"
