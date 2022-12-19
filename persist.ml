@@ -20,7 +20,8 @@
 (**
   Simple serialization module
 
-  Helps to keep an object state in a file in a friendly format (for instance javascript or csv)
+  Helps to keep an object state in a file in a friendly format (for instance
+  javascript or csv)
  *)
 open Batteries
 

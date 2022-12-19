@@ -23,10 +23,9 @@ The purpose of this module is to help individual packet inquiry and
 manipulation by offering an {e unpacked} view of a single packet.
 It is not used when simulating a network.
 
-This is the module to look for if you want to fiddle with packets on a
-one to one basis, for instance to fuzz some packet source, collect some
-statistics on individual packets, search for some packets in a pcap file,
-etc...
+This is the module to look for if you want to fiddle with packets a single at
+a time, for instance to fuzz some packet source, collect some statistics on
+individual packets, search for some packets in a pcap file, etc...
 
 Due to the fact that every packet is considered in isolation, it can only
 decode the simplest protocols for which all required data fits within a
