@@ -41,7 +41,8 @@ SOURCES  = \
 	wrapper.ml
 
 C_SOURCES = pcap_wrap.c eth_vendors.c tap_wrap.c
-CLIB = librobinetext.a
+CLIB_SHORT = robinetext
+CLIB = lib$(CLIB_SHORT).a
 # libpcap elsewhere? Call make with:
 # LIBS="-cclib -L/usr/local/lib -cclib -lpcap"
 LIBS += -cclib -lpcap

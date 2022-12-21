@@ -27,8 +27,10 @@ XARCHIVE = $(ARCHIVE:.cma=.cmxa)
 $(ARCHIVE): $(OBJECTS) $(CLIB)
 	$(OCAMLC) $(CLIB) -package "$(REQUIRES)" -custom -linkpkg $(OCAMLFLAGS) $(OBJECTS) $(LIBS) -a -o $@
 
+# Note: CLIB_SHORT is required for the lib to be recorded in the cmxa file
+# (ocamlopt does not record required C libs unless -cclib is used)
 $(XARCHIVE): $(XOBJECTS) $(CLIB)
-	$(OCAMLOPT) $(CLIB) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $(XOBJECTS) $(LIBS) -a -o $@
+	$(OCAMLOPT) -cclib -l$(CLIB_SHORT) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $(XOBJECTS) $(LIBS) -a -o $@
 
 install: $(ARCHIVE)
 	if test -f "$(XARCHIVE)" ; then extra="$(XARCHIVE) $(XARCHIVE:.cmxa=.a)" ; fi ; \
