@@ -49,7 +49,7 @@ endif
 	$(OCAMLC) -o $@ -package "$(REQUIRES)" $(OCAMLFLAGS) $^
 
 %.opt: $(XARCHIVE) %.cmx
-	$(OCAMLOPT) -o $@ -linkpkg -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $^
+	$(OCAMLOPT) -o $@ -I . -linkpkg -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $^
 
 %.cmo %.annot: %.ml
 	$(OCAMLC) -package "$(REQUIRES)" $(OCAMLFLAGS) -c $<
