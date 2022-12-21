@@ -70,7 +70,7 @@ EXAMPLES_BYTE = \
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
-REQUIRES = bitstring cmdliner ppx_bitstring batteries
+REQUIRES = bitstring ppx_bitstring batteries
 
 include $(top_srcdir)make.common
 
