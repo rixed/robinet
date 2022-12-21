@@ -23,15 +23,20 @@ OBJECTS  = $(SOURCES:.ml=.cmo)
 XOBJECTS = $(OBJECTS:.cmo=.cmx)
 ARCHIVE  = $(PKG_NAME).cma
 XARCHIVE = $(ARCHIVE:.cma=.cmxa)
+
 $(ARCHIVE): $(OBJECTS) $(CLIB)
 	$(OCAMLC) $(CLIB) -package "$(REQUIRES)" -custom -linkpkg $(OCAMLFLAGS) $(OBJECTS) $(LIBS) -a -o $@
+
 $(XARCHIVE): $(XOBJECTS) $(CLIB)
 	$(OCAMLOPT) $(CLIB) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $(XOBJECTS) $(LIBS) -a -o $@
+
 install: $(ARCHIVE)
 	if test -f "$(XARCHIVE)" ; then extra="$(XARCHIVE) $(XARCHIVE:.cmxa=.a)" ; fi ; \
-	ocamlfind install "$(PKG_NAME)" *.cmi *.cmx *.cmo $(PKG_NAME).a "$(ARCHIVE)" META $$extra
+	ocamlfind install "$(PKG_NAME)" *.cmi *.cmx *.cmo $(PKG_NAME).a $(CLIB) "$(ARCHIVE)" META $$extra
+
 uninstall:
 	ocamlfind remove $(PKG_NAME)
+
 reinstall: uninstall install
 endif
 
