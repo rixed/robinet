@@ -80,6 +80,10 @@ let get_i cmd params n =
 let get_b cmd params n =
   get cmd params n |> bool_of_string
 
+let get_def_b cmd params n def =
+  try get_b cmd params n
+  with MissingParam _ -> def
+
 let get_opt_i params n =
   get_opt params n |> Option.map int_of_string
 
@@ -134,7 +138,7 @@ end
 module Socket =
 struct
   let of_string params =
-    let dgram = get_b "socket" params "dgram"
+    let dgram = get_def_b "socket" params "dgram" false
     and dst = get "socket" params "dst"
     and dst_port = get_i "socket" params "dst_port"
     and src_port = get_opt_i params "src_port"
