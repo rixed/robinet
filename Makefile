@@ -40,7 +40,7 @@ SOURCES  = \
 	sim.ml \
 	wrapper.ml
 
-C_SOURCES = pcap_wrap.c eth_vendors.c tap_wrap.c
+C_SOURCES = pcap_wrap.c eth_vendors.c tap_wrap.c iface_wrap.c
 CLIB_SHORT = robinetext
 CLIB = lib$(CLIB_SHORT).a
 # libpcap elsewhere? Call make with:

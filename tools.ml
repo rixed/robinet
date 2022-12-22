@@ -364,6 +364,35 @@ let info_of_iface ifname what =
 let mtu_of_iface ifname =
     info_of_iface ifname "mtu" |> int_of_string
 
+let mac_of_iface ifname =
+    info_of_iface ifname "address"
+
+let list_dir path =
+  let hdl = Unix.opendir path in
+  finally
+    (fun () -> Unix.closedir hdl)
+    (fun () ->
+      let rec loop acc =
+        match Unix.readdir hdl with
+        | exception End_of_file ->
+            List.rev acc
+        | entry ->
+            loop (entry :: acc) in
+      loop [])
+    ()
+
+external addresses_of_iface : string -> string list = "wrap_addresses_of_iface"
+
+let list_interfaces () =
+    let sys_class_net = "/sys/class/net" in
+    let dirs = list_dir sys_class_net in
+    List.filter_map (fun ifname ->
+        if ifname <> "." && ifname <> ".." then
+            Some ifname
+        else
+            None
+    ) dirs
+
 (** An OrdArray is a container for an ordered set of bounded size. *)
 module OrdArray =
 struct
