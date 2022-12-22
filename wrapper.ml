@@ -327,7 +327,7 @@ let to_trx t cont =
         cont (Option.map (fun tcp_trx -> tcp_trx.Tcp.TRX.trx) tcp_trx_opt)) in
     ignore tcp_trx in
   let trx_of_socket sock =
-    if sock.dgram then trx_of_tcp_sock sock else trx_of_udp_sock sock in
+    if sock.dgram then trx_of_udp_sock sock else trx_of_tcp_sock sock in
   let trx_of_trxs _trxs =
     todo "trx_of_trxs"
   in
