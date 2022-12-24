@@ -69,7 +69,7 @@ all_tests.cmo: all_tests.ml $(OBJECTS)
 	$(OCAMLC) -package "$(REQUIRES) qcheck" $(OCAMLFLAGS) -w -33 -c -impl $<
 
 all_tests.opt: all_tests.cmx $(XARCHIVE)
-	$(OCAMLOPT) -o $@ -package "$(REQUIRES) qcheck" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
+	$(OCAMLOPT) -I . -o $@ -package "$(REQUIRES) qcheck" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
 
 all_tests.cmx: all_tests.ml $(XOBJECTS)
 	$(OCAMLOPT) -package "$(REQUIRES) qcheck" $(OCAMLOPTFLAGS) -w -33 -c -impl $<
