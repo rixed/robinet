@@ -114,20 +114,36 @@ let gethostbyname name cont =
         List.of_enum in
     cont (Some ips)
 
+let wait_server_delay = ref 3.
 
-let tcp_connect dst ?src_port (dst_port : Tcp.Port.t) cont =
-    let connect_tcp_ inet_addr =
-        Log.(log logger Debug (lazy (Printf.sprintf "Connecting to %s" (Unix.string_of_inet_addr inet_addr)))) ;
+let tcp_connect ?(wait_for_server=true) dst ?src_port (dst_port : Tcp.Port.t) cont =
+    let connect_ inet_addr =
+        Log.(log logger Debug (lazy (Printf.sprintf "Connecting to %s:%s"
+            (Unix.string_of_inet_addr inet_addr)
+            (Tcp.Port.to_string dst_port)))) ;
         let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
         Option.may (fun (port : Tcp.Port.t) ->
             Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_any, (port :> int))))
             src_port ;
-        Unix.connect sock (Unix.ADDR_INET (inet_addr, (dst_port :> int))) ;
-        cont (Some (tcp_trx_of_socket sock))
+        (* Retry the connect from time to time, waiting for the server: *)
+        let rec try_connect () =
+            match
+                Unix.connect sock (Unix.ADDR_INET (inet_addr, (dst_port :> int)))
+            with
+            | exception (Unix.(Unix_error (ECONNREFUSED, _, _)) as e) ->
+                if wait_for_server then
+                    (* More luck later: *)
+                    let d = jitter 0.1 !wait_server_delay in
+                    Clock.(delay (Interval.sec d)) try_connect ()
+                else
+                    raise e
+            | () ->
+                cont (Some (tcp_trx_of_socket sock)) in
+        Clock.asap try_connect ()
     in
     match dst with
         | Host.IPv4 dst_ip ->
-            connect_tcp_ (Ip.Addr.to_inet_addr dst_ip)
+            connect_ (Ip.Addr.to_inet_addr dst_ip)
         | Host.Name name ->
             let dst_ips =
                 (* FIXME: use Localhost.gethostbyname *)
@@ -138,7 +154,7 @@ let tcp_connect dst ?src_port (dst_port : Tcp.Port.t) cont =
                     (Array.print Ip.inet_addr_print)
                     h_entry.Unix.h_addr_list))) ;
                 h_entry.Unix.h_addr_list in
-            connect_tcp_ dst_ips.(0)
+            connect_ dst_ips.(0)
 
 let tcp_server src_port server_f =
     Log.(log logger Debug (lazy (Printf.sprintf "Establishing a server on port %s" (Tcp.Port.to_string src_port)))) ;
@@ -156,7 +172,7 @@ let tcp_server src_port server_f =
 let make () =
     { Host.name          = "localhost" ;
       Host.logger        = logger ;
-      Host.tcp_connect   = tcp_connect ;
+      Host.tcp_connect   = tcp_connect ~wait_for_server:true ;
       Host.udp_connect   = (fun _ ?src_port _ _ -> ignore src_port ; todo "UDP connect for localhost") ;
       Host.udp_send      = (fun _ ?src_port _ _ -> ignore src_port ; todo "UDP send for localhost") ;
       Host.ping          = (fun ?id ?seq _ -> ignore id ; ignore seq ; todo "Ping from localhost") ;

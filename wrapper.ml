@@ -51,7 +51,10 @@ and trx_wrapper =
   (* TODO: HTTP Posts *)
 
 and socket_wrapper =
-  { dgram : bool ; dst : string ; dst_port : int ; src_port : int option }
+  { dgram : bool ;
+    dst : string ;
+    dst_port : int ;
+    src_port : int option }
 
 (* We want to be able to turn a string description of a wrapper into an actual
  * TRX.
@@ -322,10 +325,8 @@ let to_trx t cont =
     let dst = Host.addr_of_string sock.dst
     and src_port = Option.map Tcp.Port.o sock.src_port
     and dst_port = Tcp.Port.o sock.dst_port in
-    let tcp_trx =
-      Localhost.tcp_connect dst ?src_port dst_port (fun tcp_trx_opt ->
-        cont (Option.map (fun tcp_trx -> tcp_trx.Tcp.TRX.trx) tcp_trx_opt)) in
-    ignore tcp_trx in
+    Localhost.tcp_connect dst ?src_port dst_port (fun tcp_trx_opt ->
+      cont (Option.map (fun tcp_trx -> tcp_trx.Tcp.TRX.trx) tcp_trx_opt)) in
   let trx_of_socket sock =
     if sock.dgram then trx_of_udp_sock sock else trx_of_tcp_sock sock in
   let trx_of_trxs _trxs =
