@@ -100,9 +100,14 @@ struct
         Hashtbl.add all name ret ;
         ret
 
-    let increase ev c =
+    let add ev c =
         Atomic.fire ev.events ;
         ev.value <- Int64.add ev.value c
+
+    let addi ev c =
+        add ev (Int64.of_int c)
+
+    let increase [@deprecated "Use Counter.add instead."] = add
 
     let print oc ev =
         Printf.fprintf oc "Metric: %s:\n\tcount: %Ld %s\n"

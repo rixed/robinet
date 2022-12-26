@@ -665,7 +665,7 @@ let parse str =
                 let tot_len = String.length str
                 and rem_len = List.length rem in
                 Printf.fprintf stdout "Html: parzer stopped after %d/%d bytes (at '%s')\n" (tot_len - rem_len) tot_len (abbrev (String.of_list rem)) ;
-                Metric.Counter.increase unparsable (Int64.of_int rem_len)
+                Metric.Counter.add unparsable (Int64.of_int rem_len)
             ) ;
             Some res
 

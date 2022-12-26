@@ -475,7 +475,7 @@ let inject iface bits =
         if debug then Printf.printf "Pcap: injecting a packet (%d bytes)...\n%!" (String.length str) ;
         inject_ iface.handler str ;
         Metric.Atomic.fire packets_injected_ok ;
-        Metric.Counter.increase bytes_out (Int64.of_int (bytelength bits))
+        Metric.Counter.add bytes_out (Int64.of_int (bytelength bits))
     with e ->
         Printf.printf "Pcap: Cannot inject a packet: %s\n%!"
             (Printexc.to_string e) ;
@@ -498,7 +498,7 @@ let sniffer iface rx =
         | Some pdu ->
             Clock.synch () ;
             Metric.Atomic.fire packets_sniffed_ok ;
-            Metric.Counter.increase bytes_in (Int64.of_int (Payload.length pdu.Pdu.payload)) ;
+            Metric.Counter.add bytes_in (Int64.of_int (Payload.length pdu.Pdu.payload)) ;
             if debug then Printf.printf "Pcap: Got packet for ts %s\n%!" (Clock.Time.to_string pdu.Pdu.ts) ;
             Clock.at pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
             loop () in
