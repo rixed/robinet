@@ -67,6 +67,10 @@ struct
         Hashtbl.add all name ret ;
         ret
 
+    let reset ev =
+        ev.count <- 0L ;
+        ev.first_last <- None
+
     let fire ev =
         let now = Clock.now () in
         ev.count <- Int64.succ ev.count ;
@@ -99,6 +103,10 @@ struct
                     value = 0L ; events = Atomic.make (name^"_events") } in
         Hashtbl.add all name ret ;
         ret
+
+    let reset ev =
+        ev.value <- 0L ;
+        Atomic.reset ev.events
 
     let add ev c =
         Atomic.fire ev.events ;
@@ -147,6 +155,14 @@ struct
                     max_simult        = 0 } in
         Hashtbl.add all name ret ;
         ret
+
+    let reset ev =
+        Atomic.reset ev.start ;
+        Atomic.reset ev.stop ;
+        ev.tot_duration <- Clock.Interval.o 0. ;
+        ev.minmax <- None ;
+        ev.simult <- 0 ;
+        ev.max_simult <- 0
 
     let start ev =
         Atomic.fire ev.start ;
@@ -223,3 +239,9 @@ let tree () =
         tree_add tree (String.split_on_char '/' n) (Timed ev)) Timed.all tree in
     tree
 
+(* Misc *)
+
+let reset () =
+    Hashtbl.iter (fun _ ev -> Atomic.reset ev) Atomic.all ;
+    Hashtbl.iter (fun _ ev -> Counter.reset ev) Counter.all ;
+    Hashtbl.iter (fun _ ev -> Timed.reset ev) Timed.all
