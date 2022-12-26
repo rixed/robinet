@@ -318,6 +318,7 @@ let to_string =
             "dst_port", always sock.dst_port Int.print ;
             "src_port", if_not_none sock.src_port Int.print ]) sock
 
+(* Returns the trx and a close function *)
 let to_trx t cont =
   let trx_of_udp_sock _sock =
     todo "trx_of_udp_sock"
@@ -326,7 +327,10 @@ let to_trx t cont =
     and src_port = Option.map Tcp.Port.o sock.src_port
     and dst_port = Tcp.Port.o sock.dst_port in
     Localhost.tcp_connect dst ?src_port dst_port (fun tcp_trx_opt ->
-      cont (Option.map (fun tcp_trx -> tcp_trx.Tcp.TRX.trx) tcp_trx_opt)) in
+      cont (Option.map (fun tcp_trx ->
+                          tcp_trx.Tcp.TRX.trx,
+                          tcp_trx.close
+                       ) tcp_trx_opt)) in
   let trx_of_socket sock =
     if sock.dgram then trx_of_udp_sock sock else trx_of_tcp_sock sock in
   let trx_of_trxs _trxs =
