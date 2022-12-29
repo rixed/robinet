@@ -26,6 +26,7 @@ SOURCES  = \
 	pcap.ml \
 	tap.ml \
 	packet.ml \
+	sockopt.ml \
 	hub.ml \
 	host.ml \
 	named.ml \
@@ -40,7 +41,7 @@ SOURCES  = \
 	sim.ml \
 	wrapper.ml
 
-C_SOURCES = pcap_wrap.c eth_vendors.c tap_wrap.c iface_wrap.c
+C_SOURCES = pcap_wrap.c eth_vendors.c tap_wrap.c iface_wrap.c sockopt_wrap.c
 CLIB_SHORT = robinetext
 CLIB = lib$(CLIB_SHORT).a
 # libpcap elsewhere? Call make with:

@@ -116,7 +116,8 @@ let gethostbyname name cont =
 
 let wait_server_delay = ref 3.
 
-let tcp_connect ?(wait_for_server=true) dst ?src_port (dst_port : Tcp.Port.t) cont =
+let tcp_connect ?(wait_for_server=true) dst ?src_port ?ttl ?tos
+                (dst_port : Tcp.Port.t) cont =
     let connect_ inet_addr =
         Log.(log logger Debug (lazy (Printf.sprintf "Connecting to %s:%s"
             (Unix.string_of_inet_addr inet_addr)
@@ -125,6 +126,8 @@ let tcp_connect ?(wait_for_server=true) dst ?src_port (dst_port : Tcp.Port.t) co
         Option.may (fun (port : Tcp.Port.t) ->
             Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_any, (port :> int))))
             src_port ;
+        Option.may (Sockopt.set_ttl sock) ttl ;
+        Option.may (Sockopt.set_tos sock) tos ;
         (* Retry the connect from time to time, waiting for the server: *)
         let rec try_connect () =
             match
@@ -172,7 +175,7 @@ let tcp_server src_port server_f =
 let make () =
     { Host.name          = "localhost" ;
       Host.logger        = logger ;
-      Host.tcp_connect   = tcp_connect ~wait_for_server:true ;
+      Host.tcp_connect   = tcp_connect ~wait_for_server:true ?ttl:None ?tos:None ;
       Host.udp_connect   = (fun _ ?src_port _ _ -> ignore src_port ; todo "UDP connect for localhost") ;
       Host.udp_send      = (fun _ ?src_port _ _ -> ignore src_port ; todo "UDP send for localhost") ;
       Host.ping          = (fun ?id ?seq _ -> ignore id ; ignore seq ; todo "Ping from localhost") ;

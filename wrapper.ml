@@ -54,7 +54,9 @@ and socket_wrapper =
   { dgram : bool ;
     dst : string ;
     dst_port : int ;
-    src_port : int option }
+    src_port : int option ;
+    ttl : int option ;
+    tos : int option }
 
 (* We want to be able to turn a string description of a wrapper into an actual
  * TRX.
@@ -145,8 +147,10 @@ struct
     and dst = get "socket" params "dst"
     and dst_port = get_i "socket" params "dst_port"
     and src_port = get_opt_i params "src_port"
+    and ttl = get_opt_i params "ttl"
+    and tos = get_opt_i params "tos"
     in
-    { dgram ; dst ; dst_port ; src_port }
+    { dgram ; dst ; dst_port ; src_port ; ttl ; tos }
 end
 
 let of_string s =
@@ -316,7 +320,9 @@ let to_string =
           [ "dgram", always sock.dgram Bool.print ;
             "dst", always sock.dst String.print ;
             "dst_port", always sock.dst_port Int.print ;
-            "src_port", if_not_none sock.src_port Int.print ]) sock
+            "src_port", if_not_none sock.src_port Int.print ;
+            "ttl", if_not_none sock.ttl Int.print ;
+            "tos", if_not_none sock.tos Int.print ]) sock
 
 (* Returns the trx and a close function *)
 let to_trx t cont =
@@ -325,8 +331,10 @@ let to_trx t cont =
   and trx_of_tcp_sock sock =
     let dst = Host.addr_of_string sock.dst
     and src_port = Option.map Tcp.Port.o sock.src_port
-    and dst_port = Tcp.Port.o sock.dst_port in
-    Localhost.tcp_connect dst ?src_port dst_port (fun tcp_trx_opt ->
+    and dst_port = Tcp.Port.o sock.dst_port
+    and ttl = sock.ttl
+    and tos = sock.tos in
+    Localhost.tcp_connect dst ?src_port ?ttl ?tos dst_port (fun tcp_trx_opt ->
       cont (Option.map (fun tcp_trx ->
                           tcp_trx.Tcp.TRX.trx,
                           tcp_trx.close
