@@ -82,7 +82,7 @@ static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, s
     if (0 != pcap_set_promisc(handle, promisc)) goto err;
     if (0 != pcap_set_snaplen(handle, snaplen)) goto err;
     /* In recent kernels packets are buffered before being sent to userland in
-     * batches. We don;'t want this to delay sniffing by more than 0.01s: */
+     * batches. We don't want this to delay sniffing by more than 0.01s: */
     if (0 != pcap_set_timeout(handle, 10)) goto err;
     //if (0 != pcap_set_immediate_mode(handle, 1)) goto err;
     if (0 != pcap_setnonblock(handle, 1, errbuf)) goto err1;
