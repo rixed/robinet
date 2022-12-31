@@ -447,7 +447,11 @@ type iface = { handler : iface_handler ;
  * of each packets. Notice that if [caplen] is not set then {e MTU} for the
  * device will be chosen. *)
 let openif ?(promisc=true) ?(filter="") ?caplen ifname =
-    let caplen = Option.default_delayed (fun () -> mtu_of_iface ifname) caplen in
+    let caplen =
+        if ifname = "any" then
+            65535
+        else
+            Option.default_delayed (fun () -> mtu_of_iface ifname) caplen in
     { handler = openif_ ifname promisc filter caplen ;
       name = ifname ;
       caplen = caplen }
