@@ -104,8 +104,11 @@ type iface_handler
 external inject_ : iface_handler -> string -> unit = "wrap_pcap_inject"
 
 (** [sniff_ iface_handler] will return the next available packet as a string,
- * as well as its capture timestamp. *)
-external sniff_ : iface_handler -> (Clock.Time.t * string) = "wrap_pcap_read"
+ * as well as its capture timestamp.
+ * If [wait] is set to false, then the function will raise Not_found after a
+ * short timeout if not packet have been captured. *)
+external sniff_ : ?wait:bool -> iface_handler -> (Clock.Time.t * string) =
+    "wrap_pcap_read"
 
 (** [openif_ "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
@@ -457,8 +460,8 @@ let openif ?(promisc=true) ?(filter="") ?caplen ifname =
       caplen = caplen }
 
 (** [sniff iface] will return the next available packet as a Pcap.Pdu.t. *)
-let sniff iface =
-    let ts, bytes = sniff_ iface.handler in
+let sniff ?wait iface =
+    let ts, bytes = sniff_ ?wait iface.handler in
     Pdu.make iface.name ~caplen:iface.caplen ts (bitstring_of_string bytes)
 
 (** {2 Packet injection} *)

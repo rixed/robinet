@@ -84,13 +84,16 @@ static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, s
     /* In recent kernels packets are buffered before being sent to userland in
      * batches. We don;'t want this to delay sniffing by more than 0.01s: */
     if (0 != pcap_set_timeout(handle, 10)) goto err;
+    //if (0 != pcap_set_immediate_mode(handle, 1)) goto err;
+    if (0 != pcap_setnonblock(handle, 1, errbuf)) goto err1;
     if (0 != pcap_activate(handle)) goto err;
     if (0 != set_filter(handle, filter)) goto err;
 
     return handle;
 err:
-    pcap_close(handle);
     snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s", pcap_geterr(handle));
+err1:
+    pcap_close(handle);
     return NULL;
 }
 
@@ -131,10 +134,13 @@ CAMLprim value wrap_pcap_inject(value handle_, value str_)
     CAMLreturn(Val_unit);
 }
 
-CAMLprim value wrap_pcap_read(value handle_)
+CAMLprim value wrap_pcap_read(value wait_, value handle_)
 {
-    CAMLparam1(handle_);
+    CAMLparam2(wait_, handle_);
     pcap_t *const handle = Pcap_val(handle_);
+    bool const wait =
+        // True by default:
+        !Is_block(wait_) /* Aka None */ || Bool_val(Field(wait_, 0));
 
     struct pcap_pkthdr *hdr;
     u_char const *bytes;
@@ -144,8 +150,13 @@ retry:
         case 1: // Ok
             caml_acquire_runtime_system();
             break;
-        case 0: // timeout
-            goto retry;
+        case 0: // Timeout
+            /* Retry automatically in case of timeout, to avoid acquiring
+             * and releasing the giant lock. */
+            if (wait) goto retry;
+            caml_acquire_runtime_system();
+            caml_raise_not_found();
+            break;
         case -1:    // Error
             caml_acquire_runtime_system();
             caml_failwith(pcap_geterr(handle));
