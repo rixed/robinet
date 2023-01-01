@@ -216,7 +216,7 @@ struct
     (** Return the [bitstring] ready to be written into a pcap file (see {!Pcap.save}). *)
     let pack t =
         let sec, usec = Clock.Time.to_ints t.ts in
-        let wire_len = bytelength (t.payload :> bitstring) in
+        let wire_len = Payload.length t.payload in
         let%bitstring pkt_hdr = {|
             Int32.of_int sec  : 32 : littleendian ;
             Int32.of_int usec : 32 : littleendian ;

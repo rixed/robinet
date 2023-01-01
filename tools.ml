@@ -500,7 +500,7 @@ let sum bits =
     else Random.int 65536
 
 module Payload = struct
-    include Private.Make(struct
+    include Private.Make (struct
         type t = bitstring
         let to_string t =
             let bytes = bytelength t in
@@ -513,7 +513,7 @@ module Payload = struct
 
     let empty = o empty_bitstring
     let bitlength (t : t) = bitstring_length (t :> bitstring)
-    let length (t : t) = bytelength (t :> bitstring) (* TODO: rename to length *)
+    let length (t : t) = bytelength (t :> bitstring)
     let random len = o (randbs len)
 end
 

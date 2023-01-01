@@ -55,7 +55,7 @@ module Pdu = struct
         let%bitstring hdr = {|
             Ip.Addr.to_bitstring t.src : 128 : bitstring ;
             Ip.Addr.to_bitstring t.dst : 128 : bitstring ;
-            bytelength (t.payload :> bitstring) : 16 ;
+            Payload.length t.payload : 16 ;
             0 : 24 ;
             (t.proto :> int) : 8 |} in
         hdr
@@ -63,7 +63,7 @@ module Pdu = struct
     let pack t =
         let%bitstring header = {|
             6 : 4 ; t.diff_serv : 6 ; t.ecn : 2 ; t.flow_label : 20 ;
-            bytelength (t.payload :> bitstring) : 16 ;
+            Payload.length t.payload : 16 ;
             (t.proto :> int) : 8 ; t.ttl : 8 ;
             Ip.Addr.to_bitstring t.src : 128 : bitstring ;
             Ip.Addr.to_bitstring t.dst : 128 : bitstring |} in
