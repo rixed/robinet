@@ -55,3 +55,18 @@ CAMLprim value wrap_set_tos(value fd_, value tos_)
 
     CAMLreturn(Val_unit);
 }
+
+CAMLprim value wrap_set_df(value fd_)
+{
+    CAMLparam1(fd_);
+    int fd = Int_val(fd_);
+    int flag = IP_PMTUDISC_PROBE;
+    char errbuf[2048];
+
+    if (0 != setsockopt(fd, IPPROTO_IP, IP_MTU_DISCOVER, &flag, sizeof flag)) {
+        snprintf(errbuf, sizeof errbuf, "Cannot setsockopt(): %s", strerror(errno));
+        caml_failwith(errbuf);
+    }
+
+    CAMLreturn(Val_unit);
+}
