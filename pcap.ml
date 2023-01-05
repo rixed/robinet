@@ -460,9 +460,9 @@ let openif ?(promisc=true) ?(filter="") ?caplen ifname =
       caplen = caplen }
 
 (** [sniff iface] will return the next available packet as a Pcap.Pdu.t. *)
-let sniff ?wait iface =
+let sniff ?dlt ?wait iface =
     let ts, bytes = sniff_ ?wait iface.handler in
-    Pdu.make iface.name ~caplen:iface.caplen ts (bitstring_of_string bytes)
+    Pdu.make iface.name ?dlt ~caplen:iface.caplen ts (bitstring_of_string bytes)
 
 (** {2 Packet injection} *)
 
