@@ -155,9 +155,33 @@ module Pdu = struct
                | Udp  of Udp.Pdu.t  | Tcp  of Tcp.Pdu.t
                | Dns  of Dns.Pdu.t  | Sll  of Sll.Pdu.t | Vlan of Vlan.Pdu.t
                | Icmp of Icmp.Pdu.t | Pcap of Pcap.Pdu.t
+
+    (** Name of the protocol for that layer: *)
+    let name_of_layer = function
+        | Raw _ -> ""
+        | Dhcp _ -> "Dhcp"
+        | Eth _ -> "Eth"
+        | Arp _ -> "Arp"
+        | Ip _ -> "Ip"
+        | Ip6 _ -> "Ip6"
+        | Udp _ -> "Udp"
+        | Tcp _ -> "Tcp"
+        | Dns _ -> "Dns"
+        | Sll _ -> "Sll"
+        | Vlan _ -> "Vlan"
+        | Icmp _ -> "Icmp"
+        | Pcap _ -> "Pcap"
+
     (** A Pdu.t is a list of {!Packet.Pdu.layer}s, with the outer layer first for
      * a more natural presentation when printed. *)
     type t = layer list
+
+    let rec names = function
+        | [] ->
+            ""
+        | layer :: rest ->
+            let rest = names rest in
+            name_of_layer layer ^ (if rest = "" then "" else "/"^ rest)
 
     (** [pack pdu] converts the layer list back to a {!Pcap.Pdu.t} *)
     let pack t =
