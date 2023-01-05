@@ -487,9 +487,16 @@ module Pdu = struct
              src : 32 ;
              dst : 32 ;
              options : (hdr_len-5)*32 : bitstring ;
-             payload : (tot_len - hdr_len*4)*8 : bitstring ;
-             _padding : -1 : bitstring |} ->
+             rest : -1 : bitstring |} ->
             (* TODO: control the checksum ? *)
+            (* payload must have some extra padding at the end, or may have
+             * been truncated: *)
+            let payload_len = (tot_len - hdr_len*4) * 8 in
+            let payload =
+                if bitstring_length rest > payload_len then
+                    takebits payload_len rest
+                else
+                    rest in
             Some { tos ; tot_len ;
                id ; dont_frag ; more_frags ; frag_offset ;
                ttl ; proto = Proto.o proto ;
@@ -500,7 +507,7 @@ module Pdu = struct
                 err (Printf.sprintf "Ip: Bad version (%d)" version)
             else None
         | {| _ |} ->
-            err "Ip: Not IP"
+            err ("Ip: Not IP: "^ hexstring_of_bitstring_abbrev bits)
 
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
