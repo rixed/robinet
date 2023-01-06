@@ -49,6 +49,7 @@ module rec Time : sig
     val sub : t -> t -> Interval.t
     val wall_clock : unit -> t
     val to_ints : t -> int * int
+    val compare : t -> t -> int
 end = struct
     (** When displaying a time, print also the corresponding date.
      * Only useful if your simulation spans several days, which is uncommon. *)
@@ -85,6 +86,9 @@ end = struct
         let sec  = Int.of_float t in
         let usec = Int.of_float ((t -. (floor t)) *. 1_000_000.) in
         sec, usec
+
+    let compare a b =
+        Float.compare (a : t :> float) (b : t :> float)
 end
 
 (** While Interval.t represents a time interval.
