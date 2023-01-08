@@ -107,8 +107,11 @@ external inject_ : iface_handler -> string -> unit = "wrap_pcap_inject"
  * as well as its capture timestamp.
  * If [wait] is set to false, then the function will raise Not_found after a
  * short timeout if not packet have been captured. *)
-external sniff_ : ?wait:bool -> iface_handler -> (Clock.Time.t * string) =
-    "wrap_pcap_read"
+type sniff_ret_ =
+    { sniffed_timestamp : Clock.Time.t ; sniffed_caplen : int ;
+      sniffed_wirelen : int ; sniffed_bytes : string }
+
+external sniff_ : ?wait:bool -> iface_handler -> sniff_ret_ = "wrap_pcap_read"
 
 (** [openif_ "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
@@ -207,11 +210,13 @@ module Pdu =
 struct
     (** These informations are present as the first layer of every packet
      * read from a pcap file. *)
-    type t = { source_name : string ; caplen : int ; dlt : Dlt.t ;
-               ts : Clock.Time.t ; payload : Payload.t }
+    type t = { source_name : string ; caplen : int ; wirelen : int ;
+               dlt : Dlt.t ; ts : Clock.Time.t ; payload : Payload.t }
 
-    let make source_name ?(caplen=65535) ?(dlt=Dlt.en10mb) ts bits =
-        { source_name ; caplen ; dlt ; ts ; payload = Payload.o bits }
+    let make source_name ?(caplen=65535) ?wirelen ?(dlt=Dlt.en10mb) ts bits =
+        let wirelen = wirelen |? bytelength bits
+        and payload = Payload.o bits in
+        { source_name ; caplen ; wirelen ; dlt ; ts ; payload }
 
     (** Return the [bitstring] ready to be written into a pcap file (see {!Pcap.save}). *)
     let pack t =
@@ -461,8 +466,12 @@ let openif ?(promisc=true) ?(filter="") ?caplen ifname =
 
 (** [sniff iface] will return the next available packet as a Pcap.Pdu.t. *)
 let sniff ?dlt ?wait iface =
-    let ts, bytes = sniff_ ?wait iface.handler in
-    Pdu.make iface.name ?dlt ~caplen:iface.caplen ts (bitstring_of_string bytes)
+    let sniffed = sniff_ ?wait iface.handler in
+    Pdu.make iface.name ?dlt
+        ~caplen:sniffed.sniffed_caplen
+        ~wirelen:sniffed.sniffed_wirelen
+        sniffed.sniffed_timestamp
+        (bitstring_of_string sniffed.sniffed_bytes)
 
 (** {2 Packet injection} *)
 

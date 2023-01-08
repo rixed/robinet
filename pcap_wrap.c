@@ -174,9 +174,11 @@ retry:
 
     ts = caml_copy_double(hdr->ts.tv_sec + (double)hdr->ts.tv_usec * 0.000001);
 
-    result = caml_alloc_tuple(2);
+    result = caml_alloc_tuple(4);
     Field(result, 0) = ts;
-    Field(result, 1) = pkt;
+    Field(result, 1) = Val_int(hdr->caplen);
+    Field(result, 2) = Val_int(hdr->len);
+    Field(result, 3) = pkt;
 
     CAMLreturn(result);
 }
