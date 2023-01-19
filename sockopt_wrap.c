@@ -31,6 +31,11 @@ CAMLprim value wrap_set_ttl(value fd_, value ttl_)
     CAMLparam2(fd_, ttl_);
     int fd = Int_val(fd_);
     int ttl = Int_val(ttl_);
+
+    if (ttl < 0 || ttl >= 256) {
+        caml_invalid_argument("Invalid TTL");
+    }
+
     char errbuf[2048];
 
     if (0 != setsockopt(fd, IPPROTO_IP, IP_TTL, &ttl, sizeof ttl)) {
