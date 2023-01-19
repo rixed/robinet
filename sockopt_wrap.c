@@ -48,7 +48,7 @@ CAMLprim value wrap_set_tos(value fd_, value tos_)
     int tos = Int_val(tos_);
     char errbuf[2048];
 
-    if (0 != setsockopt(fd, IPPROTO_IP, IP_TTL, &tos, sizeof tos)) {
+    if (0 != setsockopt(fd, IPPROTO_IP, IP_TOS, &tos, sizeof tos)) {
         snprintf(errbuf, sizeof errbuf, "Cannot setsockopt(): %s", strerror(errno));
         caml_failwith(errbuf);
     }
