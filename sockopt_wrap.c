@@ -22,6 +22,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <netinet/tcp.h>
 #include <netdb.h>  // for NI_MAXHOST
 #include <caml/alloc.h>
 #include <caml/mlvalues.h>
@@ -89,6 +90,18 @@ CAMLprim value wrap_set_recv_errs(value fd_, value on_)
     int on = Bool_val(on_);
 
     if (0 != setsockopt(fd, IPPROTO_IP, IP_RECVERR, &on, sizeof on))
+        fail_setsockopt();
+
+    CAMLreturn(Val_unit);
+}
+
+CAMLprim value wrap_set_tcp_syn_count(value fd_, value cnt_)
+{
+    CAMLparam2(fd_, cnt_);
+    int fd = Int_val(fd_);
+    int cnt = Int_val(cnt_);
+
+    if (0 != setsockopt(fd, IPPROTO_TCP, TCP_SYNCNT, &cnt, sizeof cnt))
         fail_setsockopt();
 
     CAMLreturn(Val_unit);

@@ -21,6 +21,12 @@ external set_df_ : int (* filedescr *) -> unit = "wrap_set_df"
 let set_df fd =
   set_df_ (int_of_fd fd)
 
+external set_tcp_syn_count_ : int (* filedescr *) -> int -> unit =
+  "wrap_set_tcp_syn_count"
+
+let set_tcp_syn_count fd cnt =
+  set_tcp_syn_count_ (int_of_fd fd) cnt
+
 external set_recv_errs_ : int (* filedescr *) -> bool -> unit =
   "wrap_set_recv_errs"
 
