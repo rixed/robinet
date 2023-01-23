@@ -20,3 +20,18 @@ external set_df_ : int (* filedescr *) -> unit = "wrap_set_df"
 
 let set_df fd =
   set_df_ (int_of_fd fd)
+
+external set_recv_errs_ : int (* filedescr *) -> bool -> unit =
+  "wrap_set_recv_errs"
+
+let set_recv_errs fd flag =
+  set_recv_errs_ (int_of_fd fd) flag
+
+external get_last_icmp_err_ :
+  int (* filedescr *) ->
+  int (* ICMP err code *) * Unix.inet_addr option (* emitter *) =
+  "wrap_get_last_icmp_err"
+
+(* Raises Not_found if no error has been received *)
+let get_last_icmp_err fd =
+  get_last_icmp_err_ (int_of_fd fd)
