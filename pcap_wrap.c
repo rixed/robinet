@@ -71,7 +71,7 @@ static int set_filter(pcap_t *handle, char const *filter)
     return 0;
 }
 
-
+#define PCAP_READ_TIMEOUT_MS 10
 static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, size_t snaplen, char *errbuf)
 {
     if (! snaplen) snaplen = 65535; // FIXME: let libpcap deal with it
@@ -83,7 +83,7 @@ static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, s
     if (0 != pcap_set_snaplen(handle, snaplen)) goto err;
     /* In recent kernels packets are buffered before being sent to userland in
      * batches. We don't want this to delay sniffing by more than 0.01s: */
-    if (0 != pcap_set_timeout(handle, 10)) goto err;
+    if (0 != pcap_set_timeout(handle, PCAP_READ_TIMEOUT_MS)) goto err;
     //if (0 != pcap_set_immediate_mode(handle, 1)) goto err;
     if (0 != pcap_setnonblock(handle, 1, errbuf)) goto err1;
     if (0 != pcap_activate(handle)) goto err;
@@ -169,7 +169,7 @@ retry:
 
     CAMLlocal3(result, ts, pkt);
     pkt = caml_alloc_string(hdr->caplen);
-    memcpy(String_val(pkt), bytes, hdr->caplen);
+    memcpy((char *)String_val(pkt), bytes, hdr->caplen);
     Byte(pkt, hdr->caplen+1) = 0;
 
     ts = caml_copy_double(hdr->ts.tv_sec + (double)hdr->ts.tv_usec * 0.000001);
