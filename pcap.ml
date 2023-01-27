@@ -229,11 +229,10 @@ struct
             Int32.of_int wire_len : 32 : littleendian |} in
         concat [ pkt_hdr ; (t.payload :> bitstring) ]
 
-    (** [save "file.pcap"] returns a function that will save passed pdus in ["file.pcap"].
+    (** [write out] returns a function that will write passed pdus into [out].
      * @param caplen can be used to cap saved packet to a given number of bytes
      * @param dlt can be used to change the file's DLT (you probably do not want to do that) *)
-    let save ?(caplen=65535) ?(dlt=Dlt.en10mb) fname =
-        let out_chan = open_out_bin fname in
+    let write ?(caplen=65535) ?(dlt=Dlt.en10mb) out_chan =
         let%bitstring file_hdr = {|
             0xa1b2c3d4l : 32 : littleendian ;
             2 (* version major *) : 16 : littleendian ;
@@ -242,24 +241,31 @@ struct
             0l : 32 : littleendian ;
             Int32.of_int caplen : 32 : littleendian ;
             (dlt :> int32) : 32 : littleendian |} in
-        output_string out_chan (string_of_bitstring file_hdr) ;
+        String.print out_chan (string_of_bitstring file_hdr) ;
         let f pdu =
             pack pdu |>
             string_of_bitstring |>
-            output_string out_chan in
+            String.print out_chan in
+        f
+    (** [save "file.pcap"] returns a function that will save passed pdus in ["file.pcap"].
+     * @param caplen can be used to cap saved packet to a given number of bytes
+     * @param dlt can be used to change the file's DLT (you probably do not want to do that) *)
+    let save ?caplen ?dlt fname =
+        let out_chan = open_out_bin fname in
+        let f = write ?caplen ?dlt out_chan in
         Gc.finalise (fun _ -> close_out out_chan) f ;
         f
 end
 
-(** [save "file.pcap"] returns a function that will save passed bitstrings as packets in
- * ["file.pcap"].
+(** [save "file.pcap"] returns a function that will save passed bitstrings as
+ * packets in ["file.pcap"].
  * @param caplen can be used to cap saved packet to a given number of bytes
  * @param dlt can be used to change the file's DLT (required if you do not write Ethernet packets) *)
 let save ?caplen ?(dlt=Dlt.en10mb) fname =
     let pdu_save = Pdu.save ?caplen ~dlt fname in
-    (fun bits ->
+    fun bits ->
         let pdu = Pdu.make fname ?caplen ~dlt (Clock.now ()) bits in
-        pdu_save pdu)
+        pdu_save pdu
 
 (** When trying to read packets from a file that doesn't look like a pcap file. *)
 exception Not_a_pcap_file
