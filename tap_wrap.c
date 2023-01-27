@@ -105,7 +105,7 @@ retry:
 
     CAMLlocal1(pkt);
     pkt = caml_alloc_string(sz);
-    memcpy(String_val(pkt), buf, sz);
+    memcpy((char *)String_val(pkt), buf, sz);
     Byte(pkt, sz+1) = 0;
 
     CAMLreturn(pkt);
