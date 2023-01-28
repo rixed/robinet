@@ -176,12 +176,14 @@ module Pdu = struct
      * a more natural presentation when printed. *)
     type t = layer list
 
+    (* Packets are given from bottom to top but we want to represent the
+     * protocol stack with higher level protocols first (as in "TCP/IP"). *)
     let rec names = function
         | [] ->
             ""
         | layer :: rest ->
             let rest = names rest in
-            name_of_layer layer ^ (if rest = "" then "" else "/"^ rest)
+            (if rest = "" then "" else rest ^"/") ^ name_of_layer layer
 
     (** [pack pdu] converts the layer list back to a {!Pcap.Pdu.t} *)
     let pack t =
