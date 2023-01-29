@@ -30,6 +30,60 @@ open Tools
 
 (** {3 Protocols} *)
 
+module ToS = struct
+    include Private.Make (struct
+        type t = int
+        let to_string t =
+            (* We don't know how it's used by the network (ToS, DSCP,
+             * intserv...) so let's stick to the int repr: *)
+            string_of_int t
+        let is_valid t = t < 0x100
+        let repl_tag = "tos"
+    end)
+
+    (* Some DSCP well known values for when ToS is used for DSCP: *)
+    let dscp_default = 0b000000
+    let dscp_cs1 = 0b001000
+    let dscp_cs2 = 0b010000
+    let dscp_cs3 = 0b011000
+    let dscp_cs4 = 0b100000
+    let dscp_cs5 = 0b101000
+    let dscp_cs6 = 0b110000
+    let dscp_cs7 = 0b111000
+
+    let no_ecn = 0b00
+    let ecn_capable = 0b01
+    let ecn_congested = 0b10
+
+    let make ?(dscp=0) ?(ecn=0) () =
+        (dscp lsl 2) lor ecn
+
+    let string_of_dscp = function
+        | 0b000000 -> "default"
+        | 0b001000 -> "cs1"
+        | 0b010000 -> "cs2"
+        | 0b011000 -> "cs3"
+        | 0b100000 -> "cs4"
+        | 0b101000 -> "cs5"
+        | 0b110000 -> "cs6"
+        | 0b111000 -> "cs7"
+        | v -> "unknown DSCP:"^ string_of_int v
+
+    let string_of_ecn = function
+        | 0b00 -> "no ECN"
+        | 0b01 -> "ECN capable"
+        | 0b10 -> "Congested"
+        | v -> "unknown ECN:"^ string_of_int v
+
+    let to_dscp_string t =
+        let t = (t : t :> int) in
+        let dscp = t lsr 2
+        and ecn = t land 0b11 in
+        string_of_dscp dscp ^","^ string_of_ecn ecn
+
+    let random () = o (randi 8)
+end
+
 (** Internet protocols, as in [/etc/protocols]. *)
 module Proto = struct
     include Private.Make (struct
@@ -407,12 +461,12 @@ module Pdu = struct
     let id_seq = ref 0
     let next_id () = id_seq := (!id_seq + 1) land 0xffff ; !id_seq
 
-    type t = { tos : int ; tot_len : int ;
+    type t = { tos : ToS.t ; tot_len : int ;
                id : int ; dont_frag : bool ; more_frags : bool ; frag_offset : int ;
                ttl : int ; proto : Proto.t ; src : Addr.t ; dst : Addr.t ;
                options : bitstring ; payload : Payload.t }
 
-    let make ?(tos=0) ?tot_len
+    let make ?(tos=ToS.o 0) ?tot_len
              ?id ?(dont_frag=false) ?(more_frags=false)
              ?(frag_offset=0) ?(ttl=64)
              ?(options=empty_bitstring)
@@ -425,7 +479,7 @@ module Pdu = struct
           ttl ; proto ; src ; dst ; options ; payload = Payload.o bits }
 
     let random () =
-        make ~tos:(randi 8) ~id:(randi 16) ~dont_frag:(randb ())
+        make ~tos:(ToS.random ()) ~id:(randi 16) ~dont_frag:(randb ())
              ~more_frags:(randb ()) ~frag_offset:(randi 13)
              ~ttl:(randi 8) ~options:(randbs (4*(randi 3)))
              (Proto.random ()) (Addr.random ()) (Addr.random ()) (randbs (Random.int 10 + 20))
@@ -460,7 +514,7 @@ module Pdu = struct
         assert (t.ttl < 256) ;
         assert ((t.proto :> int) < 256) ;
         let%bitstring hdr = {|
-            4 : 4 ; hdr_len/4 : 4 ; t.tos : 8 ;
+            4 : 4 ; hdr_len/4 : 4 ; (t.tos :> int) : 8 ;
             t.tot_len : 16 ;
             t.id : 16 ; false : 1 ; t.dont_frag : 1 ; t.more_frags : 1 ; t.frag_offset : 13 ;
             t.ttl : 8 ; (t.proto :> int) : 8 ; 0 : 16 ;
@@ -497,7 +551,7 @@ module Pdu = struct
                     takebits payload_len rest
                 else
                     rest in
-            Some { tos ; tot_len ;
+            Some { tos = ToS.o tos ; tot_len ;
                id ; dont_frag ; more_frags ; frag_offset ;
                ttl ; proto = Proto.o proto ;
                src = Addr.o32 src ; dst = Addr.o32 dst ; options ;
