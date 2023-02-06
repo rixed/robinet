@@ -217,7 +217,8 @@ module Pdu = struct
         | Pcap pcap :: rest ->
             let pld = aux None (List.rev rest) in
             { pcap with Pcap.Pdu.payload = Payload.o pld }
-        | _ -> should_not_happen ()
+        | _ ->
+            should_not_happen ()
 
     (** Converts a {!Pcap.pdu.t} into a {!Packet.Pdu.t}. *)
     let unpack pcap =
