@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  */
+#include <stdbool.h>
 #include <errno.h>
 #include <string.h>
 #include <sys/types.h>
@@ -115,6 +116,19 @@ CAMLprim value wrap_set_tcp_syn_count(value fd_, value cnt_)
 extern value alloc_inet_addr(struct in_addr *inaddr);
 extern value alloc_inet6_addr(struct in6_addr *inaddr);
 
+static bool icmp_has_ip_header(int type)
+{
+    switch (type) {
+        case 3:
+        case 4:
+        case 5:
+        case 11:
+            return true;
+        default:
+            return false;
+    }
+}
+
 /* Returns the last received ICMP error code for an unreachable destination,
  * and the inet_addr of the router emitting the error (optional), or raise
  * Not_found: */
@@ -159,7 +173,7 @@ CAMLprim value wrap_get_last_icmp_err(value fd_)
 #       endif
         if (err->ee_origin != SO_EE_ORIGIN_ICMP &&
             err->ee_origin != SO_EE_ORIGIN_ICMP6) continue;
-        if (err->ee_type == ICMP_DEST_UNREACH) {
+        if (icmp_has_ip_header(err->ee_type)) {
             /* Also return the emitting IP as a Unix.inet_addr, which is
              * in an OCaml string: */
             struct sockaddr *offender = SO_EE_OFFENDER(err);
