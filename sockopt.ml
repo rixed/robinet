@@ -35,7 +35,7 @@ let set_recv_errs fd flag =
 
 external get_last_icmp_err_ :
   int (* filedescr *) ->
-  int (* ICMP err code *) * Unix.inet_addr option (* emitter *) =
+  int (* ICMP err type *) * int (* ICMP err code *) * Unix.inet_addr option (* emitter *) =
   "wrap_get_last_icmp_err"
 
 (* Raises Not_found if no error has been received *)

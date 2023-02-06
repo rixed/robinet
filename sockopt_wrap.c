@@ -158,41 +158,45 @@ CAMLprim value wrap_get_last_icmp_err(value fd_)
                 err->ee_origin, err->ee_type, err->ee_code);
 #       endif
         if (err->ee_origin != SO_EE_ORIGIN_ICMP &&
-            err->ee_origin != SO_EE_ORIGIN_ICMP6 &&
-            err->ee_type != ICMP_DEST_UNREACH) continue;
-        /* Also return the emitting IP as a Unix.inet_addr, which is
-         * in an OCaml string: */
-        struct sockaddr *offender = SO_EE_OFFENDER(err);
-        int const family = offender->sa_family;
-        switch (family) {
-            case AF_INET:
-                addr_ = caml_alloc_small(1, 0);
-                Store_field(addr_, 0, alloc_inet_addr(
-                    &((struct sockaddr_in *)offender)->sin_addr));
-                break;
-            case AF_INET6:
-                addr_ = caml_alloc_small(1, 0);
-                Store_field(addr_, 0, alloc_inet6_addr(
-                    &((struct sockaddr_in6 *)offender)->sin6_addr));
-                break;
-            default:
-                addr_ = Val_int(0); //Val_none;
+            err->ee_origin != SO_EE_ORIGIN_ICMP6) continue;
+        if (err->ee_type == ICMP_DEST_UNREACH) {
+            /* Also return the emitting IP as a Unix.inet_addr, which is
+             * in an OCaml string: */
+            struct sockaddr *offender = SO_EE_OFFENDER(err);
+            int const family = offender->sa_family;
+            switch (family) {
+                case AF_INET:
+                    addr_ = caml_alloc_small(1, 0);
+                    Store_field(addr_, 0, alloc_inet_addr(
+                        &((struct sockaddr_in *)offender)->sin_addr));
+                    break;
+                case AF_INET6:
+                    addr_ = caml_alloc_small(1, 0);
+                    Store_field(addr_, 0, alloc_inet6_addr(
+                        &((struct sockaddr_in6 *)offender)->sin6_addr));
+                    break;
+                default:
+                    addr_ = Val_int(0); //Val_none;
+            }
+#           ifdef DEBUG
+            if (family == AF_INET || family == AF_INET6) {
+                char host[NI_MAXHOST];
+                int const s =
+                    getnameinfo(offender,
+                        (family == AF_INET) ? sizeof(struct sockaddr_in) :
+                                              sizeof(struct sockaddr_in6),
+                        host, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+                if (s != 0) fail("getnameinfo");
+                fprintf(stderr, "  offender: %s\n", host);
+            }
+#           endif
+        } else {
+            addr_ = Val_int(0); //Val_none;
         }
-#       ifdef DEBUG
-        if (family == AF_INET || family == AF_INET6) {
-            char host[NI_MAXHOST];
-            int const s =
-                getnameinfo(offender,
-                    (family == AF_INET) ? sizeof(struct sockaddr_in) :
-                                          sizeof(struct sockaddr_in6),
-                    host, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
-            if (s != 0) fail("getnameinfo");
-            fprintf(stderr, "  offender: %s\n", host);
-        }
-#       endif
-        ret_ = caml_alloc_tuple(2);
-        Store_field(ret_, 0, Val_int(err->ee_code));
-        Store_field(ret_, 1, addr_);
+        ret_ = caml_alloc_tuple(3);
+        Store_field(ret_, 0, Val_int(err->ee_type));
+        Store_field(ret_, 1, Val_int(err->ee_code));
+        Store_field(ret_, 2, addr_);
         CAMLreturn(ret_);
     }
 
