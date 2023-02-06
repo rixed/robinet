@@ -130,6 +130,10 @@ let hexstring_of_bitstring_abbrev bs =
      (hexstring_of_bitstring_abbrev (bitstring_of_string "abcdefghi")) "61 62 63 64 65 66 67..."
  *)
 
+let substring_of_bitstring bs ofs len =
+    let s = string_of_bitstring bs in
+    String.sub s ofs len
+
 (* Starting comparing from high bits: *)
 let bitstring_common_prefix_length bs1 bs2 =
     let rec loop n =
