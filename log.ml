@@ -29,11 +29,20 @@ open Batteries
 type level  = Critical | Error | Warning | Info | Debug
 type msg    = Clock.Time.t * (string Lazy.t)
 type queue  = int * msg array
-type logger = { name : string ; queues : queue array }
+type logger =
+    { name : string ;
+      use_wall_clock : bool ;
+      queues : queue array }
 
 (* log level <-> queue index *)
 
-let int_of_level = function Critical -> 0 | Error -> 1 | Warning -> 2 | Info -> 3 | Debug -> 4
+let int_of_level = function
+    | Critical -> 0
+    | Error -> 1
+    | Warning -> 2
+    | Info -> 3
+    | Debug -> 4
+
 let nb_levels = 5
 
 (* output to console happen based on a constant current loglevel *)
@@ -60,8 +69,13 @@ let queue_iter f (qs, ar) = (* TODO: ?(order=DESC) *)
 (* log *)
 
 let log logger level lstr =
-    let lvl = int_of_level level
-    and msg = Clock.now (), lstr in
+    let lvl = int_of_level level in
+    let now =
+        if logger.use_wall_clock then
+            Clock.Time.wall_clock ()
+        else
+            Clock.now () in
+    let msg = now, lstr in
     logger.queues.(lvl) <- enqueue logger.queues.(lvl) msg ;
     if lvl <= int_of_level !console_lvl then console_log logger.name msg
 
@@ -72,9 +86,10 @@ let make_queue size =
 
 let loggers = Hashtbl.create 131
 
-let make name size =
+let make ?(use_wall_clock=false) name size =
     let logger = {
         name ;
+        use_wall_clock ;
         queues = Array.init nb_levels (fun _ -> make_queue size)
     } in
     Hashtbl.add loggers name logger ;
