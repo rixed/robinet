@@ -92,6 +92,16 @@ struct
 
     let type_of (t : t) = fst (t :> int*int)
     let code_of (t : t) = snd (t :> int*int)
+
+    let is_echo_request (t : t) =
+        match (t :> int*int) with
+        | 8, 0 -> true
+        | _ -> false
+
+    let is_echo_reply (t : t) =
+        match (t :> int*int) with
+        | 0, 0 -> true
+        | _ -> false
 end
 
 (** {2 ICMP Messages} *)
@@ -155,9 +165,6 @@ module Pdu = struct
           payload = DestUnreachable (next_hop_mtu, Payload.o ip_start) }
 
     let make_port_unreachable = make_destination_unreachable 3
-
-    let is_echo_request t =
-        MsgType.type_of t.msg_type = 8 && MsgType.code_of t.msg_type = 0
 
     let pack t =
         let pack_payload = function

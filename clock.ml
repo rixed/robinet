@@ -261,4 +261,3 @@ let run wait =
         next_event () ;
         Thread.yield ()
     done
-

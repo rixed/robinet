@@ -172,7 +172,7 @@ let udp_sock_rx t socks icmp_trx bits =
 let icmp_rx _t ip_trx bits =
     match Icmp.Pdu.unpack bits with
         | None -> ()
-        | Some icmp when Icmp.Pdu.is_echo_request icmp ->
+        | Some icmp when Icmp.MsgType.is_echo_request icmp.msg_type ->
             (match icmp.Icmp.Pdu.payload with
                 | Icmp.Pdu.Ids (id, seq, pld) ->
                     Icmp.Pdu.make_echo_reply id seq ~pld |>
