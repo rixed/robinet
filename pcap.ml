@@ -118,7 +118,7 @@ external sniff_ : ?wait:bool -> iface_handler -> sniff_ret_ = "wrap_pcap_read"
  * of each packets. Notice that if [caplen] is set to 0 then a "default" value
  * of 65535 will be chosen, which is probably not what you want. You should set
  * [caplen] = your {e MTU} size. *)
-external openif_ : string -> bool -> string -> int -> iface_handler = "wrap_pcap_make"
+external openif_ : string -> bool -> string -> int -> float -> iface_handler = "wrap_pcap_make"
 
 
 (** {2 Pcap files} *)
@@ -460,13 +460,13 @@ type iface = { handler : iface_handler ;
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is not set then {e MTU} for the
  * device will be chosen. *)
-let openif ?(promisc=true) ?(filter="") ?caplen ifname =
+let openif ?(promisc=true) ?(filter="") ?caplen ?(read_timeout=0.01) ifname =
     let caplen =
         if ifname = "any" then
             65535
         else
             Option.default_delayed (fun () -> mtu_of_iface ifname) caplen in
-    { handler = openif_ ifname promisc filter caplen ;
+    { handler = openif_ ifname promisc filter caplen read_timeout ;
       name = ifname ;
       caplen = caplen }
 

@@ -71,8 +71,7 @@ static int set_filter(pcap_t *handle, char const *filter)
     return 0;
 }
 
-#define PCAP_READ_TIMEOUT_MS 10
-static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, size_t snaplen, char *errbuf)
+static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, size_t snaplen, unsigned read_timeout_ms, char *errbuf)
 {
     if (! snaplen) snaplen = 65535; // FIXME: let libpcap deal with it
 
@@ -83,7 +82,7 @@ static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, s
     if (0 != pcap_set_snaplen(handle, snaplen)) goto err;
     /* In recent kernels packets are buffered before being sent to userland in
      * batches. We don't want this to delay sniffing by more than 0.01s: */
-    if (0 != pcap_set_timeout(handle, PCAP_READ_TIMEOUT_MS)) goto err;
+    if (0 != pcap_set_timeout(handle, read_timeout_ms)) goto err;
     //if (0 != pcap_set_immediate_mode(handle, 1)) goto err;
     if (0 != pcap_setnonblock(handle, 1, errbuf)) goto err1;
     if (0 != pcap_activate(handle)) goto err;
@@ -97,18 +96,18 @@ err1:
     return NULL;
 }
 
-
-CAMLprim value wrap_pcap_make(value ifname_, value promisc_, value filter_, value snaplen_)
+CAMLprim value wrap_pcap_make(value ifname_, value promisc_, value filter_, value snaplen_, value read_timeout_)
 {
-    CAMLparam4(ifname_, promisc_, filter_, snaplen_);
+    CAMLparam5(ifname_, promisc_, filter_, snaplen_, read_timeout_);
     char errbuf[PCAP_ERRBUF_SIZE] = "";
 
     char const *const ifname = String_val(ifname_);
     bool const promisc = Bool_val(promisc_);
     char const *const filter = String_val(filter_);
     unsigned const snaplen = Unsigned_int_val(snaplen_);
+    unsigned const read_timeout_ms = 1000. * Double_val(read_timeout_);
 
-    pcap_t *handle = make_pcap(ifname, promisc, filter, snaplen, errbuf);
+    pcap_t *handle = make_pcap(ifname, promisc, filter, snaplen, read_timeout_ms, errbuf);
     if (! handle) caml_failwith(errbuf);
 
     CAMLlocal1(v);
