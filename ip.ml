@@ -199,6 +199,7 @@ module Addr = struct
             | Unix.ADDR_INET (addr, _) -> Some (o addr)
             | _ -> None in
         List.filter_map extract_addr (Unix.getaddrinfo str "" [])
+
     let of_string str = match list_of_string str with
         | [] -> invalid_arg str
         | fst::_ -> fst
@@ -210,6 +211,23 @@ module Addr = struct
         let ip = o t in
         if ip = broadcast || ip = zero then random ()
         else ip
+
+    let is_routable t =
+        match%bitstring (to_bitstring t) with
+        | {| h : 8 ; _ : 24 |} when h = 10 -> false
+        | {| h : 12 ; _ : 20 |} when h = 0xAC1 -> false
+        | {| h : 16 ; _ : 16 |} when h = 0xC0A8 -> false
+        | {| h : 10 ; z : 54 ; _ : 64 |} when h = 0b1111111010 && z = 0L -> false
+        | {| _ |} -> true
+
+    (*$T is_routable
+       is_routable (of_string "135.12.0.42")
+       is_routable (of_string "5402:7f8:5b:66b0::2")
+       not (is_routable (of_string "192.168.10.1"))
+       not (is_routable (of_string "10.20.30.40"))
+       not (is_routable (of_string "172.18.3.4"))
+       not (is_routable (of_string "fe80::1234:5678"))
+     *)
 
     (** This printer can be composed with others (for instance to print a list of ips.
      FIXME: always use batteries IO to print instead of Format printer? *)
