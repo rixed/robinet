@@ -37,7 +37,7 @@ module ToS = struct
             (* We don't know how it's used by the network (ToS, DSCP,
              * intserv...) so let's stick to the int repr: *)
             string_of_int t
-        let is_valid t = t < 0x100
+        let is_valid t = t >= 0 && t < 0x100
         let repl_tag = "tos"
     end)
 
@@ -92,7 +92,7 @@ module Proto = struct
             try (Unix.getprotobynumber t).Unix.p_name
             with Not_found ->
                 Printf.sprintf "Protocol(%d)" t
-        let is_valid t = t < 0x100
+        let is_valid t = t >= 0 && t < 0x100
         let repl_tag = "proto"
     end)
 

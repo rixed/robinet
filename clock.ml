@@ -67,7 +67,7 @@ end = struct
             else
                 Printf.sprintf "%02d:%02d:%02d.%02d"
                     tm.tm_hour tm.tm_min tm.tm_sec msec
-        let is_valid _ = true
+        let is_valid v = v = v
         let repl_tag = "time"
     end)
 
@@ -109,7 +109,7 @@ end = struct
         type t = float
         let to_string t =
             Printf.sprintf "+%fs" t
-        let is_valid _ = true
+        let is_valid v = v = v
         let repl_tag = "time"
     end)
 
