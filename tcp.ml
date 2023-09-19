@@ -141,6 +141,10 @@ struct
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
+
+    let has_payload t =
+        Payload.length t.payload = 0
+
     (*$>*)
 end
 
