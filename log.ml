@@ -79,6 +79,15 @@ let log logger level lstr =
     logger.queues.(lvl) <- enqueue logger.queues.(lvl) msg ;
     if lvl <= int_of_level !console_lvl then console_log logger.name msg
 
+let log_exceptions logger ?(level=Warning) what f x =
+    try
+        f x
+    with e ->
+        log logger level (lazy (
+            Printf.sprintf "Ignoring exception %s while performing %s"
+                (Printexc.to_string e)
+                what))
+
 (* creation *)
 
 let make_queue size =
