@@ -279,9 +279,9 @@ and do_gethostbyname t name cont =
     let name = if is_fqdn name then name else name ^ "." in
     let dns_timeout () = (* use the name redefined above *)
         let conts = Hashtbl.find_all t.dns_queries name in
-        let nb_conts = List.length conts in
-        if nb_conts > 0 then (
-            Log.(log t.host_trx.logger Warning (lazy (Printf.sprintf "Timeouting %d clients that were waiting for the address of '%s'" nb_conts name))) ;
+        let num_conts = List.length conts in
+        if num_conts > 0 then (
+            Log.(log t.host_trx.logger Warning (lazy (Printf.sprintf "Timeouting %d clients that were waiting for the address of '%s'" num_conts name))) ;
             Metric.Atomic.fire resolution_timeouts ;
             List.iter (fun (cont, start_opt) ->
                 Option.may (fun start -> Metric.Timed.stop resolutions start name) start_opt ;

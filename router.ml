@@ -18,7 +18,7 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 (**
-  Equipment for routing/nating traffic
+  Equipment for routing/NATing traffic
  *)
 open Batteries
 open Bitstring
@@ -161,16 +161,16 @@ v}
                 t.recv (Ip.Pdu.pack ip)))
 
     (** [make ip n] returns a {!Tools.trx} corresponding to a NAT device (tx is for transmitting from the LAN to the outside) that can track [n] sockets. *)
-    let make addr nb_max_cnxs logger =
-        Log.(log logger Debug (lazy (Printf.sprintf "NAT: Creating a NATer for IP %s, with %d cnxs max" (Ip.Addr.to_string addr) nb_max_cnxs))) ;
+    let make addr num_max_cnxs logger =
+        Log.(log logger Debug (lazy (Printf.sprintf "NAT: Creating a NATer for IP %s, with %d cnxs max" (Ip.Addr.to_string addr) num_max_cnxs))) ;
         let t = { addr ;
-                  cnxs = OrdArray.make nb_max_cnxs { in_addr = Ip.Addr.zero ;
-                                                     in_port = 0 ;
-                                                    out_port = 0 } ;
-                  in_cnxs_h = Hashtbl.create nb_max_cnxs ;
-                  out_cnxs_h = Hashtbl.create nb_max_cnxs ;
                   emit = ignore_bits logger ;
                   recv = ignore_bits logger ;
+                  cnxs = OrdArray.make num_max_cnxs { in_addr = Ip.Addr.zero ;
+                                                      in_port = 0 ;
+                                                      out_port = 0 } ;
+                  in_cnxs_h = Hashtbl.create num_max_cnxs ;
+                  out_cnxs_h = Hashtbl.create num_max_cnxs ;
                   logger } in
         { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;
@@ -245,10 +245,10 @@ struct
         let bits = Ip.Pdu.pack ip_pkt in
         Clock.delay (Clock.Interval.o delay) (tx trx) bits
 
-    (* The [route] function receives the IP packets from the Eth trx. The integer
-     * [n] is the input interface number. *)
-    let route n t bits =
-        Log.(log t.logger Debug (lazy (Printf.sprintf "rx from port %d" n))) ;
+    (* The [route] function receives the IP packets from the Eth trx.
+     * The integer [in_port] is the input interface number. *)
+    let route in_port t bits =
+        Log.(log t.logger Debug (lazy (Printf.sprintf "rx from port %d" in_port))) ;
         let ip_opt, src_opt, dst_opt, ttl_opt, proto_opt =
             match Ip.Pdu.unpack bits with
             | None ->
@@ -260,8 +260,8 @@ struct
             | Some (src_port, dst_port) -> Some src_port, Some dst_port
             | None -> None, None in
         match List.find_all (fun r ->
-                test_route r n src_opt dst_opt proto_opt src_port_opt dst_port_opt
               ) t.route_tbl with
+                test_route r in_port src_opt dst_opt proto_opt src_port_opt dst_port_opt
         | [] ->
             Log.(log t.logger Debug (lazy "dropping packet since no route match"))
         | out_ports ->
@@ -274,7 +274,7 @@ struct
                     Log.(log t.logger Debug (lazy "Done")) in
                 match ttl_opt with
                 | Some (0 | 1) ->
-                        Log.(log t.logger Debug (lazy (Printf.sprintf "expiring packet from %d" n))) ;
+                        Log.(log t.logger Debug (lazy (Printf.sprintf "expiring packet from %d" in_port))) ;
                         Option.may (fun (delay, loss) ->
                             if Random.float 1. > loss then
                                 let delay = jitter 0.1 delay in
@@ -299,7 +299,7 @@ struct
                         with Invalid_argument _ -> bits in
                     do_sum bits
             in
-            let rs = List.enum out_ports // (fun r -> r.out_port <> n) |> Array.of_enum in
+            let rs = List.enum out_ports // (fun r -> r.out_port <> in_port) |> Array.of_enum in
             let rs_len = Array.length rs in
             if rs_len = 0 then
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Dropping packet since port dest (%d) = source" (List.at out_ports 0).out_port)))
@@ -452,7 +452,7 @@ end
  *                 |
  *            dhcpd/named (192.168.0.2)
  *)
-let make_gw ?delay ?loss ?(nb_max_cnxs=500) ?nameserver ?(name="gw") ?notify public_ip local_cidr =
+let make_gw ?delay ?loss ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?notify public_ip local_cidr =
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let hub = Hub.Repeater.make 3 (name^"/hub") in
@@ -469,7 +469,7 @@ let make_gw ?delay ?loss ?(nb_max_cnxs=500) ?nameserver ?(name="gw") ?notify pub
     Hub.Repeater.set_read 2 hub gw_eth.Eth.TRX.trx.out.write ;
     gw_eth.Eth.TRX.trx.out.set_read (Hub.Repeater.write 2 hub) ;
     (* The second port of our router (facing internet) is the NAT *)
-    let nat = Nat.make public_ip nb_max_cnxs h.Host.logger in
+    let nat = Nat.make public_ip num_max_cnxs h.Host.logger in
     (* Which we equip with an Eth TRX on the outside *)
     let nat_mac = Eth.Addr.random () in
     let nat_eth =
@@ -493,6 +493,8 @@ let make_gw ?delay ?loss ?(nb_max_cnxs=500) ?nameserver ?(name="gw") ?notify pub
                   ip_proto = None ; src_port = None ; dst_port = None ;
                   out_port = 1 ; via = None } ]
             (Log.make (name^"/router") 50)) in
+    (* TODO: local named could serve the local names according to the dhcp
+     * leases and hostname options *)
     Dhcpd.serve h local_ips ;
     Named.serve h (fun _ -> None) ; (* Delegate everything to nameserver *)
     { ins = { write = (fun bits -> Hub.Repeater.write 0 hub bits) ;

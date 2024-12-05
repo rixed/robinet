@@ -386,7 +386,7 @@ let main =
             (* We need an IP for the router itself on that CIDR: *)
             let cidr = Ip.Cidr.enlarge cidr 1 in
             let next_ip =
-                Ip.Cidr.to_enum cidr |>
+                Ip.Cidr.enum cidr |>
                 Enum.find (fun ip -> not (List.mem ip target_ips)) in
             let cidr = Ip.Addr.to_string next_ip ^"/"^
                        string_of_int (Ip.Cidr.width cidr) in

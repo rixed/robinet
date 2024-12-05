@@ -311,29 +311,29 @@ let either ps =
 
 let repeat ?min ?max p =
     let prev = ref []
-    and nb_match = ref 0 in
+    and num_match = ref 0 in
     let res bs =
         match min with
-            | Some min when min > !nb_match ->
-                if debug then Printf.printf "Peg: repeat: fail since only %d/%d matched\n" !nb_match min ;
-                prev := [] ; nb_match := 0 ;
+            | Some min when min > !num_match ->
+                if debug then Printf.printf "Peg: repeat: fail since only %d/%d matched\n" !num_match min ;
+                prev := [] ; num_match := 0 ;
                 Fail
             | _ ->
                 let r = Res (List.rev !prev, bs) in
-                if debug then Printf.printf "Peg: repeat: res with %d items\n" !nb_match ;
-                prev := [] ; nb_match := 0 ;
+                if debug then Printf.printf "Peg: repeat: res with %d items\n" !num_match ;
+                prev := [] ; num_match := 0 ;
                 r in
     let rec aux bs m = match p bs m with
         | Wait ->
             if m then Wait else res bs
         | Res (res, rem) ->
             prev := res :: !prev ;
-            incr nb_match ;
+            incr num_match ;
             (match max with
-                | Some mx when mx = !nb_match ->
+                | Some mx when mx = !num_match ->
                     let r = Res (List.rev !prev, rem) in
-                    if debug then Printf.printf "Peg: repeat: res with max %d items\n" !nb_match ;
-                    prev := [] ; nb_match := 0 ;
+                    if debug then Printf.printf "Peg: repeat: res with max %d items\n" !num_match ;
+                    prev := [] ; num_match := 0 ;
                     r
                 | _ -> aux rem m (* FIXME: is rem=[], then Wait/Fail depending on m? *))
         | Fail ->

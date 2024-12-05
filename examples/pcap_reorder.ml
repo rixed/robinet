@@ -33,14 +33,14 @@ let sink_to name =
 
 (* TODO: a dequeue would be faster here *)
 let reorder limit inp out =
-    let nb_reorders = ref 0 and nb_tot = ref 0 and need_more_pass = ref false in
+    let num_reorders = ref 0 and num_tot = ref 0 and need_more_pass = ref false in
     let insert p lst =
         let rec aux prevs = function
             | [] -> List.rev (p::prevs)
             | p1::rest as lst ->
                 if p.Pcap.Pdu.ts < p1.Pcap.Pdu.ts then (
-                    incr nb_reorders ;
-                    if prevs = [] && !nb_tot > 0 then need_more_pass := true ;
+                    incr num_reorders ;
+                    if prevs = [] && !num_tot > 0 then need_more_pass := true ;
                     List.rev_append prevs (p::lst)
                 ) else (
                     aux (p1::prevs) rest
@@ -60,12 +60,12 @@ let reorder limit inp out =
         if len = 0 then None else
         (* output the oldest packet *)
         let oldest = List.hd prevs in
-        incr nb_tot ;
+        incr num_tot ;
         Some (oldest, (pred len, List.tl prevs))
     in
     Enum.unfold (0, []) loop |>
     sink_to out ;
-    !nb_tot, !nb_reorders, !need_more_pass
+    !num_tot, !num_reorders, !need_more_pass
 
 let main =
     let limit        = ref 20
@@ -83,7 +83,7 @@ let main =
     ) else if !output = "" then (
         Printf.printf "No output?\n"
     ) else (
-        let nb_tot, nb_reorders, need_more_pass = reorder !limit !input !output in
-        Printf.printf "%d/%d packets reordered%s\n" nb_reorders nb_tot (if need_more_pass then " (not done)" else "")
+        let num_tot, num_reorders, need_more_pass = reorder !limit !input !output in
+        Printf.printf "%d/%d packets reordered%s\n" num_reorders num_tot (if need_more_pass then " (not done)" else "")
     )
 

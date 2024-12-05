@@ -119,46 +119,46 @@ struct
         and lo = Int32.of_int (read_n16 pkt (o+2)) in
         Int32.logor (Int32.shift_left hi 16) lo
 
-    let unpack_questions pkt rest nb_qs =
-        let rec aux qs rest nb_qs =
-            if nb_qs = 0 then Some (qs, rest) else (
+    let unpack_questions pkt rest num_qs =
+        let rec aux qs rest num_qs =
+            if num_qs = 0 then Some (qs, rest) else (
                 Option.Monad.bind (unpack_name pkt rest)
                     (fun (name, rest) ->
                         let qtype = QType.o (read_n16 pkt rest)
                         and qclass = read_n16 pkt (rest+2) in
                         if debug then Printf.printf "Dns: Decoded question name '%s', qtype=%s, qclass=%d\n%!" name (QType.to_string qtype) qclass ;
-                        aux ((name, qtype, qclass) :: qs) (rest+4) (nb_qs - 1))
+                        aux ((name, qtype, qclass) :: qs) (rest+4) (num_qs - 1))
             ) in
-        aux [] rest nb_qs
+        aux [] rest num_qs
 
-    let unpack_rrs pkt rest nb_rrs =
-        let rec aux rrs rest nb_rrs =
-            if nb_rrs = 0 then (
+    let unpack_rrs pkt rest num_rrs =
+        let rec aux rrs rest num_rrs =
+            if num_rrs = 0 then (
                 Some (rrs, rest)
             ) else (
                 Option.Monad.bind (unpack_questions pkt rest 1) (function
                     | [ name, qtype, qclass ], rest ->
                         let ttl = read_n32 pkt rest in
-                        if debug then Printf.printf "Dns: Decoded RR %d name '%s', qtype=%s, qclass=%d, ttl=%ld\n%!" nb_rrs name (QType.to_string qtype) qclass ttl ;
+                        if debug then Printf.printf "Dns: Decoded RR %d name '%s', qtype=%s, qclass=%d, ttl=%ld\n%!" num_rrs name (QType.to_string qtype) qclass ttl ;
                         let res_data_len = read_n16 pkt (rest+4) in
                         let res_data = Bytes.sub pkt (rest+6) res_data_len in
-                        aux ((name, qtype, qclass, ttl, res_data) :: rrs) (rest+4+2+res_data_len) (nb_rrs-1)
+                        aux ((name, qtype, qclass, ttl, res_data) :: rrs) (rest+4+2+res_data_len) (num_rrs-1)
                     | _ -> err "Should not happen")
             ) in
-        aux [] rest nb_rrs
+        aux [] rest num_rrs
 
     let unpack bits = match%bitstring bits with
         | {| id : 16 ;
              qr : 1 ; opcode : 4 ; aa : 1 ; tc : 1 ; rd : 1 ; ra : 1 ; 0 : 3 ; rcode : 4 ;
-             nb_questions : 16 ; nb_answer_rrs : 16 ;
-             nb_authority_rrs : 16 ; nb_additional_rrs : 16 |} ->
+             num_questions : 16 ; num_answer_rrs : 16 ;
+             num_authority_rrs : 16 ; num_additional_rrs : 16 |} ->
             let pkt = bytes_of_bitstring bits
             and rest = 12 (* offset of the rest of the pkt *)
             in (
-            try Option.Monad.bind (unpack_questions pkt rest nb_questions) (fun (questions, rest) ->
-                Option.Monad.bind (unpack_rrs pkt rest nb_answer_rrs) (fun (answer_rrs, rest) ->
-                Option.Monad.bind (unpack_rrs pkt rest nb_authority_rrs) (fun (authority_rrs, rest) ->
-                Option.Monad.bind (unpack_rrs pkt rest nb_additional_rrs) (fun (additional_rrs, rest) ->
+            try Option.Monad.bind (unpack_questions pkt rest num_questions) (fun (questions, rest) ->
+                Option.Monad.bind (unpack_rrs pkt rest num_answer_rrs) (fun (answer_rrs, rest) ->
+                Option.Monad.bind (unpack_rrs pkt rest num_authority_rrs) (fun (authority_rrs, rest) ->
+                Option.Monad.bind (unpack_rrs pkt rest num_additional_rrs) (fun (additional_rrs, rest) ->
                 if debug && Bytes.length pkt > rest then err "Dns: Trailing datas in msg" else
                 Some { id = id ; is_query = not qr ; opcode = opcode ;
                        is_auth = aa ; truncated = tc ;

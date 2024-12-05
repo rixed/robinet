@@ -24,7 +24,7 @@
 open Batteries
 open Tools
 
-let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth start_url =
+let run ifname src_range num_srcs ?gw ?search_sfx ?nameserver ?pause max_depth start_url =
     (* Build the hosts *)
     let mac_of_ip ip = (*Eth.addr_of_string "00:26:5e:0a:d2:b9" in*)
         let bs = Ip.Addr.to_bitstring ip in
@@ -33,10 +33,10 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
     let netmask = Ip.Cidr.to_netmask src_range in
     let host_of_ip ip =
         Host.make_static ~on:true (Ip.Addr.to_dotted_string ip) ?gw ?search_sfx ?nameserver ~netmask (mac_of_ip ip) ip in
-    let hosts = List.of_enum (Ip.Cidr.random_addrs src_range nb_srcs /@ host_of_ip)
+    let hosts = List.of_enum (Ip.Cidr.random_addrs src_range num_srcs /@ host_of_ip)
     in
     (* Build the HUB and link it to hosts *)
-    let hub     = Hub.Repeater.make (nb_srcs+1) "hub"
+    let hub     = Hub.Repeater.make (num_srcs+1) "hub"
     and gigabit = Eth.limited (Clock.Interval.msec 10.) 1_000_000_000. in
     List.iteri (fun i h ->
         (* notice that the cable is not full duplex *)
@@ -45,7 +45,7 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
     ) hosts ;
     (* Link all these to the real world *)
     let iface = Pcap.openif ifname in
-    Hub.Repeater.set_read nb_srcs hub (Pcap.inject iface) ;
+    Hub.Repeater.set_read num_srcs hub (Pcap.inject iface) ;
     (* Start the browsers *)
     List.iter (fun h ->
         let browser = Browser.make h in
@@ -55,13 +55,13 @@ let run ifname src_range nb_srcs ?gw ?search_sfx ?nameserver ?pause max_depth st
     (* Prepare a timeout in 15s *)
     Clock.delay (Clock.Interval.sec 15.) failwith "timeout" ;
     (* Run everything *)
-    ignore (Pcap.sniffer iface (Hub.Repeater.write nb_srcs hub)) ;
+    ignore (Pcap.sniffer iface (Hub.Repeater.write num_srcs hub)) ;
     Clock.run false
 
 let main =
     let ifname        = ref "eth0"
     and src_range_str = ref "192.168.0.0/16"
-    and nb_srcs       = ref 1
+    and num_srcs      = ref 1
     and gw_str        = ref None
     and search_sfx    = ref None
     and dns_str       = ref None
@@ -71,7 +71,7 @@ let main =
     in
     Arg.parse [ "-i",      Arg.Set_string ifname, "Interface to inject traffic to (default: eth0)" ;
                 "-cidr",   Arg.Set_string src_range_str, "IP range (CIDR) for the HTTP clients (default: 192.168.0.0/16)" ;
-                "-n",      Arg.Set_int nb_srcs, "How many clients to create (default: 1)" ;
+                "-n",      Arg.Set_int num_srcs, "How many clients to create (default: 1)" ;
                 "-search", Arg.String (fun sfx -> search_sfx := Some sfx), "DNS search suffix" ;
                 "-gw",     Arg.String (fun str -> gw_str := Some str), "optional gateway IP address" ;
                 "-dns",    Arg.String (fun str -> dns_str := Some str), "optional IP of the DNS (default: same as gw)" ;
@@ -86,6 +86,6 @@ let main =
                                       Some (Eth.gw_addr_of_string gw) ]) !gw_str
     and nameserver = Option.map (fun ip -> Ip.Addr.of_string ip) !dns_str in
     ignore (Metric.report_thread stdout 10.) ;
-    run !ifname (Ip.Cidr.of_string !src_range_str) !nb_srcs
+    run !ifname (Ip.Cidr.of_string !src_range_str) !num_srcs
                 ?gw ?search_sfx:!search_sfx ?nameserver ?pause:!pause !max_depth !start_url
 

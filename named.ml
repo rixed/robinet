@@ -39,9 +39,9 @@ let serve ?(port=Udp.Port.o 53) host lookup =
                 Log.(log logger Debug (lazy "named: Not a DNS message, ignoring"))
             | Some (Pdu.{ is_query = true ; _ } as query)
               when query.opcode = std_query && query.Pdu.questions <> [] ->
-                let nb_questions = List.length query.Pdu.questions in
-                Log.(log logger Debug (lazy (Printf.sprintf "named: Received a DNS query with %d questions" nb_questions))) ;
-                let answers = Array.make nb_questions None in
+                let num_questions = List.length query.Pdu.questions in
+                Log.(log logger Debug (lazy (Printf.sprintf "named: Received a DNS query with %d questions" num_questions))) ;
+                let answers = Array.make num_questions None in
                 let check_all_answered () =
                   if Array.for_all ((<>) None) answers then (
                     let answer_rrs =

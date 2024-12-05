@@ -493,7 +493,7 @@ let limited latency throughput =
     (fun emit bits ->
         let min_start = Clock.Time.add (Clock.now ()) latency in
         let start = max min_start !next_avlb
-        and nb_bits = float_of_int (min (bitstring_length bits) 368) in
-        let duration = max (Clock.Interval.usec 1.) (Clock.Interval.o (nb_bits /. throughput)) in
+        and num_bits = float_of_int (min (bitstring_length bits) 368) in
+        let duration = max (Clock.Interval.usec 1.) (Clock.Interval.o (num_bits /. throughput)) in
         next_avlb := Clock.Time.add start duration ;
         Clock.at start emit bits)

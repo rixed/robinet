@@ -477,8 +477,8 @@ let randbs len (* in bytes! *)=
     randstr len |> bitstring_of_string
 
 let rand_hostname () =
-    let nb_parts = 1 + randi 3 in
-    let parts = List.init nb_parts (fun _i ->
+    let num_parts = 1 + randi 3 in
+    let parts = List.init num_parts (fun _i ->
         randstr ~charset:"abcdefghijklmnopqrstuvwxyz-" (3 + randi 4)) in
     String.join "." parts
 

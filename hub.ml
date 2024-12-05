@@ -83,11 +83,11 @@ struct
     let print oc t =
         Printf.fprintf oc "switch %s with %d ports" t.name (Array.length t.hub.ports)
 
-    let make nb_ports nb_macs name =
+    let make num_ports num_macs name =
         let logger = Log.make name 50 in
-        { hub = R.make ~logger nb_ports name ;
-          macs = OrdArray.init nb_macs (fun _ -> { addr = None ; port = 0 }) ;
-          macs_h = BitHash.create (nb_macs/10) ;
+        { hub = R.make ~logger num_ports name ;
+          macs = OrdArray.init num_macs (fun _ -> { addr = None ; port = 0 }) ;
+          macs_h = BitHash.create (num_macs/10) ;
           name ; logger }
 
     let forward_from ins t bits = match%bitstring bits with

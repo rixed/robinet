@@ -166,7 +166,7 @@ function select_note(note, group)
 
 function update_hub(hub, group)
 {
-    group.select("text.hub").text(hub.name + " (" + hub.nb_ports + ")");
+    group.select("text.hub").text(hub.name + " (" + hub.num_ports + ")");
 }
 
 function draw_hub(hub, group)
@@ -180,7 +180,7 @@ function select_hub(hub, group)
 {
     var div = new_controls();
     add_button(div, "Name", "name", update_hub, hub, group);
-    add_button(div, "Nb ports", "nb_ports", update_hub, hub, group);
+    add_button(div, "Num ports", "num_ports", update_hub, hub, group);
     may_end_link(hub);
 }
 
@@ -193,8 +193,8 @@ function select_switch(sw, group)
 {
     var div = new_controls();
     add_button(div, "Name", "name", update_switch, sw, group);
-    add_button(div, "Nb ports", "nb_ports", update_switch, sw, group);
-    add_button(div, "MAC table size", "nb_macs", update_switch, sw, group);
+    add_button(div, "Num ports", "num_ports", update_switch, sw, group);
+    add_button(div, "MAC table size", "num_macs", update_switch, sw, group);
     may_end_link(sw);
 }
 
@@ -305,11 +305,11 @@ function save_note(note)
 }
 function save_hub(hub)
 {
-    return ["hub", quote(hub.name), hub.x, hub.y, hub.nb_ports];
+    return ["hub", quote(hub.name), hub.x, hub.y, hub.num_ports];
 }
 function save_switch(sw)
 {
-    return ["switch", quote(sw.name), sw.x, sw.y, sw.nb_ports, sw.nb_macs];
+    return ["switch", quote(sw.name), sw.x, sw.y, sw.num_ports, sw.num_macs];
 }
 function save_host(host)
 {
@@ -352,14 +352,14 @@ function new_net_item()
             vertex.draw = curry_1_2(draw_hub, vertex);
             vertex.on_select = curry_1_2(select_hub, vertex);
             vertex.save = save_hub;
-            vertex.nb_ports = 8;
+            vertex.num_ports = 8;
             break;
         case "switch":
             vertex.draw = curry_1_2(draw_switch, vertex);
             vertex.on_select = curry_1_2(select_switch, vertex);
             vertex.save = save_switch;
-            vertex.nb_ports = 8;
-            vertex.nb_macs = 512;
+            vertex.num_ports = 8;
+            vertex.num_macs = 512;
             break;
         case "host":
             vertex.draw = curry_1_2(draw_host, vertex);

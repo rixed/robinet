@@ -43,7 +43,7 @@ let int_of_level = function
     | Info -> 3
     | Debug -> 4
 
-let nb_levels = 5
+let num_levels = 5
 
 (* output to console happen based on a constant current loglevel *)
 
@@ -99,7 +99,7 @@ let make ?(use_wall_clock=false) name size =
     let logger = {
         name ;
         use_wall_clock ;
-        queues = Array.init nb_levels (fun _ -> make_queue size)
+        queues = Array.init num_levels (fun _ -> make_queue size)
     } in
     Hashtbl.add loggers name logger ;
     logger

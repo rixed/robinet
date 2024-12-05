@@ -365,7 +365,7 @@ module Cidr = struct
         let net, width = (t :> Addr.t * int) in
         o (net, width + n)
 
-    let to_enum (t : t) =
+    let enum (t : t) =
         let net, width = (t :> Addr.t * int) in
         let net = Addr.to_bitstring net in
         let prefix = takebits width net
@@ -374,15 +374,16 @@ module Cidr = struct
         (fun suffix ->
             Bitstring.concat [ prefix ; suffix ] |>
             Addr.of_bitstring)
-    (*$= to_enum & ~printer:(IO.to_string (List.print String.print))
-      [ "192.168.10.42" ] (to_enum (of_string "192.168.10.42/32") /@ \
+    (*$= enum & ~printer:(IO.to_string (List.print String.print))
+      [ "192.168.10.42" ] (enum (of_string "192.168.10.42/32") /@ \
                            Addr.to_dotted_string |> \
                            List.of_enum)
       [ "192.168.10.42" ; "192.168.10.43" ] \
-                           (to_enum (of_string "192.168.10.42/31") /@ \
+                           (enum (of_string "192.168.10.42/31") /@ \
                            Addr.to_dotted_string |> \
                            List.of_enum)
      *)
+    let to_enum = enum  (* Backward compatibility *)
 
     (** Returns the subnet-zero address of a CIDR *)
     let zero_addr (t : t) =
@@ -412,7 +413,7 @@ module Cidr = struct
         let net, width = (t :> Addr.t * int) in
         if width >= Addr.length net then Enum.singleton net else
         let zero = zero_addr t and all1s = all1s_addr t in
-        to_enum t // (fun ip -> ip <> zero && ip <> all1s)
+        enum t // (fun ip -> ip <> zero && ip <> all1s)
     (*$= local_addrs & ~printer:dump
       [ "192.168.10.42" ] (local_addrs (of_string "192.168.10.42/32") /@ \
                            Addr.to_dotted_string |> \
@@ -435,7 +436,7 @@ module Cidr = struct
         local_addrs t |> Enum.skip 1 |> Enum.peek |> Option.get
 
     let random_addrs t n =
-        to_enum t |> Random.multi_choice n
+        enum t |> Random.multi_choice n
 
     let to_netmask (t : t) =
         let net, width = (t :> Addr.t * int) in

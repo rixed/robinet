@@ -37,9 +37,9 @@ open Tools
 
 let debug = true
 
-type hub    = { hub_nb_ports : int }
-type switch = { switch_nb_ports : int ;
-                switch_nb_macs : int }
+type hub    = { hub_num_ports : int }
+type switch = { switch_num_ports : int ;
+                switch_num_macs : int }
 type host   = { host_gw : Eth.gw_addr ;
                 host_search_sfx : string ;
                 host_nameserver : Ip.Addr.t ;
@@ -86,17 +86,17 @@ let empty name = make name [] []
 exception Cannot_parse of string * string
 
 let hub_of_csv str =
-    let make_hub name x y nb_ports =
-        { elmt = Hub { hub_nb_ports = nb_ports } ;
+    let make_hub name x y num_ports =
+        { elmt = Hub { hub_num_ports = num_ports } ;
           pos = x, y ;
           node_name = name } in
     try Scanf.sscanf str "%S,%f,%f,%d" make_hub
     with _ -> raise (Cannot_parse ("hub", str))
 
 let switch_of_csv str =
-    let make_switch name x y nb_ports nb_macs =
-        { elmt = Switch { switch_nb_ports = nb_ports ;
-                          switch_nb_macs = nb_macs } ;
+    let make_switch name x y num_ports num_macs =
+        { elmt = Switch { switch_num_ports = num_ports ;
+                          switch_num_macs = num_macs } ;
           pos = x, y ;
           node_name = name } in
     try Scanf.sscanf str "%S,%f,%f,%d,%d" make_switch
@@ -183,20 +183,20 @@ let csv_for_hosts oc t =
         t.nodes
 
 let csv_for_switches oc t =
-    Printf.fprintf oc "name,x,y,nb_ports,nb_macs\n" ;
+    Printf.fprintf oc "name,x,y,num_ports,num_macs\n" ;
     List.iter (function
         | { elmt = Switch s ; pos = x,y ; node_name } ->
             Printf.fprintf oc "%S,%f,%f,%d,%d\n"
-                node_name x y s.switch_nb_ports s.switch_nb_macs
+                node_name x y s.switch_num_ports s.switch_num_macs
         | _ -> ())
         t.nodes
 
 let csv_for_hubs oc t =
-    Printf.fprintf oc "name,x,y,nb_ports\n" ;
+    Printf.fprintf oc "name,x,y,num_ports\n" ;
     List.iter (function
         | { elmt = Hub h ; pos = x,y ; node_name } ->
             Printf.fprintf oc "%S,%f,%f,%d\n"
-                node_name x y h.hub_nb_ports
+                node_name x y h.hub_num_ports
         | _ -> ())
         t.nodes
 
@@ -234,10 +234,10 @@ let csv_for_node oc = function
                 | _ -> "")
     | { elmt = Switch s ; pos = x,y ; node_name } ->
         Printf.fprintf oc "switch,%S,%f,%f,%d,%d\n"
-            node_name x y s.switch_nb_ports s.switch_nb_macs
+            node_name x y s.switch_num_ports s.switch_num_macs
     | { elmt = Hub h ; pos = x,y ; node_name } ->
         Printf.fprintf oc "hub,%S,%f,%f,%d\n"
-            node_name x y h.hub_nb_ports
+            node_name x y h.hub_num_ports
     | { elmt = Note text ; pos = x,y ; node_name } ->
         Printf.fprintf oc "note,%S,%f,%f,%S\n"
             node_name x y text
@@ -272,10 +272,10 @@ let instanciate t =
     let create_node { node_name = name ; elmt ; _ } = match elmt with
         | Hub h ->
             Hashtbl.add hubs name
-                (Hub.Repeater.make h.hub_nb_ports name)
+                (Hub.Repeater.make h.hub_num_ports name)
         | Switch s ->
             Hashtbl.add switches name
-                (Hub.Switch.make s.switch_nb_ports s.switch_nb_macs name)
+                (Hub.Switch.make s.switch_num_ports s.switch_num_macs name)
         | Host h ->
             let gw = [ Ip.Addr.zero, Ip.Addr.zero, Some h.host_gw ] in
             Hashtbl.add hosts name
