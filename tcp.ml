@@ -390,7 +390,7 @@ struct
                   unacked_tx = Streambuf.empty ;
                   rcvd_fin = false ;
                   cnx_established_cont = None ;
-                  tcp_trx = { trx = null_trx logger ;
+                  tcp_trx = { trx = null_trx ;
                               close = ignore ;
                               is_closed = fun _ -> true } } in
         t.tcp_trx <- { trx =  { ins = { write = tx t ;

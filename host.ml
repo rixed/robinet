@@ -510,14 +510,14 @@ let power_off ?timeout t =
     t.killers <- []
 
 let make name ?gw ?search_sfx ?nameserver ?(on=true) ~(init : ?on_ip:(t -> unit) -> t -> unit) my_mac =
-    let logger = Log.make name 50 in
+    let logger = Log.make name in
     let if_on t what f x =
         if t.on then f x else Log.(log logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
     let rec t =
         { my_ip         = Ip.Addr.zero ;
           on            = on ;
           killers       = [] ;
-          eth           = Eth.TRX.make my_mac ?gw Arp.HwProto.ip4 [] logger ; (* FIXME: Don't use the GW for same net IP! *)
+          eth           = Eth.TRX.make my_mac ?gw Arp.HwProto.ip4 [] (Log.sub logger "eth") ; (* FIXME: Don't use the GW for same net IP! *)
           tcp_socks     = Hashtbl.create 11 ;
           udp_socks     = Hashtbl.create 11 ;
           icmp_socks    = Hashtbl.create 11 ;

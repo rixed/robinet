@@ -405,7 +405,7 @@ struct
                    mutable next : int }
     type 'a t =
         {     last_used : entry array ; (** The ordered list of indices. *)
-          mutable first : int ;         (** The indice of the first element. *)
+          mutable first : int ;         (** The index of the first element. *)
            mutable last : int ;         (** and the last one. *)
                    data : 'a array }    (** User data *)
 
@@ -523,17 +523,32 @@ end
 
 (** A device is something to which you can send packet and register a
  * receiving function *)
-(* FIXME: a better name which makes apparent that a trx is actually 2 devs *)
-type dev = { write : bitstring -> unit ; set_read : (bitstring -> unit) -> unit }
+type dev =
+    { write : bitstring -> unit ; set_read : (bitstring -> unit) -> unit }
+
+type counters =
+    { mutable num_writes : int ;
+        mutable num_bits : int }
+
+let counting dev =
+    let c = { num_writes = 0 ; num_bits = 0 } in
+    let write bits =
+        c.num_writes <- c.num_writes + 1 ;
+        c.num_bits <- c.num_bits + bitstring_length bits ;
+        dev.write bits in
+    { dev with write }, c
+
+let null_logger =
+    Log.make "null"
 
 (** Obituary for ignored bits: *)
-let ignore_bits logger bits =
-    Log.(log logger Debug (lazy
+let ignore_bits bits =
+    Log.(log null_logger Debug (lazy
         (Printf.sprintf "Ignoring %d bits" (bitstring_length bits))))
 
 (** For those cases when you want to build a [trx] from a single [dev] *)
-let null_dev logger =
-    { write = ignore_bits logger ; set_read = ignore }
+let null_dev =
+    { write = ignore_bits ; set_read = ignore }
 
 (** Connects two {!dev} together *)
 let (<-->) a b =
@@ -542,7 +557,31 @@ let (<-->) a b =
 
 (** A transmitter is a kind of pipe with an inside and an outside device, and is
  * thus oriented (from inside to outside, inside being left operand for following
- * functions), that transforms the written payload before emitting it. *)
+ * functions), that transforms the written payload before emitting it.
+ *
+ * Picture it like this:
+ *
+ *   receives       TRX        emits
+ *  <--------  < ins | out >  ------>
+ *
+ *        ins.write -->  out.set_read =->
+ * <-= ins.set_read <--  out.write
+ *
+ * Where the operator <-= sets the receiving function for (the inside side of)
+ * the trx, and =-> sets the function that will receive data emitted from the
+ * (outside side of) the trx.
+ *
+ * Two usual ways to connect two TRXs together, with the <==> and the ==>
+ * operators:
+ *
+ *        TRX_1                TRX_2
+ *    < ins | out >  <==>  < out | ins >
+ *
+ * and
+ *
+ *        TRX_1                TRX_2
+ *    < ins | out >   ==>  < ins | out >
+ *)
 type trx = { ins : dev ; out : dev }
 
 let tx trx = trx.ins.write
@@ -551,7 +590,7 @@ let rx trx = trx.out.write
 
 let inverse_trx trx = { ins = trx.out ; out = trx.ins }
 
-let null_trx logger = { ins = null_dev logger ; out = null_dev logger }
+let null_trx = { ins = null_dev ; out = null_dev }
 
 (** [f <-= trx] sets f as the receive function of this [trx].
  * Previous receive function, if any, is lost.
@@ -566,20 +605,31 @@ let (<-=) f trx =
 let (=->) trx f =
     trx.out.set_read f
 
+(* Connect the device to the inside of the trx: *)
+let (-=>) dev trx =
+    dev.set_read trx.ins.write ;
+    dev.write <-= trx
+
+(* Or the other way around, connect it to the output side of the trx: *)
+let (<=-) trx dev =
+    dev.set_read trx.out.write ;
+    trx =-> dev.write
+
 (** [a ==> b] connects [a] to [b] such that [b] transmits what [a] emits.
  * Previous connection from [a], if any, is overridden. *)
 let (==>) trx1 trx2 =
     trx1 =-> trx2.ins.write ;
     trx1.out.write <-= trx2
 
-(** [a <==> b] connects [a] to [b] such that [b] receives what [a] emits
- * and [a] receives what [b] emits. *)
+(** [a <==> b] connects [a] to [b] such that [b] receives from the outside
+ * what [a] emits to the outside, and [a] receives from the outside what
+ * [b] emits to the outside. *)
 let (<==>) trx1 trx2 =
     trx1 =-> trx2.out.write ;
     trx2 =-> trx1.out.write
 
-(** [pipe trx1 trx2] connects trx1 and trx2 so that trx1 output is sent through trx2,
- * and returns a trx with trx1 as the inside and trx2 as the outside. *)
+(** [pipe trx1 trx2] is like [trx1 ==> trx2] but instead of returning trx2 it
+ * returns a trx with trx1 as the inside and trx2 as the outside. *)
 let pipe trx1 trx2 =
     trx1.out.set_read trx2.ins.write ;
     trx2.ins.set_read trx1.out.write ;

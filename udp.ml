@@ -100,8 +100,8 @@ struct
 
     let make src dst logger =
         let t = { src = src ; dst = dst ;
-                  emit = ignore_bits logger ;
-                  recv = ignore_bits logger ;
+                  emit = ignore_bits ;
+                  recv = ignore_bits ;
                   logger } in
         trx_of t
 end

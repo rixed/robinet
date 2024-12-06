@@ -106,10 +106,10 @@ struct
      * @param id then vlan tag.
      * @param proto the {!Arp.HwProto.t} we want to transmit/receive.
      *)
-    let make prio id proto logger =
+    let make prio id proto =
         let t = { prio ; id ; proto ;
-                  emit = ignore_bits logger ;
-                  recv = ignore_bits logger } in
+                  emit = ignore_bits ;
+                  recv = ignore_bits } in
         { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;
           out = { write = rx t ;

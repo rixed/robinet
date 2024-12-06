@@ -199,37 +199,39 @@ let synch () =
 (** Will process the next event *)
 let next_event () =
     let min_ts_for_sleep = Interval.msec 10. in
-    let run_first =
+    (* Time to sleep while waiting for an event to be added in the queue.
+     * Must be > min_ts_for_sleep *)
+    let max_sleep_time = Interval.sec 5. in
+    let run_first_event =
         if !realtime then (
-            (* Note: In realtime, other threads may add new events while we are sleeping.
-               So we use a condition variable (instead of a mere Unix.sleep) so that addition of event can awake us. *)
-            let wait_ts = ref (Interval.o 0.) in
+            (* Note: In realtime, other threads may add new events while we are
+             * sleeping, so a condition variable is used (instead of a mere
+             * Unix.sleep). *)
             Mutex.lock cond_lock ;
-            while
-                let ts, _ = try Map.min_binding current.events
-                            with Not_found -> Time.o max_float, (fun () -> ()) in
-                wait_ts := Time.sub ts current.now ;
-                Interval.compare !wait_ts min_ts_for_sleep > 0
-            do
-                if debug then Printf.printf "Clock: next_event: waiting for %s since we're too early\n%!" (Interval.to_string !wait_ts) ;
-                (* fork a thread that will sleep then signal_me () *)
-                (* FIXME: since we cannot Thread.kill this thread many can accumulate. *)
-                Thread.create (fun ts ->
-                    (* We already know that the sleeping time is greater than [min_ts_for_sleep],
-                     * so we can trigger the GC: *)
-                    let t0 = Time.wall_clock () in
+            (* Wait until there is an event to process now: *)
+            let rec wait_loop () =
+                let until =
+                    match Map.min_binding current.events with
+                    | exception Not_found -> Time.add current.now max_sleep_time
+                    | ts, _ -> ts in
+                let wait_time = Time.sub until current.now in
+                if Interval.compare wait_time min_ts_for_sleep > 0 then (
+                    if debug then Printf.printf "Clock: next_event: waiting until %s since we're too early\n%!" (Time.to_string until) ;
+                    (* Since we are going to wait here, we could as well collect
+                     * some garbage: *)
                     Gc.major () ;
-                    let t1 = Time.wall_clock () in
-                    let gc_time = Time.sub t1 t0 in
-                    let ts = Interval.sub ts gc_time in
-                    if Interval.compare ts Interval.zero > 0 then
-                        Thread.delay (min 1. (ts :> float)) ;
-                    if debug then Printf.printf "Clock: waiker: time to waike up!\n" ;
-                    signal_me ()
-                ) !wait_ts |> ignore ;
-                Condition.wait cond cond_lock ; (* zzz *)
-                synch ()
-            done ;
+                    (try Condvar.timed_wait cond cond_lock (until :> float)
+                    with Condvar.Timeout -> ()) ;
+                    (* If we timed out we need to wait longer.
+                     * If we have been signaled we still need to wait for the
+                     * next event, which may be a different one. *)
+                    (* Because of the loop condition above: *)
+                    synch () ;
+                    wait_loop ()
+                ) in
+                (* Else there is no need to wait we can go straight to processing
+                   that event: *)
+            wait_loop () ;
             Mutex.unlock cond_lock ;
             true
         ) else ( (* not realtime *)
@@ -238,7 +240,7 @@ let next_event () =
                 false
             ) else true
         ) in
-    if run_first then (
+    if run_first_event then (
         (* We have some work to do *)
         let ts, f = Map.min_binding current.events in
         if debug then Printf.printf "Clock: next_event: executing since it's %s\n%!" (Time.to_string ts) ;

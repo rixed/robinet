@@ -146,14 +146,14 @@ struct
         let r = Hub.Repeater.make n name in
         let plugs = List.init n (fun i ->
             let iface_name = "port#"^ string_of_int i in
-            Plug.make iface_name (Hub.Repeater.to_dev i r)) in
+            Plug.make iface_name (Hub.Repeater.port r i)) in
         Simple { equip = [ Hub r ] ; plugs }
 
     (** Returns a net representing the external network via the given interface,
      * and the thread that sniffs packets. *)
-    let make_real_net iface_name logger =
+    let make_real_net iface_name =
         let iface = Pcap.openif ~caplen:1800 iface_name in
-        let emit = ref (ignore_bits logger) in
+        let emit = ref ignore_bits in
         let plug = Plug.make iface_name { write = Pcap.inject iface ;
                                           set_read = fun em -> emit := em } in
         Simple { equip = [] ; plugs = [ plug ] },
@@ -165,7 +165,7 @@ struct
         let nb_ports = 10 in
         let sw = Hub.Switch.make nb_ports 5000 "Internet" in
         let plugs = List.init nb_ports (fun i ->
-            Plug.make "" (Hub.Switch.to_dev i sw)) in
+            Plug.make "" (Hub.Switch.port sw i)) in
         Simple { equip = [ Switch sw ] ; plugs }
 
     (* Build a single server (public static IP and name) as a Net.t: *)
@@ -182,8 +182,8 @@ struct
         let cidr = Ip.Cidr.of_string "192.168.0.0/16" in
         let gw = Router.make_gw public_ip cidr ~nameserver ~name:("gw."^lan_name) in
         let sw = Hub.Switch.make (n+1) (5*n) ("switch."^lan_name) in
-        Hub.Switch.set_read n sw gw.ins.write ;
-        gw.ins.set_read (Hub.Switch.write n sw) ;
+        Hub.Switch.set_read sw n gw.ins.write ;
+        gw.ins.set_read (Hub.Switch.write sw n) ;
         let plug = Plug.make lan_name gw.out in
         let net =
             { equip = [ Switch sw ; Trx gw ] ; plugs = [ plug ] } in
@@ -198,8 +198,8 @@ struct
             let netmask = Ip.Addr.of_string "255.255.0.0" in
             let gw = [ Ip.Addr.zero, Ip.Addr.zero, Some (Eth.IPv4 gw_ip) ] in
             let h = Host.make_dhcp name ~on ~gw ~nameserver:srv_ip ~netmask (Eth.Addr.random ()) in
-            h.Host.dev.set_read (Hub.Switch.write !num_hosts sw) ;
-            Hub.Switch.set_read !num_hosts sw h.Host.dev.write ;
+            h.Host.dev.set_read (Hub.Switch.write sw !num_hosts) ;
+            Hub.Switch.set_read sw !num_hosts h.Host.dev.write ;
             net.equip <- Equipment.Host h :: net.equip ;
             incr num_hosts ;
             h
@@ -210,7 +210,7 @@ struct
     let make_dc ~dc_name ?nameserver ~cidr n =
         let sw = Hub.Switch.make (n+1) (5*n) ("switch."^dc_name) in
         let local_ips = Ip.Cidr.local_addrs cidr in
-        let plug = Plug.make dc_name (Hub.Switch.to_dev n sw) in
+        let plug = Plug.make dc_name (Hub.Switch.port sw n) in
         let net =
             { equip = [ Switch sw ] ; plugs = [ plug ] } in
         let num_hosts = ref 0 in
@@ -227,8 +227,8 @@ struct
             let mac = Eth.Addr.random () in
             let netmask = Ip.Addr.zero in
             let h = Host.make_static ~on name ?nameserver ~netmask mac ip in
-            h.Host.dev.set_read (Hub.Switch.write !num_hosts sw) ;
-            Hub.Switch.set_read !num_hosts sw h.Host.dev.write ;
+            h.Host.dev.set_read (Hub.Switch.write sw !num_hosts) ;
+            Hub.Switch.set_read sw !num_hosts h.Host.dev.write ;
             net.equip <- Equipment.Host h :: net.equip ;
             incr num_hosts ;
             h

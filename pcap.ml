@@ -93,8 +93,6 @@ open Batteries
 open Bitstring
 open Tools
 
-let debug = false
-
 (** {2 Libpcap low level wrappers} *)
 
 (** Libpcap network interface handler. *)
@@ -309,11 +307,6 @@ let read_next_pkt global_header ic =
          usec     : 32 : endian (global_header.endianness) ;
          caplen   : 32 : endian (global_header.endianness) ;
          wire_len : 32 : endian (global_header.endianness) |} ->
-        if debug then Printf.printf "Pcap: reading a packet (wire_len=%ld)\n%!" wire_len ;
-        if debug && caplen > global_header.snaplen then (
-            (* We don't really care but the user might *)
-            Printf.printf "Pcap: caplen > snaplen!\n%!"
-        ) ;
         let pkt = IO.really_nread ic (Int32.to_int caplen) in
         let bits = bitstring_of_string pkt in
         let bits = if wire_len <= caplen then bits
@@ -453,14 +446,15 @@ let play tx fname =
 
 (** A network device opened for sniffing or injection *)
 type iface = { handler : iface_handler ;
-               name : string ;
-               caplen : int }
+                  name : string ;
+                caplen : int ;
+                logger : Log.logger }
 
 (** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is not set then {e MTU} for the
  * device will be chosen. *)
-let openif ?(promisc=true) ?(filter="") ?caplen ?(read_timeout=0.01) ifname =
+let openif ?(promisc=true) ?(filter="") ?caplen ?(read_timeout=10.) ifname =
     let caplen =
         if ifname = "any" then
             65535
@@ -468,11 +462,13 @@ let openif ?(promisc=true) ?(filter="") ?caplen ?(read_timeout=0.01) ifname =
             Option.default_delayed (fun () -> mtu_of_iface ifname) caplen in
     { handler = openif_ ifname promisc filter caplen read_timeout ;
       name = ifname ;
-      caplen = caplen }
+      caplen = caplen ;
+      logger = Log.make ifname }
 
 (** [sniff iface] will return the next available packet as a Pcap.Pdu.t. *)
 let sniff ?dlt ?wait iface =
     let sniffed = sniff_ ?wait iface.handler in
+    Log.(log iface.logger Debug (lazy (Printf.sprintf "Captured %d/%d bytes" sniffed.sniffed_caplen sniffed.sniffed_wirelen))) ;
     Pdu.make iface.name ?dlt
         ~caplen:sniffed.sniffed_caplen
         ~wirelen:sniffed.sniffed_wirelen
@@ -494,13 +490,12 @@ let bytes_out            = Metric.Counter.make "Pcap/Bytes/Out" "bytes"
 let inject iface bits =
     try
         let str = string_of_bitstring bits in
-        if debug then Printf.printf "Pcap: injecting a packet (%d bytes)...\n%!" (String.length str) ;
+        Log.(log iface.logger Debug (lazy (Printf.sprintf "Injecting %d bytes" (String.length str)))) ;
         inject_ iface.handler str ;
         Metric.Atomic.fire packets_injected_ok ;
         Metric.Counter.add bytes_out (Int64.of_int (bytelength bits))
     with e ->
-        Printf.printf "Pcap: Cannot inject a packet: %s\n%!"
-            (Printexc.to_string e) ;
+        Log.(log iface.logger Error (lazy (Printf.sprintf "Cannot inject: %s" (Printexc.to_string e)))) ;
         Metric.Atomic.fire packets_injected_err
 
 (** {2 Packet sniffing} *)
@@ -521,7 +516,6 @@ let sniffer iface rx =
             Clock.synch () ;
             Metric.Atomic.fire packets_sniffed_ok ;
             Metric.Counter.add bytes_in (Int64.of_int (Payload.length pdu.Pdu.payload)) ;
-            if debug then Printf.printf "Pcap: Got packet for ts %s\n%!" (Clock.Time.to_string pdu.Pdu.ts) ;
             Clock.at pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
             loop () in
     Thread.create loop ()

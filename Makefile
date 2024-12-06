@@ -1,8 +1,10 @@
 top_srcdir = ./
 PKG_NAME = robinet
+
 SOURCES  = \
 	distribution.ml \
 	private.ml \
+	condvar.ml \
 	clock.ml \
 	log.ml \
 	tools.ml \
@@ -41,7 +43,14 @@ SOURCES  = \
 	sim.ml \
 	wrapper.ml
 
-C_SOURCES = pcap_wrap.c eth_vendors.c tap_wrap.c iface_wrap.c sockopt_wrap.c
+C_SOURCES = \
+	pcap_wrap.c \
+	eth_vendors.c \
+	tap_wrap.c \
+	iface_wrap.c \
+	sockopt_wrap.c \
+	condvar_wrap.c
+
 CLIB_SHORT = robinetext
 CLIB = lib$(CLIB_SHORT).a
 # libpcap elsewhere? Call make with:

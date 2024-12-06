@@ -214,7 +214,7 @@ module Addr = struct
 
     let is_routable t =
         match%bitstring (to_bitstring t) with
-        | {| h : 8 ; _ : 24 |} when h = 10 -> false
+        | {| h : 8 ; _ : 24 |} when h = 10 || h = 127 -> false
         | {| h : 12 ; _ : 20 |} when h = 0xAC1 -> false
         | {| h : 16 ; _ : 16 |} when h = 0xC0A8 -> false
         | {| h : 10 ; z : 54 ; _ : 64 |} when h = 0b1111111010 && z = 0L -> false
@@ -228,6 +228,14 @@ module Addr = struct
        not (is_routable (of_string "172.18.3.4"))
        not (is_routable (of_string "fe80::1234:5678"))
      *)
+
+    let is_natable t =
+        match%bitstring (to_bitstring t) with
+        | {| h : 32 |} when h = 0l || h = 0xffffffffl -> false  (* all 0s/1s *)
+        | {| h : 8 ; _ : 24 |} when h = 127 -> false  (* localhost *)
+        | {| h : 4 ; _ : 28 |} when h = 0b1110 -> false (* multicast *)
+        | {| hi : 64 ; lo : 64 |} when hi = 0L && lo = 1L -> false (* localhost *)
+        | {| hi : 64 ; _ : 64 |} when hi = 100L -> false (* discard *)
 
     (** This printer can be composed with others (for instance to print a list of ips.
      FIXME: always use batteries IO to print instead of Format printer? *)
@@ -663,8 +671,8 @@ module TRX = struct
     let make ?(mtu=1400) src dst proto logger =
         ensure ((mtu mod 8) = 0) "Ip: MTU is required to be a multiple of 8 bytes" ;
         let t = { logger ; src ; dst ; proto ; mtu ;
-                  emit = ignore_bits logger ;
-                  recv = ignore_bits logger } in
+                  emit = ignore_bits ;
+                  recv = ignore_bits } in
         { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;
           out = { write = rx t ;

@@ -6,7 +6,7 @@
 open Batteries
 open Tools
 
-let logger = Log.make "webperf" 1000
+let logger = Log.make ~size:1000 "webperf"
 
 (** {1 Tools} *)
 
@@ -47,7 +47,7 @@ let make_net avg_group_size num_groups ifname nameserver =
         assert_ok (Sim.Net.connect inet group) ;
         group) in
     Log.(log logger Info (lazy ("Connecting "^ifname))) ;
-    let sink, _sniff_thread = Sim.Net.make_real_net ifname logger in
+    let sink, _sniff_thread = Sim.Net.make_real_net ifname in
     assert_ok (Sim.Net.connect inet sink) ;
     Sim.Net.union (inet :: sink :: groups)
 

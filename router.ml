@@ -21,6 +21,7 @@
   Equipment for routing/NATing traffic
  *)
 open Batteries
+
 open Bitstring
 open Tools
 
@@ -42,9 +43,8 @@ let lb_prefix_length = ref 5
  * A Nat.t is a TRX at IP level (it expects Ip packets). *)
 module Nat =
 struct
-
     (**
-    Behavior on incomming packets:
+    Behavior on incoming packets:
 {v
     [Nat] <----------------------------- [Outside host]
               Src: outside_addr,
@@ -108,43 +108,50 @@ v}
             Udp.Pdu.pack { pdu with Udp.Pdu.dst_port = Udp.Port.o port }
         ) else should_not_happen ()
 
+    let do_nat t ip src_port dst_port =
+        (* Do we already follow this socket? *)
+        let out_sock = {       proto = ip.Ip.Pdu.proto ;
+                            nat_port = dst_port ;
+                         remote_addr = ip.Ip.Pdu.src ;
+                         remote_port = src_port } in
+        let n = hash_find_or_insert t.out_cnxs_h out_sock (fun () ->
+            let random_port = min_port + Random.int (65536-min_port) in
+            let last_idx = OrdArray.last t.cnxs in
+            OrdArray.set t.cnxs last_idx
+                {  in_addr = ip.Ip.Pdu.src ;
+                   in_port = src_port ;
+                  out_port = random_port } ;
+            (* replace also entry in in_cnxs_h *)
+            let in_sock = {       proto = ip.Ip.Pdu.proto ;
+                               nat_port = random_port ;
+                            remote_addr = ip.Ip.Pdu.dst ;
+                            remote_port = dst_port } in
+            Hashtbl.replace t.in_cnxs_h in_sock last_idx ;
+            last_idx) in
+        OrdArray.promote t.cnxs n ;
+        (* perform source NAT *)
+        let new_src_port = (OrdArray.get t.cnxs n).out_port in
+        let payload = Payload.o (patch_src_port ip.Ip.Pdu.proto
+                                                (ip.Ip.Pdu.payload :> bitstring)
+                                                new_src_port) in
+        let ip = { ip with Ip.Pdu.src = t.addr ; payload } in
+        t.emit (Ip.Pdu.pack ip)
+
     (** bits are flowing from LAN to outside world *)
     let tx t bits =
         match Ip.Pdu.unpack_with_ports bits with
         | None ->
-            Log.(log t.logger Debug (lazy (Printf.sprintf "NAT: ignoring packet of %d bytes since it's not IP" (bytelength bits))))
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Ignoring packet of %d bytes since it's not IP" (bytelength bits))))
         | Some (ip, src_port, dst_port) ->
-            Log.(log t.logger Debug (lazy (Printf.sprintf "NAT: transmitting packet of %d bytes from %s:%d to %s:%d" (bytelength bits) (Ip.Addr.to_string ip.Ip.Pdu.src) src_port (Ip.Addr.to_string ip.Ip.Pdu.dst) dst_port))) ;
-            (* Do we already follow this socket? *)
-            let out_sock = {       proto = ip.Ip.Pdu.proto ;
-                                nat_port = dst_port ;
-                             remote_addr = ip.Ip.Pdu.src ;
-                             remote_port = src_port } in
-            let n = hash_find_or_insert t.out_cnxs_h out_sock (fun () ->
-                let random_port = min_port + Random.int (65536-min_port) in
-                let last_idx = OrdArray.last t.cnxs in
-                OrdArray.set t.cnxs last_idx
-                    {  in_addr = ip.Ip.Pdu.src ;
-                       in_port = src_port ;
-                      out_port = random_port } ;
-                (* replace also entry in in_cnxs_h *)
-                let in_sock = {       proto = ip.Ip.Pdu.proto ;
-                                   nat_port = random_port ;
-                                remote_addr = ip.Ip.Pdu.dst ;
-                                remote_port = dst_port } in
-                Hashtbl.replace t.in_cnxs_h in_sock last_idx ;
-                last_idx) in
-            OrdArray.promote t.cnxs n ;
-            (* perform source NAT *)
-            let new_src_port = (OrdArray.get t.cnxs n).out_port in
-            let payload = Payload.o (patch_src_port ip.Ip.Pdu.proto
-                                                    (ip.Ip.Pdu.payload :> bitstring)
-                                                    new_src_port) in
-            let ip = { ip with Ip.Pdu.src = t.addr ; payload } in
-            t.emit (Ip.Pdu.pack ip)
+            if Ip.Addr.is_natable ip.Ip.Pdu.src then (
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Transmitting packet of %d bytes from %s:%d to %s:%d" (bytelength bits) (Ip.Addr.to_string ip.src) src_port (Ip.Addr.to_string ip.dst) dst_port))) ;
+                do_nat t ip src_port dst_port
+            ) else (
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Ignoring packet from non NATable address %s" (Ip.Addr.to_string ip.src))))
+            )
 
     let rx t bits =
-        Log.(log t.logger Debug (lazy (Printf.sprintf "NAT: Received %d bytes" (bytelength bits)))) ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Received %d bytes" (bytelength bits)))) ;
         Ip.Pdu.unpack_with_ports bits |>
         Option.may (fun (ip, src_port, dst_port) ->
             let in_sock = {       proto = ip.Ip.Pdu.proto ;
@@ -162,15 +169,15 @@ v}
 
     (** [make ip n] returns a {!Tools.trx} corresponding to a NAT device (tx is for transmitting from the LAN to the outside) that can track [n] sockets. *)
     let make addr num_max_cnxs logger =
-        Log.(log logger Debug (lazy (Printf.sprintf "NAT: Creating a NATer for IP %s, with %d cnxs max" (Ip.Addr.to_string addr) num_max_cnxs))) ;
+        Log.(log logger Debug (lazy (Printf.sprintf "Creating a NATer for IP %s, with %d cnxs max" (Ip.Addr.to_string addr) num_max_cnxs))) ;
         let t = { addr ;
-                  emit = ignore_bits logger ;
-                  recv = ignore_bits logger ;
                   cnxs = OrdArray.make num_max_cnxs { in_addr = Ip.Addr.zero ;
                                                       in_port = 0 ;
                                                       out_port = 0 } ;
                   in_cnxs_h = Hashtbl.create num_max_cnxs ;
                   out_cnxs_h = Hashtbl.create num_max_cnxs ;
+                  emit = ignore_bits ;
+                  recv = ignore_bits ;
                   logger } in
         { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;
@@ -198,11 +205,16 @@ struct
                     src_mask : Ip.Cidr.t option ;   (** Test on source IP *)
                     dst_mask : Ip.Cidr.t option ;   (** Test on dest IP *)
                     ip_proto : Ip.Proto.t option ;  (** Test on IP protocol *)
-                    src_port : port_range option ;  (** Test on source port *)
-                    dst_port : port_range option ;  (** Test on dest port *)
+                    src_port : port_range option ;  (** Test on source IP port *)
+                    dst_port : port_range option ;  (** Test on dest IP port *)
                    (* Output *)
                     out_port : int ;                (** Output port *)
                          via : Eth.gw_addr option } (** Optional gateway *)
+
+    let make_route ?iface_num ?src_mask ?dst_mask ?ip_proto ?src_port ?dst_port
+                   ?via out_port =
+        { iface_num ; src_mask ; dst_mask ; ip_proto ; src_port ; dst_port ;
+          out_port ; via }
 
     let print_route oc r =
         Printf.fprintf oc "in_port:%a, src_mask:%a, dst_mask:%a -> out_port:%d, via:%a"
@@ -227,23 +239,34 @@ struct
         test_opt route.src_port port_in_range src_port_opt &&
         test_opt route.dst_port port_in_range dst_port_opt
 
-    (** A router is an array of trxs and a route table *)
-    type t = {          trxs : (trx * Eth.Addr.t * Ip.Addr.t) array ;
-                   route_tbl : route list ;
-               (* Whether to send ICMP expiry messages, after which delay
-                * and which packet loss probability: *)
-                      notify : (float * float) option ;
+    type port = {         trx : trx ;
+                          mac : Eth.Addr.t ;
+                           ip : Ip.Addr.t ;
+                  rx_counters : counters ;
+                  tx_counters : counters ;
+                    connected : bool ref }
+
+    (** A router is an array of ports and a route table *)
+    type t = {         ports : port array ;
+              mutable routes : route list ;
+                      notify : notify ;
                       logger : Log.logger ;
               load_balancing : load_balancing }
     and load_balancing = NoLoadBalancing | Random | PrefixHash
+    (* Probability to send ICMP expiry messages after TTL expiration, and after
+     * which delay (TODO: should also depend on how busy the router is): *)
+    and notify = { probability : float ; delay : float }
+
+    (* Add a route (the added route becomes top priority *)
+    let add_route t route =
+        t.routes <- route :: t.routes
 
     let send_icmp_expiry t n ip delay =
         let icmp = Icmp.Pdu.make_ttl_expired_in_transit ip in
         let ip_pld = Icmp.Pdu.pack icmp in
-        let trx, _, ip_src = t.trxs.(n) in
-        let ip_pkt = Ip.Pdu.make Ip.Proto.icmp ip_src ip.Ip.Pdu.src ip_pld in
+        let ip_pkt = Ip.Pdu.make Ip.Proto.icmp t.ports.(n).ip ip.Ip.Pdu.src ip_pld in
         let bits = Ip.Pdu.pack ip_pkt in
-        Clock.delay (Clock.Interval.o delay) (tx trx) bits
+        Clock.delay (Clock.Interval.o delay) (tx t.ports.(n).trx) bits
 
     (* The [route] function receives the IP packets from the Eth trx.
      * The integer [in_port] is the input interface number. *)
@@ -260,34 +283,32 @@ struct
             | Some (src_port, dst_port) -> Some src_port, Some dst_port
             | None -> None, None in
         match List.find_all (fun r ->
-              ) t.route_tbl with
                 test_route r in_port src_opt dst_opt proto_opt src_port_opt dst_port_opt
+              ) t.routes with
         | [] ->
             Log.(log t.logger Debug (lazy "dropping packet since no route match"))
         | out_ports ->
             (* Forward the packet to port [r]: *)
             let forward r =
                 let forward bits =
-                    let trx, _, _ = t.trxs.(r.out_port) in
-                    Log.(log t.logger Debug (lazy (Printf.sprintf "forwarding packet to port %d" r.out_port))) ;
+                    let trx = t.ports.(r.out_port).trx in
+                    Log.(log t.logger Debug (lazy (Printf.sprintf "Forwarding packet to port %d" r.out_port))) ;
                     tx trx bits ;
                     Log.(log t.logger Debug (lazy "Done")) in
                 match ttl_opt with
                 | Some (0 | 1) ->
-                        Log.(log t.logger Debug (lazy (Printf.sprintf "expiring packet from %d" in_port))) ;
-                        Option.may (fun (delay, loss) ->
-                            if Random.float 1. > loss then
-                                let delay = jitter 0.1 delay in
-                                let ip = Option.get ip_opt in
-                                send_icmp_expiry t n ip delay
-                        ) t.notify
-                | Some ttl ->
+                    Log.(log t.logger Debug (lazy (Printf.sprintf "Expiring packet from %d" in_port))) ;
+                    if Random.float 1. > t.notify.probability then (
+                        let delay = jitter 0.1 t.notify.delay in
                         let ip = Option.get ip_opt in
-                        let ip = Ip.Pdu.{ ip with ttl = ttl - 1 } in
-                        let bits = Ip.Pdu.pack ip in
-                        forward bits
+                        send_icmp_expiry t in_port ip delay)
+                | Some ttl ->
+                    let ip = Option.get ip_opt in
+                    let ip = Ip.Pdu.{ ip with ttl = ttl - 1 } in
+                    let bits = Ip.Pdu.pack ip in
+                    forward bits
                 | None ->
-                        forward bits
+                    forward bits
             and lb_port = function
                 | NoLoadBalancing ->
                     0
@@ -309,28 +330,58 @@ struct
                 forward rs.(lb_port t.load_balancing mod rs_len)
 
     (** Change the emitter of port N. Note that the emitter may also be preset in the trx array given to [make]. *)
-    let set_read n t f =
+    let set_read t n f =
         Log.(log t.logger Debug (lazy (Printf.sprintf "setting emitter for port %d" n))) ;
-        let trx, _, _ = t.trxs.(n) in
-        trx =-> f
+        t.ports.(n).trx =-> f
 
-    (* TODO: similarly, a write n b = t.trxs.(n).write b *)
+    (* TODO: similarly, a write n b = t.ports.(n).trx.write b *)
+
+    (* Not for the general public: *)
+    let make_port ~mac ~ip trx =
+        let ins, tx_counters = counting trx.ins
+        and out, rx_counters = counting trx.out in
+        let connected = ref false in
+        let set_read f =
+            connected := true ;
+            out.set_read f in
+        let out = { out with set_read } in
+        let trx = { ins ; out } in
+        { trx ; mac ; ip ; rx_counters ; tx_counters ; connected }
+
+    (* Come handy for 2 stages initialization of ports: *)
+    let make_dummy_ports num =
+        let counters_zero = { num_writes = 0 ; num_bits = 0 } in
+        let dummy_port =
+            { trx = null_trx ; mac = Eth.Addr.zero ; ip = Ip.Addr.zero ;
+              rx_counters = counters_zero ; tx_counters = counters_zero ;
+              connected = ref false } in
+        Array.make num dummy_port
+
+    let is_connected port =
+        !(port.connected)
+
+    let first_free_port t =
+        Array.findi (not % is_connected) t.ports
+
+    let notify_never = { probability = 0. ; delay = 0. }
+    let notify_always ?(delay=0.) () = { probability = 1. ; delay }
 
     (** Build a [t] routing through these {!Tools.trx} according to the given routing table. *)
-    let make ?notify ?(load_balancing=NoLoadBalancing) trxs route_tbl logger =
+    let make ?(notify=notify_always ()) ?(load_balancing=NoLoadBalancing) ports routes logger =
         (* Display the routing table (debug) *)
         Log.(log logger Debug (lazy
             (Printf.sprintf2 "Creating a router with routing table:%a"
-                (List.print ~first:"\n\t" ~sep:"\n\t" ~last:"" print_route) route_tbl))) ;
+                (List.print ~first:(if routes=[] then "" else "\n\t")
+                            ~sep:"\n\t" ~last:"" print_route) routes))) ;
         (* Check we route only from/to the given ports *)
         let max_used_port =
             List.fold_left (fun prev r ->
                 max r.out_port (Option.default 0 r.iface_num) |>
                 max prev)
-                0 route_tbl in
-        assert (max_used_port < Array.length trxs) ;
-        let t = { trxs ; route_tbl ; logger ; notify ; load_balancing } in
-        Array.iteri (fun i (trx, _, _) -> trx.ins.set_read (route i t)) trxs ;
+                0 routes in
+        assert (max_used_port < Array.length ports) ;
+        let t = { ports ; routes ; logger ; notify ; load_balancing } in
+        Array.iteri (fun i port -> port.trx.ins.set_read (route i t)) ports ;
         t
 
     (* Returns both the router and the eth trxs (ins is inside router) created for you *)
@@ -338,7 +389,7 @@ struct
     (* Assuming the network addresses are reachable from different ports of a
      * switch, output a trivial routing table that selects the output according
      * to the destination IP only: *)
-    let route_tbl_of_addrs addrs =
+    let routes_of_addrs addrs =
         let tbl = ref [] in
         for i = 0 to Array.length addrs - 1 do
             let ip_netmask_vias, _mac = addrs.(i) in
@@ -363,7 +414,7 @@ struct
      * The router address on each port is given by the subnet address itself
      * (lan address must clear the non masked bits) *)
     let make_from_addrs ?notify ?delay ?loss ?load_balancing addrs logger =
-        let route_tbl = route_tbl_of_addrs addrs in
+        let routes = routes_of_addrs addrs in
         let rec my_address n = function
             | [] ->
                 Printf.sprintf "Router definition has no local address for port %d" n |>
@@ -375,16 +426,16 @@ struct
             | (ip, netmask, gw) :: rest ->
                 let res = (ip, netmask, gw) :: res in
                 my_gateways res rest in
-        let trxs =
+        let ports =
             Array.mapi (fun n (ip_netmask_vias, mac) ->
                 let ip, netmask = my_address n ip_netmask_vias in
                 let gw = my_gateways [] ip_netmask_vias in
                 let addr = Ip.Addr.to_bitstring ip
                 and netmask = Ip.Addr.to_bitstring netmask in
-                let eth = Eth.TRX.make ?delay ?loss ~gw mac Arp.HwProto.ip4 [ Eth.{ addr ; netmask } ] logger in
-                eth.Eth.TRX.trx, mac, ip
+                let eth = Eth.TRX.make ?delay ?loss ~gw mac Arp.HwProto.ip4 [ { addr ; netmask } ] logger in
+                make_port ~mac ~ip eth.Eth.TRX.trx
             ) addrs in
-        make ?notify ?load_balancing trxs route_tbl logger
+        make ?notify ?load_balancing ports routes logger
 
     (*$R make_from_addrs
         (* Suppose we have a router for these 3 networks: *)
@@ -397,7 +448,7 @@ struct
         (* Now we will count incoming packets from each port (ARP requests, actually) : *)
         let counts = Array.create 3 0 in
         for i = 0 to Array.length counts - 1 do
-            set_read i router (fun _ ->
+            set_read router i (fun _ ->
                 counts.(i) <- succ counts.(i))
         done ;
         let tot_count () = Array.reduce (+) counts
@@ -405,12 +456,11 @@ struct
 
         (* We are going to send some IP packets with a given destination: *)
         let easy_send n dst =
-            let trx, _, _ = router.trxs.(n) in
             { (Ip.Pdu.random ()) with Ip.Pdu.dst = Ip.Addr.of_string dst ; ttl = 9 } |>
             Ip.Pdu.pack |>
             Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (snd addrs.(n)) |>
             Eth.Pdu.pack |>
-            trx.out.write in
+            router.ports.(n).trx.out.write in
 
         (* Let's play! *)
         easy_send 0 "1.2.3.4" ;
@@ -446,7 +496,7 @@ end
  *
  *          GW: 192.168.0.1
  *           /-----------\
- *    LAN -- :0  (hub)   2:--<:0-routing-1:>-- NAT --- Internet
+ *    LAN -- :0  (hub)   2:--<:0-router-1:>-- NAT --- Internet
  *           \____ 1 ____/
  *                 |
  *                 |
@@ -461,25 +511,28 @@ let make_gw ?delay ?loss ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?notify pu
     let gw = [ Ip.Addr.zero, Ip.Addr.zero, Some (Eth.Mac gw_mac) ] in
     let srv_ip = Enum.get_exn local_ips in    (* second the dhcp/name servers *)
     (* Always on as there is no way to turn it on later: *)
-    let h = Host.make_static ?nameserver ~gw ~on:true (name^"/srv") (Eth.Addr.random ()) ~netmask srv_ip in
-    Hub.Repeater.set_read 1 hub h.Host.dev.write ;
-    h.Host.dev.set_read (Hub.Repeater.write 1 hub) ;
+    let h = Host.make_static ?nameserver ~gw ~on:true (name^"/gw") (Eth.Addr.random ()) ~netmask srv_ip in
+    Hub.Repeater.set_read hub 1 h.Host.dev.write ;
+    h.Host.dev.set_read (Hub.Repeater.write hub 1) ;
     (* Create and connect the first port of our router *)
-    let gw_eth = Eth.TRX.make ?delay ?loss gw_mac Arp.HwProto.ip4 [ Eth.{ addr = Ip.Addr.to_bitstring gw_ip ; netmask = Ip.Addr.to_bitstring netmask } ] h.Host.logger in
-    Hub.Repeater.set_read 2 hub gw_eth.Eth.TRX.trx.out.write ;
-    gw_eth.Eth.TRX.trx.out.set_read (Hub.Repeater.write 2 hub) ;
+    let router_logger = Log.sub h.Host.logger "router" in
+    let gw_eth_logger = Log.sub router_logger "eth" in
+    let gw_eth = Eth.TRX.make ?delay ?loss gw_mac Arp.HwProto.ip4 [ Eth.{ addr = Ip.Addr.to_bitstring gw_ip ; netmask = Ip.Addr.to_bitstring netmask } ] gw_eth_logger in
+    Hub.Repeater.set_read hub 2 gw_eth.Eth.TRX.trx.out.write ;
+    gw_eth.Eth.TRX.trx.out.set_read (Hub.Repeater.write hub 2) ;
     (* The second port of our router (facing internet) is the NAT *)
-    let nat = Nat.make public_ip num_max_cnxs h.Host.logger in
+    let nat_logger = Log.sub router_logger "nat" in
+    let nat = Nat.make public_ip num_max_cnxs nat_logger in
     (* Which we equip with an Eth TRX on the outside *)
     let nat_mac = Eth.Addr.random () in
     let nat_eth =
-        let eth = Eth.TRX.make nat_mac Arp.HwProto.ip4 [ Eth.{ addr = Ip.Addr.to_bitstring public_ip ; netmask = Ip.Addr.zero |> Ip.Addr.to_bitstring } ] h.Host.logger in
+        let eth = Eth.TRX.make nat_mac Arp.HwProto.ip4 [ Eth.{ addr = Ip.Addr.to_bitstring public_ip ; netmask = Ip.Addr.(to_bitstring zero) } ] (Log.sub nat_logger "eth") in
         pipe nat eth.Eth.TRX.trx in
     (* Build this router then *)
     let _router =
         Router.(make ?notify
-            [| gw_eth.Eth.TRX.trx, gw_mac, gw_ip ;
-               nat_eth, nat_mac, public_ip |]
+            [| make_port ~mac:gw_mac ~ip:gw_ip gw_eth.Eth.TRX.trx ;
+               make_port ~mac:nat_mac ~ip:public_ip nat_eth |]
             [   (* route everything from anywhere to LAN if dest fits local_cidr *)
                 { iface_num = None ; src_mask = None ; dst_mask = Some local_cidr ;
                   ip_proto = None ; src_port = None ; dst_port = None ;
@@ -492,13 +545,13 @@ let make_gw ?delay ?loss ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?notify pu
                 { iface_num = None ; src_mask = None ; dst_mask = None ;
                   ip_proto = None ; src_port = None ; dst_port = None ;
                   out_port = 1 ; via = None } ]
-            (Log.make (name^"/router") 50)) in
+            router_logger) in
     (* TODO: local named could serve the local names according to the dhcp
      * leases and hostname options *)
     Dhcpd.serve h local_ips ;
     Named.serve h (fun _ -> None) ; (* Delegate everything to nameserver *)
-    { ins = { write = (fun bits -> Hub.Repeater.write 0 hub bits) ;
-              set_read = fun f -> Hub.Repeater.set_read 0 hub f } ;
+    { ins = { write = (fun bits -> Hub.Repeater.write hub 0 bits) ;
+              set_read = fun f -> Hub.Repeater.set_read hub 0 f } ;
       out = nat_eth.out }
 (*$R make_gw
     (*Log.console_lvl := Log.Debug ;*)

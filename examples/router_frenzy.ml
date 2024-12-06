@@ -146,9 +146,9 @@ let make_router name logger interfaces router_specs delays err_delays losses err
     let delay = List.assoc_opt name delays
     and loss = List.assoc_opt name losses
     and load_balancing = List.assoc_opt name lb_configs
-    and notify_expiry = List.assoc_opt name err_delays |? 0.
-    and notify_loss = List.assoc_opt name err_losses |? 0. in
-    let notify = notify_expiry, notify_loss in
+    and notify = Router.{
+        probability = List.assoc_opt name err_losses |? 0. ;
+        delay = List.assoc_opt name err_delays |? 0. } in
     Router.make_from_addrs ~notify ?delay ?loss ?load_balancing addrs logger
 
 (* Build the network described in the [routers] hash and returns the device
@@ -160,7 +160,7 @@ let build_network logger router_specs fst_router_name delays err_delays losses e
     (* Build all routers *)
     let routers =
         Hashtbl.map (fun name ports ->
-            let logger = Log.make name 50 in
+            let logger = Log.make name in
             if debug then Printf.printf "Build router %s\n%!" name ;
             make_router name logger ports router_specs delays err_delays losses err_losses lb_configs
         ) router_specs in
@@ -173,13 +173,13 @@ let build_network logger router_specs fst_router_name delays err_delays losses e
             (* Build an emitting function for this port that just writes into
              * each of the connected routers/hosts: *)
             let cidr = Ip.Cidr.of_string cidr in
-            let port_trx, _port_mac, port_ip = emitter.Router.trxs.(i) in
+            let port = emitter.Router.ports.(i) in
             let dev_of_receiver dest_name =
                 match Hashtbl.find routers dest_name with
                 | exception Not_found ->
                     if debug then Printf.printf "\tBuild host %s\n%!" dest_name ;
                     (* If not a router, then create a host *)
-                    let gw = [ Ip.Addr.zero, Ip.Addr.zero, Some (Eth.IPv4 port_ip) ]
+                    let gw = [ Ip.Addr.zero, Ip.Addr.zero, Some (Eth.IPv4 port.Router.ip) ]
                     and netmask = Ip.Cidr.to_netmask cidr
                     and mac = Eth.Addr.random ()
                     and ip = try Ip.Addr.of_string dest_name
@@ -198,9 +198,8 @@ let build_network logger router_specs fst_router_name delays err_delays losses e
                     | exception Not_found ->
                         error "Bad input data"
                     | i', _ ->
-                        let trx, _, _ = dest_router.Router.trxs.(i') in
                         dest_name ^"#"^ string_of_int i',
-                        trx.out) in
+                        dest_router.Router.ports.(i').trx.out) in
             (* Register all those connections: *)
             List.iter (fun dest_name ->
                 if debug then Printf.printf "\tRegistering connection %s\n%!" dest_name ;
@@ -210,7 +209,7 @@ let build_network logger router_specs fst_router_name delays err_delays losses e
                 let dst_name, dst_dev = dev_of_receiver dest_name
                 and src_name = name ^"#"^ string_of_int i in
                 (* Record the device for this name: *)
-                add_once devices src_name port_trx.out ;
+                add_once devices src_name port.Router.trx.out ;
                 add_once devices dst_name dst_dev ;
                 add_once connections src_name dst_name ;
                 add_once connections dst_name src_name
@@ -235,8 +234,7 @@ let build_network logger router_specs fst_router_name delays err_delays losses e
         src_dev.set_read emit) ;
     (* Return the input device for the first port of the first router: *)
     let fst_router = Hashtbl.find routers fst_router_name in
-    let fst_trx, _, _ = fst_router.Router.trxs.(0) in
-    fst_trx.out
+    fst_router.Router.ports.(0).trx.out
 
 (* We need the name of the interface we are going to read from, and the IP
  * addresses of the routers will later come from the configuration file: *)
@@ -411,7 +409,7 @@ let main =
             target
     ) targets ;
     (* Start the simulation *)
-    let logger = Log.make "routerz" 1000 in
+    let logger = Log.make ~size:1000 "routerz" in
     Log.console_lvl := Log.Debug ;
     Log.(log logger Info (lazy
         (Printf.sprintf2 "Building network with:\n%a\n\

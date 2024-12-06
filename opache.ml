@@ -99,7 +99,7 @@ let rec stripped url =
 *)
 (* Note: we force [f] to return unit so that callers get useful diagnostics *)
 let serve host ?(port=Tcp.Port.o 80) (f : TRXtop.t -> Pdu.t -> Log.logger -> unit) =
-    let logger = Log.(make (Printf.sprintf "%s/Httpd:%s" host.Host.logger.name (Tcp.Port.to_string port)) 50) in
+    let logger = Log.(make (Printf.sprintf "%s/Httpd:%s" host.Host.logger.name (Tcp.Port.to_string port))) in
     let count_queries_per_url = Hashtbl.create 11 in
     let count_query cmd url =
         let key = cmd^"/"^(stripped url) in

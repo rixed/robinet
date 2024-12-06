@@ -305,11 +305,11 @@ let instanciate t =
             | HubPort (name, p) ->
                 Hashtbl.find_option hubs name |>
                     Option.map (fun hub ->
-                        Hub.Repeater.write p hub, Hub.Repeater.set_read p hub)
+                        Hub.Repeater.write hub p, Hub.Repeater.set_read hub p)
             | SwitchPort (name, p) ->
                 Hashtbl.find_option switches name |>
                     Option.map (fun sw ->
-                        Hub.Switch.write p sw, Hub.Switch.set_read p sw)
+                        Hub.Switch.write sw p, Hub.Switch.set_read sw p)
             | HostAdapter name ->
                 Hashtbl.find_option hosts name |>
                     Option.map (fun host ->

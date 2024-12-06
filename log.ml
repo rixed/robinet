@@ -26,24 +26,26 @@
 open Batteries
 
 (* Basically, Info is the lowest thing you want to see by default. *)
-type level  = Critical | Error | Warning | Info | Debug
+type level  = Fatal | Critical | Error | Warning | Info | Debug
 type msg    = Clock.Time.t * (string Lazy.t)
 type queue  = int * msg array
 type logger =
     { name : string ;
       use_wall_clock : bool ;
-      queues : queue array }
+      queues : queue array ;
+      parent : logger option }
 
 (* log level <-> queue index *)
 
 let int_of_level = function
-    | Critical -> 0
-    | Error -> 1
-    | Warning -> 2
-    | Info -> 3
-    | Debug -> 4
+    | Fatal -> 0
+    | Critical -> 1
+    | Error -> 2
+    | Warning -> 3
+    | Info -> 4
+    | Debug -> 5
 
-let num_levels = 5
+let num_levels = 6
 
 (* output to console happen based on a constant current loglevel *)
 
@@ -77,7 +79,8 @@ let log logger level lstr =
             Clock.now () in
     let msg = now, lstr in
     logger.queues.(lvl) <- enqueue logger.queues.(lvl) msg ;
-    if lvl <= int_of_level !console_lvl then console_log logger.name msg
+    if lvl <= int_of_level !console_lvl then console_log logger.name msg ;
+    assert (level <> Fatal)
 
 let log_exceptions logger ?(level=Warning) what f x =
     try
@@ -95,11 +98,17 @@ let make_queue size =
 
 let loggers = Hashtbl.create 131
 
-let make ?(use_wall_clock=false) name size =
+let make ?parent ?(use_wall_clock=false) ?(size=50) name =
     let logger = {
         name ;
         use_wall_clock ;
-        queues = Array.init num_levels (fun _ -> make_queue size)
+        queues = Array.init num_levels (fun _ -> make_queue size) ;
+        parent
     } in
     Hashtbl.add loggers name logger ;
     logger
+
+let sub logger ?size subname =
+    let name = logger.name ^"/"^ subname
+    and size = size |? (Array.length (snd logger.queues.(0)) / 2 + 1) in
+    make ~parent:logger ~use_wall_clock:logger.use_wall_clock ~size name

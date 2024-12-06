@@ -6,7 +6,7 @@
 open Batteries
 open Tools
 
-let logger = Log.make "simu_dc" 1000
+let logger = Log.make ~size:1000 "simu_dc"
 
 (*
  * Configuration for a test plan

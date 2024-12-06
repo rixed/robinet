@@ -29,18 +29,18 @@ open Dns
  * IP addresses or None in which case the server will delegate. *)
 let serve ?(port=Udp.Port.o 53) host lookup =
     let default_ttl = 3600l in
-    let logger = host.Host.logger in
-    Log.(log logger Debug (lazy "named: Listening for requests...")) ;
+    let logger = Log.sub host.Host.logger "named" in
+    Log.(log logger Debug (lazy "Listening for requests...")) ;
     host.Host.udp_server port (fun udp ->
         udp.Udp.TRX.trx.ins.set_read (fun bits ->
-            Log.(log logger Debug (lazy "named: Received an UDP packet...")) ;
+            Log.(log logger Debug (lazy "Received an UDP packet...")) ;
             match Pdu.unpack bits with
             | None ->
-                Log.(log logger Debug (lazy "named: Not a DNS message, ignoring"))
+                Log.(log logger Debug (lazy "Not a DNS message, ignoring"))
             | Some (Pdu.{ is_query = true ; _ } as query)
               when query.opcode = std_query && query.Pdu.questions <> [] ->
                 let num_questions = List.length query.Pdu.questions in
-                Log.(log logger Debug (lazy (Printf.sprintf "named: Received a DNS query with %d questions" num_questions))) ;
+                Log.(log logger Debug (lazy (Printf.sprintf "Received a DNS query with %d questions" num_questions))) ;
                 let answers = Array.make num_questions None in
                 let check_all_answered () =
                   if Array.for_all ((<>) None) answers then (
@@ -51,7 +51,7 @@ let serve ?(port=Udp.Port.o 53) host lookup =
                         | Some (_auth, ip) ->
                             (qname, qtype, qclass, default_ttl, Ip.Addr.to_bytes ip) :: lst
                       ) [] query.Pdu.questions in
-                    Log.(log logger Debug (lazy "named: Answering")) ;
+                    Log.(log logger Debug (lazy "Answering")) ;
                     Pdu.make_answer query.Pdu.id query.Pdu.questions answer_rrs |>
                     Pdu.pack |>
                     tx udp.trx)
@@ -62,26 +62,26 @@ let serve ?(port=Udp.Port.o 53) host lookup =
                         if String.ends_with qname "." then String.rchop qname else qname in
                     match lookup qname with
                     | None ->
-                        Log.(log logger Debug (lazy (Printf.sprintf "named: Don't know %S, delegating" qname))) ;
+                        Log.(log logger Debug (lazy (Printf.sprintf "Don't know %S, delegating" qname))) ;
                         host.Host.gethostbyname qname (fun ip_opt ->
                             (match ip_opt with
                             | None | Some [] ->
-                                Log.(log logger Debug (lazy "named: Got error from delegated query")) ;
+                                Log.(log logger Debug (lazy "Got error from delegated query")) ;
                                 answers.(i) <- Some None
                             | Some [ ip ] ->
-                                Log.(log logger Debug (lazy "named: Got answer from delegated query")) ;
+                                Log.(log logger Debug (lazy "Got answer from delegated query")) ;
                                 answers.(i) <- Some (Some (false, ip))
                             | Some lst ->
-                                Log.(log logger Warning (lazy (Printf.sprintf "named: bogus answer from delegated query with %d answers!" (List.length lst)))) ;
+                                Log.(log logger Warning (lazy (Printf.sprintf "Bogus answer from delegated query with %d answers!" (List.length lst)))) ;
                                 answers.(i) <- Some None) ;
                             check_all_answered ())
                     | Some ip ->
-                        Log.(log logger Debug (lazy (Printf.sprintf "named: I know host %S!" qname))) ;
+                        Log.(log logger Debug (lazy (Printf.sprintf "I know host %S!" qname))) ;
                         answers.(i) <- Some (Some (true, ip)) ;
                         check_all_answered ()
                 ) query.Pdu.questions
             | _ ->
-                Log.(log logger Debug (lazy "named: Ignoring that DNS message"))))
+                Log.(log logger Debug (lazy "Ignoring that DNS message"))))
 
 (*$R serve
     Clock.realtime := false ;
