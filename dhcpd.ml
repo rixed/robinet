@@ -38,7 +38,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
             match Pdu.unpack bits with
             | None ->
                 Log.(log logger Debug (lazy "Not a DHCP message, ignoring"))
-            | Some ({ Pdu.op = BootRequest ; Pdu.hlen = 6 ; _ } as dhcp)
+            | Some (Pdu.{ op = BootRequest ; hlen = 6 ; _ } as dhcp)
               when dhcp.Pdu.htype = Arp.HwType.eth &&
                    dhcp.Pdu.msg_type = Some MsgType.discover ->
                 Log.(log logger Debug (lazy (Printf.sprintf "Received a DHCP Discover from %s" (hexstring_of_bitstring dhcp.Pdu.chaddr)))) ;
@@ -51,7 +51,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
                     BitHash.replace offers dhcp.Pdu.chaddr offered_ip ;
                     (* Send the offer *)
                     Log.(log logger Debug (lazy (Printf.sprintf "Offering IP %s to %s" (Ip.Addr.to_string offered_ip) (hexstring_of_bitstring dhcp.Pdu.chaddr)))) ;
-                    Pdu.make_offer ~mac:(host.Host.get_mac ())
+                    Pdu.make_offer ~chaddr:(dhcp.chaddr)
                                    ~xid:dhcp.Pdu.xid offered_ip
                                    dhcp.Pdu.client_id |>
                     Pdu.pack |>
@@ -61,7 +61,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
                                        dst_port
                 | None ->
                     Log.(log logger Debug (lazy "No more unused IP, cannot make offer")))
-            | Some ({ Pdu.op = BootRequest ; Pdu.hlen = 6 ; _ } as dhcp)
+            | Some (Pdu.{ op = BootRequest ; hlen = 6 ; _ } as dhcp)
               when dhcp.Pdu.htype = Arp.HwType.eth &&
                    dhcp.Pdu.msg_type = Some MsgType.request ->
                 Log.(log logger Debug (lazy (Printf.sprintf "Received a DHCP Request from %s" (hexstring_of_bitstring dhcp.Pdu.chaddr)))) ;
@@ -71,7 +71,7 @@ let serve ?(port=Udp.Port.o 67) host ips =
                     BitHash.remove offers dhcp.Pdu.chaddr ;
                     BitHash.replace leases dhcp.Pdu.chaddr offered_ip ;
                     Log.(log logger Debug (lazy "ACKing it")) ;
-                    Pdu.make_ack ~mac:(host.Host.get_mac ())
+                    Pdu.make_ack ~chaddr:(dhcp.chaddr)
                                  ~xid:dhcp.Pdu.xid
                                  offered_ip dhcp.Pdu.client_id |>
                     Pdu.pack |>

@@ -270,7 +270,7 @@ struct
             0x63825363l : 32 ;
             pack_options t : -1 : bitstring |} in b
 
-    let make_base ?op ?(mac=Eth.Addr.zero) ?xid ?name ?(yiaddr=Ip.Addr.zero) msg_type =
+    let make_base ?op ?(chaddr=(Eth.Addr.zero :> bitstring)) ?xid ?name ?(yiaddr=Ip.Addr.zero) msg_type =
         let op =
             Option.default_delayed (fun () ->
                 if msg_type = MsgType.offer ||
@@ -290,7 +290,7 @@ struct
           yiaddr ;
           siaddr = Ip.Addr.zero ;
           giaddr = Ip.Addr.zero ;
-          chaddr = extendbytes 16 (mac :> bitstring) ;
+          chaddr = extendbytes 16 chaddr ;
           sname = "" ; file = "" ;
           msg_type = Some msg_type ;
           subnet_mask = None ; router = None ;
@@ -302,33 +302,33 @@ struct
           max_dhcp_msg_size = None ; vendor_class_id = None ;
           client_id = None ; request_list = None }
 
-    let make_discover ?(mac=Eth.Addr.zero) ?xid ?name () =
-        let t = make_base ~mac ?xid ?name MsgType.discover in
+    let make_discover ?(chaddr=(Eth.Addr.zero :> bitstring)) ?xid ?name () =
+        let t = make_base ~chaddr ?xid ?name MsgType.discover in
         let%bitstring id = {|
             (Arp.HwType.eth :> int) : 8 ;
-            (mac :> bitstring) : 6*8 : bitstring |} in
+            chaddr : 6*8 : bitstring |} in
         t.client_id <- Some id ;
         t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
         t
 
-    let make_offer ?(mac=Eth.Addr.zero) ?xid yiaddr client_id =
-        let t = make_base ~mac ?xid ~yiaddr MsgType.offer in
+    let make_offer ?chaddr ?xid yiaddr client_id =
+        let t = make_base ?chaddr ?xid ~yiaddr MsgType.offer in
         t.client_id <- client_id ;
         t
 
-    let make_request ?(mac=Eth.Addr.zero) ?xid ?name yiaddr server_id =
-        let t = make_base ~mac ?xid ?name MsgType.request in
+    let make_request ?(chaddr=(Eth.Addr.zero :> bitstring)) ?xid ?name yiaddr server_id =
+        let t = make_base ~chaddr ?xid ?name MsgType.request in
         let%bitstring id = {|
             (Arp.HwType.eth :> int) : 8 ;
-            (mac :> bitstring) : 6*8 : bitstring |} in
+            chaddr : 6*8 : bitstring |} in
         t.client_id <- Some id ;
         t.request_list <- Some "\001\003\006\012\015\028\051\058\119" ;
         t.requested_ip <- Some yiaddr ;
         t.server_id <- server_id ;
         t
 
-    let make_ack ?(mac=Eth.Addr.zero) ?xid yiaddr client_id =
-        let t = make_base ~mac ?xid ~yiaddr MsgType.ack in
+    let make_ack ?chaddr ?xid yiaddr client_id =
+        let t = make_base ?chaddr ?xid ~yiaddr MsgType.ack in
         t.client_id <- client_id ;
         t
 
