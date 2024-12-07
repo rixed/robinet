@@ -442,7 +442,7 @@ struct
         let addrs = [| [ Ip.Addr.of_string "192.168.1.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
                        [ Ip.Addr.of_string "192.168.2.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
                        [ Ip.Addr.of_string "192.168.3.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () |] in
-        let logger = Log.make "test" 100 in
+        let logger = Log.make "test" in
         let router = make_from_addrs addrs logger in
 
         (* Now we will count incoming packets from each port (ARP requests, actually) : *)
@@ -563,7 +563,7 @@ let make_gw ?delay ?loss ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?notify pu
                                  ~gw (Eth.Addr.random ()) in
     desktop.Host.dev.set_read gw_trx.ins.write ;
     ignore (desktop.Host.dev.write <-= gw_trx) ;
-    let logger = Log.make "test" 100 in
+    let logger = Log.make "test" in
     let server_ip = Ip.Addr.of_string "42.43.44.45" in
     let server_eth = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Eth.TRX.make_my_address (Ip.Addr.to_bitstring server_ip) ] logger in
     let src = ref None in

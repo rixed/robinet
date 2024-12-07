@@ -236,6 +236,7 @@ module Addr = struct
         | {| 0b1110 : 4 ; _ : 28 |} -> false (* multicast *)
         | {| 0L : 64 ; 1L : 64 |} -> false (* localhost *)
         | {| 100L : 64 ; _ : 64 |} -> false (* discard *)
+        | {| _ |} -> true
 
     (** This printer can be composed with others (for instance to print a list of ips.
      FIXME: always use batteries IO to print instead of Format printer? *)
