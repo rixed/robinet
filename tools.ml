@@ -51,8 +51,9 @@ let jitter r v =
  *)
 
 (* TODO: maintain a hash of error counts *)
-(* ou plutot, on prend un liste de string et on comptabilise dans un arbre *)
+(* FIXME: nope, everything should have a logger *)
 let err str = Printf.fprintf stderr "ERROR: %s\n%!" str ; None
+let warn str = Printf.fprintf stderr "WARNING: %s\n%!" str
 
 let bytelength bs = (bitstring_length bs + 7) lsr 3
 

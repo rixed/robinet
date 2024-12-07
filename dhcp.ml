@@ -92,6 +92,8 @@ struct
           mutable server_id : Ip.Addr.t option ;
           mutable requested_ip : Ip.Addr.t option ;
           mutable message : string option ;
+          mutable max_dhcp_msg_size : int32 option ;
+          mutable vendor_class_id : string option ;
           mutable client_id : bitstring option ;
           mutable request_list : string option }
 
@@ -155,14 +157,23 @@ struct
             rest : -1 : bitstring |} ->
             t.message <- Some msg ;
             unpack_options t rest
+        | {| 57 : 8 ; len : 8 : check (len > 0) ; max_size : 8*len : unsigned ;
+            rest : -1 : bitstring |} ->
+            t.max_dhcp_msg_size <- Some (Int32.of_int64 max_size) ;
+            unpack_options t rest
+        | {| 60 : 8 ; len : 8 : check (len > 0) ; vendor : 8*len : string ;
+            rest : -1 : bitstring |} ->
+            t.vendor_class_id <- Some vendor ;
+            unpack_options t rest
         | {| 61 : 8 ; len : 8 : check (len >= 2) ; id : 8*len : bitstring ;
             rest : -1 : bitstring |} ->
             t.client_id <- Some id ;
             unpack_options t rest
         (* FIXME: IP Layer parameters setting could be interesting to get/set via DHCP.
            At least netmask *)
-        (* FIXME: handle option overload of file/sname fields with more options *)
-        | {| _ : 8 ; len : 8 ; _ : 8*len ; rest : -1 : bitstring |} ->
+        (* FIXME: handle option overload of file/name fields with more options *)
+        | {| opt : 8 ; len : 8 ; _ : 8*len ; rest : -1 : bitstring |} ->
+            warn (Printf.sprintf "Dhcp: Ignoring unknown option code %d" opt) ;
             unpack_options t rest
         | {| _ |} -> false
 
@@ -201,6 +212,8 @@ struct
                     server_id = None ;
                     requested_ip = None ;
                     message = None ;
+                    max_dhcp_msg_size = None ;
+                    vendor_class_id = None ;
                     client_id = None ;
                     request_list = None } in
           if unpack_options t options then Some t
@@ -227,6 +240,8 @@ struct
                     may_pack_ip 50 t.requested_ip ;
                     may_pack_ip 54 t.server_id ;
                     may_pack_string 56 t.message ;
+                    may_pack_int32 57 t.max_dhcp_msg_size ;
+                    may_pack_string 60 t.vendor_class_id ;
                     may_pack_bits 61 t.client_id ;
                     may_pack_string 55 t.request_list ;
                     Some (let%bitstring b = {| 255 : 8 |} in b) ] //@
@@ -284,6 +299,7 @@ struct
           client_name = name ; requested_ip = None ;
           search_sfx = None ; lease_time = None ;
           server_id = None ; message = None ;
+          max_dhcp_msg_size = None ; vendor_class_id = None ;
           client_id = None ; request_list = None }
 
     let make_discover ?(mac=Eth.Addr.zero) ?xid ?name () =
