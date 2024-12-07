@@ -255,9 +255,18 @@ struct
             0x63825363l : 32 ;
             pack_options t : -1 : bitstring |} in b
 
-    let make_base ?(mac=Eth.Addr.zero) ?xid ?name ?(yiaddr=Ip.Addr.zero) msg_type =
+    let make_base ?op ?(mac=Eth.Addr.zero) ?xid ?name ?(yiaddr=Ip.Addr.zero) msg_type =
+        let op =
+            Option.default_delayed (fun () ->
+                if msg_type = MsgType.offer ||
+                   msg_type = MsgType.ack ||
+                   msg_type = MsgType.nack then
+                    BootReply
+                else
+                    BootRequest
+            ) op in
         let xid = may_default xid (fun () -> Random.int32 Int32.max_int) in
-        { op = BootRequest ;
+        { op ;
           htype = Arp.HwType.eth ;
           hlen = 6 ; hops = 0 ;
           xid ;

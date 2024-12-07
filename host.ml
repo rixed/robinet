@@ -591,14 +591,14 @@ let make_dhcp name ?gw ?search_sfx ?nameserver ~on ~netmask my_mac =
                         ) else (
                             match Dhcp.Pdu.unpack (udp.Udp.Pdu.payload :> bitstring) with
                             | None -> ()
-                            | Some ({ Dhcp.Pdu.msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.offer ->
+                            | Some (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.offer ->
                                 Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Got DHCP OFFER from %s, accepting it" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
                                 (* TODO: check the Xid? *)
                                 let pdu = Dhcp.Pdu.make_request ~mac:(t.eth.Eth.TRX.get_source ()) ~xid:dhcp.Dhcp.Pdu.xid ~name dhcp.Dhcp.Pdu.yiaddr dhcp.Dhcp.Pdu.server_id in
                                 let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
                                 let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Udp.Pdu.pack pdu) in
                                 tx t.eth.Eth.TRX.trx (Ip.Pdu.pack pdu)
-                            | Some ({ Dhcp.Pdu.msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.ack ->
+                            | Some (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.ack ->
                                 Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
                                 (* TODO: set other params than IP *)
                                 set_ip t dhcp.Dhcp.Pdu.yiaddr netmask ;
