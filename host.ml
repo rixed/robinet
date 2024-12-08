@@ -140,6 +140,7 @@ let tcp_sock_rx t socks bits =
                         )) in
                 rx trx.Tcp.TRX.trx bits (* will reorder fragments and transmit the messages up to its emit function *)
             with No_socket ->
+                Log.(log t.host_trx.logger Debug (lazy "Sending a TCP-RST")) ;
                 Tcp.Pdu.make_reset_of tcp |> Tcp.Pdu.pack |> tx socks.ip_4_tcp
 
 let udp_sock_rx t socks icmp_trx bits =
@@ -158,7 +159,7 @@ let udp_sock_rx t socks icmp_trx bits =
                         trx) in
                 rx trx.Udp.TRX.trx bits
             with No_socket ->
-                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for UDP packet on port %s" (Udp.Port.to_string udp.Udp.Pdu.dst_port)))) ;
+                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "No socket for UDP packet on port %s, sending ICMP error" (Udp.Port.to_string udp.Udp.Pdu.dst_port)))) ;
                 (* Send ICMP error *)
                 match t.last_ip_packet with
                 | None ->

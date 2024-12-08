@@ -183,8 +183,11 @@ module Addr = struct
         let str : string = Obj.magic t in
         bitstring_of_string str
 
-    let to_bytes (t : t) =
+    let to_bytes (t : t) : bytes =
         Obj.magic t
+
+    let compare t1 t2 =
+        Bytes.compare (to_bytes t1) (to_bytes t2)
 
     (** Convert a [bitstring] into an {!Ip.Addr.t}. *)
     let of_bitstring bits =
@@ -478,6 +481,36 @@ module Cidr = struct
             o (ip, n)
 
     (*$>*)
+end
+
+(** {4 IP Sets} *)
+
+module Set = BatSet.Make (Addr)
+
+(** {4 IP Ranges} *)
+
+module Range = struct
+    (** Actually, a list of ranges, assumed to be sorted and with no overlap: *)
+    type t = (Addr.t * Addr.t) list
+
+    let make lst =
+        List.sort (fun (a1, _) (a2, _) -> Addr.compare a1 a2) lst
+
+    let of_cidr cidr =
+        Cidr.[ zero_addr cidr, all1s_addr cidr ]
+
+    (** Enumerate the addresses of a single interval: *)
+    let addrs a1 a2 =
+        (* TODO: probably faster with the bytes representation *)
+        bitstring_enum ~from:(Addr.to_bitstring a1)
+                      ~until:(Addr.to_bitstring a2) |>
+        Enum.map Addr.of_bitstring
+
+    (* Enumerate all IP addresses of the range: *)
+    let enum t =
+        List.enum t |>
+        Enum.map (fun (a1, a2) -> addrs a1 a2) |>
+        Enum.concat
 end
 
 (** {2 IP packet} *)

@@ -23,24 +23,38 @@ open Dns
 
 (** DNS server *)
 
-(** [serve host lookup] listen on host name port and
- * answer queries (or delegates to its own nameserver).
- * [lookup] is a function taking names as string and returning
- * IP addresses or None in which case the server will delegate. *)
-let serve ?(port=Udp.Port.o 53) host lookup =
-    let default_ttl = 3600l in
-    let logger = Log.sub host.Host.logger "named" in
-    Log.(log logger Debug (lazy "Listening for requests...")) ;
+module State =
+struct
+    type t =
+        { logger : Log.logger ;
+          default_ttl : int ;
+          lookup : string -> Ip.Addr.t option }
+
+    (* [lookup] is a function taking names as string and returning
+     * IP addresses or None in which case the server will delegate.
+     * FIXME: any serializable/inspectable datastructure *)
+    let make ?(default_ttl=3600) ~parent_logger lookup =
+        let logger = Log.sub parent_logger "named" in
+        { logger ; default_ttl ; lookup }
+
+    let lookup st qname =
+        st.lookup qname
+end
+
+(** [serve host] listen on host name port and
+ * answer queries (or delegates to its own nameserver). *)
+let serve ?(port=Udp.Port.o 53) (st : State.t) host =
+    Log.(log st.logger Debug (lazy "Listening for requests...")) ;
     host.Host.udp_server port (fun udp ->
         udp.Udp.TRX.trx.ins.set_read (fun bits ->
-            Log.(log logger Debug (lazy "Received an UDP packet...")) ;
+            Log.(log st.logger Debug (lazy "Received an UDP packet...")) ;
             match Pdu.unpack bits with
             | None ->
-                Log.(log logger Debug (lazy "Not a DNS message, ignoring"))
+                Log.(log st.logger Debug (lazy "Not a DNS message, ignoring"))
             | Some (Pdu.{ is_query = true ; _ } as query)
               when query.opcode = std_query && query.Pdu.questions <> [] ->
                 let num_questions = List.length query.Pdu.questions in
-                Log.(log logger Debug (lazy (Printf.sprintf "Received a DNS query with %d questions" num_questions))) ;
+                Log.(log st.logger Debug (lazy (Printf.sprintf "Received a DNS query with %d questions" num_questions))) ;
                 let answers = Array.make num_questions None in
                 let check_all_answered () =
                   if Array.for_all ((<>) None) answers then (
@@ -49,9 +63,10 @@ let serve ?(port=Udp.Port.o 53) host lookup =
                         match  Option.get answers.(i) with
                         | None -> lst
                         | Some (_auth, ip) ->
-                            (qname, qtype, qclass, default_ttl, Ip.Addr.to_bytes ip) :: lst
+                            let ttl = Int32.of_int st.default_ttl in
+                            (qname, qtype, qclass, ttl, Ip.Addr.to_bytes ip) :: lst
                       ) [] query.Pdu.questions in
-                    Log.(log logger Debug (lazy "Answering")) ;
+                    Log.(log st.logger Debug (lazy "Answering")) ;
                     Pdu.make_answer query.Pdu.id query.Pdu.questions answer_rrs |>
                     Pdu.pack |>
                     tx udp.trx)
@@ -60,34 +75,39 @@ let serve ?(port=Udp.Port.o 53) host lookup =
                     (* TODO: also pass qtype to lookup? *)
                     let qname =
                         if String.ends_with qname "." then String.rchop qname else qname in
-                    match lookup qname with
+                    match State.lookup st qname with
                     | None ->
-                        Log.(log logger Debug (lazy (Printf.sprintf "Don't know %S, delegating" qname))) ;
+                        Log.(log st.logger Debug (lazy (Printf.sprintf "Don't know %S, delegating" qname))) ;
                         host.Host.gethostbyname qname (fun ip_opt ->
                             (match ip_opt with
                             | None | Some [] ->
-                                Log.(log logger Debug (lazy "Got error from delegated query")) ;
+                                Log.(log st.logger Debug (lazy "Got error from delegated query")) ;
                                 answers.(i) <- Some None
                             | Some [ ip ] ->
-                                Log.(log logger Debug (lazy "Got answer from delegated query")) ;
+                                Log.(log st.logger Debug (lazy "Got answer from delegated query")) ;
                                 answers.(i) <- Some (Some (false, ip))
                             | Some lst ->
-                                Log.(log logger Warning (lazy (Printf.sprintf "Bogus answer from delegated query with %d answers!" (List.length lst)))) ;
+                                Log.(log st.logger Warning (lazy (Printf.sprintf "Bogus answer from delegated query with %d answers!" (List.length lst)))) ;
                                 answers.(i) <- Some None) ;
                             check_all_answered ())
                     | Some ip ->
-                        Log.(log logger Debug (lazy (Printf.sprintf "I know host %S!" qname))) ;
+                        Log.(log st.logger Debug (lazy (Printf.sprintf "I know host %S!" qname))) ;
                         answers.(i) <- Some (Some (true, ip)) ;
                         check_all_answered ()
                 ) query.Pdu.questions
             | _ ->
-                Log.(log logger Debug (lazy "Ignoring that DNS message"))))
+                Log.(log st.logger Debug (lazy "Ignoring that DNS message"))))
 
 (*$R serve
+    let logger = Log.make "test" in
     Clock.realtime := false ;
     (*Log.console_lvl := Log.Debug ;*)
     let srv = Host.make_static "server" ~on:true ~netmask:Ip.Addr.all_ones (Eth.Addr.random ()) (Ip.Addr.of_dotted_string "1.1.1.1" |> Option.get) in
-    serve srv (function "popo" -> Some (Ip.Addr.of_dotted_string "1.1.1.1" |> Option.get) | _ -> None) ;
+    let lookup = function
+        | "popo" -> Some (Ip.Addr.of_dotted_string "1.1.1.1" |> Option.get)
+        | _ -> None in
+    let st = State.make ~parent_logger:logger lookup in
+    serve st srv ;
     let clt = Host.make_static "client" ~nameserver:(Ip.Addr.of_dotted_string "1.1.1.1" |> Option.get) (Eth.Addr.random ()) (Ip.Addr.random ()) in
     srv.Host.dev.set_read clt.Host.dev.write ;
     clt.Host.dev.set_read srv.Host.dev.write ;

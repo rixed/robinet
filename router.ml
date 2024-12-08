@@ -18,172 +18,13 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 (**
-  Equipment for routing/NATing traffic
+  Equipment for routing traffic
  *)
 open Batteries
 
 open Bitstring
 open Tools
-
-(** The lowest port number used by the address translation *)
-let min_port = 1024
-
-(** How many bytes to consider when hashing the packet prefix for load-balancing *)
-let lb_prefix_length = ref 5
-
-(** Network Address Translation (N.A.T.) is the process of replacing on the fly non routable
- * addresses used within a LAN by a unique routable address, so that hosts from the LAN
- * can communicate with the outside world by sharing the only routable IP address.
- * A [Nat.t] is a two sided device, with an inside and an outside, and an affected Ip address,
- * that will translate outgoing source addresses with it's own and restore it in incoming
- * packets. To match these incoming packets with the outgoing one it must use the UDP or
- * TCP client port and an internal memory of currently forwarded connections. This memory
- * is of bounded size.
- * Note that any packet that reach it will be forwarded.
- * A Nat.t is a TRX at IP level (it expects Ip packets). *)
-module Nat =
-struct
-    (**
-    Behavior on incoming packets:
-{v
-    [Nat] <----------------------------- [Outside host]
-              Src: outside_addr,
-              Dst: nat_addr
-            Ports: outside_port:nat_port
-v}
-    Lookup (outside_addr, outside_port, nat_port, proto) in in_cnxs_h.
-    If the cnx is found then replace the nat_addr:nat_port by cnx.in_addr:cnx.in_port.
-    If nothing is found, just ignore the packet (or forward it to the sink host
-    without changing the dest port).
-
-    Behavior on outgoing packets:
-{v
-    [Inside host] -----------------------------> [Nat]
-                      Src: inside_addr,
-                      Dst: outside_addr,
-                    Ports: inside_port:outside_port
-v}
-    Lookup (inside_addr, inside_port, nat_port, proto) in out_cnxs_h.
-    If the cnx is found then replace the inside_addr:inside_port by nat_addr:cnx.out_port.
-    If nothing is found, create the cnx as:
-    {[ { out_port=random_port; in_addr=inside_addr; in_port=inside_port } ]}
-    and insert it with the above key in out_cnxs_h.
-    Also, insert this cnx in in_cnxs_h with key (outside_addr, outside_port, random_port, proto).
-
-    *)
-
-    type socket = {       proto : Ip.Proto.t ;  (** the IP protocol *)
-                       nat_port : int ;         (** the Nat ports *)
-                    remote_addr : Ip.Addr.t ;   (** the other peer's address *)
-                    remote_port : int }         (** the port used by the other peer *)
-
-    type cnx = {  in_addr : Ip.Addr.t ;   (** the inside lan's host IP *)
-                  in_port : int ;         (** the origin port used by this host *)
-                 out_port : int }         (** the random port used by NAS in the outside *)
-
-    (* TODO: add an optional sink inside IP *)
-    type t = {      addr : Ip.Addr.t ;                  (** our IP addr *)
-                    cnxs : cnx OrdArray.t ;             (** all the cnxs we remember *)
-               in_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets coming from the outside *)
-              out_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets coming from the inside *)
-            mutable emit : bitstring -> unit ;          (** the emit function (ie. carry packets to the outside *)
-            mutable recv : bitstring -> unit ;          (** the receive functon (ie. forward incoming packets from the outside *)
-                  logger : Log.logger }
-
-    let patch_src_port proto bits port =
-        if proto = Ip.Proto.tcp then (
-            let pdu = Option.get (Tcp.Pdu.unpack bits) in
-            Tcp.Pdu.pack { pdu with Tcp.Pdu.src_port = Tcp.Port.o port }
-        ) else if proto = Ip.Proto.udp then (
-            let pdu = Option.get (Udp.Pdu.unpack bits) in
-            Udp.Pdu.pack { pdu with Udp.Pdu.src_port = Udp.Port.o port }
-        ) else should_not_happen ()
-
-    let patch_dst_port proto bits port =
-        if proto = Ip.Proto.tcp then (
-            let pdu = Option.get (Tcp.Pdu.unpack bits) in
-            Tcp.Pdu.pack { pdu with Tcp.Pdu.dst_port = Tcp.Port.o port }
-        ) else if proto = Ip.Proto.udp then (
-            let pdu = Option.get (Udp.Pdu.unpack bits) in
-            Udp.Pdu.pack { pdu with Udp.Pdu.dst_port = Udp.Port.o port }
-        ) else should_not_happen ()
-
-    let do_nat t ip src_port dst_port =
-        (* Do we already follow this socket? *)
-        let out_sock = {       proto = ip.Ip.Pdu.proto ;
-                            nat_port = dst_port ;
-                         remote_addr = ip.Ip.Pdu.src ;
-                         remote_port = src_port } in
-        let n = hash_find_or_insert t.out_cnxs_h out_sock (fun () ->
-            let random_port = min_port + Random.int (65536-min_port) in
-            let last_idx = OrdArray.last t.cnxs in
-            OrdArray.set t.cnxs last_idx
-                {  in_addr = ip.Ip.Pdu.src ;
-                   in_port = src_port ;
-                  out_port = random_port } ;
-            (* replace also entry in in_cnxs_h *)
-            let in_sock = {       proto = ip.Ip.Pdu.proto ;
-                               nat_port = random_port ;
-                            remote_addr = ip.Ip.Pdu.dst ;
-                            remote_port = dst_port } in
-            Hashtbl.replace t.in_cnxs_h in_sock last_idx ;
-            last_idx) in
-        OrdArray.promote t.cnxs n ;
-        (* perform source NAT *)
-        let new_src_port = (OrdArray.get t.cnxs n).out_port in
-        let payload = Payload.o (patch_src_port ip.Ip.Pdu.proto
-                                                (ip.Ip.Pdu.payload :> bitstring)
-                                                new_src_port) in
-        let ip = { ip with Ip.Pdu.src = t.addr ; payload } in
-        t.emit (Ip.Pdu.pack ip)
-
-    (** bits are flowing from LAN to outside world *)
-    let tx t bits =
-        match Ip.Pdu.unpack_with_ports bits with
-        | None ->
-            Log.(log t.logger Debug (lazy (Printf.sprintf "Ignoring packet of %d bytes since it's not IP" (bytelength bits))))
-        | Some (ip, src_port, dst_port) ->
-            if Ip.Addr.is_natable ip.Ip.Pdu.src then (
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Transmitting packet of %d bytes from %s:%d to %s:%d" (bytelength bits) (Ip.Addr.to_string ip.src) src_port (Ip.Addr.to_string ip.dst) dst_port))) ;
-                do_nat t ip src_port dst_port
-            ) else (
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Ignoring packet from non NATable address %s" (Ip.Addr.to_string ip.src))))
-            )
-
-    let rx t bits =
-        Log.(log t.logger Debug (lazy (Printf.sprintf "Received %d bytes" (bytelength bits)))) ;
-        Ip.Pdu.unpack_with_ports bits |>
-        Option.may (fun (ip, src_port, dst_port) ->
-            let in_sock = {       proto = ip.Ip.Pdu.proto ;
-                               nat_port = dst_port ;
-                            remote_addr = ip.Ip.Pdu.src ;
-                            remote_port = src_port } in
-            Hashtbl.find_option t.in_cnxs_h in_sock |>
-            Option.may (fun n ->
-                let cnx = OrdArray.get t.cnxs n in
-                let payload = Payload.o (patch_dst_port ip.Ip.Pdu.proto
-                                                        (ip.Ip.Pdu.payload :> bitstring)
-                                                        cnx.in_port) in
-                let ip = { ip with Ip.Pdu.dst = cnx.in_addr ; payload } in
-                t.recv (Ip.Pdu.pack ip)))
-
-    (** [make ip n] returns a {!Tools.trx} corresponding to a NAT device (tx is for transmitting from the LAN to the outside) that can track [n] sockets. *)
-    let make addr num_max_cnxs logger =
-        Log.(log logger Debug (lazy (Printf.sprintf "Creating a NATer for IP %s, with %d cnxs max" (Ip.Addr.to_string addr) num_max_cnxs))) ;
-        let t = { addr ;
-                  cnxs = OrdArray.make num_max_cnxs { in_addr = Ip.Addr.zero ;
-                                                      in_port = 0 ;
-                                                      out_port = 0 } ;
-                  in_cnxs_h = Hashtbl.create num_max_cnxs ;
-                  out_cnxs_h = Hashtbl.create num_max_cnxs ;
-                  emit = ignore_bits ;
-                  recv = ignore_bits ;
-                  logger } in
-        { ins = { write = tx t ;
-                  set_read = fun f -> t.recv <- f } ;
-          out = { write = rx t ;
-                  set_read = fun f -> t.emit <- f } }
-end
+module Nat = Ip_nat
 
 (** A router is a device with N IP/Eth devices and a routing
  * table with rules on interface number, Ip addresses, proto, ports.
@@ -267,6 +108,9 @@ struct
         let ip_pkt = Ip.Pdu.make Ip.Proto.icmp t.ports.(n).ip ip.Ip.Pdu.src ip_pld in
         let bits = Ip.Pdu.pack ip_pkt in
         Clock.delay (Clock.Interval.o delay) (tx t.ports.(n).trx) bits
+
+    (** How many bytes to consider when hashing the packet prefix for load-balancing *)
+    let lb_prefix_length = ref 5
 
     (* The [route] function receives the IP packets from the Eth trx.
      * The integer [in_port] is the input interface number. *)
@@ -501,9 +345,22 @@ end
  *                 |
  *            dhcpd/named (192.168.0.2)
  *)
-let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?notify public_ip local_cidr =
+
+type gw_trx =
+    { trx : trx ;
+      dhcp_state : Dhcpd.State.t ;
+      dns_state : Named.State.t ;
+      nat_state : Nat.State.t }
+
+(* Returns a [gw_trx] that gives access to the dhcpd leases, the named zones
+ * and the NAT tables.
+ * Unless [dhcp_range] is set, all local IPs (but those used by the GW itself)
+ * will be distributed via DHCP. *)
+let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?notify ?dhcp_range public_ip local_cidr =
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
+    (* FIXME: instead of a Hub that forces us into having 2 IPs make a simple TRX directly, that inspects the protostack and if
+     * the dest IP is gw_ip == src_iv then forward it to the host and if not forward it to the NAT. *)
     let hub = Hub.Repeater.make 3 (name^"/hub") in
     let gw_mac = Eth.Addr.random () in
     let gw_ip = Enum.get_exn local_ips in   (* first IP of the subnet is the GW *)
@@ -521,7 +378,8 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?noti
     gw_eth.Eth.TRX.trx.out.set_read (Hub.Repeater.write hub 2) ;
     (* The second port of our router (facing internet) is the NAT *)
     let nat_logger = Log.sub router_logger "nat" in
-    let nat = Nat.make public_ip num_max_cnxs nat_logger in
+    let nat_state = Nat.State.make ~num_max_cnxs ~logger:nat_logger public_ip in
+    let nat = Nat.TRX.make nat_state in
     (* Which we equip with an Eth TRX on the outside *)
     let nat_mac = Eth.Addr.random () in
     let nat_eth =
@@ -547,13 +405,30 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?noti
             router_logger) in
     (* TODO: local named could serve the local names according to the dhcp
      * leases and hostname options *)
+    (* [nameserver] is the nameserver for the gateway but the nameserver for the
+     * local machines is the gateway itself: *)
     let broadcast = Ip.Cidr.all1s_addr local_cidr
-    and mtu = gw_eth.get_mtu () in
-    Dhcpd.serve h ~netmask ~broadcast ~gw:srv_ip ~mtu ?dns:nameserver local_ips ;
-    Named.serve h (fun _ -> None) ; (* Delegate everything to nameserver *)
-    { ins = { write = (fun bits -> Hub.Repeater.write hub 0 bits) ;
-              set_read = fun f -> Hub.Repeater.set_read hub 0 f } ;
-      out = nat_eth.out }
+    and mtu = gw_eth.get_mtu ()
+    and dns = srv_ip
+    and dhcp_range =
+        Option.default_delayed (fun () ->
+            [ Enum.get_exn local_ips, Ip.Cidr.all1s_addr local_cidr ]
+        ) dhcp_range in
+    let dhcp_state =
+        Dhcpd.State.make ~netmask ~broadcast ~gw:gw_ip ~mtu ~dns
+                         ~parent_logger:h.logger dhcp_range in
+    (* TODO: register a callback when leasing/releasing that updates the dns lookup function *)
+    Dhcpd.serve dhcp_state h ;
+    let dns_state = Named.State.make ~parent_logger:h.logger (fun _ -> None) in (* Delegate everything to nameserver *)
+    (* FIXME: revisit that! Here we want a table (state must not contain functions
+     * because we want to be able to serialize them) *)
+    Named.serve dns_state h ;
+    let trx =
+        { ins = { write = (fun bits -> Hub.Repeater.write hub 0 bits) ;
+                  set_read = fun f -> Hub.Repeater.set_read hub 0 f } ;
+          out = nat_eth.out } in
+    { trx ; dhcp_state ; dns_state ; nat_state }
+
 (*$R make_gw
     (*Log.console_lvl := Log.Debug ;*)
     Clock.realtime := false ;
@@ -562,8 +437,8 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?noti
     let gw = Eth.Gateway.[ make ~addr:(IPv4 (Ip.Addr.of_string "192.168.0.1")) () ] in
     let desktop = Host.make_dhcp "desktop" ~on:true ~netmask:Ip.Addr.all_ones
                                  ~gw (Eth.Addr.random ()) in
-    desktop.Host.dev.set_read gw_trx.ins.write ;
-    ignore (desktop.Host.dev.write <-= gw_trx) ;
+    desktop.Host.dev.set_read gw_trx.trx.ins.write ;
+    ignore (desktop.Host.dev.write <-= gw_trx.trx) ;
     let logger = Log.make "test" in
     let server_ip = Ip.Addr.of_string "42.43.44.45" in
     let server_eth = Eth.TRX.make (Eth.Addr.random ()) Arp.HwProto.ip4 [ Eth.TRX.make_my_address (Ip.Addr.to_bitstring server_ip) ] logger in
@@ -572,7 +447,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?noti
         let ip = Ip.Pdu.unpack bits |> Option.get in
         src := Some ip.Ip.Pdu.src in
     ignore (server_recv <-= server_eth.Eth.TRX.trx) ;
-    gw_trx <==> server_eth.Eth.TRX.trx ;
+    gw_trx.trx <==> server_eth.Eth.TRX.trx ;
     Clock.delay (Clock.Interval.sec 10.) (fun () ->
         desktop.Host.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring) () ;
     Clock.run false ;

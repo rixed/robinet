@@ -334,9 +334,10 @@ struct
         and ns_name = "root" in
         let root_nameserver = Sim.Net.make_server ~on:true ~name:ns_name ns_ip in
         Hashtbl.add global_directory ns_name ns_ip ;
-        let directory = (Hashtbl.find_option global_directory) in
+        let lookup = (Hashtbl.find_option global_directory) in
+        let dns_state = Named.State.make ~parent_logger:logger lookup in
         Sim.Net.iter_equipments (function
-            | Host host -> Named.serve host directory
+            | Host host -> Named.serve dns_state host
             | _ -> ()) root_nameserver ;
         let inet = Sim.Net.make_internet () in
         assert_ok (Sim.Net.connect inet root_nameserver) ;

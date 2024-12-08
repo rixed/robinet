@@ -37,6 +37,7 @@ SOURCES  = \
 	browser.ml \
 	net.ml \
 	dhcpd.ml \
+	ip_nat.ml \
 	router.ml \
 	opache.ml \
 	myadmin.ml \

@@ -182,11 +182,11 @@ struct
         let cidr = Ip.Cidr.of_string "192.168.0.0/16" in
         let gw = Router.make_gw public_ip cidr ~nameserver ~name:("gw."^lan_name) in
         let sw = Hub.Switch.make (n+1) (5*n) ("switch."^lan_name) in
-        Hub.Switch.set_read sw n gw.ins.write ;
-        gw.ins.set_read (Hub.Switch.write sw n) ;
-        let plug = Plug.make lan_name gw.out in
+        Hub.Switch.set_read sw n gw.trx.ins.write ;
+        gw.trx.ins.set_read (Hub.Switch.write sw n) ;
+        let plug = Plug.make lan_name gw.trx.out in
         let net =
-            { equip = [ Switch sw ; Trx gw ] ; plugs = [ plug ] } in
+            { equip = [ Switch sw ; Trx gw.trx ] ; plugs = [ plug ] } in
         let num_hosts = ref 0 in
         (* Here name is the local name *)
         let add_host ?name ?ip ~on =

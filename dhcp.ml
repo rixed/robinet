@@ -166,7 +166,7 @@ module Option = struct
     let subnet_mask = 1
     let routers = 3
     let time_servers = 4
-    let name_servers = 5
+    let domain_name_servers = 6
     let host_name = 12
     let interface_mtu = 26
     let broadcast_address = 28
@@ -206,7 +206,7 @@ struct
           mutable ntp_server : Ip.Addr.t option ;
           mutable smtp_server : Ip.Addr.t option ;
           mutable pop3_server : Ip.Addr.t option ;
-          mutable name_server : Ip.Addr.t option ;
+          mutable domain_name_server : Ip.Addr.t option ;
           mutable host_name : string option ;
           mutable search_sfx : string option ;
           mutable lease_time : int32 option ; (* in seconds *)
@@ -227,7 +227,7 @@ struct
         |  3, l when ip_list l ->
                    t.router <- Some (Ip.Addr.of_bitstring (takebits 32 v))
         |  6, l when ip_list l ->
-                   t.name_server <- Some (Ip.Addr.of_bitstring (takebits 32 v))
+                   t.domain_name_server <- Some (Ip.Addr.of_bitstring (takebits 32 v))
         | 12, l when l >= 1 ->
                    t.host_name <- Some (string_of_bitstring v)
         | 15, l when l >= 1 ->
@@ -294,7 +294,7 @@ struct
                     ntp_server = None ;
                     smtp_server = None ;
                     pop3_server = None ;
-                    name_server = None ;
+                    domain_name_server = None ;
                     host_name = None ;
                     search_sfx = None ;
                     lease_time = None ;
@@ -324,7 +324,7 @@ struct
             may_pack_ip 42 t.ntp_server ;
             may_pack_ip 69 t.smtp_server ;
             may_pack_ip 70 t.pop3_server ;
-            may_pack_ip 6 t.name_server ;
+            may_pack_ip 6 t.domain_name_server ;
             may_pack_string 12 t.host_name ;
             may_pack_string 15 t.search_sfx ;
             may_pack_int32 51 t.lease_time ;
@@ -367,7 +367,7 @@ struct
     let make_base
             ?op ?(chaddr=(Eth.Addr.zero :> bitstring)) ?xid ?(yiaddr=Ip.Addr.zero)
             ?subnet_mask ?router ?ntp_server ?smtp_server
-            ?pop3_server ?name_server ?host_name ?requested_ip
+            ?pop3_server ?domain_name_server ?host_name ?requested_ip
             ?search_sfx ?lease_time ?server_id ?message
             ?max_dhcp_msg_size ?vendor_class_id ?client_id ?request_list
             ?(options=[]) msg_type =
@@ -397,7 +397,7 @@ struct
               msg_type = Some msg_type ;
               subnet_mask ; router ;
               ntp_server ; smtp_server ;
-              pop3_server ; name_server ;
+              pop3_server ; domain_name_server ;
               host_name ; requested_ip ;
               search_sfx ; lease_time ;
               server_id ; message ;
@@ -426,6 +426,9 @@ struct
 
     let make_ack ?chaddr ?xid ?client_id ?options yiaddr =
         make_base ?chaddr ?xid ?client_id ?options ~yiaddr MsgType.ack
+
+    let make_nak ?chaddr ?xid ?client_id ?options ?message () =
+        make_base ?chaddr ?xid ?client_id ?options ?message MsgType.ack
 
     let random () =
         let xid = rand32 () and host_name = rand_hostname () in

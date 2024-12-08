@@ -97,6 +97,7 @@ let bitstring_of_bytes b =
 let bytes_of_bitstring b =
     string_of_bitstring b |> Bytes.of_string
 
+(* Only for bitstrings shorter than 64 bits *)
 let bitstring_add i b =
     let len = bitstring_length b in
     if len > 31 then (
@@ -116,11 +117,13 @@ let bitstring_add i b =
     (bitstring_of_string "\042" |> bitstring_add 42) (bitstring_of_string "\084")
  *)
 
-let hexstring_of_bitstring bs =
+let hexstring s =
     (* FIXME: make use of hexdump_bitstring *)
-    let s = string_of_bitstring bs in
     let hexify c = Printf.sprintf "%02x" (Char.code c) in
     String.enum s /@ hexify |> List.of_enum |> String.join " "
+
+let hexstring_of_bitstring =
+    hexstring % string_of_bitstring
 
 let hexstring_of_bitstring_abbrev bs =
     if bitstring_length bs <= 64 then hexstring_of_bitstring bs
@@ -156,6 +159,19 @@ let bitstring_common_prefix_length bs1 bs2 =
   8 (bitstring_common_prefix_length (bitstring_of_int32 0x8000_0000) \
                                     (bitstring_of_int32 0x8080_0000))
  *)
+
+let bitstring_enum ~from ~until =
+    (* [until] is inclusive: *)
+    Enum.from_loop from (fun bits ->
+        if Bitstring.compare bits until > 0 then raise Enum.No_more_elements ;
+        let next = bitstring_add 1 bits in
+        bits, next)
+
+(*$= bitstring_enum & ~printer:(IO.to_string (List.print Int.print))
+  [ 1 ; 2 ; 3 ] (bitstring_enum ~from:(bitstring_of_int8 1) ~until:(bitstring_of_int8 3) /@ int_of_bitstring |> List.of_enum)
+  [ 1 ] (bitstring_enum ~from:(bitstring_of_int8 1) ~until:(bitstring_of_int8 1) /@ int_of_bitstring |> List.of_enum)
+  [] (bitstring_enum ~from:(bitstring_of_int8 2) ~until:(bitstring_of_int8 1) /@ int_of_bitstring |> List.of_enum)
+*)
 
 let printable str =
     let is_printable c =
@@ -657,3 +673,15 @@ end
 let int_of_fd (fd : Unix.file_descr) : int = Obj.magic fd
 
 let fd_of_int : int -> Unix.file_descr = Obj.magic
+
+(* Like Option.delayed_default, but returns still an option, so they can be
+ * chainned. *)
+let option_default_delayed_opt f a_opt =
+    match a_opt with
+    | Some _ -> a_opt
+    | None -> f ()
+
+(* Do something on an optional value but return it unchanged: *)
+let option_tap f opt =
+    Option.may f opt ;
+    opt
