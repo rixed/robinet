@@ -82,8 +82,7 @@ let main =
               "Load an HTTP server by simulating browsing" ;
     if !dns_str = None && !gw_str <> None then dns_str := !gw_str ;
     Random.self_init () ;
-    let gw  = Option.map (fun gw -> [ Ip.Addr.zero, Ip.Addr.zero,
-                                      Some (Eth.gw_addr_of_string gw) ]) !gw_str
+    let gw  = Option.map (fun gw -> Eth.Gateway.[ make ~addr:(addr_of_string gw) () ]) !gw_str
     and nameserver = Option.map (fun ip -> Ip.Addr.of_string ip) !dns_str in
     ignore (Metric.report_thread stdout 10.) ;
     run !ifname (Ip.Cidr.of_string !src_range_str) !num_srcs

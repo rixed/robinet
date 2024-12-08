@@ -201,15 +201,15 @@ struct
     (** A [route] is a set of optional tests and an output port and optional
      * gateway. *)
     type route = { (* Tests *)
-                   iface_num : int option ;         (** Test on incoming iface *)
-                    src_mask : Ip.Cidr.t option ;   (** Test on source IP *)
-                    dst_mask : Ip.Cidr.t option ;   (** Test on dest IP *)
-                    ip_proto : Ip.Proto.t option ;  (** Test on IP protocol *)
-                    src_port : port_range option ;  (** Test on source IP port *)
-                    dst_port : port_range option ;  (** Test on dest IP port *)
+                   iface_num : int option ;              (** Test on incoming iface *)
+                    src_mask : Ip.Cidr.t option ;        (** Test on source IP *)
+                    dst_mask : Ip.Cidr.t option ;        (** Test on dest IP *)
+                    ip_proto : Ip.Proto.t option ;       (** Test on IP protocol *)
+                    src_port : port_range option ;       (** Test on source IP port *)
+                    dst_port : port_range option ;       (** Test on dest IP port *)
                    (* Output *)
-                    out_port : int ;                (** Output port *)
-                         via : Eth.gw_addr option } (** Optional gateway *)
+                    out_port : int ;                     (** Output port *)
+                         via : Eth.Gateway.addr option } (** Optional gateway *)
 
     let make_route ?iface_num ?src_mask ?dst_mask ?ip_proto ?src_port ?dst_port
                    ?via out_port =
@@ -222,7 +222,7 @@ struct
             (Option.print Ip.Cidr.printf) r.src_mask
             (Option.print Ip.Cidr.printf) r.dst_mask
             r.out_port
-            (Option.print Eth.gw_addr_print) r.via
+            (Option.print Eth.Gateway.addr_print) r.via
 
     (** Test an incoming packet against a route. *)
     let test_route route ifn src_opt dst_opt proto_opt src_port_opt dst_port_opt =
@@ -392,44 +392,41 @@ struct
     let routes_of_addrs addrs =
         let tbl = ref [] in
         for i = 0 to Array.length addrs - 1 do
-            let ip_netmask_vias, _mac = addrs.(i) in
-            List.iter (fun (ip, netmask, via) ->
+            let gw, _mac = addrs.(i) in
+            List.iter (fun Eth.Gateway.{ dest_ip ; mask ; addr } ->
                 let route =
                     { iface_num = None ;
                       src_mask = None ;
                       (* [of_netmask] will clear non masked bits: *)
-                      dst_mask = Some (Ip.Cidr.of_netmask ip netmask) ;
+                      dst_mask = Some (Ip.Cidr.of_netmask dest_ip mask) ;
                       ip_proto = None ;
                       src_port = None ;
                       dst_port = None ;
                       out_port = i ;
-                      via } in
+                      via = addr } in
                 tbl := route :: !tbl
-            ) ip_netmask_vias
+            ) gw
         done ;
         List.rev !tbl
 
     (* [addrs] is an array (one entry for each port of the router) of list of
-     * networks reachable via this port (with optional gateway for each of them).
+     * networks reachable via this port (as an Etx.Gateway.t, which has an
+     * optional gateway addr).
      * The router address on each port is given by the subnet address itself
-     * (lan address must clear the non masked bits) *)
+     * (lan address must clear the non masked bits).
+     * [addrs] also, for each port, has the MAC address of the router on that
+     * port. *)
     let make_from_addrs ?notify ?delay ?loss ?load_balancing addrs logger =
         let routes = routes_of_addrs addrs in
         let rec my_address n = function
             | [] ->
                 Printf.sprintf "Router definition has no local address for port %d" n |>
                 failwith
-            | (ip, netmask, None) :: _ -> ip, netmask
+            | Eth.Gateway.{ dest_ip ; mask ; addr = None } :: _ -> dest_ip, mask
             | _ :: rest -> my_address n rest in
-        let rec my_gateways res = function
-            | [] -> res
-            | (ip, netmask, gw) :: rest ->
-                let res = (ip, netmask, gw) :: res in
-                my_gateways res rest in
         let ports =
-            Array.mapi (fun n (ip_netmask_vias, mac) ->
-                let ip, netmask = my_address n ip_netmask_vias in
-                let gw = my_gateways [] ip_netmask_vias in
+            Array.mapi (fun n (gw, mac) ->
+                let ip, netmask = my_address n gw in
                 let addr = Ip.Addr.to_bitstring ip
                 and netmask = Ip.Addr.to_bitstring netmask in
                 let eth = Eth.TRX.make ?delay ?loss ~gw mac Arp.HwProto.ip4 [ { addr ; netmask } ] logger in
@@ -439,9 +436,11 @@ struct
 
     (*$R make_from_addrs
         (* Suppose we have a router for these 3 networks: *)
-        let addrs = [| [ Ip.Addr.of_string "192.168.1.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
-                       [ Ip.Addr.of_string "192.168.2.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
-                       [ Ip.Addr.of_string "192.168.3.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () |] in
+        let addrs =
+            Eth.Gateway.[|
+                [ make ~dest_ip:(Ip.Addr.of_string "192.168.1.254") ~mask:(Ip.Addr.of_string "255.255.255.0") () ], Eth.Addr.random () ;
+                [ make ~dest_ip:(Ip.Addr.of_string "192.168.2.254") ~mask:(Ip.Addr.of_string "255.255.255.0") () ], Eth.Addr.random () ;
+                [ make ~dest_ip:(Ip.Addr.of_string "192.168.3.254") ~mask:(Ip.Addr.of_string "255.255.255.0") () ], Eth.Addr.random () |] in
         let logger = Log.make "test" in
         let router = make_from_addrs addrs logger in
 
@@ -502,13 +501,13 @@ end
  *                 |
  *            dhcpd/named (192.168.0.2)
  *)
-let make_gw ?delay ?loss ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?notify public_ip local_cidr =
+let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?notify public_ip local_cidr =
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let hub = Hub.Repeater.make 3 (name^"/hub") in
     let gw_mac = Eth.Addr.random () in
     let gw_ip = Enum.get_exn local_ips in   (* first IP of the subnet is the GW *)
-    let gw = [ Ip.Addr.zero, Ip.Addr.zero, Some (Eth.Mac gw_mac) ] in
+    let gw = [ Eth.Gateway.make ~addr:(Eth.Gateway.Mac gw_mac) () ] in
     let srv_ip = Enum.get_exn local_ips in    (* second the dhcp/name servers *)
     (* Always on as there is no way to turn it on later: *)
     let h = Host.make_static ?nameserver ~gw ~on:true (name^"/gw") (Eth.Addr.random ()) ~netmask srv_ip in
@@ -517,7 +516,7 @@ let make_gw ?delay ?loss ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?notify pu
     (* Create and connect the first port of our router *)
     let router_logger = Log.sub h.Host.logger "router" in
     let gw_eth_logger = Log.sub router_logger "eth" in
-    let gw_eth = Eth.TRX.make ?delay ?loss gw_mac Arp.HwProto.ip4 [ Eth.{ addr = Ip.Addr.to_bitstring gw_ip ; netmask = Ip.Addr.to_bitstring netmask } ] gw_eth_logger in
+    let gw_eth = Eth.TRX.make ?delay ?loss ?mtu gw_mac Arp.HwProto.ip4 [ Eth.{ addr = Ip.Addr.to_bitstring gw_ip ; netmask = Ip.Addr.to_bitstring netmask } ] gw_eth_logger in
     Hub.Repeater.set_read hub 2 gw_eth.Eth.TRX.trx.out.write ;
     gw_eth.Eth.TRX.trx.out.set_read (Hub.Repeater.write hub 2) ;
     (* The second port of our router (facing internet) is the NAT *)
@@ -548,7 +547,9 @@ let make_gw ?delay ?loss ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?notify pu
             router_logger) in
     (* TODO: local named could serve the local names according to the dhcp
      * leases and hostname options *)
-    Dhcpd.serve h local_ips ;
+    let broadcast = Ip.Cidr.all1s_addr local_cidr
+    and mtu = gw_eth.get_mtu () in
+    Dhcpd.serve h ~netmask ~broadcast ~gw:srv_ip ~mtu ?dns:nameserver local_ips ;
     Named.serve h (fun _ -> None) ; (* Delegate everything to nameserver *)
     { ins = { write = (fun bits -> Hub.Repeater.write hub 0 bits) ;
               set_read = fun f -> Hub.Repeater.set_read hub 0 f } ;
@@ -558,7 +559,7 @@ let make_gw ?delay ?loss ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?notify pu
     Clock.realtime := false ;
     let public_ip = Ip.Addr.of_string "80.82.17.127" in
     let gw_trx = make_gw public_ip (Ip.Cidr.of_string "192.168.0.0/16") in
-    let gw = [ Ip.Addr.zero, Ip.Addr.zero, Some (Eth.IPv4 (Ip.Addr.of_string "192.168.0.1")) ] in
+    let gw = Eth.Gateway.[ make ~addr:(IPv4 (Ip.Addr.of_string "192.168.0.1")) () ] in
     let desktop = Host.make_dhcp "desktop" ~on:true ~netmask:Ip.Addr.all_ones
                                  ~gw (Eth.Addr.random ()) in
     desktop.Host.dev.set_read gw_trx.ins.write ;

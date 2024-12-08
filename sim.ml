@@ -196,7 +196,7 @@ struct
             let gw_ip = Ip.Addr.of_string "192.168.0.1"
             and srv_ip = Ip.Addr.of_string "192.168.0.2" in
             let netmask = Ip.Addr.of_string "255.255.0.0" in
-            let gw = [ Ip.Addr.zero, Ip.Addr.zero, Some (Eth.IPv4 gw_ip) ] in
+            let gw = [ Eth.Gateway.make ~addr:(Eth.Gateway.IPv4 gw_ip) () ] in
             let h = Host.make_dhcp name ~on ~gw ~nameserver:srv_ip ~netmask (Eth.Addr.random ()) in
             h.Host.dev.set_read (Hub.Switch.write sw !num_hosts) ;
             Hub.Switch.set_read sw !num_hosts h.Host.dev.write ;

@@ -38,8 +38,7 @@ let main =
                 "-src-mac", Arg.Set_string src_eth_str, "MAC to use as the client" ;
                 "-dst-ip",  Arg.Set_string dst_ip_str,  "IP to send the request to (ie. name server)" ;
                 "-gw",      Arg.String (fun gw ->
-                                         gw_eth_str := Some [ Ip.Addr.zero, Ip.Addr.zero,
-                                                              Some (Eth.gw_addr_of_string gw) ]),
+                                         gw_eth_str := Some Eth.Gateway.[ make ~addr:(addr_of_string gw) () ]),
                                                         "Gateway MAC address" ]
               (fun name -> names := name :: !names)
               "Perform a DNS A query with faked addresses" ;

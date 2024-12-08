@@ -137,23 +137,32 @@ end
 
 (** {3 Gateway specifications} *)
 
-(** The address of a gateway, which can be given either as an Ethernet address
- * of as an IP address. *)
-type gw_addr = Mac of Addr.t | IPv4 of Ip.Addr.t
+module Gateway =
+struct
+    (** The address of a gateway, which can be given either as an Ethernet address
+     * of as an IP address. *)
+    type addr = Mac of Addr.t | IPv4 of Ip.Addr.t
 
-(** Converts a {!Eth.gw_addr} to a string. *)
-let string_of_gw_addr = function
-    | Mac mac -> Addr.to_string mac
-    | IPv4 ip -> Ip.Addr.to_string ip
+    (** Converts a {!Eth.addr} to a string. *)
+    let string_of_addr = function
+        | Mac mac -> Addr.to_string mac
+        | IPv4 ip -> Ip.Addr.to_string ip
 
-(** Converts the other way around. *)
-let gw_addr_of_string str =
-    try Mac (Addr.of_string str)
-    with _ -> IPv4 (Ip.Addr.of_string str)
+    (** Converts the other way around. *)
+    let addr_of_string str =
+        try Mac (Addr.of_string str)
+        with _ -> IPv4 (Ip.Addr.of_string str)
 
-(** And print. *)
-let gw_addr_print oc a =
-    String.print oc (string_of_gw_addr a)
+    (** And print. *)
+    let addr_print oc a =
+        String.print oc (string_of_addr a)
+
+    type t =
+        { dest_ip : Ip.Addr.t ; mask : Ip.Addr.t ; addr : addr option }
+
+    let make ?(dest_ip=Ip.Addr.zero) ?(mask=Ip.Addr.zero) ?addr () =
+        { dest_ip ; mask ; addr }
+end
 
 (** {2 Ethernet frames} *)
 
@@ -231,7 +240,7 @@ struct
     type t =
         { logger : Log.logger ;
           src : Addr.t ;
-          gw : (Ip.Addr.t * Ip.Addr.t * gw_addr option) list ;  (** IP, mask, GW *)
+          gw : Gateway.t list ;
           proto : Arp.HwProto.t ;
           mtu : int ;
           mutable my_addresses : my_address list ;
@@ -253,8 +262,8 @@ struct
     let gw_for_ip ip gws =
         let rec loop = function
             | [] -> None
-            | (ip', mask, gw) :: rest ->
-                if Ip.Addr.in_mask ip ip' mask then gw
+            | Gateway.{ dest_ip ; mask ; addr } :: rest ->
+                if Ip.Addr.in_mask ip dest_ip mask then addr
                 else loop rest in
         loop gws
 
@@ -271,6 +280,7 @@ struct
           set_promiscuous : (bitstring -> unit) -> unit ;
           set_addresses : my_address list -> unit ;
           get_source : unit -> Addr.t ;
+          get_mtu : unit -> int ;
           arp_set : bitstring -> Addr.t option -> unit }
 
     (** Low level send function. Takes a {!Arp.HwProto.t} since it's used both
@@ -471,6 +481,7 @@ struct
           set_promiscuous = (fun f -> t.promisc <- f) ;
           set_addresses = (fun l -> t.my_addresses <- l) ;
           get_source = (fun () -> t.src) ;
+          get_mtu = (fun () -> t.mtu) ;
           arp_set = (fun iaddr -> function
             | None      ->
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Removing entry for iaddr %s from ARP table" (hexstring_of_bitstring iaddr)))) ;

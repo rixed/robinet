@@ -60,8 +60,7 @@ let main =
                 "-src-mac", Arg.Set_string src_eth_str, "MAC to use as the HTTP client (default: 12:34:56:78:9a:bc)" ;
                 "-dst-ip",  Arg.Set_string dst_ip_str,  "IP to send the HTTP GET to (default: 192.168.1.254)" ;
                 "-gw",      Arg.String (fun gw ->
-                                            gw_eth_str := Some [ Ip.Addr.zero, Ip.Addr.zero,
-                                                                 Some (Eth.gw_addr_of_string gw) ]),
+                                            gw_eth_str := Some Eth.Gateway.[ make ~addr:(addr_of_string gw) () ]),
                                                         "Gateway MAC address (optional)" ;
                 "-dns",     Arg.String (fun str -> dns_ip := Some (Ip.Addr.of_string str)), "IP of the DNS (optional)" ;
                 "-i",       Arg.Set_string ifname,      "Interface to use (default: eth0)" ;

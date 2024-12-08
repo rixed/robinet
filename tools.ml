@@ -149,12 +149,12 @@ let bitstring_common_prefix_length bs1 bs2 =
     loop 0
 
 (*$= bitstring_common_prefix_length & ~printer:string_of_int
-  3 (bitstring_common_prefix_length (bitstring_of_int 0x8000_0000) \
-                                    (bitstring_of_int 0x9000_0000))
-  4 (bitstring_common_prefix_length (bitstring_of_int 0x8000_0000) \
-                                    (bitstring_of_int 0x8800_0000))
-  8 (bitstring_common_prefix_length (bitstring_of_int 0x8000_0000) \
-                                    (bitstring_of_int 0x8080_0000))
+  3 (bitstring_common_prefix_length (bitstring_of_int32 0x8000_0000) \
+                                    (bitstring_of_int32 0x9000_0000))
+  4 (bitstring_common_prefix_length (bitstring_of_int32 0x8000_0000) \
+                                    (bitstring_of_int32 0x8800_0000))
+  8 (bitstring_common_prefix_length (bitstring_of_int32 0x8000_0000) \
+                                    (bitstring_of_int32 0x8080_0000))
  *)
 
 let printable str =
@@ -192,8 +192,8 @@ let int_of_bitstring bs =
     (* bitstring fills bytes from high to low bits but we'd like out int to be the lower bits *)
     let bs = if l < 8 then Bitstring.concat [create_bitstring (8-l) ; bs] else bs in
     match%bitstring bs with
-    | {| n : 8 ;
-         _ : -1 : bitstring |} -> n
+    | {| n : 8 ; _ : -1 : bitstring |} -> n
+
 (*$= int_of_bitstring & ~printer:dump
     0 (int_of_bitstring (let%bitstring b = {| 0 : 3  : littleendian |} in b))
     1 (int_of_bitstring (let%bitstring b = {| 1 : 3  : littleendian |} in b))
@@ -202,17 +202,29 @@ let int_of_bitstring bs =
     2 (int_of_bitstring (let%bitstring b = {| 2 : 30 : littleendian |} in b))
 *)
 
-let bitstring_of_int n =
+let int32_of_bitstring bits =
+    match%bitstring bits with
+    | {| n : 32 ; _ : -1 : bitstring |} -> n
+
+let bitstring_of_int8 n =
+    let%bitstring s = {| n : 8 |} in
+    s
+
+let bitstring_of_int16 n =
+    let%bitstring s = {| n : 16 |} in
+    s
+
+let bitstring_of_int32 n =
     let n = int32_of_int n in
     let%bitstring s = {| n : 32 |} in
     s
 
-(* bitstring_of_int always returns a 32bits string, and bits are counted from
+(* bitstring_of_int32 always returns a 32bits string, and bits are counted from
  * the highest bit: *)
 (*$T
-  Bitstring.is_set (bitstring_of_int 0x80) (31 - 7)
-  not (Bitstring.is_set (bitstring_of_int 0x80) 0)
-  not (Bitstring.is_set (bitstring_of_int 0x80) 31)
+  Bitstring.is_set (bitstring_of_int32 0x80) (31 - 7)
+  not (Bitstring.is_set (bitstring_of_int32 0x80) 0)
+  not (Bitstring.is_set (bitstring_of_int32 0x80) 31)
 *)
 
 let bitstring_copy bs =
@@ -267,8 +279,8 @@ let match_mask mask a b =
     with Exit -> false
 
 (*$T match_mask
-  match_mask (bitstring_of_int 0xfff0) (bitstring_of_int 0x1234) (bitstring_of_int 0x1239)
-  not (match_mask (bitstring_of_int 0xfff0) (bitstring_of_int 0x1234) (bitstring_of_int 0x5234))
+  match_mask (bitstring_of_int32 0xfff0) (bitstring_of_int32 0x1234) (bitstring_of_int32 0x1239)
+  not (match_mask (bitstring_of_int32 0xfff0) (bitstring_of_int32 0x1234) (bitstring_of_int32 0x5234))
 *)
 
 let abbrev ?(len=25) str =

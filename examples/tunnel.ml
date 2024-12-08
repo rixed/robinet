@@ -86,8 +86,7 @@ let main =
                 "-tun-ip",    Arg.Set_string tun_ip,      "Tunnel IP address (this end)" ;
                 "-tun-mac",   Arg.Set_string tun_mac,     "Tunnel MAC address (this end ; optional, default random)" ;
                 "-gw",        Arg.String (fun str ->
-                                            gw := Some [ Ip.Addr.zero, Ip.Addr.zero,
-                                                         Some (Eth.gw_addr_of_string str) ]),
+                                            gw := Some Eth.Gateway.[ make ~addr:(addr_of_string str) () ]),
                                                           "Gateway IP address (optional)" ;
                 "-search",    Arg.String (fun str -> search_sfx := Some str),
                                                           "DNS search suffix (optional)" ;

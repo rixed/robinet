@@ -573,7 +573,7 @@ let make_static name ?gw ?search_sfx ?nameserver ?on my_mac ?(netmask=Ip.Addr.al
     let t = make name ?gw ?search_sfx ?nameserver ?on ~init my_mac in
     t.host_trx
 
-let make_dhcp name ?gw ?search_sfx ?nameserver ~on ~netmask my_mac =
+let make_dhcp host_name ?gw ?search_sfx ?nameserver ~on ~netmask my_mac =
     let init ?on_ip t =
         (* Will receive all eth frames until we got an IP address *)
         let dhcp_client bits = (match Ip.Pdu.unpack bits with
@@ -594,7 +594,7 @@ let make_dhcp name ?gw ?search_sfx ?nameserver ~on ~netmask my_mac =
                             | Some (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.offer ->
                                 Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Got DHCP OFFER from %s, accepting it" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
                                 (* TODO: check the Xid? *)
-                                let pdu = Dhcp.Pdu.make_request ~chaddr:(t.eth.Eth.TRX.get_source () :> bitstring) ~xid:dhcp.Dhcp.Pdu.xid ~name dhcp.Dhcp.Pdu.yiaddr dhcp.Dhcp.Pdu.server_id in
+                                let pdu = Dhcp.Pdu.make_request ~chaddr:(t.eth.Eth.TRX.get_source () :> bitstring) ~xid:dhcp.Dhcp.Pdu.xid ~host_name ?server_id:dhcp.Dhcp.Pdu.server_id dhcp.Dhcp.Pdu.yiaddr in
                                 let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
                                 let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Udp.Pdu.pack pdu) in
                                 tx t.eth.Eth.TRX.trx (Ip.Pdu.pack pdu)
@@ -610,7 +610,7 @@ let make_dhcp name ?gw ?search_sfx ?nameserver ~on ~netmask my_mac =
         let rec send_discover () =
             if t.my_ip = Ip.Addr.zero then (
                 Log.(log t.host_trx.logger Debug (lazy "Sending DHCP DISCOVER")) ;
-                Dhcp.Pdu.make_discover ~chaddr:(t.eth.Eth.TRX.get_source () :> bitstring) ~name () |>
+                Dhcp.Pdu.make_discover ~chaddr:(t.eth.Eth.TRX.get_source () :> bitstring) ~host_name () |>
                     Dhcp.Pdu.pack |>
                     Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) |>
                     Udp.Pdu.pack |>
@@ -628,7 +628,7 @@ let make_dhcp name ?gw ?search_sfx ?nameserver ~on ~netmask my_mac =
                 (Clock.Interval.to_string delay)))) ;
         Clock.delay delay send_discover ()
     in
-    let t = make name ?gw ?search_sfx ?nameserver ~on ~init my_mac in
+    let t = make host_name ?gw ?search_sfx ?nameserver ~on ~init my_mac in
     t.host_trx
 
 module Name = struct
