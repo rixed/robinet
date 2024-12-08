@@ -66,6 +66,7 @@ struct
     type t = { id : int ; is_query : bool ; opcode : int ;
                is_auth : bool ; truncated : bool ;
                rec_desired : bool ; rec_avlb : bool ;
+               authentic_data : bool ; checking_disabled : bool ;
                status : int ;
                questions : question list ;
                answer_rrs : rr list ;
@@ -79,6 +80,7 @@ struct
             { id = !id ; is_query = true ; opcode = std_query ;
               is_auth = false ; truncated = false ;
               rec_desired = true ; rec_avlb = false ;
+              authentic_data = false ; checking_disabled = true ;
               status = 0 ;
               questions = [ name, QType.a, qclass_inet ] ;
               answer_rrs = [] ; authority_rrs = [] ; additional_rrs = [] })
@@ -86,6 +88,7 @@ struct
     let make_answer id questions answer_rrs =
         { id ; is_query = false ; opcode = std_query ; is_auth = true ;
           truncated = false ; rec_desired = true ; rec_avlb = false ;
+          authentic_data = false ; checking_disabled = true ;
           status = 0 ; questions ;
           answer_rrs ; authority_rrs = [] ; additional_rrs = [] }
 
@@ -149,7 +152,7 @@ struct
 
     let unpack bits = match%bitstring bits with
         | {| id : 16 ;
-             qr : 1 ; opcode : 4 ; aa : 1 ; tc : 1 ; rd : 1 ; ra : 1 ; 0 : 3 ; rcode : 4 ;
+             qr : 1 ; opcode : 4 ; aa : 1 ; tc : 1 ; rd : 1 ; ra : 1 ; false : 1 ; ad : 1 ; cd : 1 ; rcode : 4 ;
              num_questions : 16 ; num_answer_rrs : 16 ;
              num_authority_rrs : 16 ; num_additional_rrs : 16 |} ->
             let pkt = bytes_of_bitstring bits
@@ -163,6 +166,7 @@ struct
                 Some { id = id ; is_query = not qr ; opcode = opcode ;
                        is_auth = aa ; truncated = tc ;
                        rec_desired = rd ; rec_avlb = ra ;
+                       authentic_data = ad ; checking_disabled = cd ;
                        status = rcode ;
                        questions ;
                        answer_rrs ;
@@ -230,7 +234,9 @@ struct
         let%bitstring header = {|
             t.id : 16 ;
             not t.is_query : 1 ; t.opcode : 4 ; t.is_auth : 1 ; t.truncated : 1 ;
-            t.rec_desired : 1 ; t.rec_avlb : 1 ; 0 : 3 ; t.status : 4 ;
+            t.rec_desired : 1 ; t.rec_avlb : 1 ;
+            false : 1 ; t.authentic_data : 1 ; t.checking_disabled : 1 ;
+            t.status : 4 ;
             List.length t.questions : 16 ;
             List.length t.answer_rrs : 16 ;
             List.length t.authority_rrs : 16 ;
