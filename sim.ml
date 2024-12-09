@@ -142,18 +142,18 @@ struct
 
     (* A repeater as a Net.t *)
     let make_repeater n name =
-        Printf.printf "Build repeater with %d ports\n%!" n ;
+        Printf.printf "Build repeater with %d ifaces\n%!" n ;
         let r = Hub.Repeater.make n name in
         let plugs = List.init n (fun i ->
-            let iface_name = "port#"^ string_of_int i in
-            Plug.make iface_name (Hub.Repeater.port r i)) in
+            let iface_name = "iface#"^ string_of_int i in
+            Plug.make iface_name (Hub.Repeater.iface r i)) in
         Simple { equip = [ Hub r ] ; plugs }
 
     (** Returns a net representing the external network via the given interface,
      * and the thread that sniffs packets. *)
     let make_real_net iface_name =
         let iface = Pcap.openif ~caplen:1800 iface_name in
-        let emit = ref ignore_bits in
+        let emit = ref (fun _bits -> ()) in
         let plug = Plug.make iface_name { write = Pcap.inject iface ;
                                           set_read = fun em -> emit := em } in
         Simple { equip = [] ; plugs = [ plug ] },
@@ -162,10 +162,10 @@ struct
     (** Returns a net with an unlimited supply of plugs that performs as a router. *)
     let make_internet () =
         (* A big switch for now *)
-        let nb_ports = 10 in
-        let sw = Hub.Switch.make nb_ports 5000 "Internet" in
-        let plugs = List.init nb_ports (fun i ->
-            Plug.make "" (Hub.Switch.port sw i)) in
+        let nb_ifaces = 10 in
+        let sw = Hub.Switch.make nb_ifaces 5000 "Internet" in
+        let plugs = List.init nb_ifaces (fun i ->
+            Plug.make "" (Hub.Switch.iface sw i)) in
         Simple { equip = [ Switch sw ] ; plugs }
 
     (* Build a single server (public static IP and name) as a Net.t: *)
@@ -180,7 +180,8 @@ struct
      * See make_lan_host to add a host in this LAN. *)
     let make_lan ?(lan_name="homelan") ?(public_ip=Ip.Addr.random ()) nameserver n =
         let cidr = Ip.Cidr.of_string "192.168.0.0/16" in
-        let gw = Router.make_gw public_ip cidr ~nameserver ~name:("gw."^lan_name) in
+        let gw : Router.gw_trx =
+            Router.make_gw ~nameserver ~name:("gw."^lan_name) public_ip cidr in
         let sw = Hub.Switch.make (n+1) (5*n) ("switch."^lan_name) in
         Hub.Switch.set_read sw n gw.trx.ins.write ;
         gw.trx.ins.set_read (Hub.Switch.write sw n) ;
@@ -210,7 +211,7 @@ struct
     let make_dc ~dc_name ?nameserver ~cidr n =
         let sw = Hub.Switch.make (n+1) (5*n) ("switch."^dc_name) in
         let local_ips = Ip.Cidr.local_addrs cidr in
-        let plug = Plug.make dc_name (Hub.Switch.port sw n) in
+        let plug = Plug.make dc_name (Hub.Switch.iface sw n) in
         let net =
             { equip = [ Switch sw ] ; plugs = [ plug ] } in
         let num_hosts = ref 0 in

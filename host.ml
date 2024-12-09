@@ -88,7 +88,8 @@ and t = { mutable host_trx : host_trx ;
           (* Called at shutdown. New processes must add their own destructor
            * (see [add_killer]) : *)
           mutable killers : ((unit -> unit) -> unit) list ;
-          eth : Eth.TRX.eth_trx ;
+          eth_state   : Eth.State.t ;
+          eth_trx     : trx ;
           tcp_socks   : (Ip.Addr.t, tcp_socks) Hashtbl.t ;
           udp_socks   : (Ip.Addr.t, udp_socks) Hashtbl.t ;
           icmp_socks  : (Ip.Addr.t, trx) Hashtbl.t ;
@@ -322,7 +323,7 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
         let socks = hash_find_or_insert t.tcp_socks dst_ip (fun () ->
             let trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.tcp t.host_trx.logger in
             let socks = make_tcp_socks trx in
-            (tcp_sock_rx t socks) <-= trx =-> t.eth.Eth.TRX.trx.ins.write ;
+            (tcp_sock_rx t socks) <-= trx =-> t.eth_trx.ins.write ;
             socks) in
         (* Try to find a unused port if none was given, or ensure the given one is free *)
         let src_port = match src_port with
@@ -385,10 +386,10 @@ and udp_connect t dst ?src_port dst_port client_f cont =
     let connect dst_ip =
         let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
             let icmp_trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.icmp t.host_trx.logger in
-            icmp_trx =-> (tx t.eth.Eth.TRX.trx) ;
+            icmp_trx =-> (tx t.eth_trx) ;
             let ip_trx = Ip.TRX.make t.my_ip dst_ip Ip.Proto.udp t.host_trx.logger in
             let socks = make_udp_socks ip_trx in
-            (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
+            (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> (tx t.eth_trx) ;
             socks) in
         let src_port = may_default src_port (fun () -> Udp.Port.o (Random.int 0x10000)) in
         let key = src_port, dst_port in
@@ -422,7 +423,7 @@ let udp_send t dst ?src_port dst_port bits =
             Udp.Pdu.pack |>
             Ip.Pdu.make Ip.Proto.udp t.my_ip dst_ip |>
             Ip.Pdu.pack |>
-            tx t.eth.Eth.TRX.trx in
+            tx t.eth_trx in
     match dst with
         | IPv4 dst_ip -> send dst_ip
         | Name name   ->
@@ -438,7 +439,7 @@ let ping t ?(id=1) ?(seq=1) dst =
         Icmp.Pdu.pack |>
         Ip.Pdu.make Ip.Proto.icmp t.my_ip dst_ip |>
         Ip.Pdu.pack |>
-        tx t.eth.Eth.TRX.trx in
+        tx t.eth_trx in
     match dst with
         | IPv4 dst_ip ->
             do_ping dst_ip
@@ -464,22 +465,22 @@ let ip_recv t bits = match Ip.Pdu.unpack bits with
             let sock = hash_find_or_insert t.tcp_socks ip.Ip.Pdu.src (fun () ->
                 let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.host_trx.logger in
                 let socks = make_tcp_socks ip_trx in
-                (tcp_sock_rx t socks) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
+                (tcp_sock_rx t socks) <-= ip_trx =-> (tx t.eth_trx) ;
                 socks) in
             rx sock.ip_4_tcp bits (* will handle fragmentation then pass payload to its emit function *)
         ) else if ip.Ip.Pdu.proto = Ip.Proto.udp then (
             let sock = hash_find_or_insert t.udp_socks ip.Ip.Pdu.src (fun () ->
                 let icmp_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src Ip.Proto.icmp t.host_trx.logger in
-                icmp_trx =-> (tx t.eth.Eth.TRX.trx) ;
+                icmp_trx =-> (tx t.eth_trx) ;
                 let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.host_trx.logger in
                 let socks = make_udp_socks ip_trx in
-                (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
+                (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> (tx t.eth_trx) ;
                 socks) in
             rx sock.ip_4_udp bits
         ) else if ip.Ip.Pdu.proto = Ip.Proto.icmp then (
             let ip_trx = hash_find_or_insert t.icmp_socks ip.Ip.Pdu.src (fun () ->
                 let ip_trx = Ip.TRX.make t.my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.host_trx.logger in
-                (icmp_rx t ip_trx) <-= ip_trx =-> (tx t.eth.Eth.TRX.trx) ;
+                (icmp_rx t ip_trx) <-= ip_trx =-> (tx t.eth_trx) ;
                 ip_trx) in
             rx ip_trx bits
         )
@@ -510,15 +511,20 @@ let power_off ?timeout t =
     ) t.killers ;
     t.killers <- []
 
-let make name ?gw ?search_sfx ?nameserver ?(on=true) ~(init : ?on_ip:(t -> unit) -> t -> unit) my_mac =
-    let logger = Log.make name in
+let make name ?gw ?search_sfx ?nameserver ?(on=true) ?parent_logger ~(init : ?on_ip:(t -> unit) -> t -> unit) my_mac =
+    let logger =
+        match parent_logger with
+        | None -> Log.make name
+        | Some p -> Log.sub p name in
     let if_on t what f x =
         if t.on then f x else Log.(log logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
+    let eth_state = Eth.State.make ~mac:my_mac ?gateways:gw ~parent_logger:logger () in (* FIXME: Don't use the GW for same net IP! *)
     let rec t =
         { my_ip         = Ip.Addr.zero ;
           on            = on ;
           killers       = [] ;
-          eth           = Eth.TRX.make my_mac ?gw Arp.HwProto.ip4 [] (Log.sub logger "eth") ; (* FIXME: Don't use the GW for same net IP! *)
+          eth_state ;
+          eth_trx       = Eth.TRX.make eth_state ;
           tcp_socks     = Hashtbl.create 11 ;
           udp_socks     = Hashtbl.create 11 ;
           icmp_socks    = Hashtbl.create 11 ;
@@ -535,8 +541,8 @@ let make name ?gw ?search_sfx ?nameserver ?(on=true) ~(init : ?on_ip:(t -> unit)
         { name ; logger ;
           dev           = { write = (fun bits ->
                                Log.(log logger Debug (lazy (Printf.sprintf "got written to %d bits" (bitstring_length bits)))) ;
-                               rx t.eth.Eth.TRX.trx bits) ;
-                            set_read = (fun f -> t.eth.Eth.TRX.trx =-> f) } ;
+                               rx t.eth_trx bits) ;
+                            set_read = (fun f -> t.eth_trx =-> f) } ;
           tcp_connect   = (fun addr ?src_port dst cont -> if_on t "tcp_connect" (tcp_connect t addr ?src_port dst) cont) ;
           udp_connect   = (fun dst ?src_port dst_port client_f cont -> if_on t "udp_connect" (udp_connect t dst ?src_port dst_port client_f) cont) ;
           udp_send      = (fun dst ?src_port dst_port bits -> if_on t "udp_send" (udp_send t dst ?src_port dst_port) bits) ;
@@ -545,9 +551,9 @@ let make name ?gw ?search_sfx ?nameserver ?(on=true) ~(init : ?on_ip:(t -> unit)
           tcp_server    = (fun src_port server_f -> if_on t "tcp_server" (tcp_server t src_port) server_f) ;
           udp_server    = (fun src_port server_f -> if_on t "udp_server" (udp_server t src_port) server_f) ;
           signal_err    = (fun str -> signal_err t str) ;
-          get_mac       = (fun () -> t.eth.Eth.TRX.get_source ()) ;
+          get_mac       = (fun () -> t.eth_state.mac) ;
           get_ip        = (fun () -> if ip_is_set t then Some t.my_ip else None) ;
-          arp_set       = (fun ip haddr_opt -> if_on t "arp_set" (t.eth.Eth.TRX.arp_set (Ip.Addr.to_bitstring ip)) haddr_opt) ;
+          arp_set       = (fun ip haddr_opt -> if_on t "arp_set" (Eth.State.set_arp t.eth_state (Ip.Addr.to_bitstring ip)) haddr_opt) ;
           power_on      = (fun ?on_ip () ->
                               Log.(log logger Debug (lazy "Powering on")) ;
                               assert (not t.on) ; t.on <- true ;
@@ -562,16 +568,16 @@ let make name ?gw ?search_sfx ?nameserver ?(on=true) ~(init : ?on_ip:(t -> unit)
 let set_ip t ip netmask =
     Log.(log t.host_trx.logger Info (lazy (Printf.sprintf "Setting my IP to %s" (Ip.Addr.to_string ip)))) ;
     t.my_ip <- ip ;
-    t.eth.Eth.TRX.set_addresses Eth.[ { addr = Ip.Addr.to_bitstring ip ; netmask = Ip.Addr.to_bitstring netmask } ] ;
-    ignore ((ip_recv t) <-= t.eth.Eth.TRX.trx)
+    t.eth_state.my_addresses <- [ Eth.State.make_my_ip_address ~netmask ip ] ;
+    ignore ((ip_recv t) <-= t.eth_trx)
 
-let make_static name ?gw ?search_sfx ?nameserver ?on my_mac ?(netmask=Ip.Addr.all_ones) my_ip =
+let make_static name ?gw ?search_sfx ?nameserver ?on my_mac ?(netmask=Ip.Addr.all_ones) ?parent_logger my_ip =
     let init ?on_ip t =
         set_ip t my_ip netmask ;
         (* TODO: Send a gratuitous ARP request? *)
         Option.may (fun on_ip -> Clock.asap on_ip t) on_ip
     in
-    let t = make name ?gw ?search_sfx ?nameserver ?on ~init my_mac in
+    let t = make name ?gw ?search_sfx ?nameserver ?on ~init ?parent_logger my_mac in
     t.host_trx
 
 let make_dhcp host_name ?gw ?search_sfx ?nameserver ~on ~netmask my_mac =
@@ -579,30 +585,30 @@ let make_dhcp host_name ?gw ?search_sfx ?nameserver ~on ~netmask my_mac =
         (* Will receive all eth frames until we got an IP address *)
         let dhcp_client bits = (match Ip.Pdu.unpack bits with
             | None -> ()
-            | Some ip ->
-                if ip.Ip.Pdu.proto <> Ip.Proto.udp then (
-                    Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Ignoring IP packet of proto %s while waiting for DHCP offer" (Ip.Proto.to_string ip.Ip.Pdu.proto))))
-                ) else (match Udp.Pdu.unpack (ip.Ip.Pdu.payload :> bitstring) with
+            | Some (ip : Ip.Pdu.t) ->
+                if ip.proto <> Ip.Proto.udp then (
+                    Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Ignoring IP packet of proto %s while waiting for DHCP offer" (Ip.Proto.to_string ip.proto))))
+                ) else (match Udp.Pdu.unpack (ip.payload :> bitstring) with
                     | None -> ()
-                    | Some udp ->
-                        if udp.Udp.Pdu.src_port <> (Udp.Port.o 67) || udp.Udp.Pdu.dst_port <> (Udp.Port.o 68) then (
+                    | Some (udp : Udp.Pdu.t) ->
+                        if udp.src_port <> (Udp.Port.o 67) || udp.dst_port <> (Udp.Port.o 68) then (
                             Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Ignoring UDP packet from %s:%s to %s:%s while waiting for DHCP offer"
-                                (Ip.Addr.to_string ip.Ip.Pdu.src) (Udp.Port.to_string udp.Udp.Pdu.src_port)
-                                (Ip.Addr.to_string ip.Ip.Pdu.dst) (Udp.Port.to_string udp.Udp.Pdu.dst_port))))
+                                (Ip.Addr.to_string ip.src) (Udp.Port.to_string udp.src_port)
+                                (Ip.Addr.to_string ip.dst) (Udp.Port.to_string udp.dst_port))))
                         ) else (
-                            match Dhcp.Pdu.unpack (udp.Udp.Pdu.payload :> bitstring) with
+                            match Dhcp.Pdu.unpack (udp.payload :> bitstring) with
                             | None -> ()
                             | Some (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.offer ->
-                                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Got DHCP OFFER from %s, accepting it" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
+                                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Got DHCP OFFER from %s, accepting it" (Ip.Addr.to_string ip.src)))) ;
                                 (* TODO: check the Xid? *)
-                                let pdu = Dhcp.Pdu.make_request ~chaddr:(t.eth.Eth.TRX.get_source () :> bitstring) ~xid:dhcp.Dhcp.Pdu.xid ~host_name ?server_id:dhcp.Dhcp.Pdu.server_id dhcp.Dhcp.Pdu.yiaddr in
+                                let pdu = Dhcp.Pdu.make_request ~chaddr:(t.eth_state.mac :> bitstring) ~xid:dhcp.xid ~host_name ?server_id:dhcp.server_id dhcp.yiaddr in
                                 let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
                                 let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Udp.Pdu.pack pdu) in
-                                tx t.eth.Eth.TRX.trx (Ip.Pdu.pack pdu)
+                                tx t.eth_trx (Ip.Pdu.pack pdu)
                             | Some (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.ack ->
-                                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.Ip.Pdu.src)))) ;
+                                Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.src)))) ;
                                 (* TODO: set other params than IP *)
-                                set_ip t dhcp.Dhcp.Pdu.yiaddr netmask ;
+                                set_ip t dhcp.yiaddr netmask ;
                                 (* TODO: Send a gratuitous ARP request? *)
                                 Option.may (fun on_ip -> Clock.asap on_ip t) on_ip
                             | Some _ ->
@@ -611,16 +617,16 @@ let make_dhcp host_name ?gw ?search_sfx ?nameserver ~on ~netmask my_mac =
         let rec send_discover () =
             if t.my_ip = Ip.Addr.zero then (
                 Log.(log t.host_trx.logger Debug (lazy "Sending DHCP DISCOVER")) ;
-                Dhcp.Pdu.make_discover ~chaddr:(t.eth.Eth.TRX.get_source () :> bitstring) ~host_name () |>
+                Dhcp.Pdu.make_discover ~chaddr:(t.eth_state.mac :> bitstring) ~host_name () |>
                     Dhcp.Pdu.pack |>
                     Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) |>
                     Udp.Pdu.pack |>
                     Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast |>
                     Ip.Pdu.pack |>
-                    tx t.eth.Eth.TRX.trx ;
+                    tx t.eth_trx ;
                 Clock.delay (Clock.Interval.sec (5.+.(Random.float 3.))) send_discover ()
             ) in
-        ignore (dhcp_client <-= t.eth.Eth.TRX.trx) ;
+        ignore (dhcp_client <-= t.eth_trx) ;
         (* The client should wait a random time between one and ten seconds to desynchronize
            the use of DHCP at startup - RFC 2131 *)
         let delay = Clock.Interval.sec (1.+.(Random.float 9.)) in

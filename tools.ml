@@ -568,16 +568,16 @@ let counting dev =
     { dev with write }, c
 
 let null_logger =
-    Log.make "null"
+    Log.make "voracious monster"
 
 (** Obituary for ignored bits: *)
-let ignore_bits bits =
-    Log.(log null_logger Debug (lazy
-        (Printf.sprintf "Ignoring %d bits" (bitstring_length bits))))
+let ignore_bits ?(logger=null_logger) bits =
+    Log.(log logger Debug (lazy
+        (Printf.sprintf "wolfed %d bits down" (bitstring_length bits))))
 
 (** For those cases when you want to build a [trx] from a single [dev] *)
-let null_dev =
-    { write = ignore_bits ; set_read = ignore }
+let null_dev ~logger =
+    { write = ignore_bits ~logger ; set_read = ignore }
 
 (** Connects two {!dev} together *)
 let (<-->) a b =
@@ -611,6 +611,8 @@ let (<-->) a b =
  *        TRX_1                TRX_2
  *    < ins | out >   ==>  < ins | out >
  *)
+(* TODO: Ideally TRX should have their oewn logger, accessible here, so that
+ * owners could reparent their logger: *)
 type trx = { ins : dev ; out : dev }
 
 let tx trx = trx.ins.write
@@ -619,7 +621,7 @@ let rx trx = trx.out.write
 
 let inverse_trx trx = { ins = trx.out ; out = trx.ins }
 
-let null_trx = { ins = null_dev ; out = null_dev }
+let null_trx ~logger = { ins = null_dev ~logger ; out = null_dev ~logger }
 
 (** [f <-= trx] sets f as the receive function of this [trx].
  * Previous receive function, if any, is lost.

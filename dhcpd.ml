@@ -60,8 +60,7 @@ struct
           host_parameters : (int * bitstring) list }
 
     let make ?(authoritative=true) ?(lease_time_sec=3600) ?netmask ?broadcast
-             ?gw ?mtu ?dns ?ntp ~parent_logger ip_range =
-
+             ?gw ?mtu ?dns ?ntp ?(parent_logger=Log.default) ip_range =
         let logger = Log.sub parent_logger "dhcpd" in
         let mandatory_parameters =
             [ Dhcp.Option.lease_time, bitstring_of_int32 lease_time_sec ] in
@@ -183,16 +182,17 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                         Log.(log st.logger Warning (lazy (Printf.sprintf "I never offered anything to %s (or I forgot about it). Leaving it to another dhcp server." (Eth.Addr.to_string (Eth.Addr.o dhcp.Pdu.chaddr)))))
                     ))
             (* TODO: handle release & decline *)
+            | Some (Pdu.{ msg_type = Some msg_type ; _ }) ->
+                Log.(log st.logger Debug (lazy (Printf.sprintf "Ignoring DHCP %s" (Dhcp.MsgType.to_string msg_type))))
             | _ ->
                 Log.(log st.logger Debug (lazy "Ignoring DHCP message"))))
 
 (*$R serve
     Clock.realtime := false ;
-    let logger = Log.make "test" in
     (*Log.console_lvl := Log.Debug ;*)
     let srv = Host.make_static "server" (Eth.Addr.random ()) (Ip.Addr.random ()) ~on:true ~netmask:Ip.Addr.all_ones in
     let my_net = Ip.Cidr.random () in
-    let st = State.make ~parent_logger:logger (Ip.Range.of_cidr my_net) in
+    let st = State.make (Ip.Range.of_cidr my_net) in
     serve st srv ;
     let clt = Host.make_dhcp "client" (Eth.Addr.random ()) ~on:true ~netmask:Ip.Addr.all_ones in
     srv.Host.dev.set_read clt.Host.dev.write ;

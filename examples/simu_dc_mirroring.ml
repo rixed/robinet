@@ -6,8 +6,6 @@
 open Batteries
 open Tools
 
-let logger = Log.make ~size:1000 "simu_dc"
-
 (*
  * Configuration for a test plan
  *
@@ -335,7 +333,7 @@ struct
         let root_nameserver = Sim.Net.make_server ~on:true ~name:ns_name ns_ip in
         Hashtbl.add global_directory ns_name ns_ip ;
         let lookup = (Hashtbl.find_option global_directory) in
-        let dns_state = Named.State.make ~parent_logger:logger lookup in
+        let dns_state = Named.State.make lookup in
         Sim.Net.iter_equipments (function
             | Host host -> Named.serve dns_state host
             | _ -> ()) root_nameserver ;
@@ -374,7 +372,7 @@ struct
                 let characters = give_soul add_host characters lan.hosts in
                 characters, Sim.Net.union [ net ; g ]
             ) (characters, net) p.lans in
-        Log.(log logger Info (lazy
+        Log.(log default Info (lazy
             (Printf.sprintf2 "Will run with this directory: %a"
                 (Hashtbl.print String.print Ip.Addr.printf) global_directory))) ;
         characters, net
@@ -383,7 +381,7 @@ end
 
 let simul plan =
     let characters, _net = Plan.instanciate plan in
-    Log.(log logger Info (lazy
+    Log.(log default Info (lazy
         (Printf.sprintf "Got a net with %d characters" (List.length characters)))) ;
     (* What to do with the souls? For now we just power them all on.
      * FIXME: we should power them on when the scenario says so! ie either

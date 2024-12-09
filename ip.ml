@@ -293,7 +293,8 @@ end
 (** {4 CIDR Addresses} *)
 
 (** CIDR addresses are a concise way to write network addresses,
- * with network IP then netmask length, like: 192.168.0.0/16. *)
+ * with network IP then netmask length, like: 192.168.0.0/16.
+ * Can also be used to write a IP + its netmask concisely. *)
 module Cidr = struct
     (*$< Cidr *)
     include Private.Make (struct
@@ -302,12 +303,7 @@ module Cidr = struct
         (** Converts a CIDR to its string representation. *)
         let to_string ((ip : Addr.t), n) =
             Addr.to_dotted_string ip ^ "/" ^ String.of_int n
-        let is_valid ((ip : Addr.t), n) =
-            let ok = Addr.higher_bits ip n = ip in
-            if not ok then
-                Printf.eprintf "Invalid CIDR: %s/%d\n%!"
-                    (Addr.to_string ip) n ;
-            ok
+        let is_valid _ = true
         let repl_tag = "addr"
     end)
 
@@ -315,12 +311,14 @@ module Cidr = struct
         let ip_str, width_str =
             try String.split ~by:"/" str
             with Not_found -> error (Printf.sprintf "not a CIDR: %s" str) in
-        let ip, n = Addr.of_string ip_str, Int.of_string width_str in
-        (* mask off unsignificant bits of IP *)
-        o (Addr.higher_bits ip n, n)
+        o (Addr.of_string ip_str, Int.of_string width_str)
+
+    (* Test that we actually keep the masked bits, so a Cidr can be
+     * used to write a network address _or_ a host+netmask (such as when
+     * we manipulate gateway addresses) *)
     (*$= of_string & ~printer:to_string
       (o (Addr.o32 0x01020380l, 25)) (of_string "1.2.3.128/25")
-      (o (Addr.o32 0x01020380l, 25)) (of_string "1.2.3.142/25")
+      (o (Addr.o32 0x0102038El, 25)) (of_string "1.2.3.142/25")
      *)
 
     (* Will assume [ip] has all high bits at 1 and low bits at 0 *)
@@ -357,16 +355,20 @@ module Cidr = struct
     (** Build a CIDR from a single address *)
     let single ip = o (ip, 32)
 
-    let mem (t : t) (ip : Addr.t) =
+    let mem (t : t) =
         let net, width = (t :> Addr.t * int) in
-        let hb = Addr.higher_bits ip width in
-        hb = net
+        let net_hi = takebits width (Addr.to_bitstring net) in
+        fun (ip : Addr.t) ->
+            let ip_hi = takebits width (Addr.to_bitstring ip) in
+            Bitstring.equals net_hi ip_hi
     (*$= mem & ~printer:string_of_bool
       true  (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.0"))
       true  (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.1"))
+      true  (mem (of_string "192.168.10.7/28") (Addr.of_string "192.168.10.15"))
       true  (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.15"))
       false (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.16"))
       false (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.17"))
+      false (mem (of_string "192.168.10.7/28") (Addr.of_string "192.168.10.17"))
      *)
 
     let width (t : t) =
@@ -397,12 +399,19 @@ module Cidr = struct
      *)
     let to_enum = enum  (* Backward compatibility *)
 
-    (** Returns the subnet-zero address of a CIDR *)
-    let zero_addr (t : t) =
+    (** Returns the subnet part of a CIDR, without zeroing it *)
+    let subnet (t : t) =
         let net, _width = (t :> Addr.t * int) in
         net (* Cf is_valid *)
+
+    (** Returns the subnet-zero address of a CIDR *)
+    let zero_addr (t : t) =
+        let net, width = (t :> Addr.t * int) in
+        Addr.higher_bits net width (* Cf is_valid *)
     (*$= zero_addr & ~printer:identity
       "192.168.1.0" (zero_addr (of_string "192.168.1.0/28") |> \
+                     Addr.to_dotted_string)
+      "192.168.1.0" (zero_addr (of_string "192.168.1.3/28") |> \
                      Addr.to_dotted_string)
      *)
 
@@ -418,22 +427,25 @@ module Cidr = struct
                        Addr.to_dotted_string)
      *)
 
-    (** Returns the set (as an [Enum]) of all IP addresses in the given CIDR range (that is, all minus
-     * subnet zero and all-ones subnet). For /32, returns the /32 singleton. For /31, return the empty
-     * enum. *)
+    (** Returns the set (as an [Enum]) of all IP addresses in the given CIDR
+     * range (that is, all minus subnet zero, all-ones subnet and the IP of
+     * the netmask itself if it's not the zero). *)
     let local_addrs (t : t) =
         let net, width = (t :> Addr.t * int) in
-        if width >= Addr.length net then Enum.singleton net else
+        if width >= Addr.length net then Enum.empty () else
         let zero = zero_addr t and all1s = all1s_addr t in
-        enum t // (fun ip -> ip <> zero && ip <> all1s)
+        enum t // (fun ip -> ip <> zero && ip <> all1s && ip <> net)
     (*$= local_addrs & ~printer:dump
-      [ "192.168.10.42" ] (local_addrs (of_string "192.168.10.42/32") /@ \
+      []                  (local_addrs (of_string "192.168.10.42/32") /@ \
                            Addr.to_dotted_string |> \
                            List.of_enum)
       []                  (local_addrs (of_string "192.168.10.42/31") \
                            |> List.of_enum)
       [ "192.168.0.1" ; "192.168.0.2" ] \
                           (local_addrs (of_string "192.168.0.0/30") /@ \
+                           Addr.to_dotted_string |> \
+                           List.of_enum)
+      [ "192.168.0.2" ]   (local_addrs (of_string "192.168.0.1/30") /@ \
                            Addr.to_dotted_string |> \
                            List.of_enum)
     *)
@@ -705,8 +717,8 @@ module TRX = struct
     let make ?(mtu=1400) src dst proto logger =
         ensure ((mtu mod 8) = 0) "Ip: MTU is required to be a multiple of 8 bytes" ;
         let t = { logger ; src ; dst ; proto ; mtu ;
-                  emit = ignore_bits ;
-                  recv = ignore_bits } in
+                  emit = ignore_bits ~logger ;
+                  recv = ignore_bits ~logger } in
         { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;
           out = { write = rx t ;

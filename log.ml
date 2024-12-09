@@ -112,3 +112,7 @@ let sub logger ?size subname =
     let name = logger.name ^"/"^ subname
     and size = size |? (Array.length (snd logger.queues.(0)) / 2 + 1) in
     make ~parent:logger ~use_wall_clock:logger.use_wall_clock ~size name
+
+(* The logger that will adopt any others: *)
+
+let default = make "default"

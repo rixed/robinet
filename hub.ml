@@ -25,45 +25,45 @@ open Tools
    to several locations (but the one from which the frame came from) *)
 module Repeater =
 struct
-    type t = {  ports : (bitstring -> unit) array ;
+    type t = { ifaces : (bitstring -> unit) array ;
+         is_connected : bool array ;
                  name : string ;
                logger : Log.logger }
 
     let print oc t =
-        Printf.fprintf oc "repeater %s with %d ports" t.name (Array.length t.ports)
+        Printf.fprintf oc "repeater %s with %d ifaces" t.name (Array.length t.ifaces)
 
     let make ?logger n name =
-        let logger =
-            Option.default_delayed (fun () -> Log.make name) logger in
-        { ports = Array.make n ignore_bits ;
+        let logger = Option.default_delayed (fun () -> Log.make name) logger in
+        { ifaces = Array.make n (ignore_bits ~logger) ;
+          is_connected = Array.make n false ;
           name ; logger }
 
     let forward_from t n pld =
         Array.iteri (fun i emit ->
             if i <> n then (
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Forward to port %d/%d" i (Array.length t.ports)))) ;
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Forward to iface %d/%d" i (Array.length t.ifaces)))) ;
                 Clock.asap emit pld
-            )) t.ports
+            )) t.ifaces
 
     let write t n pld =
-        Log.(log t.logger Debug (lazy (Printf.sprintf "Rx from port %d/%d" n (Array.length t.ports)))) ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.ifaces)))) ;
         forward_from t n pld
 
     let set_read t n f =
-        Log.(log t.logger Debug (lazy (Printf.sprintf "Setting reader for port %d" n))) ;
-        t.ports.(n) <- f
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Setting reader for iface %d" n))) ;
+        t.is_connected.(n) <- true ;
+        t.ifaces.(n) <- f
 
-    (** Turns a port into a device *)
-    let port t n =
+    (** Turns a iface into a device *)
+    let iface t n =
         { write = write t n ; set_read = set_read t n }
 
     let t_printer _paren oc t =
-        Printf.fprintf oc "%d" (Array.length t.ports)
+        Printf.fprintf oc "%d" (Array.length t.ifaces)
 
-    let is_connected = (!=) ignore_bits
-
-    let first_free_port t =
-        Array.findi (not % is_connected) t.ports
+    let first_free_iface t =
+        Array.findi not t.is_connected
 end
 
 (** A Switch is a device that will forward Ethernet frames based on the observed
@@ -74,7 +74,7 @@ struct
 
     type mac_entry =
         { mutable addr : Eth.Addr.t option ;
-          mutable port : int }
+          mutable iface : int }
 
     type t =
         { hub  : R.t ;
@@ -85,13 +85,13 @@ struct
           logger : Log.logger }
 
     let print oc t =
-        Printf.fprintf oc "switch %s with %d ports" t.name (Array.length t.hub.ports)
+        Printf.fprintf oc "switch %s with %d ifaces" t.name (Array.length t.hub.ifaces)
 
     (* [num_macs] is the maximum number of remembered MACs. *)
-    let make num_ports num_macs name =
+    let make num_ifaces num_macs name =
         let logger = Log.make name in
-        { hub = R.make ~logger num_ports name ;
-          macs = OrdArray.init num_macs (fun _ -> { addr = None ; port = 0 }) ;
+        { hub = R.make ~logger num_ifaces name ;
+          macs = OrdArray.init num_macs (fun _ -> { addr = None ; iface = 0 }) ;
           macs_h = BitHash.create (num_macs/10) ;
           name ; logger }
 
@@ -106,14 +106,14 @@ struct
                  * memory: *)
                 BitHash.remove t.macs_h (addr :> bitstring)) ;
             last.addr <- Some (Eth.Addr.o src) ;
-            last.port <- ins ;
+            last.iface <- ins ;
             BitHash.add t.macs_h src last_idx ;
             OrdArray.promote t.macs last_idx
         | Some n ->
             let mac = OrdArray.get t.macs n in
-            if mac.port <> ins then (
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Host %s changed from port %d to %d" (Eth.Addr.to_string (Eth.Addr.o src)) mac.port ins))) ;
-                mac.port <- ins
+            if mac.iface <> ins then (
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Host %s changed from iface %d to %d" (Eth.Addr.to_string (Eth.Addr.o src)) mac.iface ins))) ;
+                mac.iface <- ins
             ) ;
             OrdArray.promote t.macs n
 
@@ -125,7 +125,7 @@ struct
             (* TODO: addresses reserved by 802.1d should not be forwarded. *)
             (* now forward *)
             let do_broadcast () =
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Forwarding to all ports"))) ;
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Forwarding to all ifaces"))) ;
                 R.forward_from t.hub ins bits in
             if Eth.Addr.is_broadcast (Eth.Addr.o dst) then
                 do_broadcast ()
@@ -136,40 +136,43 @@ struct
                     do_broadcast ()
                 | Some n ->
                     let mac = OrdArray.get t.macs n in
-                    Log.(log t.logger Debug (lazy (Printf.sprintf "Known dest %s, will forward to port %d" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.port))) ;
-                    Clock.asap t.hub.Repeater.ports.(mac.port) bits ;
+                    Log.(log t.logger Debug (lazy (Printf.sprintf "Known dest %s, will forward to iface %d" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.iface))) ;
+                    Clock.asap t.hub.Repeater.ifaces.(mac.iface) bits ;
                     OrdArray.promote t.macs n)
         | {| _ |} ->
             Log.(log t.logger Debug (lazy (Printf.sprintf "Drop incoming frame without destination")))
 
     let write t n pld =
-        Log.(log t.logger Debug (lazy (Printf.sprintf "Rx from port %d/%d" n (Array.length t.hub.ports)))) ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.hub.ifaces)))) ;
         forward_from t n pld
 
     let set_read t n f =
-        Log.(log t.logger Debug (lazy (Printf.sprintf "Setting emitter for port %d/%d" n (Array.length t.hub.ports)))) ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Setting emitter for iface %d/%d" n (Array.length t.hub.ifaces)))) ;
         Repeater.set_read t.hub n f
 
-    (** Turns a port into a device *)
-    let port t n =
+    (** Turns a iface into a device *)
+    let iface t n =
         { write = write t n ; set_read = set_read t n }
 
-    let first_free_port t =
-        R.first_free_port t.hub
+    let first_free_iface t =
+        R.first_free_iface t.hub
 end
 
-(** A Tap is a 2 port repeater which mirror each packet to a user function.
+(** A Tap is a 2 ifaces repeater which mirror each packet to a user function.
   It can be used as a transparent TRX. *)
 module Tap =
 struct
-    type t = trx
+    type t = { trx : trx ;
+            logger : Log.logger }
 
-    let make mirror =
-        let emit_ins = ref ignore_bits
-        and emit_out = ref ignore_bits in
-        { ins = { write = (fun bits -> mirror bits ; !emit_out bits) ;
-                  set_read = fun f -> emit_ins := f } ;
-          out = { write = (fun bits -> mirror bits ; !emit_ins bits) ;
-                  set_read = fun f -> emit_out := f } }
-
+    let make ?logger mirror =
+        let logger = Option.default_delayed (fun () -> Log.make "tap") logger in
+        let emit_ins = ref (ignore_bits ~logger)
+        and emit_out = ref (ignore_bits ~logger) in
+        let trx =
+            { ins = { write = (fun bits -> mirror bits ; !emit_out bits) ;
+                      set_read = fun f -> emit_ins := f } ;
+              out = { write = (fun bits -> mirror bits ; !emit_ins bits) ;
+                      set_read = fun f -> emit_out := f } } in
+        { trx ; logger }
 end

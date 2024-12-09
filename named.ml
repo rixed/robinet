@@ -33,7 +33,7 @@ struct
     (* [lookup] is a function taking names as string and returning
      * IP addresses or None in which case the server will delegate.
      * FIXME: any serializable/inspectable datastructure *)
-    let make ?(default_ttl=3600) ~parent_logger lookup =
+    let make ?(default_ttl=3600) ?(parent_logger=Log.default) lookup =
         let logger = Log.sub parent_logger "named" in
         { logger ; default_ttl ; lookup }
 

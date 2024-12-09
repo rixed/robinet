@@ -378,8 +378,8 @@ struct
         let t = { logger ;
                   src = src ;
                   dst = dst ;
-                  emit = (fun _b -> Log.(log logger Debug (lazy (Printf.sprintf "Tcp: Ignoring a packet")))) ;
-                  recv = ignore ;
+                  emit = ignore_bits ~logger ;
+                  recv = ignore_bits ~logger ;
                   mtu = mtu ;
                   isn = may_default isn (fun () -> SeqNum.o 0l (*Random.int32 0x7FFFFFFFl*)) ;
                   rcvd_isn = None ;
@@ -390,7 +390,7 @@ struct
                   unacked_tx = Streambuf.empty ;
                   rcvd_fin = false ;
                   cnx_established_cont = None ;
-                  tcp_trx = { trx = null_trx ;
+                  tcp_trx = { trx = null_trx ~logger ;
                               close = ignore ;
                               is_closed = fun _ -> true } } in
         t.tcp_trx <- { trx =  { ins = { write = tx t ;
