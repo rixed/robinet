@@ -130,7 +130,8 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                 (match State.get_free_ip st with
                 | Some offered_ip ->
                     (* Add this entry to our ARP cache.
-                     * FIXME: actually, shouldn't we wait for the ack, in case the offer is rejected!? *)
+                     * FIXME: actually, shouldn't we wait for the ack, in case the
+                     * offer is rejected? We could clean the ARP cache then. *)
                     host.Host.arp_set offered_ip (Some (Eth.Addr.o chaddr)) ;
                     (* Store the offer *before* spawning the responding thread *)
                     let offer_key = Dhcp.Option.default_client_id ~htype chaddr in
@@ -191,15 +192,15 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
     Clock.realtime := false ;
     (*Log.console_lvl := Log.Debug ;*)
     let netmask = Ip.Addr.all_ones in
-    let srv = Host.make_static ~netmask (Ip.Addr.random ()) "server" in
+    let srv : Host.t = Host.make_static ~netmask (Ip.Addr.random ()) "server" in
     let my_net = Ip.Cidr.random () in
     let st = State.make (Ip.Range.of_cidr my_net) in
-    serve st srv ;
-    let clt = Host.make_dhcp ~netmask "client" in
-    srv.Host.dev.set_read clt.Host.dev.write ;
-    clt.Host.dev.set_read srv.Host.dev.write ;
+    serve st srv.trx ;
+    let clt : Host.t = Host.make_dhcp ~netmask "client" in
+    srv.trx.dev.set_read clt.trx.dev.write ;
+    clt.trx.dev.set_read srv.trx.dev.write ;
     Clock.run false ;
     Clock.realtime := true ;
-    assert_bool "Client got an IP" (clt.Host.get_ip () <> None) ;
-    assert_bool "IP is within net" (Ip.Cidr.mem my_net (Option.get (clt.Host.get_ip ())))
+    assert_bool "Client got an IP" (Host.ip_is_set clt) ;
+    assert_bool "IP is within net" (Eth.State.find_ip4 clt.eth_state |> Ip.Cidr.mem my_net)
  *)

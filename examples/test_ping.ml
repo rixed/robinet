@@ -10,9 +10,9 @@ let run () =
     let host_ip = Ip.Addr.random () and my_ip = Ip.Addr.random () in
     (* Build the stack *)
     let host = Host.make_static ~netmask:(Ip.Addr.all_ones) host_ip "test" in
-    let eth_state = Eth.State.make ~my_addresses:[ Eth.State.make_my_ip_address my_ip ] ~parent_logger:host.Host.logger () in
+    let eth_state = Eth.State.make ~my_addresses:[ Eth.State.make_my_ip_address my_ip ] ~parent_logger:host.trx.logger () in
     let eth = Eth.TRX.make eth_state in
-    let ip  = Ip.TRX.make my_ip host_ip Ip.Proto.icmp host.Host.logger in
+    let ip  = Ip.TRX.make my_ip host_ip Ip.Proto.icmp host.trx.logger in
     (* What to do when receiving an ip pck *)
     let my_recv bits = match Icmp.Pdu.unpack bits with
         | None -> error "Cannot decode echo reply"
@@ -25,8 +25,8 @@ let run () =
                     assert (id = 42 && seq = 1)
                 | _ -> error "Bad msg payload") in
     (* Connect everything *)
-    my_recv <-= ip ==> eth =-> host.Host.dev.write ;
-    host.Host.dev.set_read (rx eth) ;
+    my_recv <-= ip ==> eth =-> host.trx.dev.write ;
+    host.trx.dev.set_read (rx eth) ;
     (* Send an echo request *)
     let req = Icmp.Pdu.make_echo_request 42 1 in
     tx ip (Icmp.Pdu.pack req) ;
@@ -35,4 +35,3 @@ let run () =
 let main =
     Random.self_init () ;
     run ()
-

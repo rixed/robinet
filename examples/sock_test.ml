@@ -42,14 +42,14 @@ let run () =
     and hub = Hub.Repeater.make 3 "hub"
     in
     let gigabit = Eth.limited (Clock.Interval.msec 1.) 1_000_000_000. in
-    h1.Host.dev.set_read (gigabit (Hub.Repeater.write hub 0)) ;
-    Hub.Repeater.set_read hub 0 (gigabit h1.Host.dev.write) ;
-    h2.Host.dev.set_read (gigabit (Hub.Repeater.write hub 1)) ;
-    Hub.Repeater.set_read hub 1 (gigabit h2.Host.dev.write) ;
+    h1.trx.dev.set_read (gigabit (Hub.Repeater.write hub 0)) ;
+    Hub.Repeater.set_read hub 0 (gigabit h1.trx.dev.write) ;
+    h2.trx.dev.set_read (gigabit (Hub.Repeater.write hub 1)) ;
+    Hub.Repeater.set_read hub 1 (gigabit h2.trx.dev.write) ;
     (* Save everything into sock_test.pcap *)
     Hub.Repeater.set_read hub 2 (Pcap.save "sock_test.pcap") ;
     (* Start a server on h1 *)
-    h1.Host.tcp_server (Tcp.Port.o 7) (fun tcp -> tcp.Tcp.TRX.trx.ins.set_read (server_f h1 tcp)) ;
+    h1.trx.tcp_server (Tcp.Port.o 7) (fun tcp -> tcp.Tcp.TRX.trx.ins.set_read (server_f h1 tcp)) ;
     (* Client connects and write a msg *)
     let client_f tcp bits =
         Printf.printf "Client received '%s'\n" (string_of_bitstring bits) ;
@@ -60,7 +60,7 @@ let run () =
             assert false
         )
     in
-    h2.Host.tcp_connect (Host.IPv4 (Ip.Addr.of_string "192.168.0.1")) (Tcp.Port.o 7) (function
+    h2.trx.tcp_connect (Host.IPv4 (Ip.Addr.of_string "192.168.0.1")) (Tcp.Port.o 7) (function
     | None -> ()
     | Some tcp ->
         tcp.Tcp.TRX.trx.ins.set_read (client_f tcp) ;

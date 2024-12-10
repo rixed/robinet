@@ -148,7 +148,7 @@ struct
          * totally independent IP stacks. If all the admin_hosts of a router
          * were to be made to edit the router's global configuration then
          * they would have to share that storage area of course. *)
-                    admin_host : Host.host_trx option }
+                    admin_host : Host.t option }
 
     type load_balancing = NoLoadBalancing | Random | PrefixHash
 
@@ -235,7 +235,7 @@ struct
                         Log.(log t.logger Warning (lazy (Printf.sprintf "There is no admin on interface %d, now what?" in_iface)))
                     | Some host ->
                         Log.(log t.logger Debug (lazy "Delivering to the admin host")) ;
-                        host.dev.write bits)
+                        Host.ip_recv host bits)
             and lb_iface = function
                 | NoLoadBalancing ->
                     0
@@ -277,25 +277,30 @@ struct
         let logger = Log.sub parent_logger name in
         let eth =
             Eth.State.make ?proto ?mtu ?delay ?loss ?mac ?gateways ?my_addresses
-                           ~parent_logger () in
+                           ~parent_logger:logger () in
         let trx = Eth.TRX.make eth in
         (* Make it a counting TRX: *)
         let ins, tx_counters = counting trx.ins
         and out, rx_counters = counting trx.out in
         let trx = { ins ; out } in
-        (* Add the admin interface: *)
+        (* Now if we want to have an IP stack on top depending on routing decisions,
+         * We must further wrap this TRX inside one that does the routing on the
+         * inside and either forward to another iface or emit towards the host: *)
         let admin_host =
             match my_addresses with
-            | Some (Eth.State.{ addr ; netmask } :: _) ->
-                let addr = Ip.Addr.of_bitstring addr
-                and netmask = Ip.Addr.of_bitstring netmask in
+            | Some (_ :: _) ->
+                (* Make that interface a host with an IP stack on top of eth: *)
                 let name = "admin@"^ string_of_int n in
-                let admin_host =
-                    Host.make_static ~parent_logger:logger ~netmask addr name in
-                (* The other way around depends on routing decisions: *)
-                admin_host.Host.dev.set_read trx.ins.write ;
-                Some admin_host
-            | _ -> None in
+                let logger = Log.sub logger "admin" in
+                Some (Host.make_from_eth ~logger eth trx name)
+                (* On output, the host will be able to write onto that TRX and that
+                 * will be output from that iface, properly updating the counters.
+                 * On the other way around it's a bit more convoluted: the host
+                 * takes the reader callback only when set_ip is called, which
+                 * we don't have to do here. The router is going call the host
+                 * [ip_recv] function whenever that's the routing decision. *)
+            | _ ->
+                None in
         { trx ; eth ; rx_counters ; tx_counters ; logger ; admin_host }
 
     let notify_never = { probability = 0. ; delay = 0. }
@@ -528,15 +533,15 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?dhcp_range ?(name
     (* Create the "host" and configure its gateway, although we probably don't
      * want this host on the internet: *)
     let srv_ip = Enum.get_exn local_ips in    (* second the dhcp/name servers *)
-    let h : Host.host_trx =
+    let h : Host.t =
         let gateways = [ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw_mac) ] in
         Host.make_static ?nameserver ~gateways ~netmask ~parent_logger srv_ip "srv" in
     (* Now we need the repeater and the services: *)
     (* FIXME: instead of a Hub that forces us into having 2 IPs make a simple TRX directly, that inspects the protostack and if
      * the dest IP is gw_ip == src_iv then forward it to the host and if not forward it to the NAT. *)
     let hub = Hub.Repeater.make ~parent_logger 3 "hub" in
-    Hub.Repeater.set_read hub 1 h.Host.dev.write ;
-    h.Host.dev.set_read (Hub.Repeater.write hub 1) ;
+    Hub.Repeater.set_read hub 1 h.trx.dev.write ;
+    h.trx.dev.set_read (Hub.Repeater.write hub 1) ;
     (* Connect the first iface of our router *)
     Hub.Repeater.set_read hub 2 router.ifaces.(0).trx.out.write ;
     router.ifaces.(0).trx.out.set_read (Hub.Repeater.write hub 2) ;
@@ -556,13 +561,13 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?dhcp_range ?(name
         ) dhcp_range in
     let dhcp_state =
         Dhcpd.State.make ~netmask ~broadcast ~gw:gw_ip ~mtu ~dns
-                         ~parent_logger:h.logger dhcp_range in
+                         ~parent_logger:h.trx.logger dhcp_range in
     (* TODO: register a callback when leasing/releasing that updates the dns lookup function *)
-    Dhcpd.serve dhcp_state h ;
-    let dns_state = Named.State.make ~parent_logger:h.logger (fun _ -> None) in (* Delegate everything to nameserver *)
+    Dhcpd.serve dhcp_state h.trx ;
+    let dns_state = Named.State.make ~parent_logger:h.trx.logger (fun _ -> None) in (* Delegate everything to nameserver *)
     (* FIXME: revisit that! Here we want a table (state must not contain functions
      * because we want to be able to serialize them) *)
-    Named.serve dns_state h ;
+    Named.serve dns_state h.trx ;
     let trx =
         { ins = in_trx ;
           out = out_trx.out } in
@@ -575,9 +580,9 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?dhcp_range ?(name
     let gw_trx = make_gw public_ip (Ip.Cidr.of_string "192.168.0.0/16") in
     let gateways = Eth.[ State.gw_selector (), Some (Gateway.of_string "192.168.0.1") ] in
     let netmask = Ip.Addr.of_string "255.255.255.0" in
-    let desktop = Host.make_dhcp ~netmask ~gateways "desktop" in
-    desktop.Host.dev.set_read gw_trx.trx.ins.write ;
-    ignore (desktop.Host.dev.write <-= gw_trx.trx) ;
+    let desktop : Host.t = Host.make_dhcp ~netmask ~gateways "desktop" in
+    desktop.trx.dev.set_read gw_trx.trx.ins.write ;
+    ignore (desktop.trx.dev.write <-= gw_trx.trx) ;
     let server_ip = Ip.Addr.of_string "42.43.44.45" in
     let server_eth = Eth.(TRX.make State.(make ~my_addresses:[ make_my_ip_address server_ip ] ())) in
     let src = ref None in
@@ -587,8 +592,8 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?dhcp_range ?(name
     ignore (server_recv <-= server_eth) ;
     gw_trx.trx <==> server_eth ;
     Clock.delay (Clock.Interval.sec 10.) (fun () ->
-        Log.(log desktop.logger Debug (lazy "Sending UDP packet to server")) ;
-        desktop.Host.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring) () ;
+        Log.(log desktop.trx.logger Debug (lazy "Sending UDP packet to server")) ;
+        desktop.trx.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring) () ;
     Clock.run false ;
     Clock.realtime := true ;
     assert_bool "Desktop was NATed" (!src = Some public_ip)

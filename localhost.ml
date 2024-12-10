@@ -184,8 +184,6 @@ let make () =
       Host.udp_server    = (fun _ _ -> todo "UDP server for localhost") ;
       Host.signal_err    = signal_err ;
       Host.dev           = { write = ignore ; set_read = ignore } ;
-      Host.get_mac       = (fun () -> todo "get the Eth mac addr of localhost") ;
-      Host.get_ip        = (fun () -> todo "get the IP addr of localhost") ;
       Host.arp_set       = (fun _ _ -> todo "set ARP table of localhost") ;
       Host.power_on      = (fun ?on_ip () -> ignore on_ip) ;
       Host.power_off     = (fun ?timeout () -> ignore timeout) ;

@@ -40,20 +40,21 @@ let run ifname src_range num_srcs ?gateways ?search_sfx ?nameserver ?pause max_d
     (* Build the HUB and link it to hosts *)
     let hub     = Hub.Repeater.make (num_srcs+1) "hub"
     and gigabit = Eth.limited (Clock.Interval.msec 10.) 1_000_000_000. in
-    List.iteri (fun i h ->
+    List.iteri (fun i (h : Host.t) ->
         (* notice that the cable is not full duplex *)
-        h.Host.dev.set_read (gigabit (Hub.Repeater.write hub i)) ;
-        Hub.Repeater.set_read hub i (gigabit h.Host.dev.write)
+        h.trx.dev.set_read (gigabit (Hub.Repeater.write hub i)) ;
+        Hub.Repeater.set_read hub i (gigabit h.trx.dev.write)
     ) hosts ;
     (* Link all these to the real world *)
     let iface = Pcap.openif ifname in
     Hub.Repeater.set_read hub num_srcs (Pcap.inject iface) ;
     (* Start the browsers *)
-    List.iter (fun h ->
-        let browser = Browser.make h in
+    List.iter (fun (h : Host.t) ->
+        let browser = Browser.make h.trx in
         match pause with
         | Some pause -> Browser.user browser ~pause:pause max_depth (Url.of_string start_url)
-        | None       -> Browser.spider browser max_depth (Url.of_string start_url)) hosts ;
+        | None       -> Browser.spider browser max_depth (Url.of_string start_url)
+    ) hosts ;
     (* Prepare a timeout in 15s *)
     Clock.delay (Clock.Interval.sec 15.) failwith "timeout" ;
     (* Run everything *)

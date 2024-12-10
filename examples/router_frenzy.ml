@@ -183,7 +183,7 @@ let build_network logger router_specs fst_router_name delays err_delays losses e
                     and ip = try Ip.Addr.of_string dest_name
                              with Invalid_argument _ -> Ip.Cidr.second_addr cidr in
                     dest_name,
-                    Host.(make_static ~gateways ~netmask ip dest_name).dev
+                    Host.(make_static ~gateways ~netmask ip dest_name).trx.dev
                 | dest_router ->
                     (* For each of connected routers, look for their corresponding
                      * interface by subnet name: *)

@@ -48,7 +48,7 @@ let main =
     let gateways =
         (if !gw = "" then None else Some (Eth.Gateway.of_string !gw)) |>
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) in
-    let host =
+    let host : Host.t =
         Host.make_static ?gateways
                          ~nameserver:(Ip.Addr.of_string !dst_ip)
                          ~search_sfx:!search
@@ -56,11 +56,11 @@ let main =
                          ~netmask:(Ip.Addr.of_string !netmask)
                          (Ip.Addr.of_string !src_ip)
                          "requester" in
-    host.Host.dev.set_read emit ;
+    host.trx.dev.set_read emit ;
     List.iter (Clock.asap (fun name ->
-        host.Host.gethostbyname name (function
+        host.trx.gethostbyname name (function
         | None -> ()
         | Some ips ->
             List.print (fun oc ip -> Printf.fprintf oc "%s\n" (Ip.Addr.to_dotted_string ip)) stdout ips))) !names ;
-    ignore (Pcap.sniffer iface host.Host.dev.write) ;
+    ignore (Pcap.sniffer iface host.trx.dev.write) ;
     Clock.run false

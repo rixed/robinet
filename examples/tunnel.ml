@@ -30,7 +30,7 @@ let tunnel ifname tun_ip netmask mac gw search_sfx nameserver dst dst_port src_p
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) gw in
     let host = Host.make_static ?gateways ?search_sfx ?nameserver ~mac ~netmask tun_ip "tun"
     and http = Http.TRX.make [ "Content-Type", "tun/eth" ] in
-    host.Host.dev.set_read (Pcap.inject iface) ;
+    host.trx.dev.set_read (Pcap.inject iface) ;
     let connect_tunnel tcp =
         Printf.printf "Tunnel: We are now connected!\n%!" ;
         http =-> (tx tcp.Tcp.TRX.trx) ;
@@ -61,16 +61,16 @@ let tunnel ifname tun_ip netmask mac gw search_sfx nameserver dst dst_port src_p
         Pcap.inject iface bits
     in
     ignore (recv_http <-= http) ;
-    ignore (Pcap.sniffer iface host.Host.dev.write) ;
+    ignore (Pcap.sniffer iface host.trx.dev.write) ;
     (match dst with
         | Some addr ->
-            host.Host.tcp_connect addr ?src_port dst_port (function
+            host.trx.tcp_connect addr ?src_port dst_port (function
             | None -> ()
             | Some tcp ->
                 connect_tunnel tcp)
         | None ->
             Printf.printf "Tunnel: Waiting for connections on port %s...\n%!" (Tcp.Port.to_string dst_port) ;
-            host.Host.tcp_server dst_port connect_tunnel) ;
+            host.trx.tcp_server dst_port connect_tunnel) ;
     Clock.run true
 
 let main =

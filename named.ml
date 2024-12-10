@@ -103,18 +103,18 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
     Clock.realtime := false ;
     (*Log.console_lvl := Log.Debug ;*)
     let netmask = Ip.Addr.all_ones in
-    let srv = Host.make_static ~netmask (Ip.Addr.of_dotted_string_exc "1.1.1.1") "server" in
+    let srv : Host.t = Host.make_static ~netmask (Ip.Addr.of_dotted_string_exc "1.1.1.1") "server" in
     let lookup = function
         | "popo" -> Some (Ip.Addr.of_dotted_string_exc "1.1.1.1")
         | _ -> None in
     let st = State.make ~parent_logger:logger lookup in
-    serve st srv ;
+    serve st srv.trx ;
     let nameserver = Ip.Addr.of_dotted_string_exc "1.1.1.1" in
-    let clt = Host.make_static ~nameserver ~netmask (Ip.Addr.random ()) "client" in
-    srv.Host.dev.set_read clt.Host.dev.write ;
-    clt.Host.dev.set_read srv.Host.dev.write ;
+    let clt : Host.t = Host.make_static ~nameserver ~netmask (Ip.Addr.random ()) "client" in
+    srv.trx.dev.set_read clt.trx.dev.write ;
+    clt.trx.dev.set_read srv.trx.dev.write ;
     let got_ip = ref false in
-    clt.Host.gethostbyname "popo" (fun _ -> got_ip := true) ;
+    clt.trx.gethostbyname "popo" (fun _ -> got_ip := true) ;
     Clock.run false ;
     Clock.realtime := true ;
     assert_bool "Client got popo's IP" !got_ip

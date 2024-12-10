@@ -12,13 +12,12 @@ let logger = Log.make ~size:1000 "webperf"
 
 (** Spawn a browser thread in all hosts of the given network, that will browse
  * at random in a human like fashion from the root url *)
-let client_init url host =
-    let trx = host.Host.host_trx in
-    Log.(log logger Info (lazy (Printf.sprintf "Starting a new web browser on %s" trx.Host.name))) ;
-    let browser = Browser.make trx in
+let client_init url (host : Host.t) =
+    Log.(log logger Info (lazy (Printf.sprintf "Starting a new web browser on %s" host.trx.name))) ;
+    let browser = Browser.make host.trx in
     (* FIXME: better have a browser.at_init register function *)
     let rec start_browsing () =
-        if trx.Host.get_ip () <> None then (
+        if Host.ip_is_set host then (
             Browser.user browser ~pause:5. 1000 url
         ) else (
             Log.(log logger Info (lazy (Printf.sprintf "IP not initialized, wait"))) ;

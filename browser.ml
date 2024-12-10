@@ -185,8 +185,8 @@ let cookie_string t host path =
 
 (*$R
     let netmask = Ip.Addr.all_ones in
-    let host = Host.make_static ~netmask (Ip.Addr.of_dotted_string_exc "1.2.3.4") "test" in
-    let t = make host in
+    let host : Host.t = Host.make_static ~netmask (Ip.Addr.of_dotted_string_exc "1.2.3.4") "test" in
+    let t = make host.trx in
     store_cookies t "www.example.com" "/" [ "Set-Cookie", "SID=31d4" ] ;
     assert_bool "retrieve cokie"
         (cookie_string t "www.example.com" "/" = "SID=31d4") ;

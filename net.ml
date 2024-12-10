@@ -310,8 +310,8 @@ let instanciate t =
                         Hub.Switch.write sw p, Hub.Switch.set_read sw p)
             | HostAdapter name ->
                 Hashtbl.find_option hosts name |>
-                    Option.map (fun host ->
-                        host.Host.dev.write, host.Host.dev.set_read) in
+                    Option.map (fun (host : Host.t) ->
+                        host.trx.dev.write, host.trx.dev.set_read) in
         let a_dev = dev_of_plug a and b_dev = dev_of_plug b in
         match a_dev, b_dev with
         | None, _ -> Printf.printf "Net: Cannot connect unknown node %a\n%!" plug_print a

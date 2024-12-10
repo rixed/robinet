@@ -171,9 +171,10 @@ struct
     (* Build a single server (public static IP and name) as a Net.t: *)
     let make_server ?on ?(name=Host.Name.random()) ?nameserver public_ip =
         let netmask = Ip.Addr.zero in (* Should this be the default? *)
-        let host = Host.make_static ?nameserver ?on ~netmask public_ip name in
-        let plug = Plug.make "itf" host.Host.dev in
-        Simple { equip = [ Host host ] ; plugs = [ plug ] }
+        let host : Host.t =
+            Host.make_static ?nameserver ?on ~netmask public_ip name in
+        let plug = Plug.make "itf" host.trx.dev in
+        Simple { equip = [ Host host.trx ] ; plugs = [ plug ] }
 
     (** Returns an _empty_ LAN with enough room for [n] hosts.
      * A LAN consists of a switch connected to a router/dhcp server/name server/nater with an "exit" plug.
@@ -198,12 +199,13 @@ struct
             and srv_ip = Ip.Addr.of_string "192.168.0.2" in
             let netmask = Ip.Addr.of_string "255.255.0.0" in
             let gateways = [ Eth.State.gw_selector (), Some (Eth.Gateway.IPv4 gw_ip) ] in
-            let h = Host.make_dhcp ?on ~gateways ~nameserver:srv_ip ~netmask name in
-            h.Host.dev.set_read (Hub.Switch.write sw !num_hosts) ;
-            Hub.Switch.set_read sw !num_hosts h.Host.dev.write ;
-            net.equip <- Equipment.Host h :: net.equip ;
+            let h :Host.t =
+                Host.make_dhcp ?on ~gateways ~nameserver:srv_ip ~netmask name in
+            h.trx.dev.set_read (Hub.Switch.write sw !num_hosts) ;
+            Hub.Switch.set_read sw !num_hosts h.trx.dev.write ;
+            net.equip <- Equipment.Host h.trx :: net.equip ;
             incr num_hosts ;
-            h
+            h.trx
         in
         Simple net, add_host
 
@@ -226,12 +228,12 @@ struct
                           failwith
             in
             let netmask = Ip.Addr.zero in
-            let h = Host.make_static ?on ?nameserver ~netmask ip name in
-            h.Host.dev.set_read (Hub.Switch.write sw !num_hosts) ;
-            Hub.Switch.set_read sw !num_hosts h.Host.dev.write ;
-            net.equip <- Equipment.Host h :: net.equip ;
+            let h : Host.t = Host.make_static ?on ?nameserver ~netmask ip name in
+            h.trx.dev.set_read (Hub.Switch.write sw !num_hosts) ;
+            Hub.Switch.set_read sw !num_hosts h.trx.dev.write ;
+            net.equip <- Equipment.Host h.trx :: net.equip ;
             incr num_hosts ;
-            h
+            h.trx
         in
         Simple net, add_host
 

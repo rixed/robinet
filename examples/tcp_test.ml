@@ -29,10 +29,10 @@ let perform_get my_ip my_netmask mac peer_ip ?nameserver ?gw ifname url =
     let get   = Printf.sprintf "GET %s HTTP/1.0\r\n\r\n" url in
     let gateways =
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) gw in
-    let host  = Host.make_static ?nameserver ?gateways ~mac ~netmask:my_netmask my_ip "tester" in
-    host.Host.dev.set_read (Pcap.inject iface) ;
-    ignore (Pcap.sniffer iface host.Host.dev.write) ;
-    host.Host.tcp_connect (Host.IPv4 peer_ip) (Tcp.Port.o 80) (function
+    let host : Host.t = Host.make_static ?nameserver ?gateways ~mac ~netmask:my_netmask my_ip "tester" in
+    host.trx.dev.set_read (Pcap.inject iface) ;
+    ignore (Pcap.sniffer iface host.trx.dev.write) ;
+    host.trx.tcp_connect (Host.IPv4 peer_ip) (Tcp.Port.o 80) (function
     | None -> ()
     | Some tcp ->
         tcp.Tcp.TRX.trx.ins.set_read (fun bits ->
