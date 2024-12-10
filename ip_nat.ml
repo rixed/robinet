@@ -202,10 +202,11 @@ v}
             st.recv (Ip.Pdu.pack ip)
 
     let do_icmp_unnat (st : State.t) (ip : Ip.Pdu.t) (icmp : Icmp.Pdu.t) msg_type id =
-        let in_sock = State.{ msg_type ; id } in
+        let in_sock =
+            State.{ msg_type = Icmp.MsgType.request_of msg_type ; id } in
         match Hashtbl.find st.in_icmp_h in_sock with
         | exception Not_found ->
-            Log.(log st.logger Debug (lazy ("No recollection of that connection")))
+            Log.(log st.logger Debug (lazy "No recollection of that ICMP id"))
         | n ->
             let cnx = OrdArray.get st.cnxs n in
             let payload = Payload.o (patch_icmp_id icmp cnx.orig_num) in
@@ -229,8 +230,8 @@ v}
                         if st.nat_pings then (
                             match Icmp.Pdu.unpack (ip.payload :> bitstring) with
                             | Some (Icmp.Pdu.{ msg_type ; payload = Ids (id, _, _) } as icmp)
-                              when Icmp.MsgType.is_echo_request msg_type ->
-                                Log.(log st.logger Debug (lazy (Printf.sprintf "Translating PING of %d bytes from src:%s, id:%d to dst:%s" (bytelength bits) (Ip.Addr.to_string ip.src) id (Ip.Addr.to_string ip.dst)))) ;
+                              when Icmp.MsgType.is_request msg_type ->
+                                Log.(log st.logger Debug (lazy (Printf.sprintf "Translating ICMP request of %d bytes from src:%s, id:%d to dst:%s" (bytelength bits) (Ip.Addr.to_string ip.src) id (Ip.Addr.to_string ip.dst)))) ;
                                 do_icmp_nat st ip icmp msg_type id
                             (* We NAT only ICMP queries (for now?) *)
                             | Some _ ->
@@ -267,8 +268,8 @@ v}
                     if st.nat_pings then (
                         match Icmp.Pdu.unpack (ip.payload :> bitstring) with
                         | Some (Icmp.Pdu.{ msg_type ; payload = Ids (id, _, _) } as icmp)
-                          when Icmp.MsgType.is_echo_reply msg_type ->
-                            Log.(log st.logger Debug (lazy (Printf.sprintf "Translating back PING reply of %d bytes from %s, id:%d" (bytelength bits) (Ip.Addr.to_string ip.src) id))) ;
+                          when Icmp.MsgType.is_reply msg_type ->
+                            Log.(log st.logger Debug (lazy (Printf.sprintf "Translating back ICMP reply of %d bytes from %s, id:%d" (bytelength bits) (Ip.Addr.to_string ip.src) id))) ;
                             do_icmp_unnat st ip icmp msg_type id
                         (* We NAT back only ICMP echo reply and some errors *)
                         | Some _ ->

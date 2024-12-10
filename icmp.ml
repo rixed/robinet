@@ -28,6 +28,8 @@ open Tools
 
 module MsgType =
 struct
+    (*$< MsgType *)
+
     module Outer = struct
         type t = int * int
         let to_string = function
@@ -102,6 +104,43 @@ struct
         match (t :> int*int) with
         | 0, 0 -> true
         | _ -> false
+
+    let is_request (t : t) =
+        match (t :> int*int) with
+        |  8, 0
+        | 13, 0
+        | 15, 0
+        | 17, 0
+        | 35, _
+        | 37, _ -> true
+        | _ -> false
+
+    let is_reply (t : t) =
+        match (t :> int*int) with
+        |  0, 0
+        | 14, 0
+        | 16, 0
+        | 18, 0
+        | 36, _
+        | 38, _ -> true
+        | _ -> false
+
+    (* Used when NATing ICMP requests: *)
+    let request_of (t : t) =
+        match (t :> int*int) with
+        |  0, 0 -> o (8, 0)
+        | 14, 0 -> o (13, 0)
+        | 16, 0 -> o (15, 0)
+        | 18, 0 -> o (17, 0)
+        | 36, c -> o (35, c)
+        | 38, c -> o (37, c)
+        | _ -> t
+
+    (*$T request_of
+       let r = o (0, 0) in is_echo_reply r && is_echo_request (request_of r)
+     *)
+
+    (*$>*)
 end
 
 (** {2 ICMP Messages} *)
