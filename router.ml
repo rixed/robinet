@@ -248,6 +248,8 @@ struct
                     do_sum bits in
             let targets =
                 List.enum targets // (function
+                    (* Actually, that's OK if out=in but then the router should
+                     * generate also an ICMP redirect (see Stevens section 9.5) *)
                     | Forward { out_iface ; _ } when out_iface <> in_iface -> true
                     | Admin -> true
                     | _ -> false

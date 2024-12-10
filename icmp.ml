@@ -151,13 +151,16 @@ module Pdu = struct
 
     type payload = Ids of int * int * Payload.t
                  | Redirect of Ip.Addr.t * Payload.t
-                 | Header of int * Payload.t (* with optional pointer *)
+                 | Header of
+                        (* With optional pointer and MTU: *)
+                        { ptr : int ; mtu : int ; pld : Payload.t }
                  | DestUnreachable of int (* next hop MTU *) * Payload.t
 
     let random_payload msg_type =
         let random_redirect () = Redirect (Ip.Addr.random(), Payload.random (20*8 + 64))
         and random_id () = Ids (randi 8, randi 8, Payload.empty)
-        and random_header () = Header (randi 8, Payload.random (20*8 + 64))
+        and random_header () =
+            Header { ptr = randi 8 ; mtu = randi 16 ; pld = Payload.random (20*8 + 64) }
         and random_dest_unreach code =
             let next_hop_mtu = if code = 4 then randi 16 else 0 in
             DestUnreachable (next_hop_mtu, Payload.random ((20 + 8)*8)) in
@@ -189,7 +192,7 @@ module Pdu = struct
         and ip_pld = Ip.Pdu.pack_payload ip in
         let ip_start = concat [ ip_hdr ; takebits 64 (ip_pld :> bitstring) ] in
         { msg_type = MsgType.o (11, code) ;
-          payload = Header (0, Payload.o ip_start) }
+          payload = Header { ptr = 0 ; mtu = 0 ; pld = Payload.o ip_start } }
 
     let make_ttl_expired_in_transit = make_ttl_expired 0
     let make_ttl_expired_during_reassembly = make_ttl_expired 1
@@ -213,8 +216,8 @@ module Pdu = struct
             | Redirect (ip, pld) ->
                 let%bitstring b = {| (Ip.Addr.to_int32 ip) : 32 ;
                                      (pld :> bitstring) : -1 : bitstring |} in b
-            | Header (ptr, pld) ->
-                let%bitstring b = {| ptr : 8 ; 0 : 24 ;
+            | Header { ptr ; mtu ; pld } ->
+                let%bitstring b = {| ptr : 8 ; 0 : 8 ; mtu : 16 ;
                                      (pld :> bitstring) : -1 : bitstring |} in b
             | DestUnreachable (next_hop_mtu, pld) ->
                 let%bitstring b = {| 0 : 16 ; next_hop_mtu : 16 ;
@@ -239,9 +242,9 @@ module Pdu = struct
             Some { msg_type = MsgType.o (typ, cod) ;
                    payload = Ids (id, seq, Payload.o pld) }
         | {| typ : 8 ; cod : 8 ; _checksum : 16 ;
-            ptr : 8 ; _ : 24 ; pld : -1 : bitstring |} ->
+            ptr : 8 ; _ : 8 ; mtu : 16 ; pld : -1 : bitstring |} ->
             Some { msg_type = MsgType.o (typ, cod) ;
-                   payload = Header (ptr, Payload.o pld) }
+                   payload = Header { ptr ; mtu ; pld = Payload.o pld } }
         | {| _ |} ->
             err "Not ICMP"
     (*$Q pack
