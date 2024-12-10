@@ -73,7 +73,7 @@ struct
         let dst_mask = Ip.Cidr.single my_ip in
         make ?in_iface ?src_mask ~dst_mask ?ip_proto ?src_port ?dst_port Admin
 
-    let print oc r =
+    let print oc t =
         let string_of_in_iface = function
             | Some n -> "at iface#"^ string_of_int n
             | None -> "anywhere"
@@ -96,16 +96,16 @@ struct
                 "admin"
         in
         Printf.fprintf oc "Packets received %s, of %s protocol, from %s %s in transit to %s %s, will be sent to %s"
-            (string_of_in_iface r.in_iface)
-            (string_of_proto r.ip_proto)
-            (string_of_ip_mask r.src_mask)
-            (string_of_port r.src_port)
-            (string_of_ip_mask r.dst_mask)
-            (string_of_port r.dst_port)
-            (string_of_target r.target)
+            (string_of_in_iface t.in_iface)
+            (string_of_proto t.ip_proto)
+            (string_of_ip_mask t.src_mask)
+            (string_of_port t.src_port)
+            (string_of_ip_mask t.dst_mask)
+            (string_of_port t.dst_port)
+            (string_of_target t.target)
 
     (** Test an incoming packet against a route. *)
-    let test route logger ifn src_opt dst_opt proto_opt src_port_opt dst_port_opt =
+    let test t logger ifn src_opt dst_opt proto_opt src_port_opt dst_port_opt =
         let tests = ref [] in
         (* If the route test is set, then the value is required. *)
         let test_opt what opt1 test opt2 =
@@ -115,15 +115,18 @@ struct
             | None     -> Option.is_none opt1 in
         let cidr_mem_rev ip cidr = Ip.Cidr.mem cidr ip in
         let ok =
-            test_opt "in_face" route.in_iface (=) (Some ifn) &&
-            test_opt "src_ip" route.src_mask cidr_mem_rev src_opt &&
-            test_opt "dst_ip" route.dst_mask cidr_mem_rev dst_opt &&
-            test_opt "ip_proto" route.ip_proto (=) proto_opt &&
-            test_opt "src_port" route.src_port port_in_range src_port_opt &&
-            test_opt "dst_port" route.dst_port port_in_range dst_port_opt in
-        Log.(log logger Debug (lazy (Printf.sprintf2 "Routing test: %a %s"
-            (List.print String.print) (List.rev !tests)
-            (if ok then "✓" else "¡☠!")))) ;
+            test_opt "in_face" t.in_iface (=) (Some ifn) &&
+            test_opt "src_ip" t.src_mask cidr_mem_rev src_opt &&
+            test_opt "dst_ip" t.dst_mask cidr_mem_rev dst_opt &&
+            test_opt "ip_proto" t.ip_proto (=) proto_opt &&
+            test_opt "src_port" t.src_port port_in_range src_port_opt &&
+            test_opt "dst_port" t.dst_port port_in_range dst_port_opt in
+        Log.(log logger Debug (lazy (
+            let last = if ok then " ✓" else " ¡☠!" in
+            Printf.sprintf2 "Routing: route=%a: %a"
+                print t
+                (List.print ~first:"" ~sep:", " ~last String.print)
+                    (List.rev !tests)))) ;
         ok
 end
 
@@ -161,8 +164,9 @@ struct
               load_balancing : load_balancing }
 
     (* Add a route (the added route becomes top priority *)
-    let add_route t route =
-        t.routes <- route :: t.routes
+    let add_route t r =
+        Log.(log t.logger Debug (lazy (Printf.sprintf2 "Adding route %a" Route.print r))) ;
+        t.routes <- r :: t.routes
 
     let send_icmp_expiry t n ip delay =
         match Eth.State.find_ip4 t.ifaces.(n).eth with
@@ -286,8 +290,9 @@ struct
                 let addr = Ip.Addr.of_bitstring addr
                 and netmask = Ip.Addr.of_bitstring netmask in
                 let name = "admin@"^ string_of_int n in
-                let admin_host = Host.make_static ~netmask addr name in
-                (* The other way around depends on routing decision: *)
+                let admin_host =
+                    Host.make_static ~parent_logger:logger ~netmask addr name in
+                (* The other way around depends on routing decisions: *)
                 admin_host.Host.dev.set_read trx.ins.write ;
                 Some admin_host
             | _ -> None in
