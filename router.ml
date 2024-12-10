@@ -32,7 +32,10 @@ struct
     (* If we had a generic port module, this would go there *)
     type port_range = int * int (** Inclusive IP port range *)
 
-    let port_in_range p (min, max) = p >= min && p <= max
+    let string_of_port_range (mi, ma) =
+        "from port "^ string_of_int mi ^" to "^ string_of_int ma
+
+    let port_in_range p (mi, ma) = p >= mi && p <= ma
 
     let port_in_range_opt p = function
         | None -> true
@@ -41,8 +44,8 @@ struct
     (** A [route] is a set of optional tests and an output iface and optional
      * gateway. *)
     type target =
-        | Forward of { out_iface : int ;                     (** Output iface *)
-                             via : Eth.Gateway.addr option } (** Optional gateway *)
+        | Forward of { out_iface : int ;                  (** Output iface *)
+                             via : Eth.Gateway.t option } (** Optional gateway *)
         | Admin (* Packets are for the admin interface (TODO) *)
         (* TODO: MirrorTo, Deny, Ignore, with a default behavior for packets
          * dropping out of the routing table... *)
@@ -70,35 +73,58 @@ struct
         let dst_mask = Ip.Cidr.single my_ip in
         make ?in_iface ?src_mask ~dst_mask ?ip_proto ?src_port ?dst_port Admin
 
-    let print_target oc = function
-        | Forward { out_iface ; via } ->
-            Printf.fprintf oc "out_iface:%d, via:%a"
-                out_iface
-                (Option.print Eth.Gateway.addr_print) via
-        | Admin ->
-            String.print oc "Admin"
-
     let print oc r =
-        Printf.fprintf oc "in_iface:%a, src_mask:%a, dst_mask:%a -> %a"
-            (Option.print Int.print) r.in_iface
-            (Option.print Ip.Cidr.printf) r.src_mask
-            (Option.print Ip.Cidr.printf) r.dst_mask
-            print_target r.target
+        let string_of_in_iface = function
+            | Some n -> "at iface#"^ string_of_int n
+            | None -> "anywhere"
+        and string_of_ip_mask = function
+            | Some cidr -> Ip.Cidr.to_string cidr
+            | None -> "any IP"
+        and string_of_proto = function
+            | Some p -> Ip.Proto.to_string p
+            | None -> "any"
+        and string_of_port = function
+            | Some r -> string_of_port_range r
+            | None -> "any port"
+        and string_of_target = function
+            | Forward { out_iface ; via } ->
+                "iface#"^ string_of_int out_iface ^
+                (match via with
+                | None -> ", direct"
+                | Some gw -> ", using gateway "^ Eth.Gateway.to_string gw)
+            | Admin ->
+                "admin"
+        in
+        Printf.fprintf oc "Packets received %s, of %s protocol, from %s %s in transit to %s %s, will be sent to %s"
+            (string_of_in_iface r.in_iface)
+            (string_of_proto r.ip_proto)
+            (string_of_ip_mask r.src_mask)
+            (string_of_port r.src_port)
+            (string_of_ip_mask r.dst_mask)
+            (string_of_port r.dst_port)
+            (string_of_target r.target)
 
     (** Test an incoming packet against a route. *)
-    let test route ifn src_opt dst_opt proto_opt src_port_opt dst_port_opt =
+    let test route logger ifn src_opt dst_opt proto_opt src_port_opt dst_port_opt =
+        let tests = ref [] in
         (* If the route test is set, then the value is required. *)
-        let test_opt opt1 test opt2 =
+        let test_opt what opt1 test opt2 =
+            tests := what :: !tests ;
             match opt2 with
             | Some opt -> Option.map_default (test opt) true opt1
             | None     -> Option.is_none opt1 in
         let cidr_mem_rev ip cidr = Ip.Cidr.mem cidr ip in
-        test_opt route.in_iface (=) (Some ifn) &&
-        test_opt route.src_mask cidr_mem_rev src_opt &&
-        test_opt route.dst_mask cidr_mem_rev dst_opt &&
-        test_opt route.ip_proto (=) proto_opt &&
-        test_opt route.src_port port_in_range src_port_opt &&
-        test_opt route.dst_port port_in_range dst_port_opt
+        let ok =
+            test_opt "in_face" route.in_iface (=) (Some ifn) &&
+            test_opt "src_ip" route.src_mask cidr_mem_rev src_opt &&
+            test_opt "dst_ip" route.dst_mask cidr_mem_rev dst_opt &&
+            test_opt "ip_proto" route.ip_proto (=) proto_opt &&
+            test_opt "src_port" route.src_port port_in_range src_port_opt &&
+            test_opt "dst_port" route.dst_port port_in_range dst_port_opt in
+        Log.(log logger Debug (lazy (Printf.sprintf2 "Routing test: %a %s"
+            (List.print String.print) (List.rev !tests)
+            (if ok then "✓" else "¡☠!")))) ;
+        ok
 end
 
 (** A router is a device with N IP/Eth devices and a routing
@@ -167,7 +193,8 @@ struct
             | Some (src_port, dst_port) -> Some src_port, Some dst_port
             | None -> None, None in
         match List.filter_map (fun r ->
-                if Route.test r in_iface src_opt dst_opt proto_opt src_port_opt dst_port_opt then
+                if Route.test r t.logger in_iface src_opt dst_opt proto_opt
+                              src_port_opt dst_port_opt then
                     Some r.target
                 else
                     None
@@ -316,7 +343,7 @@ struct
                     List.find_map_opt (fun (r : Route.t) ->
                         match r.target with
                         | Forward { out_iface ; via = Some via } when out_iface = n ->
-                            Some Eth.Gateway.[ make ~addr:via () ]
+                            Some Eth.[ State.gw_selector (), Some via ]
                         | _ -> None
                     ) routes in
                 let mac =
@@ -341,7 +368,7 @@ struct
             Int32.logand (Int32.lognot (Ip.Addr.to_int32 mask))
                          (Ip.Addr.to_int32 dest_ip) <> Int32.zero in
         Array.fold_lefti (fun tbl i (gws, _) ->
-            List.fold_left (fun tbl Eth.Gateway.{ dest_ip ; mask ; addr } ->
+            List.fold_left (fun tbl (dest_ip, mask, addr) ->
                 (* First route: to reach that network: *)
                 let open Route in
                 let target = Forward { out_iface = i ;
@@ -386,10 +413,9 @@ struct
     (*$R make_from_addrs
         (* Suppose we have a router for these 3 networks: *)
         let addrs =
-            Eth.Gateway.[|
-                [ make ~dest_ip:(Ip.Addr.of_string "192.168.1.254") ~mask:(Ip.Addr.of_string "255.255.255.0") () ], Eth.Addr.random () ;
-                [ make ~dest_ip:(Ip.Addr.of_string "192.168.2.254") ~mask:(Ip.Addr.of_string "255.255.255.0") () ], Eth.Addr.random () ;
-                [ make ~dest_ip:(Ip.Addr.of_string "192.168.3.254") ~mask:(Ip.Addr.of_string "255.255.255.0") () ], Eth.Addr.random () |] in
+            [| [ Ip.Addr.of_string "192.168.1.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
+               [ Ip.Addr.of_string "192.168.2.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
+               [ Ip.Addr.of_string "192.168.3.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () |] in
         let logger = Log.make "test" in
         let router = make_from_addrs addrs logger in
 
@@ -498,8 +524,8 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?dhcp_range ?(name
      * want this host on the internet: *)
     let srv_ip = Enum.get_exn local_ips in    (* second the dhcp/name servers *)
     let h : Host.host_trx =
-        let gw = [ Eth.Gateway.make ~addr:(Eth.Gateway.Mac gw_mac) () ] in
-        Host.make_static ?nameserver ~gw ~netmask ~parent_logger srv_ip "srv" in
+        let gateways = [ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw_mac) ] in
+        Host.make_static ?nameserver ~gateways ~netmask ~parent_logger srv_ip "srv" in
     (* Now we need the repeater and the services: *)
     (* FIXME: instead of a Hub that forces us into having 2 IPs make a simple TRX directly, that inspects the protostack and if
      * the dest IP is gw_ip == src_iv then forward it to the host and if not forward it to the NAT. *)
@@ -542,9 +568,9 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?dhcp_range ?(name
     Clock.realtime := false ;
     let public_ip = Ip.Addr.of_string "80.82.17.127" in
     let gw_trx = make_gw public_ip (Ip.Cidr.of_string "192.168.0.0/16") in
-    let gw = Eth.Gateway.[ make ~addr:(IPv4 (Ip.Addr.of_string "192.168.0.1")) () ] in
+    let gateways = Eth.[ State.gw_selector (), Some (Gateway.of_string "192.168.0.1") ] in
     let netmask = Ip.Addr.of_string "255.255.255.0" in
-    let desktop = Host.make_dhcp ~netmask ~gw "desktop" in
+    let desktop = Host.make_dhcp ~netmask ~gateways "desktop" in
     desktop.Host.dev.set_read gw_trx.trx.ins.write ;
     ignore (desktop.Host.dev.write <-= gw_trx.trx) ;
     let server_ip = Ip.Addr.of_string "42.43.44.45" in

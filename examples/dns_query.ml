@@ -31,7 +31,7 @@ let main =
     and netmask = ref "255.255.255.0"
     and src_eth = ref "12:34:56:78:9a:bc"
     and dst_ip  = ref "192.168.1.254"
-    and gw_eth  = ref None
+    and gw      = ref ""
     and search  = ref "local"
     and names   = ref []
     in
@@ -39,16 +39,17 @@ let main =
                 "-netmask", Arg.Set_string netmask, "Client's netmask (default: "^ !netmask ^")" ;
                 "-src-mac", Arg.Set_string src_eth, "MAC to use as the client (default: "^ !src_eth ^")" ;
                 "-dst-ip",  Arg.Set_string dst_ip,  "IP to send the request to (ie. name server)" ;
-                "-gw",      Arg.String (fun gw ->
-                                         gw_eth := Some Eth.Gateway.[ make ~addr:(addr_of_string gw) () ]),
-                                                    "Gateway MAC address" ]
+                "-gw",      Arg.Set_string gw,      "Gateway MAC or IP address (optional)" ]
               (fun name -> names := name :: !names)
               "Perform a DNS A query with faked addresses" ;
     let emit bits =
         hexstring_of_bitstring bits |> Printf.printf "Injecting '%s'\n" ;
         Pcap.inject iface bits in
+    let gateways =
+        (if !gw = "" then None else Some (Eth.Gateway.of_string !gw)) |>
+        Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) in
     let host =
-        Host.make_static ?gw:!gw_eth
+        Host.make_static ?gateways
                          ~nameserver:(Ip.Addr.of_string !dst_ip)
                          ~search_sfx:!search
                          ~mac:(Eth.Addr.of_string !src_eth)
@@ -63,5 +64,3 @@ let main =
             List.print (fun oc ip -> Printf.fprintf oc "%s\n" (Ip.Addr.to_dotted_string ip)) stdout ips))) !names ;
     ignore (Pcap.sniffer iface host.Host.dev.write) ;
     Clock.run false
-
-

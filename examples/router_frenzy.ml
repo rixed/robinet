@@ -59,13 +59,13 @@ let make_router name logger interfaces router_specs delays err_delays losses err
         | my_ip, _ ->
             let dest_ip = Ip.Addr.of_string my_ip in
             let mask = Ip.Cidr.(of_string cidr |> to_netmask) in
-            Eth.Gateway.{ dest_ip ; mask ; addr = via } in
+            dest_ip, mask, via in
     (* Store all routes in a hash indexed by destination CIDR (as a string), with
      * values = the output MAC (aka iface of that router, the depth of that route,
      * then the route itself.
      * Later this hash is going to be converted into the array of lists as required
      * by [Router.make_from_addrs]. *)
-    let tbl : (Ip.Cidr.t, (Eth.Addr.t * int * Eth.Gateway.t)) Hashtbl.t = Hashtbl.create 10 in
+    let tbl : (Ip.Cidr.t, (Eth.Addr.t * int * (Ip.Addr.t * Ip.Addr.t * Eth.Gateway.t option))) Hashtbl.t = Hashtbl.create 10 in
     List.iter (fun (mac, lan_cidr, peer_routers) ->
         let depth = 1 in
         let lan_cidr' = Ip.Cidr.of_string lan_cidr in
@@ -126,13 +126,13 @@ let make_router name logger interfaces router_specs delays err_delays losses err
     Printf.printf "tbl=\n%a\n%!"
         (Hashtbl.print
             Ip.Cidr.printf
-            (fun oc (mac, depth, gw) ->
+            (fun oc (mac, depth, (ip, mask, via)) ->
                 Printf.fprintf oc "mac=%a, depth=%d, dest %a/%a via %a"
                     Eth.Addr.printf mac
                     depth
-                    Ip.Addr.printf gw.Eth.Gateway.dest_ip
-                    Ip.Addr.printf gw.mask
-                    (Option.print Eth.Gateway.addr_print) gw.addr)) tbl ;
+                    Ip.Addr.printf ip
+                    Ip.Addr.printf mask
+                    (Option.print Eth.Gateway.print) via)) tbl ;
     let lst =
         List.map (fun (mac, _lan_cidr, _peer_routers) ->
             Hashtbl.fold (fun _cidr (mac', _depth, addr) lst ->
@@ -178,12 +178,12 @@ let build_network logger router_specs fst_router_name delays err_delays losses e
                     if debug then Printf.printf "\tBuild host %s\n%!" dest_name ;
                     (* If not a router, then create a host *)
                     let gw_ip = Eth.State.find_ip4 iface.eth in
-                    let gw = [ Eth.Gateway.make ~addr:(IPv4 gw_ip) () ]
+                    let gateways = [ Eth.State.gw_selector (), Some Eth.Gateway.(IPv4 gw_ip) ]
                     and netmask = Ip.Cidr.to_netmask cidr
                     and ip = try Ip.Addr.of_string dest_name
                              with Invalid_argument _ -> Ip.Cidr.second_addr cidr in
                     dest_name,
-                    Host.(make_static ~gw ~netmask ip dest_name).dev
+                    Host.(make_static ~gateways ~netmask ip dest_name).dev
                 | dest_router ->
                     (* For each of connected routers, look for their corresponding
                      * interface by subnet name: *)

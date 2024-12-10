@@ -208,27 +208,21 @@ module Gateway =
 struct
     (** The address of a gateway, which can be given either as an Ethernet address
      * of as an IP address. *)
-    type addr = Mac of Addr.t | IPv4 of Ip.Addr.t
+    type t = Mac of Addr.t | IPv4 of Ip.Addr.t
 
     (** Converts a {!Eth.addr} to a string. *)
-    let string_of_addr = function
+    let to_string = function
         | Mac mac -> Addr.to_string mac
         | IPv4 ip -> Ip.Addr.to_string ip
 
     (** Converts the other way around. *)
-    let addr_of_string str =
+    let of_string str =
         try Mac (Addr.of_string str)
         with _ -> IPv4 (Ip.Addr.of_string str)
 
     (** And print. *)
-    let addr_print oc a =
-        String.print oc (string_of_addr a)
-
-    type t =
-        { dest_ip : Ip.Addr.t ; mask : Ip.Addr.t ; addr : addr option }
-
-    let make ?(dest_ip=Ip.Addr.zero) ?(mask=Ip.Addr.zero) ?addr () =
-        { dest_ip ; mask ; addr }
+    let print oc a =
+        String.print oc (to_string a)
 end
 
 (** {2 Transceiver State} *)
@@ -251,10 +245,16 @@ struct
             (hexstring_of_bitstring my_addr.addr)
             (hexstring_of_bitstring my_addr.netmask)
 
+    type gw_selector = { dest_ip : Ip.Addr.t ; mask : Ip.Addr.t }
+
+    let gw_selector ?(dest_ip=Ip.Addr.zero) ?(mask=Ip.Addr.zero) () =
+        { dest_ip ; mask }
+
     type t =
         { logger : Log.logger ;
           mac : Addr.t ;
-          gateways : Gateway.t list ;
+          (* Eth knows how to pick a gateways according to the destination IP: *)
+          gateways : (gw_selector * Gateway.t option) list ;
           proto : Arp.HwProto.t ;
           mtu : int ;
           mutable connected : bool ;
@@ -323,7 +323,7 @@ struct
     let gw_for_ip (st : State.t) ip =
         let rec loop = function
             | [] -> None
-            | Gateway.{ dest_ip ; mask ; addr } :: rest ->
+            | (State.{ dest_ip ; mask }, addr) :: rest ->
                 if Ip.Addr.in_mask ip dest_ip mask then addr
                 else loop rest in
         loop st.gateways

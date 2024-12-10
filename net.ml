@@ -40,7 +40,7 @@ let debug = true
 type hub    = { hub_num_ports : int }
 type switch = { switch_num_ports : int ;
                 switch_num_macs : int }
-type host   = { host_gw : Eth.Gateway.addr ;
+type host   = { host_gw : Eth.Gateway.t ;
                 host_search_sfx : string ;
                 host_nameserver : Ip.Addr.t ;
                 host_mac : Eth.Addr.t ;
@@ -104,7 +104,7 @@ let switch_of_csv str =
 
 let host_of_csv str =
     let make_host name x y gw search_sfx nameserver mac netmask ip =
-        { elmt = Host { host_gw = Eth.Gateway.addr_of_string gw ;
+        { elmt = Host { host_gw = Eth.Gateway.of_string gw ;
                         host_search_sfx = search_sfx ;
                         host_nameserver = Ip.Addr.of_string nameserver ;
                         host_mac = Eth.Addr.of_string mac ;
@@ -172,7 +172,7 @@ let csv_for_hosts oc t =
         | { elmt = Host h ; pos = x,y ; node_name } ->
             Printf.fprintf oc "%S,%f,%f,%s,%s,%s,%s,%s\n"
                 node_name x y
-                (Eth.Gateway.string_of_addr h.host_gw)
+                (Eth.Gateway.to_string h.host_gw)
                 h.host_search_sfx
                 (Ip.Addr.to_dotted_string h.host_nameserver)
                 (Eth.Addr.to_string h.host_mac)
@@ -224,7 +224,7 @@ let csv_for_node oc = function
     | { elmt = Host h ; pos = x,y ; node_name } ->
         Printf.fprintf oc "host,%S,%f,%f,%s,%s,%s,%s,%s,%s\n"
             node_name x y
-            (Eth.Gateway.string_of_addr h.host_gw)
+            (Eth.Gateway.to_string h.host_gw)
             h.host_search_sfx
             (Ip.Addr.to_dotted_string h.host_nameserver)
             (Eth.Addr.to_string h.host_mac)
@@ -277,18 +277,18 @@ let instanciate t =
             Hashtbl.add switches name
                 (Hub.Switch.make s.switch_num_ports s.switch_num_macs name)
         | Host h ->
-            let gw = [ Eth.Gateway.make ~addr:h.host_gw () ] in
+            let gateways = [ Eth.State.gw_selector (), Some h.host_gw ] in
             Hashtbl.add hosts name
                 (match h.host_ip with
                 | None ->
-                    Host.make_dhcp ~gw
+                    Host.make_dhcp ~gateways
                                    ~search_sfx:h.host_search_sfx
                                    ~nameserver:h.host_nameserver
                                    ~netmask:h.host_netmask
                                    ~mac:h.host_mac
                                    name
                 | Some ip ->
-                    Host.make_static ~gw
+                    Host.make_static ~gateways
                                      ~search_sfx:h.host_search_sfx
                                      ~nameserver:h.host_nameserver
                                      ~netmask:h.host_netmask

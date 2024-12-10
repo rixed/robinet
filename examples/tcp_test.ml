@@ -27,7 +27,9 @@ open Tools
 let perform_get my_ip my_netmask mac peer_ip ?nameserver ?gw ifname url =
     let iface = Pcap.openif ifname in
     let get   = Printf.sprintf "GET %s HTTP/1.0\r\n\r\n" url in
-    let host  = Host.make_static ?nameserver ?gw ~mac ~netmask:my_netmask my_ip "tester" in
+    let gateways =
+        Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) gw in
+    let host  = Host.make_static ?nameserver ?gateways ~mac ~netmask:my_netmask my_ip "tester" in
     host.Host.dev.set_read (Pcap.inject iface) ;
     ignore (Pcap.sniffer iface host.Host.dev.write) ;
     host.Host.tcp_connect (Host.IPv4 peer_ip) (Tcp.Port.o 80) (function
@@ -52,8 +54,8 @@ let main =
     and netmask = ref "255.255.255.0"
     and src_eth = ref "12:34:56:78:9a:bc"
     and dst_ip  = ref "192.168.1.254"
-    and gw_eth  = ref None
-    and dns_ip  = ref None
+    and gw      = ref ""
+    and dns_ip  = ref ""
     and ifname  = ref "eth0"
     and url     = ref "/Am/I/a/credible/request?"
     in
@@ -61,10 +63,8 @@ let main =
                 "-netmask", Arg.Set_string netmask, "Client's netmask (default: "^ !netmask ^")" ;
                 "-src-mac", Arg.Set_string src_eth, "MAC to use as the HTTP client (default: "^ !src_eth ^")" ;
                 "-dst-ip",  Arg.Set_string dst_ip,  "IP to send the HTTP GET to (default: "^ !dst_ip ^")" ;
-                "-gw",      Arg.String (fun gw ->
-                                            gw_eth := Some Eth.Gateway.[ make ~addr:(addr_of_string gw) () ]),
-                                                    "Gateway MAC address (optional)" ;
-                "-dns",     Arg.String (fun str -> dns_ip := Some (Ip.Addr.of_string str)), "IP of the DNS (optional)" ;
+                "-gw",      Arg.Set_string gw,      "Gateway MAC or IP address (optional)" ;
+                "-dns",     Arg.Set_string dns_ip,  "IP of the DNS (optional)" ;
                 "-i",       Arg.Set_string ifname,  "Interface to use (default: "^ !ifname ^")" ;
                 "-url",     Arg.Set_string url,     "The URL to GET" ]
               (fun _ -> raise (Arg.Bad "Unknown parameter"))
@@ -72,5 +72,6 @@ let main =
     perform_get (Ip.Addr.of_string !src_ip) (Ip.Addr.of_string !netmask)
                 (Eth.Addr.of_string !src_eth)
                 (Ip.Addr.of_string !dst_ip)
-                ?nameserver:!dns_ip ?gw:!gw_eth
+                ?nameserver:(if !dns_ip = "" then None else Some (Ip.Addr.of_string !dns_ip))
+                ?gw:(if !gw = "" then None else Some (Eth.Gateway.of_string !gw))
                 !ifname !url

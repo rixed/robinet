@@ -24,7 +24,7 @@
 open Batteries
 open Tools
 
-let run ifname src_range num_srcs ?gw ?search_sfx ?nameserver ?pause max_depth start_url =
+let run ifname src_range num_srcs ?gateways ?search_sfx ?nameserver ?pause max_depth start_url =
     (* Build the hosts *)
     let mac_of_ip ip = (*Eth.addr_of_string "00:26:5e:0a:d2:b9" in*)
         let bs = Ip.Addr.to_bitstring ip in
@@ -34,7 +34,7 @@ let run ifname src_range num_srcs ?gw ?search_sfx ?nameserver ?pause max_depth s
     let host_of_ip ip =
         let name = Ip.Addr.to_dotted_string ip
         and mac = mac_of_ip ip in
-        Host.make_static ?gw ?search_sfx ?nameserver ~netmask ~mac ip name in
+        Host.make_static ?gateways ?search_sfx ?nameserver ~netmask ~mac ip name in
     let hosts = List.of_enum (Ip.Cidr.random_addrs src_range num_srcs /@ host_of_ip)
     in
     (* Build the HUB and link it to hosts *)
@@ -64,7 +64,7 @@ let main =
     let ifname        = ref "eth0"
     and src_range_str = ref "192.168.0.0/16"
     and num_srcs      = ref 1
-    and gw_str        = ref None
+    and gw            = ref None
     and search_sfx    = ref None
     and dns_str       = ref None
     and start_url     = ref "http://www.google.com"
@@ -75,18 +75,20 @@ let main =
                 "-cidr",   Arg.Set_string src_range_str, "IP range (CIDR) for the HTTP clients (default: 192.168.0.0/16)" ;
                 "-n",      Arg.Set_int num_srcs, "How many clients to create (default: 1)" ;
                 "-search", Arg.String (fun sfx -> search_sfx := Some sfx), "DNS search suffix" ;
-                "-gw",     Arg.String (fun str -> gw_str := Some str), "optional gateway IP address" ;
+                "-gw",     Arg.String (fun str -> gw := Some str), "optional gateway IP address" ;
                 "-dns",    Arg.String (fun str -> dns_str := Some str), "optional IP of the DNS (default: same as gw)" ;
                 "-url",    Arg.Set_string start_url, "Url to start spiding from (default: http://www.google.com)" ;
                 "-depth",  Arg.Set_int max_depth, "Max depth (default: 5)" ;
                 "-pause",  Arg.Float (fun p -> pause := Some p), "instead of swallowing the web, simulate a user with this average think time" ]
               (fun _ -> raise (Arg.Bad "unknown parameter"))
               "Load an HTTP server by simulating browsing" ;
-    if !dns_str = None && !gw_str <> None then dns_str := !gw_str ;
+    if !dns_str = None && !gw <> None then dns_str := !gw ;
     Random.self_init () ;
-    let gw  = Option.map (fun gw -> Eth.Gateway.[ make ~addr:(addr_of_string gw) () ]) !gw_str
+    let gateways =
+        Option.map (fun gw -> Eth.Gateway.of_string gw) !gw |>
+        Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ])
     and nameserver = Option.map (fun ip -> Ip.Addr.of_string ip) !dns_str in
     ignore (Metric.report_thread stdout 10.) ;
     run !ifname (Ip.Cidr.of_string !src_range_str) !num_srcs
-                ?gw ?search_sfx:!search_sfx ?nameserver ?pause:!pause !max_depth !start_url
-
+        ?gateways ?search_sfx:!search_sfx ?nameserver
+        ?pause:!pause !max_depth !start_url

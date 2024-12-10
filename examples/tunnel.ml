@@ -25,8 +25,10 @@ open Batteries
 open Tools
 
 let tunnel ifname tun_ip netmask mac gw search_sfx nameserver dst dst_port src_port =
-    let iface = Pcap.openif ifname
-    and host = Host.make_static ?gw ?search_sfx ?nameserver ~mac ~netmask tun_ip "tun"
+    let iface = Pcap.openif ifname in
+    let gateways =
+        Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) gw in
+    let host = Host.make_static ?gateways ?search_sfx ?nameserver ~mac ~netmask tun_ip "tun"
     and http = Http.TRX.make [ "Content-Type", "tun/eth" ] in
     host.Host.dev.set_read (Pcap.inject iface) ;
     let connect_tunnel tcp =
@@ -76,7 +78,7 @@ let main =
     and tun_ip      = ref "192.168.1.66"
     and netmask     = ref "255.255.255.0"
     and tun_mac     = ref "12:34:56:78:9a:bc"
-    and gw          = ref None
+    and gw          = ref ""
     and search_sfx  = ref None
     and nameserver  = ref None
     and dst         = ref None
@@ -87,9 +89,7 @@ let main =
                 "-tun-ip",    Arg.Set_string tun_ip,      "Tunnel IP address (this end)" ;
                 "-netmask",   Arg.Set_string netmask,     "Client's netmask (this end)" ;
                 "-tun-mac",   Arg.Set_string tun_mac,     "Tunnel MAC address (this end ; optional, default random)" ;
-                "-gw",        Arg.String (fun str ->
-                                            gw := Some Eth.Gateway.[ make ~addr:(addr_of_string str) () ]),
-                                                          "Gateway IP address (optional)" ;
+                "-gw",        Arg.Set_string gw,           "Gateway MAC or IP address (optional)" ;
                 "-search",    Arg.String (fun str -> search_sfx := Some str),
                                                           "DNS search suffix (optional)" ;
                 "-dns",       Arg.String (fun str -> nameserver := Some (Ip.Addr.of_string str)),
@@ -101,10 +101,12 @@ let main =
                                                           "Source port (optional, default: random)" ]
               (fun _ -> raise (Arg.Bad "Unknown parameter"))
               "Tunnel traffic into HTTP" ;
+    let gw = if !gw = "" then None else Some (Eth.Gateway.of_string !gw) in
     tunnel !ifname
            (Ip.Addr.of_string !tun_ip)
            (Ip.Addr.of_string !netmask)
            (Eth.Addr.of_string !tun_mac)
-           !gw  !search_sfx !nameserver
+           gw
+           !search_sfx !nameserver
            !dst (Tcp.Port.o !http_port)
            !src_port

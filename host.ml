@@ -511,14 +511,14 @@ let power_off ?timeout t =
     ) t.killers ;
     t.killers <- []
 
-let make ?gw ?search_sfx ?nameserver ?(on=true) ?parent_logger ?mac ~(init : ?on_ip:(t -> unit) -> t -> unit) name =
+let make ?gateways ?search_sfx ?nameserver ?(on=true) ?parent_logger ?mac ~(init : ?on_ip:(t -> unit) -> t -> unit) name =
     let logger =
         match parent_logger with
         | None -> Log.make name
         | Some p -> Log.sub p name in
     let if_on t what f x =
         if t.on then f x else Log.(log logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
-    let eth_state = Eth.State.make ?mac ?gateways:gw ~parent_logger:logger () in (* FIXME: Don't use the GW for same net IP! *)
+    let eth_state = Eth.State.make ?mac ?gateways ~parent_logger:logger () in (* FIXME: Don't use the GW for same net IP! *)
     let rec t =
         { my_ip         = Ip.Addr.zero ;
           on            = on ;
@@ -572,17 +572,17 @@ let set_ip t ip netmask =
     ignore ((ip_recv t) <-= t.eth_trx)
 
 (* Safer to have the netmask mandatory here *)
-let make_static ?gw ?search_sfx ?nameserver ?on ?mac ?parent_logger ~netmask my_ip name =
+let make_static ?gateways ?search_sfx ?nameserver ?on ?mac ?parent_logger ~netmask my_ip name =
     let init ?on_ip t =
         set_ip t my_ip netmask ;
         (* TODO: Send a gratuitous ARP request? *)
         Option.may (fun on_ip -> Clock.asap on_ip t) on_ip
     in
-    let t = make ?gw ?search_sfx ?nameserver ?mac ?on ?parent_logger ~init name in
+    let t = make ?gateways ?search_sfx ?nameserver ?mac ?on ?parent_logger ~init name in
     t.host_trx
 
 (* FIXME: Until we get the netmask from the DHCP it's safer to make it mandatory! *)
-let make_dhcp ?gw ?search_sfx ?nameserver ?mac ?on ~netmask (*?(netmask==Ip.Addr.zero)*) host_name =
+let make_dhcp ?gateways ?search_sfx ?nameserver ?mac ?on ~netmask (*?(netmask==Ip.Addr.zero)*) host_name =
     let init ?on_ip t =
         (* Will receive all eth frames until we got an IP address *)
         let dhcp_client bits = (match Ip.Pdu.unpack bits with
@@ -637,7 +637,7 @@ let make_dhcp ?gw ?search_sfx ?nameserver ?mac ?on ~netmask (*?(netmask==Ip.Addr
                 (Clock.Interval.to_string delay)))) ;
         Clock.delay delay send_discover ()
     in
-    let t = make ?gw ?search_sfx ?nameserver ?mac ?on ~init host_name in
+    let t = make ?gateways ?search_sfx ?nameserver ?mac ?on ~init host_name in
     t.host_trx
 
 module Name = struct
