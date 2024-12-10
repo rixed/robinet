@@ -218,7 +218,7 @@ struct
                     (match ttl_opt with
                     | Some (0 | 1) ->
                         Log.(log t.logger Debug (lazy (Printf.sprintf "Expiring packet from %d" in_iface))) ;
-                        if Random.float 1. > t.notify.probability then (
+                        if Random.float 1. < t.notify.probability then (
                             let delay = jitter 0.1 t.notify.delay in
                             let ip = Option.get ip_opt in
                             send_icmp_expiry t in_iface ip delay)
