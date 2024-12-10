@@ -167,8 +167,11 @@ module Addr = struct
     *)
 
     (** Convert from dotted representation (useful to allow DNS-less hosts to 'resolve' some name) *)
-    let of_dotted_string str =
-        try Some (o (Unix.inet_addr_of_string str))
+    let of_dotted_string_exc str =
+        o (Unix.inet_addr_of_string str)
+
+    let of_dotted_string_opt str =
+        try Some (of_dotted_string_exc str)
         with Failure _ -> None
 
     (** Some predefined addresses *)

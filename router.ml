@@ -113,7 +113,13 @@ struct
                            eth : Eth.State.t ;
                    rx_counters : counters ;
                    tx_counters : counters ;
-                        logger : Log.logger }
+                        logger : Log.logger ;
+        (** Any traffic arriving in this interface and directed to Admin is
+         * forwarded to this host. There is one per interface so they have
+         * totally independent IP stacks. If all the admin_hosts of a router
+         * were to be made to edit the router's global configuration then
+         * they would have to share that storage area of course. *)
+                    admin_host : Host.host_trx option }
 
     type load_balancing = NoLoadBalancing | Random | PrefixHash
 
@@ -193,7 +199,12 @@ struct
                     | None ->
                         do_forward bits)
                 | Admin ->
-                    Log.(log t.logger Debug (lazy ("Packet reached Admin. Now what?")))
+                    (match t.ifaces.(in_iface).admin_host with
+                    | None ->
+                        Log.(log t.logger Warning (lazy (Printf.sprintf "There is no admin on interface %d, now what?" in_iface)))
+                    | Some host ->
+                        Log.(log t.logger Debug (lazy "Delivering to the admin host")) ;
+                        host.dev.write bits)
             and lb_iface = function
                 | NoLoadBalancing ->
                     0
@@ -231,7 +242,8 @@ struct
 
     let make_iface ?proto ?mtu ?delay ?loss ?mac ?gateways ?my_addresses
                    ?(parent_logger=Log.default) n =
-        let logger = Log.sub parent_logger ("#"^ string_of_int n) in
+        let name = "#"^ string_of_int n in
+        let logger = Log.sub parent_logger name in
         let eth =
             Eth.State.make ?proto ?mtu ?delay ?loss ?mac ?gateways ?my_addresses
                            ~parent_logger () in
@@ -240,13 +252,26 @@ struct
         let ins, tx_counters = counting trx.ins
         and out, rx_counters = counting trx.out in
         let trx = { ins ; out } in
-        { trx ; eth ; rx_counters ; tx_counters ; logger }
+        (* Add the admin interface: *)
+        let admin_host =
+            match my_addresses with
+            | Some (Eth.State.{ addr ; netmask } :: _) ->
+                let addr = Ip.Addr.of_bitstring addr
+                and netmask = Ip.Addr.of_bitstring netmask in
+                let name = "admin@"^ string_of_int n in
+                let admin_host = Host.make_static ~netmask addr name in
+                (* The other way around depends on routing decision: *)
+                admin_host.Host.dev.set_read trx.ins.write ;
+                Some admin_host
+            | _ -> None in
+        { trx ; eth ; rx_counters ; tx_counters ; logger ; admin_host }
 
     let notify_never = { probability = 0. ; delay = 0. }
     let notify_always ?(delay=0.) () = { probability = 1. ; delay }
 
     let make ?(notify=notify_always ()) ?(load_balancing=NoLoadBalancing)
-             ?delay ?loss ?mtu ?(macs=[||]) num_ifaces routes logger =
+             ?delay ?loss ?mtu ?(macs=[||])
+             num_ifaces routes logger =
         (* Display the routing table (debug) *)
         Log.(log logger Debug (lazy
             (Printf.sprintf2 "Creating a router with routing table:%a"
@@ -277,8 +302,10 @@ struct
                                 (* We assume the Cidr is the actual IP and
                                  * the actual netmask, such as for instance:
                                  * 34.35.36.37/16 *)
-                                let addr = Ip.Cidr.subnet addr |> Ip.Addr.to_bitstring
-                                and netmask = Ip.Cidr.to_netmask addr |> Ip.Addr.to_bitstring in
+                                let addr = Ip.Cidr.subnet addr |>
+                                           Ip.Addr.to_bitstring
+                                and netmask = Ip.Cidr.to_netmask addr |>
+                                              Ip.Addr.to_bitstring in
                                 Some [ Eth.State.{ addr ; netmask } ]
                             else
                                 None
@@ -469,9 +496,8 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?noti
     let srv_ip = Enum.get_exn local_ips in    (* second the dhcp/name servers *)
     let h : Host.host_trx =
         let gw = [ Eth.Gateway.make ~addr:(Eth.Gateway.Mac gw_mac) () ]
-        and hostname = name ^"-srv"
-        and my_mac = Eth.Addr.random () in
-        Host.make_static ?nameserver ~gw ~on:true hostname my_mac ~netmask ~parent_logger srv_ip in
+        and hostname = name ^"-srv" in
+        Host.make_static ?nameserver ~gw ~netmask ~parent_logger srv_ip hostname in
     (* Now we need the repeater and the services: *)
     (* FIXME: instead of a Hub that forces us into having 2 IPs make a simple TRX directly, that inspects the protostack and if
      * the dest IP is gw_ip == src_iv then forward it to the host and if not forward it to the NAT. *)
@@ -515,8 +541,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?noti
     let public_ip = Ip.Addr.of_string "80.82.17.127" in
     let gw_trx = make_gw public_ip (Ip.Cidr.of_string "192.168.0.0/16") in
     let gw = Eth.Gateway.[ make ~addr:(IPv4 (Ip.Addr.of_string "192.168.0.1")) () ] in
-    let desktop = Host.make_dhcp "desktop" ~on:true ~netmask:Ip.Addr.all_ones
-                                 ~gw (Eth.Addr.random ()) in
+    let desktop = Host.make_dhcp ~gw "desktop" in
     desktop.Host.dev.set_read gw_trx.trx.ins.write ;
     ignore (desktop.Host.dev.write <-= gw_trx.trx) ;
     let server_ip = Ip.Addr.of_string "42.43.44.45" in

@@ -315,22 +315,22 @@ struct
     let instanciate p =
         let global_directory = Hashtbl.create 9 in
         (* Endow each host with a controlling soul: *)
-        let rec give_soul (make_host : ?name:string -> ?ip:Ip.Addr.t -> on:bool -> Host.host_trx) prevs = function
+        let rec give_soul (make_host : ?name:string -> ?ip:Ip.Addr.t -> ?on:bool -> unit -> Host.host_trx) prevs = function
             | [] -> prevs
             | (HerdOf 0, _)::rest ->
                 give_soul make_host prevs rest
             | (HerdOf n, make)::rest ->
-                let h = make_host ?name:None ?ip:None ~on:false in
+                let h = make_host ?name:None ?ip:None ~on:false () in
                 let chr = make h in
                 give_soul make_host (chr :: prevs) ((HerdOf (n-1), make)::rest)
             | (Individual (name, ip), make)::rest ->
-                let h = make_host ~name ~ip ~on:false in
+                let h = make_host ~name ~ip ~on:false () in
                 Hashtbl.add global_directory name ip ;
                 let chr = make h in
                 give_soul make_host (chr :: prevs) rest in
         let ns_ip = Ip.Addr.of_string p.root_nameserver
         and ns_name = "root" in
-        let root_nameserver = Sim.Net.make_server ~on:true ~name:ns_name ns_ip in
+        let root_nameserver = Sim.Net.make_server ~name:ns_name ns_ip in
         Hashtbl.add global_directory ns_name ns_ip ;
         let lookup = (Hashtbl.find_option global_directory) in
         let dns_state = Named.State.make lookup in

@@ -102,13 +102,13 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
     let logger = Log.make "test" in
     Clock.realtime := false ;
     (*Log.console_lvl := Log.Debug ;*)
-    let srv = Host.make_static "server" ~on:true ~netmask:Ip.Addr.all_ones (Eth.Addr.random ()) (Ip.Addr.of_dotted_string "1.1.1.1" |> Option.get) in
+    let srv = Host.make_static (Ip.Addr.of_dotted_string_exc "1.1.1.1") "server" in
     let lookup = function
-        | "popo" -> Some (Ip.Addr.of_dotted_string "1.1.1.1" |> Option.get)
+        | "popo" -> Some (Ip.Addr.of_dotted_string_exc "1.1.1.1")
         | _ -> None in
     let st = State.make ~parent_logger:logger lookup in
     serve st srv ;
-    let clt = Host.make_static "client" ~nameserver:(Ip.Addr.of_dotted_string "1.1.1.1" |> Option.get) (Eth.Addr.random ()) (Ip.Addr.random ()) in
+    let clt = Host.make_static ~nameserver:(Ip.Addr.of_dotted_string_exc "1.1.1.1") (Ip.Addr.random ()) "client" in
     srv.Host.dev.set_read clt.Host.dev.write ;
     clt.Host.dev.set_read srv.Host.dev.write ;
     let got_ip = ref false in

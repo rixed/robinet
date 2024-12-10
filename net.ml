@@ -281,21 +281,19 @@ let instanciate t =
             Hashtbl.add hosts name
                 (match h.host_ip with
                 | None ->
-                    Host.make_dhcp name
-                                   ~gw
+                    Host.make_dhcp ~gw
                                    ~search_sfx:h.host_search_sfx
                                    ~nameserver:h.host_nameserver
-                                   ~on:true
                                    ~netmask:h.host_netmask
-                                   h.host_mac
+                                   ~mac:h.host_mac
+                                   name
                 | Some ip ->
-                    Host.make_static name
-                                   ~gw
-                                   ~search_sfx:h.host_search_sfx
-                                   ~nameserver:h.host_nameserver
-                                   ~on:true
-                                   ~netmask:h.host_netmask
-                                   h.host_mac ip)
+                    Host.make_static ~gw
+                                     ~search_sfx:h.host_search_sfx
+                                     ~nameserver:h.host_nameserver
+                                     ~netmask:h.host_netmask
+                                     ~mac:h.host_mac
+                                     ip name)
         | Note text ->
             Hashtbl.add notes name text in
     let connect_cable { plugs = a, b } =

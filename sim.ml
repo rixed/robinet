@@ -169,9 +169,9 @@ struct
         Simple { equip = [ Switch sw ] ; plugs }
 
     (* Build a single server (public static IP and name) as a Net.t: *)
-    let make_server ~on ?(name=Host.Name.random()) ?(mac=Eth.Addr.random ()) ?nameserver public_ip =
+    let make_server ?on ?(name=Host.Name.random()) ?nameserver public_ip =
         let netmask = Ip.Addr.zero in (* Should this be the default? *)
-        let host = Host.make_static ?nameserver ~on ~netmask name mac public_ip in
+        let host = Host.make_static ?nameserver ?on ~netmask public_ip name in
         let plug = Plug.make "itf" host.Host.dev in
         Simple { equip = [ Host host ] ; plugs = [ plug ] }
 
@@ -190,7 +190,7 @@ struct
             { equip = [ Switch sw ; Trx gw.trx ] ; plugs = [ plug ] } in
         let num_hosts = ref 0 in
         (* Here name is the local name *)
-        let add_host ?name ?ip ~on =
+        let add_host ?name ?ip ?on () =
             assert (ip = None) ;
             let name = name |? "desktop_" ^ string_of_int (!num_hosts) in
             let name = name ^"."^ lan_name in
@@ -198,7 +198,7 @@ struct
             and srv_ip = Ip.Addr.of_string "192.168.0.2" in
             let netmask = Ip.Addr.of_string "255.255.0.0" in
             let gw = [ Eth.Gateway.make ~addr:(Eth.Gateway.IPv4 gw_ip) () ] in
-            let h = Host.make_dhcp name ~on ~gw ~nameserver:srv_ip ~netmask (Eth.Addr.random ()) in
+            let h = Host.make_dhcp ?on ~gw ~nameserver:srv_ip ~netmask name in
             h.Host.dev.set_read (Hub.Switch.write sw !num_hosts) ;
             Hub.Switch.set_read sw !num_hosts h.Host.dev.write ;
             net.equip <- Equipment.Host h :: net.equip ;
@@ -216,7 +216,7 @@ struct
             { equip = [ Switch sw ] ; plugs = [ plug ] } in
         let num_hosts = ref 0 in
         (* Here name is the FQ name *)
-        let add_host ?name ?ip ~on =
+        let add_host ?name ?ip ?on () =
             let name = name |? "server_" ^ string_of_int !num_hosts ^ "."^ dc_name in
             let ip =
                 ip |? try Enum.get_exn local_ips
@@ -225,9 +225,8 @@ struct
                               (Ip.Cidr.to_string cidr) n |>
                           failwith
             in
-            let mac = Eth.Addr.random () in
             let netmask = Ip.Addr.zero in
-            let h = Host.make_static ~on name ?nameserver ~netmask mac ip in
+            let h = Host.make_static ?on ?nameserver ~netmask ip name in
             h.Host.dev.set_read (Hub.Switch.write sw !num_hosts) ;
             Hub.Switch.set_read sw !num_hosts h.Host.dev.write ;
             net.equip <- Equipment.Host h :: net.equip ;

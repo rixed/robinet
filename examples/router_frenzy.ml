@@ -180,11 +180,10 @@ let build_network logger router_specs fst_router_name delays err_delays losses e
                     let gw_ip = Eth.State.find_ip4 iface.eth in
                     let gw = [ Eth.Gateway.make ~addr:(IPv4 gw_ip) () ]
                     and netmask = Ip.Cidr.to_netmask cidr
-                    and mac = Eth.Addr.random ()
                     and ip = try Ip.Addr.of_string dest_name
                              with Invalid_argument _ -> Ip.Cidr.second_addr cidr in
                     dest_name,
-                    Host.(make_static dest_name ~gw ~on:true mac ~netmask ip).dev
+                    Host.(make_static ~gw ~netmask ip dest_name).dev
                 | dest_router ->
                     (* For each of connected routers, look for their corresponding
                      * interface by subnet name: *)

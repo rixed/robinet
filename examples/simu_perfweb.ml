@@ -40,7 +40,7 @@ let make_net avg_group_size num_groups ifname nameserver =
         Log.(log logger Info (lazy (Printf.sprintf "Create group %d with %d hosts" i num_hosts))) ;
         let group, add_host = Sim.Net.make_lan nameserver num_hosts in
         for _ = 1 to num_hosts do
-            add_host ?name:None ?ip:None ~on:true |> ignore
+            add_host ?name:None ?ip:None |> ignore
         done ;
         Log.(log logger Info (lazy "Connect it...")) ;
         (* Sim.Net.connect takes two nets and connect them the obvious way *)

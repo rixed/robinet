@@ -135,35 +135,6 @@ module Addr = struct
     (*$>*)
 end
 
-(** {3 Gateway specifications} *)
-
-module Gateway =
-struct
-    (** The address of a gateway, which can be given either as an Ethernet address
-     * of as an IP address. *)
-    type addr = Mac of Addr.t | IPv4 of Ip.Addr.t
-
-    (** Converts a {!Eth.addr} to a string. *)
-    let string_of_addr = function
-        | Mac mac -> Addr.to_string mac
-        | IPv4 ip -> Ip.Addr.to_string ip
-
-    (** Converts the other way around. *)
-    let addr_of_string str =
-        try Mac (Addr.of_string str)
-        with _ -> IPv4 (Ip.Addr.of_string str)
-
-    (** And print. *)
-    let addr_print oc a =
-        String.print oc (string_of_addr a)
-
-    type t =
-        { dest_ip : Ip.Addr.t ; mask : Ip.Addr.t ; addr : addr option }
-
-    let make ?(dest_ip=Ip.Addr.zero) ?(mask=Ip.Addr.zero) ?addr () =
-        { dest_ip ; mask ; addr }
-end
-
 (** {2 Ethernet frames} *)
 
 (** Pack/Unpack an Ethernet frame.  *)
@@ -231,7 +202,36 @@ module Pdu = struct
     (*$>*)
 end
 
-(** {2 Transceiver} *)
+(** {3 Gateway specifications} *)
+
+module Gateway =
+struct
+    (** The address of a gateway, which can be given either as an Ethernet address
+     * of as an IP address. *)
+    type addr = Mac of Addr.t | IPv4 of Ip.Addr.t
+
+    (** Converts a {!Eth.addr} to a string. *)
+    let string_of_addr = function
+        | Mac mac -> Addr.to_string mac
+        | IPv4 ip -> Ip.Addr.to_string ip
+
+    (** Converts the other way around. *)
+    let addr_of_string str =
+        try Mac (Addr.of_string str)
+        with _ -> IPv4 (Ip.Addr.of_string str)
+
+    (** And print. *)
+    let addr_print oc a =
+        String.print oc (string_of_addr a)
+
+    type t =
+        { dest_ip : Ip.Addr.t ; mask : Ip.Addr.t ; addr : addr option }
+
+    let make ?(dest_ip=Ip.Addr.zero) ?(mask=Ip.Addr.zero) ?addr () =
+        { dest_ip ; mask ; addr }
+end
+
+(** {2 Transceiver State} *)
 
 module State =
 struct
@@ -313,6 +313,8 @@ struct
           postponed = BitHash.create 3 ;
           delay ; loss }
 end
+
+(** {2 Transceiver} *)
 
 (** An Ethernet TRX will convert from payload to Ethernet frames (resolving
  * destinations using ARP), for a single {!Arp.HwProto.t}. *)

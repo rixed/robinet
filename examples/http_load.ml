@@ -32,7 +32,9 @@ let run ifname src_range num_srcs ?gw ?search_sfx ?nameserver ?pause max_depth s
         Eth.Addr.o b in
     let netmask = Ip.Cidr.to_netmask src_range in
     let host_of_ip ip =
-        Host.make_static ~on:true (Ip.Addr.to_dotted_string ip) ?gw ?search_sfx ?nameserver ~netmask (mac_of_ip ip) ip in
+        let name = Ip.Addr.to_dotted_string ip
+        and mac = mac_of_ip ip in
+        Host.make_static ?gw ?search_sfx ?nameserver ~netmask ~mac ip name in
     let hosts = List.of_enum (Ip.Cidr.random_addrs src_range num_srcs /@ host_of_ip)
     in
     (* Build the HUB and link it to hosts *)

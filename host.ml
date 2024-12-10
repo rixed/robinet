@@ -264,9 +264,9 @@ let rec with_resolver_trx t cont =
 
 and gethostbyname t name cont =
     (* If the name is already an IP do not try to resolve it, otherwise host without DNS server cannot use IP addresses neither *)
-    match Ip.Addr.of_dotted_string name with
-    | Some ip -> cont (Some [ip])
-    | None -> do_gethostbyname t name cont
+    match Ip.Addr.of_dotted_string_exc name with
+    | exception _ -> do_gethostbyname t name cont
+    | ip -> cont (Some [ip])
 
 and do_gethostbyname t name cont =
     Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Resolving '%s'" name))) ;
@@ -511,14 +511,14 @@ let power_off ?timeout t =
     ) t.killers ;
     t.killers <- []
 
-let make name ?gw ?search_sfx ?nameserver ?(on=true) ?parent_logger ~(init : ?on_ip:(t -> unit) -> t -> unit) my_mac =
+let make ?gw ?search_sfx ?nameserver ?(on=true) ?parent_logger ?mac ~(init : ?on_ip:(t -> unit) -> t -> unit) name =
     let logger =
         match parent_logger with
         | None -> Log.make name
         | Some p -> Log.sub p name in
     let if_on t what f x =
         if t.on then f x else Log.(log logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
-    let eth_state = Eth.State.make ~mac:my_mac ?gateways:gw ~parent_logger:logger () in (* FIXME: Don't use the GW for same net IP! *)
+    let eth_state = Eth.State.make ?mac ?gateways:gw ~parent_logger:logger () in (* FIXME: Don't use the GW for same net IP! *)
     let rec t =
         { my_ip         = Ip.Addr.zero ;
           on            = on ;
@@ -571,16 +571,16 @@ let set_ip t ip netmask =
     t.eth_state.my_addresses <- [ Eth.State.make_my_ip_address ~netmask ip ] ;
     ignore ((ip_recv t) <-= t.eth_trx)
 
-let make_static name ?gw ?search_sfx ?nameserver ?on my_mac ?(netmask=Ip.Addr.all_ones) ?parent_logger my_ip =
+let make_static ?gw ?search_sfx ?nameserver ?on ?mac ?(netmask=Ip.Addr.all_ones) ?parent_logger my_ip name =
     let init ?on_ip t =
         set_ip t my_ip netmask ;
         (* TODO: Send a gratuitous ARP request? *)
         Option.may (fun on_ip -> Clock.asap on_ip t) on_ip
     in
-    let t = make name ?gw ?search_sfx ?nameserver ?on ~init ?parent_logger my_mac in
+    let t = make ?gw ?search_sfx ?nameserver ?mac ?on ?parent_logger ~init name in
     t.host_trx
 
-let make_dhcp host_name ?gw ?search_sfx ?nameserver ~on ~netmask my_mac =
+let make_dhcp ?gw ?search_sfx ?nameserver ?mac ?on ?(netmask=Ip.Addr.all_ones) host_name =
     let init ?on_ip t =
         (* Will receive all eth frames until we got an IP address *)
         let dhcp_client bits = (match Ip.Pdu.unpack bits with
@@ -607,7 +607,7 @@ let make_dhcp host_name ?gw ?search_sfx ?nameserver ~on ~netmask my_mac =
                                 tx t.eth_trx (Ip.Pdu.pack pdu)
                             | Some (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.ack ->
                                 Log.(log t.host_trx.logger Debug (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.src)))) ;
-                                (* TODO: set other params than IP *)
+                                (* TODO: set other params than IP, such as netmask! *)
                                 set_ip t dhcp.yiaddr netmask ;
                                 (* TODO: Send a gratuitous ARP request? *)
                                 Option.may (fun on_ip -> Clock.asap on_ip t) on_ip
@@ -635,7 +635,7 @@ let make_dhcp host_name ?gw ?search_sfx ?nameserver ~on ~netmask my_mac =
                 (Clock.Interval.to_string delay)))) ;
         Clock.delay delay send_discover ()
     in
-    let t = make host_name ?gw ?search_sfx ?nameserver ~on ~init my_mac in
+    let t = make ?gw ?search_sfx ?nameserver ?mac ?on ~init host_name in
     t.host_trx
 
 module Name = struct

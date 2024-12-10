@@ -24,9 +24,9 @@
 open Batteries
 open Tools
 
-let tunnel ifname tun_ip tun_mac gw search_sfx nameserver dst dst_port src_port =
+let tunnel ifname tun_ip mac gw search_sfx nameserver dst dst_port src_port =
     let iface = Pcap.openif ifname
-    and host = Host.make_static ~on:true "tun" ?gw ?search_sfx ?nameserver ~netmask:Ip.Addr.all_ones tun_mac tun_ip
+    and host = Host.make_static ?gw ?search_sfx ?nameserver ~mac tun_ip "tun"
     and http = Http.TRX.make [ "Content-Type", "tun/eth" ] in
     host.Host.dev.set_read (Pcap.inject iface) ;
     let connect_tunnel tcp =
