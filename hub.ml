@@ -33,8 +33,8 @@ struct
     let print oc t =
         Printf.fprintf oc "repeater %s with %d ifaces" t.name (Array.length t.ifaces)
 
-    let make ?logger n name =
-        let logger = Option.default_delayed (fun () -> Log.make name) logger in
+    let make ?(parent_logger=Log.default) n name =
+        let logger = Log.sub parent_logger name in
         { ifaces = Array.make n (ignore_bits ~logger) ;
           is_connected = Array.make n false ;
           name ; logger }
@@ -88,9 +88,9 @@ struct
         Printf.fprintf oc "switch %s with %d ifaces" t.name (Array.length t.hub.ifaces)
 
     (* [num_macs] is the maximum number of remembered MACs. *)
-    let make num_ifaces num_macs name =
-        let logger = Log.make name in
-        { hub = R.make ~logger num_ifaces name ;
+    let make ?(parent_logger=Log.default) num_ifaces num_macs name =
+        let logger = Log.sub parent_logger name in
+        { hub = R.make ~parent_logger:logger num_ifaces "hub" ;
           macs = OrdArray.init num_macs (fun _ -> { addr = None ; iface = 0 }) ;
           macs_h = BitHash.create (num_macs/10) ;
           name ; logger }
@@ -165,8 +165,8 @@ struct
     type t = { trx : trx ;
             logger : Log.logger }
 
-    let make ?logger mirror =
-        let logger = Option.default_delayed (fun () -> Log.make "tap") logger in
+    let make ?(parent_logger=Log.default) mirror =
+        let logger = Log.sub parent_logger "tap" in
         let emit_ins = ref (ignore_bits ~logger)
         and emit_out = ref (ignore_bits ~logger) in
         let trx =

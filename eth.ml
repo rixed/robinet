@@ -238,7 +238,7 @@ struct
     type my_address =
         { addr : bitstring ; netmask : bitstring }
 
-    let make_my_address ?(netmask=Ip.Addr.(to_bitstring all_ones)) addr =
+    let make_my_address ?(netmask=Ip.Addr.(to_bitstring zero)) addr =
         { addr ; netmask }
 
     let make_my_ip_address ?netmask ip =

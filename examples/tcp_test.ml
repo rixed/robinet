@@ -24,10 +24,10 @@
 open Bitstring
 open Tools
 
-let perform_get my_ip mac peer_ip ?nameserver ?gw ifname url =
+let perform_get my_ip my_netmask mac peer_ip ?nameserver ?gw ifname url =
     let iface = Pcap.openif ifname in
     let get   = Printf.sprintf "GET %s HTTP/1.0\r\n\r\n" url in
-    let host  = Host.make_static ?nameserver ?gw ~mac my_ip "tester" in
+    let host  = Host.make_static ?nameserver ?gw ~mac ~netmask:my_netmask my_ip "tester" in
     host.Host.dev.set_read (Pcap.inject iface) ;
     ignore (Pcap.sniffer iface host.Host.dev.write) ;
     host.Host.tcp_connect (Host.IPv4 peer_ip) (Tcp.Port.o 80) (function
@@ -48,27 +48,29 @@ let perform_get my_ip mac peer_ip ?nameserver ?gw ifname url =
     Clock.run false
 
 let main =
-    let src_ip_str  = ref "192.168.1.66"
-    and src_eth_str = ref "12:34:56:78:9a:bc"
-    and dst_ip_str  = ref "192.168.1.254"
-    and gw_eth_str  = ref None
-    and dns_ip      = ref None
-    and ifname      = ref "eth0"
-    and url         = ref "/Am/I/a/credible/request?"
+    let src_ip  = ref "192.168.1.66"
+    and netmask = ref "255.255.255.0"
+    and src_eth = ref "12:34:56:78:9a:bc"
+    and dst_ip  = ref "192.168.1.254"
+    and gw_eth  = ref None
+    and dns_ip  = ref None
+    and ifname  = ref "eth0"
+    and url     = ref "/Am/I/a/credible/request?"
     in
-    Arg.parse [ "-src-ip",  Arg.Set_string src_ip_str,  "IP to use as the HTTP client (default: 192.168.1.66)" ;
-                "-src-mac", Arg.Set_string src_eth_str, "MAC to use as the HTTP client (default: 12:34:56:78:9a:bc)" ;
-                "-dst-ip",  Arg.Set_string dst_ip_str,  "IP to send the HTTP GET to (default: 192.168.1.254)" ;
+    Arg.parse [ "-src-ip",  Arg.Set_string src_ip,  "IP to use as the HTTP client (default: "^ !src_ip ^")" ;
+                "-netmask", Arg.Set_string netmask, "Client's netmask (default: "^ !netmask ^")" ;
+                "-src-mac", Arg.Set_string src_eth, "MAC to use as the HTTP client (default: "^ !src_eth ^")" ;
+                "-dst-ip",  Arg.Set_string dst_ip,  "IP to send the HTTP GET to (default: "^ !dst_ip ^")" ;
                 "-gw",      Arg.String (fun gw ->
-                                            gw_eth_str := Some Eth.Gateway.[ make ~addr:(addr_of_string gw) () ]),
-                                                        "Gateway MAC address (optional)" ;
+                                            gw_eth := Some Eth.Gateway.[ make ~addr:(addr_of_string gw) () ]),
+                                                    "Gateway MAC address (optional)" ;
                 "-dns",     Arg.String (fun str -> dns_ip := Some (Ip.Addr.of_string str)), "IP of the DNS (optional)" ;
-                "-i",       Arg.Set_string ifname,      "Interface to use (default: eth0)" ;
-                "-url",     Arg.Set_string url,         "The URL to GET" ]
+                "-i",       Arg.Set_string ifname,  "Interface to use (default: "^ !ifname ^")" ;
+                "-url",     Arg.Set_string url,     "The URL to GET" ]
               (fun _ -> raise (Arg.Bad "Unknown parameter"))
               "Perform an HTTP get with faked addresses" ;
-    perform_get (Ip.Addr.of_string !src_ip_str) (Eth.Addr.of_string !src_eth_str)
-                (Ip.Addr.of_string !dst_ip_str)
-                ?nameserver:!dns_ip ?gw:!gw_eth_str
+    perform_get (Ip.Addr.of_string !src_ip) (Ip.Addr.of_string !netmask)
+                (Eth.Addr.of_string !src_eth)
+                (Ip.Addr.of_string !dst_ip)
+                ?nameserver:!dns_ip ?gw:!gw_eth
                 !ifname !url
-

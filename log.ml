@@ -50,8 +50,10 @@ let num_levels = 6
 (* output to console happen based on a constant current loglevel *)
 
 let console_lvl = ref Error
-let console_log name (t, lstr) =
-    Printf.printf "%a: %s: %s\n%!" Clock.printer t name (Lazy.force lstr)
+let console_log name =
+    let name = if name = "" then name else name ^": " in
+    fun (t, lstr) ->
+        Printf.printf "%a: %s%s\n%!" Clock.printer t name (Lazy.force lstr)
 
 (* queue management *)
 
@@ -109,10 +111,10 @@ let make ?parent ?(use_wall_clock=false) ?(size=50) name =
     logger
 
 let sub logger ?size subname =
-    let name = logger.name ^"/"^ subname
+    let name = if logger.name = "" then subname else logger.name ^"/"^ subname
     and size = size |? (Array.length (snd logger.queues.(0)) / 2 + 1) in
     make ~parent:logger ~use_wall_clock:logger.use_wall_clock ~size name
 
 (* The logger that will adopt any others: *)
 
-let default = make "default"
+let default = make ""

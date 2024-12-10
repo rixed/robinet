@@ -190,11 +190,12 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
 (*$R serve
     Clock.realtime := false ;
     (*Log.console_lvl := Log.Debug ;*)
-    let srv = Host.make_static (Ip.Addr.random ()) "server" in
+    let netmask = Ip.Addr.all_ones in
+    let srv = Host.make_static ~netmask (Ip.Addr.random ()) "server" in
     let my_net = Ip.Cidr.random () in
     let st = State.make (Ip.Range.of_cidr my_net) in
     serve st srv ;
-    let clt = Host.make_dhcp "client" in
+    let clt = Host.make_dhcp ~netmask "client" in
     srv.Host.dev.set_read clt.Host.dev.write ;
     clt.Host.dev.set_read srv.Host.dev.write ;
     Clock.run false ;

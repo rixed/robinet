@@ -460,7 +460,10 @@ type gw_trx =
  * and the NAT tables.
  * Unless [dhcp_range] is set, all local IPs (but those used by the GW itself)
  * will be distributed via DHCP. *)
-let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?notify ?dhcp_range ?(parent_logger=Log.default) public_ip local_cidr =
+let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?dhcp_range ?(name="gw") ?notify
+            ?(parent_logger=Log.default) ?public_netmask ?public_gw public_ip local_cidr =
+    (* We want all parts inherit this logger: *)
+    let parent_logger = Log.sub parent_logger name in
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let broadcast = Ip.Cidr.all1s_addr local_cidr in
@@ -472,8 +475,8 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?noti
               Route.forward ~dst_mask:local_cidr 0 ;
               (* or zero IP address *)
               Route.forward ~src_mask:(Ip.Cidr.single Ip.Addr.zero) 0 ;
-              (* route everything else toward nat *)
-              Route.forward 1 ]
+              (* route everything else toward the outside *)
+              Route.forward ?via:public_gw 1 ]
             router_logger) in
     (* Configure those 2 ifaces: *)
     (* 1st iface is for the GW: *)
@@ -481,7 +484,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?noti
     let gw_ip = Enum.get_exn local_ips in   (* first IP of the subnet is the GW *)
     Eth.State.add_ip4 router.ifaces.(0).eth ~netmask gw_ip ;
     (* The second iface of our router (facing internet) is the NAT *)
-    Eth.State.add_ip4 router.ifaces.(1).eth ~netmask public_ip ;
+    Eth.State.add_ip4 router.ifaces.(1).eth ?netmask:public_netmask public_ip ;
     let nat_state = Nat.State.make ~num_max_cnxs ~parent_logger public_ip in
     let nat_trx = Nat.TRX.make nat_state in
     (* Which we pipe *before* the iface eth (NAT operates at the IP level): *)
@@ -495,13 +498,12 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?noti
      * want this host on the internet: *)
     let srv_ip = Enum.get_exn local_ips in    (* second the dhcp/name servers *)
     let h : Host.host_trx =
-        let gw = [ Eth.Gateway.make ~addr:(Eth.Gateway.Mac gw_mac) () ]
-        and hostname = name ^"-srv" in
-        Host.make_static ?nameserver ~gw ~netmask ~parent_logger srv_ip hostname in
+        let gw = [ Eth.Gateway.make ~addr:(Eth.Gateway.Mac gw_mac) () ] in
+        Host.make_static ?nameserver ~gw ~netmask ~parent_logger srv_ip "srv" in
     (* Now we need the repeater and the services: *)
     (* FIXME: instead of a Hub that forces us into having 2 IPs make a simple TRX directly, that inspects the protostack and if
      * the dest IP is gw_ip == src_iv then forward it to the host and if not forward it to the NAT. *)
-    let hub = Hub.Repeater.make 3 (name^"/hub") in
+    let hub = Hub.Repeater.make ~parent_logger 3 "hub" in
     Hub.Repeater.set_read hub 1 h.Host.dev.write ;
     h.Host.dev.set_read (Hub.Repeater.write hub 1) ;
     (* Connect the first iface of our router *)
@@ -541,7 +543,8 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?noti
     let public_ip = Ip.Addr.of_string "80.82.17.127" in
     let gw_trx = make_gw public_ip (Ip.Cidr.of_string "192.168.0.0/16") in
     let gw = Eth.Gateway.[ make ~addr:(IPv4 (Ip.Addr.of_string "192.168.0.1")) () ] in
-    let desktop = Host.make_dhcp ~gw "desktop" in
+    let netmask = Ip.Addr.of_string "255.255.255.0" in
+    let desktop = Host.make_dhcp ~netmask ~gw "desktop" in
     desktop.Host.dev.set_read gw_trx.trx.ins.write ;
     ignore (desktop.Host.dev.write <-= gw_trx.trx) ;
     let server_ip = Ip.Addr.of_string "42.43.44.45" in
@@ -553,6 +556,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?(name="gw") ?noti
     ignore (server_recv <-= server_eth) ;
     gw_trx.trx <==> server_eth ;
     Clock.delay (Clock.Interval.sec 10.) (fun () ->
+        Log.(log desktop.logger Debug (lazy "Sending UDP packet to server")) ;
         desktop.Host.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring) () ;
     Clock.run false ;
     Clock.realtime := true ;

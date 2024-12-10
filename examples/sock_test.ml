@@ -34,8 +34,10 @@ let server_f _h tcp bits =
 
 let run () =
     let h1 = Host.make_static ~mac:(Eth.Addr.of_string "12:34:56:78:90:ab")
+                              ~netmask:(Ip.Addr.of_string "255.255.255.0")
                               (Ip.Addr.of_string "192.168.0.1") "server"
     and h2 = Host.make_static ~mac:(Eth.Addr.of_string "ab:cd:ef:01:23:45")
+                              ~netmask:(Ip.Addr.of_string "255.255.255.0")
                               (Ip.Addr.of_string "192.168.0.2") "client"
     and hub = Hub.Repeater.make 3 "hub"
     in

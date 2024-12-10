@@ -571,7 +571,8 @@ let set_ip t ip netmask =
     t.eth_state.my_addresses <- [ Eth.State.make_my_ip_address ~netmask ip ] ;
     ignore ((ip_recv t) <-= t.eth_trx)
 
-let make_static ?gw ?search_sfx ?nameserver ?on ?mac ?(netmask=Ip.Addr.all_ones) ?parent_logger my_ip name =
+(* Safer to have the netmask mandatory here *)
+let make_static ?gw ?search_sfx ?nameserver ?on ?mac ?parent_logger ~netmask my_ip name =
     let init ?on_ip t =
         set_ip t my_ip netmask ;
         (* TODO: Send a gratuitous ARP request? *)
@@ -580,7 +581,8 @@ let make_static ?gw ?search_sfx ?nameserver ?on ?mac ?(netmask=Ip.Addr.all_ones)
     let t = make ?gw ?search_sfx ?nameserver ?mac ?on ?parent_logger ~init name in
     t.host_trx
 
-let make_dhcp ?gw ?search_sfx ?nameserver ?mac ?on ?(netmask=Ip.Addr.all_ones) host_name =
+(* FIXME: Until we get the netmask from the DHCP it's safer to make it mandatory! *)
+let make_dhcp ?gw ?search_sfx ?nameserver ?mac ?on ~netmask (*?(netmask==Ip.Addr.zero)*) host_name =
     let init ?on_ip t =
         (* Will receive all eth frames until we got an IP address *)
         let dhcp_client bits = (match Ip.Pdu.unpack bits with

@@ -180,6 +180,9 @@ module Addr = struct
     let zero = o (Unix.inet_addr_of_string "0.0.0.0")
     let all_ones = o (Unix.inet_addr_of_string "255.255.255.255")
     let broadcast = all_ones
+    let mask width =
+        if width > 32 then invalid_arg "Ip.Addr.mask" ;
+        Bitstring.concat [ ones_bitstring width ; zeroes_bitstring (32 - width) ]
 
     (** Convert an {!Ip.Addr.t} to a [bitstring]. *)
     let to_bitstring (t : t) =

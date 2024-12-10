@@ -9,7 +9,7 @@ open Tools
 let run () =
     let host_ip = Ip.Addr.random () and my_ip = Ip.Addr.random () in
     (* Build the stack *)
-    let host = Host.make_static host_ip "test" in
+    let host = Host.make_static ~netmask:(Ip.Addr.all_ones) host_ip "test" in
     let eth_state = Eth.State.make ~my_addresses:[ Eth.State.make_my_ip_address my_ip ] ~parent_logger:host.Host.logger () in
     let eth = Eth.TRX.make eth_state in
     let ip  = Ip.TRX.make my_ip host_ip Ip.Proto.icmp host.Host.logger in

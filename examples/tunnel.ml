@@ -24,9 +24,9 @@
 open Batteries
 open Tools
 
-let tunnel ifname tun_ip mac gw search_sfx nameserver dst dst_port src_port =
+let tunnel ifname tun_ip netmask mac gw search_sfx nameserver dst dst_port src_port =
     let iface = Pcap.openif ifname
-    and host = Host.make_static ?gw ?search_sfx ?nameserver ~mac tun_ip "tun"
+    and host = Host.make_static ?gw ?search_sfx ?nameserver ~mac ~netmask tun_ip "tun"
     and http = Http.TRX.make [ "Content-Type", "tun/eth" ] in
     host.Host.dev.set_read (Pcap.inject iface) ;
     let connect_tunnel tcp =
@@ -74,6 +74,7 @@ let tunnel ifname tun_ip mac gw search_sfx nameserver dst dst_port src_port =
 let main =
     let ifname      = ref "eth0"
     and tun_ip      = ref "192.168.1.66"
+    and netmask     = ref "255.255.255.0"
     and tun_mac     = ref "12:34:56:78:9a:bc"
     and gw          = ref None
     and search_sfx  = ref None
@@ -84,6 +85,7 @@ let main =
     in
     Arg.parse [ "-i",         Arg.Set_string ifname,      "Interface name (optional, default eth0)" ;
                 "-tun-ip",    Arg.Set_string tun_ip,      "Tunnel IP address (this end)" ;
+                "-netmask",   Arg.Set_string netmask,     "Client's netmask (this end)" ;
                 "-tun-mac",   Arg.Set_string tun_mac,     "Tunnel MAC address (this end ; optional, default random)" ;
                 "-gw",        Arg.String (fun str ->
                                             gw := Some Eth.Gateway.[ make ~addr:(addr_of_string str) () ]),
@@ -100,7 +102,9 @@ let main =
               (fun _ -> raise (Arg.Bad "Unknown parameter"))
               "Tunnel traffic into HTTP" ;
     tunnel !ifname
-           (Ip.Addr.of_string  !tun_ip)
+           (Ip.Addr.of_string !tun_ip)
+           (Ip.Addr.of_string !netmask)
            (Eth.Addr.of_string !tun_mac)
            !gw  !search_sfx !nameserver
-           !dst (Tcp.Port.o !http_port)  !src_port
+           !dst (Tcp.Port.o !http_port)
+           !src_port

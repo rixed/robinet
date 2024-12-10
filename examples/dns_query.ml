@@ -27,25 +27,34 @@ open Tools
 let iface = Pcap.openif "eth0"
 
 let main =
-    let src_ip_str  = ref "192.168.1.66"
-    and src_eth_str = ref "12:34:56:78:9a:bc"
-    and dst_ip_str  = ref "192.168.1.254"
-    and gw_eth_str  = ref None
-    and search      = ref "local"
-    and names       = ref []
+    let src_ip  = ref "192.168.1.66"
+    and netmask = ref "255.255.255.0"
+    and src_eth = ref "12:34:56:78:9a:bc"
+    and dst_ip  = ref "192.168.1.254"
+    and gw_eth  = ref None
+    and search  = ref "local"
+    and names   = ref []
     in
-    Arg.parse [ "-src-ip",  Arg.Set_string src_ip_str,  "IP to use as the client" ;
-                "-src-mac", Arg.Set_string src_eth_str, "MAC to use as the client" ;
-                "-dst-ip",  Arg.Set_string dst_ip_str,  "IP to send the request to (ie. name server)" ;
+    Arg.parse [ "-src-ip",  Arg.Set_string src_ip,  "IP to use as the client (default: "^ !src_ip ^")" ;
+                "-netmask", Arg.Set_string netmask, "Client's netmask (default: "^ !netmask ^")" ;
+                "-src-mac", Arg.Set_string src_eth, "MAC to use as the client (default: "^ !src_eth ^")" ;
+                "-dst-ip",  Arg.Set_string dst_ip,  "IP to send the request to (ie. name server)" ;
                 "-gw",      Arg.String (fun gw ->
-                                         gw_eth_str := Some Eth.Gateway.[ make ~addr:(addr_of_string gw) () ]),
-                                                        "Gateway MAC address" ]
+                                         gw_eth := Some Eth.Gateway.[ make ~addr:(addr_of_string gw) () ]),
+                                                    "Gateway MAC address" ]
               (fun name -> names := name :: !names)
               "Perform a DNS A query with faked addresses" ;
     let emit bits =
         hexstring_of_bitstring bits |> Printf.printf "Injecting '%s'\n" ;
         Pcap.inject iface bits in
-    let host = Host.make_static ?gw:!gw_eth_str ~nameserver:(Ip.Addr.of_string !dst_ip_str) ~search_sfx:!search ~mac:(Eth.Addr.of_string !src_eth_str) (Ip.Addr.of_string !src_ip_str) "requester" in
+    let host =
+        Host.make_static ?gw:!gw_eth
+                         ~nameserver:(Ip.Addr.of_string !dst_ip)
+                         ~search_sfx:!search
+                         ~mac:(Eth.Addr.of_string !src_eth)
+                         ~netmask:(Ip.Addr.of_string !netmask)
+                         (Ip.Addr.of_string !src_ip)
+                         "requester" in
     host.Host.dev.set_read emit ;
     List.iter (Clock.asap (fun name ->
         host.Host.gethostbyname name (function

@@ -206,7 +206,7 @@ module Pdu = struct
         | {| _ |} ->
             err "Not ICMP"
     (*$Q pack
-      (Q.make ~print:(fun pdu -> string_of_bitstring (pdu :> bitstring)) (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make ~print:(fun pdu -> hexstring_of_bitstring (pdu :> bitstring)) (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
      *)
     (*$>*)
 end
