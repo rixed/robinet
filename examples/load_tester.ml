@@ -71,7 +71,9 @@ let input_of = function
 
 let sink_to = function
     | File name ->
-        Enum.iter (Pcap.Pdu.save name)
+        let write, close = Pcap.Pdu.save name in
+        at_exit close ;
+        Enum.iter write
     | Iface name ->
         let iface = Pcap.openif ~promisc:false name in
         let inject_f pdu = Pcap.inject iface (pdu.Pcap.Pdu.payload :> bitstring) in

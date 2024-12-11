@@ -91,6 +91,17 @@ let bitstring_fuzz err_rate bits =
   string_of_bitstring (bitstring_fuzz 0.1 (bitstring_of_string str)) <> str
 *)
 
+(** Shift [n]th bit (counting from higher bit!).
+ * Modify the passed bitstring! *)
+let bitstring_shift n bits =
+    let v = if Bitstring.is_clear bits n then 1 else 0 in
+    Bitstring.put bits n v
+
+(*$= bitstring_shift & ~printer:hexstring_of_bitstring
+  (bitstring_of_int8 0xE0) (let b = bitstring_of_int8 0xA0 in bitstring_shift 1 b ; b)
+  (bitstring_of_int8 0xA0) (let b = bitstring_of_int8 0xE0 in bitstring_shift 1 b ; b)
+*)
+
 let bitstring_of_bytes b =
     Bytes.to_string b |> bitstring_of_string
 
@@ -441,6 +452,7 @@ struct
     let make_from_data data =
         let s = Array.length data in
         { last_used = Array.init s (fun i ->
+            (* -1 is for invalid: *)
             { prev = if i = 0 then -1 else i-1 ;
               next = if i = s-1 then -1 else i+1 }) ;
           first = 0 ;
@@ -450,12 +462,15 @@ struct
     let make s x = make_from_data (Array.create s x)
     let init s f = make_from_data (Array.init s f)
 
-    let get t n = t.data.(n)
-    let set t n x = t.data.(n) <- x
+    (** Returns the first and last indices: *)
     let first t = t.first
     let last t = t.last
 
-    let remove t n =
+    (** So that [get t (first t)] will return the first data item in the queue *)
+    let get t n = t.data.(n)
+    let set t n x = t.data.(n) <- x
+
+    let unlink t n =
         if t.last_used.(n).prev <> -1 then
             t.last_used.(t.last_used.(n).prev).next <- t.last_used.(n).next ;
         if t.last_used.(n).next <> -1 then
@@ -463,16 +478,16 @@ struct
         if t.first = n then t.first <- t.last_used.(n).next ;
         if t.last = n then t.last <- t.last_used.(n).prev
 
-    (* n was already removed! *)
-    let add_head t n =
+    (* n must have already been unlinked! *)
+    let link_at_head t n =
         t.last_used.(n).prev <- -1 ;
         t.last_used.(n).next <- t.first ;
         t.last_used.(t.first).prev <- n ;
         t.first <- n
 
     let promote t n =
-        remove t n ;
-        add_head t n
+        unlink t n ;
+        link_at_head t n
 
     (*$R promote
         let oa = make_from_data [| 5;6;7 |] in
@@ -484,6 +499,12 @@ struct
         assert_equal ~printer:string_of_int ~msg:"but last one should not change"
             7 (get oa (last oa))
      *)
+
+    (* Overwrite the last entry with [x] and make it the new first entry: *)
+    let prepend t x =
+        set t t.last x ;
+        promote t t.last
+
     (*$>*)
 end
 

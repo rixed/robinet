@@ -47,7 +47,9 @@ let run () =
     h2.trx.dev.set_read (gigabit (Hub.Repeater.write hub 1)) ;
     Hub.Repeater.set_read hub 1 (gigabit h2.trx.dev.write) ;
     (* Save everything into sock_test.pcap *)
-    Hub.Repeater.set_read hub 2 (Pcap.save "sock_test.pcap") ;
+    let write, close = Pcap.save "sock_test.pcap" in
+    at_exit close ;
+    Hub.Repeater.set_read hub 2 write ;
     (* Start a server on h1 *)
     h1.trx.tcp_server (Tcp.Port.o 7) (fun tcp -> tcp.Tcp.TRX.trx.ins.set_read (server_f h1 tcp)) ;
     (* Client connects and write a msg *)

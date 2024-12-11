@@ -291,7 +291,7 @@ struct
             Log.(log t.logger Debug (lazy (Printf.sprintf "Adding entry for iaddr %s to MAC %s from ARP table" (hexstring_of_bitstring iaddr) (match haddr_opt with None -> "None" | Some haddr -> Addr.to_string haddr)))) ;
             BitHash.replace t.arp_cache iaddr haddr_opt
 
-    (* Create the state machine for an Ethernet communication.
+    (** Create the state machine for an Ethernet communication.
      * @param mtu the maximum transmit unit (ie. you won't be able to send longer payloads)
      * @param mac the source {!Eth.Addr.t}
      * @param gateways list of [Gateeway.t]
@@ -514,7 +514,51 @@ struct
                     st.emit <- f } }
 end
 
-(* for throughput, remember the timestamp where the link will be available again *)
+(** {2 Ethernet Cables}
+ *
+ * Can be used in between simulated equipment to introduce latency, errors,
+ * and also _record_ everything globally in a global pcap. *)
+
+
+(** {2 Global record of every Ethernet traffic} *)
+
+let recording = ref false
+let recorder_file = ref "/tmp/robinet_eth.pcap"
+
+let maybe_record =
+    let recorder = ref ignore in
+    let close_recording = ref None in
+    let next_recorder_file =
+        let file_seq = ref 0 in
+        fun () ->
+            let fname =
+                if !file_seq = 0 then
+                    !recorder_file
+                else
+                    !recorder_file ^"."^ string_of_int !file_seq in
+            incr file_seq ;
+            fname in
+    fun bits ->
+        if !recording then (
+            if !close_recording = None then (
+                let fname = next_recorder_file () in
+                (* We have to limit ourselves to Eth traffic because a pcap file,
+                 * supposedly captured from a single spot, is limited to one DLT: *)
+                let write, close = Pcap.(save ~dlt:Dlt.en10mb) fname in
+                recorder := write ;
+                close_recording := Some close
+            ) ;
+            Log.(log default Debug (lazy (Printf.sprintf "Record %d bits" (bitstring_length bits)))) ;
+            !recorder bits
+        ) else (
+            Option.may (fun close ->
+                recorder := ignore ;
+                close () ;
+                close_recording := None
+            ) !close_recording
+        )
+
+(* For throughput, remember the timestamp where the link will be available again *)
 (* It may seams bogus to have throughput as a cable characteristic instead of
  * device characteristic, but it acknowledges the fact that both ends of a same
  * cable must agree on throughput. In other words, throughput negotiation
@@ -530,3 +574,77 @@ let limited latency throughput =
         let duration = max (Clock.Interval.usec 1.) (Clock.Interval.o (num_bits /. throughput)) in
         next_avlb := Clock.Time.add start duration ;
         Clock.at start emit bits)
+
+
+(** {2 Ethernet cables}
+ *
+ * Point to point, faulty, and recordable in PCAP of type en10mb. *)
+
+module Cable =
+struct
+    (** {3 State for a given cable} *)
+
+    module State =
+    struct
+        type t = {  length : float ;  (** In meters. *)
+                     delay : Clock.Interval.t ; (** Computed from the length *)
+                error_rate : float ;  (** In faulty bits per transmitted bits *)
+              success_rate : int ;    (** The inverse of the above *)
+          mutable tot_bits : int ;    (** Both ways. *)
+        mutable bit_shifts : int ;    (** Casualties in individual bits *)
+           (** Boolean: true if from [a] to [b] (see [Cable.make] *)
+              last_packets : (bool * bitstring) OrdArray.t ;
+                    logger : Log.logger }
+
+        let make ?(length=10.) ?(error_rate=0.) ?(history=10)
+                 ?(logger=Log.default) () =
+            let delay = Clock.Interval.sec (length /. 3e9)
+            and success_rate = int_of_float (1. /. error_rate) in
+            { length ; delay ; error_rate ; success_rate ; tot_bits = 0 ;
+              bit_shifts = 0 ; logger ;
+              last_packets = OrdArray.make history (false, empty_bitstring) }
+    end
+
+    let pass (st : State.t) dir bits =
+        let len = bitstring_length bits in
+        let prev_tot_bits = st.tot_bits in
+        st.tot_bits <- st.tot_bits + len ;
+        if prev_tot_bits > st.tot_bits then (
+            Log.(log st.logger Warning (lazy "Bit count wrapped around 0")) ;
+            (* For better stats: *)
+            st.bit_shifts <- 0
+        ) ;
+        let bits =
+            (* Beware that [int_of_float infinity] is 0: *)
+            if st.success_rate > 0 then
+                let shift_pos = Random.int st.success_rate in
+                if shift_pos < len then (
+                    st.bit_shifts <- st.bit_shifts + 1 ;
+                    let bits' = bitstring_copy bits in
+                    bitstring_shift shift_pos bits' ;
+                    bits'
+                ) else bits
+            else bits in
+        maybe_record bits ;
+        OrdArray.prepend st.last_packets (dir, bits) ;
+        bits
+
+    (** Return a TRX representing an imperfect network link. *)
+    let make (st : State.t) =
+        let a_reader = ref (ignore_bits ~logger:st.logger)
+        and b_reader = ref (ignore_bits ~logger:st.logger) in
+        let ins_write bits =
+            let bits = pass st true bits in
+            Clock.delay st.delay !b_reader bits
+        and ins_set_read f = a_reader := f
+        and out_write bits =
+            let bits = pass st false bits in
+            Clock.delay st.delay !a_reader bits
+        and out_set_read f = b_reader := f
+        in
+        { ins = { write = ins_write ; set_read = ins_set_read } ;
+          out = { write = out_write ; set_read = out_set_read } }
+
+    let connect t a b =
+        a ==> t <==> b
+end

@@ -28,7 +28,8 @@ let input_of name =
     Pcap.enum_of_file name
 
 let sink_to name =
-    let f = Pcap.Pdu.save name in
+    let f, close = Pcap.Pdu.save name in
+    at_exit close ;
     Enum.iter f
 
 (* TODO: a dequeue would be faster here *)

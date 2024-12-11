@@ -245,25 +245,28 @@ struct
             string_of_bitstring |>
             String.print out_chan in
         f
-    (** [save "file.pcap"] returns a function that will save passed pdus in ["file.pcap"].
+
+    (** [save "file.pcap"] returns a function that will save passed pdus in ["file.pcap"]
+     * and another one that will close this file.
      * @param caplen can be used to cap saved packet to a given number of bytes
      * @param dlt can be used to change the file's DLT (you probably do not want to do that) *)
     let save ?caplen ?dlt fname =
         let out_chan = open_out_bin fname in
-        let f = write ?caplen ?dlt out_chan in
-        Gc.finalise (fun _ -> close_out out_chan) f ;
-        f
+        let write_pdu = write ?caplen ?dlt out_chan in
+        let close () = close_out out_chan in
+        write_pdu, close
 end
 
 (** [save "file.pcap"] returns a function that will save passed bitstrings as
- * packets in ["file.pcap"].
+ * packets in ["file.pcap"], and another function that will close that file.
  * @param caplen can be used to cap saved packet to a given number of bytes
  * @param dlt can be used to change the file's DLT (required if you do not write Ethernet packets) *)
 let save ?caplen ?(dlt=Dlt.en10mb) fname =
-    let pdu_save = Pdu.save ?caplen ~dlt fname in
-    fun bits ->
+    let write_pdu, close = Pdu.save ?caplen ~dlt fname in
+    let write_bits bits =
         let pdu = Pdu.make fname ?caplen ~dlt (Clock.now ()) bits in
-        pdu_save pdu
+        write_pdu pdu in
+    write_bits, close
 
 (** When trying to read packets from a file that doesn't look like a pcap file. *)
 exception Not_a_pcap_file

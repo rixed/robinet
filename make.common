@@ -100,8 +100,8 @@ doc: $(SOURCES)
 	@echo "Building doc in $(DOCDIR)..."
 	mkdir -p $(DOCDIR)
 	$(OCAMLDOC) -package "$(REQUIRES)" -d $(DOCDIR) $^
-	sed -i -e '/^<head>/a<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">' $(DOCDIR)/*.html
-	sed -i -e 's|<center><h1></h1></center>|<h1>$(PKG_NAME)</h1>|' $(DOCDIR)/index.html
+	#sed -i -e '/^<head>/a<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">' $(DOCDIR)/*.html
+	#sed -i -e 's|<center><h1></h1></center>|<h1>$(PKG_NAME)</h1>|' $(DOCDIR)/index.html
 
 clear: $(SOURCES)
 	sed -i -e 's/[ 	]\+$$//' $^

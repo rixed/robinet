@@ -200,12 +200,14 @@ let synch () =
     current.now <- Time.wall_clock () ;
     if debug then Printf.printf "Clock: synch: set current time to %s\n%!" (Time.to_string current.now)
 
+let continue = ref true
+
 (** Will process the next event *)
 let next_event () =
     let min_ts_for_sleep = Interval.msec 10. in
     (* Time to sleep while waiting for an event to be added in the queue.
      * Must be > min_ts_for_sleep *)
-    let max_sleep_time = Interval.sec 5. in
+    let max_sleep_time = Interval.sec 3. in
     let run_first_event =
         if !realtime then (
             (* Note: In realtime, other threads may add new events while we are
@@ -231,13 +233,13 @@ let next_event () =
                      * next event, which may be a different one. *)
                     (* Because of the loop condition above: *)
                     synch () ;
-                    wait_loop ()
+                    if !continue then wait_loop ()
                 ) in
                 (* Else there is no need to wait we can go straight to processing
                    that event: *)
             wait_loop () ;
             Mutex.unlock cond_lock ;
-            true
+            !continue
         ) else ( (* not realtime *)
             if Map.is_empty current.events then (
                 if debug then Printf.printf "Clock: no more events" ;
@@ -263,7 +265,15 @@ let next_event () =
  * probably run forever whenever you communicate with the outside. *)
 let run wait =
     if debug then Printf.printf "clock: running the clock!\n%!" ;
-    while wait || not (Map.is_empty current.events) do
+    while !continue && (wait || not (Map.is_empty current.events)) do
         next_event () ;
         Thread.yield ()
     done
+
+let with_trapped_sigint f =
+    let prev_sigint =
+        let open Sys in
+        signal sigint (Signal_handle (fun _n -> continue := false)) in
+    let res = f () in
+    Sys.(set_signal sigint prev_sigint) ;
+    res

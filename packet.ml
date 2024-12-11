@@ -316,17 +316,10 @@ let to_file fname e = Enum.map Pdu.pack e |> Pcap.file_of_enum fname
 let capture ?promisc ?filter ifname =
     let iface = Pcap.openif ?promisc ?filter ifname in
     let pkts = ref [] in
-    let continue = ref true in
     let rec aux () =
-        if not !continue then List.rev !pkts else
+        if not !Clock.continue then List.rev !pkts else
         let pkt = Pcap.sniff iface in
         pkts := pkt :: !pkts ;
         Printf.printf ".%!" ;
         aux () in
-    let prev_sigint = Sys.(
-        signal sigint (Signal_handle (fun _n ->
-            Printf.printf "Stop!\n" ;
-            continue := false))) in
-    let res = aux () in
-    Sys.(set_signal sigint prev_sigint) ;
-    res
+    Clock.with_trapped_sigint aux

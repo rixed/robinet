@@ -11,6 +11,7 @@ SOURCES  = \
 	persist.ml \
 	peg.ml \
 	metric.ml \
+	pcap.ml \
 	url.ml \
 	http.ml \
 	tcp.ml \
@@ -25,7 +26,6 @@ SOURCES  = \
 	eth.ml \
 	dhcp.ml \
 	sll.ml \
-	pcap.ml \
 	tap.ml \
 	packet.ml \
 	sockopt.ml \
