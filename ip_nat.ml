@@ -37,19 +37,34 @@ open Tools
 
 module State =
 struct
-    type socket = {       proto : Ip.Proto.t ;  (** the IP protocol *)
-                       nat_port : int ;         (** the replacement src port *)
-                    remote_addr : Ip.Addr.t ;   (** the other peer's address *)
-                    remote_port : int }         (** the port used by the other peer *)
+    type socket = {       proto : Ip.Proto.t ;  (** The IP protocol *)
+                       src_addr : Ip.Addr.t ;   (** The tracked cnx source. *)
+                       src_port : int ;
+                       dst_addr : Ip.Addr.t ;   (** The tracked cnx destination. *)
+                       dst_port : int }
 
-    type cnx = { orig_addr : Ip.Addr.t ;  (** the inside lan's host IP *)
-                  orig_num : int ;        (** the origin port/id used by this host *)
-                   nat_num : int }        (** the random port/id used by NAS in the outside *)
+    let socket_print oc s =
+        Printf.fprintf oc "%s connection from %s:%d to %s:%d"
+            (Ip.Proto.to_string s.proto)
+            (Ip.Addr.to_string s.src_addr) s.src_port
+            (Ip.Addr.to_string s.dst_addr) s.dst_port
+
+    type cnx = { orig_addr : Ip.Addr.t ;  (** The inside lan's host IP. *)
+                  orig_num : int ;        (** The origin port/id used by this host. *)
+                   nat_num : int }        (** The random port/id used by NAS in the outside. *)
 
     (* For ICMP, the message's type, code and id are tracked and the id is
      * substituted. *)
-    type icmp_sock = { msg_type : Icmp.MsgType.t ;
-                             id : int }
+    type icmp_sock = { src_addr : Ip.Addr.t ;       (** The tracked cnx source. *)
+                       dst_addr : Ip.Addr.t ;       (** The tracked cnx destination. *)
+                       msg_type : Icmp.MsgType.t ;  (** The tracked ICMP type&code. *)
+                             id : int }             (** The tracked ICMP id. *)
+
+    let icmp_sock_print oc s =
+        Printf.fprintf oc "ICMP message of type %s and id %d from %s to %s"
+            (Icmp.MsgType.to_string s.msg_type) s.id
+            (Ip.Addr.to_string s.src_addr)
+            (Ip.Addr.to_string s.dst_addr)
 
     (* TODO: add an optional sink inside IP *)
     type t = {      addr : Ip.Addr.t ;                  (** our IP addr *)
@@ -57,9 +72,9 @@ struct
                   logger : Log.logger ;
                nat_pings : bool ;
                     cnxs : cnx OrdArray.t ;             (** all the cnxs we remember, either port or ICMP based *)
-               in_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets INcoming from the outside (the value is the index in [cnxs]) *)
+               inc_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets INComing from the outside (the value is the index in [cnxs]) *)
               out_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets OUTgoing to the outside *)
-               in_icmp_h : (icmp_sock, int) Hashtbl.t ; (** the hash to retrieve original ICMP ids on INcoming packets (the value is *also* the index in [cnxs]) *)
+               inc_icmp_h : (icmp_sock, int) Hashtbl.t ; (** the hash to retrieve original ICMP ids on INComing packets (the value is *also* the index in [cnxs]) *)
               out_icmp_h : (icmp_sock, int) Hashtbl.t ; (** the hash to retrieve NATed ids on OUTgoing packets *)
               (* FIXME: Ideally, those functions are serializable references to
                * the TRX they are connected to: *)
@@ -74,9 +89,9 @@ struct
           cnxs = OrdArray.make num_max_cnxs { orig_addr = Ip.Addr.zero ;
                                               orig_num = 0 ;
                                               nat_num = 0 } ;
-          in_cnxs_h = Hashtbl.create num_max_cnxs ;
+          inc_cnxs_h = Hashtbl.create num_max_cnxs ;
           out_cnxs_h = Hashtbl.create num_max_cnxs ;
-          in_icmp_h = Hashtbl.create num_max_cnxs ;
+          inc_icmp_h = Hashtbl.create num_max_cnxs ;
           out_icmp_h = Hashtbl.create num_max_cnxs ;
           emit = ignore_bits ~logger ;
           recv = ignore_bits ~logger }
@@ -92,7 +107,7 @@ struct
               Dst: nat_addr
             Ports: outside_port:nat_port
 v}
-    Lookup (outside_addr, outside_port, nat_port, proto) in in_cnxs_h.
+    Lookup (outside_addr, outside_port, nat_port, proto) in inc_cnxs_h.
     If the cnx is found then replace the nat_addr:nat_port by cnx.orig_addr:cnx.orig_num.
     If nothing is found, just ignore the packet (or forward it to the sink host
     without changing the dest port).
@@ -109,7 +124,7 @@ v}
     If nothing is found, create the cnx as:
     {[ { nat_num=random_port; orig_addr=inside_addr; orig_num=inside_port } ]}
     and insert it with the above key in out_cnxs_h.
-    Also, insert this cnx in in_cnxs_h with key (outside_addr, outside_port, random_port, proto).
+    Also, insert this cnx in inc_cnxs_h with key (outside_addr, outside_port, random_port, proto).
 
     *)
 
@@ -148,19 +163,21 @@ v}
     let do_port_nat (st : State.t) (ip : Ip.Pdu.t) src_port dst_port =
         (* Do we already follow this socket? *)
         let out_sock = State.{ proto = ip.proto ;
-                            nat_port = dst_port ;
-                         remote_addr = ip.src ;
-                         remote_port = src_port } in
+                            src_addr = ip.src ;
+                            src_port = src_port ;
+                            dst_addr = ip.dst ;
+                            dst_port = dst_port } in
         let n = hash_find_or_insert st.out_cnxs_h out_sock (fun () ->
             (* FIXME: to avoid reusing a port that's already in use with
              * the same dest, use a long sequence of "random" generator
              * for that port number range *)
             let random_port = st.min_port + Random.int (65536 - st.min_port) in
-            let in_sock = State.{ proto = ip.proto ;
-                               nat_port = random_port ;
-                            remote_addr = ip.dst ;
-                            remote_port = dst_port } in
-            start_tracking st ip.src src_port random_port st.in_cnxs_h in_sock) in
+            let inc_sock = State.{ proto = ip.proto ;
+                                src_addr = ip.dst ;
+                                src_port = dst_port ;
+                                dst_addr = st.addr ;
+                                dst_port = random_port } in
+            start_tracking st ip.src src_port random_port st.inc_cnxs_h inc_sock) in
         OrdArray.promote st.cnxs n ;
         (* perform source NAT *)
         (* FIXME: also check that (OrdArray.get st.cnxs n).orig_num correspond to
@@ -177,12 +194,17 @@ v}
 
     let do_icmp_nat (st : State.t) (ip : Ip.Pdu.t) (icmp : Icmp.Pdu.t) msg_type id =
         (* If we track this ping already, reuse the former outside id: *)
-        let out_sock = State.{ msg_type ; id } in
+        let out_sock = State.{ src_addr = ip.src ;
+                               dst_addr = ip.dst ;
+                               msg_type ; id } in
         let n = hash_find_or_insert st.out_icmp_h out_sock (fun () ->
             (* FIXME: same as above *)
             let random_id = randi 8 in
-            let in_sock = State.{ msg_type ; id = random_id } in
-            start_tracking st ip.src id random_id st.in_icmp_h in_sock) in
+            let inc_sock = State.{ src_addr = ip.dst ;
+                                   dst_addr = st.addr ;
+                                   msg_type = Icmp.MsgType.reply_of msg_type ;
+                                   id = random_id } in
+            start_tracking st ip.src id random_id st.inc_icmp_h inc_sock) in
         OrdArray.promote st.cnxs n ;
         (* Actually substitute the id: *)
         let new_id = (OrdArray.get st.cnxs n).nat_num in
@@ -191,13 +213,13 @@ v}
         st.emit (Ip.Pdu.pack ip)
 
     let do_port_unnat (st : State.t) (ip : Ip.Pdu.t) src_port dst_port =
-        let in_sock = State.{ proto = ip.proto ;
-                           nat_port = dst_port ;
-                        remote_addr = ip.src ;
-                        remote_port = src_port } in
-        match Hashtbl.find st.in_cnxs_h in_sock with
+        let inc_sock = State.{ proto = ip.proto ;
+                            src_addr = ip.src ; src_port ;
+                            dst_addr = ip.dst ; dst_port } in
+        match Hashtbl.find st.inc_cnxs_h inc_sock with
         | exception Not_found ->
-            Log.(log st.logger Warning (lazy "No recollection of that connection"))
+            Log.(log st.logger Warning (lazy (Printf.sprintf2
+                "No idea about that incoming %a" State.socket_print inc_sock)))
         | n ->
             let cnx = OrdArray.get st.cnxs n in
             let payload = Payload.o (patch_dst_port ip.proto
@@ -208,11 +230,13 @@ v}
 
     let do_icmp_reply_unnat (st : State.t) (ip : Ip.Pdu.t) (icmp : Icmp.Pdu.t)
                             msg_type id =
-        let in_sock =
-            State.{ msg_type = Icmp.MsgType.request_of msg_type ; id } in
-        match Hashtbl.find st.in_icmp_h in_sock with
+        let inc_sock = State.{ src_addr = ip.src ;
+                               dst_addr = ip.dst ;
+                               msg_type ; id } in
+        match Hashtbl.find st.inc_icmp_h inc_sock with
         | exception Not_found ->
-            Log.(log st.logger Warning (lazy "No recollection of that ICMP id"))
+            Log.(log st.logger Warning (lazy (Printf.sprintf2
+                "No idea about that incoming %a" State.icmp_sock_print inc_sock)))
         | n ->
             let cnx = OrdArray.get st.cnxs n in
             let payload = Payload.o (patch_icmp_id icmp cnx.orig_num) in
@@ -225,37 +249,75 @@ v}
          * Unpack the IP header from the payload: *)
         match Ip.Pdu.unpack (pld :> bitstring) with
         | Some err_ip ->
+            let recv_with_err_ip_pld err_ip_pld (cnx : State.cnx) =
+                let err_ip =
+                    { err_ip with
+                      src = cnx.orig_addr ;
+                      payload = Payload.o err_ip_pld } in
+                let pld = Payload.o (Ip.Pdu.pack err_ip) in
+                let icmp = { icmp with payload = Header { ptr ; mtu ; pld } } in
+                let payload = Payload.o (Icmp.Pdu.pack icmp) in
+                let ip = { ip with dst = cnx.orig_addr ; payload } in
+                st.recv (Ip.Pdu.pack ip) in
             (* After the complete IP header, the payload must have at least 8
              * bytes, and that's all we need for NAT, so unpack and patch
              * only that: *)
-            (match%bitstring (err_ip.payload :> bitstring) with
-            | {| src_port : 16 ; dst_port : 16 ; rest : -1 : bitstring |} ->
-                (* Look for the original packet: *)
-                let in_sock = State.{ proto = err_ip.proto ;
-                                   nat_port = dst_port ;
-                                remote_addr = err_ip.src ;
-                                remote_port = src_port } in
-                (match Hashtbl.find st.in_cnxs_h in_sock with
-                | exception Not_found ->
-                    Log.(log st.logger Warning (lazy "No recollection of the connection that created this ICMP error"))
-                | n ->
-                    let cnx = OrdArray.get st.cnxs n in
-                    (* Put back the original source IP and port in the ICMP
-                     * copy of the IP header: *)
-                    let%bitstring err_ip_pld =
-                        {| cnx.orig_num : 16 ; dst_port : 16 ;
-                           rest : bitstring_length rest : bitstring |} in
-                    let err_ip =
-                        { err_ip with
-                            src = cnx.orig_addr ;
-                            payload = Payload.o err_ip_pld } in
-                    let pld = Payload.o (Ip.Pdu.pack err_ip) in
-                    let icmp = { icmp with payload = Header { ptr ; mtu ; pld } } in
-                    let payload = Payload.o (Icmp.Pdu.pack icmp) in
-                    let ip = { ip with dst = cnx.orig_addr ; payload } in
-                    st.recv (Ip.Pdu.pack ip))
-            | {| _ |} ->
-                Log.(log st.logger Warning (lazy "Cannot decode ICMP err header as IP")))
+            if err_ip.proto = Ip.Proto.tcp ||
+               err_ip.proto = Ip.Proto.udp then
+                match%bitstring (err_ip.payload :> bitstring) with
+                | {| src_port : 16 ; dst_port : 16 ; rest : -1 : bitstring |} ->
+                    (* Look for the socket answer that was expected instead: *)
+                    let inc_sock = State.{ proto = err_ip.proto ;
+                                        src_addr = err_ip.dst ;
+                                        src_port = dst_port ;
+                                        dst_addr = err_ip.src ;
+                                        dst_port = src_port } in
+                    (match Hashtbl.find st.inc_cnxs_h inc_sock with
+                    | exception Not_found ->
+                        Log.(log st.logger Warning (lazy (Printf.sprintf2
+                            "Cannot find the %a which was the expected answer to \
+                             the packet that caused this ICMP error"
+                            State.socket_print inc_sock)))
+                    | n ->
+                        let cnx = OrdArray.get st.cnxs n in
+                        (* Put back the original source IP and port in the ICMP
+                         * copy of the IP header: *)
+                        let%bitstring err_ip_pld =
+                            {| cnx.orig_num : 16 ; dst_port : 16 ;
+                               rest : bitstring_length rest : bitstring |} in
+                        recv_with_err_ip_pld err_ip_pld cnx)
+                | {| _ |} ->
+                    Log.(log st.logger Warning (lazy "Cannot decode ICMP err header as UDP/TCP"))
+            else if err_ip.proto = Ip.Proto.icmp then
+                match%bitstring (err_ip.payload :> bitstring) with
+                | {| typ : 8 ; cod : 8 ; checksum : 16 ; id : 16 ;
+                     rest : -1 : bitstring |} ->
+                    (* Look for the ICMP reply that was expected instead: *)
+                    let err_msg_type = Icmp.MsgType.o (typ, cod) in
+                    let inc_sock =
+                        State.{ src_addr = err_ip.dst ;
+                                dst_addr = err_ip.src ;
+                                msg_type = Icmp.MsgType.reply_of err_msg_type ;
+                                      id } in
+                    (match Hashtbl.find st.inc_icmp_h inc_sock with
+                    | exception Not_found ->
+                        Log.(log st.logger Warning (lazy (Printf.sprintf2
+                            "Cannot find the %a which was expected as a response
+                             to the ICMP query that caused this ICMP error"
+                            State.icmp_sock_print inc_sock)))
+                    | n ->
+                        let cnx = OrdArray.get st.cnxs n in
+                        (* Put back the original source IP and ICMP id in the ICMP
+                         * copy of the IP header: *)
+                        let%bitstring err_ip_pld =
+                            {| typ : 8 ; cod : 8 ; checksum : 16 ;
+                               cnx.orig_num : 16 ;
+                               rest : bitstring_length rest : bitstring |} in
+                        recv_with_err_ip_pld err_ip_pld cnx)
+                | {| _ |} ->
+                    Log.(log st.logger Warning (lazy "Cannot decode ICMP err header as ICMP"))
+            else
+                Log.(log st.logger Debug (lazy ("Not NATing back ICMP error for IP proto "^ Ip.Proto.to_string err_ip.proto)))
         | _ ->
             Log.(log st.logger Warning (lazy "Cannot decode IP header from ICMP payload"))
 

@@ -137,12 +137,14 @@ end
 
 (** {2 Ethernet frames} *)
 
+module Proto = Arp.HwProto
+
 (** Pack/Unpack an Ethernet frame.  *)
 module Pdu = struct
     (*$< Pdu *)
     (** An Ethernet frame is made up from these constituents *)
     type t = { src : Addr.t ; dst : Addr.t ;
-               proto : Arp.HwProto.t ;
+               proto : Proto.t ;
                payload : Payload.t }
 
     (** Build an {!Eth.Pdu.t} for the given [payload]. *)
@@ -151,7 +153,7 @@ module Pdu = struct
 
     (** Returns a random {!Eth.Pdu.t}. *)
     let random () =
-        make (Arp.HwProto.random ()) (Addr.random ()) (Addr.random ()) (randbs 30)
+        make (Proto.random ()) (Addr.random ()) (Addr.random ()) (randbs 30)
 
     (** Pack an {!Eth.Pdu.t} into its [bitstring] raw representation, ready for
      * injection onto the wire (via {!Pcap.inject_pdu} for instance). *)
@@ -170,17 +172,17 @@ module Pdu = struct
              proto : 16 ;
              payload : -1 : bitstring |} (* FIXME: might not be a proto if < 1500 *) ->
             Some { src = Addr.o src ; dst = Addr.o dst ;
-                   proto = Arp.HwProto.o proto ;
+                   proto = Proto.o proto ;
                    payload = Payload.o payload }
         | {| _ |} ->
             err "Not Eth"
 
     let extract_proto do_extract proto pld =
-        if proto = Arp.HwProto.ip4 then
+        if proto = Proto.ip4 then
             do_extract pld
-        else if proto = Arp.HwProto.ieee8021q then
+        else if proto = Proto.ieee8021q then
             Option.Monad.bind (Vlan.Pdu.unpack pld) (fun vlan ->
-                if vlan.Vlan.Pdu.proto = Arp.HwProto.ip4 then
+                if vlan.Vlan.Pdu.proto = Proto.ip4 then
                     do_extract (vlan.Vlan.Pdu.payload :> bitstring)
                 else None)
         else None
@@ -255,7 +257,7 @@ struct
           mac : Addr.t ;
           (* Eth knows how to pick a gateways according to the destination IP: *)
           gateways : (gw_selector * Gateway.t option) list ;
-          proto : Arp.HwProto.t ;
+          proto : Proto.t ;
           mtu : int ;
           mutable connected : bool ;
           mutable my_addresses : my_address list ;
@@ -296,13 +298,13 @@ struct
      * @param mac the source {!Eth.Addr.t}
      * @param gateways list of [Gateeway.t]
      * @param promisc an optional function that will receive frames received but not destined to this TRX.
-     * @param proto the {!Arp.HwProto.t} we want to transmit/receive.
+     * @param proto the {!Proto.t} we want to transmit/receive.
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
 
     let make ?(mtu=1500) ?delay ?loss ?(mac=Addr.random ()) ?(gateways=[])
              ?(promisc=ignore) ?(my_addresses=[])
-             ?(proto=Arp.HwProto.ip4) ?(parent_logger=Log.default) () =
+             ?(proto=Proto.ip4) ?(parent_logger=Log.default) () =
         let logger = Log.sub parent_logger "eth" in
         { logger ; mac ; gateways ; proto ;
           emit = ignore_bits ~logger ;
@@ -317,7 +319,7 @@ end
 (** {2 Transceiver} *)
 
 (** An Ethernet TRX will convert from payload to Ethernet frames (resolving
- * destinations using ARP), for a single {!Arp.HwProto.t}. *)
+ * destinations using ARP), for a single {!Proto.t}. *)
 module TRX =
 struct
     let gw_for_ip (st : State.t) ip =
@@ -328,14 +330,14 @@ struct
                 else loop rest in
         loop st.gateways
 
-    (** Low level send function. Takes a {!Arp.HwProto.t} since it's used both
+    (** Low level send function. Takes a {!Proto.t} since it's used both
      * for the user payload protocol and ARP protocol. *)
     let really_send (st : State.t) proto dst bits =
         let pdu = Pdu.make proto st.mac dst bits in
-        Log.(log st.logger Debug (lazy (Printf.sprintf "Emitting an Eth packet, proto %s, from %s to %s (content '%s')" (Arp.HwProto.to_string proto) (Addr.to_string st.mac) (Addr.to_string dst) (hexstring_of_bitstring bits)))) ;
+        Log.(log st.logger Debug (lazy (Printf.sprintf "Emitting an Eth packet, proto %s, from %s to %s (content '%s')" (Proto.to_string proto) (Addr.to_string st.mac) (Addr.to_string dst) (hexstring_of_bitstring bits)))) ;
         let delay =
             match proto, st.delay with
-            | p, Some d when p <> Arp.HwProto.arp ->
+            | p, Some d when p <> Proto.arp ->
                 jitter 0.1 d
             | _ ->
                 0. in
@@ -343,17 +345,17 @@ struct
 
     let send (st : State.t) proto dst bits =
         let loss = st.loss |? 0. in
-        if st.proto = Arp.HwProto.arp || loss = 0. || Random.float 1. >= loss then
+        if st.proto = Proto.arp || loss = 0. || Random.float 1. >= loss then
             really_send st proto dst bits
         else
-            Log.(log st.logger Debug (lazy (Printf.sprintf "Dropping packet of proto %s from %s" (Arp.HwProto.to_string proto) (Addr.to_string st.mac))))
+            Log.(log st.logger Debug (lazy (Printf.sprintf "Dropping packet of proto %s from %s" (Proto.to_string proto) (Addr.to_string st.mac))))
 
     let resolve_proto_addr (st : State.t) bits sender_proto_addr target_proto_addr =
         (* Add the msg to postponed messages _before_ sending the query *)
         Log.(log st.logger Debug (lazy (Printf.sprintf "Postponing a msg for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
         BitHash.add st.postponed target_proto_addr bits ;
         let request = Arp.Pdu.make_request Arp.HwType.eth st.proto (st.mac :> bitstring) sender_proto_addr target_proto_addr in
-        send st Arp.HwProto.arp Addr.broadcast (Arp.Pdu.pack request)
+        send st Proto.arp Addr.broadcast (Arp.Pdu.pack request)
 
     type dst = Postponed | Dst of Addr.t
 
@@ -381,7 +383,7 @@ struct
                 Some (arp_resolve_ipv4 st bits sender_ip target_ip)) in
         let arp_resolve_ieee8021q_pld sender_ip pld =
             Option.Monad.bind (Vlan.Pdu.unpack pld) (fun vlan ->
-                if vlan.Vlan.Pdu.proto = Arp.HwProto.ip4 then
+                if vlan.Vlan.Pdu.proto = Proto.ip4 then
                     arp_resolve_ipv4_pld sender_ip (vlan.Vlan.Pdu.payload :> bitstring)
                 else None) in
         let arp_resolve_pld pld =
@@ -389,9 +391,9 @@ struct
                 match st.my_addresses with
                 | [] -> failwith "No address to use as sender proto addr for ARP"
                 | a :: _ -> a.addr in
-            if st.proto = Arp.HwProto.ip4 then (
+            if st.proto = Proto.ip4 then (
                 arp_resolve_ipv4_pld my_addr pld
-            ) else if st.proto = Arp.HwProto.ieee8021q then (
+            ) else if st.proto = Proto.ieee8021q then (
                 arp_resolve_ieee8021q_pld my_addr pld
             ) else (
                 err "Don't know how to resolve address for this protocol"
@@ -440,7 +442,7 @@ struct
         match Pdu.unpack bits with
         | None -> ()
         | Some frame ->
-            Log.(log st.logger Debug (lazy (Printf.sprintf "Got an eth frame of proto %s for %s" (Arp.HwProto.to_string frame.Pdu.proto) (Addr.to_string frame.Pdu.dst)))) ;
+            Log.(log st.logger Debug (lazy (Printf.sprintf "Got an eth frame of proto %s for %s" (Proto.to_string frame.Pdu.proto) (Addr.to_string frame.Pdu.dst)))) ;
             if frame.Pdu.proto = st.proto &&
                (Addr.eq frame.Pdu.dst st.mac || Addr.eq frame.Pdu.dst Addr.broadcast) then (
                 Log.(log st.logger Debug (lazy (Printf.sprintf "...that's me!"))) ;
@@ -452,7 +454,7 @@ struct
                         BitHash.replace st.arp_cache src_proto_addr (Some frame.src)) ;
                     Clock.asap st.recv (frame.Pdu.payload :> bitstring)
                 )
-            ) else if frame.Pdu.proto = Arp.HwProto.arp then (
+            ) else if frame.Pdu.proto = Proto.arp then (
                 match Arp.Pdu.unpack (frame.Pdu.payload :> bitstring) with
                 | None -> ()
                 | Some arp ->
@@ -480,7 +482,7 @@ struct
                                     let reply = Arp.Pdu.make_reply arp.Arp.Pdu.hw_type arp.Arp.Pdu.proto_type
                                                                    (st.mac :> bitstring) arp.Arp.Pdu.target_proto
                                                                    arp.Arp.Pdu.sender_hw arp.Arp.Pdu.sender_proto in
-                                    send st Arp.HwProto.arp sender_hw (Arp.Pdu.pack reply)
+                                    send st Proto.arp sender_hw (Arp.Pdu.pack reply)
                                 )
                             ) ;
                             (* Now that we may have gained knowledge, try to send the msg in waiting queue *)

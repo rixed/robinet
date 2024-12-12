@@ -126,18 +126,18 @@ struct
         | _ -> false
 
     (* Used when NATing ICMP requests: *)
-    let request_of (t : t) =
+    let reply_of (t : t) =
         match (t :> int*int) with
-        |  0, 0 -> o (8, 0)
-        | 14, 0 -> o (13, 0)
-        | 16, 0 -> o (15, 0)
-        | 18, 0 -> o (17, 0)
-        | 36, c -> o (35, c)
-        | 38, c -> o (37, c)
+        |  8, 0 -> o (0, 0)
+        | 13, 0 -> o (14, 0)
+        | 15, 0 -> o (16, 0)
+        | 17, 0 -> o (18, 0)
+        | 35, c -> o (36, c)
+        | 37, c -> o (38, c)
         | _ -> t
 
-    (*$T request_of
-       let r = o (0, 0) in is_echo_reply r && is_echo_request (request_of r)
+    (*$T reply_of
+       let r = o (8, 0) in is_echo_request r && is_echo_reply (reply_of r)
      *)
 
     (*$>*)
