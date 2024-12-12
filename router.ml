@@ -169,27 +169,30 @@ struct
         Log.(log t.logger Debug (lazy (Printf.sprintf2 "Adding route: %a" Route.print r))) ;
         t.routes <- r :: t.routes
 
-    let send_icmp_expiry t n ip delay =
+    (** How many bytes to consider when hashing the packet prefix for load-balancing *)
+    let lb_prefix_length = ref 5
+
+    (* Sending will perform routing again *)
+    let rec maybe_send_icmp t n ip icmp_maker =
         match Eth.State.find_ip4 t.ifaces.(n).eth with
         | exception Not_found ->
             Log.(log t.logger Debug (lazy "Cannot send an ICMP error: I have no IP!"))
         | my_ip ->
-            let icmp = Icmp.Pdu.make_ttl_expired_in_transit ip in
-            let ip_pld = Icmp.Pdu.pack icmp in
-            let ip_pkt = Ip.Pdu.make Ip.Proto.icmp my_ip ip.Ip.Pdu.src ip_pld in
-            let bits = Ip.Pdu.pack ip_pkt in
-            Clock.delay (Clock.Interval.o delay) (tx t.ifaces.(n).trx) bits
-
-    (** How many bytes to consider when hashing the packet prefix for load-balancing *)
-    let lb_prefix_length = ref 5
+            if Random.float 1. < t.notify_errs.probability then
+                let delay = jitter 0.1 t.notify_errs.delay in
+                let icmp = icmp_maker ip in
+                let ip_pld = Icmp.Pdu.pack icmp in
+                let ip_pkt = Ip.Pdu.make Ip.Proto.icmp my_ip ip.Ip.Pdu.src ip_pld in
+                let bits = Ip.Pdu.pack ip_pkt in
+                Clock.delay (Clock.Interval.o delay) (route None t) bits
 
     (* The [route] function receives the IP packets from the Eth trx.
      * The integer [in_iface_opt] is the input interface number, unless
      * it's coming from the admin. *)
-    let route in_iface_opt t bits =
+    and route in_iface_opt t bits =
         Log.(log t.logger Debug (lazy (match in_iface_opt with
             | Some n -> Printf.sprintf "rx from iface %d" n
-            | None -> "rx from admin"))) ;
+            | None -> "generated traffic"))) ;
         let ip_opt, src_opt, dst_opt, ttl_opt, proto_opt =
             match Ip.Pdu.unpack bits with
             | None ->
@@ -208,8 +211,14 @@ struct
                     None
               ) t.routes with
         | [] ->
-            Log.(log t.logger Debug (lazy "dropping packet since no route match"))
-            (* TODO: t.default_target *)
+            (match in_iface_opt, ip_opt with
+            | None, _ ->
+                Log.(log t.logger Warning (lazy "Cannot route my own packet"))
+            | _, None ->
+                Log.(log t.logger Debug (lazy "Dropping non-routable non IP packet"))
+            | Some n, Some ip ->
+                Log.(log t.logger Debug (lazy "No route match that packet")) ;
+                maybe_send_icmp t n ip Icmp.Pdu.make_host_unreachable)
         | targets ->
             (* Forward the packet to that target: *)
             let forward = function
@@ -228,10 +237,8 @@ struct
                         do_forward bits
                     | Some n, Some (0 | 1) ->
                         Log.(log t.logger Debug (lazy (Printf.sprintf "Expiring packet from %d" n))) ;
-                        if Random.float 1. < t.notify_errs.probability then (
-                            let delay = jitter 0.1 t.notify_errs.delay in
-                            let ip = Option.get ip_opt in
-                            send_icmp_expiry t n ip delay)
+                        let ip = Option.get ip_opt in
+                        maybe_send_icmp t n ip Icmp.Pdu.make_ttl_expired_in_transit
                     | Some _, Some ttl ->
                         let ip = Option.get ip_opt in
                         let ip = Ip.Pdu.{ ip with ttl = ttl - 1 } in
@@ -242,7 +249,7 @@ struct
                 | Admin ->
                     (match in_iface_opt with
                     | None ->
-                        Log.(log t.logger Error (lazy "Packet from admin to admin!?"))
+                        Log.(log t.logger Error (lazy "Generated traffic to admin!?"))
                     | Some in_iface ->
                         (match t.ifaces.(in_iface).admin_host with
                         | None ->

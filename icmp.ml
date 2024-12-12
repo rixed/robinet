@@ -207,6 +207,7 @@ module Pdu = struct
           payload = DestUnreachable (next_hop_mtu, Payload.o ip_start) }
 
     let make_port_unreachable = make_destination_unreachable 3
+    let make_host_unreachable = make_destination_unreachable 1
 
     let pack t =
         let pack_payload = function
