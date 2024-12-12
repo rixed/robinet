@@ -144,10 +144,10 @@ let make_router name logger interfaces router_specs delays err_delays losses err
     let delay = List.assoc_opt name delays
     and loss = List.assoc_opt name losses
     and load_balancing = List.assoc_opt name lb_configs
-    and notify = Router.{
+    and notify_errs = Router.{
         probability = List.assoc_opt name err_losses |? 0. ;
         delay = List.assoc_opt name err_delays |? 0. } in
-    Router.make_from_addrs ~notify ?delay ?loss ?load_balancing addrs logger
+    Router.make_from_addrs ~notify_errs ?delay ?loss ?load_balancing addrs logger
 
 (* Build the network described in the [routers] hash and returns the device
  * representing the entry point of the network: *)

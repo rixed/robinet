@@ -168,16 +168,15 @@ let udp_sock_rx t socks icmp_trx bits =
                     let icmp_bits = Icmp.Pdu.pack icmp_err in
                     tx icmp_trx icmp_bits
 
-let icmp_rx _t ip_trx bits =
+let icmp_rx t ip_trx bits =
     match Icmp.Pdu.unpack bits with
         | None -> ()
-        | Some icmp when Icmp.MsgType.is_echo_request icmp.msg_type ->
-            (match icmp.Icmp.Pdu.payload with
-                | Icmp.Pdu.Ids (id, seq, pld) ->
-                    Icmp.Pdu.make_echo_reply id seq ~pld |>
-                    Icmp.Pdu.pack |>
-                    tx ip_trx
-                | _ -> should_not_happen ())
+        | Some Icmp.Pdu.{ msg_type ; payload = Ids (id, seq, pld) ; _ }
+            when Icmp.MsgType.is_echo_request msg_type ->
+                Log.(log t.trx.logger Debug (lazy "Answering a PING")) ;
+                Icmp.Pdu.make_echo_reply id seq ~pld |>
+                Icmp.Pdu.pack |>
+                tx ip_trx
         | _ -> ()
 
 let rec find_alive_tcp tcps key =

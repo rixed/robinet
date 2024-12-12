@@ -252,11 +252,24 @@ struct
     let gw_selector ?(dest_ip=Ip.Addr.zero) ?(mask=Ip.Addr.zero) () =
         { dest_ip ; mask }
 
+    let print_selector oc sel =
+        Printf.fprintf oc "%s/%s"
+            (Ip.Addr.to_string sel.dest_ip)
+            (Ip.Addr.to_string sel.mask)
+
+    let print_gw oc (selector, gw_opt) =
+        Printf.fprintf oc "%a: " print_selector selector ;
+        match gw_opt with
+        | None -> String.print oc "direct"
+        | Some gw -> Gateway.print oc gw
+
     type t =
         { logger : Log.logger ;
           mac : Addr.t ;
           (* Eth knows how to pick a gateways according to the destination IP: *)
           gateways : (gw_selector * Gateway.t option) list ;
+          (* Which can be overridden for one packet in routers with: *)
+          mutable via : Gateway.t option ;
           proto : Proto.t ;
           mtu : int ;
           mutable connected : bool ;
@@ -310,6 +323,7 @@ struct
           emit = ignore_bits ~logger ;
           recv = ignore_bits ~logger ;
           mtu ; promisc ; my_addresses ;
+          via = None ;
           connected = false ;
           arp_cache = BitHash.create 3 ;
           postponed = BitHash.create 3 ;
@@ -323,12 +337,20 @@ end
 module TRX =
 struct
     let gw_for_ip (st : State.t) ip =
-        let rec loop = function
-            | [] -> None
-            | (State.{ dest_ip ; mask }, addr) :: rest ->
-                if Ip.Addr.in_mask ip dest_ip mask then addr
-                else loop rest in
-        loop st.gateways
+        if st.via <> None then (
+            let gw = st.via in
+            st.via <- None ;
+            gw
+        ) else (
+            (* If not provided (typically by a routing process) then look into
+             * the interface configuration: *)
+            let rec loop = function
+                | [] -> None
+                | (State.{ dest_ip ; mask }, addr) :: rest ->
+                    if Ip.Addr.in_mask ip dest_ip mask then addr
+                    else loop rest in
+            loop st.gateways
+        )
 
     (** Low level send function. Takes a {!Proto.t} since it's used both
      * for the user payload protocol and ARP protocol. *)
@@ -435,7 +457,7 @@ struct
             | Some (Dst dst) -> send st st.proto dst bits
             | Some Postponed -> Log.(log st.logger Debug (lazy (Printf.sprintf "...postponed")))
             | None -> Log.(log st.logger Debug (lazy (Printf.sprintf "...no destination?!")))
-        )
+        ) (* TODO: else (re)fragment *)
 
     (** Receive function, called to input an Ethernet frame into the TRX. *)
     let rx (st : State.t) bits =
@@ -504,9 +526,10 @@ struct
 
     (** Creates an {!Eth.TRX.t}. *)
     let make (st : State.t) =
-        Log.(log st.logger Debug (lazy (Printf.sprintf2 "Creating an eth TRX with addresses mac: %s and IPs: %a"
+        Log.(log st.logger Debug (lazy (Printf.sprintf2 "Creating an eth TRX with addresses mac: %s, IPs: %a and gateways: %a"
             (Addr.to_string st.mac)
-            (List.print State.print_my_address) st.my_addresses))) ;
+            (List.print State.print_my_address) st.my_addresses
+            (List.print State.print_gw) st.gateways))) ;
         { ins = { write = tx st ;
                   set_read = fun f -> st.recv <- f } ;
           out = { write = rx st ;

@@ -102,8 +102,14 @@ let bitstring_shift n bits =
   (bitstring_of_int8 0xA0) (let b = bitstring_of_int8 0xE0 in bitstring_shift 1 b ; b)
 *)
 
+(* Do not modify b after that unless you also intend to modify that bitstring! *)
+let bitstring_of_subbytes b ofs len =
+    if len > Bytes.length b then invalid_arg "bitstring_of_bytes" ;
+    b, ofs, len lsl 3
+
+(* See above warning *)
 let bitstring_of_bytes b =
-    Bytes.to_string b |> bitstring_of_string
+    bitstring_of_subbytes b 0 (Bytes.length b)
 
 let bytes_of_bitstring b =
     string_of_bitstring b |> Bytes.of_string
@@ -342,6 +348,43 @@ let int_of_hexstring s =
 (*$= int_of_hexstring & ~printer:dump
     (Some 26) (int_of_hexstring "0000001A")
     (Some 47) (int_of_hexstring "2F")
+*)
+
+let bitstring_of_hexstring str =
+    let bytes = Bytes.create ((String.length str + 1)/ 2) in
+    let is_digit n =
+        n < String.length str &&
+        let c = str.[n] in
+        c >= '0' && c <= '9' ||
+        c >= 'a' && c <= 'f' ||
+        c >= 'A' && c <= 'A' in
+    let rec loop s d =
+        let rec skip s =
+            if s < String.length str - 1 && not (is_digit s) then
+                skip (s + 1)
+            else
+                s in
+        let s = skip s in
+        if is_digit s then (
+            (* Accept up to 2 digits: *)
+            let v, s = int_of_hexchar str.[s], s + 1 in
+            let v, s =
+                if is_digit s then
+                    v lsl 4 + int_of_hexchar str.[s], s + 1
+                else
+                    v, s in
+            Bytes.set bytes d (Char.chr v) ;
+            loop s (d + 1)
+        ) else d in
+    let d = loop 0 0 in
+    assert (d <= Bytes.length bytes) ;
+    bitstring_of_subbytes bytes 0 d
+
+(*$T bitstring_of_hexstring
+  Bitstring.equals (bitstring_of_hexstring "00 00 00") (zeroes_bitstring 24)
+  Bitstring.equals (bitstring_of_hexstring "0") (zeroes_bitstring 8)
+  Bitstring.equals (bitstring_of_hexstring "12 34 56") \
+                   (bitstring_of_hexstring " 12--34--56")
 *)
 
 let may_default v_opt f = match v_opt with Some v -> v | None -> f ()

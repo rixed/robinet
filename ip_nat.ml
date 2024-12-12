@@ -209,6 +209,9 @@ v}
         (* Actually substitute the id: *)
         let new_id = (OrdArray.get st.cnxs n).nat_num in
         let payload = Payload.o (patch_icmp_id icmp new_id) in
+        Log.(log st.logger Debug (lazy (Printf.sprintf "NATing an ICMP packet, subst IP src %s->%s"
+            (Ip.Addr.to_string ip.src)
+            (Ip.Addr.to_string st.addr)))) ;
         let ip = { ip with src = st.addr ; payload } in
         st.emit (Ip.Pdu.pack ip)
 
@@ -284,7 +287,7 @@ v}
                          * copy of the IP header: *)
                         let%bitstring err_ip_pld =
                             {| cnx.orig_num : 16 ; dst_port : 16 ;
-                               rest : bitstring_length rest : bitstring |} in
+                               rest : -1 : bitstring |} in
                         recv_with_err_ip_pld err_ip_pld cnx)
                 | {| _ |} ->
                     Log.(log st.logger Warning (lazy "Cannot decode ICMP err header as UDP/TCP"))
@@ -312,7 +315,7 @@ v}
                         let%bitstring err_ip_pld =
                             {| typ : 8 ; cod : 8 ; checksum : 16 ;
                                cnx.orig_num : 16 ;
-                               rest : bitstring_length rest : bitstring |} in
+                               rest : -1 : bitstring |} in
                         recv_with_err_ip_pld err_ip_pld cnx)
                 | {| _ |} ->
                     Log.(log st.logger Warning (lazy "Cannot decode ICMP err header as ICMP"))
