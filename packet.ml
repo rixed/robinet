@@ -322,4 +322,4 @@ let capture ?promisc ?filter ifname =
         pkts := pkt :: !pkts ;
         Printf.printf ".%!" ;
         aux () in
-    Clock.with_trapped_sigint aux
+    Clock.with_trapped [Sys.sigint] aux

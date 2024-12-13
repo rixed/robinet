@@ -270,10 +270,12 @@ let run wait =
         Thread.yield ()
     done
 
-let with_trapped_sigint f =
-    let prev_sigint =
-        let open Sys in
-        signal sigint (Signal_handle (fun _n -> continue := false)) in
+let with_trapped signals f =
+    let prev_sigs =
+        List.map (fun s ->
+            let open Sys in
+            signal s (Signal_handle (fun _n -> continue := false))
+        ) signals in
     let res = f () in
-    Sys.(set_signal sigint prev_sigint) ;
+    List.iter2 Sys.set_signal signals prev_sigs ;
     res
