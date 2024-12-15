@@ -122,11 +122,40 @@ module Addr = struct
 
     let is_broadcast = eq broadcast
 
+    (** Returns a random Ethernet address.
+     * i_g:
+     * « The I/G address bit is used to identify the destination MAC address as
+     *   an individual MAC address or a group MAC address. If the I/G address
+     *   bit is 0, it indicates that the MAC address field is an individual MAC
+     *   address. If this bit is 1, the MAC address is a group MAC address that
+     *   identifies one or more (or all) stations connected to the IEEE 802
+     *   network. The all-stations broadcast MAC address is a special group MAC
+     *   address of all 1’s »
+     *
+     * « The U/L bit indicates whether the MAC address has been assigned by a
+     *   local or universal administrator. Universal addresses have the U/L bit
+     *   set to 0. If the U/L bit is set to 1, the remaining bits (i.e., all
+     *   bits except the I/G and U/L bits) are locally administered and should
+     *   not be expected to meet the uniqueness requirement of the IEEE
+     *   RA-assigned values. »  -- IEEE 802 *)
+    let true_random ?i_g ?u_l () =
+        let maybe_set b pos bits =
+            match b with
+            | None -> ()
+            | Some true -> Bitstring.set bits pos
+            | Some false -> Bitstring.clear bits pos in
+        let a = randbs 6 in
+        maybe_set i_g 7 a ;
+        maybe_set u_l 6 a ;
+        o a
+    (*$= bitstring_of_int16 & ~printer:hexstring_of_bitstring
+      (bitstring_of_int16 0x01_00) \
+          (let b = bitstring_of_int16 0 in Bitstring.set b 7 ; b)
+    *)
+
     (** Returns a random Ethernet address (but neither broadcast nor zero). *)
-    let rec random () =
-        let a = o (randbs 6) in
-        if eq a broadcast || eq a zero then random ()
-        else a
+    (* In general we just want a locally unique individual address: *)
+    let random = true_random ~i_g:false ~u_l:true
 
     (* Get the Eth address of a device (on Linux). *)
     let of_iface ifname =
