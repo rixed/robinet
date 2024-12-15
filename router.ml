@@ -136,7 +136,7 @@ module Router =
 struct
     (*$< Router *)
 
-    type iface = { mutable trx : trx ; (* Can come handy to splice another trx there *)
+    type iface = { mutable trx : trx ; (** Can come handy to splice another trx there. *)
                            eth : Eth.State.t ;
                    rx_counters : counters ;
                    tx_counters : counters ;
@@ -173,6 +173,15 @@ struct
     (** How many bytes to consider when hashing the packet prefix for load-balancing *)
     let lb_prefix_length = ref 5
 
+    let target_routes ?in_iface ?src_ip ?dst_ip ?proto ?src_port ?dst_port t =
+        List.filter_map (fun r ->
+            if Route.test r t.logger in_iface src_ip dst_ip proto
+                          src_port dst_port then
+                Some r.target
+            else
+                None
+        ) t.routes
+
     (* Sending will perform routing again *)
     let rec maybe_send_icmp t n ip icmp_maker =
         match Eth.State.find_ip4 t.ifaces.(n).eth with
@@ -204,13 +213,9 @@ struct
             match Option.bind ip_opt (Result.to_option % Ip.Pdu.get_ports) with
             | Some (src_port, dst_port) -> Some src_port, Some dst_port
             | None -> None, None in
-        match List.filter_map (fun r ->
-                if Route.test r t.logger in_iface_opt src_opt dst_opt proto_opt
-                              src_port_opt dst_port_opt then
-                    Some r.target
-                else
-                    None
-              ) t.routes with
+        match target_routes ?in_iface:in_iface_opt
+                            ?src_ip:src_opt ?dst_ip:dst_opt ?proto:proto_opt
+                            ?src_port:src_port_opt ?dst_port:dst_port_opt t with
         | [] ->
             (match in_iface_opt, ip_opt with
             | None, _ ->
@@ -295,6 +300,23 @@ struct
         Array.findi (not % is_connected) t.ifaces
 
     (* TODO: similarly, a write n b = t.ifaces.(n).trx.write b *)
+
+    let set_proxy_arp t n v =
+        t.ifaces.(n).eth.do_proxy_arp <-
+            if v then
+                fun (arp : Arp.Pdu.t) ->
+                    match Ip.Addr.of_bitstring arp.sender_proto,
+                          Ip.Addr.of_bitstring arp.target_proto with
+                    | src_ip, dst_ip ->
+                        let targets =
+                            target_routes ~in_iface:n ~src_ip ~dst_ip t in
+                        targets <> [] &&
+                        not (List.exists (function
+                                | Route.Forward { out_iface ; _ } -> out_iface = n
+                                | _ -> false
+                            ) targets)
+            else
+                fun _ -> false
 
     let make_iface ?proto ?mtu ?delay ?loss ?mac ?my_addresses
                    ?(parent_logger=Log.default) n =

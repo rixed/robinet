@@ -306,6 +306,7 @@ struct
           mutable emit : bitstring -> unit ;
           mutable recv : bitstring -> unit ;
           mutable promisc : bitstring -> unit ;
+          mutable do_proxy_arp : Arp.Pdu.t -> bool ;
           (* TODO: these two should be timeouted, requiring a clock *)
           arp_cache : Addr.t option BitHash.t ;     (* proto_addr -> hw_addr option (None when resolving) *)
           (* Hash of messages waiting for an ARP resolution.
@@ -340,18 +341,21 @@ struct
      * @param mac the source {!Eth.Addr.t}
      * @param gateways list of [Gateeway.t]
      * @param promisc an optional function that will receive frames received but not destined to this TRX.
+     * @param do_proxy_arp an optional function instructing the driver to perform proxy-arp on a give ARP request
      * @param proto the {!Proto.t} we want to transmit/receive.
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
 
     let make ?(mtu=1500) ?delay ?loss ?(mac=Addr.random ()) ?(gateways=[])
-             ?(promisc=ignore) ?(my_addresses=[])
-             ?(proto=Proto.ip4) ?(parent_logger=Log.default) () =
+             ?(promisc=ignore) ?(do_proxy_arp=(fun _ -> false))
+             ?(my_addresses=[]) ?(proto=Proto.ip4) ?(parent_logger=Log.default)
+             () =
         let logger = Log.sub parent_logger "eth" in
         { logger ; mac ; gateways ; proto ;
           emit = ignore_bits ~logger ;
           recv = ignore_bits ~logger ;
-          mtu ; promisc ; my_addresses ;
+          mtu ; promisc ; do_proxy_arp ;
+          my_addresses ;
           via = None ;
           connected = false ;
           arp_cache = BitHash.create 3 ;
@@ -509,42 +513,50 @@ struct
                 match Arp.Pdu.unpack (frame.Pdu.payload :> bitstring) with
                 | Error s ->
                     Log.(log st.logger Warning s)
-                | Ok arp ->
-                    Log.(log st.logger Debug (lazy (Printf.sprintf "...an ARP of opcode %s" (Arp.Op.to_string arp.Arp.Pdu.operation)))) ;
-                    if arp.Arp.Pdu.hw_type = Arp.HwType.eth then (
+                | Ok (arp : Arp.Pdu.t) ->
+                    Log.(log st.logger Debug (lazy (Printf.sprintf "...an ARP of opcode %s" (Arp.Op.to_string arp.operation)))) ;
+                    if arp.hw_type = Arp.HwType.eth then (
                         Log.(log st.logger Debug (lazy (Printf.sprintf "...regarding an ethernet device!"))) ;
-                        let sender_hw = Addr.o arp.Arp.Pdu.sender_hw (* will raise if not of the advertised type *)
+                        let sender_hw = Addr.o arp.sender_hw (* will raise if not of the advertised type *)
                         and merge_flag = ref false in
-                        if arp.Arp.Pdu.proto_type = st.proto then (
+                        if arp.proto_type = st.proto then (
                             Log.(log st.logger Debug (lazy (Printf.sprintf "...transporting same proto than me!"))) ;
-                            if BitHash.mem st.arp_cache arp.Arp.Pdu.sender_proto then (
-                                Log.(log st.logger Debug (lazy (Printf.sprintf "...updating entry %s->%s in ARP cache" (hexstring_of_bitstring arp.Arp.Pdu.sender_proto) (Addr.to_string sender_hw)))) ;
+                            if BitHash.mem st.arp_cache arp.sender_proto then (
+                                Log.(log st.logger Debug (lazy (Printf.sprintf "...updating entry %s->%s in ARP cache" (hexstring_of_bitstring arp.sender_proto) (Addr.to_string sender_hw)))) ;
                                 merge_flag := true ;
-                                BitHash.replace st.arp_cache arp.Arp.Pdu.sender_proto (Some sender_hw)
+                                BitHash.replace st.arp_cache arp.sender_proto (Some sender_hw)
                             ) ;
-                            Log.(log st.logger Debug (lazy (Printf.sprintf2 "...concerning '%s' (I'm %a)" (hexstring_of_bitstring arp.Arp.Pdu.target_proto) (List.print (fun oc a -> String.print oc (hexstring_of_bitstring a.State.addr))) st.my_addresses))) ;
-                            if List.exists (fun my_addr -> Bitstring.equals arp.Arp.Pdu.target_proto my_addr.State.addr) st.my_addresses then (
-                                Log.(log st.logger Debug (lazy (Printf.sprintf "...It's about me!!"))) ;
+                            Log.(log st.logger Debug (lazy (Printf.sprintf2 "...concerning '%s' (I'm %a)" (hexstring_of_bitstring arp.target_proto) (List.print (fun oc a -> String.print oc (hexstring_of_bitstring a.State.addr))) st.my_addresses))) ;
+                            let do_reply () =
+                                Arp.Pdu.make_reply arp.hw_type arp.proto_type
+                                    (st.mac :> bitstring) arp.target_proto
+                                    arp.sender_hw arp.sender_proto |>
+                                Arp.Pdu.pack |>
+                                send st Proto.arp sender_hw in
+                            if List.exists (fun my_addr -> Bitstring.equals arp.target_proto my_addr.State.addr) st.my_addresses then (
+                                Log.(log st.logger Debug (lazy "...It's about me!!")) ;
                                 if not !merge_flag then (
-                                    BitHash.add st.arp_cache arp.Arp.Pdu.sender_proto (Some sender_hw) ;
-                                    Log.(log st.logger Debug (lazy (Printf.sprintf "...adding %s->%s in ARP cache" (hexstring_of_bitstring arp.Arp.Pdu.sender_proto) (Addr.to_string sender_hw)))) ;
+                                    BitHash.add st.arp_cache arp.sender_proto (Some sender_hw) ;
+                                    Log.(log st.logger Debug (lazy (Printf.sprintf "...adding %s->%s in ARP cache" (hexstring_of_bitstring arp.sender_proto) (Addr.to_string sender_hw)))) ;
                                 ) ;
-                                if arp.Arp.Pdu.operation = Arp.Op.request then (
-                                    Log.(log st.logger Debug (lazy (Printf.sprintf "...It's a request, let's reply!"))) ;
-                                    let reply = Arp.Pdu.make_reply arp.Arp.Pdu.hw_type arp.Arp.Pdu.proto_type
-                                                                   (st.mac :> bitstring) arp.Arp.Pdu.target_proto
-                                                                   arp.Arp.Pdu.sender_hw arp.Arp.Pdu.sender_proto in
-                                    send st Proto.arp sender_hw (Arp.Pdu.pack reply)
+                                if arp.operation = Arp.Op.request then (
+                                    Log.(log st.logger Debug (lazy "...It's a request, let's reply!")) ;
+                                    do_reply ()
                                 )
+                            ) else if arp.operation = Arp.Op.request &&
+                                      st.do_proxy_arp arp then (
+                                (* Pretend that's me! *)
+                                Log.(log st.logger Debug (lazy "...Let's impersonate the requested IP")) ;
+                                do_reply ()
                             ) ;
                             (* Now that we may have gained knowledge, try to send the msg in waiting queue *)
                             (* TODO: timeout some? *)
-                            Log.(log st.logger Debug (lazy (Printf.sprintf "...Do I have a msg waiting for '%s'?" (hexstring_of_bitstring arp.Arp.Pdu.sender_proto)))) ;
-                            while BitHash.mem st.postponed arp.Arp.Pdu.sender_proto do
+                            Log.(log st.logger Debug (lazy (Printf.sprintf "...Do I have a msg waiting for '%s'?" (hexstring_of_bitstring arp.sender_proto)))) ;
+                            while BitHash.mem st.postponed arp.sender_proto do
                                 Log.(log st.logger Debug (lazy (Printf.sprintf "...Yes!! Let's send it!"))) ;
-                                let msg = BitHash.find st.postponed arp.Arp.Pdu.sender_proto in
+                                let msg = BitHash.find st.postponed arp.sender_proto in
                                 send st st.proto sender_hw msg ;
-                                BitHash.remove st.postponed arp.Arp.Pdu.sender_proto
+                                BitHash.remove st.postponed arp.sender_proto
                             done
                         )
                     )
