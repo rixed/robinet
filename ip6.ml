@@ -81,20 +81,18 @@ module Pdu = struct
              payload_len : 16 ; proto : 8 ; ttl : 8 ;
              src : 128 : bitstring ; dst : 128 : bitstring ;
              payload : payload_len*8 : bitstring |} ->
-            Some { diff_serv ; ecn ; flow_label ;
-                   proto = Ip.Proto.o proto ; ttl ;
-                   src = Ip.Addr.of_bitstring src ;
-                   dst = Ip.Addr.of_bitstring dst ;
-                   payload = Payload.o payload }
-        | {| version : 4 |} when version <> 6 ->
-            if version <> 4 then
-                err (Printf.sprintf "Ip6: Bad version (%d)" version)
-            else None
+            Ok { diff_serv ; ecn ; flow_label ;
+                 proto = Ip.Proto.o proto ; ttl ;
+                 src = Ip.Addr.of_bitstring src ;
+                 dst = Ip.Addr.of_bitstring dst ;
+                 payload = Payload.o payload }
+        | {| 4 : 4 ; _ |} ->
+            Error (lazy "IPv6 looks like v4")
         | {| _ |} ->
-            err "Ip6: Not IPv6"
+            Error (lazy ("Not IPv6: "^ hexstring_of_bitstring_abbrev bits))
 
     (*$Q pack
-      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
 
     (* TODO: unpack with ports a la ip.ml? *)
@@ -106,7 +104,8 @@ end
 
 module TRX = struct
 
-    type t = { src : Ip.Addr.t ; dst : Ip.Addr.t ;
+    type t = { logger : Log.logger ;
+               src : Ip.Addr.t ; dst : Ip.Addr.t ;
                proto : Ip.Proto.t ;
                mutable emit : bitstring -> unit ;
                mutable recv : bitstring -> unit }
@@ -117,20 +116,20 @@ module TRX = struct
         Clock.asap t.emit (Pdu.pack pdu)
 
     let rx t bits = (match Pdu.unpack bits with
-        | None -> ()
-        | Some ip ->
+        | Error s ->
+            Log.(log t.logger Warning s)
+        | Ok ip ->
             if Payload.bitlength ip.Pdu.payload > 0 then Clock.asap t.recv (ip.Pdu.payload :> bitstring))
 
     (* Note: In Eth we do not require dst addr since the trx knows (using ARP) how to get dest addr itself.
      *       IP cannot do this since the application layer won't tell him the destination hostname. Or
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)
-    let make src dst proto =
-        let t = { src ; dst ; proto ;
+    let make src dst proto logger =
+        let t = { logger ; src ; dst ; proto ;
                   emit = ignore ; recv = ignore } in
         { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;
           out = { write = rx t ;
                   set_read = fun f -> t.emit <- f } }
-
 end

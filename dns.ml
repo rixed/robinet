@@ -99,20 +99,20 @@ struct
 
     let unpack_name pkt rest =
         let rec aux prevs o =
-            if o >= Bytes.length pkt then err "DNS: Cannot unpack_name" else
+            if o >= Bytes.length pkt then Error (lazy "DNS: Cannot unpack_name") else
             let count = Char.code (Bytes.get pkt o) in
-            if count = 0 then Some (""::prevs, o+1) else
+            if count = 0 then Ok (""::prevs, o+1) else
             if count < 0xC0 then (
                 let part = Bytes.sub pkt (o+1) count |> Bytes.to_string in
                 aux (part :: prevs) (o+1+count)
             ) else (
                 let offset = ((count land 0x3F) lsl 8) lor Char.code (Bytes.get pkt (o+1)) in
-                Option.Monad.bind (aux prevs offset) (fun (parts, _) ->
-                    Some (parts, o+2))
+                Result.Monad.bind (aux prevs offset) (fun (parts, _) ->
+                    Ok (parts, o+2))
             ) in
-        Option.Monad.bind (aux [] rest) (fun (parts, rest) ->
+        Result.Monad.bind (aux [] rest) (fun (parts, rest) ->
             let name = String.concat "." (List.rev parts) in
-            Some (name, rest))
+            Ok (name, rest))
 
     let read_n16 pkt o =
         if o >= Bytes.length pkt - 1 then invalid_arg "packet too short" ;
@@ -124,8 +124,8 @@ struct
 
     let unpack_questions pkt rest num_qs =
         let rec aux qs rest num_qs =
-            if num_qs = 0 then Some (qs, rest) else (
-                Option.Monad.bind (unpack_name pkt rest)
+            if num_qs = 0 then Ok (qs, rest) else (
+                Result.Monad.bind (unpack_name pkt rest)
                     (fun (name, rest) ->
                         let qtype = QType.o (read_n16 pkt rest)
                         and qclass = read_n16 pkt (rest+2) in
@@ -137,16 +137,16 @@ struct
     let unpack_rrs pkt rest num_rrs =
         let rec aux rrs rest num_rrs =
             if num_rrs = 0 then (
-                Some (rrs, rest)
+                Ok (rrs, rest)
             ) else (
-                Option.Monad.bind (unpack_questions pkt rest 1) (function
+                Result.Monad.bind (unpack_questions pkt rest 1) (function
                     | [ name, qtype, qclass ], rest ->
                         let ttl = read_n32 pkt rest in
                         if debug then Printf.printf "Dns: Decoded RR %d name '%s', qtype=%s, qclass=%d, ttl=%ld\n%!" num_rrs name (QType.to_string qtype) qclass ttl ;
                         let res_data_len = read_n16 pkt (rest+4) in
                         let res_data = Bytes.sub pkt (rest+6) res_data_len in
                         aux ((name, qtype, qclass, ttl, res_data) :: rrs) (rest+4+2+res_data_len) (num_rrs-1)
-                    | _ -> err "Should not happen")
+                    | _ -> Error (lazy "Should not happen"))
             ) in
         aux [] rest num_rrs
 
@@ -158,23 +158,26 @@ struct
             let pkt = bytes_of_bitstring bits
             and rest = 12 (* offset of the rest of the pkt *)
             in (
-            try Option.Monad.bind (unpack_questions pkt rest num_questions) (fun (questions, rest) ->
-                Option.Monad.bind (unpack_rrs pkt rest num_answer_rrs) (fun (answer_rrs, rest) ->
-                Option.Monad.bind (unpack_rrs pkt rest num_authority_rrs) (fun (authority_rrs, rest) ->
-                Option.Monad.bind (unpack_rrs pkt rest num_additional_rrs) (fun (additional_rrs, rest) ->
-                if debug && Bytes.length pkt > rest then err "Dns: Trailing datas in msg" else
-                Some { id = id ; is_query = not qr ; opcode = opcode ;
-                       is_auth = aa ; truncated = tc ;
-                       rec_desired = rd ; rec_avlb = ra ;
-                       authentic_data = ad ; checking_disabled = cd ;
-                       status = rcode ;
-                       questions ;
-                       answer_rrs ;
-                       authority_rrs ;
-                       additional_rrs }))))
+            try Result.Monad.bind (unpack_questions pkt rest num_questions) (fun (questions, rest) ->
+                Result.Monad.bind (unpack_rrs pkt rest num_answer_rrs) (fun (answer_rrs, rest) ->
+                Result.Monad.bind (unpack_rrs pkt rest num_authority_rrs) (fun (authority_rrs, rest) ->
+                Result.Monad.bind (unpack_rrs pkt rest num_additional_rrs) (fun (additional_rrs, rest) ->
+                if debug && Bytes.length pkt > rest then
+                    Error (lazy "Dns: Trailing datas in msg")
+                else
+                    Ok { id = id ; is_query = not qr ; opcode = opcode ;
+                         is_auth = aa ; truncated = tc ;
+                         rec_desired = rd ; rec_avlb = ra ;
+                         authentic_data = ad ; checking_disabled = cd ;
+                         status = rcode ;
+                         questions ;
+                         answer_rrs ;
+                         authority_rrs ;
+                         additional_rrs }))))
             with Invalid_argument _ -> (* One of our Bytes.sub went wrong *)
-                err "Cannot decode names")
-        | {| _ |} -> err "Not DNS"
+                Error (lazy "Cannot decode names"))
+        | {| _ |} ->
+            Error (lazy "Not DNS")
 
     let pack_n16 v str o =
         Bytes.set str o (Char.chr ((v lsr 8) land 0xff)) ;
@@ -190,12 +193,12 @@ struct
         let len = String.length name - s in
         if len = 0 then (
             Bytes.set str d (Char.chr 0) ;
-            Some (d+1)
+            Ok (d + 1)
         ) else (
             let e = String.index_from name s '.' in
             let c = e - s in
             if c > 63 then (
-                err (Printf.sprintf "Dns: Bad name '%s'" name)
+                Error (lazy (Printf.sprintf "Dns: Bad name '%s'" name))
             ) else (
                 Bytes.set str d (Char.chr c) ;
                 Bytes.blit (Bytes.of_string name) s str (d+1) c ;
@@ -206,29 +209,31 @@ struct
     let pack_question (name, (qtype : QType.t), qclass) =
         let len = String.length name in
         if len <> 0 && (name.[0] = '.' || name.[len-1] <> '.') then (
-            err (Printf.sprintf "Dns: Bad qname '%s'" name)
+            Error (lazy (Printf.sprintf "Dns: Bad qname '%s'" name))
         ) else (
             let str = Bytes.create (len + 1 + 4) in
-            Option.Monad.bind (pack_name name 0 str 0) (fun o ->
+            Result.Monad.bind (pack_name name 0 str 0) (fun o ->
                 pack_n16 (qtype :> int) str o ;
                 pack_n16 qclass str (o + 2) ;
-                Some str)
+                Ok str)
         )
 
     let pack_questions qs =
-        Bytes.concat Bytes.empty (List.filter_map pack_question qs)
+        (List.filter_map (Result.to_option % pack_question) qs) |>
+        Bytes.concat Bytes.empty
 
     let pack_rr (name, rtype, rclass, ttl, data) =
-        Option.Monad.bind (pack_question (name, rtype, rclass)) (fun q ->
+        Result.Monad.bind (pack_question (name, rtype, rclass)) (fun q ->
             let datalen = Bytes.length data in
             let str = Bytes.create (6 + datalen) in
             pack_n32 ttl str 0 ;
             pack_n16 datalen str 4 ;
             Bytes.blit data 0 str 6 datalen ;
-            Some (Bytes.cat q str))
+            Ok (Bytes.cat q str))
 
     let pack_rrs rrs =
-        Bytes.concat Bytes.empty (List.filter_map pack_rr rrs)
+        (List.filter_map (Result.to_option % pack_rr) rrs) |>
+        Bytes.concat Bytes.empty
 
     let pack t =
         let%bitstring header = {|
@@ -252,7 +257,7 @@ struct
                  bitstring_of_bytes additional ]
 
     (*$Q pack
-      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
     (*$>*)
 end

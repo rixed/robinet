@@ -50,11 +50,6 @@ let jitter r v =
    Q.float (fun v -> let v' = jitter 0.1 v in abs_float (v'-.v) <= abs_float (v *. 0.1))
  *)
 
-(* TODO: maintain a hash of error counts *)
-(* FIXME: nope, everything should have a logger *)
-let err str = Printf.fprintf stderr "ERROR: %s\n%!" str ; None
-let warn str = Printf.fprintf stderr "WARNING: %s\n%!" str
-
 let bytelength bs = (bitstring_length bs + 7) lsr 3
 
 let takebytes n bs = takebits (n lsl 3) bs

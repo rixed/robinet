@@ -165,15 +165,15 @@ module Pdu = struct
              sender_proto : proto_len*8 : bitstring ;
              target_hw : hw_len*8 : bitstring ;
              target_proto : proto_len*8 : bitstring |} ->
-            Some { hw_type = HwType.o hw_type ;
-                   proto_type = HwProto.o proto_type ;
-                   operation = Op.o operation ;
-                   sender_hw ; sender_proto ;
-                   target_hw ; target_proto }
+            Ok { hw_type = HwType.o hw_type ;
+                 proto_type = HwProto.o proto_type ;
+                 operation = Op.o operation ;
+                 sender_hw ; sender_proto ;
+                 target_hw ; target_proto }
         | {| _ |} ->
-            err "Not ARP"
+            Error (lazy "Not ARP")
     (*$Q pack
-      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
     (*$>*)
 end

@@ -630,51 +630,49 @@ module Pdu = struct
                     takebits payload_len rest
                 else
                     rest in
-            Some { tos = ToS.o tos ; tot_len ;
+            Ok { tos = ToS.o tos ; tot_len ;
                id ; dont_frag ; more_frags ; frag_offset ;
                ttl ; proto = Proto.o proto ;
                src = Addr.o32 src ; dst = Addr.o32 dst ; options ;
                payload = Payload.o payload }
-        | {| version : 4 |} when version <> 4 ->
-            if version <> 6 then
-                err (Printf.sprintf "Ip: Bad version (%d)" version)
-            else None
+        | {| 6 : 4 ; _ |} ->
+            Error (lazy "IPv4 looks like v6")
         | {| _ |} ->
-            err ("Ip: Not IP: "^ hexstring_of_bitstring_abbrev bits)
+            Error (lazy ("Not IPv4: "^ hexstring_of_bitstring_abbrev bits))
 
     (*$Q pack
-      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
 
     (* Returns the source/dest ports from an IP PDU: *)
     let get_ports ip =
         if ip.proto = Proto.tcp then (
-            Option.bind (Tcp.Pdu.unpack (ip.payload :> bitstring))
+            Result.bind (Tcp.Pdu.unpack (ip.payload :> bitstring))
             (fun tcp ->
-                Some ((tcp.Tcp.Pdu.src_port :> int),
-                      (tcp.Tcp.Pdu.dst_port :> int)))
+                Ok ((tcp.Tcp.Pdu.src_port :> int),
+                    (tcp.Tcp.Pdu.dst_port :> int)))
         ) else if ip.proto = Proto.udp then (
-            Option.bind (Udp.Pdu.unpack (ip.payload :> bitstring))
+            Result.bind (Udp.Pdu.unpack (ip.payload :> bitstring))
             (fun udp ->
-                Some ((udp.Udp.Pdu.src_port :> int),
-                      (udp.Udp.Pdu.dst_port :> int)))
-        ) else None
+                Ok ((udp.Udp.Pdu.src_port :> int),
+                    (udp.Udp.Pdu.dst_port :> int)))
+        ) else Error (lazy "Not TCP nor UDP")
 
     (** Unpack an ip packets and return the ip PDU, source port and dest port. *)
     let unpack_with_ports bits =
-        Option.bind (unpack bits) (fun ip ->
-            Option.bind (get_ports ip) (fun (src_port, dst_port) ->
-                Some (ip, src_port, dst_port)))
+        Result.bind (unpack bits) (fun ip ->
+            Result.bind (get_ports ip) (fun (src_port, dst_port) ->
+                Ok (ip, src_port, dst_port)))
     (*$= unpack_with_ports & ~printer:dump
-        (Some (42, 12)) ( \
+        (Ok (42, 12)) ( \
             pack (make Proto.udp (Ip.Addr.random ()) (Ip.Addr.random ()) \
                         (Udp.Pdu.make ~src_port:(Udp.Port.o 42) \
                                       ~dst_port:(Udp.Port.o 12) \
                                       (randbs 10) |> \
                         Udp.Pdu.pack)) |> \
             unpack_with_ports |> \
-            flip Option.bind \
-                (fun (_, src, dst) -> Some (src, dst)) \
+            flip Result.bind \
+                (fun (_, src, dst) -> Ok (src, dst)) \
         )
      *)
     (*$>*)
@@ -711,8 +709,9 @@ module TRX = struct
     (* TODO: handle fragmentation *)
     let rx t bits =
         match Pdu.unpack bits with
-        | None -> ()
-        | Some ip ->
+        | Error s ->
+            Log.(log t.logger Warning s)
+        | Ok ip ->
             if Payload.bitlength ip.Pdu.payload > 0 then
                 Clock.asap t.recv (ip.Pdu.payload :> bitstring)
 

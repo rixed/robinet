@@ -116,8 +116,9 @@ let signal_err t str =
 (* Forward the payload to the socket function or to the server function *)
 let tcp_sock_rx t socks bits =
     match Tcp.Pdu.unpack bits with
-        | None -> ()
-        | Some tcp ->
+        | Error s ->
+            Log.(log t.trx.logger Warning s)
+        | Ok tcp ->
             let key = tcp.Tcp.Pdu.dst_port, tcp.Tcp.Pdu.src_port in
             try
                 let trx =
@@ -143,8 +144,9 @@ let tcp_sock_rx t socks bits =
 
 let udp_sock_rx t socks icmp_trx bits =
     match Udp.Pdu.unpack bits with
-        | None -> ()
-        | Some udp ->
+        | Error s ->
+            Log.(log t.trx.logger Warning s)
+        | Ok udp ->
             let key = udp.Udp.Pdu.dst_port, udp.Udp.Pdu.src_port in
             try
                 let trx =
@@ -170,8 +172,9 @@ let udp_sock_rx t socks icmp_trx bits =
 
 let icmp_rx t ip_trx bits =
     match Icmp.Pdu.unpack bits with
-        | None -> ()
-        | Some Icmp.Pdu.{ msg_type ; payload = Ids (id, seq, pld) ; _ }
+        | Error s ->
+            Log.(log t.trx.logger Warning s)
+        | Ok Icmp.Pdu.{ msg_type ; payload = Ids (id, seq, pld) ; _ }
             when Icmp.MsgType.is_echo_request msg_type ->
                 Log.(log t.trx.logger Debug (lazy "Answering a PING")) ;
                 Icmp.Pdu.make_echo_reply id seq ~pld |>
@@ -215,8 +218,9 @@ let ip_is_set t =
 
 let rec with_resolver_trx t cont =
     let dns_recv _trx bits = (match Dns.Pdu.unpack bits with
-        | None -> ()
-        | Some pdu ->
+        | Error s ->
+            Log.(log t.trx.logger Warning s)
+        | Ok pdu ->
             Log.(log t.trx.logger Debug (lazy (Printf.sprintf "Received DNS %s, opcode %d" (if pdu.Dns.Pdu.is_query then "query" else "response") pdu.Dns.Pdu.opcode))) ;
             if not pdu.Dns.Pdu.is_query &&
                pdu.Dns.Pdu.opcode = Dns.std_query (* status? *) &&
@@ -464,9 +468,10 @@ let udp_server t src_port server_f = Hashtbl.add t.udp_servers src_port server_f
 let ip_recv t bits =
     with_my_ip t (fun my_ip ->
         match Ip.Pdu.unpack bits with
-        | None -> ()
+        | Error s ->
+            Log.(log t.trx.logger Warning s)
         (* Shouldn't we check first that the dest IP is my_ip? or broadcast? *)
-        | Some ip ->
+        | Ok ip ->
             Log.(log t.trx.logger Info (lazy (Printf.sprintf "Received an IP packet."))) ;
             t.last_ip_packet <- Some ip ;
             if ip.Ip.Pdu.proto = Ip.Proto.tcp then (
@@ -599,34 +604,37 @@ let make_dhcp ?gateways ?search_sfx ?nameserver ?mac ?on ~netmask (*?(netmask==I
     let init ?on_ip t =
         (* Will receive all eth frames until we got an IP address *)
         let dhcp_client bits = (match Ip.Pdu.unpack bits with
-            | None -> ()
-            | Some (ip : Ip.Pdu.t) ->
+            | Error s ->
+                Log.(log t.trx.logger Warning s)
+            | Ok (ip : Ip.Pdu.t) ->
                 if ip.proto <> Ip.Proto.udp then (
                     Log.(log t.trx.logger Debug (lazy (Printf.sprintf "Ignoring IP packet of proto %s while waiting for DHCP offer" (Ip.Proto.to_string ip.proto))))
                 ) else (match Udp.Pdu.unpack (ip.payload :> bitstring) with
-                    | None -> ()
-                    | Some (udp : Udp.Pdu.t) ->
+                    | Error s ->
+                        Log.(log t.trx.logger Warning s)
+                    | Ok (udp : Udp.Pdu.t) ->
                         if udp.src_port <> (Udp.Port.o 67) || udp.dst_port <> (Udp.Port.o 68) then (
                             Log.(log t.trx.logger Debug (lazy (Printf.sprintf "Ignoring UDP packet from %s:%s to %s:%s while waiting for DHCP offer"
                                 (Ip.Addr.to_string ip.src) (Udp.Port.to_string udp.src_port)
                                 (Ip.Addr.to_string ip.dst) (Udp.Port.to_string udp.dst_port))))
                         ) else (
                             match Dhcp.Pdu.unpack (udp.payload :> bitstring) with
-                            | None -> ()
-                            | Some (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.offer ->
+                            | Error s ->
+                                Log.(log t.trx.logger Warning s)
+                            | Ok (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.offer ->
                                 Log.(log t.trx.logger Debug (lazy (Printf.sprintf "Got DHCP OFFER from %s, accepting it" (Ip.Addr.to_string ip.src)))) ;
                                 (* TODO: check the Xid? *)
                                 let pdu = Dhcp.Pdu.make_request ~chaddr:(t.eth_state.mac :> bitstring) ~xid:dhcp.xid ~host_name ?server_id:dhcp.server_id dhcp.yiaddr in
                                 let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
                                 let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Udp.Pdu.pack pdu) in
                                 tx t.eth_trx (Ip.Pdu.pack pdu)
-                            | Some (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.ack ->
+                            | Ok (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.ack ->
                                 Log.(log t.trx.logger Debug (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.src)))) ;
                                 (* TODO: set other params than IP, such as netmask! *)
                                 set_ip t dhcp.yiaddr netmask ;
                                 (* TODO: Send a gratuitous ARP request? *)
                                 Option.may (fun on_ip -> Clock.asap on_ip t) on_ip
-                            | Some _ ->
+                            | Ok _ ->
                                 (* TODO: print it *)
                                 t.trx.signal_err "Ignoring a DHCP message"))) in
         let rec send_discover () =

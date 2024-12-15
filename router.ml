@@ -50,6 +50,7 @@ struct
         (* TODO: MirrorTo, Deny, Ignore, with a default behavior for packets
          * dropping out of the routing table... *)
 
+    (* TODO: add usage count *)
     type t = { (* Tests *)
                in_iface : int option ;              (** Test on incoming iface *)
                src_mask : Ip.Cidr.t option ;        (** Test on source IP *)
@@ -195,12 +196,12 @@ struct
             | None -> "generated traffic"))) ;
         let ip_opt, src_opt, dst_opt, ttl_opt, proto_opt =
             match Ip.Pdu.unpack bits with
-            | None ->
+            | Error _ ->
                 None, None, None, None, None
-            | Some ip ->
+            | Ok ip ->
                 Some ip, Some ip.Ip.Pdu.src, Some ip.dst, Some ip.ttl, Some ip.proto in
         let src_port_opt, dst_port_opt =
-            match Option.bind ip_opt Ip.Pdu.get_ports with
+            match Option.bind ip_opt (Result.to_option % Ip.Pdu.get_ports) with
             | Some (src_port, dst_port) -> Some src_port, Some dst_port
             | None -> None, None in
         match List.filter_map (fun r ->
@@ -615,7 +616,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?dhcp_range
     let server_eth = Eth.(TRX.make State.(make ~my_addresses:[ make_my_ip_address server_ip ] ())) in
     let src = ref None in
     let server_recv bits = (* check source IP is the public one (NATed) *)
-        let ip = Ip.Pdu.unpack bits |> Option.get in
+        let ip = Ip.Pdu.unpack bits |> Result.get_ok in
         src := Some ip.Ip.Pdu.src in
     ignore (server_recv <-= server_eth) ;
     gw_trx.trx <==> server_eth ;

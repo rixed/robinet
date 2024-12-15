@@ -15,8 +15,9 @@ let run () =
     let ip  = Ip.TRX.make my_ip host_ip Ip.Proto.icmp host.trx.logger in
     (* What to do when receiving an ip pck *)
     let my_recv bits = match Icmp.Pdu.unpack bits with
-        | None -> error "Cannot decode echo reply"
-        | Some { Icmp.Pdu.msg_type = msg_type ; Icmp.Pdu.payload = payload } ->
+        | Error s ->
+            error ("Cannot decode echo reply: "^ Lazy.force s)
+        | Ok { Icmp.Pdu.msg_type = msg_type ; Icmp.Pdu.payload = payload } ->
             assert (Icmp.MsgType.type_of msg_type = 0) ;
             assert (Icmp.MsgType.code_of msg_type = 0) ;
             (match payload with

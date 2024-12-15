@@ -132,14 +132,14 @@ struct
              win_size : 16 ; _checksum : 16 ; urg_ptr  : 16 ;
              options : ((hdr_len lsl 2) - 20) * 8 : bitstring ;
              payload  : -1 : bitstring |} ->
-        Some { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
+        Ok { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
                seq_num  = SeqNum.o seq_num  ; ack_num  = SeqNum.o ack_num ;
                flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
                win_size ; urg_ptr  ; options ; payload = Payload.o payload }
-        | {| _ |} -> err "Not TCP"
+        | {| _ |} -> Error (lazy "Not TCP")
 
     (*$Q pack
-      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
 
     let has_payload t =
@@ -324,8 +324,9 @@ struct
     and is_established t = t.sent_pld > 0 && t.rcvd_pld > 0
 
     and rx t bits = (match Pdu.unpack bits with (* If rx were receiving unpacked PDUs then we could bind unpack to rx *)
-        | None -> ()
-        | Some tcp ->
+        | Error s ->
+            Log.(log t.logger Warning s)
+        | Ok tcp ->
             Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Received a segment!"))) ;
             (* TODO: check checksum *)
             if tcp.Pdu.flags.Pdu.syn then (

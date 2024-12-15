@@ -152,16 +152,16 @@ module Pdu = struct
     let unpack bits = match%bitstring bits with
         | {| (128|129) as typ : 8 ; 0 : 8 ; _checksum : 16 ;
              id : 16 ; seq : 16 ; pld : -1 : bitstring |} ->
-            Some { msg_type = MsgType.o (typ, 0) ;
-                   payload = Ids (id, seq, Payload.o pld) }
+            Ok { msg_type = MsgType.o (typ, 0) ;
+                 payload = Ids (id, seq, Payload.o pld) }
         | {| typ : 8 ; cod : 8 ; _checksum : 16 ;
              pld : -1 : bitstring |} ->
-            Some { msg_type = MsgType.o (typ, cod) ;
-                   payload = Unknown (Payload.o pld) }
+            Ok { msg_type = MsgType.o (typ, cod) ;
+                 payload = Unknown (Payload.o pld) }
         | {| _ |} ->
-            err "Not ICMP"
+            Error (lazy "Not ICMP")
     (*$Q pack
-      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
     (*$>*)
 end

@@ -56,12 +56,12 @@ struct
         | {| src_port : 16 ; dst_port : 16 ;
              length   : 16 ; _checksum : 16 ;
              payload  : (length-8) * 8 : bitstring |} when length >= 8 ->
-            Some { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
-                   payload  = Payload.o payload }
-        | {| _ |} -> err "Not UDP"
+            Ok { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
+                 payload  = Payload.o payload }
+        | {| _ |} -> Error (lazy "Not UDP")
 
     (*$Q pack
-      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
     (*$>*)
 end
@@ -85,8 +85,9 @@ struct
 
     (* TODO: check checksum *)
     let rx t bits = (match Pdu.unpack bits with
-        | None -> ()
-        | Some udp ->
+        | Error s ->
+            Log.(log t.logger Warning s)
+        | Ok udp ->
             Log.(log t.logger Debug (lazy (Printf.sprintf "Udp: Received a datagram"))) ;
             Log.(log t.logger Debug (lazy (Printf.sprintf "Udp: Got a datagram with %d bytes" (Payload.length udp.Pdu.payload)))) ;
             if Payload.bitlength udp.Pdu.payload > 0 then Clock.asap t.recv (udp.Pdu.payload :> bitstring))

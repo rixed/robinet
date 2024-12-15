@@ -61,14 +61,14 @@ module Pdu = struct
         | {| prio : 3 ; cfi : 1 ; id : 12 ;
              proto : 16 ;
              payload : -1 : bitstring |} ->
-            Some { prio ; cfi ; id ;
-                   proto = Arp.HwProto.o proto ;
-                   payload = Payload.o payload }
+            Ok { prio ; cfi ; id ;
+                 proto = Arp.HwProto.o proto ;
+                 payload = Payload.o payload }
         | {| _ |} ->
-            err "Not 802.1q"
+            Error (lazy "Not 802.1q")
 
     (*$Q pack
-      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
     (*$>*)
 end
@@ -83,7 +83,8 @@ end
 module TRX =
 struct
     type t =
-        { prio : int ; id : int ;
+        { logger : Log.logger ;
+          prio : int ; id : int ;
           proto : Arp.HwProto.t ;
           mutable emit : bitstring -> unit ;
           mutable recv : bitstring -> unit }
@@ -95,8 +96,9 @@ struct
 
     (** Receive function, called to output untaggd frames from the 802.1q tunnel. *)
     let rx t bits = match Pdu.unpack bits with
-        | None -> ()
-        | Some frame ->
+        | Error s ->
+            Log.(log t.logger Warning s)
+        | Ok frame ->
             if frame.Pdu.proto = t.proto && Payload.bitlength frame.Pdu.payload > 0 then (
                 Clock.asap t.recv (frame.Pdu.payload :> bitstring)
             )
@@ -106,10 +108,10 @@ struct
      * @param id then vlan tag.
      * @param proto the {!Arp.HwProto.t} we want to transmit/receive.
      *)
-    let make ?logger prio id proto =
-        let t = { prio ; id ; proto ;
-                  emit = ignore_bits ?logger ;
-                  recv = ignore_bits ?logger } in
+    let make prio id proto logger =
+        let t = { logger ; prio ; id ; proto ;
+                  emit = ignore_bits ~logger ;
+                  recv = ignore_bits ~logger } in
         { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;
           out = { write = rx t ;

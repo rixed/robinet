@@ -235,21 +235,21 @@ module Pdu = struct
     let unpack bits = match%bitstring bits with
         | {| 5 : 8 ; cod : 8 ; _checksum : 16 ;
              ip : 32 ; pld : -1 : bitstring |} ->
-            Some { msg_type = MsgType.o (5, cod) ;
-                   payload = Redirect (Ip.Addr.o32 ip, Payload.o pld) }
+            Ok { msg_type = MsgType.o (5, cod) ;
+                 payload = Redirect (Ip.Addr.o32 ip, Payload.o pld) }
         | {| typ : 8 ; cod : 8 ; _checksum : 16 ;
              id : 16 ; seq : 16 ; pld : -1 : bitstring |}
             when typ = 0 || typ = 8 || (typ >= 13 && typ <= 16) ->
-            Some { msg_type = MsgType.o (typ, cod) ;
-                   payload = Ids (id, seq, Payload.o pld) }
+            Ok { msg_type = MsgType.o (typ, cod) ;
+                 payload = Ids (id, seq, Payload.o pld) }
         | {| typ : 8 ; cod : 8 ; _checksum : 16 ;
             ptr : 8 ; _ : 8 ; mtu : 16 ; pld : -1 : bitstring |} ->
-            Some { msg_type = MsgType.o (typ, cod) ;
-                   payload = Header { ptr ; mtu ; pld = Payload.o pld } }
+            Ok { msg_type = MsgType.o (typ, cod) ;
+                 payload = Header { ptr ; mtu ; pld = Payload.o pld } }
         | {| _ |} ->
-            err "Not ICMP"
+            Error (lazy "Not ICMP")
     (*$Q pack
-      (Q.make ~print:(fun pdu -> hexstring_of_bitstring (pdu :> bitstring)) (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make ~print:(fun pdu -> hexstring_of_bitstring (pdu :> bitstring)) (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
     (*$>*)
 end

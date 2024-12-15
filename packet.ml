@@ -237,8 +237,8 @@ module Pdu = struct
         let unpack_raw bits =
             if bitstring_is_empty bits then [] else [ Raw bits ] in
         let try_unpack unp do_t bits =
-            match unp bits with None -> unpack_raw bits
-                              | Some x -> do_t x in
+            match unp bits with Error _ -> unpack_raw bits
+                              | Ok x    -> do_t x in
         let unpack_dhcp = try_unpack Dhcp.Pdu.unpack (fun x -> [ Dhcp x]) in
         let unpack_dns  = try_unpack Dns.Pdu.unpack  (fun x -> [ Dns x]) in
         let unpack_icmp = try_unpack Icmp.Pdu.unpack (fun x -> [ Icmp x]) in

@@ -307,9 +307,9 @@ struct
                     client_id = None ;
                     request_list = None ;
                     other_options = [] } in
-          if unpack_options t options then Some t
-          else err "Dhcp: Cannot decode options"
-        | {| _ |} -> err "Dhcp: Not DHCP"
+          if unpack_options t options then Ok t
+          else Error (lazy "Dhcp: Cannot decode options")
+        | {| _ |} -> Error (lazy "Dhcp: Not DHCP")
 
     let pack_options t =
         let may_pack_msgtyp t v = BatOption.map (fun (v : MsgType.t) -> let%bitstring b = {| t : 8 ; 1 : 8 ; (v :> int) : 8 |} in b) v
@@ -439,7 +439,7 @@ struct
             make_request ~xid ?server_id (Ip.Addr.random ())
 
     (*$Q pack
-      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (BatOption.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
     (*$>*)
 

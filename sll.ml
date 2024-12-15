@@ -82,15 +82,15 @@ module Pdu = struct
              _zeroes : if ll_addr_len*8 >= 64 then 0 else 64-ll_addr_len*8 : bitstring ;
              proto : 16 ;
              payload : -1 : bitstring |} when pkt_type >= 0 && pkt_type <= 4 ->
-            Some { pkt_type = pkt_type_of_int pkt_type ;
-                   ll_addr_type ; ll_addr ;
-                   proto = Arp.HwProto.o proto ;
-                   payload = Payload.o payload }
+            Ok { pkt_type = pkt_type_of_int pkt_type ;
+                 ll_addr_type ; ll_addr ;
+                 proto = Arp.HwProto.o proto ;
+                 payload = Payload.o payload }
         | {| _ |} ->
-            err "Not SLL"
+            Error (lazy "Not SLL")
 
     (*$Q pack
-      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
     (*$>*)
 end

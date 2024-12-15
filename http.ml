@@ -261,10 +261,10 @@ struct
         let str = string_of_bitstring bits
         and p = parzer () in
         match p (String.to_list str) false with
-            | Res (msg, []) -> Some msg
-            | Wait          -> err "Http: unpack: Cannot unpack (truncated?)"
-            | Fail          -> err "Http: unpack: not HTTP"
-            | Res (_, l)    -> err (Printf.sprintf "Http: unpack: %d bytes left" (List.length l))
+            | Res (msg, []) -> Ok msg
+            | Wait          -> Error "Http: unpack: Cannot unpack (truncated?)"
+            | Fail          -> Error "Http: unpack: not HTTP"
+            | Res (_, l)    -> Error (Printf.sprintf "Http: unpack: %d bytes left" (List.length l))
 end
 
 
@@ -362,95 +362,95 @@ let post_encode body =
 (*$R
     let simple_msg = bitstring_of_string "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n12345" in
     assert_bool "unpack simple msg" (match Pdu.unpack simple_msg with
-        | Some { Pdu.cmd = Status 200 ;
-                 Pdu.headers = [ "Content-Type", "text/plain" ] ;
-                 Pdu.body = "12345" } -> true
-        | Some x ->
+        | Ok { Pdu.cmd = Status 200 ;
+               Pdu.headers = [ "Content-Type", "text/plain" ] ;
+               Pdu.body = "12345" } -> true
+        | Ok x ->
             let msg = Pdu.pack x in
             Printf.printf "Http: Fail: simple_msg: got %s\n" (string_of_bitstring msg) ;
             false
-        | None ->
+        | Error _ ->
             Printf.printf "Http: Fail: cannot Unpack\n" ;
             false) ;
 *)
 (*$R
     let simple_msg2 = bitstring_of_string "GET /toto HTTP/1.1\r\n\r\n" in
     assert_bool "unpack simple msg (2)" (match Pdu.unpack simple_msg2 with
-        | Some { Pdu.cmd = Request ("GET", "/toto") ;
-                 Pdu.headers = [] ;
-                 Pdu.body = "" } -> true
-        | Some x ->
+        | Ok { Pdu.cmd = Request ("GET", "/toto") ;
+               Pdu.headers = [] ;
+               Pdu.body = "" } -> true
+        | Ok x ->
             let msg = Pdu.pack x in
             Printf.printf "Http: Fail: simple_msg2: got %s\n" (string_of_bitstring msg) ;
             false
-        | None ->
+        | Error _ ->
             Printf.printf "Http: Fail: Cannot unpack simple_msg2\n" ;
             false) ;
 *)
 (*$R
     let complex_msg = bitstring_of_string (file_content "tests/http.real") in
     assert_bool "unpack complex msg" (match Pdu.unpack complex_msg with
-        | Some { Pdu.cmd = Status 200 ;
-                 Pdu.headers = hs ;
-                 Pdu.body = body } ->
+        | Ok { Pdu.cmd = Status 200 ;
+               Pdu.headers = hs ;
+               Pdu.body = body } ->
             (if List.length hs <> 9 then (Printf.printf "Http: Fail: bad header count\n" ; false) else true) &&
             (if headers_find "Connection" hs <> Some "Keep-Alive" then (Printf.printf "Http: Fail: Cannot find header\n" ; false) else true) &&
             (if String.length body <> 2175 then (Printf.printf "Http: Fail: Bad body length (%d)\n" (String.length body) ; false) else true)
-        | Some x ->
+        | Ok x ->
             let msg = Pdu.pack x in
             Printf.printf "Http: Fail: complex_msg: got %s\n" (string_of_bitstring msg) ;
             false
-        | None ->
+        | Error _ ->
             Printf.printf "Http: Fail: Cannot unpack complex_msg\n" ;
             false) ;
 *)
 (*$R
     let chunked_msg = bitstring_of_string (file_content "tests/http.chunked") in
     assert_bool "unpack chunked msg" (match Pdu.unpack chunked_msg with
-        | Some { Pdu.cmd = Status 200 ;
-                 Pdu.headers = hs ;
-                 Pdu.body = body } ->
+        | Ok { Pdu.cmd = Status 200 ;
+               Pdu.headers = hs ;
+               Pdu.body = body } ->
             (if List.length hs <> 9 then (Printf.printf "Http: Fail: bad header count\n" ; false) else true) &&
             (if headers_find "Server" hs <> Some "gws" then (Printf.printf "Http: Fail: Cannot find header\n" ; false) else true) &&
             (if String.length body <> 0x1000+0xCEA+0x97C then (Printf.printf "Http: Fail: Bad body length (%d)\n" (String.length body) ; false) else true)
-        | Some x ->
+        | Ok x ->
             let msg = Pdu.pack x in
             Printf.printf "Http: Fail: chunked_msg: got %s\n" (string_of_bitstring msg) ;
             false
-        | None ->
+        | Error _ ->
             Printf.printf "Http: Fail: Cannot unpack chunked_msg\n" ;
             false) ;
 *)
 (*$R
     let err403_msg = bitstring_of_string (file_content "tests/http.403") in
     assert_bool "unpack err 403" (match Pdu.unpack err403_msg with
-        | Some { Pdu.cmd = Status 403 ;
-                 Pdu.headers = hs ;
-                 Pdu.body = body } ->
+        | Ok { Pdu.cmd = Status 403 ;
+               Pdu.headers = hs ;
+               Pdu.body = body } ->
             (if List.length hs <> 4 then (Printf.printf "Http: Fail: bad header count\n" ; false) else true) &&
             (if headers_find "Server" hs <> Some "GFE/2.0" then (Printf.printf "Http: Fail: Cannot find header\n" ; false) else true) &&
             (if String.length body <> 1207 then (Printf.printf "Http: Fail: Bad body length (%d)\n" (String.length body) ; false) else true)
-        | Some x ->
+        | Ok x ->
             let msg = Pdu.pack x in
             Printf.printf "Http: Fail: err403_msg: got %s\n" (string_of_bitstring msg) ;
             false
-        | None ->
+        | Error _ ->
             Printf.printf "Http: Fail: Cannot unpack err403_msg\n" ;
             false) ;
 *)
 (*$R
     let post_msg = bitstring_of_string (file_content "tests/http.post") in
     assert_bool "unpack POST" (match Pdu.unpack post_msg with
-        | Some { Pdu.cmd = Request ("POST", "/nevrax/do_login.html") ;
-                 Pdu.headers = hs ;
-                 Pdu.body = "login=admin&password=admin&submit=Connexion&came_from=%2F" } ->
+        | Ok { Pdu.cmd = Request ("POST", "/nevrax/do_login.html") ;
+               Pdu.headers = hs ;
+               Pdu.body = "login=admin&password=admin&submit=Connexion&came_from=%2F" } ->
             (if List.length hs <> 12 then (Printf.printf "Http: Fail: bad header count\n" ; false) else true) &&
             (if headers_find "Connection" hs <> Some "keep-alive" then (Printf.printf "Http: Fail: Cannot find header\n" ; false) else true)
-        | Some x ->
+        | Ok x ->
             let msg = Pdu.pack x in
             Printf.printf "Http: Fail: http.post: got %s\n" (string_of_bitstring msg) ;
             false
-        | None ->
+        | Error _ ->
             Printf.printf "Http: Fail: Cannot unpack http.post\n" ;
             false)
 *)

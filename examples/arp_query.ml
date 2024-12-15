@@ -36,12 +36,14 @@ let wait_answer target_ip_bits =
     let rec aux () =
         let pdu = Pcap.sniff iface in
         (match Eth.Pdu.unpack (pdu.Pcap.Pdu.payload :> bitstring) with
-        | None -> failwith "Cannot unpack Eth"
-        | Some eth ->
+        | Error s ->
+            failwith ("Cannot unpack Eth: "^ Lazy.force s)
+        | Ok eth ->
             if eth.Eth.Pdu.proto <> Arp.HwProto.arp then aux () else
             (match Arp.Pdu.unpack (eth.Eth.Pdu.payload :> bitstring) with
-            | None -> failwith "Cannot unpack ARP"
-            | Some arp ->
+            | Error s ->
+                failwith ("Cannot unpack ARP: "^ Lazy.force s)
+            | Ok arp ->
                 if arp.Arp.Pdu.operation <> Arp.Op.reply ||
                    not (Bitstring.equals arp.Arp.Pdu.sender_proto target_ip_bits) then aux ()
                 else

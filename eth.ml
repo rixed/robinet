@@ -171,35 +171,35 @@ module Pdu = struct
              src : 6*8 : bitstring ;
              proto : 16 ;
              payload : -1 : bitstring |} (* FIXME: might not be a proto if < 1500 *) ->
-            Some { src = Addr.o src ; dst = Addr.o dst ;
-                   proto = Proto.o proto ;
-                   payload = Payload.o payload }
+            Ok { src = Addr.o src ; dst = Addr.o dst ;
+                 proto = Proto.o proto ;
+                 payload = Payload.o payload }
         | {| _ |} ->
-            err "Not Eth"
+           Error (lazy "Not Eth")
 
     let extract_proto do_extract proto pld =
         if proto = Proto.ip4 then
             do_extract pld
         else if proto = Proto.ieee8021q then
-            Option.Monad.bind (Vlan.Pdu.unpack pld) (fun vlan ->
+            Result.Monad.bind (Vlan.Pdu.unpack pld) (fun vlan ->
                 if vlan.Vlan.Pdu.proto = Proto.ip4 then
                     do_extract (vlan.Vlan.Pdu.payload :> bitstring)
-                else None)
-        else None
+                else Error (lazy ("Vlan proto not IPv4")))
+        else Error (lazy ("Eth proto neither IPv4 not ieee8021q"))
 
     (* Actually only extract IP addresses *)
     let extract_src_proto =
         extract_proto (fun pdu ->
-            Option.Monad.bind (Ip.Pdu.unpack pdu) (fun ip ->
-                Some ip.Ip.Pdu.src))
+            Result.Monad.bind (Ip.Pdu.unpack pdu) (fun ip ->
+                Ok ip.Ip.Pdu.src))
 
     let extract_dst_proto =
         extract_proto (fun pdu ->
-            Option.Monad.bind (Ip.Pdu.unpack pdu) (fun ip ->
-                Some ip.Ip.Pdu.dst))
+            Result.Monad.bind (Ip.Pdu.unpack pdu) (fun ip ->
+                Ok ip.Ip.Pdu.dst))
 
     (*$Q pack
-      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Option.get (unpack t)))
+      (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
     (*$>*)
 end
@@ -397,17 +397,17 @@ struct
 
     let dst_for (st : State.t) bits =
         let arp_resolve_ipv4_pld sender_ip pld =
-            Option.Monad.bind (Ip.Pdu.unpack pld) (fun ip ->
+            Result.Monad.bind (Ip.Pdu.unpack pld) (fun ip ->
                 (* Note: we might be a router forwarding a packet. In that case,
                  * ip.mac is that of the original packet, yet the ARP sender addr
                  * is that of the emitting device, aka the router: *)
                 let target_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.dst in
-                Some (arp_resolve_ipv4 st bits sender_ip target_ip)) in
+                Ok (arp_resolve_ipv4 st bits sender_ip target_ip)) in
         let arp_resolve_ieee8021q_pld sender_ip pld =
-            Option.Monad.bind (Vlan.Pdu.unpack pld) (fun vlan ->
+            Result.Monad.bind (Vlan.Pdu.unpack pld) (fun vlan ->
                 if vlan.Vlan.Pdu.proto = Proto.ip4 then
                     arp_resolve_ipv4_pld sender_ip (vlan.Vlan.Pdu.payload :> bitstring)
-                else None) in
+                else Error (lazy "Vlan proto not IPv4")) in
         let arp_resolve_pld pld =
             let my_addr =
                 match st.my_addresses with
@@ -418,19 +418,19 @@ struct
             ) else if st.proto = Proto.ieee8021q then (
                 arp_resolve_ieee8021q_pld my_addr pld
             ) else (
-                err "Don't know how to resolve address for this protocol"
+                Error (lazy "Don't know how to resolve address for this protocol")
             ) in
         let same_net my_addresses bits =
             List.exists (fun (my_addr : State.my_address) ->
                 match_mask my_addr.netmask my_addr.addr bits
             ) my_addresses in
         match Pdu.extract_dst_proto st.proto bits with
-        | Some dst_ip when dst_ip = Ip.Addr.broadcast ->
-            Some (Dst Addr.broadcast)
-        | Some dst_ip when same_net st.my_addresses (Ip.Addr.to_bitstring dst_ip) ->
+        | Ok dst_ip when dst_ip = Ip.Addr.broadcast ->
+            Ok (Dst Addr.broadcast)
+        | Ok dst_ip when same_net st.my_addresses (Ip.Addr.to_bitstring dst_ip) ->
             Log.(log st.logger Debug (lazy "Same network as me, sending directly")) ;
             arp_resolve_pld bits (* FIXME: should also tell us which source address to use *)
-        | Some dst_ip ->
+        | Ok dst_ip ->
             Log.(log st.logger Debug (lazy (Printf.sprintf2 "Not on my LAN (my addresses = %a)" (List.print State.print_my_address) st.my_addresses))) ;
             (match gw_for_ip st dst_ip with
             | None ->
@@ -438,32 +438,32 @@ struct
                 arp_resolve_pld bits
             | Some (Mac addr) ->
                 Log.(log st.logger Debug (lazy (Printf.sprintf "Using GW MAC %s" (Addr.to_string addr)))) ;
-                Some (Dst addr)
+                Ok (Dst addr)
             | Some (IPv4 ip)  ->
                 Log.(log st.logger Debug (lazy (Printf.sprintf "Using GW IP %s" (Ip.Addr.to_string ip)))) ;
                 let sender_ip = match st.my_addresses with
                     | my_ip::_ -> my_ip.addr
                     | []       -> Ip.Addr.zero |> Ip.Addr.to_bitstring (* maybe take the source IP from the payload? *) in
-                Some (arp_resolve_ipv4 st bits sender_ip (Ip.Addr.to_bitstring ip)))
-        | None ->
-            Log.(log st.logger Warning (lazy (Printf.sprintf2 "Cannot extract dest IP"))) ;
-            None
+                Ok (arp_resolve_ipv4 st bits sender_ip (Ip.Addr.to_bitstring ip)))
+        | Error s ->
+            Error (lazy ("Cannot extract dest IP: "^ Lazy.force s))
 
     (** Transmit function. [tx t payload] Will send the payload. *)
     let tx (st : State.t) bits =
         Log.(log st.logger Debug (lazy (Printf.sprintf "TX a payload of %d bytes (while MTU=%d)" (bytelength bits) st.mtu))) ;
         if bytelength bits <= st.mtu then (
             match dst_for st bits with
-            | Some (Dst dst) -> send st st.proto dst bits
-            | Some Postponed -> Log.(log st.logger Debug (lazy (Printf.sprintf "...postponed")))
-            | None -> Log.(log st.logger Debug (lazy (Printf.sprintf "...no destination?!")))
+            | Ok (Dst dst) -> send st st.proto dst bits
+            | Ok Postponed -> Log.(log st.logger Debug (lazy (Printf.sprintf "...postponed")))
+            | Error s -> Log.(log st.logger Debug s)
         ) (* TODO: else (re)fragment *)
 
     (** Receive function, called to input an Ethernet frame into the TRX. *)
     let rx (st : State.t) bits =
         match Pdu.unpack bits with
-        | None -> ()
-        | Some frame ->
+        | Error s ->
+            Log.(log st.logger Warning s)
+        | Ok frame ->
             Log.(log st.logger Debug (lazy (Printf.sprintf "Got an eth frame of proto %s for %s" (Proto.to_string frame.Pdu.proto) (Addr.to_string frame.Pdu.dst)))) ;
             if frame.Pdu.proto = st.proto &&
                (Addr.eq frame.Pdu.dst st.mac || Addr.eq frame.Pdu.dst Addr.broadcast) then (
@@ -471,15 +471,16 @@ struct
                 if Payload.bitlength frame.Pdu.payload > 0 then (
                     (* Take note of the MAC/IP pair of the sender (TODO: with a short timeout) : *)
                     Pdu.extract_src_proto frame.proto (frame.payload :> bitstring) |>
-                    Option.may (fun ip_src ->
+                    Result.iter (fun ip_src ->
                         let src_proto_addr = Ip.Addr.to_bitstring ip_src in
                         BitHash.replace st.arp_cache src_proto_addr (Some frame.src)) ;
                     Clock.asap st.recv (frame.Pdu.payload :> bitstring)
                 )
             ) else if frame.Pdu.proto = Proto.arp then (
                 match Arp.Pdu.unpack (frame.Pdu.payload :> bitstring) with
-                | None -> ()
-                | Some arp ->
+                | Error s ->
+                    Log.(log st.logger Warning s)
+                | Ok arp ->
                     Log.(log st.logger Debug (lazy (Printf.sprintf "...an ARP of opcode %s" (Arp.Op.to_string arp.Arp.Pdu.operation)))) ;
                     if arp.Arp.Pdu.hw_type = Arp.HwType.eth then (
                         Log.(log st.logger Debug (lazy (Printf.sprintf "...regarding an ethernet device!"))) ;

@@ -49,9 +49,9 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
         udp.Udp.TRX.trx.ins.set_read (fun bits ->
             Log.(log st.logger Debug (lazy "Received an UDP packet...")) ;
             match Pdu.unpack bits with
-            | None ->
-                Log.(log st.logger Debug (lazy "Not a DNS message, ignoring"))
-            | Some (Pdu.{ is_query = true ; _ } as query)
+            | Error s ->
+                Log.(log st.logger Debug (lazy ("Not DNS: "^ Lazy.force s)))
+            | Ok (Pdu.{ is_query = true ; _ } as query)
               when query.opcode = std_query && query.Pdu.questions <> [] ->
                 let num_questions = List.length query.Pdu.questions in
                 Log.(log st.logger Debug (lazy (Printf.sprintf "Received a DNS query with %d questions" num_questions))) ;

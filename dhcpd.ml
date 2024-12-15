@@ -121,9 +121,9 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
             Log.(log st.logger Debug (lazy "Received an UDP packet...")) ;
             let src_port, dst_port = udp.Udp.TRX.get_ports () in
             match Pdu.unpack bits with
-            | None ->
-                Log.(log st.logger Debug (lazy "Not a DHCP message, ignoring"))
-            | Some (Pdu.{ op = BootRequest ; htype ; hlen = 6 ; chaddr ; client_id ; _ } as dhcp)
+            | Error s ->
+                Log.(log st.logger Debug (lazy ("Not DHCP: "^ Lazy.force s)))
+            | Ok (Pdu.{ op = BootRequest ; htype ; hlen = 6 ; chaddr ; client_id ; _ } as dhcp)
               when dhcp.Pdu.htype = Arp.HwType.eth &&
                    dhcp.Pdu.msg_type = Some MsgType.discover ->
                 Log.(log st.logger Debug (lazy (Printf.sprintf "Received a DHCP Discover from %s" (hexstring_of_bitstring chaddr)))) ;
@@ -145,7 +145,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                     host.Host.udp_send (Host.IPv4 offered_ip) ~src_port dst_port
                 | None ->
                     Log.(log st.logger Debug (lazy "No more unused IP, cannot make offer")))
-            | Some (Pdu.{ op = BootRequest ; htype ; hlen = 6 ; chaddr ; xid ; client_id ; requested_ip = Some requested_ip ; _ } as dhcp)
+            | Ok (Pdu.{ op = BootRequest ; htype ; hlen = 6 ; chaddr ; xid ; client_id ; requested_ip = Some requested_ip ; _ } as dhcp)
               when dhcp.Pdu.htype = Arp.HwType.eth &&
                    dhcp.Pdu.msg_type = Some MsgType.request ->
                 Log.(log st.logger Debug (lazy (Printf.sprintf "Received a DHCP Request from %s" (hexstring_of_bitstring chaddr)))) ;
@@ -183,7 +183,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                         Log.(log st.logger Warning (lazy (Printf.sprintf "I never offered anything to %s (or I forgot about it). Leaving it to another dhcp server." (Eth.Addr.to_string (Eth.Addr.o dhcp.Pdu.chaddr)))))
                     ))
             (* TODO: handle release & decline *)
-            | Some (Pdu.{ msg_type = Some msg_type ; _ }) ->
+            | Ok (Pdu.{ msg_type = Some msg_type ; _ }) ->
                 Log.(log st.logger Debug (lazy (Printf.sprintf "Ignoring DHCP %s" (Dhcp.MsgType.to_string msg_type))))
             | _ ->
                 Log.(log st.logger Debug (lazy "Ignoring DHCP message"))))

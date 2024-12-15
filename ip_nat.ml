@@ -137,21 +137,25 @@ v}
 
     let patch_src_port proto bits port =
         if proto = Ip.Proto.tcp then (
-            let pdu = Option.get (Tcp.Pdu.unpack bits) in
-            Tcp.Pdu.pack { pdu with Tcp.Pdu.src_port = Tcp.Port.o port }
+            Tcp.Pdu.unpack bits |>
+            Result.map (fun pdu ->
+                Tcp.Pdu.pack { pdu with Tcp.Pdu.src_port = Tcp.Port.o port })
         ) else if proto = Ip.Proto.udp then (
-            let pdu = Option.get (Udp.Pdu.unpack bits) in
-            Udp.Pdu.pack { pdu with Udp.Pdu.src_port = Udp.Port.o port }
-        ) else should_not_happen ()
+            Udp.Pdu.unpack bits |>
+            Result.map (fun pdu ->
+                Udp.Pdu.pack { pdu with Udp.Pdu.src_port = Udp.Port.o port })
+        ) else Error (lazy "Neither UDP nor TCP")
 
     let patch_dst_port proto bits port =
         if proto = Ip.Proto.tcp then (
-            let pdu = Option.get (Tcp.Pdu.unpack bits) in
-            Tcp.Pdu.pack { pdu with Tcp.Pdu.dst_port = Tcp.Port.o port }
+            Tcp.Pdu.unpack bits |>
+            Result.map (fun pdu ->
+                Tcp.Pdu.pack { pdu with Tcp.Pdu.dst_port = Tcp.Port.o port })
         ) else if proto = Ip.Proto.udp then (
-            let pdu = Option.get (Udp.Pdu.unpack bits) in
-            Udp.Pdu.pack { pdu with Udp.Pdu.dst_port = Udp.Port.o port }
-        ) else should_not_happen ()
+            Udp.Pdu.unpack bits |>
+            Result.map (fun pdu ->
+                Udp.Pdu.pack { pdu with Udp.Pdu.dst_port = Udp.Port.o port })
+        ) else Error (lazy "Neither UDP nor TCP")
 
     let patch_icmp_id (icmp : Icmp.Pdu.t) new_id =
         let payload =
@@ -186,11 +190,11 @@ v}
          * Do this each time we read from OrdArray. *)
         (* FIXME: Also, clean the hash when that happen. Store the hash key in cnx? *)
         let new_src_port = (OrdArray.get st.cnxs n).nat_num in
-        let payload = Payload.o (patch_src_port ip.proto
-                                                (ip.payload :> bitstring)
-                                                new_src_port) in
-        let ip = { ip with src = st.addr ; payload } in
-        st.emit (Ip.Pdu.pack ip)
+        patch_src_port ip.proto (ip.payload :> bitstring) new_src_port |>
+        Result.iter (fun pld ->
+            let payload = Payload.o pld in
+            let ip = { ip with src = st.addr ; payload } in
+            st.emit (Ip.Pdu.pack ip))
 
     let do_icmp_nat (st : State.t) (ip : Ip.Pdu.t) (icmp : Icmp.Pdu.t) msg_type id =
         (* If we track this ping already, reuse the former outside id: *)
@@ -221,15 +225,16 @@ v}
                             dst_addr = ip.dst ; dst_port } in
         match Hashtbl.find st.inc_cnxs_h inc_sock with
         | exception Not_found ->
+            (* TODO: a DMZ / config to forward incoming traffic to publicly accessible host *)
             Log.(log st.logger Warning (lazy (Printf.sprintf2
                 "No idea about that incoming %a" State.socket_print inc_sock)))
         | n ->
             let cnx = OrdArray.get st.cnxs n in
-            let payload = Payload.o (patch_dst_port ip.proto
-                                                    (ip.payload :> bitstring)
-                                                    cnx.orig_num) in
-            let ip = { ip with dst = cnx.orig_addr ; payload } in
-            st.recv (Ip.Pdu.pack ip)
+            patch_dst_port ip.proto (ip.payload :> bitstring) cnx.orig_num |>
+            Result.iter (fun pld ->
+                let payload = Payload.o pld in
+                let ip = { ip with dst = cnx.orig_addr ; payload } in
+                st.recv (Ip.Pdu.pack ip))
 
     let do_icmp_reply_unnat (st : State.t) (ip : Ip.Pdu.t) (icmp : Icmp.Pdu.t)
                             msg_type id =
@@ -251,7 +256,7 @@ v}
         (* In that case we have to look at normal UDP/TCP connections.
          * Unpack the IP header from the payload: *)
         match Ip.Pdu.unpack (pld :> bitstring) with
-        | Some err_ip ->
+        | Ok err_ip ->
             let recv_with_err_ip_pld err_ip_pld (cnx : State.cnx) =
                 let err_ip =
                     { err_ip with
@@ -321,34 +326,34 @@ v}
                     Log.(log st.logger Warning (lazy "Cannot decode ICMP err header as ICMP"))
             else
                 Log.(log st.logger Debug (lazy ("Not NATing back ICMP error for IP proto "^ Ip.Proto.to_string err_ip.proto)))
-        | _ ->
-            Log.(log st.logger Warning (lazy "Cannot decode IP header from ICMP payload"))
+        | Error s ->
+            Log.(log st.logger Warning (lazy ("Cannot decode IP header from ICMP payload: "^ Lazy.force s)))
 
     (** bits are flowing from LAN to outside world *)
     let tx (st : State.t) bits =
         match Ip.Pdu.unpack bits with
-        | Some (ip : Ip.Pdu.t) ->
+        | Ok (ip : Ip.Pdu.t) ->
             if Ip.Addr.is_natable ip.src then (
                 if ip.dst <> st.addr then (
                     if ip.proto = Ip.Proto.udp || ip.proto = Ip.Proto.tcp then (
                         match Ip.Pdu.get_ports ip with
-                        | Some (src_port, dst_port) ->
+                        | Ok (src_port, dst_port) ->
                             Log.(log st.logger Debug (lazy (Printf.sprintf "Translating packet of %d bytes from %s:%d to %s:%d" (bytelength bits) (Ip.Addr.to_string ip.src) src_port (Ip.Addr.to_string ip.dst) dst_port))) ;
                             do_port_nat st ip src_port dst_port
-                        | None ->
-                            Log.(log st.logger Debug (lazy (Printf.sprintf "Ignoring outgoing IP packet of %d bytes since it has no ports" (bytelength bits))))
+                        | Error s ->
+                            Log.(log st.logger Debug (lazy (Printf.sprintf "Ignoring outgoing IP packet of %d bytes since it has no ports (%s)" (bytelength bits) (Lazy.force s))))
                     ) else if ip.proto = Ip.Proto.icmp then (
                         if st.nat_pings then (
                             match Icmp.Pdu.unpack (ip.payload :> bitstring) with
-                            | Some (Icmp.Pdu.{ msg_type ; payload = Ids (id, _, _) } as icmp)
+                            | Ok (Icmp.Pdu.{ msg_type ; payload = Ids (id, _, _) } as icmp)
                               when Icmp.MsgType.is_request msg_type ->
                                 Log.(log st.logger Debug (lazy (Printf.sprintf "Translating ICMP request of %d bytes from src:%s, id:%d to dst:%s" (bytelength bits) (Ip.Addr.to_string ip.src) id (Ip.Addr.to_string ip.dst)))) ;
                                 do_icmp_nat st ip icmp msg_type id
                             (* We NAT only ICMP queries (for now?) *)
-                            | Some _ ->
+                            | Ok _ ->
                                 Log.(log st.logger Debug (lazy "Ignoring outgoing uninteresting ICMP packet"))
-                            | None ->
-                                Log.(log st.logger Debug (lazy "Ignoring bad outgoing ICMP packet"))
+                            | Error s ->
+                                Log.(log st.logger Debug (lazy ("Ignoring bad outgoing ICMP packet: "^ Lazy.force s)))
                         ) else (
                             Log.(log st.logger Debug (lazy "Not NATing outgoing ICMP"))
                         )
@@ -361,41 +366,41 @@ v}
             ) else (
                 Log.(log st.logger Debug (lazy (Printf.sprintf "Ignoring outgoing IP packet from non NATable address %s" (Ip.Addr.to_string ip.src))))
             )
-        | None ->
-            Log.(log st.logger Debug (lazy "Ignoring bad IP packet"))
+        | Error s ->
+            Log.(log st.logger Debug (lazy ("Ignoring bad IP packet: "^ Lazy.force s)))
 
     let rx (st : State.t) bits =
         Log.(log st.logger Debug (lazy (Printf.sprintf "Received %d bytes" (bytelength bits)))) ;
         match Ip.Pdu.unpack bits with
-        | Some (ip : Ip.Pdu.t) ->
+        | Ok (ip : Ip.Pdu.t) ->
             if ip.dst = st.addr then (
                 if ip.proto = Ip.Proto.udp || ip.proto = Ip.Proto.tcp then (
                     match Ip.Pdu.get_ports ip with
-                    | Some (src_port, dst_port) ->
+                    | Ok (src_port, dst_port) ->
                         do_port_unnat st ip src_port dst_port
-                    | None ->
-                        Log.(log st.logger Debug (lazy "Ignoring bad incoming UDP/TCP packet"))
+                    | Error s ->
+                        Log.(log st.logger Debug (lazy ("Ignoring bad incoming UDP/TCP packet: "^ Lazy.force s)))
                 ) else if ip.proto = Ip.Proto.icmp then (
                     match Icmp.Pdu.unpack (ip.payload :> bitstring) with
-                    | Some (Icmp.Pdu.{ msg_type ; payload = Ids (id, _, _) } as icmp)
+                    | Ok (Icmp.Pdu.{ msg_type ; payload = Ids (id, _, _) } as icmp)
                       when Icmp.MsgType.is_reply msg_type ->
                         Log.(log st.logger Debug (lazy (Printf.sprintf "Translating back ICMP reply of %d bytes from %s, id:%d" (bytelength bits) (Ip.Addr.to_string ip.src) id))) ;
                         do_icmp_reply_unnat st ip icmp msg_type id
-                    | Some (Icmp.Pdu.{ payload = Header { ptr ; mtu ; pld } ; _ } as icmp) ->
+                    | Ok (Icmp.Pdu.{ payload = Header { ptr ; mtu ; pld } ; _ } as icmp) ->
                         Log.(log st.logger Debug (lazy (Printf.sprintf "Translating back an ICMP error of %d bytes from %s" (bytelength bits) (Ip.Addr.to_string ip.src)))) ;
                         do_icmp_err_unnat st ip icmp ptr mtu pld
-                    | Some _ ->
+                    | Ok _ ->
                         Log.(log st.logger Debug (lazy "Ignoring uninteresting incoming ICMP packet"))
-                    | None ->
-                        Log.(log st.logger Debug (lazy "Ignoring bad incoming ICMP packet"))
+                    | Error s ->
+                        Log.(log st.logger Debug (lazy ("Ignoring bad incoming ICMP packet"^ Lazy.force s)))
                 ) else (
                     Log.(log st.logger Debug (lazy "Ignoring incoming uninteresting IP packet"))
                 )
             ) else (
                 Log.(log st.logger Debug (lazy (Printf.sprintf "Ignoring incoming IP packet for %s (I'm %s)" (Ip.Addr.to_string ip.dst) (Ip.Addr.to_string st.addr))))
             )
-        | None ->
-            Log.(log st.logger Debug (lazy "Ignoring incoming non-IP packet"))
+        | Error s ->
+            Log.(log st.logger Debug (lazy ("Ignoring incoming non-IP packet: "^ Lazy.force s)))
 
     (** [make ip n] returns a {!Tools.trx} corresponding to a NAT device (tx is for transmitting from the LAN to the outside) that can track [n] sockets. *)
     let make (st : State.t) =
