@@ -125,7 +125,7 @@ struct
             (* TODO: addresses reserved by 802.1d should not be forwarded. *)
             (* now forward *)
             let do_broadcast () =
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Forwarding to all ifaces"))) ;
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Forwarding to all ifaces (but %d)" ins))) ;
                 R.forward_from t.hub ins bits in
             if Eth.Addr.is_broadcast (Eth.Addr.o dst) then
                 do_broadcast ()
@@ -136,9 +136,13 @@ struct
                     do_broadcast ()
                 | Some n ->
                     let mac = OrdArray.get t.macs n in
-                    Log.(log t.logger Debug (lazy (Printf.sprintf "Known dest %s, will forward to iface %d" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.iface))) ;
-                    Clock.asap t.hub.Repeater.ifaces.(mac.iface) bits ;
-                    OrdArray.promote t.macs n)
+                    if mac.iface <> ins then (
+                        Log.(log t.logger Debug (lazy (Printf.sprintf "Known dest %s, will forward to iface %d" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.iface))) ;
+                        Clock.asap t.hub.Repeater.ifaces.(mac.iface) bits ;
+                        OrdArray.promote t.macs n
+                    ) else
+                        Log.(log t.logger Debug (lazy (Printf.sprintf "Known dest %s is located on iface %d, dropping" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.iface)))
+            )
         | {| _ |} ->
             Log.(log t.logger Debug (lazy (Printf.sprintf "Drop incoming frame without destination")))
 
