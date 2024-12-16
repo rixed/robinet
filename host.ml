@@ -472,7 +472,7 @@ let ip_recv t bits =
             Log.(log t.trx.logger Warning s)
         (* Shouldn't we check first that the dest IP is my_ip? or broadcast? *)
         | Ok ip ->
-            Log.(log t.trx.logger Info (lazy (Printf.sprintf "Received an IP packet."))) ;
+            Log.(log t.trx.logger Debug (lazy (Printf.sprintf "Received an IP packet."))) ;
             t.last_ip_packet <- Some ip ;
             if ip.Ip.Pdu.proto = Ip.Proto.tcp then (
                 let sock = hash_find_or_insert t.tcp_socks ip.Ip.Pdu.src (fun () ->
@@ -501,7 +501,7 @@ let ip_recv t bits =
 let power_off ?timeout t =
     let to_kill = ref (List.length t.killers) in
     let do_power_off () =
-        Log.(log t.trx.logger Info (lazy
+        Log.(log t.trx.logger Debug (lazy
             (Printf.sprintf "Halting (%d processes left)." !to_kill))) ;
         t.resolv_trx <- None ;
         Hashtbl.clear t.tcp_socks ;
@@ -570,7 +570,7 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ?logger ?(init=on_init_noth
           power_off     = (fun ?timeout () -> assert t.on ; power_off ?timeout t ; t.on <- false) ;
           add_killer    = (fun f -> t.killers <- f :: t.killers) }
     in
-    Log.(log t.trx.logger Info (lazy (Printf.sprintf "New host '%s'" name))) ;
+    Log.(log t.trx.logger Debug (lazy (Printf.sprintf "New host '%s'" name))) ;
     if t.on then init t ;
     t
 
@@ -586,7 +586,7 @@ let make ?gateways ?search_sfx ?nameserver ?on ?parent_logger ?mac ?init name =
     make_from_eth ?search_sfx ?nameserver ?on ~logger ?init eth_state eth_trx name
 
 let set_ip t my_ip netmask =
-    Log.(log t.trx.logger Info (lazy (Printf.sprintf "Setting my IP to %s" (Ip.Addr.to_string my_ip)))) ;
+    Log.(log t.trx.logger Debug (lazy (Printf.sprintf "Setting my IP to %s" (Ip.Addr.to_string my_ip)))) ;
     t.eth_state.my_addresses <- [ Eth.State.make_my_ip_address ~netmask my_ip ] ;
     ip_recv t <-= t.eth_trx |> ignore
 
