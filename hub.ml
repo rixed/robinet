@@ -63,7 +63,8 @@ struct
         Printf.fprintf oc "%d" (Array.length t.ifaces)
 
     let first_free_iface t =
-        Array.findi not t.is_connected
+        try Some (Array.findi not t.is_connected)
+        with Not_found -> None
 end
 
 (** A Switch is a device that will forward Ethernet frames based on the observed

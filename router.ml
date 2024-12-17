@@ -297,7 +297,8 @@ struct
         iface.eth.Eth.State.connected
 
     let first_free_iface t =
-        Array.findi (not % is_connected) t.ifaces
+        try Some (Array.findi (not % is_connected) t.ifaces)
+        with Not_found -> None
 
     (* TODO: similarly, a write n b = t.ifaces.(n).trx.write b *)
 
