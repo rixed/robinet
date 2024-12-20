@@ -27,13 +27,20 @@ open Batteries
 
 (* Basically, Info is the lowest thing you want to see by default. *)
 type level  = Fatal | Critical | Error | Warning | Info | Debug
+
 type msg    = Clock.Time.t * (string Lazy.t)
-type queue  = int * msg array
+
+type queue  =
+    { mutable head : int ; (* points to the last message enqueued *)
+      msgs : msg array }
+
 type logger =
     { name : string ;
+      full_name : string ;
       use_wall_clock : bool ;
       queues : queue array ;
-      parent : logger option }
+      parent : logger option ;
+      mutable children : logger list }
 
 (* log level <-> queue index *)
 
@@ -57,18 +64,17 @@ let console_log name =
 
 (* queue management *)
 
-let enqueue (qs, ar) m =
-    let next_wrap max v = if v >= max-1 then 0 else v+1 in
-    ar.(qs) <- m ;
-    next_wrap (Array.length ar) qs, ar
+let enqueue q m =
+    q.msgs.(q.head) <- m ;
+    q.head <- if q.head >= Array.length q.msgs - 1 then 0 else q.head + 1
 
-let queue_iter f (qs, ar) = (* TODO: ?(order=DESC) *)
+let queue_iter f q = (* TODO: ?(order=DESC) *)
     let aux i =
-        let t, lstr = ar.(i) in
+        let t, lstr = q.msgs.(i) in
         let str = Lazy.force lstr in
-        if String.length str > 0 then f t str in
-    for i = qs-1 downto 0 do aux i done ;
-    for i = (Array.length ar) - 1 downto qs do aux i done
+        if str <> "" then f t str in
+    for i = q.head - 1 downto 0 do aux i done ;
+    for i = Array.length q.msgs - 1 downto q.head do aux i done
 
 (* log *)
 
@@ -80,8 +86,8 @@ let log logger level lstr =
         else
             Clock.now () in
     let msg = now, lstr in
-    logger.queues.(lvl) <- enqueue logger.queues.(lvl) msg ;
-    if lvl <= int_of_level !console_lvl then console_log logger.name msg ;
+    enqueue logger.queues.(lvl) msg ;
+    if lvl <= int_of_level !console_lvl then console_log logger.full_name msg ;
     assert (level <> Fatal)
 
 let log_exceptions logger ?(level=Warning) what f x =
@@ -96,23 +102,33 @@ let log_exceptions logger ?(level=Warning) what f x =
 (* creation *)
 
 let make_queue size =
-    0, Array.create size (Clock.Time.o 0., lazy "")
+    { head = 0 ; msgs = Array.create size (Clock.Time.o 0., lazy "") }
 
+(* All existing loggers are known so we can display them in the GUI.
+ * Indexed by a list of names, from indexed logger to ancestor: *)
 let loggers = Hashtbl.create 131
 
 let make ?parent ?(use_wall_clock=false) ?(size=50) name =
+    let full_name =
+        let rec loop full_name = function
+            | None -> full_name
+            | Some p ->
+                let full_name = "/"^ p.name ^ full_name in
+                loop full_name p.parent in
+        loop ("/"^ name) parent in
     let logger = {
         name ;
+        full_name ;
         use_wall_clock ;
         queues = Array.init num_levels (fun _ -> make_queue size) ;
-        parent
-    } in
-    Hashtbl.add loggers name logger ;
+        parent ;
+        children = [] } in
+    Option.may (fun p -> p.children <- logger :: p.children) parent ;
+    Hashtbl.add loggers full_name logger ;
     logger
 
-let sub logger ?size subname =
-    let name = if logger.name = "" then subname else logger.name ^"/"^ subname
-    and size = size |? (Array.length (snd logger.queues.(0)) / 2 + 1) in
+let sub logger ?size name =
+    let size = size |? Array.length logger.queues.(0).msgs in
     make ~parent:logger ~use_wall_clock:logger.use_wall_clock ~size name
 
 (* The logger that will adopt any others: *)

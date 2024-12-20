@@ -87,7 +87,7 @@ let page_head resp_body =
 <head>
     <title>RobiNet: Network Simulator</title>
 </head>
-<div id="menu">
+<div>
     <a href="home.html">home</a>
     <a href="metrics.html">metrics</a>
     <a href="logs.html">logs</a>
@@ -140,14 +140,14 @@ let metrics _mth _matches vars _qry_body resp_body =
     in
     page_head resp_body ;
     Printf.fprintf resp_body {|
-<div id="controls">
-    <form id='metric' method='post'>
+<div>
+    <form>
         %a
         <input type='submit' name='redraw' value='redraw'/>
     </form>
 </div>
-<div id="view">
-    <img width='%d' height='%d' class='chart'
+<div>
+    <img width='%d' height='%d'
      src='https://chart.googleapis.com/chart?chs=%dx%d&amp;cht=lc&amp;chd=%s&amp;chdl=%s&amp;chdlp=b&amp;chco=%s&amp;chxt=x,y&amp;chxl=0:|Past|Now&amp;chxr=1,%Ld,%Ld&amp;chds=%Ld,%Ld'
      alt='Metrics'/>
 </div>
@@ -160,21 +160,53 @@ let metrics _mth _matches vars _qry_body resp_body =
 let logs _mth _matches vars _qry_body resp_body =
     let print_queue oc q =
         Log.queue_iter (fun t str ->
-                Printf.fprintf oc "<tr><td class=\"time\">%a</td><td>%s</td></tr>\n"
+                Printf.fprintf oc "<tr><td>%a</td><td>%s</td></tr>\n"
                 Clock.printer t str)
             q in
     page_head resp_body ;
-    let logger_name = try Hashtbl.find vars "logger" with Not_found -> "Host/localhost" in
-    let logger = Hashtbl.find Log.loggers logger_name in
+    let all_names =
+        Hashtbl.keys Log.loggers |>
+        Array.of_enum in
+    Array.fast_sort String.compare all_names ;
+    let logger_name =
+        try
+            Some (Hashtbl.find vars "logger")
+        with Not_found ->
+            if Array.length all_names > 0 then Some all_names.(0) else None in
     Printf.fprintf resp_body {|
-<div id="controls">
-    <form id='logger' method='post'>
-        %a
-        <input type='submit' name='show' value='show'/>
+<div>
+    <form>
+        <select name="logger">
+            %a
+        </select>
+        <input type="submit" name="show" value="show"/>
     </form>
 </div>
-<div id="view" class="logs">
-    <table class="log">
+|}
+        (Array.print ~first:"" ~last:"" ~sep:""
+            (fun oc name ->
+                Printf.fprintf oc "<option value=\"%s\"%s/>%s</option>\n"
+                    name
+                    (if logger_name = Some name then " selected=\"selected\"" else "")
+                    name)) all_names ;
+    Option.may (fun logger_name ->
+        let logger = Hashtbl.find_option Log.loggers logger_name in
+        Option.may (fun (logger : Log.logger) ->
+            let link_to (l : Log.logger) =
+                Printf.sprintf "<a href=\"?logger=%s\">" (Url.encode l.full_name) in
+            let print_child oc (l : Log.logger) =
+                Printf.fprintf oc "%s%s</a>\n" (link_to l) l.name in
+            let open_link, close_link =
+                match logger.parent with
+                | None -> "<s>", "</s>"
+                | Some parent -> link_to parent, "</a>" in
+            Printf.fprintf resp_body {|
+<div>
+    %sparent%s
+%s%a
+</div>
+<div>
+    <table>
     <caption>%s</caption>
     <thead>
         <tr><th>Time</th><th>Message</th></tr>
@@ -188,15 +220,14 @@ let logs _mth _matches vars _qry_body resp_body =
     </table>
 </div>
 |}
-        (Hashtbl.print ~first:"<select name='logger'>\n" ~last:"</select>\n" ~sep:"" ~kvsep:""
-            (fun _ _ -> ())
-            (fun oc v ->
-                Printf.fprintf oc "<option value='%s'%s/>%s</option>\n"
-                    v.Log.name
-                    (if logger_name = v.Log.name then " selected='selected'" else "")
-                    (basename v.Log.name))) Log.loggers
-        logger.Log.name
-        (Array.print ~first:"" ~last:"" ~sep:"" print_queue) logger.Log.queues ; (* add a select box for log levels *)
+                open_link close_link
+                (if logger.children <> [] then "children: " else "")
+                (List.print ~first:"" ~last:"" ~sep:" | " print_child) logger.children
+                logger_name
+                (Array.print ~first:"" ~last:"" ~sep:"" print_queue)
+                    logger.queues (* TODO: add a select box for log levels *)
+        ) logger
+    ) logger_name ;
     [ "Content-Type", "text/html" ]
 
 let make host port =
