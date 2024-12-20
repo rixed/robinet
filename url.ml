@@ -67,6 +67,7 @@ let decode s =
 
 (*$= decode & ~printer:identity
     "came_from=/" (decode "came_from=%2F")
+    "0.4/#0/admin" (decode "0.4%2F%230%2Fadmin")
 *)
 
 let char_encode c =
@@ -90,7 +91,6 @@ let encode ?(reserved=true) s =
 (** [Url.of_string str] will return the {!Url.t} corresponding to the given [str] *)
 let of_string ?(force_absolute=false) str =
     if debug then Printf.printf "Url: of_string: parse '%s'\n%!" str ;
-    let str = decode str in
     (* If we insist this url must be absolute, then add the missing scheme *)
     let str =
         if force_absolute then (

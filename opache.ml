@@ -36,7 +36,10 @@ let params_of_query q =
                 Some (String.sub q 0 eq, String.lchop ~n:(eq+1) q)
             with Not_found -> Some (q, "")
                | Invalid_argument _ -> None) |>
-        List.iter (fun (name, value) -> Hashtbl.add vars name value) ;
+        List.iter (fun (name, value) ->
+            (* Now that all the parsing is done, we can url-decode: *)
+            let name = Url.decode name and value = Url.decode value in
+            Hashtbl.add vars name value) ;
     vars
 
 (*$= params_of_query & ~printer:dump
