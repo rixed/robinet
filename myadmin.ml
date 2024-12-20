@@ -79,124 +79,23 @@ let print_tree vars oc tree =
         | Metric.Tree (n, t) -> add_tree oc n t in
     add_tree oc "" tree
 
-let page_head ?(selected="home") resp_body =
+let page_head resp_body =
     Printf.fprintf resp_body
         {|<?xml version="1.0"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
 <head>
     <title>RobiNet: Network Simulator</title>
-    <link rel="stylesheet" type="text/css" media="screen" href="fonts.css" />
-    <link rel="stylesheet" type="text/css" media="screen" href="colors.css" />
-    <link rel="stylesheet" type="text/css" media="screen" href="layout.css" />
-    <link rel="stylesheet" type="text/css" media="screen" href="svg.css" />
-    <script type="text/javascript" src="d3.js"></script>
-    <script type="text/javascript" src="d3.csv.js"></script>
-    <script type="text/javascript" src="gge.js"></script>
-    <script type="text/javascript" src="myfuncs.js"></script>
 </head>
-<body onload='load_menu("%s")'>
-<div id="menu"></div>
-<div id="page">
-|}
-        selected
-
-let page_foot resp_body =
-    Printf.fprintf resp_body {|</div>
-<div id="foot">
-    <p>footer</p>
+<div id="menu">
+    <a href="home.html">home</a>
+    <a href="metrics.html">metrics</a>
+    <a href="logs.html">logs</a>
 </div>
-</body>
 |}
 
 let home _mth _matches _vars _qry_body resp_body =
-    page_head ~selected:"home" resp_body ;
-    page_foot resp_body ;
-    [ "Content-Type", "text/html" ]
-
-let net _mth _matches _vars _qry_body resp_body =
-    page_head ~selected:"net editor" resp_body ;
-    Printf.fprintf resp_body {|
-<div id="controls">
-    <form action="javascript: false;">
-        <!-- a select to choose the net to edit? -->
-        <div id="dyncontrols">
-            Select an item to edit.
-        </div>
-        <span class="buttons">
-            <span class="grouped">
-                <input type="button" value="Add:" onclick='javascript: new_net_item();'/>
-                <select name="what">
-                    <option value="">New...</option>
-                    <option value="host">host (static)</option>
-                    <option value="dynhost">host (dhcp)</option>
-                    <option value="hub">hub</option>
-                    <option value="switch">switch</option>
-                    <option value="tap">tap</option>
-                    <option value="note">note</option>
-                    <!-- where the user can plug another net, a pcap file, a pcap dev... -->
-                    <option value="anchor">anchor</option>
-                </select>
-                <input type="button" id="netlink" value="Link to..." onclick='javascript: new_net_link();'/>
-                <input type="button" id="netunlink" value="Unlink from..." onclick='javascript: del_net_link();'/>
-                <input type="button" value="Save" onclick='javascript: save_net();'/>
-            </span>
-            <span class="away">
-                <input type="submit" value="Delete" onclick='javascript: del_net_item();'/>
-            </span>
-        </span>
-    </form>
-</div>
-<div id="view">
-    <svg id="net" />
-</div>
-<script type="text/javascript">
-    load_net_editor("demonet", "net");
-</script>
-|};
-    page_foot resp_body ;
-    [ "Content-Type", "text/html" ]
-
-let netpart_csv _mth matches _vars _qry_body resp_body =
-    match matches with
-    | _total :: netname :: partname :: [] ->
-        let net = Net.load netname in
-        if partname = "hub" then Net.csv_for_hubs resp_body net
-        else if partname = "switch" then Net.csv_for_switches resp_body net
-        else if partname = "host"   then Net.csv_for_hosts    resp_body net
-        else if partname = "note"   then Net.csv_for_notes    resp_body net
-        else if partname = "cable"  then Net.csv_for_cables   resp_body net ;
-        [ "Content-Type", "text/csv" ]
-    | _ -> should_not_happen ()
-
-let net_csv mth matches _vars qry_body resp_body =
-    match matches with
-    | _total :: netname :: [] ->
-        (match mth with
-        | "GET" ->
-            let net = Net.load netname in
-            Net.to_csv_file resp_body net ;
-            [ "Content-Type", "text/csv" ]
-        | "PUT" ->
-            (try
-                let net = Net.of_csv_string qry_body netname in
-                Net.save net ;
-                Printf.fprintf resp_body "Ok" ;
-                [ "content-Type", "text/plain" ]
-            with Net.Cannot_parse (what, line) ->
-                raise (Opache.ResourceError (406, Printf.sprintf "Cannot make a %s out of '%s'" what line)))
-        | _ ->
-            raise (Opache.ResourceError (405, Printf.sprintf "Unknown method '%s'" mth)))
-    | _ -> should_not_happen ()
-
-let scenarii _mth _matches _vars _qry_body resp_body =
-    page_head ~selected:"scenarii" resp_body ;
-    page_foot resp_body ;
-    [ "Content-Type", "text/html" ]
-
-let engine _mth _matches _vars _qry_body resp_body =
-    page_head ~selected:"engine" resp_body ;
-    page_foot resp_body ;
+    page_head resp_body ;
     [ "Content-Type", "text/html" ]
 
 (* See Google chart API doc here: http://code.google.com/apis/chart/image/docs/making_charts.html *)
@@ -239,7 +138,7 @@ let metrics _mth _matches vars _qry_body resp_body =
         BatIO.close_out str
     and width, height = 640, 460
     in
-    page_head ~selected:"metrics" resp_body ;
+    page_head resp_body ;
     Printf.fprintf resp_body {|
 <div id="controls">
     <form id='metric' method='post'>
@@ -256,7 +155,6 @@ let metrics _mth _matches vars _qry_body resp_body =
         (print_tree vars) (Metric.tree ())
         width height width height
         chd chdl chco !chds_min !chds_max !chds_min !chds_max ;
-    page_foot resp_body ;
     [ "Content-Type", "text/html" ]
 
 let logs _mth _matches vars _qry_body resp_body =
@@ -265,7 +163,7 @@ let logs _mth _matches vars _qry_body resp_body =
                 Printf.fprintf oc "<tr><td class=\"time\">%a</td><td>%s</td></tr>\n"
                 Clock.printer t str)
             q in
-    page_head ~selected:"logs" resp_body ;
+    page_head resp_body ;
     let logger_name = try Hashtbl.find vars "logger" with Not_found -> "Host/localhost" in
     let logger = Hashtbl.find Log.loggers logger_name in
     Printf.fprintf resp_body {|
@@ -299,18 +197,11 @@ let logs _mth _matches vars _qry_body resp_body =
                     (basename v.Log.name))) Log.loggers
         logger.Log.name
         (Array.print ~first:"" ~last:"" ~sep:"" print_queue) logger.Log.queues ; (* add a select box for log levels *)
-    page_foot resp_body ;
     [ "Content-Type", "text/html" ]
 
 let make host port =
-    let res = [ Str.regexp "/home.dyn$", home ;
+    let res = [ Str.regexp "/home.html$", home ;
                 Str.regexp "/$", home ;
-                Str.regexp "/net.dyn$", net ;
-                Str.regexp "/nets/\\(.+\\)/\\([^/]+\\).csv$", netpart_csv ;
-                Str.regexp "/nets/\\(.+\\).csv$", net_csv ;
-                Str.regexp "/scenarii.dyn$", scenarii ;
-                Str.regexp "/engine.dyn$", engine ;
-                Str.regexp "/metrics.dyn$", metrics ;
-                Str.regexp "/logs.dyn$", logs ;
-                Str.regexp "/\\(.*\\)$", Opache.static_file_server "./www" ] in
+                Str.regexp "/metrics.html$", metrics ;
+                Str.regexp "/logs.html$", logs ] in
     Opache.serve host ~port (Opache.multiplexer res)
