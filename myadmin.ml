@@ -312,4 +312,3 @@ let make host port =
                 Str.regexp "/logs.dyn$", logs ;
                 Str.regexp "/\\(.*\\)$", Opache.static_file_server "./www" ] in
     Opache.serve host ~port (Opache.multiplexer res)
-

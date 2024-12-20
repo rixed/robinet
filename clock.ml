@@ -162,27 +162,33 @@ type clock = { mutable now : Time.t ; mutable events : (unit -> unit) Map.t }
 (** We have only one clock so can run only one simulation at the same time. *)
 let current = { now = Time.o (Unix.gettimeofday ()) ; events = Map.empty }
 
-(** Return the current simulation time. *)
-let now () = current.now
-
-let cond_lock = Mutex.create ()
+(* A lock to protect both the condition and the current events map *)
+let lock = Mutex.create ()
 let cond = Condition.create ()
+
+let with_lock f x =
+    BatMutex.synchronize ~lock f x
 
 let signal_me () = Condition.signal cond
 
-let epsilon = Interval.usec 1.
+(** Return the current simulation time. *)
+let now () =
+    with_lock (fun () -> current.now) ()
 
 (** [at t f x] will execute [f x] when simulation clock reaches time [t]. *)
-let rec at (ts : Time.t) f x =
-    (* FIXME: since localhost.reader add events from other threads, use a mutex to protect current.events *)
-    (* If ts was already bound in current.events, its previous binding disappears.
-       Also, we do not like the idea of several sequential events having the same TS. *)
-    try Map.find ts current.events |> ignore ;
-        at (Time.add ts epsilon) f x
-    with Not_found ->
-        if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.sub ts current.now)) ;
-        current.events <- Map.add ts (fun () -> f x) current.events ;
-        signal_me ()
+let at (ts : Time.t) f x =
+    let epsilon = Interval.usec 1. in
+    let rec loop ts =
+        (* If ts was already bound in current.events, its previous binding disappears.
+           Also, we do not like the idea of several sequential events having the same TS. *)
+        if Map.mem ts current.events then (
+            loop (Time.add ts epsilon)
+        ) else (
+            if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.sub ts current.now)) ;
+            current.events <- Map.add ts (fun () -> f x) current.events
+        ) in
+    with_lock loop ts ;
+    signal_me ()
 
 (** [delay d f x] will delay the execution of [f x] by the interval [d]. *)
 let delay d f x =
@@ -192,13 +198,15 @@ let asap f x =
     (* FIXME: would be more precise and fast to have a dedicated list for asap events *)
     delay (Interval.o 0.) f x
 
-(** Synchronize internal clock with realtime clock.
- * You must call this after real time passes (for instance after a blocking call).
- * Otherwise, time jumps from one registered event to the next. *)
-let synch () =
+let synch_locked () =
     assert !realtime (* Synch with real clock in non-realtime mode!? *) ;
     current.now <- Time.wall_clock () ;
     if debug then Printf.printf "Clock: synch: set current time to %s\n%!" (Time.to_string current.now)
+
+(** Synchronize internal clock with realtime clock.
+ * You must call this after real time passes (for instance after a blocking call).
+ * Otherwise, time jumps from one registered event to the next. *)
+let synch = with_lock synch_locked
 
 let continue = ref true
 
@@ -213,7 +221,7 @@ let next_event () =
             (* Note: In realtime, other threads may add new events while we are
              * sleeping, so a condition variable is used (instead of a mere
              * Unix.sleep). *)
-            Mutex.lock cond_lock ;
+            Mutex.lock lock ;
             (* Wait until there is an event to process now: *)
             let rec wait_loop () =
                 let until =
@@ -223,35 +231,35 @@ let next_event () =
                 let wait_time = Time.sub until current.now in
                 if Interval.compare wait_time min_ts_for_sleep > 0 then (
                     if debug then Printf.printf "Clock: next_event: waiting until %s since we're too early\n%!" (Time.to_string until) ;
-                    (* Since we are going to wait here, we could as well collect
-                     * some garbage: *)
-                    Gc.major () ;
-                    (try Condvar.timed_wait cond cond_lock (until :> float)
+                    (try Condvar.timed_wait cond lock (until :> float)
                     with Condvar.Timeout -> ()) ;
                     (* If we timed out we need to wait longer.
                      * If we have been signaled we still need to wait for the
                      * next event, which may be a different one. *)
                     (* Because of the loop condition above: *)
-                    synch () ;
+                    synch_locked () ;
                     if !continue then wait_loop ()
                 ) in
                 (* Else there is no need to wait we can go straight to processing
                    that event: *)
             wait_loop () ;
-            Mutex.unlock cond_lock ;
+            Mutex.unlock lock ;
             !continue
         ) else ( (* not realtime *)
-            if Map.is_empty current.events then (
+            if with_lock Map.is_empty current.events then (
                 if debug then Printf.printf "Clock: no more events" ;
                 false
             ) else true
         ) in
     if run_first_event then (
         (* We have some work to do *)
-        let ts, f = Map.min_binding current.events in
-        if debug then Printf.printf "Clock: next_event: executing since it's %s\n%!" (Time.to_string ts) ;
-        current.events <- Map.remove ts current.events ;
-        current.now <- ts ;
+        let f =
+            with_lock (fun () ->
+                let ts, f = Map.min_binding current.events in
+                if debug then Printf.printf "Clock: next_event: executing since it's %s\n%!" (Time.to_string ts) ;
+                current.events <- Map.remove ts current.events ;
+                current.now <- ts ;
+                f) () in
         try f ()
         with exn ->
             Printf.printf "Clock: event handler triggered an exception : %a\n%s%!"
