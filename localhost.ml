@@ -24,7 +24,7 @@ open Batteries
 open Bitstring
 open Tools
 
-let logger = Log.make "Host/localhost"
+let logger = Log.make "localhost"
 
 let signal_err e =
     Printf.fprintf stderr "Localhost: %s\n%!" e

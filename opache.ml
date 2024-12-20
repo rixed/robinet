@@ -102,14 +102,14 @@ let rec stripped url =
 *)
 (* Note: we force [f] to return unit so that callers get useful diagnostics *)
 let serve host ?(port=Tcp.Port.o 80) (f : TRXtop.t -> Pdu.t -> Log.logger -> unit) =
-    let logger = Log.(make (Printf.sprintf "%s/Httpd:%s" host.Host.logger.name (Tcp.Port.to_string port))) in
+    let logger = Log.sub host.Host.logger ("httpd:"^ Tcp.Port.to_string port) in
     let count_queries_per_url = Hashtbl.create 11 in
     let count_query cmd url =
         let key = cmd^"/"^(stripped url) in
         let counter = hash_find_or_insert count_queries_per_url key (fun () ->
-            Metric.Atomic.make ("Hosts/"^host.Host.name^"/Httpd/queries/"^key)) in
+            Metric.Atomic.make ("Hosts/"^ host.name^ "/Httpd/queries/"^key)) in
         Metric.Atomic.fire counter in
-    host.Host.tcp_server port (fun (tcp : Tcp.TRX.tcp_trx) ->
+    host.tcp_server port (fun (tcp : Tcp.TRX.tcp_trx) ->
         (* once we obtain the transport layer, build an http on top of it *)
         Log.(log logger Debug (lazy "Building a new HTTP.TRXtop")) ;
         let http = TRXtop.make () in

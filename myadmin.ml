@@ -176,10 +176,7 @@ let logs _mth _matches vars _qry_body resp_body =
     Printf.fprintf resp_body {|
 <div>
     <form>
-        <select name="logger">
-            %a
-        </select>
-        <input type="submit" name="show" value="show"/>
+        <select name="logger" onchange="this.form.submit()">%a</select>
     </form>
 </div>
 |}
