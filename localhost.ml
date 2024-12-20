@@ -58,7 +58,7 @@ let close t () =
 
 let rec reader t =
     if not t.is_closed then
-    let buf = Bytes.create 1000 in
+    let buf = Bytes.create 4000 in
     let r =
         try Unix.read t.sock buf 0 (Bytes.length buf)
         with Unix.Unix_error (error, func_name, _) ->
@@ -85,7 +85,7 @@ let rec reader t =
 let tcp_trx_of_socket sock =
     let t = {
         sock = sock ;
-        recv = ignore ;
+        recv = ignore_bits ~logger ;
         is_closed = false ;
         reader = None } in
     let trx =
@@ -116,8 +116,8 @@ let gethostbyname name cont =
 
 let wait_server_delay = ref 3.
 
-let tcp_connect ?(wait_for_server=true) dst ?src_port ?ttl ?tos
-                (dst_port : Tcp.Port.t) cont =
+let tcp_connect ?(wait_for_server=true) ?ttl ?tos
+                dst ?src_port (dst_port : Tcp.Port.t) cont =
     let connect_ inet_addr =
         Log.(log logger Debug (lazy (Printf.sprintf "Connecting to %s:%s"
             (Unix.string_of_inet_addr inet_addr)
@@ -167,25 +167,35 @@ let tcp_server src_port server_f =
     Unix.listen sock 5 ;
     let rec sock_server () =
         let fd, _ = Unix.accept sock in
+        Log.(log logger Debug (lazy (Printf.sprintf "Accepted a new connection on port %s" (Tcp.Port.to_string src_port)))) ;
         let trx = tcp_trx_of_socket fd in
         server_f trx ; (* supposed to set the recv of this trx *)
-        sock_server () in (* accept next connection *)
-    sock_server ()
+        if !Clock.continue then sock_server () in (* accept next connection *)
+    Thread.create sock_server () |>
+    ignore
 
 let make () =
-    { Host.name          = "localhost" ;
-      Host.logger        = logger ;
-      Host.tcp_connect   = tcp_connect ~wait_for_server:true ?ttl:None ?tos:None ;
-      Host.udp_connect   = (fun _ ?src_port _ _ -> ignore src_port ; todo "UDP connect for localhost") ;
-      Host.udp_send      = (fun _ ?src_port _ _ -> ignore src_port ; todo "UDP send for localhost") ;
-      Host.ping          = (fun ?id ?seq _ -> ignore id ; ignore seq ; todo "Ping from localhost") ;
-      Host.gethostbyname = gethostbyname ;
-      Host.tcp_server    = tcp_server ;
-      Host.udp_server    = (fun _ _ -> todo "UDP server for localhost") ;
-      Host.signal_err    = signal_err ;
-      Host.dev           = { write = ignore ; set_read = ignore } ;
-      Host.arp_set       = (fun _ _ -> todo "set ARP table of localhost") ;
-      Host.power_on      = (fun ?on_ip () -> ignore on_ip) ;
-      Host.power_off     = (fun ?timeout () -> ignore timeout) ;
-      Host.add_killer    = ignore }
-
+    let tcp_connect = tcp_connect ~wait_for_server:true ?ttl:None ?tos:None
+    and udp_connect _ ?src_port _ _ =
+        ignore src_port ;
+        todo "UDP connect for localhost"
+    and udp_send _ ?src_port _ _ =
+        ignore src_port ;
+        todo "UDP send for localhost"
+    and ping ?id ?seq _ =
+        ignore id ; ignore seq ;
+        todo "Ping from localhost"
+    and udp_server _ _ =
+        todo "UDP server for localhost"
+    and arp_set _ _ =
+        todo "set ARP table of localhost"
+    and power_on ?on_ip () =
+        ignore on_ip
+    and power_off ?timeout () =
+        ignore timeout
+    and add_killer = ignore in
+    { Host.name = "localhost" ;
+      logger ; tcp_connect ; udp_connect ; udp_send ; ping ;
+      gethostbyname ; tcp_server ; udp_server ; signal_err ;
+      dev = { write = ignore ; set_read = ignore } ;
+      arp_set ; power_on ; power_off ; add_killer }

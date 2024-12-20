@@ -80,5 +80,5 @@ let sniffer iface rx =
             if debug then Printf.printf "Tap(%s): Got packet for ts %s\n%!"
                 iface.name (Clock.Time.to_string pdu.ts) ;
             Clock.at pdu.ts rx (pdu.payload :> bitstring) ;
-            loop () in
+            if !Clock.continue then loop () in
     Thread.create loop ()

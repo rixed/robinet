@@ -520,5 +520,5 @@ let sniffer iface rx =
             Metric.Atomic.fire packets_sniffed_ok ;
             Metric.Counter.add bytes_in (Int64.of_int (Payload.length pdu.Pdu.payload)) ;
             Clock.at pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
-            loop () in
+            if !Clock.continue then loop () in
     Thread.create loop ()

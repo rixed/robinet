@@ -31,7 +31,7 @@ let run port =
     Opache.serve host ~port:(Tcp.Port.o port) (Opache.multiplexer resources) ;
     Myadmin.make host (Tcp.Port.o (port+1)) ;
     (* Run everything *)
-   Clock.run true
+    Clock.run true
 
 let main =
     let port = ref 80 in

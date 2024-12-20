@@ -204,7 +204,7 @@ let report_thread oc period =
     let rec loop () =
         Thread.delay period ;
         print_report oc ;
-        loop () in
+        if !Clock.continue then loop () in
     Thread.create loop ()
 
 (* Tools for building UI *)

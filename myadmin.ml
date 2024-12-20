@@ -31,7 +31,7 @@ let series = Hashtbl.create 11 (* name -> past values array or size serie_size *
 let serie_current_idx = ref 0 (* last value is there, previous one is in current-1, and so on *)
 
 (* If you use the above, you must also run this thread. period is in seconds. *)
-let rec report_thread period =
+let report_thread period =
     let make_color =
         let colors = [| 0xFF0000l ; 0x00FF00l ; 0x0000FFl ;
                         0x909000l ; 0x900090l ; 0x009090l ;
@@ -50,12 +50,14 @@ let rec report_thread period =
         serie.past.(!serie_current_idx) <- ev.Metric.Atomic.count ;
         if serie.used < serie_size then serie.used <- serie.used + 1
     in
-    Thread.delay period ;
-    (* Save all the metrics *)
-    if debug then Printf.printf "MyAdmin: updating stored metrics\n%!" ;
-    serie_current_idx := if !serie_current_idx < serie_size-1 then !serie_current_idx+1 else 0 ;
-    Hashtbl.iter update_atomic Metric.Atomic.all ;
-    report_thread period
+    let rec loop () =
+        Thread.delay period ;
+        (* Save all the metrics *)
+        if debug then Printf.printf "MyAdmin: updating stored metrics\n%!" ;
+        serie_current_idx := if !serie_current_idx < serie_size-1 then !serie_current_idx+1 else 0 ;
+        Hashtbl.iter update_atomic Metric.Atomic.all ;
+        if !Clock.continue then loop () in
+    Thread.create loop ()
 
 let basename s =
     try snd (String.rsplit ~by:"/" s) with Not_found -> s

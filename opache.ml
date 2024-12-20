@@ -106,20 +106,20 @@ let serve host ?(port=Tcp.Port.o 80) (f : TRXtop.t -> Pdu.t -> Log.logger -> uni
         let counter = hash_find_or_insert count_queries_per_url key (fun () ->
             Metric.Atomic.make ("Hosts/"^host.Host.name^"/Httpd/queries/"^key)) in
         Metric.Atomic.fire counter in
-    host.Host.tcp_server port (fun tcp ->
+    host.Host.tcp_server port (fun (tcp : Tcp.TRX.tcp_trx) ->
         (* once we obtain the transport layer, build an http on top of it *)
         Log.(log logger Debug (lazy "Building a new HTTP.TRXtop")) ;
         let http = TRXtop.make () in
-        TRXtop.set_emit http (tx tcp.Tcp.TRX.trx) ;
+        TRXtop.set_emit http (tx tcp.trx) ;
         TRXtop.set_recv http (function
             | TRXtop.HttpError x ->
                 Log.(log logger Debug (lazy (Printf.sprintf "Got error %s" x))) ;
-                tcp.Tcp.TRX.close ()
+                tcp.close ()
             | TRXtop.HttpMsg (pdu, opened) ->
                 Log.(log logger Debug (lazy "Got HTTP msg")) ;
                 if not opened then (
                     Log.(log logger Debug (lazy (Printf.sprintf "Close the Tcp cnx"))) ;
-                    tcp.Tcp.TRX.close ()
+                    tcp.close ()
                 ) ;
                 (match pdu with
                 | { Pdu.cmd = Request (cmd, url) ; _ } ->
@@ -127,13 +127,16 @@ let serve host ?(port=Tcp.Port.o 80) (f : TRXtop.t -> Pdu.t -> Log.logger -> uni
                     count_query cmd url ;
                     f http pdu logger ;
                     Log.(log logger Debug (lazy (Printf.sprintf "Headers were %s, so we must%s close" (string_of_headers pdu.Pdu.headers) (if must_close_cnx pdu.Pdu.headers then "" else " not")))) ;
-                    if must_close_cnx pdu.Pdu.headers then tcp.Tcp.TRX.close ()
+                    if must_close_cnx pdu.Pdu.headers then tcp.close ()
                 | _ ->
                     Log.(log logger Debug (lazy (Printf.sprintf "Http msg is unknown"))) ;
                     Pdu.make_response 500 |> TRXtop.tx http ;
-                    tcp.Tcp.TRX.close ())) ;
+                    tcp.close ())) ;
         (* Only when everything's set up do we connect the tcp recv to http rx *)
-        ignore ((TRXtop.rx http) <-= tcp.Tcp.TRX.trx))
+        let verbose_rx bits =
+            Log.(log logger Debug (lazy "Got some bits for HTTP!")) ;
+            TRXtop.rx http bits in
+        ignore (verbose_rx <-= tcp.trx))
 
 (** {2 HTTP servicing functions}
   These functions build a function taking an {Http.TRXtop.t}, an incomming {Http.Pdu.t} and
