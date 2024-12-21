@@ -610,7 +610,9 @@ module Payload = struct
 end
 
 (** A device is something to which you can send packet and register a
- * receiving function *)
+ * receiving function.
+ * In a way this is just a trick to defer initialization of a peer when
+ * creating another. *)
 type dev =
     { write : bitstring -> unit ; set_read : (bitstring -> unit) -> unit }
 

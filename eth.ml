@@ -651,6 +651,9 @@ module Cable =
 struct
     (** {3 State for a given cable} *)
 
+    (* FIXME: state should be the real object and "trx" a function
+     * returning the trx? *)
+
     module State =
     struct
         type t = {  length : float ;  (** In meters. *)

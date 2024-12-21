@@ -144,13 +144,13 @@ let metrics _mth _matches vars _qry_body resp_body =
 <div>
     <form>
         %a
-        <input type='submit' name='redraw' value='redraw'/>
+        <input type="submit" name="redraw" value="redraw"/>
     </form>
 </div>
 <div>
-    <img width='%d' height='%d'
-     src='https://chart.googleapis.com/chart?chs=%dx%d&amp;cht=lc&amp;chd=%s&amp;chdl=%s&amp;chdlp=b&amp;chco=%s&amp;chxt=x,y&amp;chxl=0:|Past|Now&amp;chxr=1,%Ld,%Ld&amp;chds=%Ld,%Ld'
-     alt='Metrics'/>
+    <img width="%d" height="%d"
+     src="https://chart.googleapis.com/chart?chs=%dx%d&amp;cht=lc&amp;chd=%s&amp;chdl=%s&amp;chdlp=b&amp;chco=%s&amp;chxt=x,y&amp;chxl=0:|Past|Now&amp;chxr=1,%Ld,%Ld&amp;chds=%Ld,%Ld"
+     alt="Metrics"/>
 </div>
 |}
         (print_tree vars) (Metric.tree ())
@@ -158,12 +158,78 @@ let metrics _mth _matches vars _qry_body resp_body =
         chd chdl chco !chds_min !chds_max !chds_min !chds_max ;
     [ "Content-Type", "text/html" ]
 
+let find_logs ?(max_level=Log.max_level) ?(vert_distance=0) ?(horiz_distance=0)
+              logger =
+    (* Collect all loggers within those distances: *)
+    let loggers =
+        let visited = ref Set.String.empty in
+        let is_close max_dist logger =
+            if max_dist < 0 then (
+                Printf.printf "max dist %d < 0\n%!" max_dist ;
+                false
+            ) else if Set.String.mem logger.Log.full_name !visited then (
+                Printf.printf "already visited %s\n%!" logger.full_name ;
+                false
+            ) else (
+                Printf.printf "Visiting logger %s\n%!" logger.full_name ;
+                visited := Set.String.add logger.full_name !visited ;
+                true
+            ) in
+        let rec loop_up loggers max_horiz max_up max_down logger =
+            if max_up >= 0 then (
+                loop_horiz loggers max_horiz max_up max_down logger
+            ) else loggers
+        and loop_down loggers max_horiz max_up max_down logger =
+            if max_down >= 0 then (
+                loop_horiz loggers max_horiz max_up max_down logger
+            ) else loggers
+        and loop_horiz loggers max_horiz max_up max_down logger =
+            Printf.printf "loop_horiz %d %d %d %S\n%!" max_horiz max_up max_down logger.Log.full_name ;
+            if is_close max_horiz logger then (
+                Printf.printf "Adding logger %s\n%!" logger.full_name ;
+                let loggers = logger :: loggers in
+                let loggers =
+                    match logger.parent with
+                    | Some p ->
+                        (* Don't come back down to not end up in other branches *)
+                        loop_up loggers max_horiz (max_up - 1) 0 p
+                    | None -> loggers in
+                let loggers =
+                    List.fold_left (fun loggers child ->
+                        (* There is no point coming back up: *)
+                        loop_down loggers max_horiz 0 (max_down - 1) child
+                    ) loggers logger.children in
+                List.fold_left (fun loggers (sibling : Log.sibling) ->
+                    match sibling.via with
+                    | None ->
+                        loop_horiz loggers (max_horiz - 1) max_up max_down
+                                   sibling.peer
+                    | Some via ->
+                        let loggers =
+                            loop_horiz loggers (max_horiz - 1) max_up max_down
+                                       via in
+                        loop_horiz loggers (max_horiz - 2) max_up max_down
+                                   sibling.peer
+                ) loggers logger.siblings
+            ) else loggers in
+        loop_horiz [] horiz_distance vert_distance vert_distance logger in
+    Printf.printf "Got these loggers: %a\n%!" (List.print (fun oc l -> String.print oc l.Log.full_name)) loggers ;
+    (* TODO: options to include N parents/children, M siblings... Aka vertical
+     * and horizontal distance *)
+    let collect_logger e (logger : Log.logger) =
+        let rec loop lvl e =
+            if lvl > max_level then e else
+            let e' = Log.queue_enum logger.queues.(lvl) in
+            let e' = Enum.map (fun l -> logger, lvl, l) e' in
+            loop (lvl + 1) (Enum.append e e') in
+        loop 0 e in
+    let e = List.fold_left collect_logger (Enum.empty ()) loggers in
+    let a = Array.of_enum e in
+    Array.fast_sort
+        (fun (_, _, (t1, _)) (_, _, (t2, _)) -> Clock.Time.compare t1 t2) a ;
+    Array.enum a, loggers
+
 let logs _mth _matches vars _qry_body resp_body =
-    let print_queue oc q =
-        Log.queue_iter (fun t str ->
-                Printf.fprintf oc "<tr><td>%a</td><td>%s</td></tr>\n"
-                Clock.printer t str)
-            q in
     page_head resp_body ;
     let all_names =
         Hashtbl.keys Log.loggers |>
@@ -174,24 +240,80 @@ let logs _mth _matches vars _qry_body resp_body =
             Some (Hashtbl.find vars "logger")
         with Not_found ->
             if Array.length all_names > 0 then Some all_names.(0) else None in
-    Printf.fprintf resp_body {|
-<div>
-    <form>
-        <select name="logger" onchange="this.form.submit()">%a</select>
-    </form>
-</div>
-|}
+    let int_of_var name def =
+        Hashtbl.find_option vars name |>
+        Option.map int_of_string |? def in
+    let max_level = int_of_var "max_level" Log.max_level in
+    let vert_distance = int_of_var "vert_distance" 0 in
+    let horiz_distance = int_of_var "horiz_distance" 0 in
+    let ignored_loggers =
+        Hashtbl.find_all vars "ignored" |>
+        List.fold_left (fun ignored_loggers name ->
+            Set.String.add name ignored_loggers
+        ) Set.String.empty in
+    Printf.fprintf resp_body "<div><form>\n" ;
+    let selected = " selected" in
+    Printf.fprintf resp_body "\
+        <select name=\"logger\" \
+                onchange=\"this.form.submit()\">\n\
+            %a\
+        </select>\n"
         (Array.print ~first:"" ~last:"" ~sep:""
             (fun oc name ->
-                Printf.fprintf oc "<option value=\"%s\"%s/>%s</option>\n"
-                    name
-                    (if logger_name = Some name then " selected=\"selected\"" else "")
-                    name)) all_names ;
+                let v = Html.cdata_encode name in
+                Printf.fprintf oc "<option value=\"%s\"%s>%s</option>\n"
+                    v
+                    (if logger_name = Some name then selected else "")
+                    v)
+        ) all_names ;
+    Printf.fprintf resp_body "\
+        <label>Up to:\n\
+          <select name=\"max_level\" \
+                  onchange=\"this.form.submit()\">\n\
+            %a\
+          </select>\n\
+        </label>\n"
+        (Enum.print ~first:"" ~last:"" ~sep:""
+            (fun oc lvl ->
+                Printf.fprintf oc "<option value=\"%d\"%s>%s</option>\n"
+                    lvl
+                    (if max_level = lvl then selected else "")
+                    (Log.string_of_int_level lvl))
+        ) (Enum.range 0 ~until:Log.max_level) ;
+    Printf.fprintf resp_body "\
+        <label>Parents:\n\
+          <select name=\"vert_distance\" \
+                  onchange=\"this.form.submit()\">\n\
+            %a\
+          </select>\n\
+        </label>\n"
+        (List.print ~first:"" ~last:"" ~sep:""
+            (fun oc (v, l) ->
+                Printf.fprintf oc "<option value=\"%d\"%s>%s</option>\n"
+                    v
+                    (if vert_distance = v then selected else "")
+                    l)
+        ) [ 0, "none" ; 1, "direct" ; 2, "two levels" ; max_int, "all" ] ;
+    Printf.fprintf resp_body "\
+        <label>Siblings:\n\
+          <select name=\"horiz_distance\" \
+                  onchange=\"this.form.submit()\">%a\
+          </select>\n\
+        </label>\n"
+        (List.print ~first:"" ~last:"" ~sep:""
+            (fun oc (v, l) ->
+                Printf.fprintf oc "<option value=\"%d\"%s/>%s</option>\n"
+                    v
+                    (if horiz_distance = v then selected else "")
+                    l)
+        ) [ 0, "none" ; 1, "direct" ; 2, "two levels" ; max_int, "all" ] ;
     Option.may (fun logger_name ->
         let logger = Hashtbl.find_option Log.loggers logger_name in
         Option.may (fun (logger : Log.logger) ->
             let open_link_to (l : Log.logger) =
-                Printf.sprintf "<a href=\"?logger=%s\">" (Url.encode l.full_name) in
+                Printf.sprintf "<a href=\"?logger=%s&max_level=%d&vert_distance=%d&horiz_distance=%d\">"
+                    (Url.encode l.full_name)
+                    max_level vert_distance horiz_distance in
             let link_to ?(full_name=false) (l : Log.logger) =
                 Printf.sprintf "%s%s</a>"
                     (open_link_to l)
@@ -215,13 +337,56 @@ let logs _mth _matches vars _qry_body resp_body =
 <!-- siblings: -->
 %s%a
 </div>
+|}
+                (* parent *)
+                open_link close_link
+                (* children *)
+                (if logger.children <> [] then "children: " else "")
+                (List.print ~first:"" ~last:"" ~sep:" | " print_child)
+                    logger.children
+                (* siblings *)
+                (if logger.siblings <> [] then "siblings: " else "")
+                (List.print ~first:"" ~last:"" ~sep:" | " print_sibling)
+                    logger.siblings ;
+            (* And now the log selection: *)
+            let logs, loggers = find_logs ~max_level ~vert_distance ~horiz_distance logger in
+            let loggers =
+                List.fast_sort (fun l1 l2 ->
+                    String.compare l1.Log.full_name l2.full_name
+                ) loggers in
+            if loggers <> [] then (
+                let print_ignored_logger oc logger =
+                    let v = Html.cdata_encode logger.Log.full_name in
+                    Printf.fprintf oc "\
+                        <option value=\"%s\"%s>%s</option>\n"
+                        v
+                        (if Set.String.mem logger.full_name ignored_loggers
+                        then selected else "")
+                        v in
+                Printf.fprintf resp_body "\
+                    <div><label>Hide:&nbsp;\n\
+                        <select multiple name=\"ignored\" \
+                                onchange=\"this.form.submit()\">\n\
+                        %a\
+                        </select>\n\
+                    </label></div>\n"
+                    (List.print ~first:"" ~last:"" ~sep:"" print_ignored_logger)
+                        loggers
+            ) ;
+            let print_log oc (logger, lvl, (t, msg)) =
+                Printf.fprintf oc "<tr><td>%a</td><td>%s</td><td>%s</td><td>%s</td></tr>\n"
+                    Clock.printer t
+                    logger.Log.full_name
+                    (Log.string_of_int_level lvl)
+                    (Lazy.force msg) in
+            Printf.fprintf resp_body {|
 <div>
     <table>
     <thead>
-        <tr><th>Time</th><th>Message</th></tr>
+        <tr><th>Time</th><th>Source</th><th>Level</th><th>Message</th></tr>
     </thead>
     <tfoot>
-        <tr><th>Time</th><th>Message</th></tr>
+        <tr><th>Time</th><th>Source</th><th>Level</th><th>Message</th></tr>
     </tfoot>
     <tbody>
     %a
@@ -229,18 +394,13 @@ let logs _mth _matches vars _qry_body resp_body =
     </table>
 </div>
 |}
-                (* parent *)
-                open_link close_link
-                (* children *)
-                (if logger.children <> [] then "children: " else "")
-                (List.print ~first:"" ~last:"" ~sep:" | " print_child) logger.children
-                (* siblings *)
-                (if logger.siblings <> [] then "siblings: " else "")
-                (List.print ~first:"" ~last:"" ~sep:" | " print_sibling) logger.siblings
-                (Array.print ~first:"" ~last:"" ~sep:"" print_queue)
-                    logger.queues (* TODO: add a select box for log levels *)
+                (Enum.print ~first:"" ~last:"" ~sep:"" print_log)
+                    (Enum.filter (fun (l, _, _) ->
+                        not (Set.String.mem l.Log.full_name ignored_loggers)
+                    ) logs)
         ) logger
     ) logger_name ;
+    Printf.fprintf resp_body "</form></div>\n" ;
     [ "Content-Type", "text/html" ]
 
 let make host port =

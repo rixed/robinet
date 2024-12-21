@@ -26,12 +26,13 @@
 open Batteries
 
 (* Basically, Info is the lowest thing you want to see by default. *)
+(* TODO: several Debug level? *)
 type level  = Fatal | Critical | Error | Warning | Info | Debug
 
-type msg    = Clock.Time.t * (string Lazy.t)
+type msg = Clock.Time.t * (string Lazy.t)
 
 type queue  =
-    { mutable head : int ; (* points to the last message enqueued *)
+    { mutable oldest : int ; (* points to the next to be overwritten *)
       msgs : msg array }
 
 type logger =
@@ -74,7 +75,27 @@ let int_of_level = function
     | Info -> 4
     | Debug -> 5
 
+let level_of_int = function
+    | 0 -> Fatal
+    | 1 -> Critical
+    | 2 -> Error
+    | 3 -> Warning
+    | 4 -> Info
+    | 5 -> Debug
+    | _ -> invalid_arg "Log.level_of_int"
+
 let num_levels = 6
+let max_level = num_levels - 1
+
+let string_of_level = function
+    | Fatal -> "fatal"
+    | Critical -> "critical"
+    | Error -> "error"
+    | Warning -> "warning"
+    | Info -> "info"
+    | Debug -> "debug"
+
+let string_of_int_level = string_of_level % level_of_int
 
 (* output to console happen based on a constant current loglevel *)
 
@@ -86,17 +107,85 @@ let console_log name =
 
 (* queue management *)
 
-let enqueue q m =
-    q.msgs.(q.head) <- m ;
-    q.head <- if q.head >= Array.length q.msgs - 1 then 0 else q.head + 1
+let make_queue size =
+    { oldest = 0 ; msgs = Array.create size (Clock.Time.o 0., lazy "") }
 
-let queue_iter f q = (* TODO: ?(order=DESC) *)
-    let aux i =
-        let t, lstr = q.msgs.(i) in
-        let str = Lazy.force lstr in
-        if str <> "" then f t str in
-    for i = q.head - 1 downto 0 do aux i done ;
-    for i = Array.length q.msgs - 1 downto q.head do aux i done
+let enqueue q m =
+    q.msgs.(q.oldest) <- m ;
+    q.oldest <- if q.oldest + 1 >= Array.length q.msgs then 0 else q.oldest + 1
+
+type queue_cursor = { mutable next : int ; mutable wrapped : bool }
+
+let queue_enum q =
+    let rec next cursor () =
+        (* cursor points to the next entry to output: *)
+        let i = cursor.next in
+        let i =
+            if i >= Array.length q.msgs then
+                if cursor.wrapped then raise Enum.No_more_elements
+                else (cursor.wrapped <- true ; 0)
+            else i in
+        let i =
+            if i >= q.oldest && cursor.wrapped then
+                raise Enum.No_more_elements
+            else i in
+        cursor.next <- i + 1 ; (* for next iteration *)
+        q.msgs.(i)
+    and count cursor () =
+        let l = q.oldest - cursor.next in
+        if l <= 0 then
+            if not cursor.wrapped then l + Array.length q.msgs
+            else 0
+        else l
+    and clone cursor () =
+        let cursor = { cursor with next = cursor.next } in (* Copy the cursor *)
+        make cursor
+    and make cursor =
+        Enum.make (next cursor) (count cursor) (clone cursor)
+    in
+    let cursor = { next = q.oldest ; wrapped = false } in
+    let e = make cursor in
+    (* Advance cursor as strings are empty or we moved back to oldest: *)
+    Enum.drop_while (fun (_, s) -> Lazy.force s = "") e
+
+(*$inject
+  let queue_of_list ?(size=3) msgs =
+    let q = make_queue size in
+    List.iteri (fun i s ->
+        let t = Clock.Time.o (float_of_int i) in
+        enqueue q (t, lazy s)
+    ) msgs ;
+    q
+ *)
+(*$= queue_enum & ~printer:(fun lst -> String.concat "," (List.map (Lazy.force % snd) lst))
+  [] \
+        (List.of_enum (queue_enum (queue_of_list [])))
+  [ Clock.Time.o 0., lazy "glop" ] \
+        (List.of_enum (queue_enum (queue_of_list [ "glop" ])))
+  [ Clock.Time.o 0., lazy "glop" ; \
+    Clock.Time.o 1., lazy "pas glop" ] \
+        (List.of_enum (queue_enum (queue_of_list [ "glop" ; "pas glop" ])))
+  [ Clock.Time.o 0., lazy "glop" ; \
+    Clock.Time.o 1., lazy "glop glop" ; \
+    Clock.Time.o 2., lazy "pas glop" ] \
+        (List.of_enum (queue_enum (queue_of_list [ "glop" ; "glop glop" ; \
+                                                   "pas glop" ])))
+  [ Clock.Time.o 1., lazy "glop glop" ; \
+    Clock.Time.o 2., lazy "pas glop" ; \
+    Clock.Time.o 3., lazy "glop pas glop" ] \
+        (List.of_enum (queue_enum (queue_of_list [ "glop" ; "glop glop" ; \
+                                                   "pas glop" ; "glop pas glop" ])))
+*)
+
+(*$= queue_enum & ~printer:string_of_int
+  0  (Enum.count (queue_enum (queue_of_list [])))
+  1  (Enum.count (queue_enum (queue_of_list [ "glop" ])))
+  2  (Enum.count (queue_enum (queue_of_list [ "glop" ; "pas glop" ])))
+  3  (Enum.count (queue_enum (queue_of_list [ "glop" ; "glop glop" ; \
+                                              "pas glop" ])))
+  3  (Enum.count (queue_enum (queue_of_list [ "glop" ; "glop glop" ; \
+                                              "pas glop" ; "glop pas glop" ])))
+*)
 
 (* log *)
 
@@ -122,9 +211,6 @@ let log_exceptions logger ?(level=Warning) what f x =
                 what))
 
 (* creation *)
-
-let make_queue size =
-    { head = 0 ; msgs = Array.create size (Clock.Time.o 0., lazy "") }
 
 (* All existing loggers are known so we can display them in the GUI.
  * Indexed by a list of names, from indexed logger to ancestor: *)

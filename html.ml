@@ -802,3 +802,232 @@ let extract_links ?(default_base=Url.empty) headers tree =
                 List.of_enum |> \
                 List.sort Stdlib.compare))
 *)
+
+(* Apart from a full HTML parser we are also interested by a simple converter to
+ * and from CDATA strings: *)
+
+let entity_number_re = Str.regexp "&#[0-9]+"
+let entity_name_re = Str.regexp "&\\([a-z1-4][a-z1-4]\\|[a-z1-4][a-z1-4][a-z1-4]\\|[a-z1-4][a-z1-4][a-z1-4][a-z1-4]\\|[a-z1-4][a-z1-4][a-z1-4][a-z1-4][a-z1-4]\\|[a-z1-4][a-z1-4][a-z1-4][a-z1-4][a-z1-4][a-z1-4]\\|[a-z1-4][a-z1-4][a-z1-4][a-z1-4][a-z1-4][a-z1-4][a-z1-4]\\);"
+
+let string_of_entity_name s =
+    let invalid () = invalid_arg ("string_of_entity_name "^ s) in
+    match String.length s with
+    | 2 ->
+        (match s with
+        | "lt" -> "<"
+        | "gt" -> ">"
+        | "ni" -> "∋"
+        | "or" -> "∨"
+        | "ne" -> "≠"
+        | "le" -> "≤"
+        | "ge" -> "≥"
+        | "Mu" -> "Μ"
+        | "Nu" -> "Ν"
+        | "Xi" -> "Ξ"
+        | "Pi" -> "Π"
+        | "mu" -> "μ"
+        | "nu" -> "ν"
+        | "xi" -> "ξ"
+        | "pi" -> "π"
+        | _ -> invalid ())
+    | 3 ->
+        (match s with
+        | "amp" -> "&"
+        | "yen" -> "¥"
+        | "uml" -> "¨"
+        | "not" -> "¬"
+        | "shy" -> "­"
+        | "reg" -> "®"
+        | "deg" -> "°"
+        | "sum" -> "∑"
+        | "ang" -> "∠"
+        | "and" -> "∧"
+        | "cap" -> "∩"
+        | "cup" -> "∪"
+        | "int" -> "∫"
+        | "sim" -> "∼"
+        | "sub" -> "⊂"
+        | "sup" -> "⊃"
+        | "Eta" -> "Η"
+        | "Rho" -> "Ρ"
+        | "Tau" -> "Τ"
+        | "Phi" -> "Φ"
+        | "Chi" -> "Χ"
+        | "Psi" -> "Ψ"
+        | "eta" -> "η"
+        | "rho" -> "ρ"
+        | "tau" -> "τ"
+        | "phi" -> "φ"
+        | "chi" -> "χ"
+        | "psi" -> "ψ"
+        | "piv" -> "ϖ"
+        | "zwj" -> "‍"
+        | "lrm" -> "‎"
+        | "rlm" -> "‏"
+        | "loz" -> "◊"
+        | _ -> invalid ())
+    | 4 ->
+        (match s with
+        | "nbsp" -> " "
+        | "cent" -> "¢"
+        | "sect" -> "§"
+        | "copy" -> "©"
+        | "ordf" -> "ª"
+        | "macr" -> "¯"
+        | "sup2" -> "²"
+        | "sup3" -> "³"
+        | "para" -> "¶"
+        | "sup1" -> "¹"
+        | "ordm" -> "º"
+        | "part" -> "∂"
+        | "isin" -> "∈"
+        | "prod" -> "∏"
+        | "prop" -> "∝"
+        | "cong" -> "≅"
+        | "sube" -> "⊆"
+        | "supe" -> "⊇"
+        | "nsub" -> "⊄"
+        | "perp" -> "⊥"
+        | "sdot" -> "⋅"
+        | "Beta" -> "Β"
+        | "Zeta" -> "Ζ"
+        | "Iota" -> "Ι"
+        | "beta" -> "β"
+        | "zeta" -> "ζ"
+        | "iota" -> "ι"
+        | "Yuml" -> "Ÿ"
+        | "fnof" -> "ƒ"
+        | "circ" -> "ˆ"
+        | "ensp" -> " "
+        | "emsp" -> " "
+        | "zwnj" -> "‌"
+        | "bull" -> "•"
+        | "euro" -> "€"
+        | "larr" -> "←"
+        | "uarr" -> "↑"
+        | "rarr" -> "→"
+        | "darr" -> "↓"
+        | "harr" -> "↔"
+        | _ -> invalid ())
+    | 5 ->
+        (match s with
+        | "iexcl" -> "¡"
+        | "pound" -> "£"
+        | "laquo" -> "«"
+        | "acute" -> "´"
+        | "micro" -> "µ"
+        | "cedil" -> "¸"
+        | "raquo" -> "»"
+        | "times" -> "×"
+        | "exist" -> "∃"
+        | "empty" -> "∅"
+        | "nabla" -> "∇"
+        | "notin" -> "∉"
+        | "minus" -> "−"
+        | "radic" -> "√"
+        | "infin" -> "∞"
+        | "asymp" -> "≈"
+        | "equiv" -> "≡"
+        | "oplus" -> "⊕"
+        | "Alpha" -> "Α"
+        | "Gamma" -> "Γ"
+        | "Delta" -> "Δ"
+        | "Theta" -> "Θ"
+        | "Kappa" -> "Κ"
+        | "Sigma" -> "Σ"
+        | "Omega" -> "Ω"
+        | "alpha" -> "α"
+        | "gamma" -> "γ"
+        | "delta" -> "δ"
+        | "theta" -> "θ"
+        | "kappa" -> "κ"
+        | "sigma" -> "σ"
+        | "omega" -> "ω"
+        | "upsih" -> "ϒ"
+        | "OElig" -> "Œ"
+        | "oelig" -> "œ"
+        | "tilde" -> "˜"
+        | "ndash" -> "–"
+        | "mdash" -> "—"
+        | "lsquo" -> "‘"
+        | "rsquo" -> "’"
+        | "sbquo" -> "‚"
+        | "ldquo" -> "“"
+        | "rdquo" -> "”"
+        | "bdquo" -> "„"
+        | "prime" -> "′"
+        | "Prime" -> "″"
+        | "oline" -> "‾"
+        | "trade" -> "™"
+        | "crarr" -> "↵"
+        | "lceil" -> "⌈"
+        | "rceil" -> "⌉"
+        | "clubs" -> "♣"
+        | "diams" -> "♦"
+        | _ -> invalid ())
+    | 6 ->
+        (match s with
+        | "curren" -> "¤"
+        | "brvbar" -> "¦"
+        | "plusmn" -> "±"
+        | "frac14" -> "¼"
+        | "frac12" -> "½"
+        | "frac34" -> "¾"
+        | "iquest" -> "¿"
+        | "divide" -> "÷"
+        | "forall" -> "∀"
+        | "lowast" -> "∗"
+        | "there4" -> "∴"
+        | "otimes" -> "⊗"
+        | "Lambda" -> "Λ"
+        | "lambda" -> "λ"
+        | "sigmaf" -> "ς"
+        | "Scaron" -> "Š"
+        | "scaron" -> "š"
+        | "thinsp" -> " "
+        | "dagger" -> "†"
+        | "Dagger" -> "‡"
+        | "hellip" -> "…"
+        | "permil" -> "‰"
+        | "lsaquo" -> "‹"
+        | "rsaquo" -> "›"
+        | "lfloor" -> "⌊"
+        | "rfloor" -> "⌋"
+        | "spades" -> "♠"
+        | "hearts" -> "♥"
+        | _ -> invalid ())
+    | 7 ->
+        (match s with
+        | "Epsilon" -> "Ε"
+        | "Omicron" -> "Ο"
+        | "Upsilon" -> "Υ"
+        | "epsilon" -> "ε"
+        | "omicron" -> "ο"
+        | "upsilon" -> "υ"
+        | "thetasym" -> "ϑ"
+        | _ -> invalid ())
+    | _ ->
+        invalid ()
+
+
+let string_of_entity_number s =
+    let invalid () = invalid_arg ("string_of_entity_number"^ s) in
+    if String.length s < 3 then invalid () ;
+    if s.[0] != '&' || s.[1] != '#' then invalid () ;
+    let rec loop n i =
+        if i >= String.length s then n else
+        let n = n * 10 + c2i s.[i] in
+        loop n (i + 1) in
+    let n = loop 0 2 in
+    String.make 1 (Char.chr n)
+
+let cdata_encode s =
+    let s =
+        Str.global_substitute entity_number_re (fun s ->
+            string_of_entity_number (Str.matched_string s)
+        ) s in
+    let s =
+        Str.global_substitute entity_name_re (fun s ->
+            string_of_entity_name (Str.matched_string s)
+        ) s in
+    s
