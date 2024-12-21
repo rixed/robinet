@@ -39,8 +39,30 @@ type logger =
       full_name : string ;
       use_wall_clock : bool ;
       queues : queue array ;
+      (* We want to be able to navigate the logs/stats/characteristics of
+       * every simulated things.
+       * Things are connected with TRX in various ways, sometime "vertically",
+       * as a stack of layers to assemble composed objects (ex: a service with
+       * a host with an HTTP layer with a TCP layer with an IP layer with an
+       * ETH layer), and sometimes "horizontally" as connections between various
+       * objects, mostly via cables.
+       * From the point of view of the simulator, all these are just trxs
+       * connected together.
+       * That's only when the loggers are constructed that those relationships
+       * are indicated.
+       *
+       * TODO: logger is becoming a base "connected thing" object. Make it so?
+       * Not the same things as a trx though, as trxs are linear.
+       *
+       * Parent / children: loggers form a hierarchy. The full_name of a logger
+       * indicate that hierarchy. *)
       parent : logger option ;
-      mutable children : logger list }
+      mutable children : logger list ;
+      (* Siblings: When loggers are connected "horizontally" to others.
+       * Loggers names are then unrelated. *)
+      mutable siblings : sibling list }
+
+and sibling = { peer : logger ; via : logger option }
 
 (* log level <-> queue index *)
 
@@ -122,7 +144,8 @@ let make ?parent ?(use_wall_clock=false) ?(size=50) name =
         use_wall_clock ;
         queues = Array.init num_levels (fun _ -> make_queue size) ;
         parent ;
-        children = [] } in
+        children = [] ;
+        siblings = [] } in
     Option.may (fun p -> p.children <- logger :: p.children) parent ;
     Hashtbl.add loggers full_name logger ;
     logger
@@ -130,6 +153,14 @@ let make ?parent ?(use_wall_clock=false) ?(size=50) name =
 let sub logger ?size name =
     let size = size |? Array.length logger.queues.(0).msgs in
     make ~parent:logger ~use_wall_clock:logger.use_wall_clock ~size name
+
+let make_siblings ?via l1 l2 =
+    l1.siblings <- { peer = l2 ; via } :: l1.siblings ;
+    l2.siblings <- { peer = l1 ; via } :: l2.siblings ;
+    Option.may (fun via ->
+        via.siblings <- { peer = l1 ; via = None } ::
+                        { peer = l2 ; via = None } :: via.siblings
+    ) via
 
 (* The logger that will adopt any others: *)
 

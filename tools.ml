@@ -638,10 +638,15 @@ let ignore_bits ?(logger=null_logger) bits =
 let null_dev ~logger =
     { write = ignore_bits ~logger ; set_read = ignore }
 
-(** Connects two {!dev} together *)
-let (<-->) a b =
-    a.set_read b.write ;
-    b.set_read a.write
+(* Sets the reader of a device, "graphically" *)
+let (-->) dev f =
+    dev.set_read f
+
+(* Connects two devices [a] and [b] in such a way that one receives what
+ * the other transmit. *)
+let (<-->) dev1 dev2 =
+    dev1 --> dev2.write ;
+    dev2 --> dev1.write
 
 (** A transmitter is a kind of pipe with an inside and an outside device, and is
  * thus oriented (from inside to outside, inside being left operand for following
@@ -714,6 +719,8 @@ let (==>) trx1 trx2 =
 (** [a <==> b] connects [a] to [b] such that [b] receives from the outside
  * what [a] emits to the outside, and [a] receives from the outside what
  * [b] emits to the outside. *)
+(* BEWARE that for a change, [b]'s is not oriented inside->outside but the
+ * other way around. *)
 let (<==>) trx1 trx2 =
     trx1 =-> trx2.out.write ;
     trx2 =-> trx1.out.write
@@ -724,6 +731,13 @@ let pipe trx1 trx2 =
     trx1.out.set_read trx2.ins.write ;
     trx2.ins.set_read trx1.out.write ;
     { ins = trx1.ins ; out = trx2.out }
+
+(* Sometime we connect trx to mere devices: *)
+let (<=->) trx dev =
+    trx.out <--> dev
+
+let (<-=>) dev trx =
+    dev <--> trx.ins
 
 module type PDU = sig
     type t

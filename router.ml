@@ -539,6 +539,7 @@ end
 
 type gw_trx =
     { trx : trx ;
+      logger : Log.logger ;
       dhcp_state : Dhcpd.State.t ;
       dns_state : Named.State.t ;
       nat_state : Nat.State.t }
@@ -623,7 +624,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?dhcp_range
     let trx =
         { ins = in_trx ;
           out = out_trx.out } in
-    { trx ; dhcp_state ; dns_state ; nat_state }
+    { trx ; logger = parent_logger ; dhcp_state ; dns_state ; nat_state }
 
 (*$R make_gw
     (*Log.console_lvl := Log.Debug ;*)

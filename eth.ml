@@ -664,7 +664,8 @@ struct
                     logger : Log.logger }
 
         let make ?(length=10.) ?(error_rate=0.) ?(history=10)
-                 ?(logger=Log.default) () =
+                 ?(name="cable") () =
+            let logger = Log.make name in
             let delay = Clock.Interval.sec (length /. 3e9)
             and success_rate = int_of_float (1. /. error_rate) in
             { length ; delay ; error_rate ; success_rate ; tot_bits = 0 ;
@@ -712,6 +713,8 @@ struct
         { ins = { write = ins_write ; set_read = ins_set_read } ;
           out = { write = out_write ; set_read = out_set_read } }
 
-    let connect t a b =
-        a ==> t <==> b
+    let connect (st : State.t) a loga b logb =
+        let trx = make st in
+        Log.make_siblings loga ~via:st.logger logb ;
+        a ==> trx <==> b
 end

@@ -85,6 +85,7 @@ let page_head resp_body =
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
 <head>
+    <meta charset="utf-8">
     <title>RobiNet: Network Simulator</title>
 </head>
 <div>
@@ -189,22 +190,33 @@ let logs _mth _matches vars _qry_body resp_body =
     Option.may (fun logger_name ->
         let logger = Hashtbl.find_option Log.loggers logger_name in
         Option.may (fun (logger : Log.logger) ->
-            let link_to (l : Log.logger) =
+            let open_link_to (l : Log.logger) =
                 Printf.sprintf "<a href=\"?logger=%s\">" (Url.encode l.full_name) in
+            let link_to ?(full_name=false) (l : Log.logger) =
+                Printf.sprintf "%s%s</a>"
+                    (open_link_to l)
+                    (if full_name then l.full_name else l.name) in
             let print_child oc (l : Log.logger) =
-                Printf.fprintf oc "%s%s</a>\n" (link_to l) l.name in
+                String.print oc (link_to l) in
+            let print_sibling oc (s : Log.sibling) =
+                String.print oc (link_to ~full_name:true s.peer) ;
+                Option.may (fun via ->
+                    Printf.fprintf oc "&nbsp;(via: %s)" (link_to via)
+                ) s.via in
             let open_link, close_link =
                 match logger.parent with
                 | None -> "<s>", "</s>"
-                | Some parent -> link_to parent, "</a>" in
+                | Some parent -> open_link_to parent, "</a>" in
             Printf.fprintf resp_body {|
 <div>
     %sparent%s
+<!-- children: -->
+%s%a<br/>
+<!-- siblings: -->
 %s%a
 </div>
 <div>
     <table>
-    <caption>%s</caption>
     <thead>
         <tr><th>Time</th><th>Message</th></tr>
     </thead>
@@ -217,10 +229,14 @@ let logs _mth _matches vars _qry_body resp_body =
     </table>
 </div>
 |}
+                (* parent *)
                 open_link close_link
+                (* children *)
                 (if logger.children <> [] then "children: " else "")
                 (List.print ~first:"" ~last:"" ~sep:" | " print_child) logger.children
-                logger_name
+                (* siblings *)
+                (if logger.siblings <> [] then "siblings: " else "")
+                (List.print ~first:"" ~last:"" ~sep:" | " print_sibling) logger.siblings
                 (Array.print ~first:"" ~last:"" ~sep:"" print_queue)
                     logger.queues (* TODO: add a select box for log levels *)
         ) logger
