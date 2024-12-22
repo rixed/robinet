@@ -55,6 +55,8 @@ let decode s =
                     try (int_of_hexchar s.[o+1] lsl 4) + int_of_hexchar s.[o+2]
                     with Invalid_argument _ -> Char.code '?' in
                 s'.[o'] <- Char.chr c
+            ) else if s.[o] = '+' then (
+                s'.[o'] <- ' '
             ) else (
                 s'.[o'] <- s.[o]
             ) ;
@@ -68,6 +70,7 @@ let decode s =
 (*$= decode & ~printer:identity
     "came_from=/" (decode "came_from=%2F")
     "0.4/#0/admin" (decode "0.4%2F%230%2Fadmin")
+    "/glop glop" (decode "%2Fglop+glop")
 *)
 
 let char_encode c =
