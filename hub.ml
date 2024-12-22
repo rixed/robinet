@@ -39,18 +39,18 @@ struct
           is_connected = Array.make n false ;
           name ; logger }
 
-    let forward_from t n pld =
+    let forward_from (t : t) n pld =
         Array.iteri (fun i emit ->
             if i <> n then (
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Forward to iface %d/%d" i (Array.length t.ifaces)))) ;
                 Clock.asap emit pld
             )) t.ifaces
 
-    let write t n pld =
+    let write (t : t) n pld =
         Log.(log t.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.ifaces)))) ;
         forward_from t n pld
 
-    let set_read t n f =
+    let set_read (t : t) n f =
         Log.(log t.logger Debug (lazy (Printf.sprintf "Setting reader for iface %d" n))) ;
         t.is_connected.(n) <- true ;
         t.ifaces.(n) <- f
@@ -147,16 +147,16 @@ struct
         | {| _ |} ->
             Log.(log t.logger Debug (lazy (Printf.sprintf "Drop incoming frame without destination")))
 
-    let write t n pld =
+    let write (t : t) n pld =
         Log.(log t.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.hub.ifaces)))) ;
         forward_from t n pld
 
-    let set_read t n f =
+    let set_read (t : t) n f =
         Log.(log t.logger Debug (lazy (Printf.sprintf "Setting emitter for iface %d/%d" n (Array.length t.hub.ifaces)))) ;
         Repeater.set_read t.hub n f
 
     (** Turns a iface into a device *)
-    let iface t n =
+    let iface (t : t) n =
         { write = write t n ; set_read = set_read t n }
 
     let first_free_iface t =

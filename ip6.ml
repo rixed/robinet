@@ -115,7 +115,7 @@ module TRX = struct
         if debug then Printf.printf "Ip6: Emitting an IPv6 packet from %s to %s of length %d (content '%s')\n%!" (Ip.Addr.to_dotted_string t.src) (Ip.Addr.to_dotted_string t.dst) (bytelength bits) (hexstring_of_bitstring bits) ;
         Clock.asap t.emit (Pdu.pack pdu)
 
-    let rx t bits = (match Pdu.unpack bits with
+    let rx (t : t) bits = (match Pdu.unpack bits with
         | Error s ->
             Log.(log t.logger Warning s)
         | Ok ip ->

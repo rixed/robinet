@@ -762,3 +762,22 @@ let option_default_delayed_opt f a_opt =
 let option_tap f opt =
     Option.may f opt ;
     opt
+
+let memoize ?(h_size=10) f =
+    let h = Hashtbl.create h_size in
+    fun x ->
+        try Hashtbl.find h x
+        with Not_found ->
+            let v = f x in
+            Hashtbl.add h x v ;
+            v
+
+let common_pref_length s1 s2 =
+    let l1 = String.length s1
+    and l2 = String.length s2 in
+    let len = min l1 l2 in
+    let rec loop i =
+        if i >= len then i else
+        if s1.[i] <> s2.[i] then i else
+        loop (i + 1) in
+    loop 0

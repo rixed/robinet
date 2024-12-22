@@ -61,9 +61,9 @@ type logger =
       mutable children : logger list ;
       (* Siblings: When loggers are connected "horizontally" to others.
        * Loggers names are then unrelated. *)
-      mutable siblings : sibling list }
+      mutable peers : peer list }
 
-and sibling = { peer : logger ; via : logger option }
+and peer = { logger : logger ; via : logger option }
 
 (* log level <-> queue index *)
 
@@ -231,7 +231,7 @@ let make ?parent ?(use_wall_clock=false) ?(size=50) name =
         queues = Array.init num_levels (fun _ -> make_queue size) ;
         parent ;
         children = [] ;
-        siblings = [] } in
+        peers = [] } in
     Option.may (fun p -> p.children <- logger :: p.children) parent ;
     Hashtbl.add loggers full_name logger ;
     logger
@@ -240,12 +240,12 @@ let sub logger ?size name =
     let size = size |? Array.length logger.queues.(0).msgs in
     make ~parent:logger ~use_wall_clock:logger.use_wall_clock ~size name
 
-let make_siblings ?via l1 l2 =
-    l1.siblings <- { peer = l2 ; via } :: l1.siblings ;
-    l2.siblings <- { peer = l1 ; via } :: l2.siblings ;
+let make_peers ?via l1 l2 =
+    l1.peers <- { logger = l2 ; via } :: l1.peers ;
+    l2.peers <- { logger = l1 ; via } :: l2.peers ;
     Option.may (fun via ->
-        via.siblings <- { peer = l1 ; via = None } ::
-                        { peer = l2 ; via = None } :: via.siblings
+        via.peers <- { logger = l1 ; via = None } ::
+                     { logger = l2 ; via = None } :: via.peers
     ) via
 
 (* The logger that will adopt any others: *)

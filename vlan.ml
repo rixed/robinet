@@ -95,7 +95,7 @@ struct
         Clock.asap t.emit (Pdu.pack pdu)
 
     (** Receive function, called to output untaggd frames from the 802.1q tunnel. *)
-    let rx t bits = match Pdu.unpack bits with
+    let rx (t : t) bits = match Pdu.unpack bits with
         | Error s ->
             Log.(log t.logger Warning s)
         | Ok frame ->

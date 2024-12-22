@@ -84,7 +84,7 @@ struct
         Clock.asap t.emit (Pdu.pack udp)
 
     (* TODO: check checksum *)
-    let rx t bits = (match Pdu.unpack bits with
+    let rx (t : t) bits = (match Pdu.unpack bits with
         | Error s ->
             Log.(log t.logger Warning s)
         | Ok udp ->

@@ -166,7 +166,7 @@ struct
               load_balancing : load_balancing }
 
     (* Add a route (the added route becomes top priority *)
-    let add_route t r =
+    let add_route (t : t) r =
         Log.(log t.logger Debug (lazy (Printf.sprintf2 "Adding route: %a" Route.print r))) ;
         t.routes <- r :: t.routes
 
@@ -289,7 +289,7 @@ struct
                     forward targets.(n)
 
     (** Change the emitter of iface N. *)
-    let set_read t n f =
+    let set_read (t : t) n f =
         Log.(log t.logger Debug (lazy (Printf.sprintf "setting emitter for iface %d" n))) ;
         t.ifaces.(n).trx =-> f
 

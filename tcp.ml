@@ -225,7 +225,7 @@ struct
         in
         aux 0 bits
 
-    let delayed_ack t =
+    let delayed_ack (t : t) =
         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: I acked %d / %d received bytes" t.rcvd_acked t.rcvd_pld))) ;
         if t.rcvd_acked < t.rcvd_pld then emit_one t empty_bitstring
 
@@ -323,7 +323,7 @@ struct
 
     and is_established t = t.sent_pld > 0 && t.rcvd_pld > 0
 
-    and rx t bits = (match Pdu.unpack bits with (* If rx were receiving unpacked PDUs then we could bind unpack to rx *)
+    and rx (t : t) bits = (match Pdu.unpack bits with (* If rx were receiving unpacked PDUs then we could bind unpack to rx *)
         | Error s ->
             Log.(log t.logger Warning s)
         | Ok tcp ->

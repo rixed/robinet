@@ -726,7 +726,7 @@ module TRX = struct
 
     (* TODO: check checksum? *)
     (* TODO: handle fragmentation *)
-    let rx t bits =
+    let rx (t : t) bits =
         match Pdu.unpack bits with
         | Error s ->
             Log.(log t.logger Warning s)

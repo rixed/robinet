@@ -490,7 +490,7 @@ let packets_injected_err = Metric.Atomic.make "Pcap/Packets/Injected/Err"
 let bytes_out            = Metric.Counter.make "Pcap/Bytes/Out" "bytes"
 
 (** [inject iface bits] inject the packet [bits] into interface [iface]. *)
-let inject iface bits =
+let inject (iface : iface) bits =
     try
         let str = string_of_bitstring bits in
         Log.(log iface.logger Debug (lazy (Printf.sprintf "Injecting %d bytes" (String.length str)))) ;

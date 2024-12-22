@@ -718,6 +718,6 @@ struct
 
     let connect (st : State.t) a loga b logb =
         let trx = make st in
-        Log.make_siblings loga ~via:st.logger logb ;
+        Log.make_peers loga ~via:st.logger logb ;
         a ==> trx <==> b
 end

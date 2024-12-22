@@ -7,8 +7,8 @@ OCAMLMKTOP = ocamlfind ocamlmktop -thread -g
 QTEST      = qtest
 DOCDIR    ?= doc/
 WARNS      = -w -40-31+27
-override OCAMLOPTFLAGS += $(INCS) $(WARNS) -bin-annot
-override OCAMLFLAGS    += $(INCS) $(WARNS) -bin-annot
+override OCAMLOPTFLAGS += $(INCS) $(WARNS) -annot
+override OCAMLFLAGS    += $(INCS) $(WARNS) -annot
 
 ifndef NDEBUG
 override OCAMLOPTFLAGS += -g
