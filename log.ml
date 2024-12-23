@@ -103,7 +103,7 @@ let console_lvl = ref Error
 let console_log name =
     let name = if name = "" then name else name ^": " in
     fun (t, lstr) ->
-        Printf.printf "%a: %s%s\n%!" Clock.printer t name (Lazy.force lstr)
+        Printf.printf "%a: %s%s\n%!" Clock.Time.printf t name (Lazy.force lstr)
 
 (* queue management *)
 

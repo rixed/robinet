@@ -32,7 +32,7 @@ sig
     type outer_t
     val to_string : t -> string
     val print : Format.formatter -> t -> unit
-    val printf : unit BatInnerIO.output -> t -> unit
+    val printf : 'a BatInnerIO.output -> t -> unit
     val o : outer_t -> t
 end
 

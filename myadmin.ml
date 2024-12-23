@@ -90,7 +90,7 @@ let page_head resp =
     <style type="text/css">
         /* Loggers tables */
         table.loggers {
-            font-size: 0.8rem;
+            font-size: 0.7rem;
         }
         td.pointy {
             cursor: pointer;
@@ -113,10 +113,38 @@ let page_head resp =
             background-color: #4ff;
         }
 
+        label.top-pretty-please {
+            display: flex;
+        }
+
         /* Log lines */
+        .hidden {
+            visibility: collapse;
+        }
         table.logs {
             font-family: monospace;
             font-size: 0.8rem;
+            text-wrap: nowrap;
+        }
+        table.logs th {
+            text-align: left;
+            position: sticky;
+            top: 0em;
+            box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.4);
+            background: #fff;
+            height: 1.5rem;
+        }
+        table.logs tr.separated > td.src, table.logs td.lvl-set {
+            position: sticky;
+            top: 1.75rem;
+            background: #fff;
+        }
+        table.logs label.compl {
+            font-size: 0.8em;
+            font-style: italic;
+        }
+        table.logs td, table.logs th {
+            margin-right: 0.6em;
         }
         tr.dbg {
             color: #333;
@@ -132,6 +160,9 @@ let page_head resp =
         tr.nfo {
             background-color: #aff;
             font-weight: bold;
+        }
+        tr.separated td {
+            border-top: 1px solid #888;
         }
     </style>
 </head>
@@ -297,6 +328,12 @@ let logs_menu resp selected_name also_selected ignored_loggers =
         sel.value = val;
         sel.onchange();
     }
+    function chgreltime(is_rel) {
+        let to_show = this.document.getElementById(is_rel ? 'reltime-col':'abstime-col');
+        let to_hide = this.document.getElementById(is_rel ? 'abstime-col':'reltime-col');
+        to_hide.classList.add('hidden');
+        to_show.classList.remove('hidden');
+    }
     </script>
 |};
     (* The root layer is composed of all loggre without parents: *)
@@ -437,7 +474,10 @@ let logs _mth _matches vars _qry_body resp =
     let int_of_var name def =
         Hashtbl.find_option vars name |>
         Option.map int_of_string |? def in
+    let bool_of_var name =
+        (Hashtbl.find_option vars name |? "0") = "1" in
     let max_level = int_of_var "max_level" Log.max_level in
+    let reltime = bool_of_var "reltime" in
     let vert_distance = int_of_var "vert_distance" 0 in
     let horiz_distance = int_of_var "horiz_distance" 0 in
     let ignored_loggers =
@@ -566,7 +606,7 @@ let logs _mth _matches vars _qry_body resp =
                         then selected else "")
                         v in
                 Printf.fprintf resp "\
-                    <div><label>Hide:&nbsp;\n\
+                    <div><label class=\"top-pretty-please\">Hide:&nbsp;\n\
                         <select multiple name=\"ignored\" \
                                 onchange=\"this.form.submit()\">\n\
                         %a\
@@ -575,36 +615,79 @@ let logs _mth _matches vars _qry_body resp =
                     (List.print ~first:"" ~last:"" ~sep:"" print_ignored_logger)
                         loggers
             ) ;
-            let print_log oc (logger, lvl, (t, msg)) =
-                let class_of_log_level =
+            let interv_print =
+                let prev_t = ref None in
+                fun oc t ->
+                    (match !prev_t with
+                    | None ->
+                        Clock.Time.printf oc t
+                    | Some pt ->
+                        let i = Clock.Time.sub t pt in
+                        Clock.Interval.printf oc i) ;
+                    prev_t := Some t in
+            let print_log =
+                let class_of_level =
                     [| "fatal" ; "crit" ; "err" ; "wrn" ; "nfo" ; "dbg" |] in
-                Printf.fprintf oc "\
-                    <tr class=\"%s\">\
-                        <td class=\"tm\">%a</td>\
-                        <td class=\"src\">%s</td>\
-                        <td class=\"lvl\">%s</td>\
-                        <td class=\"msg\">%s</td>\
-                    </tr>\n"
-                    class_of_log_level.(lvl)
-                    Clock.printer t
-                    logger.Log.full_name
-                    (Log.string_of_int_level lvl)
-                    (Lazy.force msg) in
+                let prev_src = ref "" in
+                let prev_lvl = ref ~-1 in
+                fun oc (logger, lvl, (t, msg)) ->
+                    let src = logger.Log.full_name in
+                    let with_border =
+                        if !prev_src <> src then (
+                            prev_src := src ;
+                            true
+                        ) else false in
+                    let lvl_str =
+                        if !prev_lvl <> lvl then (
+                            prev_lvl := lvl ;
+                            Log.string_of_int_level lvl
+                        ) else "" in
+                    Printf.fprintf oc "\
+                        <tr class=\"%s%s\">\
+                            <td class=\"tm tm-abs\">%a</td>\
+                            <td class=\"tm tm-rel\">%a</td>\
+                            <td class=\"src\">%s</td>\
+                            <td class=\"lvl%s\">%s</td>\
+                            <td class=\"msg\">%s</td>\
+                        </tr>\n"
+                        class_of_level.(lvl)
+                        (if with_border then " separated" else "")
+                        Clock.Time.printf t
+                        interv_print t
+                        (if with_border then src else "")
+                        (if lvl_str <> "" then " lvl-set" else "")
+                        lvl_str
+                        (Lazy.force msg) in
             Printf.fprintf resp {|
 <div>
     <table class="logs">
+    <colgroup>
+        <col id="abstime-col" class="%s"/>
+        <col id="reltime-col" class="%s"/>
+        <col/>
+        <col/>
+        <col/>
+    </colgroup>
     <thead>
-        <tr><th>Time</th><th>Source</th><th>Level</th><th>Message</th></tr>
+        <tr>
+            <th colspan="2">
+            Time<br/>
+            <label class="compl">
+                <input type="checkbox" value="1" name="reltime"%s \
+                       onchange="chgreltime(this.checked)"/>relative
+            </label>
+            </th>
+        <th>Source</th><th>Level</th><th>Message</th></tr>
     </thead>
-    <tfoot>
-        <tr><th>Time</th><th>Source</th><th>Level</th><th>Message</th></tr>
-    </tfoot>
     <tbody>
     %a
     </tbody>
     </table>
 </div>
 |}
+                (if reltime then "hidden" else "")
+                (if reltime then "" else "hidden")
+                (if reltime then " checked" else "")
                 (Enum.print ~first:"" ~last:"" ~sep:"" print_log)
                     (Enum.filter (fun (l, _, _) ->
                         not (Set.String.mem l.Log.full_name ignored_loggers)

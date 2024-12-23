@@ -196,18 +196,22 @@ Your requested: '%s'<br/>
         (List.first path_matches) ;
     [ "Content-Type", "text/html" ]
 
-type params = (string, string) Hashtbl.t
-type resource = (Str.regexp * (string -> string list -> params -> string -> string BatIO.output -> Http.header list)) list
+(*type params = (string, string) Hashtbl.t
+type resource = (Str.regexp * (string -> string list -> params -> string -> unit BatIO.output -> Http.header list)) list*)
 (* list of (regex matching URL * (function of method, matches, parameters hash and output stream to list of headers)) *)
-let multiplexer (res:resource) http msg logger =
+let multiplexer res http msg logger =
     let handle mth url _headers ext_params qry_body =
         let url = Url.of_string url in
-        match none_if_not_found
-            (List.find_map (fun (re, f) ->
+        match List.find_map (fun (re, f) ->
                 if Str.string_match re url.Url.path 0
                 then Some (str_all_matches url.Url.path, f)
-                else None)) res with
-        | Some (matches, f) ->
+                else None) res with
+        | exception Not_found ->
+            Log.(log logger Debug (lazy (Printf.sprintf "Multiplexer: No taker for url '%s'" url.Url.path))) ;
+            TRXtop.tx http { Pdu.cmd = Status 404 ;
+                             Pdu.headers = [] ;
+                             Pdu.body = "" }
+        | matches, f ->
             Log.(log logger Debug (lazy (Printf.sprintf2 "Multiplexer: Found a match for url '%s', matches=%a" url.Url.path (List.print String.print) matches))) ;
             let vars = params_of_query url.Url.query in
             hash_merge vars (params_of_query ext_params) ;
@@ -227,12 +231,7 @@ let multiplexer (res:resource) http msg logger =
                 TRXtop.tx http { Pdu.cmd = Status code ;
                                  Pdu.headers = [ "Content-Type", "text/plain" ;
                                                  "Content-Length", Printf.sprintf "%d" (String.length err_msg) ] ;
-                                 Pdu.body = err_msg })
-        | None ->
-            Log.(log logger Debug (lazy (Printf.sprintf "Multiplexer: No taker for url '%s'" url.Url.path))) ;
-            TRXtop.tx http { Pdu.cmd = Status 404 ;
-                             Pdu.headers = [] ;
-                             Pdu.body = "" } in
+                                 Pdu.body = err_msg }) in
     match msg with
     | { Pdu.cmd = Request ("GET", url) ; headers ; body } ->
         handle "GET" url headers "" body

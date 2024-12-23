@@ -109,7 +109,7 @@ and Interval : sig
     val add : t -> t -> t
     val sub : t -> t -> t
 end = struct
-    include Private.Make(struct
+    include Private.Make (struct
         type t = float
         let to_string t =
             Printf.sprintf "+%fs" t
@@ -145,9 +145,6 @@ end = struct
     (** Subtract two intervals. *)
     let sub (a : t) (b : t) = o ((a :> float) -. (b :> float))
 end
-
-(* Poor man's asctime *)
-let printer oc t = BatIO.nwrite oc (Time.to_string t)
 
 (** {2 Current running time} *)
 

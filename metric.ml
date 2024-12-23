@@ -83,7 +83,7 @@ struct
     let print oc ev =
         Printf.fprintf oc "Metric: %s:\n\tcount: %Ld\n" ev.name ev.count ;
         match ev.first_last with None -> () | Some (first, last) ->
-            Printf.fprintf oc "\tfirst: %a\n\tlast: %a\n" Clock.printer first Clock.printer last ;
+            Printf.fprintf oc "\tfirst: %a\n\tlast: %a\n" Clock.Time.printf first Clock.Time.printf last ;
             if first <> last then
                 Printf.fprintf oc "\trate: %f Hz\n" (Int64.to_float ev.count /. ((Clock.Time.sub last first) :> float))
 end
