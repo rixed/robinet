@@ -108,6 +108,7 @@ and Interval : sig
     val compare : t -> t -> int
     val add : t -> t -> t
     val sub : t -> t -> t
+    val mul : t -> float -> t
 end = struct
     include Private.Make (struct
         type t = float
@@ -144,6 +145,9 @@ end = struct
 
     (** Subtract two intervals. *)
     let sub (a : t) (b : t) = o ((a :> float) -. (b :> float))
+
+    (** Multiply the duration by a scalar. *)
+    let mul (t : t) s = o ((t :> float) *. s)
 end
 
 (** {2 Current running time} *)

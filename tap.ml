@@ -76,7 +76,7 @@ let sniffer iface rx =
         | Some pdu ->
             Clock.synch () ;
             Metric.Atomic.fire packets_sniffed_ok ;
-            Metric.Counter.add bytes_in (Int64.of_int (Payload.length pdu.Pcap.Pdu.payload)) ;
+            Metric.Counter.add bytes_in (Payload.length pdu.Pcap.Pdu.payload) ;
             if debug then Printf.printf "Tap(%s): Got packet for ts %s\n%!"
                 iface.name (Clock.Time.to_string pdu.ts) ;
             Clock.at pdu.ts rx (pdu.payload :> bitstring) ;

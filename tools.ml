@@ -781,3 +781,14 @@ let common_pref_length s1 s2 =
         if s1.[i] <> s2.[i] then i else
         loop (i + 1) in
     loop 0
+
+let string_of_timestamp ts =
+    let open Unix in
+    let t = Unix.localtime ts in
+    Printf.sprintf "%04d-%02d-%02d %02dh%02dm%02ds"
+        (t.tm_year + 1900)
+        (t.tm_mon + 1)
+        t.tm_mday
+        t.tm_hour
+        t.tm_min
+        t.tm_sec

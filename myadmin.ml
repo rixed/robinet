@@ -25,42 +25,93 @@ open Tools
 
 let debug = false
 
-let serie_size = 100 (* keep the 100 last values for each metric *)
-type serie = { mutable used : int ; past : int64 array ; color : int32 }
-let series = Hashtbl.create 11 (* name -> past values array or size serie_size *)
-let serie_current_idx = ref 0 (* last value is there, previous one is in current-1, and so on *)
-
-(* If you use the above, you must also run this thread. period is in seconds. *)
-let report_thread period =
-    let make_color =
-        let colors = [| 0xFF0000l ; 0x00FF00l ; 0x0000FFl ;
-                        0x909000l ; 0x900090l ; 0x009090l ;
-                        0x909090l ; 0xC08040l ; 0xC04080l ;
-                        0x80C040l ; 0x8040C0l ; 0x40C080l ;
-                        0x4080C0l |]
-        and idx = ref 0 in
-        fun () ->
-            incr idx ;
-            colors.(!idx mod Array.length colors) in
-    let make_serie () =
-        { used = 0 ; past = Array.create serie_size 0L ; color = make_color () } in
-    let update_atomic n ev =
-        let serie =
-            hash_find_or_insert series n make_serie in
-        serie.past.(!serie_current_idx) <- ev.Metric.Atomic.count ;
-        if serie.used < serie_size then serie.used <- serie.used + 1
-    in
-    let rec loop () =
-        Thread.delay period ;
-        (* Save all the metrics *)
-        if debug then Printf.printf "MyAdmin: updating stored metrics\n%!" ;
-        serie_current_idx := if !serie_current_idx < serie_size-1 then !serie_current_idx+1 else 0 ;
-        Hashtbl.iter update_atomic Metric.Atomic.all ;
-        if !Clock.continue then loop () in
-    Thread.create loop ()
+let to_js_string s =
+    "'"^ s ^"'"  (* TODDO *)
 
 let basename s =
     try snd (String.rsplit ~by:"/" s) with Not_found -> s
+
+let page_head_open resp =
+    Printf.fprintf resp {|<?xml version="1.0"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>RobiNet: MyAdmin</title>
+|}
+
+let page_head_close resp =
+    Printf.fprintf resp {|</head>
+<div>
+    <a href="home.html">home</a>
+    <a href="metrics.html">metrics</a>
+    <a href="logs.html">logs</a>
+</div>
+|}
+
+let page_head resp =
+    page_head_open resp ;
+    page_head_close resp
+
+let home _mth _matches _vars _qry_body resp =
+    page_head resp ;
+    [ "Content-Type", "text/html" ]
+
+(*
+ * Metrics
+ *)
+
+(* Only for atomic events (ie counters): (FIXME) *)
+
+let seq_size = 100 (* keep the 100 last values for each metric *)
+let seq_used = ref 0 (* That many are used in the sequences *)
+let seq_next_idx = ref 0 (* next value to write *)
+
+type seq = { name : string ; params : Metric.Params.t ;
+             past : int array ; color : string }
+
+let series : (string, (Metric.Params.t, seq) Hashtbl.t) Hashtbl.t =
+    Hashtbl.create 11
+
+let make_color =
+    let colors = [| "#FF0000" ; "#00FF00" ; "#0000FF" ;
+                    "#909000" ; "#900090" ; "#009090" ;
+                    "#909090" ; "#C08040" ; "#C04080" ;
+                    "#80C040" ; "#8040C0" ; "#40C080" ;
+                    "#4080C0" |]
+    and idx = ref 0 in
+    fun () ->
+        incr idx ;
+        colors.(!idx mod Array.length colors)
+
+let make_seq name params = {
+    name ; params ;
+    past = Array.create seq_size 0 ; color = make_color () }
+
+let seq_time = make_seq "time" Metric.Params.empty
+
+(* If you use the above, you must also run this thread.
+ * [period] is in seconds. *)
+let report_thread period =
+    let update_atomic_metric n ev =
+        Hashtbl.iter (fun params count ->
+            let names =
+                hash_find_or_insert series n (fun () -> Hashtbl.create 10) in
+            let seq =
+                hash_find_or_insert names params (fun () -> make_seq n params) in
+            seq.past.(!seq_next_idx) <- count
+        ) ev.Metric.Atomic.counts in
+    let rec forever () =
+        Thread.delay period ;
+        (* Save all the metrics *)
+        if debug then Printf.printf "MyAdmin: updating stored metrics\n%!" ;
+        Hashtbl.iter update_atomic_metric Metric.Atomic.all ;
+        seq_time.past.(!seq_next_idx) <- int_of_float (Unix.gettimeofday ()) ;
+        seq_next_idx :=
+            if !seq_next_idx < seq_size-1 then !seq_next_idx+1 else 0 ;
+        if !seq_used < seq_size then incr seq_used ;
+        if !Clock.continue then forever () in
+    Thread.create forever ()
 
 (* Must be placed within a FORM *)
 let print_tree vars oc tree =
@@ -79,145 +130,52 @@ let print_tree vars oc tree =
         | Metric.Tree (n, t) -> add_tree oc n t in
     add_tree oc "" tree
 
-let page_head resp =
-    Printf.fprintf resp
-        {|<?xml version="1.0"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
-<head>
-    <meta charset="utf-8">
-    <title>RobiNet: Network Simulator</title>
-    <style type="text/css">
-        /* Loggers tables */
-        table.loggers {
-            font-size: 0.7rem;
-        }
-        td.pointy {
-            cursor: pointer;
-        }
-        td.selected {
-            background-color: #faa;
-            font-weight: bold;
-        }
-        td.also-selected {
-            background-color: #fcc;
-        }
-        td.ignored {
-            text-decoration: line-through wavy red;
-        }
-        /* Last because higher priority: */
-        td.pointy:hover {
-            background-color: #ccf;
-        }
-        td.highlighted {
-            background-color: #4ff;
-        }
-
-        label.top-pretty-please {
-            display: flex;
-        }
-
-        /* Log lines */
-        .hidden {
-            visibility: collapse;
-        }
-        table.logs {
-            font-family: monospace;
-            font-size: 0.8rem;
-            text-wrap: nowrap;
-        }
-        table.logs th {
-            text-align: left;
-            position: sticky;
-            top: 0em;
-            box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.4);
-            background: #fff;
-            height: 1.5rem;
-        }
-        table.logs tr.separated > td.src, table.logs td.lvl-set {
-            position: sticky;
-            top: 1.75rem;
-            background: #fff;
-        }
-        table.logs label.compl {
-            font-size: 0.8em;
-            font-style: italic;
-        }
-        table.logs td, table.logs th {
-            margin-right: 0.6em;
-        }
-        tr.dbg {
-            color: #333;
-        }
-        tr.err, tr.fatal, tr.crit {
-            background-color: #f88;
-            font-weight: bold;
-        }
-        tr.wrn {
-            background-color: #fcc;
-            font-weight: bold;
-        }
-        tr.nfo {
-            background-color: #aff;
-            font-weight: bold;
-        }
-        tr.separated td {
-            border-top: 1px solid #888;
-        }
-    </style>
-</head>
-<div>
-    <a href="home.html">home</a>
-    <a href="metrics.html">metrics</a>
-    <a href="logs.html">logs</a>
-</div>
-|}
-
-let home _mth _matches _vars _qry_body resp =
-    page_head resp ;
-    [ "Content-Type", "text/html" ]
-
-(* See Google chart API doc here: http://code.google.com/apis/chart/image/docs/making_charts.html *)
 let metrics _mth _matches vars _qry_body resp =
     if debug then Printf.printf "MyAdmin: metric: vars = %a\n" Opache.print_vars vars ;
-    let chds_min = ref 0L and chds_max = ref 0L in
-    let serie_of_metric n =
-        (* given the name of a metric, returns the serie of values we know for this metric and a color *)
-        match Hashtbl.find_option series n with
-        | None -> [], 0x000000l
-        | Some serie ->
-            let rec aux prev idx left =
-                if left > 0 then (
-                    let v = serie.past.(idx) in
-                    if v < !chds_min then chds_min := v ;
-                    if v > !chds_max then chds_max := v ;
-                    aux (v::prev) (if idx>0 then idx-1 else serie_size-1) (left-1)
-                ) else prev in
-            let values = aux [] !serie_current_idx serie.used in
-            values, serie.color
-    in
-    let names, values, colors = Hashtbl.fold (fun n _ ((names, values, colors) as prev) ->
-        match serie_of_metric n with
-        | [], _ -> prev
-        | s, c -> (Url.encode n::names, s::values, c::colors)) vars ([], [], []) in
-    let chd =
-        let str = BatIO.output_string () in
-        List.print ~first:"t:" ~last:"" ~sep:"|"
-            (List.print ~first:"" ~last:"" ~sep:"," Int64.print) str values ;
-        BatIO.close_out str
-    and chdl =
-        let str = BatIO.output_string () in
-        List.print ~first:"" ~last:"" ~sep:"|" String.print str names ;
-        BatIO.close_out str
-    and chco =
-        let str = BatIO.output_string () in
-        List.print ~first:"" ~last:"" ~sep:","
-            (fun out t -> Printf.fprintf out "%06lX" t)
-            str colors ;
-        BatIO.close_out str
-    and width, height = 640, 460
-    in
-    page_head resp ;
+    page_head_open resp ;
+    String.print resp
+        "<script src=\"https://cdn.jsdelivr.net/npm/chart.js\"></script>\n" ;
+    page_head_close resp ;
+    let fold_seq_values f u seq =
+        let rec loop u idx left =
+            if left <= 0 then u else
+            let idx = if idx < seq_size then idx else 0 in
+            let u = f u seq.past.(idx) in
+            loop u (idx + 1) (left - 1) in
+        let start_idx =
+            if !seq_used < seq_size then 0 else !seq_next_idx in
+        loop u start_idx !seq_used in
+    let all_seqs =
+        Hashtbl.fold (fun name _ seqs ->
+            match Hashtbl.find series name with
+            | exception Not_found ->
+                seqs
+            | h ->
+                (* For now just take all params: *)
+                Hashtbl.fold (fun _params seq seqs ->
+                    seq :: seqs
+                ) h seqs
+        ) vars [] in
+    let print_values to_str oc seq =
+        Char.print oc '[' ;
+        fold_seq_values (fun is_first v ->
+            if not is_first then Char.print oc ',' ;
+            String.print oc (to_str v) ;
+            false
+        ) true seq |> ignore ;
+        Char.print oc ']' in
+    let print_dataset oc seq =
+        Printf.fprintf oc "\
+        { label: %s,
+          data: %a,
+          fill: false,
+          borderColor: %s,
+          tension: 0.1 }\n"
+        (to_js_string seq.name)
+        (print_values string_of_int) seq
+        (to_js_string seq.color) in
+    let datetime_of_int i =
+        to_js_string (string_of_timestamp (float_of_int i)) in
     Printf.fprintf resp {|
 <div>
     <form>
@@ -226,15 +184,27 @@ let metrics _mth _matches vars _qry_body resp =
     </form>
 </div>
 <div>
-    <img width="%d" height="%d"
-     src="https://chart.googleapis.com/chart?chs=%dx%d&amp;cht=lc&amp;chd=%s&amp;chdl=%s&amp;chdlp=b&amp;chco=%s&amp;chxt=x,y&amp;chxl=0:|Past|Now&amp;chxr=1,%Ld,%Ld&amp;chds=%Ld,%Ld"
-     alt="Metrics"/>
+    <canvas id="my_chart"></canvas>
 </div>
+<script type="text/javascript">
+    const ctx = document.getElementById('my_chart');
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: %a,
+            datasets: %a
+        }
+    });
+</script>
 |}
         (print_tree vars) (Metric.tree ())
-        width height width height
-        chd chdl chco !chds_min !chds_max !chds_min !chds_max ;
+        (print_values datetime_of_int) seq_time
+        (List.print ~sep:",\n" print_dataset) all_seqs ;
     [ "Content-Type", "text/html" ]
+
+(*
+ * Logs
+ *)
 
 let find_loggers ?(vert_distance=0) ?(horiz_distance=0) logger =
     (* Collect all loggers within those distances: *)
@@ -309,33 +279,7 @@ let get_logs ?(max_level=Log.max_level) loggers =
         (fun (_, _, (t1, _)) (_, _, (t2, _)) -> Clock.Time.compare t1 t2) a ;
     Array.enum a
 
-let to_js_string s =
-    "'"^ s ^"'"  (* TODDO *)
-
 let logs_menu resp selected_name also_selected ignored_loggers =
-    String.print resp {|
-    <script language="javascript">
-    function highlight(ids) {
-        ids.forEach((id) =>
-          this.document.getElementById(id).classList.add("highlighted"));
-    }
-    function unhighlight(ids) {
-        ids.forEach((id) =>
-          this.document.getElementById(id).classList.remove("highlighted"));
-    }
-    function setLogger(val) {
-        let sel = this.document.getElementById('logger_select');
-        sel.value = val;
-        sel.onchange();
-    }
-    function chgreltime(is_rel) {
-        let to_show = this.document.getElementById(is_rel ? 'reltime-col':'abstime-col');
-        let to_hide = this.document.getElementById(is_rel ? 'abstime-col':'reltime-col');
-        to_hide.classList.add('hidden');
-        to_show.classList.remove('hidden');
-    }
-    </script>
-|};
     (* The root layer is composed of all loggre without parents: *)
     let roots =
         Hashtbl.fold (fun _k l root ->
@@ -461,7 +405,107 @@ let logs_menu resp selected_name also_selected ignored_loggers =
     Printf.fprintf resp "</div><br style=\"clear: left\"/>\n"
 
 let logs _mth _matches vars _qry_body resp =
-    page_head resp ;
+    page_head_open resp ;
+    Printf.fprintf resp {|
+    <style type="text/css">
+        /* Loggers tables */
+        table.loggers {
+            font-size: 0.7rem;
+        }
+        td.pointy {
+            cursor: pointer;
+        }
+        td.selected {
+            background-color: #faa;
+            font-weight: bold;
+        }
+        td.also-selected {
+            background-color: #fcc;
+        }
+        td.ignored {
+            text-decoration: line-through wavy red;
+        }
+        /* Last because higher priority: */
+        td.pointy:hover {
+            background-color: #ccf;
+        }
+        td.highlighted {
+            background-color: #4ff;
+        }
+        label.top-pretty-please {
+            display: flex;
+        }
+        /* Log lines */
+        .hidden {
+            visibility: collapse;
+        }
+        table.logs {
+            font-family: monospace;
+            font-size: 0.8rem;
+            text-wrap: nowrap;
+        }
+        table.logs th {
+            text-align: left;
+            position: sticky;
+            top: 0em;
+            box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.4);
+            background: #fff;
+            height: 1.5rem;
+        }
+        table.logs tr.separated > td.src, table.logs td.lvl-set {
+            position: sticky;
+            top: 1.75rem;
+            background: #fff;
+        }
+        table.logs label.compl {
+            font-size: 0.8em;
+            font-style: italic;
+        }
+        table.logs td, table.logs th {
+            margin-right: 0.6em;
+        }
+        tr.dbg {
+            color: #333;
+        }
+        tr.err, tr.fatal, tr.crit {
+            background-color: #f88;
+            font-weight: bold;
+        }
+        tr.wrn {
+            background-color: #fcc;
+            font-weight: bold;
+        }
+        tr.nfo {
+            background-color: #aff;
+            font-weight: bold;
+        }
+        tr.separated td {
+            border-top: 1px solid #888;
+        }
+    </style>
+    <script type="text/javascript">
+        function highlight(ids) {
+            ids.forEach((id) =>
+              this.document.getElementById(id).classList.add("highlighted"));
+        }
+        function unhighlight(ids) {
+            ids.forEach((id) =>
+              this.document.getElementById(id).classList.remove("highlighted"));
+        }
+        function setLogger(val) {
+            let sel = this.document.getElementById('logger_select');
+            sel.value = val;
+            sel.onchange();
+        }
+        function chgreltime(is_rel) {
+            let to_show = this.document.getElementById(is_rel ? 'reltime-col':'abstime-col');
+            let to_hide = this.document.getElementById(is_rel ? 'abstime-col':'reltime-col');
+            to_hide.classList.add('hidden');
+            to_show.classList.remove('hidden');
+        }
+    </script>
+|};
+    page_head_close resp ;
     let all_names =
         Hashtbl.keys Log.loggers |>
         Array.of_enum in

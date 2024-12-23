@@ -97,7 +97,7 @@ and t = { mutable trx : host_trx ;
           search_sfx : string option ;
           nameserver : Ip.Addr.t option ;
           mutable resolv_trx : trx option ;
-          dns_queries : (string, ((Ip.Addr.t list option -> unit) * Clock.Time.t option)) Hashtbl.t ;
+          dns_queries : (string, ((Ip.Addr.t list option -> unit) * Metric.Timed.stop_func option)) Hashtbl.t ;
           dns_cache   : (string, Ip.Addr.t list) Hashtbl.t ;
           (* ICMP errors want to embed the first 8 bytes of the IP packet so we save
            * it here: *)
@@ -237,8 +237,8 @@ let rec with_resolver_trx t cont =
                         ) pdu.Dns.Pdu.answer_rrs in
                     let conts = Hashtbl.find_all t.dns_queries name in
                     Log.(log t.trx.logger Debug (lazy (Printf.sprintf "Awakening %d clients that were waiting for the address of '%s'" (List.length conts) name))) ;
-                    List.iter (fun (cont, start_opt) ->
-                        Option.may (fun start -> Metric.Timed.stop resolutions start name) start_opt ;
+                    List.iter (fun (cont, timer_stop_opt) ->
+                        Option.may (fun f -> f (Metric.Params.singleton "status" (Metric.Param.String "ok"))) timer_stop_opt ;
                         cont (Some ips)) conts ;
                     Hashtbl.remove_all t.dns_queries name ;
                     (* cache the result *)
@@ -286,8 +286,8 @@ and do_gethostbyname t name cont =
         if num_conts > 0 then (
             Log.(log t.trx.logger Warning (lazy (Printf.sprintf "Timeouting %d clients that were waiting for the address of '%s'" num_conts name))) ;
             Metric.Atomic.fire resolution_timeouts ;
-            List.iter (fun (cont, start_opt) ->
-                Option.may (fun start -> Metric.Timed.stop resolutions start name) start_opt ;
+            List.iter (fun (cont, timer_stop_opt) ->
+                Option.may (fun f -> f (Metric.Params.singleton "status" (Metric.Param.String "timeout"))) timer_stop_opt ;
                 cont None) conts ;
             Hashtbl.remove_all t.dns_queries name
         ) in
@@ -308,8 +308,8 @@ and do_gethostbyname t name cont =
                     (* add a timeout event that will awake all waiters for this name after some time *)
                     Clock.delay dns_timeout_delay dns_timeout () ;
                     (* Then actually sends the query *)
-                    let start = Metric.Timed.start resolutions in
-                    Hashtbl.add t.dns_queries name (cont, Some start) ;
+                    let stop = Metric.(Timed.start ~params:(Params.singleton "name" (Param.String name)) resolutions) in
+                    Hashtbl.add t.dns_queries name (cont, Some stop) ;
                     Dns.Pdu.make_query name |> Dns.Pdu.pack |> tx resolv_trx
                 ) else (
                     Hashtbl.add t.dns_queries name (cont, None)

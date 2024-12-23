@@ -496,7 +496,7 @@ let inject (iface : iface) bits =
         Log.(log iface.logger Debug (lazy (Printf.sprintf "Injecting %d bytes" (String.length str)))) ;
         inject_ iface.handler str ;
         Metric.Atomic.fire packets_injected_ok ;
-        Metric.Counter.add bytes_out (Int64.of_int (bytelength bits))
+        Metric.Counter.add bytes_out (bytelength bits)
     with e ->
         Log.(log iface.logger Error (lazy (Printf.sprintf "Cannot inject: %s" (Printexc.to_string e)))) ;
         Metric.Atomic.fire packets_injected_err
@@ -518,7 +518,7 @@ let sniffer iface rx =
         | Some pdu ->
             Clock.synch () ;
             Metric.Atomic.fire packets_sniffed_ok ;
-            Metric.Counter.add bytes_in (Int64.of_int (Payload.length pdu.Pdu.payload)) ;
+            Metric.Counter.add bytes_in (Payload.length pdu.Pdu.payload) ;
             Clock.at pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
             if !Clock.continue then loop () in
     Thread.create loop ()

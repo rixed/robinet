@@ -245,9 +245,7 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
         (* Use a pool of tcp cnx already established _and_not_used_by_any_thread_ *)
         (* FIXME: this should be a pool of Http.TRXtop (optionaly with Tcp if we can't close the Tcp cnx in any other way) DONE? *)
         if debug then Printf.printf "Browser: connecting to addr %s\n" (Host.string_of_addr addr) ;
-        let with_http_cnx = function
-        | None -> cont None
-        | Some (http, tcp) ->
+        let with_http_cnx http tcp =
             TRXtop.set_recv http (fun msg ->
                 TRXtop.set_recv http ignore ; (* we only want to trigger once *)
                 cont (Some (msg, http, tcp))) ;
@@ -279,13 +277,18 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
                 | Some tcp ->
                     ignore ((TRXtop.rx http) <-= tcp.Tcp.TRX.trx) ;
                     TRXtop.set_emit http (tx tcp.Tcp.TRX.trx) ;
-                    with_http_cnx (Some (http, tcp)))
+                    with_http_cnx http tcp)
             | Some v ->
-                with_http_cnx (Some (v.http, v.tcp)) in
+                with_http_cnx v.http v.tcp in
     if url.Url.scheme <> "http" then (
         Printf.printf "Browser: bad scheme: %s" (Url.to_string url)
     ) else (
-        let get_start = Metric.Timed.start message_get in
+        let stop_with_status =
+            let open Metric in
+            let params = Params.singleton "url" (Param.String (Url.to_string url)) in
+            let stop_func = Timed.start ~params message_get in
+            fun status ->
+                stop_func Metric.(Params.singleton "status" (Param.String status)) in
         let addr, port =
             (* Try to use the port present in the URL *)
             try let n = String.index url.Url.net_loc ':' in
@@ -295,15 +298,18 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
             with _ ->
                 Host.Name url.Url.net_loc, Tcp.Port.o 80 in
         get_msg addr port (function
-        | None -> cont None
+        | None ->
+            stop_with_status "no cnx" ;
+            cont None
         | Some (msg, http, tcp) ->
-            Metric.Timed.stop message_get get_start (Url.to_string url) ;
             match msg with
                 | TRXtop.HttpError x ->
+                    stop_with_status "error" ;
                     if debug then Printf.printf "Browser: got error %s\n%!" x ;
                     tcp.Tcp.TRX.close () ;
                     cont None
                 | TRXtop.HttpMsg (pdu, opened) ->
+                    stop_with_status "ok" ;
                     (* Close the TCP cnx if we are done with it, or relieve it *)
                     if opened && not (must_close_cnx pdu.Pdu.headers) then (
                         make_vacant_cnx t tcp http addr port ;

@@ -50,154 +50,306 @@ open Tools
 
 let debug = false
 
+module Param =
+struct
+    type t =
+        | Bool of bool
+        | Int of int
+        | String of string
+
+    let to_string = function
+        | Bool b -> string_of_bool b
+        | Int d -> string_of_int d
+        | String s -> s
+end
+
+module Params =
+struct
+    (* There are smarter representations but let's see if we need them *)
+    type t = (string * Param.t) list
+
+    let empty = []
+
+    let singleton n v = [ n, v ]
+
+    let compare = List.compare
+
+    let cmp_param (n1, _) (n2, _) = String.compare n1 n2
+
+    let make assoc_lst =
+        List.fast_sort cmp_param assoc_lst
+
+    let ref find n = function
+        | [] ->
+            raise Not_found
+        | (n', v) :: rest ->
+            let c = String.compare n n' in
+            if c < 0 then raise Not_found else
+            if c = 0 then v else
+            find n rest
+
+    let rec (+::) (n, _ as p) = function
+        | [] ->
+            [ p ]
+        | (n', _ as p') :: rest ->
+            let c = String.compare n n' in
+            if c < 0 then p :: rest else
+            if c = 0 then invalid_arg ("Params.cons: "^ n ^" added twice")
+            else p' :: (p +:: rest)
+
+    let add t1 t2 =
+        List.merge cmp_param t1 t2
+
+    let has_param n t =
+        try ignore (find n t) ; true with Not_found -> false
+
+    let print oc t =
+        List.print ~first:"" ~sep:"|" ~last:""
+            (fun oc (n, v) -> Printf.fprintf oc "%S:%s" n (Param.to_string v))
+            oc t
+
+    let print_hash p oc h =
+        Hashtbl.print ~first:"" ~last:"" ~sep:"" ~kvsep:""
+            (fun oc params -> Printf.fprintf oc "\t\t%a: " print params)
+            (fun oc v -> Printf.fprintf oc "%a\n" p v)
+            oc h
+end
+
+module FirstLast =
+struct
+    type t_ = { first : Clock.Time.t ; mutable last : Clock.Time.t }
+
+    type t = t_ ref
+
+    let empty =
+        let z = Clock.Time.o 0. in
+        { first = z ; last = z }
+
+    let make () =
+        ref empty
+
+    let reset t =
+        t := empty
+
+    let update ?now t =
+        let now = Option.default_delayed Clock.now now in
+        if !t == empty then
+            t := { first = now ; last = now }
+        else
+            !t.last <- now
+
+    let printf oc t =
+        if !t != empty then
+            Printf.fprintf oc "\
+                \tfirst: %a\n\
+                \tlast: %a\n"
+                Clock.Time.printf !t.first
+                Clock.Time.printf !t.last
+end
+
 (* Atomic events are for errors, per results stats, etc *)
 module Atomic =
 struct
 
-    type t = { name               : string ;
-               mutable count      : int64 ;
-               mutable first_last : (Clock.Time.t * Clock.Time.t) option }
+    type t = { name : string ;
+               counts : (Params.t, int) Hashtbl.t ;
+               first_last : FirstLast.t }
 
     let all = Hashtbl.create 37
 
     let make name =
-        let ret = { name        = name ;
-                    count       = 0L ;
-                    first_last  = None } in
+        let ret = { name = name ;
+                    counts = Hashtbl.create 5 ;
+                    first_last = FirstLast.make () } in
         Hashtbl.add all name ret ;
         ret
 
-    let reset ev =
-        ev.count <- 0L ;
-        ev.first_last <- None
+    let reset t =
+        Hashtbl.clear t.counts ;
+        FirstLast.reset t.first_last
 
-    let fire ev =
-        let now = Clock.now () in
-        ev.count <- Int64.succ ev.count ;
-        match ev.first_last with
-        | None ->
-            ev.first_last <- Some (now, now)
-        | Some (first, _) ->
-            ev.first_last <- Some (first, now)
+    let fire ?now ?(params=Params.empty) t =
+        Hashtbl.modify_def 0 params succ t.counts ;
+        FirstLast.update ?now t.first_last
 
-    let print oc ev =
-        Printf.fprintf oc "Metric: %s:\n\tcount: %Ld\n" ev.name ev.count ;
-        match ev.first_last with None -> () | Some (first, last) ->
-            Printf.fprintf oc "\tfirst: %a\n\tlast: %a\n" Clock.Time.printf first Clock.Time.printf last ;
-            if first <> last then
-                Printf.fprintf oc "\trate: %f Hz\n" (Int64.to_float ev.count /. ((Clock.Time.sub last first) :> float))
+    let print oc t =
+        Printf.fprintf oc "\
+            Metric: %s:\n\
+            \tcounts:\n\
+            %a"
+            t.name
+            (Params.print_hash Int.print)
+                t.counts ;
+        FirstLast.printf oc t.first_last
 end
 
 (* Counters are for counting bytes, etc *)
 module Counter =
 struct
-    type t = { name          : string ;
-               unit_str      : string ;
-               mutable value : int64 ;
-               events        : Atomic.t }
+    type t = { name : string ;
+               unit_str : string ;
+               values : (Params.t, int) Hashtbl.t ;
+               fired : Atomic.t }
 
     let all = Hashtbl.create 37
 
-    let make name u =
-        let ret = { name = name ; unit_str = u ;
-                    value = 0L ; events = Atomic.make (name^"_events") } in
+    let make name unit_str =
+        let ret = {
+            name ; unit_str ;
+            values = Hashtbl.create 10 ;
+            fired = Atomic.make (name^"/fired")
+        } in
         Hashtbl.add all name ret ;
         ret
 
-    let reset ev =
-        ev.value <- 0L ;
-        Atomic.reset ev.events
+    let reset t =
+        Hashtbl.clear t.values ;
+        Atomic.reset t.fired
 
-    let add ev c =
-        Atomic.fire ev.events ;
-        ev.value <- Int64.add ev.value c
+    let add t ?now ?(params=Params.empty) c =
+        Hashtbl.modify_opt params (function
+            | None ->
+                Some c
+            | Some sum ->
+                Some (sum + c)
+        ) t.values ;
+        Atomic.fire ?now t.fired
 
-    let addi ev c =
-        add ev (Int64.of_int c)
-
-    let increase [@deprecated "Use Counter.add instead."] = add
-
-    let print oc ev =
-        Printf.fprintf oc "Metric: %s:\n\tcount: %Ld %s\n"
-            ev.name ev.value ev.unit_str
+    let print oc t =
+        Printf.fprintf oc "\
+            Metric: %s:\n\
+            \tcounts:\n\
+            %a"
+            t.name
+            (Params.print_hash
+                (fun oc v -> Printf.fprintf oc "%d\n" v))
+                t.values
 end
 
 (* Timeds are for download times, connection times, etc *)
 module Timed =
 struct
 
-    type minmax = { mutable min : (Clock.Interval.t * string) ;
-                    mutable max : (Clock.Interval.t * string) }
+    type t = { name : string ;
+               durations : (Params.t, duration) Hashtbl.t ;
+               starts : Atomic.t ;
+               stops : Atomic.t ;
+               mutable simult : int ;
+               mutable max_simult : int }
 
-    let make_minmax v id = { min = v, id ; max = v, id }
-
-    let update_minmax mm v id =
-        if fst mm.max <= v then mm.max <- v, id ;
-        if fst mm.min >= v then mm.min <- v, id
-
-    type t = { name                  : string ;
-               start                 : Atomic.t ;
-               stop                  : Atomic.t ;
-               mutable tot_duration  : Clock.Interval.t ;
-               mutable minmax        : minmax option ;
-               mutable simult        : int ;
-               mutable max_simult    : int }
+    and duration =
+        { min : Clock.Interval.t ;
+          max : Clock.Interval.t ;
+          sum : Clock.Interval.t ;
+          count : int }
 
     let all = Hashtbl.create 37
 
     let make name =
-        let ret = { name              = name ;
-                    start             = Atomic.make (name^"/start") ;
-                    stop              = Atomic.make (name^"/stop") ;
-                    tot_duration      = Clock.Interval.o 0. ;
-                    minmax            = None ;
-                    simult            = 0 ;
-                    max_simult        = 0 } in
+        let ret = { name ;
+                    starts = Atomic.make (name^"/start") ;
+                    stops = Atomic.make (name^"/stop") ;
+                    durations = Hashtbl.create 10 ;
+                    simult = 0 ;
+                    max_simult = 0 } in
         Hashtbl.add all name ret ;
         ret
 
-    let reset ev =
-        Atomic.reset ev.start ;
-        Atomic.reset ev.stop ;
-        ev.tot_duration <- Clock.Interval.o 0. ;
-        ev.minmax <- None ;
-        ev.simult <- 0 ;
-        ev.max_simult <- 0
+    let reset t =
+        Atomic.reset t.starts ;
+        Atomic.reset t.stops ;
+        Hashtbl.clear t.durations ;
+        t.simult <- 0 ;
+        t.max_simult <- 0
 
-    let start ev =
-        Atomic.fire ev.start ;
-        ev.simult <- ev.simult + 1 ;
-        if ev.simult > ev.max_simult then ev.max_simult <- ev.simult ;
-        Clock.now ()
+    type stop_func = Params.t -> unit
 
-    let stop ev start_time id =
-        let now = Clock.now () in
-        Atomic.fire ev.stop ;
-        ev.simult <- ev.simult - 1 ;
-        let duration = Clock.Time.sub now start_time in
-        ev.tot_duration <- Clock.Interval.add ev.tot_duration duration ;
-        match ev.minmax with
-            | None -> ev.minmax <- Some (make_minmax duration id)
-            | Some mm -> update_minmax mm duration id
+    let start ?(params=Params.empty) t : stop_func =
+        let start_time = Clock.now () in
+        t.simult <- t.simult + 1 ;
+        if t.simult > t.max_simult then t.max_simult <- t.simult ;
+        (* Return the stop function: *)
+        fun extra_params ->
+            let now = Clock.now () in
+            let params = Params.add params extra_params in
+            Atomic.fire ~now:start_time ~params t.starts ;
+            Atomic.fire ~now ~params t.stops ;
+            t.simult <- t.simult - 1 ;
+            let duration = Clock.Time.sub now start_time in
+            Hashtbl.modify_opt params (function
+                | None ->
+                    Some {
+                        min = duration ;
+                        max = duration ;
+                        sum = duration ;
+                        count = 1 }
+                | Some d ->
+                    Some {
+                        min = min d.min duration ;
+                        max = max d.max duration ;
+                        sum = Clock.Interval.add d.sum duration ;
+                        count = d.count + 1 }
+            ) t.durations
 
-    let print oc ev =
-        Printf.fprintf oc "Metric: %s:\n\ttotal-duration: %s\n\tsimultaneous: %d\n\tmax-simult: %d\n"
-            ev.name (Clock.Interval.to_string ev.tot_duration) ev.simult ev.max_simult ;
-        if ev.stop.Atomic.count <> 0L then
-            Printf.fprintf oc "\tavg-duration: %s\n"
-                (((ev.tot_duration :> float) /. Int64.to_float ev.stop.Atomic.count) |> Clock.Interval.o |> Clock.Interval.to_string) ;
-        (match ev.minmax with None -> () | Some mm ->
-            Printf.fprintf oc "\tmin-duration: %s (%s)\n\tmax-duration: %s (%s)\n"
-                (Clock.Interval.to_string (fst mm.min)) (snd mm.min)
-                (Clock.Interval.to_string (fst mm.max)) (snd mm.max))
+    let timed ?(params=Params.empty) t f =
+        let start_time = Clock.now () in
+        t.simult <- t.simult + 1 ;
+        if t.simult > t.max_simult then t.max_simult <- t.simult ;
+        match f () with
+        | exception e ->
+            let bt = Printexc.get_raw_backtrace () in
+            Atomic.fire ~now:start_time ~params t.starts ;
+            t.simult <- t.simult - 1 ;
+            Printexc.raise_with_backtrace e bt
+        | extra_params, res->
+            let now = Clock.now () in
+            let params = Params.add params extra_params in
+            Atomic.fire ~now:start_time ~params t.starts ;
+            Atomic.fire ~now ~params t.stops ;
+            t.simult <- t.simult - 1 ;
+            let duration = Clock.Time.sub now start_time in
+            Hashtbl.modify_opt params (function
+                | None ->
+                    Some {
+                        min = duration ;
+                        max = duration ;
+                        sum = duration ;
+                        count = 1 }
+                | Some d ->
+                    Some {
+                        min = min d.min duration ;
+                        max = max d.max duration ;
+                        sum = Clock.Interval.add d.sum duration ;
+                        count = d.count + 1 }
+            ) t.durations ;
+            res
+
+    let print oc t =
+        Printf.fprintf oc "\
+            Metric: %s:\n\
+            \tdurations:\n\
+            %a\
+            \tsimultaneous: %d\n\
+            \tmax-simultaneous: %d\n"
+            t.name
+            (Params.print_hash
+                (fun oc d ->
+                    let open Clock.Interval in
+                    Printf.fprintf oc "min:%s, avg:%s, max:%s, count:%d"
+                        (to_string d.min)
+                        (to_string (mul d.sum (1. /. float_of_int d.count)))
+                        (to_string d.max)
+                        d.count)
+            ) t.durations
+            t.simult t.max_simult
 end
 
 (* Report generation *)
 
 let print_report oc =
-    Hashtbl.iter (fun _ ev -> Atomic.print oc ev) Atomic.all ;
-    Hashtbl.iter (fun _ ev -> Counter.print oc ev) Counter.all ;
-    Hashtbl.iter (fun _ ev -> Timed.print oc ev) Timed.all ;
+    Hashtbl.iter (fun _ t -> Atomic.print oc t) Atomic.all ;
+    Hashtbl.iter (fun _ t -> Counter.print oc t) Counter.all ;
+    Hashtbl.iter (fun _ t -> Timed.print oc t) Timed.all ;
     flush oc
 
 let report_thread oc period =
@@ -206,6 +358,7 @@ let report_thread oc period =
         print_report oc ;
         if !Clock.continue then loop () in
     Thread.create loop ()
+
 
 (* Tools for building UI *)
 
@@ -242,6 +395,6 @@ let tree () =
 (* Misc *)
 
 let reset () =
-    Hashtbl.iter (fun _ ev -> Atomic.reset ev) Atomic.all ;
-    Hashtbl.iter (fun _ ev -> Counter.reset ev) Counter.all ;
-    Hashtbl.iter (fun _ ev -> Timed.reset ev) Timed.all
+    Hashtbl.iter (fun _ t -> Atomic.reset t) Atomic.all ;
+    Hashtbl.iter (fun _ t -> Counter.reset t) Counter.all ;
+    Hashtbl.iter (fun _ t -> Timed.reset t) Timed.all
