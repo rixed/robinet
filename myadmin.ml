@@ -93,19 +93,22 @@ let seq_time = make_seq "time" Metric.Params.empty
 (* If you use the above, you must also run this thread.
  * [period] is in seconds. *)
 let report_thread period =
-    let update_atomic_metric n ev =
-        Hashtbl.iter (fun params count ->
-            let names =
-                hash_find_or_insert series n (fun () -> Hashtbl.create 10) in
-            let seq =
-                hash_find_or_insert names params (fun () -> make_seq n params) in
-            seq.past.(!seq_next_idx) <- count
-        ) ev.Metric.Atomic.counts in
+    let update_atomic_metric n = function
+        | Metric.Atomic.T ev ->
+            Hashtbl.iter (fun params count ->
+                let names =
+                    hash_find_or_insert series n (fun () -> Hashtbl.create 10) in
+                let seq =
+                    hash_find_or_insert names params (fun () -> make_seq n params) in
+                seq.past.(!seq_next_idx) <- count
+            ) ev.counts
+        | _ ->
+            () (* TODO *) in
     let rec forever () =
         Thread.delay period ;
         (* Save all the metrics *)
         if debug then Printf.printf "MyAdmin: updating stored metrics\n%!" ;
-        Hashtbl.iter update_atomic_metric Metric.Atomic.all ;
+        Hashtbl.iter update_atomic_metric Metric.all ;
         seq_time.past.(!seq_next_idx) <- int_of_float (Unix.gettimeofday ()) ;
         seq_next_idx :=
             if !seq_next_idx < seq_size-1 then !seq_next_idx+1 else 0 ;
@@ -113,29 +116,30 @@ let report_thread period =
         if !Clock.continue then forever () in
     Thread.create forever ()
 
-(* Must be placed within a FORM *)
-let print_tree vars oc tree =
-    let rec add_ev oc n =
-        Printf.fprintf oc "<label><input type='checkbox' name='%s'%s/>%s</label>"
-            n
-            (if Hashtbl.mem vars n then " checked='checked'" else "")
-            (basename n)
-    and add_tree oc n t =
-        Printf.fprintf oc "%s\n<ul>%a</ul>\n"
-            n (List.print ~first:"<li>" ~last:"</li>" ~sep:"</li>\n<li>" add_item) t
-    and add_item oc = function
-        | Metric.Atomic ev   -> add_ev oc ev.Metric.Atomic.name
-        | Metric.Counter ev  -> add_ev oc ev.Metric.Counter.name
-        | Metric.Timed ev    -> add_ev oc ev.Metric.Timed.name
-        | Metric.Tree (n, t) -> add_tree oc n t in
-    add_tree oc "" tree
+(*
+ * Tree of all metrics
+ *)
 
-let metrics _mth _matches vars _qry_body resp =
-    if debug then Printf.printf "MyAdmin: metric: vars = %a\n" Opache.print_vars vars ;
+let selected = " selected"
+
+let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyAdmin: metric: vars = %a\n" Opache.print_vars vars ;
     page_head_open resp ;
-    String.print resp
-        "<script src=\"https://cdn.jsdelivr.net/npm/chart.js\"></script>\n" ;
+    let chartjs_url = "http://happyleptic.org:8080/chart.js" in (* cached locally *)
+    (* let chartjs_url = "https://cdn.jsdelivr.net/npm/chart.js" in *)
+    String.print resp ("<script src=\""^ chartjs_url ^"\"></script>\n") ;
     page_head_close resp ;
+    let selected_metrics = Hashtbl.find_all vars "metric" in
+    let parameters : (string, Metric.Param.t) Hashtbl.t = Hashtbl.create 99 in
+    List.iter (fun name ->
+        match Hashtbl.find Metric.all name with
+        | exception Not_found ->
+            (* Although unlikely, it is possible that a metric disappear: *)
+            ()
+        | metric ->
+            Metric.params metric |>
+            Enum.iter (fun params ->
+                List.iter (fun (n, v) -> Hashtbl.add parameters n v) params)
+    ) selected_metrics ;
     let fold_seq_values f u seq =
         let rec loop u idx left =
             if left <= 0 then u else
@@ -145,17 +149,6 @@ let metrics _mth _matches vars _qry_body resp =
         let start_idx =
             if !seq_used < seq_size then 0 else !seq_next_idx in
         loop u start_idx !seq_used in
-    let all_seqs =
-        Hashtbl.fold (fun name _ seqs ->
-            match Hashtbl.find series name with
-            | exception Not_found ->
-                seqs
-            | h ->
-                (* For now just take all params: *)
-                Hashtbl.fold (fun _params seq seqs ->
-                    seq :: seqs
-                ) h seqs
-        ) vars [] in
     let print_values to_str oc seq =
         Char.print oc '[' ;
         fold_seq_values (fun is_first v ->
@@ -176,10 +169,51 @@ let metrics _mth _matches vars _qry_body resp =
         (to_js_string seq.color) in
     let datetime_of_int i =
         to_js_string (string_of_timestamp (float_of_int i)) in
+    let all_metrics = Hashtbl.keys Metric.all |> Array.of_enum in
+    Array.fast_sort String.compare all_metrics ;
+    let all_seqs =
+        List.fold_left (fun seqs name ->
+            match Hashtbl.find series name with
+            | exception Not_found ->
+                (* Although unlikely, it is possible that a metric disappear: *)
+                seqs
+            | h ->
+                (* For now just take all params: *)
+                Hashtbl.fold (fun _params seq seqs ->
+                    seq :: seqs
+                ) h seqs
+        ) [] selected_metrics in
+    let print_option oc name =
+        let v = Html.cdata_encode name in
+        Printf.fprintf oc "<option value=\"%s\"%s>%s</option>"
+            v
+            (if List.mem name selected_metrics then selected else "")
+            v in
     Printf.fprintf resp {|
 <div>
     <form>
-        %a
+        <select multiple size="%d" name="metric">
+%a
+        </select>
+|}
+
+        (min 15 (Array.length all_metrics))
+        (Array.print print_option) all_metrics ;
+    if not (Hashtbl.is_empty parameters) then (
+        String.print resp "Parameters:<br/>\n%a\n" ;
+        Enum.iter (fun pnam ->
+            let pnam_ = Html.cdata_encode pnam in
+            Printf.fprintf resp
+                "<label>%s&nbsp;<input name=\"%s\" placeholder=\"%a\"/></label>"
+                pnam_ pnam_
+                (List.print ~first:"" ~last:"" ~sep:", " (fun oc v ->
+                    Metric.Param.to_string v |>
+                    Html.cdata_encode |>
+                    String.print oc)
+                ) (Hashtbl.find_all parameters pnam)
+        ) (Hashtbl.keys parameters)
+    ) ;
+    Printf.fprintf resp {|
         <input type="submit" name="redraw" value="redraw"/>
     </form>
 </div>
@@ -197,8 +231,9 @@ let metrics _mth _matches vars _qry_body resp =
     });
 </script>
 |}
-        (print_tree vars) (Metric.tree ())
+        (* labels, aka timestamps: *)
         (print_values datetime_of_int) seq_time
+        (* datasets: *)
         (List.print ~sep:",\n" print_dataset) all_seqs ;
     [ "Content-Type", "text/html" ]
 
@@ -538,7 +573,6 @@ let logs _mth _matches vars _qry_body resp =
         ) |? [] in
     Printf.fprintf resp "<div><form>\n" ;
     logs_menu resp logger_name selected_loggers ignored_loggers ;
-    let selected = " selected" in
     Printf.fprintf resp "\
         <select id=\"logger_select\" name=\"logger\" \
                 onchange=\"this.form.submit()\">\n\
@@ -746,4 +780,4 @@ let make host port =
                 Str.regexp "/$", home ;
                 Str.regexp "/metrics.html$", metrics ;
                 Str.regexp "/logs.html$", logs ] in
-    Opache.serve host ~port (Opache.multiplexer res)
+    Opache.(serve host ~port (multiplexer res))

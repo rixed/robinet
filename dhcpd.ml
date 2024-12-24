@@ -114,6 +114,10 @@ end
 (** [serve host ips] listen on host DHCP port and allocate the
  * given ips to any requester. *)
 let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
+    let counter = Metric.Atomic.make ("hosts/"^ host.Host.name ^"/dhcpd/queries") in
+    let count cmd =
+        let params = Metric.(Params.make Param.[ "cmd", String cmd ]) in
+        Metric.Atomic.fire ~params counter in
     (* Offered IPs (and options), indexed by client-ids: *)
     Log.(log st.logger Debug (lazy "Listening for requests...")) ;
     host.Host.udp_server port (fun udp ->
@@ -127,6 +131,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
               when dhcp.Pdu.htype = Arp.HwType.eth &&
                    dhcp.Pdu.msg_type = Some MsgType.discover ->
                 Log.(log st.logger Debug (lazy (Printf.sprintf "Received a DHCP Discover from %s" (hexstring_of_bitstring chaddr)))) ;
+                count "discover" ;
                 (match State.get_free_ip st with
                 | Some offered_ip ->
                     (* Add this entry to our ARP cache.
@@ -167,6 +172,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                     (* TODO: mask that previous leased IP as free, if any: *)
                     BitHash.replace st.leases chaddr (Lease.make ~until offered_ip) ;
                     Log.(log st.logger Debug (lazy "ACKing it")) ;
+                    count "ack" ;
                     let options = State.get_options st dhcp.request_list in
                     Pdu.make_ack ~chaddr ~xid ?client_id ~options offered_ip |>
                     Pdu.pack |>
@@ -174,19 +180,23 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                 | _ ->
                     if st.authoritative then (
                         Log.(log st.logger Warning (lazy (Printf.sprintf "I never offered anything to %s (or I forgot about it). Denying since I'm in charge here." (Eth.Addr.to_string (Eth.Addr.o dhcp.Pdu.chaddr))))) ;
+                        count "nack" ;
                         Pdu.make_nak ~chaddr ~xid ?client_id ~message:"go away" () |>
                         Pdu.pack |>
                         host.Host.udp_send (Host.IPv4 requested_ip) ~src_port dst_port
                         (* We could answer to the emitter with `udp.trx.ins.write`
                          * but it's likely a broadcast anyway. *)
                     ) else (
-                        Log.(log st.logger Warning (lazy (Printf.sprintf "I never offered anything to %s (or I forgot about it). Leaving it to another dhcp server." (Eth.Addr.to_string (Eth.Addr.o dhcp.Pdu.chaddr)))))
+                        Log.(log st.logger Warning (lazy (Printf.sprintf "I never offered anything to %s (or I forgot about it). Leaving it to another dhcp server." (Eth.Addr.to_string (Eth.Addr.o dhcp.Pdu.chaddr))))) ;
+                        count "no-authority"
                     ))
             (* TODO: handle release & decline *)
             | Ok (Pdu.{ msg_type = Some msg_type ; _ }) ->
-                Log.(log st.logger Debug (lazy (Printf.sprintf "Ignoring DHCP %s" (Dhcp.MsgType.to_string msg_type))))
+                Log.(log st.logger Debug (lazy (Printf.sprintf "Ignoring DHCP %s" (Dhcp.MsgType.to_string msg_type)))) ;
+                count "bad-type"
             | _ ->
-                Log.(log st.logger Debug (lazy "Ignoring DHCP message"))))
+                Log.(log st.logger Debug (lazy "Ignoring DHCP message")) ;
+                count "err"))
 
 (*$R serve
     Clock.realtime := false ;

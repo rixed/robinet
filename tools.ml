@@ -616,18 +616,6 @@ end
 type dev =
     { write : bitstring -> unit ; set_read : (bitstring -> unit) -> unit }
 
-type counters =
-    { mutable num_writes : int ;
-        mutable num_bits : int }
-
-let counting dev =
-    let c = { num_writes = 0 ; num_bits = 0 } in
-    let write bits =
-        c.num_writes <- c.num_writes + 1 ;
-        c.num_bits <- c.num_bits + bitstring_length bits ;
-        dev.write bits in
-    { dev with write }, c
-
 let null_logger =
     Log.make "voracious monster"
 

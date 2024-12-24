@@ -120,7 +120,7 @@ class host h = object (self)
          * We have to have a non optional argument though. *)
         (* TODO Uses [sql_backend] default throughput and relative qps (aka queries
          * per pages distribution). *)
-        Opache.serve h ?port (fun http pdu logger ->
+        Opache.serve h ?port (fun _host http pdu logger ->
             ignore pdu ;
             ignore logger ;
             let open Http in

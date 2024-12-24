@@ -49,27 +49,6 @@ let params_of_query q =
         (params_of_query "foo=bar&bar=baz" |> Hashtbl.enum |> List.of_enum |> List.sort Stdlib.compare)
 *)
 
-let rec stripped url =
-    if url = "" || url = "/" then "root"
-    else
-        let l = String.length url in
-        let start = if url.[0] = '/' then 1 else 0
-        and stop = if url.[l-1] = '/' then l-1 else l in
-        if start = 0 && stop = l then url
-        else stripped (String.sub url start (stop-start))
-
-(*$= stripped & ~printer:identity
-    "foo" (stripped "foo")
-    "foo" (stripped "/foo")
-    "foo" (stripped "foo/")
-    "foo" (stripped "/foo/")
-    "foo" (stripped "///foo//")
-    "root" (stripped "")
-    "root" (stripped "/")
-    "root" (stripped "//")
-    "root" (stripped "////")
-*)
-
 (**
   Listen HTTP connections arriving at [host] on given [port],
   passing incoming messages to a user supplied function [f].
@@ -100,15 +79,8 @@ let rec stripped url =
   Notice that this example, if copied into test.ml, will generate a pcap containing the source code that
   generates the pcap :-)
 *)
-(* Note: we force [f] to return unit so that callers get useful diagnostics *)
-let serve host ?(port=Tcp.Port.o 80) (f : TRXtop.t -> Pdu.t -> Log.logger -> unit) =
+let serve host ?(port=Tcp.Port.o 80) f =
     let logger = Log.sub host.Host.logger ("httpd:"^ Tcp.Port.to_string port) in
-    let count_queries_per_url = Hashtbl.create 11 in
-    let count_query cmd url =
-        let key = cmd^"/"^(stripped url) in
-        let counter = hash_find_or_insert count_queries_per_url key (fun () ->
-            Metric.Atomic.make ("Hosts/"^ host.name^ "/Httpd/queries/"^key)) in
-        Metric.Atomic.fire counter in
     host.tcp_server port (fun (tcp : Tcp.TRX.tcp_trx) ->
         (* once we obtain the transport layer, build an http on top of it *)
         Log.(log logger Debug (lazy "Building a new HTTP.TRXtop")) ;
@@ -125,10 +97,10 @@ let serve host ?(port=Tcp.Port.o 80) (f : TRXtop.t -> Pdu.t -> Log.logger -> uni
                     tcp.close ()
                 ) ;
                 (match pdu with
-                | { Pdu.cmd = Request (cmd, url) ; _ } ->
+                | { Pdu.cmd = Request (_cmd, url) ; _ } ->
                     Log.(log logger Debug (lazy (Printf.sprintf "Http msg is a request for %s" url))) ;
-                    count_query cmd url ;
-                    f http pdu logger ;
+                    (* Force the callback to return unit to get better diagnostic: *)
+                    let () = f host http pdu logger in
                     Log.(log logger Debug (lazy (Printf.sprintf "Headers were %s, so we must%s close" (string_of_headers pdu.Pdu.headers) (if must_close_cnx pdu.Pdu.headers then "" else " not")))) ;
                     if must_close_cnx pdu.Pdu.headers then tcp.close ()
                 | _ ->
@@ -199,16 +171,27 @@ Your requested: '%s'<br/>
 (*type params = (string, string) Hashtbl.t
 type resource = (Str.regexp * (string -> string list -> params -> string -> unit BatIO.output -> Http.header list)) list*)
 (* list of (regex matching URL * (function of method, matches, parameters hash and output stream to list of headers)) *)
-let multiplexer res http msg logger =
+let multiplexer res host http msg logger =
+    (* We'd rather have one such metric per host: *)
+    let counter = Metric.Atomic.make ("hosts/"^ host.Host.name ^"/httpd/queries") in
     let handle mth url _headers ext_params qry_body =
         let url = Url.of_string url in
+        let count_query status =
+            let open Metric in
+            let params =
+                Params.make Param.[ "method", String mth ;
+                                    "path", String url.path ;
+                                    "status", Int status ] in
+            Metric.Atomic.fire ~params counter in
         match List.find_map (fun (re, f) ->
                 if Str.string_match re url.Url.path 0
                 then Some (str_all_matches url.Url.path, f)
                 else None) res with
         | exception Not_found ->
             Log.(log logger Debug (lazy (Printf.sprintf "Multiplexer: No taker for url '%s'" url.Url.path))) ;
-            TRXtop.tx http { Pdu.cmd = Status 404 ;
+            let code = 404 in
+            count_query code ;
+            TRXtop.tx http { Pdu.cmd = Status code ;
                              Pdu.headers = [] ;
                              Pdu.body = "" }
         | matches, f ->
@@ -223,18 +206,21 @@ let multiplexer res http msg logger =
                         ("Content-Type", "text/html") :: headers
                     else headers in
                 let body = BatIO.close_out str in
-                TRXtop.tx http { Pdu.cmd = Status 200 ;
+                let code = 200 in
+                count_query code ;
+                TRXtop.tx http { Pdu.cmd = Status code ;
                                  Pdu.headers = ("Content-Length", Printf.sprintf "%d" (String.length body)) :: headers ;
                                  Pdu.body = body }
             with ResourceError (code, str) ->
                 let err_msg = "It failed again! This time because:\n" ^ str in
+                count_query code ;
                 TRXtop.tx http { Pdu.cmd = Status code ;
                                  Pdu.headers = [ "Content-Type", "text/plain" ;
                                                  "Content-Length", Printf.sprintf "%d" (String.length err_msg) ] ;
                                  Pdu.body = err_msg }) in
     match msg with
-    | { Pdu.cmd = Request ("GET", url) ; headers ; body } ->
-        handle "GET" url headers "" body
+    | { Pdu.cmd = Request ("GET" as mth, url) ; headers ; body } ->
+        handle mth url headers "" body
     | { Pdu.cmd = Request ("POST" as mth, url) ; headers ; body }
     | { Pdu.cmd = Request ("PUT" as mth, url) ; headers ; body } ->
         let is_submit =

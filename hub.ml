@@ -28,7 +28,9 @@ struct
     type t = { ifaces : (bitstring -> unit) array ;
          is_connected : bool array ;
                  name : string ;
-               logger : Log.logger }
+               logger : Log.logger ;
+              ingress : Metric.Counter.t ;
+               egress : Metric.Counter.t }
 
     let print oc t =
         Printf.fprintf oc "repeater %s with %d ifaces" t.name (Array.length t.ifaces)
@@ -37,17 +39,21 @@ struct
         let logger = Log.sub parent_logger name in
         { ifaces = Array.make n (ignore_bits ~logger) ;
           is_connected = Array.make n false ;
-          name ; logger }
+          name ; logger ;
+          ingress = Metric.Counter.make (logger.full_name ^"/ingress") "bytes" ;
+          egress = Metric.Counter.make (logger.full_name ^"/egress") "bytes" }
 
     let forward_from (t : t) n pld =
         Array.iteri (fun i emit ->
             if i <> n then (
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Forward to iface %d/%d" i (Array.length t.ifaces)))) ;
+                Metric.(Counter.add t.egress ~params:(Params.singleton "port" (Param.Int i)) (bytelength pld)) ;
                 Clock.asap emit pld
             )) t.ifaces
 
     let write (t : t) n pld =
         Log.(log t.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.ifaces)))) ;
+        Metric.(Counter.add t.ingress ~params:(Params.singleton "port" (Param.Int n)) (bytelength pld)) ;
         forward_from t n pld
 
     let set_read (t : t) n f =
@@ -83,7 +89,10 @@ struct
           (* Mapping from mac to position in the OrdArray [macs] *)
           macs_h : int BitHash.t ;
           name : string ;
-          logger : Log.logger }
+          logger : Log.logger ;
+          mac_size : Metric.Gauge.t ;
+          mac_hits : Metric.Atomic.t ;
+          mac_misses : Metric.Atomic.t }
 
     let print oc t =
         Printf.fprintf oc "switch %s with %d ifaces" t.name (Array.length t.hub.ifaces)
@@ -94,7 +103,10 @@ struct
         { hub = R.make ~parent_logger:logger num_ifaces "hub" ;
           macs = OrdArray.init num_macs (fun _ -> { addr = None ; iface = 0 }) ;
           macs_h = BitHash.create (num_macs/10) ;
-          name ; logger }
+          name ; logger ;
+          mac_size = Metric.Gauge.make (logger.full_name ^"/macs") ;
+          mac_hits = Metric.Atomic.make (logger.full_name ^"/hits") ;
+          mac_misses = Metric.Atomic.make (logger.full_name ^"/misses") }
 
     let update_macs t src ins =
         match BitHash.find_option t.macs_h src with
@@ -102,7 +114,10 @@ struct
             Log.(log t.logger Debug (lazy (Printf.sprintf "New mac %s" (Eth.Addr.to_string (Eth.Addr.o src))))) ;
             let last_idx = OrdArray.last t.macs in
             let last = OrdArray.get t.macs last_idx in
-            (match last.addr with None -> () | Some addr ->
+            (match last.addr with
+            | None ->
+                Metric.Gauge.add t.mac_size 1
+            | Some addr ->
                 (* This MAC which has not been used for long leaves the switch
                  * memory: *)
                 BitHash.remove t.macs_h (addr :> bitstring)) ;
@@ -134,8 +149,10 @@ struct
                 match BitHash.find_option t.macs_h dst with
                 | None ->
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Unknown dest %s, broadcasting" (Eth.Addr.to_string (Eth.Addr.o dst))))) ;
+                    Metric.Atomic.fire t.mac_misses ;
                     do_broadcast ()
                 | Some n ->
+                    Metric.Atomic.fire t.mac_hits ;
                     let mac = OrdArray.get t.macs n in
                     if mac.iface <> ins then (
                         Log.(log t.logger Debug (lazy (Printf.sprintf "Known dest %s, will forward to iface %d" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.iface))) ;

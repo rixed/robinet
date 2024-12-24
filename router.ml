@@ -138,8 +138,6 @@ struct
 
     type iface = { mutable trx : trx ; (** Can come handy to splice another trx there. *)
                            eth : Eth.State.t ;
-                   rx_counters : counters ;
-                   tx_counters : counters ;
                         logger : Log.logger ;
         (** Any traffic arriving in this interface and directed to Admin is
          * forwarded to this host. There is one per interface so they have
@@ -163,7 +161,9 @@ struct
                 * to return via the same interface: *)
                admin_reroute : bool ;
                       logger : Log.logger ;
-              load_balancing : load_balancing }
+              load_balancing : load_balancing ;
+                     ingress : Metric.Counter.t ;
+                      egress : Metric.Counter.t }
 
     (* Add a route (the added route becomes top priority *)
     let add_route (t : t) r =
@@ -203,6 +203,9 @@ struct
         Log.(log t.logger Debug (lazy (match in_iface_opt with
             | Some n -> Printf.sprintf "rx from iface %d" n
             | None -> "generated traffic"))) ;
+        Option.may (fun in_iface ->
+            Metric.(Counter.add t.ingress ~params:(Params.singleton "port" (Param.Int in_iface)) (bytelength bits))
+        ) in_iface_opt ;
         let ip_opt, src_opt, dst_opt, ttl_opt, proto_opt =
             match Ip.Pdu.unpack bits with
             | Error _ ->
@@ -231,6 +234,7 @@ struct
                 | Route.Forward { out_iface ; via } ->
                     let do_forward bits =
                         Log.(log t.logger Debug (lazy (Printf.sprintf "Forwarding packet to iface %d" out_iface))) ;
+                        Metric.(Counter.add t.egress ~params:(Params.singleton "port" (Param.Int out_iface)) (bytelength bits)) ;
                         let iface = t.ifaces.(out_iface) in
                         (* So we want to set the gateway for this packet but cannot
                          * call Etc.TRX.tx directly because some additional processing
@@ -328,11 +332,7 @@ struct
         let eth = Eth.State.make ?proto ?mtu ?delay ?loss ?mac ?my_addresses
                                  ~parent_logger:logger () in
         let trx = Eth.TRX.make eth in
-        (* Make it a counting TRX: *)
-        let ins, tx_counters = counting trx.ins
-        and out, rx_counters = counting trx.out in
-        let trx = { ins ; out } in
-        { trx ; eth ; rx_counters ; tx_counters ; logger ; admin_host = None }
+        { trx ; eth ; logger ; admin_host = None }
 
     let notify_never = { probability = 0. ; delay = 0. }
     let notify_always ?(delay=0.) () = { probability = 1. ; delay }
@@ -386,8 +386,10 @@ struct
                 make_iface ?delay ?loss ?mtu ?mac ?my_addresses
                            ~parent_logger:logger n
             ) in
+        let ingress = Metric.Counter.make (logger.full_name ^"/ingress") "bytes" in
+        let egress = Metric.Counter.make (logger.full_name ^"/egress") "bytes" in
         let t = { ifaces ; routes ; logger ; notify_errs ; admin_reroute ;
-                  load_balancing } in
+                  load_balancing ; ingress ; egress } in
         Array.iteri (fun n iface ->
             if iface.eth.my_addresses <> [] then (
                 (* Make that interface a host with an IP stack on top of eth: *)

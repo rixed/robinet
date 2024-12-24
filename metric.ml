@@ -147,6 +147,12 @@ struct
                 Clock.Time.printf !t.last
 end
 
+(* All defined metrics *)
+
+type metric = ..
+
+let all : (string, metric) Hashtbl.t = Hashtbl.create 99
+
 (* Atomic events are for errors, per results stats, etc *)
 module Atomic =
 struct
@@ -155,14 +161,16 @@ struct
                counts : (Params.t, int) Hashtbl.t ;
                first_last : FirstLast.t }
 
-    let all = Hashtbl.create 37
+    type metric += T of t
 
     let make name =
-        let ret = { name = name ;
+        match hash_find_or_insert all name (fun () ->
+                T {
+                    name = name ;
                     counts = Hashtbl.create 5 ;
-                    first_last = FirstLast.make () } in
-        Hashtbl.add all name ret ;
-        ret
+                    first_last = FirstLast.make () }) with
+        | T t -> t
+        | _ -> invalid_arg ("Atomic.make reuse name "^ name)
 
     let reset t =
         Hashtbl.clear t.counts ;
@@ -183,24 +191,76 @@ struct
         FirstLast.printf oc t.first_last
 end
 
+(* Measure some current capacity. Can increase or decrease. *)
+module Gauge =
+struct
+    type t = { name : string ;
+               values : (Params.t, value) Hashtbl.t ;
+               first_last : FirstLast.t }
+    and value = { min : int ; current : int ; max : int }
+
+    type metric += T of t
+
+    let make name =
+        match hash_find_or_insert all name (fun () ->
+                T {
+                    name = name ;
+                    values = Hashtbl.create 5 ;
+                    first_last = FirstLast.make () }) with
+        | T t -> t
+        | _ -> invalid_arg ("Gauge.make reuse name "^ name)
+
+    let reset t =
+        Hashtbl.clear t.values ;
+        FirstLast.reset t.first_last
+
+    let set ?now ?(params=Params.empty) t v =
+        Hashtbl.modify_opt params (function
+        | None ->
+            Some { min = v ; current = v ; max = v }
+        | Some value ->
+            Some { min = min value.min v ; current = v ; max = max value.max v }
+        ) t.values ;
+        FirstLast.update ?now t.first_last
+
+    let add ?now ?(params=Params.empty) t d =
+        let v =
+            try (Hashtbl.find t.values params).current
+            with Not_found -> 0 in
+        set ?now ~params t (v + d)
+
+    let print oc t =
+        Printf.fprintf oc "\
+            Metric: %s:\n\
+            \tvalues:\n\
+            %a"
+            t.name
+            (Params.print_hash
+                (fun oc value ->
+                    Printf.fprintf oc "min:%d, current:%d, max:%d"
+                        value.min value.current value.max)
+            ) t.values ;
+        FirstLast.printf oc t.first_last
+end
+
 (* Counters are for counting bytes, etc *)
 module Counter =
 struct
     type t = { name : string ;
-               unit_str : string ;
+               units : string ; (* TODO: an enum with known pretty printers *)
                values : (Params.t, int) Hashtbl.t ;
                fired : Atomic.t }
 
-    let all = Hashtbl.create 37
+    type metric += T of t
 
-    let make name unit_str =
-        let ret = {
-            name ; unit_str ;
-            values = Hashtbl.create 10 ;
-            fired = Atomic.make (name^"/fired")
-        } in
-        Hashtbl.add all name ret ;
-        ret
+    let make name units =
+        match hash_find_or_insert all name (fun () ->
+            T {
+                name ; units ;
+                values = Hashtbl.create 10 ;
+                fired = Atomic.make (name^"/fired") }) with
+        | T t -> t
+        | _ -> invalid_arg ("Counter.make reuse name "^ name)
 
     let reset t =
         Hashtbl.clear t.values ;
@@ -229,7 +289,6 @@ end
 (* Timeds are for download times, connection times, etc *)
 module Timed =
 struct
-
     type t = { name : string ;
                durations : (Params.t, duration) Hashtbl.t ;
                starts : Atomic.t ;
@@ -243,17 +302,19 @@ struct
           sum : Clock.Interval.t ;
           count : int }
 
-    let all = Hashtbl.create 37
+    type metric += T of t
 
     let make name =
-        let ret = { name ;
-                    starts = Atomic.make (name^"/start") ;
-                    stops = Atomic.make (name^"/stop") ;
-                    durations = Hashtbl.create 10 ;
-                    simult = 0 ;
-                    max_simult = 0 } in
-        Hashtbl.add all name ret ;
-        ret
+        match hash_find_or_insert all name (fun () ->
+            T {
+                name ;
+                starts = Atomic.make (name^"/start") ;
+                stops = Atomic.make (name^"/stop") ;
+                durations = Hashtbl.create 10 ;
+                simult = 0 ;
+                max_simult = 0 }) with
+        | T t -> t
+        | _ -> invalid_arg ("Timed.make reuse name "^ name)
 
     let reset t =
         Atomic.reset t.starts ;
@@ -347,9 +408,13 @@ end
 (* Report generation *)
 
 let print_report oc =
-    Hashtbl.iter (fun _ t -> Atomic.print oc t) Atomic.all ;
-    Hashtbl.iter (fun _ t -> Counter.print oc t) Counter.all ;
-    Hashtbl.iter (fun _ t -> Timed.print oc t) Timed.all ;
+    Hashtbl.iter (fun _ -> function
+        | Atomic.T t -> Atomic.print oc t
+        | Gauge.T t -> Gauge.print oc t
+        | Counter.T t -> Counter.print oc t
+        | Timed.T t -> Timed.print oc t
+        | _ -> invalid_arg "Metric.print_report"
+    ) all ;
     flush oc
 
 let report_thread oc period =
@@ -359,42 +424,20 @@ let report_thread oc period =
         if !Clock.continue then loop () in
     Thread.create loop ()
 
-
-(* Tools for building UI *)
-
-type item = Atomic of Atomic.t
-          | Counter of Counter.t
-          | Timed of Timed.t
-          | Tree of string * tree
-and tree = item list
-
-let tree () =
-    let empty = [] in
-    let rec tree_add tree path item =
-        match path with
-        | [] -> should_not_happen ()
-        | [_] -> item :: tree
-        | p::p' -> (* look for a subtree of this name *)
-            (match tree with
-            | [] -> [ Tree (p, tree_add empty p' item) ]
-            | Tree (n, t) :: t' when n = p ->
-                Tree (n, tree_add t p' item) :: t'
-            | i :: t' ->
-                i :: tree_add t' path item) in
-    let tree = Hashtbl.fold (fun n ev tree ->
-        if debug then Printf.printf "Merging %s into the tree\n" n ;
-        tree_add tree (String.split_on_char '/' n) (Atomic ev)) Atomic.all empty in
-    let tree = Hashtbl.fold (fun n ev tree ->
-        if debug then Printf.printf "Merging %s into the tree\n" n ;
-        tree_add tree (String.split_on_char '/' n) (Counter ev)) Counter.all tree in
-    let tree = Hashtbl.fold (fun n ev tree ->
-        if debug then Printf.printf "Merging %s into the tree\n" n ;
-        tree_add tree (String.split_on_char '/' n) (Timed ev)) Timed.all tree in
-    tree
-
 (* Misc *)
 
 let reset () =
-    Hashtbl.iter (fun _ t -> Atomic.reset t) Atomic.all ;
-    Hashtbl.iter (fun _ t -> Counter.reset t) Counter.all ;
-    Hashtbl.iter (fun _ t -> Timed.reset t) Timed.all
+    Hashtbl.iter (fun _ -> function
+        | Atomic.T t -> Atomic.reset t
+        | Gauge.T t -> Gauge.reset t
+        | Counter.T t -> Counter.reset t
+        | Timed.T t -> Timed.reset t
+        | _ -> invalid_arg "Metric.reset"
+    ) all
+
+let params = function
+    | Atomic.T t -> Hashtbl.keys t.counts
+    | Gauge.T t -> Hashtbl.keys t.values
+    | Counter.T t -> Hashtbl.keys t.values
+    | Timed.T t -> Hashtbl.keys t.durations
+    | _ -> invalid_arg "Metric.params"
