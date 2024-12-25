@@ -780,3 +780,6 @@ let string_of_timestamp ts =
         t.tm_hour
         t.tm_min
         t.tm_sec
+
+let quoted s =
+    "\""^ String.escaped s ^"\""

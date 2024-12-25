@@ -480,9 +480,6 @@ let sniff ?dlt ?wait iface =
 
 (** {2 Packet injection} *)
 
-(** A counter for how many packets were injected successfully. *)
-let packets_injected_ok  = Metric.Atomic.make "Pcap/Packets/Injected/Ok"
-
 (** A counter for how many packets we failed to inject. *)
 let packets_injected_err = Metric.Atomic.make "Pcap/Packets/Injected/Err"
 
@@ -491,15 +488,15 @@ let bytes_out            = Metric.Counter.make "Pcap/Bytes/Out" "bytes"
 
 (** [inject iface bits] inject the packet [bits] into interface [iface]. *)
 let inject (iface : iface) bits =
+    let params = Metric.(Params.singleton "iface" Param.(String iface.name)) in
     try
         let str = string_of_bitstring bits in
         Log.(log iface.logger Debug (lazy (Printf.sprintf "Injecting %d bytes" (String.length str)))) ;
         inject_ iface.handler str ;
-        Metric.Atomic.fire packets_injected_ok ;
-        Metric.Counter.add bytes_out (bytelength bits)
+        Metric.Counter.add ~params bytes_out (bytelength bits)
     with e ->
         Log.(log iface.logger Error (lazy (Printf.sprintf "Cannot inject: %s" (Printexc.to_string e)))) ;
-        Metric.Atomic.fire packets_injected_err
+        Metric.Atomic.fire ~params packets_injected_err
 
 (** {2 Packet sniffing} *)
 

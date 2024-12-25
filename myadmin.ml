@@ -122,6 +122,10 @@ let report_thread period =
 
 let selected = " selected"
 
+type param_filter =
+    | Expr of Search.Expr.t
+    | Error of string
+
 let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyAdmin: metric: vars = %a\n" Opache.print_vars vars ;
     page_head_open resp ;
     let chartjs_url = "http://happyleptic.org:8080/chart.js" in (* cached locally *)
@@ -129,17 +133,48 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
     String.print resp ("<script src=\""^ chartjs_url ^"\"></script>\n") ;
     page_head_close resp ;
     let selected_metrics = Hashtbl.find_all vars "metric" in
+    (* All parameters and their possible values that are present in selected
+     * metrics: *)
     let parameters : (string, Metric.Param.t) Hashtbl.t = Hashtbl.create 99 in
     List.iter (fun name ->
-        match Hashtbl.find Metric.all name with
+        match Hashtbl.find series name with
         | exception Not_found ->
             (* Although unlikely, it is possible that a metric disappear: *)
             ()
-        | metric ->
-            Metric.params metric |>
+        | seqs ->
+            Hashtbl.keys seqs |> Enum.uniqq |>
             Enum.iter (fun params ->
                 List.iter (fun (n, v) -> Hashtbl.add parameters n v) params)
     ) selected_metrics ;
+    let filter_str = Hashtbl.find_default vars "filter" "" in
+    let filter =
+        let s = String.trim filter_str in
+        let s = if s = "" then "true" else s in
+        try Expr (Search.Expr.of_string s)
+        with e ->
+            Error (Printexc.to_string e) in
+    Printf.eprintf "filter_str=%S, expr=%s\n"
+        filter_str
+        (match filter with Expr e -> Search.Expr.to_string e | Error e -> "Err:"^e) ;
+    let filter_vars_of_params params =
+        Printf.eprintf "filter_vars_of_params: %a\n"
+            (List.print (Tuple2.print String.print Metric.Param.print)) params ;
+        (* FIXME: Maybe search should go with Metric.Param values directly for
+         * immediate values? *)
+        List.map (fun (pnam, pval) ->
+            pnam,
+            match pval with
+            | Metric.Param.Bool v -> Search.Expr.BoolVal v
+            | Int v -> IntVal v
+            | String v -> StrVal v
+        ) params in
+    (* Prepare the list of all metrics: *)
+    let all_metrics =
+        Hashtbl.enum Metric.all //@
+        (fun (k, metric) ->
+            if Metric.has_data metric then Some k else None) |>
+        Array.of_enum in
+    Array.fast_sort String.compare all_metrics ;
     let fold_seq_values f u seq =
         let rec loop u idx left =
             if left <= 0 then u else
@@ -169,20 +204,35 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
         (to_js_string seq.color) in
     let datetime_of_int i =
         to_js_string (string_of_timestamp (float_of_int i)) in
-    let all_metrics = Hashtbl.keys Metric.all |> Array.of_enum in
-    Array.fast_sort String.compare all_metrics ;
     let all_seqs =
-        List.fold_left (fun seqs name ->
-            match Hashtbl.find series name with
-            | exception Not_found ->
-                (* Although unlikely, it is possible that a metric disappear: *)
-                seqs
-            | h ->
-                (* For now just take all params: *)
-                Hashtbl.fold (fun _params seq seqs ->
-                    seq :: seqs
-                ) h seqs
-        ) [] selected_metrics in
+        match filter with
+        | Error _ ->
+            []
+        | Expr filter_expr ->
+            List.fold_left (fun seqs name ->
+                match Hashtbl.find series name with
+                | exception Not_found ->
+                    (* Although unlikely, it is possible that a metric disappear: *)
+                    seqs
+                | h ->
+                    (* For now just take all params: *)
+                    Hashtbl.fold (fun params seq seqs ->
+                        let filter_vars = filter_vars_of_params params in
+                        Printf.eprintf "vars = %a\n%!"
+                            (List.print (Tuple2.print String.print Search.Expr.print_expr)) filter_vars ;
+                        match Search.Expr.(
+                                eval ~vars:filter_vars filter_expr |>
+                                to_bool) with
+                        | exception e ->
+                            Printf.eprintf "Cannot evaluate filter: %S\n"
+                                (Printexc.to_string e) ;
+                            seqs
+                        | true ->
+                            seq :: seqs
+                        | false ->
+                            seqs
+                    ) h seqs
+            ) [] selected_metrics in
     let print_option oc name =
         let v = Html.cdata_encode name in
         Printf.fprintf oc "<option value=\"%s\"%s>%s</option>"
@@ -196,22 +246,26 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
 %a
         </select>
 |}
-
         (min 15 (Array.length all_metrics))
         (Array.print print_option) all_metrics ;
     if not (Hashtbl.is_empty parameters) then (
-        String.print resp "Parameters:<br/>\n%a\n" ;
-        Enum.iter (fun pnam ->
-            let pnam_ = Html.cdata_encode pnam in
-            Printf.fprintf resp
-                "<label>%s&nbsp;<input name=\"%s\" placeholder=\"%a\"/></label>"
-                pnam_ pnam_
-                (List.print ~first:"" ~last:"" ~sep:", " (fun oc v ->
-                    Metric.Param.to_string v |>
-                    Html.cdata_encode |>
-                    String.print oc)
-                ) (Hashtbl.find_all parameters pnam)
-        ) (Hashtbl.keys parameters)
+        Printf.fprintf resp "<p>Parameters:&nbsp;%a</p>\n"
+            (Enum.print (fun oc pnam ->
+                Printf.fprintf oc "<span>%s (%a)</span>"
+                    (Html.cdata_encode pnam)
+                    (List.print ~first:"" ~last:"" ~sep:", " (fun oc v ->
+                        Metric.Param.to_string v |>
+                        Html.cdata_encode |>
+                        String.print oc)
+                    ) (Hashtbl.find_all parameters pnam)
+            )) (Hashtbl.keys parameters |> Enum.uniqq) ;
+        Printf.fprintf resp
+            "<input name=\"filter\" value=\"%s\" size=\"80\"/>\n"
+            (Html.cdata_encode filter_str) ;
+        (match filter with
+        | Error str ->
+            Printf.fprintf resp "<p class=\"error\">%s</p>" str
+        | _ -> ())
     ) ;
     Printf.fprintf resp {|
         <input type="submit" name="redraw" value="redraw"/>
@@ -467,7 +521,7 @@ let logs _mth _matches vars _qry_body resp =
         td.highlighted {
             background-color: #4ff;
         }
-        label.top-pretty-please {
+        .top-pretty-please {
             display: flex;
         }
         /* Log lines */

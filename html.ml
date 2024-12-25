@@ -1009,7 +1009,6 @@ let string_of_entity_name s =
     | _ ->
         invalid ()
 
-
 let string_of_entity_number s =
     let invalid () = invalid_arg ("string_of_entity_number"^ s) in
     if String.length s < 3 then invalid () ;
@@ -1021,7 +1020,7 @@ let string_of_entity_number s =
     let n = loop 0 2 in
     String.make 1 (Char.chr n)
 
-let cdata_encode s =
+let cdata_decode s =
     let s =
         Str.global_substitute entity_number_re (fun s ->
             string_of_entity_number (Str.matched_string s)
@@ -1031,3 +1030,26 @@ let cdata_encode s =
             string_of_entity_name (Str.matched_string s)
         ) s in
     s
+
+let entity_of_char c =
+    Printf.sprintf "&#x%02x;" (Char.code c)
+
+let cdata_encode s =
+    (* Transcribing only the few ASCII characters that are inconvenient for the
+     * markup: *)
+    String.replace_chars (function
+        | '<' -> "&lt;"
+        | '>' -> "&gt;"
+        | '&' -> "&amp;"
+        | '"' -> "&quot;"
+        | '\'' -> "&lsquo;"
+        | '/' | '%' | '*' | '+' | ' ' | ',' | '-' | ';' | '=' | '^' | '|' as c ->
+            entity_of_char c
+        | c -> String.of_char c
+    ) s
+
+(*$= cdata_encode & ~printer:identity
+  "&lt;glop&gt;" (cdata_encode "<glop>")
+  "&quot;glop&quot;" (cdata_encode "\"glop\"")
+  "&#x20;" (cdata_encode " ")
+*)

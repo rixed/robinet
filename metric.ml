@@ -61,6 +61,9 @@ struct
         | Bool b -> string_of_bool b
         | Int d -> string_of_int d
         | String s -> s
+
+    let print oc v =
+        String.print oc (to_string v)
 end
 
 module Params =
@@ -273,7 +276,7 @@ struct
             | Some sum ->
                 Some (sum + c)
         ) t.values ;
-        Atomic.fire ?now t.fired
+        Atomic.fire ?now ~params t.fired
 
     let print oc t =
         Printf.fprintf oc "\
@@ -441,3 +444,6 @@ let params = function
     | Counter.T t -> Hashtbl.keys t.values
     | Timed.T t -> Hashtbl.keys t.durations
     | _ -> invalid_arg "Metric.params"
+
+let has_data metric =
+    not (Enum.is_empty (params metric))

@@ -40,6 +40,7 @@ SOURCES  = \
 	ip_nat.ml \
 	router.ml \
 	opache.ml \
+	search.ml \
 	myadmin.ml \
 	sim.ml \
 	wrapper.ml
