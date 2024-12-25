@@ -67,8 +67,15 @@ let seq_size = 100 (* keep the 100 last values for each metric *)
 let seq_used = ref 0 (* That many are used in the sequences *)
 let seq_next_idx = ref 0 (* next value to write *)
 
-type seq = { name : string ; params : Metric.Params.t ;
-             past : int array ; color : string }
+type seq = { name : string ;
+             past : value array ;
+            color : string ;
+       is_instant : bool }
+
+and value = { min : float ; current : float ; max : float }
+
+let value ?min ?max current =
+    { min = min |? 0. ; current ; max = max |? current }
 
 let series : (string, (Metric.Params.t, seq) Hashtbl.t) Hashtbl.t =
     Hashtbl.create 11
@@ -84,24 +91,54 @@ let make_color =
         incr idx ;
         colors.(!idx mod Array.length colors)
 
-let make_seq name params = {
-    name ; params ;
-    past = Array.create seq_size 0 ; color = make_color () }
+let make_seq name is_instant =
+    let past =
+        Array.init seq_size (fun _ -> { min = 0. ; current = 0. ; max = 0. }) in
+    { name ; past ; color = make_color () ; is_instant }
 
-let seq_time = make_seq "time" Metric.Params.empty
+let seq_time = make_seq "time" false
 
 (* If you use the above, you must also run this thread.
  * [period] is in seconds. *)
 let report_thread period =
     let update_atomic_metric n = function
-        | Metric.Atomic.T ev ->
+        | Metric.Atomic.T m ->
             Hashtbl.iter (fun params count ->
                 let names =
                     hash_find_or_insert series n (fun () -> Hashtbl.create 10) in
                 let seq =
-                    hash_find_or_insert names params (fun () -> make_seq n params) in
-                seq.past.(!seq_next_idx) <- count
-            ) ev.counts
+                    hash_find_or_insert names params (fun () -> make_seq n false) in
+                seq.past.(!seq_next_idx) <- value (float_of_int count)
+            ) m.counts
+        | Metric.Gauge.T m ->
+            Hashtbl.iter (fun params (v : Metric.Gauge.value) ->
+                let names =
+                    hash_find_or_insert series n (fun () -> Hashtbl.create 10) in
+                let seq =
+                    hash_find_or_insert names params (fun () -> make_seq n true) in
+                seq.past.(!seq_next_idx) <-
+                    value ~min:(float_of_int v.min)
+                          ~max:(float_of_int v.max)
+                          (float_of_int v.current)
+            ) m.values
+        | Metric.Counter.T m ->
+            Hashtbl.iter (fun params count ->
+                let names =
+                    hash_find_or_insert series n (fun () -> Hashtbl.create 10) in
+                let seq =
+                    hash_find_or_insert names params (fun () -> make_seq n false) in
+                seq.past.(!seq_next_idx) <- value (float_of_int count)
+            ) m.values
+        | Metric.Timed.T m ->
+            Hashtbl.iter (fun params (v : Metric.Timed.duration) ->
+                let names =
+                    hash_find_or_insert series n (fun () -> Hashtbl.create 10) in
+                let seq =
+                    hash_find_or_insert names params (fun () -> make_seq n true) in
+                seq.past.(!seq_next_idx) <-
+                    value ~min:(v.min :> float) ~max:(v.max :> float)
+                          ((v.sum :> float) /. float_of_int v.count)
+            ) m.durations
         | _ ->
             () (* TODO *) in
     let rec forever () =
@@ -109,7 +146,7 @@ let report_thread period =
         (* Save all the metrics *)
         if debug then Printf.printf "MyAdmin: updating stored metrics\n%!" ;
         Hashtbl.iter update_atomic_metric Metric.all ;
-        seq_time.past.(!seq_next_idx) <- int_of_float (Unix.gettimeofday ()) ;
+        seq_time.past.(!seq_next_idx) <- value (Unix.gettimeofday ()) ;
         seq_next_idx :=
             if !seq_next_idx < seq_size-1 then !seq_next_idx+1 else 0 ;
         if !seq_used < seq_size then incr seq_used ;
@@ -135,7 +172,7 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
     let selected_metrics = Hashtbl.find_all vars "metric" in
     (* All parameters and their possible values that are present in selected
      * metrics: *)
-    let parameters : (string, Metric.Param.t) Hashtbl.t = Hashtbl.create 99 in
+    let parameters : (string, Metric.Param.t Set.t) Hashtbl.t = Hashtbl.create 99 in
     List.iter (fun name ->
         match Hashtbl.find series name with
         | exception Not_found ->
@@ -144,7 +181,12 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
         | seqs ->
             Hashtbl.keys seqs |> Enum.uniqq |>
             Enum.iter (fun params ->
-                List.iter (fun (n, v) -> Hashtbl.add parameters n v) params)
+                List.iter (fun (n, v) ->
+                    Hashtbl.modify_opt n (function
+                        | None -> Some (Set.singleton v)
+                        | Some s -> Some (Set.add v s)
+                    ) parameters
+                ) params)
     ) selected_metrics ;
     let filter_str = Hashtbl.find_default vars "filter" "" in
     let filter =
@@ -153,12 +195,9 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
         try Expr (Search.Expr.of_string s)
         with e ->
             Error (Printexc.to_string e) in
-    Printf.eprintf "filter_str=%S, expr=%s\n"
-        filter_str
-        (match filter with Expr e -> Search.Expr.to_string e | Error e -> "Err:"^e) ;
+    if debug then Printf.eprintf "filter_str=%S, expr=%s\n" filter_str (match filter with Expr e -> Search.Expr.to_string e | Error e -> "Err:"^e) ;
     let filter_vars_of_params params =
-        Printf.eprintf "filter_vars_of_params: %a\n"
-            (List.print (Tuple2.print String.print Metric.Param.print)) params ;
+        if debug then Printf.eprintf "filter_vars_of_params: %a\n" (List.print (Tuple2.print String.print Metric.Param.print)) params ;
         (* FIXME: Maybe search should go with Metric.Param values directly for
          * immediate values? *)
         List.map (fun (pnam, pval) ->
@@ -188,7 +227,7 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
         Char.print oc '[' ;
         fold_seq_values (fun is_first v ->
             if not is_first then Char.print oc ',' ;
-            String.print oc (to_str v) ;
+            String.print oc (to_str v.current) ;
             false
         ) true seq |> ignore ;
         Char.print oc ']' in
@@ -200,10 +239,10 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
           borderColor: %s,
           tension: 0.1 }\n"
         (to_js_string seq.name)
-        (print_values string_of_int) seq
+        (print_values string_of_float) seq
         (to_js_string seq.color) in
-    let datetime_of_int i =
-        to_js_string (string_of_timestamp (float_of_int i)) in
+    let datetime_of_float f =
+        to_js_string (string_of_timestamp f) in
     let all_seqs =
         match filter with
         | Error _ ->
@@ -218,8 +257,6 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
                     (* For now just take all params: *)
                     Hashtbl.fold (fun params seq seqs ->
                         let filter_vars = filter_vars_of_params params in
-                        Printf.eprintf "vars = %a\n%!"
-                            (List.print (Tuple2.print String.print Search.Expr.print_expr)) filter_vars ;
                         match Search.Expr.(
                                 eval ~vars:filter_vars filter_expr |>
                                 to_bool) with
@@ -253,11 +290,11 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
             (Enum.print (fun oc pnam ->
                 Printf.fprintf oc "<span>%s (%a)</span>"
                     (Html.cdata_encode pnam)
-                    (List.print ~first:"" ~last:"" ~sep:", " (fun oc v ->
+                    (Set.print ~first:"" ~last:"" ~sep:", " (fun oc v ->
                         Metric.Param.to_string v |>
                         Html.cdata_encode |>
                         String.print oc)
-                    ) (Hashtbl.find_all parameters pnam)
+                    ) (Hashtbl.find_default parameters pnam Set.empty)
             )) (Hashtbl.keys parameters |> Enum.uniqq) ;
         Printf.fprintf resp
             "<input name=\"filter\" value=\"%s\" size=\"80\"/>\n"
@@ -286,7 +323,7 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
 </script>
 |}
         (* labels, aka timestamps: *)
-        (print_values datetime_of_int) seq_time
+        (print_values datetime_of_float) seq_time
         (* datasets: *)
         (List.print ~sep:",\n" print_dataset) all_seqs ;
     [ "Content-Type", "text/html" ]
