@@ -62,12 +62,15 @@ end = struct
             let open Unix in
             let tm = localtime t in
             let msec = Float.round_to_int (100. *. (fst (modf t))) in
+            let sec, msec =
+                if msec < 100 then tm.tm_sec, msec
+                else tm.tm_sec + 1, 0 in
             if !print_date then
                 Printf.sprintf "%d-%02d-%02d %02d:%02d:%02d.%02d"
-                    (1900+tm.tm_year) (1+tm.tm_mon) tm.tm_mday tm.tm_hour tm.tm_min tm.tm_sec msec
+                    (1900+tm.tm_year) (1+tm.tm_mon) tm.tm_mday tm.tm_hour tm.tm_min sec msec
             else
                 Printf.sprintf "%02d:%02d:%02d.%02d"
-                    tm.tm_hour tm.tm_min tm.tm_sec msec
+                    tm.tm_hour tm.tm_min sec msec
         let is_valid v = v = v
         let repl_tag = "time"
     end)
