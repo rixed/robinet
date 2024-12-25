@@ -168,6 +168,36 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
     let chartjs_url = "http://happyleptic.org:8080/chart.js" in (* cached locally *)
     (* let chartjs_url = "https://cdn.jsdelivr.net/npm/chart.js" in *)
     String.print resp ("<script src=\""^ chartjs_url ^"\"></script>\n") ;
+    Printf.fprintf resp {|
+        <style type="text/css">
+            select.metrics {
+                float: left;
+                margin-right: 1em;
+                margin-bottom: 1em;
+                font-family: monospace;
+                font-size: 0.7rem;
+            }
+            div.filter {
+                clear: left;
+            }
+            p.params {
+                font-weight: bold;
+                text-decoration: underline 1px solid #555;
+            }
+            ul.params {
+                padding-left: 1em;
+            }
+            ul.params li {
+                font-family: monospace;
+                font-size: 0.8rem;
+                list-style-position: inside;
+                list-style-type: "-";
+            }
+            span.pvalues {
+                font-size: 0.7rem;
+            }
+        </style>
+|};
     page_head_close resp ;
     let selected_metrics = Hashtbl.find_all vars "metric" in
     (* All parameters and their possible values that are present in selected
@@ -279,16 +309,19 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
     Printf.fprintf resp {|
 <div>
     <form>
-        <select multiple size="%d" name="metric">
+        <select class="metrics" multiple size="%d" name="metric">
 %a
         </select>
 |}
         (min 15 (Array.length all_metrics))
-        (Array.print print_option) all_metrics ;
+        (Array.print ~first:"" ~last:"" ~sep:"\n" print_option) all_metrics ;
     if not (Hashtbl.is_empty parameters) then (
-        Printf.fprintf resp "<p>Parameters:&nbsp;%a</p>\n"
+        Printf.fprintf resp
+            "<p class=\"params\">Parameters:</p>\n\
+            <ul class=\"params\">%a</ul>\n"
             (Enum.print (fun oc pnam ->
-                Printf.fprintf oc "<span>%s (%a)</span>"
+                Printf.fprintf oc "\
+                    <li>%s <span class=\"pvalues\">(%a)</span></li>"
                     (Html.cdata_encode pnam)
                     (Set.print ~first:"" ~last:"" ~sep:", " (fun oc v ->
                         Metric.Param.to_string v |>
@@ -296,8 +329,13 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
                         String.print oc)
                     ) (Hashtbl.find_default parameters pnam Set.empty)
             )) (Hashtbl.keys parameters |> Enum.uniqq) ;
-        Printf.fprintf resp
-            "<input name=\"filter\" value=\"%s\" size=\"80\"/>\n"
+        Printf.fprintf resp "\
+            <div class=\"filter\">\n\
+            <label>Filter:&nbsp;\n\
+            <input size=\"80\" name=\"filter\" value=\"%s\"/>\n\
+            </label>\n\
+            <input type=\"submit\" name=\"redraw\"/>\n\
+            </div>\n"
             (Html.cdata_encode filter_str) ;
         (match filter with
         | Error str ->
@@ -305,7 +343,6 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
         | _ -> ())
     ) ;
     Printf.fprintf resp {|
-        <input type="submit" name="redraw" value="redraw"/>
     </form>
 </div>
 <div>
