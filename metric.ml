@@ -232,6 +232,12 @@ struct
             with Not_found -> 0 in
         set ?now ~params t (v + d)
 
+    let succ ?now ?params t =
+        add ?now ?params t 1
+
+    let pred ?now ?params t =
+        add ?now ?params t (-1)
+
     let print oc t =
         Printf.fprintf oc "\
             Metric: %s:\n\
@@ -296,8 +302,7 @@ struct
                durations : (Params.t, duration) Hashtbl.t ;
                starts : Atomic.t ;
                stops : Atomic.t ;
-               mutable simult : int ;
-               mutable max_simult : int }
+               simult : Gauge.t }
 
     and duration =
         { min : Clock.Interval.t ;
@@ -311,11 +316,10 @@ struct
         match hash_find_or_insert all name (fun () ->
             T {
                 name ;
-                starts = Atomic.make (name^"/start") ;
-                stops = Atomic.make (name^"/stop") ;
+                starts = Atomic.make (name^ "/start") ;
+                stops = Atomic.make (name^ "/stop") ;
                 durations = Hashtbl.create 10 ;
-                simult = 0 ;
-                max_simult = 0 }) with
+                simult = Gauge.make (name^ "/simult") }) with
         | T t -> t
         | _ -> invalid_arg ("Timed.make reuse name "^ name)
 
@@ -323,22 +327,20 @@ struct
         Atomic.reset t.starts ;
         Atomic.reset t.stops ;
         Hashtbl.clear t.durations ;
-        t.simult <- 0 ;
-        t.max_simult <- 0
+        Gauge.reset t.simult
 
     type stop_func = Params.t -> unit
 
     let start ?(params=Params.empty) t : stop_func =
         let start_time = Clock.now () in
-        t.simult <- t.simult + 1 ;
-        if t.simult > t.max_simult then t.max_simult <- t.simult ;
+        Gauge.succ ~params t.simult ;
         (* Return the stop function: *)
         fun extra_params ->
             let now = Clock.now () in
             let params = Params.add params extra_params in
             Atomic.fire ~now:start_time ~params t.starts ;
             Atomic.fire ~now ~params t.stops ;
-            t.simult <- t.simult - 1 ;
+            Gauge.pred ~params t.simult ;
             let duration = Clock.Time.sub now start_time in
             Hashtbl.modify_opt params (function
                 | None ->
@@ -357,20 +359,19 @@ struct
 
     let timed ?(params=Params.empty) t f =
         let start_time = Clock.now () in
-        t.simult <- t.simult + 1 ;
-        if t.simult > t.max_simult then t.max_simult <- t.simult ;
+        Gauge.succ ~params t.simult ;
         match f () with
         | exception e ->
             let bt = Printexc.get_raw_backtrace () in
             Atomic.fire ~now:start_time ~params t.starts ;
-            t.simult <- t.simult - 1 ;
+            Gauge.pred ~params t.simult ;
             Printexc.raise_with_backtrace e bt
         | extra_params, res->
             let now = Clock.now () in
             let params = Params.add params extra_params in
             Atomic.fire ~now:start_time ~params t.starts ;
             Atomic.fire ~now ~params t.stops ;
-            t.simult <- t.simult - 1 ;
+            Gauge.pred ~params t.simult ;
             let duration = Clock.Time.sub now start_time in
             Hashtbl.modify_opt params (function
                 | None ->
@@ -392,9 +393,7 @@ struct
         Printf.fprintf oc "\
             Metric: %s:\n\
             \tdurations:\n\
-            %a\
-            \tsimultaneous: %d\n\
-            \tmax-simultaneous: %d\n"
+            %a"
             t.name
             (Params.print_hash
                 (fun oc d ->
@@ -405,7 +404,6 @@ struct
                         (to_string d.max)
                         d.count)
             ) t.durations
-            t.simult t.max_simult
 end
 
 (* Report generation *)
