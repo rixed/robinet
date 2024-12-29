@@ -600,7 +600,8 @@ module Pdu = struct
                 Payload.o pld
             ) else pld
         | {| _ |} ->
-            Printf.fprintf stderr "Ip: Cannot patch checksum at offset %d" offset ;
+            Printf.fprintf stderr "Ip: Cannot patch checksum at offset %d, payload: %s\n"
+                offset (hexstring_of_bitstring_abbrev ~bits:(offset + 16) (pld :> bitstring)) ;
             pld
 
     let pack_header t =

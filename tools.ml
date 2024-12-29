@@ -137,9 +137,9 @@ let hexstring s =
 let hexstring_of_bitstring =
     hexstring % string_of_bitstring
 
-let hexstring_of_bitstring_abbrev bs =
-    if bitstring_length bs <= 64 then hexstring_of_bitstring bs
-    else hexstring_of_bitstring (takebits (64-8) bs) ^ "..."
+let hexstring_of_bitstring_abbrev ?(bits=64) bs =
+    if bitstring_length bs <= bits then hexstring_of_bitstring bs
+    else hexstring_of_bitstring (takebits (bits-8) bs) ^ "..."
 (*$= hexstring_of_bitstring_abbrev & ~printer:identity
      (hexstring_of_bitstring_abbrev (bitstring_of_string "\x42")) "42"
      (hexstring_of_bitstring_abbrev (bitstring_of_string "abcdefgh"))  "61 62 63 64 65 66 67 68"
