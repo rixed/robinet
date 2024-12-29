@@ -66,15 +66,25 @@ struct
             (Ip.Addr.to_string s.src_addr)
             (Ip.Addr.to_string s.dst_addr)
 
+    type port_forward = { proto : Ip.Proto.t ;
+                       ext_port : int ;
+                    internal_ip : Ip.Addr.t ;
+                  internal_port : int }
+
+    let port_forward ?(proto=Ip.Proto.tcp) ?internal_port internal_ip ext_port =
+        let internal_port = internal_port |? ext_port in
+        { proto ; ext_port ; internal_ip ; internal_port }
+
     (* TODO: add an optional sink inside IP *)
     type t = {      addr : Ip.Addr.t ;                  (** our IP addr *)
                 min_port : int ;                        (** smallest port to use for outgoing source ports *)
                   logger : Log.logger ;
-               nat_pings : bool ;
+               nat_pings : bool ;                       (** whether to NAT outgoing PINGs or to drop them *)
+           port_forwards : port_forward list ;
                     cnxs : cnx OrdArray.t ;             (** all the cnxs we remember, either port or ICMP based *)
-               inc_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets INComing from the outside (the value is the index in [cnxs]) *)
+              inc_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets INComing from the outside (the value is the index in [cnxs]) *)
               out_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets OUTgoing to the outside *)
-               inc_icmp_h : (icmp_sock, int) Hashtbl.t ; (** the hash to retrieve original ICMP ids on INComing packets (the value is *also* the index in [cnxs]) *)
+              inc_icmp_h : (icmp_sock, int) Hashtbl.t ; (** the hash to retrieve original ICMP ids on INComing packets (the value is *also* the index in [cnxs]) *)
               out_icmp_h : (icmp_sock, int) Hashtbl.t ; (** the hash to retrieve NATed ids on OUTgoing packets *)
               (* FIXME: Ideally, those functions are serializable references to
                * the TRX they are connected to: *)
@@ -82,10 +92,11 @@ struct
             mutable recv : bitstring -> unit }          (** the receive functon (ie. forward incoming packets from the outside *)
 
     (** Initialize the state for a NAT TRX. *)
-    let make ?(min_port=1024) ?(num_max_cnxs=200) ?(nat_pings=true) ?(parent_logger=Log.default) addr =
+    let make ?(min_port=1024) ?(num_max_cnxs=200) ?(nat_pings=true)
+             ?(parent_logger=Log.default) ?(port_forwards=[]) addr =
         let logger = Log.sub parent_logger "nat" in
         Log.(log logger Debug (lazy (Printf.sprintf "Creating a NATer for IP %s, with %d cnxs max" (Ip.Addr.to_string addr) num_max_cnxs))) ;
-        { addr ; min_port ; logger ; nat_pings ;
+        { addr ; min_port ; logger ; nat_pings ; port_forwards ;
           cnxs = OrdArray.make num_max_cnxs { orig_addr = Ip.Addr.zero ;
                                               orig_num = 0 ;
                                               nat_num = 0 } ;
@@ -220,21 +231,46 @@ v}
         st.emit (Ip.Pdu.pack ip)
 
     let do_port_unnat (st : State.t) (ip : Ip.Pdu.t) src_port dst_port =
-        let inc_sock = State.{ proto = ip.proto ;
-                            src_addr = ip.src ; src_port ;
-                            dst_addr = ip.dst ; dst_port } in
-        match Hashtbl.find st.inc_cnxs_h inc_sock with
-        | exception Not_found ->
-            (* TODO: a DMZ / config to forward incoming traffic to publicly accessible host *)
-            Log.(log st.logger Warning (lazy (Printf.sprintf2
-                "No idea about that incoming %a" State.socket_print inc_sock)))
-        | n ->
+        let do_nat n =
             let cnx = OrdArray.get st.cnxs n in
             patch_dst_port ip.proto (ip.payload :> bitstring) cnx.orig_num |>
             Result.iter (fun pld ->
                 let payload = Payload.o pld in
                 let ip = { ip with dst = cnx.orig_addr ; payload } in
-                st.recv (Ip.Pdu.pack ip))
+                st.recv (Ip.Pdu.pack ip)) in
+        let inc_sock = State.{ proto = ip.proto ;
+                            src_addr = ip.src ; src_port ;
+                            dst_addr = ip.dst ; dst_port } in
+        match Hashtbl.find st.inc_cnxs_h inc_sock with
+        | exception Not_found ->
+            (* Maybe it's declared in the port forwards: *)
+            (match List.find (fun (pf : State.port_forward) ->
+                       pf.proto = ip.proto && pf.ext_port = dst_port
+                   ) st.port_forwards with
+            | exception Not_found ->
+                Log.(log st.logger Warning (lazy (Printf.sprintf2
+                    "No idea about that incoming %a" State.socket_print inc_sock)))
+            | (pf : State.port_forward) ->
+                Log.(log st.logger Info (lazy (Printf.sprintf
+                    "Incoming connection to forwarded port %d" dst_port))) ;
+                (* Track this: *)
+                let out_sock = State.{ proto = ip.proto ;
+                                    src_addr = pf.internal_ip ;
+                                    src_port = pf.internal_port ;
+                                    dst_addr = ip.src ;
+                                    dst_port = src_port }
+                and inc_sock = State.{ proto = ip.proto ;
+                                    src_addr = ip.src ;
+                                    src_port = src_port ;
+                                    dst_addr = st.addr ;
+                                    dst_port = dst_port } in
+                let n = start_tracking st pf.internal_ip pf.internal_port
+                                       dst_port st.inc_cnxs_h inc_sock in
+                Hashtbl.add st.out_cnxs_h out_sock n ;
+                (* With the tracking in place, go NAT: *)
+                do_nat n)
+        | n ->
+            do_nat n
 
     let do_icmp_reply_unnat (st : State.t) (ip : Ip.Pdu.t) (icmp : Icmp.Pdu.t)
                             msg_type id =
