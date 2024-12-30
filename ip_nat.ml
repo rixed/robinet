@@ -271,7 +271,6 @@ v}
             Log.(log st.logger Warning (lazy ("Cannot decode IP header from ICMP payload: "^ Lazy.force s))) ;
             None
 
-    (* BEWARE: never tested! *)
     let do_icmp_err_nat (st : State.t) (ip : Ip.Pdu.t) (icmp : Icmp.Pdu.t) ptr mtu pld =
         let emit_with_err_ip_pld err_ip_pld (err_ip : Ip.Pdu.t) =
             let err_ip = { err_ip with
@@ -472,23 +471,23 @@ v}
                         | Error s ->
                             Log.(log st.logger Debug (lazy (Printf.sprintf "Ignoring outgoing IP packet of %d bytes since it has no ports (%s)" (bytelength bits) (Lazy.force s))))
                     ) else if ip.proto = Ip.Proto.icmp then (
-                        if st.nat_pings then (
-                            match Icmp.Pdu.unpack (ip.payload :> bitstring) with
-                            | Ok (Icmp.Pdu.{ msg_type ; payload = Ids (id, _, _) } as icmp)
-                              when Icmp.MsgType.is_request msg_type ->
+                        match Icmp.Pdu.unpack (ip.payload :> bitstring) with
+                        | Ok (Icmp.Pdu.{ msg_type ; payload = Ids (id, _, _) } as icmp)
+                          when Icmp.MsgType.is_request msg_type ->
+                            if st.nat_pings then (
                                 Log.(log st.logger Debug (lazy (Printf.sprintf "Translating outgoing ICMP request of %d bytes from src:%s, id:%d to dst:%s" (bytelength bits) (Ip.Addr.to_string ip.src) id (Ip.Addr.to_string ip.dst)))) ;
                                 do_icmp_request_nat st ip icmp msg_type id
-                            (* We should also NAT outgoing ICMP errors: *)
-                            | Ok (Icmp.Pdu.{ payload = Header { ptr ; mtu ; pld } ; _ } as icmp) ->
-                                do_icmp_err_nat st ip icmp ptr mtu pld
-                            (* And that's all: *)
-                            | Ok _ ->
-                                Log.(log st.logger Debug (lazy "Ignoring outgoing uninteresting ICMP packet"))
-                            | Error s ->
-                                Log.(log st.logger Debug (lazy ("Ignoring bad outgoing ICMP packet: "^ Lazy.force s)))
-                        ) else (
-                            Log.(log st.logger Debug (lazy "Not NATing outgoing ICMP"))
-                        )
+                            ) else
+                                Log.(log st.logger Debug (lazy "Not NATing outgoing ICMP"))
+                        (* We should also NAT outgoing ICMP errors: *)
+                        | Ok (Icmp.Pdu.{ payload = Header { ptr ; mtu ; pld } ; _ } as icmp) ->
+                            Log.(log st.logger Debug (lazy (Printf.sprintf "Translating outgoing ICMP error of %d bytes from src:%s to dst:%s" (bytelength bits) (Ip.Addr.to_string ip.src) (Ip.Addr.to_string ip.dst)))) ;
+                            do_icmp_err_nat st ip icmp ptr mtu pld
+                        (* And that's all: *)
+                        | Ok _ ->
+                            Log.(log st.logger Debug (lazy "Ignoring outgoing uninteresting ICMP packet"))
+                        | Error s ->
+                            Log.(log st.logger Debug (lazy ("Ignoring bad outgoing ICMP packet: "^ Lazy.force s)))
                     ) else (
                         Log.(log st.logger Debug (lazy (Printf.sprintf "Ignoring outgoing IP packet of %d bytes since it's neither UDP, TCP or ICMP" (bytelength bits))))
                     )
