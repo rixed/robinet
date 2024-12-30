@@ -80,6 +80,7 @@ struct
                 min_port : int ;                        (** smallest port to use for outgoing source ports *)
                   logger : Log.logger ;
                nat_pings : bool ;                       (** whether to NAT outgoing PINGs or to drop them *)
+               send_errs : bool ;                       (** whether to send ICMP/TCP errors on bad incoming packets *)
            port_forwards : port_forward list ;
                     cnxs : cnx OrdArray.t ;             (** all the cnxs we remember, either port or ICMP based *)
               inc_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets INComing from the outside (the value is the index in [cnxs]) *)
@@ -93,10 +94,11 @@ struct
 
     (** Initialize the state for a NAT TRX. *)
     let make ?(min_port=1024) ?(num_max_cnxs=200) ?(nat_pings=true)
-             ?(parent_logger=Log.default) ?(port_forwards=[]) addr =
+             ?(send_errs=true) ?(parent_logger=Log.default) ?(port_forwards=[])
+             addr =
         let logger = Log.sub parent_logger "nat" in
         Log.(log logger Debug (lazy (Printf.sprintf "Creating a NATer for IP %s, with %d cnxs max" (Ip.Addr.to_string addr) num_max_cnxs))) ;
-        { addr ; min_port ; logger ; nat_pings ; port_forwards ;
+        { addr ; min_port ; logger ; nat_pings ; send_errs ; port_forwards ;
           cnxs = OrdArray.make num_max_cnxs { orig_addr = Ip.Addr.zero ;
                                               orig_num = 0 ;
                                               nat_num = 0 } ;
@@ -342,7 +344,22 @@ v}
                    ) st.port_forwards with
             | exception Not_found ->
                 Log.(log st.logger Warning (lazy (Printf.sprintf2
-                    "No idea about that incoming %a" State.socket_print inc_sock)))
+                    "No idea about that incoming %a" State.socket_print inc_sock))) ;
+                if st.send_errs then (
+                    if ip.proto = Ip.Proto.tcp then
+                        match Tcp.Pdu.unpack (ip.payload :> bitstring) with
+                        | Ok tcp ->
+                            Tcp.Pdu.(make_reset_of tcp |> pack) |>
+                            Ip.Pdu.make ip.proto st.addr ip.src |>
+                            Ip.Pdu.pack |> st.emit
+                        | _ ->
+                            (* Not supposed to happen here *)
+                            Log.(log st.logger Error (lazy "Cannot unpack TCP?!"))
+                    else if ip.proto = Ip.Proto.udp then
+                        Icmp.Pdu.(make_port_unreachable ip |> pack) |>
+                        Ip.Pdu.make Ip.Proto.icmp st.addr ip.src |>
+                        Ip.Pdu.pack |> st.emit
+                )
             | (pf : State.port_forward) ->
                 Log.(log st.logger Info (lazy (Printf.sprintf
                     "Incoming connection forwarded to port %d" dst_port))) ;
