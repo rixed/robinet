@@ -552,7 +552,7 @@ type gw_trx =
  * will be distributed via DHCP. *)
 let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?dhcp_range
             ?(name="gw") ?notify_errs ?admin_reroute ?(parent_logger=Log.default)
-            ?public_netmask ?public_gw public_ip local_cidr =
+            ?public_netmask ?public_gw ?port_forwards public_ip local_cidr =
     (* We want all parts inherit this logger: *)
     let parent_logger = Log.sub parent_logger name in
     let local_ips = Ip.Cidr.local_addrs local_cidr in
@@ -576,7 +576,8 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?dhcp_range
     Eth.State.add_ip4 router.ifaces.(0).eth ~netmask gw_ip ;
     (* The second iface of our router (facing internet) is the NAT *)
     Eth.State.add_ip4 router.ifaces.(1).eth ?netmask:public_netmask public_ip ;
-    let nat_state = Nat.State.make ~num_max_cnxs ~parent_logger public_ip in
+    let nat_state =
+        Nat.State.make ~num_max_cnxs ~parent_logger ?port_forwards public_ip in
     let nat_trx = Nat.TRX.make nat_state in
     (* Which we pipe *before* the iface eth (NAT operates at the IP level): *)
     router.ifaces.(1).trx <- pipe nat_trx router.ifaces.(1).trx ;
