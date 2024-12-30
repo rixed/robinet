@@ -207,7 +207,7 @@ v}
             let ip = { ip with src = st.addr ; payload } in
             st.emit (Ip.Pdu.pack ip))
 
-    let do_icmp_nat (st : State.t) (ip : Ip.Pdu.t) (icmp : Icmp.Pdu.t) msg_type id =
+    let do_icmp_request_nat (st : State.t) (ip : Ip.Pdu.t) (icmp : Icmp.Pdu.t) msg_type id =
         (* If we track this ping already, reuse the former outside id: *)
         let out_sock = State.{ src_addr = ip.src ;
                                dst_addr = ip.dst ;
@@ -229,6 +229,99 @@ v}
             (Ip.Addr.to_string st.addr)))) ;
         let ip = { ip with src = st.addr ; payload } in
         st.emit (Ip.Pdu.pack ip)
+
+    type unpacked_icmp_err_header =
+        | TcpUdpCnx of { err_ip : Ip.Pdu.t ; src_port : int ; dst_port : int ;
+                         rest : bitstring }
+        | IcmpCnx of { err_ip : Ip.Pdu.t ; typ : int ; cod : int ;
+                       checksum : int ; id : int ; rest : bitstring }
+
+    let unpack_icmp_err_header (st : State.t) (pld : Payload.t) =
+        match Ip.Pdu.unpack (pld :> bitstring) with
+        | Ok err_ip ->
+            (* After the complete IP header, the payload must have at least 8
+             * bytes, and that's all we need for NAT, so unpack and patch
+             * only that: *)
+            if err_ip.proto = Ip.Proto.tcp ||
+               err_ip.proto = Ip.Proto.udp then
+                match%bitstring (err_ip.payload :> bitstring) with
+                | {| src_port : 16 ; dst_port : 16 ; rest : -1 : bitstring |} ->
+                    Some (TcpUdpCnx { err_ip ; src_port ; dst_port ; rest })
+                | {| _ |} ->
+                    Log.(log st.logger Warning (lazy "Cannot decode ICMP err header as UDP/TCP")) ;
+                    None
+            else if err_ip.proto = Ip.Proto.icmp then
+                match%bitstring (err_ip.payload :> bitstring) with
+                | {| typ : 8 ; cod : 8 ; checksum : 16 ; id : 16 ;
+                     rest : -1 : bitstring |} ->
+                     Some (IcmpCnx { err_ip ; typ ; cod ; checksum ; id ; rest })
+                | {| _ |} ->
+                    Log.(log st.logger Warning (lazy "Cannot decode ICMP err header as ICMP")) ;
+                    None
+            else (
+                Log.(log st.logger Debug (lazy ("Not NATing back ICMP error for IP proto "^ Ip.Proto.to_string err_ip.proto))) ;
+                None
+            )
+        | Error s ->
+            Log.(log st.logger Warning (lazy ("Cannot decode IP header from ICMP payload: "^ Lazy.force s))) ;
+            None
+
+    let do_icmp_err_nat (st : State.t) (ip : Ip.Pdu.t) (icmp : Icmp.Pdu.t) ptr mtu pld =
+        let emit_with_err_ip_pld err_ip_pld (err_ip : Ip.Pdu.t) =
+            let err_ip = { err_ip with
+                             dst = st.addr ; (* External version of the dest IP *)
+                         payload = Payload.o err_ip_pld } in
+            let pld = Payload.o (Ip.Pdu.pack err_ip) in
+            let icmp = { icmp with payload = Header { ptr ; mtu ; pld } } in
+            let payload = Payload.o (Icmp.Pdu.pack icmp) in
+            let ip = { ip with src = st.addr ; payload } in
+            st.emit (Ip.Pdu.pack ip) in
+        unpack_icmp_err_header st pld |> Option.may (function
+        | TcpUdpCnx { err_ip ; src_port ; dst_port ; rest } ->
+            (* If this ICMP error is sent to an external dest, the original
+             * packet that triggered the error was sent from this external
+             * dest. Let's retrieve this tracked socket using the parameters
+             * from the internal LAN, thus indexed in [out_cnxs_h]: *)
+            let out_sock = State.{ proto = err_ip.proto ;
+                                src_addr = err_ip.dst ;
+                                dst_addr = err_ip.src ;
+                                src_port = dst_port ;
+                                dst_port = src_port } in
+            (match Hashtbl.find st.out_cnxs_h out_sock with
+            | exception Not_found ->
+                Log.(log st.logger Warning (lazy (Printf.sprintf2
+                    "No idea about that outgoing %a which triggered this ICMP error"
+                        State.socket_print out_sock)))
+                (* Do not send another ICMP error on an ICMP error. *)
+            | n ->
+                let cnx = OrdArray.get st.cnxs n in
+                (* Patch the external version of the dest port: *)
+                let%bitstring err_ip_pld =
+                    {| src_port : 16 ; cnx.nat_num : 16 ;
+                       rest : -1 : bitstring |} in
+                emit_with_err_ip_pld err_ip_pld err_ip)
+        (* An ICMP packet can also trigger an ICMP error: *)
+        | IcmpCnx { err_ip ; typ ; cod ; checksum ; id ; rest } ->
+            (* Will stay unchanged if it's already a reply: *)
+            let msg_type = Icmp.MsgType.(reply_of (o (typ, cod))) in
+            let out_sock = State.{ src_addr = err_ip.dst ;
+                                   dst_addr = err_ip.src ;
+                                   msg_type ; id } in
+            (match Hashtbl.find st.out_icmp_h out_sock with
+            | exception Not_found ->
+                Log.(log st.logger Warning (lazy (Printf.sprintf2
+                    "Cannot find the %a which was expected as a reply
+                     to the ICMP packet that caused this ICMP error"
+                    State.icmp_sock_print out_sock)))
+            | n ->
+                let cnx = OrdArray.get st.cnxs n in
+                (* Put back the original dest IP and ICMP id in the
+                 * ICMP copy of the IP header: *)
+                let%bitstring err_ip_pld =
+                    {| typ : 8 ; cod : 8 ; checksum : 16 ;
+                       cnx.nat_num : 16 ;
+                       rest : -1 : bitstring |} in
+                emit_with_err_ip_pld err_ip_pld err_ip))
 
     let do_port_unnat (st : State.t) (ip : Ip.Pdu.t) src_port dst_port =
         let do_nat n =
@@ -291,79 +384,57 @@ v}
                           ptr mtu (pld : Payload.t) =
         (* In that case we have to look at normal UDP/TCP connections.
          * Unpack the IP header from the payload: *)
-        match Ip.Pdu.unpack (pld :> bitstring) with
-        | Ok err_ip ->
-            let recv_with_err_ip_pld err_ip_pld (cnx : State.cnx) =
-                let err_ip =
-                    { err_ip with
-                      src = cnx.orig_addr ;
-                      payload = Payload.o err_ip_pld } in
-                let pld = Payload.o (Ip.Pdu.pack err_ip) in
-                let icmp = { icmp with payload = Header { ptr ; mtu ; pld } } in
-                let payload = Payload.o (Icmp.Pdu.pack icmp) in
-                let ip = { ip with dst = cnx.orig_addr ; payload } in
-                st.recv (Ip.Pdu.pack ip) in
-            (* After the complete IP header, the payload must have at least 8
-             * bytes, and that's all we need for NAT, so unpack and patch
-             * only that: *)
-            if err_ip.proto = Ip.Proto.tcp ||
-               err_ip.proto = Ip.Proto.udp then
-                match%bitstring (err_ip.payload :> bitstring) with
-                | {| src_port : 16 ; dst_port : 16 ; rest : -1 : bitstring |} ->
-                    (* Look for the socket answer that was expected instead: *)
-                    let inc_sock = State.{ proto = err_ip.proto ;
-                                        src_addr = err_ip.dst ;
-                                        src_port = dst_port ;
-                                        dst_addr = err_ip.src ;
-                                        dst_port = src_port } in
-                    (match Hashtbl.find st.inc_cnxs_h inc_sock with
-                    | exception Not_found ->
-                        Log.(log st.logger Warning (lazy (Printf.sprintf2
-                            "Cannot find the %a which was the expected answer to \
-                             the packet that caused this ICMP error"
-                            State.socket_print inc_sock)))
-                    | n ->
-                        let cnx = OrdArray.get st.cnxs n in
-                        (* Put back the original source IP and port in the ICMP
-                         * copy of the IP header: *)
-                        let%bitstring err_ip_pld =
-                            {| cnx.orig_num : 16 ; dst_port : 16 ;
-                               rest : -1 : bitstring |} in
-                        recv_with_err_ip_pld err_ip_pld cnx)
-                | {| _ |} ->
-                    Log.(log st.logger Warning (lazy "Cannot decode ICMP err header as UDP/TCP"))
-            else if err_ip.proto = Ip.Proto.icmp then
-                match%bitstring (err_ip.payload :> bitstring) with
-                | {| typ : 8 ; cod : 8 ; checksum : 16 ; id : 16 ;
-                     rest : -1 : bitstring |} ->
-                    (* Look for the ICMP reply that was expected instead: *)
-                    let err_msg_type = Icmp.MsgType.o (typ, cod) in
-                    let inc_sock =
-                        State.{ src_addr = err_ip.dst ;
+        let recv_with_err_ip_pld err_ip_pld (err_ip : Ip.Pdu.t) (cnx : State.cnx) =
+            let err_ip = { err_ip with
+                             src = cnx.orig_addr ;
+                         payload = Payload.o err_ip_pld } in
+            let pld = Payload.o (Ip.Pdu.pack err_ip) in
+            let icmp = { icmp with payload = Header { ptr ; mtu ; pld } } in
+            let payload = Payload.o (Icmp.Pdu.pack icmp) in
+            let ip = { ip with dst = cnx.orig_addr ; payload } in
+            st.recv (Ip.Pdu.pack ip) in
+        unpack_icmp_err_header st pld |> Option.may (function
+        | TcpUdpCnx { err_ip ; src_port ; dst_port ; rest } ->
+            (* Look for the socket answer that was expected instead: *)
+            let inc_sock = State.{ proto = err_ip.proto ;
+                                src_addr = err_ip.dst ;
+                                src_port = dst_port ;
                                 dst_addr = err_ip.src ;
-                                msg_type = Icmp.MsgType.reply_of err_msg_type ;
-                                      id } in
-                    (match Hashtbl.find st.inc_icmp_h inc_sock with
-                    | exception Not_found ->
-                        Log.(log st.logger Warning (lazy (Printf.sprintf2
-                            "Cannot find the %a which was expected as a response
-                             to the ICMP query that caused this ICMP error"
-                            State.icmp_sock_print inc_sock)))
-                    | n ->
-                        let cnx = OrdArray.get st.cnxs n in
-                        (* Put back the original source IP and ICMP id in the ICMP
-                         * copy of the IP header: *)
-                        let%bitstring err_ip_pld =
-                            {| typ : 8 ; cod : 8 ; checksum : 16 ;
-                               cnx.orig_num : 16 ;
-                               rest : -1 : bitstring |} in
-                        recv_with_err_ip_pld err_ip_pld cnx)
-                | {| _ |} ->
-                    Log.(log st.logger Warning (lazy "Cannot decode ICMP err header as ICMP"))
-            else
-                Log.(log st.logger Debug (lazy ("Not NATing back ICMP error for IP proto "^ Ip.Proto.to_string err_ip.proto)))
-        | Error s ->
-            Log.(log st.logger Warning (lazy ("Cannot decode IP header from ICMP payload: "^ Lazy.force s)))
+                                dst_port = src_port } in
+            (match Hashtbl.find st.inc_cnxs_h inc_sock with
+            | exception Not_found ->
+                Log.(log st.logger Warning (lazy (Printf.sprintf2
+                    "Cannot find the %a which was the expected answer to \
+                     the packet that caused this ICMP error"
+                    State.socket_print inc_sock)))
+            | n ->
+                let cnx = OrdArray.get st.cnxs n in
+                (* Put back the original source IP and port in the ICMP
+                 * copy of the IP header: *)
+                let%bitstring err_ip_pld =
+                    {| cnx.orig_num : 16 ; dst_port : 16 ;
+                       rest : -1 : bitstring |} in
+                recv_with_err_ip_pld err_ip_pld err_ip cnx)
+        | IcmpCnx { err_ip ; typ ; cod ; checksum ; id ; rest } ->
+            let msg_type = Icmp.MsgType.(reply_of (o (typ, cod))) in
+            let inc_sock = State.{ src_addr = err_ip.dst ;
+                                   dst_addr = err_ip.src ;
+                                   msg_type ; id } in
+            (match Hashtbl.find st.inc_icmp_h inc_sock with
+            | exception Not_found ->
+                Log.(log st.logger Warning (lazy (Printf.sprintf2
+                    "Cannot find the %a which was expected as a reply
+                     to the ICMP query that caused this ICMP error"
+                    State.icmp_sock_print inc_sock)))
+            | n ->
+                let cnx = OrdArray.get st.cnxs n in
+                (* Put back the original source IP and ICMP id in the ICMP
+                 * copy of the IP header: *)
+                let%bitstring err_ip_pld =
+                    {| typ : 8 ; cod : 8 ; checksum : 16 ;
+                       cnx.orig_num : 16 ;
+                       rest : -1 : bitstring |} in
+                recv_with_err_ip_pld err_ip_pld err_ip cnx))
 
     (** bits are flowing from LAN to outside world *)
     let tx (st : State.t) bits =
@@ -383,9 +454,12 @@ v}
                             match Icmp.Pdu.unpack (ip.payload :> bitstring) with
                             | Ok (Icmp.Pdu.{ msg_type ; payload = Ids (id, _, _) } as icmp)
                               when Icmp.MsgType.is_request msg_type ->
-                                Log.(log st.logger Debug (lazy (Printf.sprintf "Translating ICMP request of %d bytes from src:%s, id:%d to dst:%s" (bytelength bits) (Ip.Addr.to_string ip.src) id (Ip.Addr.to_string ip.dst)))) ;
-                                do_icmp_nat st ip icmp msg_type id
-                            (* We NAT only ICMP queries (for now?) *)
+                                Log.(log st.logger Debug (lazy (Printf.sprintf "Translating outgoing ICMP request of %d bytes from src:%s, id:%d to dst:%s" (bytelength bits) (Ip.Addr.to_string ip.src) id (Ip.Addr.to_string ip.dst)))) ;
+                                do_icmp_request_nat st ip icmp msg_type id
+                            (* We should also NAT outgoing ICMP errors: *)
+                            | Ok (Icmp.Pdu.{ payload = Header { ptr ; mtu ; pld } ; _ } as icmp) ->
+                                do_icmp_err_nat st ip icmp ptr mtu pld
+                            (* And that's all: *)
                             | Ok _ ->
                                 Log.(log st.logger Debug (lazy "Ignoring outgoing uninteresting ICMP packet"))
                             | Error s ->
