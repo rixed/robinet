@@ -271,6 +271,7 @@ v}
             Log.(log st.logger Warning (lazy ("Cannot decode IP header from ICMP payload: "^ Lazy.force s))) ;
             None
 
+    (* BEWARE: never tested! *)
     let do_icmp_err_nat (st : State.t) (ip : Ip.Pdu.t) (icmp : Icmp.Pdu.t) ptr mtu pld =
         let emit_with_err_ip_pld err_ip_pld (err_ip : Ip.Pdu.t) =
             let err_ip = { err_ip with
@@ -534,7 +535,7 @@ v}
                                 ()
                         )
                     | Ok (Icmp.Pdu.{ payload = Header { ptr ; mtu ; pld } ; _ } as icmp) ->
-                        Log.(log st.logger Debug (lazy (Printf.sprintf "Translating incoming an ICMP error of %d bytes from %s" (bytelength bits) (Ip.Addr.to_string ip.src)))) ;
+                        Log.(log st.logger Debug (lazy (Printf.sprintf "Translating an incoming ICMP error of %d bytes from %s" (bytelength bits) (Ip.Addr.to_string ip.src)))) ;
                         do_icmp_err_unnat st ip icmp ptr mtu pld
                     | Ok _ ->
                         Log.(log st.logger Debug (lazy "Ignoring uninteresting incoming ICMP packet"))
