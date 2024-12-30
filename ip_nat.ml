@@ -81,6 +81,7 @@ struct
                   logger : Log.logger ;
                nat_pings : bool ;                       (** whether to NAT outgoing PINGs or to drop them *)
                send_errs : bool ;                       (** whether to send ICMP/TCP errors on bad incoming packets *)
+            answer_pings : bool ;                       (** whether to answer incoming pings in absence of port forwarding *)
            port_forwards : port_forward list ;
                     cnxs : cnx OrdArray.t ;             (** all the cnxs we remember, either port or ICMP based *)
               inc_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets INComing from the outside (the value is the index in [cnxs]) *)
@@ -94,11 +95,13 @@ struct
 
     (** Initialize the state for a NAT TRX. *)
     let make ?(min_port=1024) ?(num_max_cnxs=200) ?(nat_pings=true)
-             ?(send_errs=true) ?(parent_logger=Log.default) ?(port_forwards=[])
+             ?(send_errs=true) ?(answer_pings=true)
+             ?(parent_logger=Log.default) ?(port_forwards=[])
              addr =
         let logger = Log.sub parent_logger "nat" in
         Log.(log logger Debug (lazy (Printf.sprintf "Creating a NATer for IP %s, with %d cnxs max" (Ip.Addr.to_string addr) num_max_cnxs))) ;
-        { addr ; min_port ; logger ; nat_pings ; send_errs ; port_forwards ;
+        { addr ; min_port ; logger ; nat_pings ; send_errs ; answer_pings ;
+          port_forwards ;
           cnxs = OrdArray.make num_max_cnxs { orig_addr = Ip.Addr.zero ;
                                               orig_num = 0 ;
                                               nat_num = 0 } ;
@@ -510,11 +513,26 @@ v}
                         Log.(log st.logger Debug (lazy ("Ignoring bad incoming UDP/TCP packet: "^ Lazy.force s)))
                 ) else if ip.proto = Ip.Proto.icmp then (
                     match Icmp.Pdu.unpack (ip.payload :> bitstring) with
-                    | Ok (Icmp.Pdu.{ msg_type ; payload = Ids (id, _, _) } as icmp)
-                      when Icmp.MsgType.is_reply msg_type ->
-                      (* TODO: when is_request, look for a port_forwards for ICMP! *)
-                        Log.(log st.logger Debug (lazy (Printf.sprintf "Translating incoming ICMP reply of %d bytes from %s, id:%d" (bytelength bits) (Ip.Addr.to_string ip.src) id))) ;
-                        do_icmp_reply_unnat st ip icmp msg_type id
+                    | Ok (Icmp.Pdu.{ msg_type ; payload = Ids (id, seq, _) } as icmp) ->
+                        if Icmp.MsgType.is_reply msg_type then (
+                            Log.(log st.logger Debug (lazy (Printf.sprintf "Translating incoming ICMP reply of %d bytes from %s, id:%d" (bytelength bits) (Ip.Addr.to_string ip.src) id))) ;
+                            do_icmp_reply_unnat st ip icmp msg_type id
+                        ) else (
+                            (* When a_request, look for a port_forwards for ICMP: *)
+                            match List.find (fun (pf : State.port_forward) ->
+                                        pf.proto = ip.proto
+                                   ) st.port_forwards with
+                            | exception Not_found ->
+                                if Icmp.MsgType.is_echo_request msg_type && st.answer_pings then    (
+                                    Icmp.Pdu.(make_echo_reply id seq |> pack) |>
+                                    Ip.(Pdu.make Proto.icmp st.addr ip.src) |>
+                                    Ip.Pdu.pack |> st.emit
+                                ) else
+                                    Log.(log st.logger Debug (lazy "Ignoring incoming ICMP request"))
+                            | (_pf : State.port_forward) ->
+                                (* TODO: track this ICMP request and port forward it *)
+                                ()
+                        )
                     | Ok (Icmp.Pdu.{ payload = Header { ptr ; mtu ; pld } ; _ } as icmp) ->
                         Log.(log st.logger Debug (lazy (Printf.sprintf "Translating incoming an ICMP error of %d bytes from %s" (bytelength bits) (Ip.Addr.to_string ip.src)))) ;
                         do_icmp_err_unnat st ip icmp ptr mtu pld
