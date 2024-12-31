@@ -49,10 +49,6 @@ struct
             (Ip.Addr.to_string s.src_addr) s.src_port
             (Ip.Addr.to_string s.dst_addr) s.dst_port
 
-    type cnx = { orig_addr : Ip.Addr.t ;  (** The inside lan's host IP. *)
-                  orig_num : int ;        (** The origin port/id used by this host. *)
-                   nat_num : int }        (** The random port/id used by NAT in the outside. *)
-
     (* For ICMP, the message's type, code and id are tracked and the id is
      * substituted. *)
     type icmp_sock = { src_addr : Ip.Addr.t ;       (** The tracked cnx source. *)
@@ -65,6 +61,19 @@ struct
             (Icmp.MsgType.to_string s.msg_type) s.id
             (Ip.Addr.to_string s.src_addr)
             (Ip.Addr.to_string s.dst_addr)
+
+    type cnx_keys =
+        | None
+        | SocketKeys of { inc_sock : socket ; out_sock : socket }
+        | IcmpKeys of { inc_sock : icmp_sock ; out_sock : icmp_sock }
+
+    type cnx = { orig_addr : Ip.Addr.t ;     (** The inside lan's host IP. *)
+                  orig_num : int ;           (** The origin port/id used by this host. *)
+                   nat_num : int ;           (** The random port/id used by NAT in the outside. *)
+         mutable last_used : Clock.Time.t ;  (** Just for information *)
+         (* Also store references to the two keys indexing this entry, so they
+          * can be removed when this entry is overwritten (see [unkey_cnx]): *)
+                      keys : cnx_keys }
 
     type port_forward = { proto : Ip.Proto.t ;
                        ext_port : int ;
@@ -104,13 +113,25 @@ struct
           port_forwards ;
           cnxs = OrdArray.make num_max_cnxs { orig_addr = Ip.Addr.zero ;
                                               orig_num = 0 ;
-                                              nat_num = 0 } ;
+                                              nat_num = 0 ;
+                                              keys = None ;
+                                              last_used = Clock.now () } ;
           inc_cnxs_h = Hashtbl.create num_max_cnxs ;
           out_cnxs_h = Hashtbl.create num_max_cnxs ;
           inc_icmp_h = Hashtbl.create num_max_cnxs ;
           out_icmp_h = Hashtbl.create num_max_cnxs ;
           emit = ignore_bits ~logger ;
           recv = ignore_bits ~logger }
+
+    (* Remove an overwritten tracked connection from the hashes: *)
+    let unkey_cnx (t : t) = function
+        | None -> ()
+        | SocketKeys { inc_sock ; out_sock } ->
+            Hashtbl.remove t.inc_cnxs_h inc_sock ;
+            Hashtbl.remove t.out_cnxs_h out_sock
+        | IcmpKeys { inc_sock ; out_sock } ->
+            Hashtbl.remove t.inc_icmp_h inc_sock ;
+            Hashtbl.remove t.out_icmp_h out_sock
 end
 
 module TRX =
@@ -144,9 +165,15 @@ v}
 
     *)
 
-    let start_tracking (st : State.t) orig_addr orig_num nat_num in_h in_k =
+    let start_tracking (st : State.t) orig_addr orig_num nat_num in_h in_k keys =
         let last_idx = OrdArray.last st.cnxs in
-        OrdArray.set st.cnxs last_idx { orig_addr ; orig_num ; nat_num } ;
+        let prev = OrdArray.get st.cnxs last_idx in
+        let now_ = Clock.now () in
+        if prev.keys <> State.None then
+            Log.(log st.logger Debug (lazy (Printf.sprintf "Recycling an old connection last used %s ago" Clock.(Interval.to_string Time.(sub now_ prev.last_used))))) ;
+        State.unkey_cnx st (OrdArray.get st.cnxs last_idx).keys ;
+        OrdArray.set st.cnxs last_idx
+            { orig_addr ; orig_num ; nat_num ; keys ; last_used = now_ } ;
         (* replace also entry in one of the incoming hashes: *)
         Hashtbl.replace in_h in_k last_idx ;
         last_idx
@@ -197,7 +224,8 @@ v}
                                 src_port = dst_port ;
                                 dst_addr = st.addr ;
                                 dst_port = random_port } in
-            start_tracking st ip.src src_port random_port st.inc_cnxs_h inc_sock) in
+            start_tracking st ip.src src_port random_port st.inc_cnxs_h inc_sock
+                State.(SocketKeys { inc_sock ; out_sock })) in
         OrdArray.promote st.cnxs n ;
         (* perform source NAT *)
         (* FIXME: also check that (OrdArray.get st.cnxs n).orig_num correspond to
@@ -205,7 +233,9 @@ v}
          * an outdated hash entry!
          * Do this each time we read from OrdArray. *)
         (* FIXME: Also, clean the hash when that happen. Store the hash key in cnx? *)
-        let new_src_port = (OrdArray.get st.cnxs n).nat_num in
+        let cnx = OrdArray.get st.cnxs n in
+        cnx.last_used <- Clock.now () ;
+        let new_src_port = cnx.nat_num in
         patch_src_port ip.proto (ip.payload :> bitstring) new_src_port |>
         Result.iter (fun pld ->
             let payload = Payload.o pld in
@@ -224,10 +254,13 @@ v}
                                    dst_addr = st.addr ;
                                    msg_type = Icmp.MsgType.reply_of msg_type ;
                                    id = random_id } in
-            start_tracking st ip.src id random_id st.inc_icmp_h inc_sock) in
+            start_tracking st ip.src id random_id st.inc_icmp_h inc_sock
+                State.(IcmpKeys { inc_sock ; out_sock })) in
         OrdArray.promote st.cnxs n ;
         (* Actually substitute the id: *)
-        let new_id = (OrdArray.get st.cnxs n).nat_num in
+        let cnx = OrdArray.get st.cnxs n in
+        cnx.last_used <- Clock.now () ;
+        let new_id = cnx.nat_num in
         let payload = Payload.o (patch_icmp_id icmp new_id) in
         Log.(log st.logger Debug (lazy (Printf.sprintf "NATing an ICMP packet, subst IP src %s->%s"
             (Ip.Addr.to_string ip.src)
@@ -299,7 +332,9 @@ v}
                         State.socket_print out_sock)))
                 (* Do not send another ICMP error on an ICMP error. *)
             | n ->
+                OrdArray.promote st.cnxs n ;
                 let cnx = OrdArray.get st.cnxs n in
+                cnx.last_used <- Clock.now () ;
                 (* Patch the external version of the dest port: *)
                 let%bitstring err_ip_pld =
                     {| src_port : 16 ; cnx.nat_num : 16 ;
@@ -319,7 +354,9 @@ v}
                      to the ICMP packet that caused this ICMP error"
                     State.icmp_sock_print out_sock)))
             | n ->
+                OrdArray.promote st.cnxs n ;
                 let cnx = OrdArray.get st.cnxs n in
+                cnx.last_used <- Clock.now () ;
                 (* Put back the original dest IP and ICMP id in the
                  * ICMP copy of the IP header: *)
                 let%bitstring err_ip_pld =
@@ -329,8 +366,11 @@ v}
                 emit_with_err_ip_pld err_ip_pld err_ip))
 
     let do_port_unnat (st : State.t) (ip : Ip.Pdu.t) src_port dst_port =
-        let do_nat n =
+        let do_unnat n =
+            OrdArray.promote st.cnxs n ;
             let cnx = OrdArray.get st.cnxs n in
+            cnx.last_used <- Clock.now () ;
+            Log.(log st.logger Debug (lazy (Printf.sprintf "Translating back from NATed port %d to original port %d" cnx.nat_num cnx.orig_num))) ;
             patch_dst_port ip.proto (ip.payload :> bitstring) cnx.orig_num |>
             Result.iter (fun pld ->
                 let payload = Payload.o pld in
@@ -364,26 +404,28 @@ v}
                         Ip.Pdu.pack |> st.emit
                 )
             | (pf : State.port_forward) ->
+                (* TODO: for TCP, only on SYNs? *)
                 Log.(log st.logger Info (lazy (Printf.sprintf
                     "Incoming connection forwarded to port %d" dst_port))) ;
                 (* Track this: *)
-                let out_sock = State.{ proto = ip.proto ;
-                                    src_addr = pf.internal_ip ;
-                                    src_port = pf.internal_port ;
-                                    dst_addr = ip.src ;
-                                    dst_port = src_port }
-                and inc_sock = State.{ proto = ip.proto ;
+                let inc_sock = State.{ proto = ip.proto ;
                                     src_addr = ip.src ;
                                     src_port = src_port ;
                                     dst_addr = st.addr ;
-                                    dst_port = dst_port } in
+                                    dst_port = dst_port }
+                and out_sock = State.{ proto = ip.proto ;
+                                    src_addr = pf.internal_ip ;
+                                    src_port = pf.internal_port ;
+                                    dst_addr = ip.src ;
+                                    dst_port = src_port } in
                 let n = start_tracking st pf.internal_ip pf.internal_port
-                                       dst_port st.inc_cnxs_h inc_sock in
+                                       dst_port st.inc_cnxs_h inc_sock
+                                       State.(SocketKeys { inc_sock ; out_sock }) in
                 Hashtbl.add st.out_cnxs_h out_sock n ;
                 (* With the tracking in place, go NAT: *)
-                do_nat n)
+                do_unnat n)
         | n ->
-            do_nat n
+            do_unnat n
 
     let do_icmp_reply_unnat (st : State.t) (ip : Ip.Pdu.t) (icmp : Icmp.Pdu.t)
                             msg_type id =
@@ -396,7 +438,9 @@ v}
                 "No idea about that incoming %a" State.icmp_sock_print inc_sock)))
             (* Do not sent out an ICMP error on an ICMP message. *)
         | n ->
+            OrdArray.promote st.cnxs n ;
             let cnx = OrdArray.get st.cnxs n in
+            cnx.last_used <- Clock.now () ;
             let payload = Payload.o (patch_icmp_id icmp cnx.orig_num) in
             let ip = { ip with dst = cnx.orig_addr ; payload } in
             st.recv (Ip.Pdu.pack ip)
@@ -429,7 +473,9 @@ v}
                      the packet that caused this ICMP error"
                     State.socket_print inc_sock)))
             | n ->
+                OrdArray.promote st.cnxs n ;
                 let cnx = OrdArray.get st.cnxs n in
+                cnx.last_used <- Clock.now () ;
                 (* Put back the original source IP and port in the ICMP
                  * copy of the IP header: *)
                 let%bitstring err_ip_pld =
@@ -448,7 +494,9 @@ v}
                      to the ICMP query that caused this ICMP error"
                     State.icmp_sock_print inc_sock)))
             | n ->
+                OrdArray.promote st.cnxs n ;
                 let cnx = OrdArray.get st.cnxs n in
+                cnx.last_used <- Clock.now () ;
                 (* Put back the original source IP and ICMP id in the ICMP
                  * copy of the IP header: *)
                 let%bitstring err_ip_pld =
