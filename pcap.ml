@@ -103,20 +103,20 @@ external inject_ : iface_handler -> string -> unit = "wrap_pcap_inject"
 
 (** [sniff_ iface_handler] will return the next available packet as a string,
  * as well as its capture timestamp.
- * If [wait] is set to false, then the function will raise Not_found after a
- * short timeout if not packet have been captured. *)
+ * If timeout is set then the function will raise Not_found after that number of
+ * seconds if not packet have been captured. *)
 type sniff_ret_ =
     { sniffed_timestamp : Clock.Time.t ; sniffed_caplen : int ;
       sniffed_wirelen : int ; sniffed_bytes : string }
 
-external sniff_ : ?wait:bool -> iface_handler -> sniff_ret_ = "wrap_pcap_read"
+external sniff_ : ?timeout:float -> iface_handler -> sniff_ret_ = "wrap_pcap_read"
 
 (** [openif_ "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is set to 0 then a "default" value
  * of 65535 will be chosen, which is probably not what you want. You should set
  * [caplen] = your {e MTU} size. *)
-external openif_ : string -> bool -> string -> int -> float -> iface_handler = "wrap_pcap_make"
+external openif_ : string -> bool -> string -> int -> iface_handler = "wrap_pcap_make"
 
 
 (** {2 Pcap files} *)
@@ -457,20 +457,20 @@ type iface = { handler : iface_handler ;
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is not set then {e MTU} for the
  * device will be chosen. *)
-let openif ?(promisc=true) ?(filter="") ?caplen ?(read_timeout=10.) ifname =
+let openif ?(promisc=true) ?(filter="") ?caplen ifname =
     let caplen =
         if ifname = "any" then
             65535
         else
             Option.default_delayed (fun () -> mtu_of_iface ifname) caplen in
-    { handler = openif_ ifname promisc filter caplen read_timeout ;
+    { handler = openif_ ifname promisc filter caplen ;
       name = ifname ;
       caplen = caplen ;
       logger = Log.make ifname }
 
 (** [sniff iface] will return the next available packet as a Pcap.Pdu.t. *)
-let sniff ?dlt ?wait iface =
-    let sniffed = sniff_ ?wait iface.handler in
+let sniff ?dlt ?timeout iface =
+    let sniffed = sniff_ ?timeout iface.handler in
     Log.(log iface.logger Debug (lazy (Printf.sprintf "Captured %d/%d bytes" sniffed.sniffed_caplen sniffed.sniffed_wirelen))) ;
     Pdu.make iface.name ?dlt
         ~caplen:sniffed.sniffed_caplen

@@ -64,7 +64,7 @@ in there. We start with the obvious:
 This will take a significant amount of time since the whole pcap file
 must be scanned.
 
-Now we are interrested in all the packets attempting to connect port 80:
+Now we are interested in all the packets attempting to connect port 80:
 
 {[
 # open Packet;;

@@ -346,6 +346,9 @@ module Cidr = struct
       (o (Addr.o32 0x0102038El, 25)) (of_string "1.2.3.142/25")
      *)
 
+    let abbrev (_t : t) =
+        todo "abbrev"
+
     (* Will assume [ip] has all high bits at 1 and low bits at 0 *)
     let width_of_netmask ip =
         let ip = Addr.to_bitstring ip in

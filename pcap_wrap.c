@@ -16,11 +16,13 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  */
+#include <assert.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
-#include <assert.h>
+#include <sys/select.h>
 #include <pcap/pcap.h>
 #include <caml/mlvalues.h>
 #include <caml/fail.h>
@@ -71,7 +73,7 @@ static int set_filter(pcap_t *handle, char const *filter)
     return 0;
 }
 
-static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, size_t snaplen, unsigned read_timeout_ms, char *errbuf)
+static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, size_t snaplen, char *errbuf)
 {
     if (! snaplen) snaplen = 65535; // FIXME: let libpcap deal with it
 
@@ -80,9 +82,11 @@ static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, s
 
     if (0 != pcap_set_promisc(handle, promisc)) goto err;
     if (0 != pcap_set_snaplen(handle, snaplen)) goto err;
-    if (0 != pcap_set_timeout(handle, read_timeout_ms)) goto err;
+    // Ask libpcap to ask the kernel not to buffer packets:
     if (0 != pcap_set_immediate_mode(handle, 1)) goto err;
-    if (0 != pcap_setnonblock(handle, 0, errbuf)) goto err1;
+    // Also, not to wait when there are no packets at all:
+    if (0 != pcap_setnonblock(handle, 1, errbuf)) goto err1;
+    // We will implement timeout ourselves
     if (0 != pcap_activate(handle)) goto err;
     if (0 != set_filter(handle, filter)) goto err;
 
@@ -94,18 +98,17 @@ err1:
     return NULL;
 }
 
-CAMLprim value wrap_pcap_make(value ifname_, value promisc_, value filter_, value snaplen_, value read_timeout_)
+CAMLprim value wrap_pcap_make(value ifname_, value promisc_, value filter_, value snaplen_)
 {
-    CAMLparam5(ifname_, promisc_, filter_, snaplen_, read_timeout_);
+    CAMLparam4(ifname_, promisc_, filter_, snaplen_);
     char errbuf[PCAP_ERRBUF_SIZE] = "";
 
     char const *const ifname = String_val(ifname_);
     bool const promisc = Bool_val(promisc_);
     char const *const filter = String_val(filter_);
     unsigned const snaplen = Unsigned_int_val(snaplen_);
-    unsigned const read_timeout_ms = 1000. * Double_val(read_timeout_);
 
-    pcap_t *handle = make_pcap(ifname, promisc, filter, snaplen, read_timeout_ms, errbuf);
+    pcap_t *handle = make_pcap(ifname, promisc, filter, snaplen, errbuf);
     if (! handle) caml_failwith(errbuf);
 
     CAMLlocal1(v);
@@ -131,26 +134,45 @@ CAMLprim value wrap_pcap_inject(value handle_, value str_)
     CAMLreturn(Val_unit);
 }
 
-CAMLprim value wrap_pcap_read(value wait_, value handle_)
+CAMLprim value wrap_pcap_read(value timeout_, value handle_)
 {
-    CAMLparam2(wait_, handle_);
+    CAMLparam2(timeout_, handle_);
     pcap_t *const handle = Pcap_val(handle_);
-    bool const wait =
-        // True by default:
-        !Is_block(wait_) /* Aka None */ || Bool_val(Field(wait_, 0));
+    double const timeout =
+        Is_block(timeout_) ? Double_val(Field(timeout_, 0)) : 0.;
+    bool const have_timeout = timeout > 0;
 
     struct pcap_pkthdr *hdr;
     u_char const *bytes;
     caml_release_runtime_system();
 retry:
-    switch (pcap_next_ex(handle, &hdr, &bytes)) {
+    int fd = pcap_fileno(handle);
+    fd_set set;
+    FD_ZERO(&set);
+    FD_SET(fd, &set);
+    struct timeval timeout_s;
+    if (have_timeout) {
+        time_t const sec = timeout;
+        suseconds_t const usec = (timeout - (double)sec) * 1e6;
+        timeout_s.tv_sec = sec;
+        timeout_s.tv_usec = usec;
+    };
+    int s = select(fd + 1, &set, NULL, NULL, have_timeout ? &timeout_s : NULL);
+    if (s < 0) {
+        caml_acquire_runtime_system();
+        caml_failwith(strerror(errno));
+    } else if (s == 0) {
+        // Timeout: return
+        caml_acquire_runtime_system();
+        caml_raise_not_found();
+    } else switch (pcap_next_ex(handle, &hdr, &bytes)) {
         case 1: // Ok
             caml_acquire_runtime_system();
             break;
-        case 0: // Timeout
+        case 0: // Nothing?!
             /* Retry automatically in case of timeout, to avoid acquiring
              * and releasing the giant lock. */
-            if (wait) goto retry;
+            if (! have_timeout) goto retry;
             caml_acquire_runtime_system();
             caml_raise_not_found();
             break;
