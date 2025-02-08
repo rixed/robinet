@@ -179,6 +179,12 @@ let signal_me () = Condition.signal cond
 let now () =
     with_lock (fun () -> current.now) ()
 
+let end_of_time =
+    Time.o infinity
+
+let beginning_of_time =
+    Time.o neg_infinity
+
 (** [at t f x] will execute [f x] when simulation clock reaches time [t]. *)
 let at (ts : Time.t) f x =
     let epsilon = Interval.usec 1. in
