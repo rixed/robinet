@@ -141,7 +141,7 @@ let queue_enum q =
         let cursor = { cursor with next = cursor.next } in (* Copy the cursor *)
         make cursor
     and make cursor =
-        Enum.make (next cursor) (count cursor) (clone cursor)
+        Enum.make ~next:(next cursor) ~count:(count cursor) ~clone:(clone cursor)
     in
     let cursor = { next = q.oldest ; wrapped = false } in
     let e = make cursor in
