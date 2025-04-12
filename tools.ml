@@ -783,3 +783,17 @@ let string_of_timestamp ts =
 
 let quoted s =
     "\""^ String.escaped s ^"\""
+
+module Infix =
+struct
+    let (-->) = (-->)
+    let (<-->) = (<-->)
+    let (<-=) = (<-=)
+    let (=->) = (=->)
+    let (-=>) = (-=>)
+    let (<=-) = (<=-)
+    let (==>) = (==>)
+    let (<==>) = (<==>)
+    let (<=->) = (<=->)
+    let (<-=>) = (<-=>)
+end
