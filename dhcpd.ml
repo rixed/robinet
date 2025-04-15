@@ -191,6 +191,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                         count "no-authority"
                     ))
             (* TODO: handle release & decline *)
+            (* TODO: handle intermediary renewal (Requests or preallocated IPs) *)
             | Ok (Pdu.{ msg_type = Some msg_type ; _ }) ->
                 Log.(log st.logger Debug (lazy (Printf.sprintf "Ignoring DHCP %s" (Dhcp.MsgType.to_string msg_type)))) ;
                 count "bad-type"

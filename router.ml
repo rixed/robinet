@@ -550,7 +550,8 @@ type gw_trx =
  * and the NAT tables.
  * Unless [dhcp_range] is set, all local IPs (but those used by the GW itself)
  * will be distributed via DHCP. *)
-let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?dhcp_range
+let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
+            ?dhcp_range ?dhcp_mtu ?lease_time_sec
             ?(name="gw") ?notify_errs ?admin_reroute ?(parent_logger=Log.default)
             ?public_netmask ?public_gw ?port_forwards public_ip local_cidr =
     (* We want all parts inherit this logger: *)
@@ -609,15 +610,14 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver ?dhcp_range
      * leases and hostname options *)
     (* [nameserver] is the nameserver for the gateway but the nameserver for the
      * local machines is the gateway itself: *)
-    let mtu = router.ifaces.(0).eth.mtu
-    and dns = srv_ip
+    let dns = srv_ip
     and dhcp_range =
         Option.default_delayed (fun () ->
             [ Enum.get_exn local_ips, Ip.Cidr.all1s_addr local_cidr ]
         ) dhcp_range in
     let dhcp_state =
-        Dhcpd.State.make ~netmask ~broadcast ~gw:gw_ip ~mtu ~dns
-                         ~parent_logger:h.trx.logger dhcp_range in
+        Dhcpd.State.make ~netmask ~broadcast ~gw:gw_ip ?mtu:dhcp_mtu ~dns
+                         ?lease_time_sec ~parent_logger:h.trx.logger dhcp_range in
     (* TODO: register a callback when leasing/releasing that updates the dns lookup function *)
     Dhcpd.serve dhcp_state h.trx ;
     let dns_state = Named.State.make ~parent_logger:h.trx.logger (fun _ -> None) in (* Delegate everything to nameserver *)
