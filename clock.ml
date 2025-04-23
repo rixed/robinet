@@ -51,6 +51,7 @@ module rec Time : sig
     val to_ints : t -> int * int
     val compare : t -> t -> int
     val is_after : t -> t -> bool
+    val trunc : t -> Interval.t -> t
 end = struct
     (** When displaying a time, print also the corresponding date.
      * Only useful if your simulation spans several days, which is uncommon. *)
@@ -96,6 +97,9 @@ end = struct
 
     let is_after a b =
         compare a b >= 0
+
+    let trunc (t : t) (i : Interval.t) =
+        o (floor ((t :> float) /. (i :> float)) *. (i :> float))
 end
 
 (** While Interval.t represents a time interval.
