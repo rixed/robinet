@@ -607,6 +607,10 @@ module Payload = struct
     let bitlength (t : t) = bitstring_length (t :> bitstring)
     let length (t : t) = bytelength (t :> bitstring)
     let random len = o (randbs len)
+    (* Since a bitstring is a slice, if we want a hash of the content we have
+     * to extract the content first: *)
+    let hash (t : t) =
+        string_of_bitstring (t :> bitstring) |> Hashtbl.hash
 end
 
 (** A device is something to which you can send packet and register a
