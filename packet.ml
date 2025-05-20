@@ -197,7 +197,12 @@ module Pdu = struct
             let rest = names rest in
             (if rest = "" then "" else rest ^"/") ^ name_of_layer layer
 
-    (** [pack pdu] converts the layer list back to a {!Pcap.Pdu.t} *)
+    (* TODO: to_short_string, for all Pdu types, with a compact description
+     * of each layer, so we can print the packet in one line *)
+
+    (** [pack pdu] converts the layer list back to a {!Pcap.Pdu.t}.
+     * It is of course much faster to just take the Pcap.Pdu.t from the
+     * first [Pcap] layer (see [fast_pack]). *)
     let pack t =
         let new_payload bits = function
             | Raw _  -> Raw bits
@@ -229,6 +234,12 @@ module Pdu = struct
         | Pcap pcap :: rest ->
             let pld = aux None (List.rev rest) in
             { pcap with Pcap.Pdu.payload = Payload.o pld }
+        | _ ->
+            should_not_happen ()
+
+    let fast_pack = function
+        | Pcap pcap :: _ ->
+            pcap
         | _ ->
             should_not_happen ()
 
