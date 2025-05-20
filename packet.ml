@@ -172,17 +172,17 @@ module Pdu = struct
         | Icmp _ -> "Icmp"
         | Pcap _ -> "Pcap"
 
-     let payload = function
-         | Raw bits  -> bits
-         | Pcap p -> (p.Pcap.Pdu.payload :> bitstring)
-         | Eth  p -> (p.Eth.Pdu.payload :> bitstring)
-         | Sll  p -> (p.Sll.Pdu.payload :> bitstring)
-         | Vlan p -> (p.Vlan.Pdu.payload :> bitstring)
-         | Ip   p -> (p.Ip.Pdu.payload :> bitstring)
-         | Ip6  p -> (p.Ip6.Pdu.payload :> bitstring)
-         | Udp  p -> (p.Udp.Pdu.payload :> bitstring)
-         | Tcp  p -> (p.Tcp.Pdu.payload :> bitstring)
-         | _ -> invalid_arg "Packet.Pdu.payload"
+    let payload = function
+        | Raw bits  -> bits
+        | Pcap p -> (p.Pcap.Pdu.payload :> bitstring)
+        | Eth  p -> (p.Eth.Pdu.payload :> bitstring)
+        | Sll  p -> (p.Sll.Pdu.payload :> bitstring)
+        | Vlan p -> (p.Vlan.Pdu.payload :> bitstring)
+        | Ip   p -> (p.Ip.Pdu.payload :> bitstring)
+        | Ip6  p -> (p.Ip6.Pdu.payload :> bitstring)
+        | Udp  p -> (p.Udp.Pdu.payload :> bitstring)
+        | Tcp  p -> (p.Tcp.Pdu.payload :> bitstring)
+        | _ -> invalid_arg "Packet.Pdu.payload"
 
     (** A Pdu.t is a list of {!Packet.Pdu.layer}s, with the outer layer first for
      * a more natural presentation when printed. *)
