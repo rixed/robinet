@@ -238,7 +238,7 @@ module Addr = struct
        not (is_routable (of_string "fe80::1234:5678"))
      *)
 
-    let is_locale t =
+    let is_local t =
         match%bitstring (to_bitstring t) with
         | {| 127 : 8 ; _ : 24 |} -> true
         | {| 0L : 64 ; 1L : 64 |} -> false
@@ -255,7 +255,7 @@ module Addr = struct
         | {| 0l : 32 |} -> true
         | {| _ |} -> false
 
-    (* not (is_locale || is_broadcast || is_zero || is_discard(?)),
+    (* not (is_local || is_broadcast || is_zero || is_discard(?)),
      * but faster: *)
     let is_natable t =
         match%bitstring (to_bitstring t) with

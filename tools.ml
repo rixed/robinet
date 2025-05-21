@@ -611,6 +611,7 @@ module Payload = struct
      * to extract the content first: *)
     let hash (t : t) =
         string_of_bitstring (t :> bitstring) |> Hashtbl.hash
+    let is_empty (t : t) = bitstring_is_empty (t :> bitstring)
 end
 
 (** A device is something to which you can send packet and register a
