@@ -163,7 +163,8 @@ module Addr = struct
      * [string]) of a given address. *)
     let to_dotted_string (t : t) = Unix.string_of_inet_addr (t :> Unix.inet_addr)
     (*$= to_dotted_string & ~printer:identity
-      (to_dotted_string (Addr.of_string "1.2.3.4")) "1.2.3.4"
+      "1.2.3.4" (to_dotted_string (Addr.of_string "1.2.3.4"))
+      "2a05:d050:8000::" (to_dotted_string (Addr.of_string "2a05:d050:8000::"))
     *)
 
     (** Convert from dotted representation (useful to allow DNS-less hosts to 'resolve' some name) *)
@@ -344,6 +345,7 @@ module Cidr = struct
     (*$= of_string & ~printer:to_string
       (o (Addr.o32 0x01020380l, 25)) (of_string "1.2.3.128/25")
       (o (Addr.o32 0x0102038El, 25)) (of_string "1.2.3.142/25")
+      (o (Addr.of_string "2a05:d050:8000::", 40)) (of_string "2a05:d050:8000::/40")
      *)
 
     let abbrev (_t : t) =
@@ -446,8 +448,12 @@ module Cidr = struct
     (** Returns the all-ones address of a CIDR *)
     let all1s_addr (t : t) =
         let net, width = (t :> Addr.t * int) in
-        let prefix = takebits width (Addr.to_bitstring net) in
-        Addr.of_bitstring (Bitstring.concat [ prefix ; ones_bitstring (if width >= 32 then 0 else 32 - width) ])
+        let net_bs = Addr.to_bitstring net in
+        let l = bitstring_length net_bs in
+        if width >= l then net else
+        let prefix = takebits width net_bs in
+        Bitstring.concat [ prefix ; ones_bitstring (l-width) ] |>
+        Addr.of_bitstring
     (*$= all1s_addr & ~printer:identity
       "192.168.1.15"  (all1s_addr (of_string "192.168.1.0/28") |> \
                        Addr.to_dotted_string)
@@ -475,6 +481,11 @@ module Cidr = struct
                            List.of_enum)
       [ "192.168.0.2" ]   (local_addrs (of_string "192.168.0.1/30") /@ \
                            Addr.to_dotted_string |> \
+                           List.of_enum)
+      [ "2a05:d050:8000::1" ; "2a05:d050:8000::2" ] \
+                          (local_addrs (of_string "2a05:d050:8000::/40") /@ \
+                           Addr.to_dotted_string |> \
+                           Enum.take 2 |> \
                            List.of_enum)
     *)
 

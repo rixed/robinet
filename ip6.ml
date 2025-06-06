@@ -18,7 +18,8 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 (**
- * Everything related to IPv6 packets: (un)packing, addresses, transceiver...
+ * Everything related to IPv6 packets.
+ * For addresses and CIDR, see ip.ml.
  *
  * TODO: Some usual IP options should be understood.
  *)
