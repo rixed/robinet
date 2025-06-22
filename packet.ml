@@ -77,7 +77,7 @@ val s80 : Packet.Pdu.layer list BatEnum.t = <abstr>
 ]}
 
 This will return surprisingly fast, due to the lazy nature of Enum.filter.
-Note that in this exemple, for brevety, I pattern match for Tcp in 5th
+Note that in this example, for brevity, I pattern match for Tcp in 5th
 position only (since my big_file.pcap have a 802.1q tunnel between Ethernet
 and IP).
 

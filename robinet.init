@@ -4,6 +4,8 @@ let () =
   with Not_found -> ()
 ;;
 
+#use "topfind";;
+
 (*
 #require "findlib";;
 #camlp4o;;
@@ -11,9 +13,8 @@ Toploop.use_silently
 	Format.err_formatter (Filename.concat (Findlib.package_directory "batteries") "battop.ml");;
 *)
 #require "bitstring";;
-#require "bitstring.syntax";;
+(*#require "bitstring.syntax";;*)
 #require "batteries";;
-#camlp4o;;
 
 open Batteries;;
 open Bitstring;;
