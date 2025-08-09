@@ -18,3 +18,7 @@ depends: [
   "ocamlfind" {build}
   "ppx_bitstring"
 ]
+depexts: [
+  [["debian"]
+    ["libpcap-dev"]]
+]
