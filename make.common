@@ -1,9 +1,10 @@
 # vim:ft=make
-OCAMLC     = ocamlfind ocamlc -thread
-OCAMLOPT   = ocamlfind ocamlopt -thread
-OCAMLDEP   = ocamlfind ocamldep
-OCAMLDOC   = ocamlfind ocamldoc -html -colorize-code -thread -sort -stars
-OCAMLMKTOP = ocamlfind ocamlmktop -thread -g
+DUPS_IN    = $(shell ocamlfind query compiler-libs):$(shell ocamlfind query num)
+OCAMLC     = OCAMLFIND_IGNORE_DUPS_IN="$(DUPS_IN)" ocamlfind ocamlc -thread
+OCAMLOPT   = OCAMLFIND_IGNORE_DUPS_IN="$(DUPS_IN)" ocamlfind ocamlopt -thread
+OCAMLDEP   = OCAMLFIND_IGNORE_DUPS_IN="$(DUPS_IN)" ocamlfind ocamldep
+OCAMLDOC   = OCAMLFIND_IGNORE_DUPS_IN="$(DUPS_IN)" ocamlfind ocamldoc -html -colorize-code -thread -sort -stars
+OCAMLMKTOP = OCAMLFIND_IGNORE_DUPS_IN="$(DUPS_IN)" ocamlfind ocamlmktop -thread -g
 QTEST      = qtest
 DOCDIR    ?= doc/
 WARNS      = -w -40-31+27
