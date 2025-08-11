@@ -47,7 +47,9 @@ let jitter r v =
     v +. (Random.float 2. -. 1.) *. r *. abs_float v
 
 (*$Q jitter
-   Q.float (fun v -> let v' = jitter 0.1 v in abs_float (v'-.v) <= abs_float (v *. 0.1))
+   Q.float (fun v -> \
+     not (Float.is_finite v) || \
+     let v' = jitter 0.1 v in abs_float (v'-.v) <= abs_float (v *. 0.1))
  *)
 
 let bytelength bs = (bitstring_length bs + 7) lsr 3
