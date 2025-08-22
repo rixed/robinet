@@ -131,10 +131,30 @@ let bitstring_add i b =
     (bitstring_of_string "\042" |> bitstring_add 42) (bitstring_of_string "\084")
  *)
 
-let hexstring s =
-    (* FIXME: make use of hexdump_bitstring *)
-    let hexify c = Printf.sprintf "%02x" (Char.code c) in
-    String.enum s /@ hexify |> List.of_enum |> String.join " "
+(* [sep] is the digit separator *)
+let hexstring ?(sep=" ") s =
+    let sep_len = String.length sep in
+    let in_len = String.length s in
+    if in_len = 0 then "" else
+    let out_len = (in_len - 1) * (2 + sep_len) + 2 in
+    let out = Bytes.create out_len in
+    let hex_char n =
+        if n < 10 then Char.chr (Char.code '0' + n)
+                  else Char.chr (Char.code 'A' + (n - 10)) in
+    let hexify c o =
+        let c = Char.code c in
+        let hi = c lsr 4 and lo = c land 0xf in
+        Bytes.set out o (hex_char hi) ;
+        Bytes.set out (o + 1) (hex_char lo) in
+    let rec loop i o =
+        hexify s.[i] o ;
+        if i = in_len - 1 then
+            Bytes.to_string out
+        else (
+            Bytes.blit_string sep 0 out (o + 2) sep_len ;
+            loop (i + 1) (o + 2 + sep_len)
+        ) in
+    loop 0 0
 
 let hexstring_of_bitstring =
     hexstring % string_of_bitstring
@@ -147,6 +167,18 @@ let hexstring_of_bitstring_abbrev ?(bits=64) bs =
      (hexstring_of_bitstring_abbrev (bitstring_of_string "abcdefgh"))  "61 62 63 64 65 66 67 68"
      (hexstring_of_bitstring_abbrev (bitstring_of_string "abcdefghi")) "61 62 63 64 65 66 67..."
  *)
+
+(* Hexadecimal string suitable for instance to write some ports in libpcap
+ * filters. *)
+let hexstring_of_u16 t =
+    Printf.sprintf "%04X" (t land 0xffff)
+
+(*$= hexstring_of_u16 & ~printer:identity
+    "AB54" (hexstring_of_u16 0xab54)
+*)
+
+let hexstring_of_u32 t =
+    Printf.sprintf "0x%08X" (t land 0xffffffff)
 
 let substring_of_bitstring bs ofs len =
     let s = string_of_bitstring bs in

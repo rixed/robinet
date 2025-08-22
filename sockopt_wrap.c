@@ -25,6 +25,7 @@
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netdb.h>  // for NI_MAXHOST
+#include <arpa/inet.h>
 #include <caml/alloc.h>
 #include <caml/mlvalues.h>
 #include <caml/fail.h>
@@ -215,4 +216,22 @@ CAMLprim value wrap_get_last_icmp_err(value fd_)
     }
 
     caml_raise_not_found();
+}
+
+/*
+ * Cram an FFI call to htons here:
+ */
+
+CAMLprim value wrap_htons(value v_)
+{
+    CAMLparam1(v_);
+    int v = Int_val(v_);
+    CAMLreturn(Val_int(htons(v)));
+}
+
+CAMLprim value wrap_ntohs(value v_)
+{
+    CAMLparam1(v_);
+    int v = Int_val(v_);
+    CAMLreturn(Val_int(ntohs(v)));
 }

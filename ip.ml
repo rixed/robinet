@@ -214,6 +214,11 @@ module Addr = struct
         | [] -> invalid_arg str
         | fst::_ -> fst
 
+    (* Output a hexstring suitable for a pcap filter for instance: *)
+    let to_hexstring (t : t) =
+        let str : string = Obj.magic t in
+        Tools.hexstring ~sep:"" str
+
     (** Returns a random {!Ip.Addr.t} (apart from broadcast and zero). *)
     let rec random ?(v4=true) () =
         let str = randstr (if v4 then 4 else 16) in
@@ -266,6 +271,9 @@ module Addr = struct
         | {| 0L : 64 ; 1L : 64 |} -> false (* localhost *)
         | {| 100L : 64 ; _ : 64 |} -> false (* discard *)
         | {| _ |} -> true
+
+    let is_v6 (t : t) =
+        Unix.is_inet6_addr (t :> Unix.inet_addr)
 
     (** This printer can be composed with others (for instance to print a list of ips.
      FIXME: always use batteries IO to print instead of Format printer? *)

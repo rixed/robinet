@@ -41,3 +41,10 @@ external get_last_icmp_err_ :
 (* Raises Not_found if no error has been received *)
 let get_last_icmp_err fd =
   get_last_icmp_err_ (int_of_fd fd)
+
+external htons : int -> int = "wrap_htons"
+external ntohs : int -> int = "wrap_ntohs"
+
+(*$= htons & ~printer:string_of_int
+  0x3412 (ntohs 0x1234)
+*)
