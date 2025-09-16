@@ -45,6 +45,6 @@ let get_last_icmp_err fd =
 external htons : int -> int = "wrap_htons"
 external ntohs : int -> int = "wrap_ntohs"
 
-(*$= htons & ~printer:string_of_int
+(*$= ntohs & ~printer:string_of_int
   0x3412 (ntohs 0x1234)
 *)
