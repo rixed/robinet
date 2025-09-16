@@ -512,6 +512,20 @@ module Cidr = struct
     let random_addrs t n =
         enum t |> Random.multi_choice n
 
+    (* Much faster than building the enum if we need just one: *)
+    let random_addr (t : t) =
+        let net, width = (t :> Addr.t * int) in
+        let tot_width = Addr.to_bitstring net |> bitstring_length in
+        Bitstring.(concat [ takebits width (Addr.to_bitstring net) ;
+                            randbits (tot_width - width) ]) |>
+        Addr.of_bitstring
+    (*$Q random_addr
+       Q.unit (fun () -> \
+        let cidr = random () in \
+        let ip = random_addr cidr in \
+        mem cidr ip)
+    *)
+
     let to_netmask (t : t) =
         let net, width = (t :> Addr.t * int) in
         let tot_width = Addr.to_bitstring net |> bitstring_length in

@@ -608,8 +608,16 @@ let randstr ?charset len =
     and sc s _s = s.[Random.int (String.length s)] in
     String.init len (match charset with None -> rc | Some s -> sc s)
 
-let randbs len (* in bytes! *)=
+let randbs len (* in bytes! *) =
     randstr len |> bitstring_of_string
+
+let randbits len (* in bits *) =
+    let len' = (len + 7) / 8 in
+    randbs len' |> Bitstring.takebits len
+
+(*$Q randbits
+  Q.small_int (fun n -> bitstring_length (randbits n) = n)
+*)
 
 let rand_hostname () =
     let num_parts = 1 + randi 3 in
