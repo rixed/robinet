@@ -413,8 +413,13 @@ module Cidr = struct
         width
 
     (* Number of IPs in that range *)
-    let count t =
-        1 lsl (width t)
+    let count (t : t) =
+        let net, width = (t :> Addr.t * int) in
+        let tot_width = Addr.length net in
+        1 lsl (tot_width - width)
+    (*$= count & ~printer:string_of_int
+      256 (count (of_string "192.168.1.0/24"))
+    *)
 
     let enlarge (t : t) n =
         let net, width = (t :> Addr.t * int) in
@@ -515,8 +520,9 @@ module Cidr = struct
     (* Much faster than building the enum if we need just one: *)
     let random_addr (t : t) =
         let net, width = (t :> Addr.t * int) in
-        let tot_width = Addr.to_bitstring net |> bitstring_length in
-        Bitstring.(concat [ takebits width (Addr.to_bitstring net) ;
+        let net = Addr.to_bitstring net in
+        let tot_width = net |> bitstring_length in
+        Bitstring.(concat [ takebits width net ;
                             randbits (tot_width - width) ]) |>
         Addr.of_bitstring
     (*$Q random_addr
@@ -528,7 +534,7 @@ module Cidr = struct
 
     let to_netmask (t : t) =
         let net, width = (t :> Addr.t * int) in
-        let tot_width = Addr.to_bitstring net |> bitstring_length in
+        let tot_width = Addr.length net in
         Bitstring.concat [ ones_bitstring width ;
                            zeroes_bitstring (tot_width - width) ] |>
         Addr.of_bitstring
