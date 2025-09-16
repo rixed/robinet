@@ -308,12 +308,11 @@ module Addr = struct
        (o32 0x01020305l) (higher_bits (o32 0x01020305l) 33)
      *)
 
-    (* FIXME: duplicate with match_mask? *)
     let in_mask ip ip_mask mask =
-        let ip = to_int32 ip
-        and ip_mask = to_int32 ip_mask
-        and mask = to_int32 mask in
-        Int32.logand ip mask = Int32.logand ip_mask mask
+        let ip = to_bitstring ip
+        and ip_mask = to_bitstring ip_mask
+        and mask = to_bitstring mask in
+        match_mask mask ip ip_mask
 
     (*$T in_mask
        in_mask (of_string "192.168.1.42") (of_string "192.168.0.0") (of_string "255.255.0.0")
@@ -412,6 +411,10 @@ module Cidr = struct
     let width (t : t) =
         let _, width = (t :> Addr.t * int) in
         width
+
+    (* Number of IPs in that range *)
+    let count t =
+        1 lsl (width t)
 
     let enlarge (t : t) n =
         let net, width = (t :> Addr.t * int) in
