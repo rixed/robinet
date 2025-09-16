@@ -309,13 +309,26 @@ let all_bits n =
                 Some bs
             ) in
         aux (n-1) in
-    let bs = ref (Some (create_bitstring n)) in
-    Enum.from (fun () ->
-        match !bs with
-        | Some v ->
-            bs := succ v ;
-            v
-        | None -> raise Enum.No_more_elements)
+    let rec of_state st =
+        let next () =
+            match !st with
+            | Some (v, n) ->
+                st := Option.bind (succ v) (fun v -> Some (v, n - 1)) ;
+                v
+            | None ->
+                raise Enum.No_more_elements
+        and count () =
+            match !st with
+            | Some (_, n) -> n
+            | None -> 0
+        and clone () =
+            let st = ref (Option.map (fun (v, n) -> bitstring_copy v, n) !st) in
+            of_state st
+        in
+        Enum.make ~next ~count ~clone
+    in
+    let st = ref (Some (create_bitstring n, 1 lsl n)) in
+    of_state st
 (*$= all_bits & ~printer:(IO.to_string (List.print Int.print))
   [ 0 ; 1 ; 2 ; 3 ] (all_bits 2 /@ int_of_bitstring |> List.of_enum)
   [ 2 ; 2 ; 2 ; 2 ] (all_bits 2 /@ bitstring_length |> List.of_enum)
