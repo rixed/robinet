@@ -165,8 +165,7 @@ type param_filter =
 
 let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyAdmin: metric: vars = %a\n" Opache.print_vars vars ;
     page_head_open resp ;
-    let chartjs_url = "http://happyleptic.org:8080/chart.js" in (* cached locally *)
-    (* let chartjs_url = "https://cdn.jsdelivr.net/npm/chart.js" in *)
+    let chartjs_url = "https://cdn.jsdelivr.net/npm/chart.js" in
     String.print resp ("<script src=\""^ chartjs_url ^"\"></script>\n") ;
     Printf.fprintf resp {|
         <style type="text/css">
@@ -341,6 +340,11 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
         | Error str ->
             Printf.fprintf resp "<p class=\"error\">%s</p>" str
         | _ -> ())
+    ) else (
+        Printf.fprintf resp "\
+            <div class=\"filter\">\n\
+            <input type=\"submit\" name=\"select\"/>\n\
+            </div>\n"
     ) ;
     Printf.fprintf resp {|
     </form>
