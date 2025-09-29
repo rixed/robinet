@@ -35,13 +35,15 @@ struct
      * will be set to 0 by {!Udp.Pdu.pack}, and filled in by {!Ip.Pdu.pack},
      * since it's computed over some IP fields. *)
     type t = {
-        src_port : Port.t ; dst_port : Port.t ; length : int ;
+        src_port : Port.t ; dst_port : Port.t ; length : int ; checksum : int ;
         payload  : Payload.t }
 
-    let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80) ?length bits =
+    let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80) ?length ?checksum bits =
         let payload = Payload.o bits in
         let length = length |? Payload.length payload + 8 in
-        { src_port ; dst_port ; length ; payload }
+        (* Will be overwritten by Ip.pack_header for outgoing packets, anyway *)
+        let checksum = checksum |? 0 in
+        { src_port ; dst_port ; length ; checksum ; payload }
 
     let random () =
         make ~src_port:(Port.o (randi 16)) ~dst_port:(Port.o (randi 16))
@@ -50,15 +52,15 @@ struct
     let pack t =
         let%bitstring hdr = {|
             (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
-            t.length : 16 ; 0 : 16 |} in
+            t.length : 16 ; t.checksum : 16 |} in
         concat [ hdr ; (t.payload :> bitstring) ]
 
     let unpack bits = match%bitstring bits with
         | {| src_port : 16 ; dst_port : 16 ;
-             length   : 16 ; _checksum : 16 ;
+             length   : 16 ; checksum : 16 ;
              payload  : (length-8) * 8 : bitstring |} when length >= 8 ->
             Ok { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
-                 length ; payload  = Payload.o payload }
+                 length ; checksum ; payload  = Payload.o payload }
         | {| _ |} -> Error (lazy "Not UDP")
 
     (*$Q pack
