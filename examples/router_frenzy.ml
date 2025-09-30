@@ -333,11 +333,9 @@ let main =
         "-err-loss", Arg.String add_err_loss,
                      "Set loss for ICMP errors echoed by this router" ;
         "-lb-random", Arg.String (add_lb Router.Random),
-                      "Configure load balancer for this router \
-                       (random port method)" ;
-        "-lb-prefix", Arg.String (add_lb Router.PrefixHash),
-                      "Configure load balancer for this router \
-                       (hash of prefix method)" ;
+                      "Configure load balancer for this router (random based)" ;
+        "-lb-flow", Arg.String (add_lb Router.Flow),
+                      "Configure load balancer for this router (flow based)" ;
         "-target", Arg.String add_target,
                    "Attach this target to the last router \
                     (random single target by default)" ]

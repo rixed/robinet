@@ -146,7 +146,10 @@ struct
          * they would have to share that storage area of course. *)
             mutable admin_host : Host.t option }
 
-    type load_balancing = First | Random | PrefixHash
+    type load_balancing =
+        | First (* Forward a packet to its first matching route *)
+        | Flow (* Forward a packet to one matching route based on the socket pair *)
+        | Random (* Pick a matching route at random *)
 
     (* Probability to send ICMP expiry messages after TTL expiration, and after
      * which delay (TODO: should also depend on how busy the router is): *)
@@ -282,14 +285,12 @@ struct
             else match t.load_balancing with
                 | First ->
                     forward targets.(0)
+                | Flow ->
+                    let h = Hashtbl.hash (src_opt, dst_opt, proto_opt,
+                                          src_port_opt, dst_port_opt) in
+                    forward targets.(h mod rs_len)
                 | Random ->
-                    let n = Random.bits () mod rs_len in
-                    forward targets.(n)
-                | PrefixHash ->
-                    let bits =
-                        try takebytes !lb_prefix_length bits
-                        with Invalid_argument _ -> bits in
-                    let n = do_sum bits mod rs_len in
+                    let n = Random.int rs_len in
                     forward targets.(n)
 
     (** Change the emitter of iface N. *)
