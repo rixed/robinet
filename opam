@@ -8,7 +8,9 @@ bug-reports: "https://github.com/rixed/robinet/issues"
 dev-repo: "git+https://github.com/rixed/robinet.git"
 synopsis: "Poor man's network simulator"
 build: [
-  [make "NDEBUG=1"]
+  [make ".depend"]
+  [make "-j6" "NDEBUG=1"]
+  [make "check"] {with-test}
 ]
 install: [make "install"]
 remove: [make "uninstall"]
