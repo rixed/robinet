@@ -227,10 +227,9 @@ struct
             Int32.of_int wire_len : 32 : littleendian |} in
         concat [ pkt_hdr ; (t.payload :> bitstring) ]
 
-    (** [write out] returns a function that will write passed pdus into [out].
-     * @param caplen can be used to cap saved packet to a given number of bytes
-     * @param dlt can be used to change the file's DLT (you probably do not want to do that) *)
-    let write ?(caplen=65535) ?(dlt=Dlt.en10mb) out_chan =
+    (** [output out] returns a function that will call [out] with the file header
+     * and then the binary encoding of all passed pdus. *)
+    let output ?(caplen=65535) ?(dlt=Dlt.en10mb) out =
         let%bitstring file_hdr = {|
             0xa1b2c3d4l : 32 : littleendian ;
             2 (* version major *) : 16 : littleendian ;
@@ -239,12 +238,17 @@ struct
             0l : 32 : littleendian ;
             Int32.of_int caplen : 32 : littleendian ;
             (dlt :> int32) : 32 : littleendian |} in
-        String.print out_chan (string_of_bitstring file_hdr) ;
-        let f pdu =
+        out (string_of_bitstring file_hdr) ;
+        fun pdu ->
             pack pdu |>
             string_of_bitstring |>
-            String.print out_chan in
-        f
+            out
+
+    (** [write out] returns a function that will write passed pdus into [out].
+     * @param caplen can be used to cap saved packet to a given number of bytes
+     * @param dlt can be used to change the file's DLT (you probably do not want to do that) *)
+    let write ?caplen ?dlt out_chan =
+        output ?caplen ?dlt (String.print out_chan)
 
     (** [save "file.pcap"] returns a function that will save passed pdus in ["file.pcap"]
      * and another one that will close this file.
