@@ -40,6 +40,7 @@ module QType = struct
             | 12 -> "PTR"
             | 13 -> "HINFO"
             | 15 -> "MX"
+            | 28 -> "AAAA"
             |  x -> string_of_int x
         let is_valid t = t < 0x10000
         let repl_tag = "code"
@@ -50,6 +51,7 @@ module QType = struct
     let ptr   = o 12
     let hinfo = o 13
     let mx    = o 15
+    let aaaa  = o 28
 
     let random () = randi 16
 end

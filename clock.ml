@@ -296,7 +296,9 @@ let with_trapped signals f =
     let prev_sigs =
         List.map (fun s ->
             let open Sys in
-            signal s (Signal_handle (fun _n -> continue := false))
+            signal s (Signal_handle (fun _n ->
+                Printf.printf "Quitting...\n%!" ;
+                continue := false))
         ) signals in
     let res = f () in
     List.iter2 Sys.set_signal signals prev_sigs ;

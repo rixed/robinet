@@ -139,7 +139,7 @@ module Addr = struct
     include Private.Make (struct
         type t = Unix.inet_addr
 
-        (** Converts an address to it's string representation. *)
+        (** Converts an address to its string representation. *)
         let to_string t =
             if !print_as_names then
                 try (Unix.gethostbyaddr t).Unix.h_name
@@ -192,6 +192,11 @@ module Addr = struct
 
     let to_bytes (t : t) : bytes =
         Obj.magic t
+
+    let of_bytes bytes : t =
+        let len = Bytes.length bytes in
+        if len = 4 || len = 16 then Obj.magic bytes
+        else invalid_arg "Ip.Addr.of_bytes"
 
     let compare t1 t2 =
         Bytes.compare (to_bytes t1) (to_bytes t2)
@@ -274,6 +279,8 @@ module Addr = struct
 
     let is_v6 (t : t) =
         Unix.is_inet6_addr (t :> Unix.inet_addr)
+
+    let is_v4 = not % is_v6
 
     (** This printer can be composed with others (for instance to print a list of ips.
      FIXME: always use batteries IO to print instead of Format printer? *)

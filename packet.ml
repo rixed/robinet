@@ -295,6 +295,70 @@ module Pdu = struct
         Pcap pcap :: ((if pcap.Pcap.Pdu.dlt = Pcap.Dlt.linux_cooked then unpack_sll
                       else unpack_eth) (pcap.Pcap.Pdu.payload :> bitstring))
 
+    let fold_ips t f u =
+        List.fold_left (fun u -> function
+            | Raw _ | Eth _ | Udp _ | Tcp _ | Sll _ | Vlan _ | Pcap _ ->
+                u
+            | Dhcp (pdu : Dhcp.Pdu.t) ->
+                f pdu.ciaddr u |>
+                f pdu.yiaddr |>
+                f pdu.siaddr |>
+                f pdu.giaddr
+            | Arp (pdu : Arp.Pdu.t) ->
+                if pdu.proto_type = Arp.HwProto.ip4 ||
+                   pdu.proto_type = Arp.HwProto.ip6
+                then
+                    let try_bitstring bs u =
+                        try f (Ip.Addr.of_bitstring bs) u
+                        with _ -> u in
+                    try_bitstring pdu.sender_proto u |>
+                    try_bitstring pdu.target_proto
+                else
+                    u
+            | Ip (pdu : Ip.Pdu.t) ->
+                f pdu.src u |>
+                f pdu.dst
+            | Ip6 (pdu : Ip6.Pdu.t) ->
+                f pdu.src u |>
+                f pdu.dst
+            | Dns (pdu : Dns.Pdu.t) ->
+                let open Dns.QType in
+                let fold_rrs lst u =
+                    List.fold_left (fun u (_, typ, _, _, bytes) ->
+                        if typ = a || typ = aaaa then
+                            match Ip.Addr.of_bytes bytes with
+                            | exception _ -> u
+                            | ip -> f ip u
+                        else u
+                    ) u lst in
+                (* Collect IPs from PTR questions: *)
+                List.fold_left (fun u (s, typ, _) ->
+                    if typ = ptr then
+                        match Ip.Addr.of_string s with
+                        | exception _ -> u
+                        | ip -> f ip u
+                    else u
+                ) u pdu.questions |>
+                (* Then collect IPs from answers: *)
+                fold_rrs pdu.answer_rrs |>
+                fold_rrs pdu.authority_rrs |>
+                fold_rrs pdu.additional_rrs
+            | Icmp (pdu : Icmp.Pdu.t) ->
+                (match pdu with
+                | { payload = Header { pld ; _ } ; _ } ->
+                    (match Ip.Pdu.unpack (pld :> bitstring) with
+                    | Ok (ip : Ip.Pdu.t) ->
+                        f ip.src u |> f ip.dst
+                    | _ ->
+                        (match Ip6.Pdu.unpack (pld :> bitstring) with
+                        | Ok (ip : Ip6.Pdu.t) ->
+                            f ip.src u |> f ip.dst
+                        | _ ->
+                            u))
+                | _ ->
+                    u)
+
+        ) u t
 end
 
 (** {2 Shorthands} *)
