@@ -237,6 +237,7 @@ module Addr = struct
         | {| (10 | 127) : 8 ; _ : 24 |} -> false
         | {| 0xAC1 : 12 ; _ : 20 |} -> false
         | {| 0xC0A8 : 16 ; _ : 16 |} -> false
+        | {| 0b1111 : 4 ; _ : 28 |} -> false (* class E, reserved *)
         | {| 0b1111111010 : 10 ; 0L : 54 ; _ : 64 |} -> false
         | {| _ |} -> true
 
@@ -246,6 +247,7 @@ module Addr = struct
        not (is_routable (of_string "192.168.10.1"))
        not (is_routable (of_string "10.20.30.40"))
        not (is_routable (of_string "172.18.3.4"))
+       not (is_routable (of_string "240.0.92.35"))
        not (is_routable (of_string "fe80::1234:5678"))
      *)
 
