@@ -234,11 +234,39 @@ module Addr = struct
 
     let is_routable t =
         match%bitstring (to_bitstring t) with
-        | {| (10 | 127) : 8 ; _ : 24 |} -> false
+        (* Private as per RFC 1918: *)
+        | {| 10 : 8 ; _ : 24 |} -> false
         | {| 0xAC1 : 12 ; _ : 20 |} -> false
         | {| 0xC0A8 : 16 ; _ : 16 |} -> false
-        | {| 0b1111 : 4 ; _ : 28 |} -> false (* class E, reserved *)
-        | {| 0b1111111010 : 10 ; 0L : 54 ; _ : 64 |} -> false
+        (* Loopback (127.0.0.0/8) *)
+        | {| 127 : 8 ; _ : 24 |} -> false
+        (* Link-Local / APIPA (169.254.0.0/16) *)
+        | {| 0xA9Fe : 16 ; _ : 16 |} -> false
+        (* CG-NAT (100.64.0.0/10) *)
+        | {| 0b1100100101 : 10 ; _ : 22 |} -> false
+        (* Examples (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24) *)
+        | {| 0xC00002 : 24 ; _ : 8 |} -> false
+        | {| 0xC63364 : 24 ; _ : 8 |} -> false
+        | {| 0xCB0071 : 24 ; _ : 8 |} -> false
+        (* Multicast (224.0.0.0/4) *)
+        | {| 0x1110 : 4 ; _ : 28 |} -> false
+        (* Class E, reserved *)
+        | {| 0b1111 : 4 ; _ : 28 |} -> false
+        (* IPv6 link-local (fe80::/10) *)
+        | {| 0b1111111010 : 10 ; _ : 54 ; _ : 64 |} -> false
+        (* IPv6 unique Local (fc00::/7) *)
+        | {| 0b1111110 : 7 ; _ : 57 ; _ : 64 |} -> false
+        (* IPv6 loopback (::1/128) *)
+        | {| 0L : 64 ; 1L : 64 |} -> false
+        (* IPv6 unspecified (::/128) *)
+        | {| 0L : 64 ; 0L : 64 |} -> false
+        (* Examples (2001:db8::/32) *)
+        | {| 0x2001_0DB8l : 32 ; _ : 32 ; 0L : 64 |} -> false
+        (* Discard prefix (100::/64) *)
+        | {| 0x0100_0000_0000_0000L : 64 ; _ : 64 |} -> false
+        (* IPv4 Mapped (::ffff:0:0/96) *)
+        | {| 0L : 64 ; 0x0000_FFFFl : 32 ; _ : 32 |} -> false
+        (* Everything else should be routable *)
         | {| _ |} -> true
 
     (*$T is_routable
