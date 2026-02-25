@@ -289,6 +289,7 @@ module Pdu = struct
                       else unpack_raw) (eth.Eth.Pdu.payload :> bitstring))) in
         let unpack_sll = try_unpack Sll.Pdu.unpack (fun sll -> Sll sll ::
                     ((if sll.Sll.Pdu.proto = Arp.HwProto.ip4 then unpack_ip
+                      else if sll.Sll.Pdu.proto = Arp.HwProto.ip6 then unpack_ip6
                       else if sll.Sll.Pdu.proto = Arp.HwProto.arp then unpack_arp
                       else unpack_raw) (sll.Sll.Pdu.payload :> bitstring)))
         in

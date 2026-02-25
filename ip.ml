@@ -219,7 +219,9 @@ module Addr = struct
         | [] -> invalid_arg str
         | fst::_ -> fst
 
-    (* Output a hexstring suitable for a pcap filter for instance: *)
+    (* Output a hexstring suitable for a pcap filter for instance (but
+     * remember that a pcap filter can match at 1, 2 or 4 bytes only,
+     * so split it if it's an IPv6!): *)
     let to_hexstring (t : t) =
         let str : string = Obj.magic t in
         Tools.hexstring ~sep:"" str
