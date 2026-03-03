@@ -19,6 +19,8 @@
 #include <pthread.h>
 #include <errno.h>
 #include <stdio.h>
+#include <sys/types.h>
+#include <sys/time.h>
 
 #include "caml/alloc.h"
 #include "caml/fail.h"
