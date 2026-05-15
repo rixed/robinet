@@ -616,7 +616,7 @@ let randbits len (* in bits *) =
     randbs len' |> Bitstring.takebits len
 
 (*$Q randbits
-  Q.small_int (fun n -> bitstring_length (randbits n) = n)
+  Q.nat_small (fun n -> bitstring_length (randbits n) = n)
 *)
 
 let rand_hostname () =

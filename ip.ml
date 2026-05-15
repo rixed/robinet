@@ -274,6 +274,7 @@ module Addr = struct
     (*$T is_routable
        is_routable (of_string "135.12.0.42")
        is_routable (of_string "5402:7f8:5b:66b0::2")
+       is_routable (of_string "2a01:4f8:1c1e:808e::1")
        not (is_routable (of_string "192.168.10.1"))
        not (is_routable (of_string "10.20.30.40"))
        not (is_routable (of_string "172.18.3.4"))
