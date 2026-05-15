@@ -197,8 +197,9 @@ module Pdu = struct
             let rest = names rest in
             (if rest = "" then "" else rest ^"/") ^ name_of_layer layer
 
-    (* TODO: to_short_string, for all Pdu types, with a compact description
-     * of each layer, so we can print the packet in one line *)
+    (* TODO: Add a compact description of each layer *)
+    let to_short_string t =
+        names t
 
     (** [pack pdu] converts the layer list back to a {!Pcap.Pdu.t}.
      * It is of course much faster to just take the Pcap.Pdu.t from the
