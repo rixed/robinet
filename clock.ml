@@ -116,6 +116,7 @@ and Interval : sig
     val add : t -> t -> t
     val sub : t -> t -> t
     val mul : t -> float -> t
+    val abs  : t -> t
 end = struct
     include Private.Make (struct
         type t = float
@@ -155,6 +156,8 @@ end = struct
 
     (** Multiply the duration by a scalar. *)
     let mul (t : t) s = o ((t :> float) *. s)
+
+    let abs (t : t) = o (Float.abs (t :> float))
 end
 
 (** {2 Current running time} *)
