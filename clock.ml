@@ -114,6 +114,7 @@ and Interval : sig
     val sec  : float -> t
     val min  : float -> t
     val hour : float -> t
+    val day : float -> t
     val zero : t
     val compare : t -> t -> int
     val add : t -> t -> t
@@ -123,10 +124,47 @@ and Interval : sig
     val abs  : t -> t
     val to_secs : t -> float
 end = struct
+    (*$< Interval *)
     include Private.Make (struct
         type t = float
-        let to_string t =
-            Printf.sprintf "+%fs" t
+
+        let rec to_string t =
+            if t < 0. then "-"^ to_string (~-. t) else
+            let epsilon = 1e-9 in
+            let finished t = abs_float t <= epsilon in
+            let to_str = Printf.sprintf "%g" in
+            let aux s t k u =
+                if t >= k then
+                    let x = Float.floor (epsilon +. t /. k) in
+                    s ^ to_str x ^ u, t -. x *. k
+                else
+                    s, t in
+            let s, t = aux "" t 86400. "d" in
+            if finished t && s <> "" then s else
+            let s, t = aux s t 3600. "h" in
+            if finished t && s <> "" then s else
+            let s, t = aux s t 60. "m" in
+            if finished t && s <> "" then s else
+            let s, t = aux s t 1. "s" in
+            if finished t then
+                if s <> "" then s else "0s"
+            else
+            let s, t = aux s t 1e-3 "ms" in
+            if finished t && s <> "" then s else
+            s ^ to_str (1e6 *. t) ^ "µs"
+        (*$= to_string & ~printer:identity
+          "1d10m" (to_string (sec 87000.))
+          "10s" (to_string (sec 10.))
+          "0s" (to_string zero)
+          "1d42ms" (to_string (add (day 1.) (msec 42.)))
+          "3s42ms" (to_string (o 3.042))
+          "-3s42ms" (to_string (o (-3.042)))
+          "3s42µs" (to_string (o 3.000_042))
+          "-3s42µs" (to_string (o (-3.000_042)))
+          "-10ms390µs" (to_string (o (-0.010_390)))
+          "10ms390µs" (to_string (o 0.010_390))
+        *)
+
         let is_valid v = v = v
         let repl_tag = "time"
     end)
@@ -145,6 +183,9 @@ end = struct
 
     (** hours to {Interval.t}. *)
     let hour i = o (i *. 3600.)
+
+    (** days to {Interval.t} *)
+    let day d = hour (24. *. d)
 
     (** Empty interval *)
     let zero = o 0.
@@ -167,6 +208,8 @@ end = struct
     let abs (t : t) = o (Float.abs (t :> float))
 
     let to_secs (t : t) = (t :> float)
+
+    (*$>*)
 end
 
 (** {2 Current running time} *)
