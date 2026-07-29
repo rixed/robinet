@@ -52,6 +52,7 @@ module rec Time : sig
     val compare : t -> t -> int
     val is_after : t -> t -> bool
     val trunc : t -> Interval.t -> t
+    val to_timestamp : t -> float
 end = struct
     (** When displaying a time, print also the corresponding date.
      * Only useful if your simulation spans several days, which is uncommon. *)
@@ -100,6 +101,8 @@ end = struct
 
     let trunc (t : t) (i : Interval.t) =
         o (floor ((t :> float) /. (i :> float)) *. (i :> float))
+
+    let to_timestamp (t : t) = (t :> float)
 end
 
 (** While Interval.t represents a time interval.
@@ -116,7 +119,9 @@ and Interval : sig
     val add : t -> t -> t
     val sub : t -> t -> t
     val mul : t -> float -> t
+    val div : t -> float -> t
     val abs  : t -> t
+    val to_secs : t -> float
 end = struct
     include Private.Make (struct
         type t = float
@@ -154,10 +159,14 @@ end = struct
     (** Subtract two intervals. *)
     let sub (a : t) (b : t) = o ((a :> float) -. (b :> float))
 
-    (** Multiply the duration by a scalar. *)
+    (** Multiply/divide the duration by a scalar. *)
     let mul (t : t) s = o ((t :> float) *. s)
 
+    let div (t : t) s = o ((t :> float) /. s)
+
     let abs (t : t) = o (Float.abs (t :> float))
+
+    let to_secs (t : t) = (t :> float)
 end
 
 (** {2 Current running time} *)

@@ -64,7 +64,7 @@ module Pdu =
 struct
     (*$< Pdu *)
     type question = string * QType.t * int
-    type rr = string * QType.t * int * int32 (* TTL *) * bytes
+    type rr = string * QType.t * int (* qclass *) * int32 (* TTL *) * bytes
     type t = { id : int ; is_query : bool ; opcode : int ;
                is_auth : bool ; truncated : bool ;
                rec_desired : bool ; rec_avlb : bool ;
