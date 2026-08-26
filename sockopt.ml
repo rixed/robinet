@@ -18,6 +18,9 @@ external set_tcp_syn_count : Unix.file_descr -> int -> unit =
 external set_recv_errs : Unix.file_descr -> bool -> unit =
   "wrap_set_recv_errs"
 
+external wait_error_on_socket : Unix.file_descr -> float -> unit =
+  "wrap_wait_error_on_socket"
+
 (* Raises Not_found if no error has been received *)
 external get_last_icmp_err :
   Unix.file_descr ->

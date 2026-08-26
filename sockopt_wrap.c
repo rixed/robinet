@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <string.h>
+#include <poll.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -130,9 +131,10 @@ static bool icmp_has_ip_header(int type)
     }
 }
 
-/* Returns the last received ICMP error code for an unreachable destination,
- * and the inet_addr of the router emitting the error (optional), or raise
- * Not_found: */
+/* Returns the next unread received ICMP error code for an unreachable
+ * destination, and the inet_addr of the router emitting the error (optional),
+ * or raise Not_found. Should be called over and over until Not_found to drain
+ * the error queue. */
 CAMLprim value wrap_get_last_icmp_err(value fd_)
 {
     CAMLparam1(fd_);
@@ -150,6 +152,7 @@ CAMLprim value wrap_get_last_icmp_err(value fd_)
         .msg_controllen = sizeof buffer,
         .msg_flags = 0
     };
+    // Note: MSG_ERRQUEUE never blocks.
     if (0 > recvmsg(fd, &msg, /*MSG_DONTWAIT |*/ MSG_ERRQUEUE)) {
         if (EAGAIN == errno || EWOULDBLOCK == errno) {
 #           ifdef DEBUG
@@ -216,6 +219,17 @@ CAMLprim value wrap_get_last_icmp_err(value fd_)
     }
 
     caml_raise_not_found();
+}
+
+// Returns as soon as an error was received, or until timeout
+CAMLprim value wrap_wait_error_on_socket(value fd_, value to_ms_)
+{
+    CAMLparam2(fd_, to_ms_);
+    int fd = Int_val(fd_);
+    int to_ms = Int_val(to_ms_);
+    struct pollfd pfd = { .fd = fd, .events = 0 };   // POLLERR comes anyway
+    if (poll(&pfd, 1, to_ms) < 0) fail("poll");
+    CAMLreturn(Val_unit);
 }
 
 /*
