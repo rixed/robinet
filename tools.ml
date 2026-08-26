@@ -630,15 +630,13 @@ let (<-->) dev1 dev2 =
  *        TRX_1                TRX_2
  *    < ins | out >   ==>  < ins | out >
  *)
-(* TODO: Ideally TRX should have their oewn logger, accessible here, so that
+(* TODO: Ideally TRX should have their own logger, accessible here, so that
  * owners could reparent their logger: *)
 type trx = { ins : dev ; out : dev }
 
 let tx trx = trx.ins.write
 
 let rx trx = trx.out.write
-
-let inverse_trx trx = { ins = trx.out ; out = trx.ins }
 
 let null_trx ~logger = { ins = null_dev ~logger ; out = null_dev ~logger }
 

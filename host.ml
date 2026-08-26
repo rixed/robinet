@@ -130,7 +130,7 @@ let tcp_sock_rx t socks bits =
                                             raise No_socket
                                         ) in
                             let tcp = Tcp.TRX.make tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port t.trx.logger in
-                            tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx =-> socks.ip_4_tcp.ins.write ;
+                            tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx =-> tx socks.ip_4_tcp ;
                             server tcp.Tcp.TRX.tcp_trx ; (* supposed to set the recver of this tcp trx *)
                             tcp.Tcp.TRX.tcp_trx
                         ) else (
@@ -154,7 +154,7 @@ let udp_sock_rx t socks icmp_trx bits =
                         let server = try Hashtbl.find t.udp_servers udp.Udp.Pdu.dst_port
                                      with Not_found -> raise No_socket in
                         let trx = Udp.TRX.make udp.Udp.Pdu.dst_port udp.Udp.Pdu.src_port t.trx.logger in
-                        trx.Udp.TRX.trx =-> socks.ip_4_udp.ins.write ;
+                        trx.Udp.TRX.trx =-> tx socks.ip_4_udp ;
                         server trx ; (* supposed to set the recver of this udp trx *)
                         trx) in
                 rx trx.Udp.TRX.trx bits
@@ -325,7 +325,7 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
         let socks = hash_find_or_insert t.tcp_socks dst_ip (fun () ->
             let trx = Ip.TRX.make my_ip dst_ip Ip.Proto.tcp t.trx.logger in
             let socks = make_tcp_socks trx in
-            (tcp_sock_rx t socks) <-= trx =-> t.eth_trx.ins.write ;
+            (tcp_sock_rx t socks) <-= trx =-> tx t.eth_trx ;
             socks) in
         (* Try to find a unused port if none was given, or ensure the given one is free *)
         let src_port = match src_port with
@@ -389,10 +389,10 @@ and udp_connect t dst ?src_port dst_port client_f cont =
     let connect dst_ip =
         let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
             let icmp_trx = Ip.TRX.make my_ip dst_ip Ip.Proto.icmp t.trx.logger in
-            icmp_trx =-> (tx t.eth_trx) ;
+            icmp_trx =-> tx t.eth_trx ;
             let ip_trx = Ip.TRX.make my_ip dst_ip Ip.Proto.udp t.trx.logger in
             let socks = make_udp_socks ip_trx in
-            (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> (tx t.eth_trx) ;
+            (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> tx t.eth_trx ;
             socks) in
         let src_port = may_default src_port (fun () -> Udp.Port.o (Random.int 0x10000)) in
         let key = src_port, dst_port in
@@ -403,7 +403,7 @@ and udp_connect t dst ?src_port dst_port client_f cont =
         ) else (
             let trx = Udp.TRX.make src_port dst_port t.trx.logger in
             (* connect this udp to the underlaying ip *)
-            (client_f trx) <-= trx.Udp.TRX.trx =-> socks.ip_4_udp.ins.write ;
+            (client_f trx) <-= trx.Udp.TRX.trx =-> tx socks.ip_4_udp ;
             Hashtbl.add socks.udps key trx ;
             Metric.Atomic.fire udp_cnxs_ok ;
             cont (Some trx)
@@ -478,22 +478,22 @@ let ip_recv t bits =
                 let sock = hash_find_or_insert t.tcp_socks ip.Ip.Pdu.src (fun () ->
                     let ip_trx = Ip.TRX.make my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.logger in
                     let socks = make_tcp_socks ip_trx in
-                    (tcp_sock_rx t socks) <-= ip_trx =-> (tx t.eth_trx) ;
+                    (tcp_sock_rx t socks) <-= ip_trx =-> tx t.eth_trx ;
                     socks) in
                 rx sock.ip_4_tcp bits (* will handle fragmentation then pass payload to its emit function *)
             ) else if ip.Ip.Pdu.proto = Ip.Proto.udp then (
                 let sock = hash_find_or_insert t.udp_socks ip.Ip.Pdu.src (fun () ->
                     let icmp_trx = Ip.TRX.make my_ip ip.Ip.Pdu.src Ip.Proto.icmp t.trx.logger in
-                    icmp_trx =-> (tx t.eth_trx) ;
+                    icmp_trx =-> tx t.eth_trx ;
                     let ip_trx = Ip.TRX.make my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.logger in
                     let socks = make_udp_socks ip_trx in
-                    (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> (tx t.eth_trx) ;
+                    (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> tx t.eth_trx ;
                     socks) in
                 rx sock.ip_4_udp bits
             ) else if ip.Ip.Pdu.proto = Ip.Proto.icmp then (
                 let ip_trx = hash_find_or_insert t.icmp_socks ip.Ip.Pdu.src (fun () ->
                     let ip_trx = Ip.TRX.make my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.logger in
-                    (icmp_rx t ip_trx) <-= ip_trx =-> (tx t.eth_trx) ;
+                    (icmp_rx t ip_trx) <-= ip_trx =-> tx t.eth_trx ;
                     ip_trx) in
                 rx ip_trx bits
             ))

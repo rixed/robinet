@@ -33,7 +33,7 @@ let tunnel ifname tun_ip netmask mac gw search_sfx nameserver dst dst_port src_p
     host.trx.dev.set_read (Pcap.inject iface) ;
     let connect_tunnel tcp =
         Printf.printf "Tunnel: We are now connected!\n%!" ;
-        http =-> (tx tcp.Tcp.TRX.trx) ;
+        http =-> tx tcp.Tcp.TRX.trx ;
         tcp.Tcp.TRX.trx.ins.set_read (fun bits ->
             if bitstring_is_empty bits then (
                 (* close the socket *)
