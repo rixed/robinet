@@ -8,6 +8,8 @@ SOURCES  = \
 	clock.ml \
 	log.ml \
 	tools.ml \
+	ordArray.ml \
+	payload.ml \
 	persist.ml \
 	peg.ml \
 	metric.ml \
