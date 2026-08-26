@@ -27,37 +27,37 @@ module Repeater =
 struct
     type t = { ifaces : (bitstring -> unit) array ;
          is_connected : bool array ;
-                 name : string ;
-               logger : Log.logger ;
+               widget : Widget.t ;
               ingress : Metric.Counter.t ;
                egress : Metric.Counter.t }
 
     let print oc t =
-        Printf.fprintf oc "repeater %s with %d ifaces" t.name (Array.length t.ifaces)
+        Printf.fprintf oc "repeater %s with %d ifaces" t.widget.name (Array.length t.ifaces)
 
-    let make ?(parent_logger=Log.default) n name =
-        let logger = Log.sub parent_logger name in
-        { ifaces = Array.make n (ignore_bits ~logger) ;
+    let make ?parent n name =
+        let widget = Widget.make ?parent name in
+        let full_name = Widget.full_name widget in
+        { ifaces = Array.make n (ignore_bits ~logger:widget.logger) ;
           is_connected = Array.make n false ;
-          name ; logger ;
-          ingress = Metric.Counter.make (logger.full_name ^"/ingress") "bytes" ;
-          egress = Metric.Counter.make (logger.full_name ^"/egress") "bytes" }
+          widget ;
+          ingress = Metric.Counter.make (full_name ^"/ingress") "bytes" ;
+          egress = Metric.Counter.make (full_name ^"/egress") "bytes" }
 
     let forward_from (t : t) n pld =
         Array.iteri (fun i emit ->
             if i <> n then (
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Forward to iface %d/%d" i (Array.length t.ifaces)))) ;
+                Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to iface %d/%d" i (Array.length t.ifaces)))) ;
                 Metric.(Counter.add t.egress ~params:(Params.singleton "port" (Param.Int i)) (bytelength pld)) ;
                 Clock.asap emit pld
             )) t.ifaces
 
     let write (t : t) n pld =
-        Log.(log t.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.ifaces)))) ;
+        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.ifaces)))) ;
         Metric.(Counter.add t.ingress ~params:(Params.singleton "port" (Param.Int n)) (bytelength pld)) ;
         forward_from t n pld
 
     let set_read (t : t) n f =
-        Log.(log t.logger Debug (lazy (Printf.sprintf "Setting reader for iface %d" n))) ;
+        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting reader for iface %d" n))) ;
         t.is_connected.(n) <- true ;
         t.ifaces.(n) <- f
 
@@ -88,30 +88,30 @@ struct
           macs : mac_entry OrdArray.t ;
           (* Mapping from mac to position in the OrdArray [macs] *)
           macs_h : int BitHash.t ;
-          name : string ;
-          logger : Log.logger ;
+          widget : Widget.t ;
           mac_size : Metric.Gauge.t ;
           mac_hits : Metric.Atomic.t ;
           mac_misses : Metric.Atomic.t }
 
     let print oc t =
-        Printf.fprintf oc "switch %s with %d ifaces" t.name (Array.length t.hub.ifaces)
+        Printf.fprintf oc "switch %s with %d ifaces" t.widget.name (Array.length t.hub.ifaces)
 
     (* [num_macs] is the maximum number of remembered MACs. *)
-    let make ?(parent_logger=Log.default) num_ifaces num_macs name =
-        let logger = Log.sub parent_logger name in
-        { hub = R.make ~parent_logger:logger num_ifaces "hub" ;
+    let make ?parent num_ifaces num_macs name =
+        let widget = Widget.make ?parent name in
+        let full_name = Widget.full_name widget in
+        { hub = R.make ~parent:widget num_ifaces "hub" ;
           macs = OrdArray.init num_macs (fun _ -> { addr = None ; iface = 0 }) ;
           macs_h = BitHash.create (num_macs/10) ;
-          name ; logger ;
-          mac_size = Metric.Gauge.make (logger.full_name ^"/macs") ;
-          mac_hits = Metric.Atomic.make (logger.full_name ^"/hits") ;
-          mac_misses = Metric.Atomic.make (logger.full_name ^"/misses") }
+          widget ;
+          mac_size = Metric.Gauge.make (full_name ^"/macs") ;
+          mac_hits = Metric.Atomic.make (full_name ^"/hits") ;
+          mac_misses = Metric.Atomic.make (full_name ^"/misses") }
 
     let update_macs t src ins =
         match BitHash.find_option t.macs_h src with
         | None ->
-            Log.(log t.logger Debug (lazy (Printf.sprintf "New mac %s" (Eth.Addr.to_string (Eth.Addr.o src))))) ;
+            Log.(log t.widget.logger Debug (lazy (Printf.sprintf "New mac %s" (Eth.Addr.to_string (Eth.Addr.o src))))) ;
             let last_idx = OrdArray.last t.macs in
             let last = OrdArray.get t.macs last_idx in
             (match last.addr with
@@ -128,7 +128,7 @@ struct
         | Some n ->
             let mac = OrdArray.get t.macs n in
             if mac.iface <> ins then (
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Host %s changed from iface %d to %d" (Eth.Addr.to_string (Eth.Addr.o src)) mac.iface ins))) ;
+                Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Host %s changed from iface %d to %d" (Eth.Addr.to_string (Eth.Addr.o src)) mac.iface ins))) ;
                 mac.iface <- ins
             ) ;
             OrdArray.promote t.macs n
@@ -141,35 +141,35 @@ struct
             (* TODO: addresses reserved by 802.1d should not be forwarded. *)
             (* now forward *)
             let do_broadcast () =
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Forwarding to all ifaces (but %d)" ins))) ;
+                Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forwarding to all ifaces (but %d)" ins))) ;
                 R.forward_from t.hub ins bits in
             if Eth.Addr.is_broadcast (Eth.Addr.o dst) then
                 do_broadcast ()
             else (
                 match BitHash.find_option t.macs_h dst with
                 | None ->
-                    Log.(log t.logger Debug (lazy (Printf.sprintf "Unknown dest %s, broadcasting" (Eth.Addr.to_string (Eth.Addr.o dst))))) ;
+                    Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Unknown dest %s, broadcasting" (Eth.Addr.to_string (Eth.Addr.o dst))))) ;
                     Metric.Atomic.fire t.mac_misses ;
                     do_broadcast ()
                 | Some n ->
                     Metric.Atomic.fire t.mac_hits ;
                     let mac = OrdArray.get t.macs n in
                     if mac.iface <> ins then (
-                        Log.(log t.logger Debug (lazy (Printf.sprintf "Known dest %s, will forward to iface %d" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.iface))) ;
+                        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Known dest %s, will forward to iface %d" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.iface))) ;
                         Clock.asap t.hub.Repeater.ifaces.(mac.iface) bits ;
                         OrdArray.promote t.macs n
                     ) else
-                        Log.(log t.logger Debug (lazy (Printf.sprintf "Known dest %s is located on iface %d, dropping" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.iface)))
+                        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Known dest %s is located on iface %d, dropping" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.iface)))
             )
         | {| _ |} ->
-            Log.(log t.logger Debug (lazy (Printf.sprintf "Drop incoming frame without destination")))
+            Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Drop incoming frame without destination")))
 
     let write (t : t) n pld =
-        Log.(log t.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.hub.ifaces)))) ;
+        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.hub.ifaces)))) ;
         forward_from t n pld
 
     let set_read (t : t) n f =
-        Log.(log t.logger Debug (lazy (Printf.sprintf "Setting emitter for iface %d/%d" n (Array.length t.hub.ifaces)))) ;
+        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting emitter for iface %d/%d" n (Array.length t.hub.ifaces)))) ;
         Repeater.set_read t.hub n f
 
     (** Turns a iface into a device *)
@@ -185,16 +185,16 @@ end
 module Tap =
 struct
     type t = { trx : trx ;
-            logger : Log.logger }
+            widget : Widget.t }
 
-    let make ?(parent_logger=Log.default) mirror =
-        let logger = Log.sub parent_logger "tap" in
-        let emit_ins = ref (ignore_bits ~logger)
-        and emit_out = ref (ignore_bits ~logger) in
+    let make ?parent mirror =
+        let widget = Widget.make ?parent "tap" in
+        let emit_ins = ref (ignore_bits ~logger:widget.logger)
+        and emit_out = ref (ignore_bits ~logger:widget.logger) in
         let trx =
             { ins = { write = (fun bits -> mirror bits ; !emit_out bits) ;
                       set_read = fun f -> emit_ins := f } ;
               out = { write = (fun bits -> mirror bits ; !emit_ins bits) ;
                       set_read = fun f -> emit_out := f } } in
-        { trx ; logger }
+        { trx ; widget }
 end

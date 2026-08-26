@@ -788,7 +788,7 @@ end
 module TRX = struct
 
     type t = {
-        logger : Log.logger ;
+        logger : Log.t ;
         src : Addr.t ; dst : Addr.t ;
         proto : Proto.t ; mtu : int ;
         mutable emit : bitstring -> unit ;

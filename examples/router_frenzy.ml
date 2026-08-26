@@ -27,9 +27,9 @@ open Router
 
 let debug = true
 
-let forward_traffic logger ifname input_dev =
+let forward_traffic (widget : Widget.t) ifname input_dev =
     let log_paquet what to_string f b =
-        Log.(log logger Debug (lazy (Printf.sprintf "%s: %s" what (to_string b)))) ;
+        Log.(log widget.logger Debug (lazy (Printf.sprintf "%s: %s" what (to_string b)))) ;
         f b in
     let iface = Pcap.openif ifname in
     let pcap_to_string b =
@@ -39,7 +39,7 @@ let forward_traffic logger ifname input_dev =
         (log_paquet "spitting" pcap_to_string (fun b -> Pcap.inject iface b)) ;
     Pcap.sniffer iface
         (log_paquet "swallowing" pcap_to_string input_dev.write) |> ignore ;
-    Log.(log logger Info (lazy (Printf.sprintf "You can send traffic to %s now" ifname))) ;
+    Log.(log widget.logger Info (lazy (Printf.sprintf "You can send traffic to %s now" ifname))) ;
     Clock.run true
 
 (* The router IP is given by the subnet CIDR IP (not masked). Targets will be
@@ -151,16 +151,16 @@ let make_router name logger interfaces router_specs delays err_delays losses err
 
 (* Build the network described in the [routers] hash and returns the device
  * representing the entry point of the network: *)
-let build_network logger router_specs fst_router_name delays err_delays losses err_losses lb_configs =
+let build_network (widget : Widget.t) router_specs fst_router_name delays err_delays losses err_losses lb_configs =
     ensure (Hashtbl.length router_specs > 0) "Invalid router specifications" ;
     let connections = Hashtbl.create 40 in
     let devices = Hashtbl.create 40 in
     (* Build all routers *)
     let routers =
         Hashtbl.map (fun name ifaces ->
-            let logger = Log.make name in
+            let widget = Widget.make name in
             if debug then Printf.printf "Build router %s\n%!" name ;
-            make_router name logger ifaces router_specs delays err_delays losses err_losses lb_configs
+            make_router name widget ifaces router_specs delays err_delays losses err_losses lb_configs
         ) router_specs in
     (* Connect all routers together. *)
     Hashtbl.iter (fun name ifaces ->
@@ -220,10 +220,10 @@ let build_network logger router_specs fst_router_name delays err_delays losses e
     Enum.uniq |> (* Filter out duplicate names *)
     Enum.iter (fun src_name ->
         let dests = Hashtbl.find_all connections src_name in
-        Log.(log logger Info (lazy (Printf.sprintf2 "%s --> %a" src_name (List.print String.print) dests))) ;
+        Log.(log widget.logger Info (lazy (Printf.sprintf2 "%s --> %a" src_name (List.print String.print) dests))) ;
         let emit bits =
             List.iter (fun dst_name ->
-                Log.(log logger Info (lazy (Printf.sprintf "Writing packet to %s" dst_name))) ;
+                Log.(log widget.logger Info (lazy (Printf.sprintf "Writing packet to %s" dst_name))) ;
                 let dst_dev = Hashtbl.find devices dst_name in
                 dst_dev.write bits
             ) dests in
@@ -405,14 +405,14 @@ let main =
             target
     ) targets ;
     (* Start the simulation *)
-    let logger = Log.make ~size:1000 "routerz" in
+    let widget = Widget.make ~size:1000 "routerz" in
     Log.console_lvl := Log.Debug ;
-    Log.(log logger Info (lazy
+    Log.(log widget.logger Info (lazy
         (Printf.sprintf2 "Building network with:\n%a\n\
                           Try to hit targets:\n%a\n"
             (Hashtbl.print String.print (List.print print_port)) routers
             (List.print String.print) targets))) ;
     let input_dev =
-        build_network logger routers !fst_router_name !delays !err_delays !losses !err_losses !lb_configs in
+        build_network widget routers !fst_router_name !delays !err_delays !losses !err_losses !lb_configs in
     Printf.printf "Forwarding traffic...\n" ;
-    forward_traffic logger !ifname input_dev
+    forward_traffic widget !ifname input_dev

@@ -91,7 +91,7 @@ class host h = object (self)
                     tcp_trx.Tcp.TRX.close () ; k ()) ;
                 tcp_write_continuously ~throughput tcp_trx
             | None ->
-                Log.(log h.Host.logger Error (lazy "Cannot traffic"))
+                Log.(log h.Host.widget.logger Error (lazy "Cannot traffic"))
         in
         if num_connections > 1 then
             let throughput = throughput /. (float_of_int num_connections) in
@@ -109,7 +109,7 @@ class host h = object (self)
          * where access require a dispatch but allows for customization from
          * child classes, which users might find useful. *)
         ignore (read_time ()) ; (* TODO *)
-        Log.(log h.Host.logger Info (lazy "Starting a web browser")) ;
+        Log.(log h.Host.widget.logger Info (lazy "Starting a web browser")) ;
         let browser = Browser.make h in
         h.Host.add_killer (Browser.kill browser) ;
         Browser.user browser ~pause:5. 1000 from
@@ -138,7 +138,7 @@ class pinger h = object
 
     method powered_on =
         let dst = Host.IPv4 (Ip.Addr.of_string "8.8.8.8") in
-        Log.(log h.Host.logger Debug (lazy "Pinging!")) ;
+        Log.(log h.Host.widget.logger Debug (lazy "Pinging!")) ;
         h.Host.ping dst
 end
 

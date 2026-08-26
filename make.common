@@ -57,13 +57,13 @@ endif
 %.opt: $(XARCHIVE) %.cmx
 	$(OCAMLOPT) -o $@ -I . -linkpkg -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $^
 
-%.cmo %.annot: %.ml
+%.cmo %.annot &: %.ml
 	$(OCAMLC) -package "$(REQUIRES)" $(OCAMLFLAGS) -c $<
 
 %.cmi: %.mli
 	$(OCAMLC) -package "$(REQUIRES)" $(OCAMLFLAGS) -c $<
 
-%.cmx: %.ml
+%.cmx %.annot &: %.ml
 	$(OCAMLOPT) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) -c $<
 
 # Tests with qtest

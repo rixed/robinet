@@ -35,35 +35,10 @@ type queue  =
     { mutable oldest : int ; (* points to the next to be overwritten *)
       msgs : msg array }
 
-type logger =
+type t =
     { name : string ;
-      full_name : string ;
       use_wall_clock : bool ;
-      queues : queue array ;
-      (* We want to be able to navigate the logs/stats/characteristics of
-       * every simulated things.
-       * Things are connected with TRX in various ways, sometime "vertically",
-       * as a stack of layers to assemble composed objects (ex: a service with
-       * a host with an HTTP layer with a TCP layer with an IP layer with an
-       * ETH layer), and sometimes "horizontally" as connections between various
-       * objects, mostly via cables.
-       * From the point of view of the simulator, all these are just trxs
-       * connected together.
-       * That's only when the loggers are constructed that those relationships
-       * are indicated.
-       *
-       * TODO: logger is becoming a base "connected thing" object. Make it so?
-       * Not the same things as a trx though, as trxs are linear.
-       *
-       * Parent / children: loggers form a hierarchy. The full_name of a logger
-       * indicate that hierarchy. *)
-      parent : logger option ;
-      mutable children : logger list ;
-      (* Siblings: When loggers are connected "horizontally" to others.
-       * Loggers names are then unrelated. *)
-      mutable peers : peer list }
-
-and peer = { logger : logger ; via : logger option }
+      queues : queue array }
 
 (* log level <-> queue index *)
 
@@ -189,64 +164,31 @@ let queue_enum q =
 
 (* log *)
 
-let log logger level lstr =
+let log t level lstr =
     let lvl = int_of_level level in
     let now =
-        if logger.use_wall_clock then
+        if t.use_wall_clock then
             Clock.Time.wall_clock ()
         else
             Clock.now () in
     let msg = now, lstr in
-    enqueue logger.queues.(lvl) msg ;
-    if lvl <= int_of_level !console_lvl then console_log logger.full_name msg ;
+    enqueue t.queues.(lvl) msg ;
+    if lvl <= int_of_level !console_lvl then console_log t.name msg ;
     assert (level <> Fatal)
 
-let log_exceptions logger ?(level=Warning) what f x =
+let log_exceptions t ?(level=Warning) what f x =
     try
         f x
     with e ->
-        log logger level (lazy (
+        log t level (lazy (
             Printf.sprintf "Ignoring exception %s while performing %s"
                 (Printexc.to_string e)
                 what))
 
-(* creation *)
-
-(* All existing loggers are known so we can display them in the GUI.
- * Indexed by a list of names, from indexed logger to ancestor: *)
-let loggers = Hashtbl.create 131
-
-let make ?parent ?(use_wall_clock=false) ?(size=50) name =
-    let full_name =
-        let rec loop full_name = function
-            | None -> full_name
-            | Some p ->
-                let full_name = "/"^ p.name ^ full_name in
-                loop full_name p.parent in
-        loop ("/"^ name) parent in
-    let logger = {
-        name ;
-        full_name ;
-        use_wall_clock ;
-        queues = Array.init num_levels (fun _ -> make_queue size) ;
-        parent ;
-        children = [] ;
-        peers = [] } in
-    Option.may (fun p -> p.children <- logger :: p.children) parent ;
-    Hashtbl.add loggers full_name logger ;
-    logger
-
-let sub logger ?size name =
-    let size = size |? Array.length logger.queues.(0).msgs in
-    make ~parent:logger ~use_wall_clock:logger.use_wall_clock ~size name
-
-let make_peers ?via l1 l2 =
-    l1.peers <- { logger = l2 ; via } :: l1.peers ;
-    l2.peers <- { logger = l1 ; via } :: l2.peers ;
-    Option.may (fun via ->
-        via.peers <- { logger = l1 ; via = None } ::
-                     { logger = l2 ; via = None } :: via.peers
-    ) via
+let make ?(use_wall_clock=false) ?(size=50) name =
+    { name ;
+      use_wall_clock ;
+      queues = Array.init num_levels (fun _ -> make_queue size) }
 
 (* The logger that will adopt any others: *)
 

@@ -40,7 +40,7 @@ end
 module State =
 struct
     type t =
-        { logger : Log.logger ; (* Should be: logger.state *)
+        { widget : Widget.t ;
           authoritative : bool ;
           lease_time_sec : int ;
           netmask : Ip.Addr.t option ;
@@ -60,8 +60,8 @@ struct
           host_parameters : (int * bitstring) list }
 
     let make ?(authoritative=true) ?(lease_time_sec=3600) ?netmask ?broadcast
-             ?gw ?mtu ?dns ?ntp ?(parent_logger=Log.default) ip_range =
-        let logger = Log.sub parent_logger "dhcpd" in
+             ?gw ?mtu ?dns ?ntp ?parent ip_range =
+        let widget = Widget.make ?parent "dhcpd" in
         let mandatory_parameters =
             [ Dhcp.Option.lease_time, bitstring_of_int32 lease_time_sec ] in
         let host_parameters =
@@ -81,7 +81,7 @@ struct
         let offers = Hashtbl.create 8 in
         let leases = BitHash.create 8 in
         let used_ips = Ip.Set.empty in
-        { logger ; authoritative ; lease_time_sec ;
+        { widget ; authoritative ; lease_time_sec ;
           netmask ; broadcast ; gw ; mtu ; dns ; ntp ;
           ip_range ; offers ; leases ; used_ips ;
           mandatory_parameters ; host_parameters }
@@ -114,23 +114,23 @@ end
 (** [serve host ips] listen on host DHCP port and allocate the
  * given ips to any requester. *)
 let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
-    let counter = Metric.Atomic.make ("hosts/"^ host.Host.name ^"/dhcpd/queries") in
+    let counter = Metric.Atomic.make ("hosts/"^ host.Host.widget.name ^"/dhcpd/queries") in
     let count cmd =
         let params = Metric.(Params.make Param.[ "cmd", String cmd ]) in
         Metric.Atomic.fire ~params counter in
     (* Offered IPs (and options), indexed by client-ids: *)
-    Log.(log st.logger Debug (lazy "Listening for requests...")) ;
+    Log.(log st.widget.logger Debug (lazy "Listening for requests...")) ;
     host.Host.udp_server port (fun udp ->
         udp.Udp.TRX.trx.ins.set_read (fun bits ->
-            Log.(log st.logger Debug (lazy "Received an UDP packet...")) ;
+            Log.(log st.widget.logger Debug (lazy "Received an UDP packet...")) ;
             let src_port, dst_port = udp.Udp.TRX.get_ports () in
             match Pdu.unpack bits with
             | Error s ->
-                Log.(log st.logger Debug (lazy ("Not DHCP: "^ Lazy.force s)))
+                Log.(log st.widget.logger Debug (lazy ("Not DHCP: "^ Lazy.force s)))
             | Ok (Pdu.{ op = BootRequest ; htype ; hlen = 6 ; chaddr ; client_id ; _ } as dhcp)
               when dhcp.Pdu.htype = Arp.HwType.eth &&
                    dhcp.Pdu.msg_type = Some MsgType.discover ->
-                Log.(log st.logger Debug (lazy (Printf.sprintf "Received a DHCP Discover from %s" (hexstring_of_bitstring chaddr)))) ;
+                Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Received a DHCP Discover from %s" (hexstring_of_bitstring chaddr)))) ;
                 count "discover" ;
                 (match State.get_free_ip st with
                 | Some offered_ip ->
@@ -143,17 +143,17 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                     Hashtbl.replace st.offers offer_key offered_ip ;
                     (* Send the offer *)
                     let options = State.get_options st dhcp.request_list in
-                    Log.(log st.logger Debug (lazy (Printf.sprintf "Offering IP %s to %s" (Ip.Addr.to_string offered_ip) (hexstring_of_bitstring chaddr)))) ;
+                    Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Offering IP %s to %s" (Ip.Addr.to_string offered_ip) (hexstring_of_bitstring chaddr)))) ;
                     Pdu.make_offer ~chaddr ~xid:dhcp.Pdu.xid ~options ?client_id offered_ip |>
                     Pdu.pack |>
                     (* We can't use 'udp.tx offer' since we have to force both IP and Eth dest addr *)
                     host.Host.udp_send (Host.IPv4 offered_ip) ~src_port dst_port
                 | None ->
-                    Log.(log st.logger Debug (lazy "No more unused IP, cannot make offer")))
+                    Log.(log st.widget.logger Debug (lazy "No more unused IP, cannot make offer")))
             | Ok (Pdu.{ op = BootRequest ; htype ; hlen = 6 ; chaddr ; xid ; client_id ; requested_ip = Some requested_ip ; _ } as dhcp)
               when dhcp.Pdu.htype = Arp.HwType.eth &&
                    dhcp.Pdu.msg_type = Some MsgType.request ->
-                Log.(log st.logger Debug (lazy (Printf.sprintf "Received a DHCP Request from %s" (hexstring_of_bitstring chaddr)))) ;
+                Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Received a DHCP Request from %s" (hexstring_of_bitstring chaddr)))) ;
                 (* Look for previous offers *)
                 let offer_key = Dhcp.Option.default_client_id ~htype chaddr
                 and now = now () in
@@ -171,7 +171,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                     (* TODO: clean [leases] from time to time! *)
                     (* TODO: mask that previous leased IP as free, if any: *)
                     BitHash.replace st.leases chaddr (Lease.make ~until offered_ip) ;
-                    Log.(log st.logger Debug (lazy "ACKing it")) ;
+                    Log.(log st.widget.logger Debug (lazy "ACKing it")) ;
                     count "ack" ;
                     let options = State.get_options st dhcp.request_list in
                     Pdu.make_ack ~chaddr ~xid ?client_id ~options offered_ip |>
@@ -179,7 +179,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                     host.Host.udp_send (Host.IPv4 offered_ip) ~src_port dst_port
                 | _ ->
                     if st.authoritative then (
-                        Log.(log st.logger Warning (lazy (Printf.sprintf "I never offered anything to %s (or I forgot about it). Denying since I'm in charge here." (Eth.Addr.to_string (Eth.Addr.o dhcp.Pdu.chaddr))))) ;
+                        Log.(log st.widget.logger Warning (lazy (Printf.sprintf "I never offered anything to %s (or I forgot about it). Denying since I'm in charge here." (Eth.Addr.to_string (Eth.Addr.o dhcp.Pdu.chaddr))))) ;
                         count "nack" ;
                         Pdu.make_nak ~chaddr ~xid ?client_id ~message:"go away" () |>
                         Pdu.pack |>
@@ -187,16 +187,16 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                         (* We could answer to the emitter with `udp.trx.ins.write`
                          * but it's likely a broadcast anyway. *)
                     ) else (
-                        Log.(log st.logger Warning (lazy (Printf.sprintf "I never offered anything to %s (or I forgot about it). Leaving it to another dhcp server." (Eth.Addr.to_string (Eth.Addr.o dhcp.Pdu.chaddr))))) ;
+                        Log.(log st.widget.logger Warning (lazy (Printf.sprintf "I never offered anything to %s (or I forgot about it). Leaving it to another dhcp server." (Eth.Addr.to_string (Eth.Addr.o dhcp.Pdu.chaddr))))) ;
                         count "no-authority"
                     ))
             (* TODO: handle release & decline *)
             (* TODO: handle intermediary renewal (Requests or preallocated IPs) *)
             | Ok (Pdu.{ msg_type = Some msg_type ; _ }) ->
-                Log.(log st.logger Debug (lazy (Printf.sprintf "Ignoring DHCP %s" (Dhcp.MsgType.to_string msg_type)))) ;
+                Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Ignoring DHCP %s" (Dhcp.MsgType.to_string msg_type)))) ;
                 count "bad-type"
             | _ ->
-                Log.(log st.logger Debug (lazy "Ignoring DHCP message")) ;
+                Log.(log st.widget.logger Debug (lazy "Ignoring DHCP message")) ;
                 count "err"))
 
 (*$R serve

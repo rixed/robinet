@@ -168,7 +168,7 @@ struct
         close : unit -> unit ; (* close the trx *)
         is_closed : unit -> bool }
     type t = {
-        logger : Log.logger ;
+        logger : Log.t ;
         mutable tcp_trx : tcp_trx ;
         mutable src : Port.t ;
         mutable dst : Port.t ;

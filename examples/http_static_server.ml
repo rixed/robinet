@@ -23,11 +23,10 @@
 open Batteries
 
 let run port root =
-    let host = Localhost.make () in
     (* Start server *)
     let resources =
         [ Str.regexp "/\\(.*\\)$", Opache.static_file_server root ] in
-    Opache.serve host ~port:(Tcp.Port.o port) (Opache.multiplexer resources) ;
+    Opache.serve Localhost.host ~port:(Tcp.Port.o port) (Opache.multiplexer resources) ;
     (* Run everything *)
     Clock.run true
 

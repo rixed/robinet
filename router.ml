@@ -138,7 +138,7 @@ struct
 
     type iface = { mutable trx : trx ; (** Can come handy to splice another trx there. *)
                            eth : Eth.State.t ;
-                        logger : Log.logger ;
+                        widget : Widget.t ;
         (** Any traffic arriving in this interface and directed to Admin is
          * forwarded to this host. There is one per interface so they have
          * totally independent IP stacks. If all the admin_hosts of a router
@@ -163,14 +163,14 @@ struct
                (** Answers from admin should go through routing, as opposed
                 * to return via the same interface: *)
                admin_reroute : bool ;
-                      logger : Log.logger ;
+                      widget : Widget.t ;
               load_balancing : load_balancing ;
                      ingress : Metric.Counter.t ;
                       egress : Metric.Counter.t }
 
     (* Add a route (the added route becomes top priority *)
     let add_route (t : t) r =
-        Log.(log t.logger Debug (lazy (Printf.sprintf2 "Adding route: %a" Route.print r))) ;
+        Log.(log t.widget.logger Debug (lazy (Printf.sprintf2 "Adding route: %a" Route.print r))) ;
         t.routes <- r :: t.routes
 
     (** How many bytes to consider when hashing the packet prefix for load-balancing *)
@@ -178,7 +178,7 @@ struct
 
     let target_routes ?in_iface ?src_ip ?dst_ip ?proto ?src_port ?dst_port t =
         List.filter_map (fun r ->
-            if Route.test r t.logger in_iface src_ip dst_ip proto
+            if Route.test r t.widget.logger in_iface src_ip dst_ip proto
                           src_port dst_port then
                 Some r.target
             else
@@ -189,7 +189,7 @@ struct
     let rec maybe_send_icmp t n ip icmp_maker =
         match Eth.State.find_ip4 t.ifaces.(n).eth with
         | exception Not_found ->
-            Log.(log t.logger Debug (lazy "Cannot send an ICMP error: I have no IP!"))
+            Log.(log t.widget.logger Debug (lazy "Cannot send an ICMP error: I have no IP!"))
         | my_ip ->
             if Random.float 1. < t.notify_errs.probability then
                 let delay = jitter 0.1 t.notify_errs.delay in
@@ -203,7 +203,7 @@ struct
      * The integer [in_iface_opt] is the input interface number, unless
      * it's coming from the admin. *)
     and route in_iface_opt t bits =
-        Log.(log t.logger Debug (lazy (match in_iface_opt with
+        Log.(log t.widget.logger Debug (lazy (match in_iface_opt with
             | Some n -> Printf.sprintf "rx from iface %d" n
             | None -> "generated traffic"))) ;
         Option.may (fun in_iface ->
@@ -225,18 +225,18 @@ struct
         | [] ->
             (match in_iface_opt, ip_opt with
             | None, _ ->
-                Log.(log t.logger Warning (lazy "Cannot route my own packet"))
+                Log.(log t.widget.logger Warning (lazy "Cannot route my own packet"))
             | _, None ->
-                Log.(log t.logger Debug (lazy "Dropping non-routable non IP packet"))
+                Log.(log t.widget.logger Debug (lazy "Dropping non-routable non IP packet"))
             | Some n, Some ip ->
-                Log.(log t.logger Debug (lazy "No route match that packet")) ;
+                Log.(log t.widget.logger Debug (lazy "No route match that packet")) ;
                 maybe_send_icmp t n ip Icmp.Pdu.make_host_unreachable)
         | targets ->
             (* Forward the packet to that target: *)
             let forward = function
                 | Route.Forward { out_iface ; via } ->
                     let do_forward bits =
-                        Log.(log t.logger Debug (lazy (Printf.sprintf "Forwarding packet to iface %d" out_iface))) ;
+                        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forwarding packet to iface %d" out_iface))) ;
                         Metric.(Counter.add t.egress ~params:(Params.singleton "port" (Param.Int out_iface)) (bytelength bits)) ;
                         let iface = t.ifaces.(out_iface) in
                         (* So we want to set the gateway for this packet but cannot
@@ -244,12 +244,12 @@ struct
                          * might be hidden in the TRX (NAT...) *)
                         iface.eth.via <- via ;
                         tx iface.trx bits ;
-                        Log.(log t.logger Debug (lazy "Done")) in
+                        Log.(log t.widget.logger Debug (lazy "Done")) in
                     (match in_iface_opt, ttl_opt with
                     | None, _ ->
                         do_forward bits
                     | Some n, Some (0 | 1) ->
-                        Log.(log t.logger Debug (lazy (Printf.sprintf "Expiring packet from %d" n))) ;
+                        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Expiring packet from %d" n))) ;
                         let ip = Option.get ip_opt in
                         maybe_send_icmp t n ip Icmp.Pdu.make_ttl_expired_in_transit
                     | Some _, Some ttl ->
@@ -262,13 +262,13 @@ struct
                 | Admin ->
                     (match in_iface_opt with
                     | None ->
-                        Log.(log t.logger Error (lazy "Generated traffic to admin!?"))
+                        Log.(log t.widget.logger Error (lazy "Generated traffic to admin!?"))
                     | Some in_iface ->
                         (match t.ifaces.(in_iface).admin_host with
                         | None ->
-                            Log.(log t.logger Warning (lazy (Printf.sprintf "There is no admin on interface %d, now what?" in_iface)))
+                            Log.(log t.widget.logger Warning (lazy (Printf.sprintf "There is no admin on interface %d, now what?" in_iface)))
                         | Some host ->
-                            Log.(log t.logger Debug (lazy "Delivering to the admin host")) ;
+                            Log.(log t.widget.logger Debug (lazy "Delivering to the admin host")) ;
                             Host.ip_recv host bits)) in
             let targets =
                 List.enum targets // (function
@@ -281,7 +281,7 @@ struct
                  ) |> Array.of_enum in
             let rs_len = Array.length targets in
             if rs_len = 0 then
-                Log.(log t.logger Debug (lazy ("Dropping packet with no targets")))
+                Log.(log t.widget.logger Debug (lazy ("Dropping packet with no targets")))
             else match t.load_balancing with
                 | First ->
                     forward targets.(0)
@@ -295,7 +295,7 @@ struct
 
     (** Change the emitter of iface N. *)
     let set_read (t : t) n f =
-        Log.(log t.logger Debug (lazy (Printf.sprintf "setting emitter for iface %d" n))) ;
+        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "setting emitter for iface %d" n))) ;
         t.ifaces.(n).trx =-> f
 
     let is_connected iface =
@@ -324,16 +324,15 @@ struct
             else
                 fun _ -> false
 
-    let make_iface ?proto ?mtu ?delay ?loss ?mac ?my_addresses
-                   ?(parent_logger=Log.default) n =
+    let make_iface ?proto ?mtu ?delay ?loss ?mac ?my_addresses ?parent n =
         let name = "#"^ string_of_int n in
-        let logger = Log.sub parent_logger name in
+        let widget = Widget.make ?parent name in
         (* For our ifaces we force the GW on a packet by packet basis according
          * to the dynamic (and likely still unset) routing table. *)
         let eth = Eth.State.make ?proto ?mtu ?delay ?loss ?mac ?my_addresses
-                                 ~parent_logger:logger () in
+                                 ~parent:widget () in
         let trx = Eth.TRX.make eth in
-        { trx ; eth ; logger ; admin_host = None }
+        { trx ; eth ; widget ; admin_host = None }
 
     let notify_never = { probability = 0. ; delay = 0. }
     let notify_always ?(delay=0.) () = { probability = 1. ; delay }
@@ -341,9 +340,9 @@ struct
     let make ?(notify_errs=notify_always ()) ?(admin_reroute=true)
              ?(load_balancing=First)
              ?delay ?loss ?mtu ?(macs=[||])
-             num_ifaces routes logger =
+             num_ifaces routes widget =
         (* Display the routing table (debug) *)
-        Log.(log logger Debug (lazy
+        Log.(log widget.Widget.logger Debug (lazy
             (Printf.sprintf2 "Creating a router with routing table:%a"
                 (List.print ~first:(if routes=[] then "" else "\n\t")
                             ~sep:"\n\t" ~last:"" Route.print) routes))) ;
@@ -385,17 +384,17 @@ struct
                     (* Caller can set the MAC addresses: *)
                     if n >= Array.length macs then None else Some macs.(n) in
                 make_iface ?delay ?loss ?mtu ?mac ?my_addresses
-                           ~parent_logger:logger n
+                           ~parent:widget n
             ) in
-        let ingress = Metric.Counter.make (logger.full_name ^"/ingress") "bytes" in
-        let egress = Metric.Counter.make (logger.full_name ^"/egress") "bytes" in
-        let t = { ifaces ; routes ; logger ; notify_errs ; admin_reroute ;
+        let full_name = Widget.full_name widget in
+        let ingress = Metric.Counter.make (full_name ^"/ingress") "bytes" in
+        let egress = Metric.Counter.make (full_name ^"/egress") "bytes" in
+        let t = { ifaces ; routes ; widget ; notify_errs ; admin_reroute ;
                   load_balancing ; ingress ; egress } in
         Array.iteri (fun n iface ->
             if iface.eth.my_addresses <> [] then (
                 (* Make that interface a host with an IP stack on top of eth: *)
-                let name = "admin@"^ string_of_int n in
-                let logger = Log.sub iface.logger "admin" in
+                let widget = Widget.make ~parent:iface.widget "admin" in
                 (* On output, the host will be able to write onto that TRX and that
                  * will be output from that iface, properly updating the counters.
                  * Unless we want to give a chance for the answer to go through
@@ -410,8 +409,9 @@ struct
                  * takes the reader callback only when set_ip is called, which
                  * we don't have to do here. The router is going call the host
                  * [ip_recv] function whenever that's the routing decision. *)
+                let name = "admin@"^ string_of_int n in
                 iface.admin_host <-
-                    Some (Host.make_from_eth ~logger iface.eth trx name)
+                    Some (Host.make_from_eth ~widget iface.eth trx name)
             ) ;
             (* When packets are received from the outside, go to routing: *)
             iface.trx.ins.set_read (route (Some n) t)
@@ -467,12 +467,12 @@ struct
     (* [addrs] also, for each iface, has the MAC address of the router on that
      * iface. *)
     let make_from_addrs ?notify_errs ?admin_reroute ?load_balancing ?delay ?loss
-                        addrs logger =
+                        addrs widget =
         let routes = routes_of_addrs addrs in
         let num_ifaces = Array.length addrs in
         let macs = Array.map snd addrs in
         make ?notify_errs ?admin_reroute ?load_balancing ?delay ?loss ~macs
-             num_ifaces routes logger
+             num_ifaces routes widget
 
     (*$R make_from_addrs
         (* Suppose we have a router for these 3 networks: *)
@@ -480,8 +480,8 @@ struct
             [| [ Ip.Addr.of_string "192.168.1.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
                [ Ip.Addr.of_string "192.168.2.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
                [ Ip.Addr.of_string "192.168.3.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () |] in
-        let logger = Log.make "test" in
-        let router = make_from_addrs addrs logger in
+        let widget = Widget.make "test" in
+        let router = make_from_addrs addrs widget in
 
         (* Now we will count incoming packets from each iface (ARP requests, actually) : *)
         let counts = Array.create 3 0 in
@@ -542,7 +542,7 @@ end
 
 type gw_trx =
     { trx : trx ;
-      logger : Log.logger ;
+      widget : Widget.t ;
       dhcp_state : Dhcpd.State.t ;
       dns_state : Named.State.t ;
       nat_state : Nat.State.t }
@@ -553,15 +553,15 @@ type gw_trx =
  * will be distributed via DHCP. *)
 let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
             ?dhcp_range ?dhcp_mtu ?lease_time_sec
-            ?(name="gw") ?notify_errs ?admin_reroute ?(parent_logger=Log.default)
+            ?(name="gw") ?notify_errs ?admin_reroute ?parent
             ?public_netmask ?public_gw ?port_forwards public_ip local_cidr =
-    (* We want all parts inherit this logger: *)
-    let parent_logger = Log.sub parent_logger name in
+    (* We want all parts inherit this widget: *)
+    let parent = Widget.make ?parent name in
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let broadcast = Ip.Cidr.all1s_addr local_cidr in
     (* Build the output router *)
-    let router_logger = Log.sub parent_logger "router" in
+    let router_widget = Widget.make ~parent "router" in
     let router =
         Router.(make ?delay ?loss ?mtu ?notify_errs ?admin_reroute 2
             [ (* route everything from anywhere to LAN if dest fits local_cidr *)
@@ -570,7 +570,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
               Route.forward ~src_mask:(Ip.Cidr.single Ip.Addr.zero) 0 ;
               (* route everything else toward the outside *)
               Route.forward ?via:public_gw 1 ]
-            router_logger) in
+            router_widget) in
     (* Configure those 2 ifaces: *)
     (* 1st iface is for the GW: *)
     let gw_mac = router.ifaces.(0).eth.mac in
@@ -579,7 +579,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     (* The second iface of our router (facing internet) is the NAT *)
     Eth.State.add_ip4 router.ifaces.(1).eth ?netmask:public_netmask public_ip ;
     let nat_state =
-        Nat.State.make ~num_max_cnxs ~parent_logger ?port_forwards public_ip in
+        Nat.State.make ~num_max_cnxs ~parent ?port_forwards public_ip in
     let nat_trx = Nat.TRX.make nat_state in
     (* Which we pipe *before* the iface eth (NAT operates at the IP level): *)
     router.ifaces.(1).trx <- pipe nat_trx router.ifaces.(1).trx ;
@@ -593,11 +593,11 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let srv_ip = Enum.get_exn local_ips in    (* second the dhcp/name servers *)
     let h : Host.t =
         let gateways = [ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw_mac) ] in
-        Host.make_static ?nameserver ~gateways ~netmask ~parent_logger srv_ip "srv" in
+        Host.make_static ?nameserver ~gateways ~netmask ~parent srv_ip "srv" in
     (* Now we need the repeater and the services: *)
     (* FIXME: instead of a Hub that forces us into having 2 IPs make a simple TRX directly, that inspects the protostack and if
      * the dest IP is gw_ip == src_iv then forward it to the host and if not forward it to the NAT. *)
-    let hub = Hub.Repeater.make ~parent_logger 3 "hub" in
+    let hub = Hub.Repeater.make ~parent 3 "hub" in
     Hub.Repeater.set_read hub 1 h.trx.dev.write ;
     h.trx.dev.set_read (Hub.Repeater.write hub 1) ;
     (* Connect the first iface of our router *)
@@ -618,17 +618,17 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
         ) dhcp_range in
     let dhcp_state =
         Dhcpd.State.make ~netmask ~broadcast ~gw:gw_ip ?mtu:dhcp_mtu ~dns
-                         ?lease_time_sec ~parent_logger:h.trx.logger dhcp_range in
+                         ?lease_time_sec ~parent:h.trx.widget dhcp_range in
     (* TODO: register a callback when leasing/releasing that updates the dns lookup function *)
     Dhcpd.serve dhcp_state h.trx ;
-    let dns_state = Named.State.make ~parent_logger:h.trx.logger (fun _ -> None) in (* Delegate everything to nameserver *)
+    let dns_state = Named.State.make ~parent:h.trx.widget (fun _ -> None) in (* Delegate everything to nameserver *)
     (* FIXME: revisit that! Here we want a table (state must not contain functions
      * because we want to be able to serialize them) *)
     Named.serve dns_state h.trx ;
     let trx =
         { ins = in_trx ;
           out = out_trx.out } in
-    { trx ; logger = parent_logger ; dhcp_state ; dns_state ; nat_state }
+    { trx ; widget = parent ; dhcp_state ; dns_state ; nat_state }
 
 (*$R make_gw
     (*Log.console_lvl := Log.Debug ;*)
@@ -649,7 +649,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     ignore (server_recv <-= server_eth) ;
     gw_trx.trx <==> server_eth ;
     Clock.delay (Clock.Interval.sec 10.) (fun () ->
-        Log.(log desktop.trx.logger Debug (lazy "Sending UDP packet to server")) ;
+        Log.(log desktop.trx.widget.logger Debug (lazy "Sending UDP packet to server")) ;
         desktop.trx.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring) () ;
     Clock.run false ;
     Clock.realtime := true ;

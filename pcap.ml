@@ -455,7 +455,7 @@ let play tx fname =
 type iface = { handler : iface_handler ;
                   name : string ;
                 caplen : int ;
-                logger : Log.logger }
+                widget : Widget.t }
 
 (** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
@@ -470,12 +470,12 @@ let openif ?(promisc=true) ?(filter="") ?caplen ifname =
     { handler = openif_ ifname promisc filter caplen ;
       name = ifname ;
       caplen = caplen ;
-      logger = Log.make ifname }
+      widget = Widget.make ifname }
 
 (** [sniff iface] will return the next available packet as a Pcap.Pdu.t. *)
 let sniff ?dlt ?timeout iface =
     let sniffed = sniff_ ?timeout iface.handler in
-    Log.(log iface.logger Debug (lazy (Printf.sprintf "Captured %d/%d bytes" sniffed.sniffed_caplen sniffed.sniffed_wirelen))) ;
+    Log.(log iface.widget.logger Debug (lazy (Printf.sprintf "Captured %d/%d bytes" sniffed.sniffed_caplen sniffed.sniffed_wirelen))) ;
     Pdu.make iface.name ?dlt
         ~caplen:sniffed.sniffed_caplen
         ~wirelen:sniffed.sniffed_wirelen
@@ -495,11 +495,11 @@ let inject (iface : iface) bits =
     let params = Metric.(Params.singleton "iface" Param.(String iface.name)) in
     try
         let str = string_of_bitstring bits in
-        Log.(log iface.logger Debug (lazy (Printf.sprintf "Injecting %d bytes" (String.length str)))) ;
+        Log.(log iface.widget.logger Debug (lazy (Printf.sprintf "Injecting %d bytes" (String.length str)))) ;
         inject_ iface.handler str ;
         Metric.Counter.add ~params bytes_out (bytelength bits)
     with e ->
-        Log.(log iface.logger Error (lazy (Printf.sprintf "Cannot inject: %s" (Printexc.to_string e)))) ;
+        Log.(log iface.widget.logger Error (lazy (Printf.sprintf "Cannot inject: %s" (Printexc.to_string e)))) ;
         Metric.Atomic.fire ~params packets_injected_err
 
 (** {2 Packet sniffing} *)

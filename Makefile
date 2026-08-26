@@ -7,6 +7,7 @@ SOURCES  = \
 	condvar.ml \
 	clock.ml \
 	log.ml \
+	widget.ml \
 	tools.ml \
 	ordArray.ml \
 	payload.ml \

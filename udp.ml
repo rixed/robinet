@@ -76,7 +76,7 @@ struct
     type udp_trx = {       trx : trx ;
                      get_ports : unit -> Port.t * Port.t }
     type t = {
-        logger : Log.logger ;
+        logger : Log.t ;
         mutable src : Port.t ; mutable dst : Port.t ;
         mutable emit : bitstring -> unit ;
         mutable recv : bitstring -> unit }

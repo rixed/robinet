@@ -165,6 +165,7 @@ type param_filter =
 
 let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyAdmin: metric: vars = %a\n" Opache.print_vars vars ;
     page_head_open resp ;
+    (*let chartjs_url = "http://happyleptic.org:8080/chart.js" in (* cached locally *)*)
     let chartjs_url = "https://cdn.jsdelivr.net/npm/chart.js" in
     String.print resp ("<script src=\""^ chartjs_url ^"\"></script>\n") ;
     Printf.fprintf resp {|
@@ -370,115 +371,115 @@ let metrics _mth _matches vars _qry_body resp = if debug then Printf.printf "MyA
     [ "Content-Type", "text/html" ]
 
 (*
- * Logs
+ * Logs (from widgets)
  *)
 
-let find_loggers ?(vert_distance=0) ?(horiz_distance=0) logger =
-    (* Collect all loggers within those distances: *)
-    let loggers =
+let find_widgets ?(vert_distance=0) ?(horiz_distance=0) widget =
+    (* Collect all widgets within those distances: *)
+    let widgets =
         let visited = ref Set.String.empty in
-        let is_close max_dist logger =
+        let is_close max_dist widget =
             if max_dist < 0 then (
                 Printf.printf "max dist %d < 0\n%!" max_dist ;
                 false
-            ) else if Set.String.mem logger.Log.full_name !visited then (
-                Printf.printf "already visited %s\n%!" logger.full_name ;
+            ) else if Set.String.mem (Widget.full_name widget) !visited then (
+                Printf.printf "already visited %s\n%!" (Widget.full_name widget) ;
                 false
             ) else (
-                Printf.printf "Visiting logger %s\n%!" logger.full_name ;
-                visited := Set.String.add logger.full_name !visited ;
+                Printf.printf "Visiting widget %s\n%!" (Widget.full_name widget) ;
+                visited := Set.String.add (Widget.full_name widget) !visited ;
                 true
             ) in
-        let rec loop_up loggers max_horiz max_up max_down logger =
+        let rec loop_up widgets max_horiz max_up max_down widget =
             if max_up >= 0 then (
-                loop_horiz loggers max_horiz max_up max_down logger
-            ) else loggers
-        and loop_down loggers max_horiz max_up max_down logger =
+                loop_horiz widgets max_horiz max_up max_down widget
+            ) else widgets
+        and loop_down widgets max_horiz max_up max_down widget =
             if max_down >= 0 then (
-                loop_horiz loggers max_horiz max_up max_down logger
-            ) else loggers
-        and loop_horiz loggers max_horiz max_up max_down logger =
-            Printf.printf "loop_horiz %d %d %d %S\n%!" max_horiz max_up max_down logger.Log.full_name ;
-            if is_close max_horiz logger then (
-                Printf.printf "Adding logger %s\n%!" logger.full_name ;
-                let loggers = logger :: loggers in
-                let loggers =
-                    match logger.parent with
+                loop_horiz widgets max_horiz max_up max_down widget
+            ) else widgets
+        and loop_horiz widgets max_horiz max_up max_down widget =
+            Printf.printf "loop_horiz %d %d %d %S\n%!" max_horiz max_up max_down (Widget.full_name widget) ;
+            if is_close max_horiz widget then (
+                Printf.printf "Adding widget %s\n%!" (Widget.full_name widget) ;
+                let widgets = widget :: widgets in
+                let widgets =
+                    match widget.parent with
                     | Some p ->
                         (* Don't come back down to not end up in other branches *)
-                        loop_up loggers max_horiz (max_up - 1) 0 p
-                    | None -> loggers in
-                let loggers =
-                    List.fold_left (fun loggers child ->
+                        loop_up widgets max_horiz (max_up - 1) 0 p
+                    | None -> widgets in
+                let widgets =
+                    List.fold_left (fun widgets child ->
                         (* There is no point coming back up: *)
-                        loop_down loggers max_horiz 0 (max_down - 1) child
-                    ) loggers logger.children in
-                List.fold_left (fun loggers (peer : Log.peer) ->
+                        loop_down widgets max_horiz 0 (max_down - 1) child
+                    ) widgets widget.children in
+                List.fold_left (fun widgets (peer : Widget.peer) ->
                     match peer.via with
                     | None ->
-                        loop_horiz loggers (max_horiz - 1) max_up max_down
-                                   peer.logger
+                        loop_horiz widgets (max_horiz - 1) max_up max_down
+                                   peer.widget
                     | Some via ->
-                        let loggers =
-                            loop_horiz loggers (max_horiz - 1) max_up max_down
+                        let widgets =
+                            loop_horiz widgets (max_horiz - 1) max_up max_down
                                        via in
-                        loop_horiz loggers (max_horiz - 2) max_up max_down
-                                   peer.logger
-                ) loggers logger.peers
-            ) else loggers in
-        loop_horiz [] horiz_distance vert_distance vert_distance logger in
-    Printf.printf "Got these loggers: %a\n%!" (List.print (fun oc l -> String.print oc l.Log.full_name)) loggers ;
-    loggers
+                        loop_horiz widgets (max_horiz - 2) max_up max_down
+                                   peer.widget
+                ) widgets widget.peers
+            ) else widgets in
+        loop_horiz [] horiz_distance vert_distance vert_distance widget in
+    Printf.printf "Got these widgets: %a\n%!" (List.print (fun oc w -> String.print oc (Widget.full_name w))) widgets ;
+    widgets
 
-let get_logs ?(max_level=Log.max_level) loggers =
+let get_logs ?(max_level=Log.max_level) widgets =
     (* TODO: options to include N parents/children, M peers... Aka vertical
      * and horizontal distance *)
-    let collect_logger e (logger : Log.logger) =
+    let collect_logger e (widget : Widget.t) =
         let rec loop lvl e =
             if lvl > max_level then e else
-            let e' = Log.queue_enum logger.queues.(lvl) in
-            let e' = Enum.map (fun l -> logger, lvl, l) e' in
+            let e' = Log.queue_enum widget.logger.queues.(lvl) in
+            let e' = Enum.map (fun l -> widget, lvl, l) e' in
             loop (lvl + 1) (Enum.append e e') in
         loop 0 e in
-    let e = List.fold_left collect_logger (Enum.empty ()) loggers in
+    let e = List.fold_left collect_logger (Enum.empty ()) widgets in
     let a = Array.of_enum e in
     Array.fast_sort
         (fun (_, _, (t1, _)) (_, _, (t2, _)) -> Clock.Time.compare t1 t2) a ;
     Array.enum a
 
-let logs_menu resp selected_name also_selected ignored_loggers =
+let logs_menu resp selected_name also_selected ignored_widgets =
     (* The root layer is composed of all loggre without parents: *)
     let roots =
-        Hashtbl.fold (fun _k l root ->
-            if l.Log.parent = None then  l :: root else root
-        ) Log.loggers [] in
-    let rec num_descendants logger =
+        Hashtbl.fold (fun _k w root ->
+            if w.Widget.parent = None then w :: root else root
+        ) Widget.all [] in
+    let rec num_descendants widget =
         List.fold_left (fun num child ->
             num + num_descendants child
-        ) 0 logger.Log.children |> max 1 in
+        ) 0 widget.Widget.children |> max 1 in
     (* Memoize those for the duration of this function call: *)
     let num_descendants = memoize num_descendants in
-    let rec max_depth logger =
+    let rec max_depth widget =
         List.fold_left (fun depth child ->
             max depth (1 + max_depth child)
-        ) 1 logger.Log.children in
-    let onmouseover (l : Log.logger) =
+        ) 1 widget.Widget.children in
+    let onmouseover (w : Widget.t) =
         let peers =
-            List.fold_left (fun peers (peer : Log.peer) ->
-                let peers = peer.logger :: peers in
+            List.fold_left (fun peers (peer : Widget.peer) ->
+                let peers = peer.widget :: peers in
                 match peer.via with
                 | None -> peers
                 | Some via -> via :: peers
-            ) [] l.peers in
+            ) [] w.peers in
         let ids =
-            IO.to_string (List.print ~sep:"," (fun oc (l : Log.logger) ->
-                String.print oc (to_js_string ("td_"^ l.full_name)))
+            IO.to_string (List.print ~sep:"," (fun oc (w : Widget.t) ->
+                String.print oc (to_js_string ("td_"^ Widget.full_name w)))
             ) peers in
         Printf.sprintf " onmouseover=\"highlight(%s)\" \
                          onmouseout=\"unhighlight(%s)\"" ids ids in
-    let onclick (l : Log.logger) =
-        " onclick=\"setLogger("^ to_js_string l.full_name ^")\"" in
-    let rec loop_row bw (groups : (int * Log.logger list * int) list) =
+    let onclick (w : Widget.t) =
+        " onclick=\"setLogger("^ to_js_string (Widget.full_name w) ^")\"" in
+    let rec loop_row bw (groups : (int * Widget.t list * int) list) =
         (* [bw] is the border width for the new separations between those \
          * [groups] *)
         Printf.fprintf resp "<tr>\n" ;
@@ -504,51 +505,51 @@ let logs_menu resp selected_name also_selected ignored_loggers =
                     function
                     | [] ->
                         next_row, next_is_empty
-                    | (l : Log.logger) :: loggers ->
-                        let is_last = loggers = [] in
+                    | (w : Widget.t) :: widgets ->
+                        let is_last = widgets = [] in
                         let prev_full, prev_clen, disp_name =
-                            let clen = common_pref_length prev_full l.name in
+                            let clen = common_pref_length prev_full w.name in
                             if clen > 5 && clen >= prev_clen then
                                 let eff_clen =
                                     if prev_clen > 0 then
                                         prev_clen
                                     else
                                         let clen = clen - 2 in (* keep an "anchor" *)
-                                        let len = String.length l.name in
+                                        let len = String.length w.name in
                                         let rem_len = max 3 (len - clen) in
                                         len - rem_len in
                                 prev_full,
                                 eff_clen,
-                                "…"^ String.lchop ~n:eff_clen l.name
+                                "…"^ String.lchop ~n:eff_clen w.name
                             else
-                                l.name,
+                                w.name,
                                 0,
-                                l.name in
+                                w.name in
                         let sel_class =
-                            if selected_name = Some l.full_name then
+                            if selected_name = Some (Widget.full_name w) then
                                 " selected" else
-                            if List.exists ((==) l) also_selected then
+                            if List.exists ((==) w) also_selected then
                                 " also-selected" else "" in
                         Printf.fprintf resp
                             "<td id=\"td_%s\" \
                                 colspan=\"%d\" class=\"pointy%s%s\" \
                                 style=\"%s\"%s%s>%s</td>"
-                            (Html.cdata_encode l.full_name)
-                            (num_descendants l)
+                            (Html.cdata_encode (Widget.full_name w))
+                            (num_descendants w)
                             sel_class
-                            (if Set.String.mem l.full_name ignored_loggers then
+                            (if Set.String.mem (Widget.full_name w) ignored_widgets then
                                 " ignored" else "")
-                            (style is_first bwl is_last bwr (l.children = []))
-                            (if l.peers = [] then "" else onmouseover l)
-                            (onclick l)
+                            (style is_first bwl is_last bwr (w.children = []))
+                            (if w.peers = [] then "" else onmouseover w)
+                            (onclick w)
                             (if disp_name <> "" then disp_name
                              else "<i>unnamed</i>") ;
                         let next_row =
-                            ((if is_first then bwl else bw), l.children,
+                            ((if is_first then bwl else bw), w.children,
                              (if is_last then bwr else bw)) :: next_row in
                         let next_is_empty =
-                            if l.children = [] then next_is_empty else false in
-                        loop_children false next_row next_is_empty prev_full prev_clen loggers in
+                            if w.children = [] then next_is_empty else false in
+                        loop_children false next_row next_is_empty prev_full prev_clen widgets in
                 let next_row, next_is_empty =
                     loop_children true next_row next_is_empty "" 0 group in
                 loop_groups next_row next_is_empty groups in
@@ -561,7 +562,7 @@ let logs_menu resp selected_name also_selected ignored_loggers =
         let max_rows = max_depth root in
         let bw = max_rows in
         Printf.fprintf resp
-            "<table class=\"loggers\" \
+            "<table class=\"widgets\" \
                     style=\"background-color: #fee; float: left; margin: 5px; \
                             border-collapse: separate; border-spacing: %dpx 0; \
                             text-align: center;\">\n"
@@ -576,7 +577,7 @@ let logs _mth _matches vars _qry_body resp =
     Printf.fprintf resp {|
     <style type="text/css">
         /* Loggers tables */
-        table.loggers {
+        table.widgets {
             font-size: 0.7rem;
         }
         td.pointy {
@@ -660,7 +661,7 @@ let logs _mth _matches vars _qry_body resp =
               this.document.getElementById(id).classList.remove("highlighted"));
         }
         function setLogger(val) {
-            let sel = this.document.getElementById('logger_select');
+            let sel = this.document.getElementById('widget_select');
             sel.value = val;
             sel.onchange();
         }
@@ -674,12 +675,12 @@ let logs _mth _matches vars _qry_body resp =
 |};
     page_head_close resp ;
     let all_names =
-        Hashtbl.keys Log.loggers |>
+        Hashtbl.keys Widget.all |>
         Array.of_enum in
     Array.fast_sort String.compare all_names ;
-    let logger_name =
+    let widget_name =
         try
-            Some (Hashtbl.find vars "logger")
+            Some (Hashtbl.find vars "widget")
         with Not_found ->
             if Array.length all_names > 0 then Some all_names.(0) else None in
     let int_of_var name def =
@@ -691,22 +692,22 @@ let logs _mth _matches vars _qry_body resp =
     let reltime = bool_of_var "reltime" in
     let vert_distance = int_of_var "vert_distance" 0 in
     let horiz_distance = int_of_var "horiz_distance" 0 in
-    let ignored_loggers =
+    let ignored_widgets =
         Hashtbl.find_all vars "ignored" |>
-        List.fold_left (fun ignored_loggers name ->
-            Set.String.add name ignored_loggers
+        List.fold_left (fun ignored_widgets name ->
+            Set.String.add name ignored_widgets
         ) Set.String.empty in
-    let selected_loggers =
-        Option.bind logger_name (fun name ->
+    let selected_widgets =
+        Option.bind widget_name (fun name ->
             Option.bind
-                (Hashtbl.find_option Log.loggers name)
-                (fun logger ->
-                    Some (find_loggers ~vert_distance ~horiz_distance logger))
+                (Hashtbl.find_option Widget.all name)
+                (fun widget ->
+                    Some (find_widgets ~vert_distance ~horiz_distance widget))
         ) |? [] in
     Printf.fprintf resp "<div><form>\n" ;
-    logs_menu resp logger_name selected_loggers ignored_loggers ;
+    logs_menu resp widget_name selected_widgets ignored_widgets ;
     Printf.fprintf resp "\
-        <select id=\"logger_select\" name=\"logger\" \
+        <select id=\"widget_select\" name=\"widget\" \
                 onchange=\"this.form.submit()\">\n\
             %a\
         </select>\n"
@@ -715,7 +716,7 @@ let logs _mth _matches vars _qry_body resp =
                 let v = Html.cdata_encode name in
                 Printf.fprintf oc "<option value=\"%s\"%s>%s</option>\n"
                     v
-                    (if logger_name = Some name then selected else "")
+                    (if widget_name = Some name then selected else "")
                     v)
         ) all_names ;
     Printf.fprintf resp "\
@@ -740,11 +741,11 @@ let logs _mth _matches vars _qry_body resp =
           </select>\n\
         </label>\n"
         (List.print ~first:"" ~last:"" ~sep:""
-            (fun oc (v, l) ->
+            (fun oc (v, w) ->
                 Printf.fprintf oc "<option value=\"%d\"%s>%s</option>\n"
                     v
                     (if vert_distance = v then selected else "")
-                    l)
+                    w)
         ) [ 0, "none" ; 1, "direct" ; 2, "two levels" ; max_int, "all" ] ;
     Printf.fprintf resp "\
         <label>Siblings:\n\
@@ -753,32 +754,32 @@ let logs _mth _matches vars _qry_body resp =
           </select>\n\
         </label>\n"
         (List.print ~first:"" ~last:"" ~sep:""
-            (fun oc (v, l) ->
+            (fun oc (v, w) ->
                 Printf.fprintf oc "<option value=\"%d\"%s/>%s</option>\n"
                     v
                     (if horiz_distance = v then selected else "")
-                    l)
+                    w)
         ) [ 0, "none" ; 1, "direct" ; 2, "two levels" ; max_int, "all" ] ;
-    Option.may (fun logger_name ->
-        let logger = Hashtbl.find_option Log.loggers logger_name in
-        Option.may (fun (logger : Log.logger) ->
-            let open_link_to (l : Log.logger) =
-                Printf.sprintf "<a href=\"?logger=%s&max_level=%d&vert_distance=%d&horiz_distance=%d\">"
-                    (Url.encode l.full_name)
+    Option.may (fun widget_name ->
+        let widget = Hashtbl.find_option Widget.all widget_name in
+        Option.may (fun (widget : Widget.t) ->
+            let open_link_to (w : Widget.t) =
+                Printf.sprintf "<a href=\"?widget=%s&max_level=%d&vert_distance=%d&horiz_distance=%d\">"
+                    (Url.encode (Widget.full_name w))
                     max_level vert_distance horiz_distance in
-            let link_to ?(full_name=false) (l : Log.logger) =
+            let link_to ?(full_name=false) (w : Widget.t) =
                 Printf.sprintf "%s%s</a>"
-                    (open_link_to l)
-                    (if full_name then l.full_name else l.name) in
-            let print_child oc (l : Log.logger) =
-                String.print oc (link_to l) in
-            let print_peer oc (p : Log.peer) =
-                String.print oc (link_to ~full_name:true p.logger) ;
+                    (open_link_to w)
+                    (if full_name then Widget.full_name w else w.name) in
+            let print_child oc (w : Widget.t) =
+                String.print oc (link_to w) in
+            let print_peer oc (p : Widget.peer) =
+                String.print oc (link_to ~full_name:true p.widget) ;
                 Option.may (fun via ->
                     Printf.fprintf oc "&nbsp;(via: %s)" (link_to via)
                 ) p.via in
             let open_link, close_link =
-                match logger.parent with
+                match widget.parent with
                 | None -> "<s>", "</s>"
                 | Some parent -> open_link_to parent, "</a>" in
             Printf.fprintf resp {|
@@ -793,26 +794,26 @@ let logs _mth _matches vars _qry_body resp =
                 (* parent *)
                 open_link close_link
                 (* children *)
-                (if logger.children <> [] then "children: " else "")
+                (if widget.children <> [] then "children: " else "")
                 (List.print ~first:"" ~last:"" ~sep:" | " print_child)
-                    logger.children
+                    widget.children
                 (* peers *)
-                (if logger.peers <> [] then "peers: " else "")
+                (if widget.peers <> [] then "peers: " else "")
                 (List.print ~first:"" ~last:"" ~sep:" | " print_peer)
-                    logger.peers ;
+                    widget.peers ;
             (* And now the log selection: *)
-            let logs = get_logs ~max_level selected_loggers in
-            let loggers =
+            let logs = get_logs ~max_level selected_widgets in
+            let widgets =
                 List.fast_sort (fun l1 l2 ->
-                    String.compare l1.Log.full_name l2.full_name
-                ) selected_loggers in
-            if loggers <> [] then (
-                let print_ignored_logger oc logger =
-                    let v = Html.cdata_encode logger.Log.full_name in
+                    String.compare (Widget.full_name l1) (Widget.full_name l2)
+                ) selected_widgets in
+            if widgets <> [] then (
+                let print_ignored_widget oc widget =
+                    let v = Html.cdata_encode (Widget.full_name widget) in
                     Printf.fprintf oc "\
                         <option value=\"%s\"%s>%s</option>\n"
                         v
-                        (if Set.String.mem logger.full_name ignored_loggers
+                        (if Set.String.mem (Widget.full_name widget) ignored_widgets
                         then selected else "")
                         v in
                 Printf.fprintf resp "\
@@ -822,8 +823,8 @@ let logs _mth _matches vars _qry_body resp =
                         %a\
                         </select>\n\
                     </label></div>\n"
-                    (List.print ~first:"" ~last:"" ~sep:"" print_ignored_logger)
-                        loggers
+                    (List.print ~first:"" ~last:"" ~sep:"" print_ignored_widget)
+                        widgets
             ) ;
             let interv_print =
                 let prev_t = ref None in
@@ -840,8 +841,8 @@ let logs _mth _matches vars _qry_body resp =
                     [| "fatal" ; "crit" ; "err" ; "wrn" ; "nfo" ; "dbg" |] in
                 let prev_src = ref "" in
                 let prev_lvl = ref ~-1 in
-                fun oc (logger, lvl, (t, msg)) ->
-                    let src = logger.Log.full_name in
+                fun oc (widget, lvl, (t, msg)) ->
+                    let src = Widget.full_name widget in
                     let with_border =
                         if !prev_src <> src then (
                             prev_src := src ;
@@ -899,11 +900,11 @@ let logs _mth _matches vars _qry_body resp =
                 (if reltime then "" else "hidden")
                 (if reltime then " checked" else "")
                 (Enum.print ~first:"" ~last:"" ~sep:"" print_log)
-                    (Enum.filter (fun (l, _, _) ->
-                        not (Set.String.mem l.Log.full_name ignored_loggers)
+                    (Enum.filter (fun (w, _, _) ->
+                        not (Set.String.mem (Widget.full_name w) ignored_widgets)
                     ) logs)
-        ) logger
-    ) logger_name ;
+        ) widget
+    ) widget_name ;
     Printf.fprintf resp "</form></div>\n" ;
     [ "Content-Type", "text/html" ]
 

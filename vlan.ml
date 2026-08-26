@@ -83,7 +83,7 @@ end
 module TRX =
 struct
     type t =
-        { logger : Log.logger ;
+        { logger : Log.t ;
           prio : int ; id : int ;
           proto : Arp.HwProto.t ;
           mutable emit : bitstring -> unit ;

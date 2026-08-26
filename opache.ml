@@ -80,36 +80,36 @@ let params_of_query q =
   generates the pcap :-)
 *)
 let serve host ?(port=Tcp.Port.o 80) f =
-    let logger = Log.sub host.Host.logger ("httpd:"^ Tcp.Port.to_string port) in
+    let widget = Widget.make ~parent:host.Host.widget ("httpd:"^ Tcp.Port.to_string port) in
     host.tcp_server port (fun (tcp : Tcp.TRX.tcp_trx) ->
         (* once we obtain the transport layer, build an http on top of it *)
-        Log.(log logger Debug (lazy "Building a new HTTP.TRXtop")) ;
+        Log.(log widget.logger Debug (lazy "Building a new HTTP.TRXtop")) ;
         let http = TRXtop.make () in
         TRXtop.set_emit http (tx tcp.trx) ;
         TRXtop.set_recv http (function
             | TRXtop.HttpError x ->
-                Log.(log logger Debug (lazy (Printf.sprintf "Got error %s" x))) ;
+                Log.(log widget.logger Debug (lazy (Printf.sprintf "Got error %s" x))) ;
                 tcp.close ()
             | TRXtop.HttpMsg (pdu, opened) ->
-                Log.(log logger Debug (lazy "Got HTTP msg")) ;
+                Log.(log widget.logger Debug (lazy "Got HTTP msg")) ;
                 if not opened then (
-                    Log.(log logger Debug (lazy (Printf.sprintf "Close the Tcp cnx"))) ;
+                    Log.(log widget.logger Debug (lazy (Printf.sprintf "Close the Tcp cnx"))) ;
                     tcp.close ()
                 ) ;
                 (match pdu with
                 | { Pdu.cmd = Request (_cmd, url) ; _ } ->
-                    Log.(log logger Debug (lazy (Printf.sprintf "Http msg is a request for %s" url))) ;
+                    Log.(log widget.logger Debug (lazy (Printf.sprintf "Http msg is a request for %s" url))) ;
                     (* Force the callback to return unit to get better diagnostic: *)
-                    let () = f host http pdu logger in
-                    Log.(log logger Debug (lazy (Printf.sprintf "Headers were %s, so we must%s close" (string_of_headers pdu.Pdu.headers) (if must_close_cnx pdu.Pdu.headers then "" else " not")))) ;
+                    let () = f host http pdu widget in
+                    Log.(log widget.logger Debug (lazy (Printf.sprintf "Headers were %s, so we must%s close" (string_of_headers pdu.Pdu.headers) (if must_close_cnx pdu.Pdu.headers then "" else " not")))) ;
                     if must_close_cnx pdu.Pdu.headers then tcp.close ()
                 | _ ->
-                    Log.(log logger Debug (lazy (Printf.sprintf "Http msg is unknown"))) ;
+                    Log.(log widget.logger Debug (lazy (Printf.sprintf "Http msg is unknown"))) ;
                     Pdu.make_response 500 |> TRXtop.tx http ;
                     tcp.close ())) ;
         (* Only when everything's set up do we connect the tcp recv to http rx *)
         let verbose_rx bits =
-            Log.(log logger Debug (lazy "Got some bits for HTTP!")) ;
+            Log.(log widget.logger Debug (lazy "Got some bits for HTTP!")) ;
             TRXtop.rx http bits in
         ignore (verbose_rx <-= tcp.trx))
 
@@ -171,9 +171,9 @@ Your requested: '%s'<br/>
 (*type params = (string, string) Hashtbl.t
 type resource = (Str.regexp * (string -> string list -> params -> string -> unit BatIO.output -> Http.header list)) list*)
 (* list of (regex matching URL * (function of method, matches, parameters hash and output stream to list of headers)) *)
-let multiplexer res host http msg logger =
+let multiplexer res host http msg (widget : Widget.t) =
     (* We'd rather have one such metric per host: *)
-    let counter = Metric.Atomic.make ("hosts/"^ host.Host.name ^"/httpd/queries") in
+    let counter = Metric.Atomic.make ("hosts/"^ host.Host.widget.name ^"/httpd/queries") in
     let handle mth url _headers ext_params qry_body =
         let url = Url.of_string url in
         let count_query status =
@@ -188,14 +188,14 @@ let multiplexer res host http msg logger =
                 then Some (str_all_matches url.Url.path, f)
                 else None) res with
         | exception Not_found ->
-            Log.(log logger Debug (lazy (Printf.sprintf "Multiplexer: No taker for url '%s'" url.Url.path))) ;
+            Log.(log widget.logger Debug (lazy (Printf.sprintf "Multiplexer: No taker for url '%s'" url.Url.path))) ;
             let code = 404 in
             count_query code ;
             TRXtop.tx http { Pdu.cmd = Status code ;
                              Pdu.headers = [] ;
                              Pdu.body = "" }
         | matches, f ->
-            Log.(log logger Debug (lazy (Printf.sprintf2 "Multiplexer: Found a match for url '%s', matches=%a" url.Url.path (List.print String.print) matches))) ;
+            Log.(log widget.logger Debug (lazy (Printf.sprintf2 "Multiplexer: Found a match for url '%s', matches=%a" url.Url.path (List.print String.print) matches))) ;
             let vars = params_of_query url.Url.query in
             hash_merge vars (params_of_query ext_params) ;
             let str = BatIO.output_string () in
@@ -233,7 +233,7 @@ let multiplexer res host http msg logger =
             handle mth url headers "" body
         )
     | _ ->
-        Log.(log logger Debug (lazy ("Multiplexer: Don't know how to handle this HTTP message, returning 501"))) ;
+        Log.(log widget.logger Debug (lazy ("Multiplexer: Don't know how to handle this HTTP message, returning 501"))) ;
         let body = "Don't know how to process this" in
         TRXtop.tx http { Pdu.cmd = Status 501 ;
                          (* We are suposed to have a message-body *)

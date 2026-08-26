@@ -105,7 +105,7 @@ end
 
 module TRX = struct
 
-    type t = { logger : Log.logger ;
+    type t = { logger : Log.t ;
                src : Ip.Addr.t ; dst : Ip.Addr.t ;
                proto : Ip.Proto.t ;
                mutable emit : bitstring -> unit ;

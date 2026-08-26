@@ -43,9 +43,8 @@ let reserve date time login pwd =
     let sha1 =
         let cmd = "echo -n "^(Filename.quote pwd)^" | sha1sum | cut -d' ' -f 1" in
         IO.read_line (Unix.open_process_in cmd) in
-    let host = Localhost.make ()
-    and mozilla_user_agent = "Mozilla/5.0 (X11; U; Linux x86_64; en-US; rv:1.9.1.16) Gecko/20110929 Iceweasel/3.5.16 (like Firefox/3.5.16)" in
-    let browser = Browser.make ~user_agent:mozilla_user_agent host in
+    let mozilla_user_agent = "Mozilla/5.0 (X11; U; Linux x86_64; en-US; rv:1.9.1.16) Gecko/20110929 Iceweasel/3.5.16 (like Firefox/3.5.16)" in
+    let browser = Browser.make ~user_agent:mozilla_user_agent Localhost.host in
     step "Get homepage for the fun of it (and collect some cookies)"
          (Browser.get browser (Url.of_string "http://www.wanaplay.com/"))
          (function _ ->

@@ -23,7 +23,7 @@
 open Batteries
 
 let run port =
-    let host = Localhost.make () in
+    let host = Localhost.host in
     (* Start server *)
     let resources =
         [ Str.regexp "/static/\\([^/]+/[^/]+\\)/\\(.*\\)$", Opache.static_file_server "./" ;

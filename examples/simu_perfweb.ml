@@ -13,7 +13,7 @@ let logger = Log.make ~size:1000 "webperf"
 (** Spawn a browser thread in all hosts of the given network, that will browse
  * at random in a human like fashion from the root url *)
 let client_init url (host : Host.t) =
-    Log.(log logger Info (lazy (Printf.sprintf "Starting a new web browser on %s" host.trx.name))) ;
+    Log.(log logger Info (lazy (Printf.sprintf "Starting a new web browser on %s" host.trx.widget.name))) ;
     let browser = Browser.make host.trx in
     (* FIXME: better have a browser.at_init register function *)
     let rec start_browsing () =
