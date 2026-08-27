@@ -149,7 +149,7 @@ let static_file_server root _mth path_matches _params _qry_body resp_body =
         (try File.with_file_in file (fun ic ->
                 BatIO.copy ic resp_body)
         with Sys_error _ -> raise (ResourceError (404, "No such file "^file))) ;
-        [ "Content-Type", content_type_from_filename file ] in
+        200, [ "Content-Type", content_type_from_filename file ] in
     match path_matches with
         | [ _url ] ->
             serve_file root
@@ -166,11 +166,22 @@ let it_works _mth path_matches _params _qry_body resp_body =
 Your requested: '%s'<br/>
 </body></html>|}
         (List.first path_matches) ;
-    [ "Content-Type", "text/html" ]
+    200, [ "Content-Type", "text/html" ]
 
-(*type params = (string, string) Hashtbl.t
-type resource = (Str.regexp * (string -> string list -> params -> string -> unit BatIO.output -> Http.header list)) list*)
-(* list of (regex matching URL * (function of method, matches, parameters hash and output stream to list of headers)) *)
+type params = (string, string) Hashtbl.t
+
+(** A resource handler is given the method, the matches of the regexp that
+ * selected it, the query parameters, the query body, and the output to write
+ * the response body into. It returns the status code and the headers of the
+ * response.
+ *
+ * Alternatively it can raise [ResourceError (code, message)] to abort with a
+ * plain text error. *)
+type resource =
+    string -> string list -> params -> string -> string BatIO.output ->
+    Http.code * Http.header list
+
+(* [res] is a list of (regexp matching the URL, handler): *)
 let multiplexer res host http msg (widget : Widget.t) =
     (* We'd rather have one such metric per host: *)
     let counter = Metric.Atomic.make ("hosts/"^ host.Host.widget.name ^"/httpd/queries") in
@@ -200,13 +211,12 @@ let multiplexer res host http msg (widget : Widget.t) =
             hash_merge vars (params_of_query ext_params) ;
             let str = BatIO.output_string () in
             (try
-                let headers = f mth matches vars qry_body str in
+                let code, headers = f mth matches vars qry_body str in
                 let headers =
                     if Http.headers_find "Content-Type" headers = None then
                         ("Content-Type", "text/html") :: headers
                     else headers in
                 let body = BatIO.close_out str in
-                let code = 200 in
                 count_query code ;
                 TRXtop.tx http { Pdu.cmd = Status code ;
                                  Pdu.headers = ("Content-Length", Printf.sprintf "%d" (String.length body)) :: headers ;
@@ -219,7 +229,8 @@ let multiplexer res host http msg (widget : Widget.t) =
                                                  "Content-Length", Printf.sprintf "%d" (String.length err_msg) ] ;
                                  Pdu.body = err_msg }) in
     match msg with
-    | { Pdu.cmd = Request ("GET" as mth, url) ; headers ; body } ->
+    | { Pdu.cmd = Request ("GET" as mth, url) ; headers ; body }
+    | { Pdu.cmd = Request ("DELETE" as mth, url) ; headers ; body } ->
         handle mth url headers "" body
     | { Pdu.cmd = Request ("POST" as mth, url) ; headers ; body }
     | { Pdu.cmd = Request ("PUT" as mth, url) ; headers ; body } ->

@@ -19,6 +19,7 @@ depends: [
   "bitstring"
   "ocamlfind" {build}
   "ppx_bitstring"
+  "yojson"
 ]
 depexts: [
   [["debian"]

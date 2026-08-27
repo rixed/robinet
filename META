@@ -1,5 +1,5 @@
 description = "poor man's network simulator"
 version = "2.0.0"
-requires = "findlib bitstring ppx_bitstring batteries"
+requires = "findlib bitstring ppx_bitstring batteries yojson"
 archive(byte) = "robinet.cma"
 archive(native) = "robinet.cmxa"

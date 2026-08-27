@@ -36,8 +36,7 @@ type queue  =
       msgs : msg array }
 
 type t =
-    { name : string ;
-      use_wall_clock : bool ;
+    { use_wall_clock : bool ;
       queues : queue array }
 
 (* log level <-> queue index *)
@@ -75,10 +74,8 @@ let string_of_int_level = string_of_level % level_of_int
 (* output to console happen based on a constant current loglevel *)
 
 let console_lvl = ref Error
-let console_log name =
-    let name = if name = "" then name else name ^": " in
-    fun (t, lstr) ->
-        Printf.printf "%a: %s%s\n%!" Clock.Time.printf t name (Lazy.force lstr)
+let console_log (t, lstr) =
+    Printf.printf "%a: %s\n%!" Clock.Time.printf t (Lazy.force lstr)
 
 (* queue management *)
 
@@ -173,7 +170,7 @@ let log t level lstr =
             Clock.now () in
     let msg = now, lstr in
     enqueue t.queues.(lvl) msg ;
-    if lvl <= int_of_level !console_lvl then console_log t.name msg ;
+    if lvl <= int_of_level !console_lvl then console_log msg ;
     assert (level <> Fatal)
 
 let log_exceptions t ?(level=Warning) what f x =
@@ -185,11 +182,10 @@ let log_exceptions t ?(level=Warning) what f x =
                 (Printexc.to_string e)
                 what))
 
-let make ?(use_wall_clock=false) ?(size=50) name =
-    { name ;
-      use_wall_clock ;
+let make ?(use_wall_clock=false) ?(size=50) () =
+    { use_wall_clock ;
       queues = Array.init num_levels (fun _ -> make_queue size) }
 
 (* The logger that will adopt any others: *)
 
-let default = make ""
+let default = make ()

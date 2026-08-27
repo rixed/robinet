@@ -44,6 +44,11 @@ SOURCES  = \
 	router.ml \
 	opache.ml \
 	search.ml \
+	myadmin_common.ml \
+	myadmin_home.ml \
+	myadmin_metrics.ml \
+	myadmin_logs.ml \
+	myadmin_api.ml \
 	myadmin.ml \
 	sim.ml \
 	wrapper.ml
@@ -85,7 +90,7 @@ EXAMPLES_BYTE = \
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
-REQUIRES = bitstring ppx_bitstring batteries
+REQUIRES = bitstring ppx_bitstring batteries yojson
 
 include $(top_srcdir)make.common
 

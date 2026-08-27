@@ -18,21 +18,35 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 (**
-  An HTTP server for monitoring/editing the virtual network.
-
-  This module now only holds the routing table; the handlers themselves live in
-  the myadmin_* modules.
+  Helpers shared by the MyAdmin page handlers.
 *)
 open Batteries
 
-(* Kept here for the benefit of the simulations that start it: *)
-let report_thread = Myadmin_metrics.report_thread
+let debug = false
 
-let make host port =
-    let res =
-        Myadmin_api.resources @
-        [ Str.regexp "/home.html$", Myadmin_home.home ;
-          Str.regexp "/$", Myadmin_home.home ;
-          Str.regexp "/metrics.html$", Myadmin_metrics.metrics ;
-          Str.regexp "/logs.html$", Myadmin_logs.logs ] in
-    Opache.(serve host ~port (multiplexer res))
+let to_js_string s =
+    "'"^ s ^"'"  (* TODDO *)
+
+let page_head_open resp =
+    Printf.fprintf resp {|<?xml version="1.0"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>RobiNet: MyAdmin</title>
+|}
+
+let page_head_close resp =
+    Printf.fprintf resp {|</head>
+<div>
+    <a href="home.html">home</a>
+    <a href="metrics.html">metrics</a>
+    <a href="logs.html">logs</a>
+</div>
+|}
+
+let page_head resp =
+    page_head_open resp ;
+    page_head_close resp
+
+let selected = " selected"

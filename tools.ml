@@ -582,7 +582,7 @@ type dev =
     { write : bitstring -> unit ; set_read : (bitstring -> unit) -> unit }
 
 let null_logger =
-    Log.make "voracious monster"
+    Log.make ()
 
 (** Obituary for ignored bits: *)
 let ignore_bits ?(logger=null_logger) bits =

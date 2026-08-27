@@ -18,21 +18,11 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 (**
-  An HTTP server for monitoring/editing the virtual network.
-
-  This module now only holds the routing table; the handlers themselves live in
-  the myadmin_* modules.
+  MyAdmin home page.
 *)
 open Batteries
+open Myadmin_common
 
-(* Kept here for the benefit of the simulations that start it: *)
-let report_thread = Myadmin_metrics.report_thread
-
-let make host port =
-    let res =
-        Myadmin_api.resources @
-        [ Str.regexp "/home.html$", Myadmin_home.home ;
-          Str.regexp "/$", Myadmin_home.home ;
-          Str.regexp "/metrics.html$", Myadmin_metrics.metrics ;
-          Str.regexp "/logs.html$", Myadmin_logs.logs ] in
-    Opache.(serve host ~port (multiplexer res))
+let home _mth _matches _vars _qry_body resp =
+    page_head resp ;
+    200, [ "Content-Type", "text/html" ]

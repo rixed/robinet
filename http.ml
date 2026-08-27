@@ -228,9 +228,6 @@ struct
                     | `HttpResponse (code, _) when (code >= 100 && code <= 199) || code = 204 || code = 304 ->
                         if debug then Printf.printf "Http: msg required to have no body\n" ;
                         return []
-                    | `HttpRequest ("GET", _) ->
-                        if debug then Printf.printf "Http: request required to have no body\n" ;
-                        return []
                     | _ -> (match headers_find "Transfer-Encoding" hs with
                         (* FIXME: when te _contains_ "chunked"? *)
                         | Some te when String.icompare te "chunked" = 0 ->
@@ -242,8 +239,19 @@ struct
                                 if debug then Printf.printf "Http: msg of size %d\n" cl ;
                                 take cl
                             | _ ->
-                                if debug then Printf.printf "Http: msg up to end of data\n" ;
-                                all ()))) in
+                                (match start with
+                                | `HttpRequest _ ->
+                                    (* A request with neither Transfer-Encoding
+                                     * nor Content-Length has no body at all
+                                     * (RFC 7230 3.3.3). Only a response may be
+                                     * delimited by the end of the connection,
+                                     * so waiting for more data here would hang
+                                     * every bodyless GET, DELETE, HEAD... *)
+                                    if debug then Printf.printf "Http: request has no body\n" ;
+                                    return []
+                                | _ ->
+                                    if debug then Printf.printf "Http: msg up to end of data\n" ;
+                                    all ())))) in
                 map_filter body_parser (msg_of start hs)
             | _ -> should_not_happen () in
         bind (seqf [ none (many (Peg.crlf ())) ;

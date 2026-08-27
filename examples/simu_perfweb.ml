@@ -6,7 +6,7 @@
 open Batteries
 open Tools
 
-let logger = Log.make ~size:1000 "webperf"
+let logger = Log.make ~size:1000 ()
 
 (** {1 Tools} *)
 
