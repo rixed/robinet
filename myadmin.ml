@@ -380,13 +380,13 @@ let find_widgets ?(vert_distance=0) ?(horiz_distance=0) widget =
         let visited = ref Set.String.empty in
         let is_close max_dist widget =
             if max_dist < 0 then (
-                Printf.printf "max dist %d < 0\n%!" max_dist ;
+                if debug then Printf.printf "max dist %d < 0\n%!" max_dist ;
                 false
             ) else if Set.String.mem (Widget.full_name widget) !visited then (
-                Printf.printf "already visited %s\n%!" (Widget.full_name widget) ;
+                if debug then Printf.printf "already visited %s\n%!" (Widget.full_name widget) ;
                 false
             ) else (
-                Printf.printf "Visiting widget %s\n%!" (Widget.full_name widget) ;
+                if debug then Printf.printf "Visiting widget %s\n%!" (Widget.full_name widget) ;
                 visited := Set.String.add (Widget.full_name widget) !visited ;
                 true
             ) in
@@ -399,9 +399,9 @@ let find_widgets ?(vert_distance=0) ?(horiz_distance=0) widget =
                 loop_horiz widgets max_horiz max_up max_down widget
             ) else widgets
         and loop_horiz widgets max_horiz max_up max_down widget =
-            Printf.printf "loop_horiz %d %d %d %S\n%!" max_horiz max_up max_down (Widget.full_name widget) ;
+            if debug then Printf.printf "loop_horiz %d %d %d %S\n%!" max_horiz max_up max_down (Widget.full_name widget) ;
             if is_close max_horiz widget then (
-                Printf.printf "Adding widget %s\n%!" (Widget.full_name widget) ;
+                if debug then Printf.printf "Adding widget %s\n%!" (Widget.full_name widget) ;
                 let widgets = widget :: widgets in
                 let widgets =
                     match widget.parent with
@@ -428,7 +428,7 @@ let find_widgets ?(vert_distance=0) ?(horiz_distance=0) widget =
                 ) widgets widget.peers
             ) else widgets in
         loop_horiz [] horiz_distance vert_distance vert_distance widget in
-    Printf.printf "Got these widgets: %a\n%!" (List.print (fun oc w -> String.print oc (Widget.full_name w))) widgets ;
+    if debug then Printf.printf "Got these widgets: %a\n%!" (List.print (fun oc w -> String.print oc (Widget.full_name w))) widgets ;
     widgets
 
 let get_logs ?(max_level=Log.max_level) widgets =
