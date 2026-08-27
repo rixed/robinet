@@ -656,24 +656,50 @@ struct
 
     module State =
     struct
-        type t = {  length : float ;  (** In meters. *)
-                     delay : Clock.Interval.t ; (** Computed from the length *)
-                error_rate : float ;  (** In faulty bits per transmitted bits *)
-              success_rate : int ;    (** The inverse of the above *)
+        type t = {
+            mutable length : float ;  (** In meters. *)
+             mutable delay : Clock.Interval.t ; (** Computed from the length *)
+        mutable error_rate : float ;  (** In faulty bits per transmitted bits *)
+      mutable success_rate : int ;    (** The inverse of the above *)
           mutable tot_bits : int ;    (** Both ways. *)
         mutable bit_shifts : int ;    (** Casualties in individual bits *)
            (** Boolean: true if from [a] to [b] (see [Cable.make] *)
               last_packets : (bool * bitstring) OrdArray.t ;
                     widget : Widget.t }
 
+        let delay length = Clock.Interval.sec (length /. 3e9)
+        let success_rate error_rate = int_of_float (1. /. error_rate)
+
         let make ?(length=10.) ?(error_rate=0.) ?(history=10)
                  ?(name="cable") () =
             let widget = Widget.make name in
-            let delay = Clock.Interval.sec (length /. 3e9)
-            and success_rate = int_of_float (1. /. error_rate) in
-            { length ; delay ; error_rate ; success_rate ; tot_bits = 0 ;
-              bit_shifts = 0 ; widget ;
-              last_packets = OrdArray.make history (false, empty_bitstring) }
+            let t = {
+                length ; delay = delay length ;
+                error_rate ; success_rate = success_rate error_rate ;
+                tot_bits = 0 ; bit_shifts = 0 ; widget ;
+                last_packets =
+                    OrdArray.make history (false, empty_bitstring) } in
+            widget.properties <- Widget.[
+                property "length"
+                    ~setter:(fun s ->
+                        let l = float_of_string s in
+                        t.length <- l ;
+                        t.delay <- delay l)
+                    ~getter:(fun () -> string_of_float t.length) ;
+                property "error rate"
+                    ~descr:"Faulty bits per transmitted bits."
+                    ~setter:(fun s ->
+                        let r = float_of_string s in
+                        t.error_rate <- r ;
+                        t.success_rate <- success_rate r)
+                    ~getter:(fun () -> string_of_float t.error_rate) ;
+                property "tot bits"
+                    ~descr:"Total number of transmitted bits (both ways)"
+                    ~getter:(fun () -> string_of_int t.tot_bits) ;
+                property "bit shifts"
+                    ~descr:"Number of flipped bits"
+                    ~getter:(fun () -> string_of_int t.bit_shifts) ] ;
+            t
     end
 
     let pass (st : State.t) dir bits =
