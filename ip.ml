@@ -725,7 +725,8 @@ module Pdu = struct
              src : 32 ;
              dst : 32 ;
              options : (hdr_len-5)*32 : bitstring ;
-             rest : -1 : bitstring |} ->
+             rest : -1 : bitstring |}
+          when hdr_len >= 5 && tot_len >= hdr_len * 4 ->
             (* TODO: control the checksum ? *)
             (* payload must have some extra padding at the end, or may have
              * been truncated: *)
@@ -740,6 +741,10 @@ module Pdu = struct
                ttl ; proto = Proto.o proto ;
                src = Addr.o32 src ; dst = Addr.o32 dst ; options ;
                payload = Payload.o payload }
+        | {| 4 : 4 ; hdr_len : 4 ; _tos : 8 ; tot_len : 16 ; _ |} ->
+            Error (lazy (Printf.sprintf
+                "Bogus IPv4 header: announces a header of %d bytes in a \
+                 packet of %d" (hdr_len * 4) tot_len))
         | {| 6 : 4 ; _ |} ->
             Error (lazy "IPv4 looks like v6")
         | {| _ |} ->
@@ -747,6 +752,26 @@ module Pdu = struct
 
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
+     *)
+
+    (* A cable with an error rate flips bits wherever it pleases, the length
+       fields included: whatever comes out, [unpack] must judge it rather than
+       raise -- an exception here escapes into the event handler and takes the
+       simulation with it. *)
+    (*$T unpack
+      (let bits0 = pack (make Proto.udp (Addr.random ()) (Addr.random ()) (randbs 8)) in \
+       let ok = ref true in \
+       for i = 0 to bitstring_length bits0 - 1 do \
+         let bits = bitstring_copy bits0 in \
+         bitstring_shift i bits ; \
+         (try ignore (unpack bits) with _ -> ok := false) \
+       done ; \
+       !ok)
+     *)
+    (*$T unpack
+      Result.is_bad (unpack (bitstring_of_string ("\x45\x00\x00\x03" ^ String.make 24 '\x00')))
+      Result.is_bad (unpack (bitstring_of_string ("\x40\x00\x00\x1c" ^ String.make 24 '\x00')))
+      Result.is_ok  (unpack (bitstring_of_string ("\x45\x00\x00\x1c" ^ String.make 24 '\x00')))
      *)
 
     (* Returns the source/dest ports from an IP PDU: *)
