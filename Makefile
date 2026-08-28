@@ -93,6 +93,12 @@ EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
 REQUIRES = bitstring ppx_bitstring batteries yojson
 
+# Tests that do not fit qtest's inline style: concurrency and the admin API.
+# Run them on their own for a longer, harder run:
+#   tests/stress.opt <seconds> <threads>
+EXTRA_TESTS = tests/stress.opt
+
+
 include $(top_srcdir)make.common
 
 .PHONY: examples run
@@ -104,6 +110,7 @@ run: robinet.top
 
 $(EXAMPLES_BYTE): $(ARCHIVE)
 $(EXAMPLES_OPT): $(XARCHIVE)
+$(EXTRA_TESTS): $(XARCHIVE)
 
 $(CLIB): $(C_SOURCES:.c=.o)
 	$(AR) rcs $@ $^
@@ -125,3 +132,4 @@ robinet.top: $(ARCHIVE)
 
 clean-spec:
 	$(RM) examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
+	$(RM) tests/*.cm[ioxa] tests/*.o tests/*.annot $(EXTRA_TESTS)

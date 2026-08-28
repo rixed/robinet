@@ -83,7 +83,7 @@ all_tests.cmx: all_tests.ml $(XOBJECTS)
 all_tests.ml: $(SOURCES)
 	$(QTEST) --shuffle --preamble 'open Batteries;; open Bitstring;; open Tools' -o $@ extract $^
 
-check: all_tests.opt
+check: all_tests.opt $(EXTRA_TESTS)
 	@for t in $^; do \
 		echo "Running $$t" ;\
 		./$$t ;\
