@@ -103,7 +103,7 @@ include $(top_srcdir)make.common
 
 .PHONY: examples run
 
-all: robinet.top examples
+all: robinet.top examples $(EXTRA_TESTS)
 
 run: robinet.top
 	rlwrap ./robinet.top -init robinet.init

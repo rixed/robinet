@@ -702,6 +702,8 @@ let int_of_fd (fd : Unix.file_descr) : int = Obj.magic fd
 
 let fd_of_int : int -> Unix.file_descr = Obj.magic
 
+let bad_fd = fd_of_int (-1)
+
 (* Like Option.delayed_default, but returns still an option, so they can be
  * chainned. *)
 let option_default_delayed_opt f a_opt =

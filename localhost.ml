@@ -36,7 +36,7 @@ let signal_err e =
 
 type t =
     { ctx : ctx ;
-      sock : Unix.file_descr ;
+      mutable sock : Unix.file_descr ;
       mutable recv : bitstring -> unit ;
       mutable is_closed : bool ;
       mutable reader : Thread.t option }
@@ -53,14 +53,30 @@ let tx t bits =
     ignore (aux 0)   (* FIXME: if this actually blocks, we may end up writing things in mixed order. tx should enqueue the payload and another thread should perform the actual write. *)
 
 let close t () =
-    Log.(log (logger t.ctx) Debug (lazy (Printf.sprintf "Closing socket"))) ;
-    t.is_closed <- true ;
-    Unix.close t.sock ;
-    (* In case the closing of the fd is not enough: *)
-    match t.reader with
-    | None -> ()
-    | Some _reader ->
+    if not t.is_closed then (
+        (* Set first, and with nothing in between: [close] is called both by the
+         * reader on end of file and by whoever is handling the connection, so
+         * two threads do race here, and anything between the test and the
+         * assignment -- a log line will do, since it allocates -- is a chance
+         * for both to get through and close the socket twice. *)
+        t.is_closed <- true ;
+        Log.(log (logger t.ctx) Debug (lazy (Printf.sprintf "Closing socket"))) ;
+        (* Not merely [close]: the reader thread is blocked in [read] on this
+         * very fd, and closing it then leaves the socket alive -- the blocked
+         * syscall still holds the file description -- so no FIN is ever sent
+         * and a client honouring "Connection: close" waits for end of file for
+         * ever. Shutting down first both sends the FIN and wakes the reader. *)
+        Unix.shutdown t.sock SHUTDOWN_ALL ;
+        Unix.close t.sock ;
+        t.sock <- bad_fd ;
+        (* Deliberately *not* joining the reader here. [close] is called from within
+         * an event handler, so this thread is holding the simulation's lock, while
+         * the reader needs that same lock to finish its round through the clock:
+         * waiting for it deadlocks the simulation, and with it every later
+         * connection. [is_closed] above is what makes the reader go away, and it
+         * needs no help from us to do it. *)
         t.reader <- None
+    )
 
 let rec reader t =
     if not t.is_closed then
@@ -74,24 +90,21 @@ let rec reader t =
             | _ -> 0 in
     Simulation.synch t.ctx.sim ;
     Log.(log (logger t.ctx) Debug (lazy (Printf.sprintf "Read %d bytes" r))) ;
-    if not t.is_closed then (
-        if r > 0 then (
-            let s = Bytes.sub buf 0 r |> Bytes.to_string in
-            Log.(log (logger t.ctx) Debug (lazy (Printf.sprintf "Received '%s'" s))) ;
-            (* Use the Clock so that the recv function is called in main thread *)
-            Simulation.asap t.ctx.sim t.recv (bitstring_of_string s) ;
-            reader t
-        ) else if r = 0 then (
-            Log.(log (logger t.ctx) Debug (lazy (Printf.sprintf "Received EOF"))) ;
-            Simulation.asap t.ctx.sim t.recv empty_bitstring ;
-            t.is_closed <- true
-        )
+    if r > 0 then (
+        let s = Bytes.sub buf 0 r |> Bytes.to_string in
+        Log.(log (logger t.ctx) Debug (lazy (Printf.sprintf "Received '%s'" s))) ;
+        (* Use the Clock so that the recv function is called in main thread *)
+        Simulation.asap t.ctx.sim t.recv (bitstring_of_string s) ;
+        reader t
+    ) else if r = 0 then (
+        Log.(log (logger t.ctx) Debug (lazy (Printf.sprintf "Received EOF"))) ;
+        Simulation.asap t.ctx.sim t.recv empty_bitstring ;
+        close t ()
     )
 
 let tcp_trx_of_socket ctx sock =
     let t = {
-        ctx ;
-        sock = sock ;
+        ctx ; sock ;
         recv = ignore_bits ~logger:(logger ctx) ;
         is_closed = false ;
         reader = None } in
@@ -108,7 +121,7 @@ let tcp_trx_of_socket ctx sock =
       Tcp.TRX.close     = close t ;
       Tcp.TRX.is_closed = (fun () -> t.is_closed) }
 
-(* TODO: make use of another thread for an assynchronous gethostbyname *)
+(* TODO: make use of another thread for an asynchronous gethostbyname *)
 let gethostbyname ctx name cont =
     let h_entry = Unix.gethostbyname name in
     Simulation.synch ctx.sim ;
