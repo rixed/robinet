@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>RobiNet</title>
+    <!-- Linked for now; to be vendored into www/ so that this works offline. -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"/>
+    <link rel="stylesheet" href="style.css"/>
+    <!-- Ours first: Alpine dispatches alpine:init as it starts, and a component
+         registered after that is never seen. -->
+    <script defer src="app.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body x-data="admin" x-init="start()">
+
+<div class="layout">
+
+    <!-- ============ left column: the clock, and every widget ============ -->
+    <aside>
+        <hgroup class="brand">
+            <h1>RobiNet</h1>
+            <p x-text="sims.length + ' simulation' + (sims.length === 1 ? '' : 's')"></p>
+        </hgroup>
+
+        <template x-for="s in sims" :key="s.id">
+            <article class="sim" :class="{ 'is-serving': s.id === servingId }">
+                <header>
+                    <strong x-text="s.name"></strong>
+                    <span class="badge" x-text="s.realtime ? 'realtime' : 'as fast as it can'"></span>
+                </header>
+
+                <dl class="clock">
+                    <dt>now</dt>       <dd x-text="s.now_str"></dd>
+                    <dt>events</dt>    <dd x-text="s.pending_events"></dd>
+                    <dt>paused for</dt><dd x-text="s.paused_total.toFixed(2) + 's'"></dd>
+                </dl>
+
+                <!-- The simulation serving this page must not pause itself, and
+                     the API would refuse anyway: do not offer it. -->
+                <div class="controls" x-show="s.id !== servingId">
+                    <button class="outline" x-show="!s.paused"
+                            @click="control(s, 'pause')">Pause</button>
+                    <button x-show="s.paused"
+                            @click="control(s, 'resume')">Resume</button>
+                    <button class="outline secondary" :disabled="!s.paused"
+                            @click="control(s, 'step?n=1')">Step</button>
+                    <button class="outline secondary" :disabled="!s.paused"
+                            @click="control(s, 'step?n=10')">Step 10</button>
+                </div>
+
+                <nav class="tree">
+                    <template x-for="row in tree(s.id)" :key="row.w.id">
+                        <div class="row" :style="'padding-left:' + (row.depth * 0.9) + 'rem'"
+                             :class="{ selected: isSelected(s.id, row.w.id) }">
+                            <button class="twisty" x-show="row.hasKids"
+                                    @click="toggle(s.id, row.w.id)"
+                                    x-text="row.open ? '▾' : '▸'"></button>
+                            <span class="twisty" x-show="!row.hasKids"></span>
+                            <a href="#" @click.prevent="select(s.id, row.w.id)"
+                               x-text="row.w.name || '(unnamed)'"></a>
+                            <span class="count" x-show="row.w.properties.length"
+                                  x-text="row.w.properties.length"></span>
+                        </div>
+                    </template>
+                </nav>
+            </article>
+        </template>
+    </aside>
+
+    <!-- ================= main: the selected widget ================= -->
+    <main>
+        <template x-if="!selected">
+            <article class="empty">
+                <p>Pick a widget on the left.</p>
+            </article>
+        </template>
+
+        <template x-if="selected">
+            <div>
+                <!-- ancestors, as a straight line, always -->
+                <nav class="breadcrumb" aria-label="ancestors">
+                    <template x-for="(a, i) in ancestors()" :key="a.id">
+                        <span>
+                            <a href="#" @click.prevent="select(selected.sim, a.id)"
+                               x-text="a.name"></a>
+                            <span class="sep">/</span>
+                        </span>
+                    </template>
+                    <strong x-text="selected.name"></strong>
+                </nav>
+
+                <!-- peers to the left, the widget, peers to the right -->
+                <div class="inspector">
+                    <div class="peers left">
+                        <template x-for="p in peersLeft()" :key="p.widget + '-' + p.via">
+                            <div class="peer">
+                                <a href="#" class="node peer-node"
+                                   @click.prevent="select(selected.sim, p.widget)"
+                                   x-text="nameOf(p.widget)"></a>
+                                <div class="cable">
+                                    <a href="#" x-show="p.via !== null"
+                                       @click.prevent="select(selected.sim, p.via)"
+                                       x-text="nameOf(p.via)"></a>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <div class="self">
+                        <div class="node current">
+                            <strong x-text="selected.name"></strong>
+                            <small x-text="selected.full_name"></small>
+                        </div>
+                    </div>
+
+                    <div class="peers right">
+                        <template x-for="p in peersRight()" :key="p.widget + '-' + p.via">
+                            <div class="peer">
+                                <div class="cable">
+                                    <a href="#" x-show="p.via !== null"
+                                       @click.prevent="select(selected.sim, p.via)"
+                                       x-text="nameOf(p.via)"></a>
+                                </div>
+                                <a href="#" class="node peer-node"
+                                   @click.prevent="select(selected.sim, p.widget)"
+                                   x-text="nameOf(p.widget)"></a>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- children, below, always -->
+                <div class="children" x-show="children().length">
+                    <template x-for="c in children()" :key="c.id">
+                        <a href="#" class="node child"
+                           @click.prevent="select(selected.sim, c.id)"
+                           x-text="c.name"></a>
+                    </template>
+                </div>
+
+                <!-- ================= properties ================= -->
+                <article class="properties">
+                    <header>
+                        <strong>Properties</strong>
+                        <button class="outline secondary" @click="loadProps()">Refresh</button>
+                    </header>
+
+                    <p x-show="!props.length"><small>This widget has none.</small></p>
+
+                    <table x-show="props.length">
+                        <thead>
+                            <tr><th>Name</th><th>Value</th><th>Description</th></tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="p in props" :key="p.name">
+                                <tr :class="{ 'has-error': p.error }">
+                                    <td x-text="p.name"></td>
+                                    <td>
+                                        <span x-show="p.read_only" class="ro"
+                                              x-text="p.value"></span>
+
+                                        <template x-if="!p.read_only && p.kind.type === 'bool'">
+                                            <input type="checkbox" :checked="p.draft === 'true'"
+                                                   @change="p.draft = $event.target.checked ? 'true' : 'false' ; save(p)"/>
+                                        </template>
+
+                                        <template x-if="!p.read_only && p.kind.type === 'enum'">
+                                            <select x-model="p.draft" @change="save(p)">
+                                                <template x-for="c in p.kind.choices" :key="c">
+                                                    <option :value="c" x-text="c"></option>
+                                                </template>
+                                            </select>
+                                        </template>
+
+                                        <template x-if="!p.read_only && p.kind.type === 'range'">
+                                            <span class="range">
+                                                <input type="range" :min="p.kind.min" :max="p.kind.max"
+                                                       :step="(p.kind.max - p.kind.min) / 1000"
+                                                       x-model="p.draft" @change="save(p)"/>
+                                                <input type="number" :min="p.kind.min" :max="p.kind.max"
+                                                       step="any" x-model="p.draft"
+                                                       @keydown.enter="save(p)" @blur="save(p)"/>
+                                            </span>
+                                        </template>
+
+                                        <template x-if="!p.read_only && (p.kind.type === 'int' || p.kind.type === 'float')">
+                                            <input type="number" :step="p.kind.type === 'int' ? 1 : 'any'"
+                                                   x-model="p.draft"
+                                                   @keydown.enter="save(p)" @blur="save(p)"/>
+                                        </template>
+
+                                        <template x-if="!p.read_only && p.kind.type === 'string'">
+                                            <input type="text" x-model="p.draft"
+                                                   @keydown.enter="save(p)" @blur="save(p)"/>
+                                        </template>
+                                    </td>
+                                    <td>
+                                        <small x-text="p.descr"></small>
+                                        <small class="error" x-show="p.error" x-text="p.error"></small>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </article>
+            </div>
+        </template>
+    </main>
+</div>
+
+<footer class="status" :class="{ bad: error }">
+    <span x-show="error" x-text="error"></span>
+    <span x-show="!error">
+        refreshing every <span x-text="period"></span>s
+    </span>
+    <label>
+        <input type="checkbox" x-model="live"/> live
+    </label>
+</footer>
+
+</body>
+</html>

@@ -25,3 +25,4 @@ TODO
 all_tests.ml
 core
 oUnit-*
+myadmin_assets.ml

@@ -50,6 +50,8 @@ SOURCES  = \
 	myadmin_metrics.ml \
 	myadmin_logs.ml \
 	myadmin_api.ml \
+	myadmin_assets.ml \
+	myadmin_ui.ml \
 	myadmin.ml \
 	sim.ml \
 	wrapper.ml
@@ -86,12 +88,18 @@ EXAMPLES_BYTE = \
 	examples/load_tester.byte \
 	examples/pcap_reorder.byte \
 	examples/simu_perfweb.byte \
-	examples/simu_dc_mirroring.byte
+	examples/simu_dc_mirroring.byte \
+	examples/admin_demo.byte
 
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
 REQUIRES = bitstring ppx_bitstring batteries yojson
+
+# The administration interface is written as ordinary files in www/ and
+# compiled into the library, so that a robinet program has nothing to install
+# beside it and no directory to locate at run time.
+UI_ASSETS = www/index.html www/app.js www/style.css
 
 # Tests that do not fit qtest's inline style: concurrency and the admin API.
 # Run them on their own for a longer, harder run:
@@ -111,6 +119,18 @@ run: robinet.top
 $(EXAMPLES_BYTE): $(ARCHIVE)
 $(EXAMPLES_OPT): $(XARCHIVE)
 $(EXTRA_TESTS): $(XARCHIVE)
+
+myadmin_assets.ml: $(UI_ASSETS)
+	@echo 'Embedding $(UI_ASSETS) into $@'
+	@{ echo '(* Generated from www/ by the Makefile. Do not edit. *)' ;\
+	   echo 'let all = [' ;\
+	   for f in $(UI_ASSETS) ; do \
+	     echo "  \"$$(basename $$f)\", {robinet|" ;\
+	     cat "$$f" ;\
+	     echo '|robinet} ;' ;\
+	   done ;\
+	   echo ']' ;\
+	 } > $@
 
 $(CLIB): $(C_SOURCES:.c=.o)
 	$(AR) rcs $@ $^
@@ -133,3 +153,4 @@ robinet.top: $(ARCHIVE)
 clean-spec:
 	$(RM) examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
 	$(RM) tests/*.cm[ioxa] tests/*.o tests/*.annot $(EXTRA_TESTS)
+	$(RM) myadmin_assets.ml

@@ -102,9 +102,22 @@ let json_of_property (p : Widget.property) =
             bad_request "Cannot read property %S: %s" p.name
                 (Printexc.to_string e)
         | v -> `String v in
+    let kind =
+        match p.kind with
+        | Widget.String -> `Assoc [ "type", `String "string" ]
+        | Int -> `Assoc [ "type", `String "int" ]
+        | Float -> `Assoc [ "type", `String "float" ]
+        | Bool -> `Assoc [ "type", `String "bool" ]
+        | Enum choices ->
+            `Assoc [ "type", `String "enum" ;
+                     "choices", `List (List.map (fun c -> `String c) choices) ]
+        | Range (mi, ma) ->
+            `Assoc [ "type", `String "range" ;
+                     "min", `Float mi ; "max", `Float ma ] in
     `Assoc [ "name", `String p.name ;
              "descr", `String p.descr ;
              "read_only", `Bool (p.setter = None) ;
+             "kind", kind ;
              "value", value ]
 
 let json_of_peer (p : Widget.peer) =
@@ -132,16 +145,16 @@ let json_of_widget (w : Widget.t) =
  *)
 
 let json_of_simulation (s : Simulation.t) =
-        `Assoc [ "id", `Int s.Simulation.id ;
-             "name", `String s.Simulation.name ;
-             "root", `Int (Simulation.root s).Widget.id ;
-             "now", `Float (Clock.Time.to_timestamp s.Simulation.now) ;
-             "now_str", `String (Clock.Time.to_string s.Simulation.now) ;
-             "realtime", `Bool s.Simulation.realtime ;
-             "running", `Bool s.Simulation.continue ;
-             "paused", `Bool s.Simulation.paused ;
-             "paused_total", `Float (s.Simulation.paused_total :> float) ;
-             "pending_events", `Int (Simulation.Events.cardinal s.Simulation.events) ]
+        `Assoc [ "id", `Int s.id ;
+             "name", `String s.name ;
+             "root", `Int s.root.Widget.id ;
+             "now", `Float (Clock.Time.to_timestamp (Simulation.now s)) ;
+             "now_str", `String (Clock.Time.to_string (Simulation.now s)) ;
+             "realtime", `Bool s.realtime ;
+             "running", `Bool s.continue ;
+             "paused", `Bool s.paused ;
+             "paused_total", `Float (s.paused_total :> float) ;
+             "pending_events", `Int (Simulation.Events.cardinal s.events) ]
 
 (* Reading a simulation's state means borrowing it from its own thread. *)
 let simulation_of_matches matches n =

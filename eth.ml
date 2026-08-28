@@ -683,23 +683,28 @@ struct
                     OrdArray.make history (false, empty_bitstring) } in
             widget.properties <- Widget.[
                 property "length"
+                    ~descr:"Length of the cable, in meters."
+                    ~kind:Float
                     ~setter:(fun s ->
                         let l = float_of_string s in
                         t.length <- l ;
                         t.delay <- delay l)
-                    ~getter:(fun () -> string_of_float t.length) ;
+                    ~getter:(fun () -> Printf.sprintf "%.12g" t.length) ;
                 property "error rate"
                     ~descr:"Faulty bits per transmitted bits."
+                    ~kind:(Range (0., 1.))
                     ~setter:(fun s ->
                         let r = float_of_string s in
                         t.error_rate <- r ;
                         t.success_rate <- success_rate r)
-                    ~getter:(fun () -> string_of_float t.error_rate) ;
+                    ~getter:(fun () -> Printf.sprintf "%.12g" t.error_rate) ;
                 property "tot bits"
                     ~descr:"Total number of transmitted bits (both ways)"
+                    ~kind:Int
                     ~getter:(fun () -> string_of_int t.tot_bits) ;
                 property "bit shifts"
                     ~descr:"Number of flipped bits"
+                    ~kind:Int
                     ~getter:(fun () -> string_of_int t.bit_shifts) ] ;
             t
     end

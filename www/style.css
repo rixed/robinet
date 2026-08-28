@@ -1,0 +1,232 @@
+/* On top of Pico, which styles the plain elements: only what Pico has no
+ * opinion about is set here -- the two column layout, the widget tree, and the
+ * picture of the selected widget. */
+
+:root {
+    --pico-form-element-spacing-vertical: .4rem;
+    --pico-form-element-spacing-horizontal: .5rem;
+    --pico-typography-spacing-vertical: .6rem;
+    --cable: var(--pico-muted-border-color);
+}
+
+body { padding: 0; }
+
+.layout {
+    display: grid;
+    grid-template-columns: minmax(15rem, 22rem) 1fr;
+    gap: 0;
+    min-height: 100vh;
+}
+
+/* ---------------------------------------------------------- left column */
+
+aside {
+    border-right: 1px solid var(--pico-muted-border-color);
+    padding: .8rem;
+    overflow-y: auto;
+    max-height: 100vh;
+}
+
+.brand { margin-bottom: .8rem; }
+.brand h1 { font-size: 1.3rem; margin: 0; }
+.brand p { margin: 0; font-size: .8rem; color: var(--pico-muted-color); }
+
+article.sim {
+    margin: 0 0 .8rem 0;
+    padding: .6rem;
+}
+article.sim > header {
+    padding: 0 0 .4rem 0;
+    margin: 0 0 .4rem 0;
+    display: flex;
+    align-items: baseline;
+    gap: .5rem;
+}
+/* The simulation serving this page: it is the one that must keep running. */
+article.sim.is-serving { border-left: 3px solid var(--pico-primary); }
+
+.badge {
+    font-size: .7rem;
+    color: var(--pico-muted-color);
+    margin-left: auto;
+}
+
+dl.clock {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0 .6rem;
+    margin: 0 0 .5rem 0;
+    font-size: .8rem;
+}
+dl.clock dt { color: var(--pico-muted-color); }
+dl.clock dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+.controls {
+    display: flex;
+    gap: .3rem;
+    margin-bottom: .6rem;
+}
+.controls button {
+    padding: .2rem .5rem;
+    font-size: .75rem;
+    margin: 0;
+    width: auto;
+}
+
+/* the foldable tree: flattened, indented by depth */
+nav.tree { font-size: .85rem; }
+nav.tree .row {
+    display: flex;
+    align-items: center;
+    gap: .2rem;
+    border-radius: var(--pico-border-radius);
+}
+nav.tree .row:hover { background: var(--pico-secondary-background); }
+nav.tree .row.selected {
+    background: var(--pico-primary-background);
+}
+nav.tree .row.selected a { color: var(--pico-primary-inverse); }
+nav.tree a {
+    text-decoration: none;
+    padding: .1rem 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+button.twisty, span.twisty {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    width: 1rem;
+    color: var(--pico-muted-color);
+    font-size: .7rem;
+    line-height: 1;
+}
+nav.tree .count {
+    font-size: .65rem;
+    color: var(--pico-muted-color);
+    padding: 0 .3rem;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 1rem;
+}
+
+/* ------------------------------------------------------------ main view */
+
+main { padding: 1rem 1.2rem; overflow-y: auto; max-height: 100vh; }
+article.empty { color: var(--pico-muted-color); }
+
+nav.breadcrumb {
+    font-size: .85rem;
+    margin-bottom: 1rem;
+    display: block;
+}
+nav.breadcrumb a { text-decoration: none; }
+nav.breadcrumb .sep { color: var(--pico-muted-color); margin: 0 .2rem; }
+
+/* The picture: peers to either side, the widget in the middle, children
+ * below. Fixed slots, so that revisiting a widget shows it the same way. */
+.inspector {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 0;
+}
+
+.node {
+    display: block;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    padding: .5rem .8rem;
+    text-decoration: none;
+    text-align: center;
+    background: var(--pico-card-background-color);
+}
+.node.current {
+    border-color: var(--pico-primary);
+    border-width: 2px;
+    padding: .8rem 1.2rem;
+}
+.node.current small {
+    display: block;
+    color: var(--pico-muted-color);
+    font-size: .7rem;
+}
+
+.peers { display: flex; flex-direction: column; gap: .5rem; }
+.peers.left { align-items: flex-end; }
+.peers.right { align-items: flex-start; }
+.peer { display: flex; align-items: center; width: 100%; }
+.peers.left .peer { justify-content: flex-end; }
+.peer .peer-node { flex: 0 1 auto; min-width: 0; }
+
+/* A cable is a real element, not a drawn line: it has properties of its own,
+ * and will grow capture controls. */
+.cable {
+    flex: 1 1 2rem;
+    min-width: 2rem;
+    border-top: 2px solid var(--cable);
+    text-align: center;
+    font-size: .7rem;
+    line-height: 0;
+}
+.cable a {
+    background: var(--pico-background-color);
+    padding: 0 .3rem;
+    text-decoration: none;
+    color: var(--pico-muted-color);
+    line-height: 1;
+}
+.cable a:hover { color: var(--pico-primary); }
+
+.children {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: .5rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 2px solid var(--cable);
+}
+
+/* ------------------------------------------------------------ properties */
+
+article.properties { margin-top: 2rem; }
+article.properties > header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+article.properties > header button {
+    margin: 0 0 0 auto;
+    width: auto;
+    padding: .2rem .6rem;
+    font-size: .75rem;
+}
+article.properties table { margin: 0; font-size: .9rem; }
+article.properties input, article.properties select { margin: 0; }
+article.properties td { vertical-align: middle; }
+.ro { font-variant-numeric: tabular-nums; color: var(--pico-muted-color); }
+.range { display: flex; align-items: center; gap: .5rem; }
+.range input[type=number] { width: 7rem; }
+tr.has-error input { border-color: var(--pico-del-color); }
+small.error { display: block; color: var(--pico-del-color); }
+
+/* --------------------------------------------------------------- status */
+
+footer.status {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    padding: .2rem .8rem;
+    font-size: .75rem;
+    background: var(--pico-card-background-color);
+    border-top: 1px solid var(--pico-muted-border-color);
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    color: var(--pico-muted-color);
+}
+footer.status.bad { color: var(--pico-del-color); }
+footer.status label { margin: 0 0 0 auto; font-size: .75rem; }
+footer.status input { margin: 0 .3rem 0 0; }

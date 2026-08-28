@@ -67,10 +67,25 @@ and property = { name : string ;
                 descr : string ;
                getter : (unit -> string) ;
                (* If that property can be set *)
-               setter : (string -> unit) option }
+               setter : (string -> unit) option ;
+               (* What the value looks like, so that the UI can offer the right
+                * input and reject nonsense before submitting it. Values still
+                * travel as strings: this only says how to render one. *)
+                 kind : kind }
 
-let property ?(descr="") ?setter ~getter name =
-    { name ; descr ; getter ; setter }
+and kind =
+    | String
+    | Int
+    | Float
+    (* "true" or "false", as the setter reads them *)
+    | Bool
+    (* One of those values, and nothing else *)
+    | Enum of string list
+    (* A number known to lie within those bounds *)
+    | Range of float * float
+
+let property ?(descr="") ?setter ?(kind=String) ~getter name =
+    { name ; descr ; getter ; setter ; kind }
 
 (* Beware that the widget graph is cyclic (parent/children and peers point back
  * at each other), so widgets must never be compared with the polymorphic

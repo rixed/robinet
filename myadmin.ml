@@ -31,6 +31,7 @@ let report_thread = Myadmin_metrics.report_thread
 let make sim host port =
     let res =
         Myadmin_api.resources sim @
+        Myadmin_ui.resources @
         [ Str.regexp "/home.html$", Myadmin_home.home ;
           Str.regexp "/$", Myadmin_home.home ;
           Str.regexp "/metrics.html$", Myadmin_metrics.metrics ;
