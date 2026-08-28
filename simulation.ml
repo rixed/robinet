@@ -245,12 +245,6 @@ let stop t () =
     t.continue <- false ;
     Condition.signal t.cond
 
-let end_of_time =
-    Time.o infinity
-
-let beginning_of_time =
-    Time.o neg_infinity
-
 (** [at t f x] will execute [f x] when simulation clock reaches time [t]. *)
 let at t (ts : Time.t) f x =
     let epsilon = Interval.usec 1. in

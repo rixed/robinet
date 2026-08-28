@@ -197,3 +197,9 @@ end = struct
 
     (*$>*)
 end
+
+let end_of_time =
+    Time.o infinity
+
+let beginning_of_time =
+    Time.o neg_infinity
