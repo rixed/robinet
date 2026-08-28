@@ -3,6 +3,12 @@
  * Everything here goes through the REST API; this file knows nothing about the
  * simulator beyond what /api serves. A widget is identified by the pair
  * (simulation id, widget id), which is how the API addresses it too.
+ *
+ * On failure the guiding rule is: never show something that looks current when
+ * it is not. A simulation that cannot be reached leaves the last known values
+ * on screen, but says so, marks them stale, and stops offering controls that
+ * would not work -- rather than quietly presenting yesterday's numbers, or an
+ * empty list that reads as "there is nothing here".
  */
 
 /* A property value arrives as JSON of its own type -- a number stays a number.
@@ -27,14 +33,33 @@ const encode = (p) => {
     }
 }
 
+/* Two kinds of failure, which want opposite treatment:
+ *  - 'offline': no answer at all. Everything is suspect, keep retrying.
+ *  - 'refused': the server answered, and said no. Only the thing we asked for
+ *    failed; it belongs next to that thing, and retrying would just fail again.
+ */
+class ApiError extends Error {
+    constructor(kind, status, message) {
+        super(message)
+        this.kind = kind
+        this.status = status
+    }
+}
+
 const api = async (path, options) => {
-    const resp = await fetch('/api' + path, options)
+    let resp
+    try {
+        resp = await fetch('/api' + path, options)
+    } catch (e) {
+        /* fetch only rejects when the request got no answer at all. */
+        throw new ApiError('offline', 0, 'no answer from the simulator')
+    }
     let body = null
     try { body = await resp.json() } catch (e) { /* no body, or not JSON */ }
-    if (!resp.ok) {
-        const msg = (body && body.error) || (resp.status + ' ' + resp.statusText)
-        throw new Error(msg)
-    }
+    if (!resp.ok)
+        throw new ApiError('refused', resp.status,
+                           (body && body.error) ||
+                           `${resp.status} ${resp.statusText}`)
     return body
 }
 
@@ -48,58 +73,171 @@ document.addEventListener('alpine:init', () => {
         /* "simId/widgetId" of the folded subtrees */
         folded: new Set(),
         selected: null,
+
         props: [],
-        error: null,
-        live: true,
+        /* 'loading' until we know, so that "this widget has none" is only ever
+         * said about a widget we actually managed to ask about. */
+        propsState: 'loading',
+        propsError: null,
+
+        /* 'connecting' | 'online' | 'offline' */
+        conn: 'connecting',
+        lastError: null,
+        lastOk: null,
+        /* seconds between polls when all is well, and the growing wait between
+         * attempts when it is not */
         period: 1,
+        backoff: 1,
+        maxBackoff: 20,
+        nextTryAt: null,
+        /* bumped every second purely so that the countdown re-renders */
+        tock: 0,
+        live: true,
+        /* simulation id -> the reason its last command was refused */
+        simError: {},
+
         /* Which simulation serves this page: the one that must never be
          * paused. It is the only one whose httpd widget we are talking to, so
          * we recognise it by that. */
         servingId: null,
 
-        async start() {
-            await this.reload()
-            /* Poll rather than push: opache answers whole responses, so there
-             * is no streaming to be had. */
-            setInterval(() => { if (this.live) this.refresh() }, this.period * 1000)
+        /*
+         * Connection state
+         */
+
+        get online() { return this.conn === 'online' },
+        get offline() { return this.conn === 'offline' },
+        /* Something is on screen, but we can no longer vouch for it. */
+        get stale() { return this.conn === 'offline' && this.lastOk !== null },
+
+        get retryIn() {
+            this.tock /* re-evaluate me every second */
+            if (!this.nextTryAt) return 0
+            return Math.max(0, Math.ceil((this.nextTryAt - Date.now()) / 1000))
         },
 
-        /* Full reload: the list of simulations and every widget tree. Only
-         * needed when the shape of things may have changed. */
-        async reload() {
+        get lastOkText() {
+            this.tock
+            if (!this.lastOk) return 'never'
+            const secs = Math.round((Date.now() - this.lastOk) / 1000)
+            if (secs < 2) return 'a moment ago'
+            if (secs < 60) return secs + 's ago'
+            return Math.floor(secs / 60) + 'min ago'
+        },
+
+        /* Every exchange with the server goes through here, so that the
+         * connection state is decided in one place rather than at each call
+         * site. Returns { ok, value } or { ok: false, error }. */
+        async exchange(fn) {
             try {
-                this.sims = await api('/simulations')
-                for (const s of this.sims) {
-                    const list = await api(`/simulations/${s.id}/widgets`)
-                    const byId = {}
-                    for (const w of list) byId[w.id] = w
-                    this.widgets[s.id] = byId
-                    this.roots[s.id] = s.root
-                    if (this.servingId === null &&
-                        list.some(w => w.name.startsWith('httpd:')))
-                        this.servingId = s.id
+                const value = await fn()
+                this.conn = 'online'
+                this.lastOk = Date.now()
+                this.lastError = null
+                this.backoff = 1
+                return { ok: true, value }
+            } catch (error) {
+                if (error.kind === 'offline') {
+                    this.conn = 'offline'
+                    this.lastError = error.message
+                } else {
+                    /* It answered, so we are not offline -- it just said no. */
+                    this.conn = 'online'
+                    this.lastOk = Date.now()
                 }
-                if (!this.selected && this.sims.length) {
-                    /* Open on something more interesting than a root if we can:
-                     * the first simulation that is not the one serving us. */
-                    const s = this.sims.find(s => s.id !== this.servingId)
-                                || this.sims[0]
-                    this.select(s.id, s.root)
-                }
-                this.error = null
-            } catch (e) {
-                this.error = e.message
+                return { ok: false, error }
             }
         },
 
-        /* Cheap refresh: clocks, and the selected widget's values. */
-        async refresh() {
-            try {
-                this.sims = await api('/simulations')
-                if (this.selected) await this.loadProps()
-                this.error = null
-            } catch (e) {
-                this.error = e.message
+        /*
+         * Polling
+         */
+
+        async start() {
+            setInterval(() => { this.tock++ }, 1000)
+            await this.reload()
+            this.schedule()
+        },
+
+        schedule() {
+            const delay = this.offline ? this.backoff : this.period
+            this.nextTryAt = Date.now() + delay * 1000
+            clearTimeout(this.timer)
+            this.timer = setTimeout(() => this.tick(), delay * 1000)
+        },
+
+        async tick() {
+            if (this.live) {
+                const wasOffline = this.offline
+                await this.poll()
+                if (wasOffline && this.online)
+                    /* The topology may have changed while we could not see it,
+                     * so come back with a full reload rather than a refresh. */
+                    await this.reload()
+                else if (this.offline)
+                    this.backoff = Math.min(this.backoff * 2, this.maxBackoff)
+            }
+            this.schedule()
+        },
+
+        /* Ask again straight away, whatever the backoff had planned. */
+        async retryNow() {
+            this.backoff = 1
+            clearTimeout(this.timer)
+            await this.poll()
+            if (this.online) await this.reload()
+            this.schedule()
+        },
+
+        /* The cheap poll: clocks, and the selected widget's values. */
+        async poll() {
+            const r = await this.exchange(() => api('/simulations'))
+            if (r.ok) this.sims = r.value
+            /* Ask for the properties even when the first call just failed:
+             * skipping it would leave the panel reporting itself as loaded,
+             * which is the one thing it must not do when it is not. */
+            if (this.selected) await this.loadProps()
+        },
+
+        /* Everything: the simulations and their widget trees. Needed whenever
+         * the shape of things may have changed. */
+        async reload() {
+            const r = await this.exchange(() => api('/simulations'))
+            if (!r.ok) return
+            const sims = r.value
+            const widgets = {}, roots = {}
+            let serving = null
+            for (const s of sims) {
+                const list = await this.exchange(() =>
+                    api(`/simulations/${s.id}/widgets`))
+                if (!list.ok) return   /* it went away mid-reload; try later */
+                const byId = {}
+                for (const w of list.value) byId[w.id] = w
+                widgets[s.id] = byId
+                roots[s.id] = s.root
+                if (serving === null &&
+                    list.value.some(w => w.name.startsWith('httpd:')))
+                    serving = s.id
+            }
+            this.sims = sims
+            this.widgets = widgets
+            this.roots = roots
+            this.servingId = serving
+            /* These describe attempts that are now history. */
+            this.simError = {}
+            /* A widget we were looking at may be gone. */
+            if (this.selected && !this.get(this.selected.sim, this.selected.id))
+                this.selected = null
+            if (!this.selected && sims.length) {
+                /* Open on something more interesting than a root if we can:
+                 * the first simulation that is not the one serving us. */
+                const s = sims.find(s => s.id !== serving) || sims[0]
+                await this.select(s.id, s.root)
+            } else if (this.selected) {
+                /* Refresh the copy we hold, in case its relations changed. */
+                const w = this.get(this.selected.sim, this.selected.id)
+                this.selected = Object.assign({ sim: this.selected.sim }, w)
+                await this.loadProps({ full: true })
             }
         },
 
@@ -123,7 +261,12 @@ document.addEventListener('alpine:init', () => {
             const w = this.get(simId, id)
             if (!w) return
             this.selected = Object.assign({ sim: simId }, w)
-            await this.loadProps()
+            /* Drop the previous widget's values rather than leaving them under
+             * the new widget's name while the request is in flight. */
+            this.props = []
+            this.propsState = 'loading'
+            this.propsError = null
+            await this.loadProps({ full: true })
         },
 
         /* From the root down to the selected widget's parent. */
@@ -189,46 +332,93 @@ document.addEventListener('alpine:init', () => {
          * Properties
          */
 
-        async loadProps() {
-            if (!this.selected) return
-            const { sim, id } = this.selected
-            try {
-                const ps = await api(`/simulations/${sim}/widgets/${id}/properties`)
-                /* Keep the draft the user is editing, so that a refresh landing
-                 * mid-edit does not yank the field from under them. */
-                const drafts = {}
-                for (const p of this.props) if (p.dirty) drafts[p.name] = p.draft
-                for (const p of ps) {
-                    p.text = asText(p.value)
-                    p.draft = (p.name in drafts) ? drafts[p.name] : p.text
-                    p.dirty = p.name in drafts
-                    p.error = null
-                }
-                this.props = ps
-            } catch (e) {
-                this.error = e.message
+        /* [full] adopts every value the simulator reports, editable fields
+         * included. Without it -- which is how the once-a-second poll asks --
+         * only the values that are merely displayed are refreshed, and the
+         * fields one can type in are left strictly alone.
+         *
+         * Anything else makes editing impossible: a poll landing between two
+         * keystrokes would put the old value back. A field showing a value a
+         * few seconds old matters far less than being able to change it, and
+         * the Refresh button is there to read the lot again. */
+        async loadProps({ full = false } = {}) {
+            if (!this.selected) {
+                this.props = []
+                this.propsState = 'loading'
+                return
             }
+            const { sim, id } = this.selected
+            const r = await this.exchange(() =>
+                api(`/simulations/${sim}/widgets/${id}/properties`))
+            if (!r.ok) {
+                /* Keep whatever we have, marked stale by the banner, rather
+                 * than emptying the table -- an empty table reads as "this
+                 * widget has no properties", which is a different statement. */
+                this.propsState = 'failed'
+                this.propsError = r.error.message
+                if (r.error.status === 404) await this.reload()
+                return
+            }
+            this.mergeProps(r.value, full)
+            this.propsState = 'loaded'
+            this.propsError = null
+        },
+
+        /* Fold what the simulator just said into what is on screen, reusing
+         * the property objects the inputs are bound to: replacing them would
+         * reset the inputs just as surely as overwriting their drafts. */
+        mergeProps(incoming, full) {
+            const known = {}
+            for (const p of this.props) known[p.name] = p
+            const merged = incoming.map(p => {
+                const old = known[p.name]
+                if (!old) {
+                    p.text = asText(p.value)
+                    p.draft = p.text
+                    p.dirty = false
+                    p.error = null
+                    return p
+                }
+                /* An editable field: not ours to touch unless asked. */
+                if (!full && !old.read_only) return old
+                old.value = p.value
+                old.text = asText(p.value)
+                old.descr = p.descr
+                old.kind = p.kind
+                old.read_only = p.read_only
+                /* Something typed but not accepted yet outlives even an
+                 * explicit refresh: it is the reader's, not ours to drop. */
+                if (!old.dirty) { old.draft = old.text ; old.error = null }
+                return old
+            })
+            /* Reassigning the array re-runs the x-for; when the same objects
+             * come back in the same order there is nothing to redraw. */
+            const same = merged.length === this.props.length &&
+                         merged.every((p, i) => p === this.props[i])
+            if (!same) this.props = merged
         },
 
         async save(p) {
             if (p.read_only || p.draft === p.text) { p.dirty = false ; return }
             const { sim, id } = this.selected
-            try {
-                /* The body is the value, as JSON. */
-                const updated = await api(
-                    `/simulations/${sim}/widgets/${id}/properties/${encodeURIComponent(p.name)}`,
-                    { method: 'PUT', body: encode(p) })
-                p.value = updated.value
-                p.text = asText(updated.value)
-                p.draft = p.text
-                p.dirty = false
-                p.error = null
-            } catch (e) {
-                /* Whatever the setter refused, say so next to the field rather
-                 * than in the status bar: it belongs to this property. */
-                p.error = e.message
+            const r = await this.exchange(() => api(
+                `/simulations/${sim}/widgets/${id}/properties/${encodeURIComponent(p.name)}`,
+                { method: 'PUT', body: encode(p) }))
+            if (!r.ok) {
+                /* Say which of the two happened: "the simulator refused 1e9"
+                 * and "we never reached the simulator" call for different
+                 * things from whoever is reading. */
+                p.error = r.error.kind === 'offline'
+                    ? 'not saved: no answer from the simulator'
+                    : r.error.message
                 p.dirty = true
+                return
             }
+            p.value = r.value.value
+            p.text = asText(r.value.value)
+            p.draft = p.text
+            p.dirty = false
+            p.error = null
         },
 
         /*
@@ -236,12 +426,15 @@ document.addEventListener('alpine:init', () => {
          */
 
         async control(sim, action) {
-            try {
-                await api(`/simulations/${sim.id}/${action}`, { method: 'POST' })
-                await this.refresh()
-            } catch (e) {
-                this.error = e.message
-            }
+            const r = await this.exchange(() =>
+                api(`/simulations/${sim.id}/${action}`, { method: 'POST' }))
+            /* Alpine does not see mutation of a nested object: replace it. */
+            this.simError = Object.assign({}, this.simError,
+                { [sim.id]: r.ok ? null
+                          : r.error.kind === 'offline'
+                            ? 'no answer from the simulator'
+                            : r.error.message })
+            if (r.ok) await this.poll()
         },
     }))
 })

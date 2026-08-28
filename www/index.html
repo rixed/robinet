@@ -14,7 +14,20 @@
 </head>
 <body x-data="admin" x-init="start()">
 
-<div class="layout">
+<!-- Not a corner of the status bar: if these numbers are no longer live, that
+     is the most important thing on the page. -->
+<div class="banner" x-show="offline" x-cloak>
+    <strong>No answer from the simulator.</strong>
+    <span x-show="lastOk">
+        Showing what was last known, <span x-text="lastOkText"></span>.
+    </span>
+    <span x-show="!lastOk">Never managed to reach it.</span>
+    <span x-show="live">Trying again in <span x-text="retryIn"></span>s.</span>
+    <span x-show="!live">Refresh is off.</span>
+    <button class="outline" @click="retryNow()">Try now</button>
+</div>
+
+<div class="layout" :class="{ stale: stale }">
 
     <!-- ============ left column: the clock, and every widget ============ -->
     <aside>
@@ -39,15 +52,19 @@
                 <!-- The simulation serving this page must not pause itself, and
                      the API would refuse anyway: do not offer it. -->
                 <div class="controls" x-show="s.id !== servingId">
-                    <button class="outline" x-show="!s.paused"
+                    <button class="outline" x-show="!s.paused" :disabled="!online"
                             @click="control(s, 'pause')">Pause</button>
-                    <button x-show="s.paused"
+                    <button x-show="s.paused" :disabled="!online"
                             @click="control(s, 'resume')">Resume</button>
-                    <button class="outline secondary" :disabled="!s.paused"
+                    <button class="outline secondary" :disabled="!online || !s.paused"
                             @click="control(s, 'step?n=1')">Step</button>
-                    <button class="outline secondary" :disabled="!s.paused"
+                    <button class="outline secondary" :disabled="!online || !s.paused"
                             @click="control(s, 'step?n=10')">Step 10</button>
                 </div>
+                <!-- Whatever this simulation refused, said where it happened. -->
+                <p class="sim-error" x-show="simError[s.id]" x-cloak>
+                    <small x-text="simError[s.id]"></small>
+                </p>
 
                 <nav class="tree">
                     <template x-for="row in tree(s.id)" :key="row.w.id">
@@ -143,10 +160,24 @@
                 <article class="properties">
                     <header>
                         <strong>Properties</strong>
-                        <button class="outline secondary" @click="loadProps()">Refresh</button>
+                        <!-- The live refresh deliberately leaves the fields
+                             below alone; this is how one asks for their true
+                             values back. -->
+                        <button class="outline secondary"
+                                :disabled="!online || !props.length"
+                                title="Read every value again, the editable ones included"
+                                @click="loadProps({ full: true })">Refresh</button>
                     </header>
 
-                    <p x-show="!props.length"><small>This widget has none.</small></p>
+                    <p x-show="propsState === 'loading'" x-cloak>
+                        <small>Reading them&hellip;</small></p>
+                    <p x-show="propsState === 'loaded' && !props.length" x-cloak>
+                        <small>This widget has none.</small></p>
+                    <p class="sim-error" x-show="propsState === 'failed'" x-cloak>
+                        <small x-text="props.length
+                                       ? 'Could not read them again: ' + propsError
+                                       : 'Could not read them: ' + propsError"></small>
+                    </p>
 
                     <table x-show="props.length">
                         <thead>
@@ -161,12 +192,12 @@
                                               x-text="p.text"></span>
 
                                         <template x-if="!p.read_only && p.kind.type === 'bool'">
-                                            <input type="checkbox" :checked="p.draft === 'true'"
+                                            <input type="checkbox" :disabled="!online" :checked="p.draft === 'true'"
                                                    @change="p.draft = $event.target.checked ? 'true' : 'false' ; save(p)"/>
                                         </template>
 
                                         <template x-if="!p.read_only && p.kind.type === 'enum'">
-                                            <select x-model="p.draft" @change="save(p)">
+                                            <select :disabled="!online" x-model="p.draft" @change="save(p)">
                                                 <template x-for="c in p.kind.choices" :key="c">
                                                     <option :value="c" x-text="c"></option>
                                                 </template>
@@ -175,23 +206,23 @@
 
                                         <template x-if="!p.read_only && p.kind.type === 'range'">
                                             <span class="range">
-                                                <input type="range" :min="p.kind.min" :max="p.kind.max"
+                                                <input type="range" :disabled="!online" :min="p.kind.min" :max="p.kind.max"
                                                        :step="(p.kind.max - p.kind.min) / 1000"
                                                        x-model="p.draft" @change="save(p)"/>
-                                                <input type="number" :min="p.kind.min" :max="p.kind.max"
+                                                <input type="number" :disabled="!online" :min="p.kind.min" :max="p.kind.max"
                                                        step="any" x-model="p.draft"
                                                        @keydown.enter="save(p)" @blur="save(p)"/>
                                             </span>
                                         </template>
 
                                         <template x-if="!p.read_only && (p.kind.type === 'int' || p.kind.type === 'float')">
-                                            <input type="number" :step="p.kind.type === 'int' ? 1 : 'any'"
+                                            <input type="number" :disabled="!online" :step="p.kind.type === 'int' ? 1 : 'any'"
                                                    x-model="p.draft"
                                                    @keydown.enter="save(p)" @blur="save(p)"/>
                                         </template>
 
                                         <template x-if="!p.read_only && p.kind.type === 'string'">
-                                            <input type="text" x-model="p.draft"
+                                            <input type="text" :disabled="!online" x-model="p.draft"
                                                    @keydown.enter="save(p)" @blur="save(p)"/>
                                         </template>
                                     </td>
@@ -209,12 +240,15 @@
     </main>
 </div>
 
-<footer class="status" :class="{ bad: error }">
-    <span x-show="error" x-text="error"></span>
-    <span x-show="!error">
-        refreshing every <span x-text="period"></span>s
+<footer class="status" :class="{ bad: offline }">
+    <span x-show="conn === 'connecting'" x-cloak>connecting&hellip;</span>
+    <span x-show="online" x-cloak>
+        connected, refreshing every <span x-text="period"></span>s
     </span>
-    <label>
+    <span x-show="offline" x-cloak>
+        no answer &mdash; last heard from <span x-text="lastOkText"></span>
+    </span>
+    <label title="Keep the read-only values up to date; editable fields are left as they are">
         <input type="checkbox" x-model="live"/> live
     </label>
 </footer>

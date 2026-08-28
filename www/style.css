@@ -3,19 +3,36 @@
  * picture of the selected widget. */
 
 :root {
-    --pico-form-element-spacing-vertical: .4rem;
-    --pico-form-element-spacing-horizontal: .5rem;
-    --pico-typography-spacing-vertical: .6rem;
+    /* Pico grows the root font with the viewport, up to 21px, which is right
+     * for prose and wasteful here: this is an instrument panel, and there is
+     * already more worth showing than there is room for. Everything below is
+     * in rem, so this one number sets the density of the whole page. */
+    font-size: 87.5%;
+    --pico-line-height: 1.4;
+    /* Pico derives most of its paddings and margins from this. */
+    --pico-spacing: .7rem;
+    --pico-form-element-spacing-vertical: .25rem;
+    --pico-form-element-spacing-horizontal: .4rem;
+    --pico-typography-spacing-vertical: .5rem;
     --cable: var(--pico-muted-border-color);
 }
 
-body { padding: 0; }
+/* A column, so that the banner takes the room it needs and the two panes get
+ * what is left -- rather than each being 100vh and the banner pushing the
+ * bottom of them off the screen. */
+body {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
 
 .layout {
     display: grid;
     grid-template-columns: minmax(15rem, 22rem) 1fr;
     gap: 0;
-    min-height: 100vh;
+    flex: 1;
+    min-height: 0;
 }
 
 /* ---------------------------------------------------------- left column */
@@ -24,7 +41,6 @@ aside {
     border-right: 1px solid var(--pico-muted-border-color);
     padding: .8rem;
     overflow-y: auto;
-    max-height: 100vh;
 }
 
 .brand { margin-bottom: .8rem; }
@@ -114,7 +130,7 @@ nav.tree .count {
 
 /* ------------------------------------------------------------ main view */
 
-main { padding: 1rem 1.2rem; overflow-y: auto; max-height: 100vh; }
+main { padding: 1rem 1.2rem; overflow-y: auto; }
 article.empty { color: var(--pico-muted-color); }
 
 nav.breadcrumb {
@@ -206,6 +222,11 @@ article.properties > header button {
 }
 article.properties table { margin: 0; font-size: .9rem; }
 article.properties input, article.properties select { margin: 0; }
+/* A field as wide as the column says nothing about the value; keep them the
+ * size of what they hold, and the description where the eye expects it. */
+article.properties input[type=text],
+article.properties input[type=number] { max-width: 12rem; }
+article.properties select { max-width: 12rem; }
 article.properties td { vertical-align: middle; }
 .ro { font-variant-numeric: tabular-nums; color: var(--pico-muted-color); }
 .range { display: flex; align-items: center; gap: .5rem; }
@@ -216,8 +237,6 @@ small.error { display: block; color: var(--pico-del-color); }
 /* --------------------------------------------------------------- status */
 
 footer.status {
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
     padding: .2rem .8rem;
     font-size: .75rem;
     background: var(--pico-card-background-color);
@@ -230,3 +249,44 @@ footer.status {
 footer.status.bad { color: var(--pico-del-color); }
 footer.status label { margin: 0 0 0 auto; font-size: .75rem; }
 footer.status input { margin: 0 .3rem 0 0; }
+
+/* --------------------------------------------------------------- failure */
+
+/* Alpine only removes x-show'd elements once it has booted; without this they
+ * all flash on screen first. */
+[x-cloak] { display: none !important; }
+
+.banner {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    padding: .5rem .8rem;
+    background: var(--pico-del-color);
+    color: var(--pico-primary-inverse);
+    font-size: .85rem;
+}
+/* Set outright rather than through Pico's variables: [.outline] assigns those
+ * itself, and the blue it picks is barely legible on the red. */
+.banner button {
+    margin: 0 0 0 auto;
+    width: auto;
+    padding: .1rem .6rem;
+    font-size: .75rem;
+    color: var(--pico-primary-inverse);
+    border-color: var(--pico-primary-inverse);
+    background: transparent;
+}
+.banner button:hover, .banner button:focus {
+    color: var(--pico-primary-inverse);
+    border-color: var(--pico-primary-inverse);
+    background: rgba(255, 255, 255, .18);
+}
+
+/* What is on screen is the last we knew, not what is true now. */
+.layout.stale main,
+.layout.stale dl.clock,
+.layout.stale article.properties {
+    opacity: .55;
+}
+
+p.sim-error { margin: .2rem 0 0 0; color: var(--pico-del-color); }
