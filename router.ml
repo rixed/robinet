@@ -481,7 +481,7 @@ struct
                [ Ip.Addr.of_string "192.168.2.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
                [ Ip.Addr.of_string "192.168.3.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () |] in
         let sim = Simulation.make ~realtime:false "test-router" in
-        let widget = Widget.make ~parent:(Simulation.root sim) "test" in
+        let widget = Widget.make ~parent:sim.root "test" in
         let router = make_from_addrs addrs widget in
 
         (* Now we will count incoming packets from each iface (ARP requests, actually) : *)
@@ -635,14 +635,14 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     (*Log.console_lvl := Log.Debug ;*)
     let sim = Simulation.make ~realtime:false "test-gw" in
     let public_ip = Ip.Addr.of_string "80.82.17.127" in
-    let gw_trx = make_gw ~parent:(Simulation.root sim) public_ip (Ip.Cidr.of_string "192.168.0.0/16") in
+    let gw_trx = make_gw ~parent:sim.root public_ip (Ip.Cidr.of_string "192.168.0.0/16") in
     let gateways = Eth.[ State.gw_selector (), Some (Gateway.of_string "192.168.0.1") ] in
     let netmask = Ip.Addr.of_string "255.255.255.0" in
-    let desktop : Host.t = Host.make_dhcp ~parent:(Simulation.root sim) ~netmask ~gateways "desktop" in
+    let desktop : Host.t = Host.make_dhcp ~parent:sim.root ~netmask ~gateways "desktop" in
     desktop.trx.dev.set_read gw_trx.trx.ins.write ;
     ignore (desktop.trx.dev.write <-= gw_trx.trx) ;
     let server_ip = Ip.Addr.of_string "42.43.44.45" in
-    let server_eth = Eth.(TRX.make State.(make ~parent:(Simulation.root sim) ~my_addresses:[ make_my_ip_address server_ip ] ())) in
+    let server_eth = Eth.(TRX.make State.(make ~parent:sim.root ~my_addresses:[ make_my_ip_address server_ip ] ())) in
     let src = ref None in
     let server_recv bits = (* check source IP is the public one (NATed) *)
         let ip = Ip.Pdu.unpack bits |> Result.get_ok in

@@ -86,7 +86,7 @@ let tick = Clock.Interval.msec 100.
 
 let make_net () =
     let net = Simulation.make ~realtime:false "net" in
-    let parent = Simulation.root net in
+    let parent = net.root in
     let netmask = Ip.Addr.of_string "255.255.255.0" in
     let h1 =
         Host.make_static ~parent ~netmask (Ip.Addr.of_string "192.168.1.1") "h1"
@@ -351,7 +351,7 @@ let test_http net cable duration nthreads =
         check "a simulation's root cannot be deleted"
             (fst (http ~meth:"DELETE" port
                       (Printf.sprintf "/api/simulations/%d/widgets/%d"
-                          net_id (Simulation.root net).Widget.id)) = 400) ;
+                          net_id net.root.Widget.id)) = 400) ;
 
         (* Then, that it keeps answering while hammered from all sides -- which
          * is the whole point of myadmin living in its own simulation. *)

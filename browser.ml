@@ -186,7 +186,7 @@ let cookie_string t host path =
 (*$R
     let sim = Simulation.make ~realtime:false "test-browser" in
     let netmask = Ip.Addr.all_ones in
-    let host : Host.t = Host.make_static ~parent:(Simulation.root sim) ~netmask (Ip.Addr.of_dotted_string_exc "1.2.3.4") "test" in
+    let host : Host.t = Host.make_static ~parent:sim.root ~netmask (Ip.Addr.of_dotted_string_exc "1.2.3.4") "test" in
     let t = make host.trx in
     store_cookies t "www.example.com" "/" [ "Set-Cookie", "SID=31d4" ] ;
     assert_bool "retrieve cokie"

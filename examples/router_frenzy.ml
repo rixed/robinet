@@ -32,7 +32,7 @@ let forward_traffic (widget : Widget.t) ifname input_dev =
     let log_paquet what to_string f b =
         Log.(log widget.logger Debug (lazy (Printf.sprintf "%s: %s" what (to_string b)))) ;
         f b in
-    let iface = Pcap.openif ~parent:(Simulation.root sim) ifname in
+    let iface = Pcap.openif ~parent:sim.root ifname in
     let pcap_to_string b =
         let len = Bitstring.bitstring_length b / 8 in
         Printf.sprintf "packet of %d byte(s)" len in
@@ -408,7 +408,7 @@ let main =
             target
     ) targets ;
     (* Start the simulation *)
-    let widget = Widget.make ~parent:(Simulation.root sim) ~size:1000 "routerz" in
+    let widget = Widget.make ~parent:sim.root ~size:1000 "routerz" in
     Log.console_lvl := Log.Debug ;
     Log.(log widget.logger Info (lazy
         (Printf.sprintf2 "Building network with:\n%a\n\

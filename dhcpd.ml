@@ -203,11 +203,11 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
     let sim = Simulation.make ~realtime:false "test-dhcpd" in
     (*Log.console_lvl := Log.Debug ;*)
     let netmask = Ip.Addr.all_ones in
-    let srv : Host.t = Host.make_static ~parent:(Simulation.root sim) ~netmask (Ip.Addr.random ()) "server" in
+    let srv : Host.t = Host.make_static ~parent:sim.root ~netmask (Ip.Addr.random ()) "server" in
     let my_net = Ip.Cidr.random () in
-    let st = State.make ~parent:(Simulation.root sim) (Ip.Range.of_cidr my_net) in
+    let st = State.make ~parent:sim.root (Ip.Range.of_cidr my_net) in
     serve st srv.trx ;
-    let clt : Host.t = Host.make_dhcp ~parent:(Simulation.root sim) ~netmask "client" in
+    let clt : Host.t = Host.make_dhcp ~parent:sim.root ~netmask "client" in
     srv.trx.dev.set_read clt.trx.dev.write ;
     clt.trx.dev.set_read srv.trx.dev.write ;
     Simulation.run sim false ;

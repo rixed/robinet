@@ -58,30 +58,30 @@ let random_tcp_streams simult avg_len =
             Tcp.Pdu.make ~src_port:cnx.src_port ~dst_port:cnx.dst_port ~
 *)
 
-let input_of sim = function
+let input_of (sim : Simulation.t) = function
     | File name ->
         Pcap.enum_of_file name
     | Iface name ->
-        let iface = Pcap.openif ~parent:(Simulation.root sim) name in
+        let iface = Pcap.openif ~parent:sim.root name in
         Enum.from (fun () -> Pcap.sniff iface)
     | Tcps _n ->
         assert false
         (*random_tcp_streams n 100*)
 
 
-let sink_to sim = function
+let sink_to (sim : Simulation.t) = function
     | File name ->
         let write, close = Pcap.Pdu.save name in
         at_exit close ;
         Enum.iter write
     | Iface name ->
-        let iface = Pcap.openif ~parent:(Simulation.root sim) ~promisc:false name in
+        let iface = Pcap.openif ~parent:sim.root ~promisc:false name in
         let inject_f pdu = Pcap.inject iface (pdu.Pcap.Pdu.payload :> bitstring) in
         Enum.iter inject_f
     | Tcps _n ->
         assert false
 
-let replay sim offset n inps outs =
+let replay (sim : Simulation.t) offset n inps outs =
     (* TODO: use several inputs *)
     let inp = List.hd inps and out = List.hd outs in
     let open Packet in

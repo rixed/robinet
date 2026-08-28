@@ -71,13 +71,13 @@ let matched matches n =
 
 (* A widget is identified by the pair (simulation, widget), since its
  * inventory is its simulation's tree. *)
-let widget_of_matches sim matches n =
+let widget_of_matches (sim : Simulation.t) matches n =
     let s = matched matches n in
     match int_of_string s with
     | exception _ ->
         bad_request "Not a widget id: %S" s
     | id ->
-        (match Widget.find (Simulation.root sim) id with
+        (match Widget.find sim.root id with
         | None ->
             not_found "Simulation %s has no widget %d" (Simulation.name sim) id
         | Some w -> w)
@@ -198,7 +198,7 @@ let get_widgets _mth matches vars _qry_body resp =
     Simulation.borrow sim (fun () ->
         let widgets =
             match Hashtbl.find_option vars "path" with
-            | Some path -> Widget.find_by_path (Simulation.root sim) path
+            | Some path -> Widget.find_by_path sim.root path
             | None -> Simulation.widgets sim in
         let widgets =
             List.sort (fun (a : Widget.t) b -> Int.compare a.id b.id) widgets in
@@ -213,7 +213,7 @@ let delete_widget _mth matches _vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
     Simulation.borrow sim (fun () ->
         let w = widget_of_matches sim matches 2 in
-        if w == Simulation.root sim then
+        if w == sim.root then
             bad_request "%s is the root of simulation %s and cannot be deleted"
                 (Widget.full_name w) (Simulation.name sim) ;
         let full_name = Widget.full_name w in

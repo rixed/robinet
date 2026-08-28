@@ -263,7 +263,7 @@ let load name =
         of_csv_file ic name)
 
 (* creates all the nodes and returns an index allowing to reach any (named) node by name *)
-let instanciate sim t =
+let instanciate (sim : Simulation.t) t =
     Printf.printf "Net: instanciate net %s\n" t.name ;
     let hubs = Hashtbl.create 11 in
     let switches = Hashtbl.create 11 in
@@ -272,23 +272,23 @@ let instanciate sim t =
     let create_node { node_name = name ; elmt ; _ } = match elmt with
         | Hub h ->
             Hashtbl.add hubs name
-                (Hub.Repeater.make ~parent:(Simulation.root sim) h.hub_num_ports name)
+                (Hub.Repeater.make ~parent:sim.root h.hub_num_ports name)
         | Switch s ->
             Hashtbl.add switches name
-                (Hub.Switch.make ~parent:(Simulation.root sim) s.switch_num_ports s.switch_num_macs name)
+                (Hub.Switch.make ~parent:sim.root s.switch_num_ports s.switch_num_macs name)
         | Host h ->
             let gateways = [ Eth.State.gw_selector (), Some h.host_gw ] in
             Hashtbl.add hosts name
                 (match h.host_ip with
                 | None ->
-                    Host.make_dhcp ~parent:(Simulation.root sim) ~gateways
+                    Host.make_dhcp ~parent:sim.root ~gateways
                                    ~search_sfx:h.host_search_sfx
                                    ~nameserver:h.host_nameserver
                                    ~netmask:h.host_netmask
                                    ~mac:h.host_mac
                                    name
                 | Some ip ->
-                    Host.make_static ~parent:(Simulation.root sim) ~gateways
+                    Host.make_static ~parent:sim.root ~gateways
                                      ~search_sfx:h.host_search_sfx
                                      ~nameserver:h.host_nameserver
                                      ~netmask:h.host_netmask

@@ -35,7 +35,7 @@ let find_widget id =
     (* Batteries' find_map raises rather than returning an option: *)
     try
         Simulation.all () |>
-        List.find_map (fun s -> Widget.find (Simulation.root s) id) |>
+        List.find_map (fun s -> Widget.find s.Simulation.root id) |>
         Option.some
     with Not_found -> None
 
@@ -115,7 +115,7 @@ let get_logs ?(max_level=Log.max_level) widgets =
 let logs_menu resp selected_id also_selected ignored_widgets =
     (* The root layer is composed of all widgets without parents: *)
     let roots =
-        Simulation.all () |> List.map Simulation.root in
+        Simulation.all () |> List.map (fun s -> s.Simulation.root) in
     let rec num_descendants widget =
         List.fold_left (fun num child ->
             num + num_descendants child
@@ -339,7 +339,7 @@ let logs _mth _matches vars _qry_body resp =
     page_head_close resp ;
     let all_widgets =
         Simulation.all () |>
-        List.map (fun s -> Widget.descendants (Simulation.root s)) |>
+        List.map (fun s -> Widget.descendants s.Simulation.root) |>
         List.concat |> Array.of_list in
     Array.fast_sort (fun (a : Widget.t) b ->
         String.compare (Widget.full_name a) (Widget.full_name b)) all_widgets ;

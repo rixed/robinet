@@ -129,8 +129,8 @@ struct
                 Ok ())))
 
     (** Returns a sink toward the real world via the named interface: *)
-    let make_sink sim iface_name =
-        let iface = Pcap.openif ~parent:(Simulation.root sim) ~caplen:1800 iface_name in
+    let make_sink (sim : Simulation.t) iface_name =
+        let iface = Pcap.openif ~parent:sim.root ~caplen:1800 iface_name in
         (* As we always [connect] both read and write, just silently ignore
          * calls to [set_read] instead of reporting an error: *)
         let write bits =
@@ -141,9 +141,9 @@ struct
         Simple { equip = [] ; plugs = [ plug ] }
 
     (* A repeater as a Net.t *)
-    let make_repeater sim n name =
+    let make_repeater (sim : Simulation.t) n name =
         Printf.printf "Build repeater with %d ifaces\n%!" n ;
-        let r = Hub.Repeater.make ~parent:(Simulation.root sim) n name in
+        let r = Hub.Repeater.make ~parent:sim.root n name in
         let plugs = List.init n (fun i ->
             let iface_name = "iface#"^ string_of_int i in
             Plug.make iface_name (Hub.Repeater.iface r i)) in
@@ -151,8 +151,8 @@ struct
 
     (** Returns a net representing the external network via the given interface,
      * and the thread that sniffs packets. *)
-    let make_real_net sim iface_name =
-        let iface = Pcap.openif ~parent:(Simulation.root sim) ~caplen:1800 iface_name in
+    let make_real_net (sim : Simulation.t) iface_name =
+        let iface = Pcap.openif ~parent:sim.root ~caplen:1800 iface_name in
         let emit = ref (fun _bits -> ()) in
         let plug = Plug.make iface_name { write = Pcap.inject iface ;
                                           set_read = fun em -> emit := em } in
@@ -160,30 +160,30 @@ struct
         Pcap.sniffer iface (fun bits -> !emit bits)
 
     (** Returns a net with an unlimited supply of plugs that performs as a router. *)
-    let make_internet sim =
+    let make_internet (sim : Simulation.t) =
         (* A big switch for now *)
         let nb_ifaces = 10 in
-        let sw = Hub.Switch.make ~parent:(Simulation.root sim) nb_ifaces 5000 "Internet" in
+        let sw = Hub.Switch.make ~parent:sim.root nb_ifaces 5000 "Internet" in
         let plugs = List.init nb_ifaces (fun i ->
             Plug.make "" (Hub.Switch.iface sw i)) in
         Simple { equip = [ Switch sw ] ; plugs }
 
     (* Build a single server (public static IP and name) as a Net.t: *)
-    let make_server sim ?on ?(name=Host.Name.random()) ?nameserver public_ip =
+    let make_server (sim : Simulation.t) ?on ?(name=Host.Name.random()) ?nameserver public_ip =
         let netmask = Ip.Addr.zero in (* Should this be the default? *)
         let host : Host.t =
-            Host.make_static ~parent:(Simulation.root sim) ?nameserver ?on ~netmask public_ip name in
+            Host.make_static ~parent:sim.root ?nameserver ?on ~netmask public_ip name in
         let plug = Plug.make "itf" host.trx.dev in
         Simple { equip = [ Host host.trx ] ; plugs = [ plug ] }
 
     (** Returns an _empty_ LAN with enough room for [n] hosts.
      * A LAN consists of a switch connected to a router/dhcp server/name server/nater with an "exit" plug.
      * See make_lan_host to add a host in this LAN. *)
-    let make_lan sim ?(lan_name="homelan") ?(public_ip=Ip.Addr.random ()) nameserver n =
+    let make_lan (sim : Simulation.t) ?(lan_name="homelan") ?(public_ip=Ip.Addr.random ()) nameserver n =
         let cidr = Ip.Cidr.of_string "192.168.0.0/16" in
         let gw : Router.gw_trx =
-            Router.make_gw ~parent:(Simulation.root sim) ~nameserver ~name:("gw."^lan_name) public_ip cidr in
-        let sw = Hub.Switch.make ~parent:(Simulation.root sim) (n+1) (5*n) ("switch."^lan_name) in
+            Router.make_gw ~parent:sim.root ~nameserver ~name:("gw."^lan_name) public_ip cidr in
+        let sw = Hub.Switch.make ~parent:sim.root (n+1) (5*n) ("switch."^lan_name) in
         Hub.Switch.set_read sw n gw.trx.ins.write ;
         gw.trx.ins.set_read (Hub.Switch.write sw n) ;
         let plug = Plug.make lan_name gw.trx.out in
@@ -200,7 +200,7 @@ struct
             let netmask = Ip.Addr.of_string "255.255.0.0" in
             let gateways = [ Eth.State.gw_selector (), Some (Eth.Gateway.IPv4 gw_ip) ] in
             let h :Host.t =
-                Host.make_dhcp ~parent:(Simulation.root sim) ?on ~gateways ~nameserver:srv_ip ~netmask name in
+                Host.make_dhcp ~parent:sim.root ?on ~gateways ~nameserver:srv_ip ~netmask name in
             h.trx.dev.set_read (Hub.Switch.write sw !num_hosts) ;
             Hub.Switch.set_read sw !num_hosts h.trx.dev.write ;
             net.equip <- Equipment.Host h.trx :: net.equip ;
@@ -210,8 +210,8 @@ struct
         Simple net, add_host
 
     (** Returns a set of many static hosts and a switch with no NAT: *)
-    let make_dc sim ~dc_name ?nameserver ~cidr n =
-        let sw = Hub.Switch.make ~parent:(Simulation.root sim) (n+1) (5*n) ("switch."^dc_name) in
+    let make_dc (sim : Simulation.t) ~dc_name ?nameserver ~cidr n =
+        let sw = Hub.Switch.make ~parent:sim.root (n+1) (5*n) ("switch."^dc_name) in
         let local_ips = Ip.Cidr.local_addrs cidr in
         let plug = Plug.make dc_name (Hub.Switch.iface sw n) in
         let net =
@@ -228,7 +228,7 @@ struct
                           failwith
             in
             let netmask = Ip.Addr.zero in
-            let h : Host.t = Host.make_static ~parent:(Simulation.root sim) ?on ?nameserver ~netmask ip name in
+            let h : Host.t = Host.make_static ~parent:sim.root ?on ?nameserver ~netmask ip name in
             h.trx.dev.set_read (Hub.Switch.write sw !num_hosts) ;
             Hub.Switch.set_read sw !num_hosts h.trx.dev.write ;
             net.equip <- Equipment.Host h.trx :: net.equip ;

@@ -333,7 +333,7 @@ struct
         let root_nameserver = Sim.Net.make_server sim ~name:ns_name ns_ip in
         Hashtbl.add global_directory ns_name ns_ip ;
         let lookup = (Hashtbl.find_option global_directory) in
-        let dns_state = Named.State.make ~parent:(Simulation.root sim) lookup in
+        let dns_state = Named.State.make ~parent:sim.root lookup in
         Sim.Net.iter_equipments (function
             | Host host -> Named.serve dns_state host
             | _ -> ()) root_nameserver ;

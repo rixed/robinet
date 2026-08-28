@@ -75,13 +75,16 @@ type t =
       id : int ;
       (* Only a label. The root widget of this simulation takes this name. *)
       name : string ;
-      (* The clock: the current simulated time, and everything waiting to
-       * happen, soonest first. *)
       (* The root of this simulation's widget tree, and its inventory: every
-       * widget of this simulation is somewhere below it. An option only so that
-       * it can be built just after the record it points back at; see [root]. *)
-      mutable root_opt : Widget.t option ;
-      mutable now : Time.t ;
+       * widget of this simulation is somewhere below it. *)
+      root : Widget.t ;
+      (* The clock: the current simulated time, and everything waiting to
+       * happen, soonest first.
+       *
+       * [now] is a ref rather than a field so that the root widget's logger can
+       * share it: the logger has to be given a way to read the time when the
+       * widget is built, which is before this record exists. *)
+      now : Time.t ref ;
       mutable events : (unit -> unit) Events.t ;
       mutable thread : Thread.t option ;
       (* Protects everything this simulation owns. It is held for the whole of
@@ -152,13 +155,15 @@ let make =
     let seq = ref 0 in
     fun ?(realtime=true) name ->
         let id = !seq in
+        let now = ref (Time.o (Unix.gettimeofday ())) in
+        let root = Widget.make_root ~sim:id ~now:(fun () -> !now) name in
         incr seq ;
         let t =
             { id ;
               name ;
-              root_opt = None ;
+              root ;
               thread = None ;
-              now = Time.o (Unix.gettimeofday ()) ;
+              now ;
               events = Events.empty ;
               lock = Mutex.create () ;
               cond = Condition.create () ;
@@ -169,10 +174,6 @@ let make =
               paused_since = None ;
               paused_total = Interval.zero ;
               steps = 0 } in
-        (* The root of the tree, named after the simulation, and the only
-         * widget of it with no parent. Its logger -- and, by inheritance, every
-         * logger below it -- dates its entries by this simulation's clock. *)
-        t.root_opt <- Some (Widget.make_root ~sim:id ~now:(fun () -> t.now) name) ;
         register t ;
         t
 
@@ -183,12 +184,6 @@ let find id =
 let id t = t.id
 
 let name t = t.name
-
-(** The root of this simulation's widget tree. *)
-let root t =
-    match t.root_opt with
-    | Some r -> r
-    | None -> assert false (* set by [make] before it returns *)
 
 (** The simulation a widget belongs to.
  *
@@ -203,13 +198,13 @@ let of_widget (w : Widget.t) =
                      " belongs to no simulation")
 
 (** Every widget of this simulation. *)
-let widgets t = Widget.descendants (root t)
+let widgets t = Widget.descendants t.root
 
 (** Lookup one of its widgets by id. *)
-let find_widget t id = Widget.find (root t) id
+let find_widget t id = Widget.find t.root id
 
 (** Lookup its widgets by path. *)
-let find_widgets_by_path t path = Widget.find_by_path (root t) path
+let find_widgets_by_path t path = Widget.find_by_path t.root path
 
 let me () = Thread.(id (self ()))
 
@@ -231,16 +226,18 @@ let signal_me t () =
 (** Return the current simulation time. *)
 (** The current simulated time.
  *
- * Deliberately not under the lock. [now] is a boxed float in a record with
- * other fields, so reading it is a single pointer read, which the runtime lock
- * makes atomic: a reader sees either the previous value or the new one, never
- * a torn one. And there is no invariant tying it to anything else that one read
- * could break -- whatever needs a consistent view of [now] *and* [events], as
- * [next_event] does, takes the lock itself.
+ * Deliberately not under the lock: reading the ref is a single word load,
+ * which the runtime lock makes atomic, so a reader sees either the previous
+ * value or the new one, never a torn one. (A [float ref] is an ordinary block
+ * holding a pointer to a boxed float, not the flat float record a
+ * float-only record would get -- either way it is one word.) And there is no
+ * invariant tying [now] to anything else that a lone read could break:
+ * whatever needs a consistent view of it *and* [events], as [next_event] does,
+ * takes the lock itself.
  *
  * (This is the same unsynchronised read the root logger's clock closure does on
  * every log line.) *)
-let now t = t.now
+let now t = !(t.now)
 
 let is_running t = t.continue
 
@@ -263,7 +260,7 @@ let at t (ts : Time.t) f x =
         if Events.mem ts t.events then (
             loop (Time.add ts epsilon)
         ) else (
-            if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.sub ts t.now)) ;
+            if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.sub ts (now t))) ;
             t.events <- Events.add ts (fun () -> f x) t.events
         ) in
     with_lock t loop ts ;
@@ -271,7 +268,7 @@ let at t (ts : Time.t) f x =
 
 (** [delay d f x] will delay the execution of [f x] by the interval [d]. *)
 let delay t d f x =
-    at t (Time.add t.now d) f x
+    at t (Time.add (now t) d) f x
 
 let asap t f x =
     (* FIXME: would be more precise and fast to have a dedicated list for asap events *)
@@ -286,8 +283,8 @@ let synch_locked t =
     (* While paused, time must stand still: the pause duration has not been
      * accounted into paused_total yet. *)
     if not t.paused then (
-        t.now <- unpaused_wall_clock t ;
-        if debug then Printf.printf "Clock: synch: set current time to %s\n%!" (Time.to_string t.now)
+        t.now := unpaused_wall_clock t ;
+        if debug then Printf.printf "Clock: synch: set current time to %s\n%!" (Time.to_string (now t))
     )
 
 (** Synchronize internal clock with realtime clock.
@@ -379,12 +376,12 @@ let next_event t =
                 let until =
                     if not (may_dispatch t) then
                         (* Paused: nothing to run, wake up only when signalled *)
-                        Time.add t.now max_sleep_time
+                        Time.add (now t) max_sleep_time
                     else
                         match Events.min_binding t.events with
-                        | exception Not_found -> Time.add t.now max_sleep_time
+                        | exception Not_found -> Time.add (now t) max_sleep_time
                         | ts, _ -> ts in
-                let wait_time = Time.sub until t.now in
+                let wait_time = Time.sub until (now t) in
                 if not (may_dispatch t) ||
                    Interval.compare wait_time min_ts_for_sleep > 0 then (
                     if debug then Printf.printf "Clock: next_event: waiting until %s since we're too early\n%!" (Time.to_string until) ;
@@ -425,7 +422,7 @@ let next_event t =
                 | ts, f ->
                     if debug then Printf.printf "Clock: next_event: executing since it's %s\n%!" (Time.to_string ts) ;
                     t.events <- Events.remove ts t.events ;
-                    t.now <- ts ;
+                    t.now := ts ;
                     dispatched t ;
                     Some f) () in
         Option.may (fun f ->

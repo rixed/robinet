@@ -197,7 +197,7 @@ let tcp_server ctx src_port server_f =
 (** The context Localhost's functions work against: which simulation dates what
  * it does, and the widget its logs hang under. *)
 let make_ctx sim =
-    { sim ; widget = Widget.make ~parent:(Simulation.root sim) "localhost" }
+    { sim ; widget = Widget.make ~parent:sim.root "localhost" }
 
 let host sim =
     let ctx = make_ctx sim in

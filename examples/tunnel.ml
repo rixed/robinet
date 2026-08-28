@@ -24,11 +24,11 @@
 open Batteries
 open Tools
 
-let tunnel sim ifname tun_ip netmask mac gw search_sfx nameserver dst dst_port src_port =
-    let iface = Pcap.openif ~parent:(Simulation.root sim) ifname in
+let tunnel (sim : Simulation.t) ifname tun_ip netmask mac gw search_sfx nameserver dst dst_port src_port =
+    let iface = Pcap.openif ~parent:sim.root ifname in
     let gateways =
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) gw in
-    let host = Host.make_static ~parent:(Simulation.root sim) ?gateways ?search_sfx ?nameserver ~mac ~netmask tun_ip "tun"
+    let host = Host.make_static ~parent:sim.root ?gateways ?search_sfx ?nameserver ~mac ~netmask tun_ip "tun"
     and http = Http.TRX.make [ "Content-Type", "tun/eth" ] in
     host.trx.dev.set_read (Pcap.inject iface) ;
     let connect_tunnel tcp =

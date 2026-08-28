@@ -27,7 +27,7 @@ open Tools
 let main =
     (* Everything this program does happens in this simulation. *)
     let sim = Simulation.make "dns_query" in
-    let iface = Pcap.openif ~parent:(Simulation.root sim) "eth0" in
+    let iface = Pcap.openif ~parent:sim.Simulation.root "eth0" in
     let src_ip  = ref "192.168.1.66"
     and netmask = ref "255.255.255.0"
     and src_eth = ref "12:34:56:78:9a:bc"
@@ -50,7 +50,7 @@ let main =
         (if !gw = "" then None else Some (Eth.Gateway.of_string !gw)) |>
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) in
     let host : Host.t =
-        Host.make_static ~parent:(Simulation.root sim) ?gateways
+        Host.make_static ~parent:sim.root ?gateways
                          ~nameserver:(Ip.Addr.of_string !dst_ip)
                          ~search_sfx:!search
                          ~mac:(Eth.Addr.of_string !src_eth)

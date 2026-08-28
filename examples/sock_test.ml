@@ -32,14 +32,14 @@ let server_f _h tcp bits =
         tcp.Tcp.TRX.close ()
     )
 
-let run sim () =
-    let h1 = Host.make_static ~parent:(Simulation.root sim) ~mac:(Eth.Addr.of_string "12:34:56:78:90:ab")
+let run (sim : Simulation.t) () =
+    let h1 = Host.make_static ~parent:sim.root ~mac:(Eth.Addr.of_string "12:34:56:78:90:ab")
                               ~netmask:(Ip.Addr.of_string "255.255.255.0")
                               (Ip.Addr.of_string "192.168.0.1") "server"
-    and h2 = Host.make_static ~parent:(Simulation.root sim) ~mac:(Eth.Addr.of_string "ab:cd:ef:01:23:45")
+    and h2 = Host.make_static ~parent:sim.root ~mac:(Eth.Addr.of_string "ab:cd:ef:01:23:45")
                               ~netmask:(Ip.Addr.of_string "255.255.255.0")
                               (Ip.Addr.of_string "192.168.0.2") "client"
-    and hub = Hub.Repeater.make ~parent:(Simulation.root sim) 3 "hub"
+    and hub = Hub.Repeater.make ~parent:sim.root 3 "hub"
     in
     let gigabit = Eth.limited sim (Clock.Interval.msec 1.) 1_000_000_000. in
     h1.trx.dev.set_read (gigabit (Hub.Repeater.write hub 0)) ;

@@ -24,7 +24,7 @@
 open Batteries
 open Tools
 
-let run sim ifname src_range num_srcs ?gateways ?search_sfx ?nameserver ?pause max_depth start_url =
+let run (sim : Simulation.t) ifname src_range num_srcs ?gateways ?search_sfx ?nameserver ?pause max_depth start_url =
     (* Build the hosts *)
     let mac_of_ip ip = (*Eth.addr_of_string "00:26:5e:0a:d2:b9" in*)
         let bs = Ip.Addr.to_bitstring ip in
@@ -34,11 +34,11 @@ let run sim ifname src_range num_srcs ?gateways ?search_sfx ?nameserver ?pause m
     let host_of_ip ip =
         let name = Ip.Addr.to_dotted_string ip
         and mac = mac_of_ip ip in
-        Host.make_static ~parent:(Simulation.root sim) ?gateways ?search_sfx ?nameserver ~netmask ~mac ip name in
+        Host.make_static ~parent:sim.root ?gateways ?search_sfx ?nameserver ~netmask ~mac ip name in
     let hosts = List.of_enum (Ip.Cidr.random_addrs src_range num_srcs /@ host_of_ip)
     in
     (* Build the HUB and link it to hosts *)
-    let hub     = Hub.Repeater.make ~parent:(Simulation.root sim) (num_srcs+1) "hub"
+    let hub     = Hub.Repeater.make ~parent:sim.root (num_srcs+1) "hub"
     and gigabit = Eth.limited sim (Clock.Interval.msec 10.) 1_000_000_000. in
     List.iteri (fun i (h : Host.t) ->
         (* notice that the cable is not full duplex *)
@@ -46,7 +46,7 @@ let run sim ifname src_range num_srcs ?gateways ?search_sfx ?nameserver ?pause m
         Hub.Repeater.set_read hub i (gigabit h.trx.dev.write)
     ) hosts ;
     (* Link all these to the real world *)
-    let iface = Pcap.openif ~parent:(Simulation.root sim) ifname in
+    let iface = Pcap.openif ~parent:sim.root ifname in
     Hub.Repeater.set_read hub num_srcs (Pcap.inject iface) ;
     (* Start the browsers *)
     List.iter (fun (h : Host.t) ->
