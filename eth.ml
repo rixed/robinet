@@ -313,9 +313,9 @@ struct
            * dest_proto_addr -> msg *)
           postponed : bitstring BitHash.t ;
           (* Optional average delay to add to transmissions: *)
-          delay : float option ;
+          mutable delay : float ;
           (* Optional packet loss ratio: *)
-          loss : float option }
+          mutable loss : float }
 
     let find_ip4 t =
         List.find_map (fun my_addr ->
@@ -346,21 +346,34 @@ struct
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
 
-    let make ?(mtu=1500) ?delay ?loss ?(mac=Addr.random ()) ?(gateways=[])
+    let make ?(mtu=1500) ?(delay=0.) ?(loss=0.) ?(mac=Addr.random ()) ?(gateways=[])
              ?(promisc=ignore) ?(do_proxy_arp=(fun _ -> false))
              ?(my_addresses=[]) ?(proto=Proto.ip4) ~parent
              () =
         let widget = Widget.make ~parent "eth" in
-        { widget ; mac ; gateways ; proto ;
-          emit = ignore_bits ~logger:widget.logger ;
-          recv = ignore_bits ~logger:widget.logger ;
-          mtu ; promisc ; do_proxy_arp ;
-          my_addresses ;
-          via = None ;
-          connected = false ;
-          arp_cache = BitHash.create 3 ;
-          postponed = BitHash.create 3 ;
-          delay ; loss }
+        let t = {
+            widget ; mac ; gateways ; proto ;
+            emit = ignore_bits ~logger:widget.logger ;
+            recv = ignore_bits ~logger:widget.logger ;
+            mtu ; promisc ; do_proxy_arp ;
+            my_addresses ;
+            via = None ;
+            connected = false ;
+            arp_cache = BitHash.create 3 ;
+            postponed = BitHash.create 3 ;
+            delay ; loss } in
+        widget.properties <- Widget.[
+            property "delay"
+                ~descr:"Average delay to add to transmissions."
+                ~kind:Float
+                ~setter:(fun v -> t.delay <- to_float v)
+                ~getter:(fun () -> `Float t.delay) ;
+            property "loss"
+                ~descr:"Packet loss ratio."
+                ~kind:(Range (0., 1.))
+                ~setter:(fun v -> t.loss <- to_float v)
+                ~getter:(fun () -> `Float t.loss) ] ;
+        t
 end
 
 (** {2 Transceiver} *)
@@ -391,16 +404,13 @@ struct
         let pdu = Pdu.make proto st.mac dst bits in
         Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Emitting an Eth packet, proto %s, from %s to %s (content '%s')" (Proto.to_string proto) (Addr.to_string st.mac) (Addr.to_string dst) (hexstring_of_bitstring bits)))) ;
         let delay =
-            match proto, st.delay with
-            | p, Some d when p <> Proto.arp ->
-                jitter 0.1 d
-            | _ ->
-                0. in
+            if proto <> Proto.arp && st.delay > 0. then
+                max 0. (jitter 0.1 st.delay)
+            else 0. in
         Simulation.delay (Simulation.of_widget st.widget) (Clock.Interval.o delay) st.emit (Pdu.pack pdu)
 
     let send (st : State.t) proto dst bits =
-        let loss = st.loss |? 0. in
-        if st.proto = Proto.arp || loss = 0. || Random.float 1. >= loss then
+        if st.proto = Proto.arp || st.loss = 0. || Random.float 1. >= st.loss then
             really_send st proto dst bits
         else
             Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Dropping packet of proto %s from %s" (Proto.to_string proto) (Addr.to_string st.mac))))

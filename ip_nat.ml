@@ -37,6 +37,8 @@ open Tools
 
 module State =
 struct
+    (*$< State *)
+
     type socket = { proto : Ip.Proto.t ;  (** The IP protocol *)
                  src_addr : Ip.Addr.t ;   (** The tracked cnx source. *)
                  src_port : int ;
@@ -86,11 +88,11 @@ struct
 
     (* TODO: add an optional sink inside IP *)
     type t = {      addr : Ip.Addr.t ;                  (** our IP addr *)
-                min_port : int ;                        (** smallest port to use for outgoing source ports *)
+        mutable min_port : int ;                        (** smallest port to use for outgoing source ports *)
                   widget : Widget.t ;
-               nat_pings : bool ;                       (** whether to NAT outgoing PINGs or to drop them *)
-               send_errs : bool ;                       (** whether to send ICMP/TCP errors on bad incoming packets *)
-            answer_pings : bool ;                       (** whether to answer incoming pings in absence of port forwarding *)
+       mutable nat_pings : bool ;                       (** whether to NAT outgoing PINGs or to drop them *)
+       mutable send_errs : bool ;                       (** whether to send ICMP/TCP errors on bad incoming packets *)
+    mutable answer_pings : bool ;                       (** whether to answer incoming pings in absence of port forwarding *)
            port_forwards : port_forward list ;
                     cnxs : cnx OrdArray.t ;             (** all the cnxs we remember, either port or ICMP based *)
               inc_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets INComing from the outside (the value is the index in [cnxs]) *)
@@ -102,26 +104,70 @@ struct
             mutable emit : bitstring -> unit ;          (** the emit function (ie. carry packets to the outside *)
             mutable recv : bitstring -> unit }          (** the receive functon (ie. forward incoming packets from the outside *)
 
+    (* [min_port] is used as [Random.int (65536 - min_port)]: out of range, it takes
+     * down every packet the NAT handles, one event handler at a time. *)
+    let checked_min_port p =
+        if p > 0 && p < 65536 then p else
+        Widget.bad_value "min port must be between 1 and 65535, not %d" p
+
+    (*$T checked_min_port
+      (try ignore (checked_min_port 1024) ; true with Widget.Bad_value _ -> false)
+      (try ignore (checked_min_port 65535) ; true with Widget.Bad_value _ -> false)
+      (* [Random.int (65536 - min_port)] would raise on either of these: *) \
+      (try ignore (checked_min_port 65536) ; false with Widget.Bad_value _ -> true)
+      (try ignore (checked_min_port 70000) ; false with Widget.Bad_value _ -> true)
+      (try ignore (checked_min_port 0) ; false with Widget.Bad_value _ -> true)
+      (try ignore (checked_min_port (-1)) ; false with Widget.Bad_value _ -> true)
+     *)
+
     (** Initialize the state for a NAT TRX. *)
     let make ?(min_port=1024) ?(num_max_cnxs=200) ?(nat_pings=true)
              ?(send_errs=true) ?(answer_pings=true)
              ~parent ?(port_forwards=[])
              addr =
+        let min_port = checked_min_port min_port in
         let widget = Widget.make ~parent "nat" in
         Log.(log widget.logger Debug (lazy (Printf.sprintf "Creating a NATer for IP %s, with %d cnxs max" (Ip.Addr.to_string addr) num_max_cnxs))) ;
-        { addr ; min_port ; widget ; nat_pings ; send_errs ; answer_pings ;
-          port_forwards ;
-          cnxs = OrdArray.make num_max_cnxs { orig_addr = Ip.Addr.zero ;
-                                              orig_num = 0 ;
-                                              nat_num = 0 ;
-                                              keys = None ;
-                                              last_used = Simulation.now (Simulation.of_widget widget) } ;
-          inc_cnxs_h = Hashtbl.create num_max_cnxs ;
-          out_cnxs_h = Hashtbl.create num_max_cnxs ;
-          inc_icmp_h = Hashtbl.create num_max_cnxs ;
-          out_icmp_h = Hashtbl.create num_max_cnxs ;
-          emit = ignore_bits ~logger:widget.logger ;
-          recv = ignore_bits ~logger:widget.logger }
+        let t = {
+            addr ; min_port ; widget ; nat_pings ; send_errs ; answer_pings ;
+            port_forwards ;
+            cnxs = OrdArray.make num_max_cnxs {
+                       orig_addr = Ip.Addr.zero ;
+                       orig_num = 0 ;
+                       nat_num = 0 ;
+                       keys = None ;
+                       last_used = Simulation.now (Simulation.of_widget widget) } ;
+            inc_cnxs_h = Hashtbl.create num_max_cnxs ;
+            out_cnxs_h = Hashtbl.create num_max_cnxs ;
+            inc_icmp_h = Hashtbl.create num_max_cnxs ;
+            out_icmp_h = Hashtbl.create num_max_cnxs ;
+            emit = ignore_bits ~logger:widget.logger ;
+            recv = ignore_bits ~logger:widget.logger } in
+        widget.properties <- Widget.[
+            property "addr" ~descr:"IP address" ~kind:String
+                ~getter:(fun () -> `String (Ip.Addr.to_string t.addr)) ;
+            property "min port"
+                ~descr:"Smallest port to use for outgoing source ports."
+                ~kind:Int
+                ~getter:(fun () -> `Int t.min_port)
+                ~setter:(fun v -> t.min_port <- checked_min_port (to_int v)) ;
+            property "NAT pings"
+                ~descr:"Whether to NAT outgoing pings or to drop them."
+                ~kind:Bool
+                ~getter:(fun () -> `Bool t.nat_pings)
+                ~setter:(fun v -> t.nat_pings <- to_bool v) ;
+            property "send errors"
+                ~descr:"Whether to send ICMP/TCP errors on bad incoming packets."
+                ~kind:Bool
+                ~getter:(fun () -> `Bool t.send_errs)
+                ~setter:(fun v -> t.send_errs <- to_bool v) ;
+            property "answer pings"
+                ~descr:"Whether to answer incoming pings in absence of port \
+                        forwarding."
+                ~kind:Bool
+                ~getter:(fun () -> `Bool t.answer_pings)
+                ~setter:(fun v -> t.answer_pings <- to_bool v) ] ;
+        t
 
     (* Remove an overwritten tracked connection from the hashes: *)
     let unkey_cnx (t : t) = function
@@ -132,6 +178,7 @@ struct
         | IcmpKeys { inc_sock ; out_sock } ->
             Hashtbl.remove t.inc_icmp_h inc_sock ;
             Hashtbl.remove t.out_icmp_h out_sock
+    (*$>*)
 end
 
 module TRX =

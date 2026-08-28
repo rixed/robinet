@@ -318,7 +318,7 @@ let test_http net cable duration nthreads =
     | None ->
         incr failures ;
         Printf.printf "  FAIL could not start the admin interface\n%!"
-    | Some (_admin, port) ->
+    | Some (admin, port) ->
         let net_id = Simulation.id net
         and cable_id = cable.Eth.Cable.State.widget.Widget.id in
         let api fmt = Printf.ksprintf (fun p -> http port p) fmt in
@@ -352,6 +352,29 @@ let test_http net cable duration nthreads =
                       (Printf.sprintf
                           "/api/simulations/%d/widgets/%d/properties/length"
                           net_id cable_id)) = 400) ;
+        (* The composition tree is what the interface draws: a server has to
+           appear within the host running it, not beside it. *)
+        check "a server is shown within the host that runs it"
+            (match api "/api/simulations/%d/widgets" (Simulation.id admin) with
+            | 200, body ->
+                let widgets =
+                    Yojson.Basic.from_string body |> Yojson.Basic.Util.to_list in
+                let name w = Yojson.Basic.Util.(member "name" w |> to_string)
+                and id w = Yojson.Basic.Util.(member "id" w |> to_int)
+                and parent w = Yojson.Basic.Util.(member "parent" w |> to_int_option) in
+                let httpd =
+                    List.find_opt (fun w ->
+                        String.starts_with (name w) "httpd:") widgets in
+                (match httpd with
+                | None -> false
+                | Some httpd ->
+                    (match parent httpd with
+                    | None -> false
+                    | Some p ->
+                        List.exists (fun w -> id w = p && name w = "localhost")
+                                    widgets))
+            | _ ->
+                false) ;
         check "an unknown widget is not found"
             (fst (api "/api/simulations/%d/widgets/99999" net_id) = 404) ;
         check "an unknown simulation is not found"
@@ -359,7 +382,7 @@ let test_http net cable duration nthreads =
         check "the serving simulation refuses to pause itself"
             (fst (http ~meth:"POST" port
                       (Printf.sprintf "/api/simulations/%d/pause"
-                          (Simulation.id _admin))) = 400) ;
+                          (Simulation.id admin))) = 400) ;
         check "a simulation's root cannot be deleted"
             (fst (http ~meth:"DELETE" port
                       (Printf.sprintf "/api/simulations/%d/widgets/%d"

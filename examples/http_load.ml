@@ -50,7 +50,7 @@ let run (sim : Simulation.t) ifname src_range num_srcs ?gateways ?search_sfx ?na
     Hub.Repeater.set_read hub num_srcs (Pcap.inject iface) ;
     (* Start the browsers *)
     List.iter (fun (h : Host.t) ->
-        let browser = Browser.make h.trx in
+        let browser = Browser.make ~parent:h.trx.widget h.trx in
         match pause with
         | Some pause -> Browser.user browser ~pause:pause max_depth (Url.of_string start_url)
         | None       -> Browser.spider browser max_depth (Url.of_string start_url)

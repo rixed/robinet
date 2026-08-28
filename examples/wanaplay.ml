@@ -31,7 +31,7 @@ open Tools
    - perform some action of type continuation -> 'a option
    - if we got None, display an error and stop
    - if ok, return the result of the action so we can use it for next one *)
-let step sim title action cont =
+let step (sim : Simulation.t) title action cont =
     Printf.printf "%s: %!" title ;
     Simulation.delay sim (Clock.Interval.sec 1.) (fun () ->
         action (function
@@ -39,12 +39,12 @@ let step sim title action cont =
         | Some x -> Printf.printf "Ok!\n%!" ;
                     cont x)) ()
 
-let reserve sim date time login pwd =
+let reserve (sim : Simulation.t) date time login pwd =
     let sha1 =
         let cmd = "echo -n "^(Filename.quote pwd)^" | sha1sum | cut -d' ' -f 1" in
         IO.read_line (Unix.open_process_in cmd) in
     let mozilla_user_agent = "Mozilla/5.0 (X11; U; Linux x86_64; en-US; rv:1.9.1.16) Gecko/20110929 Iceweasel/3.5.16 (like Firefox/3.5.16)" in
-    let browser = Browser.make ~user_agent:mozilla_user_agent (Localhost.host sim) in
+    let browser = Browser.make ~parent:sim.root ~user_agent:mozilla_user_agent (Localhost.host sim) in
     step sim "Get homepage for the fun of it (and collect some cookies)"
          (Browser.get browser (Url.of_string "http://www.wanaplay.com/"))
          (function _ ->

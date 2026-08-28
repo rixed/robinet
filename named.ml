@@ -27,7 +27,7 @@ module State =
 struct
     type t =
         { widget : Widget.t ;
-          default_ttl : int ;
+          mutable default_ttl : int ;
           lookup : string -> Ip.Addr.t option }
 
     (* [lookup] is a function taking names as string and returning
@@ -35,7 +35,13 @@ struct
      * FIXME: any serializable/inspectable datastructure *)
     let make ?(default_ttl=3600) ~parent lookup =
         let widget = Widget.make ~parent "named" in
-        { widget ; default_ttl ; lookup }
+        let t = { widget ; default_ttl ; lookup } in
+        widget.properties <- Widget.[
+            property "default TTL" ~kind:Int
+                ~descr:"Default TTL for DNS answers."
+                ~getter:(fun () -> `Int t.default_ttl)
+                ~setter:(fun v -> t.default_ttl <- to_int v) ] ;
+        t
 
     let lookup st qname =
         st.lookup qname

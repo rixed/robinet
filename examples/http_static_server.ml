@@ -22,7 +22,7 @@
 *)
 open Batteries
 
-let run sim port root =
+let run (sim : Simulation.t) port root =
     (* Start server *)
     let resources =
         [ Str.regexp "/\\(.*\\)$", Opache.static_file_server root ] in

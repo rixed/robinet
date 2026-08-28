@@ -22,7 +22,7 @@ let main =
             let trx = Eth.Cable.make cable in
             Hub.Switch.iface switch i -=> trx <=-> h.Host.trx.dev ;
             Widget.make_peers ~via:cable.widget
-                switch.Hub.Switch.widget h.Host.trx.Host.widget ;
+                switch.Hub.Switch.widget h.Host.trx.widget ;
             h, ip) in
     (* Some traffic, so that the counters have something to count: every host
      * pings the next one, round and round. *)

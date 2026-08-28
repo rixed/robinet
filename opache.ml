@@ -79,8 +79,9 @@ let params_of_query q =
   Notice that this example, if copied into test.ml, will generate a pcap containing the source code that
   generates the pcap :-)
 *)
-let serve host ?(port=Tcp.Port.o 80) f =
-    let widget = Widget.make ~parent:host.Host.widget ("httpd:"^ Tcp.Port.to_string port) in
+let serve (host : Host.host_trx) ?(port=Tcp.Port.o 80) f =
+    let widget =
+        Widget.make ~parent:host.Host.widget ("httpd:"^ Tcp.Port.to_string port) in
     host.tcp_server port (fun (tcp : Tcp.TRX.tcp_trx) ->
         (* once we obtain the transport layer, build an http on top of it *)
         Log.(log widget.logger Debug (lazy "Building a new HTTP.TRXtop")) ;

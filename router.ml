@@ -153,7 +153,9 @@ struct
 
     (* Probability to send ICMP expiry messages after TTL expiration, and after
      * which delay (TODO: should also depend on how busy the router is): *)
-    type icmp_probability = { probability : float ; delay : float }
+    type icmp_probability = {
+        mutable probability : float ;
+              mutable delay : float }
 
     (** A router is mainly an array of ifaces and a route table *)
     type t = {        ifaces : iface array ;
@@ -162,13 +164,11 @@ struct
                  notify_errs : icmp_probability ;
                (** Answers from admin should go through routing, as opposed
                 * to return via the same interface: *)
-               admin_reroute : bool ;
+       mutable admin_reroute : bool ;
                       widget : Widget.t ;
-              load_balancing : load_balancing }
-                     (* Waiting to be attached to that widget, which will
-                      * supply the clock they must be dated with:
+              load_balancing : load_balancing ;
                      ingress : Metric.Counter.t ;
-                      egress : Metric.Counter.t *)
+                      egress : Metric.Counter.t }
 
     (* Add a route (the added route becomes top priority *)
     let add_route (t : t) r =
@@ -208,9 +208,11 @@ struct
         Log.(log t.widget.logger Debug (lazy (match in_iface_opt with
             | Some n -> Printf.sprintf "rx from iface %d" n
             | None -> "generated traffic"))) ;
-        (* Option.may (fun in_iface ->
-            Metric.(Counter.add t.ingress ~params:(Params.singleton "port" (Param.Int in_iface)) (bytelength bits))
-        ) in_iface_opt ; *)
+        Option.may (fun in_iface ->
+            let now = Simulation.Widget.now t.widget in
+            let params = Metric.(Params.singleton "port" (Param.Int in_iface)) in
+            Metric.Counter.add t.ingress ~now ~params (bytelength bits)
+        ) in_iface_opt ;
         let ip_opt, src_opt, dst_opt, ttl_opt, proto_opt =
             match Ip.Pdu.unpack bits with
             | Error _ ->
@@ -239,7 +241,9 @@ struct
                 | Route.Forward { out_iface ; via } ->
                     let do_forward bits =
                         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forwarding packet to iface %d" out_iface))) ;
-                        (* Metric.(Counter.add t.egress ~params:(Params.singleton "port" (Param.Int out_iface)) (bytelength bits)) ; *)
+                        let params = Metric.(Params.singleton "port" (Param.Int out_iface)) in
+                        let now = Simulation.Widget.now t.widget in
+                        Metric.Counter.add t.egress ~now ~params (bytelength bits) ;
                         let iface = t.ifaces.(out_iface) in
                         (* So we want to set the gateway for this packet but cannot
                          * call Etc.TRX.tx directly because some additional processing
@@ -388,16 +392,27 @@ struct
                 make_iface ?delay ?loss ?mtu ?mac ?my_addresses
                            ~parent:widget n
             ) in
-        (* let full_name = Widget.full_name widget in
-           let ingress = Metric.Counter.make (full_name ^"/ingress") "bytes" in
-           let egress = Metric.Counter.make (full_name ^"/egress") "bytes" in *)
+        let full_name = Widget.full_name widget in
+        let ingress = Metric.Counter.make (full_name ^"/ingress") "bytes" in
+        let egress = Metric.Counter.make (full_name ^"/egress") "bytes" in
         let t = { ifaces ; routes ; widget ; notify_errs ; admin_reroute ;
-                  load_balancing } in
-                  (* ingress ; egress *)
+                  load_balancing ; ingress ; egress } in
+        widget.properties <- Widget.[
+            property "errors probability" ~kind:(Range (0., 1.))
+                ~descr:"Probability to report errors with ICMP."
+                ~getter:(fun () -> `Float t.notify_errs.probability)
+                ~setter:(fun v -> t.notify_errs.probability <- to_float v) ;
+            property "errors delay" ~kind:Float
+                ~descr:"Report ICMP errors after that delay."
+                ~getter:(fun () -> `Float t.notify_errs.delay)
+                ~setter:(fun v -> t.notify_errs.delay <- to_float v) ;
+            metric_property "ingress" ~descr:"Received bytes."
+                (Metric.Counter.T t.ingress) ;
+            metric_property "egress" ~descr:"Emitted bytes."
+                (Metric.Counter.T t.egress) ] ;
         Array.iteri (fun n iface ->
             if iface.eth.my_addresses <> [] then (
                 (* Make that interface a host with an IP stack on top of eth: *)
-                let widget = Widget.make ~parent:iface.widget "admin" in
                 (* On output, the host will be able to write onto that TRX and that
                  * will be output from that iface, properly updating the counters.
                  * Unless we want to give a chance for the answer to go through
@@ -413,6 +428,7 @@ struct
                  * we don't have to do here. The router is going call the host
                  * [ip_recv] function whenever that's the routing decision. *)
                 let name = "admin@"^ string_of_int n in
+                let widget = Widget.make ~parent:iface.widget name in
                 iface.admin_host <-
                     Some (Host.make_from_eth ~widget iface.eth trx name)
             ) ;
@@ -560,12 +576,12 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
             ?(name="gw") ?notify_errs ?admin_reroute ~parent
             ?public_netmask ?public_gw ?port_forwards public_ip local_cidr =
     (* We want all parts inherit this widget: *)
-    let parent = Widget.make ~parent name in
+    let widget = Widget.make ~parent name in
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let broadcast = Ip.Cidr.all1s_addr local_cidr in
     (* Build the output router *)
-    let router_widget = Widget.make ~parent "router" in
+    let router_widget = Widget.make ~parent:widget "router" in
     let router =
         Router.(make ?delay ?loss ?mtu ?notify_errs ?admin_reroute 2
             [ (* route everything from anywhere to LAN if dest fits local_cidr *)
@@ -583,7 +599,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     (* The second iface of our router (facing internet) is the NAT *)
     Eth.State.add_ip4 router.ifaces.(1).eth ?netmask:public_netmask public_ip ;
     let nat_state =
-        Nat.State.make ~num_max_cnxs ~parent ?port_forwards public_ip in
+        Nat.State.make ~num_max_cnxs ~parent:widget ?port_forwards public_ip in
     let nat_trx = Nat.TRX.make nat_state in
     (* Which we pipe *before* the iface eth (NAT operates at the IP level): *)
     router.ifaces.(1).trx <- pipe nat_trx router.ifaces.(1).trx ;
@@ -597,11 +613,11 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let srv_ip = Enum.get_exn local_ips in    (* second the dhcp/name servers *)
     let h : Host.t =
         let gateways = [ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw_mac) ] in
-        Host.make_static ?nameserver ~gateways ~netmask ~parent srv_ip "srv" in
+        Host.make_static ?nameserver ~gateways ~netmask ~parent:widget srv_ip "srv" in
     (* Now we need the repeater and the services: *)
     (* FIXME: instead of a Hub that forces us into having 2 IPs make a simple TRX directly, that inspects the protostack and if
      * the dest IP is gw_ip == src_iv then forward it to the host and if not forward it to the NAT. *)
-    let hub = Hub.Repeater.make ~parent 3 "hub" in
+    let hub = Hub.Repeater.make ~parent:widget 3 "hub" in
     Hub.Repeater.set_read hub 1 h.trx.dev.write ;
     h.trx.dev.set_read (Hub.Repeater.write hub 1) ;
     (* Connect the first iface of our router *)
@@ -632,7 +648,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let trx =
         { ins = in_trx ;
           out = out_trx.out } in
-    { trx ; widget = parent ; dhcp_state ; dns_state ; nat_state }
+    { trx ; widget ; dhcp_state ; dns_state ; nat_state }
 
 (*$R make_gw
     (*Log.console_lvl := Log.Debug ;*)

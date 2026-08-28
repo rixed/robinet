@@ -14,14 +14,14 @@ let logger = Log.make ~size:1000 ()
  * at random in a human like fashion from the root url *)
 let client_init url (host : Host.t) =
     Log.(log logger Info (lazy (Printf.sprintf "Starting a new web browser on %s" host.trx.widget.name))) ;
-    let browser = Browser.make host.trx in
+    let browser = Browser.make ~parent:host.trx.widget host.trx in
     (* FIXME: better have a browser.at_init register function *)
     let rec start_browsing () =
         if Host.ip_is_set host then (
             Browser.user browser ~pause:5. 1000 url
         ) else (
             Log.(log logger Info (lazy (Printf.sprintf "IP not initialized, wait"))) ;
-            Simulation.delay (Simulation.of_widget host.Host.trx.Host.widget) (Clock.Interval.sec 1.) start_browsing ()
+            Simulation.delay (Simulation.of_widget host.trx.widget) (Clock.Interval.sec 1.) start_browsing ()
         ) in
     start_browsing ()
 

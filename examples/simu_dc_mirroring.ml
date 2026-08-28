@@ -69,7 +69,7 @@ let tcp_write_continuously sim ~throughput tcp_trx =
     send_next ()
 
 (* This one is supposedly provided in Sim *)
-class host h = object (self)
+class host sim h = object (self)
     inherit equipment
 
     method power_on =
@@ -82,14 +82,14 @@ class host h = object (self)
         h.Host.tcp_server port (fun tcp_trx ->
             (* TODO: Host should automatically close all established connections
              * at power-off. *)
-            tcp_write_continuously (Simulation.of_widget h.Host.widget) ~throughput tcp_trx)
+            tcp_write_continuously sim ~throughput tcp_trx)
 
     method tcp_traffic ?src_port ?port ?(num_connections=1) ~throughput to_ =
         let random_traffic throughput = function
             | Some tcp_trx ->
                 h.Host.add_killer (fun k ->
                     tcp_trx.Tcp.TRX.close () ; k ()) ;
-                tcp_write_continuously (Simulation.of_widget h.Host.widget) ~throughput tcp_trx
+                tcp_write_continuously sim ~throughput tcp_trx
             | None ->
                 Log.(log h.Host.widget.logger Error (lazy "Cannot traffic"))
         in
@@ -110,7 +110,7 @@ class host h = object (self)
          * child classes, which users might find useful. *)
         ignore (read_time ()) ; (* TODO *)
         Log.(log h.Host.widget.logger Info (lazy "Starting a web browser")) ;
-        let browser = Browser.make h in
+        let browser = Browser.make ~parent:h.Host.widget h in
         h.Host.add_killer (Browser.kill browser) ;
         Browser.user browser ~pause:5. 1000 from
 
@@ -133,8 +133,8 @@ class host h = object (self)
 end
 
 (* DEBUG *)
-class pinger h = object
-    inherit host h
+class pinger sim h = object
+    inherit host sim h
 
     method powered_on =
         let dst = Host.IPv4 (Ip.Addr.of_string "8.8.8.8") in
@@ -142,8 +142,8 @@ class pinger h = object
         h.Host.ping dst
 end
 
-class web_client h = object (self)
-    inherit host h
+class web_client sim h = object (self)
+    inherit host sim h
     (* where we take power_on from *)
 
     method powered_on =
@@ -193,8 +193,8 @@ class web_client h = object (self)
         | _ -> ()
 end
 
-class infested_web_client h = object (self)
-    inherit web_client h
+class infested_web_client sim h = object (self)
+    inherit web_client sim h
     val mutable infested = false
     val mutable triggered = false
 
@@ -217,8 +217,8 @@ class infested_web_client h = object (self)
         | _ -> ()
 end
 
-class boringjob_intranet h = object (self)
-    inherit host h
+class boringjob_intranet sim h = object (self)
+    inherit host sim h
 
     method powered_on =
         self#http_serve (*~backends:[Backend.sql ~host:"pgsql.boringjob.com"]*) ()
@@ -229,15 +229,15 @@ class boringjob_intranet h = object (self)
          * per pages distribution). *)
 end
 
-class boringjob_db h = object (self)
-    inherit host h
+class boringjob_db sim h = object (self)
+    inherit host sim h
 
     method powered_on =
         self#pgsql_serve ~response_time:(Distribution.chi_squared 2.5) ~response_size:(Distribution.chi_squared 7.) ()
 end
 
-class malicious_web_server h = object (self)
-    inherit host h
+class malicious_web_server sim h = object (self)
+    inherit host sim h
 
     method powered_on =
         self#tcp_serve ~port:(Tcp.Port.o 666) ~throughput:50. () ;
@@ -401,13 +401,13 @@ let main =
         lans = [
             { name = None ;
               public_ip = Ip.Addr.of_string "1.2.3.4" ;
-              hosts = [ HerdOf 1, new web_client ] } ] ;
+              hosts = [ HerdOf 1, new web_client sim ] } ] ;
         dcs = [ {
             name = None ;
             nameserver = None ;
             cidr = "1.0.0.0/8" ;
             hosts = [
-                Individual ("intranet.boringjob.com", Ip.Addr.of_string "1.2.3.4"), new boringjob_intranet
+                Individual ("intranet.boringjob.com", Ip.Addr.of_string "1.2.3.4"), new boringjob_intranet sim
             ] ;
             iface_name = "bridge0" } ] } in
     Log.console_lvl := Log.Debug ;

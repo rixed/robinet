@@ -40,7 +40,8 @@ type cookie = { name : string ; value : string ; domain : string ; path : string
 type vacant_cnx = { tcp : Tcp.TRX.tcp_trx ; http : TRXtop.t ; last_used : Clock.Time.t }
 
 (** A browser is build from a host, and has a set of cookies and of connections. *)
-type t = { host : Host.host_trx ;
+type t = { widget : Widget.t ;
+           host : Host.host_trx ;
            user_agent : string ;
            mutable cookies : cookie list ;
            (* We maintain a pool of unused cnx to some destination/port, so that
@@ -52,13 +53,15 @@ type t = { host : Host.host_trx ;
            (* When it has been ordered to stop: *)
            mutable killed : bool }
 
-let make ?(user_agent="RobiNet") ?(max_vacant_cnx=10) ?(max_idle_cnx=Clock.Interval.sec 15.) host =
-    { host = host ;
-      user_agent = user_agent ;
+let make ?(user_agent="RobiNet") ?(max_vacant_cnx=10) ?(max_idle_cnx=Clock.Interval.sec 15.) ~parent host =
+    let widget = Widget.make ~parent "browser" in
+    { widget ;
+      host ;
+      user_agent ;
       cookies = [] ;
       vacant_cnxs = Hashtbl.create 7 ;
-      max_vacant_cnx = max_vacant_cnx ;
-      max_idle_cnx = max_idle_cnx ;
+      max_vacant_cnx ;
+      max_idle_cnx ;
       killed = false }
 
 (** {2 Cookies}
@@ -187,7 +190,7 @@ let cookie_string t host path =
     let sim = Simulation.make ~realtime:false "test-browser" in
     let netmask = Ip.Addr.all_ones in
     let host : Host.t = Host.make_static ~parent:sim.root ~netmask (Ip.Addr.of_dotted_string_exc "1.2.3.4") "test" in
-    let t = make host.trx in
+    let t = make ~parent:sim.root host.trx in
     store_cookies t "www.example.com" "/" [ "Set-Cookie", "SID=31d4" ] ;
     assert_bool "retrieve cokie"
         (cookie_string t "www.example.com" "/" = "SID=31d4") ;
@@ -224,7 +227,7 @@ let find_vacant_cnx t addr port =
 
 let clean_vacant_cnxs t =
     let count = ref 0
-    and now = Simulation.now (Simulation.of_widget t.host.Host.widget) in
+    and now = Simulation.now (Simulation.of_widget t.widget) in
     let age t = Clock.Time.sub now t in
     t.vacant_cnxs <- Hashtbl.filter (fun v ->
         incr count ;
@@ -240,7 +243,7 @@ let clean_vacant_cnxs t =
 (* Place this cnx into the pool of vacant cnx *)
 let make_vacant_cnx t tcp http addr port =
     clean_vacant_cnxs t ;
-    Hashtbl.add t.vacant_cnxs (addr, port) { tcp ; http ; last_used = Simulation.now (Simulation.of_widget t.host.Host.widget) }
+    Hashtbl.add t.vacant_cnxs (addr, port) { tcp ; http ; last_used = Simulation.now (Simulation.of_widget t.widget) }
 
 (* Takes an URL and an optional body and call the continuation with the obtained document *)
 let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
@@ -386,7 +389,7 @@ let spider t max_depth start =
                                 (Hashtbl.mem fetched %> not) |>
                                 List.of_enum |>
                                 List.iter (fun url ->
-                                    Simulation.asap (Simulation.of_widget t.host.Host.widget) (aux (max_depth-1)) url)
+                                    Simulation.asap (Simulation.of_widget t.widget) (aux (max_depth-1)) url)
                         | None ->
                             if debug then Printf.printf "Browser: Cannot parse HTML from %s\n" (Url.to_string url)
                     )
@@ -415,7 +418,7 @@ let user t ?pause max_depth start =
                             tap (fun l -> if debug then Printf.printf "Browser: will iter on %d urls\n" (List.length l)) |>
                             List.iter (fun url' ->
                                 if debug then Printf.printf "Browser: user: fetching %s for %s\n" (Url.to_string url') (Url.to_string url) ;
-                                Simulation.asap (Simulation.of_widget t.host.Host.widget) (aux (max_depth-1)) url') ;
+                                Simulation.asap (Simulation.of_widget t.widget) (aux (max_depth-1)) url') ;
                         (* fetch sequentially, depth first, a links *)
                         (* TODO: get only one URL amongst the possible links but keep all
                          * encountered URL in this set of possible next links. Also,
@@ -430,7 +433,7 @@ let user t ?pause max_depth start =
                                 let d = match pause with
                                     | None -> 0.
                                     | Some t -> Random.float (2.*.t) in
-                                Simulation.delay (Simulation.of_widget t.host.Host.widget) (Clock.Interval.o d) (fun () ->
+                                Simulation.delay (Simulation.of_widget t.widget) (Clock.Interval.o d) (fun () ->
                                     if debug then Printf.printf "Browser: user: fetching %s after %s\n" (Url.to_string url') (Url.to_string url) ;
                                     aux (max_depth-1) url' ;
                                     fetch_next ()) () in

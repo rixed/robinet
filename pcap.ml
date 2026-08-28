@@ -454,6 +454,8 @@ let play sim tx fname =
 (** A network device opened for sniffing or injection *)
 type iface = { handler : iface_handler ;
                   name : string ;
+               (* Not mutable: the handler is opened with it, and libpcap has
+                * no way to change it afterwards. *)
                 caplen : int ;
                 widget : Widget.t }
 
@@ -469,10 +471,20 @@ let openif ~parent ?(promisc=true) ?(filter="") ?caplen ifname =
             Option.default_delayed (fun () -> mtu_of_iface ifname) caplen in
     (* TODO: a real interface only makes sense in a realtime simulation; either
      * refuse a simulation that is not, or switch it to realtime. *)
-    { handler = openif_ ifname promisc filter caplen ;
-      name = ifname ;
-      caplen = caplen ;
-      widget = Widget.make ~parent ifname }
+    let widget = Widget.make ~parent ifname in
+    let t = {
+        handler = openif_ ifname promisc filter caplen ;
+        name = ifname ;
+        caplen = caplen ;
+        widget } in
+    widget.properties <- Widget.[
+        property "name" ~kind:String
+            ~descr:"Interface name."
+            ~getter:(fun () -> `String t.name) ;
+        property "caplen" ~kind:Int
+            ~descr:"Capture length, fixed when the interface was opened."
+            ~getter:(fun () -> `Int t.caplen) ] ;
+    t
 
 (** [sniff iface] will return the next available packet as a Pcap.Pdu.t. *)
 let sniff ?dlt ?timeout iface =

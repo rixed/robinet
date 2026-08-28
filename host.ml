@@ -49,6 +49,8 @@ type addr = IPv4 of Ip.Addr.t | Name of string
  * state. *)
 
 type host_trx = {
+    (* The widget of the host this speaks for: will have the properties of a
+     * [Host.t] for a simulated host, whereas the localhost's has no properties. *)
     widget        : Widget.t ;
     tcp_connect   : addr -> ?src_port:Tcp.Port.t -> Tcp.Port.t -> (Tcp.TRX.tcp_trx option -> unit) -> unit ;
     udp_connect   : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> (Udp.TRX.udp_trx -> bitstring -> unit) -> (Udp.TRX.udp_trx option -> unit) -> unit ;
@@ -80,7 +82,7 @@ and udp_socks = { ip_4_udp : trx ;
                    udps : (Udp.Port.t * Udp.Port.t (* local, remote *), Udp.TRX.udp_trx) Hashtbl.t }
 
 and t = { mutable trx : host_trx ;
-          mutable on : bool ; (* If that host is powered on *)
+          mutable on  : bool ; (* If that host is powered on *)
           (* Called at shutdown. New processes must add their own destructor
            * (see [add_killer]) : *)
           mutable killers : ((unit -> unit) -> unit) list ;
@@ -93,30 +95,28 @@ and t = { mutable trx : host_trx ;
           tcp_servers : (Tcp.Port.t, (Tcp.TRX.tcp_trx -> unit)) Hashtbl.t ;
           udp_servers : (Udp.Port.t, (Udp.TRX.udp_trx -> unit)) Hashtbl.t ;
           (* the resolver *)
-          search_sfx : string option ;
+          mutable search_sfx : string option ;
           nameserver : Ip.Addr.t option ;
           mutable resolv_trx : trx option ;
-          (* Waiting for this host's metrics to be attached to its widget:
           dns_queries : (string, ((Ip.Addr.t list option -> unit) * Metric.Timed.stop_func option)) Hashtbl.t ;
-          *)
-          dns_queries : (string, (Ip.Addr.t list option -> unit)) Hashtbl.t ;
           dns_cache   : (string, Ip.Addr.t list) Hashtbl.t ;
+          resolutions : Metric.Timed.t ;
           (* ICMP errors want to embed the first 8 bytes of the IP packet so we save
            * it here: *)
           mutable last_ip_packet : Ip.Pdu.t option }
 
-let print oc trx = String.print oc trx.widget.name
+let print oc trx = String.print oc trx.widget.Widget.name
 let make_tcp_socks ip = { ip_4_tcp = ip ; tcps = Hashtbl.create 3 }
 let make_udp_socks ip = { ip_4_udp = ip ; udps = Hashtbl.create 3 }
 
 exception No_socket
 
-let signal_err t str =
+let signal_err (t : t) str =
     (* later, change this into a nice log *)
     Printf.fprintf stderr "Host %s: %s\n%!" t.trx.widget.name str
 
 (* Forward the payload to the socket function or to the server function *)
-let tcp_sock_rx t socks bits =
+let tcp_sock_rx (t : t) socks bits =
     match Tcp.Pdu.unpack bits with
         | Error s ->
             Log.(log t.trx.widget.logger Warning s)
@@ -144,7 +144,7 @@ let tcp_sock_rx t socks bits =
                 Log.(log t.trx.widget.logger Debug (lazy "Sending a TCP-RST")) ;
                 Tcp.Pdu.make_reset_of tcp |> Tcp.Pdu.pack |> tx socks.ip_4_tcp
 
-let udp_sock_rx t socks icmp_trx bits =
+let udp_sock_rx (t : t) socks icmp_trx bits =
     match Udp.Pdu.unpack bits with
         | Error s ->
             Log.(log t.trx.widget.logger Warning s)
@@ -172,7 +172,7 @@ let udp_sock_rx t socks icmp_trx bits =
                     let icmp_bits = Icmp.Pdu.pack icmp_err in
                     tx icmp_trx icmp_bits
 
-let icmp_rx t ip_trx bits =
+let icmp_rx (t : t) ip_trx bits =
     match Icmp.Pdu.unpack bits with
         | Error s ->
             Log.(log t.trx.widget.logger Warning s)
@@ -215,14 +215,13 @@ let udp_cnxs_ok  = Metric.Atomic.make "Host/Udp/Connect/Ok"
 let udp_cnxs_err = Metric.Atomic.make "Host/Udp/Connect/Err"
 let resolution_timeouts  = Metric.Atomic.make "Host/Resolver/Timeouts"
 let resolution_cachehits = Metric.Atomic.make "Host/Resolver/CacheHits"
-let resolutions = Metric.Timed.make "Host/Resolver/Queries"
 *)
 
-let ip_is_set t =
+let ip_is_set (t : t) =
     try ignore (Eth.State.find_ip4 t.eth_state) ; true
     with Not_found -> false
 
-let rec with_resolver_trx t cont =
+let rec with_resolver_trx (t : t) cont =
     let dns_recv _trx bits = (match Dns.Pdu.unpack bits with
         | Error s ->
             Log.(log t.trx.widget.logger Warning s)
@@ -243,8 +242,11 @@ let rec with_resolver_trx t cont =
                         ) pdu.Dns.Pdu.answer_rrs in
                     let conts = Hashtbl.find_all t.dns_queries name in
                     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Awakening %d clients that were waiting for the address of '%s'" (List.length conts) name))) ;
-                    List.iter (fun cont ->
-                        (* Option.may (fun f -> f (Metric.Params.singleton "status" (Metric.Param.String "ok"))) timer_stop_opt ; *)
+                    List.iter (fun (cont, timer_stop_opt) ->
+                        Option.may (fun f ->
+                            let now = Simulation.Widget.now t.trx.widget in
+                            f ~now (Metric.Params.singleton "status" (Metric.Param.String "ok"))
+                        ) timer_stop_opt ;
                         cont (Some ips)) conts ;
                     Hashtbl.remove_all t.dns_queries name ;
                     (* cache the result *)
@@ -269,13 +271,13 @@ let rec with_resolver_trx t cont =
             t.resolv_trx <- Some trx.Udp.TRX.trx ;
             cont (Some trx.Udp.TRX.trx))
 
-and gethostbyname t name cont =
+and gethostbyname (t : t) name cont =
     (* If the name is already an IP do not try to resolve it, otherwise host without DNS server cannot use IP addresses neither *)
     match Ip.Addr.of_dotted_string_exc name with
     | exception _ -> do_gethostbyname t name cont
     | ip -> cont (Some [ip])
 
-and do_gethostbyname t name cont =
+and do_gethostbyname (t : t) name cont =
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Resolving '%s'" name))) ;
     let dns_timeout_delay = Clock.Interval.sec 3. in
     let is_fqdn n = n.[String.length n - 1] = '.' in
@@ -292,8 +294,11 @@ and do_gethostbyname t name cont =
         if num_conts > 0 then (
             Log.(log t.trx.widget.logger Warning (lazy (Printf.sprintf "Timeouting %d clients that were waiting for the address of '%s'" num_conts name))) ;
             (* Metric.Atomic.fire resolution_timeouts ; *)
-            List.iter (fun cont ->
-                (* Option.may (fun f -> f (Metric.Params.singleton "status" (Metric.Param.String "timeout"))) timer_stop_opt ; *)
+            List.iter (fun (cont, timer_stop_opt) ->
+                Option.may (fun f ->
+                    let now = Simulation.Widget.now t.trx.widget in
+                    f ~now (Metric.Params.singleton "status" (Metric.Param.String "timeout"))
+                ) timer_stop_opt ;
                 cont None) conts ;
             Hashtbl.remove_all t.dns_queries name
         ) in
@@ -314,15 +319,17 @@ and do_gethostbyname t name cont =
                     (* add a timeout event that will awake all waiters for this name after some time *)
                     Simulation.delay (Simulation.of_widget t.trx.widget) dns_timeout_delay dns_timeout () ;
                     (* Then actually sends the query *)
-                    (* let stop = Metric.(Timed.start ~params:(Params.singleton "name" (Param.String name)) resolutions) in *)
-                    Hashtbl.add t.dns_queries name cont ;
+                    let now = Simulation.Widget.now t.trx.widget in
+                    let params = Metric.(Params.singleton "name" (Param.String name)) in
+                    let stop = Metric.Timed.start ~now ~params t.resolutions in
+                    Hashtbl.add t.dns_queries name (cont, Some stop) ;
                     Dns.Pdu.make_query name |> Dns.Pdu.pack |> tx resolv_trx
                 ) else (
-                    Hashtbl.add t.dns_queries name cont
+                    Hashtbl.add t.dns_queries name (cont, None)
                 )
             )
 
-and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
+and tcp_connect (t : t) dst ?src_port (dst_port : Tcp.Port.t) cont =
     (* Fail if we do not have an IP yet *)
     if not (t.on && ip_is_set t) then cont None else
     let my_ip = Eth.State.find_ip4 t.eth_state in
@@ -388,7 +395,7 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
                     cont None
                 ))
 
-and udp_connect t dst ?src_port dst_port client_f cont =
+and udp_connect (t : t) dst ?src_port dst_port client_f cont =
     (* Fail if we do not have an IP yet *)
     if not (t.on && ip_is_set t) then cont None else
     let my_ip = Eth.State.find_ip4 t.eth_state in
@@ -424,13 +431,13 @@ and udp_connect t dst ?src_port dst_port client_f cont =
             | Some dst_ips ->
                 connect (List.hd dst_ips))
 
-let with_my_ip t f =
+let with_my_ip (t : t) f =
     if t.on then
         match Eth.State.find_ip4 t.eth_state with
         | exception Not_found -> ()
         | my_ip -> f my_ip
 
-let udp_send t dst ?src_port dst_port bits =
+let udp_send (t : t) dst ?src_port dst_port bits =
     with_my_ip t (fun my_ip ->
         let send dst_ip =
             Udp.Pdu.make ~src_port:(Option.default dst_port src_port)
@@ -447,7 +454,7 @@ let udp_send t dst ?src_port dst_port bits =
                 | Some dst_ips ->
                     send (List.hd dst_ips)))
 
-let ping t ?(id=1) ?(seq=1) dst =
+let ping (t : t) ?(id=1) ?(seq=1) dst =
     with_my_ip t (fun my_ip ->
         let do_ping dst_ip =
             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Transmitting a ping to %s" (Ip.Addr.to_string dst_ip)))) ;
@@ -467,11 +474,11 @@ let ping t ?(id=1) ?(seq=1) dst =
                         do_ping (List.hd dst_ips)))
 
 
-let tcp_server t src_port server_f = Hashtbl.add t.tcp_servers src_port server_f
-let udp_server t src_port server_f = Hashtbl.add t.udp_servers src_port server_f
+let tcp_server (t : t) src_port server_f = Hashtbl.add t.tcp_servers src_port server_f
+let udp_server (t : t) src_port server_f = Hashtbl.add t.udp_servers src_port server_f
 
 (* The recv of the eth is responsible for handling the payload to the correct Ip.TRX *)
-let ip_recv t bits =
+let ip_recv (t : t) bits =
     with_my_ip t (fun my_ip ->
         match Ip.Pdu.unpack bits with
         | Error s ->
@@ -504,7 +511,7 @@ let ip_recv t bits =
                 rx ip_trx bits
             ))
 
-let power_off ?timeout t =
+let power_off ?timeout (t : t) =
     let to_kill = ref (List.length t.killers) in
     let do_power_off () =
         Log.(log t.trx.widget.logger Debug (lazy
@@ -550,6 +557,7 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget ?(init=on_init_noth
           search_sfx    = search_sfx ;
           dns_queries   = Hashtbl.create 3 ;
           dns_cache     = Hashtbl.create 3 ;
+          resolutions   = Metric.Timed.make (Widget.full_name widget ^"/resolutions") ;
           trx           = host_trx ;
           last_ip_packet = None }
     and host_trx =
@@ -575,6 +583,16 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget ?(init=on_init_noth
           power_off     = (fun ?timeout () -> assert t.on ; power_off ?timeout t ; t.on <- false) ;
           add_killer    = (fun f -> t.killers <- f :: t.killers) }
     in
+    widget.properties <- Widget.[
+        property "on" ~descr:"The host is powered on." ~kind:Bool
+            ~getter:(fun () -> `Bool t.on)
+            ~setter:(fun v -> let on = to_bool v in if on && not t.on then t.trx.power_on () else if not on && t.on then t.trx.power_off ()) ;
+        property "search suffix" ~kind:String
+            ~descr:"Search suffix"
+            ~getter:(fun () -> `String (t.search_sfx |? ""))
+            ~setter:(fun v -> t.search_sfx <- match to_string v with "" -> None | s -> Some s) ;
+        metric_property "DNS resolutions" ~descr:"DNS resolution times."
+            (Metric.Timed.T t.resolutions) ] ;
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "New host '%s'" name))) ;
     if t.on then init t ;
     t
@@ -587,14 +605,27 @@ let make ?gateways ?search_sfx ?nameserver ?on ~parent ?mac ?init name =
     let eth_trx = Eth.TRX.make eth_state in
     make_from_eth ?search_sfx ?nameserver ?on ~widget ?init eth_state eth_trx name
 
-let set_ip t my_ip netmask =
+let set_ip (t : t) my_ip netmask =
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Setting my IP to %s" (Ip.Addr.to_string my_ip)))) ;
     t.eth_state.my_addresses <- [ Eth.State.make_my_ip_address ~netmask my_ip ] ;
     ip_recv t <-= t.eth_trx |> ignore
 
+(* What a host is built from belongs within it, which is what the interface
+   being built under the host's own widget buys. *)
+(*$T make_static
+  (let sim = Simulation.make ~realtime:false "test-tree" in \
+   let h = \
+     make_static ~parent:sim.Simulation.root \
+                 ~netmask:(Ip.Addr.of_string "255.255.255.0") \
+                 (Ip.Addr.of_string "192.168.1.1") "h" in \
+   List.exists (fun (w : Widget.t) -> w.name = "eth") h.trx.widget.Widget.children && \
+   not (List.exists (fun (w : Widget.t) -> w.name = "eth") \
+                    sim.Simulation.root.Widget.children))
+ *)
+
 (* Safer to have the netmask mandatory here *)
 let make_static ?gateways ?search_sfx ?nameserver ?on ?mac ~parent ~netmask my_ip name =
-    let init ?on_ip t =
+    let init ?on_ip (t : t) =
         set_ip t my_ip netmask ;
         (* TODO: Send a gratuitous ARP request? *)
         Option.may (fun on_ip -> Simulation.asap (Simulation.of_widget t.trx.widget) on_ip t) on_ip
@@ -603,7 +634,7 @@ let make_static ?gateways ?search_sfx ?nameserver ?on ?mac ~parent ~netmask my_i
 
 (* FIXME: Until we get the netmask from the DHCP it's safer to make it mandatory! *)
 let make_dhcp ?gateways ?search_sfx ?nameserver ?mac ?on ~parent ~netmask (*?(netmask==Ip.Addr.zero)*) host_name =
-    let init ?on_ip t =
+    let init ?on_ip (t : t) =
         (* Will receive all eth frames until we got an IP address *)
         let dhcp_client bits = (match Ip.Pdu.unpack bits with
             | Error s ->
