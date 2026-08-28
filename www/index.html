@@ -158,7 +158,7 @@
                                     <td x-text="p.name"></td>
                                     <td>
                                         <span x-show="p.read_only" class="ro"
-                                              x-text="p.value"></span>
+                                              x-text="p.text"></span>
 
                                         <template x-if="!p.read_only && p.kind.type === 'bool'">
                                             <input type="checkbox" :checked="p.draft === 'true'"

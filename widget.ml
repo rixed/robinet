@@ -65,13 +65,26 @@ and peer = { widget : t ;
 
 and property = { name : string ;
                 descr : string ;
-               getter : (unit -> string) ;
+               getter : (unit -> value) ;
                (* If that property can be set *)
-               setter : (string -> unit) option ;
+               setter : (value -> unit) option ;
                (* What the value looks like, so that the UI can offer the right
                 * input and reject nonsense before submitting it. Values still
                 * travel as strings: this only says how to render one. *)
                  kind : kind }
+
+(* A property value, in the shape the administration interface speaks.
+ *
+ * Not a string: properties exist only for that interface, so its own type is
+ * their natural one, and keeping values typed all the way to the setter spares
+ * every property author from inventing a string encoding -- and from getting it
+ * wrong, which is easier than it sounds (string_of_float renders 5. as "5.",
+ * which is not a number any browser will accept).
+ *
+ * [Basic] rather than [Safe]: the three extra constructors Safe carries --
+ * Intlit, Tuple, Variant -- cannot mean anything here, and would only show up
+ * as dead branches, or worse, be swallowed by a catch-all. *)
+and value = Yojson.Basic.t
 
 and kind =
     | String
@@ -86,6 +99,50 @@ and kind =
 
 let property ?(descr="") ?setter ?(kind=String) ~getter name =
     { name ; descr ; getter ; setter ; kind }
+
+(** What a setter raises when handed something it cannot use. The API turns it
+ * into a 400 with this message, like any other exception a setter throws. *)
+exception Bad_value of string
+
+let bad_value fmt =
+    Printf.ksprintf (fun s -> raise (Bad_value s)) fmt
+
+(* Coercions for setters to read their argument with.
+ *
+ * JSON has a single number type while Yojson has two, so a UI sending a round
+ * number for a float property delivers `Int, not `Float: a setter that matched
+ * only `Float would refuse 42 and accept 42.5, which is the kind of bug that
+ * only shows up when a user happens to type a whole number. These accept both,
+ * and a string besides, so that a value typed by hand also works. *)
+
+let to_float = function
+    | `Float f -> f
+    | `Int i -> float_of_int i
+    | `String s ->
+        (try float_of_string s
+        with _ -> bad_value "not a number: %S" s)
+    | v -> bad_value "expected a number, not %s" (Yojson.Basic.to_string v)
+
+let to_int = function
+    | `Int i -> i
+    | `Float f when f = float_of_int (int_of_float f) -> int_of_float f
+    | `Float f -> bad_value "expected a whole number, not %g" f
+    | `String s ->
+        (try int_of_string s
+        with _ -> bad_value "not a whole number: %S" s)
+    | v -> bad_value "expected a whole number, not %s" (Yojson.Basic.to_string v)
+
+let to_bool = function
+    | `Bool b -> b
+    | `String ("true" | "1") -> true
+    | `String ("false" | "0") -> false
+    | v -> bad_value "expected true or false, not %s" (Yojson.Basic.to_string v)
+
+let to_string = function
+    | `String s -> s
+    (* Anything else is rendered as it would be on the wire, so that a property
+     * declared as a string still gets something usable when handed a number. *)
+    | v -> Yojson.Basic.to_string v
 
 (* Beware that the widget graph is cyclic (parent/children and peers point back
  * at each other), so widgets must never be compared with the polymorphic

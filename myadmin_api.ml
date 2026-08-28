@@ -58,7 +58,7 @@ let not_found fmt =
 let json_headers = [ "Content-Type", "application/json" ]
 
 let respond resp json =
-    Yojson.Safe.to_string json |> String.print resp ;
+    Yojson.Basic.to_string json |> String.print resp ;
     200, json_headers
 
 (* [matches] holds the whole url first, then one string per group of the
@@ -96,12 +96,14 @@ let property_of_matches (widget : Widget.t) matches n =
 
 let json_of_property (p : Widget.property) =
     (* The value is read through the getter, which may fail on us: *)
+    (* The value goes out as whatever it is -- a number stays a number -- so
+     * that the interface has nothing to parse and nothing to guess. *)
     let value =
         match p.getter () with
         | exception e ->
             bad_request "Cannot read property %S: %s" p.name
                 (Printexc.to_string e)
-        | v -> `String v in
+        | v -> v in
     let kind =
         match p.kind with
         | Widget.String -> `Assoc [ "type", `String "string" ]
@@ -246,19 +248,24 @@ let get_property _mth matches _vars _qry_body resp =
         let p = property_of_matches w matches 3 in
         respond resp (json_of_property p))
 
-(* The body is the raw value, not JSON: property values are strings all the way
- * down to the setter, so there is nothing to decode. *)
+(* The body is the value, as JSON: 42.5 for a number, "foo" for a string.
+ * Anything that is not JSON at all is taken to be a bare string, so that a
+ * value typed by hand at a shell prompt still works. *)
 let set_property _mth matches vars qry_body resp =
     let sim = simulation_of_matches matches 1 in
     Simulation.borrow sim (fun () ->
     let w = widget_of_matches sim matches 2 in
     let p = property_of_matches w matches 3 in
-    let value =
+    let raw =
         (* Accept the value either as the body or as a "value" parameter, so
          * that a plain HTML form can be used as well: *)
         match Hashtbl.find_option vars "value" with
         | Some v -> v
         | None -> qry_body in
+    let value =
+        match Yojson.Basic.from_string raw with
+        | exception _ -> `String raw
+        | v -> v in
     match p.setter with
     | None ->
         raise (Opache.ResourceError (
@@ -267,11 +274,15 @@ let set_property _mth matches vars qry_body resp =
     | Some setter ->
         (match setter value with
         | exception e ->
-            bad_request "Cannot set property %S to %S: %s"
-                p.name value (Printexc.to_string e)
+            bad_request "Cannot set property %S to %s: %s"
+                p.name (Yojson.Basic.to_string value)
+                (match e with
+                | Widget.Bad_value m -> m
+                | e -> Printexc.to_string e)
         | () ->
             Log.(log w.logger Info (lazy (
-                Printf.sprintf "Property %S set to %S" p.name value))) ;
+                Printf.sprintf "Property %S set to %s" p.name
+                    (Yojson.Basic.to_string value)))) ;
             respond resp (json_of_property p)))
 
 (*
@@ -284,7 +295,7 @@ let set_property _mth matches vars qry_body resp =
  * emitted yet by the time we get here. *)
 let json_errors f mth matches vars qry_body resp =
     let fail code msg =
-        Yojson.Safe.to_string (`Assoc [ "status", `Int code ;
+        Yojson.Basic.to_string (`Assoc [ "status", `Int code ;
                                         "error", `String msg ]) |>
         String.print resp ;
         code, json_headers in

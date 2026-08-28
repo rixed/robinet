@@ -182,7 +182,7 @@ let test_concurrency net cable duration nthreads =
             Simulation.borrow net (fun () -> ignore (tot_bits.getter ()))) ;
         (* Write one. *)
         worker (fun () ->
-            let v = Printf.sprintf "%d.5" (Random.int 100) in
+            let v = `Float (float_of_int (Random.int 100) +. 0.5) in
             Simulation.borrow net (fun () ->
                 (Option.get length.setter) v)) ;
         (* Walk the whole widget tree. *)
@@ -212,7 +212,7 @@ let test_concurrency net cable duration nthreads =
         (let t0 = Simulation.now net in
          wait_for (fun () -> Simulation.now net > t0)) ;
     check "its length property is still readable"
-        (float_of_string (length.getter ()) >= 0.)
+        (Widget.to_float (length.getter ()) >= 0.)
 
 (*
  * 3. The administration interface, over HTTP

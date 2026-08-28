@@ -5,6 +5,28 @@
  * (simulation id, widget id), which is how the API addresses it too.
  */
 
+/* A property value arrives as JSON of its own type -- a number stays a number.
+ * The inputs are text, so each one keeps a [text] rendering to edit, and
+ * [encode] turns that back into the JSON the setter expects. */
+const asText = (v) =>
+    v === null || v === undefined ? '' :
+    typeof v === 'string' ? v : JSON.stringify(v)
+
+const encode = (p) => {
+    switch (p.kind.type) {
+        case 'bool':
+            return JSON.stringify(p.draft === true || p.draft === 'true')
+        case 'int': case 'float': case 'range': {
+            const n = Number(p.draft)
+            /* Send what was typed rather than guessing, and let the setter say
+             * what is wrong with it. */
+            return JSON.stringify(Number.isNaN(n) || p.draft === '' ? String(p.draft) : n)
+        }
+        default:
+            return JSON.stringify(String(p.draft))
+    }
+}
+
 const api = async (path, options) => {
     const resp = await fetch('/api' + path, options)
     let body = null
@@ -177,7 +199,8 @@ document.addEventListener('alpine:init', () => {
                 const drafts = {}
                 for (const p of this.props) if (p.dirty) drafts[p.name] = p.draft
                 for (const p of ps) {
-                    p.draft = (p.name in drafts) ? drafts[p.name] : p.value
+                    p.text = asText(p.value)
+                    p.draft = (p.name in drafts) ? drafts[p.name] : p.text
                     p.dirty = p.name in drafts
                     p.error = null
                 }
@@ -188,16 +211,16 @@ document.addEventListener('alpine:init', () => {
         },
 
         async save(p) {
-            if (p.read_only || p.draft === p.value) { p.dirty = false ; return }
+            if (p.read_only || p.draft === p.text) { p.dirty = false ; return }
             const { sim, id } = this.selected
             try {
-                /* The body *is* the value: property values are strings all the
-                 * way down to the setter. */
+                /* The body is the value, as JSON. */
                 const updated = await api(
                     `/simulations/${sim}/widgets/${id}/properties/${encodeURIComponent(p.name)}`,
-                    { method: 'PUT', body: p.draft })
+                    { method: 'PUT', body: encode(p) })
                 p.value = updated.value
-                p.draft = updated.value
+                p.text = asText(updated.value)
+                p.draft = p.text
                 p.dirty = false
                 p.error = null
             } catch (e) {
