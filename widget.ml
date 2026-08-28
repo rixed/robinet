@@ -29,6 +29,12 @@ type t =
        * the browser URL and (eventually) the saved topology all need a handle
        * that survives those changes, so that handle is this id. *)
       id : int ;
+      (* Which simulation this widget belongs to. An id rather than the
+       * simulation itself, because a simulation holds the root of its widget
+       * tree and this module is therefore compiled before it. A widget only
+       * ever relates to widgets of its own simulation: a cable cannot span two
+       * clocks. *)
+      sim : int ;
       (* A mere label. Must not contain '/' so that [full_name] stays
        * unambiguous. *)
       name : string ;
@@ -73,13 +79,13 @@ let property ?(descr="") ?setter ~getter name =
 let full_name t =
     let rec loop full_name = function
         | None -> full_name
-        | Some p ->
-            loop ("/"^ p.name ^ full_name) p.parent in
+        | Some p -> loop ("/"^ p.name ^ full_name) p.parent in
     loop ("/"^ t.name) t.parent
 
-(* All existing widgets are inventoried here, indexed by their id: *)
-let all : (int, t) Hashtbl.t = Hashtbl.create 131
-
+(* Ids are unique across the whole process rather than merely within a
+ * simulation, which costs nothing: allocating one needs no simulation in hand,
+ * and widget creation is vanishingly rare on the time scale of a simulation.
+ * They remain unique within a simulation, which is all the API asks of them. *)
 let next_id =
     let seq = ref 0 in
     fun () ->
@@ -87,45 +93,69 @@ let next_id =
         incr seq ;
         id
 
-let make ?parent ?use_wall_clock ?size ?(properties=[]) name =
+(* The one place a widget is built. *)
+let make_ ?parent ~sim ?now ?size ?(properties=[]) name =
     if String.contains name '/' then
         invalid_arg ("Widget.make: name must not contain '/': "^ name) ;
-    let size =
-        match size, parent with
-        | Some _, _ -> size
-        | None, Some p -> Some (Array.length p.logger.queues.(0).msgs)
-        | None, None -> None in
-    let use_wall_clock =
-        match use_wall_clock, parent with
-        | Some _, _ -> use_wall_clock
-        | None, Some p -> Some p.logger.use_wall_clock
-        | None, None -> None in
-    let logger = Log.make ?use_wall_clock ?size () in
+    let logger = Log.make ?size ?now () in
     let t = {
         id = next_id () ;
+        sim ;
         name ;
         parent ;
         children = [] ;
         peers = [] ;
         logger ;
         properties } in
-    Option.may (fun p -> p.children <- t :: p.children) parent ;
-    Hashtbl.add all t.id t ;
+    (* Linking it to its parent is all the registration there is: a simulation's
+     * inventory of widgets is that tree, reachable from its root.
+     * Appended rather than prepended so that children stay in creation order,
+     * which is the order they are then enumerated, listed by the API and shown
+     * in the UI. Quadratic in the number of siblings, which is irrelevant:
+     * widgets are created once, at set-up. *)
+    Option.may (fun p -> p.children <- p.children @ [ t ]) parent ;
     t
 
-(** Lookup a widget by its id. *)
-let find id =
-    Hashtbl.find_option all id
+(** Create a widget below [parent], in [parent]'s simulation and reading the
+ * time from [parent]'s clock.
+ *
+ * A parent is always required, and always available: a caller either has the
+ * widget it is building this one under, or has the simulation, whose root is
+ * one [Simulation.root] away. That is what keeps the root the only parentless
+ * widget of a simulation, and hence keeps it a complete inventory. *)
+let make ~parent ?size ?properties name =
+    make_ ~parent ~sim:parent.sim ~now:parent.logger.Log.now
+          ?size ?properties name
 
-(** All the widgets with no parent. *)
-let roots () =
-    Hashtbl.fold (fun _id t roots ->
-        if t.parent = None then t :: roots else roots
-    ) all []
+(** Create the root of a simulation's widget tree: the only widget with no
+ * parent, and the only one that has to be told which simulation it is in and
+ * where to read the time. Called by [Simulation.make], and nowhere else. *)
+let make_root ~sim ~now ?size ?properties name =
+    make_ ~sim ~now ?size ?properties name
 
-(** Lookup widgets by their [full_name]. Since names are not unique this may
- * return any number of widgets (usually zero or one). *)
-let find_by_path path =
+(** Enumerate [t] and all of its descendants, depth first. *)
+let rec enum t =
+    Enum.append
+        (Enum.singleton t)
+        (Enum.flatten (List.enum t.children /@ enum))
+
+(** [t] and all of its descendants. *)
+let descendants t =
+    enum t |> List.of_enum
+
+(** Lookup a widget by id within a tree. *)
+let find root id =
+    try
+        enum root |>
+        Enum.find (fun w -> w.id = id) |>
+        Option.some
+    with Not_found ->
+        None
+
+(** Lookup widgets by their [full_name] within a tree. Since names are not
+ * unique this may return any number of widgets (usually zero or one). The first
+ * component of the path is the root's own name. *)
+let find_by_path root path =
     let names =
         String.split_on_char '/' path |>
         List.filter (fun n -> n <> "") in
@@ -139,7 +169,7 @@ let find_by_path path =
             loop (matching name children) rest in
     match names with
     | [] -> []
-    | first :: rest -> loop (matching first (roots ())) rest
+    | first :: rest -> loop (matching first [ root ]) rest
 
 (* Is [a] [t] itself or one of its ancestors? *)
 let rec is_ancestor a t =
@@ -158,7 +188,10 @@ let unlink_from_parent t =
  *
  * Any peering relationship involving the deleted widgets is dropped, including
  * those where they merely served as the intermediary: a cable *is* the link, so
- * removing it disconnects its two ends. *)
+ * removing it disconnects its two ends.
+ *
+ * Unlinking it from its parent is all there is to it: nothing else holds a
+ * reference, since a simulation's widgets are just its root's subtree. *)
 let rec delete t =
     (* [List.iter] walks the list value we have now, which is unaffected by the
      * children unlinking themselves from [t.children] as they go: *)
@@ -175,23 +208,22 @@ let rec delete t =
     ) t.peers ;
     t.peers <- [] ;
     unlink_from_parent t ;
-    t.parent <- None ;
-    Hashtbl.remove all t.id
+    t.parent <- None
 
 (** Move a widget (and therefore its whole subtree) elsewhere in the hierarchy.
- * [new_parent] is [None] to turn it into a root.
  *
  * Nothing else has to be updated: the id is unchanged and [full_name] is
- * computed on demand. *)
+ * computed on demand. A widget cannot leave its simulation. *)
 let reparent t new_parent =
-    (match new_parent with
-    | Some p when is_ancestor t p ->
-        invalid_arg ("Widget.reparent: "^ full_name p ^" is within "^
-                     full_name t ^", that would create a cycle")
-    | _ -> ()) ;
+    if new_parent.sim <> t.sim then
+        invalid_arg ("Widget.reparent: "^ full_name new_parent ^
+                     " belongs to another simulation") ;
+    if is_ancestor t new_parent then
+        invalid_arg ("Widget.reparent: "^ full_name new_parent ^" is within "^
+                     full_name t ^", that would create a cycle") ;
     unlink_from_parent t ;
-    t.parent <- new_parent ;
-    Option.may (fun p -> p.children <- t :: p.children) new_parent
+    t.parent <- Some new_parent ;
+    new_parent.children <- t :: new_parent.children
 
 let same_via v1 v2 =
     match v1, v2 with
@@ -203,6 +235,14 @@ let has_peer t peer via =
     List.exists (fun p -> p.widget == peer && same_via p.via via) t.peers
 
 let make_peers ?via t1 t2 =
+    if t1.sim <> t2.sim then
+        invalid_arg ("Widget.make_peers: "^ full_name t1 ^" and "^ full_name t2 ^
+                     " belong to different simulations") ;
+    (match via with
+    | Some v when v.sim <> t1.sim ->
+        invalid_arg ("Widget.make_peers: "^ full_name v ^
+                     " belongs to another simulation")
+    | _ -> ()) ;
     if t1 == t2 then
         invalid_arg ("Widget.make_peers: "^ full_name t1 ^
                      " cannot be its own peer") ;

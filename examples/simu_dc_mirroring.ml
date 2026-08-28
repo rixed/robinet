@@ -58,13 +58,13 @@ class equipment = object
 end
 
 (* Should belong to some Generators.Tcp module: *)
-let tcp_write_continuously ~throughput tcp_trx =
+let tcp_write_continuously sim ~throughput tcp_trx =
     (* We write chunks of throughput bytes every seconds: *)
     let chunk = Bitstring.make_bitstring (int_of_float throughput) 'z' in
     let rec send_next () =
-        Clock.(delay (Interval.sec 1.) (fun () ->
+        Simulation.delay sim (Clock.Interval.sec 1.) (fun () ->
             tx tcp_trx.Tcp.TRX.trx chunk ;
-            send_next ()) ())
+            send_next ()) ()
     in
     send_next ()
 
@@ -82,14 +82,14 @@ class host h = object (self)
         h.Host.tcp_server port (fun tcp_trx ->
             (* TODO: Host should automatically close all established connections
              * at power-off. *)
-            tcp_write_continuously ~throughput tcp_trx)
+            tcp_write_continuously (Simulation.of_widget h.Host.widget) ~throughput tcp_trx)
 
     method tcp_traffic ?src_port ?port ?(num_connections=1) ~throughput to_ =
         let random_traffic throughput = function
             | Some tcp_trx ->
                 h.Host.add_killer (fun k ->
                     tcp_trx.Tcp.TRX.close () ; k ()) ;
-                tcp_write_continuously ~throughput tcp_trx
+                tcp_write_continuously (Simulation.of_widget h.Host.widget) ~throughput tcp_trx
             | None ->
                 Log.(log h.Host.widget.logger Error (lazy "Cannot traffic"))
         in
@@ -312,7 +312,7 @@ struct
           dcs : DC.t list ;
           lans : LAN.t list }
 
-    let instanciate p =
+    let instanciate sim p =
         let global_directory = Hashtbl.create 9 in
         (* Endow each host with a controlling soul: *)
         let rec give_soul (make_host : ?name:string -> ?ip:Ip.Addr.t -> ?on:bool -> unit -> Host.host_trx) prevs = function
@@ -330,14 +330,14 @@ struct
                 give_soul make_host (chr :: prevs) rest in
         let ns_ip = Ip.Addr.of_string p.root_nameserver
         and ns_name = "root" in
-        let root_nameserver = Sim.Net.make_server ~name:ns_name ns_ip in
+        let root_nameserver = Sim.Net.make_server sim ~name:ns_name ns_ip in
         Hashtbl.add global_directory ns_name ns_ip ;
         let lookup = (Hashtbl.find_option global_directory) in
-        let dns_state = Named.State.make lookup in
+        let dns_state = Named.State.make ~parent:(Simulation.root sim) lookup in
         Sim.Net.iter_equipments (function
             | Host host -> Named.serve dns_state host
             | _ -> ()) root_nameserver ;
-        let inet = Sim.Net.make_internet () in
+        let inet = Sim.Net.make_internet sim in
         assert_ok (Sim.Net.connect inet root_nameserver) ;
         let net = Sim.Net.union [ inet ; root_nameserver ] in
         let num_hosts =
@@ -352,10 +352,10 @@ struct
                 let cidr = Ip.Cidr.of_string dc.cidr in
                 let num_hosts = num_hosts dc.hosts in
                 let g, add_host =
-                    Sim.Net.make_dc ~dc_name ~nameserver:ns_ip ~cidr num_hosts in
+                    Sim.Net.make_dc sim ~dc_name ~nameserver:ns_ip ~cidr num_hosts in
                 (* Tap DC traffic to the sink: *)
-                let tap = Sim.Net.make_repeater 3 ("tap."^ dc_name) in
-                let sink = Sim.Net.make_sink dc.iface_name in
+                let tap = Sim.Net.make_repeater sim 3 ("tap."^ dc_name) in
+                let sink = Sim.Net.make_sink sim dc.iface_name in
                 assert_ok (Sim.Net.connect tap sink) ;
                 assert_ok (Sim.Net.connect tap g) ;
                 assert_ok (Sim.Net.connect tap inet) ;
@@ -367,7 +367,7 @@ struct
                 let open LAN in
                 let num_hosts = num_hosts lan.hosts in
                 let g, add_host =
-                    Sim.Net.make_lan ?lan_name:lan.name ns_ip num_hosts in
+                    Sim.Net.make_lan sim ?lan_name:lan.name ns_ip num_hosts in
                 assert_ok (Sim.Net.connect inet g) ;
                 let characters = give_soul add_host characters lan.hosts in
                 characters, Sim.Net.union [ net ; g ]
@@ -379,8 +379,8 @@ struct
 
 end
 
-let simul plan =
-    let characters, _net = Plan.instanciate plan in
+let simul sim plan =
+    let characters, _net = Plan.instanciate sim plan in
     Log.(log default Info (lazy
         (Printf.sprintf "Got a net with %d characters" (List.length characters)))) ;
     (* What to do with the souls? For now we just power them all on.
@@ -393,6 +393,8 @@ let simul plan =
     (* And so on. *)
 
 let main =
+    (* Everything this program does happens in this simulation. *)
+    let sim = Simulation.make "simu_dc_mirroring" in
     Random.self_init () ; (* TODO: parameter for seed *)
     let plan = Plan.{
         root_nameserver = "1.1.1.1" ;
@@ -409,5 +411,5 @@ let main =
             ] ;
             iface_name = "bridge0" } ] } in
     Log.console_lvl := Log.Debug ;
-    simul plan ;
-    Clock.run true
+    simul sim plan ;
+    Simulation.run sim true

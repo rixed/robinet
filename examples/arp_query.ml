@@ -21,9 +21,8 @@ open Bitstring
 
 (* TODO: make this a parameter.
          make eth0 a command line arg *)
-let iface = Pcap.openif "eth0"
 
-let arp_query (src_eth : Eth.Addr.t) src_ip target_ip =
+let arp_query iface (src_eth : Eth.Addr.t) src_ip target_ip =
     let arp = Arp.Pdu.make_request Arp.HwType.eth Arp.HwProto.ip4
                                    (src_eth :> bitstring)
                                    ( Ip.Addr.to_bitstring src_ip)
@@ -31,7 +30,7 @@ let arp_query (src_eth : Eth.Addr.t) src_ip target_ip =
     let eth = Eth.Pdu.make Arp.HwProto.arp src_eth Eth.Addr.broadcast (Arp.Pdu.pack arp) in
     Pcap.inject iface (Eth.Pdu.pack eth)
 
-let wait_answer target_ip_bits =
+let wait_answer iface target_ip_bits =
     (* TODO: times out *)
     let rec aux () =
         let pdu = Pcap.sniff iface in
@@ -53,14 +52,17 @@ let wait_answer target_ip_bits =
     in aux ()
 
 let main =
+    (* Everything this program does happens in this simulation. *)
+    let sim = Simulation.make "arp_query" in
+    let iface = Pcap.openif ~parent:(Simulation.root sim) "eth0" in
     let src_ip_str = ref "192.168.66.147" and src_eth_str = ref "01:23:45:67:89:ab" in
     let resolve_one target_ip_str =
         let target_ip      = Ip.Addr.of_string target_ip_str in
         let target_ip_bits = Ip.Addr.to_bitstring target_ip
         and src_eth        = Eth.Addr.of_string !src_eth_str
         and src_ip         = Ip.Addr.of_string !src_ip_str in
-        arp_query src_eth src_ip target_ip ;
-        let answer = Eth.Addr.o (wait_answer target_ip_bits) in
+        arp_query iface src_eth src_ip target_ip ;
+        let answer = Eth.Addr.o (wait_answer iface target_ip_bits) in
         Printf.printf "%s: %s\n" (Ip.Addr.to_string target_ip) (Eth.Addr.to_string answer)
     in
     Arg.parse [ "-src-ip",  Arg.Set_string src_ip_str,  "IP to use as the query sender" ;

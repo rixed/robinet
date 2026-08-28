@@ -70,7 +70,7 @@ let seq_time = make_seq "time" false
 
 (* If you use the above, you must also run this thread.
  * [period] is in seconds. *)
-let report_thread period =
+let report_thread sim period =
     let update_atomic_metric n = function
         | Metric.Atomic.T m ->
             Hashtbl.iter (fun params count ->
@@ -120,7 +120,7 @@ let report_thread period =
         seq_next_idx :=
             if !seq_next_idx < seq_size-1 then !seq_next_idx+1 else 0 ;
         if !seq_used < seq_size then incr seq_used ;
-        if !Clock.continue then forever () in
+        if Simulation.is_running sim then forever () in
     Thread.create forever ()
 
 type param_filter =

@@ -33,8 +33,8 @@ struct
     (* [lookup] is a function taking names as string and returning
      * IP addresses or None in which case the server will delegate.
      * FIXME: any serializable/inspectable datastructure *)
-    let make ?(default_ttl=3600) ?parent lookup =
-        let widget = Widget.make ?parent "named" in
+    let make ?(default_ttl=3600) ~parent lookup =
+        let widget = Widget.make ~parent "named" in
         { widget ; default_ttl ; lookup }
 
     let lookup st qname =
@@ -106,22 +106,21 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
                 Log.(log st.widget.logger Debug (lazy "Ignoring that DNS message"))))
 
 (*$R serve
-    Clock.realtime := false ;
+    let sim = Simulation.make ~realtime:false "test-named" in
     (*Log.console_lvl := Log.Debug ;*)
     let netmask = Ip.Addr.all_ones in
-    let srv : Host.t = Host.make_static ~netmask (Ip.Addr.of_dotted_string_exc "1.1.1.1") "server" in
+    let srv : Host.t = Host.make_static ~parent:(Simulation.root sim) ~netmask (Ip.Addr.of_dotted_string_exc "1.1.1.1") "server" in
     let lookup = function
         | "popo" -> Some (Ip.Addr.of_dotted_string_exc "1.1.1.1")
         | _ -> None in
-    let st = State.make lookup in
+    let st = State.make ~parent:(Simulation.root sim) lookup in
     serve st srv.trx ;
     let nameserver = Ip.Addr.of_dotted_string_exc "1.1.1.1" in
-    let clt : Host.t = Host.make_static ~nameserver ~netmask (Ip.Addr.random ()) "client" in
+    let clt : Host.t = Host.make_static ~parent:(Simulation.root sim) ~nameserver ~netmask (Ip.Addr.random ()) "client" in
     srv.trx.dev.set_read clt.trx.dev.write ;
     clt.trx.dev.set_read srv.trx.dev.write ;
     let got_ip = ref false in
     clt.trx.gethostbyname "popo" (fun _ -> got_ip := true) ;
-    Clock.run false ;
-    Clock.realtime := true ;
+    Simulation.run sim false ;
     assert_bool "Client got popo's IP" !got_ip
  *)

@@ -22,20 +22,22 @@
 *)
 open Batteries
 
-let run port root =
+let run sim port root =
     (* Start server *)
     let resources =
         [ Str.regexp "/\\(.*\\)$", Opache.static_file_server root ] in
-    Opache.serve Localhost.host ~port:(Tcp.Port.o port) (Opache.multiplexer resources) ;
+    Opache.serve (Localhost.host sim) ~port:(Tcp.Port.o port) (Opache.multiplexer resources) ;
     (* Run everything *)
-    Clock.run true
+    Simulation.run sim true
 
 let main =
+    (* Everything this program does happens in this simulation. *)
+    let sim = Simulation.make "http_static_server" in
     let port = ref 80 and root = ref "./" in
     Arg.parse [ "-port", Arg.Set_int port,    "TCP port to listen to (default: 80)" ;
                 "-root", Arg.Set_string root, "Root directory (default: ./)" ]
               (fun _ -> raise (Arg.Bad "unknown parameter"))
               "Start a static file http server" ;
     Random.self_init () ;
-    run !port !root
+    run sim !port !root
 

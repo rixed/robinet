@@ -73,7 +73,7 @@ let params_of_query q =
         | None -> Printf.printf "fail\n"
         | Some (headers, body) ->
             Printf.printf "\nResult:\n%a\n\n%s\n" Http.print_headers headers body);;
-    Clock.run false;;
+    Simulation.run false;;
   ]}
 
   Notice that this example, if copied into test.ml, will generate a pcap containing the source code that

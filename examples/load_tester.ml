@@ -58,30 +58,30 @@ let random_tcp_streams simult avg_len =
             Tcp.Pdu.make ~src_port:cnx.src_port ~dst_port:cnx.dst_port ~
 *)
 
-let input_of = function
+let input_of sim = function
     | File name ->
         Pcap.enum_of_file name
     | Iface name ->
-        let iface = Pcap.openif name in
+        let iface = Pcap.openif ~parent:(Simulation.root sim) name in
         Enum.from (fun () -> Pcap.sniff iface)
     | Tcps _n ->
         assert false
         (*random_tcp_streams n 100*)
 
 
-let sink_to = function
+let sink_to sim = function
     | File name ->
         let write, close = Pcap.Pdu.save name in
         at_exit close ;
         Enum.iter write
     | Iface name ->
-        let iface = Pcap.openif ~promisc:false name in
+        let iface = Pcap.openif ~parent:(Simulation.root sim) ~promisc:false name in
         let inject_f pdu = Pcap.inject iface (pdu.Pcap.Pdu.payload :> bitstring) in
         Enum.iter inject_f
     | Tcps _n ->
         assert false
 
-let replay offset n inps outs =
+let replay sim offset n inps outs =
     (* TODO: use several inputs *)
     let inp = List.hd inps and out = List.hd outs in
     let open Packet in
@@ -103,16 +103,18 @@ let replay offset n inps outs =
     let alter_packet i l =
         if i = 0 then l else
         List.map (alter_layer i) l in
-    input_of inp /@
+    input_of sim inp /@
     (fun p ->
         let packet = Packet.Pdu.unpack p in
         Enum.init n (fun i ->
             alter_packet (offset+i) packet |>
             Packet.Pdu.pack)) |>
     Enum.flatten |>
-    sink_to out
+    sink_to sim out
 
 let main =
+    (* Everything this program does happens in this simulation. *)
+    let sim = Simulation.make "load_tester" in
     let growth        = ref 1 (* TODO: a number of simultaneous flows *)
     and offset        = ref 0
     and input         = ref []
@@ -140,7 +142,7 @@ let main =
         Printf.printf "No output?\n"
     ) else (
         let rec aux () =
-            replay !offset !growth !input !output ;
+            replay sim !offset !growth !input !output ;
             if !loop then aux () in
         aux ()
     )

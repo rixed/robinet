@@ -24,9 +24,10 @@
 open Batteries
 open Tools
 
-let iface = Pcap.openif "eth0"
-
 let main =
+    (* Everything this program does happens in this simulation. *)
+    let sim = Simulation.make "dns_query" in
+    let iface = Pcap.openif ~parent:(Simulation.root sim) "eth0" in
     let src_ip  = ref "192.168.1.66"
     and netmask = ref "255.255.255.0"
     and src_eth = ref "12:34:56:78:9a:bc"
@@ -49,7 +50,7 @@ let main =
         (if !gw = "" then None else Some (Eth.Gateway.of_string !gw)) |>
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) in
     let host : Host.t =
-        Host.make_static ?gateways
+        Host.make_static ~parent:(Simulation.root sim) ?gateways
                          ~nameserver:(Ip.Addr.of_string !dst_ip)
                          ~search_sfx:!search
                          ~mac:(Eth.Addr.of_string !src_eth)
@@ -57,10 +58,10 @@ let main =
                          (Ip.Addr.of_string !src_ip)
                          "requester" in
     host.trx.dev.set_read emit ;
-    List.iter (Clock.asap (fun name ->
+    List.iter (Simulation.asap sim (fun name ->
         host.trx.gethostbyname name (function
         | None -> ()
         | Some ips ->
             List.print (fun oc ip -> Printf.fprintf oc "%s\n" (Ip.Addr.to_dotted_string ip)) stdout ips))) !names ;
     ignore (Pcap.sniffer iface host.trx.dev.write) ;
-    Clock.run false
+    Simulation.run sim false

@@ -34,8 +34,8 @@ struct
     let print oc t =
         Printf.fprintf oc "repeater %s with %d ifaces" t.widget.name (Array.length t.ifaces)
 
-    let make ?parent n name =
-        let widget = Widget.make ?parent name in
+    let make ~parent n name =
+        let widget = Widget.make ~parent name in
         let full_name = Widget.full_name widget in
         { ifaces = Array.make n (ignore_bits ~logger:widget.logger) ;
           is_connected = Array.make n false ;
@@ -48,7 +48,7 @@ struct
             if i <> n then (
                 Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to iface %d/%d" i (Array.length t.ifaces)))) ;
                 Metric.(Counter.add t.egress ~params:(Params.singleton "port" (Param.Int i)) (bytelength pld)) ;
-                Clock.asap emit pld
+                Simulation.asap (Simulation.of_widget t.widget) emit pld
             )) t.ifaces
 
     let write (t : t) n pld =
@@ -97,8 +97,8 @@ struct
         Printf.fprintf oc "switch %s with %d ifaces" t.widget.name (Array.length t.hub.ifaces)
 
     (* [num_macs] is the maximum number of remembered MACs. *)
-    let make ?parent num_ifaces num_macs name =
-        let widget = Widget.make ?parent name in
+    let make ~parent num_ifaces num_macs name =
+        let widget = Widget.make ~parent name in
         let full_name = Widget.full_name widget in
         { hub = R.make ~parent:widget num_ifaces "hub" ;
           macs = OrdArray.init num_macs (fun _ -> { addr = None ; iface = 0 }) ;
@@ -156,7 +156,8 @@ struct
                     let mac = OrdArray.get t.macs n in
                     if mac.iface <> ins then (
                         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Known dest %s, will forward to iface %d" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.iface))) ;
-                        Clock.asap t.hub.Repeater.ifaces.(mac.iface) bits ;
+                        Simulation.asap (Simulation.of_widget t.widget)
+                            t.hub.Repeater.ifaces.(mac.iface) bits ;
                         OrdArray.promote t.macs n
                     ) else
                         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Known dest %s is located on iface %d, dropping" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.iface)))
@@ -187,8 +188,8 @@ struct
     type t = { trx : trx ;
             widget : Widget.t }
 
-    let make ?parent mirror =
-        let widget = Widget.make ?parent "tap" in
+    let make ~parent mirror =
+        let widget = Widget.make ~parent "tap" in
         let emit_ins = ref (ignore_bits ~logger:widget.logger)
         and emit_out = ref (ignore_bits ~logger:widget.logger) in
         let trx =

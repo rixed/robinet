@@ -6,13 +6,13 @@
 open Batteries
 open Tools
 
-let run () =
+let run sim () =
     let host_ip = Ip.Addr.random () and my_ip = Ip.Addr.random () in
     (* Build the stack *)
-    let host = Host.make_static ~netmask:(Ip.Addr.all_ones) host_ip "test" in
+    let host = Host.make_static ~parent:(Simulation.root sim) ~netmask:(Ip.Addr.all_ones) host_ip "test" in
     let eth_state = Eth.State.make ~my_addresses:[ Eth.State.make_my_ip_address my_ip ] ~parent:host.trx.widget () in
     let eth = Eth.TRX.make eth_state in
-    let ip  = Ip.TRX.make my_ip host_ip Ip.Proto.icmp host.trx.widget.logger in
+    let ip  = Ip.TRX.make sim my_ip host_ip Ip.Proto.icmp host.trx.widget.logger in
     (* What to do when receiving an ip pck *)
     let my_recv bits = match Icmp.Pdu.unpack bits with
         | Error s ->
@@ -31,8 +31,10 @@ let run () =
     (* Send an echo request *)
     let req = Icmp.Pdu.make_echo_request 42 1 in
     tx ip (Icmp.Pdu.pack req) ;
-    Clock.run false
+    Simulation.run sim false
 
 let main =
+    (* Everything this program does happens in this simulation. *)
+    let sim = Simulation.make "test_ping" in
     Random.self_init () ;
-    run ()
+    run sim ()

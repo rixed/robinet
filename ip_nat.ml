@@ -105,9 +105,9 @@ struct
     (** Initialize the state for a NAT TRX. *)
     let make ?(min_port=1024) ?(num_max_cnxs=200) ?(nat_pings=true)
              ?(send_errs=true) ?(answer_pings=true)
-             ?parent ?(port_forwards=[])
+             ~parent ?(port_forwards=[])
              addr =
-        let widget = Widget.make ?parent "nat" in
+        let widget = Widget.make ~parent "nat" in
         Log.(log widget.logger Debug (lazy (Printf.sprintf "Creating a NATer for IP %s, with %d cnxs max" (Ip.Addr.to_string addr) num_max_cnxs))) ;
         { addr ; min_port ; widget ; nat_pings ; send_errs ; answer_pings ;
           port_forwards ;
@@ -115,7 +115,7 @@ struct
                                               orig_num = 0 ;
                                               nat_num = 0 ;
                                               keys = None ;
-                                              last_used = Clock.now () } ;
+                                              last_used = Simulation.now (Simulation.of_widget widget) } ;
           inc_cnxs_h = Hashtbl.create num_max_cnxs ;
           out_cnxs_h = Hashtbl.create num_max_cnxs ;
           inc_icmp_h = Hashtbl.create num_max_cnxs ;
@@ -168,7 +168,7 @@ v}
     let start_tracking (st : State.t) orig_addr orig_num nat_num in_h in_k keys =
         let last_idx = OrdArray.last st.cnxs in
         let prev = OrdArray.get st.cnxs last_idx in
-        let now_ = Clock.now () in
+        let now_ = Simulation.now (Simulation.of_widget st.widget) in
         if prev.keys <> State.None then
             Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Recycling an old connection last used %s ago" Clock.(Interval.to_string Time.(sub now_ prev.last_used))))) ;
         State.unkey_cnx st (OrdArray.get st.cnxs last_idx).keys ;
@@ -234,7 +234,7 @@ v}
          * Do this each time we read from OrdArray. *)
         (* FIXME: Also, clean the hash when that happen. Store the hash key in cnx? *)
         let cnx = OrdArray.get st.cnxs n in
-        cnx.last_used <- Clock.now () ;
+        cnx.last_used <- Simulation.now (Simulation.of_widget st.widget) ;
         let new_src_port = cnx.nat_num in
         patch_src_port ip.proto (ip.payload :> bitstring) new_src_port |>
         Result.iter (fun pld ->
@@ -259,7 +259,7 @@ v}
         OrdArray.promote st.cnxs n ;
         (* Actually substitute the id: *)
         let cnx = OrdArray.get st.cnxs n in
-        cnx.last_used <- Clock.now () ;
+        cnx.last_used <- Simulation.now (Simulation.of_widget st.widget) ;
         let new_id = cnx.nat_num in
         let payload = Payload.o (patch_icmp_id icmp new_id) in
         Log.(log st.widget.logger Debug (lazy (Printf.sprintf "NATing an ICMP packet, subst IP src %s->%s"
@@ -334,7 +334,7 @@ v}
             | n ->
                 OrdArray.promote st.cnxs n ;
                 let cnx = OrdArray.get st.cnxs n in
-                cnx.last_used <- Clock.now () ;
+                cnx.last_used <- Simulation.now (Simulation.of_widget st.widget) ;
                 (* Patch the external version of the dest port: *)
                 let%bitstring err_ip_pld =
                     {| src_port : 16 ; cnx.nat_num : 16 ;
@@ -356,7 +356,7 @@ v}
             | n ->
                 OrdArray.promote st.cnxs n ;
                 let cnx = OrdArray.get st.cnxs n in
-                cnx.last_used <- Clock.now () ;
+                cnx.last_used <- Simulation.now (Simulation.of_widget st.widget) ;
                 (* Put back the original dest IP and ICMP id in the
                  * ICMP copy of the IP header: *)
                 let%bitstring err_ip_pld =
@@ -369,7 +369,7 @@ v}
         let do_unnat n =
             OrdArray.promote st.cnxs n ;
             let cnx = OrdArray.get st.cnxs n in
-            cnx.last_used <- Clock.now () ;
+            cnx.last_used <- Simulation.now (Simulation.of_widget st.widget) ;
             Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Translating back from NATed port %d to original port %d" cnx.nat_num cnx.orig_num))) ;
             patch_dst_port ip.proto (ip.payload :> bitstring) cnx.orig_num |>
             Result.iter (fun pld ->
@@ -440,7 +440,7 @@ v}
         | n ->
             OrdArray.promote st.cnxs n ;
             let cnx = OrdArray.get st.cnxs n in
-            cnx.last_used <- Clock.now () ;
+            cnx.last_used <- Simulation.now (Simulation.of_widget st.widget) ;
             let payload = Payload.o (patch_icmp_id icmp cnx.orig_num) in
             let ip = { ip with dst = cnx.orig_addr ; payload } in
             st.recv (Ip.Pdu.pack ip)
@@ -475,7 +475,7 @@ v}
             | n ->
                 OrdArray.promote st.cnxs n ;
                 let cnx = OrdArray.get st.cnxs n in
-                cnx.last_used <- Clock.now () ;
+                cnx.last_used <- Simulation.now (Simulation.of_widget st.widget) ;
                 (* Put back the original source IP and port in the ICMP
                  * copy of the IP header: *)
                 let%bitstring err_ip_pld =
@@ -496,7 +496,7 @@ v}
             | n ->
                 OrdArray.promote st.cnxs n ;
                 let cnx = OrdArray.get st.cnxs n in
-                cnx.last_used <- Clock.now () ;
+                cnx.last_used <- Simulation.now (Simulation.of_widget st.widget) ;
                 (* Put back the original source IP and ICMP id in the ICMP
                  * copy of the IP header: *)
                 let%bitstring err_ip_pld =

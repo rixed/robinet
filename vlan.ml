@@ -84,6 +84,7 @@ module TRX =
 struct
     type t =
         { logger : Log.t ;
+          sim : Simulation.t ;
           prio : int ; id : int ;
           proto : Arp.HwProto.t ;
           mutable emit : bitstring -> unit ;
@@ -92,7 +93,7 @@ struct
     (** Transmit function. [tx t payload] will tunnel the payload through this TRX. *)
     let tx t bits =
         let pdu = Pdu.make ~prio:t.prio t.id t.proto bits in
-        Clock.asap t.emit (Pdu.pack pdu)
+        Simulation.asap t.sim t.emit (Pdu.pack pdu)
 
     (** Receive function, called to output untaggd frames from the 802.1q tunnel. *)
     let rx (t : t) bits = match Pdu.unpack bits with
@@ -100,7 +101,7 @@ struct
             Log.(log t.logger Warning s)
         | Ok frame ->
             if frame.Pdu.proto = t.proto && Payload.bitlength frame.Pdu.payload > 0 then (
-                Clock.asap t.recv (frame.Pdu.payload :> bitstring)
+                Simulation.asap t.sim t.recv (frame.Pdu.payload :> bitstring)
             )
 
     (** Creates a {!Vlan.TRX.t}.
@@ -108,8 +109,8 @@ struct
      * @param id then vlan tag.
      * @param proto the {!Arp.HwProto.t} we want to transmit/receive.
      *)
-    let make prio id proto logger =
-        let t = { logger ; prio ; id ; proto ;
+    let make sim prio id proto logger =
+        let t = { logger ; sim ; prio ; id ; proto ;
                   emit = ignore_bits ~logger ;
                   recv = ignore_bits ~logger } in
         { ins = { write = tx t ;

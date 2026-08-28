@@ -32,22 +32,22 @@ let server_f _h tcp bits =
         tcp.Tcp.TRX.close ()
     )
 
-let run () =
-    let h1 = Host.make_static ~mac:(Eth.Addr.of_string "12:34:56:78:90:ab")
+let run sim () =
+    let h1 = Host.make_static ~parent:(Simulation.root sim) ~mac:(Eth.Addr.of_string "12:34:56:78:90:ab")
                               ~netmask:(Ip.Addr.of_string "255.255.255.0")
                               (Ip.Addr.of_string "192.168.0.1") "server"
-    and h2 = Host.make_static ~mac:(Eth.Addr.of_string "ab:cd:ef:01:23:45")
+    and h2 = Host.make_static ~parent:(Simulation.root sim) ~mac:(Eth.Addr.of_string "ab:cd:ef:01:23:45")
                               ~netmask:(Ip.Addr.of_string "255.255.255.0")
                               (Ip.Addr.of_string "192.168.0.2") "client"
-    and hub = Hub.Repeater.make 3 "hub"
+    and hub = Hub.Repeater.make ~parent:(Simulation.root sim) 3 "hub"
     in
-    let gigabit = Eth.limited (Clock.Interval.msec 1.) 1_000_000_000. in
+    let gigabit = Eth.limited sim (Clock.Interval.msec 1.) 1_000_000_000. in
     h1.trx.dev.set_read (gigabit (Hub.Repeater.write hub 0)) ;
     Hub.Repeater.set_read hub 0 (gigabit h1.trx.dev.write) ;
     h2.trx.dev.set_read (gigabit (Hub.Repeater.write hub 1)) ;
     Hub.Repeater.set_read hub 1 (gigabit h2.trx.dev.write) ;
     (* Save everything into sock_test.pcap *)
-    let write, close = Pcap.save "sock_test.pcap" in
+    let write, close = Pcap.save sim "sock_test.pcap" in
     at_exit close ;
     Hub.Repeater.set_read hub 2 write ;
     (* Start a server on h1 *)
@@ -69,4 +69,6 @@ let run () =
         tx tcp.Tcp.TRX.trx (bitstring_of_string "Hello world!"))
 
 let main =
-    run ()
+    (* Everything this program does happens in this simulation. *)
+    let sim = Simulation.make "sock_test" in
+    run sim ()

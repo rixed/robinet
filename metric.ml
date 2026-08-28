@@ -135,7 +135,7 @@ struct
         t := empty
 
     let update ?now t =
-        let now = Option.default_delayed Clock.now now in
+        let now = Option.default_delayed Clock.Time.wall_clock now in
         if !t == empty then
             t := { first = now ; last = now }
         else
@@ -332,11 +332,11 @@ struct
     type stop_func = Params.t -> unit
 
     let start ?(params=Params.empty) t : stop_func =
-        let start_time = Clock.now () in
+        let start_time = Clock.Time.wall_clock () in
         Gauge.succ ~params t.simult ;
         (* Return the stop function: *)
         fun extra_params ->
-            let now = Clock.now () in
+            let now = Clock.Time.wall_clock () in
             let params = Params.add params extra_params in
             Atomic.fire ~now:start_time ~params t.starts ;
             Atomic.fire ~now ~params t.stops ;
@@ -358,7 +358,7 @@ struct
             ) t.durations
 
     let timed ?(params=Params.empty) t f =
-        let start_time = Clock.now () in
+        let start_time = Clock.Time.wall_clock () in
         Gauge.succ ~params t.simult ;
         match f () with
         | exception e ->
@@ -367,7 +367,7 @@ struct
             Gauge.pred ~params t.simult ;
             Printexc.raise_with_backtrace e bt
         | extra_params, res->
-            let now = Clock.now () in
+            let now = Clock.Time.wall_clock () in
             let params = Params.add params extra_params in
             Atomic.fire ~now:start_time ~params t.starts ;
             Atomic.fire ~now ~params t.stops ;
@@ -418,11 +418,12 @@ let print_report oc =
     ) all ;
     flush oc
 
-let report_thread oc period =
+(* [sim] only to know when to stop. *)
+let report_thread sim oc period =
     let rec loop () =
         Thread.delay period ;
         print_report oc ;
-        if !Clock.continue then loop () in
+        if Simulation.is_running sim then loop () in
     Thread.create loop ()
 
 (* Misc *)

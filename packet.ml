@@ -390,13 +390,13 @@ let enum_of_file fname = Pcap.enum_of_file fname /@ Pdu.unpack
 (** [Packet.to_file filename e] write the enumeration of {!Packet.Pdu.t} into the given file. *)
 let to_file fname e = Enum.map Pdu.pack e |> Pcap.file_of_enum fname
 
-let capture ?promisc ?filter ifname =
-    let iface = Pcap.openif ?promisc ?filter ifname in
+let capture sim ?promisc ?filter ifname =
+    let iface = Pcap.openif ~parent:(Simulation.root sim) ?promisc ?filter ifname in
     let pkts = ref [] in
     let rec aux () =
-        if not !Clock.continue then List.rev !pkts else
+        if not (Simulation.is_running sim) then List.rev !pkts else
         let pkt = Pcap.sniff iface in
         pkts := pkt :: !pkts ;
         Printf.printf ".%!" ;
         aux () in
-    Clock.with_trapped [Sys.sigint] aux
+    Simulation.with_trapped sim [Sys.sigint] aux

@@ -8,6 +8,7 @@ SOURCES  = \
 	clock.ml \
 	log.ml \
 	widget.ml \
+	simulation.ml \
 	tools.ml \
 	ordArray.ml \
 	payload.ml \

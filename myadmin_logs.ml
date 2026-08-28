@@ -30,6 +30,15 @@ open Myadmin_common
  * Logs (from widgets)
  *)
 
+(* These pages predate simulations and just look everywhere. *)
+let find_widget id =
+    (* Batteries' find_map raises rather than returning an option: *)
+    try
+        Simulation.all () |>
+        List.find_map (fun s -> Widget.find (Simulation.root s) id) |>
+        Option.some
+    with Not_found -> None
+
 let find_widgets ?(vert_distance=0) ?(horiz_distance=0) widget =
     (* Collect all widgets within those distances: *)
     let widgets =
@@ -105,7 +114,8 @@ let get_logs ?(max_level=Log.max_level) widgets =
 
 let logs_menu resp selected_id also_selected ignored_widgets =
     (* The root layer is composed of all widgets without parents: *)
-    let roots = Widget.roots () in
+    let roots =
+        Simulation.all () |> List.map Simulation.root in
     let rec num_descendants widget =
         List.fold_left (fun num child ->
             num + num_descendants child
@@ -328,8 +338,9 @@ let logs _mth _matches vars _qry_body resp =
 |};
     page_head_close resp ;
     let all_widgets =
-        Hashtbl.values Widget.all |>
-        Array.of_enum in
+        Simulation.all () |>
+        List.map (fun s -> Widget.descendants (Simulation.root s)) |>
+        List.concat |> Array.of_list in
     Array.fast_sort (fun (a : Widget.t) b ->
         String.compare (Widget.full_name a) (Widget.full_name b)) all_widgets ;
     let widget_id =
@@ -355,7 +366,7 @@ let logs _mth _matches vars _qry_body resp =
     let selected_widgets =
         Option.bind widget_id (fun id ->
             Option.bind
-                (Widget.find id)
+                (find_widget id)
                 (fun widget ->
                     Some (find_widgets ~vert_distance ~horiz_distance widget))
         ) |? [] in
@@ -415,7 +426,7 @@ let logs _mth _matches vars _qry_body resp =
                     w)
         ) [ 0, "none" ; 1, "direct" ; 2, "two levels" ; max_int, "all" ] ;
     Option.may (fun widget_id ->
-        let widget = Widget.find widget_id in
+        let widget = find_widget widget_id in
         Option.may (fun (widget : Widget.t) ->
             let open_link_to (w : Widget.t) =
                 Printf.sprintf "<a href=\"?widget=%d&max_level=%d&vert_distance=%d&horiz_distance=%d\">"

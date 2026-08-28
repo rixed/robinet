@@ -128,7 +128,7 @@ let tcp_sock_rx t socks bits =
                                             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have no server listening on port %s" (Tcp.Port.to_string tcp.Tcp.Pdu.dst_port)))) ;
                                             raise No_socket
                                         ) in
-                            let tcp = Tcp.TRX.make tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port t.trx.widget.logger in
+                            let tcp = Tcp.TRX.make (Simulation.of_widget t.trx.widget) tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port t.trx.widget.logger in
                             tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx =-> tx socks.ip_4_tcp ;
                             server tcp.Tcp.TRX.tcp_trx ; (* supposed to set the recver of this tcp trx *)
                             tcp.Tcp.TRX.tcp_trx
@@ -152,7 +152,7 @@ let udp_sock_rx t socks icmp_trx bits =
                     hash_find_or_insert socks.udps key (fun () ->
                         let server = try Hashtbl.find t.udp_servers udp.Udp.Pdu.dst_port
                                      with Not_found -> raise No_socket in
-                        let trx = Udp.TRX.make udp.Udp.Pdu.dst_port udp.Udp.Pdu.src_port t.trx.widget.logger in
+                        let trx = Udp.TRX.make (Simulation.of_widget t.trx.widget) udp.Udp.Pdu.dst_port udp.Udp.Pdu.src_port t.trx.widget.logger in
                         trx.Udp.TRX.trx =-> tx socks.ip_4_udp ;
                         server trx ; (* supposed to set the recver of this udp trx *)
                         trx) in
@@ -305,7 +305,7 @@ and do_gethostbyname t name cont =
                 Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Add a query for resolution of '%s' (%s)" name (if pending then "one was already pending" else "first one")))) ;
                 if not pending then (
                     (* add a timeout event that will awake all waiters for this name after some time *)
-                    Clock.delay dns_timeout_delay dns_timeout () ;
+                    Simulation.delay (Simulation.of_widget t.trx.widget) dns_timeout_delay dns_timeout () ;
                     (* Then actually sends the query *)
                     let stop = Metric.(Timed.start ~params:(Params.singleton "name" (Param.String name)) resolutions) in
                     Hashtbl.add t.dns_queries name (cont, Some stop) ;
@@ -322,7 +322,7 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
     let connect dst_ip =
         Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Connecting to %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
         let socks = hash_find_or_insert t.tcp_socks dst_ip (fun () ->
-            let trx = Ip.TRX.make my_ip dst_ip Ip.Proto.tcp t.trx.widget.logger in
+            let trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip dst_ip Ip.Proto.tcp t.trx.widget.logger in
             let socks = make_tcp_socks trx in
             (tcp_sock_rx t socks) <-= trx =-> tx t.eth_trx ;
             socks) in
@@ -353,7 +353,7 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
             | None ->
                 cont None
             | Some src_port ->
-                let tcp = Tcp.TRX.make src_port dst_port t.trx.widget.logger in
+                let tcp = Tcp.TRX.make (Simulation.of_widget t.trx.widget) src_port dst_port t.trx.widget.logger in
                 tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx.out.set_read socks.ip_4_tcp.ins.write ;
                 Hashtbl.add socks.tcps (src_port, dst_port) tcp.Tcp.TRX.tcp_trx ;
                 Tcp.TRX.connect tcp (function
@@ -387,9 +387,9 @@ and udp_connect t dst ?src_port dst_port client_f cont =
     let my_ip = Eth.State.find_ip4 t.eth_state in
     let connect dst_ip =
         let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
-            let icmp_trx = Ip.TRX.make my_ip dst_ip Ip.Proto.icmp t.trx.widget.logger in
+            let icmp_trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip dst_ip Ip.Proto.icmp t.trx.widget.logger in
             icmp_trx =-> tx t.eth_trx ;
-            let ip_trx = Ip.TRX.make my_ip dst_ip Ip.Proto.udp t.trx.widget.logger in
+            let ip_trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip dst_ip Ip.Proto.udp t.trx.widget.logger in
             let socks = make_udp_socks ip_trx in
             (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> tx t.eth_trx ;
             socks) in
@@ -400,7 +400,7 @@ and udp_connect t dst ?src_port dst_port client_f cont =
             Log.(log t.trx.widget.logger Error (lazy "Already connected")) ;
             cont None
         ) else (
-            let trx = Udp.TRX.make src_port dst_port t.trx.widget.logger in
+            let trx = Udp.TRX.make (Simulation.of_widget t.trx.widget) src_port dst_port t.trx.widget.logger in
             (* connect this udp to the underlaying ip *)
             (client_f trx) <-= trx.Udp.TRX.trx =-> tx socks.ip_4_udp ;
             Hashtbl.add socks.udps key trx ;
@@ -475,23 +475,23 @@ let ip_recv t bits =
             t.last_ip_packet <- Some ip ;
             if ip.Ip.Pdu.proto = Ip.Proto.tcp then (
                 let sock = hash_find_or_insert t.tcp_socks ip.Ip.Pdu.src (fun () ->
-                    let ip_trx = Ip.TRX.make my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
+                    let ip_trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
                     let socks = make_tcp_socks ip_trx in
                     (tcp_sock_rx t socks) <-= ip_trx =-> tx t.eth_trx ;
                     socks) in
                 rx sock.ip_4_tcp bits (* will handle fragmentation then pass payload to its emit function *)
             ) else if ip.Ip.Pdu.proto = Ip.Proto.udp then (
                 let sock = hash_find_or_insert t.udp_socks ip.Ip.Pdu.src (fun () ->
-                    let icmp_trx = Ip.TRX.make my_ip ip.Ip.Pdu.src Ip.Proto.icmp t.trx.widget.logger in
+                    let icmp_trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip ip.Ip.Pdu.src Ip.Proto.icmp t.trx.widget.logger in
                     icmp_trx =-> tx t.eth_trx ;
-                    let ip_trx = Ip.TRX.make my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
+                    let ip_trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
                     let socks = make_udp_socks ip_trx in
                     (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> tx t.eth_trx ;
                     socks) in
                 rx sock.ip_4_udp bits
             ) else if ip.Ip.Pdu.proto = Ip.Proto.icmp then (
                 let ip_trx = hash_find_or_insert t.icmp_socks ip.Ip.Pdu.src (fun () ->
-                    let ip_trx = Ip.TRX.make my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
+                    let ip_trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
                     (icmp_rx t ip_trx) <-= ip_trx =-> tx t.eth_trx ;
                     ip_trx) in
                 rx ip_trx bits
@@ -512,7 +512,7 @@ let power_off ?timeout t =
         Hashtbl.clear t.dns_cache ;
     in
     Option.may (fun d ->
-        Clock.delay d (fun () ->
+        Simulation.delay (Simulation.of_widget t.trx.widget) d (fun () ->
             if !to_kill > 0 then do_power_off ()) ()
     ) timeout ;
     List.iter (fun k ->
@@ -572,8 +572,8 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget ?(init=on_init_noth
     if t.on then init t ;
     t
 
-let make ?gateways ?search_sfx ?nameserver ?on ?parent ?mac ?init name =
-    let widget = Widget.make ?parent name in
+let make ?gateways ?search_sfx ?nameserver ?on ~parent ?mac ?init name =
+    let widget = Widget.make ~parent name in
     let eth_state =
         (* FIXME: Don't use the GW for same net IP! *)
         Eth.State.make ?mac ?gateways ~parent:widget () in
@@ -586,16 +586,16 @@ let set_ip t my_ip netmask =
     ip_recv t <-= t.eth_trx |> ignore
 
 (* Safer to have the netmask mandatory here *)
-let make_static ?gateways ?search_sfx ?nameserver ?on ?mac ?parent ~netmask my_ip name =
+let make_static ?gateways ?search_sfx ?nameserver ?on ?mac ~parent ~netmask my_ip name =
     let init ?on_ip t =
         set_ip t my_ip netmask ;
         (* TODO: Send a gratuitous ARP request? *)
-        Option.may (fun on_ip -> Clock.asap on_ip t) on_ip
+        Option.may (fun on_ip -> Simulation.asap (Simulation.of_widget t.trx.widget) on_ip t) on_ip
     in
-    make ?gateways ?search_sfx ?nameserver ?mac ?on ?parent ~init name
+    make ?gateways ?search_sfx ?nameserver ?mac ?on ~parent ~init name
 
 (* FIXME: Until we get the netmask from the DHCP it's safer to make it mandatory! *)
-let make_dhcp ?gateways ?search_sfx ?nameserver ?mac ?on ~netmask (*?(netmask==Ip.Addr.zero)*) host_name =
+let make_dhcp ?gateways ?search_sfx ?nameserver ?mac ?on ~parent ~netmask (*?(netmask==Ip.Addr.zero)*) host_name =
     let init ?on_ip t =
         (* Will receive all eth frames until we got an IP address *)
         let dhcp_client bits = (match Ip.Pdu.unpack bits with
@@ -628,7 +628,7 @@ let make_dhcp ?gateways ?search_sfx ?nameserver ?mac ?on ~netmask (*?(netmask==I
                                 (* TODO: set other params than IP, such as netmask! *)
                                 set_ip t dhcp.yiaddr netmask ;
                                 (* TODO: Send a gratuitous ARP request? *)
-                                Option.may (fun on_ip -> Clock.asap on_ip t) on_ip
+                                Option.may (fun on_ip -> Simulation.asap (Simulation.of_widget t.trx.widget) on_ip t) on_ip
                             | Ok _ ->
                                 (* TODO: print it *)
                                 t.trx.signal_err "Ignoring a DHCP message"))) in
@@ -642,7 +642,7 @@ let make_dhcp ?gateways ?search_sfx ?nameserver ?mac ?on ~netmask (*?(netmask==I
                     Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast |>
                     Ip.Pdu.pack |>
                     tx t.eth_trx ;
-                Clock.delay (Clock.Interval.sec (5.+.(Random.float 3.))) send_discover ()
+                Simulation.delay (Simulation.of_widget t.trx.widget) (Clock.Interval.sec (5.+.(Random.float 3.))) send_discover ()
             ) in
         ignore (dhcp_client <-= t.eth_trx) ;
         (* The client should wait a random time between one and ten seconds to desynchronize
@@ -651,9 +651,9 @@ let make_dhcp ?gateways ?search_sfx ?nameserver ?mac ?on ~netmask (*?(netmask==I
         Log.(log t.trx.widget.logger Debug (lazy
             (Printf.sprintf "Waiting %s before using DHCP..."
                 (Clock.Interval.to_string delay)))) ;
-        Clock.delay delay send_discover ()
+        Simulation.delay (Simulation.of_widget t.trx.widget) delay send_discover ()
     in
-    make ?gateways ?search_sfx ?nameserver ?mac ?on ~init host_name
+    make ?gateways ?search_sfx ?nameserver ?mac ?on ~parent ~init host_name
 
 module Name = struct
     let random () =

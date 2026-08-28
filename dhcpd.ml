@@ -60,8 +60,8 @@ struct
           host_parameters : (int * bitstring) list }
 
     let make ?(authoritative=true) ?(lease_time_sec=3600) ?netmask ?broadcast
-             ?gw ?mtu ?dns ?ntp ?parent ip_range =
-        let widget = Widget.make ?parent "dhcpd" in
+             ?gw ?mtu ?dns ?ntp ~parent ip_range =
+        let widget = Widget.make ~parent "dhcpd" in
         let mandatory_parameters =
             [ Dhcp.Option.lease_time, bitstring_of_int32 lease_time_sec ] in
         let host_parameters =
@@ -156,7 +156,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                 Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Received a DHCP Request from %s" (hexstring_of_bitstring chaddr)))) ;
                 (* Look for previous offers *)
                 let offer_key = Dhcp.Option.default_client_id ~htype chaddr
-                and now = now () in
+                and now = Simulation.now (Simulation.of_widget st.widget) in
                 let offered_ip =
                     Hashtbl.find_option st.offers offer_key |>
                     option_default_delayed_opt (fun () ->
@@ -200,18 +200,17 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                 count "err"))
 
 (*$R serve
-    Clock.realtime := false ;
+    let sim = Simulation.make ~realtime:false "test-dhcpd" in
     (*Log.console_lvl := Log.Debug ;*)
     let netmask = Ip.Addr.all_ones in
-    let srv : Host.t = Host.make_static ~netmask (Ip.Addr.random ()) "server" in
+    let srv : Host.t = Host.make_static ~parent:(Simulation.root sim) ~netmask (Ip.Addr.random ()) "server" in
     let my_net = Ip.Cidr.random () in
-    let st = State.make (Ip.Range.of_cidr my_net) in
+    let st = State.make ~parent:(Simulation.root sim) (Ip.Range.of_cidr my_net) in
     serve st srv.trx ;
-    let clt : Host.t = Host.make_dhcp ~netmask "client" in
+    let clt : Host.t = Host.make_dhcp ~parent:(Simulation.root sim) ~netmask "client" in
     srv.trx.dev.set_read clt.trx.dev.write ;
     clt.trx.dev.set_read srv.trx.dev.write ;
-    Clock.run false ;
-    Clock.realtime := true ;
+    Simulation.run sim false ;
     assert_bool "Client got an IP" (Host.ip_is_set clt) ;
     assert_bool "IP is within net" (Eth.State.find_ip4 clt.eth_state |> Ip.Cidr.mem my_net)
  *)

@@ -24,7 +24,7 @@
 open Batteries
 open Tools
 
-let run ifname src_range num_srcs ?gateways ?search_sfx ?nameserver ?pause max_depth start_url =
+let run sim ifname src_range num_srcs ?gateways ?search_sfx ?nameserver ?pause max_depth start_url =
     (* Build the hosts *)
     let mac_of_ip ip = (*Eth.addr_of_string "00:26:5e:0a:d2:b9" in*)
         let bs = Ip.Addr.to_bitstring ip in
@@ -34,19 +34,19 @@ let run ifname src_range num_srcs ?gateways ?search_sfx ?nameserver ?pause max_d
     let host_of_ip ip =
         let name = Ip.Addr.to_dotted_string ip
         and mac = mac_of_ip ip in
-        Host.make_static ?gateways ?search_sfx ?nameserver ~netmask ~mac ip name in
+        Host.make_static ~parent:(Simulation.root sim) ?gateways ?search_sfx ?nameserver ~netmask ~mac ip name in
     let hosts = List.of_enum (Ip.Cidr.random_addrs src_range num_srcs /@ host_of_ip)
     in
     (* Build the HUB and link it to hosts *)
-    let hub     = Hub.Repeater.make (num_srcs+1) "hub"
-    and gigabit = Eth.limited (Clock.Interval.msec 10.) 1_000_000_000. in
+    let hub     = Hub.Repeater.make ~parent:(Simulation.root sim) (num_srcs+1) "hub"
+    and gigabit = Eth.limited sim (Clock.Interval.msec 10.) 1_000_000_000. in
     List.iteri (fun i (h : Host.t) ->
         (* notice that the cable is not full duplex *)
         h.trx.dev.set_read (gigabit (Hub.Repeater.write hub i)) ;
         Hub.Repeater.set_read hub i (gigabit h.trx.dev.write)
     ) hosts ;
     (* Link all these to the real world *)
-    let iface = Pcap.openif ifname in
+    let iface = Pcap.openif ~parent:(Simulation.root sim) ifname in
     Hub.Repeater.set_read hub num_srcs (Pcap.inject iface) ;
     (* Start the browsers *)
     List.iter (fun (h : Host.t) ->
@@ -56,12 +56,14 @@ let run ifname src_range num_srcs ?gateways ?search_sfx ?nameserver ?pause max_d
         | None       -> Browser.spider browser max_depth (Url.of_string start_url)
     ) hosts ;
     (* Prepare a timeout in 15s *)
-    Clock.delay (Clock.Interval.sec 15.) failwith "timeout" ;
+    Simulation.delay sim (Clock.Interval.sec 15.) failwith "timeout" ;
     (* Run everything *)
     ignore (Pcap.sniffer iface (Hub.Repeater.write hub num_srcs)) ;
-    Clock.run false
+    Simulation.run sim false
 
 let main =
+    (* Everything this program does happens in this simulation. *)
+    let sim = Simulation.make "http_load" in
     let ifname        = ref "eth0"
     and src_range_str = ref "192.168.0.0/16"
     and num_srcs      = ref 1
@@ -89,7 +91,7 @@ let main =
         Option.map (fun gw -> Eth.Gateway.of_string gw) !gw |>
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ])
     and nameserver = Option.map (fun ip -> Ip.Addr.of_string ip) !dns_str in
-    ignore (Metric.report_thread stdout 10.) ;
-    run !ifname (Ip.Cidr.of_string !src_range_str) !num_srcs
+    ignore (Metric.report_thread sim stdout 10.) ;
+    run sim !ifname (Ip.Cidr.of_string !src_range_str) !num_srcs
         ?gateways ?search_sfx:!search_sfx ?nameserver
         ?pause:!pause !max_depth !start_url

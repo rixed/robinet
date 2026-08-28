@@ -22,22 +22,24 @@
 *)
 open Batteries
 
-let run port =
-    let host = Localhost.host in
+let run sim port =
+    let host = Localhost.host sim in
     (* Start server *)
     let resources =
         [ Str.regexp "/static/\\([^/]+/[^/]+\\)/\\(.*\\)$", Opache.static_file_server "./" ;
           Str.regexp ".*", Opache.it_works ] in
     Opache.serve host ~port:(Tcp.Port.o port) (Opache.multiplexer resources) ;
-    Myadmin.make host (Tcp.Port.o (port+1)) ;
+    Myadmin.make sim host (Tcp.Port.o (port+1)) ;
     (* Run everything *)
-    Clock.run true
+    Simulation.run sim true
 
 let main =
+    (* Everything this program does happens in this simulation. *)
+    let sim = Simulation.make "http_echo_server" in
     let port = ref 80 in
     Arg.parse [ "-port",   Arg.Set_int port,      "TCP port to listen to (default: 80)" ]
               (fun _ -> raise (Arg.Bad "unknown parameter"))
               "Start a dummy http server" ;
     Random.self_init () ;
-    ignore (Myadmin.report_thread 10.) ;
-    run !port
+    ignore (Myadmin.report_thread sim 10.) ;
+    run sim !port

@@ -69,16 +69,16 @@ let bytes_in           = Metric.Counter.make "Tap/Bytes/In" "bytes"
 (* TODO: This should be provided for any sniffing module by the functor: *)
 (** [sniffer iface rx] returns a thread that continuously sniff packets
  * and pass them to the [rx] function (via the Clock). *)
-let sniffer iface rx =
+let sniffer sim iface rx =
     let rec loop () =
         match none_if_exception sniff iface with
         | None -> ()
         | Some pdu ->
-            Clock.synch () ;
+            Simulation.synch sim ;
             Metric.Atomic.fire packets_sniffed_ok ;
             Metric.Counter.add bytes_in (Payload.length pdu.Pcap.Pdu.payload) ;
             if debug then Printf.printf "Tap(%s): Got packet for ts %s\n%!"
                 iface.name (Clock.Time.to_string pdu.ts) ;
-            Clock.at pdu.ts rx (pdu.payload :> bitstring) ;
-            if !Clock.continue then loop () in
+            Simulation.at sim pdu.ts rx (pdu.payload :> bitstring) ;
+            if Simulation.is_running sim then loop () in
     Thread.create loop ()

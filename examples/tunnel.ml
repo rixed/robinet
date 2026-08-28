@@ -24,11 +24,11 @@
 open Batteries
 open Tools
 
-let tunnel ifname tun_ip netmask mac gw search_sfx nameserver dst dst_port src_port =
-    let iface = Pcap.openif ifname in
+let tunnel sim ifname tun_ip netmask mac gw search_sfx nameserver dst dst_port src_port =
+    let iface = Pcap.openif ~parent:(Simulation.root sim) ifname in
     let gateways =
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) gw in
-    let host = Host.make_static ?gateways ?search_sfx ?nameserver ~mac ~netmask tun_ip "tun"
+    let host = Host.make_static ~parent:(Simulation.root sim) ?gateways ?search_sfx ?nameserver ~mac ~netmask tun_ip "tun"
     and http = Http.TRX.make [ "Content-Type", "tun/eth" ] in
     host.trx.dev.set_read (Pcap.inject iface) ;
     let connect_tunnel tcp =
@@ -71,9 +71,11 @@ let tunnel ifname tun_ip netmask mac gw search_sfx nameserver dst dst_port src_p
         | None ->
             Printf.printf "Tunnel: Waiting for connections on port %s...\n%!" (Tcp.Port.to_string dst_port) ;
             host.trx.tcp_server dst_port connect_tunnel) ;
-    Clock.run true
+    Simulation.run sim true
 
 let main =
+    (* Everything this program does happens in this simulation. *)
+    let sim = Simulation.make "tunnel" in
     let ifname      = ref "eth0"
     and tun_ip      = ref "192.168.1.66"
     and netmask     = ref "255.255.255.0"
@@ -102,7 +104,7 @@ let main =
               (fun _ -> raise (Arg.Bad "Unknown parameter"))
               "Tunnel traffic into HTTP" ;
     let gw = if !gw = "" then None else Some (Eth.Gateway.of_string !gw) in
-    tunnel !ifname
+    tunnel sim !ifname
            (Ip.Addr.of_string !tun_ip)
            (Ip.Addr.of_string !netmask)
            (Eth.Addr.of_string !tun_mac)

@@ -28,9 +28,9 @@ open Batteries
 (* Kept here for the benefit of the simulations that start it: *)
 let report_thread = Myadmin_metrics.report_thread
 
-let make host port =
+let make sim host port =
     let res =
-        Myadmin_api.resources @
+        Myadmin_api.resources sim @
         [ Str.regexp "/home.html$", Myadmin_home.home ;
           Str.regexp "/$", Myadmin_home.home ;
           Str.regexp "/metrics.html$", Myadmin_metrics.metrics ;

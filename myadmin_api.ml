@@ -28,13 +28,17 @@
   Routes (see [resources] at the end of this file):
 
   {v
-    GET    /api/clock                       simulation time and event queue
-    GET    /api/widgets                     every widget; ?path=/a/b to filter
-    GET    /api/widgets/<id>                one widget
-    DELETE /api/widgets/<id>                delete it, and its children
-    GET    /api/widgets/<id>/properties     all properties, with their values
-    GET    /api/widgets/<id>/properties/<name>
-    PUT    /api/widgets/<id>/properties/<name>   body is the raw value
+    GET    /api/simulations                 every simulation, with its clock
+    GET    /api/simulations/<id>            one of them
+    POST   /api/simulations/<id>/pause      freeze its clock
+    POST   /api/simulations/<id>/resume     and let it run again
+    POST   /api/simulations/<id>/step       run one event (?n= for more)
+    GET    /api/simulations/<s>/widgets    its widgets; ?path=/a/b to filter
+    GET    /api/simulations/<s>/widgets/<w>
+    DELETE /api/simulations/<s>/widgets/<w> delete it, and its children
+    GET    /api/simulations/<s>/widgets/<w>/properties
+    GET    /api/simulations/<s>/widgets/<w>/properties/<name>
+    PUT    /api/simulations/<s>/widgets/<w>/properties/<name>  body is the value
   v}
 
   Property names are used as-is in the URL (url-encoded): they are already
@@ -65,14 +69,17 @@ let matched matches n =
         bad_request "Missing part #%d of the path" n
     | s -> s
 
-let widget_of_matches matches n =
+(* A widget is identified by the pair (simulation, widget), since its
+ * inventory is its simulation's tree. *)
+let widget_of_matches sim matches n =
     let s = matched matches n in
     match int_of_string s with
     | exception _ ->
         bad_request "Not a widget id: %S" s
     | id ->
-        (match Widget.find id with
-        | None -> not_found "No widget with id %d" id
+        (match Widget.find (Simulation.root sim) id with
+        | None ->
+            not_found "Simulation %s has no widget %d" (Simulation.name sim) id
         | Some w -> w)
 
 let property_of_matches (widget : Widget.t) matches n =
@@ -107,6 +114,7 @@ let json_of_peer (p : Widget.peer) =
 
 let json_of_widget (w : Widget.t) =
     `Assoc [ "id", `Int w.id ;
+             "sim", `Int w.sim ;
              "name", `String w.name ;
              "full_name", `String (Widget.full_name w) ;
              "parent", (match w.parent with None -> `Null
@@ -123,49 +131,115 @@ let json_of_widget (w : Widget.t) =
  * Handlers
  *)
 
-let get_clock _mth _matches _vars _qry_body resp =
-    let now = Clock.now () in
-    respond resp (`Assoc [
-        "now", `Float (Clock.Time.to_timestamp now) ;
-        "now_str", `String (Clock.Time.to_string now) ;
-        "wall_clock", `Float (Clock.Time.to_timestamp (Clock.Time.wall_clock ())) ;
-        "realtime", `Bool !Clock.realtime ;
-        "running", `Bool !Clock.continue ;
-        "pending_events", `Int (Clock.Map.cardinal Clock.current.events) ])
+let json_of_simulation (s : Simulation.t) =
+        `Assoc [ "id", `Int s.Simulation.id ;
+             "name", `String s.Simulation.name ;
+             "root", `Int (Simulation.root s).Widget.id ;
+             "now", `Float (Clock.Time.to_timestamp s.Simulation.now) ;
+             "now_str", `String (Clock.Time.to_string s.Simulation.now) ;
+             "realtime", `Bool s.Simulation.realtime ;
+             "running", `Bool s.Simulation.continue ;
+             "paused", `Bool s.Simulation.paused ;
+             "paused_total", `Float (s.Simulation.paused_total :> float) ;
+             "pending_events", `Int (Simulation.Events.cardinal s.Simulation.events) ]
 
-let get_widgets _mth _matches vars _qry_body resp =
-    let widgets =
-        match Hashtbl.find_option vars "path" with
-        | Some path -> Widget.find_by_path path
-        | None -> Hashtbl.values Widget.all |> List.of_enum in
-    let widgets =
-        List.sort (fun (a : Widget.t) b -> Int.compare a.id b.id) widgets in
-    respond resp (`List (List.map json_of_widget widgets))
+(* Reading a simulation's state means borrowing it from its own thread. *)
+let simulation_of_matches matches n =
+    let s = matched matches n in
+    match int_of_string s with
+    | exception _ -> bad_request "Not a simulation id: %S" s
+    | id ->
+        (match Simulation.find id with
+        | None -> not_found "No simulation with id %d" id
+        | Some s -> s)
+
+let get_simulations _mth _matches _vars _qry_body resp =
+    let sims =
+        Simulation.all () |>
+        List.sort (fun (a : Simulation.t) b ->
+            Int.compare a.Simulation.id b.Simulation.id) in
+    respond resp
+        (`List (List.map (fun s ->
+            Simulation.borrow s (fun () -> json_of_simulation s)) sims))
+
+let get_simulation _mth matches _vars _qry_body resp =
+    let s = simulation_of_matches matches 1 in
+    respond resp (Simulation.borrow s (fun () -> json_of_simulation s))
+
+(* Pause/resume/step. Note myadmin runs in its own realtime simulation, so it
+ * stays responsive whatever it does to the others. *)
+let control_simulation serving _mth matches vars _qry_body resp =
+    let s = simulation_of_matches matches 1 in
+    let action = Url.decode (matched matches 2) in
+    (* Pausing the simulation that serves this API would freeze the very thread
+     * about to answer, and nothing would be left to unpause it. This is exactly
+     * why myadmin belongs in a simulation of its own. *)
+    if s == serving then
+        bad_request "Simulation %s serves this API and cannot control itself"
+            s.Simulation.name ;
+    (match action with
+    | "pause" -> Simulation.pause s ()
+    | "resume" -> Simulation.resume s ()
+    | "step" ->
+        let n =
+            match Hashtbl.find_option vars "n" with
+            | None -> 1
+            | Some n ->
+                (match int_of_string n with
+                | exception _ -> bad_request "Not a number of steps: %S" n
+                | n -> n) in
+        Simulation.step ~n s ()
+    | _ ->
+        bad_request "Unknown action %S (pause, resume or step)" action) ;
+    respond resp (Simulation.borrow s (fun () -> json_of_simulation s))
+
+let get_widgets _mth matches vars _qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        let widgets =
+            match Hashtbl.find_option vars "path" with
+            | Some path -> Widget.find_by_path (Simulation.root sim) path
+            | None -> Simulation.widgets sim in
+        let widgets =
+            List.sort (fun (a : Widget.t) b -> Int.compare a.id b.id) widgets in
+        respond resp (`List (List.map json_of_widget widgets)))
 
 let get_widget _mth matches _vars _qry_body resp =
-    let w = widget_of_matches matches 1 in
-    respond resp (json_of_widget w)
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        respond resp (json_of_widget (widget_of_matches sim matches 2)))
 
 let delete_widget _mth matches _vars _qry_body resp =
-    let w = widget_of_matches matches 1 in
-    let full_name = Widget.full_name w in
-    Widget.delete w ;
-    respond resp (`Assoc [ "deleted", `String full_name ])
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        let w = widget_of_matches sim matches 2 in
+        if w == Simulation.root sim then
+            bad_request "%s is the root of simulation %s and cannot be deleted"
+                (Widget.full_name w) (Simulation.name sim) ;
+        let full_name = Widget.full_name w in
+        Widget.delete w ;
+        respond resp (`Assoc [ "deleted", `String full_name ]))
 
 let get_properties _mth matches _vars _qry_body resp =
-    let w = widget_of_matches matches 1 in
-    respond resp (`List (List.map json_of_property w.properties))
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        let w = widget_of_matches sim matches 2 in
+        respond resp (`List (List.map json_of_property w.properties)))
 
 let get_property _mth matches _vars _qry_body resp =
-    let w = widget_of_matches matches 1 in
-    let p = property_of_matches w matches 2 in
-    respond resp (json_of_property p)
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        let w = widget_of_matches sim matches 2 in
+        let p = property_of_matches w matches 3 in
+        respond resp (json_of_property p))
 
 (* The body is the raw value, not JSON: property values are strings all the way
  * down to the setter, so there is nothing to decode. *)
 let set_property _mth matches vars qry_body resp =
-    let w = widget_of_matches matches 1 in
-    let p = property_of_matches w matches 2 in
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+    let w = widget_of_matches sim matches 2 in
+    let p = property_of_matches w matches 3 in
     let value =
         (* Accept the value either as the body or as a "value" parameter, so
          * that a plain HTML form can be used as well: *)
@@ -185,7 +259,7 @@ let set_property _mth matches vars qry_body resp =
         | () ->
             Log.(log w.logger Info (lazy (
                 Printf.sprintf "Property %S set to %S" p.name value))) ;
-            respond resp (json_of_property p))
+            respond resp (json_of_property p)))
 
 (*
  * Routing
@@ -208,20 +282,26 @@ let json_errors f mth matches vars qry_body resp =
 
 (* Beware that the multiplexer picks the first matching regexp, so the more
  * specific routes must come first. *)
-let resources : (Str.regexp * Opache.resource) list =
+(* [serving] is the simulation this API runs in: it is the one that must never
+ * be paused, and the only one it can be asked to control that it must refuse. *)
+let resources serving : (Str.regexp * Opache.resource) list =
     List.map (fun (re, f) -> re, json_errors f) [
-    Str.regexp "/api/clock$", get_clock ;
-    Str.regexp "/api/widgets/\\([0-9]+\\)/properties/\\(.+\\)$",
+    Str.regexp "/api/simulations/\\([0-9]+\\)/\\(pause\\|resume\\|step\\)$",
+        control_simulation serving ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)$", get_simulation ;
+    Str.regexp "/api/simulations$", get_simulations ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/properties/\\(.+\\)$",
         (fun mth matches vars qry_body resp ->
             match mth with
             | "GET" -> get_property mth matches vars qry_body resp
             | "PUT" | "POST" -> set_property mth matches vars qry_body resp
             | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
-    Str.regexp "/api/widgets/\\([0-9]+\\)/properties$", get_properties ;
-    Str.regexp "/api/widgets/\\([0-9]+\\)$",
+    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/properties$",
+        get_properties ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)$",
         (fun mth matches vars qry_body resp ->
             match mth with
             | "GET" -> get_widget mth matches vars qry_body resp
             | "DELETE" -> delete_widget mth matches vars qry_body resp
             | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
-    Str.regexp "/api/widgets$", get_widgets ]
+    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets$", get_widgets ]

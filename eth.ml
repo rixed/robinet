@@ -348,9 +348,9 @@ struct
 
     let make ?(mtu=1500) ?delay ?loss ?(mac=Addr.random ()) ?(gateways=[])
              ?(promisc=ignore) ?(do_proxy_arp=(fun _ -> false))
-             ?(my_addresses=[]) ?(proto=Proto.ip4) ?parent
+             ?(my_addresses=[]) ?(proto=Proto.ip4) ~parent
              () =
-        let widget = Widget.make ?parent "eth" in
+        let widget = Widget.make ~parent "eth" in
         { widget ; mac ; gateways ; proto ;
           emit = ignore_bits ~logger:widget.logger ;
           recv = ignore_bits ~logger:widget.logger ;
@@ -396,7 +396,7 @@ struct
                 jitter 0.1 d
             | _ ->
                 0. in
-        Clock.delay (Clock.Interval.o delay) st.emit (Pdu.pack pdu)
+        Simulation.delay (Simulation.of_widget st.widget) (Clock.Interval.o delay) st.emit (Pdu.pack pdu)
 
     let send (st : State.t) proto dst bits =
         let loss = st.loss |? 0. in
@@ -507,7 +507,7 @@ struct
                     Result.iter (fun ip_src ->
                         let src_proto_addr = Ip.Addr.to_bitstring ip_src in
                         BitHash.replace st.arp_cache src_proto_addr (Some frame.src)) ;
-                    Clock.asap st.recv (frame.Pdu.payload :> bitstring)
+                    Simulation.asap (Simulation.of_widget st.widget) st.recv (frame.Pdu.payload :> bitstring)
                 )
             ) else if frame.Pdu.proto = Proto.arp then (
                 match Arp.Pdu.unpack (frame.Pdu.payload :> bitstring) with
@@ -605,13 +605,13 @@ let maybe_record =
                     !recorder_file ^"."^ string_of_int !file_seq in
             incr file_seq ;
             fname in
-    fun bits ->
+    fun sim bits ->
         if !recording then (
             if !close_recording = None then (
                 let fname = next_recorder_file () in
                 (* We have to limit ourselves to Eth traffic because a pcap file,
                  * supposedly captured from a single spot, is limited to one DLT: *)
-                let write, close = Pcap.(save ~dlt:Dlt.en10mb) fname in
+                let write, close = Pcap.(save sim ~dlt:Dlt.en10mb) fname in
                 recorder := write ;
                 close_recording := Some close
             ) ;
@@ -632,15 +632,15 @@ let maybe_record =
  * already happened and you pass the resulting throughput here.
  * Also, notice that you can use the same [limited x y] in both directions,
  * thus having something similar to a half-duplex cable ;-) *)
-let limited latency throughput =
+let limited sim latency throughput =
     let next_avlb = ref (Clock.Time.o 0.) in
     (fun emit bits ->
-        let min_start = Clock.Time.add (Clock.now ()) latency in
+        let min_start = Clock.Time.add (Simulation.now sim) latency in
         let start = max min_start !next_avlb
         and num_bits = float_of_int (min (bitstring_length bits) 368) in
         let duration = max (Clock.Interval.usec 1.) (Clock.Interval.o (num_bits /. throughput)) in
         next_avlb := Clock.Time.add start duration ;
-        Clock.at start emit bits)
+        Simulation.at sim start emit bits)
 
 
 (** {2 Ethernet cables}
@@ -670,9 +670,11 @@ struct
         let delay length = Clock.Interval.sec (length /. 3e9)
         let success_rate error_rate = int_of_float (1. /. error_rate)
 
-        let make ?(length=10.) ?(error_rate=0.) ?(history=10)
+        (* A cable has no natural parent; hang it off the root of the
+         * simulation it connects things within. *)
+        let make ~parent ?(length=10.) ?(error_rate=0.) ?(history=10)
                  ?(name="cable") () =
-            let widget = Widget.make name in
+            let widget = Widget.make ~parent name in
             let t = {
                 length ; delay = delay length ;
                 error_rate ; success_rate = success_rate error_rate ;
@@ -722,7 +724,7 @@ struct
                     bits'
                 ) else bits
             else bits in
-        maybe_record bits ;
+        maybe_record (Simulation.of_widget st.widget) bits ;
         OrdArray.prepend st.last_packets (dir, bits) ;
         bits
 
@@ -732,11 +734,11 @@ struct
         and b_reader = ref (ignore_bits ~logger:st.widget.logger) in
         let ins_write bits =
             let bits = pass st true bits in
-            Clock.delay st.delay !b_reader bits
+            Simulation.delay (Simulation.of_widget st.widget) st.delay !b_reader bits
         and ins_set_read f = a_reader := f
         and out_write bits =
             let bits = pass st false bits in
-            Clock.delay st.delay !a_reader bits
+            Simulation.delay (Simulation.of_widget st.widget) st.delay !a_reader bits
         and out_set_read f = b_reader := f
         in
         { ins = { write = ins_write ; set_read = ins_set_read } ;

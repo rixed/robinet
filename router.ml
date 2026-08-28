@@ -197,7 +197,7 @@ struct
                 let ip_pld = Icmp.Pdu.pack icmp in
                 let ip_pkt = Ip.Pdu.make Ip.Proto.icmp my_ip ip.Ip.Pdu.src ip_pld in
                 let bits = Ip.Pdu.pack ip_pkt in
-                Clock.delay (Clock.Interval.o delay) (route None t) bits
+                Simulation.delay (Simulation.of_widget t.widget) (Clock.Interval.o delay) (route None t) bits
 
     (* The [route] function receives the IP packets from the Eth trx.
      * The integer [in_iface_opt] is the input interface number, unless
@@ -324,9 +324,9 @@ struct
             else
                 fun _ -> false
 
-    let make_iface ?proto ?mtu ?delay ?loss ?mac ?my_addresses ?parent n =
+    let make_iface ?proto ?mtu ?delay ?loss ?mac ?my_addresses ~parent n =
         let name = "#"^ string_of_int n in
-        let widget = Widget.make ?parent name in
+        let widget = Widget.make ~parent name in
         (* For our ifaces we force the GW on a packet by packet basis according
          * to the dynamic (and likely still unset) routing table. *)
         let eth = Eth.State.make ?proto ?mtu ?delay ?loss ?mac ?my_addresses
@@ -480,7 +480,8 @@ struct
             [| [ Ip.Addr.of_string "192.168.1.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
                [ Ip.Addr.of_string "192.168.2.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
                [ Ip.Addr.of_string "192.168.3.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () |] in
-        let widget = Widget.make "test" in
+        let sim = Simulation.make ~realtime:false "test-router" in
+        let widget = Widget.make ~parent:(Simulation.root sim) "test" in
         let router = make_from_addrs addrs widget in
 
         (* Now we will count incoming packets from each iface (ARP requests, actually) : *)
@@ -502,22 +503,22 @@ struct
         (* Let's play! *)
         easy_send 0 "1.2.3.4" ;
         easy_send 1 "1.2.3.4" ;
-        Clock.run false ;
+        Simulation.run sim false ;
         "no match means dropped" @? (counts = [| 0;0;0 |]) ;
 
         reset_count () ;
         easy_send 0 "192.168.3.42" ;
-        Clock.run false ;
+        Simulation.run sim false ;
         "route from 0 to 2" @? (counts = [| 0;0;1 |]) ;
 
         reset_count () ;
         easy_send 2 "192.168.2.42" ;
-        Clock.run false ;
+        Simulation.run sim false ;
         "route from 2 to 1" @? (counts = [| 0;1;0 |]) ;
 
         reset_count () ;
         easy_send 0 "192.168.1.42" ;
-        Clock.run false ;
+        Simulation.run sim false ;
         "no revert" @? (counts = [| 0;0;0 |]) ;
     *)
 
@@ -553,10 +554,10 @@ type gw_trx =
  * will be distributed via DHCP. *)
 let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
             ?dhcp_range ?dhcp_mtu ?lease_time_sec
-            ?(name="gw") ?notify_errs ?admin_reroute ?parent
+            ?(name="gw") ?notify_errs ?admin_reroute ~parent
             ?public_netmask ?public_gw ?port_forwards public_ip local_cidr =
     (* We want all parts inherit this widget: *)
-    let parent = Widget.make ?parent name in
+    let parent = Widget.make ~parent name in
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let broadcast = Ip.Cidr.all1s_addr local_cidr in
@@ -632,26 +633,25 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
 
 (*$R make_gw
     (*Log.console_lvl := Log.Debug ;*)
-    Clock.realtime := false ;
+    let sim = Simulation.make ~realtime:false "test-gw" in
     let public_ip = Ip.Addr.of_string "80.82.17.127" in
-    let gw_trx = make_gw public_ip (Ip.Cidr.of_string "192.168.0.0/16") in
+    let gw_trx = make_gw ~parent:(Simulation.root sim) public_ip (Ip.Cidr.of_string "192.168.0.0/16") in
     let gateways = Eth.[ State.gw_selector (), Some (Gateway.of_string "192.168.0.1") ] in
     let netmask = Ip.Addr.of_string "255.255.255.0" in
-    let desktop : Host.t = Host.make_dhcp ~netmask ~gateways "desktop" in
+    let desktop : Host.t = Host.make_dhcp ~parent:(Simulation.root sim) ~netmask ~gateways "desktop" in
     desktop.trx.dev.set_read gw_trx.trx.ins.write ;
     ignore (desktop.trx.dev.write <-= gw_trx.trx) ;
     let server_ip = Ip.Addr.of_string "42.43.44.45" in
-    let server_eth = Eth.(TRX.make State.(make ~my_addresses:[ make_my_ip_address server_ip ] ())) in
+    let server_eth = Eth.(TRX.make State.(make ~parent:(Simulation.root sim) ~my_addresses:[ make_my_ip_address server_ip ] ())) in
     let src = ref None in
     let server_recv bits = (* check source IP is the public one (NATed) *)
         let ip = Ip.Pdu.unpack bits |> Result.get_ok in
         src := Some ip.Ip.Pdu.src in
     ignore (server_recv <-= server_eth) ;
     gw_trx.trx <==> server_eth ;
-    Clock.delay (Clock.Interval.sec 10.) (fun () ->
+    Simulation.delay sim (Clock.Interval.sec 10.) (fun () ->
         Log.(log desktop.trx.widget.logger Debug (lazy "Sending UDP packet to server")) ;
         desktop.trx.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring) () ;
-    Clock.run false ;
-    Clock.realtime := true ;
+    Simulation.run sim false ;
     assert_bool "Desktop was NATed" (!src = Some public_ip)
  *)

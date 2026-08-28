@@ -265,10 +265,10 @@ end
  * packets in ["file.pcap"], and another function that will close that file.
  * @param caplen can be used to cap saved packet to a given number of bytes
  * @param dlt can be used to change the file's DLT (required if you do not write Ethernet packets) *)
-let save ?caplen ?(dlt=Dlt.en10mb) fname =
+let save sim ?caplen ?(dlt=Dlt.en10mb) fname =
     let write_pdu, close = Pdu.save ?caplen ~dlt fname in
     let write_bits bits =
-        let pdu = Pdu.make fname ?caplen ~dlt (Clock.now ()) bits in
+        let pdu = Pdu.make fname ?caplen ~dlt (Simulation.now sim) bits in
         write_pdu pdu in
     write_bits, close
 
@@ -433,7 +433,7 @@ let repair_file fname =
  * copying the pcap file frame rate. Notice that we use the internal
  * {!module:Clock} for this, so it's both very accurate or not accurate at all,
  * depending on how you look at it. *)
-let play tx fname =
+let play sim tx fname =
     let packets = enum_of_file fname in
     (* With last_packet_timestamp (or None), schedule a function using the clock to read
        the next packet from the file. *)
@@ -443,11 +443,11 @@ let play tx fname =
             | Some pdu ->
                 let d = match last_ts with None     -> Clock.Interval.o 0.
                                          | Some lts -> Clock.Time.sub pdu.Pdu.ts lts in
-                Clock.delay d (fun () ->
+                Simulation.delay sim d (fun () ->
                     tx (pdu.Pdu.payload :> bitstring) ;
                     read_next_pkt (Some pdu.Pdu.ts)) ()
     in
-    Clock.asap read_next_pkt None
+    Simulation.asap sim read_next_pkt None
 
 (** {2 User friendly functions for capturing/injecting packets} *)
 
@@ -461,16 +461,18 @@ type iface = { handler : iface_handler ;
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is not set then {e MTU} for the
  * device will be chosen. *)
-let openif ?(promisc=true) ?(filter="") ?caplen ifname =
+let openif ~parent ?(promisc=true) ?(filter="") ?caplen ifname =
     let caplen =
         if ifname = "any" then
             65535
         else
             Option.default_delayed (fun () -> mtu_of_iface ifname) caplen in
+    (* TODO: a real interface only makes sense in a realtime simulation; either
+     * refuse a simulation that is not, or switch it to realtime. *)
     { handler = openif_ ifname promisc filter caplen ;
       name = ifname ;
       caplen = caplen ;
-      widget = Widget.make ifname }
+      widget = Widget.make ~parent ifname }
 
 (** [sniff iface] will return the next available packet as a Pcap.Pdu.t. *)
 let sniff ?dlt ?timeout iface =
@@ -517,9 +519,9 @@ let sniffer iface rx =
         match none_if_exception sniff iface with
         | None -> ()
         | Some pdu ->
-            Clock.synch () ;
+            Simulation.synch (Simulation.of_widget iface.widget) ;
             Metric.Atomic.fire packets_sniffed_ok ;
             Metric.Counter.add bytes_in (Payload.length pdu.Pdu.payload) ;
-            Clock.at pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
-            if !Clock.continue then loop () in
+            Simulation.at (Simulation.of_widget iface.widget) pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
+            if Simulation.is_running (Simulation.of_widget iface.widget) then loop () in
     Thread.create loop ()

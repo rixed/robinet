@@ -21,23 +21,23 @@ let client_init url (host : Host.t) =
             Browser.user browser ~pause:5. 1000 url
         ) else (
             Log.(log logger Info (lazy (Printf.sprintf "IP not initialized, wait"))) ;
-            Clock.(delay (Interval.sec 1.) start_browsing ())
+            Simulation.delay (Simulation.of_widget host.Host.trx.Host.widget) (Clock.Interval.sec 1.) start_browsing ()
         ) in
     start_browsing ()
 
 (** Creates [num_groups] groups connected through an Internet. *)
-let make_net avg_group_size num_groups ifname nameserver =
+let make_net sim avg_group_size num_groups ifname nameserver =
     (* Sim.Net.make_internet returns a network with an unlimited amount of eth "plugs"
      * (functioning as a router internally). *)
     Log.(log logger Info (lazy "Create the Internet... :^O")) ;
-    let inet = Sim.Net.make_internet () in
+    let inet = Sim.Net.make_internet sim in
     Log.(log logger Info (lazy (Printf.sprintf "Create %d groups..." num_groups))) ;
     let groups = List.init num_groups (fun i ->
         (* Sim.make_lan returns a network made with many hosts, a dhcp
          * server and a switch, with a free port for external connectivity. *)
         let num_hosts = avg_group_size in
         Log.(log logger Info (lazy (Printf.sprintf "Create group %d with %d hosts" i num_hosts))) ;
-        let group, add_host = Sim.Net.make_lan nameserver num_hosts in
+        let group, add_host = Sim.Net.make_lan sim nameserver num_hosts in
         for _ = 1 to num_hosts do
             add_host ?name:None ?ip:None () |> ignore
         done ;
@@ -46,17 +46,17 @@ let make_net avg_group_size num_groups ifname nameserver =
         assert_ok (Sim.Net.connect inet group) ;
         group) in
     Log.(log logger Info (lazy ("Connecting "^ifname))) ;
-    let sink, _sniff_thread = Sim.Net.make_real_net ifname in
+    let sink, _sniff_thread = Sim.Net.make_real_net sim ifname in
     assert_ok (Sim.Net.connect inet sink) ;
     Sim.Net.union (inet :: sink :: groups)
 
 (** {1 Main function} *)
 
 (** This will creates the objects and queue the first callbacks but does not start the clock *)
-let simul_webperf avg_group_size num_groups _duration ifname nameserver url =
+let simul_webperf sim avg_group_size num_groups _duration ifname nameserver url =
     Log.(log logger Info (lazy (Printf.sprintf "Starting webperf simulation with %d groups of %d users (avg) for base url %s"
         num_groups avg_group_size (Url.to_string url)))) ;
-    let net = make_net avg_group_size num_groups ifname nameserver in
+    let net = make_net sim avg_group_size num_groups ifname nameserver in
     (* Power on everything: *)
     Log.(log logger Info (lazy "Starting browser on each host...")) ;
     Sim.Net.iter_equipments (function
@@ -65,6 +65,8 @@ let simul_webperf avg_group_size num_groups _duration ifname nameserver url =
     ) net
 
 let main =
+    (* Everything this program does happens in this simulation. *)
+    let sim = Simulation.make "simu_perfweb" in
     let url = ref "http://google.com"
     and ifname = ref "eth0"
     and num_groups = ref 5
@@ -81,12 +83,12 @@ let main =
               (fun _ -> raise (Arg.Bad "unknown parameter"))
               "Browse a web site from various locations" ;
     Log.console_lvl := Log.Debug ;
-    simul_webperf !avg_grp_size
+    simul_webperf sim !avg_grp_size
                   !num_groups
                   (Clock.Interval.sec (float_of_int !duration))
                   !ifname
                   (Ip.Addr.of_string !nameserver)
                   (Url.of_string !url) ;
     Log.(log logger Info (lazy "Running it all...")) ;
-    Clock.run true
+    Simulation.run sim true
 

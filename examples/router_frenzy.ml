@@ -28,10 +28,11 @@ open Router
 let debug = true
 
 let forward_traffic (widget : Widget.t) ifname input_dev =
+    let sim = Simulation.of_widget widget in
     let log_paquet what to_string f b =
         Log.(log widget.logger Debug (lazy (Printf.sprintf "%s: %s" what (to_string b)))) ;
         f b in
-    let iface = Pcap.openif ifname in
+    let iface = Pcap.openif ~parent:(Simulation.root sim) ifname in
     let pcap_to_string b =
         let len = Bitstring.bitstring_length b / 8 in
         Printf.sprintf "packet of %d byte(s)" len in
@@ -40,7 +41,7 @@ let forward_traffic (widget : Widget.t) ifname input_dev =
     Pcap.sniffer iface
         (log_paquet "swallowing" pcap_to_string input_dev.write) |> ignore ;
     Log.(log widget.logger Info (lazy (Printf.sprintf "You can send traffic to %s now" ifname))) ;
-    Clock.run true
+    Simulation.run sim true
 
 (* The router IP is given by the subnet CIDR IP (not masked). Targets will be
  * allocated in sequence. TODO: also spawn a DNS server with all the names and
@@ -158,7 +159,7 @@ let build_network (widget : Widget.t) router_specs fst_router_name delays err_de
     (* Build all routers *)
     let routers =
         Hashtbl.map (fun name ifaces ->
-            let widget = Widget.make name in
+            let widget = Widget.make ~parent:widget name in
             if debug then Printf.printf "Build router %s\n%!" name ;
             make_router name widget ifaces router_specs delays err_delays losses err_losses lb_configs
         ) router_specs in
@@ -183,7 +184,7 @@ let build_network (widget : Widget.t) router_specs fst_router_name delays err_de
                     and ip = try Ip.Addr.of_string dest_name
                              with Invalid_argument _ -> Ip.Cidr.second_addr cidr in
                     dest_name,
-                    Host.(make_static ~gateways ~netmask ip dest_name).trx.dev
+                    Host.(make_static ~parent:widget ~gateways ~netmask ip dest_name).trx.dev
                 | dest_router ->
                     (* For each of connected routers, look for their corresponding
                      * interface by subnet name: *)
@@ -237,6 +238,8 @@ let build_network (widget : Widget.t) router_specs fst_router_name delays err_de
 (* We need the name of the interface we are going to read from, and the IP
  * addresses of the routers will later come from the configuration file: *)
 let main =
+    (* Everything this program does happens in this simulation. *)
+    let sim = Simulation.make "router_frenzy" in
     let ifname = ref "veth1" in
     let subnet_seq = ref 0 in
     let subnet_size = Hashtbl.create 10 in  (* seq -> num of IPs *)
@@ -405,7 +408,7 @@ let main =
             target
     ) targets ;
     (* Start the simulation *)
-    let widget = Widget.make ~size:1000 "routerz" in
+    let widget = Widget.make ~parent:(Simulation.root sim) ~size:1000 "routerz" in
     Log.console_lvl := Log.Debug ;
     Log.(log widget.logger Info (lazy
         (Printf.sprintf2 "Building network with:\n%a\n\

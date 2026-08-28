@@ -36,7 +36,12 @@ type queue  =
       msgs : msg array }
 
 type t =
-    { use_wall_clock : bool ;
+    { (* Where this logger reads the time. Defaults to the wall clock, which is
+       * the only time there is for a logger belonging to no simulation (a
+       * parser, a tool). Widget points its widgets' loggers at their own
+       * simulation's clock -- their own, note, not whichever simulation the
+       * thread doing the logging happens to be running. *)
+      now : unit -> Clock.Time.t ;
       queues : queue array }
 
 (* log level <-> queue index *)
@@ -163,11 +168,7 @@ let queue_enum q =
 
 let log t level lstr =
     let lvl = int_of_level level in
-    let now =
-        if t.use_wall_clock then
-            Clock.Time.wall_clock ()
-        else
-            Clock.now () in
+    let now = t.now () in
     let msg = now, lstr in
     enqueue t.queues.(lvl) msg ;
     if lvl <= int_of_level !console_lvl then console_log msg ;
@@ -182,9 +183,8 @@ let log_exceptions t ?(level=Warning) what f x =
                 (Printexc.to_string e)
                 what))
 
-let make ?(use_wall_clock=false) ?(size=50) () =
-    { use_wall_clock ;
-      queues = Array.init num_levels (fun _ -> make_queue size) }
+let make ?(size=50) ?(now=Clock.Time.wall_clock) () =
+    { now ; queues = Array.init num_levels (fun _ -> make_queue size) }
 
 (* The logger that will adopt any others: *)
 

@@ -31,24 +31,24 @@ open Tools
    - perform some action of type continuation -> 'a option
    - if we got None, display an error and stop
    - if ok, return the result of the action so we can use it for next one *)
-let step title action cont =
+let step sim title action cont =
     Printf.printf "%s: %!" title ;
-    Clock.delay (Clock.Interval.sec 1.) (fun () ->
+    Simulation.delay sim (Clock.Interval.sec 1.) (fun () ->
         action (function
         | None   -> error "Fail!"
         | Some x -> Printf.printf "Ok!\n%!" ;
                     cont x)) ()
 
-let reserve date time login pwd =
+let reserve sim date time login pwd =
     let sha1 =
         let cmd = "echo -n "^(Filename.quote pwd)^" | sha1sum | cut -d' ' -f 1" in
         IO.read_line (Unix.open_process_in cmd) in
     let mozilla_user_agent = "Mozilla/5.0 (X11; U; Linux x86_64; en-US; rv:1.9.1.16) Gecko/20110929 Iceweasel/3.5.16 (like Firefox/3.5.16)" in
-    let browser = Browser.make ~user_agent:mozilla_user_agent Localhost.host in
-    step "Get homepage for the fun of it (and collect some cookies)"
+    let browser = Browser.make ~user_agent:mozilla_user_agent (Localhost.host sim) in
+    step sim "Get homepage for the fun of it (and collect some cookies)"
          (Browser.get browser (Url.of_string "http://www.wanaplay.com/"))
          (function _ ->
-    step "Post the login form with hardcoded username and password"
+    step sim "Post the login form with hardcoded username and password"
          (Browser.post browser (Url.of_string "http://fr.wanaplay.com/auth/doLogin")    (* here we know it's fr.wanaplay.com. Better get this from the previous base. ie. browser should save the last base so that we can provide relative URLs. *)
                 [ "sha1mdp", sha1 ;
                   "login", login ;
@@ -56,10 +56,10 @@ let reserve date time login pwd =
                   "rememberMe", "on" ;
                   "commit", "S" ])
          (function _ ->
-    step "Go to EspacePontoise Planning"
+    step sim "Go to EspacePontoise Planning"
          (Browser.get browser (Url.of_string "http://fr.wanaplay.com/plannings/espacesportifpontoise"))
          (function _ ->
-    step (Printf.sprintf "Ask for the planning for this date (%s)" date)
+    step sim (Printf.sprintf "Ask for the planning for this date (%s)" date)
          (Browser.post browser
                        ~headers: [ "X-Requested-With", "XMLHttpRequest" ;
                                    "X-Prototype-Version", "1.5.0" ]
@@ -79,7 +79,7 @@ let reserve date time login pwd =
     if (try ignore (Str.search_forward freeslots_re body 0) ; true with Not_found -> false) then (
         let idTspl = Str.matched_group 1 body
         and time = Str.matched_group 2 body in
-        step (Printf.sprintf "Reserving for %s" time)
+        step sim (Printf.sprintf "Reserving for %s" time)
              (Browser.post browser (Url.of_string "http://fr.wanaplay.com/reservation/takeReservationBase")
                 [ "idTspl", idTspl ;
                   "date", date ;
@@ -101,12 +101,14 @@ let reserve date time login pwd =
     )))))
 
 let main =
+    (* Everything this program does happens in this simulation. *)
+    let sim = Simulation.make "wanaplay" in
     if Array.length Sys.argv <> 5 then (
         Printf.printf "wanaplay YYYY-MM-DD HH:MM login passwd\n(note: time is actually used in a regexp)\n" ;
     ) else (
-        reserve Sys.argv.(1)    (* date *)
+        reserve sim Sys.argv.(1)    (* date *)
                 Sys.argv.(2)    (* time *)
                 Sys.argv.(3)    (* login *)
                 Sys.argv.(4)    (* passwd *)
     ) ;
-    Clock.run true
+    Simulation.run sim true
