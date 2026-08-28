@@ -245,6 +245,9 @@ let stop t () =
     t.continue <- false ;
     Condition.signal t.cond
 
+(** Stop every simulation. *)
+let stop_all () = List.iter (fun t -> stop t ()) (all ())
+
 (** [at t f x] will execute [f x] when simulation clock reaches time [t]. *)
 let at t (ts : Time.t) f x =
     let epsilon = Interval.usec 1. in
@@ -443,17 +446,17 @@ let run t wait =
         Thread.yield ()
     done
 
-let with_trapped t signals f =
+(** Run [f] with those signals stopping every simulation, then put the previous
+ * handlers back. *)
+let with_trapped signals f =
     let prev_sigs =
         List.map (fun s ->
             let open Sys in
             signal s (Signal_handle (fun _n ->
                 Printf.printf "Quitting...\n%!" ;
-                stop t ()))
+                stop_all ()))
         ) signals in
-    let res = f () in
-    List.iter2 Sys.set_signal signals prev_sigs ;
-    res
+    finally (fun () -> List.iter2 Sys.set_signal signals prev_sigs) f ()
 
 (** Start this simulation in its own thread. [wait] has the meaning it has for
  * [run]: keep going even with an empty event queue. *)

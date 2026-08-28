@@ -399,4 +399,4 @@ let capture sim ?promisc ?filter ifname =
         pkts := pkt :: !pkts ;
         Printf.printf ".%!" ;
         aux () in
-    Simulation.with_trapped sim [Sys.sigint] aux
+    Simulation.with_trapped [Sys.sigint] aux
