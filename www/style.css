@@ -17,9 +17,9 @@
     --cable: var(--pico-muted-border-color);
 }
 
-/* A column, so that the banner takes the room it needs and the two panes get
- * what is left -- rather than each being 100vh and the banner pushing the
- * bottom of them off the screen. */
+/* A column: the banner and the status bar take the room they need, the two
+ * panes share what is left and scroll within it. Neither pane may be sized
+ * against the viewport, or whatever else is on the page hides its last row. */
 body {
     padding: 0;
     display: flex;

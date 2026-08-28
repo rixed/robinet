@@ -447,7 +447,11 @@ let run t wait =
     done
 
 (** Run [f] with those signals stopping every simulation, then put the previous
- * handlers back. *)
+ * handlers back.
+ *
+ * Signals are delivered to the process, not to a simulation: there is no such
+ * thing as interrupting one of them and leaving the others running, so the
+ * handler stops the lot -- including any simulation started while [f] runs. *)
 let with_trapped signals f =
     let prev_sigs =
         List.map (fun s ->
