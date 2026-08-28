@@ -115,7 +115,11 @@ let json_of_property (p : Widget.property) =
                      "choices", `List (List.map (fun c -> `String c) choices) ]
         | Range (mi, ma) ->
             `Assoc [ "type", `String "range" ;
-                     "min", `Float mi ; "max", `Float ma ] in
+                     "min", `Float mi ; "max", `Float ma ]
+        (* Counter, gauge or timed comes with the value: the metric says what
+         * it is. *)
+        | Metric ->
+            `Assoc [ "type", `String "metric" ] in
     `Assoc [ "name", `String p.name ;
              "descr", `String p.descr ;
              "read_only", `Bool (p.setter = None) ;

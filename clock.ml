@@ -39,6 +39,9 @@ module rec Time : sig
     val is_after : t -> t -> bool
     val trunc : t -> Interval.t -> t
     val to_timestamp : t -> float
+    (* Seconds since the epoch. Named for ppx_deriving_yojson, which looks for
+     * [to_yojson] beside any type it is asked to serialize. *)
+    val to_yojson : t -> Yojson.Safe.t
 end = struct
     (** When displaying a time, print also the corresponding date.
      * Only useful if your simulation spans several days, which is uncommon. *)
@@ -89,6 +92,8 @@ end = struct
         o (floor ((t :> float) /. (i :> float)) *. (i :> float))
 
     let to_timestamp (t : t) = (t :> float)
+
+    let to_yojson (t : t) = `Float (t :> float)
 end
 
 (** While Interval.t represents a time interval.
@@ -109,6 +114,8 @@ and Interval : sig
     val div : t -> float -> t
     val abs  : t -> t
     val to_secs : t -> float
+    (* In seconds. See Time.to_yojson. *)
+    val to_yojson : t -> Yojson.Safe.t
 end = struct
     (*$< Interval *)
     include Private.Make (struct
@@ -194,6 +201,8 @@ end = struct
     let abs (t : t) = o (Float.abs (t :> float))
 
     let to_secs (t : t) = (t :> float)
+
+    let to_yojson (t : t) = `Float (t :> float)
 
     (*$>*)
 end

@@ -182,18 +182,20 @@ type resource =
     Http.code * Http.header list
 
 (* [res] is a list of (regexp matching the URL, handler): *)
-let multiplexer res host http msg (widget : Widget.t) =
-    (* We'd rather have one such metric per host: *)
-    let counter = Metric.Atomic.make ("hosts/"^ host.Host.widget.name ^"/httpd/queries") in
+let multiplexer res _host http msg (widget : Widget.t) =
+    (* Waiting to be attached to this server's widget, which will supply the
+     * clock it must be dated with:
+    let counter = Metric.Atomic.make ("hosts/"^ _host.Host.widget.name ^"/httpd/queries") in
+    *)
     let handle mth url _headers ext_params qry_body =
         let url = Url.of_string url in
-        let count_query status =
+        let count_query _status = (*
             let open Metric in
             let params =
                 Params.make Param.[ "method", String mth ;
                                     "path", String url.path ;
                                     "status", Int status ] in
-            Metric.Atomic.fire ~params counter in
+            Metric.Atomic.fire ~params counter *) () in
         match List.find_map (fun (re, f) ->
                 if Str.string_match re url.Url.path 0
                 then Some (str_all_matches url.Url.path, f)

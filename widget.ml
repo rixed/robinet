@@ -96,9 +96,21 @@ and kind =
     | Enum of string list
     (* A number known to lie within those bounds *)
     | Range of float * float
+    (* A family of counts or measures, keyed by the parameters of the events
+     * they come from: it reads as a small table, and the only thing a write
+     * does is reset it. Which sort of metric it is comes with the value, which
+     * a metric, unlike a range, describes itself. *)
+    | Metric
 
 let property ?(descr="") ?setter ?(kind=String) ~getter name =
     { name ; descr ; getter ; setter ; kind }
+
+(** A metric, as a property: it reads as the metric's current figures, and the
+ * only thing that can be written to it is a reset -- whatever the value. *)
+let metric_property ?(descr="") ?(resettable=true) name metric =
+    property name ~descr ~kind:Metric
+        ~getter:(fun () -> Metric.to_json metric)
+        ?setter:(if resettable then Some (fun _ -> Metric.reset metric) else None)
 
 (** What a setter raises when handed something it cannot use. The API turns it
  * into a 400 with this message, like any other exception a setter throws. *)

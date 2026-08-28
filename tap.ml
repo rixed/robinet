@@ -28,8 +28,12 @@ open Tools
 
 let debug = true
 
+(* Waiting to be attached to the widget that owns it, which will supply the
+ * clock it must be dated with:
+
 (** A counter for how many packets we failed to inject. *)
 let packets_injected_err = Metric.Atomic.make "Tap/Packets/Injected/Err"
+*)
 
 type tap_iface = { name : string ; sock : Unix.file_descr }
 
@@ -50,8 +54,8 @@ let inject iface bits =
         assert (sent = len)
     with e ->
         Printf.printf "Tap(%s): Cannot inject a packet: %s\n%!"
-            iface.name (Printexc.to_string e) ;
-        Metric.Atomic.fire packets_injected_err
+            iface.name (Printexc.to_string e)
+        (* Metric.Atomic.fire packets_injected_err *)
 
 external tap_read : int -> string = "wrap_tap_read"
 
@@ -60,11 +64,14 @@ let sniff iface =
     let ts = Clock.Time.wall_clock () in
     Pcap.Pdu.make iface.name ts (bitstring_of_string bytes)
 
+(* Waiting for their widget, as above:
+
 (** A counter for how many packets were sniffed. *)
 let packets_sniffed_ok = Metric.Atomic.make "Tap/Packets/Sniffed"
 
 (** A counter for how many bytes were sniffed. *)
 let bytes_in           = Metric.Counter.make "Tap/Bytes/In" "bytes"
+*)
 
 (* TODO: This should be provided for any sniffing module by the functor: *)
 (** [sniffer iface rx] returns a thread that continuously sniff packets
@@ -75,8 +82,8 @@ let sniffer sim iface rx =
         | None -> ()
         | Some pdu ->
             Simulation.synch sim ;
-            Metric.Atomic.fire packets_sniffed_ok ;
-            Metric.Counter.add bytes_in (Payload.length pdu.Pcap.Pdu.payload) ;
+            (* Metric.Atomic.fire packets_sniffed_ok ;
+               Metric.Counter.add bytes_in (Payload.length pdu.Pcap.Pdu.payload) ; *)
             if debug then Printf.printf "Tap(%s): Got packet for ts %s\n%!"
                 iface.name (Clock.Time.to_string pdu.ts) ;
             Simulation.at sim pdu.ts rx (pdu.payload :> bitstring) ;

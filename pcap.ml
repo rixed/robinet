@@ -486,31 +486,38 @@ let sniff ?dlt ?timeout iface =
 
 (** {2 Packet injection} *)
 
+(* Waiting to be attached to the widget that owns them, which will supply the
+ * clock they must be dated with:
+
 (** A counter for how many packets we failed to inject. *)
 let packets_injected_err = Metric.Atomic.make "Pcap/Packets/Injected/Err"
 
 (** A counter for how many bytes were injected successfully. *)
 let bytes_out            = Metric.Counter.make "Pcap/Bytes/Out" "bytes"
+*)
 
 (** [inject iface bits] inject the packet [bits] into interface [iface]. *)
 let inject (iface : iface) bits =
-    let params = Metric.(Params.singleton "iface" Param.(String iface.name)) in
+    (* let params = Metric.(Params.singleton "iface" Param.(String iface.name)) in *)
     try
         let str = string_of_bitstring bits in
         Log.(log iface.widget.logger Debug (lazy (Printf.sprintf "Injecting %d bytes" (String.length str)))) ;
-        inject_ iface.handler str ;
-        Metric.Counter.add ~params bytes_out (bytelength bits)
+        inject_ iface.handler str
+        (* Metric.Counter.add ~params bytes_out (bytelength bits) *)
     with e ->
-        Log.(log iface.widget.logger Error (lazy (Printf.sprintf "Cannot inject: %s" (Printexc.to_string e)))) ;
-        Metric.Atomic.fire ~params packets_injected_err
+        Log.(log iface.widget.logger Error (lazy (Printf.sprintf "Cannot inject: %s" (Printexc.to_string e))))
+        (* Metric.Atomic.fire ~params packets_injected_err *)
 
 (** {2 Packet sniffing} *)
+
+(* Waiting for their widget, as above:
 
 (** A counter for how many packets were sniffed. *)
 let packets_sniffed_ok = Metric.Atomic.make "Pcap/Packets/Sniffed"
 
 (** A counter for how many bytes were sniffed. *)
 let bytes_in           = Metric.Counter.make "Pcap/Bytes/In" "bytes"
+*)
 
 (** [sniffer iface rx] returns a thread that continuously sniff packets
  * and pass them to the [rx] function (via the Clock). *)
@@ -520,8 +527,8 @@ let sniffer iface rx =
         | None -> ()
         | Some pdu ->
             Simulation.synch (Simulation.of_widget iface.widget) ;
-            Metric.Atomic.fire packets_sniffed_ok ;
-            Metric.Counter.add bytes_in (Payload.length pdu.Pdu.payload) ;
+            (* Metric.Atomic.fire packets_sniffed_ok ;
+               Metric.Counter.add bytes_in (Payload.length pdu.Pdu.payload) ; *)
             Simulation.at (Simulation.of_widget iface.widget) pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
             if Simulation.is_running (Simulation.of_widget iface.widget) then loop () in
     Thread.create loop ()

@@ -44,7 +44,10 @@ end
 (** [serve host] listen on host name port and
  * answer queries (or delegates to its own nameserver). *)
 let serve ?(port=Udp.Port.o 53) (st : State.t) host =
+    (* Waiting to be attached to this server's widget, which will supply the
+     * clock it must be dated with:
     let timed = Metric.Timed.make ("hosts/"^ host.Host.widget.name ^"/named/queries") in
+    *)
     Log.(log st.widget.logger Debug (lazy "Listening for requests...")) ;
     host.Host.udp_server port (fun udp ->
         udp.Udp.TRX.trx.ins.set_read (fun bits ->
@@ -56,11 +59,11 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
               when query.opcode = std_query && query.Pdu.questions <> [] ->
                 let num_questions = List.length query.Pdu.questions in
                 Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Received a DNS query with %d questions" num_questions))) ;
-                let stop_func =
+                let stop_func () = (*
                     let open Metric in
                     let params =
                        Params.make Param.[ "questions", Int num_questions ] in
-                    Timed.start ~params timed in
+                    Timed.start ~params timed *) () in
                 let answers = Array.make num_questions None in
                 let check_all_answered () =
                   if Array.for_all ((<>) None) answers then (
@@ -73,7 +76,7 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
                             (qname, qtype, qclass, ttl, Ip.Addr.to_bytes ip) :: lst
                       ) [] query.Pdu.questions in
                     Log.(log st.widget.logger Debug (lazy "Answering")) ;
-                    stop_func Metric.Params.(make []) ;
+                    stop_func () ; (* stop_func Metric.Params.(make []) ; *)
                     Pdu.make_answer query.Pdu.id query.Pdu.questions answer_rrs |>
                     Pdu.pack |>
                     tx udp.trx)

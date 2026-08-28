@@ -91,7 +91,8 @@ let main =
         Option.map (fun gw -> Eth.Gateway.of_string gw) !gw |>
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ])
     and nameserver = Option.map (fun ip -> Ip.Addr.of_string ip) !dns_str in
-    ignore (Metric.report_thread sim stdout 10.) ;
+    (* No more report thread: metrics are read through the administration
+     * interface, from the widgets that own them. *)
     run sim !ifname (Ip.Cidr.of_string !src_range_str) !num_srcs
         ?gateways ?search_sfx:!search_sfx ?nameserver
         ?pause:!pause !max_depth !start_url

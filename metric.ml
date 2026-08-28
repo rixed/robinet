@@ -37,16 +37,21 @@
    (note: "current" values can be obtained from a polling agent from the bare counters
    offered here)
 
-   Also, each event is given a name and is known to the module so that we can
-   build reports including all events without requiring much from the user.
-
    Also, events of the same kind may be grouped together to form a compound
    event of this same type. Events are thus ordered in a tree. This need not to
    be performed until creation of the report, though.
+
+   A metric belongs to the widget that owns it, and is read through that
+   widget's properties; there is no registry of every metric in the process.
+
+   Whatever records a time takes it as an argument: a metric measuring a
+   simulation must be told that simulation's time, and there is no default that
+   could quietly substitute the wall clock for it. This module therefore knows
+   nothing of simulations, and can be used by a parser as readily as by a
+   simulated host.
 *)
 
 open Batteries
-open Tools
 
 let debug = false
 
@@ -64,6 +69,13 @@ struct
 
     let print oc v =
         String.print oc (to_string v)
+
+    (* Written out rather than derived: a parameter is a value, and the UI has
+     * no use for the constructor that carried it. *)
+    let to_yojson = function
+        | Bool b -> `Bool b
+        | Int d -> `Int d
+        | String s -> `String s
 end
 
 module Params =
@@ -116,11 +128,25 @@ struct
             (fun oc params -> Printf.fprintf oc "\t\t%a: " print params)
             (fun oc v -> Printf.fprintf oc "%a\n" p v)
             oc h
+
+    let to_yojson t =
+        `Assoc (List.map (fun (n, v) -> n, Param.to_yojson v) t)
 end
+
+(* Every metric is a family, keyed by the parameters of the event: a JSON
+ * object cannot hold that, its keys being strings, so the tables become a list
+ * of the pairs they hold. *)
+let table_to_yojson value_to_yojson h =
+    `List (
+        Hashtbl.fold (fun params v lst ->
+            `Assoc [ "params", Params.to_yojson params ;
+                     "value", value_to_yojson v ] :: lst
+        ) h [])
 
 module FirstLast =
 struct
     type t_ = { first : Clock.Time.t ; mutable last : Clock.Time.t }
+        [@@deriving to_yojson]
 
     type t = t_ ref
 
@@ -134,12 +160,16 @@ struct
     let reset t =
         t := empty
 
-    let update ?now t =
-        let now = Option.default_delayed Clock.Time.wall_clock now in
+    let update now t =
         if !t == empty then
             t := { first = now ; last = now }
         else
             !t.last <- now
+
+    (* Null while the event has never happened: "never" and "at the epoch" are
+     * not the same statement. *)
+    let to_yojson t =
+        if !t == empty then `Null else t__to_yojson !t
 
     let printf oc t =
         if !t != empty then
@@ -150,38 +180,34 @@ struct
                 Clock.Time.printf !t.last
 end
 
-(* All defined metrics *)
+(* A metric is one of those; each kind adds its own constructor below, and
+ * [to_yojson] at the end of this file knows how to name them. *)
 
 type metric = ..
-
-let all : (string, metric) Hashtbl.t = Hashtbl.create 99
 
 (* Atomic events are for errors, per results stats, etc *)
 module Atomic =
 struct
 
     type t = { name : string ;
-               counts : (Params.t, int) Hashtbl.t ;
-               first_last : FirstLast.t }
+               counts : (Params.t, int) Hashtbl.t
+                   [@to_yojson table_to_yojson (fun c -> `Int c)] ;
+               first_last : FirstLast.t } [@@deriving to_yojson]
 
     type metric += T of t
 
     let make name =
-        match hash_find_or_insert all name (fun () ->
-                T {
-                    name = name ;
-                    counts = Hashtbl.create 5 ;
-                    first_last = FirstLast.make () }) with
-        | T t -> t
-        | _ -> invalid_arg ("Atomic.make reuse name "^ name)
+        { name ;
+          counts = Hashtbl.create 5 ;
+          first_last = FirstLast.make () }
 
     let reset t =
         Hashtbl.clear t.counts ;
         FirstLast.reset t.first_last
 
-    let fire ?now ?(params=Params.empty) t =
+    let fire ~now ?(params=Params.empty) t =
         Hashtbl.modify_def 0 params succ t.counts ;
-        FirstLast.update ?now t.first_last
+        FirstLast.update now t.first_last
 
     let print oc t =
         Printf.fprintf oc "\
@@ -198,45 +224,43 @@ end
 module Gauge =
 struct
     type t = { name : string ;
-               values : (Params.t, value) Hashtbl.t ;
+               values : (Params.t, value) Hashtbl.t
+                   [@to_yojson table_to_yojson value_to_yojson] ;
                first_last : FirstLast.t }
     and value = { min : int ; current : int ; max : int }
+    [@@deriving to_yojson]
 
     type metric += T of t
 
     let make name =
-        match hash_find_or_insert all name (fun () ->
-                T {
-                    name = name ;
-                    values = Hashtbl.create 5 ;
-                    first_last = FirstLast.make () }) with
-        | T t -> t
-        | _ -> invalid_arg ("Gauge.make reuse name "^ name)
+        { name ;
+          values = Hashtbl.create 5 ;
+          first_last = FirstLast.make () }
 
     let reset t =
         Hashtbl.clear t.values ;
         FirstLast.reset t.first_last
 
-    let set ?now ?(params=Params.empty) t v =
+    let set ~now ?(params=Params.empty) t v =
         Hashtbl.modify_opt params (function
         | None ->
             Some { min = v ; current = v ; max = v }
         | Some value ->
             Some { min = min value.min v ; current = v ; max = max value.max v }
         ) t.values ;
-        FirstLast.update ?now t.first_last
+        FirstLast.update now t.first_last
 
-    let add ?now ?(params=Params.empty) t d =
+    let add ~now ?(params=Params.empty) t d =
         let v =
             try (Hashtbl.find t.values params).current
             with Not_found -> 0 in
-        set ?now ~params t (v + d)
+        set ~now ~params t (v + d)
 
-    let succ ?now ?params t =
-        add ?now ?params t 1
+    let succ ~now ?params t =
+        add ~now ?params t 1
 
-    let pred ?now ?params t =
-        add ?now ?params t (-1)
+    let pred ~now ?params t =
+        add ~now ?params t (-1)
 
     let print oc t =
         Printf.fprintf oc "\
@@ -257,32 +281,29 @@ module Counter =
 struct
     type t = { name : string ;
                units : string ; (* TODO: an enum with known pretty printers *)
-               values : (Params.t, int) Hashtbl.t ;
-               fired : Atomic.t }
+               values : (Params.t, int) Hashtbl.t
+                   [@to_yojson table_to_yojson (fun c -> `Int c)] ;
+               fired : Atomic.t } [@@deriving to_yojson]
 
     type metric += T of t
 
     let make name units =
-        match hash_find_or_insert all name (fun () ->
-            T {
-                name ; units ;
-                values = Hashtbl.create 10 ;
-                fired = Atomic.make (name^"/fired") }) with
-        | T t -> t
-        | _ -> invalid_arg ("Counter.make reuse name "^ name)
+        { name ; units ;
+          values = Hashtbl.create 10 ;
+          fired = Atomic.make (name ^"/fired") }
 
     let reset t =
         Hashtbl.clear t.values ;
         Atomic.reset t.fired
 
-    let add t ?now ?(params=Params.empty) c =
+    let add t ~now ?(params=Params.empty) c =
         Hashtbl.modify_opt params (function
             | None ->
                 Some c
             | Some sum ->
                 Some (sum + c)
         ) t.values ;
-        Atomic.fire ?now ~params t.fired
+        Atomic.fire ~now ~params t.fired
 
     let print oc t =
         Printf.fprintf oc "\
@@ -299,9 +320,11 @@ end
 module Timed =
 struct
     type t = { name : string ;
-               durations : (Params.t, duration) Hashtbl.t ;
+               durations : (Params.t, duration) Hashtbl.t
+                   [@to_yojson table_to_yojson duration_to_yojson] ;
                starts : Atomic.t ;
                stops : Atomic.t ;
+               (* How many are running right now. *)
                simult : Gauge.t }
 
     and duration =
@@ -309,19 +332,16 @@ struct
           max : Clock.Interval.t ;
           sum : Clock.Interval.t ;
           count : int }
+    [@@deriving to_yojson]
 
     type metric += T of t
 
     let make name =
-        match hash_find_or_insert all name (fun () ->
-            T {
-                name ;
-                starts = Atomic.make (name^ "/start") ;
-                stops = Atomic.make (name^ "/stop") ;
-                durations = Hashtbl.create 10 ;
-                simult = Gauge.make (name^ "/simult") }) with
-        | T t -> t
-        | _ -> invalid_arg ("Timed.make reuse name "^ name)
+        { name ;
+          starts = Atomic.make (name ^"/start") ;
+          stops = Atomic.make (name ^"/stop") ;
+          durations = Hashtbl.create 10 ;
+          simult = Gauge.make (name ^"/simult") }
 
     let reset t =
         Atomic.reset t.starts ;
@@ -329,18 +349,18 @@ struct
         Hashtbl.clear t.durations ;
         Gauge.reset t.simult
 
-    type stop_func = Params.t -> unit
+    (* The event is over at the time the caller says it is: only the caller
+     * knows which clock was running while it lasted. *)
+    type stop_func = now:Clock.Time.t -> Params.t -> unit
 
-    let start ?(params=Params.empty) t : stop_func =
-        let start_time = Clock.Time.wall_clock () in
-        Gauge.succ ~params t.simult ;
+    let start ~now:start_time ?(params=Params.empty) t : stop_func =
+        Gauge.succ ~now:start_time ~params t.simult ;
         (* Return the stop function: *)
-        fun extra_params ->
-            let now = Clock.Time.wall_clock () in
+        fun ~now extra_params ->
             let params = Params.add params extra_params in
             Atomic.fire ~now:start_time ~params t.starts ;
             Atomic.fire ~now ~params t.stops ;
-            Gauge.pred ~params t.simult ;
+            Gauge.pred ~now ~params t.simult ;
             let duration = Clock.Time.sub now start_time in
             Hashtbl.modify_opt params (function
                 | None ->
@@ -357,21 +377,23 @@ struct
                         count = d.count + 1 }
             ) t.durations
 
-    let timed ?(params=Params.empty) t f =
-        let start_time = Clock.Time.wall_clock () in
-        Gauge.succ ~params t.simult ;
+    (* [clock] rather than a timestamp: this one spans the call to [f], so it
+     * has to read the time twice. *)
+    let timed ~clock ?(params=Params.empty) t f =
+        let start_time = clock () in
+        Gauge.succ ~now:start_time ~params t.simult ;
         match f () with
         | exception e ->
             let bt = Printexc.get_raw_backtrace () in
             Atomic.fire ~now:start_time ~params t.starts ;
-            Gauge.pred ~params t.simult ;
+            Gauge.pred ~now:(clock ()) ~params t.simult ;
             Printexc.raise_with_backtrace e bt
         | extra_params, res->
-            let now = Clock.Time.wall_clock () in
+            let now = clock () in
             let params = Params.add params extra_params in
             Atomic.fire ~now:start_time ~params t.starts ;
             Atomic.fire ~now ~params t.stops ;
-            Gauge.pred ~params t.simult ;
+            Gauge.pred ~now ~params t.simult ;
             let duration = Clock.Time.sub now start_time in
             Hashtbl.modify_opt params (function
                 | None ->
@@ -406,43 +428,76 @@ struct
             ) t.durations
 end
 
-(* Report generation *)
+(* Whatever the kind, one of these. The dispatch is written out rather than
+ * derived: every kind names its constructor [T], so the tag the ppx would emit
+ * says nothing, while the reader needs to know a counter from a gauge. *)
 
-let print_report oc =
-    Hashtbl.iter (fun _ -> function
-        | Atomic.T t -> Atomic.print oc t
-        | Gauge.T t -> Gauge.print oc t
-        | Counter.T t -> Counter.print oc t
-        | Timed.T t -> Timed.print oc t
-        | _ -> invalid_arg "Metric.print_report"
-    ) all ;
-    flush oc
+(* Which of them it is. A metric never changes kind, so this is what tells the
+ * interface how to display one, before and independently of its figures. *)
+let kind_name = function
+    | Atomic.T _ -> "atomic"
+    | Gauge.T _ -> "gauge"
+    | Counter.T _ -> "counter"
+    | Timed.T _ -> "timed"
+    | _ -> invalid_arg "Metric.kind_name: unknown kind of metric"
 
-(* [sim] only to know when to stop. *)
-let report_thread sim oc period =
-    let rec loop () =
-        Thread.delay period ;
-        print_report oc ;
-        if Simulation.is_running sim then loop () in
-    Thread.create loop ()
+let to_yojson m =
+    let tagged = function
+        | `Assoc fields -> `Assoc (("kind", `String (kind_name m)) :: fields)
+        | json -> json in
+    match m with
+    | Atomic.T t -> tagged (Atomic.to_yojson t)
+    | Gauge.T t -> tagged (Gauge.to_yojson t)
+    | Counter.T t -> tagged (Counter.to_yojson t)
+    | Timed.T t -> tagged (Timed.to_yojson t)
+    | _ -> invalid_arg "Metric.to_yojson: unknown kind of metric"
 
-(* Misc *)
+(* What the administration interface speaks. *)
+let to_json m = Yojson.Safe.to_basic (to_yojson m)
 
-let reset () =
-    Hashtbl.iter (fun _ -> function
-        | Atomic.T t -> Atomic.reset t
-        | Gauge.T t -> Gauge.reset t
-        | Counter.T t -> Counter.reset t
-        | Timed.T t -> Timed.reset t
-        | _ -> invalid_arg "Metric.reset"
-    ) all
+(*$T to_json
+  (match to_json (Counter.T (Counter.make "c" "bytes")) with \
+   | `Assoc l -> List.assoc "kind" l = `String "counter" \
+   | _ -> false)
+  (* Never fired: not "fired at the epoch". *) \
+  (match to_json (Atomic.T (Atomic.make "a")) with \
+   | `Assoc l -> List.assoc "first_last" l = `Null \
+   | _ -> false)
+  (* A family, keyed by the parameters of the events. *) \
+  (let a = Atomic.make "a" in \
+   let params = Params.singleton "port" (Param.Int 2) in \
+   Atomic.fire ~now:(Clock.Time.o 1.) ~params a ; \
+   Atomic.fire ~now:(Clock.Time.o 3.) ~params a ; \
+   match to_json (Atomic.T a) with \
+   | `Assoc l -> \
+       List.assoc "counts" l = \
+           `List [ `Assoc [ "params", `Assoc [ "port", `Int 2 ] ; \
+                            "value", `Int 2 ] ] && \
+       List.assoc "first_last" l = \
+           `Assoc [ "first", `Float 1. ; "last", `Float 3. ] \
+   | _ -> false)
+ *)
+
+let print oc = function
+    | Atomic.T t -> Atomic.print oc t
+    | Gauge.T t -> Gauge.print oc t
+    | Counter.T t -> Counter.print oc t
+    | Timed.T t -> Timed.print oc t
+    | _ -> invalid_arg "Metric.print: unknown kind of metric"
+
+let reset = function
+    | Atomic.T t -> Atomic.reset t
+    | Gauge.T t -> Gauge.reset t
+    | Counter.T t -> Counter.reset t
+    | Timed.T t -> Timed.reset t
+    | _ -> invalid_arg "Metric.reset: unknown kind of metric"
 
 let params = function
     | Atomic.T t -> Hashtbl.keys t.counts
     | Gauge.T t -> Hashtbl.keys t.values
     | Counter.T t -> Hashtbl.keys t.values
     | Timed.T t -> Hashtbl.keys t.durations
-    | _ -> invalid_arg "Metric.params"
+    | _ -> invalid_arg "Metric.params: unknown kind of metric"
 
 let has_data metric =
     not (Enum.is_empty (params metric))

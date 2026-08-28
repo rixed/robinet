@@ -207,8 +207,11 @@ let cookie_string t host path =
         (cookie_string t "www.example3.com" "/" = "SID=31d4")
 *)
 
+(* Waiting to be attached to the browser's widget, which will supply the clock
+ * they must be dated with:
 let message_get = Metric.Timed.make "Browser/Msg/Get" (* FIXME: instead of Get use request name *)
 let per_status  = Hashtbl.create 11
+*)
 
 (* Returns an unused HTTP.TRXtop * tcp TRX (and removes it from the pool *)
 let find_vacant_cnx t addr port =
@@ -284,12 +287,13 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
     if url.Url.scheme <> "http" then (
         Printf.printf "Browser: bad scheme: %s" (Url.to_string url)
     ) else (
-        let stop_with_status =
+        let stop_with_status = (*
             let open Metric in
             let params = Params.singleton "url" (Param.String (Url.to_string url)) in
             let stop_func = Timed.start ~params message_get in
             fun status ->
-                stop_func Metric.(Params.singleton "status" (Param.String status)) in
+                stop_func Metric.(Params.singleton "status" (Param.String status)) *)
+            fun (_ : string) -> () in
         let addr, port =
             (* Try to use the port present in the URL *)
             try let n = String.index url.Url.net_loc ':' in
@@ -318,13 +322,14 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
                         if debug then Printf.printf "Browser: closing the Tcp cnx\n%!" ;
                         tcp.Tcp.TRX.close ()
                     ) ;
-                    (* update Get metric *)
+                    (* update Get metric
                     (match pdu with
                         | { Pdu.cmd = Status s ; _ } ->
                             let ev = hash_find_or_insert per_status s (fun () ->
                                 Metric.Atomic.make ("Browser/Get."^(string_of_int s))) in
                             Metric.Atomic.fire ev
                         | _ -> ()) ;
+*)
                     (* store cookies from any response *)
                     (match pdu with
                         | { Pdu.cmd = Status _ ; Pdu.headers = headers ; _ } ->

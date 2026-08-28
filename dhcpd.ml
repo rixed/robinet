@@ -114,10 +114,13 @@ end
 (** [serve host ips] listen on host DHCP port and allocate the
  * given ips to any requester. *)
 let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
+    (* Waiting to be attached to this server's widget, which will supply the
+     * clock it must be dated with:
     let counter = Metric.Atomic.make ("hosts/"^ host.Host.widget.name ^"/dhcpd/queries") in
-    let count cmd =
+    *)
+    let count _cmd = (*
         let params = Metric.(Params.make Param.[ "cmd", String cmd ]) in
-        Metric.Atomic.fire ~params counter in
+        Metric.Atomic.fire ~params counter *) () in
     (* Offered IPs (and options), indexed by client-ids: *)
     Log.(log st.widget.logger Debug (lazy "Listening for requests...")) ;
     host.Host.udp_server port (fun udp ->

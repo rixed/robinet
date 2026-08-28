@@ -164,9 +164,11 @@ struct
                 * to return via the same interface: *)
                admin_reroute : bool ;
                       widget : Widget.t ;
-              load_balancing : load_balancing ;
+              load_balancing : load_balancing }
+                     (* Waiting to be attached to that widget, which will
+                      * supply the clock they must be dated with:
                      ingress : Metric.Counter.t ;
-                      egress : Metric.Counter.t }
+                      egress : Metric.Counter.t *)
 
     (* Add a route (the added route becomes top priority *)
     let add_route (t : t) r =
@@ -206,9 +208,9 @@ struct
         Log.(log t.widget.logger Debug (lazy (match in_iface_opt with
             | Some n -> Printf.sprintf "rx from iface %d" n
             | None -> "generated traffic"))) ;
-        Option.may (fun in_iface ->
+        (* Option.may (fun in_iface ->
             Metric.(Counter.add t.ingress ~params:(Params.singleton "port" (Param.Int in_iface)) (bytelength bits))
-        ) in_iface_opt ;
+        ) in_iface_opt ; *)
         let ip_opt, src_opt, dst_opt, ttl_opt, proto_opt =
             match Ip.Pdu.unpack bits with
             | Error _ ->
@@ -237,7 +239,7 @@ struct
                 | Route.Forward { out_iface ; via } ->
                     let do_forward bits =
                         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forwarding packet to iface %d" out_iface))) ;
-                        Metric.(Counter.add t.egress ~params:(Params.singleton "port" (Param.Int out_iface)) (bytelength bits)) ;
+                        (* Metric.(Counter.add t.egress ~params:(Params.singleton "port" (Param.Int out_iface)) (bytelength bits)) ; *)
                         let iface = t.ifaces.(out_iface) in
                         (* So we want to set the gateway for this packet but cannot
                          * call Etc.TRX.tx directly because some additional processing
@@ -386,11 +388,12 @@ struct
                 make_iface ?delay ?loss ?mtu ?mac ?my_addresses
                            ~parent:widget n
             ) in
-        let full_name = Widget.full_name widget in
-        let ingress = Metric.Counter.make (full_name ^"/ingress") "bytes" in
-        let egress = Metric.Counter.make (full_name ^"/egress") "bytes" in
+        (* let full_name = Widget.full_name widget in
+           let ingress = Metric.Counter.make (full_name ^"/ingress") "bytes" in
+           let egress = Metric.Counter.make (full_name ^"/egress") "bytes" in *)
         let t = { ifaces ; routes ; widget ; notify_errs ; admin_reroute ;
-                  load_balancing ; ingress ; egress } in
+                  load_balancing } in
+                  (* ingress ; egress *)
         Array.iteri (fun n iface ->
             if iface.eth.my_addresses <> [] then (
                 (* Make that interface a host with an IP stack on top of eth: *)

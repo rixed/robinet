@@ -41,5 +41,6 @@ let main =
               (fun _ -> raise (Arg.Bad "unknown parameter"))
               "Start a dummy http server" ;
     Random.self_init () ;
-    ignore (Myadmin.report_thread sim 10.) ;
+    (* No more report thread: metrics are read through the administration
+     * interface, from the widgets that own them. *)
     run sim !port

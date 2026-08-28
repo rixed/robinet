@@ -44,7 +44,10 @@ let check_results res_printer p bs m expected =
 
 (* From bytes (char) to characters (char) *)
 
+(* Waiting to be attached to the widget that owns it, which will supply the
+ * clock it must be dated with:
 let bad_attr_chars = Metric.Atomic.make "Html/ParseError/attrChars"
+*)
 
 let c2i c =
     if c >= '0' && c <= '9' then
@@ -147,17 +150,17 @@ let rec var_printer oc = function
 let ext_alphabetic () =
     either [ item '_' ; item '-' ; item ':' ; item '.' ;
              (* not legal but yet often encountered *)
-             map (item '#') (fun x -> Metric.Atomic.fire bad_attr_chars ; x) ]
+             map (item '#') (fun x -> (* Metric.Atomic.fire bad_attr_chars ; *) x) ]
 
 let first_char_name () =
     either [ alphabetic () ; ext_alphabetic () ;
              (* illegal but often encountered in the wild *)
-             map (numeric ()) (fun x -> Metric.Atomic.fire bad_attr_chars ; x) ]
+             map (numeric ()) (fun x -> (* Metric.Atomic.fire bad_attr_chars ; *) x) ]
 
 let ext_alphanum () =
     either [ first_char_name () ; numeric () ;
              (* illegal but often encountered *)
-             map (item '%') (fun x -> Metric.Atomic.fire bad_attr_chars ; x) ]
+             map (item '%') (fun x -> (* Metric.Atomic.fire bad_attr_chars ; *) x) ]
 
 let name () =
     map (seq [ map (first_char_name ()) (fun c -> [c]) ; many (ext_alphanum ()) ]) (fun ll ->
@@ -358,8 +361,10 @@ let comply new_tag pending_tag =
         f new_tag
     with Not_found -> true
 
+(* Waiting for their widget, as above:
 let autocloses = Metric.Atomic.make "Html/ParseError/badTagContent"
 let uncloseds = Metric.Atomic.make "Html/ParseError/unclosedTag"
+*)
 
 let autoclose l =
     let remove_first t ts =
@@ -374,12 +379,12 @@ let autoclose l =
             | [] ->
                 List.rev prev
             | t :: t' ->
-                Metric.Atomic.fire uncloseds ;
+                (* Metric.Atomic.fire uncloseds ; *)
                 aux ((`CloseTag t)::prev) t' [])
         | new_tag :: next ->
             (* Does this break one of our pending constraint ? *)
             let still_pending, violated = List.partition (comply new_tag) pending_tags in
-            if violated <> [] then Metric.Atomic.fire autocloses ;
+            (* if violated <> [] then Metric.Atomic.fire autocloses ; *)
             let new_doc = new_tag :: (List.map (fun v -> `CloseTag v) violated) @ prev in
             let new_pending_tags = (match new_tag with
                 | `OpenTag (t, _) -> t :: still_pending
@@ -650,7 +655,9 @@ let parzer () =
         if rem <> [] then Printf.fprintf stderr "Html: check parzer: some tags left?!\n" ;
         unify trees)
 
+(* Waiting for its widget, as above:
 let unparsable = Metric.Counter.make "Html/Unparseable" "bytes"
+*)
 
 let parse str =
     let p = parzer () in
@@ -664,8 +671,8 @@ let parse str =
             if debug && rem <> [] then (
                 let tot_len = String.length str
                 and rem_len = List.length rem in
-                Printf.fprintf stdout "Html: parzer stopped after %d/%d bytes (at '%s')\n" (tot_len - rem_len) tot_len (abbrev (String.of_list rem)) ;
-                Metric.Counter.add unparsable rem_len
+                Printf.fprintf stdout "Html: parzer stopped after %d/%d bytes (at '%s')\n" (tot_len - rem_len) tot_len (abbrev (String.of_list rem))
+                (* Metric.Counter.add unparsable rem_len *)
             ) ;
             Some res
 

@@ -96,7 +96,10 @@ and t = { mutable trx : host_trx ;
           search_sfx : string option ;
           nameserver : Ip.Addr.t option ;
           mutable resolv_trx : trx option ;
+          (* Waiting for this host's metrics to be attached to its widget:
           dns_queries : (string, ((Ip.Addr.t list option -> unit) * Metric.Timed.stop_func option)) Hashtbl.t ;
+          *)
+          dns_queries : (string, (Ip.Addr.t list option -> unit)) Hashtbl.t ;
           dns_cache   : (string, Ip.Addr.t list) Hashtbl.t ;
           (* ICMP errors want to embed the first 8 bytes of the IP packet so we save
            * it here: *)
@@ -203,6 +206,9 @@ let addr_of_string s =
    try IPv4 (Ip.Addr.of_string s)
    with _ -> Name s
 
+(* Waiting to be attached to the widget of the host that owns them, which will
+ * supply the clock they must be dated with:
+
 let tcp_cnxs_ok  = Metric.Atomic.make "Host/Tcp/Connect/Ok"
 let tcp_cnxs_err = Metric.Atomic.make "Host/Tcp/Connect/Err"
 let udp_cnxs_ok  = Metric.Atomic.make "Host/Udp/Connect/Ok"
@@ -210,6 +216,7 @@ let udp_cnxs_err = Metric.Atomic.make "Host/Udp/Connect/Err"
 let resolution_timeouts  = Metric.Atomic.make "Host/Resolver/Timeouts"
 let resolution_cachehits = Metric.Atomic.make "Host/Resolver/CacheHits"
 let resolutions = Metric.Timed.make "Host/Resolver/Queries"
+*)
 
 let ip_is_set t =
     try ignore (Eth.State.find_ip4 t.eth_state) ; true
@@ -236,8 +243,8 @@ let rec with_resolver_trx t cont =
                         ) pdu.Dns.Pdu.answer_rrs in
                     let conts = Hashtbl.find_all t.dns_queries name in
                     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Awakening %d clients that were waiting for the address of '%s'" (List.length conts) name))) ;
-                    List.iter (fun (cont, timer_stop_opt) ->
-                        Option.may (fun f -> f (Metric.Params.singleton "status" (Metric.Param.String "ok"))) timer_stop_opt ;
+                    List.iter (fun cont ->
+                        (* Option.may (fun f -> f (Metric.Params.singleton "status" (Metric.Param.String "ok"))) timer_stop_opt ; *)
                         cont (Some ips)) conts ;
                     Hashtbl.remove_all t.dns_queries name ;
                     (* cache the result *)
@@ -284,16 +291,16 @@ and do_gethostbyname t name cont =
         let num_conts = List.length conts in
         if num_conts > 0 then (
             Log.(log t.trx.widget.logger Warning (lazy (Printf.sprintf "Timeouting %d clients that were waiting for the address of '%s'" num_conts name))) ;
-            Metric.Atomic.fire resolution_timeouts ;
-            List.iter (fun (cont, timer_stop_opt) ->
-                Option.may (fun f -> f (Metric.Params.singleton "status" (Metric.Param.String "timeout"))) timer_stop_opt ;
+            (* Metric.Atomic.fire resolution_timeouts ; *)
+            List.iter (fun cont ->
+                (* Option.may (fun f -> f (Metric.Params.singleton "status" (Metric.Param.String "timeout"))) timer_stop_opt ; *)
                 cont None) conts ;
             Hashtbl.remove_all t.dns_queries name
         ) in
     (* Try to find the IP in the cache *)
     match Hashtbl.find_option t.dns_cache name with
         | Some ips ->
-            Metric.Atomic.fire resolution_cachehits ;
+            (* Metric.Atomic.fire resolution_cachehits ; *)
             cont (Some ips)
         | None ->
             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Start resolver..."))) ;
@@ -307,11 +314,11 @@ and do_gethostbyname t name cont =
                     (* add a timeout event that will awake all waiters for this name after some time *)
                     Simulation.delay (Simulation.of_widget t.trx.widget) dns_timeout_delay dns_timeout () ;
                     (* Then actually sends the query *)
-                    let stop = Metric.(Timed.start ~params:(Params.singleton "name" (Param.String name)) resolutions) in
-                    Hashtbl.add t.dns_queries name (cont, Some stop) ;
+                    (* let stop = Metric.(Timed.start ~params:(Params.singleton "name" (Param.String name)) resolutions) in *)
+                    Hashtbl.add t.dns_queries name cont ;
                     Dns.Pdu.make_query name |> Dns.Pdu.pack |> tx resolv_trx
                 ) else (
-                    Hashtbl.add t.dns_queries name (cont, None)
+                    Hashtbl.add t.dns_queries name cont
                 )
             )
 
@@ -344,7 +351,7 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
                 if None = find_alive_tcp socks.tcps (src_port, dst_port) then (
                     Some src_port
                 ) else (
-                    Metric.Atomic.fire tcp_cnxs_err ;
+                    (* Metric.Atomic.fire tcp_cnxs_err ; *)
                     Log.(log t.trx.widget.logger Error (lazy "Already connected")) ;
                     None
                 ) in
@@ -359,10 +366,10 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
                 Tcp.TRX.connect tcp (function
                 | Some trx ->
                     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf2 "Connection established with %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
-                    Metric.Atomic.fire tcp_cnxs_ok ;
+                    (* Metric.Atomic.fire tcp_cnxs_ok ; *)
                     cont (Some trx)
                 | None ->
-                    Metric.Atomic.fire tcp_cnxs_err ;
+                    (* Metric.Atomic.fire tcp_cnxs_err ; *)
                     Log.(log t.trx.widget.logger Error (lazy (Printf.sprintf2 "Cannot connect to %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
                     cont None)
     in
@@ -396,7 +403,7 @@ and udp_connect t dst ?src_port dst_port client_f cont =
         let src_port = may_default src_port (fun () -> Udp.Port.o (Random.int 0x10000)) in
         let key = src_port, dst_port in
         if Hashtbl.mem socks.udps key then (
-            Metric.Atomic.fire udp_cnxs_err ;
+            (* Metric.Atomic.fire udp_cnxs_err ; *)
             Log.(log t.trx.widget.logger Error (lazy "Already connected")) ;
             cont None
         ) else (
@@ -404,7 +411,7 @@ and udp_connect t dst ?src_port dst_port client_f cont =
             (* connect this udp to the underlaying ip *)
             (client_f trx) <-= trx.Udp.TRX.trx =-> tx socks.ip_4_udp ;
             Hashtbl.add socks.udps key trx ;
-            Metric.Atomic.fire udp_cnxs_ok ;
+            (* Metric.Atomic.fire udp_cnxs_ok ; *)
             cont (Some trx)
         )
     in

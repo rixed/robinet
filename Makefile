@@ -6,6 +6,7 @@ SOURCES  = \
 	private.ml \
 	condvar.ml \
 	clock.ml \
+	metric.ml \
 	log.ml \
 	widget.ml \
 	simulation.ml \
@@ -14,7 +15,6 @@ SOURCES  = \
 	payload.ml \
 	persist.ml \
 	peg.ml \
-	metric.ml \
 	pcap.ml \
 	url.ml \
 	http.ml \
@@ -47,7 +47,6 @@ SOURCES  = \
 	search.ml \
 	myadmin_common.ml \
 	myadmin_home.ml \
-	myadmin_metrics.ml \
 	myadmin_logs.ml \
 	myadmin_api.ml \
 	myadmin_assets.ml \
@@ -94,7 +93,7 @@ EXAMPLES_BYTE = \
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
 EXAMPLES = $(EXAMPLES_BYTE) $(EXAMPLES_OPT)
 
-REQUIRES = bitstring ppx_bitstring batteries yojson
+REQUIRES = bitstring ppx_bitstring batteries yojson ppx_deriving_yojson
 
 # The administration interface is written as ordinary files in www/ and
 # compiled into the library, so that a robinet program has nothing to install
