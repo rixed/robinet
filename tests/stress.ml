@@ -96,6 +96,12 @@ let make_net () =
         Eth.Cable.State.make ~parent ~length:10. ~error_rate:0.001
                              ~name:"link" () in
     Widget.make_peers ~via:cable.widget h1.Host.trx.widget h2.Host.trx.widget ;
+    (* One of our own, so that what the API does with a property that cannot be
+     * written does not depend on which of a cable's happen to be read-only. *)
+    cable.widget.properties <-
+        cable.widget.properties @
+        [ Widget.property "sealed" ~descr:"Cannot be written."
+              ~kind:Widget.Int ~getter:(fun () -> `Int 1) ] ;
     (* Something to keep its clock busy for ever: *)
     let rec ticking () = Simulation.delay net tick ticking () in
     ticking () ;
@@ -175,7 +181,7 @@ let test_concurrency net cable duration nthreads =
         with e -> record e) ;
         count !n in
     let length = property cable.Eth.Cable.State.widget "length"
-    and tot_bits = property cable.Eth.Cable.State.widget "tot bits" in
+    and tot_bits = property cable.Eth.Cable.State.widget "total bits" in
     let workers = [
         (* Read a property while the simulation mutates it. *)
         worker (fun () ->
@@ -333,8 +339,14 @@ let test_http net cable duration nthreads =
         check "PUT a read-only property is refused"
             (fst (http ~meth:"PUT" ~body:"1" port
                       (Printf.sprintf
-                          "/api/simulations/%d/widgets/%d/properties/tot%%20bits"
+                          "/api/simulations/%d/widgets/%d/properties/sealed"
                           net_id cable_id)) = 405) ;
+        (* Writing to a metric resets it, whatever is written. *)
+        check "PUT a metric resets it"
+            (fst (http ~meth:"PUT" ~body:"null" port
+                      (Printf.sprintf
+                          "/api/simulations/%d/widgets/%d/properties/total%%20bits"
+                          net_id cable_id)) = 200) ;
         check "PUT a bad value is refused"
             (fst (http ~meth:"PUT" ~body:"nonsense" port
                       (Printf.sprintf

@@ -188,8 +188,39 @@
                                 <tr :class="{ 'has-error': p.error }">
                                     <td x-text="p.name"></td>
                                     <td>
-                                        <span x-show="p.read_only" class="ro"
-                                              x-text="p.text"></span>
+                                        <!-- A metric: one row per parameter
+                                             combination, and when it was last
+                                             touched. -->
+                                        <template x-if="p.kind.type === 'metric'">
+                                            <div class="metric">
+                                                <p x-show="!p.metric.rows.length" class="ro">
+                                                    <small>nothing yet</small></p>
+                                                <template x-for="(row, i) in p.metric.rows" :key="i">
+                                                    <div class="metric-row">
+                                                        <span class="params"
+                                                              x-show="Object.keys(row.params).length"
+                                                              x-text="paramsText(row.params)"></span>
+                                                        <span class="figure" x-text="row.figure"></span>
+                                                        <small class="detail" x-text="row.detail"></small>
+                                                    </div>
+                                                </template>
+                                                <!-- The button is pinned to the
+                                                     right of the cell rather
+                                                     than following the text
+                                                     beside it, which changes
+                                                     width on every refresh. -->
+                                                <div class="metric-foot">
+                                                    <small class="detail" x-show="p.metric.last !== null"
+                                                           x-text="'last ' + ago(p.metric.last)"></small>
+                                                    <button class="outline secondary metric-reset"
+                                                            x-show="!p.read_only" :disabled="!online"
+                                                            @click="resetMetric(p)">Reset</button>
+                                                </div>
+                                            </div>
+                                        </template>
+
+                                        <span x-show="p.read_only && p.kind.type !== 'metric'"
+                                              class="ro" x-text="p.text"></span>
 
                                         <template x-if="!p.read_only && p.kind.type === 'bool'">
                                             <input type="checkbox" :disabled="!online" :checked="p.draft === 'true'"

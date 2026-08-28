@@ -119,6 +119,11 @@ $(EXAMPLES_BYTE): $(ARCHIVE)
 $(EXAMPLES_OPT): $(XARCHIVE)
 $(EXTRA_TESTS): $(XARCHIVE)
 
+# .depend is computed by scanning the sources, and this one is generated: were
+# it missing from that scan, nothing would know that myadmin_ui.ml uses it, and
+# a change to www/ would leave the two disagreeing about it.
+.depend: myadmin_assets.ml
+
 myadmin_assets.ml: $(UI_ASSETS)
 	@echo 'Embedding $(UI_ASSETS) into $@'
 	@{ echo '(* Generated from www/ by the Makefile. Do not edit. *)' ;\

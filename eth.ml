@@ -661,8 +661,8 @@ struct
              mutable delay : Clock.Interval.t ; (** Computed from the length *)
         mutable error_rate : float ;  (** In faulty bits per transmitted bits *)
       mutable success_rate : int ;    (** The inverse of the above *)
-          mutable tot_bits : int ;    (** Both ways. *)
-        mutable bit_shifts : int ;    (** Casualties in individual bits *)
+          mutable tot_bits : Metric.Counter.t ; (** Both ways. *)
+        mutable bit_shifts : Metric.Counter.t ; (** Casualties in individual bits *)
            (** Boolean: true if from [a] to [b] (see [Cable.make] *)
               last_packets : (bool * bitstring) OrdArray.t ;
                     widget : Widget.t }
@@ -678,7 +678,9 @@ struct
             let t = {
                 length ; delay = delay length ;
                 error_rate ; success_rate = success_rate error_rate ;
-                tot_bits = 0 ; bit_shifts = 0 ; widget ;
+                tot_bits = Metric.Counter.make "total bits" "bits" ;
+                bit_shifts = Metric.Counter.make "bit shifts" "bits" ;
+                widget ;
                 last_packets =
                     OrdArray.make history (false, empty_bitstring) } in
             widget.properties <- Widget.[
@@ -698,32 +700,30 @@ struct
                         t.error_rate <- r ;
                         t.success_rate <- success_rate r)
                     ~getter:(fun () -> `Float t.error_rate) ;
-                property "tot bits"
+                metric_property "total bits"
                     ~descr:"Total number of transmitted bits (both ways)"
-                    ~kind:Int
-                    ~getter:(fun () -> `Int t.tot_bits) ;
-                property "bit shifts"
-                    ~descr:"Number of flipped bits"
-                    ~kind:Int
-                    ~getter:(fun () -> `Int t.bit_shifts) ] ;
+                    (Metric.Counter.T t.tot_bits) ;
+                metric_property "bit shifts" ~descr:"Number of flipped bits"
+                    (Metric.Counter.T t.bit_shifts) ] ;
             t
     end
 
     let pass (st : State.t) dir bits =
         let len = bitstring_length bits in
-        let prev_tot_bits = st.tot_bits in
-        st.tot_bits <- st.tot_bits + len ;
-        if prev_tot_bits > st.tot_bits then (
+        let prev_tot_bits = Metric.Counter.get st.tot_bits in
+        let now = Simulation.Widget.now st.widget in
+        Metric.Counter.add st.tot_bits ~now len ;
+        if prev_tot_bits > Metric.Counter.get st.tot_bits then (
             Log.(log st.widget.logger Warning (lazy "Bit count wrapped around 0")) ;
             (* For better stats: *)
-            st.bit_shifts <- 0
+            Metric.Counter.reset st.bit_shifts
         ) ;
         let bits =
             (* Beware that [int_of_float infinity] is 0: *)
             if st.success_rate > 0 then
                 let shift_pos = Random.int st.success_rate in
                 if shift_pos < len then (
-                    st.bit_shifts <- st.bit_shifts + 1 ;
+                    Metric.Counter.inc st.bit_shifts ~now ;
                     let bits' = bitstring_copy bits in
                     bitstring_shift shift_pos bits' ;
                     bits'

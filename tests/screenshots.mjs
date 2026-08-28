@@ -117,10 +117,11 @@ await page.waitForSelector('input[type=range]')
 const length = page.locator('article.properties input[type=number]').first()
 await length.click()
 await length.fill('42.5')
-/* Named rather than positional: every row has a read-only span, the editable
- * ones simply keep theirs hidden. */
-const counter = page.locator('article.properties tr').filter({ hasText: 'tot bits' })
-                    .locator('.ro')
+/* Named rather than positional: the rows carry hidden spans for the shapes
+ * they are not. */
+const counter = page.locator('article.properties tr')
+                    .filter({ hasText: 'total bits' })
+                    .locator('.metric .figure')
 const countedBefore = await counter.innerText()
 await page.waitForTimeout(3500)   /* three polls or so */
 const typed = await length.inputValue()
@@ -136,6 +137,93 @@ await page.locator('article.properties strong').first().click()
 await page.waitForTimeout(1500)
 const saved = await length.inputValue()
 if (saved !== '42.5') problems.push(`the edited value did not stick: "${saved}"`)
+
+/* The cable only has counters, so the other three kinds of metric would go
+ * unseen. Feed the renderer the shapes metric.ml produces for them -- with the
+ * poll off, since it would replace them with what the server really has. */
+await page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    d.live = false
+    const now = d.sims[0].now
+    const fired = (n, counts, at) => ({
+        name: n, counts, first_last: { first: at, last: at } })
+    const once = (params, value) => ({ params, value })
+    const mk = (name, descr, value, read_only) => ({
+        name, descr, read_only, kind: { type: 'metric' },
+        value, metric: metricView(value), error: null })
+    d.props = [
+        mk('mac table', 'MACs the switch remembers.', {
+            kind: 'gauge', name: 'macs',
+            values: [ { params: {}, value: { min: 0, current: 12, max: 25 } } ],
+            first_last: { first: now - 60, last: now - 2.5 } }, true),
+        mk('lookups', 'Table misses, per port.', {
+            kind: 'atomic', name: 'misses',
+            counts: [ { params: { port: 0 }, value: 3 },
+                      { params: { port: 1 }, value: 17 } ],
+            first_last: { first: now - 60, last: now - 0.5 } }, true),
+        mk('resolutions', 'How long a name took to resolve.', {
+            kind: 'timed', name: 'queries',
+            durations: [ { params: {},
+                           value: { min: 0.25, max: 0.9, sum: 2.3, count: 4 } } ],
+            starts: fired('queries/start', [ once({}, 6) ], now - 30),
+            stops: fired('queries/stop', [ once({}, 4) ], now - 4),
+            simult: { name: 'queries/simult',
+                      values: [ { params: {}, value: { min: 0, current: 2, max: 3 } } ],
+                      first_last: { first: now - 60, last: now - 4 } } }, true),
+        /* Writable: the only thing a write does is reset it. */
+        mk('queries', 'Every request served.', {
+            kind: 'counter', name: 'queries', units: 'requests',
+            values: [ { params: { status: 200 }, value: 1204 },
+                      { params: { status: 404 }, value: 3 } ],
+            /* Counted one at a time, as Counter.add does with the same
+             * params it was given. */
+            fired: fired('queries/fired',
+                         [ once({ status: 200 }, 1204), once({ status: 404 }, 3) ],
+                         now - 0.2) }, false),
+        mk('errors', 'Nothing has gone wrong yet.',
+           { kind: 'atomic', name: 'errors', counts: [], first_last: null }, true),
+    ]
+})
+await page.waitForTimeout(300)
+await page.screenshot({ path: `${OUT}/g-metrics.png` })
+
+const shown = await page.evaluate(() =>
+    [...document.querySelectorAll('article.properties tbody tr')].map(tr =>
+        tr.innerText.replace(/\s+/g, ' ').trim()))
+const wants = [
+    [ 'gauge', /12 between 0 and 25/ ],
+    [ 'params of an atomic', /port=0 3 times.*port=1 17 times/ ],
+    [ 'timed', /575ms on average 4 of them, 250ms to 900ms, 2 still running/ ],
+    [ 'counter rows', /status=200 1,204 requests status=404 3 requests/ ],
+    [ 'a metric with nothing in it', /nothing yet/ ],
+]
+for (const [what, re] of wants)
+    if (!shown.some(t => re.test(t)))
+        problems.push(`${what} not rendered as expected; rows were: ${JSON.stringify(shown)}`)
+/* Only the writable one offers a reset. */
+const resets = await page.locator('button.metric-reset:visible').count()
+if (resets !== 1) problems.push(`expected 1 reset button, found ${resets}`)
+
+/* And it must not move as the text beside it is refreshed: "last just now"
+ * and "last 3h 20min ago" are not the same width, and a button that shifts
+ * under the pointer is a button one misses. */
+const spots = new Set()
+for (const age of [ 0, 0.5, 2.5, 45.7, 3600 * 3 + 1200, 86400 ]) {
+    await page.evaluate((age) => {
+        const d = Alpine.$data(document.body)
+        const now = d.sims.find(s => s.id === d.selected.sim).now
+        for (const p of d.props)
+            if (p.metric && p.metric.last !== null) p.metric.last = now - age
+    }, age)
+    await page.waitForTimeout(120)
+    spots.add(await page.locator('button.metric-reset:visible').evaluate(e => {
+        const b = e.getBoundingClientRect()
+        return Math.round(b.x) + ',' + Math.round(b.y)
+    }))
+}
+if (spots.size !== 1)
+    problems.push('the reset button moves as its metric refreshes: ' +
+                  [...spots].join(' then '))
 
 console.log('banner said:', banner)
 console.log(problems.length ? 'UNCAUGHT ERRORS:\n  ' + problems.join('\n  ')

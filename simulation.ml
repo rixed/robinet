@@ -487,3 +487,11 @@ let run_here ?(wait=true) t =
  * simulation needs in order to dispatch. Read state, change a parameter,
  * schedule an event for later, and return. *)
 let borrow t f = with_lock t f ()
+
+(** Helpers for reaching the simulation of a widget: *)
+module Widget =
+struct
+    let now = now % of_widget
+
+    (* TODO: etc... *)
+end

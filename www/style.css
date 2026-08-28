@@ -229,6 +229,39 @@ article.properties input[type=number] { max-width: 12rem; }
 article.properties select { max-width: 12rem; }
 article.properties td { vertical-align: middle; }
 .ro { font-variant-numeric: tabular-nums; color: var(--pico-muted-color); }
+
+/* A metric reads as rows, one per combination of the parameters of the events
+ * it measures -- most take none, and then it is a single line. */
+.metric-row {
+    display: flex;
+    align-items: baseline;
+    gap: .5rem;
+    flex-wrap: wrap;
+}
+.metric .figure { font-variant-numeric: tabular-nums; }
+.metric .detail { color: var(--pico-muted-color); }
+.metric .params {
+    font-size: .7rem;
+    color: var(--pico-muted-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 1rem;
+    padding: 0 .4rem;
+}
+/* "last 2.50s ago" and "last just now" are not the same width, so the button
+ * cannot sit after it: it is pinned to the right of the cell, where nothing
+ * that refreshes can move it. */
+.metric-foot {
+    display: flex;
+    align-items: baseline;
+    gap: .5rem;
+    margin-top: .3rem;
+}
+button.metric-reset {
+    margin: 0 0 0 auto;
+    width: auto;
+    padding: .1rem .5rem;
+    font-size: .7rem;
+}
 .range { display: flex; align-items: center; gap: .5rem; }
 .range input[type=number] { width: 7rem; }
 tr.has-error input { border-color: var(--pico-del-color); }

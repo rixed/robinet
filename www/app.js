@@ -33,6 +33,93 @@ const encode = (p) => {
     }
 }
 
+/* A count reads better with its thousands apart, and a duration in the unit it
+ * happens to be in. */
+const num = (n) => Number(n).toLocaleString()
+
+const dur = (s) => {
+    if (s < 1e-3) return (s * 1e6).toFixed(0) + 'us'
+    if (s < 1) return (s * 1e3).toFixed(s < 1e-2 ? 1 : 0) + 'ms'
+    if (s < 60) return s.toFixed(s < 10 ? 2 : 1) + 's'
+    if (s < 3600) return Math.floor(s / 60) + 'min ' + (s % 60).toFixed(0) + 's'
+    return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'min'
+}
+
+/* Every kind of metric is a family, keyed by the parameters of the events it
+ * measures, so all of them read as rows -- usually just the one, since most
+ * metrics take no parameters. This turns any of them into those rows, so that
+ * the page can render a metric without knowing which kind it is: a headline
+ * figure, the detail behind it, and when the metric was last touched.
+ *
+ * The kinds differ only in what those figures mean: a counter totals, a gauge
+ * holds a current value between two bounds, an atomic counts occurrences, and
+ * a timed is a distribution of durations with some still running. */
+const metricView = (m) => {
+    if (!m || !m.kind) return { rows: [], last: null }
+    const key = (params) => JSON.stringify(params)
+    /* The sub-metrics are keyed the same way, so a row can be completed from
+     * them. */
+    const lookup = (list, params) => {
+        const e = (list || []).find(e => key(e.params) === key(params))
+        return e ? e.value : null
+    }
+    const last = (fl) => fl ? fl.last : null
+    const rows = []
+    switch (m.kind) {
+        case 'atomic':
+            for (const e of m.counts)
+                rows.push({ params: e.params, figure: num(e.value), detail: 'times' })
+            return { rows, last: last(m.first_last) }
+
+        case 'counter': {
+            const units = m.units ? ' ' + m.units : ''
+            for (const e of m.values) {
+                const times = lookup(m.fired.counts, e.params)
+                rows.push({ params: e.params,
+                            figure: num(e.value) + units,
+                            /* How many times it was added to is worth saying
+                             * only when it is not the total itself, which it
+                             * is for anything counted one at a time. */
+                            detail: times === null || times === e.value ? ''
+                                  : 'over ' + num(times) + ' times' })
+            }
+            return { rows, last: last(m.fired.first_last) }
+        }
+
+        case 'gauge':
+            for (const e of m.values)
+                rows.push({ params: e.params,
+                            figure: num(e.value.current),
+                            detail: 'between ' + num(e.value.min) +
+                                    ' and ' + num(e.value.max) })
+            return { rows, last: last(m.first_last) }
+
+        case 'timed': {
+            const seen = new Set()
+            for (const e of m.durations) {
+                const d = e.value
+                const running = lookup(m.simult.values, e.params)
+                seen.add(key(e.params))
+                rows.push({ params: e.params,
+                            figure: dur(d.sum / d.count) + ' on average',
+                            detail: num(d.count) + ' of them, ' + dur(d.min) +
+                                    ' to ' + dur(d.max) +
+                                    (running && running.current
+                                        ? ', ' + running.current + ' still running' : '') })
+            }
+            /* Started and not finished: it has no duration yet, but saying
+             * nothing about it would be worse than saying that much. */
+            for (const e of (m.simult ? m.simult.values : []))
+                if (!seen.has(key(e.params)) && e.value.current)
+                    rows.push({ params: e.params,
+                                figure: e.value.current + ' running',
+                                detail: 'none finished yet' })
+            return { rows, last: m.stops ? last(m.stops.first_last) : null }
+        }
+    }
+    return { rows: [], last: null }
+}
+
 /* Two kinds of failure, which want opposite treatment:
  *  - 'offline': no answer at all. Everything is suspect, keep retrying.
  *  - 'refused': the server answered, and said no. Only the thing we asked for
@@ -45,6 +132,9 @@ class ApiError extends Error {
         this.status = status
     }
 }
+
+/* A property the reader can type into: what a poll must never overwrite. */
+const isEditable = (p) => !p.read_only && p.kind.type !== 'metric'
 
 const api = async (path, options) => {
     let resp
@@ -377,15 +467,19 @@ document.addEventListener('alpine:init', () => {
                     p.draft = p.text
                     p.dirty = false
                     p.error = null
+                    p.metric = p.kind.type === 'metric' ? metricView(p.value) : null
                     return p
                 }
-                /* An editable field: not ours to touch unless asked. */
-                if (!full && !old.read_only) return old
+                /* A field one types in is not ours to touch unless asked. A
+                 * metric is not one: it is read, and reset at most, so it
+                 * refreshes like any other value even when it is writable. */
+                if (!full && isEditable(old)) return old
                 old.value = p.value
                 old.text = asText(p.value)
                 old.descr = p.descr
                 old.kind = p.kind
                 old.read_only = p.read_only
+                if (p.kind.type === 'metric') old.metric = metricView(p.value)
                 /* Something typed but not accepted yet outlives even an
                  * explicit refresh: it is the reader's, not ours to drop. */
                 if (!old.dirty) { old.draft = old.text ; old.error = null }
@@ -396,6 +490,38 @@ document.addEventListener('alpine:init', () => {
             const same = merged.length === this.props.length &&
                          merged.every((p, i) => p === this.props[i])
             if (!same) this.props = merged
+        },
+
+        /* Whatever is written to a metric resets it; the value does not
+         * matter, so send the least meaningful one. */
+        async resetMetric(p) {
+            const { sim, id } = this.selected
+            const r = await this.exchange(() => api(
+                `/simulations/${sim}/widgets/${id}/properties/${encodeURIComponent(p.name)}`,
+                { method: 'PUT', body: 'null' }))
+            if (!r.ok) {
+                p.error = r.error.kind === 'offline'
+                    ? 'not reset: no answer from the simulator'
+                    : r.error.message
+                return
+            }
+            p.value = r.value.value
+            p.metric = metricView(p.value)
+            p.error = null
+        },
+
+        /* How long ago, on the clock of the simulation being looked at: a
+         * metric of a simulation running as fast as it can is dated by that
+         * simulation's clock, not by the wall clock the page runs on. */
+        ago(t) {
+            const s = this.selected && this.sims.find(s => s.id === this.selected.sim)
+            if (!s || t === null || t === undefined) return ''
+            const d = s.now - t
+            return d <= 0 ? 'just now' : dur(d) + ' ago'
+        },
+
+        paramsText(params) {
+            return Object.entries(params).map(([k, v]) => k + '=' + v).join(', ')
         },
 
         async save(p) {

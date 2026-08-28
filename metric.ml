@@ -305,6 +305,13 @@ struct
         ) t.values ;
         Atomic.fire ~now ~params t.fired
 
+    let inc ?params t =
+        add t ?params 1
+
+    let get ?(params=Params.empty) t =
+        try Hashtbl.find t.values params
+        with Not_found -> 0
+
     let print oc t =
         Printf.fprintf oc "\
             Metric: %s:\n\
