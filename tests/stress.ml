@@ -351,7 +351,10 @@ let test_metric_samples () =
             try Simulation.set_metrics_sample_rate sim (Clock.Interval.o r) ;
                 false
             with Invalid_argument _ -> true)
-            [ 0. ; -1. ; infinity ])
+            [ 0. ; -1. ; infinity ]) ;
+    (* Handed to the HTTP tests: a ring that has stopped being written to, of a
+       length and a content they can check exactly. *)
+    sim, w
 
 let test_concurrency net cable duration nthreads =
     section
@@ -506,7 +509,8 @@ let start_admin () =
                 else None) in
     attempt 5
 
-let test_http net cable duration nthreads =
+let test_http net cable duration nthreads
+              (hist_sim : Simulation.t) (hist_widget : Widget.t) =
     section "Administration interface over HTTP" ;
     match start_admin () with
     | None ->
@@ -602,6 +606,77 @@ let test_http net cable duration nthreads =
                       (Printf.sprintf
                           "/api/simulations/%d/widgets/%d/properties/count"
                           net_id cable_id)) = 400) ;
+        (* What a metric has been worth, which is what the plots are drawn
+           from. Asked of the simulation the sampling test left behind: it has
+           stopped, so its ring holds exactly what that test put there. *)
+        let history ?since () =
+            let path =
+                Printf.sprintf
+                    "/api/simulations/%d/widgets/%d/properties/bytes/history%s"
+                    (Simulation.id hist_sim) hist_widget.Widget.id
+                    (match since with
+                     | None -> ""
+                     | Some t -> Printf.sprintf "?since=%.9f" t) in
+            match http port path with
+            | 200, body -> Some (Yojson.Basic.from_string body)
+            | _ -> None in
+        let points j =
+            Yojson.Basic.Util.(
+                member "series" j |> to_list |> List.map (fun s ->
+                    member "points" s |> to_list |> List.map (fun p ->
+                        member "t" p |> to_float,
+                        member "value" p |> to_int))) in
+        check "GET the history of a metric"
+            (match history () with
+            | None -> false
+            | Some j ->
+                Yojson.Basic.Util.(
+                    member "kind" j = `String "counter" &&
+                    member "units" j = `String "bytes" &&
+                    member "rate" j = `Float 0.5 &&
+                    (match member "now" j with `Float _ -> true | _ -> false)) &&
+                (match points j with
+                 (* One row, since nothing was counted with parameters, and as
+                    many points as the ring was told to keep. *)
+                 | [ ps ] -> List.length ps = 5
+                 | _ -> false)) ;
+        check "the points come oldest first, and only grow"
+            (match Option.map points (history ()) with
+            | Some [ ps ] ->
+                List.for_all2 (fun (t1, v1) (t2, v2) -> t2 > t1 && v2 > v1)
+                    (List.take (List.length ps - 1) ps) (List.tl ps)
+            | _ -> false) ;
+        check "since brings back what was taken after it, and nothing else"
+            (match Option.map points (history ()) with
+            | Some [ ps ] ->
+                let t, _ = List.nth ps 2 in
+                (match Option.map points (history ~since:t ()) with
+                | Some [ after ] ->
+                    List.length after = 2 &&
+                    List.for_all (fun (t', _) -> t' > t) after
+                | _ -> false)
+            | _ -> false) ;
+        check "since the last point brings back nothing at all"
+            (match Option.map points (history ()) with
+            | Some [ ps ] ->
+                let t, _ = List.last ps in
+                (match Option.map points (history ~since:t ()) with
+                 (* A row with nothing new to say does not appear: an empty
+                    answer is "nothing has been written down since". *)
+                 | Some [] -> true
+                 | _ -> false)
+            | _ -> false) ;
+        check "a since that is not a time is refused"
+            (List.for_all (fun since ->
+                fst (http port
+                        (Printf.sprintf
+                            "/api/simulations/%d/widgets/%d/properties/bytes/history?since=%s"
+                            (Simulation.id hist_sim) hist_widget.Widget.id
+                            since)) = 400)
+                [ "nonsense" ; "inf" ; "" ]) ;
+        check "a property that is not a metric has no history"
+            (fst (api "/api/simulations/%d/widgets/%d/properties/length/history"
+                      net_id cable_id) = 400) ;
         (* The composition tree is what the interface draws: a server has to
            appear within the host running it, not beside it. *)
         check "a server is shown within the host that runs it"
@@ -728,9 +803,9 @@ let main =
     ignore (Simulation.start net) ;
     test_clock net ;
     test_speed net ;
-    test_metric_samples () ;
+    let samples_sim, samples_widget = test_metric_samples () in
     test_concurrency net cable duration nthreads ;
-    test_http net cable duration nthreads ;
+    test_http net cable duration nthreads samples_sim samples_widget ;
     Printf.printf "\n%d checks, %d failure(s)\n%!" !checks !failures ;
     (* Simulations run in threads of their own, which would otherwise keep the
      * process alive: *)

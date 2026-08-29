@@ -441,6 +441,16 @@ let samples m =
     | Timed.T t -> of_table (fun d -> Durations d) t.Timed.durations
     | _ -> invalid_arg "Metric.samples: unknown kind of metric"
 
+(* As the interface reads them: a count is a number, and the other two are the
+ * objects their own serializers give -- the same shapes a metric's current
+ * figures already arrive in, so a point and a live value read alike. *)
+let value_to_yojson = function
+    | Count c -> `Int c
+    | Value v -> Gauge.value_to_yojson v
+    | Durations d -> Timed.duration_to_yojson d
+
+let value_to_json v = Yojson.Safe.to_basic (value_to_yojson v)
+
 (*$T samples
   samples (Atomic.T (Atomic.make ())) = []
   (let a = Atomic.make () in    let params = Params.singleton "port" (Param.Int 2) in    Atomic.fire ~now:(Clock.Time.o 1.) ~params a ;    Atomic.fire ~now:(Clock.Time.o 3.) ~params a ;    samples (Atomic.T a) = [ params, Count 2 ])

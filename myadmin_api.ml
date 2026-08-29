@@ -39,6 +39,10 @@
     GET    /api/simulations/<s>/widgets/<w>/properties
     GET    /api/simulations/<s>/widgets/<w>/properties/<name>
     PUT    /api/simulations/<s>/widgets/<w>/properties/<name>  body is the value
+    GET    /api/simulations/<s>/widgets/<w>/properties/<name>/history
+                                            what that metric has been worth;
+                                            ?since=<simulated time> for the
+                                            points taken after that one
   v}
 
   Property names are used as-is in the URL (url-encoded): they are already
@@ -292,6 +296,59 @@ let get_property _mth matches _vars _qry_body resp =
         let p = property_of_matches w matches 3 in
         respond resp (json_of_property p))
 
+(* What a metric has been worth, as the simulation wrote it down: one list of
+ * points per parameter row.
+ *
+ * [since] is the time of the last point the caller already has, and the answer
+ * holds what was taken strictly after it -- so polling with the last [t] seen
+ * asks exactly for what is missing, and asking with no [since] at all brings
+ * back the whole history that is kept.
+ *
+ * [now] and [rate] come along because a plot needs to know where the present
+ * is and how far apart the points were meant to be: a gap wider than the rate
+ * is a simulation that had nothing to do, not points that went missing. *)
+let get_property_history _mth matches vars _qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    (* Only finding the property needs the simulation held still. Reading the
+       history out of the ring does not (see [Simulation.metric_history]), and
+       neither does writing the answer -- which, for a first request that asks
+       for the whole ring, is the longest part of the lot. *)
+    let w, p, metric =
+        Simulation.borrow sim (fun () ->
+            let w = widget_of_matches sim matches 2 in
+            let p = property_of_matches w matches 3 in
+            match p.metric with
+            | Some m -> w, p, m
+            | None ->
+                bad_request "Property %S of %s is not a metric, and nothing \
+                             is written down about it"
+                    p.name (Widget.full_name w)) in
+    let since =
+        match Hashtbl.find_option vars "since" with
+        | None -> None
+        | Some s ->
+            (match float_of_string s with
+            | exception _ ->
+                bad_request "since must be a simulated time, not %S" s
+            | f when not (Float.is_finite f) ->
+                bad_request "since must be a simulated time, not %S" s
+            | f -> Some (Clock.Time.o f)) in
+    let series = Simulation.metric_history ?since sim w.id p.name in
+    let json_of_point (t, v) =
+        `Assoc [ "t", `Float (t : Clock.Time.t :> float) ;
+                 "value", Metric.value_to_json v ] in
+    let json_of_series (params, points) =
+        `Assoc [ "params",
+                 Yojson.Safe.to_basic (Metric.Params.to_yojson params) ;
+                 "points", `List (List.map json_of_point points) ] in
+    respond resp (`Assoc [
+        "now", `Float (Simulation.now sim : Clock.Time.t :> float) ;
+        "rate", `Float (Simulation.metrics_sample_rate sim :
+                            Clock.Interval.t :> float) ;
+        "kind", `String (Metric.kind_name metric) ;
+        "units", `String p.units ;
+        "series", `List (List.map json_of_series series) ])
+
 (* The body is the value, as JSON: 42.5 for a number, "foo" for a string.
  * Anything that is not JSON at all is taken to be a bare string, so that a
  * value typed by hand at a shell prompt still works. *)
@@ -358,6 +415,13 @@ let resources serving : (Str.regexp * Opache.resource) list =
         control_simulation serving ;
     Str.regexp "/api/simulations/\\([0-9]+\\)$", get_simulation ;
     Str.regexp "/api/simulations$", get_simulations ;
+    (* Before the property itself, whose [.+] would otherwise swallow the
+       trailing /history. *)
+    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/properties/\\(.+\\)/history$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "GET" -> get_property_history mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/properties/\\(.+\\)$",
         (fun mth matches vars qry_body resp ->
             match mth with

@@ -487,6 +487,49 @@ let take_metric_sample t =
         t.metric_samples_next <- (t.metric_samples_next + 1) mod n
     )
 
+(** The history kept for one metric property: its points, one list per
+ * parameter row, oldest first. [since] leaves out everything at or before that
+ * simulated time, which is how the interface asks for what it has not got yet:
+ * it passes the time of its last point back.
+ *
+ * A row with nothing new to say does not appear at all -- an empty answer is
+ * "nothing has been written down since", which is what a caller polling for
+ * fresh points wants to hear. *)
+let metric_history ?since t widget_id property_name =
+    (* Deliberately not under the lock, beyond the moment [metric_samples]
+     * holds it to copy the ring: a snapshot is built whole and only then put
+     * into the ring, and never touched again -- the dispatcher replaces the
+     * slot it sits in, it does not write into the snapshot. So a reference to
+     * one is enough to read it at leisure, and this walk, which is by far the
+     * longest thing anybody does with the history, does not stop the
+     * simulation for as long as it takes.
+     *
+     * A snapshot that gets evicted while being read is still a true point of
+     * the history, so nothing has to be done about it. *)
+    let samples = metric_samples t in
+    let wanted (id, name, _params) = id = widget_id && name = property_name
+    and after (s : sample) =
+        match since with
+        | None -> true
+        | Some (since : Time.t) -> Time.compare s.taken since > 0 in
+    (* Points are gathered per row, then handed back in the order they were
+     * taken. *)
+    let rows = Hashtbl.create 8 in
+    List.iter (fun (s : sample) ->
+        if after s then
+            Hashtbl.iter (fun ((_, _, params) as key) v ->
+                if wanted key then
+                    Hashtbl.modify_def [] params
+                        (fun points -> (s.taken, v) :: points) rows
+            ) s.values
+    ) samples ;
+    Hashtbl.fold (fun params points l ->
+        (params, List.rev points) :: l
+    ) rows [] |>
+    (* By parameters, so that a caller polling every second is handed the rows
+     * in the same order every time: a hash table has none. *)
+    List.sort (fun (a, _) (b, _) -> Metric.Params.compare Stdlib.compare a b)
+
 (* Take one if the clock has reached the time it was due at, and say when the
  * next one is. Due times are multiples of the rate, so that the snapshots of a
  * simulation that has something to do land on a regular grid whatever the
