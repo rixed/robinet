@@ -300,8 +300,11 @@ button.metric-reset {
     padding: .1rem .5rem;
     font-size: .7rem;
 }
-.range { display: flex; align-items: center; gap: .5rem; }
+/* Inline, so that the unit that follows stays on the same line. */
+.range { display: inline-flex; align-items: center; gap: .5rem;
+         vertical-align: middle; }
 .range input[type=number] { width: 7rem; }
+small.units { margin-left: .3rem; color: var(--pico-muted-color); }
 tr.has-error input { border-color: var(--pico-del-color); }
 small.error { display: block; color: var(--pico-del-color); }
 

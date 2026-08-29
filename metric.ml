@@ -174,8 +174,8 @@ struct
     let printf oc t =
         if !t != empty then
             Printf.fprintf oc "\
-                \tfirst: %a\n\
-                \tlast: %a\n"
+                first: %a\n\
+                last: %a\n"
                 Clock.Time.printf !t.first
                 Clock.Time.printf !t.last
 end
@@ -189,16 +189,14 @@ type metric = ..
 module Atomic =
 struct
 
-    type t = { name : string ;
-               counts : (Params.t, int) Hashtbl.t
+    type t = { counts : (Params.t, int) Hashtbl.t
                    [@to_yojson table_to_yojson (fun c -> `Int c)] ;
                first_last : FirstLast.t } [@@deriving to_yojson]
 
     type metric += T of t
 
-    let make name =
-        { name ;
-          counts = Hashtbl.create 5 ;
+    let make () =
+        { counts = Hashtbl.create 5 ;
           first_last = FirstLast.make () }
 
     let reset t =
@@ -210,11 +208,7 @@ struct
         FirstLast.update now t.first_last
 
     let print oc t =
-        Printf.fprintf oc "\
-            Metric: %s:\n\
-            \tcounts:\n\
-            %a"
-            t.name
+        Printf.fprintf oc "counts: %a"
             (Params.print_hash Int.print)
                 t.counts ;
         FirstLast.printf oc t.first_last
@@ -223,8 +217,7 @@ end
 (* Measure some current capacity. Can increase or decrease. *)
 module Gauge =
 struct
-    type t = { name : string ;
-               values : (Params.t, value) Hashtbl.t
+    type t = { values : (Params.t, value) Hashtbl.t
                    [@to_yojson table_to_yojson value_to_yojson] ;
                first_last : FirstLast.t }
     and value = { min : int ; current : int ; max : int }
@@ -232,9 +225,8 @@ struct
 
     type metric += T of t
 
-    let make name =
-        { name ;
-          values = Hashtbl.create 5 ;
+    let make () =
+        { values = Hashtbl.create 5 ;
           first_last = FirstLast.make () }
 
     let reset t =
@@ -264,10 +256,8 @@ struct
 
     let print oc t =
         Printf.fprintf oc "\
-            Metric: %s:\n\
             \tvalues:\n\
             %a"
-            t.name
             (Params.print_hash
                 (fun oc value ->
                     Printf.fprintf oc "min:%d, current:%d, max:%d"
@@ -279,18 +269,15 @@ end
 (* Counters are for counting bytes, etc *)
 module Counter =
 struct
-    type t = { name : string ;
-               units : string ; (* TODO: an enum with known pretty printers *)
-               values : (Params.t, int) Hashtbl.t
+    type t = { values : (Params.t, int) Hashtbl.t
                    [@to_yojson table_to_yojson (fun c -> `Int c)] ;
                fired : Atomic.t } [@@deriving to_yojson]
 
     type metric += T of t
 
-    let make name units =
-        { name ; units ;
-          values = Hashtbl.create 10 ;
-          fired = Atomic.make (name ^"/fired") }
+    let make () =
+        { values = Hashtbl.create 10 ;
+          fired = Atomic.make () }
 
     let reset t =
         Hashtbl.clear t.values ;
@@ -313,11 +300,7 @@ struct
         with Not_found -> 0
 
     let print oc t =
-        Printf.fprintf oc "\
-            Metric: %s:\n\
-            \tcounts:\n\
-            %a"
-            t.name
+        Printf.fprintf oc "counts: %a"
             (Params.print_hash
                 (fun oc v -> Printf.fprintf oc "%d\n" v))
                 t.values
@@ -326,8 +309,7 @@ end
 (* Timeds are for download times, connection times, etc *)
 module Timed =
 struct
-    type t = { name : string ;
-               durations : (Params.t, duration) Hashtbl.t
+    type t = { durations : (Params.t, duration) Hashtbl.t
                    [@to_yojson table_to_yojson duration_to_yojson] ;
                starts : Atomic.t ;
                stops : Atomic.t ;
@@ -343,12 +325,11 @@ struct
 
     type metric += T of t
 
-    let make name =
-        { name ;
-          starts = Atomic.make (name ^"/start") ;
-          stops = Atomic.make (name ^"/stop") ;
+    let make () =
+        { starts = Atomic.make () ;
+          stops = Atomic.make () ;
           durations = Hashtbl.create 10 ;
-          simult = Gauge.make (name ^"/simult") }
+          simult = Gauge.make () }
 
     let reset t =
         Atomic.reset t.starts ;
@@ -419,11 +400,7 @@ struct
             res
 
     let print oc t =
-        Printf.fprintf oc "\
-            Metric: %s:\n\
-            \tdurations:\n\
-            %a"
-            t.name
+        Printf.fprintf oc "durations: %a"
             (Params.print_hash
                 (fun oc d ->
                     let open Clock.Interval in
@@ -463,15 +440,15 @@ let to_yojson m =
 let to_json m = Yojson.Safe.to_basic (to_yojson m)
 
 (*$T to_json
-  (match to_json (Counter.T (Counter.make "c" "bytes")) with \
+  (match to_json (Counter.T (Counter.make ())) with \
    | `Assoc l -> List.assoc "kind" l = `String "counter" \
    | _ -> false)
   (* Never fired: not "fired at the epoch". *) \
-  (match to_json (Atomic.T (Atomic.make "a")) with \
+  (match to_json (Atomic.T (Atomic.make ())) with \
    | `Assoc l -> List.assoc "first_last" l = `Null \
    | _ -> false)
   (* A family, keyed by the parameters of the events. *) \
-  (let a = Atomic.make "a" in \
+  (let a = Atomic.make () in \
    let params = Params.singleton "port" (Param.Int 2) in \
    Atomic.fire ~now:(Clock.Time.o 1.) ~params a ; \
    Atomic.fire ~now:(Clock.Time.o 3.) ~params a ; \

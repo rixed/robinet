@@ -290,6 +290,14 @@
                                             <input type="text" :disabled="!online" x-model="p.draft"
                                                    @keydown.enter="save(p)" @blur="save(p)"/>
                                         </template>
+
+                                        <!-- What the value is counted in, kept
+                                             beside the value rather than in it:
+                                             what is typed and what is sent must
+                                             stay the bare number. A metric's
+                                             figures carry their own. -->
+                                        <small class="units" x-show="p.units && p.kind.type !== 'metric'"
+                                               x-text="p.units"></small>
                                     </td>
                                     <td>
                                         <small x-text="p.descr"></small>

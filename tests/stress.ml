@@ -421,16 +421,17 @@ let test_http net cable duration nthreads =
         (* What a range tells the interface: both of its ends, and which values
            it will take. An end that is not there is null, not an infinity that
            JSON cannot carry nor a [max_int] no slider could span. *)
-        let kind name =
+        let field name what =
             match api "/api/simulations/%d/widgets/%d/properties"
                       net_id cable_id with
             | 200, body ->
                 Yojson.Basic.(
                     from_string body |> Util.to_list |>
                     List.find (fun p -> Util.(member "name" p |> to_string) = name) |>
-                    Util.member "kind")
+                    Util.member what)
             | _ ->
                 `Null in
+        let kind name = field name "kind" in
         check "a bounded range comes with both of its ends"
             (kind "error rate" =
                 `Assoc [ "type", `String "range" ; "int", `Bool false ;
@@ -439,6 +440,12 @@ let test_http net cable duration nthreads =
             (kind "count" =
                 `Assoc [ "type", `String "range" ; "int", `Bool true ;
                          "min", `Int 0 ; "max", `Null ]) ;
+        (* What a value is counted in travels with it, so that the interface
+           can show it without knowing what a cable is. *)
+        check "a property says what it is counted in"
+            (field "length" "units" = `String "meters") ;
+        check "and says so plainly when it is counted in nothing"
+            (field "count" "units" = `String "") ;
         check "a value within a range is taken"
             (fst (http ~meth:"PUT" ~body:"5" port
                       (Printf.sprintf

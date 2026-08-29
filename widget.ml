@@ -65,6 +65,7 @@ and peer = { widget : t ;
 
 and property = { name : string ;
                 descr : string ;
+                units : string ;
                getter : (unit -> value) ;
                (* If that property can be set *)
                setter : (value -> unit) option ;
@@ -103,13 +104,13 @@ and kind =
      * a metric, unlike a range, describes itself. *)
     | Metric
 
-let property ?(descr="") ?setter ?(kind=String) ~getter name =
-    { name ; descr ; getter ; setter ; kind }
+let property ?(descr="") ?(units="") ?setter ?(kind=String) ~getter name =
+    { name ; descr ; units ; getter ; setter ; kind }
 
 (** A metric, as a property: it reads as the metric's current figures, and the
  * only thing that can be written to it is a reset -- whatever the value. *)
-let metric_property ?(descr="") ?(resettable=true) name metric =
-    property name ~descr ~kind:Metric
+let metric_property ?descr ?units ?(resettable=true) name metric =
+    property name ?descr ?units ~kind:Metric
         ~getter:(fun () -> Metric.to_json metric)
         ?setter:(if resettable then Some (fun _ -> Metric.reset metric) else None)
 

@@ -557,7 +557,7 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget ?(init=on_init_noth
           search_sfx    = search_sfx ;
           dns_queries   = Hashtbl.create 3 ;
           dns_cache     = Hashtbl.create 3 ;
-          resolutions   = Metric.Timed.make (Widget.full_name widget ^"/resolutions") ;
+          resolutions   = Metric.Timed.make () ;
           trx           = host_trx ;
           last_ip_packet = None }
     and host_trx =

@@ -135,6 +135,9 @@ let json_of_property (p : Widget.property) =
             `Assoc [ "type", `String "metric" ] in
     `Assoc [ "name", `String p.name ;
              "descr", `String p.descr ;
+             (* What the figure is counted in, if anything: an empty string is
+                simply a property that has nothing to add to its number. *)
+             "units", `String p.units ;
              "read_only", `Bool (p.setter = None) ;
              "kind", kind ;
              "value", value ]

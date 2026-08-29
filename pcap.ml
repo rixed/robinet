@@ -481,7 +481,7 @@ let openif ~parent ?(promisc=true) ?(filter="") ?caplen ifname =
         property "name" ~kind:String
             ~descr:"Interface name."
             ~getter:(fun () -> `String t.name) ;
-        property "caplen" ~kind:Int
+        property "caplen" ~kind:Int ~units:"bytes"
             ~descr:"Capture length, fixed when the interface was opened."
             ~getter:(fun () -> `Int t.caplen) ] ;
     t

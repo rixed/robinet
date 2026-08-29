@@ -76,8 +76,7 @@ struct
         let offers = Hashtbl.create 8 in
         let leases = BitHash.create 8 in
         let used_ips = Ip.Set.empty in
-        let queries =
-            Metric.Atomic.make (Widget.full_name widget ^"/queries") in
+        let queries = Metric.Atomic.make () in
         let t = {
             widget ; authoritative ; lease_time_sec ;
             netmask ; broadcast ; gw ; mtu ; dns ; ntp ;
@@ -91,7 +90,7 @@ struct
                 ~descr:"Is this server authoritative"
                 ~getter:(fun () -> `Bool t.authoritative)
                 ~setter:(fun v -> t.authoritative <- to_bool v) ;
-            property "lease time" ~kind:(IRange (0, max_int))
+            property "lease time" ~kind:(IRange (0, max_int)) ~units:"secs"
                 ~descr:"Lease time for the offers"
                 ~getter:(fun () -> `Int t.lease_time_sec)
                 ~setter:(fun v ->

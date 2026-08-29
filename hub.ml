@@ -36,17 +36,16 @@ struct
 
     let make ~parent n name =
         let widget = Widget.make ~parent name in
-        let full_name = Widget.full_name widget in
         let t = {
             ifaces = Array.make n (ignore_bits ~logger:widget.logger) ;
             is_connected = Array.make n false ;
             widget ;
-            ingress = Metric.Counter.make (full_name ^"/ingress") "bytes" ;
-            egress = Metric.Counter.make (full_name ^"/egress") "bytes" } in
+            ingress = Metric.Counter.make () ;
+            egress = Metric.Counter.make () } in
         widget.properties <- Widget.[
-            metric_property "ingress" ~descr:"Bytes received."
+            metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
                 (Metric.Counter.T t.ingress) ;
-            metric_property "egress" ~descr:"Bytes emitted."
+            metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
                 (Metric.Counter.T t.egress) ] ;
         t
 
@@ -108,15 +107,14 @@ struct
     (* [num_macs] is the maximum number of remembered MACs. *)
     let make ~parent num_ifaces num_macs name =
         let widget = Widget.make ~parent name in
-        let full_name = Widget.full_name widget in
         let t = {
             hub = R.make ~parent:widget num_ifaces "hub" ;
             macs = OrdArray.init num_macs (fun _ -> { addr = None ; iface = 0 }) ;
             macs_h = BitHash.create (num_macs/10) ;
             widget ;
-            mac_size = Metric.Gauge.make (full_name ^"/macs") ;
-            mac_hits = Metric.Atomic.make (full_name ^"/hits") ;
-            mac_misses = Metric.Atomic.make (full_name ^"/misses") } in
+            mac_size = Metric.Gauge.make () ;
+            mac_hits = Metric.Atomic.make () ;
+            mac_misses = Metric.Atomic.make () } in
         widget.properties <- Widget.[
             metric_property "macs"
                 ~descr:"Number of MAC addresses remembered."

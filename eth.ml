@@ -363,14 +363,12 @@ struct
             postponed = BitHash.create 3 ;
             delay ; loss } in
         widget.properties <- Widget.[
-            property "delay"
+            property "delay" ~kind:Float ~units:"secs"
                 ~descr:"Average delay to add to transmissions."
-                ~kind:Float
                 ~setter:(fun v -> t.delay <- to_float v)
                 ~getter:(fun () -> `Float t.delay) ;
-            property "loss"
+            property "loss" ~kind:(FRange (0., 1.))
                 ~descr:"Packet loss ratio."
-                ~kind:(FRange (0., 1.))
                 ~setter:(fun v -> t.loss <- to_float_range ~min:0. ~max:1. v)
                 ~getter:(fun () -> `Float t.loss) ] ;
         t
@@ -688,23 +686,21 @@ struct
             let t = {
                 length ; delay = delay length ;
                 error_rate ; success_rate = success_rate error_rate ;
-                tot_bits = Metric.Counter.make "total bits" "bits" ;
-                bit_shifts = Metric.Counter.make "bit shifts" "bits" ;
+                tot_bits = Metric.Counter.make () ;
+                bit_shifts = Metric.Counter.make () ;
                 widget ;
                 last_packets =
                     OrdArray.make history (false, empty_bitstring) } in
             widget.properties <- Widget.[
-                property "length"
-                    ~descr:"Length of the cable, in meters."
-                    ~kind:Float
+                property "length" ~kind:Float ~units:"meters"
+                    ~descr:"Length of the cable."
                     ~setter:(fun v ->
                         let l = to_float v in
                         t.length <- l ;
                         t.delay <- delay l)
                     ~getter:(fun () -> `Float t.length) ;
-                property "error rate"
+                property "error rate" ~kind:(FRange (0., 1.))
                     ~descr:"Faulty bits per transmitted bits."
-                    ~kind:(FRange (0., 1.))
                     ~setter:(fun v ->
                         let r = to_float_range ~min:0. ~max:1. v in
                         t.error_rate <- r ;

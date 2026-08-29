@@ -37,7 +37,7 @@ struct
         let widget = Widget.make ~parent "named" in
         let t = { widget ; default_ttl ; lookup } in
         widget.properties <- Widget.[
-            property "default TTL" ~kind:Int
+            property "default TTL" ~kind:Int ~units:"secs"
                 ~descr:"Default TTL for DNS answers."
                 ~getter:(fun () -> `Int t.default_ttl)
                 ~setter:(fun v -> t.default_ttl <- to_int v) ] ;

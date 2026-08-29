@@ -110,6 +110,41 @@ if (drawn.floatStep !== 0.01)
     problems.push('a continuous slider steps by a thousandth of its span: ' +
                   drawn.floatStep)
 
+/* What a value is counted in is shown beside it and nowhere else: what is
+ * typed, and what is sent, stays the bare number. */
+const lengthRow = page.locator('article.properties tr').filter({ hasText: 'length' })
+const unit = await lengthRow.locator('small.units').innerText()
+const inInput = await lengthRow.locator('input[type=number]').inputValue()
+if (unit !== 'meters') problems.push('a length in metres said: ' + unit)
+if (!/^[0-9.]+$/.test(inInput))
+    problems.push('the unit leaked into the field: ' + inInput)
+if (await rate.locator('small.units').isVisible())
+    problems.push('a property with no units still showed one')
+
+/* And within a metric it goes on the figure -- except where the figure
+ * already knows what it is: an atomic counts events, so the unit says what
+ * they are, and a duration is written as one whatever the property says. */
+const counted = await page.evaluate(() => {
+    const atomic = (units) => metricView(
+        { kind: 'atomic', counts: [ { params: {}, value: 3 } ], first_last: null },
+        units).rows[0]
+    const timed = metricView(
+        { kind: 'timed', simult: { values: [] }, stops: { first_last: null },
+          durations: [ { params: {}, value: { count: 2, sum: 4, min: 1, max: 3 } } ] },
+        'seconds').rows[0]
+    const counter = metricView(
+        { kind: 'counter', values: [ { params: {}, value: 1024 } ],
+          fired: { counts: [], first_last: null } }, 'bytes').rows[0]
+    return { units: atomic('queries').detail, none: atomic('').detail,
+             timed: timed.figure, counter: counter.figure }
+})
+if (counted.units !== 'queries' || counted.none !== 'times')
+    problems.push('what an atomic counts: ' + JSON.stringify(counted))
+if (counted.counter !== '1,024 bytes')
+    problems.push('a counter of bytes reads: ' + counted.counter)
+if (/seconds/.test(counted.timed))
+    problems.push('a duration took a unit it had no use for: ' + counted.timed)
+
 /* The switch: three peers, each joined by the cable that reaches it. */
 await page.getByRole('link', { name: 'switch', exact: true }).first().click()
 await page.waitForTimeout(300)
@@ -276,46 +311,47 @@ await page.evaluate(() => {
     const d = Alpine.$data(document.body)
     d.live = false
     const now = d.sims[0].now
-    const fired = (n, counts, at) => ({
-        name: n, counts, first_last: { first: at, last: at } })
+    const fired = (counts, at) => ({ counts, first_last: { first: at, last: at } })
     const once = (params, value) => ({ params, value })
-    const mk = (name, descr, value, read_only) => ({
-        name, descr, read_only, kind: { type: 'metric' },
-        value, metric: metricRows(value), error: null })
+    /* [units] belongs to the property, not to the metric: what a figure is
+     * counted in is the same question for a counter and for a length. */
+    const mk = (name, descr, value, read_only, units = '') => ({
+        name, descr, units, read_only, kind: { type: 'metric' },
+        value, metric: metricRows(value, units), error: null })
     d.props = [
         mk('mac table', 'MACs the switch remembers.', {
-            kind: 'gauge', name: 'macs',
+            kind: 'gauge',
             values: [ { params: {}, value: { min: 0, current: 12, max: 25 } } ],
             first_last: { first: now - 60, last: now - 2.5 } }, true),
         /* Out of order, and with a two-digit port: the simulator's hash
          * table has no order, and 9 must not sort after 10. */
         mk('lookups', 'Table misses, per port.', {
-            kind: 'atomic', name: 'misses',
+            kind: 'atomic',
             counts: [ { params: { port: 10 }, value: 3 },
                       { params: { port: 2 }, value: 17 },
                       { params: { port: 9 }, value: 5 } ],
             first_last: { first: now - 60, last: now - 0.5 } }, true),
         mk('resolutions', 'How long a name took to resolve.', {
-            kind: 'timed', name: 'queries',
+            kind: 'timed',
             durations: [ { params: {},
                            value: { min: 0.25, max: 0.9, sum: 2.3, count: 4 } } ],
-            starts: fired('queries/start', [ once({}, 6) ], now - 30),
-            stops: fired('queries/stop', [ once({}, 4) ], now - 4),
-            simult: { name: 'queries/simult',
-                      values: [ { params: {}, value: { min: 0, current: 2, max: 3 } } ],
-                      first_last: { first: now - 60, last: now - 4 } } }, true),
+            starts: fired([ once({}, 6) ], now - 30),
+            stops: fired([ once({}, 4) ], now - 4),
+            simult: { values: [ { params: {}, value: { min: 0, current: 2, max: 3 } } ],
+                      first_last: { first: now - 60, last: now - 4 } } }, true,
+            /* A duration says what it is on its own: this must not show. */
+            'seconds'),
         /* Writable: the only thing a write does is reset it. */
         mk('queries', 'Every request served.', {
-            kind: 'counter', name: 'queries', units: 'requests',
+            kind: 'counter',
             values: [ { params: { status: 200 }, value: 1204 },
                       { params: { status: 404 }, value: 3 } ],
             /* Counted one at a time, as Counter.add does with the same
              * params it was given. */
-            fired: fired('queries/fired',
-                         [ once({ status: 200 }, 1204), once({ status: 404 }, 3) ],
-                         now - 0.2) }, false),
+            fired: fired([ once({ status: 200 }, 1204), once({ status: 404 }, 3) ],
+                         now - 0.2) }, false, 'requests'),
         mk('errors', 'Nothing has gone wrong yet.',
-           { kind: 'atomic', name: 'errors', counts: [], first_last: null }, true),
+           { kind: 'atomic', counts: [], first_last: null }, true),
     ]
 })
 await page.waitForTimeout(300)
@@ -329,6 +365,7 @@ const wants = [
     [ 'params of an atomic, in order',
       /port=2 17 times port=9 5 times port=10 3 times/ ],
     [ 'timed', /575ms on average 4 of them, 250ms to 900ms, 2 still running/ ],
+    [ 'a duration ignoring the property\'s unit', /^(?!.*seconds).*575ms on average/ ],
     [ 'counter rows', /status=200 1,204 requests status=404 3 requests/ ],
     [ 'a metric with nothing in it', /nothing yet/ ],
 ]

@@ -91,8 +91,12 @@ const compareParams = (a, b) => {
  * The kinds differ only in what those figures mean: a counter totals, a gauge
  * holds a current value between two bounds, an atomic counts occurrences, and
  * a timed is a distribution of durations with some still running. */
-const metricView = (m, previous) => {
+const metricView = (m, units) => {
     if (!m || !m.kind) return { rows: [], last: null }
+    /* What the figures are counted in, when the property says: a counter of
+     * bytes reads "1,234 bytes". A duration already knows what it is and is
+     * written as one, so it has nothing to take from here. */
+    const suffix = units ? ' ' + units : ''
     const key = (params) => JSON.stringify(params)
     /* The sub-metrics are keyed the same way, so a row can be completed from
      * them. */
@@ -106,16 +110,18 @@ const metricView = (m, previous) => {
     const push = (row) => rows.push(Object.assign(row, { key: key(row.params) }))
     switch (m.kind) {
         case 'atomic':
+            /* The figure counts events, so the unit is what those events are:
+               "12 queries" rather than "12 times". */
             for (const e of m.counts)
-                push({ params: e.params, figure: num(e.value), detail: 'times' })
+                push({ params: e.params, figure: num(e.value),
+                       detail: units || 'times' })
             return { rows, last: last(m.first_last) }
 
         case 'counter': {
-            const units = m.units ? ' ' + m.units : ''
             for (const e of m.values) {
                 const times = lookup(m.fired.counts, e.params)
                 push({ params: e.params,
-                            figure: num(e.value) + units,
+                            figure: num(e.value) + suffix,
                             /* How many times it was added to is worth saying
                              * only when it is not the total itself, which it
                              * is for anything counted one at a time. */
@@ -128,7 +134,7 @@ const metricView = (m, previous) => {
         case 'gauge':
             for (const e of m.values)
                 push({ params: e.params,
-                            figure: num(e.value.current),
+                            figure: num(e.value.current) + suffix,
                             detail: 'between ' + num(e.value.min) +
                                     ' and ' + num(e.value.max) })
             return { rows, last: last(m.first_last) }
@@ -162,8 +168,8 @@ const metricView = (m, previous) => {
 /* Order the rows, and note which of them are showing something new: a figure
  * that just moved is worth pointing at, and a table of numbers refreshing in
  * place gives the reader no clue which one did. */
-const metricRows = (m, previous) => {
-    const view = metricView(m)
+const metricRows = (m, units, previous) => {
+    const view = metricView(m, units)
     view.rows.sort((a, b) => compareParams(a.params, b.params))
     const was = new Map()
     for (const row of (previous ? previous.rows : [])) was.set(row.key, row)
@@ -528,7 +534,8 @@ document.addEventListener('alpine:init', () => {
                     p.draft = p.text
                     p.dirty = false
                     p.error = null
-                    p.metric = p.kind.type === 'metric' ? metricRows(p.value) : null
+                    p.metric = p.kind.type === 'metric'
+                        ? metricRows(p.value, p.units) : null
                     return p
                 }
                 /* A field one types in is not ours to touch unless asked. A
@@ -538,10 +545,11 @@ document.addEventListener('alpine:init', () => {
                 old.value = p.value
                 old.text = asText(p.value)
                 old.descr = p.descr
+                old.units = p.units
                 old.kind = p.kind
                 old.read_only = p.read_only
                 if (p.kind.type === 'metric') {
-                    old.metric = metricRows(p.value, old.metric)
+                    old.metric = metricRows(p.value, p.units, old.metric)
                     if (old.metric.rows.some(r => this.fresh(r.changedAt)))
                         this.unlightLater()
                 /* A value that is only ever displayed: say when it moved. */
@@ -595,7 +603,7 @@ document.addEventListener('alpine:init', () => {
                 return
             }
             p.value = r.value.value
-            p.metric = metricRows(p.value, p.metric)
+            p.metric = metricRows(p.value, p.units, p.metric)
             p.error = null
         },
 

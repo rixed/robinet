@@ -392,9 +392,8 @@ struct
                 make_iface ?delay ?loss ?mtu ?mac ?my_addresses
                            ~parent:widget n
             ) in
-        let full_name = Widget.full_name widget in
-        let ingress = Metric.Counter.make (full_name ^"/ingress") "bytes" in
-        let egress = Metric.Counter.make (full_name ^"/egress") "bytes" in
+        let ingress = Metric.Counter.make () in
+        let egress = Metric.Counter.make () in
         let t = { ifaces ; routes ; widget ; notify_errs ; admin_reroute ;
                   load_balancing ; ingress ; egress } in
         widget.properties <- Widget.[
@@ -403,13 +402,13 @@ struct
                 ~getter:(fun () -> `Float t.notify_errs.probability)
                 ~setter:(fun v ->
                     t.notify_errs.probability <- to_float_range ~min:0. ~max:1. v) ;
-            property "errors delay" ~kind:Float
+            property "errors delay" ~kind:Float ~units:"secs"
                 ~descr:"Report ICMP errors after that delay."
                 ~getter:(fun () -> `Float t.notify_errs.delay)
                 ~setter:(fun v -> t.notify_errs.delay <- to_float v) ;
-            metric_property "ingress" ~descr:"Received bytes."
+            metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
                 (Metric.Counter.T t.ingress) ;
-            metric_property "egress" ~descr:"Emitted bytes."
+            metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
                 (Metric.Counter.T t.egress) ] ;
         Array.iteri (fun n iface ->
             if iface.eth.my_addresses <> [] then (
