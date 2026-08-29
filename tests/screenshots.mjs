@@ -169,6 +169,21 @@ if (stuck) problems.push(`${stuck} value(s) stayed highlighted after the simulat
 await page.getByRole('button', { name: 'Resume' }).first().click()
 await page.waitForTimeout(1500)
 
+/* Columns must not shift while the values refresh. The hub is the one to
+ * watch: its counters have a row per port, and they gain digits as they run. */
+await page.getByRole('link', { name: 'hub', exact: true }).first().click()
+await page.waitForSelector('.metric .figure')
+const widths = new Set()
+for (let i = 0; i < 25; i++) {
+    widths.add(await page.evaluate(() =>
+        [...document.querySelectorAll('article.properties thead th')]
+            .map(e => Math.round(e.getBoundingClientRect().width)).join('/')))
+    await page.waitForTimeout(120)
+}
+if (widths.size !== 1)
+    problems.push('the property columns move as the values refresh: ' +
+                  [...widths].join(' then '))
+
 /* The cable only has counters, so the other three kinds of metric would go
  * unseen. Feed the renderer the shapes metric.ml produces for them -- with the
  * poll off, since it would replace them with what the server really has. */
