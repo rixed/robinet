@@ -210,48 +210,10 @@ let all () =
     ) !sims []
 
 (* One second of simulated time between snapshots, and half an hour of them
- * kept. Both are meant to become properties of the root widget, so that a
- * simulation can be told to remember more, or less often, while it runs. *)
+ * kept. Both are properties of the root widget, so that a simulation can be
+ * told to remember more, or less often, while it runs. *)
 let default_metrics_sample_rate = Interval.sec 1.
 let default_metrics_max_samples = 1800
-
-(** Create a simulation. [realtime] tells whether its clock follows the wall
- * clock: a simulation talking to the outside world needs it, a closed one does
- * not and will then run as fast as it can. *)
-let make =
-    let seq = ref 0 in
-    fun ?(realtime=true) name ->
-        let id = !seq in
-        let now = ref (Time.o (Unix.gettimeofday ())) in
-        let root = Widget.make_root ~sim:id ~now:(fun () -> !now) name in
-        incr seq ;
-        let t =
-            { id ;
-              name ;
-              root ;
-              thread = None ;
-              now ;
-              events = Events.empty ;
-              lock = Mutex.create () ;
-              cond = Condition.create () ;
-              lock_owner = None ;
-              realtime ;
-              continue = true ;
-              paused = false ;
-              paused_since = None ;
-              paused_total = Interval.zero ;
-              steps = 0 ;
-              speed_ratio = None ;
-              pace_anchor = None ;
-              late = Interval.zero ;
-              metrics_sample_rate = default_metrics_sample_rate ;
-              metric_samples = Array.make default_metrics_max_samples None ;
-              metric_samples_next = 0 ;
-              (* Due at once, so that a simulation has a first point to be
-               * plotted from rather than a rate's worth of nothing. *)
-              metric_samples_due = !now } in
-        register t ;
-        t
 
 let find id =
     let a = !sims in
@@ -568,6 +530,68 @@ let set_metrics_max_samples t n =
         List.iteri (fun i s -> a.(i) <- Some s) kept ;
         t.metric_samples <- a ;
         t.metric_samples_next <- if n = 0 then 0 else List.length kept mod n) ()
+
+(** Create a simulation. [realtime] tells whether its clock follows the wall
+ * clock: a simulation talking to the outside world needs it, a closed one does
+ * not and will then run as fast as it can. *)
+let make =
+    let seq = ref 0 in
+    fun ?(realtime=true) name ->
+        let id = !seq in
+        let now = ref (Time.o (Unix.gettimeofday ())) in
+        let root = Widget.make_root ~sim:id ~now:(fun () -> !now) name in
+        incr seq ;
+        let t =
+            { id ;
+              name ;
+              root ;
+              thread = None ;
+              now ;
+              events = Events.empty ;
+              lock = Mutex.create () ;
+              cond = Condition.create () ;
+              lock_owner = None ;
+              realtime ;
+              continue = true ;
+              paused = false ;
+              paused_since = None ;
+              paused_total = Interval.zero ;
+              steps = 0 ;
+              speed_ratio = None ;
+              pace_anchor = None ;
+              late = Interval.zero ;
+              metrics_sample_rate = default_metrics_sample_rate ;
+              metric_samples = Array.make default_metrics_max_samples None ;
+              metric_samples_next = 0 ;
+              (* Due at once, so that a simulation has a first point to be
+               * plotted from rather than a rate's worth of nothing. *)
+              metric_samples_due = !now } in
+        root.properties <- Widget.[
+            property "metrics sample rate" ~kind:Float ~units:"secs"
+              ~descr:"How often every metric of this simulation is written \
+                      down, in its own simulated time."
+              ~getter:(fun () -> `Float (metrics_sample_rate t :> float))
+              ~setter:(fun v ->
+                  let r = to_float v in
+                  (* Said here rather than left to [set_metrics_sample_rate],
+                   * whose [Invalid_argument] means a mistake in the program
+                   * while this one means a mistake by whoever typed it. *)
+                  if not (Float.is_finite r) || r <= 0. then
+                      bad_value
+                          "a sample rate is a delay above zero, not %g" r ;
+                  set_metrics_sample_rate t (Interval.o r)) ;
+            property "metrics samples kept" ~kind:(IRange (0, 1_000_000))
+              ~descr:"How many of those snapshots to keep; none at all means \
+                      no history."
+              (* The bound is not the array, which is one word per sample, but
+               * what fills it: a million snapshots of anything is already
+               * more than any plot can use. *)
+              ~getter:(fun () -> `Int (metrics_max_samples t))
+              ~setter:(fun v ->
+                  set_metrics_max_samples t
+                      (Widget.to_int_range ~min:0 ~max:1_000_000 v)) ] ;
+        register t ;
+        t
 
 (** Will process the next event *)
 let next_event t =

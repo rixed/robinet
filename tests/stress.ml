@@ -280,11 +280,11 @@ let test_metric_samples () =
        are multiples of the rate, so the gaps are a second give or take one
        event -- all but the first, since the baseline is taken as soon as the
        simulation dispatches anything and the grid only starts after it. *)
-    let gaps =
+    let gaps_of l =
         List.map2 (fun (a : Simulation.sample) (b : Simulation.sample) ->
             (Clock.Time.sub b.Simulation.taken a.Simulation.taken :> float)
-        ) (List.take (List.length samples - 1) samples)
-          (List.tl samples) in
+        ) (List.take (List.length l - 1) l) (List.tl l) in
+    let gaps = gaps_of samples in
     check "the samples after the baseline are a simulated second apart"
         (List.for_all (fun g -> g > 0.7 && g < 1.3) (List.tl gaps)) ;
     check "and the baseline comes no later than one sample in"
@@ -311,6 +311,39 @@ let test_metric_samples () =
     check "the ring never grows past what it may keep" (List.length after = 2) ;
     check "and what it keeps is the newest"
         (count (List.last after) > last) ;
+    (* Both knobs are properties of the root widget, so that the interface can
+       turn them while the simulation runs without knowing anything about
+       rings. *)
+    let root_prop name =
+        List.find (fun (p : Widget.property) -> p.Widget.name = name)
+                  sim.Simulation.root.Widget.properties in
+    let set name v = (Option.get (root_prop name).Widget.setter) v in
+    set "metrics samples kept" (`Int 5) ;
+    check "the root widget says how many samples are kept"
+        (Simulation.metrics_max_samples sim = 5 &&
+         (root_prop "metrics samples kept").Widget.getter () = `Int 5) ;
+    set "metrics sample rate" (`Float 0.5) ;
+    check "and how often they are taken"
+        ((Simulation.metrics_sample_rate sim :> float) = 0.5 &&
+         (root_prop "metrics sample rate").Widget.getter () = `Float 0.5) ;
+    (* Five more simulated seconds, now sampled twice a second: more than
+       enough to fill the shortened ring at the new pace. *)
+    Simulation.delay sim (Clock.Interval.sec 0.25) (feed 19) () ;
+    Simulation.run sim false ;
+    let dense = Simulation.metric_samples sim in
+    check "the sampler follows what the properties say"
+        (List.length dense = 5 &&
+         List.for_all (fun g -> g > 0.3 && g < 0.7) (gaps_of dense)) ;
+    check "a rate that is not a delay is refused through the property too"
+        (List.for_all (fun v ->
+            try set "metrics sample rate" v ; false
+            with Widget.Bad_value _ -> true)
+            [ `Float 0. ; `Float (-1.) ; `Float infinity ; `String "nonsense" ]) ;
+    check "and so is a history of a length that is not one"
+        (List.for_all (fun v ->
+            try set "metrics samples kept" v ; false
+            with Widget.Bad_value _ -> true)
+            [ `Int (-1) ; `Int 2_000_000 ; `String "plenty" ]) ;
     (* A rate is a delay, and some floats are not. (Not nan, which cannot be
        made into an [Interval.t] in the first place.) *)
     check "a rate that is not a delay is refused"
