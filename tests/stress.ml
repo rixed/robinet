@@ -98,10 +98,17 @@ let make_net () =
     Widget.make_peers ~via:cable.widget h1.Host.trx.widget h2.Host.trx.widget ;
     (* One of our own, so that what the API does with a property that cannot be
      * written does not depend on which of a cable's happen to be read-only. *)
+    (* And one bounded on a single side, since no cable has such a property and
+       what the API says about an end that is not there is worth pinning. *)
+    let count = ref 0 in
     cable.widget.properties <-
         cable.widget.properties @
         [ Widget.property "sealed" ~descr:"Cannot be written."
-              ~kind:Widget.Int ~getter:(fun () -> `Int 1) ] ;
+              ~kind:Widget.Int ~getter:(fun () -> `Int 1) ;
+          Widget.property "count" ~descr:"Any number of things."
+              ~kind:(Widget.IRange (0, max_int))
+              ~getter:(fun () -> `Int !count)
+              ~setter:(fun v -> count := Widget.to_int_range ~min:0 v) ] ;
     (* Something to keep its clock busy for ever: *)
     let rec ticking () = Simulation.delay net tick ticking () in
     ticking () ;
@@ -410,6 +417,37 @@ let test_http net cable duration nthreads =
             (fst (http ~meth:"PUT" ~body:"nonsense" port
                       (Printf.sprintf
                           "/api/simulations/%d/widgets/%d/properties/length"
+                          net_id cable_id)) = 400) ;
+        (* What a range tells the interface: both of its ends, and which values
+           it will take. An end that is not there is null, not an infinity that
+           JSON cannot carry nor a [max_int] no slider could span. *)
+        let kind name =
+            match api "/api/simulations/%d/widgets/%d/properties"
+                      net_id cable_id with
+            | 200, body ->
+                Yojson.Basic.(
+                    from_string body |> Util.to_list |>
+                    List.find (fun p -> Util.(member "name" p |> to_string) = name) |>
+                    Util.member "kind")
+            | _ ->
+                `Null in
+        check "a bounded range comes with both of its ends"
+            (kind "error rate" =
+                `Assoc [ "type", `String "range" ; "int", `Bool false ;
+                         "min", `Float 0. ; "max", `Float 1. ]) ;
+        check "a range bounded on one side only says so"
+            (kind "count" =
+                `Assoc [ "type", `String "range" ; "int", `Bool true ;
+                         "min", `Int 0 ; "max", `Null ]) ;
+        check "a value within a range is taken"
+            (fst (http ~meth:"PUT" ~body:"5" port
+                      (Printf.sprintf
+                          "/api/simulations/%d/widgets/%d/properties/count"
+                          net_id cable_id)) = 200) ;
+        check "a value outside a range is refused"
+            (fst (http ~meth:"PUT" ~body:"-1" port
+                      (Printf.sprintf
+                          "/api/simulations/%d/widgets/%d/properties/count"
                           net_id cable_id)) = 400) ;
         (* The composition tree is what the interface draws: a server has to
            appear within the host running it, not beside it. *)

@@ -95,7 +95,8 @@ and kind =
     (* One of those values, and nothing else *)
     | Enum of string list
     (* A number known to lie within those bounds *)
-    | Range of float * float
+    | FRange of float * float
+    | IRange of int * int
     (* A family of counts or measures, keyed by the parameters of the events
      * they come from: it reads as a small table, and the only thing a write
      * does is reset it. Which sort of metric it is comes with the value, which
@@ -135,6 +136,16 @@ let to_float = function
         with _ -> bad_value "not a number: %S" s)
     | v -> bad_value "expected a number, not %s" (Yojson.Basic.to_string v)
 
+let to_float_range ?(min=neg_infinity) ?(max=infinity) v =
+    let f = to_float v in
+    if f < min || f > max then
+        (* An end that is not there is left blank rather than spelled out: the
+         * reader of "not in range (0…inf)" has to work out that the infinity
+         * is us saying there is no upper bound. *)
+        let bound b = if Float.is_finite b then Printf.sprintf "%g" b else "" in
+        bad_value "%g is not in range (%s…%s)" f (bound min) (bound max)
+    else f
+
 let to_int = function
     | `Int i -> i
     | `Float f when f = float_of_int (int_of_float f) -> int_of_float f
@@ -143,6 +154,17 @@ let to_int = function
         (try int_of_string s
         with _ -> bad_value "not a whole number: %S" s)
     | v -> bad_value "expected a whole number, not %s" (Yojson.Basic.to_string v)
+
+let to_int_range ?(min=min_int) ?(max=max_int) v =
+    let i = to_int v in
+    if i < min || i > max then
+        (* [min_int] and [max_int] are how "no bound on this side" is spelled,
+         * here as in what the API sends the interface: naming them would only
+         * puzzle whoever reads the refusal. *)
+        let bound b = if b = min_int || b = max_int then ""
+                      else string_of_int b in
+        bad_value "%d is not in range (%s…%s)" i (bound min) (bound max)
+    else i
 
 let to_bool = function
     | `Bool b -> b

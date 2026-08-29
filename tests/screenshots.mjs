@@ -70,6 +70,46 @@ await page.getByRole('link', { name: 'cable1', exact: true }).first().click()
 await page.waitForSelector('input[type=range]')
 await page.screenshot({ path: `${OUT}/a-cable.png` })
 
+/* A range, drawn from what the API said about it: a slider between the two
+ * ends, and a number input beside it for the value the slider cannot land on
+ * exactly. */
+const rate = page.locator('article.properties tr').filter({ hasText: 'error rate' })
+const attrs = async (sel) => {
+    const e = rate.locator(sel)
+    return { n: await e.count(), min: await e.getAttribute('min'),
+             max: await e.getAttribute('max'), step: await e.getAttribute('step') }
+}
+const slider = await attrs('input[type=range]')
+const typed_ = await attrs('input[type=number]')
+if (slider.n !== 1 || slider.min !== '0' || slider.max !== '1' ||
+    slider.step !== '0.001')
+    problems.push('the slider of a 0..1 range: ' + JSON.stringify(slider))
+if (typed_.step !== 'any')
+    problems.push('a continuous range must accept any value: ' + typed_.step)
+
+/* And the two decisions it makes, on the ranges the demo has not got: a
+ * slider is drawn only when it has both ends to draw a track between and,
+ * when only whole numbers will do, few enough of them that a drag lands
+ * where it was aimed. */
+const drawn = await page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    const k = (int, min, max) => ({ type: 'range', int, min, max })
+    return { smallInt: d.hasSlider(k(true, 0, 100)),
+             smallStep: d.sliderStep(k(true, 0, 100)),
+             hugeInt: d.hasSlider(k(true, 0, 1e6)),
+             unbounded: d.hasSlider(k(true, 0, null)),
+             floatStep: d.sliderStep(k(false, -5, 5)) }
+})
+if (!drawn.smallInt || drawn.smallStep !== 1)
+    problems.push('a short whole range wants a slider stepping by one: ' +
+                  JSON.stringify(drawn))
+if (drawn.hugeInt || drawn.unbounded)
+    problems.push('a slider was drawn where dragging it means nothing: ' +
+                  JSON.stringify(drawn))
+if (drawn.floatStep !== 0.01)
+    problems.push('a continuous slider steps by a thousandth of its span: ' +
+                  drawn.floatStep)
+
 /* The switch: three peers, each joined by the cable that reaches it. */
 await page.getByRole('link', { name: 'switch', exact: true }).first().click()
 await page.waitForTimeout(300)

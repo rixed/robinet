@@ -269,11 +269,13 @@
 
                                         <template x-if="!p.read_only && p.kind.type === 'range'">
                                             <span class="range">
-                                                <input type="range" :disabled="!online" :min="p.kind.min" :max="p.kind.max"
-                                                       :step="(p.kind.max - p.kind.min) / 1000"
-                                                       x-model="p.draft" @change="save(p)"/>
+                                                <template x-if="hasSlider(p.kind)">
+                                                    <input type="range" :disabled="!online" :min="p.kind.min" :max="p.kind.max"
+                                                           :step="sliderStep(p.kind)"
+                                                           x-model="p.draft" @change="save(p)"/>
+                                                </template>
                                                 <input type="number" :disabled="!online" :min="p.kind.min" :max="p.kind.max"
-                                                       step="any" x-model="p.draft"
+                                                       :step="p.kind.int ? 1 : 'any'" x-model="p.draft"
                                                        @keydown.enter="save(p)" @blur="save(p)"/>
                                             </span>
                                         </template>

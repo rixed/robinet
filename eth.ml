@@ -370,8 +370,8 @@ struct
                 ~getter:(fun () -> `Float t.delay) ;
             property "loss"
                 ~descr:"Packet loss ratio."
-                ~kind:(Range (0., 1.))
-                ~setter:(fun v -> t.loss <- to_float v)
+                ~kind:(FRange (0., 1.))
+                ~setter:(fun v -> t.loss <- to_float_range ~min:0. ~max:1. v)
                 ~getter:(fun () -> `Float t.loss) ] ;
         t
 end
@@ -704,9 +704,9 @@ struct
                     ~getter:(fun () -> `Float t.length) ;
                 property "error rate"
                     ~descr:"Faulty bits per transmitted bits."
-                    ~kind:(Range (0., 1.))
+                    ~kind:(FRange (0., 1.))
                     ~setter:(fun v ->
-                        let r = to_float v in
+                        let r = to_float_range ~min:0. ~max:1. v in
                         t.error_rate <- r ;
                         t.success_rate <- success_rate r)
                     ~getter:(fun () -> `Float t.error_rate) ;

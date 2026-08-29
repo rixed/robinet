@@ -190,6 +190,10 @@ class ApiError extends Error {
     }
 }
 
+/* How many whole values a slider may span before dragging it becomes a game
+ * of chance and the number input is the only honest control. */
+const sliderValues = 10000
+
 /* A property the reader can type into: what a poll must never overwrite. */
 const isEditable = (p) => !p.read_only && p.kind.type !== 'metric'
 
@@ -555,6 +559,26 @@ document.addEventListener('alpine:init', () => {
             const same = merged.length === this.props.length &&
                          merged.every((p, i) => p === this.props[i])
             if (!same) this.props = merged
+        },
+
+        /* A range is drawn as a slider beside the number input, but only when
+         * the slider has something to offer: it needs both ends to draw a
+         * track between, and, when only whole numbers will do, few enough of
+         * them that a drag lands on the one that was aimed at. A lease time of
+         * "zero to as long as you like" is left to the number input alone.
+         * A missing end is one that means "no bound" -- the API sends null
+         * rather than an infinity, which JSON cannot carry, or [max_int],
+         * which no slider could span. */
+        hasSlider(kind) {
+            return kind.min !== null && kind.max !== null &&
+                   (!kind.int || kind.max - kind.min <= sliderValues)
+        },
+
+        /* Whole ranges step by one, so that the slider can only ever produce a
+         * value the setter accepts; a continuous one divides its track into a
+         * thousand, which is finer than the track has pixels. */
+        sliderStep(kind) {
+            return kind.int ? 1 : (kind.max - kind.min) / 1000
         },
 
         /* Whatever is written to a metric resets it; the value does not

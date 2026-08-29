@@ -398,10 +398,11 @@ struct
         let t = { ifaces ; routes ; widget ; notify_errs ; admin_reroute ;
                   load_balancing ; ingress ; egress } in
         widget.properties <- Widget.[
-            property "errors probability" ~kind:(Range (0., 1.))
+            property "errors probability" ~kind:(FRange (0., 1.))
                 ~descr:"Probability to report errors with ICMP."
                 ~getter:(fun () -> `Float t.notify_errs.probability)
-                ~setter:(fun v -> t.notify_errs.probability <- to_float v) ;
+                ~setter:(fun v ->
+                    t.notify_errs.probability <- to_float_range ~min:0. ~max:1. v) ;
             property "errors delay" ~kind:Float
                 ~descr:"Report ICMP errors after that delay."
                 ~getter:(fun () -> `Float t.notify_errs.delay)

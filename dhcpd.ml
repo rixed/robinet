@@ -41,8 +41,8 @@ module State =
 struct
     type t =
         { widget : Widget.t ;
-          authoritative : bool ;
-          lease_time_sec : int ;
+          mutable authoritative : bool ;
+          mutable lease_time_sec : int ;
           netmask : Ip.Addr.t option ;
           broadcast : Ip.Addr.t option ;
           gw : Ip.Addr.t option ;
@@ -55,36 +55,89 @@ struct
           offers : (string, Ip.Addr.t) Hashtbl.t ;
           leases : Lease.t BitHash.t ;
           mutable used_ips : Ip.Set.t ;
-          (* Precomputed for the service: *)
-          mandatory_parameters : (int * bitstring) list ;
-          host_parameters : (int * bitstring) list }
+          (* The options served to clients, which are built once and then kept
+           * until something they are made of changes. Whatever writes such a
+           * field -- [lease_time_sec] is the only mutable one so far -- must
+           * set this back to [None], or the server would go on offering what
+           * it no longer holds. *)
+          mutable parameters : parameters option ;
+          queries : Metric.Atomic.t }
+
+    (* The options every offer carries, and those a client may ask for (which
+     * include the former). *)
+    and parameters =
+        { mandatory : (int * bitstring) list ;
+          host : (int * bitstring) list }
 
     let make ?(authoritative=true) ?(lease_time_sec=3600) ?netmask ?broadcast
              ?gw ?mtu ?dns ?ntp ~parent ip_range =
         let widget = Widget.make ~parent "dhcpd" in
-        let mandatory_parameters =
-            [ Dhcp.Option.lease_time, bitstring_of_int32 lease_time_sec ] in
-        let host_parameters =
-            let add opt_val code enc lst =
-                match opt_val with
-                | None -> lst
-                | Some v -> (code, enc v) :: lst in
-            let open Dhcp.Option in
-            mandatory_parameters |>
-            add netmask subnet_mask Ip.Addr.to_bitstring |>
-            add gw routers Ip.Addr.to_bitstring |>
-            add broadcast broadcast_address Ip.Addr.to_bitstring |>
-            add dns domain_name_servers Ip.Addr.to_bitstring |>
-            add mtu interface_mtu bitstring_of_int16 |>
-            add ntp time_servers Ip.Addr.to_bitstring in
         (* Offered IPs (and options), indexed by client-ids: *)
         let offers = Hashtbl.create 8 in
         let leases = BitHash.create 8 in
         let used_ips = Ip.Set.empty in
-        { widget ; authoritative ; lease_time_sec ;
-          netmask ; broadcast ; gw ; mtu ; dns ; ntp ;
-          ip_range ; offers ; leases ; used_ips ;
-          mandatory_parameters ; host_parameters }
+        let queries =
+            Metric.Atomic.make (Widget.full_name widget ^"/queries") in
+        let t = {
+            widget ; authoritative ; lease_time_sec ;
+            netmask ; broadcast ; gw ; mtu ; dns ; ntp ;
+            ip_range ; offers ; leases ; used_ips ;
+            parameters = None ; queries } in
+        let string_of_ip_opt = function
+            | None -> `String ""
+            | Some ip -> `String (Ip.Addr.to_string ip) in
+        widget.properties <- Widget.[
+            property "authoritative" ~kind:Bool
+                ~descr:"Is this server authoritative"
+                ~getter:(fun () -> `Bool t.authoritative)
+                ~setter:(fun v -> t.authoritative <- to_bool v) ;
+            property "lease time" ~kind:(IRange (0, max_int))
+                ~descr:"Lease time for the offers"
+                ~getter:(fun () -> `Int t.lease_time_sec)
+                ~setter:(fun v ->
+                    t.lease_time_sec <- to_int_range ~min:0 v ;
+                    (* It is one of the options served: *)
+                    t.parameters <- None) ;
+            property "netmask" ~kind:String
+                ~getter:(fun () -> string_of_ip_opt t.netmask) ;
+            property "broadcast" ~kind:String
+                ~getter:(fun () -> string_of_ip_opt t.broadcast) ;
+            property "gateway" ~kind:String
+                ~getter:(fun () -> string_of_ip_opt t.gw) ;
+            property "DNS" ~kind:String
+                ~getter:(fun () -> string_of_ip_opt t.dns) ;
+            property "NTP" ~kind:String
+                ~getter:(fun () -> string_of_ip_opt t.ntp) ;
+            property "leases" ~descr:"Number of current leases" ~kind:Int
+                ~getter:(fun () -> `Int (BitHash.length t.leases)) ;
+            metric_property "queries" ~descr:"Count queries per status"
+                (Metric.Atomic.T t.queries) ] ;
+        t
+
+    (* The options as they stand, built on the first ask after a change. *)
+    let get_parameters t =
+        match t.parameters with
+        | Some p -> p
+        | None ->
+            let mandatory =
+                [ Dhcp.Option.lease_time,
+                  bitstring_of_int32 t.lease_time_sec ] in
+            let host =
+                let add opt_val code enc lst =
+                    match opt_val with
+                    | None -> lst
+                    | Some v -> (code, enc v) :: lst in
+                let open Dhcp.Option in
+                mandatory |>
+                add t.netmask subnet_mask Ip.Addr.to_bitstring |>
+                add t.gw routers Ip.Addr.to_bitstring |>
+                add t.broadcast broadcast_address Ip.Addr.to_bitstring |>
+                add t.dns domain_name_servers Ip.Addr.to_bitstring |>
+                add t.mtu interface_mtu bitstring_of_int16 |>
+                add t.ntp time_servers Ip.Addr.to_bitstring in
+            let p = { mandatory ; host } in
+            t.parameters <- Some p ;
+            p
 
     (* Return a list in the same order as the request_list:
      * The client MAY list the options in order of preference.  The DHCP
@@ -94,13 +147,36 @@ struct
     (* FIXME: instead of this, just add the min of lease_time_sec and the client's
      * requested lease_time! *)
     let get_options t request_list =
+        let parameters = get_parameters t in
         String.fold_right (fun c opts ->
             let c = int_of_char c in
-            match List.find (fun (code, _) -> code = c) t.host_parameters with
+            match List.find (fun (code, _) -> code = c) parameters.host with
             | exception Not_found -> opts
             | opt -> opt :: opts
         ) (request_list |? "") [] |>
-        List.rev_append t.mandatory_parameters
+        List.rev_append parameters.mandatory
+
+    (* The options served are built once and then kept, so anything that
+       changes one of them has to say so: the lease time clients are offered
+       must be the one that has been set. *)
+    (*$< State *)
+    (*$R get_options
+        let sim = Simulation.make ~realtime:false "test-lease" in
+        let st = make ~lease_time_sec:3600 ~parent:sim.root
+                      (Ip.Range.of_cidr (Ip.Cidr.random ())) in
+        let offered () =
+            List.assoc Dhcp.Option.lease_time (get_options st None) in
+        assert_bool "the lease time is offered as it was given"
+            (Bitstring.equals (offered ()) (bitstring_of_int32 3600)) ;
+        let set_lease_time =
+            List.find (fun (p : Widget.property) -> p.Widget.name = "lease time")
+                      st.widget.Widget.properties |>
+            (fun p -> Option.get p.Widget.setter) in
+        set_lease_time (`Int 60) ;
+        assert_bool "and follows when it is changed"
+            (Bitstring.equals (offered ()) (bitstring_of_int32 60))
+     *)
+    (*$>*)
 
     (* Returns the next unused IP from the range, and mark it as used: *)
     let get_free_ip t =
@@ -114,13 +190,10 @@ end
 (** [serve host ips] listen on host DHCP port and allocate the
  * given ips to any requester. *)
 let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
-    (* Waiting to be attached to this server's widget, which will supply the
-     * clock it must be dated with:
-    let counter = Metric.Atomic.make ("hosts/"^ host.Host.widget.name ^"/dhcpd/queries") in
-    *)
-    let count _cmd = (*
+    let count cmd =
+        let now = Simulation.Widget.now st.widget in
         let params = Metric.(Params.make Param.[ "cmd", String cmd ]) in
-        Metric.Atomic.fire ~params counter *) () in
+        Metric.Atomic.fire ~now ~params st.queries in
     (* Offered IPs (and options), indexed by client-ids: *)
     Log.(log st.widget.logger Debug (lazy "Listening for requests...")) ;
     host.Host.udp_server port (fun udp ->

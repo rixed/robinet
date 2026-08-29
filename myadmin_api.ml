@@ -113,9 +113,22 @@ let json_of_property (p : Widget.property) =
         | Enum choices ->
             `Assoc [ "type", `String "enum" ;
                      "choices", `List (List.map (fun c -> `String c) choices) ]
-        | Range (mi, ma) ->
-            `Assoc [ "type", `String "range" ;
-                     "min", `Float mi ; "max", `Float ma ]
+        (* Both ranges take the same shape, since the interface builds the same
+         * input out of either one; [int] says which values are acceptable, and
+         * therefore how the input must step.
+         * A bound that means "no bound" goes out as null rather than as its
+         * value: an infinity is not representable in JSON and would abort the
+         * serialization of the whole answer, and [max_int] is both meaningless
+         * as a slider end and beyond what a JSON number can carry exactly. *)
+        | FRange (mi, ma) ->
+            let bound f = if Float.is_finite f then `Float f else `Null in
+            `Assoc [ "type", `String "range" ; "int", `Bool false ;
+                     "min", bound mi ; "max", bound ma ]
+        | IRange (mi, ma) ->
+            let bound i =
+                if i = min_int || i = max_int then `Null else `Int i in
+            `Assoc [ "type", `String "range" ; "int", `Bool true ;
+                     "min", bound mi ; "max", bound ma ]
         (* Counter, gauge or timed comes with the value: the metric says what
          * it is. *)
         | Metric ->
