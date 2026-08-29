@@ -257,6 +257,12 @@ let test_metric_samples () =
     let rec feed n () =
         Metric.Counter.add c ~now:(Simulation.now sim) 100 ;
         Metric.Gauge.set ~now:(Simulation.now sim) g (10 * (20 - n)) ;
+        (* Something to read back through the logs endpoint, at one instant per
+           event and at two levels, so that both what [since] and what [level]
+           leave out can be told apart from what they keep. *)
+        Log.(log w.Widget.logger Info (lazy (Printf.sprintf "tick %d" n))) ;
+        if n mod 5 = 0 then
+            Log.(log w.Widget.logger Warning (lazy "every fifth tick")) ;
         if n > 0 then
             Simulation.delay sim (Clock.Interval.sec 0.25) (feed (n - 1)) () in
     Simulation.delay sim (Clock.Interval.sec 0.25) (feed 19) () ;
@@ -707,6 +713,75 @@ let test_http net cable duration nthreads
         check "a property that is not a metric has no history"
             (fst (api "/api/simulations/%d/widgets/%d/properties/length/history"
                       net_id cable_id) = 400) ;
+        (* What a widget logged. Asked of the same stopped simulation: nothing
+           writes to its logger any more, so what comes back is exactly what
+           the sampling test put there. *)
+        let logs ?since ?level () =
+            let path =
+                Printf.sprintf "/api/simulations/%d/widgets/%d/logs"
+                    (Simulation.id hist_sim) hist_widget.Widget.id ^
+                (match since with
+                 | None -> "" | Some t -> Printf.sprintf "?since=%.9f" t) ^
+                (match level with
+                 | None -> "" | Some l -> (if since = None then "?" else "&") ^
+                                          "level=" ^ l) in
+            match http port path with
+            | 200, body ->
+                let j = Yojson.Basic.from_string body in
+                Yojson.Basic.Util.(
+                    Some (member "lost" j |> to_bool,
+                          member "messages" j |> to_list |> List.map (fun m ->
+                              member "t" m |> to_float,
+                              member "level" m |> to_string,
+                              member "text" m |> to_string)))
+            | _ ->
+                None in
+        check "GET what a widget logged"
+            (match logs () with
+            | Some (false, msgs) ->
+                List.length msgs >= 20 &&
+                List.for_all (fun (_, l, _) -> l = "info" || l = "warning") msgs
+            | _ -> false) ;
+        check "oldest first"
+            (match logs () with
+            | Some (_, msgs) ->
+                List.for_all2 (fun (t1, _, _) (t2, _, _) -> t2 >= t1)
+                    (List.take (List.length msgs - 1) msgs) (List.tl msgs)
+            | None -> false) ;
+        check "since brings back what was logged after it, and nothing else"
+            (match logs () with
+            | Some (_, msgs) ->
+                let t, _, _ = List.nth msgs 4 in
+                (match logs ~since:t () with
+                | Some (_, after) ->
+                    List.length after = List.length msgs - 5 &&
+                    List.for_all (fun (t', _, _) -> t' > t) after
+                | None -> false)
+            | None -> false) ;
+        check "since the last of them brings back nothing"
+            (match logs () with
+            | Some (_, msgs) ->
+                let t, _, _ = List.last msgs in
+                (match logs ~since:t () with
+                 | Some (false, []) -> true
+                 | _ -> false)
+            | None -> false) ;
+        check "a level is how deep to go, not which one to show"
+            (match logs ~level:"warning" () with
+            | Some (_, msgs) ->
+                msgs <> [] &&
+                List.for_all (fun (_, l, _) -> l = "warning") msgs
+            | None -> false) ;
+        check "a level that is not one is refused"
+            (fst (http port
+                     (Printf.sprintf
+                         "/api/simulations/%d/widgets/%d/logs?level=chatty"
+                         (Simulation.id hist_sim) hist_widget.Widget.id)) = 400) ;
+        check "and a since that is not a time"
+            (fst (http port
+                     (Printf.sprintf
+                         "/api/simulations/%d/widgets/%d/logs?since=nonsense"
+                         (Simulation.id hist_sim) hist_widget.Widget.id)) = 400) ;
         (* The composition tree is what the interface draws: a server has to
            appear within the host running it, not beside it. *)
         check "a server is shown within the host that runs it"

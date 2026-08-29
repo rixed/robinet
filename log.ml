@@ -33,6 +33,14 @@ type msg = Clock.Time.t * (string Lazy.t)
 
 type queue  =
     { mutable oldest : int ; (* points to the next to be overwritten *)
+      (* How many of [msgs] hold a message: the array fills up once, and from
+       * then on every write overwrites an older message. *)
+      mutable len : int ;
+      (* When the message that was overwritten last had been logged, if any.
+       * A reader asking for everything logged after some time can then be told
+       * that part of what it asked for is already gone -- which a log window
+       * must say, or it quietly claims a continuity it does not have. *)
+      mutable purged : Clock.Time.t option ;
       msgs : msg array }
 
 type t =
@@ -85,9 +93,18 @@ let console_log (t, lstr) =
 (* queue management *)
 
 let make_queue size =
-    { oldest = 0 ; msgs = Array.create size (Clock.Time.o 0., lazy "") }
+    { oldest = 0 ; len = 0 ; purged = None ;
+      msgs = Array.create size (Clock.Time.o 0., lazy "") }
 
 let enqueue q m =
+    if q.len >= Array.length q.msgs then
+        (* What is about to be overwritten is lost from here on: remember when
+         * it was logged. Only the time, and only the last one: what a reader
+         * needs to know is whether anything is missing from what it asked
+         * for, not how much. *)
+        q.purged <- Some (fst q.msgs.(q.oldest))
+    else
+        q.len <- q.len + 1 ;
     q.msgs.(q.oldest) <- m ;
     q.oldest <- if q.oldest + 1 >= Array.length q.msgs then 0 else q.oldest + 1
 
@@ -163,6 +180,73 @@ let queue_enum q =
   3  (Enum.count (queue_enum (queue_of_list [ "glop" ; "glop glop" ; \
                                               "pas glop" ; "glop pas glop" ])))
 *)
+
+(** Everything a logger holds, oldest first: the messages of every level up to
+ * [max_level] that were logged strictly after [since], and whether anything
+ * that would have answered has already been overwritten.
+ *
+ * [since] is exclusive and needs no more than a time to be exact. A logger
+ * belonging to a simulation is stamped with that simulation's clock, which
+ * stands still for the whole of an event dispatch, and no two events are ever
+ * scheduled at the same instant (see [Simulation.at]); so one timestamp is one
+ * dispatch, a reader holding the simulation's lock sees all of a dispatch's
+ * messages or none of them, and "everything after t" cannot cut a dispatch in
+ * half. What can slip through is a message logged by another thread at the
+ * current time, out of any dispatch, after a reader has already been given
+ * that instant -- a ping asked for from the outside, say.
+ *
+ * Messages logged at the same instant keep the order they were logged in
+ * within one level, and are ordered by level between them: the queues are per
+ * level, so the true interleaving of a debug and an info message logged one
+ * after the other is not recorded anywhere. *)
+let messages ?since ?(max_level=max_level) t =
+    let after (ts, _) =
+        match since with
+        | None -> true
+        | Some (since : Clock.Time.t) -> Clock.Time.compare ts since > 0 in
+    let lost =
+        match since with
+        | None ->
+            (* Nothing was asked for, so nothing can be missing from it: a
+             * reader with no history yet has lost nothing. *)
+            false
+        | Some since ->
+            Enum.range 0 ~until:max_level |>
+            Enum.exists (fun lvl ->
+                match t.queues.(lvl).purged with
+                | Some p -> Clock.Time.compare p since > 0
+                | None -> false) in
+    let msgs =
+        Enum.range 0 ~until:max_level |>
+        Enum.map (fun lvl ->
+            queue_enum t.queues.(lvl) //
+            after /@
+            (fun (ts, lstr) -> ts, level_of_int lvl, Lazy.force lstr)) |>
+        Enum.flatten |>
+        List.of_enum in
+    (* Stable, so that the messages of one level stay in the order they were
+     * logged in when they share a timestamp. *)
+    lost, List.stable_sort (fun (t1, _, _) (t2, _, _) ->
+              Clock.Time.compare t1 t2) msgs
+
+(*$inject
+  let logged ?since ?max_level msgs =
+    let t = make ~size:2 ~now:(fun () -> Clock.Time.o 0.) () in
+    List.iter (fun (ts, lvl, s) ->
+      enqueue t.queues.(int_of_level lvl) (Clock.Time.o ts, lazy s)) msgs ;
+    let lost, msgs = messages ?since ?max_level t in
+    lost, List.map (fun (ts, lvl, s) ->
+      (ts : Clock.Time.t :> float), string_of_level lvl, s) msgs
+ *)
+(*$= logged & ~printer:dump
+  (false, []) (logged [])
+  (false, [ 1., "info", "a" ; 2., "error", "b" ])     (logged [ 1., Info, "a" ; 2., Error, "b" ])
+  (* [since] is exclusive, and what it leaves out is not lost: it was read. *)   (false, [ 2., "error", "b" ])     (logged ~since:(Clock.Time.o 1.) [ 1., Info, "a" ; 2., Error, "b" ])
+  (* A level nobody asked for is not read at all. *)   (false, [ 2., "error", "b" ])     (logged ~max_level:(int_of_level Error) [ 1., Info, "a" ; 2., Error, "b" ])
+  (* Two of that level fit; the third pushes the first out, and a reader that      had asked for everything after it is told so. *)   (true, [ 2., "info", "b" ; 3., "info", "c" ])     (logged ~since:(Clock.Time.o 0.5)       [ 1., Info, "a" ; 2., Info, "b" ; 3., Info, "c" ])
+  (* But not one that had already read it. *)   (false, [ 3., "info", "c" ])     (logged ~since:(Clock.Time.o 2.)       [ 1., Info, "a" ; 2., Info, "b" ; 3., Info, "c" ])
+  (* Of one instant, every level, most serious first. *)   (false, [ 1., "error", "b" ; 1., "info", "a" ; 1., "info", "c" ])     (logged [ 1., Info, "a" ; 1., Error, "b" ; 1., Info, "c" ])
+ *)
 
 (* log *)
 

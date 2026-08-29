@@ -143,6 +143,16 @@
                         </span>
                     </template>
                     <strong x-text="selected.name"></strong>
+                    <!-- The one thing about the selected widget that is not
+                         shown below but somewhere else: the log window keeps
+                         what it is given, whatever is being looked at. -->
+                    <button class="outline secondary watch-logs" :disabled="!online"
+                            :class="{ watching: isLogged({ sim: selected.sim, id: selected.id }) }"
+                            :title="isLogged({ sim: selected.sim, id: selected.id })
+                                    ? 'Stop following what this widget logs'
+                                    : 'Follow what this widget logs'"
+                            @click="toggleLogged()">logs</button>
+                    <small class="error" x-show="logError" x-text="logError"></small>
                 </nav>
 
                 <!-- peers to the left, the widget, peers to the right -->
@@ -350,10 +360,22 @@
             </div>
         </template>
 
-        <!-- ================= charts ================= -->
-        <!-- Outside the block above: a chart is watched while looking at
-             something else than the widget it came from. -->
-        <section class="charts" x-show="charts.length" x-cloak>
+        <!-- ================= the dock ================= -->
+        <!-- Outside the block above: what is watched here outlives the
+             selection, a chart as much as a log. Each panel keeps a header
+             that stays put when it is folded away, so that what is being
+             watched is legible even when it is not shown. -->
+        <section class="dock" x-show="charts.length || logged.length" x-cloak>
+
+        <section class="panel" x-show="charts.length">
+            <header>
+                <button class="twisty" @click="fold('charts')"
+                        :title="collapsed.charts ? 'Show them' : 'Fold them away'"
+                        x-text="collapsed.charts ? '▸' : '▾'"></button>
+                <strong>Charts</strong>
+                <small x-text="charts.length + (charts.length > 1 ? ' charts' : ' chart')"></small>
+            </header>
+        <div class="body charts" x-show="!collapsed.charts">
             <template x-for="c in charts" :key="c.id">
                 <article class="chart"
                          :class="{ over: dragOver === c.id }"
@@ -382,6 +404,50 @@
                     <div class="plot" x-init="mountChart(c, $el)"></div>
                 </article>
             </template>
+        </div>
+        </section>
+
+        <section class="panel logs" x-show="logged.length">
+            <header>
+                <button class="twisty" @click="fold('logs')"
+                        :title="collapsed.logs ? 'Show them' : 'Fold them away'"
+                        x-text="collapsed.logs ? '▸' : '▾'"></button>
+                <strong>Logs</strong>
+                <!-- One entry per widget: what it is, how deep to follow it,
+                     and a cross to stop. -->
+                <span class="log-legend">
+                    <template x-for="w in logged" :key="w.sim + '/' + w.widget">
+                        <span class="entry">
+                            <i :style="'background:' + w.color"></i>
+                            <span class="what" x-text="w.name"></span>
+                            <select x-model="w.level" :disabled="!online"
+                                    title="How deep to follow this one"
+                                    @change="relevel(w)">
+                                <template x-for="l in levels" :key="l">
+                                    <option :value="l" x-text="l"></option>
+                                </template>
+                            </select>
+                            <button title="Stop following this one"
+                                    @click="unwatch(w)">&times;</button>
+                        </span>
+                    </template>
+                </span>
+            </header>
+            <div class="body log" x-show="!collapsed.logs"
+                 x-ref="logBody" x-init="mountLog($el)" @scroll="onLogScroll()">
+                <template x-for="m in logLines()" :key="m.key">
+                    <div class="line" :class="m.level">
+                        <span class="t" x-text="clock(m.t)"></span>
+                        <span class="who" :style="'color:' + m.color"
+                              x-text="m.who"></span>
+                        <span class="msg" x-text="m.text"></span>
+                    </div>
+                </template>
+                <p class="quiet" x-show="!logLines().length">
+                    <small>Nothing logged yet.</small></p>
+            </div>
+        </section>
+
         </section>
     </main>
 </div>

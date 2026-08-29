@@ -356,6 +356,55 @@ const drawChart = (id, lines) => {
     }, data, p.el)
 }
 
+/*
+ * Logs
+ *
+ * What the watched widgets have logged, merged into one chronology. Kept out
+ * of the reactive data for the same reason the chart points are: it is a lot
+ * of it, and none of it is edited.
+ */
+const logs = new Map()   /* "sim/widget" -> { last, level, lines } */
+
+const widgetKey = (w) => `${w.sim}/${w.widget}`
+
+/* Enough to be worth scrolling through, and no more: the simulator keeps a
+ * bounded history of its own, and a window left open for an afternoon must not
+ * turn into an unread heap of debug lines nobody will ever read. */
+const maxLogLines = 2000
+
+/* The levels, most serious first, as the API names them. A level is how deep
+ * to go, not which one to show: picking "info" asks for everything down to it,
+ * fatal included. */
+const levels = [ 'fatal', 'critical', 'error', 'warning', 'info', 'debug' ]
+
+/* Fold one answer into what is kept for that widget. A gap the simulator
+ * reports -- messages it had to overwrite before we asked for them -- becomes
+ * a line of its own, in the place where the missing ones would have been: a
+ * log that goes quiet about what it dropped is a log that lies. */
+const mergeLogs = (w, answer) => {
+    const key = widgetKey(w)
+    let l = logs.get(key)
+    if (!l) { l = { last: null, lines: [] } ; logs.set(key, l) }
+    const line = (m, lost) => ({
+        t: m.t, level: lost ? 'lost' : m.level, text: m.text,
+        who: w.name, color: w.color,
+        /* Stable across polls, and unique: several messages share an instant
+         * by design, since a whole dispatch is logged at one. */
+        key: key + '/' + m.t + '/' + (l.lines.length + Math.random()) })
+    if (answer.lost)
+        l.lines.push(line({ t: answer.messages.length ? answer.messages[0].t
+                                                      : answer.now,
+                            text: 'some messages were overwritten before we ' +
+                                  'asked for them -- slow the simulation down ' +
+                                  'to follow this closely' }, true))
+    for (const m of answer.messages) {
+        l.lines.push(line(m, false))
+        if (l.last === null || m.t > l.last) l.last = m.t
+    }
+    if (l.lines.length > maxLogLines)
+        l.lines.splice(0, l.lines.length - maxLogLines)
+}
+
 /* Two kinds of failure, which want opposite treatment:
  *  - 'offline': no answer at all. Everything is suspect, keep retrying.
  *  - 'refused': the server answered, and said no. Only the thing we asked for
@@ -425,6 +474,8 @@ document.addEventListener('alpine:init', () => {
         live: true,
         /* simulation id -> the reason its last command was refused */
         simError: {},
+        /* Why the last widget offered to the log window was not taken. */
+        logError: null,
 
         /* Which simulation serves this page: the one that must never be
          * paused. It is the only one whose httpd widget we are talking to, so
@@ -442,6 +493,22 @@ document.addEventListener('alpine:init', () => {
         /* The metric being dragged, and the chart the cursor is over. */
         dragging: null,
         dragOver: null,
+
+        /* The widgets whose logs are watched, each at its own level: some are
+         * far more talkative than others, and the one being followed is
+         * usually not the one that needs quietening. */
+        logged: [],
+        logTock: 0,
+        /* Whether the window follows the newest line. It does until the reader
+         * scrolls up, and again as soon as they come back to the bottom:
+         * anything else fights whoever is trying to read. */
+        logFollow: true,
+        pollingLogs: false,
+
+        /* Which panels of the dock are folded away. Remembered across
+         * reloads: a reader who folds the graph away wants it folded away
+         * tomorrow too. */
+        collapsed: { charts: false, logs: false },
 
         /*
          * Connection state
@@ -496,6 +563,7 @@ document.addEventListener('alpine:init', () => {
          */
 
         async start() {
+            this.restoreFolds()
             setInterval(() => { this.tock++ }, 1000)
             await this.reload()
             this.schedule()
@@ -540,6 +608,7 @@ document.addEventListener('alpine:init', () => {
              * which is the one thing it must not do when it is not. */
             if (this.selected) await this.loadProps()
             if (this.charts.length) await this.pollCharts()
+            if (this.logged.length) await this.pollLogs()
         },
 
         /* Everything: the simulations and their widget trees. Needed whenever
@@ -808,6 +877,16 @@ document.addEventListener('alpine:init', () => {
             return d <= 0 ? 'just now' : dur(d) + ' ago'
         },
 
+        /* A simulated time as a clock reads it. Three decimals rather than
+         * the two the simulator shows for the present: a whole dispatch is
+         * logged at one instant, and the reader is looking for the boundaries
+         * between them. */
+        clock(t) {
+            const d = new Date(t * 1000)
+            return d.toTimeString().slice(0, 8) + '.' +
+                   String(d.getMilliseconds()).padStart(3, '0')
+        },
+
         fresh(t) {
             this.tock /* re-evaluate me as time passes */
             return t != null && Date.now() - t < highlightMs
@@ -1021,6 +1100,139 @@ document.addEventListener('alpine:init', () => {
                 c.metrics = c.metrics.filter(x => metricKey(x) !== key)
                 if (!c.metrics.length) this.closeChart(c)
             }
+        },
+
+        /*
+         * Logs
+         */
+
+        /* Is the selected widget among those being watched? *(The button that
+         * adds it says so, and takes it off again.) */
+        isLogged(w) {
+            return this.logged.some(x => x.sim === w.sim && x.widget === w.id)
+        },
+
+        toggleLogged() {
+            const { sim, id } = this.selected
+            if (this.isLogged({ sim, id })) {
+                this.unwatch(this.logged.find(x =>
+                    x.sim === sim && x.widget === id))
+                return
+            }
+            /* One clock per window: lines from two simulations interleaved by
+             * time would be in an order that means nothing. */
+            if (this.logged.length && this.logged[0].sim !== sim) {
+                this.logError =
+                    'The log window follows one simulation at a time; take ' +
+                    'the others off it first.'
+                return
+            }
+            const w = this.get(sim, id)
+            this.logged.push({ sim, widget: id, name: w ? w.name : '#' + id,
+                               level: 'info',
+                               color: palette[this.logged.length % palette.length] })
+            this.logError = null
+            this.pollLogs()
+        },
+
+        unwatch(w) {
+            logs.delete(widgetKey(w))
+            this.logged = this.logged.filter(x => x !== w)
+            this.logError = null
+            this.logTock++
+        },
+
+        /* Asking for more than was being asked for cannot be answered from
+         * what we hold, so that widget starts again from the beginning of what
+         * the simulator still has. Asking for less could be done by filtering,
+         * but starting again is the same request and one rule instead of
+         * two. */
+        relevel(w) {
+            logs.delete(widgetKey(w))
+            this.logTock++
+            this.pollLogs()
+        },
+
+        async pollLogs() {
+            /* Changing a level asks for a poll of its own, which must not run
+             * alongside the one the clock started: both would ask from the
+             * same cursor and the window would show everything twice. */
+            if (this.pollingLogs) return
+            this.pollingLogs = true
+            try { await this.fetchLogs() } finally { this.pollingLogs = false }
+        },
+
+        async fetchLogs() {
+            for (const w of this.logged) {
+                const l = logs.get(widgetKey(w))
+                const since = l && l.last !== null ? `&since=${l.last}` : ''
+                const r = await this.exchange(() => api(
+                    `/simulations/${w.sim}/widgets/${w.widget}` +
+                    `/logs?level=${w.level}${since}`))
+                if (!r.ok) {
+                    if (r.error.status === 404) this.unwatch(w)
+                    continue
+                }
+                mergeLogs(w, r.value)
+            }
+            this.logTock++
+            this.$nextTick(() => this.followTail())
+        },
+
+        /* Every watched widget's messages, in one chronology. */
+        logLines() {
+            this.logTock /* re-read me when messages arrive */
+            const all = []
+            for (const w of this.logged) {
+                const l = logs.get(widgetKey(w))
+                if (l) all.push(...l.lines)
+            }
+            /* Stable: messages sharing an instant keep the order they were
+             * logged in, widget by widget. */
+            all.sort((a, b) => a.t - b.t)
+            return all.length > maxLogLines
+                 ? all.slice(all.length - maxLogLines) : all
+        },
+
+        followTail() {
+            const el = this.$refs.logBody
+            if (el && this.logFollow) el.scrollTop = el.scrollHeight
+        },
+
+        /* Lines are rendered as the interface gets round to it, which is not
+         * necessarily before the tick that asked for them is over. Watching
+         * the list itself is the only way to stay at the bottom of something
+         * that is still growing. */
+        mountLog(el) {
+            new MutationObserver(() => this.followTail()).observe(el, {
+                childList: true, subtree: true })
+        },
+
+        onLogScroll() {
+            const el = this.$refs.logBody
+            if (!el) return
+            this.logFollow =
+                el.scrollTop + el.clientHeight >= el.scrollHeight - 4
+        },
+
+        /*
+         * The dock
+         */
+
+        fold(what) {
+            this.collapsed[what] = !this.collapsed[what]
+            try {
+                localStorage.setItem('robinet.collapsed',
+                                     JSON.stringify(this.collapsed))
+            } catch (e) { /* a browser that keeps nothing is not a failure */ }
+            if (what === 'logs') this.$nextTick(() => this.followTail())
+        },
+
+        restoreFolds() {
+            try {
+                const kept = localStorage.getItem('robinet.collapsed')
+                if (kept) Object.assign(this.collapsed, JSON.parse(kept))
+            } catch (e) { /* likewise */ }
         },
 
         /*

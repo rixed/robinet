@@ -320,7 +320,72 @@ while (await entries() && await page.locator('article.chart').count()) {
 }
 if (await page.locator('article.chart').count())
     problems.push('a chart with no lines left must go')
+
+/* Logs. Two widgets at once, merged into one chronology, each followed as
+ * deeply as one asks. Still at real time: debug logs are only readable when
+ * the clock is. */
+const watch = async (widget) => {
+    await page.getByRole('link', { name: widget, exact: true }).first().click()
+    await page.waitForSelector('button.watch-logs')
+    await page.locator('button.watch-logs').click()
+    await page.waitForTimeout(800)
+}
+await watch('host0')
+await watch('eth')
+if (!await page.locator('section.panel.logs').isVisible())
+    problems.push('watching a widget must open the log panel')
+if (await page.locator('.log-legend .entry').count() !== 2)
+    problems.push('one legend entry per watched widget')
+for (const sel of await page.locator('.log-legend .entry select').all())
+    await sel.selectOption('debug')
+await page.waitForTimeout(2500)
+const logged = await page.evaluate(() => {
+    const ls = Alpine.$data(document.body).logLines()
+    return { n: ls.length, debug: ls.filter(l => l.level === 'debug').length,
+             who: [ ...new Set(ls.map(l => l.who)) ],
+             ordered: ls.every((l, i) => i === 0 || ls[i - 1].t <= l.t) }
+})
+if (!logged.debug) problems.push('asking for debug must bring debug lines')
+if (logged.who.length !== 2)
+    problems.push('both widgets belong in the one chronology: ' + logged.who)
+if (!logged.ordered) problems.push('and it must be in order')
+await page.screenshot({ path: `${OUT}/g-logs.png` })
+
+/* Following the newest line, until the reader looks away. */
+const atBottom = () => page.locator('.body.log').evaluate(e =>
+    e.scrollTop + e.clientHeight >= e.scrollHeight - 4)
+if (!await atBottom()) problems.push('the log window must follow the newest line')
+await page.locator('.body.log').evaluate(e => { e.scrollTop = 0 })
+await page.waitForTimeout(2500)
+if (await page.evaluate(() => Alpine.$data(document.body).logFollow))
+    problems.push('it must stop following once the reader scrolls up')
+if (await page.locator('.body.log').evaluate(e => e.scrollTop) > 40)
+    problems.push('and leave what they are reading where it was')
+await page.locator('.body.log').evaluate(e => { e.scrollTop = e.scrollHeight })
+await page.waitForTimeout(2500)
+if (!await atBottom()) problems.push('and follow again once they come back to it')
+
+/* Let it rip: the queues then overwrite themselves between two polls, and a
+ * log that went quiet about what it dropped would be lying. */
 await fetch(`${BASE}/api/simulations/0/speed?ratio=full`, { method: 'POST' })
+await page.waitForTimeout(3000)
+if (!await page.locator('.body.log .line.lost').count())
+    problems.push('a gap in the log must say so')
+const kept = await page.evaluate(() => Alpine.$data(document.body).logLines().length)
+if (kept > 2000) problems.push('the window must keep a bounded number of lines: ' + kept)
+
+/* Folded away, the panel still says what it is watching -- and stays folded. */
+await page.locator('section.panel.logs .twisty').click()
+await page.waitForTimeout(300)
+if (await page.locator('.body.log').isVisible())
+    problems.push('folding must hide the lines')
+if (!await page.locator('.log-legend').isVisible())
+    problems.push('but not what is being watched')
+await page.reload({ waitUntil: 'networkidle' })
+await page.waitForTimeout(600)
+if (!await page.evaluate(() => Alpine.$data(document.body).collapsed.logs))
+    problems.push('a folded panel must still be folded after a reload')
+await page.evaluate(() => { Alpine.$data(document.body).fold('logs') })
 
 /* The simulator goes away: everything on screen becomes last-known. */
 await stop()

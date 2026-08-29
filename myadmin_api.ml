@@ -43,6 +43,10 @@
                                             what that metric has been worth;
                                             ?since=<simulated time> for the
                                             points taken after that one
+    GET    /api/simulations/<s>/widgets/<w>/logs
+                                            what it logged; ?since=<simulated
+                                            time> for what came after, and
+                                            ?level=<name> for how deep to go
   v}
 
   Property names are used as-is in the URL (url-encoded): they are already
@@ -349,6 +353,60 @@ let get_property_history _mth matches vars _qry_body resp =
         "units", `String p.units ;
         "series", `List (List.map json_of_series series) ])
 
+(* What a widget logged, oldest first.
+ *
+ * [since] is exclusive and is a simulated time, which is enough to ask for
+ * exactly what one has not seen: see [Log.messages] for why one timestamp is
+ * one dispatch and cannot be delivered by halves.
+ *
+ * [lost] says that something logged after [since] has since been overwritten:
+ * the queues are small, and a window that just stopped showing lines without
+ * saying so would claim a continuity it does not have. It is a flag rather
+ * than a count because what a reader can do about it is the same either way --
+ * slow the simulation down. *)
+let get_logs _mth matches vars _qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    let level =
+        match Hashtbl.find_option vars "level" with
+        | None -> Log.max_level
+        | Some name ->
+            (match List.find (fun lvl ->
+                       Log.string_of_int_level lvl = String.lowercase name)
+                       (List.init Log.num_levels identity) with
+            | exception Not_found ->
+                bad_request "No such log level: %S. One of %s" name
+                    (List.init Log.num_levels Log.string_of_int_level |>
+                     String.join ", ")
+            | lvl -> lvl) in
+    let since =
+        match Hashtbl.find_option vars "since" with
+        | None -> None
+        | Some s ->
+            (match float_of_string s with
+            | exception _ ->
+                bad_request "since must be a simulated time, not %S" s
+            | f when not (Float.is_finite f) ->
+                bad_request "since must be a simulated time, not %S" s
+            | f -> Some (Clock.Time.o f)) in
+    (* Held only while the messages are collected: a logger is written to by
+       the dispatcher, and reading one halfway through a dispatch would give
+       half of what that dispatch had to say. Forcing them into JSON afterwards
+       needs nothing of the simulation. *)
+    let w, lost, msgs =
+        Simulation.borrow sim (fun () ->
+            let w = widget_of_matches sim matches 2 in
+            let lost, msgs = Log.messages ?since ~max_level:level w.logger in
+            w, lost, msgs) in
+    let json_of_msg (ts, lvl, text) =
+        `Assoc [ "t", `Float (ts : Clock.Time.t :> float) ;
+                 "level", `String (Log.string_of_level lvl) ;
+                 "text", `String text ] in
+    respond resp (`Assoc [
+        "now", `Float (Simulation.now sim : Clock.Time.t :> float) ;
+        "widget", `Int w.id ;
+        "lost", `Bool lost ;
+        "messages", `List (List.map json_of_msg msgs) ])
+
 (* The body is the value, as JSON: 42.5 for a number, "foo" for a string.
  * Anything that is not JSON at all is taken to be a bare string, so that a
  * value typed by hand at a shell prompt still works. *)
@@ -430,6 +488,8 @@ let resources serving : (Str.regexp * Opache.resource) list =
             | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/properties$",
         get_properties ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/logs$",
+        get_logs ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)$",
         (fun mth matches vars qry_body resp ->
             match mth with
