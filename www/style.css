@@ -239,6 +239,20 @@ article.properties td { vertical-align: middle; }
     flex-wrap: wrap;
 }
 .metric .figure { font-variant-numeric: tabular-nums; }
+
+/* What just moved, in the manner of [watch -d]: a table of numbers refreshing
+ * in place says nothing about which of them is the one that changed. Lit at
+ * once and faded out, so that the eye is drawn to the change rather than left
+ * with a permanent colour. */
+.changed {
+    background-color: var(--pico-mark-background-color);
+    transition: none;
+}
+.ro, .metric .figure {
+    padding: 0 .2rem;
+    border-radius: var(--pico-border-radius);
+    transition: background-color .5s ease-out;
+}
 .metric .detail { color: var(--pico-muted-color); }
 .metric .params {
     font-size: .7rem;

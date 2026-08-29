@@ -45,6 +45,29 @@ const dur = (s) => {
     return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'min'
 }
 
+/* How long a value that just moved stays lit. Shorter than the poll, so that
+ * something changing on every refresh pulses rather than staying lit -- which
+ * would say no more than a steady colour does. */
+const highlightMs = 400
+
+/* Rows arrive in whatever order the simulator's hash table held them, which is
+ * neither stable nor meaningful. Order them by their parameters, comparing
+ * numbers as numbers so that port 9 comes before port 10. The names are
+ * already in the same order in every row of a metric, the simulator keeping
+ * them sorted. */
+const compareParams = (a, b) => {
+    const ea = Object.entries(a), eb = Object.entries(b)
+    for (let i = 0; i < Math.min(ea.length, eb.length); i++) {
+        const [ka, va] = ea[i], [kb, vb] = eb[i]
+        if (ka !== kb) return ka < kb ? -1 : 1
+        if (va !== vb) {
+            if (typeof va === 'number' && typeof vb === 'number') return va - vb
+            return String(va) < String(vb) ? -1 : 1
+        }
+    }
+    return ea.length - eb.length
+}
+
 /* Every kind of metric is a family, keyed by the parameters of the events it
  * measures, so all of them read as rows -- usually just the one, since most
  * metrics take no parameters. This turns any of them into those rows, so that
@@ -54,7 +77,7 @@ const dur = (s) => {
  * The kinds differ only in what those figures mean: a counter totals, a gauge
  * holds a current value between two bounds, an atomic counts occurrences, and
  * a timed is a distribution of durations with some still running. */
-const metricView = (m) => {
+const metricView = (m, previous) => {
     if (!m || !m.kind) return { rows: [], last: null }
     const key = (params) => JSON.stringify(params)
     /* The sub-metrics are keyed the same way, so a row can be completed from
@@ -64,18 +87,20 @@ const metricView = (m) => {
         return e ? e.value : null
     }
     const last = (fl) => fl ? fl.last : null
+    /* [key] identifies a row across refreshes: which parameters it is for. */
     const rows = []
+    const push = (row) => rows.push(Object.assign(row, { key: key(row.params) }))
     switch (m.kind) {
         case 'atomic':
             for (const e of m.counts)
-                rows.push({ params: e.params, figure: num(e.value), detail: 'times' })
+                push({ params: e.params, figure: num(e.value), detail: 'times' })
             return { rows, last: last(m.first_last) }
 
         case 'counter': {
             const units = m.units ? ' ' + m.units : ''
             for (const e of m.values) {
                 const times = lookup(m.fired.counts, e.params)
-                rows.push({ params: e.params,
+                push({ params: e.params,
                             figure: num(e.value) + units,
                             /* How many times it was added to is worth saying
                              * only when it is not the total itself, which it
@@ -88,7 +113,7 @@ const metricView = (m) => {
 
         case 'gauge':
             for (const e of m.values)
-                rows.push({ params: e.params,
+                push({ params: e.params,
                             figure: num(e.value.current),
                             detail: 'between ' + num(e.value.min) +
                                     ' and ' + num(e.value.max) })
@@ -100,7 +125,7 @@ const metricView = (m) => {
                 const d = e.value
                 const running = lookup(m.simult.values, e.params)
                 seen.add(key(e.params))
-                rows.push({ params: e.params,
+                push({ params: e.params,
                             figure: dur(d.sum / d.count) + ' on average',
                             detail: num(d.count) + ' of them, ' + dur(d.min) +
                                     ' to ' + dur(d.max) +
@@ -111,13 +136,31 @@ const metricView = (m) => {
              * nothing about it would be worse than saying that much. */
             for (const e of (m.simult ? m.simult.values : []))
                 if (!seen.has(key(e.params)) && e.value.current)
-                    rows.push({ params: e.params,
+                    push({ params: e.params,
                                 figure: e.value.current + ' running',
                                 detail: 'none finished yet' })
             return { rows, last: m.stops ? last(m.stops.first_last) : null }
         }
     }
     return { rows: [], last: null }
+}
+
+/* Order the rows, and note which of them are showing something new: a figure
+ * that just moved is worth pointing at, and a table of numbers refreshing in
+ * place gives the reader no clue which one did. */
+const metricRows = (m, previous) => {
+    const view = metricView(m)
+    view.rows.sort((a, b) => compareParams(a.params, b.params))
+    const was = new Map()
+    for (const row of (previous ? previous.rows : [])) was.set(row.key, row)
+    for (const row of view.rows) {
+        const before = was.get(row.key)
+        row.changedAt =
+            !before ? null :
+            before.figure !== row.figure || before.detail !== row.detail
+                ? Date.now() : before.changedAt
+    }
+    return view
 }
 
 /* Two kinds of failure, which want opposite treatment:
@@ -467,7 +510,7 @@ document.addEventListener('alpine:init', () => {
                     p.draft = p.text
                     p.dirty = false
                     p.error = null
-                    p.metric = p.kind.type === 'metric' ? metricView(p.value) : null
+                    p.metric = p.kind.type === 'metric' ? metricRows(p.value) : null
                     return p
                 }
                 /* A field one types in is not ours to touch unless asked. A
@@ -479,7 +522,15 @@ document.addEventListener('alpine:init', () => {
                 old.descr = p.descr
                 old.kind = p.kind
                 old.read_only = p.read_only
-                if (p.kind.type === 'metric') old.metric = metricView(p.value)
+                if (p.kind.type === 'metric') {
+                    old.metric = metricRows(p.value, old.metric)
+                    if (old.metric.rows.some(r => this.fresh(r.changedAt)))
+                        this.unlightLater()
+                /* A value that is only ever displayed: say when it moved. */
+                } else if (old.text !== asText(p.value)) {
+                    old.changedAt = Date.now()
+                    this.unlightLater()
+                }
                 /* Something typed but not accepted yet outlives even an
                  * explicit refresh: it is the reader's, not ours to drop. */
                 if (!old.dirty) { old.draft = old.text ; old.error = null }
@@ -506,7 +557,7 @@ document.addEventListener('alpine:init', () => {
                 return
             }
             p.value = r.value.value
-            p.metric = metricView(p.value)
+            p.metric = metricRows(p.value, p.metric)
             p.error = null
         },
 
@@ -518,6 +569,19 @@ document.addEventListener('alpine:init', () => {
             if (!s || t === null || t === undefined) return ''
             const d = s.now - t
             return d <= 0 ? 'just now' : dur(d) + ' ago'
+        },
+
+        fresh(t) {
+            this.tock /* re-evaluate me as time passes */
+            return t != null && Date.now() - t < highlightMs
+        },
+
+        /* [tock] only ticks once a second, far too slow to put a highlight
+         * out on time: after marking something as changed, ask for one
+         * re-evaluation at the moment it stops being true. */
+        unlightLater() {
+            clearTimeout(this.unlightTimer)
+            this.unlightTimer = setTimeout(() => this.tock++, highlightMs + 30)
         },
 
         paramsText(params) {

@@ -138,6 +138,37 @@ await page.waitForTimeout(1500)
 const saved = await length.inputValue()
 if (saved !== '42.5') problems.push(`the edited value did not stick: "${saved}"`)
 
+/* What just changed is pointed at, and stops being pointed at once it stops
+ * changing. */
+await page.getByRole('link', { name: 'cable1', exact: true }).first().click()
+await page.waitForSelector('.metric .figure')
+const counterRow = page.locator('article.properties tr').filter({ hasText: 'total bits' })
+/* The highlight lasts a fraction of a second and the poll a whole one, so
+ * looking once would mostly look between two pulses: watch for one. */
+const lit = counterRow.locator('.metric .figure.changed')
+let sawLit = false
+for (let i = 0; i < 40 && !sawLit; i++) {
+    if (await lit.count()) sawLit = true
+    else await page.waitForTimeout(100)
+}
+if (!sawLit) problems.push('a counter that is moving is never highlighted')
+/* For the picture only: the pulse is over before a screenshot can be taken,
+ * so light it by hand. That it lights on its own is what the loop above
+ * establishes; this only records what it looks like. */
+await page.evaluate(() => {
+    for (const p of Alpine.$data(document.body).props)
+        if (p.metric) for (const row of p.metric.rows) row.changedAt = Date.now()
+})
+await page.screenshot({ path: `${OUT}/h-changed.png` })
+/* Stop the simulation from underneath it: nothing moves, so nothing stays
+ * lit. This also exercises the highlight going out on its own. */
+await page.getByRole('button', { name: 'Pause' }).first().click()
+await page.waitForTimeout(2000)
+const stuck = await page.locator('article.properties .changed').count()
+if (stuck) problems.push(`${stuck} value(s) stayed highlighted after the simulation was paused`)
+await page.getByRole('button', { name: 'Resume' }).first().click()
+await page.waitForTimeout(1500)
+
 /* The cable only has counters, so the other three kinds of metric would go
  * unseen. Feed the renderer the shapes metric.ml produces for them -- with the
  * poll off, since it would replace them with what the server really has. */
@@ -150,16 +181,19 @@ await page.evaluate(() => {
     const once = (params, value) => ({ params, value })
     const mk = (name, descr, value, read_only) => ({
         name, descr, read_only, kind: { type: 'metric' },
-        value, metric: metricView(value), error: null })
+        value, metric: metricRows(value), error: null })
     d.props = [
         mk('mac table', 'MACs the switch remembers.', {
             kind: 'gauge', name: 'macs',
             values: [ { params: {}, value: { min: 0, current: 12, max: 25 } } ],
             first_last: { first: now - 60, last: now - 2.5 } }, true),
+        /* Out of order, and with a two-digit port: the simulator's hash
+         * table has no order, and 9 must not sort after 10. */
         mk('lookups', 'Table misses, per port.', {
             kind: 'atomic', name: 'misses',
-            counts: [ { params: { port: 0 }, value: 3 },
-                      { params: { port: 1 }, value: 17 } ],
+            counts: [ { params: { port: 10 }, value: 3 },
+                      { params: { port: 2 }, value: 17 },
+                      { params: { port: 9 }, value: 5 } ],
             first_last: { first: now - 60, last: now - 0.5 } }, true),
         mk('resolutions', 'How long a name took to resolve.', {
             kind: 'timed', name: 'queries',
@@ -192,7 +226,8 @@ const shown = await page.evaluate(() =>
         tr.innerText.replace(/\s+/g, ' ').trim()))
 const wants = [
     [ 'gauge', /12 between 0 and 25/ ],
-    [ 'params of an atomic', /port=0 3 times.*port=1 17 times/ ],
+    [ 'params of an atomic, in order',
+      /port=2 17 times port=9 5 times port=10 3 times/ ],
     [ 'timed', /575ms on average 4 of them, 250ms to 900ms, 2 still running/ ],
     [ 'counter rows', /status=200 1,204 requests status=404 3 requests/ ],
     [ 'a metric with nothing in it', /nothing yet/ ],
