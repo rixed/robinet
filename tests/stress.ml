@@ -446,7 +446,10 @@ let test_concurrency net cable duration nthreads =
 
 (* A throwaway HTTP client: enough to drive the API, and no dependency on
  * anything outside the standard library. *)
-let http ?(meth="GET") ?body port path =
+(* Returns the status, the headers as they came, and the body. Most tests want
+   only the first and the last; the headers matter when what is being checked
+   is how the answer is framed rather than what it says. *)
+let http_full ?(meth="GET") ?body port path =
     let sock = Unix.(socket PF_INET SOCK_STREAM 0) in
     finally (fun () -> Unix.close sock) (fun () ->
         (* A test must never be able to hang the suite: give up rather than
@@ -502,7 +505,11 @@ let http ?(meth="GET") ?body port path =
         let payload =
             try snd (String.split ~by:"\r\n\r\n" resp)
             with Not_found -> "" in
-        status, payload) ()
+        status, head, payload) ()
+
+let http ?meth ?body port path =
+    let status, _head, payload = http_full ?meth ?body port path in
+    status, payload
 
 (* Ask the OS for a free port, then hand it to myadmin. Racy in principle,
  * retried in practice. *)
@@ -743,6 +750,15 @@ let test_http net cable duration nthreads
             (fst (http ~meth:"POST" port
                       (Printf.sprintf "/api/simulations/%d/speed?ratio=full" net_id))
              = 200) ;
+        (* An answer with no [Content-Length] is one a client cannot tell the
+           end of: it waits for the connection to close, and this server keeps
+           it open. So what matters about a refusal is not only its status. *)
+        check "a URL nobody serves is refused, and says how long the refusal is"
+            (match http_full port "/no/such/thing" with
+            | 404, head, body ->
+                String.exists (String.lowercase head) "content-length:" &&
+                String.trim body <> ""
+            | _ -> false) ;
         check "an unknown widget is not found"
             (fst (api "/api/simulations/%d/widgets/99999" net_id) = 404) ;
         check "an unknown simulation is not found"

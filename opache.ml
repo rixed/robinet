@@ -205,9 +205,13 @@ let multiplexer res _host http msg (widget : Widget.t) =
             Log.(log widget.logger Debug (lazy (Printf.sprintf "Multiplexer: No taker for url '%s'" url.Url.path))) ;
             let code = 404 in
             count_query code ;
-            TRXtop.tx http { Pdu.cmd = Status code ;
-                             Pdu.headers = [] ;
-                             Pdu.body = "" }
+            (* Through [make_response], which states the length of the body.
+             * A client told nothing about it has only one way to know when the
+             * answer is over -- the connection closing -- and this one does not
+             * close it, so the client waits for ever. *)
+            TRXtop.tx http
+                (Pdu.make_response ~headers:[ "Content-Type", "text/plain" ]
+                                   ~body:"No such resource\n" code)
         | matches, f ->
             Log.(log widget.logger Debug (lazy (Printf.sprintf2 "Multiplexer: Found a match for url '%s', matches=%a" url.Url.path (List.print String.print) matches))) ;
             let vars = params_of_query url.Url.query in
