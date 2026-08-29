@@ -149,7 +149,44 @@ type t =
       mutable pace_anchor : (float * Time.t) option ;
       (* How far behind that pace the simulation is: zero while it keeps up,
        * growing while it cannot go as fast as it was asked to. *)
-      mutable late : Interval.t }
+      mutable late : Interval.t ;
+      (* How often, in *simulated* time, every metric of this simulation is
+       * written down. A plot of a simulation is drawn against that
+       * simulation's own clock, so the samples must be spaced along it too: a
+       * simulation running as fast as it can would otherwise be sampled at
+       * whatever irregular intervals the wall clock happened to catch it at.
+       *
+       * The cost follows from that: a simulation running N times faster than
+       * real time writes N/rate snapshots per wall second, each proportional
+       * to the number of metric rows it has. Lower the rate for a big network
+       * watched at speed. *)
+      mutable metrics_sample_rate : Interval.t ;
+      (* The snapshots kept, oldest overwritten first, [None] where none has
+       * been written yet. How many are kept is the length of this array --
+       * there is no second field to disagree with it; see
+       * [set_metrics_max_samples].
+       *
+       * Memory is that count times the number of metric rows, so one or the
+       * other has to give on a large network. *)
+      mutable metric_samples : sample option array ;
+      (* Where the next snapshot goes, which is also the oldest one. *)
+      mutable metric_samples_next : int ;
+      (* The simulated time the next snapshot is due at. *)
+      mutable metric_samples_due : Time.t }
+
+(* What every metric of a simulation was worth at one instant, keyed by the
+ * widget that owns it, the property it is read through, and the parameters of
+ * the events it counts -- a hub counts its bytes per port, so that triple is
+ * what identifies one series among the rest.
+ *
+ * [taken] is the simulated time the snapshot was taken at, which is the time
+ * of the event about to be dispatched: everything strictly before it has
+ * happened, and nothing at it has. It is on or after the instant the snapshot
+ * was due, never before, and the two differ by however long the simulation had
+ * nothing to do. *)
+and sample =
+    { taken : Time.t ;
+      values : (int * string * Metric.Params.t, Metric.value) Hashtbl.t }
 
 (* Indexed by id, which is handed out in sequence, so this is a plain array
  * rather than a hash: resolving the simulation a widget belongs to happens
@@ -171,6 +208,12 @@ let all () =
     Array.fold_right (fun t l ->
         match t with Some t -> t :: l | None -> l
     ) !sims []
+
+(* One second of simulated time between snapshots, and half an hour of them
+ * kept. Both are meant to become properties of the root widget, so that a
+ * simulation can be told to remember more, or less often, while it runs. *)
+let default_metrics_sample_rate = Interval.sec 1.
+let default_metrics_max_samples = 1800
 
 (** Create a simulation. [realtime] tells whether its clock follows the wall
  * clock: a simulation talking to the outside world needs it, a closed one does
@@ -200,7 +243,13 @@ let make =
               steps = 0 ;
               speed_ratio = None ;
               pace_anchor = None ;
-              late = Interval.zero } in
+              late = Interval.zero ;
+              metrics_sample_rate = default_metrics_sample_rate ;
+              metric_samples = Array.make default_metrics_max_samples None ;
+              metric_samples_next = 0 ;
+              (* Due at once, so that a simulation has a first point to be
+               * plotted from rather than a rate's worth of nothing. *)
+              metric_samples_due = !now } in
         register t ;
         t
 
@@ -425,6 +474,101 @@ let wait_on_cond ?until t =
         with Condvar.Timeout -> ())) ;
     t.lock_owner <- Some me
 
+(*
+ * Metric history
+ *
+ * Every metric of the simulation, written down at regular intervals of
+ * simulated time, so that the interface can plot what happened rather than
+ * only what is. The snapshots are taken by the dispatcher, on the simulation's
+ * own clock: only it knows when simulated time has moved, and only it can
+ * catch the figures between two events rather than halfway through one.
+ *)
+
+(** How many snapshots are kept at most. *)
+let metrics_max_samples t = Array.length t.metric_samples
+
+(** How often, in simulated time, they are taken. *)
+let metrics_sample_rate t = t.metrics_sample_rate
+
+(** The snapshots kept, oldest first. *)
+let metric_samples t =
+    with_lock t (fun () ->
+        let n = Array.length t.metric_samples in
+        let rec loop acc i =
+            if i >= n then List.rev acc else
+            let s = t.metric_samples.((t.metric_samples_next + i) mod n) in
+            loop (match s with None -> acc | Some s -> s :: acc) (i + 1) in
+        loop [] 0) ()
+
+(* Write down what every metric of this simulation is worth. Must be called
+ * with the lock held: it reads the tables that event handlers write to.
+ *
+ * Every metric is reached through the widget tree, which is the whole
+ * inventory of a simulation; a metric that belongs to no widget is not part of
+ * the simulation as far as anything here is concerned. *)
+let take_metric_sample t =
+    let n = Array.length t.metric_samples in
+    if n > 0 then (
+        let values = Hashtbl.create 64 in
+        Widget.enum t.root |>
+        Enum.iter (fun (w : Widget.t) ->
+            List.iter (fun (p : Widget.property) ->
+                Option.may (fun m ->
+                    List.iter (fun (params, v) ->
+                        Hashtbl.replace values
+                            (w.Widget.id, p.Widget.name, params) v
+                    ) (Metric.samples m)
+                ) p.Widget.metric
+            ) w.Widget.properties) ;
+        t.metric_samples.(t.metric_samples_next) <-
+            Some { taken = now t ; values } ;
+        t.metric_samples_next <- (t.metric_samples_next + 1) mod n
+    )
+
+(* Take one if the clock has reached the time it was due at, and say when the
+ * next one is. Due times are multiples of the rate, so that the snapshots of a
+ * simulation that has something to do land on a regular grid whatever the
+ * delays between its events. Periods that went by without a snapshot are
+ * skipped rather than filled with copies of the same figures: a simulation
+ * with nothing to do produced nothing to record.
+ *
+ * Must be called with the lock held, and with [now] already advanced to the
+ * event about to be dispatched. *)
+let sample_metrics_if_due t =
+    if Time.is_after (now t) t.metric_samples_due then (
+        take_metric_sample t ;
+        t.metric_samples_due <-
+            Time.add (Time.trunc (now t) t.metrics_sample_rate)
+                     t.metrics_sample_rate
+    )
+
+(** How often to take a snapshot, in simulated time. Changing it makes one due
+ * at once, so that the new cadence starts from a point rather than from a gap.
+ *)
+let set_metrics_sample_rate t (rate : Interval.t) =
+    (* [Interval.o] has already refused a nan; an infinity it lets through, and
+     * a sample due at the end of time is never due at all. *)
+    if not (Float.is_finite (rate :> float)) || (rate :> float) <= 0. then
+        invalid_arg "Simulation.set_metrics_sample_rate: not a delay: it must \
+                     be finite and above zero" ;
+    with_lock t (fun () ->
+        t.metrics_sample_rate <- rate ;
+        t.metric_samples_due <- Time.trunc (now t) rate) ()
+
+(** How many snapshots to keep. The most recent ones are kept when there is
+ * suddenly room for fewer, since those are the ones anybody is looking at. *)
+let set_metrics_max_samples t n =
+    if n < 0 then
+        invalid_arg "Simulation.set_metrics_max_samples: cannot keep fewer \
+                     than no samples at all" ;
+    with_lock t (fun () ->
+        let kept = metric_samples t in
+        let kept = List.drop (max 0 (List.length kept - n)) kept in
+        let a = Array.make n None in
+        List.iteri (fun i s -> a.(i) <- Some s) kept ;
+        t.metric_samples <- a ;
+        t.metric_samples_next <- if n = 0 then 0 else List.length kept mod n) ()
+
 (** Will process the next event *)
 let next_event t =
     let min_ts_for_sleep = Interval.msec 10. in
@@ -511,6 +655,10 @@ let next_event t =
                     if debug then Printf.printf "Clock: next_event: executing since it's %s\n%!" (Time.to_string ts) ;
                     t.events <- Events.remove ts t.events ;
                     t.now := ts ;
+                    (* Before the handler runs, so that a snapshot holds
+                     * everything that happened strictly before [ts] and
+                     * nothing that happens at it. *)
+                    sample_metrics_if_due t ;
                     dispatched t ;
                     Some f) () in
         Option.may (fun f ->

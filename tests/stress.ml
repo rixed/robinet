@@ -232,6 +232,94 @@ let test_speed net =
 
 (* Each worker hammers one facet of the API. What we are looking for is not a
  * result but the absence of a deadlock, an exception, or a corrupted value. *)
+(*
+ * 3. Metric history
+ *)
+
+(* A simulation of its own, dispatching a known number of events at a known
+   pace, so that what lands in the ring can be predicted exactly. Not the
+   shared [net]: this one has to run to exhaustion and be sampled while nothing
+   else feeds it. *)
+let test_metric_samples () =
+    section "Metrics: the history the plots are drawn from" ;
+    let sim = Simulation.make ~realtime:false "samples" in
+    let w = Widget.make ~parent:sim.Simulation.root "thing" in
+    let c = Metric.Counter.make () in
+    w.Widget.properties <-
+        [ Widget.metric_property "bytes" ~units:"bytes" (Metric.Counter.T c) ] ;
+    Simulation.set_metrics_sample_rate sim (Clock.Interval.sec 1.) ;
+    (* One event every quarter of a simulated second, for five seconds. *)
+    let rec feed n () =
+        Metric.Counter.add c ~now:(Simulation.now sim) 100 ;
+        if n > 0 then
+            Simulation.delay sim (Clock.Interval.sec 0.25) (feed (n - 1)) () in
+    Simulation.delay sim (Clock.Interval.sec 0.25) (feed 19) () ;
+    Simulation.run sim false ;
+    let key = w.Widget.id, "bytes", Metric.Params.empty in
+    (* A metric that has not fired yet has no row at all, which is not the
+       same as a row worth zero -- but it plots the same. *)
+    let count (s : Simulation.sample) =
+        match Hashtbl.find_opt s.Simulation.values key with
+        | Some (Metric.Count c) -> c
+        | _ -> 0 in
+    let samples = Simulation.metric_samples sim in
+    (* Five simulated seconds sampled once a simulated second: five crossings
+       of the grid, or six depending on where within a second the clock
+       started. *)
+    check_between "one sample per simulated second" 5. 7.
+        (float_of_int (List.length samples)) ;
+    (* The first snapshot is due at once and is therefore taken before the
+       first event runs: at that point the counter has never been added to and
+       has nothing to say. *)
+    check "the first sample holds what there was to hold: nothing"
+        (Hashtbl.length (List.hd samples).Simulation.values = 0) ;
+    check "and every one after it holds the metric"
+        (List.for_all (fun (s : Simulation.sample) ->
+            Hashtbl.mem s.Simulation.values key) (List.tl samples)) ;
+    (* Each is taken at the first event at or after its due time, and those
+       are multiples of the rate, so the gaps are a second give or take one
+       event -- all but the first, since the baseline is taken as soon as the
+       simulation dispatches anything and the grid only starts after it. *)
+    let gaps =
+        List.map2 (fun (a : Simulation.sample) (b : Simulation.sample) ->
+            (Clock.Time.sub b.Simulation.taken a.Simulation.taken :> float)
+        ) (List.take (List.length samples - 1) samples)
+          (List.tl samples) in
+    check "the samples after the baseline are a simulated second apart"
+        (List.for_all (fun g -> g > 0.7 && g < 1.3) (List.tl gaps)) ;
+    check "and the baseline comes no later than one sample in"
+        (List.hd gaps <= 1.3) ;
+    check "and each holds more than the one before"
+        (List.for_all2 (fun a b -> count b > count a)
+            (List.take (List.length samples - 1) samples) (List.tl samples)) ;
+    (* Nothing is sampled while nothing happens: the clock of a closed
+       simulation does not move on its own. *)
+    let quiet = List.length (Simulation.metric_samples sim) in
+    Thread.delay 0.2 ;
+    check "a simulation with nothing to do records nothing"
+        (List.length (Simulation.metric_samples sim) = quiet) ;
+    (* Keeping fewer keeps the most recent. *)
+    let last = count (List.last samples) in
+    Simulation.set_metrics_max_samples sim 2 ;
+    let kept = Simulation.metric_samples sim in
+    check "keeping fewer keeps that many" (List.length kept = 2) ;
+    check "and keeps the newest" (count (List.last kept) = last) ;
+    (* And the ring wraps rather than growing. *)
+    Simulation.delay sim (Clock.Interval.sec 0.25) (feed 19) () ;
+    Simulation.run sim false ;
+    let after = Simulation.metric_samples sim in
+    check "the ring never grows past what it may keep" (List.length after = 2) ;
+    check "and what it keeps is the newest"
+        (count (List.last after) > last) ;
+    (* A rate is a delay, and some floats are not. (Not nan, which cannot be
+       made into an [Interval.t] in the first place.) *)
+    check "a rate that is not a delay is refused"
+        (List.for_all (fun r ->
+            try Simulation.set_metrics_sample_rate sim (Clock.Interval.o r) ;
+                false
+            with Invalid_argument _ -> true)
+            [ 0. ; -1. ; infinity ])
+
 let test_concurrency net cable duration nthreads =
     section
         (Printf.sprintf "Concurrency: %d threads for %gs against a running \
@@ -607,6 +695,7 @@ let main =
     ignore (Simulation.start net) ;
     test_clock net ;
     test_speed net ;
+    test_metric_samples () ;
     test_concurrency net cable duration nthreads ;
     test_http net cable duration nthreads ;
     Printf.printf "\n%d checks, %d failure(s)\n%!" !checks !failures ;

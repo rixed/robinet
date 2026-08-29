@@ -416,6 +416,37 @@ end
  * derived: every kind names its constructor [T], so the tag the ppx would emit
  * says nothing, while the reader needs to know a counter from a gauge. *)
 
+(* What a metric is worth at one instant: the figures a plot can be drawn from,
+ * one entry per parameter combination. A metric's kind is what says which of
+ * these it yields, so a series always knows how to read its own points.
+ *
+ * The bare figures, and not what surrounds them: when a metric was first and
+ * last touched, or how many times a counter was added to, tell the reader
+ * about the metric as it stands, not about the instant a sample was taken. *)
+type value =
+    (* How many times, for an [Atomic]; how much, for a [Counter]. *)
+    | Count of int
+    | Value of Gauge.value
+    | Durations of Timed.duration
+
+(* Everything a metric holds right now, as a list because that is what a
+ * snapshot does with it: read it once and move on. *)
+let samples m =
+    let of_table wrap h =
+        Hashtbl.fold (fun params v l -> (params, wrap v) :: l) h [] in
+    match m with
+    | Atomic.T t -> of_table (fun c -> Count c) t.Atomic.counts
+    | Counter.T t -> of_table (fun c -> Count c) t.Counter.values
+    | Gauge.T t -> of_table (fun v -> Value v) t.Gauge.values
+    | Timed.T t -> of_table (fun d -> Durations d) t.Timed.durations
+    | _ -> invalid_arg "Metric.samples: unknown kind of metric"
+
+(*$T samples
+  samples (Atomic.T (Atomic.make ())) = []
+  (let a = Atomic.make () in    let params = Params.singleton "port" (Param.Int 2) in    Atomic.fire ~now:(Clock.Time.o 1.) ~params a ;    Atomic.fire ~now:(Clock.Time.o 3.) ~params a ;    samples (Atomic.T a) = [ params, Count 2 ])
+  (let g = Gauge.make () in    Gauge.set ~now:(Clock.Time.o 1.) g 5 ;    samples (Gauge.T g) = [ Params.empty, Value { min = 5 ; current = 5 ; max = 5 } ])
+ *)
+
 (* Which of them it is. A metric never changes kind, so this is what tells the
  * interface how to display one, before and independently of its figures. *)
 let kind_name = function

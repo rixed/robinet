@@ -69,6 +69,13 @@ and property = { name : string ;
                getter : (unit -> value) ;
                (* If that property can be set *)
                setter : (value -> unit) option ;
+               (* The metric this property reads, when it reads one. The getter
+                * renders it for display and the kind says so; this is the
+                * thing itself, for whoever wants its figures rather than their
+                * rendering -- the sampler that keeps a history of them does,
+                * and reading them back out of the getter's JSON would be
+                * absurd. *)
+               metric : Metric.metric option ;
                (* What the value looks like, so that the UI can offer the right
                 * input and reject nonsense before submitting it. Values still
                 * travel as strings: this only says how to render one. *)
@@ -124,13 +131,13 @@ let optional = function
   (try ignore (optional Metric) ; false with Invalid_argument _ -> true)
  *)
 
-let property ?(descr="") ?(units="") ?setter ?(kind=String) ~getter name =
-    { name ; descr ; units ; getter ; setter ; kind }
+let property ?(descr="") ?(units="") ?metric ?setter ?(kind=String) ~getter name =
+    { name ; descr ; units ; getter ; setter ; kind ; metric }
 
 (** A metric, as a property: it reads as the metric's current figures, and the
  * only thing that can be written to it is a reset -- whatever the value. *)
 let metric_property ?descr ?units ?(resettable=true) name metric =
-    property name ?descr ?units ~kind:Metric
+    property name ?descr ?units ~kind:Metric ~metric
         ~getter:(fun () -> Metric.to_json metric)
         ?setter:(if resettable then Some (fun _ -> Metric.reset metric) else None)
 
