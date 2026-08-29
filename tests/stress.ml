@@ -244,13 +244,19 @@ let test_metric_samples () =
     section "Metrics: the history the plots are drawn from" ;
     let sim = Simulation.make ~realtime:false "samples" in
     let w = Widget.make ~parent:sim.Simulation.root "thing" in
-    let c = Metric.Counter.make () in
+    let c = Metric.Counter.make ()
+    (* A gauge as well, whose value moves within every sampling window: the
+       point of the windows is that they say what happened between two points,
+       which the figures since the last reset cannot. *)
+    and g = Metric.Gauge.make () in
     w.Widget.properties <-
-        [ Widget.metric_property "bytes" ~units:"bytes" (Metric.Counter.T c) ] ;
+        [ Widget.metric_property "bytes" ~units:"bytes" (Metric.Counter.T c) ;
+          Widget.metric_property "level" (Metric.Gauge.T g) ] ;
     Simulation.set_metrics_sample_rate sim (Clock.Interval.sec 1.) ;
     (* One event every quarter of a simulated second, for five seconds. *)
     let rec feed n () =
         Metric.Counter.add c ~now:(Simulation.now sim) 100 ;
+        Metric.Gauge.set ~now:(Simulation.now sim) g (10 * (20 - n)) ;
         if n > 0 then
             Simulation.delay sim (Clock.Interval.sec 0.25) (feed (n - 1)) () in
     Simulation.delay sim (Clock.Interval.sec 0.25) (feed 19) () ;
@@ -311,6 +317,23 @@ let test_metric_samples () =
     check "the ring never grows past what it may keep" (List.length after = 2) ;
     check "and what it keeps is the newest"
         (count (List.last after) > last) ;
+    (* The windows: each sample says what the gauge did since the one before,
+       while the figures beside them say what it has done since it started. *)
+    let level (s : Simulation.sample) =
+        Hashtbl.find_option s.Simulation.values
+            (w.Widget.id, "level", Metric.Params.empty) in
+    let levels =
+        List.filter_map (fun s ->
+            match level s with
+            | Some (Metric.Value v) -> Some v
+            | _ -> None) samples in
+    check "a window holds the value it was sampled at"
+        (List.for_all (fun (v : Metric.Gauge.value) ->
+            v.sample_min <= v.current && v.current <= v.sample_max &&
+            v.min <= v.sample_min && v.sample_max <= v.max) levels) ;
+    check "and only what happened within it, not since the beginning"
+        (List.exists (fun (v : Metric.Gauge.value) ->
+            v.sample_max - v.sample_min < v.max - v.min) levels) ;
     (* Both knobs are properties of the root widget, so that the interface can
        turn them while the simulation runs without knowing anything about
        rings. *)

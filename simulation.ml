@@ -479,7 +479,7 @@ let take_metric_sample t =
                     List.iter (fun (params, v) ->
                         Hashtbl.replace values
                             (w.Widget.id, p.Widget.name, params) v
-                    ) (Metric.samples m)
+                    ) (Metric.sample m)
                 ) p.Widget.metric
             ) w.Widget.properties) ;
         t.metric_samples.(t.metric_samples_next) <-

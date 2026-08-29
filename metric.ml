@@ -220,7 +220,15 @@ struct
     type t = { values : (Params.t, value) Hashtbl.t
                    [@to_yojson table_to_yojson value_to_yojson] ;
                first_last : FirstLast.t }
-    and value = { min : int ; current : int ; max : int }
+    (* [min] and [max] are the extremes since the metric was last reset, which
+     * is what a reader looking at the figures wants to know. [sample_min] and
+     * [sample_max] are those of the window that started when the metric was
+     * last sampled, which is what a plot of the interval between two points
+     * wants instead -- the others only ever widen, and a band drawn from them
+     * would swallow the plot within a minute. Sampling closes the window and
+     * opens a new one at the value standing then; see [sample]. *)
+    and value = { min : int ; current : int ; max : int ;
+                  sample_min : int ; sample_max : int }
     [@@deriving to_yojson]
 
     type metric += T of t
@@ -236,11 +244,24 @@ struct
     let set ~now ?(params=Params.empty) t v =
         Hashtbl.modify_opt params (function
         | None ->
-            Some { min = v ; current = v ; max = v }
+            Some { min = v ; current = v ; max = v ;
+                   sample_min = v ; sample_max = v }
         | Some value ->
-            Some { min = min value.min v ; current = v ; max = max value.max v }
+            Some { min = min value.min v ; current = v ; max = max value.max v ;
+                   sample_min = min value.sample_min v ;
+                   sample_max = max value.sample_max v }
         ) t.values ;
         FirstLast.update now t.first_last
+
+    (* Read every row and start a new window at the value each of them stands
+     * at: the extremes of what comes next are those of what happens next. *)
+    let take_windows t =
+        let rows = Hashtbl.fold (fun params v l -> (params, v) :: l) t.values [] in
+        List.iter (fun (params, v) ->
+            Hashtbl.replace t.values params
+                { v with sample_min = v.current ; sample_max = v.current }
+        ) rows ;
+        rows
 
     let add ~now ?(params=Params.empty) t d =
         let v =
@@ -320,7 +341,14 @@ struct
         { min : Clock.Interval.t ;
           max : Clock.Interval.t ;
           sum : Clock.Interval.t ;
-          count : int }
+          count : int ;
+          (* The shortest and longest of those measured since the metric was
+           * last sampled, as opposed to the [min] and [max] above, which are
+           * those since it was last reset. [None] when nothing at all was
+           * measured in that window, which is not the same as a duration of
+           * zero. See [sample]. *)
+          sample_min : Clock.Interval.t option ;
+          sample_max : Clock.Interval.t option }
     [@@deriving to_yojson]
 
     type metric += T of t
@@ -341,6 +369,40 @@ struct
      * knows which clock was running while it lasted. *)
     type stop_func = now:Clock.Time.t -> Params.t -> unit
 
+    let record t params duration =
+        Hashtbl.modify_opt params (function
+            | None ->
+                Some {
+                    min = duration ;
+                    max = duration ;
+                    sum = duration ;
+                    count = 1 ;
+                    sample_min = Some duration ;
+                    sample_max = Some duration }
+            | Some d ->
+                let keep f = function
+                    | None -> Some duration
+                    | Some d -> Some (f d duration) in
+                Some {
+                    min = min d.min duration ;
+                    max = max d.max duration ;
+                    sum = Clock.Interval.add d.sum duration ;
+                    count = d.count + 1 ;
+                    sample_min = keep min d.sample_min ;
+                    sample_max = keep max d.sample_max }
+        ) t.durations
+
+    (* Read every row and start a new window, which holds nothing until
+     * something else is measured. *)
+    let take_windows t =
+        let rows =
+            Hashtbl.fold (fun params d l -> (params, d) :: l) t.durations [] in
+        List.iter (fun (params, d) ->
+            Hashtbl.replace t.durations params
+                { d with sample_min = None ; sample_max = None }
+        ) rows ;
+        rows
+
     let start ~now:start_time ?(params=Params.empty) t : stop_func =
         Gauge.succ ~now:start_time ~params t.simult ;
         (* Return the stop function: *)
@@ -350,20 +412,7 @@ struct
             Atomic.fire ~now ~params t.stops ;
             Gauge.pred ~now ~params t.simult ;
             let duration = Clock.Time.sub now start_time in
-            Hashtbl.modify_opt params (function
-                | None ->
-                    Some {
-                        min = duration ;
-                        max = duration ;
-                        sum = duration ;
-                        count = 1 }
-                | Some d ->
-                    Some {
-                        min = min d.min duration ;
-                        max = max d.max duration ;
-                        sum = Clock.Interval.add d.sum duration ;
-                        count = d.count + 1 }
-            ) t.durations
+            record t params duration
 
     (* [clock] rather than a timestamp: this one spans the call to [f], so it
      * has to read the time twice. *)
@@ -383,20 +432,7 @@ struct
             Atomic.fire ~now ~params t.stops ;
             Gauge.pred ~now ~params t.simult ;
             let duration = Clock.Time.sub now start_time in
-            Hashtbl.modify_opt params (function
-                | None ->
-                    Some {
-                        min = duration ;
-                        max = duration ;
-                        sum = duration ;
-                        count = 1 }
-                | Some d ->
-                    Some {
-                        min = min d.min duration ;
-                        max = max d.max duration ;
-                        sum = Clock.Interval.add d.sum duration ;
-                        count = d.count + 1 }
-            ) t.durations ;
+            record t params duration ;
             res
 
     let print oc t =
@@ -430,16 +466,22 @@ type value =
     | Durations of Timed.duration
 
 (* Everything a metric holds right now, as a list because that is what a
- * snapshot does with it: read it once and move on. *)
-let samples m =
-    let of_table wrap h =
-        Hashtbl.fold (fun params v l -> (params, wrap v) :: l) h [] in
+ * snapshot does with it: read it once and move on.
+ *
+ * A verb, because reading is not without effect: it closes the window that the
+ * [sample_min] and [sample_max] of a gauge or a duration describe, and opens
+ * the next one. Sample a metric from one place only -- the simulation that
+ * owns it does, once per period -- or those two figures end up describing
+ * whatever happened since some other caller last looked. *)
+let sample m =
+    let of_table wrap l = List.map (fun (params, v) -> params, wrap v) l in
+    let all h = Hashtbl.fold (fun params v l -> (params, v) :: l) h [] in
     match m with
-    | Atomic.T t -> of_table (fun c -> Count c) t.Atomic.counts
-    | Counter.T t -> of_table (fun c -> Count c) t.Counter.values
-    | Gauge.T t -> of_table (fun v -> Value v) t.Gauge.values
-    | Timed.T t -> of_table (fun d -> Durations d) t.Timed.durations
-    | _ -> invalid_arg "Metric.samples: unknown kind of metric"
+    | Atomic.T t -> of_table (fun c -> Count c) (all t.Atomic.counts)
+    | Counter.T t -> of_table (fun c -> Count c) (all t.Counter.values)
+    | Gauge.T t -> of_table (fun v -> Value v) (Gauge.take_windows t)
+    | Timed.T t -> of_table (fun d -> Durations d) (Timed.take_windows t)
+    | _ -> invalid_arg "Metric.sample: unknown kind of metric"
 
 (* As the interface reads them: a count is a number, and the other two are the
  * objects their own serializers give -- the same shapes a metric's current
@@ -451,10 +493,16 @@ let value_to_yojson = function
 
 let value_to_json v = Yojson.Safe.to_basic (value_to_yojson v)
 
-(*$T samples
-  samples (Atomic.T (Atomic.make ())) = []
-  (let a = Atomic.make () in    let params = Params.singleton "port" (Param.Int 2) in    Atomic.fire ~now:(Clock.Time.o 1.) ~params a ;    Atomic.fire ~now:(Clock.Time.o 3.) ~params a ;    samples (Atomic.T a) = [ params, Count 2 ])
-  (let g = Gauge.make () in    Gauge.set ~now:(Clock.Time.o 1.) g 5 ;    samples (Gauge.T g) = [ Params.empty, Value { min = 5 ; current = 5 ; max = 5 } ])
+(*$T sample
+  sample (Atomic.T (Atomic.make ())) = []
+  (let a = Atomic.make () in let params = Params.singleton "port" (Param.Int 2) in Atomic.fire ~now:(Clock.Time.o 1.) ~params a ; Atomic.fire ~now:(Clock.Time.o 3.) ~params a ; sample (Atomic.T a) = [ params, Count 2 ])
+  (let g = Gauge.make () in Gauge.set ~now:(Clock.Time.o 1.) g 5 ; sample (Gauge.T g) = [ Params.empty, Value { min = 5 ; current = 5 ; max = 5 ; sample_min = 5 ; sample_max = 5 } ])
+  (* The window is what happened since the last sample; the extremes beside it are those since the metric began. *) \
+  (let now = Clock.Time.o 1. in let g = Gauge.make () in Gauge.set ~now g 5 ; Gauge.set ~now g 1 ; ignore (sample (Gauge.T g)) ; Gauge.set ~now g 3 ; sample (Gauge.T g) = [ Params.empty, Value { min = 1 ; current = 3 ; max = 5 ; sample_min = 1 ; sample_max = 3 } ])
+  (* Nothing having moved, the window is the value standing still. *) \
+  (let now = Clock.Time.o 1. in let g = Gauge.make () in Gauge.set ~now g 5 ; Gauge.set ~now g 2 ; ignore (sample (Gauge.T g)) ; sample (Gauge.T g) = [ Params.empty, Value { min = 2 ; current = 2 ; max = 5 ; sample_min = 2 ; sample_max = 2 } ])
+  (* A duration's window holds nothing until one is measured in it, which is not the same as a duration of zero. *) \
+  (let t = Timed.make () in let stop = Timed.start ~now:(Clock.Time.o 1.) t in stop ~now:(Clock.Time.o 3.) Params.empty ; (match sample (Timed.T t) with [ _, Durations d ] -> d.count = 1 && d.sample_min = Some (Clock.Interval.o 2.) && d.sample_max = Some (Clock.Interval.o 2.) | _ -> false) && (match sample (Timed.T t) with [ _, Durations d ] -> d.count = 1 && d.sample_min = None && d.sample_max = None | _ -> false))
  *)
 
 (* Which of them it is. A metric never changes kind, so this is what tells the
