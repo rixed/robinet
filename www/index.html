@@ -5,16 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
     <title>RobiNet</title>
     <!-- Linked for now; to be vendored into www/ so that this works offline. -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"/>
-    <link rel="stylesheet" href="uPlot.min.css"/>
+    <!-- Everything this page needs is served from the binary itself: a
+         simulator on a machine with no network still gets its interface.
+         Pico CSS, uPlot and Alpine (all MIT) live in www/ like the rest; the
+         `vendor' target of the Makefile is where their versions are pinned and
+         where they are fetched from. -->
+    <link rel="stylesheet" href="pico.min.css"/>
+    <link rel="stylesheet" href="uplot.min.css"/>
     <link rel="stylesheet" href="style.css"/>
     <!-- Ours first: Alpine dispatches alpine:init as it starts, and a component
          registered after that is never seen. -->
-    <!-- Served from the binary, so that a simulator on a machine with no
-         network still draws its charts. -->
-    <script defer src="uPlot.iife.min.js"></script>
+    <script defer src="uplot.min.js"></script>
+    <!-- Deferred scripts run in the order they are written: this one defines
+         the component that the next one then goes looking for. -->
     <script defer src="app.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script defer src="alpine.min.js"></script>
 </head>
 <body x-data="admin" x-init="start()">
 

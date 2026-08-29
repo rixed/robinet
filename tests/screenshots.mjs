@@ -62,6 +62,18 @@ const page = await browser.newPage({ viewport: { width: 1400, height: 950 } })
 const problems = []
 page.on('pageerror', e => problems.push('uncaught: ' + e.message))
 
+/* Everything the page needs is served by the simulator itself: a robinet
+ * program is one binary, and its interface has to work on a machine with no
+ * network. Anything reaching elsewhere is cut off here and reported, so that a
+ * script or a style sheet fetched from a CDN cannot pass unnoticed. */
+const outside = []
+await page.route('**', route => {
+    const url = route.request().url()
+    if (url.startsWith(BASE + '/')) return route.continue()
+    outside.push(url)
+    return route.abort()
+})
+
 await page.goto(BASE + '/', { waitUntil: 'networkidle' })
 await page.waitForSelector('nav.tree a')
 
@@ -497,6 +509,10 @@ for (const age of [ 0, 0.5, 2.5, 45.7, 3600 * 3 + 1200, 86400 ]) {
 if (spots.size !== 1)
     problems.push('the reset button moves as its metric refreshes: ' +
                   [...spots].join(' then '))
+
+if (outside.length)
+    problems.push('the page went looking outside the simulator for ' +
+                  [ ...new Set(outside) ].join(', '))
 
 console.log('banner said:', banner)
 console.log(problems.length ? 'UNCAUGHT ERRORS:\n  ' + problems.join('\n  ')
