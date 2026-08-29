@@ -145,6 +145,47 @@ if (counted.counter !== '1,024 bytes')
 if (/seconds/.test(counted.timed))
     problems.push('a duration took a unit it had no use for: ' + counted.timed)
 
+/* A DHCP server: values that may be absent. The box in front says whether
+ * there is one; the input beside it keeps the last, disabled, so that ticking
+ * the box back offers it again rather than an empty field. */
+await page.getByRole('link', { name: 'dhcpd', exact: true }).first().click()
+await page.waitForSelector('input.enabler')
+const dhcpdId = (await (await fetch(`${BASE}/api/simulations/0/widgets`)).json())
+                .find(w => w.name === 'dhcpd').id
+const mtuValue = async () =>
+    (await (await fetch(
+        `${BASE}/api/simulations/0/widgets/${dhcpdId}/properties/MTU`)).json()).value
+const mtu = page.locator('article.properties tbody tr').filter({ hasText: 'MTU' })
+const box = mtu.locator('input.enabler')
+const num = mtu.locator('input[type=number]')
+const unset = page.locator('article.properties tbody tr').filter({ hasText: 'gateway' })
+if ((await unset.locator('span.ro').innerText()).trim() !== 'unset')
+    problems.push('an unset read-only value must say so, not show an empty cell')
+if (await unset.locator('input.enabler').count())
+    problems.push('a read-only value got a box that cannot do anything')
+await page.screenshot({ path: `${OUT}/b-optional.png` })
+
+if (!await box.isChecked()) problems.push('a value that is there must be ticked')
+await box.uncheck()
+await page.waitForTimeout(500)
+if (await mtuValue() !== null) problems.push('unticking must unset the value')
+if (!await num.isDisabled() || await num.inputValue() !== '1500')
+    problems.push('the input must stay, disabled, holding what it had: ' +
+                  await num.inputValue())
+/* Three polls: the box is part of what the reader is editing. */
+await page.waitForTimeout(3200)
+if (await box.isChecked() || await num.inputValue() !== '1500')
+    problems.push('a poll undid the unticking')
+await box.check()
+await page.waitForTimeout(400)
+if (await mtuValue() !== null) problems.push('ticking the box alone must save nothing')
+if (!await num.evaluate(e => e === document.activeElement))
+    problems.push('ticking the box must hand the reader the field')
+await num.press('Enter')
+await page.waitForTimeout(400)
+if (await mtuValue() !== 1500)
+    problems.push('confirming must save what was remembered, got ' + await mtuValue())
+
 /* The switch: three peers, each joined by the cable that reaches it. */
 await page.getByRole('link', { name: 'switch', exact: true }).first().click()
 await page.waitForTimeout(300)

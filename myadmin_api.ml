@@ -104,8 +104,7 @@ let json_of_property (p : Widget.property) =
             bad_request "Cannot read property %S: %s" p.name
                 (Printexc.to_string e)
         | v -> v in
-    let kind =
-        match p.kind with
+    let rec loop = function
         | Widget.String -> `Assoc [ "type", `String "string" ]
         | Int -> `Assoc [ "type", `String "int" ]
         | Float -> `Assoc [ "type", `String "float" ]
@@ -132,14 +131,18 @@ let json_of_property (p : Widget.property) =
         (* Counter, gauge or timed comes with the value: the metric says what
          * it is. *)
         | Metric ->
-            `Assoc [ "type", `String "metric" ] in
+            `Assoc [ "type", `String "metric" ]
+        (* The interface builds the input for what is inside and puts a tick
+           box in front of it; the value itself is null when there is none. *)
+        | Optional k ->
+            `Assoc [ "type", `String "optional" ; "of", loop k ] in
     `Assoc [ "name", `String p.name ;
              "descr", `String p.descr ;
              (* What the figure is counted in, if anything: an empty string is
                 simply a property that has nothing to add to its number. *)
              "units", `String p.units ;
              "read_only", `Bool (p.setter = None) ;
-             "kind", kind ;
+             "kind", loop p.kind ;
              "value", value ]
 
 let json_of_peer (p : Widget.peer) =

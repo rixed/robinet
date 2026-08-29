@@ -18,8 +18,20 @@ const asText = (v) =>
     v === null || v === undefined ? '' :
     typeof v === 'string' ? v : JSON.stringify(v)
 
+/* What the input is built from: for a value that may be absent, the kind of
+ * the value it may hold. */
+const baseKind = (kind) => kind.type === 'optional' ? kind.of : kind
+
+/* What the field must show for a value that came from the simulator. A value
+ * that is not set keeps whatever was in the field: the input is only disabled,
+ * so ticking the box back hands the reader what they had. */
+const draftFor = (p, text) =>
+    p.kind.type === 'optional' && p.value === null ? p.draft : text
+
 const encode = (p) => {
-    switch (p.kind.type) {
+    /* Unticked is a value in itself: there is none. */
+    if (p.kind.type === 'optional' && !p.enabled) return 'null'
+    switch (baseKind(p.kind).type) {
         case 'bool':
             return JSON.stringify(p.draft === true || p.draft === 'true')
         case 'int': case 'float': case 'range': {
@@ -201,7 +213,7 @@ class ApiError extends Error {
 const sliderValues = 10000
 
 /* A property the reader can type into: what a poll must never overwrite. */
-const isEditable = (p) => !p.read_only && p.kind.type !== 'metric'
+const isEditable = (p) => !p.read_only && baseKind(p.kind).type !== 'metric'
 
 const api = async (path, options) => {
     let resp
@@ -532,6 +544,7 @@ document.addEventListener('alpine:init', () => {
                 if (!old) {
                     p.text = asText(p.value)
                     p.draft = p.text
+                    p.enabled = p.value !== null
                     p.dirty = false
                     p.error = null
                     p.metric = p.kind.type === 'metric'
@@ -559,7 +572,11 @@ document.addEventListener('alpine:init', () => {
                 }
                 /* Something typed but not accepted yet outlives even an
                  * explicit refresh: it is the reader's, not ours to drop. */
-                if (!old.dirty) { old.draft = old.text ; old.error = null }
+                if (!old.dirty) {
+                    old.draft = draftFor(old, old.text)
+                    old.enabled = p.value !== null
+                    old.error = null
+                }
                 return old
             })
             /* Reassigning the array re-runs the x-for; when the same objects
@@ -630,12 +647,38 @@ document.addEventListener('alpine:init', () => {
             this.unlightTimer = setTimeout(() => this.tock++, highlightMs + 30)
         },
 
+        /* The kind whose input this property gets: see [baseKind]. */
+        base(p) {
+            return baseKind(p.kind)
+        },
+
+        /* Has this property a value to edit at all? Anything that cannot be
+         * absent always has one. */
+        set(p) {
+            return p.kind.type !== 'optional' || p.enabled
+        },
+
         paramsText(params) {
             return Object.entries(params).map(([k, v]) => k + '=' + v).join(', ')
         },
 
+        /* The tick box in front of a value that may be absent. Unticking is
+         * itself a value -- there is none -- so it saves at once; ticking
+         * cannot save yet, since the field holds whatever was there before it
+         * was unset and it is the reader's to confirm or change. */
+        async toggleOptional(p, el) {
+            if (!p.enabled) return await this.save(p)
+            const input = el.closest('td')
+                            .querySelector('input[type=number], input[type=text], select')
+            if (input) this.$nextTick(() => input.focus())
+        },
+
         async save(p) {
-            if (p.read_only || p.draft === p.text) { p.dirty = false ; return }
+            /* Neither the value nor its presence has moved: nothing to say. */
+            const unchanged =
+                p.draft === p.text &&
+                (p.kind.type !== 'optional' || p.enabled === (p.value !== null))
+            if (p.read_only || unchanged) { p.dirty = false ; return }
             const { sim, id } = this.selected
             const r = await this.exchange(() => api(
                 `/simulations/${sim}/widgets/${id}/properties/${encodeURIComponent(p.name)}`,
@@ -652,7 +695,8 @@ document.addEventListener('alpine:init', () => {
             }
             p.value = r.value.value
             p.text = asText(r.value.value)
-            p.draft = p.text
+            p.draft = draftFor(p, p.text)
+            p.enabled = r.value.value !== null
             p.dirty = false
             p.error = null
         },

@@ -100,7 +100,7 @@ let make_net () =
      * written does not depend on which of a cable's happen to be read-only. *)
     (* And one bounded on a single side, since no cable has such a property and
        what the API says about an end that is not there is worth pinning. *)
-    let count = ref 0 in
+    let count = ref 0 and nickname = ref None in
     cable.widget.properties <-
         cable.widget.properties @
         [ Widget.property "sealed" ~descr:"Cannot be written."
@@ -108,7 +108,14 @@ let make_net () =
           Widget.property "count" ~descr:"Any number of things."
               ~kind:(Widget.IRange (0, max_int))
               ~getter:(fun () -> `Int !count)
-              ~setter:(fun v -> count := Widget.to_int_range ~min:0 v) ] ;
+              ~setter:(fun v -> count := Widget.to_int_range ~min:0 v) ;
+          (* And one that may have no value at all. *)
+          Widget.property "nickname" ~descr:"A name, or none."
+              ~kind:(Widget.optional Widget.String)
+              ~getter:(fun () ->
+                  match !nickname with None -> `Null | Some s -> `String s)
+              ~setter:(fun v ->
+                  nickname := Widget.to_option Widget.to_string v) ] ;
     (* Something to keep its clock busy for ever: *)
     let rec ticking () = Simulation.delay net tick ticking () in
     ticking () ;
@@ -446,6 +453,24 @@ let test_http net cable duration nthreads =
             (field "length" "units" = `String "meters") ;
         check "and says so plainly when it is counted in nothing"
             (field "count" "units" = `String "") ;
+        (* A value that may be absent: the interface is told what the value
+           would be, and null is how its absence travels both ways. *)
+        check "an optional value says what it would hold"
+            (kind "nickname" =
+                `Assoc [ "type", `String "optional" ;
+                         "of", `Assoc [ "type", `String "string" ] ]) ;
+        check "PUT a value to an optional property"
+            (fst (http ~meth:"PUT" ~body:"\"link0\"" port
+                      (Printf.sprintf
+                          "/api/simulations/%d/widgets/%d/properties/nickname"
+                          net_id cable_id)) = 200 &&
+             field "nickname" "value" = `String "link0") ;
+        check "PUT null unsets it"
+            (fst (http ~meth:"PUT" ~body:"null" port
+                      (Printf.sprintf
+                          "/api/simulations/%d/widgets/%d/properties/nickname"
+                          net_id cable_id)) = 200 &&
+             field "nickname" "value" = `Null) ;
         check "a value within a range is taken"
             (fst (http ~meth:"PUT" ~body:"5" port
                       (Printf.sprintf

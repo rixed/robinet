@@ -46,7 +46,7 @@ struct
           netmask : Ip.Addr.t option ;
           broadcast : Ip.Addr.t option ;
           gw : Ip.Addr.t option ;
-          mtu : int option ;
+          mutable mtu : int option ;
           dns : Ip.Addr.t option ;
           ntp : Ip.Addr.t option ;
           (* The whole range available. Must deduce those leased: *)
@@ -82,8 +82,10 @@ struct
             netmask ; broadcast ; gw ; mtu ; dns ; ntp ;
             ip_range ; offers ; leases ; used_ips ;
             parameters = None ; queries } in
-        let string_of_ip_opt = function
-            | None -> `String ""
+        (* Those options may have no value, which is what [`Null] says; an
+         * empty string would be a value, and a nonsensical one at that. *)
+        let json_of_ip_opt = function
+            | None -> `Null
             | Some ip -> `String (Ip.Addr.to_string ip) in
         widget.properties <- Widget.[
             property "authoritative" ~kind:Bool
@@ -97,16 +99,27 @@ struct
                     t.lease_time_sec <- to_int_range ~min:0 v ;
                     (* It is one of the options served: *)
                     t.parameters <- None) ;
-            property "netmask" ~kind:String
-                ~getter:(fun () -> string_of_ip_opt t.netmask) ;
-            property "broadcast" ~kind:String
-                ~getter:(fun () -> string_of_ip_opt t.broadcast) ;
-            property "gateway" ~kind:String
-                ~getter:(fun () -> string_of_ip_opt t.gw) ;
-            property "DNS" ~kind:String
-                ~getter:(fun () -> string_of_ip_opt t.dns) ;
-            property "NTP" ~kind:String
-                ~getter:(fun () -> string_of_ip_opt t.ntp) ;
+            property "netmask" ~kind:(optional String)
+                ~getter:(fun () -> json_of_ip_opt t.netmask) ;
+            property "broadcast" ~kind:(optional String)
+                ~getter:(fun () -> json_of_ip_opt t.broadcast) ;
+            property "gateway" ~kind:(optional String)
+                ~getter:(fun () -> json_of_ip_opt t.gw) ;
+            property "DNS" ~kind:(optional String)
+                ~getter:(fun () -> json_of_ip_opt t.dns) ;
+            property "NTP" ~kind:(optional String)
+                ~getter:(fun () -> json_of_ip_opt t.ntp) ;
+            (* Clients are told the MTU only when there is one to tell them
+             * about, so this is the whole of [int option]: no value at all,
+             * or one that must be a possible MTU. *)
+            property "MTU" ~kind:(optional (IRange (68, 65535))) ~units:"bytes"
+                ~descr:"Interface MTU to offer, if any"
+                ~getter:(fun () ->
+                    match t.mtu with None -> `Null | Some m -> `Int m)
+                ~setter:(fun v ->
+                    t.mtu <- to_option (to_int_range ~min:68 ~max:65535) v ;
+                    (* It is one of the options served: *)
+                    t.parameters <- None) ;
             property "leases" ~descr:"Number of current leases" ~kind:Int
                 ~getter:(fun () -> `Int (BitHash.length t.leases)) ;
             metric_property "queries" ~descr:"Count queries per status"
@@ -173,7 +186,21 @@ struct
             (fun p -> Option.get p.Widget.setter) in
         set_lease_time (`Int 60) ;
         assert_bool "and follows when it is changed"
-            (Bitstring.equals (offered ()) (bitstring_of_int32 60))
+            (Bitstring.equals (offered ()) (bitstring_of_int32 60)) ;
+        (* Same for an option that may be there or not: asking for it when
+           there is none must bring nothing back. *)
+        let set_mtu =
+            List.find (fun (p : Widget.property) -> p.Widget.name = "MTU")
+                      st.widget.Widget.properties |>
+            (fun p -> Option.get p.Widget.setter) in
+        let mtu_asked () =
+            let request = String.of_char (Char.chr Dhcp.Option.interface_mtu) in
+            List.mem_assoc Dhcp.Option.interface_mtu (get_options st (Some request)) in
+        assert_bool "an option that has no value is not served" (not (mtu_asked ())) ;
+        set_mtu (`Int 1400) ;
+        assert_bool "and is served once it has one" (mtu_asked ()) ;
+        set_mtu `Null ;
+        assert_bool "and stops being served when it loses it" (not (mtu_asked ()))
      *)
     (*$>*)
 

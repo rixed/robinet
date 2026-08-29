@@ -220,7 +220,7 @@
                                         <!-- A metric: one row per parameter
                                              combination, and when it was last
                                              touched. -->
-                                        <template x-if="p.kind.type === 'metric'">
+                                        <template x-if="base(p).type === 'metric'">
                                             <div class="metric">
                                                 <p x-show="!p.metric.rows.length" class="ro">
                                                     <small>nothing yet</small></p>
@@ -250,44 +250,60 @@
                                             </div>
                                         </template>
 
-                                        <span x-show="p.read_only && p.kind.type !== 'metric'"
-                                              class="ro" :class="{ changed: fresh(p.changedAt) }"
-                                              x-text="p.text"></span>
+                                        <!-- A value that may be absent: the box
+                                             says whether there is one, and the
+                                             input keeps the last one, disabled,
+                                             so that ticking it back offers it
+                                             again. -->
+                                        <template x-if="!p.read_only && p.kind.type === 'optional'">
+                                            <input type="checkbox" class="enabler" :disabled="!online"
+                                                   x-model="p.enabled"
+                                                   :title="p.enabled ? 'unset this value' : 'give it a value'"
+                                                   @change="toggleOptional(p, $event.target)"/>
+                                        </template>
 
-                                        <template x-if="!p.read_only && p.kind.type === 'bool'">
-                                            <input type="checkbox" :disabled="!online" :checked="p.draft === 'true'"
+                                        <span x-show="p.read_only && base(p).type !== 'metric'"
+                                              class="ro" :class="{ changed: fresh(p.changedAt),
+                                                                   unset: p.value === null }"
+                                              x-text="p.value === null ? 'unset' : p.text"></span>
+
+                                        <template x-if="!p.read_only && base(p).type === 'bool'">
+                                            <input type="checkbox" :disabled="!online || !set(p)" :checked="p.draft === 'true'"
                                                    @change="p.draft = $event.target.checked ? 'true' : 'false' ; save(p)"/>
                                         </template>
 
-                                        <template x-if="!p.read_only && p.kind.type === 'enum'">
-                                            <select :disabled="!online" x-model="p.draft" @change="save(p)">
-                                                <template x-for="c in p.kind.choices" :key="c">
+                                        <template x-if="!p.read_only && base(p).type === 'enum'">
+                                            <select :disabled="!online || !set(p)" x-model="p.draft" @change="save(p)">
+                                                <template x-for="c in base(p).choices" :key="c">
                                                     <option :value="c" x-text="c"></option>
                                                 </template>
                                             </select>
                                         </template>
 
-                                        <template x-if="!p.read_only && p.kind.type === 'range'">
+                                        <template x-if="!p.read_only && base(p).type === 'range'">
                                             <span class="range">
-                                                <template x-if="hasSlider(p.kind)">
-                                                    <input type="range" :disabled="!online" :min="p.kind.min" :max="p.kind.max"
-                                                           :step="sliderStep(p.kind)"
+                                                <template x-if="hasSlider(base(p))">
+                                                    <input type="range" :disabled="!online || !set(p)"
+                                                           :min="base(p).min" :max="base(p).max"
+                                                           :step="sliderStep(base(p))"
                                                            x-model="p.draft" @change="save(p)"/>
                                                 </template>
-                                                <input type="number" :disabled="!online" :min="p.kind.min" :max="p.kind.max"
-                                                       :step="p.kind.int ? 1 : 'any'" x-model="p.draft"
+                                                <input type="number" :disabled="!online || !set(p)"
+                                                       :min="base(p).min" :max="base(p).max"
+                                                       :step="base(p).int ? 1 : 'any'" x-model="p.draft"
                                                        @keydown.enter="save(p)" @blur="save(p)"/>
                                             </span>
                                         </template>
 
-                                        <template x-if="!p.read_only && (p.kind.type === 'int' || p.kind.type === 'float')">
-                                            <input type="number" :disabled="!online" :step="p.kind.type === 'int' ? 1 : 'any'"
+                                        <template x-if="!p.read_only && (base(p).type === 'int' || base(p).type === 'float')">
+                                            <input type="number" :disabled="!online || !set(p)"
+                                                   :step="base(p).type === 'int' ? 1 : 'any'"
                                                    x-model="p.draft"
                                                    @keydown.enter="save(p)" @blur="save(p)"/>
                                         </template>
 
-                                        <template x-if="!p.read_only && p.kind.type === 'string'">
-                                            <input type="text" :disabled="!online" x-model="p.draft"
+                                        <template x-if="!p.read_only && base(p).type === 'string'">
+                                            <input type="text" :disabled="!online || !set(p)" x-model="p.draft"
                                                    @keydown.enter="save(p)" @blur="save(p)"/>
                                         </template>
 
@@ -296,7 +312,7 @@
                                              what is typed and what is sent must
                                              stay the bare number. A metric's
                                              figures carry their own. -->
-                                        <small class="units" x-show="p.units && p.kind.type !== 'metric'"
+                                        <small class="units" x-show="p.units && base(p).type !== 'metric'"
                                                x-text="p.units"></small>
                                     </td>
                                     <td>

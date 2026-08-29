@@ -103,6 +103,26 @@ and kind =
      * does is reset it. Which sort of metric it is comes with the value, which
      * a metric, unlike a range, describes itself. *)
     | Metric
+    (* A value that may be absent, which is [`Null] on the wire. Build one with
+     * [optional] rather than by hand, so that the combinations that mean
+     * nothing cannot be written. *)
+    | Optional of kind
+
+(* Only a value can be absent, and only once: [Optional (Optional _)] has no
+ * second absence to describe, and a metric is a table that is always there --
+ * an empty one when nothing has happened yet. *)
+let optional = function
+    | (Optional _ | Metric) as k ->
+        invalid_arg ("Widget.optional: nothing to make optional in "^
+                     (match k with Metric -> "a metric"
+                                 | _ -> "an optional value"))
+    | k -> Optional k
+
+(*$T optional
+  optional Int = Optional Int
+  (try ignore (optional (Optional Int)) ; false with Invalid_argument _ -> true)
+  (try ignore (optional Metric) ; false with Invalid_argument _ -> true)
+ *)
 
 let property ?(descr="") ?(units="") ?setter ?(kind=String) ~getter name =
     { name ; descr ; units ; getter ; setter ; kind }
@@ -166,6 +186,13 @@ let to_int_range ?(min=min_int) ?(max=max_int) v =
                       else string_of_int b in
         bad_value "%d is not in range (%s…%s)" i (bound min) (bound max)
     else i
+
+(** Read a value that may be absent: [`Null] is the absence, anything else is
+ * read by [f]. The counterpart of an [Optional] kind, for the setter of a
+ * property whose field is an option. *)
+let to_option f = function
+    | `Null -> None
+    | v -> Some (f v)
 
 let to_bool = function
     | `Bool b -> b

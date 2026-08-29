@@ -305,6 +305,9 @@ button.metric-reset {
          vertical-align: middle; }
 .range input[type=number] { width: 7rem; }
 small.units { margin-left: .3rem; color: var(--pico-muted-color); }
+/* The box that says whether there is a value, in front of the input for it. */
+input[type=checkbox].enabler { margin-right: .4rem; vertical-align: middle; }
+.ro.unset { color: var(--pico-muted-color); font-style: italic; }
 tr.has-error input { border-color: var(--pico-del-color); }
 small.error { display: block; color: var(--pico-del-color); }
 

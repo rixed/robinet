@@ -31,6 +31,13 @@ let main =
             let _, dst = List.at hosts ((i + 1) mod List.length hosts) in
             h.Host.trx.Host.ping (Host.IPv4 dst)) hosts ;
         Simulation.delay net (Clock.Interval.msec 100.) tick () in
+    (* A DHCP server on the first host, so that the interface has properties
+     * that may have no value to show (and one metric that has not fired). *)
+    let first = fst (List.hd hosts) in
+    let dhcpd =
+        Dhcpd.State.make ~parent:first.Host.trx.Host.widget ~netmask ~mtu:1500
+            (Ip.Range.of_cidr (Ip.Cidr.of_string "192.168.1.128/25")) in
+    Dhcpd.serve dhcpd first.Host.trx ;
     tick () ;
     ignore (Simulation.start net) ;
     (* And the interface, in a simulation of its own so that pausing the one
