@@ -508,7 +508,7 @@ document.addEventListener('alpine:init', () => {
         /* Which panels of the dock are folded away. Remembered across
          * reloads: a reader who folds the graph away wants it folded away
          * tomorrow too. */
-        collapsed: { charts: false, logs: false },
+        collapsed: { properties: false, charts: false, logs: false },
 
         /*
          * Connection state
@@ -1206,6 +1206,15 @@ document.addEventListener('alpine:init', () => {
         mountLog(el) {
             new MutationObserver(() => this.followTail()).observe(el, {
                 childList: true, subtree: true })
+        },
+
+        /* Back to the newest line, and following it again. Unfolds the panel
+         * on the way if it was folded away: being shown the newest line is the
+         * whole of what was asked for. */
+        jumpToBottom() {
+            this.logFollow = true
+            if (this.collapsed.logs) this.fold('logs')
+            this.$nextTick(() => this.followTail())
         },
 
         onLogScroll() {

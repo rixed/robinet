@@ -144,7 +144,30 @@ nav.tree .count {
 
 /* ------------------------------------------------------------ main view */
 
-main { padding: 1rem 1.2rem; overflow-y: auto; }
+/* The main pane never scrolls as a whole: what is being looked at scrolls
+ * above, the dock keeps its place below, and every panel scrolls within its
+ * own bounds. A scrollbar inside a scrolling page is a good way to lose
+ * whatever one was reading. */
+main {
+    padding: 1rem 1.2rem;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+/* The widget being inspected: as much room as the dock leaves it. */
+main > .widget-view {
+    flex: 1 1 auto;
+    /* Never squeezed down to nothing, however much is docked below. */
+    min-height: 6rem;
+    overflow-y: auto;
+    /* So that the last row of a table does not end flush against the dock. */
+    padding-bottom: .4rem;
+}
+/* The dock takes what it needs and gives way when there is not enough: on a
+ * short window every panel shrinks rather than the widget above disappearing.
+ */
+main > .dock { flex: 0 1 auto; min-height: 0; }
 article.empty { color: var(--pico-muted-color); }
 
 nav.breadcrumb {
@@ -226,7 +249,7 @@ article.properties { margin-top: 2rem; }
 article.properties > header {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: .5rem;
 }
 article.properties > header button {
     margin: 0 0 0 auto;
@@ -234,6 +257,10 @@ article.properties > header button {
     padding: .2rem .6rem;
     font-size: .75rem;
 }
+/* Only the Refresh button is pushed to the far side; the twisty belongs where
+ * every other twisty on the page is, at the left of what it folds. */
+article.properties > header button.twisty { margin: 0 ; padding: 0 ; }
+article.properties > header small { color: var(--pico-muted-color); }
 /* Fixed rather than sized from the content: the values refresh every second
  * and gain a digit now and then, and with an automatic layout every column in
  * the table shifts when they do. Proportions rather than lengths, so that they
@@ -317,16 +344,32 @@ small.error { display: block; color: var(--pico-del-color); }
  * most about half the window: what is being watched matters, but not more
  * than what is being inspected. */
 .dock {
-    margin-top: .8rem;
-    display: flex;
-    flex-direction: column;
+    /* Where the page stops being about the widget being looked at: worth a
+     * line, since what is below outlives what is above. */
+    border-top: 1px solid var(--pico-muted-border-color);
+    padding-top: .5rem;
+    margin-top: .6rem;
+    /* A grid of equal rows rather than a column: two open panels then get half
+     * of the dock each, whatever they hold. Left to flexbox they would divide
+     * it by what is in them, and a chart -- which has a plot of a fixed height
+     * in it and cannot shrink far -- would take it all and leave the log a
+     * couple of lines. */
+    display: grid;
+    grid-auto-rows: minmax(3rem, 1fr);
+    align-content: start;
     gap: .5rem;
-    max-height: 60vh;
+    /* Half the window at most: what is watched here matters, but never more
+     * than the widget being looked at above it. Two open panels then get about
+     * a quarter each, less than their own caps -- which is why their bodies
+     * shrink as well as scroll. */
+    max-height: 50vh;
 }
 .dock .panel {
     display: flex;
     flex-direction: column;
+    /* Down to its header, and no further. */
     min-height: 0;
+    overflow: hidden;
     border: 1px solid var(--pico-muted-border-color);
     border-radius: var(--pico-border-radius);
     background: var(--pico-card-background-color);
@@ -353,7 +396,7 @@ small.error { display: block; color: var(--pico-del-color); }
     padding: 0 .2rem;
     line-height: 1;
 }
-.dock .panel > .body { overflow-y: auto; min-height: 0; }
+.dock .panel > .body { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
 
 /* --------------------------------------------------------------- charts */
 
@@ -464,6 +507,16 @@ button.metric-plot svg {
     line-height: 1;
 }
 .log-legend button:hover { color: var(--pico-del-color); }
+
+/* Only there when the reader has left the tail: the way back. */
+button.follow-tail {
+    flex: none;
+    width: auto;
+    margin: 0;
+    padding: 0 .4rem;
+    font-size: .7rem;
+    line-height: 1.4;
+}
 
 .body.log {
     max-height: 33vh;

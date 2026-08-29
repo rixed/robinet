@@ -132,7 +132,7 @@
         </template>
 
         <template x-if="selected">
-            <div>
+            <div class="widget-view">
                 <!-- ancestors, as a straight line, always -->
                 <nav class="breadcrumb" aria-label="ancestors">
                     <template x-for="(a, i) in ancestors()" :key="a.id">
@@ -207,7 +207,12 @@
                 <!-- ================= properties ================= -->
                 <article class="properties">
                     <header>
+                        <button class="twisty" @click="fold('properties')"
+                                :title="collapsed.properties ? 'Show them' : 'Fold them away'"
+                                x-text="collapsed.properties ? '▸' : '▾'"></button>
                         <strong>Properties</strong>
+                        <small x-show="collapsed.properties && props.length"
+                               x-text="props.length + (props.length > 1 ? ' of them' : '')"></small>
                         <!-- The live refresh deliberately leaves the fields
                              below alone; this is how one asks for their true
                              values back. -->
@@ -217,6 +222,7 @@
                                 @click="loadProps({ full: true })">Refresh</button>
                     </header>
 
+                    <div class="body" x-show="!collapsed.properties">
                     <p x-show="propsState === 'loading'" x-cloak>
                         <small>Reading them&hellip;</small></p>
                     <p x-show="propsState === 'loaded' && !props.length" x-cloak>
@@ -356,6 +362,7 @@
                             </template>
                         </tbody>
                     </table>
+                    </div>
                 </article>
             </div>
         </template>
@@ -432,6 +439,12 @@
                         </span>
                     </template>
                 </span>
+                <!-- Only there when the reader has scrolled away from the
+                     newest line, which is the only time it has anything to
+                     do. -->
+                <button class="outline secondary follow-tail" x-show="!logFollow"
+                        title="Jump to the newest line and follow it"
+                        @click="jumpToBottom()">&darr; newest</button>
             </header>
             <div class="body log" x-show="!collapsed.logs"
                  x-ref="logBody" x-init="mountLog($el)" @scroll="onLogScroll()">

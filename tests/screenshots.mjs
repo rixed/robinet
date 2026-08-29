@@ -351,19 +351,33 @@ if (logged.who.length !== 2)
 if (!logged.ordered) problems.push('and it must be in order')
 await page.screenshot({ path: `${OUT}/g-logs.png` })
 
-/* Following the newest line, until the reader looks away. */
+/* Following the newest line, until the reader looks away. Waited for rather
+ * than timed: how fast the lines come is the simulation's business. */
+const waitFor = async (cond, secs = 6) => {
+    for (let i = 0; i < secs * 10; i++) {
+        if (await cond()) return true
+        await page.waitForTimeout(100)
+    }
+    return false
+}
 const atBottom = () => page.locator('.body.log').evaluate(e =>
     e.scrollTop + e.clientHeight >= e.scrollHeight - 4)
+const following = () => page.evaluate(() => Alpine.$data(document.body).logFollow)
+/* There has to be more than fits, or there is nothing to scroll away from. */
+if (!await waitFor(() => page.locator('.body.log').evaluate(e =>
+        e.scrollHeight > e.clientHeight + 50)))
+    problems.push('the log window filled up with nothing to scroll')
 if (!await atBottom()) problems.push('the log window must follow the newest line')
 await page.locator('.body.log').evaluate(e => { e.scrollTop = 0 })
-await page.waitForTimeout(2500)
-if (await page.evaluate(() => Alpine.$data(document.body).logFollow))
+if (!await waitFor(async () => !await following()))
     problems.push('it must stop following once the reader scrolls up')
+await page.waitForTimeout(1500)   /* a poll or two of staying put */
 if (await page.locator('.body.log').evaluate(e => e.scrollTop) > 40)
     problems.push('and leave what they are reading where it was')
 await page.locator('.body.log').evaluate(e => { e.scrollTop = e.scrollHeight })
-await page.waitForTimeout(2500)
-if (!await atBottom()) problems.push('and follow again once they come back to it')
+if (!await waitFor(following))
+    problems.push('and follow again once they come back to it')
+if (!await waitFor(atBottom)) problems.push('staying at the newest line')
 
 /* Let it rip: the queues then overwrite themselves between two polls, and a
  * log that went quiet about what it dropped would be lying. */
@@ -373,6 +387,52 @@ if (!await page.locator('.body.log .line.lost').count())
     problems.push('a gap in the log must say so')
 const kept = await page.evaluate(() => Alpine.$data(document.body).logLines().length)
 if (kept > 2000) problems.push('the window must keep a bounded number of lines: ' + kept)
+
+/* A chart as well as the logs, so that both panels are docked at once -- the
+ * charts were all closed again by the section above. */
+await (await plotIcon('cable0', 'total bits')).click()
+await page.waitForSelector('article.chart canvas')
+await page.waitForTimeout(1000)
+
+/* With both panels docked, nothing above them scrolls: the widget being
+ * looked at scrolls within its own bounds, and the panels within theirs. A
+ * scrollbar inside a scrolling page loses whatever one was reading. */
+const room = await page.evaluate(() => ({
+    doc: document.documentElement.scrollHeight - document.documentElement.clientHeight,
+    body: document.body.scrollHeight - document.body.clientHeight,
+    main: document.querySelector('main').scrollHeight -
+          document.querySelector('main').clientHeight,
+    view: document.querySelector('.widget-view').clientHeight,
+    charts: document.querySelector('.body.charts').clientHeight,
+    logs: document.querySelector('.body.log').clientHeight,
+}))
+if (room.doc > 0 || room.body > 0 || room.main > 0)
+    problems.push('the page itself must not scroll: ' + JSON.stringify(room))
+/* And the two panels share the dock rather than one crowding the other out. */
+if (Math.min(room.charts, room.logs) < Math.max(room.charts, room.logs) / 3)
+    problems.push('the docked panels must share the room: ' + JSON.stringify(room))
+if (room.view < 100)
+    problems.push('and leave the widget above something to be seen in: ' + room.view)
+
+/* The properties fold away too, and say how many they are while folded. */
+await page.locator('article.properties .twisty').click()
+await page.waitForTimeout(300)
+if (await page.locator('article.properties table').isVisible())
+    problems.push('folding the properties must hide them')
+if (!await page.locator('article.properties header strong').isVisible())
+    problems.push('but not the panel itself')
+await page.locator('article.properties .twisty').click()
+
+/* The way back to the newest line, for a reader who scrolled away from it. */
+if (await page.locator('button.follow-tail').isVisible())
+    problems.push('nothing to jump to while already following')
+await page.locator('.body.log').evaluate(e => { e.scrollTop = 0 })
+await page.waitForTimeout(1500)
+if (!await page.locator('button.follow-tail').isVisible())
+    problems.push('a way back must appear once the reader scrolls up')
+await page.locator('button.follow-tail').click()
+await page.waitForTimeout(800)
+if (!await atBottom()) problems.push('and it must go back to the newest line')
 
 /* Folded away, the panel still says what it is watching -- and stays folded. */
 await page.locator('section.panel.logs .twisty').click()
@@ -394,10 +454,13 @@ await page.waitForTimeout(1500)
 await page.screenshot({ path: `${OUT}/d-offline.png` })
 const banner = (await page.locator('.banner').innerText()).replace(/\s+/g, ' ')
 /* Nothing that needs the simulator may still look pressable. */
+/* Folding a panel away is the reader's own business and works offline, so the
+   twisty is not one of the things that must go grey. */
 const live = await page.evaluate(() =>
     [...document.querySelectorAll('.controls button, article.properties button, ' +
                                   'article.properties input, article.properties select')]
-        .filter(e => e.offsetParent !== null && !e.disabled)
+        .filter(e => e.offsetParent !== null && !e.disabled &&
+                     !e.classList.contains('twisty'))
         .map(e => e.textContent.trim() || e.type))
 if (live.length) problems.push('still offered while offline: ' + live.join(', '))
 
