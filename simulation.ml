@@ -125,7 +125,31 @@ type t =
        * and fire every pending event at once. *)
       mutable paused_total : Interval.t ;
       (* When > 0, run that many events then pause again: *)
-      mutable steps : int }
+      mutable steps : int ;
+      (* Non-realtime only: how fast simulated time is to advance compared to
+       * the wall clock -- 1. for real time, .5 for half of it, 2. for twice as
+       * fast. [None] is as fast as it can, which is what a closed simulation
+       * does when nobody asks for anything else.
+       *
+       * Pausing leaves it alone, so that unpausing goes back to the speed that
+       * was in use: it is the simulation that remembers it, not whoever paused
+       * it. *)
+      mutable speed_ratio : float option ;
+      (* Where the pace is measured from: the wall clock time (the float, as
+       * [Unix.gettimeofday] gives it) and the simulated time (the [Time.t]),
+       * both read at the same instant when the anchor was set. An event due at
+       * simulated time [ts] is then due, by the wall clock, at
+       * [wall +. (ts -. sim) /. ratio].
+       *
+       * Measured from an anchor rather than event by event: per event, every
+       * dispatch that ran late would push the next one later still, and a
+       * simulation that fell behind would stay behind instead of catching up.
+       * Set afresh whenever the speed changes or the simulation resumes --
+       * neither of which is the simulation being late. *)
+      mutable pace_anchor : (float * Time.t) option ;
+      (* How far behind that pace the simulation is: zero while it keeps up,
+       * growing while it cannot go as fast as it was asked to. *)
+      mutable late : Interval.t }
 
 (* Indexed by id, which is handed out in sequence, so this is a plain array
  * rather than a hash: resolving the simulation a widget belongs to happens
@@ -173,7 +197,10 @@ let make =
               paused = false ;
               paused_since = None ;
               paused_total = Interval.zero ;
-              steps = 0 } in
+              steps = 0 ;
+              speed_ratio = None ;
+              pace_anchor = None ;
+              late = Interval.zero } in
         register t ;
         t
 
@@ -300,12 +327,21 @@ let pause t () =
         if not t.paused then (
             t.paused <- true ;
             t.paused_since <- Some (Unix.gettimeofday ()) ;
-            t.steps <- 0
+            t.steps <- 0 ;
+            (* Standing still is not falling behind. *)
+            t.late <- Interval.zero
         )) () ;
     Condition.signal t.cond
 
+(* Measure the pace from here: this wall clock time, this simulated time. Also
+ * clears the lateness, which was measured against the anchor being replaced. *)
+let reanchor t =
+    t.pace_anchor <- Some (Unix.gettimeofday (), !(t.now)) ;
+    t.late <- Interval.zero
+
 (** Resume a paused simulation, accounting for the time it stood still so that
- * its clock does not leap forward. *)
+ * its clock does not leap forward. It goes back to the speed it was running at:
+ * pausing does not disturb that. *)
 let resume t () =
     with_lock t (fun () ->
         if t.paused then (
@@ -315,9 +351,42 @@ let resume t () =
                                  (Interval.o (Unix.gettimeofday () -. since))
             ) t.paused_since ;
             t.paused_since <- None ;
-            t.paused <- false
+            t.paused <- false ;
+            (* Standing still is not being late. *)
+            reanchor t
         )) () ;
     Condition.signal t.cond
+
+(** How fast simulated time is to advance compared to the wall clock: [None] as
+ * fast as it can, [Some r] at [r] times real time -- 1. for real time, .5 for
+ * half of it. Meaningless for a simulation that follows the wall clock, and
+ * refused for one. *)
+let set_speed_ratio t ratio =
+    if t.realtime then
+        invalid_arg ("Simulation.set_speed_ratio: "^ t.name ^
+                     " follows the wall clock") ;
+    Option.may (fun r ->
+        (* [is_finite] is false for the infinities and for nan alike; the
+         * comparison then leaves only the positives. *)
+        if not (Float.is_finite r) || r <= 0. then
+            invalid_arg (Printf.sprintf
+                "Simulation.set_speed_ratio: %g is not a speed (use None to \
+                 run as fast as possible)" r)
+    ) ratio ;
+    with_lock t (fun () ->
+        t.speed_ratio <- ratio ;
+        (* The speed that was not being kept up with is not this one's fault. *)
+        reanchor t) () ;
+    Condition.signal t.cond
+
+(* When, by the wall clock, the event at [ts] is due at that speed. *)
+let due_at t ratio ts =
+    match t.pace_anchor with
+    | None ->
+        reanchor t ;
+        Unix.gettimeofday ()
+    | Some (wall0, sim0) ->
+        wall0 +. (Time.sub ts sim0 :> float) /. ratio
 
 (** Run [n] events then pause again. *)
 let step ?(n=1) t () =
@@ -408,7 +477,29 @@ let next_event t =
                      * instead of spinning: *)
                     wait_on_cond t ;
                     false
-                ) else true) ()
+                ) else match t.speed_ratio with
+                | None ->
+                    (* As fast as it can. *)
+                    true
+                | Some _ when t.steps > 0 ->
+                    (* A step is asked for now: pacing it would defeat it. *)
+                    true
+                | Some ratio ->
+                    let ts, _ = Events.min_binding t.events in
+                    let due = due_at t ratio ts
+                    and wall = Unix.gettimeofday () in
+                    if wall >= due then (
+                        (* Due already: run it, and say how far behind we are. *)
+                        t.late <- Interval.o (wall -. due) ;
+                        true
+                    ) else (
+                        t.late <- Interval.zero ;
+                        (* Sleeping on the condition rather than on the clock:
+                         * whoever changes the speed, resumes or adds an event
+                         * meanwhile wakes us to reconsider. *)
+                        wait_on_cond ~until:(Time.o due) t ;
+                        false
+                    )) ()
         ) in
     if run_first_event then (
         (* We have some work to do *)

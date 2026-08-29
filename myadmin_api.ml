@@ -157,6 +157,12 @@ let json_of_simulation (s : Simulation.t) =
              "now", `Float (Clock.Time.to_timestamp (Simulation.now s)) ;
              "now_str", `String (Clock.Time.to_string (Simulation.now s)) ;
              "realtime", `Bool s.realtime ;
+             (* Null is "as fast as it can", and is what a realtime simulation
+              * reports too: its speed is not ours to choose. *)
+             "speed_ratio", (match s.speed_ratio with
+                            | None -> `Null
+                            | Some r -> `Float r) ;
+             "late", `Float (s.late :> float) ;
              "running", `Bool s.continue ;
              "paused", `Bool s.paused ;
              "paused_total", `Float (s.paused_total :> float) ;
@@ -191,7 +197,7 @@ let control_simulation serving _mth matches vars _qry_body resp =
     let s = simulation_of_matches matches 1 in
     let action = Url.decode (matched matches 2) in
     (* Pausing the simulation that serves this API would freeze the very thread
-     * about to answer, and nothing would be left to unpause it. This is exactly
+     * about to answer, and nothing would be left to resume it. This is exactly
      * why myadmin belongs in a simulation of its own. *)
     if s == serving then
         bad_request "Simulation %s serves this API and cannot control itself"
@@ -199,6 +205,21 @@ let control_simulation serving _mth matches vars _qry_body resp =
     (match action with
     | "pause" -> Simulation.pause s ()
     | "resume" -> Simulation.resume s ()
+    | "speed" ->
+        if s.Simulation.realtime then
+            bad_request "Simulation %s follows the wall clock: its speed is \
+                         not ours to set" s.Simulation.name ;
+        let ratio =
+            match Hashtbl.find_option vars "ratio" with
+            | None | Some "full" -> None
+            | Some r ->
+                (match float_of_string r with
+                | exception _ -> bad_request "Not a speed: %S" r
+                | r when not (Float.is_finite r) || r <= 0. ->
+                    bad_request "%g is not a speed (use \"full\" to run as \
+                                 fast as possible)" r
+                | r -> Some r) in
+        Simulation.set_speed_ratio s ratio
     | "step" ->
         let n =
             match Hashtbl.find_option vars "n" with
@@ -209,7 +230,7 @@ let control_simulation serving _mth matches vars _qry_body resp =
                 | n -> n) in
         Simulation.step ~n s ()
     | _ ->
-        bad_request "Unknown action %S (pause, resume or step)" action) ;
+        bad_request "Unknown action %S (pause, resume, speed or step)" action) ;
     respond resp (Simulation.borrow s (fun () -> json_of_simulation s))
 
 let get_widgets _mth matches vars _qry_body resp =
@@ -314,7 +335,7 @@ let json_errors f mth matches vars qry_body resp =
  * be paused, and the only one it can be asked to control that it must refuse. *)
 let resources serving : (Str.regexp * Opache.resource) list =
     List.map (fun (re, f) -> re, json_errors f) [
-    Str.regexp "/api/simulations/\\([0-9]+\\)/\\(pause\\|resume\\|step\\)$",
+    Str.regexp "/api/simulations/\\([0-9]+\\)/\\(pause\\|resume\\|speed\\|step\\)$",
         control_simulation serving ;
     Str.regexp "/api/simulations/\\([0-9]+\\)$", get_simulation ;
     Str.regexp "/api/simulations$", get_simulations ;

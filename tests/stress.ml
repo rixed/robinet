@@ -153,6 +153,65 @@ let test_clock net =
          Thread.delay 0.05 ;
          Simulation.now net > t0)
 
+(* How fast a simulation runs against the wall clock, in simulated seconds per
+   wall second, measured over [wall]. *)
+let measure_speed net wall =
+    let t0 = Simulation.now net in
+    Thread.delay wall ;
+    (Clock.Time.sub (Simulation.now net) t0 :> float) /. wall
+
+let test_speed net =
+    section "Clock: speed against the wall clock" ;
+    (* This network's events are on a 100ms grid and time only moves when one
+       of them is dispatched, so a measurement over a second lands within one
+       tick of the speed asked for. That tick, not drift, is what the tolerances
+       below leave room for. *)
+    Simulation.set_speed_ratio net (Some 1.) ;
+    check_between "at one, a simulated second takes a second" 0.85 1.15
+        (measure_speed net 1.) ;
+    Simulation.set_speed_ratio net (Some 4.) ;
+    check_between "at four, four of them do" 3.8 4.2
+        (measure_speed net 1.) ;
+    Simulation.set_speed_ratio net (Some 0.25) ;
+    check_between "at a quarter, a quarter of one does" 0.15 0.35
+        (measure_speed net 1.) ;
+    check "keeping up is not being late"
+        ((net.Simulation.late :> float) < 0.1) ;
+
+    (* Asked for more than any machine can do: it must say how far behind it
+       is rather than pretend. *)
+    Simulation.set_speed_ratio net (Some 1e9) ;
+    Thread.delay 0.5 ;
+    let late = (net.Simulation.late :> float) in
+    check_between "an impossible speed is reported as lateness" 0.4 2.0 late ;
+
+    (* Changing the speed is not the new speed being late. *)
+    Simulation.set_speed_ratio net (Some 1.) ;
+    check "changing the speed clears the lateness"
+        ((net.Simulation.late :> float) < 0.1) ;
+
+    (* A step is asked for now, whatever the pace says. *)
+    Simulation.set_speed_ratio net (Some 0.01) ;
+    Simulation.pause net () ;
+    Thread.delay 0.05 ;
+    let before = Simulation.now net in
+    Simulation.step ~n:5 net () ;
+    check "stepping does not wait for the pace"
+        (wait_for (fun () -> net.Simulation.steps = 0)) ;
+    Thread.delay 0.05 ;
+    check_between "and stepped by exactly five ticks" 0.49 0.51
+        (Clock.Time.sub (Simulation.now net) before :> float) ;
+    Simulation.resume net () ;
+
+    (* Back to what the other tests expect. *)
+    Simulation.set_speed_ratio net None ;
+    check "full speed outruns the wall clock" (measure_speed net 0.2 > 10.) ;
+    check "a realtime simulation has no speed of ours to set"
+        (let admin = Simulation.make ~realtime:true "speed-guard" in
+         match Simulation.set_speed_ratio admin (Some 2.) with
+         | exception Invalid_argument _ -> true
+         | () -> false)
+
 (*
  * 2. Concurrent access to a running simulation
  *)
@@ -375,6 +434,26 @@ let test_http net cable duration nthreads =
                                     widgets))
             | _ ->
                 false) ;
+        check "PUT a speed"
+            (fst (http ~meth:"POST" port
+                      (Printf.sprintf "/api/simulations/%d/speed?ratio=2" net_id))
+             = 200) ;
+        check "a speed that is not one is refused"
+            (List.for_all (fun ratio ->
+                fst (http ~meth:"POST" port
+                         (Printf.sprintf "/api/simulations/%d/speed?ratio=%s"
+                             net_id ratio)) = 400)
+                (* Zero is a pause, not a speed; the rest are not numbers you
+                   can run at, and [float_of_string] accepts them all. *)
+                [ "0" ; "-1" ; "inf" ; "-inf" ; "nan" ; "nonsense" ]) ;
+        check "a simulation on the wall clock has no speed to set"
+            (fst (http ~meth:"POST" port
+                      (Printf.sprintf "/api/simulations/%d/speed?ratio=2"
+                          (Simulation.id admin))) = 400) ;
+        check "back to full speed"
+            (fst (http ~meth:"POST" port
+                      (Printf.sprintf "/api/simulations/%d/speed?ratio=full" net_id))
+             = 200) ;
         check "an unknown widget is not found"
             (fst (api "/api/simulations/%d/widgets/99999" net_id) = 404) ;
         check "an unknown simulation is not found"
@@ -457,6 +536,7 @@ let main =
     let net, cable = make_net () in
     ignore (Simulation.start net) ;
     test_clock net ;
+    test_speed net ;
     test_concurrency net cable duration nthreads ;
     test_http net cable duration nthreads ;
     Printf.printf "\n%d checks, %d failure(s)\n%!" !checks !failures ;

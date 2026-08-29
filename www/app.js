@@ -45,6 +45,20 @@ const dur = (s) => {
     return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'min'
 }
 
+/* The speeds the buttons walk through: powers of two around real time, with
+ * "as fast as it can" off the top of the ladder. Any other speed can still be
+ * set through the API; the buttons then move to the neighbouring rung. */
+const speeds = [ 1/64, 1/32, 1/16, 1/8, 1/4, 1/2, 1, 2, 4, 8, 16, 32, 64, 128,
+                 256, 512, 1024 ]
+
+/* Halves and doubles read better as fractions than as 0.0156. */
+const ratioText = (r) => {
+    if (r >= 1) return String(Number(r.toFixed(4)))
+    const inv = 1 / r
+    return Math.abs(inv - Math.round(inv)) < 1e-6 ? '1/' + Math.round(inv)
+                                                  : String(Number(r.toFixed(4)))
+}
+
 /* How long a value that just moved stays lit. Shorter than the poll, so that
  * something changing on every refresh pulses rather than staying lit -- which
  * would say no more than a steady colour does. */
@@ -609,6 +623,46 @@ document.addEventListener('alpine:init', () => {
             p.draft = p.text
             p.dirty = false
             p.error = null
+        },
+
+        /*
+         * Speed
+         */
+
+        /* The rung below, or the fastest one when coming down from full
+         * speed -- which is above the whole ladder. */
+        slower(s) {
+            if (s.speed_ratio === null) return speeds[speeds.length - 1]
+            const below = speeds.filter(x => x < s.speed_ratio * 0.999999)
+            return below.length ? below[below.length - 1] : speeds[0]
+        },
+
+        /* The rung above, or full speed once off the top. */
+        faster(s) {
+            if (s.speed_ratio === null) return null
+            const above = speeds.find(x => x > s.speed_ratio * 1.000001)
+            return above === undefined ? null : above
+        },
+
+        speedText(s) {
+            if (s.paused) return 'paused'
+            /* A simulation that follows the wall clock has no speed to set. */
+            if (s.realtime) return 'real time'
+            if (s.speed_ratio === null) return 'full speed'
+            return ratioText(s.speed_ratio) + ' \u00d7 real time'
+        },
+
+        /* Only worth pointing at when it is more than the jitter of a poll. */
+        isLate(s) { return !s.paused && s.late > 0.1 },
+
+        lateText(s) {
+            return 'Cannot keep up: ' + s.late.toFixed(1) +
+                   's behind the speed asked for'
+        },
+
+        async setSpeed(sim, ratio) {
+            await this.control(sim, 'speed?ratio=' +
+                                    (ratio === null ? 'full' : ratio))
         },
 
         /*

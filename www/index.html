@@ -40,7 +40,10 @@
             <article class="sim" :class="{ 'is-serving': s.id === servingId }">
                 <header>
                     <strong x-text="s.name"></strong>
-                    <span class="badge" x-text="s.realtime ? 'realtime' : 'as fast as it can'"></span>
+                    <!-- Which clock it runs on, which never changes. How fast
+                         it is running on it is the line under the buttons. -->
+                    <span class="badge"
+                          x-text="s.realtime ? 'wall clock' : 'simulated clock'"></span>
                 </header>
 
                 <dl class="clock">
@@ -54,13 +57,39 @@
                 <div class="controls" x-show="s.id !== servingId">
                     <button class="outline" x-show="!s.paused" :disabled="!online"
                             @click="control(s, 'pause')">Pause</button>
+                    <!-- Resuming goes back to the speed that was in use:
+                         pausing does not disturb it. -->
                     <button x-show="s.paused" :disabled="!online"
                             @click="control(s, 'resume')">Resume</button>
-                    <button class="outline secondary" :disabled="!online || !s.paused"
-                            @click="control(s, 'step?n=1')">Step</button>
-                    <button class="outline secondary" :disabled="!online || !s.paused"
-                            @click="control(s, 'step?n=10')">Step 10</button>
+
+                    <!-- A simulation that follows the wall clock has no speed
+                         of ours to set. -->
+                    <button class="outline secondary" title="Slower"
+                            :disabled="!online || s.realtime"
+                            @click="setSpeed(s, slower(s))">&laquo;</button>
+                    <button class="outline secondary" title="Real time"
+                            :disabled="!online || s.realtime"
+                            @click="setSpeed(s, 1)">1&times;</button>
+                    <button class="outline secondary" title="Faster"
+                            :disabled="!online || s.realtime"
+                            @click="setSpeed(s, faster(s))">&raquo;</button>
+
+                    <!-- Only while it is standing still is stepping meaningful. -->
+                    <template x-if="s.paused">
+                        <span class="steps">
+                            <button class="outline secondary" :disabled="!online"
+                                    @click="control(s, 'step?n=1')">Step</button>
+                            <button class="outline secondary" :disabled="!online"
+                                    @click="control(s, 'step?n=10')">Step 10</button>
+                        </span>
+                    </template>
                 </div>
+                <p class="speed" x-show="s.id !== servingId">
+                    <span x-text="speedText(s)"></span>
+                    <!-- Asked to run faster than it can. -->
+                    <span class="late" x-show="isLate(s)" :title="lateText(s)"
+                          x-cloak>&#9888;</span>
+                </p>
                 <!-- Whatever this simulation refused, said where it happened. -->
                 <p class="sim-error" x-show="simError[s.id]" x-cloak>
                     <small x-text="simError[s.id]"></small>

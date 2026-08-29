@@ -79,8 +79,22 @@ dl.clock dd { margin: 0; font-variant-numeric: tabular-nums; }
 
 .controls {
     display: flex;
+    flex-wrap: wrap;
     gap: .3rem;
-    margin-bottom: .6rem;
+    margin-bottom: .3rem;
+}
+.controls .steps { display: flex; gap: .3rem; }
+
+/* What the clock is doing, under the buttons that decide it. */
+p.speed {
+    margin: 0 0 .6rem 0;
+    font-size: .75rem;
+    color: var(--pico-muted-color);
+}
+p.speed .late {
+    color: var(--pico-del-color);
+    margin-left: .3rem;
+    cursor: help;
 }
 .controls button {
     padding: .2rem .5rem;

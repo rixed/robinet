@@ -75,6 +75,51 @@ await page.getByRole('link', { name: 'switch', exact: true }).first().click()
 await page.waitForTimeout(300)
 await page.screenshot({ path: `${OUT}/b-switch.png` })
 
+/* The speed controls, driven as a reader would: what the buttons do, what the
+ * simulation says it is doing, and that unpausing goes back to the speed that
+ * was in use rather than to full speed. */
+const wan = page.locator('article.sim').first()
+const says = async () => (await wan.locator('p.speed span').first().innerText()).trim()
+const shouldSay = async (want, what) => {
+    for (let i = 0; i < 40; i++) {
+        if (await says() === want) return
+        await page.waitForTimeout(100)
+    }
+    problems.push(`${what}: expected "${want}", the page said "${await says()}"`)
+}
+await shouldSay('full speed', 'a closed simulation starts at full speed')
+await wan.getByTitle('Real time').click()
+await shouldSay('1 \u00d7 real time', 'matching real time')
+await wan.getByTitle('Faster').click()
+await shouldSay('2 \u00d7 real time', 'speeding up')
+await wan.getByTitle('Slower').click()
+await wan.getByTitle('Slower').click()
+await shouldSay('1/2 \u00d7 real time', 'slowing down, in halves')
+await wan.getByRole('button', { name: 'Pause' }).click()
+await shouldSay('paused', 'pausing')
+if (!await wan.getByRole('button', { name: 'Step 10' }).isVisible())
+    problems.push('stepping is not offered while paused')
+await page.screenshot({ path: `${OUT}/i-speed.png` })
+await wan.getByRole('button', { name: 'Resume' }).click()
+await shouldSay('1/2 \u00d7 real time', 'unpausing goes back to the speed in use')
+
+/* Asked for more than the machine can do: it must say so rather than quietly
+ * run slower than asked. Through the API, since the buttons deliberately do
+ * not offer a speed that absurd. */
+await fetch(`${BASE}/api/simulations/0/speed?ratio=1e9`, { method: 'POST' })
+await page.waitForTimeout(1500)
+const warned = wan.locator('p.speed .late')
+if (!await warned.isVisible())
+    problems.push('a simulation that cannot keep up does not say so')
+else {
+    const tip = await warned.getAttribute('title')
+    if (!/behind/.test(tip || '')) problems.push(`unhelpful warning: ${tip}`)
+}
+await fetch(`${BASE}/api/simulations/0/speed?ratio=full`, { method: 'POST' })
+await shouldSay('full speed', 'back to full speed')
+if (await warned.isVisible())
+    problems.push('the warning outlived the speed that caused it')
+
 /* How a refused value looks against its field. The inputs are type=number, so
  * the browser blocks non-numeric text before any setter sees it, and no
  * property currently refuses a number -- so put the component in that state
