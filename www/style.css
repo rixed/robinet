@@ -295,7 +295,7 @@ article.properties td { vertical-align: middle; }
     margin-top: .3rem;
 }
 button.metric-reset {
-    margin: 0 0 0 auto;
+    margin: 0;
     width: auto;
     padding: .1rem .5rem;
     font-size: .7rem;
@@ -310,6 +310,83 @@ input[type=checkbox].enabler { margin-right: .4rem; vertical-align: middle; }
 .ro.unset { color: var(--pico-muted-color); font-style: italic; }
 tr.has-error input { border-color: var(--pico-del-color); }
 small.error { display: block; color: var(--pico-del-color); }
+
+/* --------------------------------------------------------------- charts */
+
+/* A third of the window at rest; past that the area scrolls rather than
+ * squeezing every chart into a strip too short to read. */
+.charts {
+    max-height: 33vh;
+    overflow-y: auto;
+    margin-top: .8rem;
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+}
+article.chart {
+    margin: 0;
+    padding: .4rem .6rem .2rem;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    background: var(--pico-card-background-color);
+}
+article.chart.over { border-color: var(--pico-primary); }
+article.chart > header {
+    display: flex;
+    align-items: flex-start;
+    gap: .5rem;
+    margin: 0 0 .2rem;
+    padding: 0;
+    background: none;
+    border: none;
+}
+.chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .1rem .8rem;
+    flex: 1;
+    font-size: .75rem;
+    line-height: 1.5;
+}
+.chart-legend .entry { display: flex; align-items: center; gap: .3rem; }
+.chart-legend i {
+    width: .7rem;
+    height: .2rem;
+    border-radius: .1rem;
+}
+.chart-legend .what { color: var(--pico-muted-color); }
+.chart-legend small { color: var(--pico-muted-color); }
+.chart-legend button, article.chart > header button.close {
+    background: none;
+    border: none;
+    color: var(--pico-muted-color);
+    padding: 0 .2rem;
+    width: auto;
+    font-size: .8rem;
+    line-height: 1;
+}
+.chart-legend button:hover, article.chart > header button.close:hover {
+    color: var(--pico-del-color);
+}
+/* The height a chart is worth reading at; the area scrolls to make room. */
+.chart .plot { height: 140px; }
+.uplot, .u-wrap { width: 100% !important; }
+
+button.metric-plot {
+    width: auto;
+    margin: 0 0 0 auto;
+    padding: .1rem .45rem;
+    line-height: 1;
+    cursor: grab;
+}
+button.metric-plot + button.metric-reset { margin-left: .3rem; }
+button.metric-plot svg {
+    width: .9rem;
+    height: .7rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+}
 
 /* --------------------------------------------------------------- status */
 

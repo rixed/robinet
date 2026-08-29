@@ -250,6 +250,66 @@ await page.evaluate(() => {
 await page.waitForTimeout(300)
 await page.screenshot({ path: `${OUT}/c-refused.png` })
 
+/* Charts. Driven at real time: a chart of a simulation running as fast as it
+ * can scrolls a simulated hour every second, which is hard to assert about. */
+await fetch(`${BASE}/api/simulations/0/speed?ratio=1`, { method: 'POST' })
+const plotIcon = async (widget, metric) => {
+    await page.getByRole('link', { name: widget, exact: true }).first().click()
+    await page.waitForSelector('button.metric-plot')
+    return page.locator('article.properties tr').filter({ hasText: metric })
+               .locator('button.metric-plot')
+}
+const legendText = async () =>
+    (await page.locator('.chart-legend').first().innerText()).replace(/\s+/g, ' ')
+const entries = () => page.locator('.chart-legend .entry:not(.empty)').count()
+
+await (await plotIcon('cable0', 'total bits')).click()
+await page.waitForSelector('article.chart canvas')
+await page.waitForTimeout(2000)
+if (await page.locator('article.chart').count() !== 1)
+    problems.push('clicking the plot icon must open one chart')
+if (!/total bits/.test(await legendText()))
+    problems.push('the legend must name the metric: ' + await legendText())
+/* A counter holds a running total; what is drawn is how fast it grows. */
+const asRate = await page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    const l = d.lines(d.charts[0])[0]
+    return { above: l.ys.filter(y => y > 0).length, units: l.units }
+})
+if (!asRate.above) problems.push('a counter must be drawn as a rate, and this one is flat')
+if (asRate.units !== '/s') problems.push('a rate is per second: ' + asRate.units)
+
+/* Charts outlive the selection: this one came from a cable, and is still
+ * there -- and still droppable onto -- while the switch is being looked at. */
+const gaugeIcon = await plotIcon('switch', 'macs')
+if (await page.locator('article.chart').count() !== 1)
+    problems.push('a chart must outlive the widget it was opened from')
+await gaugeIcon.dragTo(page.locator('article.chart').first())
+await page.waitForTimeout(2000)
+const both = await legendText()
+if (!/total bits/.test(both) || !/macs/.test(both))
+    problems.push('dragging a metric onto a chart must add it there: ' + both)
+if (await page.locator('article.chart').count() !== 1)
+    problems.push('and must not open a second chart')
+/* Two units, so two axes: one metric per side. */
+const sides = await page.evaluate(() =>
+    [...document.querySelectorAll('article.chart .u-axis')].length)
+if (sides < 3) problems.push(`two units want an axis each, found ${sides} axes in all`)
+await page.screenshot({ path: `${OUT}/f-charts.png` })
+
+const before = await entries()
+await page.locator('.chart-legend .entry button').first().click()
+await page.waitForTimeout(400)
+if (await entries() !== before - 1)
+    problems.push(`the cross must take one line off (${before} -> ${await entries()})`)
+while (await entries() && await page.locator('article.chart').count()) {
+    await page.locator('.chart-legend .entry button').first().click()
+    await page.waitForTimeout(300)
+}
+if (await page.locator('article.chart').count())
+    problems.push('a chart with no lines left must go')
+await fetch(`${BASE}/api/simulations/0/speed?ratio=full`, { method: 'POST' })
+
 /* The simulator goes away: everything on screen becomes last-known. */
 await stop()
 await page.waitForSelector('.banner', { state: 'visible', timeout: 15000 })

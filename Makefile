@@ -98,7 +98,8 @@ REQUIRES = bitstring ppx_bitstring batteries yojson ppx_deriving_yojson
 # The administration interface is written as ordinary files in www/ and
 # compiled into the library, so that a robinet program has nothing to install
 # beside it and no directory to locate at run time.
-UI_ASSETS = www/index.html www/app.js www/style.css
+UI_ASSETS = www/index.html www/app.js www/style.css \
+            www/uPlot.iife.min.js www/uPlot.min.css
 
 # Tests that do not fit qtest's inline style: concurrency and the admin API.
 # Run them on their own for a longer, harder run:

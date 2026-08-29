@@ -195,6 +195,167 @@ const metricRows = (m, units, previous) => {
     return view
 }
 
+/*
+ * Charts
+ *
+ * uPlot instances, the elements they live in and the points they draw are kept
+ * out of Alpine's reactive data: it deep-proxies whatever it holds, and a
+ * proxy around something that keeps DOM references and compares them by
+ * identity is asking for trouble. The reactive side holds the descriptions --
+ * which metric is in which chart -- and these hold the pixels and the numbers.
+ */
+const plots = new Map()    /* chart id -> { u, el, signature } */
+const history = new Map()  /* metric key -> { last, kind, units, rows } */
+
+const metricKey = (m) => `${m.sim}/${m.widget}/${m.property}`
+const rowKey = (m, params) => metricKey(m) + '/' + JSON.stringify(params)
+
+/* How much of a series is kept here. The simulator keeps a bounded history of
+ * its own and this only ever holds what it was told, but a page left open for
+ * a day would otherwise accumulate every point it ever saw. */
+const maxPoints = 2000
+
+/* Distinguishable at a glance and stable within a chart: a line keeps its
+ * colour as others come and go, since it is picked by position among the
+ * lines the chart was given, not among those it happens to show. */
+const palette = [ '#1f77b4', '#d62728', '#2ca02c', '#ff7f0e', '#9467bd',
+                  '#17becf', '#8c564b', '#e377c2' ]
+
+/* Fold an answer from .../history into what is kept for that metric. Points
+ * arrive oldest first and only ever after the ones we have, so appending is
+ * all there is to it. */
+const mergeHistory = (m, answer) => {
+    const key = metricKey(m)
+    let h = history.get(key)
+    if (!h) { h = { last: null, rows: new Map() } ; history.set(key, h) }
+    h.kind = answer.kind
+    h.units = answer.units
+    for (const s of answer.series) {
+        const k = JSON.stringify(s.params)
+        let row = h.rows.get(k)
+        if (!row) { row = { params: s.params, pts: [] } ; h.rows.set(k, row) }
+        for (const p of s.points) {
+            row.pts.push(p)
+            if (h.last === null || p.t > h.last) h.last = p.t
+        }
+        if (row.pts.length > maxPoints)
+            row.pts.splice(0, row.pts.length - maxPoints)
+    }
+}
+
+/* What is drawn for one row, from the points as the simulator wrote them down.
+ *
+ * A counter holds a running total, which as a line says only that time passes:
+ * what is worth looking at is how fast it grows. A total that drops means
+ * somebody reset it -- a break in the line, not a negative rate.
+ *
+ * A gauge is drawn as it stands, a duration as its average over the interval
+ * ((sum - sum') / (count - count')), and both carry the extremes of that same
+ * interval, which is what the band is drawn from. An interval in which nothing
+ * was measured has no average and no extremes: a gap, honestly. */
+const lineOf = (kind, pts) => {
+    const xs = [], ys = [], los = [], his = []
+    const banded = kind === 'gauge' || kind === 'timed'
+    for (let i = 0; i < pts.length; i++) {
+        const p = pts[i], prev = i > 0 ? pts[i - 1] : null
+        xs.push(p.t)
+        if (kind === 'counter' || kind === 'atomic') {
+            const dt = prev ? p.t - prev.t : 0
+            ys.push(prev && dt > 0 && p.value >= prev.value
+                    ? (p.value - prev.value) / dt : null)
+        } else if (kind === 'gauge') {
+            ys.push(p.value.current)
+            los.push(p.value.sample_min)
+            his.push(p.value.sample_max)
+        } else {
+            const dn = prev ? p.value.count - prev.value.count : 0
+            ys.push(dn > 0 ? (p.value.sum - prev.value.sum) / dn : null)
+            los.push(p.value.sample_min)
+            his.push(p.value.sample_max)
+        }
+    }
+    return { xs, ys, los: banded ? los : null, his: banded ? his : null }
+}
+
+/* A rate is per second whatever it counts. An atomic counts events and can say
+ * so; a counter without a unit cannot say what it counts, so it says only how
+ * often. A duration is a duration. */
+const lineUnits = (kind, units) =>
+    kind === 'atomic' ? (units || 'events') + '/s' :
+    kind === 'counter' ? (units || '') + '/s' :
+    kind === 'timed' ? 'secs' : units
+
+const lineText = (kind, y) =>
+    y === null || y === undefined ? '--' :
+    kind === 'timed' ? dur(y) :
+    Math.abs(y) >= 100 ? num(Math.round(y)) : String(Number(y.toFixed(2)))
+
+/* Every line of a chart shares one x, since they are all sampled by the same
+ * simulation at the same instants -- but a row that appeared late has fewer
+ * points than one that was always there, so the axis is the union of what they
+ * hold, and a line says nothing where it has nothing. */
+const alignedData = (lines) => {
+    const all = new Set()
+    for (const l of lines) for (const x of l.xs) all.add(x)
+    const xs = [ ...all ].sort((a, b) => a - b)
+    const at = new Map()
+    xs.forEach((x, i) => at.set(x, i))
+    const spread = (src, values) => {
+        const out = new Array(xs.length).fill(null)
+        src.forEach((x, i) => { out[at.get(x)] = values[i] })
+        return out
+    }
+    const data = [ xs ]
+    for (const l of lines) {
+        data.push(spread(l.xs, l.ys))
+        if (l.los) { data.push(spread(l.xs, l.los)) ; data.push(spread(l.xs, l.his)) }
+    }
+    return data
+}
+
+/* Build (or rebuild) the plot of a chart. The instance is thrown away and made
+ * again only when the lines themselves change, which is rare; a poll just
+ * hands it new numbers. */
+const drawChart = (id, lines) => {
+    const p = plots.get(id)
+    if (!p || !p.el) return
+    const signature = lines.map(l => l.key).join('|')
+    const data = alignedData(lines)
+    if (p.u && p.signature === signature) { p.u.setData(data) ; return }
+    if (p.u) { p.u.destroy() ; p.u = null }
+    if (!lines.length) return
+    /* One scale per unit, two at most: a chart of bytes and one of seconds
+     * share an axis only by accident. */
+    const units = [ ...new Set(lines.map(l => l.units)) ]
+    const series = [ {} ], bands = []
+    for (const l of lines) {
+        const scale = l.units || 'y'
+        series.push({ label: l.label, stroke: l.color, width: 1.5,
+                      scale, points: { show: false } })
+        if (l.los) {
+            const lo = series.length, hi = lo + 1
+            series.push({ scale, stroke: 'transparent', points: { show: false } })
+            series.push({ scale, stroke: 'transparent', points: { show: false } })
+            bands.push({ series: [ hi, lo ], fill: l.color + '25' })
+        }
+    }
+    const axes = [ { stroke: '#888', grid: { stroke: '#8884' } } ]
+    units.forEach((u, i) => {
+        if (i > 1) return
+        axes.push({ scale: u || 'y', side: i === 0 ? 3 : 1, label: u || undefined,
+                    stroke: '#888', grid: { stroke: i === 0 ? '#8884' : 'transparent' } })
+    })
+    p.signature = signature
+    p.u = new uPlot({
+        width: p.el.clientWidth || 600,
+        height: p.el.clientHeight || 140,
+        legend: { show: false },
+        cursor: { y: false },
+        scales: { x: { time: true } },
+        series, bands, axes,
+    }, data, p.el)
+}
+
 /* Two kinds of failure, which want opposite treatment:
  *  - 'offline': no answer at all. Everything is suspect, keep retrying.
  *  - 'refused': the server answered, and said no. Only the thing we asked for
@@ -269,6 +430,18 @@ document.addEventListener('alpine:init', () => {
          * paused. It is the only one whose httpd widget we are talking to, so
          * we recognise it by that. */
         servingId: null,
+
+        /* The charts, which outlive the selection: one is opened while looking
+         * at a hub and watched while looking at something else. Only their
+         * descriptions live here -- see [plots] and [history] for the rest. */
+        charts: [],
+        chartSeq: 1,
+        /* Bumped when new points arrive, purely so that the legends, which
+         * read from [history], are re-rendered. */
+        chartTock: 0,
+        /* The metric being dragged, and the chart the cursor is over. */
+        dragging: null,
+        dragOver: null,
 
         /*
          * Connection state
@@ -366,6 +539,7 @@ document.addEventListener('alpine:init', () => {
              * skipping it would leave the panel reporting itself as loaded,
              * which is the one thing it must not do when it is not. */
             if (this.selected) await this.loadProps()
+            if (this.charts.length) await this.pollCharts()
         },
 
         /* Everything: the simulations and their widget trees. Needed whenever
@@ -699,6 +873,154 @@ document.addEventListener('alpine:init', () => {
             p.enabled = r.value.value !== null
             p.dirty = false
             p.error = null
+        },
+
+        /*
+         * Charts
+         */
+
+        /* Every metric a chart wants, once: the same metric in two charts is
+         * one request, and the answer feeds both. */
+        wantedMetrics() {
+            const wanted = new Map()
+            for (const c of this.charts)
+                for (const m of c.metrics)
+                    wanted.set(metricKey(m), m)
+            return [ ...wanted.values() ]
+        },
+
+        /* Ask each of them for what has been written down since the last point
+         * we hold: the whole history the first time, a point or two after
+         * that. */
+        async pollCharts() {
+            for (const m of this.wantedMetrics()) {
+                const h = history.get(metricKey(m))
+                const since = h && h.last !== null ? `?since=${h.last}` : ''
+                const r = await this.exchange(() => api(
+                    `/simulations/${m.sim}/widgets/${m.widget}` +
+                    `/properties/${encodeURIComponent(m.property)}/history${since}`))
+                /* A metric that has gone (its widget deleted, say) leaves the
+                 * charts it was in rather than making every poll fail. */
+                if (!r.ok) {
+                    if (r.error.status === 404) this.forget(m)
+                    continue
+                }
+                mergeHistory(m, r.value)
+            }
+            this.chartTock++
+            for (const c of this.charts) drawChart(c.id, this.lines(c))
+        },
+
+        /* What a chart draws, and what its legend lists: one line per metric
+         * and set of parameters, minus the ones struck off. */
+        lines(chart) {
+            this.chartTock /* re-read me when points arrive */
+            const lines = []
+            let colour = 0
+            for (const m of chart.metrics) {
+                const h = history.get(metricKey(m))
+                if (!h) continue
+                const rows = [ ...h.rows.values() ]
+                    .sort((a, b) => compareParams(a.params, b.params))
+                for (const row of rows) {
+                    const key = rowKey(m, row.params)
+                    const color = palette[colour++ % palette.length]
+                    if (chart.hidden.includes(key)) continue
+                    const l = lineOf(h.kind, row.pts)
+                    const params = this.paramsText(row.params)
+                    lines.push({ key, color, ...l,
+                                 units: lineUnits(h.kind, h.units),
+                                 label: `${m.widgetName} ${m.property}` +
+                                        (params ? ` (${params})` : ''),
+                                 text: lineText(h.kind, l.ys[l.ys.length - 1]) })
+                }
+            }
+            return lines
+        },
+
+        /* The metric a property row stands for. */
+        metricOf(p) {
+            const w = this.get(this.selected.sim, this.selected.id)
+            return { sim: this.selected.sim, widget: this.selected.id,
+                     widgetName: w ? w.name : '#' + this.selected.id,
+                     property: p.name }
+        },
+
+        addChart(p) {
+            const chart = { id: this.chartSeq++, sim: this.selected.sim,
+                            metrics: [ this.metricOf(p) ], hidden: [] }
+            this.charts.push(chart)
+            this.chartTock++
+            this.pollCharts()
+        },
+
+        /* Where the plot of a chart lives. Mounted from the template, since
+         * that is where the element comes into being. */
+        mountChart(chart, el) {
+            plots.set(chart.id, { u: null, el, signature: null })
+            /* uPlot is told a size in pixels, so it has to be told again when
+             * the page gives it a different one. */
+            const watcher = new ResizeObserver(() => {
+                const p = plots.get(chart.id)
+                if (p && p.u && el.clientWidth)
+                    p.u.setSize({ width: el.clientWidth, height: el.clientHeight })
+            })
+            watcher.observe(el)
+            plots.get(chart.id).watcher = watcher
+            drawChart(chart.id, this.lines(chart))
+        },
+
+        startDrag(p, event) {
+            this.dragging = this.metricOf(p)
+            /* Firefox starts no drag at all without something to carry. */
+            event.dataTransfer.setData('text/plain', p.name)
+            event.dataTransfer.effectAllowed = 'copy'
+        },
+
+        /* A chart is one simulation's: its lines share a clock, and two clocks
+         * on one axis would say nothing. */
+        canDrop(chart) {
+            return this.dragging !== null && this.dragging.sim === chart.sim
+        },
+
+        dropOn(chart) {
+            this.dragOver = null
+            if (!this.canDrop(chart)) return
+            const m = this.dragging
+            this.dragging = null
+            if (chart.metrics.some(x => metricKey(x) === metricKey(m))) return
+            chart.metrics.push(m)
+            /* Struck off in an earlier life, but asked for again now. */
+            chart.hidden = chart.hidden.filter(k => !k.startsWith(metricKey(m) + '/'))
+            this.pollCharts()
+        },
+
+        /* Striking off the last line of a metric drops the metric, and a chart
+         * with nothing left in it is a chart nobody asked for. */
+        removeLine(chart, key) {
+            chart.hidden.push(key)
+            chart.metrics = chart.metrics.filter(m =>
+                this.lines(chart).some(l => l.key.startsWith(metricKey(m) + '/')))
+            if (!chart.metrics.length) this.closeChart(chart)
+            else drawChart(chart.id, this.lines(chart))
+        },
+
+        closeChart(chart) {
+            const p = plots.get(chart.id)
+            if (p && p.u) p.u.destroy()
+            if (p && p.watcher) p.watcher.disconnect()
+            plots.delete(chart.id)
+            this.charts = this.charts.filter(c => c.id !== chart.id)
+        },
+
+        /* Drop a metric from every chart that holds it. */
+        forget(m) {
+            const key = metricKey(m)
+            history.delete(key)
+            for (const c of [ ...this.charts ]) {
+                c.metrics = c.metrics.filter(x => metricKey(x) !== key)
+                if (!c.metrics.length) this.closeChart(c)
+            }
         },
 
         /*

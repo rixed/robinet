@@ -50,13 +50,19 @@ struct
         t
 
     let forward_from (t : t) n pld =
+        let now = Simulation.Widget.now t.widget in
+        let sim = Simulation.of_widget t.widget in
         Array.iteri (fun i emit ->
             if i <> n then (
                 Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to iface %d/%d" i (Array.length t.ifaces)))) ;
-                let now = Simulation.Widget.now t.widget in
                 Metric.(Counter.add t.egress ~now ~params:(Params.singleton "port" (Param.Int i)) (bytelength pld)) ;
-                Simulation.asap (Simulation.of_widget t.widget) emit pld
+                Simulation.asap sim emit pld
             )) t.ifaces
+
+    let forward_to_single (t : t) n pld =
+        let now = Simulation.Widget.now t.widget in
+        Metric.(Counter.add t.egress ~now ~params:(Params.singleton "port" (Param.Int n)) (bytelength pld)) ;
+        Simulation.asap (Simulation.of_widget t.widget) t.ifaces.(n) pld
 
     let write (t : t) n pld =
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.ifaces)))) ;
@@ -163,6 +169,9 @@ struct
             let do_broadcast () =
                 Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forwarding to all ifaces (but %d)" ins))) ;
                 R.forward_from t.hub ins bits in
+            let do_unicast out =
+                Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Known dest %s, will forward to iface %d" (Eth.Addr.to_string (Eth.Addr.o dst)) out))) ;
+                R.forward_to_single t.hub out bits in
             if Eth.Addr.is_broadcast (Eth.Addr.o dst) then
                 do_broadcast ()
             else (
@@ -176,9 +185,7 @@ struct
                     Metric.Atomic.fire ~now t.mac_hits ;
                     let mac = OrdArray.get t.macs n in
                     if mac.iface <> ins then (
-                        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Known dest %s, will forward to iface %d" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.iface))) ;
-                        Simulation.asap (Simulation.of_widget t.widget)
-                            t.hub.Repeater.ifaces.(mac.iface) bits ;
+                        do_unicast mac.iface ;
                         OrdArray.promote t.macs n
                     ) else
                         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Known dest %s is located on iface %d, dropping" (Eth.Addr.to_string (Eth.Addr.o dst)) mac.iface)))
@@ -192,7 +199,7 @@ struct
 
     let set_read (t : t) n f =
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting emitter for iface %d/%d" n (Array.length t.hub.ifaces)))) ;
-        Repeater.set_read t.hub n f
+        R.set_read t.hub n f
 
     (** Turns a iface into a device *)
     let iface (t : t) n =

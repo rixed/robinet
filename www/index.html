@@ -6,9 +6,13 @@
     <title>RobiNet</title>
     <!-- Linked for now; to be vendored into www/ so that this works offline. -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"/>
+    <link rel="stylesheet" href="uPlot.min.css"/>
     <link rel="stylesheet" href="style.css"/>
     <!-- Ours first: Alpine dispatches alpine:init as it starts, and a component
          registered after that is never seen. -->
+    <!-- Served from the binary, so that a simulator on a machine with no
+         network still draws its charts. -->
+    <script defer src="uPlot.iife.min.js"></script>
     <script defer src="app.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
@@ -243,6 +247,20 @@
                                                 <div class="metric-foot">
                                                     <small class="detail" x-show="p.metric.last !== null"
                                                            x-text="'last ' + ago(p.metric.last)"></small>
+                                                    <!-- Clicking opens a chart of
+                                                         its own; dragging it
+                                                         onto one that is open
+                                                         adds it there. -->
+                                                    <button class="outline secondary metric-plot"
+                                                            :disabled="!online" draggable="true"
+                                                            @dragstart="startDrag(p, $event)"
+                                                            @dragend="dragging = null ; dragOver = null"
+                                                            @click="addChart(p)"
+                                                            title="Plot this metric, or drag it onto a chart">
+                                                        <svg viewBox="0 0 16 12" aria-hidden="true">
+                                                            <polyline points="1,10 5,6 8,8 15,1"/>
+                                                        </svg>
+                                                    </button>
                                                     <button class="outline secondary metric-reset"
                                                             x-show="!p.read_only" :disabled="!online"
                                                             @click="resetMetric(p)">Reset</button>
@@ -326,6 +344,40 @@
                 </article>
             </div>
         </template>
+
+        <!-- ================= charts ================= -->
+        <!-- Outside the block above: a chart is watched while looking at
+             something else than the widget it came from. -->
+        <section class="charts" x-show="charts.length" x-cloak>
+            <template x-for="c in charts" :key="c.id">
+                <article class="chart"
+                         :class="{ over: dragOver === c.id }"
+                         @dragover.prevent="dragOver = canDrop(c) ? c.id : null"
+                         @dragleave="dragOver = null"
+                         @drop.prevent="dropOn(c)">
+                    <header>
+                        <span class="chart-legend">
+                            <template x-for="l in lines(c)" :key="l.key">
+                                <span class="entry">
+                                    <i :style="'background:' + l.color"></i>
+                                    <span class="what" x-text="l.label"></span>
+                                    <b x-text="l.text"></b>
+                                    <small x-text="l.units"></small>
+                                    <button title="Take this line off the chart"
+                                            @click="removeLine(c, l.key)">&times;</button>
+                                </span>
+                            </template>
+                            <span class="entry empty" x-show="!lines(c).length">
+                                <small>Nothing has been written down yet.</small>
+                            </span>
+                        </span>
+                        <button class="close" title="Close this chart"
+                                @click="closeChart(c)">&times;</button>
+                    </header>
+                    <div class="plot" x-init="mountChart(c, $el)"></div>
+                </article>
+            </template>
+        </section>
     </main>
 </div>
 
