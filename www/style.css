@@ -17,9 +17,9 @@
     --cable: var(--pico-muted-border-color);
 }
 
-/* A column: the banner and the status bar take the room they need, the two
- * panes share what is left and scroll within it. Neither pane may be sized
- * against the viewport, or whatever else is on the page hides its last row. */
+/* A column: the banner takes the room it needs, the two panes share what is
+ * left and scroll within it. Neither pane may be sized against the viewport,
+ * or whatever else is on the page hides its last row. */
 body {
     padding: 0;
     display: flex;
@@ -45,6 +45,27 @@ aside {
 
 .brand { margin-bottom: .8rem; }
 .brand h1 { font-size: 1.3rem; margin: 0; }
+/* The title is the way out to the project's own page, and says so with the
+ * usual icon; it is not a control of this page, so it keeps the heading's
+ * colour and only underlines when pointed at. */
+.brand h1 a {
+    color: inherit;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: .25rem;
+}
+.brand h1 a:hover { text-decoration: underline; }
+.brand h1 .ext {
+    width: .7em;
+    height: .7em;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: .55;
+}
 .brand p { margin: 0; font-size: .8rem; color: var(--pico-muted-color); }
 
 article.sim {
@@ -60,6 +81,14 @@ article.sim > header {
 }
 /* The simulation serving this page: it is the one that must keep running. */
 article.sim.is-serving { border-left: 3px solid var(--pico-primary); }
+/* Folded away, the header is all that is left of it, and it should not go on
+ * looking like the top of something. */
+article.sim.folded > header {
+    padding-bottom: 0;
+    margin-bottom: 0;
+    border-bottom: none;
+}
+article.sim.folded { padding: .4rem .6rem; }
 
 .badge {
     font-size: .7rem;
@@ -76,6 +105,9 @@ dl.clock {
 }
 dl.clock dt { color: var(--pico-muted-color); }
 dl.clock dd { margin: 0; font-variant-numeric: tabular-nums; }
+/* The unit beside the figure rather than in the label, so that the label stays
+ * the short word the eye scans for. */
+dl.clock dd small { color: var(--pico-muted-color); font-size: .9em; }
 
 .controls {
     display: flex;
@@ -83,7 +115,7 @@ dl.clock dd { margin: 0; font-variant-numeric: tabular-nums; }
     gap: .3rem;
     margin-bottom: .3rem;
 }
-.controls .steps { display: flex; gap: .3rem; }
+.controls .steps, .controls .speeds { display: flex; gap: .3rem; }
 
 /* What the clock is doing, under the buttons that decide it. */
 p.speed {
@@ -101,6 +133,15 @@ p.speed .late {
     font-size: .75rem;
     margin: 0;
     width: auto;
+}
+/* Pause and resume, as their shapes. Filled rather than stroked: the two bars
+ * and the triangle are solid shapes, not outlines of them. */
+.controls button.icon { padding: .2rem .45rem; line-height: 1; }
+.controls button.icon svg {
+    display: block;
+    width: .55rem;
+    height: .66rem;
+    fill: currentColor;
 }
 
 /* the foldable tree: flattened, indented by depth */
@@ -155,20 +196,265 @@ main {
     min-height: 0;
     overflow: hidden;
 }
-/* The widget being inspected: as much room as the dock leaves it. */
+/* The widget being inspected: as much room as the dock leaves it.
+ *
+ * It does not scroll itself -- the left column inside it does. The map is
+ * beside that column, not below it, and a map that scrolled off the top of the
+ * window as one read down a long list of properties would be no map at all. */
 main > .widget-view {
-    flex: 1 1 auto;
-    /* Never squeezed down to nothing, however much is docked below. */
-    min-height: 6rem;
-    overflow-y: auto;
-    /* So that the last row of a table does not end flush against the dock. */
-    padding-bottom: .4rem;
+    /* From nothing, growing into whatever the dock leaves: a basis of zero
+     * rather than of its content, so that the share the divider was put at is
+     * the share it gets, whatever happens to be in the column. */
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
 }
-/* The dock takes what it needs and gives way when there is not enough: on a
- * short window every panel shrinks rather than the widget above disappearing.
- */
+/* The dock takes the share the divider was left at, and gives way to the
+ * divider itself when that share is the whole window -- otherwise the divider
+ * is pushed off the bottom, and with it the only way back. */
 main > .dock { flex: 0 1 auto; min-height: 0; }
 article.empty { color: var(--pico-muted-color); }
+
+/* ------------------------------------------------ schematic and map, side by side */
+
+/* Both at once. The two say different things about the same selection -- what
+ * it is, and where it sits in the network -- and wanting one while looking at
+ * the other is the normal case. */
+.panes {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: stretch;
+    min-width: 0;
+}
+.pane { min-width: 0; }
+/* Everything about the selected widget: the picture of it, and its values
+ * under that. This is the column that scrolls. */
+.pane.detail {
+    /* It may shrink, and that is what keeps the divider on screen when this
+     * column has been given the whole row: an unshrinkable pane at 100% pushes
+     * the divider out of the view, and with it the only way back. */
+    flex: 0 1 auto;
+    overflow-y: auto;
+    /* So that the last row of a table does not end flush against the dock. */
+    padding: 0 .5rem .4rem 0;
+}
+/* Half the width it used to have, so one number sets the density of the
+ * picture -- the same way the page pins its root font and puts everything else
+ * in rem. Only the picture: the properties below have their own, and stacking
+ * the two reductions would leave the values too small to read. */
+.pane.detail .schematic { font-size: .85rem; }
+/* Sticky rather than scrolling with the column beside it: the map is not part
+ * of that list, it is what the list is about. */
+.pane.map {
+    flex: 1 1 0;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    background: var(--pico-card-background-color);
+    /* The background pans; grabbing it says so. */
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+/* Also the switch between the two things it separates: pushed all the way
+ * over, it shuts one side, so there is no separate control saying which is
+ * showing. The same element serves both axes: [cols] divides the two columns,
+ * [rows] lies across them and divides the dock from what is above it. */
+.splitter {
+    flex: 0 0 .5rem;
+    margin: 0 .2rem;
+    border-radius: var(--pico-border-radius);
+    background: var(--pico-muted-border-color);
+    cursor: col-resize;
+    touch-action: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.splitter:hover { background: var(--pico-primary); }
+/* With one side shut it is a handle rather than a divider: wide enough to aim
+ * at, with a mark in the middle pointing at where the shut side will come back
+ * from. The mark carries the colour rather than the whole strip -- a full
+ * height bar of it beside the page shouts louder than anything on the page. */
+.splitter.shut {
+    flex: 0 0 1rem;
+    cursor: pointer;
+}
+.splitter.rows { margin: .3rem 0; cursor: row-resize; }
+.splitter.rows.shut { cursor: pointer; }
+.splitter.rows .grip { padding: .15rem .4rem; }
+.splitter .grip {
+    padding: .4rem .15rem;
+    border-radius: 1rem;
+    background: var(--pico-primary);
+    color: var(--pico-primary-inverse);
+    font-size: .8rem;
+    line-height: 1;
+}
+/* While it is being dragged the pointer is over whatever it happens to cross,
+ * and text selecting through the whole page is not what was meant. */
+body.splitting { user-select: none; cursor: col-resize; }
+body.splitting.rows { cursor: row-resize; }
+
+/* ------------------------------------------------------------------- the map */
+
+/* The cables, and only the cables: everything one can click is HTML above
+ * them. Nothing here takes the pointer, so a click on a line goes through to
+ * the pane and pans it, which is what a click on the background should do. */
+.pane.map svg.cables {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+.pane.map svg.cables line {
+    stroke: var(--cable);
+    stroke-width: 2;
+}
+/* The cable being looked at. It is a line here and not a box, so this and its
+ * name are all there is to mark. */
+.pane.map svg.cables line.on {
+    stroke: var(--pico-primary);
+    stroke-width: 3;
+}
+
+/* The order things are drawn in: the cables under everything, then the boxes,
+ * then what names them. A label that a box paints over says nothing. */
+.pane.map .box { z-index: 1; }
+.pane.map .port { z-index: 2; }
+.pane.map .cable-label { z-index: 3; }
+
+.pane.map .box {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: .25rem;
+    padding: 0 .4rem;
+    font-size: .75rem;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    background: var(--pico-card-background-color);
+    cursor: grab;
+    overflow: hidden;
+}
+/* An open box is a container, so its name goes at the top and its insides are
+ * drawn inside it; a shut one is a single line. */
+.pane.map .box.open {
+    display: block;
+    align-items: initial;
+    padding: 0;
+    background: var(--pico-card-sectioning-background-color);
+}
+.pane.map .box.open > .name,
+.pane.map .box.open > .twisty,
+.pane.map .box.open > .folded { position: absolute; top: 1px; }
+.pane.map .box.open > .twisty { left: .2rem; }
+.pane.map .box.open > .name { left: 1.4rem; }
+.pane.map .box.open > .folded { right: .3rem; }
+.pane.map .box.selected {
+    border-color: var(--pico-primary);
+    border-width: 2px;
+}
+/* The selected widget is somewhere in here. Fainter than the thing itself, and
+ * it stacks: a box inside a box inside the one that is selected reads as the
+ * way down to it. */
+.pane.map .box.holds { border-color: var(--pico-primary); }
+/* Nothing says where it is, so it is drawn in the strip below rather than
+ * being put somewhere and left to look placed. */
+.pane.map .box.unplaced { border-style: dashed; }
+.pane.map .box .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pane.map .box .twisty {
+    flex: none;
+    width: auto;
+    margin: 0;
+    padding: 0 .2rem;
+    font-size: .7rem;
+    line-height: 1.1;
+    background: none;
+    border: none;
+    color: var(--pico-muted-color);
+    cursor: pointer;
+}
+.pane.map .box .folded {
+    flex: none;
+    margin-left: auto;
+    padding: 0 .25rem;
+    font-size: .65rem;
+    border-radius: 1rem;
+    color: var(--pico-muted-color);
+    background: var(--pico-muted-border-color);
+}
+
+/* Where a cable really lands, when what it lands on is inside a shut box. */
+.pane.map .port {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    padding: 0 .2rem;
+    font-size: .6rem;
+    line-height: 1.2;
+    text-decoration: none;
+    color: var(--pico-muted-color);
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--cable);
+    border-radius: 1rem;
+    white-space: nowrap;
+}
+.pane.map .port:hover { color: var(--pico-primary); }
+
+.pane.map .cable-label {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    padding: 0 .25rem;
+    font-size: .65rem;
+    text-decoration: none;
+    color: var(--pico-muted-color);
+    background: var(--pico-card-background-color);
+    white-space: nowrap;
+}
+.pane.map .cable-label:hover { color: var(--pico-primary); }
+.pane.map .cable-label.on { color: var(--pico-primary); font-weight: bold; }
+
+/* The line under which things are nowhere. */
+.pane.map .tray-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    border-top: 1px dashed var(--pico-muted-border-color);
+    pointer-events: none;
+}
+/* On the right, where the boxes are not: they fill the strip from the left. */
+.pane.map .tray-line {
+    display: flex;
+    justify-content: flex-end;
+}
+.pane.map .tray-line small {
+    padding: 0 .3rem;
+    font-size: .6rem;
+    color: var(--pico-muted-color);
+}
+
+.pane.map .map-tools { position: absolute; top: .3rem; right: .3rem; }
+.pane.map .map-tools button {
+    width: auto;
+    margin: 0;
+    padding: .1rem .45rem;
+    font-size: .7rem;
+}
+.pane.map .map-error {
+    position: absolute;
+    left: .3rem;
+    top: .3rem;
+    font-size: .7rem;
+}
 
 nav.breadcrumb {
     font-size: .85rem;
@@ -245,7 +531,10 @@ nav.breadcrumb .sep { color: var(--pico-muted-color); margin: 0 .2rem; }
 
 /* ------------------------------------------------------------ properties */
 
-article.properties { margin-top: 2rem; }
+/* Under the picture rather than beside it. Pico draws it as a card, which is
+ * separation enough: a rule of our own on top of that is two lines saying the
+ * same thing. */
+article.properties { margin-top: 1.2rem; }
 article.properties > header {
     display: flex;
     align-items: center;
@@ -266,15 +555,26 @@ article.properties table {
     font-size: .9rem;
     table-layout: fixed;
 }
-article.properties th:nth-child(1) { width: 15%; }
-article.properties th:nth-child(2) { width: 45%; }
+/* Two columns now: what the property is, and what it is worth. The
+ * description used to have one of its own, which cost the values half the
+ * table for a line of prose that is read once -- and there is no room for a
+ * third column in half a window. */
+article.properties th:nth-child(1) { width: 38%; }
+article.properties .descr {
+    display: block;
+    color: var(--pico-muted-color);
+    font-size: .75rem;
+    line-height: 1.3;
+}
 article.properties input, article.properties select { margin: 0; }
 /* A field as wide as the column says nothing about the value; keep them the
  * size of what they hold, and the description where the eye expects it. */
 article.properties input[type=text],
 article.properties input[type=number] { max-width: 12rem; }
 article.properties select { max-width: 12rem; }
-article.properties td { vertical-align: middle; }
+/* Top, not middle: a name with its description under it is two lines tall,
+ * and the name has to stay level with the value it belongs to. */
+article.properties td { vertical-align: top; padding-top: .5rem; }
 .ro { font-variant-numeric: tabular-nums; color: var(--pico-muted-color); }
 
 /* A metric reads as rows, one per combination of the parameters of the events
@@ -354,11 +654,10 @@ small.error { display: block; color: var(--pico-del-color); }
     grid-auto-rows: minmax(3rem, 1fr);
     align-content: start;
     gap: .5rem;
-    /* Half the window at most: what is watched here matters, but never more
-     * than the widget being looked at above it. Two open panels then get about
-     * a quarter each, less than their own caps -- which is why their bodies
-     * shrink as well as scroll. */
-    max-height: 50vh;
+    /* No cap of its own: how much of the window it is worth is what the
+     * divider above it says, and that is the reader's to set. Two open panels
+     * then share whatever that is, less than their own caps -- which is why
+     * their bodies shrink as well as scroll. */
 }
 .dock .panel {
     display: flex;
@@ -396,16 +695,23 @@ small.error { display: block; color: var(--pico-del-color); }
 
 /* --------------------------------------------------------------- charts */
 
-/* A third of the window at rest; past that the area scrolls rather than
- * squeezing every chart into a strip too short to read. */
+/* No cap: the dock is the height the divider was left at, the panels share
+ * that, and this fills its panel and scrolls when what is in it does not fit.
+ * A cap here would only leave dead space under the last chart. */
 .body.charts {
-    max-height: 33vh;
     padding: 0 .5rem .4rem;
     display: flex;
     flex-direction: column;
     gap: .6rem;
 }
+/* Charts share the room the divider left the dock, growing into it rather than
+ * sitting at a fixed height with a gap beneath them -- and stopping at a height
+ * a plot can still be read at, past which the area scrolls instead. */
 article.chart {
+    flex: 1 1 auto;
+    min-height: 9rem;
+    display: flex;
+    flex-direction: column;
     margin: 0;
     padding: .4rem .6rem .2rem;
     border: 1px solid var(--pico-muted-border-color);
@@ -458,7 +764,8 @@ article.chart > header {
     color: var(--pico-del-color);
 }
 /* The height a chart is worth reading at; the area scrolls to make room. */
-.chart .plot { height: 140px; }
+/* What is left of the chart once its header and legend have had theirs. */
+.chart .plot { flex: 1 1 auto; min-height: 6rem; }
 .uplot, .u-wrap { width: 100% !important; }
 
 /* The plot button and the menu it opens, which floats over the page rather
@@ -559,7 +866,6 @@ button.follow-tail {
 }
 
 .body.log {
-    max-height: 33vh;
     padding: 0 .5rem .3rem;
     font-family: var(--pico-font-family-monospace, monospace);
     font-size: .72rem;
@@ -590,22 +896,6 @@ button.watch-logs.watching {
     background: var(--pico-primary);
     color: var(--pico-primary-inverse);
 }
-
-/* --------------------------------------------------------------- status */
-
-footer.status {
-    padding: .2rem .8rem;
-    font-size: .75rem;
-    background: var(--pico-card-background-color);
-    border-top: 1px solid var(--pico-muted-border-color);
-    display: flex;
-    gap: 1rem;
-    align-items: center;
-    color: var(--pico-muted-color);
-}
-footer.status.bad { color: var(--pico-del-color); }
-footer.status label { margin: 0 0 0 auto; font-size: .75rem; }
-footer.status input { margin: 0 .3rem 0 0; }
 
 /* --------------------------------------------------------------- failure */
 

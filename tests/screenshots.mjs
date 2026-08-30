@@ -77,6 +77,21 @@ await page.route('**', route => {
 await page.goto(BASE + '/', { waitUntil: 'networkidle' })
 await page.waitForSelector('nav.tree a')
 
+/* The title is the one link out of the page. It leaves for somewhere this
+ * simulator cannot serve, so it has to say so and take the reader there
+ * without taking this page with it -- and without handing the new tab a
+ * handle on this one. */
+const brand = page.locator('.brand h1 a')
+const away = await brand.evaluate(a => ({
+    href: a.getAttribute('href'), target: a.getAttribute('target'),
+    rel: a.getAttribute('rel'), text: a.innerText.trim(),
+    icons: a.querySelectorAll('svg.ext').length }))
+if (away.href !== 'https://happyleptic.org/robinet.html' ||
+    away.target !== '_blank' || !/\bnoopener\b/.test(away.rel || '') ||
+    away.text !== 'RobiNet' || away.icons !== 1)
+    problems.push('the title must link out, marked as leaving: ' +
+                  JSON.stringify(away))
+
 /* A cable: its two ends either side, and its properties below. */
 await page.getByRole('link', { name: 'cable1', exact: true }).first().click()
 await page.waitForSelector('input[type=range]')
@@ -203,6 +218,44 @@ await page.getByRole('link', { name: 'switch', exact: true }).first().click()
 await page.waitForTimeout(300)
 await page.screenshot({ path: `${OUT}/b-switch.png` })
 
+/* One simulation is what is being worked on; the rest are in the way, and the
+ * one serving this page never is the subject. So it opens with that one folded
+ * away and the other not. */
+const simCard = (name) => page.locator('article.sim')
+    .filter({ has: page.locator(`header strong:text-is("${name}")`) })
+const folded = async (name) =>
+    !await simCard(name).locator('.body').isVisible()
+
+if (await folded('wan'))
+    problems.push('the simulation under study should open unfolded')
+if (!await folded('admin'))
+    problems.push('the simulation serving the page should open folded away')
+/* Folded, its header is all there is of it, so it has to say what its clock is
+ * doing: folding one is not ceasing to care whether it is running. */
+const adminBadge = await simCard('admin').locator('.badge:visible').innerText()
+if (adminBadge !== 'real time')
+    problems.push('a folded simulation must still say what it is doing, and ' +
+                  `it said "${adminBadge}"`)
+
+await simCard('admin').locator('header button.twisty').click()
+await page.waitForTimeout(200)
+await simCard('wan').locator('header button.twisty').click()
+await page.waitForTimeout(200)
+if (await folded('admin') || !await folded('wan'))
+    problems.push('the twisty must fold and unfold a simulation')
+
+/* And what the reader chose survives the topology being read afresh -- which
+ * happens on its own whenever the simulator goes away and comes back. */
+await page.evaluate(() => Alpine.$data(document.body).reload())
+await page.waitForTimeout(500)
+if (await folded('admin') || !await folded('wan'))
+    problems.push('a reload must not undo what the reader folded')
+
+/* Back to the way it opened, for the sections below. */
+await simCard('admin').locator('header button.twisty').click()
+await simCard('wan').locator('header button.twisty').click()
+await page.waitForTimeout(300)
+
 /* The speed controls, driven as a reader would: what the buttons do, what the
  * simulation says it is doing, and that unpausing goes back to the speed that
  * was in use rather than to full speed. */
@@ -216,20 +269,33 @@ const shouldSay = async (want, what) => {
     problems.push(`${what}: expected "${want}", the page said "${await says()}"`)
 }
 await shouldSay('full speed', 'a closed simulation starts at full speed')
-await wan.getByTitle('Real time').click()
+const speedButton = (name) =>
+    wan.getByRole('button', { name, exact: true })
+await speedButton('Real time').click()
 await shouldSay('1 \u00d7 real time', 'matching real time')
-await wan.getByTitle('Faster').click()
+await speedButton('Faster').click()
 await shouldSay('2 \u00d7 real time', 'speeding up')
-await wan.getByTitle('Slower').click()
-await wan.getByTitle('Slower').click()
+await speedButton('Slower').click()
+await speedButton('Slower').click()
 await shouldSay('1/2 \u00d7 real time', 'slowing down, in halves')
 await wan.getByRole('button', { name: 'Pause' }).click()
 await shouldSay('paused', 'pausing')
 if (!await wan.getByRole('button', { name: 'Step 10' }).isVisible())
     problems.push('stepping is not offered while paused')
+/* And a speed is not, while there is no clock running for it to be the speed
+ * of: three buttons that set one without starting it are three ways of
+ * appearing to resume without resuming. */
+for (const which of [ 'Slower', 'Real time', 'Faster', 'Full speed' ])
+    if (await speedButton(which).isVisible())
+        problems.push(`${which} is offered while the simulation is paused`)
 await page.screenshot({ path: `${OUT}/i-speed.png` })
 await wan.getByRole('button', { name: 'Resume' }).click()
 await shouldSay('1/2 \u00d7 real time', 'unpausing goes back to the speed in use')
+/* The speed it was set to is what it comes back at, so the buttons come back
+ * having lost nothing by being away. */
+for (const which of [ 'Slower', 'Real time', 'Faster', 'Full speed' ])
+    if (!await speedButton(which).isVisible())
+        problems.push(`${which} did not come back once it was resumed`)
 
 /* Asked for more than the machine can do: it must say so rather than quietly
  * run slower than asked. Through the API, since the buttons deliberately do
@@ -603,10 +669,12 @@ if (widths.size !== 1)
 
 /* The cable only has counters, so the other three kinds of metric would go
  * unseen. Feed the renderer the shapes metric.ml produces for them -- with the
- * poll off, since it would replace them with what the server really has. */
+ * poll off, since it would replace them with what the server really has. The
+ * poll reschedules itself from its own callback, so dropping the pending timer
+ * stops it for good. */
 await page.evaluate(() => {
     const d = Alpine.$data(document.body)
-    d.live = false
+    clearTimeout(d.timer)
     const now = d.sims[0].now
     const fired = (counts, at) => ({ counts, first_last: { first: at, last: at } })
     const once = (params, value) => ({ params, value })
@@ -715,7 +783,9 @@ for (const [ id, name, parent, children ] of [
         [ 6, 'eth0', 1, [] ], [ 7, 'tcp', 1, [] ], [ 11, 'eth1', 1, [] ],
         [ 12, 'loopback cable', 1, [] ],
         [ 8, 'eth0', 2, [] ], [ 9, 'port0', 3, [] ], [ 10, 'port1', 3, [] ] ])
-    graph[id] = { id, name, parent, children, peers: [] }
+    graph[id] = { id, name, parent, children, peers: [], properties: [],
+                  location: null, sim: 0,
+                  full_name: (parent === null ? '' : '/net') + '/' + name }
 const peer = (a, b, via) => {
     graph[a].peers.push({ widget: b, via })
     graph[b].peers.push({ widget: a, via })
@@ -738,7 +808,11 @@ const map = await page.evaluate((byId) => {
                  edges: edges.map(e => [ e.from, e.fromPort, e.to, e.toPort,
                                          e.via ]),
                  inside: [ ...inside.entries() ],
-                 ports: plane.map(id => [ id, portsOf(byId, edges, id) ]) }
+                 /* A box's ports are the ends of its edges that are not the box
+                  * itself, which is how the drawing reads them too. */
+                 ports: plane.map(id => [ id, edges.flatMap(e =>
+                     [ e.from === id ? e.fromPort : null,
+                       e.to === id ? e.toPort : null ]).filter(p => p !== null) ]) }
     }
     return { links, plane, relations: relations(byId).length,
              closed: view([]), openA: view([ 1 ]),
@@ -799,6 +873,431 @@ mapSay('the demo edges', demoMap.edges,
        [ [ 'switch', null, 'host2', null ], [ 'switch', null, 'host1', null ],
          [ 'switch', null, 'host0', null ] ])
 mapSay('nothing hidden in the demo', demoMap.inside, 0)
+
+/* ---------------------------------------------------------- the two panes */
+
+/* Both views at once, and the divider between them is the switch: pushed all
+ * the way over, it shuts one side. */
+const paneWidth = (which) =>
+    page.locator(`.pane.${which}`).evaluate(e => e.getBoundingClientRect().width)
+        .catch(() => 0)
+const widths0 = { detail: await paneWidth('detail'), map: await paneWidth('map') }
+if (widths0.detail < 100 || widths0.map < 100)
+    problems.push('both panes must be showing to start with, and they were ' +
+                  JSON.stringify(widths0))
+
+const splitter = await page.locator('.splitter.cols').boundingBox()
+const panes = await page.locator('.panes').boundingBox()
+await page.mouse.move(splitter.x + splitter.width / 2, splitter.y + splitter.height / 2)
+await page.mouse.down()
+await page.mouse.move(panes.x + panes.width * 0.7, splitter.y + 10, { steps: 6 })
+await page.mouse.up()
+await page.waitForTimeout(200)
+const widths1 = { detail: await paneWidth('detail'), map: await paneWidth('map') }
+if (!(widths1.detail > widths0.detail + 40))
+    problems.push('dragging the divider right must widen the left column: ' +
+                  JSON.stringify(widths0) + ' then ' + JSON.stringify(widths1))
+/* And it is remembered, or folding it away would have to be done again on
+ * every visit. */
+const keptSplit = await page.evaluate(() => localStorage.getItem('robinet.split'))
+if (!(Number(keptSplit) > 0.6))
+    problems.push(`the split must be remembered, and was kept as ${keptSplit}`)
+
+/* Measured again: it has just moved, and pressing where it used to be is
+ * pressing on the pane beside it. */
+const splitter2 = await page.locator('.splitter.cols').boundingBox()
+await page.mouse.move(splitter2.x + splitter2.width / 2, splitter2.y + 10)
+await page.mouse.down()
+await page.mouse.move(panes.x + panes.width - 4, splitter2.y + 10, { steps: 6 })
+await page.mouse.up()
+await page.waitForTimeout(200)
+if (await page.locator('.pane.map').isVisible())
+    problems.push('the divider pushed all the way over must shut the map')
+/* And it must still be reachable, or a pane shut once is shut for good --
+ * the share being remembered, that would outlast the browser. */
+/* Off the divider first: it has just been dragged, and a photograph of it
+ * under the pointer is a photograph of the hover state. */
+await page.mouse.move(panes.x + panes.width / 2, panes.y + panes.height / 2)
+await page.waitForTimeout(150)
+await page.screenshot({ path: `${OUT}/h-split-shut.png` })
+const handle = await page.locator('.splitter.cols').boundingBox()
+const view = await page.locator('.widget-view').boundingBox()
+if (!handle || handle.x + handle.width > view.x + view.width + 1 || handle.width < 4)
+    problems.push('the divider must stay on screen with a side shut: ' +
+                  JSON.stringify(handle) + ' in ' + JSON.stringify(view))
+await page.locator('.splitter.cols').click()
+await page.waitForTimeout(300)
+if (!await page.locator('.pane.map').isVisible())
+    problems.push('clicking the shut divider must bring that side back')
+const backTo = await page.evaluate(() => Alpine.$data(document.body).split)
+if (!(backTo > 0.6 && backTo < 1))
+    problems.push('and at the share it had before it was shut, not ' + backTo)
+/* Back to something to look at. */
+await page.evaluate(() => { Alpine.$data(document.body).split = 0.45 })
+await page.waitForTimeout(200)
+
+/* The same divider along the other axis, between the dock and everything above
+ * it: how much of the window the charts and the logs are worth is a question
+ * about the screen, so it is asked of the reader rather than answered here. */
+const dockSizes = () => page.evaluate(() => {
+    const h = (s) => { const e = document.querySelector(s)
+        if (!e) return 0
+        return Math.round(e.getBoundingClientRect().height) }
+    return { share: Alpine.$data(document.body).dockShare,
+             view: h('.widget-view'), dock: h('.dock'),
+             plot: h('.chart .plot'), canvas: h('.chart .plot canvas'),
+             panels: [ ...document.querySelectorAll('.dock .panel') ]
+                 .map(e => Math.round(e.getBoundingClientRect().height)) }
+})
+/* Something in the dock to share the room with, whatever the sections above
+ * left behind. */
+await page.locator('nav.tree a', { hasText: 'cable0' }).click()
+await page.waitForTimeout(400)
+if (await page.evaluate(() => !Alpine.$data(document.body).charts.length))
+    await page.locator('button.metric-plot').first().click()
+if (await page.evaluate(() => !Alpine.$data(document.body).logged.length))
+    await page.locator('button.watch-logs').click()
+await page.waitForTimeout(800)
+
+const dockWas = await dockSizes()
+if (!(dockWas.dock > 60) || !dockWas.panels.every(p => p > 40))
+    problems.push('the dock and its panels must have room to start with: ' +
+                  JSON.stringify(dockWas))
+
+const bar = await page.locator('.splitter.rows').boundingBox()
+const mainBox = await page.locator('main').boundingBox()
+await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2)
+await page.mouse.down()
+await page.mouse.move(bar.x + bar.width / 2, mainBox.y + mainBox.height * 0.35,
+                      { steps: 8 })
+await page.mouse.up()
+await page.waitForTimeout(400)
+const dockTall = await dockSizes()
+if (!(dockTall.dock > dockWas.dock + 100) || !(dockTall.view < dockWas.view - 100))
+    problems.push('dragging the dock divider up must give the dock the room ' +
+                  'the view above it loses: ' + JSON.stringify(dockWas) +
+                  ' then ' + JSON.stringify(dockTall))
+/* The panels take the room with it, rather than the dock growing around them,
+ * and so does the plot inside: a chart at a fixed height in a taller panel is
+ * a chart with a gap under it. */
+if (!dockTall.panels.every((p, i) => p > dockWas.panels[i] + 40))
+    problems.push('and the panels in it must grow too: ' +
+                  JSON.stringify(dockTall.panels))
+if (!(dockTall.plot > dockWas.plot + 40) ||
+    !(dockTall.canvas > dockWas.canvas + 40))
+    problems.push('and the plot must be redrawn at the size it is given: ' +
+                  JSON.stringify([ dockWas.plot, dockWas.canvas ]) + ' then ' +
+                  JSON.stringify([ dockTall.plot, dockTall.canvas ]))
+await page.screenshot({ path: `${OUT}/h-dock-tall.png` })
+
+/* All the way down shuts it, and the handle left behind is the way back -- at
+ * the share it had dockWas, not at the sliver the drag went out through. */
+const bar2 = await page.locator('.splitter.rows').boundingBox()
+await page.mouse.move(bar2.x + bar2.width / 2, bar2.y + bar2.height / 2)
+await page.mouse.down()
+await page.mouse.move(bar2.x + bar2.width / 2, mainBox.y + mainBox.height - 2,
+                      { steps: 8 })
+await page.mouse.up()
+await page.waitForTimeout(400)
+if (await page.locator('.dock').isVisible())
+    problems.push('the dock divider pushed all the way down must shut it')
+const shutBar = await page.locator('.splitter.rows').boundingBox()
+if (!shutBar || shutBar.y + shutBar.height > mainBox.y + mainBox.height + 1)
+    problems.push('and must stay on screen: ' + JSON.stringify(shutBar))
+await page.locator('.splitter.rows').click()
+await page.waitForTimeout(400)
+const back = await dockSizes()
+if (Math.abs(back.share - dockTall.share) > 0.01)
+    problems.push('clicking it must bring the dock back at the share it had, ' +
+                  `${dockTall.share}, and it came back at ${back.share}`)
+/* Back to what the shots below are taken with. */
+await page.evaluate(() => { Alpine.$data(document.body).dockShare = 0.4 })
+await page.waitForTimeout(300)
+
+/* -------------------------------------------------------------- the map */
+
+const mapBox = () => page.locator('.pane.map').boundingBox()
+const boxOf = (name) =>
+    page.locator('.pane.map .box', { has: page.locator(`.name:text-is("${name}")`) })
+const scene = () => page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    const s = d.mapScene()
+    return { trayCount: s.trayCount, k: d.mapView.k,
+             boxes: s.boxes.map(b => ({ name: b.name, placed: b.placed,
+                                        depth: b.depth, open: b.open,
+                                        inside: b.inside })),
+             ports: s.ports.map(p => p.name),
+             edges: s.edges.map(e => e.name) }
+})
+
+/* From a known starting point: whatever was being looked at above may be
+ * inside a box, and the selection holds the boxes it is inside open. A box on
+ * the plane holds nothing open. */
+await page.locator('nav.tree a', { hasText: 'host2' }).click()
+await page.waitForTimeout(400)
+
+let sc = await scene()
+/* The demo places its switch and its hosts, and derives its cable lengths from
+ * the distances between them, so the map has something on it from the start.
+ * Only the boxes on the plane: what is inside one is drawn where that box says
+ * and never has a place of its own. */
+if (sc.trayCount !== 0 || !sc.boxes.filter(b => !b.depth).every(b => b.placed))
+    problems.push('every box of the demo should start placed, and the scene ' +
+                  'was ' + JSON.stringify(sc))
+if (await page.locator('.pane.map svg.cables line').count() !== 3)
+    problems.push('the three cables of the demo should be drawn as three lines')
+mapSay('the cables are named on the map', [ ...sc.edges ].sort(),
+       [ 'cable0', 'cable1', 'cable2' ])
+
+/* Dragging a box about is for real, both ways: the simulator is told, and says
+ * so when asked again. Into the strip is a location that is not -- one request
+ * with a null -- and back out of it is a location again. */
+const grab = async (loc, at) => {
+    const b = await loc.boundingBox()
+    await page.mouse.move(b.x + (at === 'header' ? 20 : b.width / 2),
+                          b.y + (at === 'header' ? 6 : b.height / 2))
+    await page.mouse.down()
+}
+const locationOf = async (id) =>
+    (await (await fetch(`${BASE}/api/simulations/0/widgets/${id}`)).json()).location
+const pane = await mapBox()
+
+await grab(boxOf('switch'))
+await page.mouse.move(pane.x + 120, pane.y + pane.height - 12, { steps: 8 })
+await page.mouse.up()
+await page.waitForTimeout(400)
+if (await locationOf(1) !== null)
+    problems.push('dragging a box into the strip must take it off the map, ' +
+                  'and it is still at ' + JSON.stringify(await locationOf(1)))
+sc = await scene()
+if (sc.trayCount !== 1)
+    problems.push(`one box should be left unplaced, not ${sc.trayCount}`)
+
+await grab(boxOf('switch'))
+await page.mouse.move(pane.x + pane.width * 0.4, pane.y + 80, { steps: 8 })
+await page.mouse.up()
+await page.waitForTimeout(400)
+const placedAt = await locationOf(1)
+if (!placedAt ||
+    !Number.isFinite(placedAt.lat) || !Number.isFinite(placedAt.lon))
+    problems.push('dragging it back onto the map must place it: the simulator ' +
+                  'has it at ' + JSON.stringify(placedAt))
+sc = await scene()
+if (sc.trayCount !== 0)
+    problems.push(`nothing should be left unplaced, not ${sc.trayCount}`)
+
+/* Opening a box shows what is in it. Which is not a matter of zoom: one wants
+ * a single box open with the rest of the network shut around it. */
+await boxOf('switch').locator('.twisty').click()
+await page.waitForTimeout(300)
+sc = await scene()
+if (!sc.boxes.some(b => b.name === 'hub') ||
+    !sc.boxes.some(b => b.name === 'switch' && b.open))
+    problems.push('opening the switch must show the hub inside it: ' +
+                  JSON.stringify(sc.boxes))
+const zoomed = await scene()
+await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2)
+await page.mouse.wheel(0, -400)
+await page.waitForTimeout(200)
+if (!((await scene()).k > zoomed.k * 1.2))
+    problems.push('the wheel must zoom the map in')
+if (!(await scene()).boxes.some(b => b.name === 'hub'))
+    problems.push('zooming must not close what was opened: detail is not scale')
+
+/* A cable is a widget with properties of its own, so its name on the line is
+ * the way to it. */
+await page.locator('.pane.map .cable-label').first().click()
+await page.waitForTimeout(400)
+const onCable = await page.evaluate(() => Alpine.$data(document.body).selected.name)
+if (!/^cable/.test(onCable))
+    problems.push(`clicking a cable's name must select it, and selected ${onCable}`)
+
+/* Framed again: the zoom above moved everything. */
+await page.locator('.map-tools button').click()
+await page.waitForTimeout(300)
+await page.screenshot({ path: `${OUT}/h-map.png` })
+
+/* Framing the demo must show it, rather than a scale at which its four boxes
+ * are one heap: it is 900m across, and a map that only went down to a few
+ * kilometres would have nothing to say about a network of that size. */
+const spread = await page.evaluate(() => {
+    const bs = Alpine.$data(document.body).mapScene().boxes
+    const xs = bs.map(b => b.x), ys = bs.map(b => b.y)
+    return { x: Math.max(...xs) - Math.min(...xs),
+             y: Math.max(...ys) - Math.min(...ys) }
+})
+if (spread.x < 120 || spread.y < 60)
+    problems.push('fitting a network 900m across must spread it over the ' +
+                  'pane, and it spans ' + JSON.stringify(spread))
+
+/* And it frames what the map draws and nothing else. Anything with a widget
+ * can be placed -- by [Widget.place], or through the API the map's own drags
+ * go through -- including something inside a box, which is drawn at that box's
+ * place: framing around it would leave the reader looking at empty world
+ * halfway to it. */
+const framed = await page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    const before = Object.assign({}, d.mapView)
+    const inner = Object.values(d.widgetsOf(d.selected.sim))
+                        .find(w => w.name === 'eth')
+    inner.location = { lat: -33.87, lon: 151.21 }   /* the other hemisphere */
+    d.fitMap()
+    const after = Object.assign({}, d.mapView)
+    inner.location = null
+    d.fitMap()
+    return { before, after }
+})
+if (framed.before.k !== framed.after.k ||
+    framed.before.cx !== framed.after.cx || framed.before.cy !== framed.after.cy)
+    problems.push('a location on something the map never draws must not move ' +
+                  'the framing: ' + JSON.stringify(framed))
+
+/* Selecting something the map is not showing must still show something. The
+ * boxes between it and the plane are held open by the selection itself, so
+ * that the widget being looked at is drawn rather than hidden inside a box --
+ * and every box it is inside is marked, so that there is a way back up. */
+const marks = () => page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    const s = d.mapScene()
+    return { open: [ ...d.mapOpen ], auto: [ ...d.mapAuto ],
+             names: s.boxes.map(b => b.name),
+             selected: s.boxes.filter(b => b.id === d.selected.id)
+                              .map(b => b.name),
+             holds: s.boxes.filter(b => b.holds).map(b => b.name),
+             cable: s.edges.filter(e => e.on).map(e => e.name) }
+})
+await page.locator('nav.tree a', { hasText: 'eth' }).first().click()
+await page.waitForTimeout(500)
+let mk = await marks()
+mapSay('the host holding the selected layer is opened', mk.auto, [ 3 ])
+mapSay('so the layer itself is drawn, and marked', mk.selected, [ 'eth' ])
+mapSay('and the box it is in says so', mk.holds, [ 'host0' ])
+/* A box the reader opened is not one the selection may shut. */
+if (!mk.open.length || !mk.names.includes('hub'))
+    problems.push('a box the reader opened must stay open: ' + JSON.stringify(mk))
+
+/* A cable is a line, not a box, so that is what is marked. */
+await page.locator('nav.tree a', { hasText: 'cable1' }).click()
+await page.waitForTimeout(500)
+mk = await marks()
+mapSay('the selected cable is the line', mk.cable, [ 'cable1' ])
+
+/* And moving on lets go of what was held open, without touching what the
+ * reader opened. */
+await page.locator('nav.tree a', { hasText: 'host2' }).click()
+await page.waitForTimeout(500)
+mk = await marks()
+mapSay('nothing is held open any more', mk.auto, [])
+mapSay('the selection is the box itself', mk.selected, [ 'host2' ])
+if (mk.names.includes('eth'))
+    problems.push('the host opened by the selection must shut when it moves ' +
+                  'on: ' + JSON.stringify(mk.names))
+if (!mk.names.includes('hub'))
+    problems.push('but the box the reader opened must still be open: ' +
+                  JSON.stringify(mk.names))
+await page.screenshot({ path: `${OUT}/h-map-selection.png` })
+
+/* And picking something out of the tree that is off the edge of the map brings
+ * it into view. Only then: the map's promise is that things stay where they
+ * were left, and sliding it about whenever the reader clicks something already
+ * on screen is exactly what breaks that. */
+const inView = () => page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    const s = d.mapScene()
+    const ok = (b) => b.x >= 0 && b.y >= 0 &&
+                      b.x + b.w <= d.mapSize.w && b.y + b.h <= s.trayTop
+    const line = s.edges.find(e => e.via === d.selected.id)
+    return { cx: d.mapView.cx, cy: d.mapView.cy,
+             on: s.boxes.filter(ok).map(b => b.name),
+             off: s.boxes.filter(b => !ok(b)).map(b => b.name),
+             cable: line === undefined ? null
+                    : line.mx >= 0 && line.mx <= d.mapSize.w &&
+                      line.my >= 0 && line.my <= s.trayTop }
+})
+/* Somewhere else entirely. */
+const panAway = () => page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    d.mapView = { k: d.mapView.k, cx: d.mapView.cx + 0.0002,
+                                  cy: d.mapView.cy + 0.0002 }
+})
+await panAway()
+await page.waitForTimeout(300)
+if ((await inView()).on.length)
+    problems.push('the map should be looking at nothing at this point')
+await page.locator('nav.tree a', { hasText: 'host1' }).click()
+await page.waitForTimeout(500)
+const found = await inView()
+if (!found.on.includes('host1'))
+    problems.push('selecting a widget off the edge of the map must bring it ' +
+                  'into view: ' + JSON.stringify(found))
+
+/* Something already on screen leaves the view exactly where it was. Whichever
+ * box that turns out to be: the pan just above chose the framing, so which of
+ * them lands clear of the edges is not something this test may assume, and a
+ * box straddling the edge is one the map is right to bring in. Clear by a
+ * wider margin than the map itself asks for, so that the box picked here is in
+ * view by any reading. By its header, since an open box has its contents drawn
+ * across its middle. */
+const settled = await page.evaluate(() => {
+    const d = Alpine.$data(document.body), s = d.mapScene(), m = 16
+    const b = s.boxes.find(b => b.depth === 0 && b.id !== d.selected.id &&
+                                b.x >= m && b.y >= m &&
+                                b.x + b.w <= d.mapSize.w - m &&
+                                b.y + b.h <= s.trayTop - m)
+    return b ? b.name : null
+})
+if (settled === null) {
+    problems.push('framing the map should leave a box clear of its edges')
+} else {
+    await boxOf(settled).click({ position: { x: 20, y: 6 } })
+    await page.waitForTimeout(500)
+    const still = await inView()
+    if (still.cx !== found.cx || still.cy !== found.cy)
+        problems.push(`picking ${settled}, already in view, must not move the ` +
+                      `map: ${found.cx},${found.cy} then ${still.cx},${still.cy}`)
+}
+
+/* A cable is a line and not a box, so what is brought into view is the line --
+ * at the point its name is written. */
+await panAway()
+await page.waitForTimeout(300)
+await page.locator('nav.tree a', { hasText: 'cable2' }).click()
+await page.waitForTimeout(500)
+const onCable2 = await inView()
+if (onCable2.cable !== true)
+    problems.push('selecting a cable off the edge must bring its line into ' +
+                  'view: ' + JSON.stringify(onCable2))
+
+/* Ports, which the demo has none of: every cable in it joins two boxes that
+ * are on the plane already. The graph from the promotion checks above does
+ * have them, so the drawing is tried against that -- a shape a real network
+ * has as soon as its cables are wired at interface level, as simwan's are. */
+await page.evaluate((byId) => {
+    const d = Alpine.$data(document.body)
+    const sim = d.selected.sim
+    /* Somewhere, so that the boxes are spread over a map rather than heaped in
+     * the strip: this is the view the ports exist for. */
+    byId[1].location = { lat: 51.51, lon: -0.13 }   /* hostA */
+    byId[2].location = { lat: 52.37, lon: 4.90 }    /* hostB */
+    byId[3].location = { lat: 48.85, lon: 2.35 }    /* the switch */
+    d.widgets[sim] = byId
+    d.roots[sim] = 0
+    d.mapOpen = []
+    d.mapAuto = []
+    d.selected = Object.assign({ sim }, byId[1])
+    d.topoTock++
+    d.fitMap()
+}, graph)
+await page.waitForTimeout(300)
+sc = await scene()
+mapSay('the ports of a shut box, drawn on it', [ ...sc.ports ].sort(),
+       [ 'eth0', 'eth0', 'port0', 'port1' ])
+mapSay('and what the shut box is folding away',
+       sc.boxes.filter(b => b.inside).map(b => [ b.name, b.inside ]),
+       [ [ 'hostA', 1 ] ])
+if (await page.locator('.pane.map .port').count() !== 4)
+    problems.push('the four ports must be drawn')
+await page.screenshot({ path: `${OUT}/h-map-ports.png` })
 
 if (outside.length)
     problems.push('the page went looking outside the simulator for ' +

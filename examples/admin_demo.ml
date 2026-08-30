@@ -10,13 +10,50 @@ let main =
     let net = Simulation.make ~realtime:false "wan" in
     let parent = net.root in
     let netmask = Ip.Addr.of_string "255.255.255.0" in
+    (* Where this little network is.
+     *
+     * The spot itself is arbitrary; that its parts have one at all is not. A
+     * widget with no place of its own is drawn in the strip under the map
+     * rather than put somewhere and left to look placed, so a simulation that
+     * places nothing opens on a map with nothing on it.
+     *
+     * The cables then take their length from the ground distance between the
+     * two ends they join, the way simwan's do, so that the picture and the
+     * delays it is supposed to explain are computed from the same numbers
+     * rather than merely agreeing by luck. *)
+    let switch_at = Widget.{ lat = 48.8566 ; lon = 2.3522 } in
+    let rad d = d *. Float.pi /. 180. in
+    (* Metres between two places, on a sphere. Good to a fraction of a percent,
+     * which is far past what a cable's delay is sensitive to -- and rounded to
+     * the metre where it is used, since the digits past that are the sphere's
+     * error rather than anything about the cable. *)
+    let ground_distance (a : Widget.location) (b : Widget.location) =
+        let hav x = let s = sin (x /. 2.) in s *. s in
+        let h = hav (rad (b.lat -. a.lat)) +.
+                cos (rad a.lat) *. cos (rad b.lat) *.
+                hav (rad (b.lon -. a.lon)) in
+        2. *. 6_371_000. *. asin (sqrt (min 1. h)) in
+    (* [dist] metres from [c], on a [bearing] in degrees clockwise from north. *)
+    let offset (c : Widget.location) ~bearing ~dist =
+        let m_per_deg = 111_320. in
+        Widget.{ lat = c.lat +. dist *. cos (rad bearing) /. m_per_deg ;
+                 lon = c.lon +. dist *. sin (rad bearing) /.
+                                (m_per_deg *. cos (rad c.lat)) } in
     let switch = Hub.Switch.make ~parent 4 64 "switch" in
+    Widget.place switch.Hub.Switch.widget (Some switch_at) ;
     let hosts =
         List.init 3 (fun i ->
             let ip = Ip.Addr.of_string (Printf.sprintf "192.168.1.%d" (i + 10)) in
             let h = Host.make_static ~parent ~netmask ip (Printf.sprintf "host%d" i) in
+            (* Spread around the switch, each one further out than the last, so
+             * that the three cables are of three different lengths. *)
+            let at = offset switch_at ~bearing:(120. *. float_of_int i)
+                            ~dist:(300. *. float_of_int (i + 1)) in
+            Widget.place h.Host.trx.widget (Some at) ;
             let cable =
-                Eth.Cable.State.make ~parent ~length:(5. *. float_of_int (i + 1))
+                Eth.Cable.State.make ~parent
+                                     ~length:(Float.round
+                                                  (ground_distance switch_at at))
                                      ~error_rate:0.0001
                                      ~name:(Printf.sprintf "cable%d" i) () in
             let trx = Eth.Cable.make cable in

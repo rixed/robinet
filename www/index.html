@@ -23,16 +23,15 @@
 </head>
 <body x-data="admin" x-init="start()">
 
-<!-- Not a corner of the status bar: if these numbers are no longer live, that
-     is the most important thing on the page. -->
+<!-- Across the top, not tucked away in a corner: if these numbers are no
+     longer live, that is the most important thing on the page. -->
 <div class="banner" x-show="offline" x-cloak>
     <strong>No answer from the simulator.</strong>
     <span x-show="lastOk">
         Showing what was last known, <span x-text="lastOkText"></span>.
     </span>
     <span x-show="!lastOk">Never managed to reach it.</span>
-    <span x-show="live">Trying again in <span x-text="retryIn"></span>s.</span>
-    <span x-show="!live">Refresh is off.</span>
+    <span>Trying again in <span x-text="retryIn"></span>s.</span>
     <button class="outline" @click="retryNow()">Try now</button>
 </div>
 
@@ -41,47 +40,116 @@
     <!-- ============ left column: the clock, and every widget ============ -->
     <aside>
         <hgroup class="brand">
-            <h1>RobiNet</h1>
+            <h1>
+                <a href="https://happyleptic.org/robinet.html"
+                   target="_blank" rel="noopener noreferrer"
+                   title="About RobiNet (opens in a new tab)">RobiNet<!--
+                --><svg class="ext" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M14 4h6v6"/>
+                        <path d="M20 4l-8 8"/>
+                        <path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>
+                    </svg></a>
+            </h1>
             <p x-text="sims.length + ' simulation' + (sims.length === 1 ? '' : 's')"></p>
         </hgroup>
 
         <template x-for="s in sims" :key="s.id">
-            <article class="sim" :class="{ 'is-serving': s.id === servingId }">
+            <article class="sim" :class="{ 'is-serving': s.id === servingId,
+                                           folded: simFolded.includes(s.id) }">
                 <header>
+                    <button class="twisty" @click="foldSim(s.id)"
+                            :title="simFolded.includes(s.id)
+                                    ? 'Show this simulation' : 'Fold it away'"
+                            x-text="simFolded.includes(s.id) ? '\u25b8' : '\u25be'"></button>
                     <strong x-text="s.name"></strong>
+                    <!-- Folded away, the header is all there is of it, so what
+                         its clock is doing goes there: the reason to fold one
+                         is that it is not the one being worked on, not that one
+                         has stopped caring whether it is running. -->
+                    <span class="badge" x-show="simFolded.includes(s.id)"
+                          x-text="speedText(s)"></span>
                     <!-- Which clock it runs on, which never changes. How fast
                          it is running on it is the line under the buttons. -->
-                    <span class="badge"
+                    <span class="badge" x-show="!simFolded.includes(s.id)"
                           x-text="s.realtime ? 'wall clock' : 'simulated clock'"></span>
                 </header>
 
+                <div class="body" x-show="!simFolded.includes(s.id)">
+
                 <dl class="clock">
                     <dt>now</dt>       <dd x-text="s.now_str"></dd>
-                    <dt>events</dt>    <dd x-text="s.pending_events"></dd>
+                    <!-- What is waiting to happen, not what has happened:
+                         the size of the clock's queue. -->
+                    <dt>pending</dt>
+                    <dd><span x-text="s.pending_events"></span>
+                        <small>event<span x-show="s.pending_events !== 1">s</span></small></dd>
                     <dt>paused for</dt><dd x-text="s.paused_total.toFixed(2) + 's'"></dd>
                 </dl>
 
                 <!-- The simulation serving this page must not pause itself, and
                      the API would refuse anyway: do not offer it. -->
                 <div class="controls" x-show="s.id !== servingId">
-                    <button class="outline" x-show="!s.paused" :disabled="!online"
-                            @click="control(s, 'pause')">Pause</button>
+                    <!-- Drawn rather than written, and drawn rather than
+                         typed: the two bars and the triangle are read without
+                         reading, and they take a fraction of the room. As an
+                         SVG and not a character, because the ones that mean
+                         these two are not in every font, and a missing glyph
+                         is a button with nothing on it. -->
+                    <button class="outline icon" x-show="!s.paused"
+                            :disabled="!online" aria-label="Pause" title="Pause"
+                            @click="control(s, 'pause')">
+                        <svg viewBox="0 0 10 12" aria-hidden="true">
+                            <rect x="1" y="1" width="3" height="10"/>
+                            <rect x="6" y="1" width="3" height="10"/>
+                        </svg>
+                    </button>
                     <!-- Resuming goes back to the speed that was in use:
                          pausing does not disturb it. -->
-                    <button x-show="s.paused" :disabled="!online"
-                            @click="control(s, 'resume')">Resume</button>
+                    <button class="icon" x-show="s.paused" :disabled="!online"
+                            aria-label="Resume" title="Resume"
+                            @click="control(s, 'resume')">
+                        <svg viewBox="0 0 10 12" aria-hidden="true">
+                            <path d="M1 1 L9 6 L1 11 Z"/>
+                        </svg>
+                    </button>
 
-                    <!-- A simulation that follows the wall clock has no speed
+                    <!-- Only while it is running: a speed set on a standing
+                         clock does nothing one can see, and these buttons would
+                         be three ways of appearing to start it without starting
+                         it. What they set is remembered across a pause anyway,
+                         so there is nothing lost by asking after resuming.
+                         A simulation that follows the wall clock has no speed
                          of ours to set. -->
-                    <button class="outline secondary" title="Slower"
-                            :disabled="!online || s.realtime"
-                            @click="setSpeed(s, slower(s))">&laquo;</button>
-                    <button class="outline secondary" title="Real time"
-                            :disabled="!online || s.realtime"
-                            @click="setSpeed(s, 1)">1&times;</button>
-                    <button class="outline secondary" title="Faster"
-                            :disabled="!online || s.realtime"
-                            @click="setSpeed(s, faster(s))">&raquo;</button>
+                    <template x-if="!s.paused">
+                        <span class="speeds">
+                            <!-- Minus and plus rather than arrows: an arrow on
+                                 a clock reads as moving through time, and a
+                                 leftward one as going back in it, which is not
+                                 something a simulation can do. The rung each
+                                 one leads to is in its tooltip rather than on
+                                 its face: written there, the button would
+                                 change width as it was used, and the ones
+                                 beside it would shift out from under the
+                                 pointer. -->
+                            <button class="outline secondary" aria-label="Slower"
+                                    :title="'Slower: ' + speedTip(slower(s))"
+                                    :disabled="!online || s.realtime"
+                                    @click="setSpeed(s, slower(s))">&minus;</button>
+                            <button class="outline secondary" aria-label="Real time"
+                                    title="Real time: 1 &times; real time"
+                                    :disabled="!online || s.realtime"
+                                    @click="setSpeed(s, 1)">1&times;</button>
+                            <button class="outline secondary" aria-label="Faster"
+                                    :title="'Faster: ' + speedTip(faster(s))"
+                                    :disabled="!online || s.realtime"
+                                    @click="setSpeed(s, faster(s))">+</button>
+                            <!-- Off the top of the ladder, in one go. -->
+                            <button class="outline secondary" aria-label="Full speed"
+                                    title="Full speed: as fast as it can go"
+                                    :disabled="!online || s.realtime"
+                                    @click="setSpeed(s, null)">&raquo;</button>
+                        </span>
+                    </template>
 
                     <!-- Only while it is standing still is stepping meaningful. -->
                     <template x-if="s.paused">
@@ -119,6 +187,7 @@
                         </div>
                     </template>
                 </nav>
+                </div>
             </article>
         </template>
     </aside>
@@ -134,268 +203,400 @@
         <template x-if="selected">
             <div class="widget-view" @scroll="repositionMenu()"
                  @resize.window="repositionMenu()">
-                <!-- ancestors, as a straight line, always -->
-                <nav class="breadcrumb" aria-label="ancestors">
-                    <template x-for="(a, i) in ancestors()" :key="a.id">
-                        <span>
-                            <a href="#" @click.prevent="select(selected.sim, a.id)"
-                               x-text="a.name"></a>
-                            <span class="sep">/</span>
-                        </span>
-                    </template>
-                    <strong x-text="selected.name"></strong>
-                    <!-- The one thing about the selected widget that is not
-                         shown below but somewhere else: the log window keeps
-                         what it is given, whatever is being looked at. -->
-                    <button class="outline secondary watch-logs" :disabled="!online"
-                            :class="{ watching: isLogged({ sim: selected.sim, id: selected.id }) }"
-                            :title="isLogged({ sim: selected.sim, id: selected.id })
-                                    ? 'Stop following what this widget logs'
-                                    : 'Follow what this widget logs'"
-                            @click="toggleLogged()">logs</button>
-                    <small class="error" x-show="logError" x-text="logError"></small>
-                </nav>
+                <!-- The map beside everything about the selected widget --
+                     what it is made of, and what it is worth -- rather than
+                     instead of it: one is forever wanting the other. The
+                     divider between the two columns is also the switch between
+                     them: dragged to either side, it shuts that side.
+                     This column is what scrolls; the map keeps its room. -->
+                <div class="panes">
+                    <div class="pane detail" x-show="split > 0" x-cloak
+                         :style="`flex-basis: ${split * 100}%`"
+                         @scroll="repositionMenu()">
+                        <div class="schematic">
+                            <!-- ancestors, as a straight line, always -->
+                            <nav class="breadcrumb" aria-label="ancestors">
+                                <template x-for="(a, i) in ancestors()" :key="a.id">
+                                    <span>
+                                        <a href="#" @click.prevent="select(selected.sim, a.id)"
+                                           x-text="a.name"></a>
+                                        <span class="sep">/</span>
+                                    </span>
+                                </template>
+                                <strong x-text="selected.name"></strong>
+                                <!-- The one thing about the selected widget that is not
+                                     shown below but somewhere else: the log window keeps
+                                     what it is given, whatever is being looked at. -->
+                                <button class="outline secondary watch-logs" :disabled="!online"
+                                        :class="{ watching: isLogged({ sim: selected.sim, id: selected.id }) }"
+                                        :title="isLogged({ sim: selected.sim, id: selected.id })
+                                                ? 'Stop following what this widget logs'
+                                                : 'Follow what this widget logs'"
+                                        @click="toggleLogged()">logs</button>
+                                <small class="error" x-show="logError" x-text="logError"></small>
+                            </nav>
 
-                <!-- peers to the left, the widget, peers to the right -->
-                <div class="inspector">
-                    <div class="peers left">
-                        <template x-for="p in peersLeft()" :key="p.widget + '-' + p.via">
-                            <div class="peer">
-                                <a href="#" class="node peer-node"
-                                   @click.prevent="select(selected.sim, p.widget)"
-                                   x-text="nameOf(p.widget)"></a>
-                                <div class="cable">
-                                    <a href="#" x-show="p.via !== null"
-                                       @click.prevent="select(selected.sim, p.via)"
-                                       x-text="nameOf(p.via)"></a>
+                            <!-- peers to the left, the widget, peers to the right -->
+                            <div class="inspector">
+                                <div class="peers left">
+                                    <template x-for="p in peersLeft()" :key="p.widget + '-' + p.via">
+                                        <div class="peer">
+                                            <a href="#" class="node peer-node"
+                                               @click.prevent="select(selected.sim, p.widget)"
+                                               x-text="nameOf(p.widget)"></a>
+                                            <div class="cable">
+                                                <a href="#" x-show="p.via !== null"
+                                                   @click.prevent="select(selected.sim, p.via)"
+                                                   x-text="nameOf(p.via)"></a>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+
+                                <div class="self">
+                                    <div class="node current">
+                                        <strong x-text="selected.name"></strong>
+                                        <small x-text="selected.full_name"></small>
+                                    </div>
+                                </div>
+
+                                <div class="peers right">
+                                    <template x-for="p in peersRight()" :key="p.widget + '-' + p.via">
+                                        <div class="peer">
+                                            <div class="cable">
+                                                <a href="#" x-show="p.via !== null"
+                                                   @click.prevent="select(selected.sim, p.via)"
+                                                   x-text="nameOf(p.via)"></a>
+                                            </div>
+                                            <a href="#" class="node peer-node"
+                                               @click.prevent="select(selected.sim, p.widget)"
+                                               x-text="nameOf(p.widget)"></a>
+                                        </div>
+                                    </template>
                                 </div>
                             </div>
-                        </template>
-                    </div>
 
-                    <div class="self">
-                        <div class="node current">
-                            <strong x-text="selected.name"></strong>
-                            <small x-text="selected.full_name"></small>
+                            <!-- children, below, always -->
+                            <div class="children" x-show="children().length">
+                                <template x-for="c in children()" :key="c.id">
+                                    <a href="#" class="node child"
+                                       @click.prevent="select(selected.sim, c.id)"
+                                       x-text="c.name"></a>
+                                </template>
+                            </div>
+
                         </div>
-                    </div>
 
-                    <div class="peers right">
-                        <template x-for="p in peersRight()" :key="p.widget + '-' + p.via">
-                            <div class="peer">
-                                <div class="cable">
-                                    <a href="#" x-show="p.via !== null"
-                                       @click.prevent="select(selected.sim, p.via)"
-                                       x-text="nameOf(p.via)"></a>
-                                </div>
-                                <a href="#" class="node peer-node"
-                                   @click.prevent="select(selected.sim, p.widget)"
-                                   x-text="nameOf(p.widget)"></a>
-                            </div>
-                        </template>
-                    </div>
-                </div>
+                        <!-- ================= properties ================= -->
+                        <article class="properties">
+                            <header>
+                                <strong>Properties</strong>
+                                <!-- The live refresh deliberately leaves the fields
+                                     below alone; this is how one asks for their true
+                                     values back. -->
+                                <button class="outline secondary"
+                                        :disabled="!online || !props.length"
+                                        title="Read every value again, the editable ones included"
+                                        @click="loadProps({ full: true })">Refresh</button>
+                            </header>
 
-                <!-- children, below, always -->
-                <div class="children" x-show="children().length">
-                    <template x-for="c in children()" :key="c.id">
-                        <a href="#" class="node child"
-                           @click.prevent="select(selected.sim, c.id)"
-                           x-text="c.name"></a>
-                    </template>
-                </div>
+                            <p x-show="propsState === 'loading'" x-cloak>
+                                <small>Reading them&hellip;</small></p>
+                            <p x-show="propsState === 'loaded' && !props.length" x-cloak>
+                                <small>This widget has none.</small></p>
+                            <p class="sim-error" x-show="propsState === 'failed'" x-cloak>
+                                <small x-text="props.length
+                                               ? 'Could not read them again: ' + propsError
+                                               : 'Could not read them: ' + propsError"></small>
+                            </p>
 
-                <!-- ================= properties ================= -->
-                <article class="properties">
-                    <header>
-                        <strong>Properties</strong>
-                        <!-- The live refresh deliberately leaves the fields
-                             below alone; this is how one asks for their true
-                             values back. -->
-                        <button class="outline secondary"
-                                :disabled="!online || !props.length"
-                                title="Read every value again, the editable ones included"
-                                @click="loadProps({ full: true })">Refresh</button>
-                    </header>
-
-                    <p x-show="propsState === 'loading'" x-cloak>
-                        <small>Reading them&hellip;</small></p>
-                    <p x-show="propsState === 'loaded' && !props.length" x-cloak>
-                        <small>This widget has none.</small></p>
-                    <p class="sim-error" x-show="propsState === 'failed'" x-cloak>
-                        <small x-text="props.length
-                                       ? 'Could not read them again: ' + propsError
-                                       : 'Could not read them: ' + propsError"></small>
-                    </p>
-
-                    <table x-show="props.length">
-                        <thead>
-                            <tr><th>Name</th><th>Value</th><th>Description</th></tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="p in props" :key="p.name">
-                                <tr :class="{ 'has-error': p.error }">
-                                    <td x-text="p.name"></td>
-                                    <td>
-                                        <!-- A metric: one row per parameter
-                                             combination, and when it was last
-                                             touched. -->
-                                        <template x-if="base(p).type === 'metric'">
-                                            <div class="metric">
-                                                <p x-show="!p.metric.rows.length" class="ro">
-                                                    <small>nothing yet</small></p>
-                                                <template x-for="row in p.metric.rows" :key="row.key">
-                                                    <div class="metric-row">
-                                                        <span class="params"
-                                                              x-show="Object.keys(row.params).length"
-                                                              x-text="paramsText(row.params)"></span>
-                                                        <span class="figure"
-                                                              :class="{ changed: fresh(row.changedAt) }"
-                                                              x-text="row.figure"></span>
-                                                        <small class="detail" x-text="row.detail"></small>
+                            <table x-show="props.length">
+                                <thead>
+                                    <tr><th>Name</th><th>Value</th></tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="p in props" :key="p.name">
+                                        <tr :class="{ 'has-error': p.error }">
+                                            <td>
+                                                <span x-text="p.name"></span>
+                                                <!-- Under the name in small print
+                                                     rather than in a column of its
+                                                     own: it is read once, when one
+                                                     wonders what the property is, and
+                                                     the width it was taking is the
+                                                     width the values needed. Not a
+                                                     tooltip either -- unreachable on a
+                                                     touch screen, and invisible to
+                                                     someone scanning the table for the
+                                                     thing they cannot name. -->
+                                                <small class="descr" x-show="p.descr"
+                                                       x-text="p.descr"></small>
+                                            </td>
+                                            <td>
+                                                <!-- A metric: one row per parameter
+                                                     combination, and when it was last
+                                                     touched. -->
+                                                <template x-if="base(p).type === 'metric'">
+                                                    <div class="metric">
+                                                        <p x-show="!p.metric.rows.length" class="ro">
+                                                            <small>nothing yet</small></p>
+                                                        <template x-for="row in p.metric.rows" :key="row.key">
+                                                            <div class="metric-row">
+                                                                <span class="params"
+                                                                      x-show="Object.keys(row.params).length"
+                                                                      x-text="paramsText(row.params)"></span>
+                                                                <span class="figure"
+                                                                      :class="{ changed: fresh(row.changedAt) }"
+                                                                      x-text="row.figure"></span>
+                                                                <small class="detail" x-text="row.detail"></small>
+                                                            </div>
+                                                        </template>
+                                                        <!-- The button is pinned to the
+                                                             right of the cell rather
+                                                             than following the text
+                                                             beside it, which changes
+                                                             width on every refresh. -->
+                                                        <div class="metric-foot">
+                                                            <small class="detail" x-show="p.metric.last !== null"
+                                                                   x-text="'last ' + ago(p.metric.last)"></small>
+                                                            <!-- Dragging this onto a
+                                                                 chart adds the metric
+                                                                 there; clicking it
+                                                                 asks which chart, or
+                                                                 opens the first one
+                                                                 outright when there is
+                                                                 none to choose. -->
+                                                            <span class="plot-menu">
+                                                                <button class="outline secondary metric-plot"
+                                                                        :disabled="!online" draggable="true"
+                                                                        @dragstart="startDrag(p, $event)"
+                                                                        @dragend="dragging = null ; dragOver = null"
+                                                                        @click="openChartMenu(p, $el)"
+                                                                        :title="chartsHere().length
+                                                                                ? 'Plot this metric: pick a chart, or drag it onto one'
+                                                                                : 'Plot this metric'">
+                                                                    <svg viewBox="0 0 16 12" aria-hidden="true">
+                                                                        <polyline points="1,10 5,6 8,8 15,1"/>
+                                                                    </svg>
+                                                                </button>
+                                                                <!-- Only ever there for
+                                                                     one row at a time,
+                                                                     so it closes on
+                                                                     anything but the
+                                                                     button that has
+                                                                     just opened
+                                                                     another. -->
+                                                                <ul class="menu" x-show="chartMenu === p.name" x-cloak
+                                                                    @click.outside="if (chartMenu === p.name) chartMenu = null"
+                                                                    @keydown.escape.window="chartMenu = null">
+                                                                    <li><a href="#" @click.prevent="newChart(p)">New chart</a></li>
+                                                                    <template x-for="c in chartsHere()" :key="c.id">
+                                                                        <li>
+                                                                            <a href="#" :class="{ taken: holds(c, p) }"
+                                                                               @mouseenter="chartHint = c.id"
+                                                                               @mouseleave="chartHint = null"
+                                                                               @click.prevent="addTo(c, p)"
+                                                                               x-text="chartName(c) +
+                                                                                       (holds(c, p) ? ' — already there' : '')"></a>
+                                                                        </li>
+                                                                    </template>
+                                                                </ul>
+                                                            </span>
+                                                            <button class="outline secondary metric-reset"
+                                                                    x-show="!p.read_only" :disabled="!online"
+                                                                    @click="resetMetric(p)">Reset</button>
+                                                        </div>
                                                     </div>
                                                 </template>
-                                                <!-- The button is pinned to the
-                                                     right of the cell rather
-                                                     than following the text
-                                                     beside it, which changes
-                                                     width on every refresh. -->
-                                                <div class="metric-foot">
-                                                    <small class="detail" x-show="p.metric.last !== null"
-                                                           x-text="'last ' + ago(p.metric.last)"></small>
-                                                    <!-- Dragging this onto a
-                                                         chart adds the metric
-                                                         there; clicking it
-                                                         asks which chart, or
-                                                         opens the first one
-                                                         outright when there is
-                                                         none to choose. -->
-                                                    <span class="plot-menu">
-                                                        <button class="outline secondary metric-plot"
-                                                                :disabled="!online" draggable="true"
-                                                                @dragstart="startDrag(p, $event)"
-                                                                @dragend="dragging = null ; dragOver = null"
-                                                                @click="openChartMenu(p, $el)"
-                                                                :title="chartsHere().length
-                                                                        ? 'Plot this metric: pick a chart, or drag it onto one'
-                                                                        : 'Plot this metric'">
-                                                            <svg viewBox="0 0 16 12" aria-hidden="true">
-                                                                <polyline points="1,10 5,6 8,8 15,1"/>
-                                                            </svg>
-                                                        </button>
-                                                        <!-- Only ever there for
-                                                             one row at a time,
-                                                             so it closes on
-                                                             anything but the
-                                                             button that has
-                                                             just opened
-                                                             another. -->
-                                                        <ul class="menu" x-show="chartMenu === p.name" x-cloak
-                                                            @click.outside="if (chartMenu === p.name) chartMenu = null"
-                                                            @keydown.escape.window="chartMenu = null">
-                                                            <li><a href="#" @click.prevent="newChart(p)">New chart</a></li>
-                                                            <template x-for="c in chartsHere()" :key="c.id">
-                                                                <li>
-                                                                    <a href="#" :class="{ taken: holds(c, p) }"
-                                                                       @mouseenter="chartHint = c.id"
-                                                                       @mouseleave="chartHint = null"
-                                                                       @click.prevent="addTo(c, p)"
-                                                                       x-text="chartName(c) +
-                                                                               (holds(c, p) ? ' — already there' : '')"></a>
-                                                                </li>
-                                                            </template>
-                                                        </ul>
+
+                                                <!-- A value that may be absent: the box
+                                                     says whether there is one, and the
+                                                     input keeps the last one, disabled,
+                                                     so that ticking it back offers it
+                                                     again. -->
+                                                <template x-if="!p.read_only && p.kind.type === 'optional'">
+                                                    <input type="checkbox" class="enabler" :disabled="!online"
+                                                           x-model="p.enabled"
+                                                           :title="p.enabled ? 'unset this value' : 'give it a value'"
+                                                           @change="toggleOptional(p, $event.target)"/>
+                                                </template>
+
+                                                <span x-show="p.read_only && base(p).type !== 'metric'"
+                                                      class="ro" :class="{ changed: fresh(p.changedAt),
+                                                                           unset: p.value === null }"
+                                                      x-text="p.value === null ? 'unset' : p.text"></span>
+
+                                                <template x-if="!p.read_only && base(p).type === 'bool'">
+                                                    <input type="checkbox" :disabled="!online || !set(p)" :checked="p.draft === 'true'"
+                                                           @change="p.draft = $event.target.checked ? 'true' : 'false' ; save(p)"/>
+                                                </template>
+
+                                                <template x-if="!p.read_only && base(p).type === 'enum'">
+                                                    <select :disabled="!online || !set(p)" x-model="p.draft" @change="save(p)">
+                                                        <template x-for="c in base(p).choices" :key="c">
+                                                            <option :value="c" x-text="c"></option>
+                                                        </template>
+                                                    </select>
+                                                </template>
+
+                                                <template x-if="!p.read_only && base(p).type === 'range'">
+                                                    <span class="range">
+                                                        <template x-if="hasSlider(base(p))">
+                                                            <input type="range" :disabled="!online || !set(p)"
+                                                                   :min="base(p).min" :max="base(p).max"
+                                                                   :step="sliderStep(base(p))"
+                                                                   x-model="p.draft" @change="save(p)"/>
+                                                        </template>
+                                                        <input type="number" :disabled="!online || !set(p)"
+                                                               :min="base(p).min" :max="base(p).max"
+                                                               :step="base(p).int ? 1 : 'any'" x-model="p.draft"
+                                                               @keydown.enter="save(p)" @blur="save(p)"/>
                                                     </span>
-                                                    <button class="outline secondary metric-reset"
-                                                            x-show="!p.read_only" :disabled="!online"
-                                                            @click="resetMetric(p)">Reset</button>
-                                                </div>
-                                            </div>
-                                        </template>
-
-                                        <!-- A value that may be absent: the box
-                                             says whether there is one, and the
-                                             input keeps the last one, disabled,
-                                             so that ticking it back offers it
-                                             again. -->
-                                        <template x-if="!p.read_only && p.kind.type === 'optional'">
-                                            <input type="checkbox" class="enabler" :disabled="!online"
-                                                   x-model="p.enabled"
-                                                   :title="p.enabled ? 'unset this value' : 'give it a value'"
-                                                   @change="toggleOptional(p, $event.target)"/>
-                                        </template>
-
-                                        <span x-show="p.read_only && base(p).type !== 'metric'"
-                                              class="ro" :class="{ changed: fresh(p.changedAt),
-                                                                   unset: p.value === null }"
-                                              x-text="p.value === null ? 'unset' : p.text"></span>
-
-                                        <template x-if="!p.read_only && base(p).type === 'bool'">
-                                            <input type="checkbox" :disabled="!online || !set(p)" :checked="p.draft === 'true'"
-                                                   @change="p.draft = $event.target.checked ? 'true' : 'false' ; save(p)"/>
-                                        </template>
-
-                                        <template x-if="!p.read_only && base(p).type === 'enum'">
-                                            <select :disabled="!online || !set(p)" x-model="p.draft" @change="save(p)">
-                                                <template x-for="c in base(p).choices" :key="c">
-                                                    <option :value="c" x-text="c"></option>
                                                 </template>
-                                            </select>
-                                        </template>
 
-                                        <template x-if="!p.read_only && base(p).type === 'range'">
-                                            <span class="range">
-                                                <template x-if="hasSlider(base(p))">
-                                                    <input type="range" :disabled="!online || !set(p)"
-                                                           :min="base(p).min" :max="base(p).max"
-                                                           :step="sliderStep(base(p))"
-                                                           x-model="p.draft" @change="save(p)"/>
+                                                <template x-if="!p.read_only && (base(p).type === 'int' || base(p).type === 'float')">
+                                                    <input type="number" :disabled="!online || !set(p)"
+                                                           :step="base(p).type === 'int' ? 1 : 'any'"
+                                                           x-model="p.draft"
+                                                           @keydown.enter="save(p)" @blur="save(p)"/>
                                                 </template>
-                                                <input type="number" :disabled="!online || !set(p)"
-                                                       :min="base(p).min" :max="base(p).max"
-                                                       :step="base(p).int ? 1 : 'any'" x-model="p.draft"
-                                                       @keydown.enter="save(p)" @blur="save(p)"/>
-                                            </span>
-                                        </template>
 
-                                        <template x-if="!p.read_only && (base(p).type === 'int' || base(p).type === 'float')">
-                                            <input type="number" :disabled="!online || !set(p)"
-                                                   :step="base(p).type === 'int' ? 1 : 'any'"
-                                                   x-model="p.draft"
-                                                   @keydown.enter="save(p)" @blur="save(p)"/>
-                                        </template>
+                                                <template x-if="!p.read_only && base(p).type === 'string'">
+                                                    <input type="text" :disabled="!online || !set(p)" x-model="p.draft"
+                                                           @keydown.enter="save(p)" @blur="save(p)"/>
+                                                </template>
 
-                                        <template x-if="!p.read_only && base(p).type === 'string'">
-                                            <input type="text" :disabled="!online || !set(p)" x-model="p.draft"
-                                                   @keydown.enter="save(p)" @blur="save(p)"/>
-                                        </template>
+                                                <!-- What the value is counted in, kept
+                                                     beside the value rather than in it:
+                                                     what is typed and what is sent must
+                                                     stay the bare number. A metric's
+                                                     figures carry their own. -->
+                                                <small class="units" x-show="p.units && base(p).type !== 'metric'"
+                                                       x-text="p.units"></small>
+                                                <!-- Beside the value it was refused
+                                                     for, which is the only place it
+                                                     means anything. -->
+                                                <small class="error" x-show="p.error" x-text="p.error"></small>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </article>
+                    </div>
 
-                                        <!-- What the value is counted in, kept
-                                             beside the value rather than in it:
-                                             what is typed and what is sent must
-                                             stay the bare number. A metric's
-                                             figures carry their own. -->
-                                        <small class="units" x-show="p.units && base(p).type !== 'metric'"
-                                               x-text="p.units"></small>
-                                    </td>
-                                    <td>
-                                        <small x-text="p.descr"></small>
-                                        <small class="error" x-show="p.error" x-text="p.error"></small>
-                                    </td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
-                </article>
+                    <!-- All the way over, this is the only part of the shut
+                         side left on screen, so it is also the way back. -->
+                    <div class="splitter cols" :class="{ shut: splitShut }"
+                         @pointerdown="grabDivider($event, 'split')"
+                         :title="splitShut
+                                 ? 'Click to bring that side back, or drag it over'
+                                 : 'Drag to share the room out; drag it all the way over to shut one side'">
+                        <span class="grip" x-show="splitShut" x-cloak
+                              x-text="split === 1 ? '\u2039' : '\u203a'"></span>
+                    </div>
+
+                    <!-- The map. Everything one can click is HTML, absolutely
+                         positioned, so that it is styled and handled like the rest
+                         of the page; only the cables are SVG, and they go in as one
+                         lump because a <template> inside an <svg> is parsed as an
+                         SVG element with no content, which x-for cannot use. -->
+                    <div class="pane map" x-show="split < 1" x-cloak
+                         x-ref="mapPane" x-init="watchMap()"
+                         @wheel="zoomMap($event)" @pointerdown="panMap($event)"
+                         @resize.window="measureMap()">
+
+                        <svg class="cables" x-html="edgeSvg()"></svg>
+
+                        <!-- A cable is a widget with properties of its own, so its
+                             name on the line is the way to it. -->
+                        <template x-for="e in mapScene().edges" :key="e.key">
+                            <a href="#" class="cable-label" :class="{ on: e.on }"
+                               x-show="e.name && e.room"
+                               :style="`left:${e.mx}px; top:${e.my}px`"
+                               @pointerdown.stop
+                               @click.prevent.stop="select(selected.sim, e.via)"
+                               x-text="e.name"></a>
+                        </template>
+
+                        <!-- Where a cable really lands, when what it lands on is
+                             inside a box that is shut. -->
+                        <template x-for="p in mapScene().ports" :key="p.key">
+                            <a href="#" class="port"
+                               :style="`left:${p.x}px; top:${p.y}px`"
+                               @pointerdown.stop
+                               @click.prevent.stop="select(selected.sim, p.id)"
+                               x-text="p.name"></a>
+                        </template>
+
+                        <template x-for="b in mapScene().boxes" :key="b.id">
+                            <div class="box"
+                                 :class="{ selected: isSelected(selected.sim, b.id),
+                                           holds: b.holds,
+                                           open: b.open, unplaced: b.nowhere }"
+                                 :style="`left:${b.x}px; top:${b.y}px;
+                                          width:${b.w}px; height:${b.h}px`"
+                                 @pointerdown.stop="dragBox(b.id, $event)">
+                                <button class="twisty" x-show="b.hasKids"
+                                        :title="isOpen(b.id) ? 'Hide what is inside'
+                                                             : 'Show what is inside'"
+                                        @pointerdown.stop
+                                        @click.stop="toggleBox(b.id)"
+                                        x-text="isOpen(b.id) ? '−' : '+'"></button>
+                                <span class="name" x-text="b.name"></span>
+                                <!-- What a shut box is folding away: cables with
+                                     both ends inside it, which would otherwise
+                                     simply not be there. -->
+                                <span class="folded" x-show="b.inside"
+                                      :title="b.inside + (b.inside === 1 ? ' cable is' : ' cables are') +
+                                              ' inside this box'"
+                                      x-text="b.inside"></span>
+                            </div>
+                        </template>
+
+                        <!-- Everything with no place of its own. It is not at 0,0
+                             -- it is nowhere, and this is where nowhere is drawn;
+                             dragging a box back down here takes it off the map. -->
+                        <div class="tray-line" :style="`top:${mapScene().trayTop}px`">
+                            <small x-text="mapScene().trayCount
+                                           ? 'not placed'
+                                           : 'drop a box here to take it off the map'"></small>
+                        </div>
+
+                        <div class="map-tools">
+                            <button class="outline secondary" @pointerdown.stop
+                                    @click.stop="fitMap()"
+                                    title="Frame everything that has been placed">fit</button>
+                        </div>
+                        <small class="error map-error" x-show="mapError" x-text="mapError"></small>
+                    </div>
+                </div>
+
             </div>
         </template>
+
+        <!-- How much of the window the dock is worth against the network
+             above it is a question about the screen and about what is being
+             watched, so it is asked of the reader rather than answered here.
+             Same divider as between the two columns, along the other axis. -->
+        <div class="splitter rows" x-show="charts.length || logged.length"
+             x-cloak :class="{ shut: dockShut }"
+             @pointerdown="grabDivider($event, 'dock')"
+             :title="dockShut
+                     ? 'Click to bring that side back, or drag it over'
+                     : 'Drag to share the room out; drag it all the way over to shut one side'">
+            <span class="grip" x-show="dockShut" x-cloak
+                  x-text="dockShare === 0 ? '\u25b4' : '\u25be'"></span>
+        </div>
 
         <!-- ================= the dock ================= -->
         <!-- Outside the block above: what is watched here outlives the
              selection, a chart as much as a log. Each panel keeps a header
              that stays put when it is folded away, so that what is being
              watched is legible even when it is not shown. -->
-        <section class="dock" x-show="charts.length || logged.length" x-cloak>
+        <section class="dock" x-cloak
+                 x-show="(charts.length || logged.length) && dockShare > 0"
+                 :style="`flex-basis: ${dockShare * 100}%`">
 
         <section class="panel" x-show="charts.length">
             <header>
@@ -493,19 +694,6 @@
         </section>
     </main>
 </div>
-
-<footer class="status" :class="{ bad: offline }">
-    <span x-show="conn === 'connecting'" x-cloak>connecting&hellip;</span>
-    <span x-show="online" x-cloak>
-        connected, refreshing every <span x-text="period"></span>s
-    </span>
-    <span x-show="offline" x-cloak>
-        no answer &mdash; last heard from <span x-text="lastOkText"></span>
-    </span>
-    <label title="Keep the read-only values up to date; editable fields are left as they are">
-        <input type="checkbox" x-model="live"/> live
-    </label>
-</footer>
 
 </body>
 </html>

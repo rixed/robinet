@@ -369,6 +369,7 @@ const drawChart = (id, lines) => {
  */
 const logs = new Map()   /* "sim/widget" -> { last, level, lines } */
 
+
 const widgetKey = (w) => `${w.sim}/${w.widget}`
 
 /* Enough to be worth scrolling through, and no more: the simulator keeps a
@@ -530,23 +531,167 @@ const mapEdges = (byId, drawn, links = linkSet(byId)) => {
     return { edges, inside }
 }
 
-/* The ports of a box: one per end of a promoted edge that is not the box
- * itself, in the order the box's own subtree holds them, so that a box's ports
- * keep their order as edges come and go. */
-const portsOf = (byId, edges, boxId) => {
-    const ports = new Set()
-    for (const e of edges) {
-        if (e.from === boxId && e.fromPort !== null) ports.add(e.fromPort)
-        if (e.to === boxId && e.toPort !== null) ports.add(e.toPort)
-    }
-    const out = []
-    const walk = (id) => {
-        if (ports.has(id)) out.push(id)
-        if (byId[id]) byId[id].children.forEach(walk)
-    }
-    walk(boxId)
-    return out
+/* Web Mercator, in a unit square: the whole world is 0..1 both ways, and the
+ * pane decides how many pixels that is worth. Ten lines rather than a map
+ * library, because with nothing to fetch from outside there are no tiles, and
+ * a map library without tiles is a projection and a wheel handler.
+ *
+ * Latitude is clamped to the square's own limit: Mercator sends the poles to
+ * infinity, and a box at 89 degrees is not worth an infinite canvas. */
+const mercatorLimit = 85.05112878
+
+const mercator = (lat, lon) => {
+    const f = Math.max(-mercatorLimit, Math.min(mercatorLimit, lat)) * Math.PI / 180
+    return { x: (lon + 180) / 360,
+             y: (1 - Math.log(Math.tan(f) + 1 / Math.cos(f)) / Math.PI) / 2 }
 }
+
+const unmercator = (x, y) => ({
+    lat: Math.atan(Math.sinh(Math.PI * (1 - 2 * y))) * 180 / Math.PI,
+    lon: x * 360 - 180,
+})
+
+/* A box is a fixed size in pixels, not in world units: zooming out must bring
+ * more of the network into view, not shrink its labels until they cannot be
+ * read. Only positions are projected. */
+const boxW = 104, boxH = 30    /* a box with nothing shown inside it */
+const boxPad = 8               /* between a box's border and its contents */
+const boxGap = 10              /* between two boxes side by side */
+const boxHead = 17             /* the name of a box that is showing its insides */
+
+/* Watching the pane rather than the window: it also changes size when the
+ * divider is dragged and when the dock is folded away. One at a time. */
+let mapObserver = null
+
+/* How far a pointer may wander between pressing a divider and letting it go
+ * and still count as having clicked it rather than dragged it. */
+const dragSlack = 4
+
+/* The two dividers are one thing along two axes. Each names the field holding
+ * its share, where to go back to when it is brought out of being shut, where
+ * that is kept, and how far along the row a pointer is -- which is measured
+ * towards the pane whose share it is: rightwards for the column divider, whose
+ * share is the left column's, and upwards for the dock's. */
+const dividers = {
+    split: { share: 'split', last: 'splitLast', kept: 'robinet.split',
+             rows: false,
+             at: (r, e) => r.width > 0 ? (e.clientX - r.left) / r.width : null },
+    dock: { share: 'dockShare', last: 'dockLast', kept: 'robinet.dock',
+            rows: true,
+            at: (r, e) => r.height > 0 ? (r.bottom - e.clientY) / r.height : null },
+}
+
+/* The world, in metres, for the two numbers below. */
+const earth = 40075000
+
+/* How far in and out the map goes, as multiples of "the whole world across the
+ * pane": out to a quarter of it, in to about ten metres across. A simulated
+ * network may be a continent apart or a rack apart and both have to be
+ * lookable at, but a ceiling there must be, or the arithmetic runs off to a
+ * zoom no wheel could ever undo. */
+const zoomTo = (paneW, k) =>
+    Math.min(paneW * earth / 10, Math.max(paneW / 4, k))
+
+/* What is framed when there is nothing to frame: a single placed box spans
+ * nothing at all, and neither does a network small enough to sit inside one.
+ * Thirty metres, so that the box is seen with a little room around it rather
+ * than at whatever the ceiling above happens to be. */
+const minSpan = 30 / earth
+
+/* How big a box is, and where everything inside it sits, from the leaves up. A
+ * closed box is one rectangle; an open one is as big as what it holds.
+ *
+ * The insides are laid out in a square-ish block rather than in a row: a host
+ * with eight layers in a row would be a box wider than the network. */
+const boxTree = (byId, id, open, links) => {
+    const w = byId[id]
+    const kids = !w || !open.has(id) ? [] :
+        w.children.filter(c => byId[c] && !links.has(c))
+    if (!kids.length) return { id, w: boxW, h: boxH, open: false, kids: [] }
+    const inner = kids.map(k => boxTree(byId, k, open, links))
+    const perRow = Math.ceil(Math.sqrt(inner.length))
+    let x = boxPad, y = boxHead + boxPad, rowH = 0, width = 0
+    inner.forEach((t, i) => {
+        if (i && i % perRow === 0) {
+            width = Math.max(width, x - boxGap)
+            x = boxPad ; y += rowH + boxGap ; rowH = 0
+        }
+        t.dx = x ; t.dy = y
+        x += t.w + boxGap ; rowH = Math.max(rowH, t.h)
+    })
+    width = Math.max(width, x - boxGap)
+    return { id, open: true, kids: inner,
+             w: Math.max(boxW, width + boxPad - boxGap + boxPad),
+             h: y + rowH + boxPad }
+}
+
+/* Turn a sized tree into one rectangle per drawn widget, in pane pixels. The
+ * depth comes along so that a nested box can be drawn as being inside another
+ * one rather than merely on top of it. */
+const placeTree = (tree, x, y, into, depth = 0) => {
+    into.set(tree.id, { id: tree.id, x, y, w: tree.w, h: tree.h,
+                        open: tree.open, depth })
+    for (const k of tree.kids) placeTree(k, x + k.dx, y + k.dy, into, depth + 1)
+    return into
+}
+
+/* Which side of a box a point on its border is on. */
+const borderSide = (r, p) => {
+    const d = [ [ 'top', Math.abs(p.y - r.y) ],
+                [ 'bottom', Math.abs(p.y - (r.y + r.h)) ],
+                [ 'left', Math.abs(p.x - r.x) ],
+                [ 'right', Math.abs(p.x - (r.x + r.w)) ] ]
+    return d.reduce((a, b) => (b[1] < a[1] ? b : a))[0]
+}
+
+/* Ends that land on the same side of the same box, spread evenly along it.
+ *
+ * Two cables coming from nearly the same direction otherwise cross the border
+ * at nearly the same spot, and the ports naming them are drawn one on top of
+ * the other -- which is the one thing a port is there to avoid. Evenly rather
+ * than merely nudged apart, so that a box with the same cables on it always
+ * looks the same, however far away the other ends happen to be; the order along
+ * the side is the order they arrive in, so that spreading them crosses no line
+ * that was not crossed already. */
+const spreadEnds = (ends, rects) => {
+    const groups = new Map()
+    for (const e of ends) {
+        const r = rects.get(e.box)
+        if (!r) continue
+        const key = e.box + ':' + borderSide(r, e.pt)
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key).push(e)
+    }
+    for (const [ key, g ] of groups) {
+        if (g.length < 2) continue
+        const r = rects.get(g[0].box)
+        const horiz = /:(top|bottom)$/.test(key)
+        g.sort((a, b) => horiz ? a.pt.x - b.pt.x : a.pt.y - b.pt.y)
+        g.forEach((e, i) => {
+            const t = (i + 1) / (g.length + 1)
+            if (horiz) e.pt.x = r.x + r.w * t
+            else e.pt.y = r.y + r.h * t
+        })
+    }
+}
+
+/* Where a line leaving a box crosses its border, heading for a point outside:
+ * the port sits there, so that no line is ever drawn across the box it comes
+ * from. */
+const borderPoint = (r, tx, ty) => {
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2
+    const dx = tx - cx, dy = ty - cy
+    if (!dx && !dy) return { x: cx, y: cy }
+    const s = Math.min(dx ? (r.w / 2) / Math.abs(dx) : Infinity,
+                       dy ? (r.h / 2) / Math.abs(dy) : Infinity)
+    return { x: cx + dx * s, y: cy + dy * s }
+}
+
+/* The scene is rebuilt from scratch whenever anything it is drawn from moves,
+ * and the bindings ask for it several times per frame; this is what keeps that
+ * from being several layouts per frame. Kept out of the component, being
+ * pixels rather than anything the page reacts to. */
+let sceneMemo = { sig: null, value: null }
 
 /* How many whole values a slider may span before dragging it becomes a game
  * of chance and the number input is the only honest control. */
@@ -601,11 +746,20 @@ document.addEventListener('alpine:init', () => {
         nextTryAt: null,
         /* bumped every second purely so that the countdown re-renders */
         tock: 0,
-        live: true,
         /* simulation id -> the reason its last command was refused */
         simError: {},
         /* Why the last widget offered to the log window was not taken. */
         logError: null,
+
+        /* The simulations folded away in the left column, and the ones that
+         * have been seen at all. One is usually being worked on and the rest
+         * are in the way -- most of all the one serving this page, which is
+         * never the subject. So a simulation seen for the first time is folded
+         * unless it is the one wanted, and what the reader folds or unfolds
+         * afterwards is left exactly as they left it, across reloads and across
+         * the simulator going away and coming back. */
+        simFolded: [],
+        simSeen: [],
 
         /* Which simulation serves this page: the one that must never be
          * paused. It is the only one whose httpd widget we are talking to, so
@@ -646,6 +800,44 @@ document.addEventListener('alpine:init', () => {
          * reloads: a reader who folds the graph away wants it folded away
          * tomorrow too. */
         collapsed: { charts: false, logs: false },
+
+        /* How much of the top half the schematic gets, the map taking the
+         * rest. Dragging the divider all the way to either side collapses that
+         * side, which is what a toggle between the two views would have been,
+         * without a second control to find. Remembered, like the folds. */
+        split: 0.45,
+        /* The share to go back to when a side that was shut is brought out
+         * again: what it was before it was shut. */
+        splitLast: 0.45,
+
+        /* And how much of the height under it goes to the dock. Dragged rather
+         * than fixed, because how much room the charts and the logs are worth
+         * against the network above them is a question about the screen and
+         * about what is being watched, neither of which this page knows. */
+        dockShare: 0.4,
+        dockLast: 0.4,
+
+        /* The boxes the reader has opened, which is not a function of the
+         * zoom: one wants a single host opened while the whole network stays
+         * collapsed around it, and that is unsayable if detail follows scale.
+         * Zooming brings more of the network into view and nothing else. */
+        mapOpen: [],
+        /* And the boxes the selection is holding open, so that the widget
+         * being looked at is drawn rather than hidden inside something. Kept
+         * apart from the ones the reader opened, because these shut again on
+         * their own: see [openToSelection]. */
+        mapAuto: [],
+        /* What the middle of the pane is looking at, in world units, and how
+         * many pixels a world unit is worth. [k] of zero means the map has not
+         * been fitted to its contents yet. */
+        mapView: { cx: 0.5, cy: 0.5, k: 0 },
+        mapSize: { w: 0, h: 0 },
+        /* The box being dragged, at the pane pixels it has been dragged to. */
+        mapDrag: null,
+        /* Bumped whenever the shape of the network, or where something in it
+         * sits, has changed: what the scene is rebuilt on. */
+        topoTock: 0,
+        mapError: null,
 
         /*
          * Connection state
@@ -714,16 +906,14 @@ document.addEventListener('alpine:init', () => {
         },
 
         async tick() {
-            if (this.live) {
-                const wasOffline = this.offline
-                await this.poll()
-                if (wasOffline && this.online)
-                    /* The topology may have changed while we could not see it,
-                     * so come back with a full reload rather than a refresh. */
-                    await this.reload()
-                else if (this.offline)
-                    this.backoff = Math.min(this.backoff * 2, this.maxBackoff)
-            }
+            const wasOffline = this.offline
+            await this.poll()
+            if (wasOffline && this.online)
+                /* The topology may have changed while we could not see it, so
+                 * come back with a full reload rather than a refresh. */
+                await this.reload()
+            else if (this.offline)
+                this.backoff = Math.min(this.backoff * 2, this.maxBackoff)
             this.schedule()
         },
 
@@ -772,6 +962,7 @@ document.addEventListener('alpine:init', () => {
             this.widgets = widgets
             this.roots = roots
             this.servingId = serving
+            this.foldNewSims(sims)
             /* These describe attempts that are now history. */
             this.simError = {}
             /* A widget we were looking at may be gone. */
@@ -786,6 +977,8 @@ document.addEventListener('alpine:init', () => {
                 /* Refresh the copy we hold, in case its relations changed. */
                 const w = this.get(this.selected.sim, this.selected.id)
                 this.selected = Object.assign({ sim: this.selected.sim }, w)
+                /* The tree may have changed shape under it. */
+                this.openToSelection()
                 await this.loadProps({ full: true })
             }
         },
@@ -793,6 +986,22 @@ document.addEventListener('alpine:init', () => {
         /*
          * Navigation
          */
+
+        foldSim(id) {
+            const i = this.simFolded.indexOf(id)
+            if (i < 0) this.simFolded.push(id) ; else this.simFolded.splice(i, 1)
+        },
+
+        /* The one worth having open: the first that is not serving this page.
+         * Applied to each simulation once, the first time it is seen. */
+        foldNewSims(sims) {
+            const wanted = sims.find(s => s.id !== this.servingId) || sims[0]
+            for (const s of sims) {
+                if (this.simSeen.includes(s.id)) continue
+                this.simSeen.push(s.id)
+                if (!wanted || s.id !== wanted.id) this.simFolded.push(s.id)
+            }
+        },
 
         widgetsOf(simId) { return this.widgets[simId] || {} },
         get(simId, id) { return this.widgetsOf(simId)[id] },
@@ -810,6 +1019,8 @@ document.addEventListener('alpine:init', () => {
             const w = this.get(simId, id)
             if (!w) return
             this.selected = Object.assign({ sim: simId }, w)
+            this.openToSelection()
+            this.showSelection()
             /* It was opened on a property of the widget being left. */
             this.chartMenu = null
             /* Drop the previous widget's values rather than leaving them under
@@ -1255,7 +1466,7 @@ document.addEventListener('alpine:init', () => {
                          menuAnchor.parentElement.querySelector('ul.menu')
             if (!menu) return
             const b = menuAnchor.getBoundingClientRect()
-            const view = menuAnchor.closest('.widget-view')
+            const view = menuAnchor.closest('.pane.detail')
             const floor = view ? view.getBoundingClientRect().bottom
                                : window.innerHeight
             const gap = 4
@@ -1272,7 +1483,7 @@ document.addEventListener('alpine:init', () => {
         repositionMenu() {
             if (this.chartMenu === null) return
             const view = menuAnchor && menuAnchor.isConnected &&
-                         menuAnchor.closest('.widget-view')
+                         menuAnchor.closest('.pane.detail')
             if (!view) { this.chartMenu = null ; return }
             const b = menuAnchor.getBoundingClientRect()
             const v = view.getBoundingClientRect()
@@ -1439,6 +1650,25 @@ document.addEventListener('alpine:init', () => {
         mountLog(el) {
             new MutationObserver(() => this.followTail()).observe(el, {
                 childList: true, subtree: true })
+            /* And the panel itself changes size -- the divider above it moves,
+             * the other panel folds away, the window is resized -- which slides
+             * the newest line out from under a reader who was following it,
+             * with no new line coming to put it back.
+             *
+             * Only when it gets shorter, which is the only direction that can:
+             * growing, the browser has already brought the bottom back into
+             * view by clamping how far down it is scrolled. Following the tail
+             * when there is nothing to follow it to would only be another
+             * chance to land between a reader scrolling away and the event
+             * that says so. */
+            if (typeof ResizeObserver !== 'undefined') {
+                let was = el.clientHeight
+                new ResizeObserver(() => {
+                    const shorter = el.clientHeight < was
+                    was = el.clientHeight
+                    if (shorter) this.followTail()
+                }).observe(el)
+            }
         },
 
         /* Back to the newest line, and following it again. Unfolds the panel
@@ -1478,7 +1708,523 @@ document.addEventListener('alpine:init', () => {
                 for (const what of Object.keys(this.collapsed))
                     if (kept && typeof kept[what] === 'boolean')
                         this.collapsed[what] = kept[what]
+                for (const name of Object.keys(dividers)) {
+                    const d = dividers[name]
+                    /* Nothing kept is not a share of zero: [Number(null)] is 0,
+                     * which would come back as "that side is shut". */
+                    const raw = localStorage.getItem(d.kept)
+                    const f = raw === null ? NaN : Number(raw)
+                    if (!Number.isFinite(f) || f < 0 || f > 1) continue
+                    this[d.share] = f
+                    /* A share that was kept shut says nothing about how wide
+                     * that side should come back: the default does. */
+                    if (f > 0 && f < 1) this[d.last] = f
+                }
             } catch (e) { /* likewise */ }
+        },
+
+        /*
+         * The divider between the schematic and the map
+         */
+
+        shut(name) {
+            const share = this[dividers[name].share]
+            return share === 0 || share === 1
+        },
+        get splitShut() { return this.shut('split') },
+        get dockShut() { return this.shut('dock') },
+
+        saveDivider(name) {
+            const d = dividers[name]
+            try {
+                localStorage.setItem(d.kept, String(this[d.share]))
+            } catch (e) { /* a browser that keeps nothing is not a failure */ }
+        },
+
+        /* Dragged to either end a divider collapses that side, so it is also
+         * the switch between the two things it separates: there is no third
+         * control saying which one is showing.
+         *
+         * And pushed all the way over it is the only part of the shut side
+         * still on screen, so it is the way back as well: pressed and released
+         * without going anywhere, it brings that side out again at the share it
+         * had before. Without that, a pane shut once is shut for good -- the
+         * share being remembered, that would outlast the browser.
+         *
+         * The click is recognised here rather than from a click event, because
+         * a drag that ends well away from the divider has its click delivered
+         * somewhere else entirely, and a flag set to swallow it would still be
+         * set when the reader went on to click the divider for real. */
+        grabDivider(ev, name) {
+            const d = dividers[name]
+            const row = ev.currentTarget.parentElement
+            /* What to come back to if this drag ends up shutting a side. Taken
+             * before rather than as it goes: the last share a drag passes
+             * through on its way out is the sliver next to the edge, which is
+             * no share to come back to. */
+            const was = this.shut(name) ? this[d.last] : this[d.share]
+            const from = { x: ev.clientX, y: ev.clientY }
+            let moved = false
+            const move = (e) => {
+                if (!moved && Math.abs(e.clientX - from.x) +
+                              Math.abs(e.clientY - from.y) < dragSlack) return
+                moved = true
+                let f = d.at(row.getBoundingClientRect(), e)
+                if (f === null) return
+                /* A sliver of a pane is no use to anyone: near either end,
+                 * shut that side rather than leaving a stripe. */
+                if (f < 0.08) f = 0
+                else if (f > 0.92) f = 1
+                this[d.share] = f
+            }
+            const done = () => {
+                window.removeEventListener('pointermove', move)
+                window.removeEventListener('pointerup', done)
+                document.body.classList.remove('splitting', 'rows')
+                if (!moved && this.shut(name)) this[d.share] = this[d.last]
+                this[d.last] = was
+                this.saveDivider(name)
+                this.$nextTick(() => this.measureMap())
+            }
+            document.body.classList.add('splitting')
+            if (d.rows) document.body.classList.add('rows')
+            window.addEventListener('pointermove', move)
+            window.addEventListener('pointerup', done)
+            ev.preventDefault()
+        },
+
+        /*
+         * The map
+         */
+
+        /* The pane's size in pixels, which the layout is done in. Watched
+         * rather than read on every frame: it changes when the divider moves,
+         * when the dock folds, and when the window is resized. */
+        measureMap() {
+            const el = this.$refs.mapPane
+            if (!el) return
+            const r = el.getBoundingClientRect()
+            if (r.width === this.mapSize.w && r.height === this.mapSize.h) return
+            this.mapSize = { w: r.width, h: r.height }
+            if (!this.mapView.k) this.fitMap()
+        },
+
+        watchMap() {
+            const el = this.$refs.mapPane
+            if (!el) return
+            if (typeof ResizeObserver !== 'undefined') {
+                if (mapObserver) mapObserver.disconnect()
+                mapObserver = new ResizeObserver(() => this.measureMap())
+                mapObserver.observe(el)
+            }
+            this.measureMap()
+        },
+
+        /* Every box that has a place in the world, as world points.
+         *
+         * Only the boxes of the plane: a location on anything else is never
+         * drawn -- what is inside a box is at that box's place, and a cable is
+         * a line between its ends -- and framing around a point that is never
+         * shown leaves the reader looking at nothing. */
+        placedPoints() {
+            if (!this.selected) return []
+            const sim = this.selected.sim
+            const byId = this.widgetsOf(sim)
+            const out = []
+            for (const id of planeOf(byId, this.roots[sim])) {
+                const w = byId[id]
+                if (w && w.location)
+                    out.push(mercator(w.location.lat, w.location.lon))
+            }
+            return out
+        },
+
+        /* Frame what is placed, with room around it. With nothing placed there
+         * is nothing to frame, and the whole world is as good a view as any. */
+        fitMap() {
+            const pts = this.placedPoints()
+            const { w, h } = this.mapSize
+            if (!w || !h) return
+            if (!pts.length) {
+                this.mapView = { cx: 0.5, cy: 0.5, k: w }
+                return
+            }
+            const xs = pts.map(p => p.x), ys = pts.map(p => p.y)
+            const x0 = Math.min(...xs), x1 = Math.max(...xs)
+            const y0 = Math.min(...ys), y1 = Math.max(...ys)
+            /* A margin in world units, and a floor under it: see [minSpan]. */
+            const span = Math.max(x1 - x0, y1 - y0, minSpan) * 1.6
+            this.mapView = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2,
+                             k: zoomTo(w, Math.min(w, h) / span) }
+            this.topoTock++
+        },
+
+        toWorld(px, py) {
+            const { cx, cy, k } = this.mapView
+            const { w, h } = this.mapSize
+            return { x: cx + (px - w / 2) / k, y: cy + (py - h / 2) / k }
+        },
+
+        toPane(wx, wy) {
+            const { cx, cy, k } = this.mapView
+            const { w, h } = this.mapSize
+            return { x: (wx - cx) * k + w / 2, y: (wy - cy) * k + h / 2 }
+        },
+
+        /* Zoom about the pointer, so that what is under it stays under it --
+         * which is the only way to zoom towards something rather than towards
+         * the middle and then pan back. */
+        zoomMap(ev) {
+            if (!this.mapView.k) return
+            ev.preventDefault()
+            const el = this.$refs.mapPane.getBoundingClientRect()
+            const px = ev.clientX - el.left, py = ev.clientY - el.top
+            const at = this.toWorld(px, py)
+            const k = zoomTo(this.mapSize.w,
+                             this.mapView.k * Math.exp(-ev.deltaY * 0.0015))
+            this.mapView = { k,
+                cx: at.x - (px - this.mapSize.w / 2) / k,
+                cy: at.y - (py - this.mapSize.h / 2) / k }
+        },
+
+        /* Dragging the background moves the view under it. */
+        panMap(ev) {
+            if (ev.button !== 0 || !this.mapView.k) return
+            const start = { x: ev.clientX, y: ev.clientY,
+                            cx: this.mapView.cx, cy: this.mapView.cy }
+            const move = (e) => {
+                this.mapView = { k: this.mapView.k,
+                    cx: start.cx - (e.clientX - start.x) / this.mapView.k,
+                    cy: start.cy - (e.clientY - start.y) / this.mapView.k }
+            }
+            const done = () => {
+                window.removeEventListener('pointermove', move)
+                window.removeEventListener('pointerup', done)
+            }
+            window.addEventListener('pointermove', move)
+            window.addEventListener('pointerup', done)
+        },
+
+        /* Show what a box holds, or stop showing it. */
+        toggleBox(id) {
+            if (this.isOpen(id)) {
+                /* Shutting one the selection was holding open shuts it: asked
+                 * plainly, the reader wins over what the selection wanted. It
+                 * comes back open when the selection next moves into it, which
+                 * is the only thing that could make it worth seeing again. */
+                this.mapOpen = this.mapOpen.filter(x => x !== id)
+                this.mapAuto = this.mapAuto.filter(x => x !== id)
+            } else {
+                this.mapOpen.push(id)
+            }
+            this.topoTock++
+        },
+
+        isOpen(id) {
+            return this.mapOpen.includes(id) || this.mapAuto.includes(id)
+        },
+
+        /* What has to be open for the selected widget to be drawn at all:
+         * every box between it and the plane.
+         *
+         * Held open by the selection rather than by the reader, so it is worked
+         * out afresh whenever the selection moves and shuts again on its own as
+         * soon as it moves elsewhere -- unlike a box the reader opened, which
+         * stays open until they shut it. Selecting the eth layer of a host
+         * therefore opens that host and nothing else, and moving on to another
+         * host puts it back as it was. */
+        openToSelection() {
+            const auto = []
+            if (this.selected) {
+                const byId = this.widgetsOf(this.selected.sim)
+                const root = this.roots[this.selected.sim]
+                let w = byId[this.selected.id]
+                for (w = w && byId[w.parent] ; w && w.id !== root ;
+                     w = byId[w.parent])
+                    auto.push(w.id)
+            }
+            this.mapAuto = auto
+            this.topoTock++
+        },
+
+        /* Drag a box: on the map it is placed where it was dropped, in the
+         * strip below it is taken off the map again. Both are the same one
+         * request, since a location that is not is null. */
+        dragBox(id, ev) {
+            if (ev.button !== 0 || !this.mapView.k) return
+            ev.stopPropagation()
+            const pane = this.$refs.mapPane.getBoundingClientRect()
+            const scene = this.mapScene()
+            const r = scene.rects.get(id)
+            if (!r) return
+            /* Only a box on the plane has a place of its own. What is inside
+             * one is drawn where its box says, so there is nowhere for it to be
+             * dragged to; clicking it still selects it. */
+            if (r.depth > 0) { this.select(this.selected.sim, id) ; return }
+            const grab = { dx: ev.clientX - pane.left - r.x,
+                           dy: ev.clientY - pane.top - r.y }
+            let moved = false
+            const move = (e) => {
+                moved = true
+                this.mapDrag = { id, x: e.clientX - pane.left - grab.dx,
+                                     y: e.clientY - pane.top - grab.dy }
+            }
+            const done = async (e) => {
+                window.removeEventListener('pointermove', move)
+                window.removeEventListener('pointerup', done)
+                const drag = this.mapDrag
+                this.mapDrag = null
+                /* A click, not a drag: that is a selection. */
+                if (!moved || !drag) { this.select(this.selected.sim, id) ; return }
+                const centre = { x: drag.x + r.w / 2, y: drag.y + r.h / 2 }
+                if (centre.y > this.mapScene().trayTop) {
+                    await this.placeBox(id, null)
+                } else {
+                    const p = this.toWorld(centre.x, centre.y)
+                    await this.placeBox(id, unmercator(p.x, p.y))
+                }
+            }
+            window.addEventListener('pointermove', move)
+            window.addEventListener('pointerup', done)
+        },
+
+        async placeBox(id, location) {
+            const sim = this.selected.sim
+            const r = await this.exchange(() =>
+                api(`/simulations/${sim}/widgets/${id}/location`,
+                    { method: 'PUT', body: JSON.stringify(location) }))
+            if (!r.ok) { this.mapError = r.error ; return }
+            this.mapError = null
+            /* Keep the listing we hold in step rather than reloading the whole
+             * topology: nothing else about it has changed. */
+            const w = this.get(sim, id)
+            if (w) w.location = r.value.location
+            this.topoTock++
+        },
+
+        /* Bring the selection into view, if it is not already there.
+         *
+         * Only if: the whole promise of this map is that things stay where they
+         * were left, and sliding it about whenever the reader clicks something
+         * they can already see is exactly what breaks that. So this is for the
+         * case it cannot help with -- picking something out of the tree that is
+         * off the edge of the map, or behind where it has been panned to. */
+        showSelection() {
+            if (!this.selected || !this.mapView.k) return
+            const scene = this.mapScene()
+            let box = scene.rects.get(this.selected.id)
+            if (!box) {
+                /* Not drawn as a box. A cable is a line, and the point of it
+                 * is where its name is written; anything else is shown by the
+                 * box standing for it. */
+                const line = scene.edges.find(e => e.via === this.selected.id)
+                if (line) {
+                    box = { x: line.mx, y: line.my, w: 0, h: 0 }
+                } else {
+                    const byId = this.widgetsOf(this.selected.sim)
+                    let w = byId[this.selected.id]
+                    for (w = w && byId[w.parent] ; w ; w = byId[w.parent])
+                        if (scene.rects.has(w.id)) {
+                            box = scene.rects.get(w.id) ; break
+                        }
+                }
+            }
+            if (!box) return
+            const at = { x: box.x + box.w / 2, y: box.y + box.h / 2 }
+            /* In the strip below the map, which is pinned to the pane rather
+             * than laid over the world: it is in view already, and panning
+             * could not bring it into view if it were not. */
+            if (at.y > scene.trayTop) return
+            const m = 8
+            if (box.x >= m && box.y >= m &&
+                box.x + box.w <= this.mapSize.w - m &&
+                box.y + box.h <= scene.trayTop - m) return
+            const w = this.toWorld(at.x, at.y)
+            this.mapView = { k: this.mapView.k, cx: w.x, cy: w.y }
+        },
+
+        /* Everything the map draws, in pane pixels.
+         *
+         * Rebuilt whenever anything it is drawn from moves, and returned as it
+         * was otherwise: the bindings ask for it several times per render, and
+         * laying the network out several times per render for the same answer
+         * would be a waste that grows with the size of the network. */
+        mapScene() {
+            const sim = this.selected ? this.selected.sim : null
+            const drag = this.mapDrag
+            const sig = [ sim, this.selected && this.selected.id, this.topoTock,
+                          this.mapOpen.join(), this.mapAuto.join(),
+                          this.mapView.cx, this.mapView.cy,
+                          this.mapView.k, this.mapSize.w, this.mapSize.h,
+                          drag && `${drag.id}@${Math.round(drag.x)},${Math.round(drag.y)}`
+                        ].join('|')
+            if (sceneMemo.sig === sig) return sceneMemo.value
+            const value = this.buildScene(sim, drag)
+            sceneMemo = { sig, value }
+            return value
+        },
+
+        buildScene(sim, drag) {
+            const { w: paneW, h: paneH } = this.mapSize
+            const empty = { boxes: [], edges: [], ports: [], rects: new Map(),
+                            trayTop: paneH, trayCount: 0 }
+            if (sim === null || !paneW || !paneH) return empty
+            const byId = this.widgetsOf(sim)
+            const root = this.roots[sim]
+            if (byId[root] === undefined) return empty
+            const links = linkSet(byId)
+            const plane = planeOf(byId, root, links)
+            const open = new Set([ ...this.mapOpen, ...this.mapAuto ])
+            const drawn = drawnSet(byId, plane, open, links)
+            const { edges, inside } = mapEdges(byId, drawn, links)
+
+            /* Size every box on the plane, then place it: where it belongs if
+             * it has a place, in the strip below if it has none. A widget with
+             * no location is not at 0,0 -- it is nowhere, and saying so is the
+             * point of the strip. */
+            const rects = new Map()
+            const placed = [], unplaced = []
+            for (const id of plane) {
+                const tree = boxTree(byId, id, open, links)
+                if (byId[id].location) placed.push({ id, tree })
+                else unplaced.push({ id, tree })
+            }
+            /* The strip is as tall as what it holds, and never shorter than one
+             * box: it is also where a box is dropped to take it off the map,
+             * so it has to be there even when it is empty. */
+            const rows = [ [] ]
+            let rowW = boxPad
+            for (const u of unplaced) {
+                if (rowW + u.tree.w > paneW - boxPad &&
+                    rows[rows.length - 1].length) {
+                    rows.push([]) ; rowW = boxPad
+                }
+                rows[rows.length - 1].push(u) ; rowW += u.tree.w + boxGap
+            }
+            const rowHeight = (r) =>
+                r.reduce((m, u) => Math.max(m, u.tree.h), boxH)
+            const trayH = rows.reduce((h, r) => h + rowHeight(r) + boxGap, 0)
+            const trayTop = paneH - trayH - boxPad
+
+            let y = trayTop + boxGap
+            for (const row of rows) {
+                let x = boxPad
+                for (const u of row) {
+                    placeTree(u.tree, x, y, rects)
+                    x += u.tree.w + boxGap
+                }
+                y += rowHeight(row) + boxGap
+            }
+            for (const p of placed) {
+                const l = byId[p.id].location
+                const m = mercator(l.lat, l.lon)
+                const c = this.toPane(m.x, m.y)
+                placeTree(p.tree, c.x - p.tree.w / 2, c.y - p.tree.h / 2, rects)
+            }
+            /* The box under the pointer follows it, and everything hanging off
+             * it follows too, because the edges are drawn from these rects. */
+            if (drag && rects.has(drag.id)) {
+                const r = rects.get(drag.id)
+                const dx = drag.x - r.x, dy = drag.y - r.y
+                const shift = (id) => {
+                    const q = rects.get(id)
+                    if (!q) return
+                    q.x += dx ; q.y += dy
+                    ;(byId[id] ? byId[id].children : []).forEach(shift)
+                }
+                shift(drag.id)
+            }
+
+            /* Now the edges, between the rectangles that are actually on
+             * screen, and the ports where they land. Where each end crosses
+             * its box first, then spread out, and only then are the lines and
+             * the ports read off them: a port and the line reaching it must
+             * arrive at the same spot. */
+            const ends = []
+            for (const e of edges) {
+                const a = rects.get(e.from), b = rects.get(e.to)
+                if (!a || !b) continue
+                const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 }
+                const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 }
+                ends.push({ edge: e, box: e.from, port: e.fromPort,
+                            pt: borderPoint(a, bc.x, bc.y), first: true },
+                          { edge: e, box: e.to, port: e.toPort,
+                            pt: borderPoint(b, ac.x, ac.y), first: false })
+            }
+            spreadEnds(ends, rects)
+
+            const lines = [], ports = []
+            for (let i = 0 ; i < ends.length ; i += 2) {
+                const e = ends[i].edge
+                const p1 = ends[i].pt, p2 = ends[i + 1].pt
+                lines.push({ key: e.key, via: e.via,
+                             name: e.via === null ? '' : this.nameOf(e.via),
+                             /* A cable is a widget one can be looking at, and
+                              * it is a line here rather than a box, so this is
+                              * the only thing there is to mark. */
+                             on: this.selected !== null &&
+                                 e.via === this.selected.id,
+                             /* Named only where there is room to read it. Two
+                              * boxes side by side leave a few pixels of cable
+                              * between them, and a name written across both of
+                              * them says less than no name at all -- which is
+                              * the state everything is in before anything has
+                              * been placed. */
+                             room: Math.hypot(p2.x - p1.x, p2.y - p1.y) > 48,
+                             x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y,
+                             mx: (p1.x + p2.x) / 2, my: (p1.y + p2.y) / 2 })
+            }
+            /* A port is an end that is not the box it is drawn from: the widget
+             * the cable really reaches, standing on the perimeter of whatever is
+             * hiding it. An end that is the box itself has no port -- the line
+             * simply goes to the box. */
+            for (const e of ends) {
+                if (e.port === null) continue
+                ports.push({ key: `${e.edge.key}:${e.first ? 'a' : 'b'}`,
+                             id: e.port, name: this.nameOf(e.port),
+                             x: e.pt.x, y: e.pt.y })
+            }
+
+            /* The boxes the selected widget is inside. There is always one of
+             * these to see even when the widget itself is not drawn -- because
+             * the reader shut the box holding it, or because it is a cable and
+             * so is no box at all. */
+            const held = new Set()
+            if (this.selected) {
+                let w = byId[this.selected.id]
+                for (w = w && byId[w.parent] ; w ; w = byId[w.parent])
+                    if (drawn.has(w.id)) held.add(w.id)
+            }
+
+            const boxes = [ ...rects.values() ].map(r => Object.assign({}, r, {
+                name: this.nameOf(r.id),
+                holds: held.has(r.id),
+                /* What a shut box is folding away, so that connectivity does
+                 * not silently vanish into it. */
+                inside: inside.get(r.id) || 0,
+                hasKids: byId[r.id].children.some(c => byId[c] && !links.has(c)),
+                placed: !!byId[r.id].location,
+                /* Drawn as having no place of its own only where having one
+                 * would mean something. What is inside a box is drawn where
+                 * that box says, and never has a place of its own: marking it
+                 * would mark every nested box on the map, always. */
+                nowhere: r.depth === 0 && !byId[r.id].location,
+            })).sort((a, b) => a.depth - b.depth)
+
+            return { boxes, edges: lines, ports, rects, trayTop,
+                     trayCount: unplaced.length }
+        },
+
+        /* The lines, as one lump of SVG: a <template> inside an <svg> is parsed
+         * as an SVG element with no content, so x-for cannot be used there.
+         * Only the lines go in -- everything one can click is HTML above
+         * them, which is also what lets them be styled like the rest of the
+         * page. */
+        edgeSvg() {
+            return this.mapScene().edges.map(e =>
+                `<line class="${e.on ? 'on' : ''}" x1="${e.x1}" y1="${e.y1}" ` +
+                `x2="${e.x2}" y2="${e.y2}"/>`
+            ).join('')
         },
 
         /*
@@ -1498,6 +2244,13 @@ document.addEventListener('alpine:init', () => {
             if (s.speed_ratio === null) return null
             const above = speeds.find(x => x > s.speed_ratio * 1.000001)
             return above === undefined ? null : above
+        },
+
+        /* What a speed button leads to, for its tooltip: null is off the top
+         * of the ladder. */
+        speedTip(ratio) {
+            return ratio === null ? 'as fast as it can go'
+                                  : ratioText(ratio) + ' \u00d7 real time'
         },
 
         speedText(s) {
