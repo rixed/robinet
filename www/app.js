@@ -206,6 +206,10 @@ const metricRows = (m, units, previous) => {
  */
 const plots = new Map()    /* chart id -> { u, el, signature } */
 const history = new Map()  /* metric key -> { last, kind, units, rows } */
+/* The button the chart menu is hanging from, for the same reason: which menu
+ * is open is a name the page reacts to, but the element it is pinned to is
+ * one of the pixels. */
+let menuAnchor = null
 
 const metricKey = (m) => `${m.sim}/${m.widget}/${m.property}`
 const rowKey = (m, params) => metricKey(m) + '/' + JSON.stringify(params)
@@ -493,6 +497,13 @@ document.addEventListener('alpine:init', () => {
         /* The metric being dragged, and the chart the cursor is over. */
         dragging: null,
         dragOver: null,
+        /* The metric whose chart menu is open, by property name, and the chart
+         * that menu is pointing at as the pointer moves down it. Dragging is
+         * the quicker way to put a metric on a chart, but not one to depend
+         * on: a touch screen has no drag, and neither has a browser told not
+         * to. */
+        chartMenu: null,
+        chartHint: null,
 
         /* The widgets whose logs are watched, each at its own level: some are
          * far more talkative than others, and the one being followed is
@@ -508,7 +519,7 @@ document.addEventListener('alpine:init', () => {
         /* Which panels of the dock are folded away. Remembered across
          * reloads: a reader who folds the graph away wants it folded away
          * tomorrow too. */
-        collapsed: { properties: false, charts: false, logs: false },
+        collapsed: { charts: false, logs: false },
 
         /*
          * Connection state
@@ -673,6 +684,8 @@ document.addEventListener('alpine:init', () => {
             const w = this.get(simId, id)
             if (!w) return
             this.selected = Object.assign({ sim: simId }, w)
+            /* It was opened on a property of the widget being left. */
+            this.chartMenu = null
             /* Drop the previous widget's values rather than leaving them under
              * the new widget's name while the request is in flight. */
             this.props = []
@@ -1067,11 +1080,104 @@ document.addEventListener('alpine:init', () => {
             if (!this.canDrop(chart)) return
             const m = this.dragging
             this.dragging = null
+            this.place(chart, m)
+        },
+
+        /* A metric onto a chart, however it was asked for -- dropped there, or
+         * picked off the menu. */
+        place(chart, m) {
             if (chart.metrics.some(x => metricKey(x) === metricKey(m))) return
             chart.metrics.push(m)
             /* Struck off in an earlier life, but asked for again now. */
             chart.hidden = chart.hidden.filter(k => !k.startsWith(metricKey(m) + '/'))
             this.pollCharts()
+        },
+
+        /*
+         * The chart menu: the same choice as dragging, for the platforms and
+         * the readers that have no drag.
+         */
+
+        /* The charts this metric could join. A chart is one simulation's: its
+         * lines share a clock, and two clocks on one axis would say nothing. */
+        chartsHere() {
+            return this.selected
+                 ? this.charts.filter(c => c.sim === this.selected.sim) : []
+        },
+
+        openChartMenu(p, button) {
+            /* With no chart to choose between, the only answer the menu could
+             * give is the one a click gives directly. */
+            if (!this.chartsHere().length) { this.addChart(p) ; return }
+            this.chartHint = null
+            if (this.chartMenu === p.name) { this.chartMenu = null ; return }
+            this.chartMenu = p.name
+            menuAnchor = button
+            /* Once it is on the page and has a height to measure. */
+            this.$nextTick(() => this.placeMenu())
+        },
+
+        /* The menu hangs off the page rather than out of the properties. They
+         * scroll within their own half of the window, and anything of ours
+         * reaching past the bottom of that is cut off there -- the reader
+         * would get a menu with its last entries missing, or none of it at
+         * all, hidden behind the dock. Fixed to the window instead, it can go
+         * where there is room: below the button, or above it when what is left
+         * below is the dock, which is about other things. */
+        placeMenu() {
+            const menu = menuAnchor &&
+                         menuAnchor.parentElement.querySelector('ul.menu')
+            if (!menu) return
+            const b = menuAnchor.getBoundingClientRect()
+            const view = menuAnchor.closest('.widget-view')
+            const floor = view ? view.getBoundingClientRect().bottom
+                               : window.innerHeight
+            const gap = 4
+            const height = menu.offsetHeight
+            menu.style.top = (b.bottom + gap + height <= floor
+                              ? b.bottom + gap
+                              : Math.max(gap, b.top - gap - height)) + 'px'
+            menu.style.left = (b.right - menu.offsetWidth) + 'px'
+        },
+
+        /* Fixed to the window, the menu does not follow the properties as they
+         * scroll: it is put back where its button now is, and dropped once
+         * that button has been scrolled out of sight. */
+        repositionMenu() {
+            if (this.chartMenu === null) return
+            const view = menuAnchor && menuAnchor.isConnected &&
+                         menuAnchor.closest('.widget-view')
+            if (!view) { this.chartMenu = null ; return }
+            const b = menuAnchor.getBoundingClientRect()
+            const v = view.getBoundingClientRect()
+            if (b.bottom < v.top || b.top > v.bottom) this.chartMenu = null
+            else this.placeMenu()
+        },
+
+        /* Charts are numbered by where they are on screen rather than by the
+         * order they were opened in: the number is read off this menu and
+         * matched against what is in front of the reader, and nothing else
+         * ever refers to it. Hence also that they are named only while the
+         * menu is open. */
+        chartName(chart) {
+            return 'Chart ' + (this.charts.indexOf(chart) + 1)
+        },
+
+        holds(chart, p) {
+            const key = metricKey(this.metricOf(p))
+            return chart.metrics.some(m => metricKey(m) === key)
+        },
+
+        newChart(p) {
+            this.chartMenu = null
+            this.chartHint = null
+            this.addChart(p)
+        },
+
+        addTo(chart, p) {
+            this.chartMenu = null
+            this.chartHint = null
+            this.place(chart, this.metricOf(p))
         },
 
         /* Striking off the last line of a metric drops the metric, and a chart
@@ -1090,6 +1196,7 @@ document.addEventListener('alpine:init', () => {
             if (p && p.watcher) p.watcher.disconnect()
             plots.delete(chart.id)
             this.charts = this.charts.filter(c => c.id !== chart.id)
+            if (this.chartHint === chart.id) this.chartHint = null
         },
 
         /* Drop a metric from every chart that holds it. */
@@ -1239,8 +1346,12 @@ document.addEventListener('alpine:init', () => {
 
         restoreFolds() {
             try {
-                const kept = localStorage.getItem('robinet.collapsed')
-                if (kept) Object.assign(this.collapsed, JSON.parse(kept))
+                const kept = JSON.parse(localStorage.getItem('robinet.collapsed'))
+                /* Only the panels there are today: what was kept was written
+                 * by whatever version of this page the reader had then. */
+                for (const what of Object.keys(this.collapsed))
+                    if (kept && typeof kept[what] === 'boolean')
+                        this.collapsed[what] = kept[what]
             } catch (e) { /* likewise */ }
         },
 

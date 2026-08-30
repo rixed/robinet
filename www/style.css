@@ -257,10 +257,6 @@ article.properties > header button {
     padding: .2rem .6rem;
     font-size: .75rem;
 }
-/* Only the Refresh button is pushed to the far side; the twisty belongs where
- * every other twisty on the page is, at the left of what it folds. */
-article.properties > header button.twisty { margin: 0 ; padding: 0 ; }
-article.properties > header small { color: var(--pico-muted-color); }
 /* Fixed rather than sized from the content: the values refresh every second
  * and gain a digit now and then, and with an automatic layout every column in
  * the table shifts when they do. Proportions rather than lengths, so that they
@@ -426,6 +422,13 @@ article.chart > header {
     background: none;
     border: none;
 }
+/* Only shown while a menu names it. */
+.chart-name {
+    flex: none;
+    font-size: .75rem;
+    font-weight: normal;
+    color: var(--pico-muted-color);
+}
 .chart-legend {
     display: flex;
     flex-wrap: wrap;
@@ -458,14 +461,51 @@ article.chart > header {
 .chart .plot { height: 140px; }
 .uplot, .u-wrap { width: 100% !important; }
 
+/* The plot button and the menu it opens, which floats over the page rather
+ * than pushing the table about. */
+.plot-menu {
+    position: relative;
+    display: inline-flex;
+    margin: 0 0 0 auto;
+}
+/* Placed by hand, in window coordinates: see [placeMenu]. */
+.plot-menu ul.menu {
+    position: fixed;
+    z-index: 20;
+    min-width: 9rem;
+    margin: 0;
+    padding: .2rem 0;
+    font-size: .75rem;
+    text-align: left;
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    box-shadow: var(--pico-card-box-shadow);
+}
+/* On the item, not the list: Pico marks up [ul li] itself, which a
+ * list-style on the list would not reach. */
+.plot-menu ul.menu li { margin: 0 ; list-style: none; }
+/* Left the colour of every other link on the page: what they are is things to
+ * click. */
+.plot-menu ul.menu a {
+    display: block;
+    padding: .2rem .6rem;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.plot-menu ul.menu a:hover { background: var(--pico-mark-background-color); }
+/* Already on that chart: still listed, so that the numbering keeps matching
+ * what is on screen, but there is nothing to be got from choosing it. */
+.plot-menu ul.menu a.taken { color: var(--pico-muted-color); }
+
 button.metric-plot {
     width: auto;
-    margin: 0 0 0 auto;
+    margin: 0;
     padding: .1rem .45rem;
     line-height: 1;
     cursor: grab;
 }
-button.metric-plot + button.metric-reset { margin-left: .3rem; }
+.plot-menu + button.metric-reset { margin-left: .3rem; }
 button.metric-plot svg {
     width: .9rem;
     height: .7rem;

@@ -309,6 +309,71 @@ const sides = await page.evaluate(() =>
 if (sides < 3) problems.push(`two units want an axis each, found ${sides} axes in all`)
 await page.screenshot({ path: `${OUT}/f-charts.png` })
 
+/* Drag is not to be depended on, so a click offers the same choice on a menu:
+   which chart, or a new one. The charts are named only while it is open, the
+   names being there to be matched against it. */
+const menu = page.locator('.plot-menu ul.menu:visible')
+await (await plotIcon('cable0', 'total bits')).click()
+await page.waitForTimeout(300)
+if (!await menu.isVisible())
+    problems.push('the plot button must offer the open charts to choose from')
+if (!await page.locator('.chart-name').first().isVisible())
+    problems.push('and they must be named while it is open')
+const choices = (await menu.innerText()).replace(/\s+/g, ' ')
+if (!/New chart/.test(choices) || !/Chart 1/.test(choices))
+    problems.push('a new chart, or one of those open: ' + choices)
+if (!/already there/.test(choices))
+    problems.push('and it must say where this metric already is: ' + choices)
+await menu.getByText('New chart').click()
+await page.waitForTimeout(1500)
+if (await page.locator('article.chart').count() !== 2)
+    problems.push('"New chart" must open one')
+if (await page.locator('.chart-name').first().isVisible())
+    problems.push('and the names go with the menu')
+
+/* Onto a chart that is already open, picked by the name it is showing. */
+await (await plotIcon('switch', 'macs')).click()
+await page.waitForTimeout(300)
+await page.screenshot({ path: `${OUT}/f-chart-menu.png` })
+await menu.locator('a', { hasText: 'Chart 2' }).click()
+await page.waitForTimeout(1500)
+if (await page.locator('article.chart').count() !== 2)
+    problems.push('choosing a chart from the menu must not open another')
+const second = (await page.locator('article.chart').nth(1).innerText()).replace(/\s+/g, ' ')
+if (!/macs/.test(second))
+    problems.push('the metric must land on the chart that was chosen: ' + second)
+
+/* Escape closes it, as a menu should. */
+await (await plotIcon('switch', 'macs')).click()
+await page.waitForTimeout(300)
+await page.keyboard.press('Escape')
+await page.waitForTimeout(300)
+if (await menu.count()) problems.push('escape must close the menu')
+
+/* A short window, and a metric near the bottom of the room the properties are
+   left: the menu must still be readable whole rather than cut off where they
+   stop scrolling, or hidden behind the dock. */
+await page.setViewportSize({ width: 1400, height: 620 })
+await page.waitForTimeout(600)
+await (await plotIcon('switch', 'cache misses')).click()
+await page.waitForTimeout(400)
+if (!await menu.isVisible())
+    problems.push('the menu must open in a short window too')
+const menuBox = await menu.boundingBox()
+const room2 = await page.evaluate(() => ({
+    page: window.innerHeight,
+    dock: Math.round(document.querySelector('.dock').getBoundingClientRect().top) }))
+if (!menuBox || menuBox.y < 0 || menuBox.y + menuBox.height > room2.page)
+    problems.push('the menu must fit on the page: ' +
+                  JSON.stringify({ menuBox, ...room2 }))
+else if (menuBox.y + menuBox.height > room2.dock)
+    problems.push('and keep off the dock: ' +
+                  JSON.stringify({ menuBox, ...room2 }))
+await page.screenshot({ path: `${OUT}/f-chart-menu-short.png` })
+await page.keyboard.press('Escape')
+await page.setViewportSize({ width: 1400, height: 950 })
+await page.waitForTimeout(600)
+
 const before = await entries()
 await page.locator('.chart-legend .entry button').first().click()
 await page.waitForTimeout(400)
@@ -413,15 +478,6 @@ if (Math.min(room.charts, room.logs) < Math.max(room.charts, room.logs) / 3)
     problems.push('the docked panels must share the room: ' + JSON.stringify(room))
 if (room.view < 100)
     problems.push('and leave the widget above something to be seen in: ' + room.view)
-
-/* The properties fold away too, and say how many they are while folded. */
-await page.locator('article.properties .twisty').click()
-await page.waitForTimeout(300)
-if (await page.locator('article.properties table').isVisible())
-    problems.push('folding the properties must hide them')
-if (!await page.locator('article.properties header strong').isVisible())
-    problems.push('but not the panel itself')
-await page.locator('article.properties .twisty').click()
 
 /* The way back to the newest line, for a reader who scrolled away from it. */
 if (await page.locator('button.follow-tail').isVisible())

@@ -132,7 +132,8 @@
         </template>
 
         <template x-if="selected">
-            <div class="widget-view">
+            <div class="widget-view" @scroll="repositionMenu()"
+                 @resize.window="repositionMenu()">
                 <!-- ancestors, as a straight line, always -->
                 <nav class="breadcrumb" aria-label="ancestors">
                     <template x-for="(a, i) in ancestors()" :key="a.id">
@@ -207,12 +208,7 @@
                 <!-- ================= properties ================= -->
                 <article class="properties">
                     <header>
-                        <button class="twisty" @click="fold('properties')"
-                                :title="collapsed.properties ? 'Show them' : 'Fold them away'"
-                                x-text="collapsed.properties ? '▸' : '▾'"></button>
                         <strong>Properties</strong>
-                        <small x-show="collapsed.properties && props.length"
-                               x-text="props.length + (props.length > 1 ? ' of them' : '')"></small>
                         <!-- The live refresh deliberately leaves the fields
                              below alone; this is how one asks for their true
                              values back. -->
@@ -222,7 +218,6 @@
                                 @click="loadProps({ full: true })">Refresh</button>
                     </header>
 
-                    <div class="body" x-show="!collapsed.properties">
                     <p x-show="propsState === 'loading'" x-cloak>
                         <small>Reading them&hellip;</small></p>
                     <p x-show="propsState === 'loaded' && !props.length" x-cloak>
@@ -268,20 +263,49 @@
                                                 <div class="metric-foot">
                                                     <small class="detail" x-show="p.metric.last !== null"
                                                            x-text="'last ' + ago(p.metric.last)"></small>
-                                                    <!-- Clicking opens a chart of
-                                                         its own; dragging it
-                                                         onto one that is open
-                                                         adds it there. -->
-                                                    <button class="outline secondary metric-plot"
-                                                            :disabled="!online" draggable="true"
-                                                            @dragstart="startDrag(p, $event)"
-                                                            @dragend="dragging = null ; dragOver = null"
-                                                            @click="addChart(p)"
-                                                            title="Plot this metric, or drag it onto a chart">
-                                                        <svg viewBox="0 0 16 12" aria-hidden="true">
-                                                            <polyline points="1,10 5,6 8,8 15,1"/>
-                                                        </svg>
-                                                    </button>
+                                                    <!-- Dragging this onto a
+                                                         chart adds the metric
+                                                         there; clicking it
+                                                         asks which chart, or
+                                                         opens the first one
+                                                         outright when there is
+                                                         none to choose. -->
+                                                    <span class="plot-menu">
+                                                        <button class="outline secondary metric-plot"
+                                                                :disabled="!online" draggable="true"
+                                                                @dragstart="startDrag(p, $event)"
+                                                                @dragend="dragging = null ; dragOver = null"
+                                                                @click="openChartMenu(p, $el)"
+                                                                :title="chartsHere().length
+                                                                        ? 'Plot this metric: pick a chart, or drag it onto one'
+                                                                        : 'Plot this metric'">
+                                                            <svg viewBox="0 0 16 12" aria-hidden="true">
+                                                                <polyline points="1,10 5,6 8,8 15,1"/>
+                                                            </svg>
+                                                        </button>
+                                                        <!-- Only ever there for
+                                                             one row at a time,
+                                                             so it closes on
+                                                             anything but the
+                                                             button that has
+                                                             just opened
+                                                             another. -->
+                                                        <ul class="menu" x-show="chartMenu === p.name" x-cloak
+                                                            @click.outside="if (chartMenu === p.name) chartMenu = null"
+                                                            @keydown.escape.window="chartMenu = null">
+                                                            <li><a href="#" @click.prevent="newChart(p)">New chart</a></li>
+                                                            <template x-for="c in chartsHere()" :key="c.id">
+                                                                <li>
+                                                                    <a href="#" :class="{ taken: holds(c, p) }"
+                                                                       @mouseenter="chartHint = c.id"
+                                                                       @mouseleave="chartHint = null"
+                                                                       @click.prevent="addTo(c, p)"
+                                                                       x-text="chartName(c) +
+                                                                               (holds(c, p) ? ' — already there' : '')"></a>
+                                                                </li>
+                                                            </template>
+                                                        </ul>
+                                                    </span>
                                                     <button class="outline secondary metric-reset"
                                                             x-show="!p.read_only" :disabled="!online"
                                                             @click="resetMetric(p)">Reset</button>
@@ -362,7 +386,6 @@
                             </template>
                         </tbody>
                     </table>
-                    </div>
                 </article>
             </div>
         </template>
@@ -385,11 +408,17 @@
         <div class="body charts" x-show="!collapsed.charts">
             <template x-for="c in charts" :key="c.id">
                 <article class="chart"
-                         :class="{ over: dragOver === c.id }"
+                         :class="{ over: dragOver === c.id || chartHint === c.id }"
                          @dragover.prevent="dragOver = canDrop(c) ? c.id : null"
                          @dragleave="dragOver = null"
                          @drop.prevent="dropOn(c)">
                     <header>
+                        <!-- A chart is named only while a menu is open on some
+                             metric: the name is there to be matched against
+                             that menu, and says nothing the rest of the
+                             time. -->
+                        <strong class="chart-name" x-show="chartMenu" x-cloak
+                                x-text="chartName(c)"></strong>
                         <span class="chart-legend">
                             <template x-for="l in lines(c)" :key="l.key">
                                 <span class="entry">
