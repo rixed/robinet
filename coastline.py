@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Turn the Natural Earth coastline shapefile into the asset the map draws.
+
+Run through the `coastline' target of the Makefile, which fetches the archive
+first.  What comes out, www/coast.js, is committed alongside the vendored
+libraries: a build must never reach the network on its own.
+
+What comes out is also deliberately coarse.  The map is there to say where the
+parts of a network are with respect to each other; the coast is only the hint
+that tells the reader which part of the world that is.  A shoreline drawn to
+the kilometre would outweigh the whole rest of the interface and answer no
+question the interface is asked.
+
+    coastline.py ne_110m_coastline.zip www/coast.js
+"""
+
+import json
+import struct
+import sys
+import zipfile
+
+# How far a point may be from the line kept in its place, in degrees, and the
+# size below which an island is not drawn at all.  Half a degree is some 50km:
+# at that tolerance Corsica is a triangle, which is all this has to be.
+TOLERANCE = 0.8
+SMALLEST = 1.5
+# Tenths of a degree, some 10km.  The map is read at two scales -- a continent
+# or a building -- and at neither of them does the third decimal say anything.
+PRECISION = 1
+
+
+def polylines(shp):
+    """The parts of every PolyLine record of a shapefile, as point lists.
+
+    Only shape type 3 (PolyLine) is understood, which is what Natural Earth's
+    coastlines are; anything else means the wrong file was handed over."""
+    out = []
+    at, end = 100, len(shp)
+    while at < end:
+        _num, words = struct.unpack('>ii', shp[at:at + 8])
+        at += 8
+        kind, = struct.unpack('<i', shp[at:at + 4])
+        if kind != 3:
+            raise SystemExit(f'{sys.argv[1]}: shape type {kind} is not a PolyLine')
+        parts, points = struct.unpack('<ii', shp[at + 36:at + 44])
+        starts = struct.unpack(f'<{parts}i', shp[at + 44:at + 44 + 4 * parts])
+        first = at + 44 + 4 * parts
+        xy = struct.unpack(f'<{2 * points}d', shp[first:first + 16 * points])
+        for i, s in enumerate(starts):
+            e = starts[i + 1] if i + 1 < parts else points
+            out.append([(xy[2 * j], xy[2 * j + 1]) for j in range(s, e)])
+        at += words * 2
+    return out
+
+
+def simplify(pts, tol):
+    """Douglas-Peucker: the points a coarser line has to keep."""
+    if len(pts) < 3:
+        return pts
+    keep = [False] * len(pts)
+    keep[0] = keep[-1] = True
+    todo = [(0, len(pts) - 1)]
+    while todo:
+        a, b = todo.pop()
+        if b <= a + 1:
+            continue
+        ax, ay = pts[a]
+        dx, dy = pts[b][0] - ax, pts[b][1] - ay
+        den = dx * dx + dy * dy
+        far, at = -1., -1
+        for i in range(a + 1, b):
+            px, py = pts[i]
+            if den == 0.:
+                off = (px - ax) ** 2 + (py - ay) ** 2
+            else:
+                t = min(1., max(0., ((px - ax) * dx + (py - ay) * dy) / den))
+                off = (px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2
+            if off > far:
+                far, at = off, i
+        if far > tol * tol:
+            keep[at] = True
+            todo += [(a, at), (at, b)]
+    return [p for p, k in zip(pts, keep) if k]
+
+
+def split_at_antimeridian(line):
+    """The line, cut wherever it steps across 180 degrees.
+
+    The map projects longitude straight onto the plane, so a step from 179 to
+    -179 is not a short step east: it is a line drawn back across the whole
+    world.  Natural Earth cuts its coastlines there already; this is what says
+    so, rather than trusting it and drawing a stripe across the Pacific if it
+    ever stops being true."""
+    out, run = [], [line[0]]
+    for prev, p in zip(line, line[1:]):
+        if abs(p[0] - prev[0]) > 180.:
+            out.append(run)
+            run = []
+        run.append(p)
+    out.append(run)
+    return [r for r in out if len(r) >= 2]
+
+
+def main(src, dst):
+    with zipfile.ZipFile(src) as z:
+        base = next(n[:-4] for n in z.namelist() if n.endswith('.shp'))
+        shp = z.read(base + '.shp')
+        version = z.read(base + '.VERSION.txt').decode().strip()
+
+    lines = []
+    for line in polylines(shp):
+        xs = [p[0] for p in line]
+        ys = [p[1] for p in line]
+        if max(xs) - min(xs) < SMALLEST and max(ys) - min(ys) < SMALLEST:
+            continue
+        for run in split_at_antimeridian(line):
+            kept = [(round(x, PRECISION), round(y, PRECISION))
+                    for x, y in simplify(run, TOLERANCE)]
+            # Rounding brings points together that the tolerance had kept
+            # apart.  A repeated point draws nothing and still costs its bytes.
+            thin = [kept[0]]
+            thin += [p for p, q in zip(kept[1:], kept) if p != q]
+            if len(thin) >= 2:
+                lines.append([c for p in thin for c in p])
+
+    with open(dst, 'w') as out:
+        out.write(
+            '/* Coastlines, generated by coastline.py from Natural Earth\n'
+            f' * {base} {version} (public domain).  Do not edit: run\n'
+            ' * `make coastline\' instead.\n'
+            ' *\n'
+            ' * One flat [lon, lat, lon, lat, ...] in degrees per line, coarse\n'
+            ' * enough to say which sea this is and no more. */\n'
+            'const coastline = ')
+        out.write(json.dumps(lines, separators=(',', ':')))
+        out.write('\n')
+
+    points = sum(len(l) for l in lines) // 2
+    print(f'{dst}: {len(lines)} lines, {points} points')
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 3:
+        raise SystemExit(__doc__)
+    main(sys.argv[1], sys.argv[2])

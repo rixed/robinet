@@ -1152,6 +1152,77 @@ if (framed.before.k !== framed.after.k ||
     problems.push('a location on something the map never draws must not move ' +
                   'the framing: ' + JSON.stringify(framed))
 
+/* The coast behind it all. Nothing about the network depends on it, so what is
+ * asked of it is that it is there, and that what reaches the renderer is
+ * bounded by the pane: the demo sits in a city, and at that zoom the shoreline
+ * of the Atlantic is tens of millions of pixels away. */
+const clipped = await page.evaluate(() => {
+    const seg = (...a) => clipSeg(...a, 100, 100)
+    return { inside: seg(10, 10, 20, 20),
+             past: seg(50, 50, 500, 50),
+             across: seg(-500, 50, 500, 50),
+             gone: seg(-500, -500, -400, -400) }
+})
+mapSay('a segment within the pane is drawn whole', clipped.inside, [10, 10, 20, 20])
+mapSay('one running out of it is cut at the edge', clipped.past, [50, 50, 104, 50])
+mapSay('one crossing it is cut at both', clipped.across, [-4, 50, 104, 50])
+mapSay('and one that never enters it is not drawn', clipped.gone, null)
+
+const coastNow = () => page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    const path = document.querySelector('.pane.map svg.coast path')
+                         .getAttribute('d') || ''
+    const nums = (path.match(/-?[0-9.]+/g) || []).map(Number)
+    const m = 8   /* the clip's own margin, and room for rounding */
+    return { points: nums.length / 2,
+             outside: nums.some((v, i) => i % 2 === 0
+                 ? v < -m || v > d.mapSize.w + m
+                 : v < -m || v > d.mapScene().trayTop + m) }
+})
+
+/* Framed on the demo, in Paris: every coastline there is is off the edge, and
+ * an unclipped path would say so in millions of pixels. */
+const near = await coastNow()
+if (near.outside)
+    problems.push('the coast must be clipped to the pane, and at the scale of ' +
+                  'the demo it reached ' + JSON.stringify(near))
+
+await page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    d.mapView = { cx: 0.5, cy: 0.5,
+                  k: Math.max(d.mapSize.w, d.mapSize.h) }
+})
+await page.waitForTimeout(300)
+const world = await coastNow()
+if (world.points < 300)
+    problems.push('the whole world should show a coastline, and it drew ' +
+                  world.points + ' points')
+if (world.outside)
+    problems.push('the coast must be clipped to the pane: ' +
+                  JSON.stringify(world))
+await page.screenshot({ path: `${OUT}/h-map-world.png` })
+
+/* And that view is as far out as the wheel goes. There is nothing beyond the
+ * world to look at, and a globe adrift in a larger window says the reader has
+ * gone somewhere they cannot have gone. Whichever way round the pane is: it is
+ * usually taller than it is wide, and the world has to cover it either way. */
+const paneNow = await mapBox()
+await page.mouse.move(paneNow.x + paneNow.width / 2,
+                      paneNow.y + paneNow.height / 2)
+for (let i = 0 ; i < 30 ; i++) await page.mouse.wheel(0, 600)
+await page.waitForTimeout(300)
+const out = await page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    return { k: d.mapView.k, w: d.mapSize.w, h: d.mapSize.h }
+})
+if (out.k < Math.max(out.w, out.h) - 0.5)
+    problems.push('zooming out must stop with the world filling the pane: ' +
+                  JSON.stringify(out))
+
+/* Framed again, for the sections below. */
+await page.locator('.map-tools button').click()
+await page.waitForTimeout(300)
+
 /* Selecting something the map is not showing must still show something. The
  * boxes between it and the plane are held open by the selection itself, so
  * that the widget being looked at is drawn rather than hidden inside a box --

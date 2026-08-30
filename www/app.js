@@ -551,6 +551,56 @@ const unmercator = (x, y) => ({
     lon: x * 360 - 180,
 })
 
+/* The coastlines, projected once.
+ *
+ * [coastline] is what coast.js defines: lon/lat in degrees, which is how the
+ * data is kept and not how anything is drawn. The projection of a shoreline
+ * never changes, so it is done on first use and kept, while the view -- which
+ * changes constantly -- is applied per frame. Missing, the map draws no coast
+ * and everything else about it still works. */
+let coastCache = null
+const coastWorld = () => {
+    if (coastCache === null)
+        coastCache = (typeof coastline === 'undefined' ? [] : coastline)
+            .map(l => {
+                const out = new Float64Array(l.length)
+                for (let i = 0 ; i < l.length ; i += 2) {
+                    const p = mercator(l[i + 1], l[i])
+                    out[i] = p.x ; out[i + 1] = p.y
+                }
+                return out
+            })
+    return coastCache
+}
+
+/* The part of a segment that falls within the pane, or null (Liang-Barsky).
+ *
+ * Drawing has to be clipped rather than left to the renderer: zoomed in on a
+ * network a kilometre across, the line along the Pacific is tens of millions
+ * of pixels long, and handing that to the browser every frame is how a map
+ * stops being a map. The margin keeps a stroke that runs along the edge from
+ * being cut in half by its own clip. */
+const clipMargin = 4
+const clipSeg = (x0, y0, x1, y1, w, h) => {
+    const dx = x1 - x0, dy = y1 - y0
+    let t0 = 0, t1 = 1
+    const edge = (p, q) => {
+        if (p === 0) return q >= 0
+        const r = q / p
+        if (p < 0) { if (r > t1) return false ; if (r > t0) t0 = r }
+        else { if (r < t0) return false ; if (r < t1) t1 = r }
+        return true
+    }
+    const m = clipMargin
+    if (!(edge(-dx, x0 + m) && edge(dx, w + m - x0) &&
+          edge(-dy, y0 + m) && edge(dy, h + m - y0))) return null
+    return [ x0 + t0 * dx, y0 + t0 * dy, x0 + t1 * dx, y0 + t1 * dy ]
+}
+
+/* Kept for the same reason as [sceneMemo]: the binding asks for the path on
+ * every render, and it only changes when the view does. */
+let coastMemo = { sig: null, value: '' }
+
 /* A box is a fixed size in pixels, not in world units: zooming out must bring
  * more of the network into view, not shrink its labels until they cannot be
  * read. Only positions are projected. */
@@ -584,13 +634,17 @@ const dividers = {
 /* The world, in metres, for the two numbers below. */
 const earth = 40075000
 
-/* How far in and out the map goes, as multiples of "the whole world across the
- * pane": out to a quarter of it, in to about ten metres across. A simulated
- * network may be a continent apart or a rack apart and both have to be
- * lookable at, but a ceiling there must be, or the arithmetic runs off to a
- * zoom no wheel could ever undo. */
-const zoomTo = (paneW, k) =>
-    Math.min(paneW * earth / 10, Math.max(paneW / 4, k))
+/* How far in and out the map goes. A simulated network may be a continent
+ * apart or a rack apart and both have to be lookable at, but there have to be
+ * ends to it, or the arithmetic runs off to a zoom no wheel could ever undo.
+ *
+ * In, to about ten metres across the pane. Out, to the whole world exactly
+ * filling it: there is nothing beyond the world to see, and a map showing the
+ * globe adrift in a larger window says the reader has gone somewhere they
+ * cannot have gone. Both directions, since the pane is usually taller than it
+ * is wide and the world has to cover it either way. */
+const zoomTo = (paneW, paneH, k) =>
+    Math.min(paneW * earth / 10, Math.max(paneW, paneH, k))
 
 /* What is framed when there is nothing to frame: a single placed box spans
  * nothing at all, and neither does a network small enough to sit inside one.
@@ -1846,7 +1900,7 @@ document.addEventListener('alpine:init', () => {
             const { w, h } = this.mapSize
             if (!w || !h) return
             if (!pts.length) {
-                this.mapView = { cx: 0.5, cy: 0.5, k: w }
+                this.mapView = { cx: 0.5, cy: 0.5, k: zoomTo(w, h, 0) }
                 return
             }
             const xs = pts.map(p => p.x), ys = pts.map(p => p.y)
@@ -1855,7 +1909,7 @@ document.addEventListener('alpine:init', () => {
             /* A margin in world units, and a floor under it: see [minSpan]. */
             const span = Math.max(x1 - x0, y1 - y0, minSpan) * 1.6
             this.mapView = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2,
-                             k: zoomTo(w, Math.min(w, h) / span) }
+                             k: zoomTo(w, h, Math.min(w, h) / span) }
             this.topoTock++
         },
 
@@ -1880,7 +1934,7 @@ document.addEventListener('alpine:init', () => {
             const el = this.$refs.mapPane.getBoundingClientRect()
             const px = ev.clientX - el.left, py = ev.clientY - el.top
             const at = this.toWorld(px, py)
-            const k = zoomTo(this.mapSize.w,
+            const k = zoomTo(this.mapSize.w, this.mapSize.h,
                              this.mapView.k * Math.exp(-ev.deltaY * 0.0015))
             this.mapView = { k,
                 cx: at.x - (px - this.mapSize.w / 2) / k,
@@ -2225,6 +2279,47 @@ document.addEventListener('alpine:init', () => {
                 `<line class="${e.on ? 'on' : ''}" x1="${e.x1}" y1="${e.y1}" ` +
                 `x2="${e.x2}" y2="${e.y2}"/>`
             ).join('')
+        },
+
+        /* The coast under it all, as a single path: a shoreline is a thousand
+         * segments, and a thousand elements to move on every pan is a thousand
+         * too many.
+         *
+         * It stops at the strip along the bottom. What is down there has no
+         * place in the world, and drawing a coast behind it would say it has
+         * one. */
+        coastPath() {
+            const { w, h } = this.mapSize
+            const { cx, cy, k } = this.mapView
+            if (!w || !h || !k) return ''
+            const bottom = this.mapScene().trayTop
+            const sig = [ cx, cy, k, w, bottom ].join('|')
+            if (coastMemo.sig === sig) return coastMemo.value
+            /* The projection, written out: [toPane] for a thousand points, a
+             * dozen times a second. */
+            const ox = w / 2 - cx * k, oy = h / 2 - cy * k
+            const at = (v) => Math.round(v * 10) / 10
+            let d = '', wasX = null, wasY = null
+            for (const l of coastWorld()) {
+                let px = l[0] * k + ox, py = l[1] * k + oy
+                for (let i = 2 ; i < l.length ; i += 2) {
+                    const qx = l[i] * k + ox, qy = l[i + 1] * k + oy
+                    const s = clipSeg(px, py, qx, qy, w, bottom)
+                    if (s !== null) {
+                        /* Carried on from where the last piece ended, or begun
+                         * afresh. Two pieces of one shoreline that meet are a
+                         * single stroke; two that do not must not be joined by
+                         * a coast that is not there. */
+                        if (s[0] !== wasX || s[1] !== wasY)
+                            d += `M${at(s[0])} ${at(s[1])}`
+                        d += `L${at(s[2])} ${at(s[3])}`
+                        wasX = s[2] ; wasY = s[3]
+                    }
+                    px = qx ; py = qy
+                }
+            }
+            coastMemo = { sig, value: d }
+            return d
         },
 
         /*

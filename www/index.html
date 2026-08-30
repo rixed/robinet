@@ -16,6 +16,9 @@
     <!-- Ours first: Alpine dispatches alpine:init as it starts, and a component
          registered after that is never seen. -->
     <script defer src="uplot.min.js"></script>
+    <!-- Data, not code: the coastlines the map draws. Before app.js only for
+         tidiness -- nothing reads it until something is drawn. -->
+    <script defer src="coast.js"></script>
     <!-- Deferred scripts run in the order they are written: this one defines
          the component that the next one then goes looking for. -->
     <script defer src="app.js"></script>
@@ -505,6 +508,11 @@
                          x-ref="mapPane" x-init="watchMap()"
                          @wheel="zoomMap($event)" @pointerdown="panMap($event)"
                          @resize.window="measureMap()">
+
+                        <!-- Under everything, and never in the way: enough of
+                             the world to tell the reader which sea they are
+                             looking at. -->
+                        <svg class="coast"><path :d="coastPath()"></path></svg>
 
                         <svg class="cables" x-html="edgeSvg()"></svg>
 

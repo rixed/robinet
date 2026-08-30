@@ -109,8 +109,15 @@ UPLOT_VERSION  = 1.6.32
 VENDORED_ASSETS = www/pico.min.css www/alpine.min.js \
                   www/uplot.min.js www/uplot.min.css
 
-# The page and its own script and style, then those libraries.
-UI_ASSETS = www/index.html www/app.js www/style.css $(VENDORED_ASSETS)
+# The coastlines the map draws behind the network, from Natural Earth's
+# 1:110m coastline (public domain), coarsened further by coastline.py. Like
+# the libraries above it is committed rather than built: see the `coastline'
+# target below.
+COASTLINE = www/coast.js
+
+# The page and its own script and style, then the coast and those libraries.
+UI_ASSETS = www/index.html www/app.js www/style.css $(COASTLINE) \
+            $(VENDORED_ASSETS)
 
 # Tests that do not fit qtest's inline style: concurrency and the admin API.
 # Run them on their own for a longer, harder run:
@@ -120,7 +127,7 @@ EXTRA_TESTS = tests/stress.opt
 
 include $(top_srcdir)make.common
 
-.PHONY: examples run vendor
+.PHONY: examples run vendor coastline
 
 all: robinet.top examples $(EXTRA_TESTS)
 
@@ -172,6 +179,17 @@ vendor:
 	   fi ; \
 	 done
 	@ls -l $(VENDORED_ASSETS)
+
+# Rebuild the coastlines. Like `vendor', by hand and not from the build: the
+# result is committed, and the shoreline of the world is not a moving target.
+NE_CDN = https://naciscdn.org/naturalearth
+
+coastline:
+	@echo 'Building $(COASTLINE) from the Natural Earth 1:110m coastline'
+	$(call fetch,ne_110m_coastline.zip,$(NE_CDN)/110m/physical/ne_110m_coastline.zip)
+	@python3 coastline.py ne_110m_coastline.zip $(COASTLINE)
+	@$(RM) ne_110m_coastline.zip
+	@ls -l $(COASTLINE)
 
 myadmin_assets.ml: $(UI_ASSETS)
 	@echo 'Embedding $(UI_ASSETS) into $@'

@@ -15,6 +15,7 @@
     --pico-form-element-spacing-horizontal: .4rem;
     --pico-typography-spacing-vertical: .5rem;
     --cable: var(--pico-muted-border-color);
+    --coast: var(--pico-muted-color);
 }
 
 /* A column: the banner takes the room it needs, the two panes share what is
@@ -304,6 +305,22 @@ body.splitting.rows { cursor: row-resize; }
 /* The cables, and only the cables: everything one can click is HTML above
  * them. Nothing here takes the pointer, so a click on a line goes through to
  * the pane and pans it, which is what a click on the background should do. */
+.pane.map svg.coast {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+/* Fainter than a cable, and no thicker however far one zooms in: it is the
+ * backdrop, and the moment it competes with the network it is drawn wrong. */
+.pane.map svg.coast path {
+    fill: none;
+    stroke: var(--coast);
+    stroke-width: 1;
+    opacity: .35;
+}
+
 .pane.map svg.cables {
     position: absolute;
     inset: 0;
@@ -322,8 +339,10 @@ body.splitting.rows { cursor: row-resize; }
     stroke-width: 3;
 }
 
-/* The order things are drawn in: the cables under everything, then the boxes,
- * then what names them. A label that a box paints over says nothing. */
+/* The order things are drawn in: the coast under the cables, the cables under
+ * everything, then the boxes, then what names them. A label that a box paints
+ * over says nothing. The two layers below take theirs from the document: they
+ * are drawn in the order they are written, which is enough. */
 .pane.map .box { z-index: 1; }
 .pane.map .port { z-index: 2; }
 .pane.map .cable-label { z-index: 3; }
