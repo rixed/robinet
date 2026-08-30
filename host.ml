@@ -583,7 +583,7 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget ?(init=on_init_noth
           power_off     = (fun ?timeout () -> assert t.on ; power_off ?timeout t ; t.on <- false) ;
           add_killer    = (fun f -> t.killers <- f :: t.killers) }
     in
-    widget.properties <- Widget.[
+    Widget.add_properties widget Widget.[
         property "on" ~descr:"The host is powered on." ~kind:Bool
             ~getter:(fun () -> `Bool t.on)
             ~setter:(fun v -> let on = to_bool v in if on && not t.on then t.trx.power_on () else if not on && t.on then t.trx.power_off ()) ;

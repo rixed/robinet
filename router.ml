@@ -396,7 +396,7 @@ struct
         let egress = Metric.Counter.make () in
         let t = { ifaces ; routes ; widget ; notify_errs ; admin_reroute ;
                   load_balancing ; ingress ; egress } in
-        widget.properties <- Widget.[
+        Widget.add_properties widget Widget.[
             property "errors probability" ~kind:(FRange (0., 1.))
                 ~descr:"Probability to report errors with ICMP."
                 ~getter:(fun () -> `Float t.notify_errs.probability)

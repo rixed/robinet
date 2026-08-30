@@ -298,27 +298,27 @@
                                      below alone; this is how one asks for their true
                                      values back. -->
                                 <button class="outline secondary"
-                                        :disabled="!online || !props.length"
+                                        :disabled="!online || !shownProps().length"
                                         title="Read every value again, the editable ones included"
                                         @click="loadProps({ full: true })">Refresh</button>
                             </header>
 
                             <p x-show="propsState === 'loading'" x-cloak>
                                 <small>Reading them&hellip;</small></p>
-                            <p x-show="propsState === 'loaded' && !props.length" x-cloak>
-                                <small>This widget has none.</small></p>
+                            <p x-show="propsState === 'loaded' && !shownProps().length" x-cloak>
+                                <small>This widget has none to show.</small></p>
                             <p class="sim-error" x-show="propsState === 'failed'" x-cloak>
                                 <small x-text="props.length
                                                ? 'Could not read them again: ' + propsError
                                                : 'Could not read them: ' + propsError"></small>
                             </p>
 
-                            <table x-show="props.length">
+                            <table x-show="shownProps().length">
                                 <thead>
                                     <tr><th>Name</th><th>Value</th></tr>
                                 </thead>
                                 <tbody>
-                                    <template x-for="p in props" :key="p.name">
+                                    <template x-for="p in shownProps()" :key="p.name">
                                         <tr :class="{ 'has-error': p.error }">
                                             <td>
                                                 <span x-text="p.name"></span>

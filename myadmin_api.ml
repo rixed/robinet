@@ -154,13 +154,18 @@ let json_of_property (p : Widget.property) =
                 simply a property that has nothing to add to its number. *)
              "units", `String p.units ;
              "read_only", `Bool (p.setter = None) ;
+             (* Say so even when there is a value to show: what the UI does
+                with a property must not depend on the moment it asked. *)
+             "only_when_set", `Bool p.only_when_set ;
              "kind", loop p.kind ;
              "value", value ]
 
 (* Where the widget is in the world, or null: most widgets are nowhere, and the
- * map places those itself. It travels with the widget rather than as a
- * property because the map wants every position at once, in the one listing it
- * already fetches -- not one request per box. *)
+ * map places those itself. It travels with the widget as well as through the
+ * read-only "latitude" and "longitude" properties, because the map wants every
+ * position at once, in the one listing it already fetches -- not one request
+ * per box. The properties are how a position is read beside the rest of what a
+ * widget says about itself; this is how the map reads them all. *)
 let json_of_location = function
     | None -> `Null
     | Some (l : Widget.location) ->
@@ -303,8 +308,10 @@ let delete_widget _mth matches _vars _qry_body resp =
 
 (* Place a widget on the map, or take its place away with a body of "null".
  *
- * Not a property: see [json_of_location]. A refused coordinate is a 400 like a
- * refused property value, since it is the same kind of mistake. *)
+ * The one way in: the "latitude" and "longitude" properties only read (a place
+ * is a pair, and setting one half at a time would put a widget somewhere nobody
+ * asked for). A refused coordinate is a 400 like a refused property value,
+ * since it is the same kind of mistake. *)
 let set_location _mth matches _vars qry_body resp =
     let sim = simulation_of_matches matches 1 in
     Simulation.borrow sim (fun () ->

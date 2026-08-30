@@ -42,7 +42,7 @@ struct
             widget ;
             ingress = Metric.Counter.make () ;
             egress = Metric.Counter.make () } in
-        widget.properties <- Widget.[
+        Widget.add_properties widget Widget.[
             metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
                 (Metric.Counter.T t.ingress) ;
             metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
@@ -121,7 +121,7 @@ struct
             mac_size = Metric.Gauge.make () ;
             mac_hits = Metric.Atomic.make () ;
             mac_misses = Metric.Atomic.make () } in
-        widget.properties <- Widget.[
+        Widget.add_properties widget Widget.[
             metric_property "macs"
                 ~descr:"Number of MAC addresses remembered."
                 (Metric.Gauge.T t.mac_size) ;

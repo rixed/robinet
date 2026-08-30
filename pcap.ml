@@ -481,7 +481,7 @@ let openif ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
         name = ifname ;
         caplen = caplen ;
         widget } in
-    widget.properties <- Widget.[
+    Widget.add_properties widget Widget.[
         property "name" ~kind:String
             ~descr:"Interface name."
             ~getter:(fun () -> `String t.name) ;

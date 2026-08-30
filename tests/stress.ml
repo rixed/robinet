@@ -101,8 +101,7 @@ let make_net () =
     (* And one bounded on a single side, since no cable has such a property and
        what the API says about an end that is not there is worth pinning. *)
     let count = ref 0 and nickname = ref None in
-    cable.widget.properties <-
-        cable.widget.properties @
+    Widget.add_properties cable.widget
         [ Widget.property "sealed" ~descr:"Cannot be written."
               ~kind:Widget.Int ~getter:(fun () -> `Int 1) ;
           Widget.property "count" ~descr:"Any number of things."
@@ -249,7 +248,7 @@ let test_metric_samples () =
        point of the windows is that they say what happened between two points,
        which the figures since the last reset cannot. *)
     and g = Metric.Gauge.make () in
-    w.Widget.properties <-
+    Widget.add_properties w
         [ Widget.metric_property "bytes" ~units:"bytes" (Metric.Counter.T c) ;
           Widget.metric_property "level" (Metric.Gauge.T g) ] ;
     Simulation.set_metrics_sample_rate sim (Clock.Interval.sec 1.) ;

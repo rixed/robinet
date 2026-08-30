@@ -143,7 +143,7 @@ struct
             out_icmp_h = Hashtbl.create num_max_cnxs ;
             emit = ignore_bits ~logger:widget.logger ;
             recv = ignore_bits ~logger:widget.logger } in
-        widget.properties <- Widget.[
+        Widget.add_properties widget Widget.[
             property "addr" ~descr:"IP address" ~kind:String
                 ~getter:(fun () -> `String (Ip.Addr.to_string t.addr)) ;
             property "min port"

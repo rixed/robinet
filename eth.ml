@@ -362,7 +362,7 @@ struct
             arp_cache = BitHash.create 3 ;
             postponed = BitHash.create 3 ;
             delay ; loss } in
-        widget.properties <- Widget.[
+        Widget.add_properties widget Widget.[
             property "delay" ~kind:Float ~units:"secs"
                 ~descr:"Average delay to add to transmissions."
                 ~setter:(fun v -> t.delay <- to_float v)
@@ -693,7 +693,7 @@ struct
                 widget ;
                 last_packets =
                     OrdArray.make history (false, empty_bitstring) } in
-            widget.properties <- Widget.[
+            Widget.add_properties widget Widget.[
                 property "length" ~kind:Float ~units:"meters"
                     ~descr:"Length of the cable."
                     ~setter:(fun v ->

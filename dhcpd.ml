@@ -87,7 +87,7 @@ struct
         let json_of_ip_opt = function
             | None -> `Null
             | Some ip -> `String (Ip.Addr.to_string ip) in
-        widget.properties <- Widget.[
+        Widget.add_properties widget Widget.[
             property "authoritative" ~kind:Bool
                 ~descr:"Is this server authoritative"
                 ~getter:(fun () -> `Bool t.authoritative)

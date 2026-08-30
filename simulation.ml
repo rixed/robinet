@@ -609,7 +609,7 @@ let make =
               (* Due at once, so that a simulation has a first point to be
                * plotted from rather than a rate's worth of nothing. *)
               metric_samples_due = !now } in
-        root.properties <- Widget.[
+        Widget.add_properties root Widget.[
             property "metrics sample rate" ~kind:Float ~units:"secs"
               ~descr:"How often every metric of this simulation is written \
                       down, in its own simulated time."

@@ -213,9 +213,40 @@ await page.waitForTimeout(400)
 if (await mtuValue() !== 1500)
     problems.push('confirming must save what was remembered, got ' + await mtuValue())
 
+/* Where a widget is, read like anything else it has to say about itself --
+ * but only once it is somewhere. Every widget carries the pair, and a server
+ * that is nowhere of its own has nothing to say through it: the row would be
+ * two lines of "unset" on every widget in the tree. Unlike the gateway just
+ * above, which is unset because that is how the server is configured, and
+ * says so. */
+const propRow = (name) =>
+    page.locator('article.properties tbody tr')
+        .filter({ has: page.locator(`td span:text-is("${name}")`) })
+const listed = async (id) =>
+    (await (await fetch(`${BASE}/api/simulations/0/widgets/${id}/properties`))
+        .json()).find(p => p.name === 'latitude')
+
+const nowhere = await listed(dhcpdId)
+if (!nowhere || nowhere.value !== null || nowhere.only_when_set !== true)
+    problems.push('an unplaced widget must still offer its latitude, marked: ' +
+                  JSON.stringify(nowhere))
+if (await propRow('latitude').count())
+    problems.push('a widget that is nowhere showed a row saying so')
+
 /* The switch: three peers, each joined by the cable that reaches it. */
 await page.getByRole('link', { name: 'switch', exact: true }).first().click()
 await page.waitForTimeout(300)
+
+/* And the same pair, on something that is somewhere. */
+const switchId = (await (await fetch(`${BASE}/api/simulations/0/widgets`)).json())
+                 .find(w => w.name === 'switch').id
+const somewhere = await listed(switchId)
+const shownLat = (await propRow('latitude').locator('span.ro').innerText()).trim()
+if (somewhere.value === null || Math.abs(somewhere.value - 48.8566) > 1e-6)
+    problems.push('a placed widget reads its latitude back: ' +
+                  JSON.stringify(somewhere))
+if (!shownLat.startsWith('48.8566'))
+    problems.push('the panel must show a place it has: ' + shownLat)
 await page.screenshot({ path: `${OUT}/b-switch.png` })
 
 /* One simulation is what is being worked on; the rest are in the way, and the

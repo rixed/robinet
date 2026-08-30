@@ -96,7 +96,18 @@ and property = { name : string ;
                (* What the value looks like, so that the UI can offer the right
                 * input and reject nonsense before submitting it. Values still
                 * travel as strings: this only says how to render one. *)
-                 kind : kind }
+                 kind : kind ;
+               (* Whether a row of the property panel is worth spending on this
+                * when it reads as nothing.
+                *
+                * Absence usually says something: a DHCP server that serves no
+                * gateway is configured that way, and the reader has to be able
+                * to see it. But a property every widget carries whether or not
+                * it means anything for that widget -- where it is on the map --
+                * says nothing at all when it is absent, and there are two of
+                * those on every widget in the tree. Those are the ones this is
+                * for. *)
+               only_when_set : bool }
 
 (* A property value, in the shape the administration interface speaks.
  *
@@ -148,8 +159,13 @@ let optional = function
   (try ignore (optional Metric) ; false with Invalid_argument _ -> true)
  *)
 
-let property ?(descr="") ?(units="") ?metric ?setter ?(kind=String) ~getter name =
-    { name ; descr ; units ; getter ; setter ; kind ; metric }
+let property ?(descr="") ?(units="") ?metric ?setter ?(kind=String)
+             ?(only_when_set=false) ~getter name =
+    { name ; descr ; units ; getter ; setter ; kind ; metric ; only_when_set }
+
+(* Add new properties before default ones: *)
+let add_properties t properties =
+    t.properties <- properties @ t.properties
 
 (** A metric, as a property: it reads as the metric's current figures, and the
  * only thing that can be written to it is a reset -- whatever the value. *)
@@ -287,6 +303,24 @@ let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) name =
      * in the UI. Quadratic in the number of siblings, which is irrelevant:
      * widgets are created once, at set-up. *)
     Option.may (fun p -> p.children <- p.children @ [ t ]) parent ;
+    (* Where it is, as something to read in the property panel. Every widget
+     * gets the pair, whether it is placed or not: a widget is placed and taken
+     * off the map long after it is built, and a property list that changed as
+     * that happened would be one the UI could not keep a place for. An unplaced
+     * widget reads as null, which is why the kind is optional -- and why the UI
+     * leaves it out until there is something to show.
+     *
+     * Read through [t] rather than off the [location] argument, for the same
+     * reason: the field moves, the argument does not. *)
+    let coord f () =
+        match t.location with None -> `Null | Some l -> `Float (f l) in
+    add_properties t [
+        property "latitude" ~units:"deg" ~kind:(optional Float) ~only_when_set:true
+            ~descr:"Where it is, north of the equator."
+            ~getter:(coord (fun l -> l.lat)) ;
+        property "longitude" ~units:"deg" ~kind:(optional Float) ~only_when_set:true
+            ~descr:"Where it is, east of Greenwich."
+            ~getter:(coord (fun l -> l.lon)) ] ;
     t
 
 (** Create a widget below [parent], in [parent]'s simulation and reading the
@@ -413,6 +447,17 @@ let place t location =
   (try check_location { lat = 91. ; lon = 0. } ; false with Invalid_argument _ -> true)
   (try check_location { lat = 0. ; lon = -181. } ; false with Invalid_argument _ -> true)
   (try check_location { lat = nan ; lon = 0. } ; false with Invalid_argument _ -> true)
+ *)
+
+(* The properties read the field, not the location the widget was built with:
+   a widget is placed, moved and taken off the map long after that. *)
+(*$T place
+  let w = make_root ~sim:0 ~now:(fun () -> Clock.Time.o 0.) "w" in \
+  let read n = (List.find (fun p -> p.name = n) w.properties).getter () in \
+  read "latitude" = `Null && read "longitude" = `Null && \
+  (place w (Some { lat = 45.75 ; lon = 4.85 }) ; \
+   read "latitude" = `Float 45.75 && read "longitude" = `Float 4.85) && \
+  (place w None ; read "latitude" = `Null)
  *)
 
 let same_via v1 v2 =

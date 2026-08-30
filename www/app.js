@@ -1208,6 +1208,7 @@ document.addEventListener('alpine:init', () => {
                 old.units = p.units
                 old.kind = p.kind
                 old.read_only = p.read_only
+                old.only_when_set = p.only_when_set
                 if (p.kind.type === 'metric') {
                     old.metric = metricRows(p.value, p.units, old.metric)
                     if (old.metric.rows.some(r => this.fresh(r.changedAt)))
@@ -1302,6 +1303,16 @@ document.addEventListener('alpine:init', () => {
         unlightLater() {
             clearTimeout(this.unlightTimer)
             this.unlightTimer = setTimeout(() => this.tock++, highlightMs + 30)
+        },
+
+        /* The properties worth a row of the panel.
+         *
+         * Absence is usually itself the answer -- a DHCP server serving no
+         * gateway says so -- so a property that reads as nothing stays, and
+         * the panel writes "unset". The exceptions say so themselves: see
+         * [only_when_set] in widget.ml. */
+        shownProps() {
+            return this.props.filter(p => p.value !== null || !p.only_when_set)
         },
 
         /* The kind whose input this property gets: see [baseKind]. */
