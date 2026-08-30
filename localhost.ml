@@ -195,12 +195,16 @@ let tcp_server ctx src_port server_f =
     ignore
 
 (** The context Localhost's functions work against: which simulation dates what
- * it does, and the widget its logs hang under. *)
-let make_ctx sim =
-    { sim ; widget = Widget.make ~parent:sim.root "localhost" }
+ * it does, and the widget its logs hang under.
+ *
+ * It takes a location for the same reason a real interface does: this is the
+ * machine running the simulation, joining it from outside, and the map has to
+ * be able to show where that is. *)
+let make_ctx ?location sim =
+    { sim ; widget = Widget.make ~parent:sim.root ?location "localhost" }
 
-let host sim =
-    let ctx = make_ctx sim in
+let host ?location sim =
+    let ctx = make_ctx ?location sim in
     let tcp_connect = tcp_connect ctx ~wait_for_server:true ?ttl:None ?tos:None
     and udp_connect _ ?src_port _ _ =
         ignore src_port ;

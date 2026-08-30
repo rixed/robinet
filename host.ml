@@ -597,8 +597,8 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget ?(init=on_init_noth
     if t.on then init t ;
     t
 
-let make ?gateways ?search_sfx ?nameserver ?on ~parent ?mac ?init name =
-    let widget = Widget.make ~parent name in
+let make ?gateways ?search_sfx ?nameserver ?on ~parent ?location ?mac ?init name =
+    let widget = Widget.make ~parent ?location name in
     let eth_state =
         (* FIXME: Don't use the GW for same net IP! *)
         Eth.State.make ?mac ?gateways ~parent:widget () in

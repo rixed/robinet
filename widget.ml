@@ -22,6 +22,20 @@
  *)
 open Batteries
 
+(* Where a widget is in the world, when it is anywhere.
+ *
+ * Degrees of latitude and longitude, as GeoIP hands them out and as simwan
+ * reads them to derive a cable's length and hence its latency: the picture and
+ * the timings it is supposed to explain must be computed from the same
+ * numbers, or the picture explains nothing.
+ *
+ * Only what the map draws on its plane -- routers, LANs, hosts -- has a place
+ * of its own. What is inside one of those boxes is at the same place as the
+ * box, and a TCP layer is nowhere at all, so a widget's location is an option
+ * and [None] means "no place of its own". It is not 0,0, which is a real spot
+ * in the Gulf of Guinea. *)
+type location = { lat : float ; lon : float }
+
 type t =
     { (* The stable identity of a widget.
        * Names are neither unique nor stable: several siblings may share a name,
@@ -56,6 +70,9 @@ type t =
       (* Siblings: When widgets are connected "horizontally" to others.
        * Widget names are then unrelated. *)
       mutable peers : peer list ;
+      (* Where it is, if it is anywhere: see [location]. Mutable because
+       * placing a box is something the reader does, from the map. *)
+      mutable location : location option ;
       logger : Log.t ;
       (* Setter and getter of configurable properties: *)
       mutable properties : property list }
@@ -234,10 +251,24 @@ let next_id =
         incr seq ;
         id
 
+(* A latitude and a longitude, or nothing that can be drawn: an out of range
+ * coordinate is not a placement that happens to be odd, it is one that has no
+ * spot on any map. Checked in the one place a location is ever stored, so that
+ * neither a caller nor the API can install one that the map would then have to
+ * cope with. *)
+let check_location { lat ; lon } =
+    if not (Float.is_finite lat) || lat < -90. || lat > 90. then
+        invalid_arg (Printf.sprintf
+            "Widget.location: latitude %g is not in (-90…90)" lat) ;
+    if not (Float.is_finite lon) || lon < -180. || lon > 180. then
+        invalid_arg (Printf.sprintf
+            "Widget.location: longitude %g is not in (-180…180)" lon)
+
 (* The one place a widget is built. *)
-let make_ ?parent ~sim ?now ?size ?(properties=[]) name =
+let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) name =
     if String.contains name '/' then
         invalid_arg ("Widget.make: name must not contain '/': "^ name) ;
+    Option.may check_location location ;
     let logger = Log.make ?size ?now () in
     let t = {
         id = next_id () ;
@@ -246,6 +277,7 @@ let make_ ?parent ~sim ?now ?size ?(properties=[]) name =
         parent ;
         children = [] ;
         peers = [] ;
+        location ;
         logger ;
         properties } in
     (* Linking it to its parent is all the registration there is: a simulation's
@@ -264,15 +296,15 @@ let make_ ?parent ~sim ?now ?size ?(properties=[]) name =
  * widget it is building this one under, or has the simulation, whose root is
  * one [Simulation.root] away. That is what keeps the root the only parentless
  * widget of a simulation, and hence keeps it a complete inventory. *)
-let make ~parent ?size ?properties name =
+let make ~parent ?size ?location ?properties name =
     make_ ~parent ~sim:parent.sim ~now:parent.logger.Log.now
-          ?size ?properties name
+          ?size ?location ?properties name
 
 (** Create the root of a simulation's widget tree: the only widget with no
  * parent, and the only one that has to be told which simulation it is in and
  * where to read the time. Called by [Simulation.make], and nowhere else. *)
-let make_root ~sim ~now ?size ?properties name =
-    make_ ~sim ~now ?size ?properties name
+let make_root ~sim ~now ?size ?location ?properties name =
+    make_ ~sim ~now ?size ?location ?properties name
 
 (** Enumerate [t] and all of its descendants, depth first. *)
 let rec enum t =
@@ -365,6 +397,23 @@ let reparent t new_parent =
     unlink_from_parent t ;
     t.parent <- Some new_parent ;
     new_parent.children <- t :: new_parent.children
+
+(** Put a widget somewhere in the world, or nowhere with [None].
+ *
+ * Nowhere is a perfectly good answer and the usual one: a widget with no place
+ * of its own is drawn wherever the map finds room for it, until someone says
+ * where it belongs. *)
+let place t location =
+    Option.may check_location location ;
+    t.location <- location
+
+(*$T check_location
+  (try check_location { lat = 45.75 ; lon = 4.85 } ; true with _ -> false)
+  (try check_location { lat = -90. ; lon = 180. } ; true with _ -> false)
+  (try check_location { lat = 91. ; lon = 0. } ; false with Invalid_argument _ -> true)
+  (try check_location { lat = 0. ; lon = -181. } ; false with Invalid_argument _ -> true)
+  (try check_location { lat = nan ; lon = 0. } ; false with Invalid_argument _ -> true)
+ *)
 
 let same_via v1 v2 =
     match v1, v2 with

@@ -573,10 +573,10 @@ type gw_trx =
  * will be distributed via DHCP. *)
 let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
             ?dhcp_range ?dhcp_mtu ?lease_time_sec
-            ?(name="gw") ?notify_errs ?admin_reroute ~parent
+            ?(name="gw") ?notify_errs ?admin_reroute ~parent ?location
             ?public_netmask ?public_gw ?port_forwards public_ip local_cidr =
     (* We want all parts inherit this widget: *)
-    let widget = Widget.make ~parent name in
+    let widget = Widget.make ~parent ?location name in
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let broadcast = Ip.Cidr.all1s_addr local_cidr in

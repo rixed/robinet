@@ -694,6 +694,112 @@ if (spots.size !== 1)
     problems.push('the reset button moves as its metric refreshes: ' +
                   [...spots].join(' then '))
 
+/* The map's promotion rule, which is a pure function of the widget listing and
+ * of which boxes are open, so it is tried here against graphs rather than
+ * against a screen -- including the shapes the demo does not have. */
+const mapSay = (what, got, want) => {
+    const a = JSON.stringify(got), b = JSON.stringify(want)
+    if (a !== b) problems.push(`${what}: got ${a}, wanted ${b}`)
+}
+
+/* Two hosts on a switch, and inside the first one a second interface cabled to
+ * the first: an edge with both ends in the same box, which is the case the
+ * Inspector cannot draw at all. */
+const graph = {}
+for (const [ id, name, parent, children ] of [
+        [ 0, 'net', null, [ 1, 2, 3, 4, 5 ] ],
+        [ 1, 'hostA', 0, [ 6, 7, 11, 12 ] ],
+        [ 2, 'hostB', 0, [ 8 ] ],
+        [ 3, 'switch', 0, [ 9, 10 ] ],
+        [ 4, 'cable1', 0, [] ], [ 5, 'cable2', 0, [] ],
+        [ 6, 'eth0', 1, [] ], [ 7, 'tcp', 1, [] ], [ 11, 'eth1', 1, [] ],
+        [ 12, 'loopback cable', 1, [] ],
+        [ 8, 'eth0', 2, [] ], [ 9, 'port0', 3, [] ], [ 10, 'port1', 3, [] ] ])
+    graph[id] = { id, name, parent, children, peers: [] }
+const peer = (a, b, via) => {
+    graph[a].peers.push({ widget: b, via })
+    graph[b].peers.push({ widget: a, via })
+    /* The cable lists its own two ends, exactly as Widget.make_peers leaves
+     * them: the listing really does state one link four times. */
+    graph[via].peers.push({ widget: a, via: null },
+                          { widget: b, via: null })
+}
+peer(6, 9, 4)
+peer(8, 10, 5)
+peer(6, 11, 12)
+
+const map = await page.evaluate((byId) => {
+    const links = [ ...linkSet(byId) ].sort((a, b) => a - b)
+    const plane = planeOf(byId, 0)
+    const view = (open) => {
+        const drawn = drawnSet(byId, plane, new Set(open))
+        const { edges, inside } = mapEdges(byId, drawn)
+        return { drawn: [ ...drawn ].sort((a, b) => a - b),
+                 edges: edges.map(e => [ e.from, e.fromPort, e.to, e.toPort,
+                                         e.via ]),
+                 inside: [ ...inside.entries() ],
+                 ports: plane.map(id => [ id, portsOf(byId, edges, id) ]) }
+    }
+    return { links, plane, relations: relations(byId).length,
+             closed: view([]), openA: view([ 1 ]),
+             elsewhere: anchorOf(byId, drawnSet(byId, plane, new Set()), 999) }
+}, graph)
+
+/* A cable is whatever a peering goes through, and is never a box: the plane is
+ * the root's children without them. */
+mapSay('the cables of the graph', map.links, [ 4, 5, 12 ])
+mapSay('the boxes on the plane', map.plane, [ 1, 2, 3 ])
+/* Four statements, one link. */
+mapSay('the number of distinct links', map.relations, 3)
+
+/* Nothing opened: every end is promoted to the box that hides it, and the
+ * link inside hostA is folded into hostA rather than drawn from it to itself.
+ *
+ * The edges are pinned down in order, not as a set: the listing is enumerated
+ * in widget order, so the same graph gives the same edges in the same order,
+ * and the map can hand them straight to the drawing without sorting. */
+mapSay('the boxes drawn with nothing opened', map.closed.drawn, [ 1, 2, 3 ])
+mapSay('the promoted edges', map.closed.edges,
+       [ [ 1, 6, 3, 9, 4 ], [ 2, 8, 3, 10, 5 ] ])
+mapSay('what the boxes swallowed', map.closed.inside, [ [ 1, 1 ] ])
+/* The switch is on the plane and both cables land inside it, so it has the two
+ * ports; the hosts have one each. */
+mapSay('the ports of each box', map.closed.ports,
+       [ [ 1, [ 6 ] ], [ 2, [ 8 ] ], [ 3, [ 9, 10 ] ] ])
+
+/* hostA opened: its interfaces are drawn, so the edges land on them directly
+ * and the link it was hiding comes out. Its cable stays a line, never a box,
+ * and the TCP layer -- which no peering mentions -- is drawn but is no port. */
+mapSay('the boxes drawn with hostA opened', map.openA.drawn, [ 1, 2, 3, 6, 7, 11 ])
+mapSay('the edges with hostA opened', map.openA.edges,
+       [ [ 6, null, 3, 9, 4 ], [ 6, null, 11, null, 12 ], [ 2, 8, 3, 10, 5 ] ])
+mapSay('what is left swallowed', map.openA.inside, [])
+mapSay('hostA has no port of its own once opened', map.openA.ports[0], [ 1, [] ])
+
+/* A widget the plane does not reach is on no box at all, rather than on some
+ * arbitrary one. */
+mapSay('a widget outside the map', map.elsewhere, null)
+
+/* And against the graph the demo actually has, where both ends of every cable
+ * are already boxes on the plane: three cables, three edges, no port and
+ * nothing hidden. */
+const demoMap = await page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    const sim = d.sims.find(s => s.id !== d.servingId)
+    const byId = d.widgetsOf(sim.id)
+    const plane = planeOf(byId, sim.root)
+    const { edges, inside } = mapEdges(byId, drawnSet(byId, plane, new Set()))
+    return { plane: plane.map(id => byId[id].name),
+             edges: edges.map(e => [ byId[e.from].name, e.fromPort,
+                                     byId[e.to].name, e.toPort ]),
+             inside: inside.size }
+})
+mapSay('the demo boxes', demoMap.plane, [ 'switch', 'host0', 'host1', 'host2' ])
+mapSay('the demo edges', demoMap.edges,
+       [ [ 'switch', null, 'host2', null ], [ 'switch', null, 'host1', null ],
+         [ 'switch', null, 'host0', null ] ])
+mapSay('nothing hidden in the demo', demoMap.inside, 0)
+
 if (outside.length)
     problems.push('the page went looking outside the simulator for ' +
                   [ ...new Set(outside) ].join(', '))

@@ -36,6 +36,10 @@
     GET    /api/simulations/<s>/widgets    its widgets; ?path=/a/b to filter
     GET    /api/simulations/<s>/widgets/<w>
     DELETE /api/simulations/<s>/widgets/<w> delete it, and its children
+    PUT    /api/simulations/<s>/widgets/<w>/location
+                                            where it is in the world; the body
+                                            is {"lat": ..., "lon": ...}, or
+                                            null to take it off the map
     GET    /api/simulations/<s>/widgets/<w>/properties
     GET    /api/simulations/<s>/widgets/<w>/properties/<name>
     PUT    /api/simulations/<s>/widgets/<w>/properties/<name>  body is the value
@@ -153,6 +157,15 @@ let json_of_property (p : Widget.property) =
              "kind", loop p.kind ;
              "value", value ]
 
+(* Where the widget is in the world, or null: most widgets are nowhere, and the
+ * map places those itself. It travels with the widget rather than as a
+ * property because the map wants every position at once, in the one listing it
+ * already fetches -- not one request per box. *)
+let json_of_location = function
+    | None -> `Null
+    | Some (l : Widget.location) ->
+        `Assoc [ "lat", `Float l.lat ; "lon", `Float l.lon ]
+
 let json_of_peer (p : Widget.peer) =
     `Assoc [ "widget", `Int p.widget.id ;
              "via", (match p.via with None -> `Null
@@ -168,6 +181,7 @@ let json_of_widget (w : Widget.t) =
              "children", `List (List.map (fun (c : Widget.t) -> `Int c.id)
                                          w.children) ;
              "peers", `List (List.map json_of_peer w.peers) ;
+             "location", json_of_location w.location ;
              (* Only the names here: values are a separate request, since they
               * are live and this listing is not. *)
              "properties", `List (List.map (fun (p : Widget.property) ->
@@ -286,6 +300,45 @@ let delete_widget _mth matches _vars _qry_body resp =
         let full_name = Widget.full_name w in
         Widget.delete w ;
         respond resp (`Assoc [ "deleted", `String full_name ]))
+
+(* Place a widget on the map, or take its place away with a body of "null".
+ *
+ * Not a property: see [json_of_location]. A refused coordinate is a 400 like a
+ * refused property value, since it is the same kind of mistake. *)
+let set_location _mth matches _vars qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        let w = widget_of_matches sim matches 2 in
+        let json =
+            match Yojson.Basic.from_string qry_body with
+            | exception _ ->
+                bad_request "Not a location: %S (expected {\"lat\": ..., \
+                             \"lon\": ...} or null)" qry_body
+            | j -> j in
+        let location =
+            match json with
+            | `Null -> None
+            | `Assoc _ ->
+                let field name =
+                    match Yojson.Basic.Util.member name json with
+                    | `Null -> bad_request "A location needs a %S" name
+                    | v ->
+                        (match Widget.to_float v with
+                        | exception Widget.Bad_value m ->
+                            bad_request "%s: %s" name m
+                        | f -> f) in
+                Some Widget.{ lat = field "lat" ; lon = field "lon" }
+            | _ ->
+                bad_request "Not a location: %s"
+                    (Yojson.Basic.to_string json) in
+        (match Widget.place w location with
+        | exception Invalid_argument m -> bad_request "%s" m
+        | () -> ()) ;
+        Log.(log w.logger Info (lazy (
+            match location with
+            | None -> "Taken off the map"
+            | Some l -> Printf.sprintf "Placed at %g, %g" l.lat l.lon))) ;
+        respond resp (json_of_widget w))
 
 let get_properties _mth matches _vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
@@ -490,6 +543,11 @@ let resources serving : (Str.regexp * Opache.resource) list =
         get_properties ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/logs$",
         get_logs ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/location$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "PUT" | "POST" -> set_location mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)$",
         (fun mth matches vars qry_body resp ->
             match mth with

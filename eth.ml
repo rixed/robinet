@@ -679,7 +679,9 @@ struct
         let success_rate error_rate = int_of_float (1. /. error_rate)
 
         (* A cable has no natural parent; hang it off the root of the
-         * simulation it connects things within. *)
+         * simulation it connects things within. It takes no location: it is
+         * drawn as the line between the two ends it joins, so where it is on
+         * the map is a consequence of where they are. *)
         let make ~parent ?(length=10.) ?(error_rate=0.) ?(history=10)
                  ?(name="cable") () =
             let widget = Widget.make ~parent name in

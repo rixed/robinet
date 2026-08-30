@@ -34,8 +34,8 @@ struct
     let print oc t =
         Printf.fprintf oc "repeater %s with %d ifaces" t.widget.name (Array.length t.ifaces)
 
-    let make ~parent n name =
-        let widget = Widget.make ~parent name in
+    let make ~parent ?location n name =
+        let widget = Widget.make ~parent ?location name in
         let t = {
             ifaces = Array.make n (ignore_bits ~logger:widget.logger) ;
             is_connected = Array.make n false ;
@@ -111,8 +111,8 @@ struct
         Printf.fprintf oc "switch %s with %d ifaces" t.widget.name (Array.length t.hub.ifaces)
 
     (* [num_macs] is the maximum number of remembered MACs. *)
-    let make ~parent num_ifaces num_macs name =
-        let widget = Widget.make ~parent name in
+    let make ~parent ?location num_ifaces num_macs name =
+        let widget = Widget.make ~parent ?location name in
         let t = {
             hub = R.make ~parent:widget num_ifaces "hub" ;
             macs = OrdArray.init num_macs (fun _ -> { addr = None ; iface = 0 }) ;
@@ -216,8 +216,8 @@ struct
     type t = { trx : trx ;
             widget : Widget.t }
 
-    let make ~parent mirror =
-        let widget = Widget.make ~parent "tap" in
+    let make ~parent ?location mirror =
+        let widget = Widget.make ~parent ?location "tap" in
         let emit_ins = ref (ignore_bits ~logger:widget.logger)
         and emit_out = ref (ignore_bits ~logger:widget.logger) in
         let trx =

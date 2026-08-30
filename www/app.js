@@ -422,6 +422,132 @@ class ApiError extends Error {
     }
 }
 
+/*
+ * The map, and the one rule that makes it work.
+ *
+ * Composition (parent and children) and connectivity (peers, through a cable)
+ * are two different graphs: a strict tree and a general graph. Keeping them
+ * apart is the whole trick -- composition is drawn as containment, so a host is
+ * a box with its insides in it rather than a node with lines to its layers, and
+ * only cables are ever lines.
+ *
+ * A box the reader has not opened hides its insides, and the ends of a cable do
+ * not all sit at the same depth: simwan wires peers at interface level, at hub
+ * level and at gateway level. So an edge cannot simply be drawn between its
+ * ends -- it is drawn between the nearest *drawn* ancestor of each end, which
+ * is what this calls promotion. Everything the map can do follows from it: a
+ * hidden end becomes a port on the box that stands for it, and a cable whose
+ * two ends are inside the same closed box disappears into that box instead of
+ * being drawn from it back to itself.
+ *
+ * All of it is a pure function of the widget listing and of which boxes are
+ * open, so none of it is in the component: it is worth being able to try
+ * against a graph rather than against a screen.
+ */
+
+/* The widgets that are links rather than boxes: a widget is a cable exactly
+ * when some peering goes through it. They are drawn as the edges they are, and
+ * never as a box of their own -- which is also why a plane built from a
+ * parent's children has to leave them out. */
+const linkSet = (byId) => {
+    const links = new Set()
+    for (const w of Object.values(byId))
+        for (const p of w.peers) if (p.via !== null) links.add(p.via)
+    return links
+}
+
+/* What the map starts from: the children of [rootId], minus the cables between
+ * them. The root itself is not drawn -- it is the simulation, not a thing
+ * inside it. */
+const planeOf = (byId, rootId, links = linkSet(byId)) =>
+    (byId[rootId] ? byId[rootId].children : []).filter(id => !links.has(id))
+
+/* Which widgets the map actually draws: the boxes of the plane, and the insides
+ * of every box the reader has opened. */
+const drawnSet = (byId, plane, open, links = linkSet(byId)) => {
+    const drawn = new Set()
+    const walk = (id) => {
+        if (!byId[id] || links.has(id)) return
+        drawn.add(id)
+        if (open.has(id)) byId[id].children.forEach(walk)
+    }
+    plane.forEach(walk)
+    return drawn
+}
+
+/* The box that stands for a widget: itself when it is drawn, otherwise the
+ * closest of its ancestors that is -- and null when it is on no box at all,
+ * which is what a widget outside the plane's subtrees comes back as. */
+const anchorOf = (byId, drawn, id) => {
+    for (let w = byId[id] ; w ; w = byId[w.parent])
+        if (drawn.has(w.id)) return w.id
+    return null
+}
+
+/* Every peering, once.
+ *
+ * The simulator records a peering on both of its ends, and the cable in the
+ * middle also lists the two ends it joins (see [Widget.make_peers]), so one
+ * link is stated four times. Keyed by its ends and its cable it is kept once,
+ * and the cable's own two statements are dropped: they say nothing the link
+ * does not already say. Parallel cables between the same pair stay distinct,
+ * the cable being part of the key. */
+const relations = (byId, links = linkSet(byId)) => {
+    const out = new Map()
+    for (const w of Object.values(byId))
+        for (const p of w.peers) {
+            const a = Math.min(w.id, p.widget), b = Math.max(w.id, p.widget)
+            if (p.via === null && (links.has(a) || links.has(b))) continue
+            out.set(`${a}-${b}-${p.via}`, { a, b, via: p.via })
+        }
+    return [ ...out.values() ]
+}
+
+/* The edges to draw, promoted onto the boxes that are on screen.
+ *
+ * An edge carries the widget each of its ends really is, beside the box it is
+ * drawn from: that widget is the port it lands on, and what the port is
+ * labelled with. A null port is an end that is the box itself, and the line
+ * simply goes to the box.
+ *
+ * [inside] counts, per box, the links that vanished into it, so that a closed
+ * box can say how much connectivity it is folding away rather than quietly
+ * losing it. */
+const mapEdges = (byId, drawn, links = linkSet(byId)) => {
+    const edges = [], inside = new Map()
+    for (const r of relations(byId, links)) {
+        const from = anchorOf(byId, drawn, r.a)
+        const to = anchorOf(byId, drawn, r.b)
+        if (from === null || to === null) continue
+        if (from === to) {
+            inside.set(from, (inside.get(from) || 0) + 1)
+            continue
+        }
+        edges.push({ key: `${r.a}-${r.b}-${r.via}`, via: r.via,
+                     from, fromPort: from === r.a ? null : r.a,
+                     to, toPort: to === r.b ? null : r.b })
+    }
+    return { edges, inside }
+}
+
+/* The ports of a box: one per end of a promoted edge that is not the box
+ * itself, in the order the box's own subtree holds them, so that a box's ports
+ * keep their order as edges come and go. */
+const portsOf = (byId, edges, boxId) => {
+    const ports = new Set()
+    for (const e of edges) {
+        if (e.from === boxId && e.fromPort !== null) ports.add(e.fromPort)
+        if (e.to === boxId && e.toPort !== null) ports.add(e.toPort)
+    }
+    const out = []
+    const walk = (id) => {
+        if (ports.has(id)) out.push(id)
+        if (byId[id]) byId[id].children.forEach(walk)
+    }
+    walk(boxId)
+    return out
+}
+
 /* How many whole values a slider may span before dragging it becomes a game
  * of chance and the number input is the only honest control. */
 const sliderValues = 10000

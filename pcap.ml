@@ -462,8 +462,12 @@ type iface = { handler : iface_handler ;
 (** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is not set then {e MTU} for the
- * device will be chosen. *)
-let openif ~parent ?(promisc=true) ?(filter="") ?caplen ifname =
+ * device will be chosen.
+ *
+ * [location] is where that interface is: a real one injecting real traffic is
+ * a device of the simulated network like any other, and has to be somewhere on
+ * the map for the traffic coming out of it to have come from anywhere. *)
+let openif ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
     let caplen =
         if ifname = "any" then
             65535
@@ -471,7 +475,7 @@ let openif ~parent ?(promisc=true) ?(filter="") ?caplen ifname =
             Option.default_delayed (fun () -> mtu_of_iface ifname) caplen in
     (* TODO: a real interface only makes sense in a realtime simulation; either
      * refuse a simulation that is not, or switch it to realtime. *)
-    let widget = Widget.make ~parent ifname in
+    let widget = Widget.make ~parent ?location ifname in
     let t = {
         handler = openif_ ifname promisc filter caplen ;
         name = ifname ;
