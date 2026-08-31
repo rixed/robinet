@@ -363,6 +363,16 @@ struct
             postponed = BitHash.create 3 ;
             delay ; loss } in
         Widget.add_properties widget Widget.[
+            property "MAC" ~kind:String ~descr:"MAC address."
+                ~getter:(fun () -> `String (Addr.to_string t.mac)) ;
+            property "MTU" ~kind:Int ~descr:"MTU of the interface."
+                ~getter:(fun () -> `Int t.mtu) ;
+            property "connected" ~kind:Bool
+                ~descr:"Is there a cable plugged in."
+                ~getter:(fun () -> `Bool t.connected) ;
+            property "ARP cache size" ~kind:Int
+                ~descr:"Current size of the ARP cache"
+                ~getter:(fun () -> `Int (BitHash.length t.arp_cache)) ;
             property "delay" ~kind:Float ~units:"secs"
                 ~descr:"Average delay to add to transmissions."
                 ~setter:(fun v -> t.delay <- to_float v)

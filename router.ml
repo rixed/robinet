@@ -416,7 +416,9 @@ struct
             metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
                 (Metric.Counter.T t.ingress) ;
             metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
-                (Metric.Counter.T t.egress) ] ;
+                (Metric.Counter.T t.egress) ;
+            property "tot ports" ~kind:Int ~descr:"Total number of ports."
+                ~getter:(fun () -> `Int (Array.length t.ifaces)) ] ;
         Array.iteri (fun n iface ->
             if iface.eth.my_addresses <> [] then (
                 (* Make that interface a host with an IP stack on top of eth: *)
