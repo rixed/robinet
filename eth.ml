@@ -294,6 +294,11 @@ struct
 
     type t =
         { widget : Widget.t ;
+          (* What pays for the frames this adapter sends and receives: the
+           * device it is part of. A host that is switched off has an adapter
+           * that neither emits nor delivers, since both go through the
+           * clock. *)
+          power : Simulation.power ;
           mac : Addr.t ;
           (* Eth knows how to pick a gateways according to the destination IP: *)
           gateways : (gw_selector * Gateway.t option) list ;
@@ -336,6 +341,18 @@ struct
             Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Adding entry for iaddr %s to MAC %s from ARP table" (hexstring_of_bitstring iaddr) (match haddr_opt with None -> "None" | Some haddr -> Addr.to_string haddr)))) ;
             BitHash.replace t.arp_cache iaddr haddr_opt
 
+    (* What an adapter learnt about its neighbours, and what it was holding
+     * back until it learnt more. Both are true only for as long as the device
+     * is running: an ARP request that went out and was answered while the
+     * device was off would have to be asked again, and a frame waiting on one
+     * is a frame nobody is waiting for any more. Left behind, the postponed
+     * entry is worse than useless -- the adapter takes it as an ARP request
+     * already in flight and sends no other. *)
+    let reset t =
+        BitHash.clear t.arp_cache ;
+        BitHash.clear t.postponed ;
+        t.via <- None
+
     let ignore_disconnected ~logger bits =
         Log.(log logger Debug (lazy
             (Printf.sprintf "Dropping %d bits sent to disconnected interface"
@@ -360,11 +377,11 @@ struct
      *)
     let make ?(mtu=1500) ?(delay=0.) ?(loss=0.) ?(mac=Addr.random ()) ?(gateways=[])
              ?(promisc=ignore) ?(do_proxy_arp=(fun _ -> false))
-             ?(my_addresses=[]) ?(proto=Proto.ip4) ~parent
+             ?(my_addresses=[]) ?(proto=Proto.ip4) ~parent ~power
              () =
         let widget = Widget.make ~parent "eth" in
         let t = {
-            widget ; mac ; gateways ; proto ;
+            widget ; power ; mac ; gateways ; proto ;
             emit = ignore_disconnected ~logger:widget.logger ;
             recv = ignore_bits ~logger:widget.logger ;
             mtu ; promisc ; do_proxy_arp ;
@@ -427,7 +444,7 @@ struct
             if proto <> Proto.arp && st.delay > 0. then
                 max 0. (jitter 0.1 st.delay)
             else 0. in
-        Simulation.delay (Simulation.of_widget st.widget) (Clock.Interval.o delay) st.emit (Pdu.pack pdu)
+        Simulation.delay st.power (Clock.Interval.o delay) st.emit (Pdu.pack pdu)
 
     let send (st : State.t) proto dst bits =
         if st.proto = Proto.arp || st.loss = 0. || Random.float 1. >= st.loss then
@@ -538,7 +555,7 @@ struct
                     Result.iter (fun ip_src ->
                         let src_proto_addr = Ip.Addr.to_bitstring ip_src in
                         BitHash.replace st.arp_cache src_proto_addr (Some frame.src)) ;
-                    Simulation.asap (Simulation.of_widget st.widget) st.recv (frame.Pdu.payload :> bitstring)
+                    Simulation.asap st.power st.recv (frame.Pdu.payload :> bitstring)
                 )
             ) else if frame.Pdu.proto = Proto.arp then (
                 match Arp.Pdu.unpack (frame.Pdu.payload :> bitstring) with
@@ -676,15 +693,15 @@ let maybe_record =
  * already happened and you pass the resulting throughput here.
  * Also, notice that you can use the same [limited x y] in both directions,
  * thus having something similar to a half-duplex cable ;-) *)
-let limited sim latency throughput =
+let limited power latency throughput =
     let next_avlb = ref (Clock.Time.o 0.) in
     (fun emit bits ->
-        let min_start = Clock.Time.add (Simulation.now sim) latency in
+        let min_start = Clock.Time.add (Simulation.now power.Simulation.sim) latency in
         let start = max min_start !next_avlb
         and num_bits = float_of_int (min (bitstring_length bits) 368) in
         let duration = max (Clock.Interval.usec 1.) (Clock.Interval.o (num_bits /. throughput)) in
         next_avlb := Clock.Time.add start duration ;
-        Simulation.at sim start emit bits)
+        Simulation.at power start emit bits)
 
 
 (** {2 Ethernet cables}
@@ -717,6 +734,10 @@ struct
              * The only thing in a simulation that has to be undone by hand:
              * everything else within a device is torn down with it. *)
               mutable ends : ((unit -> unit) * (unit -> unit)) option ;
+            (* A cable is not something one switches off, so this is the mains
+             * of its simulation; it is here only because the propagation delay
+             * is a scheduled event like any other. *)
+                     power : Simulation.power ;
                     widget : Widget.t }
 
         let delay length = Clock.Interval.sec (length /. 3e9)
@@ -729,7 +750,9 @@ struct
         let make ~parent ?(length=10.) ?(error_rate=0.) ?(history=10)
                  ?(name="cable") () =
             let widget = Widget.make ~parent name in
+            widget.Widget.device <- Some "cable" ;
             let t = {
+                power = (Simulation.of_widget widget).Simulation.power ;
                 length ; delay = delay length ;
                 error_rate ; success_rate = success_rate error_rate ;
                 tot_bits = Metric.Counter.make () ;
@@ -793,11 +816,11 @@ struct
         and b_reader = ref (ignore_bits ~logger:st.widget.logger) in
         let ins_write bits =
             let bits = pass st true bits in
-            Simulation.delay (Simulation.of_widget st.widget) st.delay !b_reader bits
+            Simulation.delay st.power st.delay !b_reader bits
         and ins_set_read f = a_reader := f
         and out_write bits =
             let bits = pass st false bits in
-            Simulation.delay (Simulation.of_widget st.widget) st.delay !a_reader bits
+            Simulation.delay st.power st.delay !a_reader bits
         and out_set_read f = b_reader := f
         in
         { ins = { write = ins_write ; set_read = ins_set_read } ;
@@ -807,6 +830,23 @@ struct
         let trx = make st in
         Widget.make_peers widget_a ~via:st.widget widget_b ;
         a ==> trx <==> b
+
+    (** Unplug both ends, so that the ports they were on emit nothing and are
+     * free for another cable.
+     *
+     * The peering is not undone here: a cable that is unplugged is a cable that
+     * is going away, and deleting its widget scrubs every relation that went
+     * through it. *)
+    let disconnect (st : State.t) =
+        match st.ends with
+        | None ->
+            Log.(log st.widget.logger Debug (lazy (Printf.sprintf
+                "Ignoring request to unplug %s, which is not plugged in"
+                st.widget.name)))
+        | Some (unplug_a, unplug_b) ->
+            unplug_a () ;
+            unplug_b () ;
+            st.ends <- None
 
     (** Plug a cable between port [pa] of [wa] and port [pb] of [wb]: wire the
      * two together, remember how to let go of them, and record in the graph
@@ -828,23 +868,11 @@ struct
         wa.Widget.ports.dev pa -=> trx <=-> wb.Widget.ports.dev pb ;
         st.ends <- Some ((fun () -> wa.Widget.ports.disconnect pa),
                          (fun () -> wb.Widget.ports.disconnect pb)) ;
+        (* Deleting the cable is how one gets rid of it, from the interface as
+           much as from a program, and a deleted cable that had not let go of
+           its two ports would leave them emitting into nothing. *)
+        st.widget.Widget.on_delete <- (fun () -> disconnect st) ;
         Widget.make_peers ~via:st.widget
             (wa.Widget.ports.owner pa) (wb.Widget.ports.owner pb)
 
-    (** Unplug both ends, so that the ports they were on emit nothing and are
-     * free for another cable.
-     *
-     * The peering is not undone here: a cable that is unplugged is a cable that
-     * is going away, and deleting its widget scrubs every relation that went
-     * through it. *)
-    let disconnect (st : State.t) =
-        match st.ends with
-        | None ->
-            Log.(log st.widget.logger Debug (lazy (Printf.sprintf
-                "Ignoring request to unplug %s, which is not plugged in"
-                st.widget.name)))
-        | Some (unplug_a, unplug_b) ->
-            unplug_a () ;
-            unplug_b () ;
-            st.ends <- None
 end

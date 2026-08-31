@@ -814,7 +814,10 @@ module TRX = struct
 
     type t = {
         logger : Log.t ;
-        sim : Simulation.t ;
+        (* What pays for the events this TRX schedules, and names the clock
+         * they run on: the host it belongs to, so that they go down with
+         * it. *)
+        power : Simulation.power ;
         src : Addr.t ; dst : Addr.t ;
         proto : Proto.t ; mtu : int ;
         mutable emit : bitstring -> unit ;
@@ -831,7 +834,7 @@ module TRX = struct
                    So the MTU is required to be a multiple of 8 bytes as well. *)
                 let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst pld in
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (bytelength pld) (hexstring_of_bitstring bits)))) ;
-                Simulation.asap t.sim t.emit (Pdu.pack pdu) ;
+                Simulation.asap t.power t.emit (Pdu.pack pdu) ;
                 aux (bit_offset + bitstring_length pld)
             ) in
         aux 0
@@ -844,15 +847,15 @@ module TRX = struct
             Log.(log t.logger Warning s)
         | Ok ip ->
             if Payload.bitlength ip.Pdu.payload > 0 then
-                Simulation.asap t.sim t.recv (ip.Pdu.payload :> bitstring)
+                Simulation.asap t.power t.recv (ip.Pdu.payload :> bitstring)
 
     (* Note: In Eth we do not require dst addr since the trx know (using ARP) how to get dest addr itself.
      *       IP cannot do this since the application layer won't tell him the destination hostname. Or
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)
-    let make sim ?(mtu=1400) src dst proto logger =
+    let make power ?(mtu=1400) src dst proto logger =
         ensure ((mtu mod 8) = 0) "Ip: MTU is required to be a multiple of 8 bytes" ;
-        let t = { logger ; sim ; src ; dst ; proto ; mtu ;
+        let t = { logger ; power ; src ; dst ; proto ; mtu ;
                   emit = ignore_bits ~logger ;
                   recv = ignore_bits ~logger } in
         { ins = { write = tx t ;

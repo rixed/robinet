@@ -72,7 +72,7 @@ let main =
         List.iteri (fun i (h, _) ->
             let _, dst = List.at hosts ((i + 1) mod List.length hosts) in
             h.Host.trx.Host.ping (Host.IPv4 dst)) hosts ;
-        Simulation.delay net (Clock.Interval.msec 100.) tick () in
+        Simulation.delay net.Simulation.power (Clock.Interval.msec 100.) tick () in
     (* A DHCP server on the first host, so that the interface has properties
      * that may have no value to show (and one metric that has not fired). *)
     let first = fst (List.hd hosts) in

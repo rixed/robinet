@@ -63,10 +63,21 @@ type host_trx = {
     dev           : dev ; (* as seen from the outside *)
     arp_set       : Ip.Addr.t -> Eth.Addr.t option -> unit ;
     power_on      : ?on_ip:(t -> unit) -> unit -> unit ;
-    power_off     : ?timeout:Clock.Interval.t -> unit -> unit ;
-    (* FIXME: Problem is: when the resources is successfully used and closed nothing
-     * remove the killer. *)
-    add_killer    : ((unit -> unit) -> unit) -> unit }
+    power_off     : unit -> unit ;
+    (* The two halves of a power cycle, without the power: [start] runs the
+     * host's initialisation, [reset] throws away the state a cut invalidates.
+     * They are for whoever *shares* this host's supply with other hosts and
+     * therefore has to switch the supply itself, once for all of them -- a
+     * router does, its admin hosts being interfaces of the same box. A host
+     * that has a supply of its own wants [power_on] and [power_off]. *)
+    start         : ?on_ip:(t -> unit) -> unit -> unit ;
+    reset         : unit -> unit ;
+    (* This host's power supply, which everything it schedules draws from: its
+     * adapter, its sockets, its timers, and whatever process runs on it.
+     * Switching it off is all there is to powering the host down -- what it
+     * had planned to do ceases to exist, rather than being asked politely to
+     * stop. *)
+    power         : Simulation.power }
 
 and tcp_socks = { ip_4_tcp : trx ;
                    (* Available sockets per IP dest.
@@ -82,10 +93,6 @@ and udp_socks = { ip_4_udp : trx ;
                    udps : (Udp.Port.t * Udp.Port.t (* local, remote *), Udp.TRX.udp_trx) Hashtbl.t }
 
 and t = { mutable trx : host_trx ;
-          mutable on  : bool ; (* If that host is powered on *)
-          (* Called at shutdown. New processes must add their own destructor
-           * (see [add_killer]) : *)
-          mutable killers : ((unit -> unit) -> unit) list ;
           eth_state   : Eth.State.t ;
           eth_trx     : trx ;
           tcp_socks   : (Ip.Addr.t, tcp_socks) Hashtbl.t ;
@@ -131,7 +138,7 @@ let tcp_sock_rx t socks bits =
                                             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have no server listening on port %s" (Tcp.Port.to_string tcp.Tcp.Pdu.dst_port)))) ;
                                             raise No_socket
                                         ) in
-                            let tcp = Tcp.TRX.make (Simulation.of_widget t.trx.widget) tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port t.trx.widget.logger in
+                            let tcp = Tcp.TRX.make t.trx.power tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port t.trx.widget.logger in
                             tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx =-> tx socks.ip_4_tcp ;
                             server tcp.Tcp.TRX.tcp_trx ; (* supposed to set the recver of this tcp trx *)
                             tcp.Tcp.TRX.tcp_trx
@@ -155,7 +162,7 @@ let udp_sock_rx t socks icmp_trx bits =
                     hash_find_or_insert socks.udps key (fun () ->
                         let server = try Hashtbl.find t.udp_servers udp.Udp.Pdu.dst_port
                                      with Not_found -> raise No_socket in
-                        let trx = Udp.TRX.make (Simulation.of_widget t.trx.widget) udp.Udp.Pdu.dst_port udp.Udp.Pdu.src_port t.trx.widget.logger in
+                        let trx = Udp.TRX.make t.trx.power udp.Udp.Pdu.dst_port udp.Udp.Pdu.src_port t.trx.widget.logger in
                         trx.Udp.TRX.trx =-> tx socks.ip_4_udp ;
                         server trx ; (* supposed to set the recver of this udp trx *)
                         trx) in
@@ -317,7 +324,7 @@ and do_gethostbyname t name cont =
                 Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Add a query for resolution of '%s' (%s)" name (if pending then "one was already pending" else "first one")))) ;
                 if not pending then (
                     (* add a timeout event that will awake all waiters for this name after some time *)
-                    Simulation.delay (Simulation.of_widget t.trx.widget) dns_timeout_delay dns_timeout () ;
+                    Simulation.delay t.trx.power dns_timeout_delay dns_timeout () ;
                     (* Then actually sends the query *)
                     let now = Simulation.Widget.now t.trx.widget in
                     let params = Metric.(Params.singleton "name" (Param.String name)) in
@@ -331,12 +338,12 @@ and do_gethostbyname t name cont =
 
 and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
     (* Fail if we do not have an IP yet *)
-    if not (t.on && ip_is_set t) then cont None else
+    if not (t.trx.power.Simulation.on && ip_is_set t) then cont None else
     let my_ip = Eth.State.find_ip4 t.eth_state in
     let connect dst_ip =
         Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Connecting to %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
         let socks = hash_find_or_insert t.tcp_socks dst_ip (fun () ->
-            let trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip dst_ip Ip.Proto.tcp t.trx.widget.logger in
+            let trx = Ip.TRX.make t.trx.power my_ip dst_ip Ip.Proto.tcp t.trx.widget.logger in
             let socks = make_tcp_socks trx in
             (tcp_sock_rx t socks) <-= trx =-> tx t.eth_trx ;
             socks) in
@@ -367,7 +374,7 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
             | None ->
                 cont None
             | Some src_port ->
-                let tcp = Tcp.TRX.make (Simulation.of_widget t.trx.widget) src_port dst_port t.trx.widget.logger in
+                let tcp = Tcp.TRX.make t.trx.power src_port dst_port t.trx.widget.logger in
                 tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx.out.set_read socks.ip_4_tcp.ins.write ;
                 Hashtbl.add socks.tcps (src_port, dst_port) tcp.Tcp.TRX.tcp_trx ;
                 Tcp.TRX.connect tcp (function
@@ -397,13 +404,13 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
 
 and udp_connect t dst ?src_port dst_port client_f cont =
     (* Fail if we do not have an IP yet *)
-    if not (t.on && ip_is_set t) then cont None else
+    if not (t.trx.power.Simulation.on && ip_is_set t) then cont None else
     let my_ip = Eth.State.find_ip4 t.eth_state in
     let connect dst_ip =
         let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
-            let icmp_trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip dst_ip Ip.Proto.icmp t.trx.widget.logger in
+            let icmp_trx = Ip.TRX.make t.trx.power my_ip dst_ip Ip.Proto.icmp t.trx.widget.logger in
             icmp_trx =-> tx t.eth_trx ;
-            let ip_trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip dst_ip Ip.Proto.udp t.trx.widget.logger in
+            let ip_trx = Ip.TRX.make t.trx.power my_ip dst_ip Ip.Proto.udp t.trx.widget.logger in
             let socks = make_udp_socks ip_trx in
             (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> tx t.eth_trx ;
             socks) in
@@ -414,7 +421,7 @@ and udp_connect t dst ?src_port dst_port client_f cont =
             Log.(log t.trx.widget.logger Error (lazy "Already connected")) ;
             cont None
         ) else (
-            let trx = Udp.TRX.make (Simulation.of_widget t.trx.widget) src_port dst_port t.trx.widget.logger in
+            let trx = Udp.TRX.make t.trx.power src_port dst_port t.trx.widget.logger in
             (* connect this udp to the underlaying ip *)
             (client_f trx) <-= trx.Udp.TRX.trx =-> tx socks.ip_4_udp ;
             Hashtbl.add socks.udps key trx ;
@@ -432,7 +439,7 @@ and udp_connect t dst ?src_port dst_port client_f cont =
                 connect (List.hd dst_ips))
 
 let with_my_ip t f =
-    if t.on then
+    if t.trx.power.Simulation.on then
         match Eth.State.find_ip4 t.eth_state with
         | exception Not_found -> ()
         | my_ip -> f my_ip
@@ -489,66 +496,69 @@ let ip_recv t bits =
             t.last_ip_packet <- Some ip ;
             if ip.Ip.Pdu.proto = Ip.Proto.tcp then (
                 let sock = hash_find_or_insert t.tcp_socks ip.Ip.Pdu.src (fun () ->
-                    let ip_trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
+                    let ip_trx = Ip.TRX.make t.trx.power my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
                     let socks = make_tcp_socks ip_trx in
                     (tcp_sock_rx t socks) <-= ip_trx =-> tx t.eth_trx ;
                     socks) in
                 rx sock.ip_4_tcp bits (* will handle fragmentation then pass payload to its emit function *)
             ) else if ip.Ip.Pdu.proto = Ip.Proto.udp then (
                 let sock = hash_find_or_insert t.udp_socks ip.Ip.Pdu.src (fun () ->
-                    let icmp_trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip ip.Ip.Pdu.src Ip.Proto.icmp t.trx.widget.logger in
+                    let icmp_trx = Ip.TRX.make t.trx.power my_ip ip.Ip.Pdu.src Ip.Proto.icmp t.trx.widget.logger in
                     icmp_trx =-> tx t.eth_trx ;
-                    let ip_trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
+                    let ip_trx = Ip.TRX.make t.trx.power my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
                     let socks = make_udp_socks ip_trx in
                     (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> tx t.eth_trx ;
                     socks) in
                 rx sock.ip_4_udp bits
             ) else if ip.Ip.Pdu.proto = Ip.Proto.icmp then (
                 let ip_trx = hash_find_or_insert t.icmp_socks ip.Ip.Pdu.src (fun () ->
-                    let ip_trx = Ip.TRX.make (Simulation.of_widget t.trx.widget) my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
+                    let ip_trx = Ip.TRX.make t.trx.power my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
                     (icmp_rx t ip_trx) <-= ip_trx =-> tx t.eth_trx ;
                     ip_trx) in
                 rx ip_trx bits
             ))
 
-let power_off ?timeout t =
-    let to_kill = ref (List.length t.killers) in
-    let do_power_off () =
-        Log.(log t.trx.widget.logger Debug (lazy
-            (Printf.sprintf "Halting (%d processes left)." !to_kill))) ;
-        t.resolv_trx <- None ;
-        Hashtbl.clear t.tcp_socks ;
-        Hashtbl.clear t.udp_socks ;
-        Hashtbl.clear t.icmp_socks ;
-        Hashtbl.clear t.tcp_servers ;
-        Hashtbl.clear t.udp_servers ;
-        Hashtbl.clear t.dns_queries ;
-        Hashtbl.clear t.dns_cache ;
-    in
-    Option.may (fun d ->
-        Simulation.delay (Simulation.of_widget t.trx.widget) d (fun () ->
-            if !to_kill > 0 then do_power_off ()) ()
-    ) timeout ;
-    List.iter (fun k ->
-        k (fun () ->
-            decr to_kill ;
-            if !to_kill <= 0 then do_power_off ())
-    ) t.killers ;
-    t.killers <- []
+(* Cutting the power is enough to stop the host doing anything further, since
+ * everything it had planned goes with it. What is left is the state those
+ * plans were about: sockets, servers, resolver cache. It has to go too, or a
+ * host powered back on would answer for connections nobody on the other end
+ * still has. *)
+let reset t =
+    Eth.State.reset t.eth_state ;
+    t.resolv_trx <- None ;
+    Hashtbl.clear t.tcp_socks ;
+    Hashtbl.clear t.udp_socks ;
+    Hashtbl.clear t.icmp_socks ;
+    Hashtbl.clear t.tcp_servers ;
+    Hashtbl.clear t.udp_servers ;
+    Hashtbl.clear t.dns_queries ;
+    Hashtbl.clear t.dns_cache
+
+let power_off t =
+    Log.(log t.trx.widget.logger Debug (lazy "Halting.")) ;
+    Simulation.power_down t.trx.power ;
+    reset t
 
 let on_init_nothing ?(on_ip:(t -> unit) option) (_t : t) =
     ignore on_ip
 
-let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget ?(init=on_init_nothing) eth_state eth_trx name =
+let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget
+                  ?(init=on_init_nothing) eth_state eth_trx name =
     (* For the API a cable reaches a host but in reality it reaches its
        adapter. *)
     widget.Widget.ports <- Widget.ports_of eth_state.Eth.State.widget ;
+    (* The adapter's supply is the host's: they are the same machine, and an
+       adapter that went on emitting after its host went down would be a host
+       that is only half off. Taken from the adapter rather than made here
+       because the adapter is built first, and something has to give it one --
+       and a host built on somebody else's adapter, as a router's admin host
+       is, shares that owner's switch, being the same box as well. *)
+    let power = eth_state.Eth.State.power in
+    if not on then Simulation.power_down power ;
     let if_on t what f x =
-        if t.on then f x else Log.(log widget.Widget.logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
+        if t.trx.power.Simulation.on then f x else Log.(log widget.Widget.logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
     let rec t =
-        { on            = on ;
-          killers       = [] ;
-          eth_state ;
+        { eth_state ;
           eth_trx ;
           tcp_socks     = Hashtbl.create 11 ;
           udp_socks     = Hashtbl.create 11 ;
@@ -579,17 +589,32 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget ?(init=on_init_noth
           signal_err    = (fun str -> signal_err t str) ;
           (* This call is needed by dhcpd servers running on this host: *)
           arp_set       = (fun ip haddr_opt -> if_on t "arp_set" (Eth.State.set_arp t.eth_state (Ip.Addr.to_bitstring ip)) haddr_opt) ;
+          (* Guarded rather than asserted: with a shared supply, whether the
+             power is on is a fact about the box, not about this host, so
+             being asked to do again what has already been done is a
+             possibility rather than a mistake. *)
           power_on      = (fun ?on_ip () ->
-                              Log.(log widget.logger Debug (lazy "Powering on")) ;
-                              assert (not t.on) ; t.on <- true ;
-                              init ?on_ip t) ;
-          power_off     = (fun ?timeout () -> assert t.on ; power_off ?timeout t ; t.on <- false) ;
-          add_killer    = (fun f -> t.killers <- f :: t.killers) }
+                              if t.trx.power.Simulation.on then
+                                  Log.(log widget.logger Debug (lazy
+                                      "Ignoring power on: already on"))
+                              else (
+                                  Log.(log widget.logger Debug (lazy "Powering on")) ;
+                                  Simulation.power_up t.trx.power ;
+                                  init ?on_ip t
+                              )) ;
+          power_off     = (fun () ->
+                              if not t.trx.power.Simulation.on then
+                                  Log.(log widget.logger Debug (lazy
+                                      "Ignoring power off: already off"))
+                              else power_off t) ;
+          start         = (fun ?on_ip () -> init ?on_ip t) ;
+          reset         = (fun () -> reset t) ;
+          power }
     in
+    (* No "on" property here: the switch belongs to whoever minted the supply,
+       which for a host built on somebody else's adapter is somebody else. See
+       [make], and [Router.make] for the other case. *)
     Widget.add_properties widget Widget.[
-        property "on" ~descr:"The host is powered on." ~kind:Bool
-            ~getter:(fun () -> `Bool t.on)
-            ~setter:(fun v -> let on = to_bool v in if on && not t.on then t.trx.power_on () else if not on && t.on then t.trx.power_off ()) ;
         property "search suffix" ~kind:String
             ~descr:"Search suffix"
             ~getter:(fun () -> `String (t.search_sfx |? ""))
@@ -597,16 +622,30 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget ?(init=on_init_noth
         metric_property "DNS resolutions" ~descr:"DNS resolution times."
             (Metric.Timed.T t.resolutions) ] ;
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "New host '%s'" name))) ;
-    if t.on then init t ;
+    if t.trx.power.Simulation.on then init t ;
     t
 
 let make ?gateways ?search_sfx ?nameserver ?on ~parent ?location ?mac ?init name =
     let widget = Widget.make ~parent ?location name in
     let eth_state =
         (* FIXME: Don't use the GW for same net IP! *)
-        Eth.State.make ?mac ?gateways ~parent:widget () in
+        Eth.State.make ?mac ?gateways ~parent:widget
+                       ~power:(Simulation.make_power
+                                   (Simulation.of_widget widget) name) () in
     let eth_trx = Eth.TRX.make eth_state in
-    make_from_eth ?search_sfx ?nameserver ?on ~widget ?init eth_state eth_trx name
+    let t = make_from_eth ?search_sfx ?nameserver ?on ~widget ?init eth_state
+                          eth_trx name in
+    (* This host minted the supply above, so the switch for it goes here, and
+       so does stopping it for good. And it is a whole machine, unlike a host
+       built on somebody else's adapter. *)
+    widget.Widget.device <- Some "host" ;
+    widget.Widget.on_delete <- (fun () -> t.trx.power_off ()) ;
+    Widget.add_properties widget Widget.[
+        property "on" ~descr:"The host is powered on." ~kind:Bool
+            ~getter:(fun () -> `Bool t.trx.power.Simulation.on)
+            ~setter:(fun v ->
+                if to_bool v then t.trx.power_on () else t.trx.power_off ()) ] ;
+    t
 
 let set_ip t my_ip netmask =
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Setting my IP to %s" (Ip.Addr.to_string my_ip)))) ;
@@ -631,7 +670,7 @@ let make_static ?gateways ?search_sfx ?nameserver ?on ?mac ~parent ~netmask my_i
     let init ?on_ip t =
         set_ip t my_ip netmask ;
         (* TODO: Send a gratuitous ARP request? *)
-        Option.may (fun on_ip -> Simulation.asap (Simulation.of_widget t.trx.widget) on_ip t) on_ip
+        Option.may (fun on_ip -> Simulation.asap t.trx.power on_ip t) on_ip
     in
     make ?gateways ?search_sfx ?nameserver ?mac ?on ~parent ~init name
 
@@ -669,7 +708,7 @@ let make_dhcp ?gateways ?search_sfx ?nameserver ?mac ?on ~parent ~netmask (*?(ne
                                 (* TODO: set other params than IP, such as netmask! *)
                                 set_ip t dhcp.yiaddr netmask ;
                                 (* TODO: Send a gratuitous ARP request? *)
-                                Option.may (fun on_ip -> Simulation.asap (Simulation.of_widget t.trx.widget) on_ip t) on_ip
+                                Option.may (fun on_ip -> Simulation.asap t.trx.power on_ip t) on_ip
                             | Ok _ ->
                                 (* TODO: print it *)
                                 t.trx.signal_err "Ignoring a DHCP message"))) in
@@ -683,7 +722,7 @@ let make_dhcp ?gateways ?search_sfx ?nameserver ?mac ?on ~parent ~netmask (*?(ne
                     Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast |>
                     Ip.Pdu.pack |>
                     tx t.eth_trx ;
-                Simulation.delay (Simulation.of_widget t.trx.widget) (Clock.Interval.sec (5.+.(Random.float 3.))) send_discover ()
+                Simulation.delay t.trx.power (Clock.Interval.sec (5.+.(Random.float 3.))) send_discover ()
             ) in
         ignore (dhcp_client <-= t.eth_trx) ;
         (* The client should wait a random time between one and ten seconds to desynchronize
@@ -692,7 +731,7 @@ let make_dhcp ?gateways ?search_sfx ?nameserver ?mac ?on ~parent ~netmask (*?(ne
         Log.(log t.trx.widget.logger Debug (lazy
             (Printf.sprintf "Waiting %s before using DHCP..."
                 (Clock.Interval.to_string delay)))) ;
-        Simulation.delay (Simulation.of_widget t.trx.widget) delay send_discover ()
+        Simulation.delay t.trx.power delay send_discover ()
     in
     make ?gateways ?search_sfx ?nameserver ?mac ?on ~parent ~init host_name
 

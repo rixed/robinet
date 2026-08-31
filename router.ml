@@ -165,6 +165,10 @@ struct
                (** Answers from admin should go through routing, as opposed
                 * to return via the same interface: *)
        mutable admin_reroute : bool ;
+              (* What the router's own delayed forwarding draws from, shared
+               * with every interface and with the admin host, since they are
+               * all the same box. *)
+                       power : Simulation.power ;
                       widget : Widget.t ;
               load_balancing : load_balancing ;
                      ingress : Metric.Counter.t ;
@@ -199,7 +203,7 @@ struct
                 let ip_pld = Icmp.Pdu.pack icmp in
                 let ip_pkt = Ip.Pdu.make Ip.Proto.icmp my_ip ip.Ip.Pdu.src ip_pld in
                 let bits = Ip.Pdu.pack ip_pkt in
-                Simulation.delay (Simulation.of_widget t.widget) (Clock.Interval.o delay) (route None t) bits
+                Simulation.delay t.power (Clock.Interval.o delay) (route None t) bits
 
     (* The [route] function receives the IP packets from the Eth trx.
      * The integer [in_iface_opt] is the input interface number, unless
@@ -330,13 +334,13 @@ struct
             else
                 fun _ -> false
 
-    let make_iface ?proto ?mtu ?delay ?loss ?mac ?my_addresses ~parent n =
+    let make_iface ?proto ?mtu ?delay ?loss ?mac ?my_addresses ~parent ~power n =
         let name = "#"^ string_of_int n in
         let widget = Widget.make ~parent name in
         (* For our ifaces we force the GW on a packet by packet basis according
          * to the dynamic (and likely still unset) routing table. *)
         let eth = Eth.State.make ?proto ?mtu ?delay ?loss ?mac ?my_addresses
-                                 ~parent:widget () in
+                                 ~parent:widget ~power () in
         let trx = Eth.TRX.make eth in
         (* An interface is its adapter, as far as a cable is concerned. *)
         widget.Widget.ports <- Widget.ports_of eth.Eth.State.widget ;
@@ -349,6 +353,9 @@ struct
              ?(load_balancing=First)
              ?delay ?loss ?mtu ?(macs=[||])
              num_ifaces routes widget =
+        let power =
+            Simulation.make_power (Simulation.of_widget widget)
+                                  (Widget.full_name widget) in
         (* Display the routing table (debug) *)
         Log.(log widget.Widget.logger Debug (lazy
             (Printf.sprintf2 "Creating a router with routing table:%a"
@@ -392,12 +399,35 @@ struct
                     (* Caller can set the MAC addresses: *)
                     if n >= Array.length macs then None else Some macs.(n) in
                 make_iface ?delay ?loss ?mtu ?mac ?my_addresses
-                           ~parent:widget n
+                           ~parent:widget ~power n
             ) in
         let ingress = Metric.Counter.make () in
         let egress = Metric.Counter.make () in
         let t = { ifaces ; routes ; widget ; notify_errs ; admin_reroute ;
-                  load_balancing ; ingress ; egress } in
+                  power ; load_balancing ; ingress ; egress } in
+        (* Read when the switch is thrown, not now: the admin hosts are built
+           further down, once the router they route for exists. *)
+        let iter_admin_hosts f =
+            Array.iter (fun iface -> Option.may f iface.admin_host) t.ifaces in
+        (* One supply for the whole box, so it is switched here once; each admin
+           host is then told to start over, or to forget what it knew, on its
+           own. *)
+        let switch on =
+            if on <> t.power.Simulation.on then
+                if on then (
+                    Simulation.power_up t.power ;
+                    iter_admin_hosts (fun h -> h.Host.trx.Host.start ())
+                ) else (
+                    Simulation.power_down t.power ;
+                    iter_admin_hosts (fun h -> h.Host.trx.Host.reset ()) ;
+                    (* Including the interfaces no admin host was built on,
+                       which no [Host.reset] would have reached. *)
+                    Array.iter (fun iface -> Eth.State.reset iface.eth) t.ifaces
+                ) in
+        (* This router minted the supply above, so the switch for it goes on its
+           widget, and so does stopping it for good. *)
+        widget.Widget.device <- Some "router" ;
+        widget.Widget.on_delete <- (fun () -> switch false) ;
         widget.Widget.ports <- Widget.{
             count = (fun () -> Array.length t.ifaces) ;
             is_connected = (fun n -> t.ifaces.(n).widget.ports.is_connected 0) ;
@@ -405,6 +435,9 @@ struct
             owner = (fun n -> t.ifaces.(n).widget.ports.owner 0) ;
             disconnect = (fun n -> t.ifaces.(n).widget.ports.disconnect 0) } ;
         Widget.add_properties widget Widget.[
+            property "on" ~kind:Bool ~descr:"The router is powered on."
+                ~getter:(fun () -> `Bool t.power.Simulation.on)
+                ~setter:(fun v -> switch (to_bool v)) ;
             property "errors probability" ~kind:(FRange (0., 1.))
                 ~descr:"Probability to report errors with ICMP."
                 ~getter:(fun () -> `Float t.notify_errs.probability)
@@ -439,6 +472,8 @@ struct
                  * [ip_recv] function whenever that's the routing decision. *)
                 let name = "admin@"^ string_of_int n in
                 let widget = Widget.make ~parent:iface.widget name in
+                (* It has the router's supply, through the router's adapter:
+                   one box, one switch. *)
                 iface.admin_host <-
                     Some (Host.make_from_eth ~widget iface.eth trx name)
             ) ;
@@ -549,7 +584,88 @@ struct
         easy_send 0 "192.168.1.42" ;
         Simulation.run sim false ;
         "no revert" @? (counts = [| 0;0;0 |]) ;
+
+        (* One box, one switch. This router has three admin hosts, one per
+         * addressed interface, and they all draw from the router's supply, so
+         * the switch is on the router and nowhere else. *)
+        let switch_of (w : Widget.t) =
+            List.find_opt (fun (p : Widget.property) -> p.name = "on")
+                          w.properties in
+        "the switch is on the router" @? (switch_of widget <> None) ;
+        "and not on any of its admin hosts" @?
+            Array.for_all (fun iface ->
+                match iface.admin_host with
+                | None -> false
+                | Some h -> switch_of h.Host.trx.Host.widget = None
+            ) router.ifaces ;
+
+        (* A packet for the router itself goes to that interface's admin host,
+         * which remembers the peer it came from -- state that must not survive
+         * the box being switched off. *)
+        let admin_socks () =
+            match router.ifaces.(0).admin_host with
+            | None -> -1
+            | Some h -> Hashtbl.length h.Host.udp_socks in
+        Ip.Pdu.{ (random ()) with dst = Ip.Addr.of_string "192.168.1.254" ;
+                                  proto = Ip.Proto.udp ; ttl = 9 } |>
+        Ip.Pdu.pack |>
+        Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (snd addrs.(0)) |>
+        Eth.Pdu.pack |>
+        router.ifaces.(0).trx.out.write ;
+        Simulation.run sim false ;
+        "the admin host answers for the router's own address" @?
+            (admin_socks () = 1) ;
+
+        let flip on =
+            match switch_of widget with
+            | None -> assert false
+            | Some p -> (Option.get p.setter) (`Bool on) in
+
+        (* Switched off, the box stops routing: what it had scheduled went with
+         * its power, and it takes on nothing new. *)
+        flip false ;
+        reset_count () ;
+        easy_send 0 "192.168.3.42" ;
+        Simulation.run sim false ;
+        "an off router routes nothing" @? (counts = [| 0;0;0 |]) ;
+        "and forgets what its admin hosts knew" @? (admin_socks () = 0) ;
+
+        flip true ;
+        reset_count () ;
+        easy_send 0 "192.168.3.42" ;
+        Simulation.run sim false ;
+        "and routes again once switched back on" @? (counts = [| 0;0;1 |]) ;
     *)
+
+    (* An interface with no address of its own gets no admin host, so nothing
+     * else would clear what its adapter learnt when the box is switched off. *)
+    (*$R make
+        let sim = Simulation.make ~realtime:false "router-off" in
+        let widget = Widget.make ~parent:sim.Simulation.root "r" in
+        let r = make 2 [] widget in
+        let eth = r.ifaces.(0).eth in
+        "an interface with no address has no admin host" @?
+            (r.ifaces.(0).admin_host = None) ;
+        Eth.State.set_arp eth
+            (Ip.Addr.to_bitstring (Ip.Addr.of_dotted_string_exc "1.2.3.4"))
+            (Some (Eth.Addr.random ())) ;
+        "and its adapter still learns" @?
+            (Tools.BitHash.length eth.Eth.State.arp_cache = 1) ;
+        let flip on =
+            match List.find_opt (fun (p : Widget.property) -> p.name = "on")
+                                widget.Widget.properties with
+            | None -> "the router has a switch" @? false
+            | Some p -> (Option.get p.setter) (`Bool on) in
+        flip false ;
+        "which the box forgets when it is switched off" @?
+            (Tools.BitHash.length eth.Eth.State.arp_cache = 0) ;
+        flip true ;
+        Widget.destroy widget ;
+        "and a deleted router is stopped for good" @?
+            (not r.power.Simulation.on) ;
+        "and out of the tree" @?
+            (Widget.find sim.Simulation.root widget.Widget.id = None)
+     *)
 
     (* A router's port n is its interface n, whatever order its parts were built
        in, and whether it has a cable is the adapter's own answer. *)
@@ -726,14 +842,14 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     desktop.trx.dev.set_read gw_trx.trx.ins.write ;
     ignore (desktop.trx.dev.write <-= gw_trx.trx) ;
     let server_ip = Ip.Addr.of_string "42.43.44.45" in
-    let server_eth = Eth.(TRX.make State.(make ~parent:sim.root ~my_addresses:[ make_my_ip_address server_ip ] ())) in
+    let server_eth = Eth.(TRX.make State.(make ~parent:sim.root ~power:sim.Simulation.power ~my_addresses:[ make_my_ip_address server_ip ] ())) in
     let src = ref None in
     let server_recv bits = (* check source IP is the public one (NATed) *)
         let ip = Ip.Pdu.unpack bits |> Result.get_ok in
         src := Some ip.Ip.Pdu.src in
     ignore (server_recv <-= server_eth) ;
     gw_trx.trx <==> server_eth ;
-    Simulation.delay sim (Clock.Interval.sec 10.) (fun () ->
+    Simulation.delay sim.Simulation.power (Clock.Interval.sec 10.) (fun () ->
         Log.(log desktop.trx.widget.logger Debug (lazy "Sending UDP packet to server")) ;
         desktop.trx.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring) () ;
     Simulation.run sim false ;

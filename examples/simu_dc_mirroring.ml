@@ -58,38 +58,36 @@ class equipment = object
 end
 
 (* Should belong to some Generators.Tcp module: *)
-let tcp_write_continuously sim ~throughput tcp_trx =
+let tcp_write_continuously power ~throughput tcp_trx =
     (* We write chunks of throughput bytes every seconds: *)
     let chunk = Bitstring.make_bitstring (int_of_float throughput) 'z' in
     let rec send_next () =
-        Simulation.delay sim (Clock.Interval.sec 1.) (fun () ->
+        Simulation.delay power (Clock.Interval.sec 1.) (fun () ->
             tx tcp_trx.Tcp.TRX.trx chunk ;
             send_next ()) ()
     in
     send_next ()
 
 (* This one is supposedly provided in Sim *)
-class host sim h = object (self)
+class host _sim h = object (self)
     inherit equipment
 
     method power_on =
         h.Host.power_on ~on_ip:(fun _ -> self#powered_on) ()
-    method power_off ~timeout =
-        h.Host.power_off ~timeout ()
+    method power_off =
+        h.Host.power_off ()
     method powered_on = ()
 
     method tcp_serve ~port ~throughput () =
         h.Host.tcp_server port (fun tcp_trx ->
             (* TODO: Host should automatically close all established connections
              * at power-off. *)
-            tcp_write_continuously sim ~throughput tcp_trx)
+            tcp_write_continuously h.Host.power ~throughput tcp_trx)
 
     method tcp_traffic ?src_port ?port ?(num_connections=1) ~throughput to_ =
         let random_traffic throughput = function
             | Some tcp_trx ->
-                h.Host.add_killer (fun k ->
-                    tcp_trx.Tcp.TRX.close () ; k ()) ;
-                tcp_write_continuously sim ~throughput tcp_trx
+                tcp_write_continuously h.Host.power ~throughput tcp_trx
             | None ->
                 Log.(log h.Host.widget.logger Error (lazy "Cannot traffic"))
         in
@@ -111,7 +109,6 @@ class host sim h = object (self)
         ignore (read_time ()) ; (* TODO *)
         Log.(log h.Host.widget.logger Info (lazy "Starting a web browser")) ;
         let browser = Browser.make ~parent:h.Host.widget h in
-        h.Host.add_killer (Browser.kill browser) ;
         Browser.user browser ~pause:5. 1000 from
 
     method http_serve ?port () =
@@ -185,10 +182,9 @@ class web_client sim h = object (self)
             (* power_on has to be inherited, and will call self#powered_on. *)
 
         | { hour = 17; min = 0; day_of_week } when Sim.Time.is_working_day day_of_week ->
-            self#power_off ~timeout:(Clock.Interval.min 1.)
-            (* will kill all running activities on that host with that timeout,
-             * aka stop sending new HTTP gets but still wait and ack answers,
-             * until timeout, and then poweroff the host. *)
+            self#power_off
+            (* Which stops every activity on that host at once: whatever it had
+             * scheduled goes down with its power. *)
 
         | _ -> ()
 end

@@ -21,7 +21,7 @@ let client_init url (host : Host.t) =
             Browser.user browser ~pause:5. 1000 url
         ) else (
             Log.(log logger Info (lazy (Printf.sprintf "IP not initialized, wait"))) ;
-            Simulation.delay (Simulation.of_widget host.trx.widget) (Clock.Interval.sec 1.) start_browsing ()
+            Simulation.delay host.trx.power (Clock.Interval.sec 1.) start_browsing ()
         ) in
     start_browsing ()
 

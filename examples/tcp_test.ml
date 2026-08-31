@@ -41,7 +41,7 @@ let perform_get (sim : Simulation.t) my_ip my_netmask mac peer_ip ?nameserver ?g
         tx tcp.Tcp.TRX.trx (bitstring_of_string get) ;
         let rec wait_close () =
             if not (tcp.Tcp.TRX.is_closed ()) then
-                Simulation.delay sim (Clock.Interval.sec 1.) wait_close ()
+                Simulation.delay sim.Simulation.power (Clock.Interval.sec 1.) wait_close ()
             else (
                 Printf.printf "We are done with the GET...\n" ;
                 exit 0

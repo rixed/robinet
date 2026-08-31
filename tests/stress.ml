@@ -116,7 +116,7 @@ let make_net () =
               ~setter:(fun v ->
                   nickname := Widget.to_option Widget.to_string v) ] ;
     (* Something to keep its clock busy for ever: *)
-    let rec ticking () = Simulation.delay net tick ticking () in
+    let rec ticking () = Simulation.delay net.Simulation.power tick ticking () in
     ticking () ;
     net, cable
 
@@ -263,8 +263,8 @@ let test_metric_samples () =
         if n mod 5 = 0 then
             Log.(log w.Widget.logger Warning (lazy "every fifth tick")) ;
         if n > 0 then
-            Simulation.delay sim (Clock.Interval.sec 0.25) (feed (n - 1)) () in
-    Simulation.delay sim (Clock.Interval.sec 0.25) (feed 19) () ;
+            Simulation.delay sim.Simulation.power (Clock.Interval.sec 0.25) (feed (n - 1)) () in
+    Simulation.delay sim.Simulation.power (Clock.Interval.sec 0.25) (feed 19) () ;
     Simulation.run sim false ;
     let key = w.Widget.id, "bytes", Metric.Params.empty in
     (* A metric that has not fired yet has no row at all, which is not the
@@ -316,7 +316,7 @@ let test_metric_samples () =
     check "keeping fewer keeps that many" (List.length kept = 2) ;
     check "and keeps the newest" (count (List.last kept) = last) ;
     (* And the ring wraps rather than growing. *)
-    Simulation.delay sim (Clock.Interval.sec 0.25) (feed 19) () ;
+    Simulation.delay sim.Simulation.power (Clock.Interval.sec 0.25) (feed 19) () ;
     Simulation.run sim false ;
     let after = Simulation.metric_samples sim in
     check "the ring never grows past what it may keep" (List.length after = 2) ;
@@ -356,7 +356,7 @@ let test_metric_samples () =
          (root_prop "metrics sample rate").Widget.getter () = `Float 0.5) ;
     (* Five more simulated seconds, now sampled twice a second: more than
        enough to fill the shortened ring at the new pace. *)
-    Simulation.delay sim (Clock.Interval.sec 0.25) (feed 19) () ;
+    Simulation.delay sim.Simulation.power (Clock.Interval.sec 0.25) (feed 19) () ;
     Simulation.run sim false ;
     let dense = Simulation.metric_samples sim in
     check "the sampler follows what the properties say"
@@ -629,6 +629,179 @@ let test_disconnect () =
     Eth.Cable.disconnect st ;
     check "unplugging a cable a second time leaves the next one alone"
         (sw_w.Widget.ports.is_connected 1 && h_w.Widget.ports.is_connected 0)
+
+(* Deleting a device is deleting the thing, not the picture of it: what it is
+   made of goes with it, it stops running, and the cables that reached it are
+   unplugged and go too -- a cable is the link, and a link with one end missing
+   is nothing. What must survive is everything else. *)
+let test_delete () =
+    section "Deleting a device" ;
+    let sim = Simulation.make ~realtime:false "delete" in
+    let parent = sim.Simulation.root in
+    let netmask = Ip.Addr.of_dotted_string_exc "255.255.255.0" in
+    let sw = Hub.Switch.make ~parent 2 8 "sw" in
+    let sw_w = sw.Hub.Switch.widget in
+    let host port name ip =
+        let h = Host.make_static ~parent ~netmask
+                                 (Ip.Addr.of_dotted_string_exc ip) name in
+        let st = Eth.Cable.State.make ~parent ~name:("cable-"^ name) () in
+        Eth.Cable.plug st (sw_w, port) (h.Host.trx.Host.widget, 0) ;
+        h, st in
+    let h1, _ = host 0 "h1" "10.3.0.1"
+    and h2, cable2 = host 1 "h2" "10.3.0.2" in
+    let h1_w = h1.Host.trx.Host.widget
+    and h2_w = h2.Host.trx.Host.widget in
+    let h1_id = h1_w.Widget.id
+    and h2_id = h2_w.Widget.id
+    and cable2_id = cable2.Eth.Cable.State.widget.Widget.id in
+    Simulation.run sim false ;
+
+    (* Something it was going to do, to tell a device that has stopped from one
+       that has merely been taken out of the drawing. *)
+    let fired = ref 0 in
+    Simulation.delay h2.Host.trx.Host.power (Clock.Interval.sec 1.)
+                     (fun () -> incr fired) () ;
+    Widget.destroy h2_w ;
+    Simulation.run sim false ;
+    check "a deleted device stops running" (!fired = 0) ;
+    check "and is out of the tree, with everything it was made of"
+        (Widget.find sim.Simulation.root h2_id = None) ;
+    check "so is the cable that reached it"
+        (Widget.find sim.Simulation.root cable2_id = None) ;
+    check "the port it was plugged into is free again"
+        (not (sw_w.Widget.ports.is_connected 1)) ;
+    check "and nothing is peered with what is gone"
+        (List.for_all (fun (p : Widget.peer) ->
+             p.widget != h2_w && p.via <> Some cable2.Eth.Cable.State.widget)
+             sw_w.Widget.peers) ;
+    (* The other end of the switch never noticed. *)
+    check "the rest of the network is untouched"
+        (sw_w.Widget.ports.is_connected 0 &&
+         h1_w.Widget.ports.is_connected 0 &&
+         Widget.find sim.Simulation.root h1_id <> None) ;
+
+    (* And from the other side: deleting what a host was cabled to leaves the
+       host, minus the cable. *)
+    Widget.destroy sw_w ;
+    check "deleting a device unplugs what was still on it"
+        (not (h1_w.Widget.ports.is_connected 0)) ;
+    check "leaving the device at the far end behind"
+        (Widget.find sim.Simulation.root h1_id <> None) ;
+    check "and taking its own parts with it"
+        (Widget.find sim.Simulation.root sw_w.Widget.id = None &&
+         sw_w.Widget.children = []) ;
+    (* Including their supply: the repeater inside a switch has one of its own,
+       and it is reached by the walk rather than by the switch knowing it is
+       there. *)
+    check "which are stopped as well"
+        (not sw.Hub.Switch.hub.Hub.Repeater.power.Simulation.on)
+
+(* Powering a host off is not a request that it stop: whatever it had planned
+   to do ceases to exist. Everything it schedules -- its adapter, its sockets,
+   its timers -- draws from one power source, so cutting that source and
+   withdrawing what it had already paid for is the whole of a power-off.
+
+   What must not happen is either half of that failing: an event outliving the
+   host that scheduled it, or a power-off taking with it something it does not
+   own. *)
+let test_power () =
+    section "Powering a host off" ;
+    let sim = Simulation.make ~realtime:false "power" in
+    let parent = sim.Simulation.root in
+    let netmask = Ip.Addr.of_dotted_string_exc "255.255.255.0" in
+    let sw = Hub.Switch.make ~parent 2 8 "sw" in
+    let host port name ip =
+        let h = Host.make_static ~parent ~netmask
+                                 (Ip.Addr.of_dotted_string_exc ip) name in
+        let st = Eth.Cable.State.make ~parent ~name:("cable-"^ name) () in
+        Eth.Cable.plug st (sw.Hub.Switch.widget, port)
+                          (h.Host.trx.Host.widget, 0) ;
+        h, st in
+    let h1, _ = host 0 "h1" "10.2.0.1"
+    and h2, cable2 = host 1 "h2" "10.2.0.2" in
+    Simulation.run sim false ;
+
+    (* Events due later, some the host's own and some not. Counting them rather
+       than watching for traffic, so that "did it fire" has one answer. *)
+    let mine = ref 0 and theirs = ref 0 in
+    let plan () =
+        for i = 1 to 5 do
+            let d = Clock.Interval.sec (float_of_int i) in
+            Simulation.delay h2.Host.trx.Host.power d (fun () -> incr mine) () ;
+            Simulation.delay sim.Simulation.power d (fun () -> incr theirs) ()
+        done in
+    plan () ;
+    h2.Host.trx.Host.power_off () ;
+    Simulation.run sim false ;
+    check "powering a host off drops what it had scheduled" (!mine = 0) ;
+    check "and leaves everybody else's events alone" (!theirs = 5) ;
+
+    (* And nothing new is taken on while it is off: a power-off that only
+       emptied the queue would let the next timer put the host back to work. *)
+    plan () ;
+    Simulation.run sim false ;
+    check "an off host schedules nothing more" (!mine = 0) ;
+    check "while the rest of the simulation carries on" (!theirs = 10) ;
+
+    h2.Host.trx.Host.power_on () ;
+    plan () ;
+    Simulation.run sim false ;
+    check "and it schedules again once powered back on" (!mine = 5) ;
+
+    (* End to end, since the counters above would be just as happy if the host
+       were merely a bag of timers: a server on h2, reached from h1. *)
+    let served = ref 0 in
+    let listen () =
+        h2.Host.trx.Host.udp_server (Udp.Port.o 1234) (fun _ -> incr served) in
+    let send () =
+        h1.Host.trx.Host.udp_send (Host.IPv4 (Ip.Addr.of_dotted_string_exc "10.2.0.2"))
+                                  (Udp.Port.o 1234) (Bitstring.zeroes_bitstring 64) ;
+        Simulation.run sim false in
+    listen () ;
+    send () ;
+    check "a live host answers for the ports it listens on" (!served = 1) ;
+    h2.Host.trx.Host.power_off () ;
+    send () ;
+    check "an off host does not" (!served = 1) ;
+    (* Its servers are gone with the rest of its state, so coming back up is
+       coming back up empty rather than resuming. *)
+    h2.Host.trx.Host.power_on () ;
+    send () ;
+    check "and does not remember them when it comes back" (!served = 1) ;
+    listen () ;
+    send () ;
+    check "but serves again once it listens again" (!served = 2) ;
+
+    (* An adapter is state too, and the sort that goes wrong quietly. A frame
+       held back waiting on an ARP that nobody answered leaves the adapter
+       believing a request is in flight; left there across a power cut, the
+       next frame for that address joins the queue and no request ever goes
+       out again. *)
+    let waiting () =
+        Tools.BitHash.length h2.Host.eth_state.Eth.State.postponed in
+    let to_nowhere () =
+        h2.Host.trx.Host.udp_send
+            (Host.IPv4 (Ip.Addr.of_dotted_string_exc "10.2.0.99"))
+            (Udp.Port.o 1234) (Bitstring.zeroes_bitstring 64) ;
+        Simulation.run sim false in
+    to_nowhere () ;
+    check "a frame for nobody leaves the adapter waiting on an ARP"
+        (waiting () > 0) ;
+    h2.Host.trx.Host.power_off () ;
+    check "which a power cut clears" (waiting () = 0) ;
+    (* And having forgotten, it asks again rather than queueing in silence. *)
+    let carried () =
+        match List.find (fun (p : Widget.property) -> p.name = "total bits")
+                        cable2.Eth.Cable.State.widget.Widget.properties with
+        | exception Not_found -> -1
+        | p ->
+            Yojson.Basic.Util.(
+                p.getter () |> member "values" |> to_list |>
+                List.fold_left (fun n v -> n + (member "value" v |> to_int)) 0) in
+    h2.Host.trx.Host.power_on () ;
+    let before = carried () in
+    to_nowhere () ;
+    check "so the adapter asks again once it is back" (carried () > before)
 
 let test_http net cable duration nthreads
               (hist_sim : Simulation.t) (hist_widget : Widget.t) =
@@ -1156,6 +1329,49 @@ let test_http net cable duration nthreads
                     `Float 391499.
             | _ -> false) ;
 
+        (* Deleting is the other half of building, and it is the cables that
+           make it more than taking a widget out of the picture: they are the
+           one thing that reaches from one device into another, so they cannot
+           outlive either end. *)
+        let del id =
+            fst (http ~meth:"DELETE" port
+                      (Printf.sprintf "/api/simulations/%d/widgets/%d"
+                                      net_id id))
+        and gone id =
+            fst (api "/api/simulations/%d/widgets/%d" net_id id) = 404 in
+        check "deleting a cable frees the two ports it was on"
+            (del long = 200 && gone long &&
+             not ((widget paris).ports.is_connected 0) &&
+             not ((widget lyon).ports.is_connected 0)) ;
+        check "and leaves the two devices it joined where they were"
+            (not (gone paris) && not (gone lyon)) ;
+        let near = created {|{"type":"host","name":"near",
+                              "params":{"address":"10.9.0.8"}}|}
+        and far = created {|{"type":"host","name":"far",
+                             "params":{"address":"10.9.0.9"}}|} in
+        let between = cable_of near far in
+        check "deleting a device takes the cable that reached it with it"
+            (del near = 200 && gone near && gone between) ;
+        check "and gives the far end its port back"
+            (not (gone far) && not ((widget far).ports.is_connected 0)) ;
+        (* What this interface cannot build it will not remove either: a part of
+           a device is not a device, and deleting a host's adapter would leave a
+           host whose port answers for a widget nobody can see. *)
+        check "a device says what kind of device it is"
+            ((widget far).Widget.device = Some "host" &&
+             (widget switch_id).Widget.device = Some "switch") ;
+        check "and its parts say they are not one"
+            ((adapter far).Widget.device = None &&
+             List.for_all (fun (c : Widget.t) -> c.device = None)
+                          (widget switch_id).Widget.children) ;
+        check "so deleting a device's adapter is refused"
+            (del (adapter far).Widget.id = 400 && not (gone far)) ;
+        check "and so is deleting the repeater inside a switch"
+            (List.for_all (fun (c : Widget.t) -> del c.id = 400)
+                          (widget switch_id).Widget.children) ;
+        check "while the whole device goes"
+            (del far = 200 && gone far) ;
+
         (* Then, that it keeps answering while hammered from all sides -- which
          * is the whole point of myadmin living in its own simulation. *)
         Printf.printf "  (hammering for %gs with %d threads)\n%!"
@@ -1229,6 +1445,8 @@ let main =
     let samples_sim, samples_widget = test_metric_samples () in
     test_concurrency net cable duration nthreads ;
     test_disconnect () ;
+    test_power () ;
+    test_delete () ;
     test_http net cable duration nthreads samples_sim samples_widget ;
     Printf.printf "\n%d checks, %d failure(s)\n%!" !checks !failures ;
     (* Simulations run in threads of their own, which would otherwise keep the

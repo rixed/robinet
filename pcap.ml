@@ -433,7 +433,7 @@ let repair_file fname =
  * copying the pcap file frame rate. Notice that we use the internal
  * {!module:Clock} for this, so it's both very accurate or not accurate at all,
  * depending on how you look at it. *)
-let play sim tx fname =
+let play power tx fname =
     let packets = enum_of_file fname in
     (* With last_packet_timestamp (or None), schedule a function using the clock to read
        the next packet from the file. *)
@@ -443,11 +443,11 @@ let play sim tx fname =
             | Some pdu ->
                 let d = match last_ts with None     -> Clock.Interval.o 0.
                                          | Some lts -> Clock.Time.sub pdu.Pdu.ts lts in
-                Simulation.delay sim d (fun () ->
+                Simulation.delay power d (fun () ->
                     tx (pdu.Pdu.payload :> bitstring) ;
                     read_next_pkt (Some pdu.Pdu.ts)) ()
     in
-    Simulation.asap sim read_next_pkt None
+    Simulation.asap power read_next_pkt None
 
 (** {2 User friendly functions for capturing/injecting packets} *)
 
@@ -457,6 +457,9 @@ type iface = { handler : iface_handler ;
                (* Not mutable: the handler is opened with it, and libpcap has
                 * no way to change it afterwards. *)
                 caplen : int ;
+               (* A real interface is not something that can be switched off,
+                * so this is merely the mains of its simulation. *)
+                power : Simulation.power ;
                 widget : Widget.t }
 
 (** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
@@ -480,6 +483,7 @@ let openif ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
         handler = openif_ ifname promisc filter caplen ;
         name = ifname ;
         caplen = caplen ;
+        power = (Simulation.of_widget widget).Simulation.power ;
         widget } in
     Widget.add_properties widget Widget.[
         property "name" ~kind:String
@@ -545,6 +549,6 @@ let sniffer iface rx =
             Simulation.synch (Simulation.of_widget iface.widget) ;
             (* Metric.Atomic.fire packets_sniffed_ok ;
                Metric.Counter.add bytes_in (Payload.length pdu.Pdu.payload) ; *)
-            Simulation.at (Simulation.of_widget iface.widget) pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
+            Simulation.at iface.power pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
             if Simulation.is_running (Simulation.of_widget iface.widget) then loop () in
     Thread.create loop ()

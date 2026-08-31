@@ -42,7 +42,9 @@
                                             {"type": ..., "name": ...,
                                              "params": {...}}
     GET    /api/simulations/<s>/widgets/<w>
-    DELETE /api/simulations/<s>/widgets/<w> delete it, and its children
+    DELETE /api/simulations/<s>/widgets/<w> take it out of the simulation for
+                                            good: it, everything it is made
+                                            of, and the cables that reached it
     PUT    /api/simulations/<s>/widgets/<w>/location
                                             where it is in the world; the body
                                             is {"lat": ..., "lon": ...}, or
@@ -201,6 +203,13 @@ let json_of_widget (w : Widget.t) =
              "children", `List (List.map (fun (c : Widget.t) -> `Int c.id)
                                          w.children) ;
              "peers", `List (List.map json_of_peer w.peers) ;
+             (* What kind of device this is, when it is a whole one, named as
+                /api/device-types names it. Null for a part of a device -- an
+                adapter, an interface -- and for a kind this interface cannot
+                build, so a name that is not in that catalogue is a device that
+                cannot be deleted here either. *)
+             "device", (match w.device with None -> `Null
+                                          | Some d -> `String d) ;
              (* One answer per port a cable can be plugged into, saying whether
                 it has one already: how many there are is how many there are,
                 and which of them are still free is what the interface needs in
@@ -389,8 +398,20 @@ let delete_widget _mth matches _vars _qry_body resp =
         if w == sim.root then
             bad_request "%s is the root of simulation %s and cannot be deleted"
                 (Widget.full_name w) (Simulation.name sim) ;
+        (* What cannot be built cannot be removed either: a part of a device is
+         * not a device, and offering to delete a host's adapter -- leaving a
+         * host whose port answers for a widget nobody can see -- would be
+         * offering something the API has no way to undo. *)
+        if Device.of_widget w = None then
+            bad_request "%s is not a device this interface can delete. \
+                         See /api/device-types for the ones it can"
+                (Widget.full_name w) ;
         let full_name = Widget.full_name w in
-        Widget.delete w ;
+        (* Under the lock like every other change, and rather more so: this
+         * stops devices and unplugs cables the simulation may be walking. *)
+        Widget.destroy w ;
+        Log.(log sim.root.logger Info (lazy (
+            Printf.sprintf "Deleted %S" full_name))) ;
         respond resp (`Assoc [ "deleted", `String full_name ]))
 
 (* Place a widget on the map, or take its place away with a body of "null".

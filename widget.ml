@@ -76,6 +76,30 @@ type t =
       logger : Log.t ;
       (* Where a cable reaches the device this widget stands for, if anywhere *)
       mutable ports : ports ;
+      (* What kind of device this widget stands for -- "host", "switch" --
+       * named the way the catalogue of buildable devices names it (see
+       * [Device.all]), or [None] when the widget is a *part* of a device
+       * rather than a whole one: an adapter, a router's interface, a server
+       * running on a host.
+       *
+       * Set by the constructor of the device itself, not by the catalogue, so
+       * that a network wired up by an OCaml program is described the same way
+       * as one built through the API. What the catalogue then says is which of
+       * these kinds it knows how to build -- and therefore, the API refusing
+       * to remove what it could not put back, which ones it will delete. *)
+      mutable device : string option ;
+      (* How to stop the thing this widget stands for, called by [destroy]
+       * before the widget leaves the tree: cut its power, unplug the cable.
+       * Set by whoever built that thing, since nothing else knows how to stop
+       * it -- and only by whoever gave it its own power supply, so that
+       * deleting one of several devices sharing a supply does not switch off
+       * the others.
+       *
+       * Nothing here undoes the wiring *within* a device: its trxs point at
+       * one another and at nothing else, so they go when the last reference to
+       * them does. Only cables cross from one device to another, and only they
+       * have to be told. *)
+      mutable on_delete : unit -> unit ;
       (* Setter and getter of configurable properties: *)
       mutable properties : property list }
 
@@ -365,6 +389,8 @@ let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) name =
         parent ;
         children = [] ;
         peers = [] ;
+        device = None ;
+        on_delete = ignore ;
         location ;
         logger ;
         ports = no_ports ;
@@ -489,6 +515,37 @@ let rec delete t =
     t.peers <- [] ;
     unlink_from_parent t ;
     t.parent <- None
+
+(** Take out of the simulation, for good, the thing a widget stands for.
+ *
+ * Where [delete] takes the picture apart, this takes the thing apart first:
+ * everything within the doomed subtree is stopped (see [on_delete]), and every
+ * cable reaching into it from outside is unplugged and deleted as well -- a
+ * cable *is* the link, so it cannot outlive either of the two things it
+ * joined.
+ *
+ * It lives here rather than with the devices because none of them can see the
+ * whole of what is being deleted; each of them left behind an [on_delete]
+ * saying how to stop itself, and this walks them. *)
+let destroy t =
+    let doomed = descendants t in
+    (* A cable's widget usually sits outside the subtree -- under the root, or
+     * under whatever groups the two ends -- so the walk above does not reach
+     * it. Both of its ends name it when both are doomed, hence the [memq]. *)
+    let cables =
+        List.fold_left (fun cables (d : t) ->
+            List.fold_left (fun cables p ->
+                match p.via with
+                | Some v when not (List.memq v cables) -> v :: cables
+                | _ -> cables
+            ) cables d.peers
+        ) [] doomed in
+    List.iter (fun (c : t) -> c.on_delete ()) cables ;
+    List.iter (fun (d : t) -> d.on_delete ()) doomed ;
+    (* After the cables have been unplugged, so that a port is told it is free
+     * before the widget that owns it stops being reachable. *)
+    List.iter delete cables ;
+    delete t
 
 (** Move a widget (and therefore its whole subtree) elsewhere in the hierarchy.
  *

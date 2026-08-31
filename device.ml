@@ -307,6 +307,16 @@ let find name =
  * Raises {!Widget.Bad_value} for anything the caller got wrong -- an unknown
  * kind of device, a parameter that is not one, a value out of range -- which
  * the API answers with a 400. *)
+(** The catalogue entry a widget was built from, if this catalogue knows how to
+ * build its kind at all.
+ *
+ * [None] for a part of a device rather than a whole one, and for a kind this
+ * catalogue does not offer -- a router, for now. That is what makes it the
+ * answer to "may the API remove this?": what it cannot put back, it will not
+ * take away. *)
+let of_widget (w : Widget.t) =
+    Option.bind w.Widget.device find
+
 let make type_ ~parent name args =
     match find type_ with
     | None ->

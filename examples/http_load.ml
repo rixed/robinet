@@ -39,7 +39,7 @@ let run (sim : Simulation.t) ifname src_range num_srcs ?gateways ?search_sfx ?na
     in
     (* Build the HUB and link it to hosts *)
     let hub     = Hub.Repeater.make ~parent:sim.root (num_srcs+1) "hub"
-    and gigabit = Eth.limited sim (Clock.Interval.msec 10.) 1_000_000_000. in
+    and gigabit = Eth.limited sim.Simulation.power (Clock.Interval.msec 10.) 1_000_000_000. in
     List.iteri (fun i (h : Host.t) ->
         (* notice that the cable is not full duplex *)
         h.trx.dev.set_read (gigabit (Hub.Repeater.write hub i)) ;
@@ -56,7 +56,7 @@ let run (sim : Simulation.t) ifname src_range num_srcs ?gateways ?search_sfx ?na
         | None       -> Browser.spider browser max_depth (Url.of_string start_url)
     ) hosts ;
     (* Prepare a timeout in 15s *)
-    Simulation.delay sim (Clock.Interval.sec 15.) failwith "timeout" ;
+    Simulation.delay sim.Simulation.power (Clock.Interval.sec 15.) failwith "timeout" ;
     (* Run everything *)
     ignore (Pcap.sniffer iface (Hub.Repeater.write hub num_srcs)) ;
     Simulation.run sim false

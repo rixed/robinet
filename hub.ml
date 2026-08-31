@@ -27,6 +27,7 @@ module Repeater =
 struct
     type t = { ifaces : (bitstring -> unit) array ;
          is_connected : bool array ;
+                power : Simulation.power ;
                widget : Widget.t ;
               ingress : Metric.Counter.t ;
                egress : Metric.Counter.t }
@@ -36,18 +37,17 @@ struct
 
     let forward_from (t : t) n pld =
         let now = Simulation.Widget.now t.widget in
-        let sim = Simulation.of_widget t.widget in
         Array.iteri (fun i emit ->
             if i <> n then (
                 Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to iface %d/%d" i (Array.length t.ifaces)))) ;
                 Metric.(Counter.add t.egress ~now ~params:(Params.singleton "port" (Param.Int i)) (bytelength pld)) ;
-                Simulation.asap sim emit pld
+                Simulation.asap t.power emit pld
             )) t.ifaces
 
     let forward_to_single (t : t) n pld =
         let now = Simulation.Widget.now t.widget in
         Metric.(Counter.add t.egress ~now ~params:(Params.singleton "port" (Param.Int n)) (bytelength pld)) ;
-        Simulation.asap (Simulation.of_widget t.widget) t.ifaces.(n) pld
+        Simulation.asap t.power t.ifaces.(n) pld
 
     let write (t : t) n pld =
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.ifaces)))) ;
@@ -91,9 +91,14 @@ struct
         let t = {
             ifaces = Array.make n (ignore_bits ~logger:widget.logger) ;
             is_connected = Array.make n false ;
+            power = Simulation.make_power (Simulation.of_widget widget) name ;
             widget ;
             ingress = Metric.Counter.make () ;
             egress = Metric.Counter.make () } in
+        (* This repeater minted the supply above; a switch's inner one is a
+           child of the switch, so deleting the switch reaches it. *)
+        widget.Widget.device <- Some "hub" ;
+        widget.Widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
         widget.Widget.ports <- Widget.{
             count = (fun () -> n) ;
             is_connected = (fun i -> t.is_connected.(i)) ;
@@ -227,8 +232,11 @@ struct
             dev = iface t ;
             owner = (fun _ -> widget) ;
             disconnect = R.disconnect t.hub } ;
-        (* You cannot plug a cable directly to the internal hub: *)
+        widget.Widget.device <- Some "switch" ;
+        (* You cannot plug a cable directly to the internal hub, nor delete it
+           on its own: it is a part of this switch, not a hub of its own. *)
         t.hub.R.widget.Widget.ports <- Widget.no_ports ;
+        t.hub.R.widget.Widget.device <- None ;
         Widget.add_properties widget Widget.[
             metric_property "macs"
                 ~descr:"Number of MAC addresses remembered."

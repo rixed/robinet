@@ -106,7 +106,10 @@ end
 module TRX = struct
 
     type t = { logger : Log.t ;
-               sim : Simulation.t ;
+               (* What pays for the events this TRX schedules, and names the
+                * clock they run on: the host it belongs to, so that they go
+                * down with it. *)
+               power : Simulation.power ;
                src : Ip.Addr.t ; dst : Ip.Addr.t ;
                proto : Ip.Proto.t ;
                mutable emit : bitstring -> unit ;
@@ -115,20 +118,20 @@ module TRX = struct
     let tx t bits =
         let pdu = Pdu.make t.proto t.src t.dst bits in
         if debug then Printf.printf "Ip6: Emitting an IPv6 packet from %s to %s of length %d (content '%s')\n%!" (Ip.Addr.to_dotted_string t.src) (Ip.Addr.to_dotted_string t.dst) (bytelength bits) (hexstring_of_bitstring bits) ;
-        Simulation.asap t.sim t.emit (Pdu.pack pdu)
+        Simulation.asap t.power t.emit (Pdu.pack pdu)
 
     let rx (t : t) bits = (match Pdu.unpack bits with
         | Error s ->
             Log.(log t.logger Warning s)
         | Ok ip ->
-            if Payload.bitlength ip.Pdu.payload > 0 then Simulation.asap t.sim t.recv (ip.Pdu.payload :> bitstring))
+            if Payload.bitlength ip.Pdu.payload > 0 then Simulation.asap t.power t.recv (ip.Pdu.payload :> bitstring))
 
     (* Note: In Eth we do not require dst addr since the trx knows (using ARP) how to get dest addr itself.
      *       IP cannot do this since the application layer won't tell him the destination hostname. Or
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)
-    let make sim src dst proto logger =
-        let t = { logger ; sim ; src ; dst ; proto ;
+    let make power src dst proto logger =
+        let t = { logger ; power ; src ; dst ; proto ;
                   emit = ignore ; recv = ignore } in
         { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;

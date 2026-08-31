@@ -58,7 +58,7 @@ let main =
                          (Ip.Addr.of_string !src_ip)
                          "requester" in
     host.trx.dev.set_read emit ;
-    List.iter (Simulation.asap sim (fun name ->
+    List.iter (Simulation.asap sim.Simulation.power (fun name ->
         host.trx.gethostbyname name (function
         | None -> ()
         | Some ips ->

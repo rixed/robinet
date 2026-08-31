@@ -10,9 +10,9 @@ let run (sim : Simulation.t) () =
     let host_ip = Ip.Addr.random () and my_ip = Ip.Addr.random () in
     (* Build the stack *)
     let host = Host.make_static ~parent:sim.root ~netmask:(Ip.Addr.all_ones) host_ip "test" in
-    let eth_state = Eth.State.make ~my_addresses:[ Eth.State.make_my_ip_address my_ip ] ~parent:host.trx.widget () in
+    let eth_state = Eth.State.make ~my_addresses:[ Eth.State.make_my_ip_address my_ip ] ~parent:host.trx.widget ~power:host.trx.power () in
     let eth = Eth.TRX.make eth_state in
-    let ip  = Ip.TRX.make sim my_ip host_ip Ip.Proto.icmp host.trx.widget.logger in
+    let ip  = Ip.TRX.make host.trx.power my_ip host_ip Ip.Proto.icmp host.trx.widget.logger in
     (* What to do when receiving an ip pck *)
     let my_recv bits = match Icmp.Pdu.unpack bits with
         | Error s ->

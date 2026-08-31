@@ -169,8 +169,9 @@ struct
         is_closed : unit -> bool }
     type t = {
         logger : Log.t ;
-        (* The simulation this connection lives in, for its timers: *)
-        sim : Simulation.t ;
+        (* What pays for this connection's timers, and says which clock they
+         * run on. When the host goes down they go with it. *)
+        power : Simulation.power ;
         mutable tcp_trx : tcp_trx ;
         mutable src : Port.t ;
         mutable dst : Port.t ;
@@ -210,7 +211,7 @@ struct
             let tcp = Pdu.make ~src_port ~dst_port ~seq_num ?ack_num
                                ~ack ~psh ~rst ~syn ~fin bits in
             Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Emitting a packet from %s to %s, seq %s, length %d, content '%s'" (Port.to_string src_port) (Port.to_string dst_port) (SeqNum.to_string seq_num) (bytelength bits) (string_of_bitstring bits)))) ;
-            Simulation.asap t.sim t.emit (Pdu.pack tcp) ;
+            Simulation.asap t.power t.emit (Pdu.pack tcp) ;
             if ack then t.rcvd_acked <- t.rcvd_pld ;
             if bitstring_length bits > 0 then
                 t.unacked_tx <- Streambuf.add (t.sent_pld, tcp) t.unacked_tx ;
@@ -259,18 +260,18 @@ struct
                     let pld = dropbytes skip (tcp.Pdu.payload :> bitstring) in
                     t.rcvd_pld <- t.rcvd_pld + (bytelength pld) ;
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: I have now read %d bytes" t.rcvd_pld))) ;
-                    if bitstring_length pld > 0 then Simulation.asap t.sim t.recv pld ;
+                    if bitstring_length pld > 0 then Simulation.asap t.power t.recv pld ;
                     if tcp.Pdu.flags.Pdu.fin && not t.rcvd_fin then (
                         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: received a FIN"))) ;
                         t.rcvd_pld <- t.rcvd_pld + 1 ;
                         t.rcvd_fin <- true ;
                         t.closed <- true ;
-                        Simulation.asap t.sim t.recv empty_bitstring (* signal the close *) (* FIXME: which is not very easy to use when the TRX is piped into another one. An Err would suit better *)
+                        Simulation.asap t.power t.recv empty_bitstring (* signal the close *) (* FIXME: which is not very easy to use when the TRX is piped into another one. An Err would suit better *)
                     ) else if tcp.Pdu.flags.Pdu.rst && not t.rcvd_fin then (
                         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: received a RST"))) ;
                         t.rcvd_fin <- true ;
                         t.closed <- true ;
-                        Simulation.asap t.sim t.recv empty_bitstring (* signal the close *)
+                        Simulation.asap t.power t.recv empty_bitstring (* signal the close *)
                     )
                 ) else (
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp:...obsolete packet")))
@@ -320,7 +321,7 @@ struct
         ) ;
         t.rcvd_pkts <- Streambuf.add (offset, tcp) t.rcvd_pkts ;
         try_really_rx t ;
-        Simulation.delay t.sim (Clock.Interval.msec 200.) delayed_ack t ;
+        Simulation.delay t.power (Clock.Interval.msec 200.) delayed_ack t ;
         try_really_tx t (* because the advertized window may have changed, we might want to send a FIN, etc *)
 
     and is_established t = t.sent_pld > 0 && t.rcvd_pld > 0
@@ -377,8 +378,8 @@ struct
             try_really_tx t
         )
 
-    let make sim ?isn ?(mtu=1300) src dst logger =
-        let t = { logger ; sim ;
+    let make power ?isn ?(mtu=1300) src dst logger =
+        let t = { logger ; power ;
                   src = src ;
                   dst = dst ;
                   emit = ignore_bits ~logger ;
@@ -408,7 +409,7 @@ struct
     let default_connect_timeout = Clock.Interval.sec 15.
     let connect ?(timeout=default_connect_timeout) t cont =
         t.cnx_established_cont <- Some cont ;
-        Simulation.delay t.sim timeout may_timeout t ;
+        Simulation.delay t.power timeout may_timeout t ;
         emit_one t ~syn:true empty_bitstring
 
 end

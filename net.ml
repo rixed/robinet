@@ -321,7 +321,7 @@ let instanciate (sim : Simulation.t) t =
             (* TODO: choose throughput according to min of both adapters throughput *)
             (* TODO: add a flag for half/full duplex *)
             let latency = Clock.Interval.msec 10. and throughput = 1_000_000_000. in
-            let half_dup = Eth.limited sim latency throughput in
+            let half_dup = Eth.limited sim.Simulation.power latency throughput in
             a_set_read (half_dup b_dev) ;
             b_set_read (half_dup a_dev)
     in

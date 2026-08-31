@@ -77,7 +77,10 @@ struct
                      get_ports : unit -> Port.t * Port.t }
     type t = {
         logger : Log.t ;
-        sim : Simulation.t ;
+        (* What pays for the events this TRX schedules, and names the clock
+         * they run on: the host it belongs to, so that they go down with
+         * it. *)
+        power : Simulation.power ;
         mutable src : Port.t ; mutable dst : Port.t ;
         mutable emit : bitstring -> unit ;
         mutable recv : bitstring -> unit }
@@ -85,7 +88,7 @@ struct
     let tx t bits =
         let udp = Pdu.make ~src_port:t.src ~dst_port:t.dst bits in
         Log.(log t.logger Debug (lazy (Printf.sprintf "Udp: Emitting a packet from %s to %s" (Port.to_string t.src) (Port.to_string t.dst)))) ;
-        Simulation.asap t.sim t.emit (Pdu.pack udp)
+        Simulation.asap t.power t.emit (Pdu.pack udp)
 
     (* TODO: check checksum *)
     let rx (t : t) bits = (match Pdu.unpack bits with
@@ -94,7 +97,7 @@ struct
         | Ok udp ->
             Log.(log t.logger Debug (lazy (Printf.sprintf "Udp: Received a datagram"))) ;
             Log.(log t.logger Debug (lazy (Printf.sprintf "Udp: Got a datagram with %d bytes" (Payload.length udp.Pdu.payload)))) ;
-            if Payload.bitlength udp.Pdu.payload > 0 then Simulation.asap t.sim t.recv (udp.Pdu.payload :> bitstring))
+            if Payload.bitlength udp.Pdu.payload > 0 then Simulation.asap t.power t.recv (udp.Pdu.payload :> bitstring))
 
     let trx_of t =
         { trx = { ins = { write = tx t ;
@@ -103,8 +106,8 @@ struct
                           set_read = fun f -> t.emit <- f } } ;
           get_ports = (fun () -> t.src, t.dst) }
 
-    let make sim src dst logger =
-        let t = { sim ; src = src ; dst = dst ;
+    let make power src dst logger =
+        let t = { power ; src = src ; dst = dst ;
                   emit = ignore_bits ~logger ;
                   recv = ignore_bits ~logger ;
                   logger } in

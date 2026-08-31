@@ -27,7 +27,14 @@ open Tools
 (* Localhost is the real host, reached through the OS network stack rather than
  * simulated. It still belongs to a simulation -- the one whose clock dates what
  * it does, and whose tree its widget hangs in -- which [host] is given. *)
-type ctx = { sim : Simulation.t ; widget : Widget.t }
+type ctx =
+    { sim : Simulation.t ;
+      (* The real machine is not something the simulation can switch off, so
+       * this is merely the mains: it is here because the sockets hand their
+       * reads back through the clock, and that needs a supply like anything
+       * else. *)
+      power : Simulation.power ;
+      widget : Widget.t }
 
 let logger ctx = ctx.widget.Widget.logger
 
@@ -94,11 +101,11 @@ let rec reader t =
         let s = Bytes.sub buf 0 r |> Bytes.to_string in
         Log.(log (logger t.ctx) Debug (lazy (Printf.sprintf "Received '%s'" s))) ;
         (* Use the Clock so that the recv function is called in main thread *)
-        Simulation.asap t.ctx.sim t.recv (bitstring_of_string s) ;
+        Simulation.asap t.ctx.power t.recv (bitstring_of_string s) ;
         reader t
     ) else if r = 0 then (
         Log.(log (logger t.ctx) Debug (lazy (Printf.sprintf "Received EOF"))) ;
-        Simulation.asap t.ctx.sim t.recv empty_bitstring ;
+        Simulation.asap t.ctx.power t.recv empty_bitstring ;
         close t ()
     )
 
@@ -157,12 +164,12 @@ let tcp_connect ctx ?(wait_for_server=true) ?ttl ?tos
                 if wait_for_server then
                     (* More luck later: *)
                     let d = jitter 0.1 !wait_server_delay in
-                    Simulation.delay ctx.sim (Clock.Interval.sec d) try_connect ()
+                    Simulation.delay ctx.power (Clock.Interval.sec d) try_connect ()
                 else
                     raise e
             | () ->
                 cont (Some (tcp_trx_of_socket ctx sock)) in
-        Simulation.asap ctx.sim try_connect ()
+        Simulation.asap ctx.power try_connect ()
     in
     match dst with
         | Host.IPv4 dst_ip ->
@@ -201,7 +208,8 @@ let tcp_server ctx src_port server_f =
  * machine running the simulation, joining it from outside, and the map has to
  * be able to show where that is. *)
 let make_ctx ?location sim =
-    { sim ; widget = Widget.make ~parent:sim.root ?location "localhost" }
+    { sim ; power = sim.Simulation.power ;
+      widget = Widget.make ~parent:sim.root ?location "localhost" }
 
 let host ?location sim =
     let ctx = make_ctx ?location sim in
@@ -221,11 +229,11 @@ let host ?location sim =
         todo "set ARP table of localhost"
     and power_on ?on_ip () =
         ignore on_ip
-    and power_off ?timeout () =
-        ignore timeout
-    and add_killer = ignore in
+    and power_off () = ()
+    and start ?on_ip () = ignore on_ip
+    and reset () = () in
     { Host.widget = ctx.widget ;
       tcp_connect ; udp_connect ; udp_send ; ping ;
       gethostbyname = gethostbyname ctx ; tcp_server = tcp_server ctx ; udp_server ; signal_err ;
       dev = { write = ignore ; set_read = ignore } ;
-      arp_set ; power_on ; power_off ; add_killer }
+      arp_set ; power_on ; power_off ; start ; reset ; power = ctx.power }
