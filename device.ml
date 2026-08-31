@@ -162,10 +162,41 @@ let addr name v =
     | Some ip -> ip
     | None -> Widget.bad_value "%s: %S is not an IP address" name s
 
-let mac name v =
-    let s = Widget.to_string v in
+let mac_of_string name s =
     try Eth.Addr.of_string s
     with _ -> Widget.bad_value "%s: %S is not a MAC address" name s
+
+let mac name v =
+    mac_of_string name (Widget.to_string v)
+
+(* [Ip.Cidr.of_string] resolves the address half, and resolving a name would
+ * hold the simulation's lock across a DNS lookup. *)
+let cidr name v =
+    let s = Widget.to_string v in
+    match String.split_on_char '/' s with
+    | [ addr ; width ] ->
+        (match Ip.Addr.of_dotted_string_opt addr, int_of_string_opt width with
+        | Some a, Some w when w >= 0 && w <= 32 -> Ip.Cidr.o (a, w)
+        | _ -> Widget.bad_value "%s: %S is not a CIDR" name s)
+    | _ -> Widget.bad_value "%s: %S is not a CIDR" name s
+
+(* An address within the range those leading octets describe, the rest picked
+ * at random. An empty range means [Eth.Addr.random], which picks a locally
+ * administered individual address rather than any 48 bits at all. *)
+let random_mac range =
+    if range = "" then Eth.Addr.random () else
+    let given = String.split_on_char ':' range |> List.filter ((<>) "") in
+    let n = List.length given in
+    if n > 5 then
+        Widget.bad_value "MAC range: %S leaves nothing to pick" range ;
+    List.iter (fun o ->
+        match int_of_string_opt ("0x"^ o) with
+        | Some v when v >= 0 && v <= 255 -> ()
+        | _ -> Widget.bad_value "MAC range: %S is not an octet" o
+    ) given ;
+    let rest =
+        List.init (6 - n) (fun _ -> Printf.sprintf "%02x" (Random.int 256)) in
+    Eth.Addr.of_string (String.concat ":" (given @ rest))
 
 (** {2 The catalogue} *)
 
@@ -295,9 +326,91 @@ let cable =
           Eth.Cable.plug st (a, pa) (b, pb) ;
           st.Eth.Cable.State.widget }
 
+(*$T random_mac
+  let pfx m = Bitstring.subbitstring (m : Eth.Addr.t :> Bitstring.t) 0 24 in \
+  Bitstring.equals (pfx (random_mac "00:11:22")) \
+                   (pfx (Eth.Addr.of_string "00:11:22:33:44:55"))
+  not (Eth.Addr.eq (random_mac "00:11:22") (random_mac "00:11:22"))
+  not (Eth.Addr.eq (random_mac "") (random_mac ""))
+  (try ignore (random_mac "zz") ; false with Widget.Bad_value _ -> true)
+  (try ignore (random_mac "00:11:22:33:44:55") ; false \
+   with Widget.Bad_value _ -> true)
+ *)
+
+(* One address per interface: the ones that were named, or ones picked within
+ * the range. *)
+let macs_of args n =
+    match String.trim (string args "MACs") with
+    | "" ->
+        let range = String.trim (string args "MAC range") in
+        Array.init n (fun _ -> random_mac range)
+    | s ->
+        let l =
+            String.split_on_char ',' s |>
+            List.map (fun a -> mac_of_string "MACs" (String.trim a)) in
+        if List.length l <> n then
+            Widget.bad_value "MACs: %d address(es) for %d port(s)"
+                (List.length l) n ;
+        Array.of_list l
+
+(* The two entries below build a machine and nothing more. A router arrives
+ * with an empty routing table and interfaces with no address, a gateway with
+ * whatever its two networks were said to be -- what a packet is to be done
+ * with is configuration, and configuration is what properties are for. What
+ * stays here is what a machine cannot be reconfigured into: how many sockets
+ * it has, and how big its tables are. *)
+let mac_params = [
+    param "MAC range" ~kind:String ~default:(`String "")
+        ~descr:"The leading octets every interface's address shares, \
+                \"00:11:22\" say, the rest being picked at random. \
+                Empty for addresses picked at random entirely." ;
+    param "MACs" ~kind:String ~default:(`String "")
+        ~descr:"The addresses themselves instead, comma separated, one per \
+                port, for when picking them is not good enough." ]
+
+let router =
+    { name = "router" ;
+      descr = "Forwards packets between its interfaces. It arrives with an \
+               empty routing table: where a packet is to go is \
+               configuration, not something the machine is built with." ;
+      params =
+          param "ports" ~kind:(IRange (1, 1024)) ~default:(`Int 4)
+              ~descr:"How many interfaces it has, each taking one cable." ::
+          mac_params ;
+      make = fun ~parent name args ->
+          let n = int args "ports" in
+          let macs = macs_of args n in
+          let widget = Widget.make ~parent name in
+          let (_ : Router.Router.t) = Router.Router.make ~macs n [] widget in
+          widget }
+
+let gateway =
+    { name = "gateway" ;
+      descr = "A router with a NAT, a DHCP server and a resolver behind it: \
+               one port to the outside world, one to the network it \
+               serves." ;
+      params = [
+          param "public address" ~kind:String ~default:(`String "192.0.2.1")
+              ~descr:"The address it is known by on the outside, and the one \
+                      it translates its network's traffic to." ;
+          param "LAN" ~kind:String ~default:(`String "192.168.0.0/24")
+              ~descr:"The network behind it, in CIDR notation. Its first \
+                      address is the gateway itself, the second the server that \
+                      hands out the rest." ;
+          param "max connections" ~kind:(IRange (1, 1_000_000))
+              ~default:(`Int 500)
+              ~descr:"How many translations its NAT holds at once." ] ;
+      make = fun ~parent name args ->
+          let public = addr "public address" (arg args "public address")
+          and lan = cidr "LAN" (arg args "LAN") in
+          let gw =
+              Router.make_gw ~parent ~name
+                  ~num_max_cnxs:(int args "max connections") public lan in
+          gw.Router.widget }
+
 (** Every kind of device that can be asked for, in the order the interface
  * offers them: what a network is mostly made of first. *)
-let all = [ host ; switch ; hub ; cable ]
+let all = [ host ; switch ; hub ; router ; gateway ; cable ]
 
 let find name =
     List.find_opt (fun t -> t.name = name) all
@@ -315,7 +428,17 @@ let find name =
  * answer to "may the API remove this?": what it cannot put back, it will not
  * take away. *)
 let of_widget (w : Widget.t) =
-    Option.bind w.Widget.device find
+    (* Nothing inside a device is one: the repeater within a switch is a
+     * repeater all right, and the router within a gateway is a router, but
+     * they are that switch's and that gateway's. One does not order, or
+     * return, the parts of a machine separately. Said once here rather than by
+     * every composite remembering to disown its parts. *)
+    let rec within_a_device (w : Widget.t) =
+        match w.parent with
+        | None -> false
+        | Some p -> p.Widget.device <> None || within_a_device p in
+    if within_a_device w then None
+    else Option.bind w.Widget.device find
 
 let make type_ ~parent name args =
     match find type_ with

@@ -233,10 +233,8 @@ struct
             owner = (fun _ -> widget) ;
             disconnect = R.disconnect t.hub } ;
         widget.Widget.device <- Some "switch" ;
-        (* You cannot plug a cable directly to the internal hub, nor delete it
-           on its own: it is a part of this switch, not a hub of its own. *)
+        (* You cannot plug a cable directly to the internal hub: *)
         t.hub.R.widget.Widget.ports <- Widget.no_ports ;
-        t.hub.R.widget.Widget.device <- None ;
         Widget.add_properties widget Widget.[
             metric_property "macs"
                 ~descr:"Number of MAC addresses remembered."

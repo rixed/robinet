@@ -723,6 +723,8 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
             ?public_netmask ?public_gw ?port_forwards public_ip local_cidr =
     (* We want all parts inherit this widget: *)
     let widget = Widget.make ~parent ?location name in
+    (* A whole machine, whatever it is made of inside. *)
+    widget.Widget.device <- Some "gateway" ;
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let broadcast = Ip.Cidr.all1s_addr local_cidr in

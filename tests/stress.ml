@@ -1360,17 +1360,95 @@ let test_http net cable duration nthreads
         check "a device says what kind of device it is"
             ((widget far).Widget.device = Some "host" &&
              (widget switch_id).Widget.device = Some "switch") ;
-        check "and its parts say they are not one"
-            ((adapter far).Widget.device = None &&
-             List.for_all (fun (c : Widget.t) -> c.device = None)
-                          (widget switch_id).Widget.children) ;
+        check "and a part of one says it is not a device at all"
+            ((adapter far).Widget.device = None) ;
+        (* The repeater inside a switch *is* a repeater, and says so. What it
+           is not is a device of its own: one does not order or return the
+           parts of a machine separately. *)
+        check "while a part that is a device in its own right says so"
+            (List.exists (fun (c : Widget.t) -> c.device = Some "hub")
+                         (widget switch_id).Widget.children) ;
         check "so deleting a device's adapter is refused"
             (del (adapter far).Widget.id = 400 && not (gone far)) ;
         check "and so is deleting the repeater inside a switch"
             (List.for_all (fun (c : Widget.t) -> del c.id = 400)
                           (widget switch_id).Widget.children) ;
+        check "and the interface says as much before being asked"
+            (match api "/api/simulations/%d/widgets/%d" net_id switch_id with
+            | 200, payload ->
+                Yojson.Basic.(from_string payload |> Util.member "deletable")
+                    = `Bool true &&
+                List.for_all (fun (c : Widget.t) ->
+                    match api "/api/simulations/%d/widgets/%d" net_id c.Widget.id with
+                    | 200, payload ->
+                        Yojson.Basic.(from_string payload |>
+                                      Util.member "deletable") = `Bool false
+                    | _ -> false) (widget switch_id).Widget.children
+            | _ -> false) ;
         check "while the whole device goes"
             (del far = 200 && gone far) ;
+
+        (* A machine arrives from the shop unconfigured: a router with as many
+           interfaces as were ordered, an empty routing table, and no address
+           on any of them. What it is to do with a packet comes later, as
+           properties do. *)
+        let r = created {|{"type":"router","name":"r1",
+                           "params":{"ports":3,"MAC range":"00:11:22"}}|} in
+        check "a router is built with the ports it was ordered with"
+            ((widget r).ports.count () = 3) ;
+        (* Unconfigured means unconfigured: an interface with no address of its
+           own has no admin host on it, so each of them is an adapter and
+           nothing else. *)
+        check "and arrives with nothing on its interfaces but their adapters"
+            (List.length (widget r).Widget.children = 3 &&
+             List.for_all (fun (c : Widget.t) ->
+                 List.map (fun (a : Widget.t) -> a.name) c.children = [ "eth" ])
+                 (widget r).Widget.children) ;
+        let macs_of id =
+            List.filter_map (fun (c : Widget.t) ->
+                match c.children with
+                | [ eth ] ->
+                    (match http port
+                             (Printf.sprintf
+                                 "/api/simulations/%d/widgets/%d/properties/MAC"
+                                 net_id eth.Widget.id) with
+                    | 200, payload ->
+                        Some Yojson.Basic.(from_string payload |>
+                                           Util.member "value")
+                    | _ -> None)
+                | _ -> None
+            ) (widget id).Widget.children in
+        check "with one address per interface, and no two the same"
+            (let macs = macs_of r in
+             List.length macs = 3 &&
+             List.length (List.sort_unique compare macs) = 3) ;
+        let plugged = created {|{"type":"host","name":"plugged",
+                                 "params":{"address":"10.9.0.11"}}|} in
+        check "a router can be cabled like anything else"
+            (fst (post {|{"type":"cable","name":"c","params":{"from":%d,"to":%d}}|}
+                       r plugged) = 200 &&
+             (widget r).ports.is_connected 0) ;
+        let g = created {|{"type":"gateway","name":"gw",
+                           "params":{"LAN":"10.42.0.0/24"}}|} in
+        check "a gateway offers its two sides and nothing from inside"
+            ((widget g).ports.count () = 2) ;
+        check "and the router within it is not a device of its own"
+            (List.for_all (fun (c : Widget.t) -> del c.id = 400)
+                          (widget g).Widget.children) ;
+        check "but the gateway itself is"
+            (del g = 200 && gone g) ;
+        check "and so is the router"
+            (del r = 200 && gone r) ;
+        check "a MAC that is not one is refused"
+            (fst (post {|{"type":"router","name":"x","params":{"MACs":"nope"}}|})
+                 = 400) ;
+        check "and so is a list that does not match the ports"
+            (fst (post {|{"type":"router","name":"x",
+                          "params":{"ports":2,"MACs":"00:11:22:33:44:55"}}|})
+                 = 400) ;
+        check "and a LAN that is not a network"
+            (fst (post {|{"type":"gateway","name":"x","params":{"LAN":"nope"}}|})
+                 = 400) ;
 
         (* Then, that it keeps answering while hammered from all sides -- which
          * is the whole point of myadmin living in its own simulation. *)

@@ -210,6 +210,10 @@ let json_of_widget (w : Widget.t) =
                 cannot be deleted here either. *)
              "device", (match w.device with None -> `Null
                                           | Some d -> `String d) ;
+             (* And whether that is a device this interface will remove, which
+                is not the same question: the repeater inside a switch is a
+                repeater, and still not something to be taken out on its own. *)
+             "deletable", `Bool (Device.of_widget w <> None) ;
              (* One answer per port a cable can be plugged into, saying whether
                 it has one already: how many there are is how many there are,
                 and which of them are still free is what the interface needs in
