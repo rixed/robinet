@@ -102,7 +102,12 @@ and ports =
        * router's interface rather than the router. Itself, for a device whose
        * ports are not widgets of their own -- a hub's and a switch's are
        * interchangeable, and a number for them would mean nothing. *)
-      owner : int -> t }
+      owner : int -> t ;
+      (* Undo what plugging a cable into port [n] did: the port stops emitting
+       * and says it is free again. There is no way back through [dev], since
+       * installing a reader is what marks a port connected in the first place,
+       * so the device has to offer the way out as well as the way in. *)
+      disconnect : int -> unit }
 
 and peer = { widget : t ;
              via : t option }
@@ -284,7 +289,8 @@ let no_ports = {
     (* Should never be called: *)
     is_connected = (fun _ -> assert false) ;
     dev = (fun _ -> assert false) ;
-    owner = (fun _ -> assert false) }
+    owner = (fun _ -> assert false) ;
+    disconnect = (fun _ -> assert false) }
 
 (* Beware that the widget graph is cyclic (parent/children and peers point back
  * at each other), so widgets must never be compared with the polymorphic
@@ -530,7 +536,8 @@ let ports_of w =
     { count = (fun () -> w.ports.count ()) ;
       is_connected = (fun n -> w.ports.is_connected n) ;
       dev = (fun n -> w.ports.dev n) ;
-      owner = (fun n -> w.ports.owner n) }
+      owner = (fun n -> w.ports.owner n) ;
+      disconnect = (fun n -> w.ports.disconnect n) }
 
 (*$T check_location
   (try check_location { lat = 45.75 ; lon = 4.85 } ; true with _ -> false)

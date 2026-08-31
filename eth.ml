@@ -336,6 +336,19 @@ struct
             Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Adding entry for iaddr %s to MAC %s from ARP table" (hexstring_of_bitstring iaddr) (match haddr_opt with None -> "None" | Some haddr -> Addr.to_string haddr)))) ;
             BitHash.replace t.arp_cache iaddr haddr_opt
 
+    let ignore_disconnected ~logger bits =
+        Log.(log logger Debug (lazy
+            (Printf.sprintf "Dropping %d bits sent to disconnected interface"
+                (bitstring_length bits))))
+
+    let disconnect t =
+        if t.connected then (
+            t.emit <- ignore_disconnected ~logger:t.widget.logger ;
+            t.connected <- false
+        ) else
+            Log.(log t.widget.logger Debug (lazy (
+                Printf.sprintf "Ignoring request to disconnect interface %s that is not connected" t.widget.name)))
+
     (** Create the state machine for an Ethernet communication.
      * @param mtu the maximum transmit unit (ie. you won't be able to send longer payloads)
      * @param mac the source {!Eth.Addr.t}
@@ -345,7 +358,6 @@ struct
      * @param proto the {!Proto.t} we want to transmit/receive.
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
-
     let make ?(mtu=1500) ?(delay=0.) ?(loss=0.) ?(mac=Addr.random ()) ?(gateways=[])
              ?(promisc=ignore) ?(do_proxy_arp=(fun _ -> false))
              ?(my_addresses=[]) ?(proto=Proto.ip4) ~parent
@@ -353,7 +365,7 @@ struct
         let widget = Widget.make ~parent "eth" in
         let t = {
             widget ; mac ; gateways ; proto ;
-            emit = ignore_bits ~logger:widget.logger ;
+            emit = ignore_disconnected ~logger:widget.logger ;
             recv = ignore_bits ~logger:widget.logger ;
             mtu ; promisc ; do_proxy_arp ;
             my_addresses ;
@@ -502,12 +514,13 @@ struct
     (** Transmit function. [tx t payload] Will send the payload. *)
     let tx (st : State.t) bits =
         Log.(log st.widget.logger Debug (lazy (Printf.sprintf "TX a payload of %d bytes (while MTU=%d)" (bytelength bits) st.mtu))) ;
-        if bytelength bits <= st.mtu then (
+        if bytelength bits > st.mtu then
+            Log.(log st.widget.logger Warning (lazy (Printf.sprintf "Dropping a frame larger than MTU (%d > %d)" (bytelength bits) st.mtu)))
+        else
             match dst_for st bits with
             | Ok (Dst dst) -> send st st.proto dst bits
             | Ok Postponed -> Log.(log st.widget.logger Debug (lazy (Printf.sprintf "...postponed")))
             | Error s -> Log.(log st.widget.logger Debug s)
-        ) (* TODO: else (re)fragment *)
 
     (** Receive function, called to input an Ethernet frame into the TRX. *)
     let rx (st : State.t) bits =
@@ -595,9 +608,11 @@ struct
                       set_read = fun f -> st.recv <- f } ;
               out = { write = rx st ;
                       set_read = fun f ->
-                        Log.(log st.widget.logger Debug (lazy "Connected!")) ;
-                        st.connected <- true ;
-                        st.emit <- f } } in
+                        st.emit <- f ;
+                        if not st.connected then (
+                            Log.(log st.widget.logger Info (lazy "Connected!")) ;
+                            st.connected <- true
+                        ) } } in
         (* An adapter is the one port of whatever owns it. *)
         st.widget.Widget.ports <- Widget.{
             count = (fun () -> 1) ;
@@ -605,7 +620,8 @@ struct
             dev = (fun _ -> trx.out) ;
             (* Where the chain ends: an adapter is a widget, and it is the one a
              * cable reaches. *)
-            owner = (fun _ -> st.widget) } ;
+            owner = (fun _ -> st.widget) ;
+            disconnect = (fun _ -> State.disconnect st) } ;
         trx
 end
 
@@ -693,6 +709,14 @@ struct
         mutable bit_shifts : Metric.Counter.t ; (** Casualties in individual bits *)
            (** Boolean: true if from [a] to [b] (see [Cable.make] *)
               last_packets : (bool * bitstring) OrdArray.t ;
+            (* How to tell each of the two ends that it is no longer
+             * connected, recorded by whoever plugged this cable in -- which is
+             * the only place that knows which port of which device each end
+             * went to. [None] until then, since a cable is built before it is
+             * plugged in, and either it reaches two ports or it reaches none.
+             * The only thing in a simulation that has to be undone by hand:
+             * everything else within a device is torn down with it. *)
+              mutable ends : ((unit -> unit) * (unit -> unit)) option ;
                     widget : Widget.t }
 
         let delay length = Clock.Interval.sec (length /. 3e9)
@@ -711,6 +735,7 @@ struct
                 tot_bits = Metric.Counter.make () ;
                 bit_shifts = Metric.Counter.make () ;
                 widget ;
+                ends = None ;
                 last_packets =
                     OrdArray.make history (false, empty_bitstring) } in
             Widget.add_properties widget Widget.[
@@ -736,6 +761,7 @@ struct
             t
     end
 
+    (* Transfer some bits along the cable *)
     let pass (st : State.t) dir bits =
         let len = bitstring_length bits in
         let prev_tot_bits = Metric.Counter.get st.tot_bits in
@@ -781,4 +807,44 @@ struct
         let trx = make st in
         Widget.make_peers widget_a ~via:st.widget widget_b ;
         a ==> trx <==> b
+
+    (** Plug a cable between port [pa] of [wa] and port [pb] of [wb]: wire the
+     * two together, remember how to let go of them, and record in the graph
+     * that this cable joins the widgets those two ports belong to.
+     *
+     * The ports-level counterpart of [connect], and the one to use when the
+     * ends are devices rather than bare trxs: it is the only place that knows
+     * which port of which device each end went to, which is what [disconnect]
+     * then needs. *)
+    let plug (st : State.t) ((wa : Widget.t), pa) ((wb : Widget.t), pb) =
+        (match st.ends with
+        | Some _ ->
+            (* Plugging it again would leave the first two ports emitting into
+             * a cable nothing can unplug them from. *)
+            invalid_arg ("Eth.Cable.plug: "^ Widget.full_name st.widget ^
+                         " is already plugged in")
+        | None -> ()) ;
+        let trx = make st in
+        wa.Widget.ports.dev pa -=> trx <=-> wb.Widget.ports.dev pb ;
+        st.ends <- Some ((fun () -> wa.Widget.ports.disconnect pa),
+                         (fun () -> wb.Widget.ports.disconnect pb)) ;
+        Widget.make_peers ~via:st.widget
+            (wa.Widget.ports.owner pa) (wb.Widget.ports.owner pb)
+
+    (** Unplug both ends, so that the ports they were on emit nothing and are
+     * free for another cable.
+     *
+     * The peering is not undone here: a cable that is unplugged is a cable that
+     * is going away, and deleting its widget scrubs every relation that went
+     * through it. *)
+    let disconnect (st : State.t) =
+        match st.ends with
+        | None ->
+            Log.(log st.widget.logger Debug (lazy (Printf.sprintf
+                "Ignoring request to unplug %s, which is not plugged in"
+                st.widget.name)))
+        | Some (unplug_a, unplug_b) ->
+            unplug_a () ;
+            unplug_b () ;
+            st.ends <- None
 end

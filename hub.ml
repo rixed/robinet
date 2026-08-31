@@ -74,6 +74,18 @@ struct
     (* Whether iface [n] has something on the other end. Set by [set_read]. *)
     let is_connected (t : t) n = t.is_connected.(n)
 
+    (* And undoes it: nothing is emitted to iface [n] any more, and it is free
+       for another cable. *)
+    let disconnect (t : t) n =
+        if t.is_connected.(n) then (
+            t.ifaces.(n) <-
+                Eth.State.ignore_disconnected ~logger:t.widget.logger ;
+            t.is_connected.(n) <- false
+        ) else
+            Log.(log t.widget.logger Debug (lazy (Printf.sprintf
+                "Ignoring request to disconnect iface %d, which is not \
+                 connected" n)))
+
     let make ~parent ?location n name =
         let widget = Widget.make ~parent ?location name in
         let t = {
@@ -88,7 +100,8 @@ struct
             dev = iface t ;
             (* Its ports are not widgets, and want no name: one is as good as
                another, so a cable is recorded as reaching the repeater. *)
-            owner = (fun _ -> widget) } ;
+            owner = (fun _ -> widget) ;
+            disconnect = disconnect t } ;
         Widget.add_properties widget Widget.[
             metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
                 (Metric.Counter.T t.ingress) ;
@@ -212,7 +225,8 @@ struct
             count = (fun () -> num_ifaces) ;
             is_connected = R.is_connected t.hub ;
             dev = iface t ;
-            owner = (fun _ -> widget) } ;
+            owner = (fun _ -> widget) ;
+            disconnect = R.disconnect t.hub } ;
         (* You cannot plug a cable directly to the internal hub: *)
         t.hub.R.widget.Widget.ports <- Widget.no_ports ;
         Widget.add_properties widget Widget.[

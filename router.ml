@@ -402,7 +402,8 @@ struct
             count = (fun () -> Array.length t.ifaces) ;
             is_connected = (fun n -> t.ifaces.(n).widget.ports.is_connected 0) ;
             dev = (fun n -> t.ifaces.(n).widget.ports.dev 0) ;
-            owner = (fun n -> t.ifaces.(n).widget.ports.owner 0) } ;
+            owner = (fun n -> t.ifaces.(n).widget.ports.owner 0) ;
+            disconnect = (fun n -> t.ifaces.(n).widget.ports.disconnect 0) } ;
         Widget.add_properties widget Widget.[
             property "errors probability" ~kind:(FRange (0., 1.))
                 ~descr:"Probability to report errors with ICMP."
@@ -685,7 +686,10 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
            repeater everything inside hangs off. *)
         owner = (function
             | 0 -> router.Router.ifaces.(1).Router.widget.Widget.ports.owner 0
-            | _ -> hub.Hub.Repeater.widget) } ;
+            | _ -> hub.Hub.Repeater.widget) ;
+        disconnect = (function
+            | 0 -> router.Router.ifaces.(1).Router.widget.Widget.ports.disconnect 0
+            | _ -> Hub.Repeater.disconnect hub 0) } ;
     let trx =
         { ins = in_trx ;
           out = out_trx.out } in

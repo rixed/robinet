@@ -69,14 +69,13 @@ type t =
 
 (** {2 Where a cable can be plugged} *)
 
-(* The port to use on [widget]: the one asked for, or the first one it has left,
- * as the widget it really belongs to and the device to write frames into.
+(* The port to use on [widget]: the one asked for, or the first one it has left.
  *
  * Which ports a widget has, and which of them are free, is the widget's own
  * answer (see [Widget.ports]) -- the device keeps that where it already had to,
  * so a cable plugged in by an OCaml program counts just as much as one plugged
  * in from here. *)
-let plug (widget : Widget.t) port =
+let free_port (widget : Widget.t) port =
     let ports = widget.ports.count () in
     if ports = 0 then
         Widget.bad_value "%s is not something a cable can be plugged into"
@@ -97,7 +96,7 @@ let plug (widget : Widget.t) port =
                 Widget.bad_value "every port of %s is taken (it has %d)"
                     (Widget.full_name widget) ports
             | Some p -> p) in
-    widget.ports.owner p, widget.ports.dev p
+    p
 
 (** {2 Reading the arguments} *)
 
@@ -280,25 +279,20 @@ let cable =
                   | _ -> None) in
           (* Both ports before the cable, so that a refusal at the second end
            * does not leave a cable hanging off the first. *)
-          let end_a, dev_a = plug a (opt args "from port" Widget.to_int)
-          and end_b, dev_b = plug b (opt args "to port" Widget.to_int) in
-          if end_a == end_b then
+          let pa = free_port a (opt args "from port" Widget.to_int)
+          and pb = free_port b (opt args "to port" Widget.to_int) in
+          (* What the cable will really reach. "Port 2 of R1" is a convenient
+           * way of saying "R1's third adapter", and it is the adapter the
+           * graph records -- which is what lets a topology be written down and
+           * read back with no port numbers in it. *)
+          if a.ports.owner pa == b.ports.owner pb then
               Widget.bad_value "both ends of this cable are %s"
-                  (Widget.full_name end_a) ;
+                  (Widget.full_name (a.ports.owner pa)) ;
           let st =
               Eth.Cable.State.make ~parent ?length
                                    ~error_rate:(float args "error rate")
                                    ~name () in
-          (* [Eth.Cable.connect] is the same thing between two trxs; the ports
-           * of the devices here are plain [dev]s. *)
-          let trx = Eth.Cable.make st in
-          dev_a -=> trx <=-> dev_b ;
-          (* Peered with what the cable reaches, not with what was named to ask
-           * for it: "port 2 of R1" is a convenient way of saying "R1's third
-           * adapter", and the widget graph is where the network itself is
-           * recorded. Which is also what lets a topology be written down and
-           * read back with no port numbers in it. *)
-          Widget.make_peers ~via:st.Eth.Cable.State.widget end_a end_b ;
+          Eth.Cable.plug st (a, pa) (b, pb) ;
           st.Eth.Cable.State.widget }
 
 (** Every kind of device that can be asked for, in the order the interface

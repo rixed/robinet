@@ -544,6 +544,92 @@ let start_admin () =
                 else None) in
     attempt 5
 
+(*
+ * 4. Unplugging a cable
+ *)
+
+(* The one thing in a simulation that has to be undone by hand: everything
+   inside a device goes away with it, but a cable reaches out of one device into
+   another, so both ends have to be told. What each end has to be told differs
+   -- an adapter clears a flag, a repeater puts an iface back to a sink -- and
+   the cable knows neither: it was handed the two undo functions when it was
+   plugged in. *)
+let test_disconnect () =
+    section "Unplugging a cable" ;
+    let sim = Simulation.make ~realtime:false "unplug" in
+    let parent = sim.Simulation.root in
+    let netmask = Ip.Addr.of_dotted_string_exc "255.255.255.0" in
+    let sw = Hub.Switch.make ~parent 2 8 "sw" in
+    let h =
+        Host.make_static ~parent ~netmask
+                         (Ip.Addr.of_dotted_string_exc "10.1.0.1") "h" in
+    let sw_w = sw.Hub.Switch.widget
+    and h_w = h.Host.trx.Host.widget in
+    (* Through the same call the creation API uses, which is the only place
+       that knows which port of which device either end went to. *)
+    let st = Eth.Cable.State.make ~parent ~name:"link" () in
+    Eth.Cable.plug st (sw_w, 1) (h_w, 0) ;
+
+    check "both ends report a cable"
+        (sw_w.Widget.ports.is_connected 1 &&
+         h_w.Widget.ports.is_connected 0) ;
+    (* Only the port it was plugged into: the one beside it was never taken. *)
+    check "and the ports beside them are untouched"
+        (not (sw_w.Widget.ports.is_connected 0)) ;
+
+    (* What the cable has carried, which is how "still plugged in" is told from
+       "no longer": a frame into the switch's other port is flooded to this one,
+       and crosses -- or does not. *)
+    let carried () =
+        match List.find (fun (p : Widget.property) -> p.name = "total bits")
+                        st.Eth.Cable.State.widget.Widget.properties with
+        | exception Not_found -> -1
+        | p ->
+            Yojson.Basic.Util.(
+                p.getter () |> member "values" |> to_list |>
+                List.fold_left (fun n v -> n + (member "value" v |> to_int)) 0) in
+    let flood () =
+        (* Addressed to everyone, so that the switch floods it rather than
+           deciding it has nowhere to send it. *)
+        let frame =
+            Bitstring.concat [ Bitstring.ones_bitstring 48 ;
+                               Bitstring.zeroes_bitstring (8 * 54) ] in
+        Hub.Switch.write sw 0 frame ;
+        Simulation.run sim false in
+    flood () ;
+    check "a frame flooded to it crosses" (carried () > 0) ;
+    let before = carried () in
+
+    (* And it cannot be plugged in twice: the first two ports would be left
+       emitting into a cable that nothing could unplug them from. *)
+    check "a cable already plugged in refuses to be plugged in again"
+        (try Eth.Cable.plug st (sw_w, 0) (h_w, 0) ; false
+         with Invalid_argument _ -> true) ;
+
+    Eth.Cable.disconnect st ;
+    flood () ;
+    check "and none does once it is unplugged" (carried () = before) ;
+    check "unplugging frees the adapter" (not (h_w.Widget.ports.is_connected 0)) ;
+    check "and the switch port, which is not an adapter at all"
+        (not (sw_w.Widget.ports.is_connected 1)) ;
+    check "so the port can be asked for again"
+        (Widget.first_free_port sw_w = Some 0 &&
+         Widget.first_free_port h_w = Some 0) ;
+    (* Deleting the cable widget is what takes it out of the graph -- which is
+       why [disconnect] does not have to. *)
+    Widget.delete st.Eth.Cable.State.widget ;
+    check "and deleting its widget unpairs the two ends"
+        (sw_w.Widget.peers = [] && (h_w.Widget.ports.owner 0).Widget.peers = []) ;
+
+    (* Those two ports are free, so another cable may take them -- and then the
+       first one must not be able to unplug it. Which is what forgetting the
+       ends is for: a cable that has let go has nothing left to let go of. *)
+    let st2 = Eth.Cable.State.make ~parent ~name:"link2" () in
+    Eth.Cable.plug st2 (sw_w, 1) (h_w, 0) ;
+    Eth.Cable.disconnect st ;
+    check "unplugging a cable a second time leaves the next one alone"
+        (sw_w.Widget.ports.is_connected 1 && h_w.Widget.ports.is_connected 0)
+
 let test_http net cable duration nthreads
               (hist_sim : Simulation.t) (hist_widget : Widget.t) =
     section "Administration interface over HTTP" ;
@@ -1142,6 +1228,7 @@ let main =
     test_speed net ;
     let samples_sim, samples_widget = test_metric_samples () in
     test_concurrency net cable duration nthreads ;
+    test_disconnect () ;
     test_http net cable duration nthreads samples_sim samples_widget ;
     Printf.printf "\n%d checks, %d failure(s)\n%!" !checks !failures ;
     (* Simulations run in threads of their own, which would otherwise keep the
