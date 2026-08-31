@@ -885,9 +885,10 @@ mapSay('hostA has no port of its own once opened', map.openA.ports[0], [ 1, [] ]
  * arbitrary one. */
 mapSay('a widget outside the map', map.elsewhere, null)
 
-/* And against the graph the demo actually has, where both ends of every cable
- * are already boxes on the plane: three cables, three edges, no port and
- * nothing hidden. */
+/* And against the graph the demo actually has: three cables, three edges,
+ * nothing hidden. Each lands on the switch itself -- whose ports are not
+ * widgets -- and on the adapter within the host it reaches, which is drawn as
+ * a port on the host's box. */
 const demoMap = await page.evaluate(() => {
     const d = Alpine.$data(document.body)
     const sim = d.sims.find(s => s.id !== d.servingId)
@@ -895,14 +896,16 @@ const demoMap = await page.evaluate(() => {
     const plane = planeOf(byId, sim.root)
     const { edges, inside } = mapEdges(byId, drawnSet(byId, plane, new Set()))
     return { plane: plane.map(id => byId[id].name),
-             edges: edges.map(e => [ byId[e.from].name, e.fromPort,
-                                     byId[e.to].name, e.toPort ]),
+             edges: edges.map(e => [ byId[e.from].name,
+                                     e.fromPort && byId[e.fromPort].name,
+                                     byId[e.to].name,
+                                     e.toPort && byId[e.toPort].name ]),
              inside: inside.size }
 })
 mapSay('the demo boxes', demoMap.plane, [ 'switch', 'host0', 'host1', 'host2' ])
 mapSay('the demo edges', demoMap.edges,
-       [ [ 'switch', null, 'host2', null ], [ 'switch', null, 'host1', null ],
-         [ 'switch', null, 'host0', null ] ])
+       [ [ 'switch', null, 'host2', 'eth' ], [ 'switch', null, 'host1', 'eth' ],
+         [ 'switch', null, 'host0', 'eth' ] ])
 mapSay('nothing hidden in the demo', demoMap.inside, 0)
 
 /* ---------------------------------------------------------- the two panes */

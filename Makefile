@@ -8,9 +8,9 @@ SOURCES  = \
 	clock.ml \
 	metric.ml \
 	log.ml \
+	tools.ml \
 	widget.ml \
 	simulation.ml \
-	tools.ml \
 	ordArray.ml \
 	payload.ml \
 	persist.ml \
@@ -43,6 +43,7 @@ SOURCES  = \
 	dhcpd.ml \
 	ip_nat.ml \
 	router.ml \
+	device.ml \
 	opache.ml \
 	search.ml \
 	myadmin_common.ml \

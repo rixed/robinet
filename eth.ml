@@ -580,13 +580,23 @@ struct
             (Addr.to_string st.mac)
             (List.print State.print_my_address) st.my_addresses
             (List.print State.print_gw) st.gateways))) ;
-        { ins = { write = tx st ;
-                  set_read = fun f -> st.recv <- f } ;
-          out = { write = rx st ;
-                  set_read = fun f ->
-                    Log.(log st.widget.logger Debug (lazy "Connected!")) ;
-                    st.connected <- true ;
-                    st.emit <- f } }
+        let trx =
+            { ins = { write = tx st ;
+                      set_read = fun f -> st.recv <- f } ;
+              out = { write = rx st ;
+                      set_read = fun f ->
+                        Log.(log st.widget.logger Debug (lazy "Connected!")) ;
+                        st.connected <- true ;
+                        st.emit <- f } } in
+        (* An adapter is the one port of whatever owns it. *)
+        st.widget.Widget.ports <- Widget.{
+            count = (fun () -> 1) ;
+            is_connected = (fun _ -> st.connected) ;
+            dev = (fun _ -> trx.out) ;
+            (* Where the chain ends: an adapter is a widget, and it is the one a
+             * cable reaches. *)
+            owner = (fun _ -> st.widget) } ;
+        trx
 end
 
 (** {2 Ethernet Cables}

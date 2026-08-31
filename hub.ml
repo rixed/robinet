@@ -34,21 +34,6 @@ struct
     let print oc t =
         Printf.fprintf oc "repeater %s with %d ifaces" t.widget.name (Array.length t.ifaces)
 
-    let make ~parent ?location n name =
-        let widget = Widget.make ~parent ?location name in
-        let t = {
-            ifaces = Array.make n (ignore_bits ~logger:widget.logger) ;
-            is_connected = Array.make n false ;
-            widget ;
-            ingress = Metric.Counter.make () ;
-            egress = Metric.Counter.make () } in
-        Widget.add_properties widget Widget.[
-            metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
-                (Metric.Counter.T t.ingress) ;
-            metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
-                (Metric.Counter.T t.egress) ] ;
-        t
-
     let forward_from (t : t) n pld =
         let now = Simulation.Widget.now t.widget in
         let sim = Simulation.of_widget t.widget in
@@ -75,7 +60,7 @@ struct
         t.is_connected.(n) <- true ;
         t.ifaces.(n) <- f
 
-    (** Turns a iface into a device *)
+    (** Turns an iface into a device *)
     let iface t n =
         { write = write t n ; set_read = set_read t n }
 
@@ -85,6 +70,31 @@ struct
     let first_free_iface t =
         try Some (Array.findi not t.is_connected)
         with Not_found -> None
+
+    (* Whether iface [n] has something on the other end. Set by [set_read]. *)
+    let is_connected (t : t) n = t.is_connected.(n)
+
+    let make ~parent ?location n name =
+        let widget = Widget.make ~parent ?location name in
+        let t = {
+            ifaces = Array.make n (ignore_bits ~logger:widget.logger) ;
+            is_connected = Array.make n false ;
+            widget ;
+            ingress = Metric.Counter.make () ;
+            egress = Metric.Counter.make () } in
+        widget.Widget.ports <- Widget.{
+            count = (fun () -> n) ;
+            is_connected = (fun i -> t.is_connected.(i)) ;
+            dev = iface t ;
+            (* Its ports are not widgets, and want no name: one is as good as
+               another, so a cable is recorded as reaching the repeater. *)
+            owner = (fun _ -> widget) } ;
+        Widget.add_properties widget Widget.[
+            metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
+                (Metric.Counter.T t.ingress) ;
+            metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
+                (Metric.Counter.T t.egress) ] ;
+        t
 end
 
 (** A Switch is a device that will forward Ethernet frames based on the observed
@@ -109,29 +119,6 @@ struct
 
     let print oc t =
         Printf.fprintf oc "switch %s with %d ifaces" t.widget.name (Array.length t.hub.ifaces)
-
-    (* [num_macs] is the maximum number of remembered MACs. *)
-    let make ~parent ?location num_ifaces num_macs name =
-        let widget = Widget.make ~parent ?location name in
-        let t = {
-            hub = R.make ~parent:widget num_ifaces "hub" ;
-            macs = OrdArray.init num_macs (fun _ -> { addr = None ; iface = 0 }) ;
-            macs_h = BitHash.create (num_macs/10) ;
-            widget ;
-            mac_size = Metric.Gauge.make () ;
-            mac_hits = Metric.Atomic.make () ;
-            mac_misses = Metric.Atomic.make () } in
-        Widget.add_properties widget Widget.[
-            metric_property "macs"
-                ~descr:"Number of MAC addresses remembered."
-                (Metric.Gauge.T t.mac_size) ;
-            metric_property "cache hits"
-                ~descr:"Number of MAC cache hits."
-                (Metric.Atomic.T t.mac_hits) ;
-            metric_property "cache misses"
-                ~descr:"Number of MAC cache misses."
-                (Metric.Atomic.T t.mac_misses) ] ;
-        t
 
     let update_macs t src ins =
         match BitHash.find_option t.macs_h src with
@@ -207,6 +194,36 @@ struct
 
     let first_free_iface t =
         R.first_free_iface t.hub
+
+    (* [num_macs] is the maximum number of remembered MACs. *)
+    let make ~parent ?location num_ifaces num_macs name =
+        let widget = Widget.make ~parent ?location name in
+        let t = {
+            hub = R.make ~parent:widget num_ifaces "hub" ;
+            macs = OrdArray.init num_macs (fun _ -> { addr = None ; iface = 0 }) ;
+            macs_h = BitHash.create (num_macs/10) ;
+            widget ;
+            mac_size = Metric.Gauge.make () ;
+            mac_hits = Metric.Atomic.make () ;
+            mac_misses = Metric.Atomic.make () } in
+        widget.Widget.ports <- Widget.{
+            count = (fun () -> num_ifaces) ;
+            is_connected = R.is_connected t.hub ;
+            dev = iface t ;
+            owner = (fun _ -> widget) } ;
+        (* You cannot plug a cable directly to the internal hub: *)
+        t.hub.R.widget.Widget.ports <- Widget.no_ports ;
+        Widget.add_properties widget Widget.[
+            metric_property "macs"
+                ~descr:"Number of MAC addresses remembered."
+                (Metric.Gauge.T t.mac_size) ;
+            metric_property "cache hits"
+                ~descr:"Number of MAC cache hits."
+                (Metric.Atomic.T t.mac_hits) ;
+            metric_property "cache misses"
+                ~descr:"Number of MAC cache misses."
+                (Metric.Atomic.T t.mac_misses) ] ;
+        t
 end
 
 (** A Tap is a 2 ifaces repeater which mirror each packet to a user function.

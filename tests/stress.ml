@@ -846,6 +846,230 @@ let test_http net cable duration nthreads
                       (Printf.sprintf "/api/simulations/%d/widgets/%d"
                           net_id net.root.Widget.id)) = 400) ;
 
+        (* Building a network from the outside. The catalogue says what can be
+           asked for, and what each of them has to be told; a POST asks for one.
+           Everything here goes through HTTP rather than through [Device]
+           directly, since what is being pinned is the API. *)
+        let post fmt =
+            Printf.ksprintf (fun body ->
+                http ~meth:"POST" ~body port
+                     (Printf.sprintf "/api/simulations/%d/widgets" net_id)) fmt in
+        let created fmt =
+            Printf.ksprintf (fun body ->
+                match http ~meth:"POST" ~body port
+                           (Printf.sprintf "/api/simulations/%d/widgets" net_id) with
+                | 200, payload ->
+                    Yojson.Basic.(from_string payload |> Util.member "id" |>
+                                  Util.to_int)
+                | status, payload ->
+                    incr failures ;
+                    Printf.printf "  FAIL creating %s: %d %s\n%!"
+                        body status payload ;
+                    -1) fmt in
+        let widget id =
+            match Widget.find net.root id with
+            | Some w -> w
+            | None -> failwith (Printf.sprintf "no widget %d" id) in
+        check "GET the catalogue of what can be built"
+            (match http port "/api/device-types" with
+            | 200, payload ->
+                let types =
+                    Yojson.Basic.(from_string payload |> Util.to_list |>
+                                  List.map (fun t ->
+                                      Util.(member "type" t |> to_string))) in
+                List.mem "host" types && List.mem "cable" types
+            | _ -> false) ;
+        (* Every parameter says what kind of value it is in the same words a
+           property does, which is what lets one dialog be built out of both. *)
+        check "a catalogue entry describes its parameters"
+            (match http port "/api/device-types" with
+            | 200, payload ->
+                Yojson.Basic.(
+                    from_string payload |> Util.to_list |>
+                    List.find (fun t -> Util.(member "type" t |> to_string) = "switch") |>
+                    Util.member "params" |> Util.to_list |>
+                    List.exists (fun p ->
+                        Util.(member "name" p |> to_string) = "ports" &&
+                        Util.member "default" p = `Int 8 &&
+                        Util.(member "kind" p |> member "type" |> to_string)
+                            = "range"))
+            | _ -> false) ;
+        let switch_id = created {|{"type":"switch","name":"built",
+                                   "params":{"ports":3,"MACs":8}}|} in
+        check "a device built from the API is in the tree"
+            (match Widget.find net.root switch_id with
+            | Some w -> w.Widget.name = "built"
+            | None -> false) ;
+        (* Made of the same parts as one an OCaml program would have built: a
+           switch is a hub that remembers, and the hub is a widget of its own. *)
+        check "and is made of what such a device is made of"
+            (match Widget.find net.root switch_id with
+            | Some w ->
+                (match w.Widget.children with
+                | [ c ] -> c.Widget.name = "hub"
+                | _ -> false)
+            | None -> false) ;
+        let host_a = created {|{"type":"host","name":"a",
+                                "params":{"address":"10.9.0.1"}}|}
+        and host_b = created {|{"type":"host","name":"b",
+                                "params":{"address":"10.9.0.2"}}|} in
+        let cable_of a b =
+            created {|{"type":"cable","name":"c","params":{"from":%d,"to":%d}}|}
+                    a b in
+        let joined = cable_of switch_id host_a in
+        (* Peered with what the cable reaches, which is not always what was
+           named to ask for it: a host is reached through its adapter, so that
+           is the end the graph records. A switch is reached at the switch --
+           its ports are not widgets, one being as good as another. *)
+        let adapter id =
+            List.find (fun (c : Widget.t) -> c.name = "eth")
+                      (widget id).Widget.children in
+        check "a cable makes peers of the two ends it joins"
+            (let c = widget joined in
+             let end_of w =
+                 List.find_opt (fun (p : Widget.peer) ->
+                     match p.via with Some v -> v == c | None -> false)
+                     w.Widget.peers in
+             match end_of (widget switch_id) with
+             | Some p -> p.widget == adapter host_a
+             | None -> false) ;
+        check "and the far end says the same the other way round"
+            (let c = widget joined in
+             List.exists (fun (p : Widget.peer) ->
+                 p.widget.Widget.id = switch_id &&
+                 (match p.via with Some v -> v == c | None -> false))
+                 (adapter host_a).Widget.peers) ;
+        (* And frames really cross it: a device added from the outside is on the
+           network, not merely in the picture of it. A host with no address of
+           its own starts asking a DHCP server for one the moment it is built,
+           so it is traffic nobody has to arrange. *)
+        let asker = created {|{"type":"host","name":"asker","params":{}}|} in
+        let asking = cable_of switch_id asker in
+        let bits_across id =
+            match Widget.find net.root id with
+            | None -> 0
+            | Some c ->
+                (match List.find (fun (p : Widget.property) ->
+                           p.name = "total bits") c.Widget.properties with
+                | exception Not_found -> 0
+                | p ->
+                    Yojson.Basic.Util.(
+                        p.getter () |> member "values" |> to_list |>
+                        List.fold_left (fun n v ->
+                            n + (member "value" v |> to_int)) 0)) in
+        check "the new network is wired, not merely drawn"
+            (wait_for (fun () -> bits_across asking > 0)) ;
+        (* And what crosses one cable reaches the far side of the next: the
+           switch forwards it, which is the whole of being connected. *)
+        check "and the device at the other end of the switch hears it"
+            (wait_for (fun () -> bits_across joined > 0)) ;
+        (* And it is a switch that is forwarding them, not the repeater it is
+           made of: the ports are the switch's own, so what arrives on one goes
+           through the address learning rather than straight out of every other
+           port. A switch that has learnt nothing has never seen a frame. *)
+        let learnt id =
+            match List.find (fun (p : Widget.property) -> p.name = "macs")
+                            (widget id).Widget.properties with
+            | exception Not_found -> false
+            | p -> Yojson.Basic.Util.member "first_last" (p.getter ()) <> `Null in
+        check "and it is the switch forwarding them, not the repeater inside it"
+            (wait_for (fun () -> learnt switch_id)) ;
+        check "which is therefore no port of its own"
+            (List.for_all (fun (c : Widget.t) -> c.ports.count () = 0)
+                          (widget switch_id).Widget.children) ;
+        (* Three ports, and the third one takes the last of them. *)
+        ignore (cable_of switch_id host_b) ;
+        let host_c = created {|{"type":"host","name":"c",
+                                "params":{"address":"10.9.0.5"}}|} in
+        check "one cable too many for the ports it has is refused"
+            (fst (post {|{"type":"cable","name":"c","params":{"from":%d,"to":%d}}|}
+                       switch_id host_c) = 400) ;
+        check "and so is a second cable on a host's single adapter"
+            (fst (post {|{"type":"cable","name":"c","params":{"from":%d,"to":%d}}|}
+                       host_a host_c) = 400) ;
+        check "an unknown kind of device is refused"
+            (fst (post {|{"type":"firewall","name":"fw"}|}) = 400) ;
+        check "a parameter that is not one is refused"
+            (fst (post {|{"type":"switch","name":"x","params":{"port":2}}|}) = 400) ;
+        check "a value out of range is refused"
+            (fst (post {|{"type":"switch","name":"x","params":{"ports":0}}|}) = 400) ;
+        check "an address that is not one is refused"
+            (fst (post {|{"type":"host","name":"x","params":{"address":"nope"}}|})
+             = 400) ;
+        (* [Ip.Addr.of_string] would have asked the resolver, which is a wait
+           this holds the simulation's lock across. *)
+        check "and a name is not resolved into one"
+            (fst (post {|{"type":"host","name":"x","params":{"address":"localhost"}}|})
+             = 400) ;
+        check "a device with no name is refused"
+            (fst (post {|{"type":"hub"}|}) = 400) ;
+        (* From a device with a port to spare, so that what is being refused is
+           the far end and not the near one. *)
+        let spare = created {|{"type":"host","name":"spare",
+                               "params":{"address":"10.9.0.7"}}|} in
+        check "a cable to something that takes none is refused"
+            (fst (post {|{"type":"cable","name":"c","params":{"from":%d,"to":%d}}|}
+                       spare net.root.Widget.id) = 400) ;
+        (* A host says nothing about ports itself: it is reached through its
+           adapter, and answers with whatever adapters it has. Which is why the
+           root of a simulation, which is reached through nothing, has none --
+           it is not that every ancestor inherits what is below it. *)
+        check "a host's ports are its adapter's"
+            ((widget host_a).ports.count () = 1 &&
+             List.exists (fun (c : Widget.t) ->
+                 c.name = "eth" && c.ports.count () = 1)
+                 (widget host_a).Widget.children) ;
+        check "and a simulation's root has none of its children's"
+            (net.root.ports.count () = 0) ;
+        (* Nothing writes down which ports are taken. The device is asked, and
+           answers from the flag it raises when a reader is installed on it --
+           which is what plugging a cable in does, whoever does it. So a cable
+           an OCaml program wired up itself is seen for what it is, without
+           anyone having had to say so. *)
+        let lone =
+            widget (created {|{"type":"host","name":"lone",
+                               "params":{"address":"10.9.0.6"}}|}) in
+        check "a port with nothing on it is free"
+            (not (lone.ports.is_connected 0)) ;
+        (lone.ports.dev 0).Tools.set_read ignore ;
+        check "and a cable plugged in by a program counts as one"
+            (lone.ports.is_connected 0) ;
+        (* The length of a cable is how long a frame takes to cross it, so where
+           the two ends are is the answer when nobody gives another. *)
+        let place id lat lon =
+            fst (http ~meth:"PUT"
+                      ~body:(Printf.sprintf {|{"lat":%g,"lon":%g}|} lat lon) port
+                      (Printf.sprintf "/api/simulations/%d/widgets/%d/location"
+                          net_id id)) in
+        let paris = created {|{"type":"host","name":"paris",
+                               "params":{"address":"10.9.0.3"}}|}
+        and lyon = created {|{"type":"host","name":"lyon",
+                              "params":{"address":"10.9.0.4"}}|} in
+        check "placing the two ends" (place paris 48.8566 2.3522 = 200 &&
+                                      place lyon 45.764 4.8357 = 200) ;
+        let long = cable_of paris lyon in
+        (* Which is all a saved topology needs: each end is a widget that takes
+           cables, so writing down the two ids is writing down the cable. No
+           port number travels, and none is needed -- where a port makes a
+           difference there is a widget for it, and where there is none the
+           ports are interchangeable. *)
+        check "and both ends are things a cable can be asked for again"
+            (match (widget joined).Widget.peers with
+            | [ x ; y ] ->
+                x.widget.Widget.ports.count () > 0 &&
+                y.widget.Widget.ports.count () > 0
+            | _ -> false) ;
+
+        check "a cable between two places is as long as the way between them"
+            (match http port
+                     (Printf.sprintf
+                         "/api/simulations/%d/widgets/%d/properties/length"
+                         net_id long) with
+            | 200, payload ->
+                Yojson.Basic.(from_string payload |> Util.member "value") =
+                    `Float 391499.
+            | _ -> false) ;
+
         (* Then, that it keeps answering while hammered from all sides -- which
          * is the whole point of myadmin living in its own simulation. *)
         Printf.printf "  (hammering for %gs with %d threads)\n%!"

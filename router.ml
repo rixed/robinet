@@ -338,6 +338,8 @@ struct
         let eth = Eth.State.make ?proto ?mtu ?delay ?loss ?mac ?my_addresses
                                  ~parent:widget () in
         let trx = Eth.TRX.make eth in
+        (* An interface is its adapter, as far as a cable is concerned. *)
+        widget.Widget.ports <- Widget.ports_of eth.Eth.State.widget ;
         { trx ; eth ; widget ; admin_host = None }
 
     let notify_never = { probability = 0. ; delay = 0. }
@@ -396,6 +398,11 @@ struct
         let egress = Metric.Counter.make () in
         let t = { ifaces ; routes ; widget ; notify_errs ; admin_reroute ;
                   load_balancing ; ingress ; egress } in
+        widget.Widget.ports <- Widget.{
+            count = (fun () -> Array.length t.ifaces) ;
+            is_connected = (fun n -> t.ifaces.(n).widget.ports.is_connected 0) ;
+            dev = (fun n -> t.ifaces.(n).widget.ports.dev 0) ;
+            owner = (fun n -> t.ifaces.(n).widget.ports.owner 0) } ;
         Widget.add_properties widget Widget.[
             property "errors probability" ~kind:(FRange (0., 1.))
                 ~descr:"Probability to report errors with ICMP."
@@ -541,6 +548,26 @@ struct
         "no revert" @? (counts = [| 0;0;0 |]) ;
     *)
 
+    (* A router's port n is its interface n, whatever order its parts were built
+       in, and whether it has a cable is the adapter's own answer. *)
+    (*$T make
+      let sim = Simulation.make ~realtime:false "router-ports" in \
+      let w = Widget.make ~parent:sim.Simulation.root "r" in \
+      let r = make 4 [] w in \
+      w.ports.count () = 4 && \
+      List.for_all (fun n -> \
+          w.ports.dev n == r.ifaces.(n).widget.ports.dev 0) \
+          [ 0 ; 1 ; 2 ; 3 ] && \
+      not (w.ports.is_connected 2) && \
+      ((w.ports.dev 2).Tools.set_read ignore ; \
+       w.ports.is_connected 2) && \
+      (* A cable to port n reaches interface n's adapter, and that is what a
+         cable joining it is recorded as reaching. *) \
+      List.for_all (fun n -> \
+          w.ports.owner n == r.ifaces.(n).widget.ports.owner 0 && \
+          (w.ports.owner n).Widget.name = "eth") [ 0 ; 1 ; 2 ; 3 ]
+     *)
+
     (*$>*)
 end
 
@@ -645,10 +672,42 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     (* FIXME: revisit that! Here we want a table (state must not contain functions
      * because we want to be able to serialize them) *)
     Named.serve dns_state h.trx ;
+    (* Two visible ports only: outside, inside. *)
+    widget.Widget.ports <- Widget.{
+        count = (fun () -> 2) ;
+        is_connected = (function
+            | 0 -> router.Router.ifaces.(1).Router.eth.Eth.State.connected
+            | _ -> Hub.Repeater.is_connected hub 0) ;
+        dev = (function 0 -> out_trx.out | _ -> in_trx) ;
+        (* The outward socket is the router's second adapter; the LAN one is the
+           repeater everything inside hangs off. *)
+        owner = (function
+            | 0 -> router.Router.ifaces.(1).Router.widget.Widget.ports.owner 0
+            | _ -> hub.Hub.Repeater.widget) } ;
     let trx =
         { ins = in_trx ;
           out = out_trx.out } in
     { trx ; widget ; dhcp_state ; dns_state ; nat_state }
+
+(* A gateway offers what a gateway has sockets for, and not one port per end
+   that happens to exist within it: the router's two interfaces, the hub's three
+   and the server's adapter are all spoken for inside. *)
+(*$T make_gw
+  let sim = Simulation.make ~realtime:false "gw-ports" in \
+  let gw = make_gw ~parent:sim.Simulation.root \
+                   (Ip.Addr.of_dotted_string_exc "80.82.17.127") \
+                   (Ip.Cidr.of_string "192.168.0.0/16") in \
+  gw.widget.ports.count () = 2 && \
+  gw.widget.ports.dev 0 == gw.trx.out && \
+  gw.widget.ports.dev 1 == gw.trx.ins && \
+  (* The outside socket is the router's second adapter, the LAN one the
+     repeater everything inside it hangs off. *) \
+  (gw.widget.ports.owner 0).Widget.name = "eth" && \
+  (gw.widget.ports.owner 1).Widget.name = "hub" && \
+  gw.widget.ports.owner 0 != gw.widget.ports.owner 1 && \
+  List.for_all (fun (c : Widget.t) -> c.ports.count() <= 3) \
+               gw.widget.Widget.children
+ *)
 
 (*$R make_gw
     (*Log.console_lvl := Log.Debug ;*)

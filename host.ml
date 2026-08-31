@@ -540,6 +540,9 @@ let on_init_nothing ?(on_ip:(t -> unit) option) (_t : t) =
     ignore on_ip
 
 let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget ?(init=on_init_nothing) eth_state eth_trx name =
+    (* For the API a cable reaches a host but in reality it reaches its
+       adapter. *)
+    widget.Widget.ports <- Widget.ports_of eth_state.Eth.State.widget ;
     let if_on t what f x =
         if t.on then f x else Log.(log widget.Widget.logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
     let rec t =

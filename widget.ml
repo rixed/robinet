@@ -74,8 +74,35 @@ type t =
        * placing a box is something the reader does, from the map. *)
       mutable location : location option ;
       logger : Log.t ;
+      (* Where a cable reaches the device this widget stands for, if anywhere *)
+      mutable ports : ports ;
       (* Setter and getter of configurable properties: *)
       mutable properties : property list }
+
+(* From a high-level perspective (the API), a cable reaches "port n of device d",
+ * not some internal TRX. Ports are a way to designate and reach those user
+ * visible sockets where a cable can be attached.
+ *
+ * A device made of other devices answers by calling theirs, and in doing so
+ * decides which of its parts each of its port numbers reaches. That decision is
+ * the point. A gateway is a router, a hub and a server wired together, and
+ * offers two ports -- the outside and the LAN -- while every other end inside it
+ * is already spoken for.
+ *
+ * Most widgets have none. *)
+and ports =
+    { (* How many cables the device takes. *)
+      count : unit -> int ;
+      (* Whether port [n] has one already. *)
+      is_connected : int -> bool ;
+      (* Port [n], as something to plug a cable into. *)
+      dev : int -> Tools.dev ;
+      (* The widget port [n] really belongs to, which is what a cable joining it
+       * is recorded as reaching: a host's adapter rather than the host, a
+       * router's interface rather than the router. Itself, for a device whose
+       * ports are not widgets of their own -- a hub's and a switch's are
+       * interchangeable, and a number for them would mean nothing. *)
+      owner : int -> t }
 
 and peer = { widget : t ;
              via : t option }
@@ -130,6 +157,11 @@ and kind =
     | Bool
     (* One of those values, and nothing else *)
     | Enum of string list
+    (* The id of another widget of the same simulation: what a cable's two ends
+     * are. Not an [Int], although that is what travels: the UI has the widgets
+     * of the simulation in hand and can offer them by name, which no number box
+     * can do. *)
+    | Widget_id
     (* A number known to lie within those bounds *)
     | FRange of float * float
     | IRange of int * int
@@ -246,6 +278,14 @@ let to_string = function
      * declared as a string still gets something usable when handed a number. *)
     | v -> Yojson.Basic.to_string v
 
+(* Most widgets have no ports: *)
+let no_ports = {
+    count = (fun () -> 0) ;
+    (* Should never be called: *)
+    is_connected = (fun _ -> assert false) ;
+    dev = (fun _ -> assert false) ;
+    owner = (fun _ -> assert false) }
+
 (* Beware that the widget graph is cyclic (parent/children and peers point back
  * at each other), so widgets must never be compared with the polymorphic
  * equality; use physical equality throughout. *)
@@ -272,6 +312,32 @@ let next_id =
  * spot on any map. Checked in the one place a location is ever stored, so that
  * neither a caller nor the API can install one that the map would then have to
  * cope with. *)
+(* The mean radius of the Earth, in metres. A sphere: the difference from the
+ * ellipsoid is a couple of parts in a thousand, which is nothing beside the
+ * question a distance is asked here -- how long a cable between two places has
+ * to be, and hence how long a frame takes to cross it. *)
+let earth_radius = 6_371_008.8
+
+(** How far apart two places are, in metres, along the ground. *)
+let distance a b =
+    let rad d = d *. Float.pi /. 180. in
+    let hav x = let s = sin (x /. 2.) in s *. s in
+    let h = hav (rad (b.lat -. a.lat)) +.
+            cos (rad a.lat) *. cos (rad b.lat) *. hav (rad (b.lon -. a.lon)) in
+    (* [min 1.] because a rounding error above one has no arcsine, and the two
+     * places that produce it are the antipodes. *)
+    2. *. earth_radius *. asin (sqrt (min 1. h))
+
+(* Paris to Lyon, a place to itself, and the antipodes -- the last of which is
+   where a rounding error above one would have turned the arcsine into a nan. *)
+(*$T distance
+  distance { lat = 48.8566 ; lon = 2.3522 } { lat = 45.764 ; lon = 4.8357 } \
+      |> Float.round |> ( = ) 391499.
+  distance { lat = 12. ; lon = 34. } { lat = 12. ; lon = 34. } = 0.
+  distance { lat = -90. ; lon = 0. } { lat = 90. ; lon = 0. } \
+      |> Float.round |> ( = ) 20015114.
+ *)
+
 let check_location { lat ; lon } =
     if not (Float.is_finite lat) || lat < -90. || lat > 90. then
         invalid_arg (Printf.sprintf
@@ -295,6 +361,7 @@ let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) name =
         peers = [] ;
         location ;
         logger ;
+        ports = no_ports ;
         properties } in
     (* Linking it to its parent is all the registration there is: a simulation's
      * inventory of widgets is that tree, reachable from its root.
@@ -440,6 +507,30 @@ let reparent t new_parent =
 let place t location =
     Option.may check_location location ;
     t.location <- location
+
+(** Which of [t]'s ports have a cable, in order. *)
+let ports_connected t = List.init (t.ports.count ()) t.ports.is_connected
+
+(** The first port of [t] with no cable, if it has one left. *)
+let first_free_port t =
+    let rec loop n =
+        if n >= t.ports.count () then None
+        else if t.ports.is_connected n then loop (n + 1)
+        else Some n in
+    loop 0
+
+(** The ports of [w], to be answered as one's own: for a device reached through
+ * one of its parts and numbering its ports the same way -- a host through its
+ * adapter, a router interface through its own. A device that has to say which
+ * of several parts each port reaches writes the three functions itself. *)
+let ports_of w =
+    (* All three read [w.ports] when they are called, not now: it is a mutable
+     * field, and a borrower that took [count] from the current record and
+     * [dev] from an older one would answer for ports it cannot reach. *)
+    { count = (fun () -> w.ports.count ()) ;
+      is_connected = (fun n -> w.ports.is_connected n) ;
+      dev = (fun n -> w.ports.dev n) ;
+      owner = (fun n -> w.ports.owner n) }
 
 (*$T check_location
   (try check_location { lat = 45.75 ; lon = 4.85 } ; true with _ -> false)

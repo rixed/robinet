@@ -33,7 +33,14 @@
     POST   /api/simulations/<id>/pause      freeze its clock
     POST   /api/simulations/<id>/resume     and let it run again
     POST   /api/simulations/<id>/step       run one event (?n= for more)
+    GET    /api/device-types               what can be built, and what each
+                                            kind of device has to be told
     GET    /api/simulations/<s>/widgets    its widgets; ?path=/a/b to filter
+                                            (each carries "ports": one boolean
+                                             per port, true when it has a cable)
+    POST   /api/simulations/<s>/widgets    add a device to it; the body is
+                                            {"type": ..., "name": ...,
+                                             "params": {...}}
     GET    /api/simulations/<s>/widgets/<w>
     DELETE /api/simulations/<s>/widgets/<w> delete it, and its children
     PUT    /api/simulations/<s>/widgets/<w>/location
@@ -106,6 +113,46 @@ let property_of_matches (widget : Widget.t) matches n =
  * Serialization
  *)
 
+(* What the value looks like, so that the interface can offer the right input.
+ * Shared by the properties of a widget and by the parameters a device is built
+ * from: the dialog that asks for the one is the panel that edits the other. *)
+let rec json_of_kind = function
+    | Widget.String -> `Assoc [ "type", `String "string" ]
+    | Int -> `Assoc [ "type", `String "int" ]
+    | Float -> `Assoc [ "type", `String "float" ]
+    | Bool -> `Assoc [ "type", `String "bool" ]
+    | Enum choices ->
+        `Assoc [ "type", `String "enum" ;
+                 "choices", `List (List.map (fun c -> `String c) choices) ]
+    (* Both ranges take the same shape, since the interface builds the same
+     * input out of either one; [int] says which values are acceptable, and
+     * therefore how the input must step.
+     * A bound that means "no bound" goes out as null rather than as its
+     * value: an infinity is not representable in JSON and would abort the
+     * serialization of the whole answer, and [max_int] is both meaningless
+     * as a slider end and beyond what a JSON number can carry exactly. *)
+    | FRange (mi, ma) ->
+        let bound f = if Float.is_finite f then `Float f else `Null in
+        `Assoc [ "type", `String "range" ; "int", `Bool false ;
+                 "min", bound mi ; "max", bound ma ]
+    | IRange (mi, ma) ->
+        let bound i =
+            if i = min_int || i = max_int then `Null else `Int i in
+        `Assoc [ "type", `String "range" ; "int", `Bool true ;
+                 "min", bound mi ; "max", bound ma ]
+    (* Counter, gauge or timed comes with the value: the metric says what
+     * it is. *)
+    | Metric ->
+        `Assoc [ "type", `String "metric" ]
+    (* Another widget of the same simulation, by id. The interface has them
+       all in hand and offers them by name. *)
+    | Widget_id ->
+        `Assoc [ "type", `String "widget" ]
+    (* The interface builds the input for what is inside and puts a tick
+       box in front of it; the value itself is null when there is none. *)
+    | Optional k ->
+        `Assoc [ "type", `String "optional" ; "of", json_of_kind k ]
+
 let json_of_property (p : Widget.property) =
     (* The value is read through the getter, which may fail on us: *)
     (* The value goes out as whatever it is -- a number stays a number -- so
@@ -116,38 +163,6 @@ let json_of_property (p : Widget.property) =
             bad_request "Cannot read property %S: %s" p.name
                 (Printexc.to_string e)
         | v -> v in
-    let rec loop = function
-        | Widget.String -> `Assoc [ "type", `String "string" ]
-        | Int -> `Assoc [ "type", `String "int" ]
-        | Float -> `Assoc [ "type", `String "float" ]
-        | Bool -> `Assoc [ "type", `String "bool" ]
-        | Enum choices ->
-            `Assoc [ "type", `String "enum" ;
-                     "choices", `List (List.map (fun c -> `String c) choices) ]
-        (* Both ranges take the same shape, since the interface builds the same
-         * input out of either one; [int] says which values are acceptable, and
-         * therefore how the input must step.
-         * A bound that means "no bound" goes out as null rather than as its
-         * value: an infinity is not representable in JSON and would abort the
-         * serialization of the whole answer, and [max_int] is both meaningless
-         * as a slider end and beyond what a JSON number can carry exactly. *)
-        | FRange (mi, ma) ->
-            let bound f = if Float.is_finite f then `Float f else `Null in
-            `Assoc [ "type", `String "range" ; "int", `Bool false ;
-                     "min", bound mi ; "max", bound ma ]
-        | IRange (mi, ma) ->
-            let bound i =
-                if i = min_int || i = max_int then `Null else `Int i in
-            `Assoc [ "type", `String "range" ; "int", `Bool true ;
-                     "min", bound mi ; "max", bound ma ]
-        (* Counter, gauge or timed comes with the value: the metric says what
-         * it is. *)
-        | Metric ->
-            `Assoc [ "type", `String "metric" ]
-        (* The interface builds the input for what is inside and puts a tick
-           box in front of it; the value itself is null when there is none. *)
-        | Optional k ->
-            `Assoc [ "type", `String "optional" ; "of", loop k ] in
     `Assoc [ "name", `String p.name ;
              "descr", `String p.descr ;
              (* What the figure is counted in, if anything: an empty string is
@@ -157,7 +172,7 @@ let json_of_property (p : Widget.property) =
              (* Say so even when there is a value to show: what the UI does
                 with a property must not depend on the moment it asked. *)
              "only_when_set", `Bool p.only_when_set ;
-             "kind", loop p.kind ;
+             "kind", json_of_kind p.kind ;
              "value", value ]
 
 (* Where the widget is in the world, or null: most widgets are nowhere, and the
@@ -186,6 +201,13 @@ let json_of_widget (w : Widget.t) =
              "children", `List (List.map (fun (c : Widget.t) -> `Int c.id)
                                          w.children) ;
              "peers", `List (List.map json_of_peer w.peers) ;
+             (* One answer per port a cable can be plugged into, saying whether
+                it has one already: how many there are is how many there are,
+                and which of them are still free is what the interface needs in
+                order to offer this widget as an end of a new cable. Empty for
+                most widgets, which are not things a cable reaches. *)
+             "ports", `List (List.map (fun connected -> `Bool connected)
+                                      (Widget.ports_connected w)) ;
              "location", json_of_location w.location ;
              (* Only the names here: values are a separate request, since they
               * are live and this listing is not. *)
@@ -294,6 +316,71 @@ let get_widget _mth matches _vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
     Simulation.borrow sim (fun () ->
         respond resp (json_of_widget (widget_of_matches sim matches 2)))
+
+(* What can be built, and what each of them has to be told. Independent of any
+ * simulation: the same catalogue builds into all of them. *)
+let get_device_types _mth _matches _vars _qry_body resp =
+    respond resp (`List (List.map (fun (t : Device.t) ->
+        `Assoc [ "type", `String t.name ;
+                 "descr", `String t.descr ;
+                 "params", `List (List.map (fun (p : Device.param) ->
+                     `Assoc [ "name", `String p.name ;
+                              "descr", `String p.descr ;
+                              "units", `String p.units ;
+                              "kind", json_of_kind p.kind ;
+                              (* What the dialog offers before anything is
+                                 typed. Null for a parameter that has no value
+                                 of its own until one is given. *)
+                              "default", p.default ]) t.params) ]
+    ) Device.all))
+
+(* Add a device to a simulation: the body says which kind, what to call it, and
+ * the characteristics that kind is built from (see [get_device_types]).
+ *
+ *   { "type": "switch", "name": "sw1", "params": { "ports": 24 } }
+ *
+ * Only whole devices, at the top of the tree, with the few characteristics that
+ * have to be settled before there is anything to configure. Everything else
+ * about the new device is a property of it, edited afterwards -- which is also
+ * the only order that can work, since which properties it has is decided by
+ * what is answered here.
+ *
+ * Answers with the widget that was built, as [get_widget] would. *)
+let create_widget _mth matches _vars qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    let json =
+        match Yojson.Basic.from_string qry_body with
+        | exception _ ->
+            bad_request "Not a device: %S (expected {\"type\": ..., \"name\": \
+                         ..., \"params\": {...}})" qry_body
+        | `Assoc _ as j -> j
+        | j -> bad_request "Not a device: %s" (Yojson.Basic.to_string j) in
+    let field name =
+        match Yojson.Basic.Util.member name json with
+        | `String s -> s
+        | `Null -> bad_request "A device needs a %S" name
+        | v -> bad_request "%S must be a string, not %s" name
+                   (Yojson.Basic.to_string v) in
+    let type_ = field "type" and name = field "name" in
+    if Device.find type_ = None then
+        bad_request "There is no such thing as a %S. See /api/device-types \
+                     for what there is" type_ ;
+    let params =
+        match Yojson.Basic.Util.member "params" json with
+        | `Null -> []
+        | `Assoc l -> l
+        | v -> bad_request "%S must be an object, not %s" "params"
+                   (Yojson.Basic.to_string v) in
+    Simulation.borrow sim (fun () ->
+        (* Under the lock, since building a device wires it into a graph the
+         * simulation is walking, and may schedule its first events. *)
+        match Device.make type_ ~parent:sim.root name params with
+        | exception Widget.Bad_value m ->
+            bad_request "Cannot make a %s: %s" type_ m
+        | w ->
+            Log.(log sim.root.logger Info (lazy (
+                Printf.sprintf "Added %s %S" type_ (Widget.full_name w)))) ;
+            respond resp (json_of_widget w))
 
 let delete_widget _mth matches _vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
@@ -561,4 +648,10 @@ let resources serving : (Str.regexp * Opache.resource) list =
             | "GET" -> get_widget mth matches vars qry_body resp
             | "DELETE" -> delete_widget mth matches vars qry_body resp
             | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
-    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets$", get_widgets ]
+    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "GET" -> get_widgets mth matches vars qry_body resp
+            | "POST" -> create_widget mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
+    Str.regexp "/api/device-types$", get_device_types ]
