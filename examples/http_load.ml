@@ -46,7 +46,7 @@ let run (sim : Simulation.t) ifname src_range num_srcs ?gateways ?search_sfx ?na
         Hub.Repeater.set_read hub i (gigabit h.trx.dev.write)
     ) hosts ;
     (* Link all these to the real world *)
-    let iface = Pcap.openif ~parent:sim.root ifname in
+    let iface = Pcap.openif ~widget:(Widget.make ~parent:sim.root ifname) ifname in
     Hub.Repeater.set_read hub num_srcs (Pcap.inject iface) ;
     (* Start the browsers *)
     List.iter (fun (h : Host.t) ->

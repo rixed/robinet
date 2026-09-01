@@ -27,7 +27,9 @@ open Tools
 let main =
     (* Everything this program does happens in this simulation. *)
     let sim = Simulation.make "dns_query" in
-    let iface = Pcap.openif ~parent:sim.Simulation.root "eth0" in
+    let ifname = "eth0" in
+    let widget = Widget.make ~parent:sim.root ifname in
+    let iface = Pcap.openif ~widget ifname in
     let src_ip  = ref "192.168.1.66"
     and netmask = ref "255.255.255.0"
     and src_eth = ref "12:34:56:78:9a:bc"

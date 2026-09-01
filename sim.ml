@@ -130,7 +130,8 @@ struct
 
     (** Returns a sink toward the real world via the named interface: *)
     let make_sink (sim : Simulation.t) iface_name =
-        let iface = Pcap.openif ~parent:sim.root ~caplen:1800 iface_name in
+        let widget = Widget.make ~parent:sim.root iface_name in
+        let iface = Pcap.openif ~widget ~caplen:1800 iface_name in
         (* As we always [connect] both read and write, just silently ignore
          * calls to [set_read] instead of reporting an error: *)
         let write bits =
@@ -152,7 +153,8 @@ struct
     (** Returns a net representing the external network via the given interface,
      * and the thread that sniffs packets. *)
     let make_real_net (sim : Simulation.t) iface_name =
-        let iface = Pcap.openif ~parent:sim.root ~caplen:1800 iface_name in
+        let widget = Widget.make ~parent:sim.Simulation.root iface_name in
+        let iface = Pcap.openif ~widget ~caplen:1800 iface_name in
         let emit = ref (fun _bits -> ()) in
         let plug = Plug.make iface_name { write = Pcap.inject iface ;
                                           set_read = fun em -> emit := em } in

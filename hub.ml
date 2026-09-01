@@ -97,9 +97,9 @@ struct
             egress = Metric.Counter.make () } in
         (* This repeater minted the supply above; a switch's inner one is a
            child of the switch, so deleting the switch reaches it. *)
-        widget.Widget.device <- Some "hub" ;
-        widget.Widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
-        widget.Widget.ports <- Widget.{
+        widget.device <- Some "hub" ;
+        widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
+        widget.ports <- Widget.{
             count = (fun () -> n) ;
             is_connected = (fun i -> t.is_connected.(i)) ;
             dev = iface t ;

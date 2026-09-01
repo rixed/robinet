@@ -180,6 +180,7 @@ let arg args name =
     try List.assoc name args
     with Not_found -> invalid_arg ("Device.arg: no parameter "^ name)
 
+let bool args name = Widget.to_bool (arg args name)
 let int args name = Widget.to_int (arg args name)
 let float args name = Widget.to_float (arg args name)
 let string args name = Widget.to_string (arg args name)
@@ -447,9 +448,27 @@ let gateway =
                   ~num_max_cnxs:(int args "max connections") public lan in
           gw.Router.widget }
 
+let portal =
+    { name = "portal" ;
+      descr = "Open a host's real interface to exchange packets with the real \
+               world. Will turn this simulation into real-time mode." ;
+      params = [
+          param "promisc" ~kind:Bool ~default:(`Bool true)
+              ~descr:"Open this interface in promiscuous mode." ;
+          param "filter" ~kind:String ~default:(`String "")
+              ~descr:"Filter to select packets to capture." ;
+          param "caplen" ~kind:(Optional (IRange (1, 65535))) ~default:`Null
+              ~descr:"Capture length (default to the interface MTU)." ] ;
+      make = fun ~parent name args ->
+          let promisc = bool args "promisc"
+          and filter = string args "filter"
+          and caplen = opt args "caplen" Widget.to_int in
+          let portal = Pcap.portal ~parent ~promisc ~filter ?caplen name in
+          portal.widget }
+
 (** Every kind of device that can be asked for, in the order the interface
  * offers them: what a network is mostly made of first. *)
-let all = [ host ; switch ; hub ; router ; gateway ; cable ]
+let all = [ host ; switch ; hub ; router ; gateway ; portal ; cable ]
 
 let find name =
     List.find_opt (fun t -> t.name = name) all

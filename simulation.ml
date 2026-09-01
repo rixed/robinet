@@ -331,7 +331,10 @@ let now t = !(t.now)
 let is_running t = t.continue
 
 let stop t () =
-    t.continue <- false ;
+    with_lock t (fun () ->
+        t.continue <- false ;
+        t.power.on <- false ;
+        t.events <- Events.empty) () ;
     Condition.signal t.cond
 
 (** Stop every simulation. *)
@@ -356,7 +359,7 @@ let at (p : power) (ts : Time.t) f x =
         Log.(log t.root.Widget.logger Debug (lazy (Printf.sprintf
             "Not scheduling anything at %s: %s is off"
             (Time.to_string ts) p.name)))
-    ) else
+    ) else (
         let epsilon = Interval.usec 1. in
         let rec loop ts =
             (* If ts was already bound in t.events, its previous binding disappears.
@@ -369,6 +372,7 @@ let at (p : power) (ts : Time.t) f x =
             ) in
         with_lock t loop ts ;
         signal_me t ()
+    )
 
 (** [delay d f x] will delay the execution of [f x] by the interval [d]. *)
 let delay (p : power) d f x =

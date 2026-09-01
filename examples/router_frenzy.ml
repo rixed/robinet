@@ -32,7 +32,7 @@ let forward_traffic (widget : Widget.t) ifname input_dev =
     let log_paquet what to_string f b =
         Log.(log widget.logger Debug (lazy (Printf.sprintf "%s: %s" what (to_string b)))) ;
         f b in
-    let iface = Pcap.openif ~parent:sim.root ifname in
+    let iface = Pcap.openif ~widget:(Widget.make ~parent:sim.root ifname) ifname in
     let pcap_to_string b =
         let len = Bitstring.bitstring_length b / 8 in
         Printf.sprintf "packet of %d byte(s)" len in

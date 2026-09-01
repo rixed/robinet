@@ -93,6 +93,8 @@ open Batteries
 open Bitstring
 open Tools
 
+let debug = false
+
 (** {2 Libpcap low level wrappers} *)
 
 (** Libpcap network interface handler. *)
@@ -104,7 +106,8 @@ external inject_ : iface_handler -> string -> unit = "wrap_pcap_inject"
 (** [sniff_ iface_handler] will return the next available packet as a string,
  * as well as its capture timestamp.
  * If timeout is set then the function will raise Not_found after that number of
- * seconds if not packet have been captured. *)
+ * seconds if no packets have been captured. It will raise End_of_file if the
+ * file descriptor has been closed. *)
 type sniff_ret_ =
     { sniffed_timestamp : Clock.Time.t ; sniffed_caplen : int ;
       sniffed_wirelen : int ; sniffed_bytes : string }
@@ -117,6 +120,8 @@ external sniff_ : ?timeout:float -> iface_handler -> sniff_ret_ = "wrap_pcap_rea
  * of 65535 will be chosen, which is probably not what you want. You should set
  * [caplen] = your {e MTU} size. *)
 external openif_ : string -> bool -> string -> int -> iface_handler = "wrap_pcap_make"
+
+external closeif_ : iface_handler -> unit = "wrap_pcap_close"
 
 
 (** {2 Pcap files} *)
@@ -271,6 +276,8 @@ let save sim ?caplen ?(dlt=Dlt.en10mb) fname =
         let pdu = Pdu.make fname ?caplen ~dlt (Simulation.now sim) bits in
         write_pdu pdu in
     write_bits, close
+
+(* TODO: a pcap recorder widget *)
 
 (** When trying to read packets from a file that doesn't look like a pcap file. *)
 exception Not_a_pcap_file
@@ -451,50 +458,48 @@ let play power tx fname =
     in
     Simulation.asap power read_next_pkt None
 
+(* TODO: a pcap player widget *)
+
 (** {2 User friendly functions for capturing/injecting packets} *)
 
 (** A network device opened for sniffing or injection *)
 type iface = { handler : iface_handler ;
                   name : string ;
-               (* Not mutable: the handler is opened with it, and libpcap has
-                * no way to change it afterwards. *)
                 caplen : int ;
-               (* A real interface is not something that can be switched off,
-                * so this is merely the mains of its simulation. *)
-                power : Simulation.power ;
+               (* Interfaces can be opened and closed, but that's still the same
+                * interface. There is nothing to reset and events need not be
+                * removed from the scheduler. So here the power is going to be
+                * the Simulation.mains. *)
+                 power : Simulation.power ;
                 widget : Widget.t }
+
+let default_caplen ifname =
+    if ifname = "any" then 65535
+    else mtu_of_iface ifname
 
 (** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is not set then {e MTU} for the
  * device will be chosen.
  *
- * [location] is where that interface is: a real one injecting real traffic is
- * a device of the simulated network like any other, and has to be somewhere on
- * the map for the traffic coming out of it to have come from anywhere. *)
-let openif ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
+ * Pass it a widget to log and pay for events. *)
+let openif ~widget ?(promisc=true) ?(filter="") ?caplen ifname =
     let caplen =
-        if ifname = "any" then
-            65535
-        else
-            Option.default_delayed (fun () -> mtu_of_iface ifname) caplen in
-    let widget = Widget.make ~parent ?location ifname in
+        Option.default_delayed (fun () -> default_caplen ifname) caplen in
     let iface = {
         handler = openif_ ifname promisc filter caplen ;
         name = ifname ;
-        caplen = caplen ;
+        caplen ;
         power = (Simulation.of_widget widget).Simulation.power ;
         widget } in
-    Widget.add_properties widget Widget.[
-        property "name" ~kind:String
-            ~descr:"Interface name."
-            ~getter:(fun () -> `String iface.name) ;
-        property "caplen" ~kind:Int ~units:"bytes"
-            ~descr:"Capture length, fixed when the interface was opened."
-            ~getter:(fun () -> `Int iface.caplen) ] ;
     (* A real interface only makes sense in a realtime simulation: *)
     Simulation.make_realtime (Simulation.of_widget widget) ;
     iface
+
+(** Never use the handler after that! *)
+let closeif iface =
+    Log.(log iface.widget.logger Info (lazy (Printf.sprintf "Closing interface %s" iface.name))) ;
+    closeif_ iface.handler
 
 (** [sniff iface] will return the next available packet as a Pcap.Pdu.t.
  *
@@ -552,14 +557,159 @@ let bytes_in           = Metric.Counter.make "Pcap/Bytes/In" "bytes"
 
 (** [sniffer iface rx] returns a thread that continuously sniff packets
  * and pass them to the [rx] function (via the Clock). *)
-let sniffer iface rx =
+let sniffer iface ?(while_=(fun () -> true)) rx =
     let rec loop () =
-        match none_if_exception sniff iface with
-        | None -> ()
-        | Some pdu ->
-            Simulation.synch (Simulation.of_widget iface.widget) ;
-            (* Metric.Atomic.fire packets_sniffed_ok ;
-               Metric.Counter.add bytes_in (Payload.length pdu.Pdu.payload) ; *)
-            Simulation.at iface.power pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
-            if Simulation.is_running (Simulation.of_widget iface.widget) then loop () in
+        if while_ () && iface.power.on then
+            (* Although we should not close the interface while this is running,
+             * sniff should just fail with End_of_file in those cases. *)
+            match sniff ~timeout:0.5 iface with
+            | exception End_of_file ->
+                Log.(log iface.widget.logger Warning (lazy (Printf.sprintf "Interface %s has been closed while in use!" iface.name)))
+            | exception Not_found ->
+                (* Loop to check the ending condition again *)
+                if debug then
+                    Log.(log iface.widget.logger Debug (lazy (Printf.sprintf "No packet to capture yet on interface %s" iface.name))) ;
+                loop ()
+            | exception e ->
+                Log.(log iface.widget.logger Error (lazy (Printf.sprintf "Cannot capture packet on %s: %s" iface.name (Printexc.to_string e))))
+            | pdu ->
+                Simulation.synch (Simulation.of_widget iface.widget) ;
+                (* Metric.Atomic.fire packets_sniffed_ok ;
+                   Metric.Counter.add bytes_in (Payload.length pdu.Pdu.payload) ; *)
+                Simulation.at iface.power pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
+                loop () in
     Thread.create loop ()
+
+(** A Pcap.portal is a widget representing a real network interface form the
+ * host, that can be added to a simulation and will have a single pluggable
+ * port where to attach cables, to exchange packets with a real interface. *)
+
+type portal = {
+   (* Share the widget with this iface: *)
+   mutable iface : iface option ;
+           (* Everything to rebuild the iface: *)
+          ifname : string ; (* Could be editable if we could rename widgets *)
+          widget : Widget.t ; (* Shared with the iface *)
+ (* Those three properties require closing/reopening the iface
+  * for a change to take effect. The handler is opened with it,
+  * and libpcap has no way to change it afterwards. *)
+ mutable promisc : bool ;
+  mutable filter : string ;
+  mutable caplen : int option ;
+    mutable emit : (bitstring -> unit) option ;
+  mutable reader : Thread.t option }
+
+let set_read (portal : portal) f =
+    Log.(log portal.widget.logger Debug (lazy (Printf.sprintf "Setting emitter for portal %s" portal.ifname))) ;
+    portal.emit <- Some f
+
+let is_connected portal =
+    portal.emit <> None
+
+let dev (portal : portal) =
+    { write = (fun bits ->
+        (* Any writer will hold the simulation lock so iface is not going to be
+         * closed before we are done writing *)
+        match portal.iface with
+        | Some iface -> inject iface bits
+        | None -> ()) ;
+      set_read = set_read portal }
+
+let disconnect portal =
+    if is_connected portal then (
+        Log.(log portal.widget.logger Debug (lazy (Printf.sprintf
+            "Disconnecting portal %s" portal.ifname))) ;
+        portal.emit <- None
+    ) else
+        Log.(log portal.widget.logger Debug (lazy (Printf.sprintf
+            "Ignoring request to disconnect portal %s, which is not \
+             connected" portal.ifname)))
+
+let power_down portal =
+    match portal.iface with
+    | Some iface ->
+        Log.(log iface.widget.logger Info (lazy ("Closing portal to "^ iface.name))) ;
+        (* Stop the reader thread *first*, then close the iface while nobody uses
+         * the handle. But do not wait with the lock: do the cleaning from another
+         * thread, releasing the simulation lock right now: *)
+        portal.iface <- None ;
+        Option.may (fun reader_thread ->
+            Thread.create (fun reader_thread ->
+                Thread.join reader_thread ;
+                (* Even if power_up have been called already on the same portal,
+                 * the new iface will be a new pcap handle so we can still close
+                 * this one safely: *)
+                closeif iface
+            ) reader_thread |> ignore
+        ) portal.reader ;
+        (* Also clear [portal.reader] while we have the lock: *)
+        portal.reader <- None ;
+    | None ->
+        Log.(log portal.widget.logger Debug (lazy
+            "Ignoring request to close closed portal."))
+
+let power_up portal =
+    Log.(log portal.widget.logger Info (lazy ("Opening portal to "^ portal.ifname))) ;
+    if portal.iface <> None then power_down portal ;
+    let iface =
+        openif ~widget:portal.widget ~promisc:portal.promisc
+               ~filter:portal.filter ?caplen:portal.caplen portal.ifname in
+    portal.iface <- Some iface ;
+    portal.reader <- Some (
+        sniffer iface
+            ~while_:(fun () ->
+                (* Continue as long as we uses the same iface: *)
+                match portal.iface with None -> false | Some i -> i == iface)
+            (fun bits ->
+                (* Use the current emit function not the one at power_up: *)
+                Option.may (fun emit -> emit bits) portal.emit))
+
+(* Create a portal.
+ * [location] is where that interface is: a real one injecting real traffic is
+ * a device of the simulated network like any other, and has to be somewhere on
+ * the map for the traffic coming out of it to have come from anywhere. *)
+let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
+    let widget = Widget.make ~parent ?location ifname in
+    let portal = {
+        iface = None ;
+        ifname ; widget ; promisc ; filter ; caplen ;
+        emit = None ;
+        reader = None } in
+    widget.device <- Some "portal" ;
+    widget.on_delete <- (fun () -> power_down portal) ;
+    widget.ports <- Widget.{
+        count = (fun () -> 1) ;
+        is_connected = (fun _ -> is_connected portal) ;
+        dev = (fun _ -> dev portal) ;
+        owner = (fun _ -> widget) ;
+        disconnect = (fun _ -> disconnect portal) } ;
+    Widget.add_properties widget Widget.[
+        property "on" ~descr:"The interface is opened." ~kind:Bool
+            ~getter:(fun () -> `Bool (portal.iface <> None))
+            ~setter:(fun v ->
+                let v = to_bool v in
+                try
+                    (if v then power_up else power_down) portal
+                with e ->
+                    bad_value "Cannot power %s interface %s: %s"
+                        (if v then "up" else "down") portal.ifname
+                        (Printexc.to_string e)) ;
+        property "name" ~kind:String
+            ~descr:"Interface name."
+            ~getter:(fun () -> `String portal.ifname) ;
+        property "promisc" ~kind:Bool
+            ~descr:"Is the interface opened in promiscuous mode."
+            ~getter:(fun () -> `Bool portal.promisc)
+            ~setter:(fun v -> portal.promisc <- to_bool v) ;
+        property "filter" ~kind:String
+            ~descr:"Filter applied to capture traffic."
+            ~getter:(fun () -> `String portal.filter)
+            ~setter:(fun v -> portal.filter <- to_string v) ;
+        property "caplen" ~kind:(Optional (IRange (1, 65535))) ~units:"bytes"
+            ~descr:"Capture length (or interface MTU)."
+            ~getter:(fun () ->
+                match portal.caplen with None -> `Null
+                | Some i -> `Int i)
+            ~setter:(fun v ->
+                portal.caplen <- to_option (to_int_range ~min:1 ~max:65535) v) ] ;
+    portal

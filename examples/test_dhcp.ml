@@ -33,6 +33,8 @@ let main =
     (* Everything this program does happens in this simulation. *)
     let sim = Simulation.make "test_dhcp" in
     Random.self_init () ;
-    let iface = Pcap.openif ~parent:sim.root "eth0" in
+    let ifname = "eth0" in
+    let widget = Widget.make ~parent:sim.root ifname in
+    let iface = Pcap.openif ~widget ifname in
     ignore (run sim iface) ;
     Simulation.run sim true

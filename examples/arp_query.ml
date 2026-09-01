@@ -54,7 +54,9 @@ let wait_answer iface target_ip_bits =
 let main =
     (* Everything this program does happens in this simulation. *)
     let sim = Simulation.make "arp_query" in
-    let iface = Pcap.openif ~parent:sim.Simulation.root "eth0" in
+    let ifname = "eth0" in
+    let widget = Widget.make ~parent:sim.root ifname in
+    let iface = Pcap.openif ~widget ifname in
     let src_ip_str = ref "192.168.66.147" and src_eth_str = ref "01:23:45:67:89:ab" in
     let resolve_one target_ip_str =
         let target_ip      = Ip.Addr.of_string target_ip_str in

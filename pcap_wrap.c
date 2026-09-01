@@ -47,7 +47,7 @@
 static void finalize(value v)
 {
     pcap_t *const handle = Pcap_val(v);
-    pcap_close(handle);
+    if (handle) pcap_close(handle);
 }
 
 static struct custom_operations ops = {
@@ -117,11 +117,23 @@ CAMLprim value wrap_pcap_make(value ifname_, value promisc_, value filter_, valu
     CAMLreturn(v);
 }
 
+CAMLprim value wrap_pcap_close(value handle_)
+{
+    CAMLparam1(handle_);
+    pcap_t *handle = Pcap_val(handle_);
+    if (! handle) caml_failwith("Pcap handle has been closed");
+    pcap_close(handle);
+    handle = NULL;
+    memcpy(Data_custom_val(handle_), &handle, sizeof(handle));
+    CAMLreturn(Val_unit);
+}
+
 CAMLprim value wrap_pcap_inject(value handle_, value str_)
 {
     CAMLparam2(handle_, str_);
 
     pcap_t *const handle = Pcap_val(handle_);
+    if (! handle) caml_failwith("Pcap handle has been closed");
 
     size_t size = caml_string_length(str_); // believed to be faster than strlen()
     char const *str = String_val(str_);
@@ -138,6 +150,7 @@ CAMLprim value wrap_pcap_read(value timeout_, value handle_)
 {
     CAMLparam2(timeout_, handle_);
     pcap_t *const handle = Pcap_val(handle_);
+    if (! handle) caml_failwith("Pcap handle has been closed");
     double const timeout =
         Is_block(timeout_) ? Double_val(Field(timeout_, 0)) : 0.;
     bool const have_timeout = timeout > 0;
@@ -159,7 +172,12 @@ retry:
     };
     int s = select(fd + 1, &set, NULL, NULL, have_timeout ? &timeout_s : NULL);
     if (s < 0) {
+        int const errno_ = errno;
         caml_acquire_runtime_system();
+        if (EBADF == errno_) {
+            // The file was closed while in select
+            caml_raise_end_of_file();
+        }
         caml_failwith(strerror(errno));
     } else if (s == 0) {
         // Timeout: return

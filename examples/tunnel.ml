@@ -25,7 +25,8 @@ open Batteries
 open Tools
 
 let tunnel (sim : Simulation.t) ifname tun_ip netmask mac gw search_sfx nameserver dst dst_port src_port =
-    let iface = Pcap.openif ~parent:sim.root ifname in
+    let widget = Widget.make ~parent:sim.root ifname in
+    let iface = Pcap.openif ~widget ifname in
     let gateways =
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) gw in
     let host = Host.make_static ~parent:sim.root ?gateways ?search_sfx ?nameserver ~mac ~netmask tun_ip "tun"

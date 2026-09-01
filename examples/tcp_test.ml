@@ -25,7 +25,8 @@ open Bitstring
 open Tools
 
 let perform_get (sim : Simulation.t) my_ip my_netmask mac peer_ip ?nameserver ?gw ifname url =
-    let iface = Pcap.openif ~parent:sim.root ifname in
+    let widget = Widget.make ~parent:sim.Simulation.root ifname in
+    let iface = Pcap.openif ~widget ifname in
     let get   = Printf.sprintf "GET %s HTTP/1.0\r\n\r\n" url in
     let gateways =
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) gw in
