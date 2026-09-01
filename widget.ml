@@ -185,7 +185,7 @@ and kind =
     (* "true" or "false", as the setter reads them *)
     | Bool
     (* One of those values, and nothing else *)
-    | Enum of string list
+    | Enum of string array
     (* The id of another widget of the same simulation: what a cable's two ends
      * are. Not an [Int], although that is what travels: the UI has the widgets
      * of the simulation in hand and can offer them by name, which no number box
@@ -216,6 +216,12 @@ and kind =
      * and every value of that property is then laid out the same way. Build
      * one with [record]. *)
     | Record of (string * kind) array
+    (* A value written a particular way, with an example of it: what the
+     * interface shows in the input while it is empty. Not a kind of its own --
+     * it is one more thing said about the value inside it -- and where a
+     * description explains what a value is for, this shows what one looks
+     * like. Build one with [hint]. *)
+    | Hint of string * kind
 
 (* What a kind is called when a refusal has to name it. *)
 let rec kind_name = function
@@ -230,6 +236,7 @@ let rec kind_name = function
     | Optional k -> "an optional value ("^ kind_name k ^")"
     | List k -> "a list of "^ kind_name k
     | Record _ -> "a record"
+    | Hint (_, k) -> kind_name k
 
 (* Only a value can be absent, and only once: [Optional (Optional _)] has no
  * second absence to describe, and a metric is a table that is always there --
@@ -247,6 +254,28 @@ let optional = function
   (try ignore (optional (Optional Int)) ; false with Invalid_argument _ -> true)
   (try ignore (optional Metric) ; false with Invalid_argument _ -> true)
   (try ignore (optional (list Int)) ; false with Invalid_argument _ -> true)
+ *)
+
+(** [k], with an example of how it is written: a port range as "min-max", an
+ * address as "192.168.0.1". It is shown in the input while that input is
+ * empty, so it is worth having wherever the name of a field does not say how
+ * to fill it in.
+ *
+ * Only what is typed into a single input has a shape to show. A table has no
+ * one input to show it in, and a value that may be absent is hinted through
+ * the value it may hold: [optional (hint "min-max" String)]. *)
+let hint h = function
+    | (Optional _ | Metric | List _ | Record _ | Hint _) as k ->
+        invalid_arg ("Widget.hint: nothing to write an example in for "^
+                     kind_name k)
+    | k -> Hint (h, k)
+
+(*$T hint
+  hint "a-b" String = Hint ("a-b", String)
+  optional (hint "a-b" String) = Optional (Hint ("a-b", String))
+  (try ignore (hint "x" (optional Int)) ; false with Invalid_argument _ -> true)
+  (try ignore (hint "x" (hint "y" Int)) ; false with Invalid_argument _ -> true)
+  (try ignore (hint "x" (list Int)) ; false with Invalid_argument _ -> true)
  *)
 
 (** A list of [k]. What may be repeated is a value the interface has a single
@@ -385,6 +414,20 @@ let to_int_range ?(min=min_int) ?(max=max_int) v =
         bad_value "%d is not in range (%s…%s)" i (bound min) (bound max)
     else i
 
+(*$T to_field
+  (try ignore (to_field "a" to_int (`Assoc [ "a", `String "x" ])) ; false \
+   with Bad_value m -> m = "a: not a whole number: \"x\"")
+  (try ignore (to_field "b" to_int (`Assoc [ "a", `Int 1 ])) ; false \
+   with Bad_value _ -> true)
+  to_field "a" to_int (`Assoc [ "a", `Int 1 ]) = 1
+ *)
+
+(*$T to_list
+  (try ignore (to_list to_int (`List [ `Int 1 ; `String "x" ])) ; false \
+   with Bad_value m -> m = "row 2: not a whole number: \"x\"")
+  to_list to_int (`List [ `Int 1 ; `Int 2 ]) = [ 1 ; 2 ]
+ *)
+
 (** Read a value that may be absent: [`Null] is the absence, anything else is
  * read by [f]. The counterpart of an [Optional] kind, for the setter of a
  * property whose field is an option. *)
@@ -398,7 +441,14 @@ let to_option f = function
  * table holds after the edit, not the edit itself, so a setter replaces its
  * list rather than patching it. *)
 let to_list f = function
-    | `List l -> List.map f l
+    (* Which row was refused, counted the way the interface numbers them: a
+     * table of a dozen routes that comes back "not a port number" leaves the
+     * reader to find which of them it was about. *)
+    | `List l ->
+        List.mapi (fun i v ->
+            try f v
+            with Bad_value msg -> bad_value "row %d: %s" (i + 1) msg
+        ) l
     | v -> bad_value "expected a list, not %s" (Yojson.Basic.to_string v)
 
 (** Read the field [name] of a record with [f]. The counterpart of a [Record]
@@ -412,7 +462,11 @@ let to_field name f = function
         (match List.assoc name l with
         | exception Not_found ->
             bad_value "no field %S in %s" name (Yojson.Basic.to_string v)
-        | v -> f v)
+        (* Whatever [f] refuses, it refuses about this field, and a record of
+         * eight of them has to say which one. Named here, once, rather than by
+         * the reader of every field of every record. *)
+        | v ->
+            (try f v with Bad_value msg -> bad_value "%s: %s" name msg))
     | v -> bad_value "expected a record, not %s" (Yojson.Basic.to_string v)
 
 let to_bool = function
@@ -426,6 +480,12 @@ let to_string = function
     (* Anything else is rendered as it would be on the wire, so that a property
      * declared as a string still gets something usable when handed a number. *)
     | v -> Yojson.Basic.to_string v
+
+(* Some common encoder to JSON: *)
+
+let json_of_optional sub = function
+    | None -> `Null
+    | Some v -> sub v
 
 (* Most widgets have no ports: *)
 let no_ports = {

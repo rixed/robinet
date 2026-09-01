@@ -19,6 +19,7 @@ depends: [
   "bitstring"
   "ocamlfind" {build}
   "ppx_bitstring"
+  "ppx_deriving" {build}
   "yojson"
 ]
 depexts: [

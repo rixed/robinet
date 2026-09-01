@@ -125,7 +125,9 @@ let rec json_of_kind = function
     | Bool -> `Assoc [ "type", `String "bool" ]
     | Enum choices ->
         `Assoc [ "type", `String "enum" ;
-                 "choices", `List (List.map (fun c -> `String c) choices) ]
+                 "choices",
+                    `List (Array.to_list choices |>
+                           List.map (fun c -> `String c)) ]
     (* Both ranges take the same shape, since the interface builds the same
      * input out of either one; [int] says which values are acceptable, and
      * therefore how the input must step.
@@ -169,6 +171,13 @@ let rec json_of_kind = function
                         List.map (fun (name, k) ->
                             `Assoc [ "name", `String name ;
                                      "kind", json_of_kind k ])) ]
+    (* Not a shape of its own on the wire: an example of how the value inside
+       is written, said alongside what that value is, so that the interface
+       reads it off whatever input it was going to build anyway. *)
+    | Hint (h, k) ->
+        (match json_of_kind k with
+        | `Assoc l -> `Assoc (l @ [ "placeholder", `String h ])
+        | j -> j)
 
 let json_of_property (p : Widget.property) =
     (* The value is read through the getter, which may fail on us: *)

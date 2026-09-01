@@ -120,13 +120,16 @@ let rec coerce name (kind : Widget.kind) v =
     | IRange (min, max) -> `Int (Widget.to_int_range ~min ~max v)
     | FRange (min, max) -> `Float (Widget.to_float_range ~min ~max v)
     | Enum choices ->
-        let s = Widget.to_string v in
-        if not (List.mem s choices) then
-            Widget.bad_value "%s must be one of %s, not %S"
-                name (String.concat ", " choices) s ;
-        `String s
+        let i = Widget.to_int v in
+        if i < 0 || i >= Array.length choices then
+            Widget.bad_value "Out of range value (%s) for %s"
+                (Yojson.Basic.to_string v) name ;
+        `Int i
     | Optional k ->
         (match v with `Null -> `Null | v -> coerce name k v)
+    (* How a value is written is the interface's business; what arrives here is
+       the value. *)
+    | Hint (_, k) -> coerce name k v
     | List k ->
         `List (Widget.to_list (coerce name k) v)
     | Record fields ->
@@ -494,7 +497,7 @@ let make type_ ~parent name args =
 (*$T coerce
   (try ignore (coerce "n" (Widget.IRange (0, 5)) (`Int 9)) ; false \
    with Widget.Bad_value _ -> true)
-  (try ignore (coerce "n" (Widget.Enum [ "a" ]) (`String "b")) ; false \
+  (try ignore (coerce "n" (Widget.Enum [| "a" |]) (`Int 9)) ; false \
    with Widget.Bad_value _ -> true)
   (try ignore (coerce "n" Widget.Metric (`Int 0)) ; false \
    with Widget.Bad_value _ -> true)

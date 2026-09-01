@@ -328,6 +328,7 @@ struct
           (* Hash of messages waiting for an ARP resolution.
            * dest_proto_addr -> msg *)
           postponed : bitstring BitHash.t ;
+          (* TODO: a gauge for how many packets are postponed *)
           (* Optional average delay to add to transmissions: *)
           mutable delay : float ;
           (* Optional packet loss ratio: *)
@@ -442,16 +443,15 @@ struct
                     (* Every row is read before any of them is installed, so
                        that a table with one bad row leaves the old one alone
                        rather than a half-replaced one behind. *)
-                    let ip what s =
+                    (* Which field it was about is added by [to_field]. *)
+                    let ip s =
                         match Ip.Addr.of_dotted_string_opt s with
                         | Some ip -> ip
-                        | None ->
-                            bad_value "%s: %S is not an IP address" what s in
+                        | None -> bad_value "%S is not an IP address" s in
                     let gateways =
                         to_list (fun row ->
                             let addr what =
-                                to_field what (fun v -> ip what (to_string v))
-                                          row in
+                                to_field what (fun v -> ip (to_string v)) row in
                             let via =
                                 to_field "via" (to_option (fun v ->
                                     let s = to_string v in
@@ -463,8 +463,8 @@ struct
                                         (match Ip.Addr.of_dotted_string_opt s with
                                         | Some ip -> Gateway.IPv4 ip
                                         | None ->
-                                            bad_value "via: %S is neither a \
-                                                       MAC nor an IP address" s)
+                                            bad_value "%S is neither a MAC nor \
+                                                       an IP address" s)
                                     | mac -> Gateway.Mac mac)) row in
                             { dest_ip = addr "destination" ;
                               mask = addr "mask" }, via

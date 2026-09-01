@@ -29,6 +29,7 @@ module Nat = Ip_nat
 (** Routes are instructions where to forward each incoming packet. *)
 module Route =
 struct
+    (*$< Route *)
     (* If we had a generic port module, this would go there *)
     type port_range = int * int (** Inclusive IP port range *)
 
@@ -126,6 +127,77 @@ struct
                 (List.print ~first:"" ~sep:", " ~last String.print)
                     (List.rev !tests)))) ;
         ok
+
+    (* Widget.kind for a route: the tests a packet must pass, then where it
+     * goes. Every test may be left out, and one left out is one not made.
+     *
+     * The fields whose name does not say how to fill them in carry an example
+     * of it (see [Widget.hint]): "src mask" is a network and not an address,
+     * and a port range is written in a way nobody would guess. *)
+    let kind num_ports =
+        Widget.(Record [|
+            "input port", optional (IRange (0, num_ports-1)) ;
+            "src mask", optional (hint "192.168.0.0/24" String) ;
+            "dst mask", optional (hint "192.168.0.0/24" String) ;
+            "ip proto", optional (IRange (0, 255)) ;
+            "src port", optional (hint "min-max" String) ;
+            "dst port", optional (hint "min-max" String) ;
+            "output port", optional (IRange (0, num_ports-1)) ;
+            "via", optional (hint "MAC or IP address" String) |])
+
+    (* One end of a port range, or one port on its own. Which field it was
+       about is added by whoever asked for it (see [Widget.to_field]). *)
+    let port_of_string s =
+        match int_of_string (String.trim s) with
+        | exception _ ->
+            Widget.bad_value "%S is not a port number" s
+        | p when p < 0 || p > 65535 ->
+            Widget.bad_value "port %d is not in 0…65535" p
+        | p -> p
+
+    (** Read a range of ports, written as the interface offers it: "min-max",
+     * or "min-" and "-max" for a range open at that end, or a single port on
+     * its own. Spaces anywhere are ignored, since a reader typing "80 - 443"
+     * has said exactly what they meant. *)
+    let port_range_of_string s =
+        let mi, ma =
+            match String.split_on_char '-' s with
+            (* No dash at all: one port, which is the range of that one port.
+               Written that way it is what most rules are about. *)
+            | [ one ] ->
+                let p = port_of_string one in p, p
+            (* An end left blank is that end of what a port can be, which is
+               what "everything above 1024" has to mean. *)
+            | [ lo ; hi ] ->
+                (if String.trim lo = "" then 0 else port_of_string lo),
+                (if String.trim hi = "" then 65535 else port_of_string hi)
+            | _ ->
+                Widget.bad_value
+                    "%S is not a port or a range of them (min-max)" s in
+        if mi > ma then
+            Widget.bad_value "%d-%d holds no port at all" mi ma ;
+        mi, ma
+
+    (*$= port_range_of_string & ~printer:dump
+      (80, 80)      (port_range_of_string "80")
+      (80, 443)     (port_range_of_string "80-443")
+      (80, 65535)   (port_range_of_string "80-")
+      (0, 443)      (port_range_of_string "-443")
+      (0, 65535)    (port_range_of_string "-")
+      (80, 443)     (port_range_of_string "  80 - 443  ")
+      (80, 80)      (port_range_of_string " 80 ")
+     *)
+    (*$T port_range_of_string
+      (try ignore (port_range_of_string "http") ; false \
+       with Widget.Bad_value _ -> true)
+      (try ignore (port_range_of_string "70000") ; false \
+       with Widget.Bad_value _ -> true)
+      (try ignore (port_range_of_string "443-80") ; false \
+       with Widget.Bad_value _ -> true)
+      (try ignore (port_range_of_string "1-2-3") ; false \
+       with Widget.Bad_value _ -> true)
+     *)
+    (*$>*)
 end
 
 (** A router is a device with N IP/Eth devices and a routing
@@ -150,6 +222,11 @@ struct
         | First (* Forward a packet to its first matching route *)
         | Flow (* Forward a packet to one matching route based on the socket pair *)
         | Random (* Pick a matching route at random *)
+        [@@deriving enum]
+
+    (* TODO: to_string_array with ppx_deriving.show if it happens again: *)
+    let all_load_balancing =
+        [| "first matching" ; "track flow" ; "random" |]
 
     (* Probability to send ICMP expiry messages after TTL expiration, and after
      * which delay (TODO: should also depend on how busy the router is): *)
@@ -170,7 +247,7 @@ struct
                * all the same box. *)
                        power : Simulation.power ;
                       widget : Widget.t ;
-              load_balancing : load_balancing ;
+      mutable load_balancing : load_balancing ;
                      ingress : Metric.Counter.t ;
                       egress : Metric.Counter.t }
 
@@ -284,10 +361,8 @@ struct
                 List.enum targets // (function
                     (* Actually, that's OK if out=in but then the router should
                      * generate also an ICMP redirect (see Stevens section 9.5) *)
-                    | Forward { out_iface ; _ }
-                        when in_iface_opt <> Some out_iface -> true
+                    | Forward { out_iface ; _ } -> in_iface_opt <> Some out_iface
                     | Admin -> true
-                    | _ -> false
                  ) |> Array.of_enum in
             let rs_len = Array.length targets in
             if rs_len = 0 then
@@ -447,12 +522,118 @@ struct
                 ~descr:"Report ICMP errors after that delay."
                 ~getter:(fun () -> `Float t.notify_errs.delay)
                 ~setter:(fun v -> t.notify_errs.delay <- to_float v) ;
+            property "routes" ~kind:(list (Route.kind num_ifaces))
+                ~descr:"The routing table"
+                ~getter:(fun () ->
+                    `List (
+                        List.map (fun (r : Route.t) ->
+                            let of_port_range (mi, ma) =
+                                `String (Printf.sprintf "%d-%d" mi ma) in
+                            `Assoc [
+                                "input port", json_of_optional (fun i -> `Int i) r.in_iface ;
+                                "src mask", json_of_optional (fun c -> `String (Ip.Cidr.to_string c)) r.src_mask ;
+                                "dst mask", json_of_optional (fun c -> `String (Ip.Cidr.to_string c)) r.dst_mask ;
+                                "ip proto", json_of_optional (fun (p : Ip.Proto.t) -> `Int (p :> int)) r.ip_proto ;
+                                "src port", json_of_optional of_port_range r.src_port ;
+                                "dst port", json_of_optional of_port_range r.dst_port ;
+                                "output port",
+                                    (match r.target with Admin -> `Null
+                                    | Forward { out_iface ; _ } -> `Int out_iface) ;
+                                "via",
+                                    (match r.target with
+                                    | Forward { via = Some v ; _ } ->
+                                        (match v with
+                                        | Eth.Gateway.Mac mac ->
+                                            `String (Eth.Addr.to_hexstring mac)
+                                        | IPv4 ip ->
+                                            `String (Ip.Addr.to_dotted_string ip))
+                                    | _ -> `Null) ]
+                        ) t.routes))
+                ~setter:(fun v ->
+                    (* The whole table, read before any of it is installed: a
+                       table with one bad row leaves the old one alone rather
+                       than a half-replaced one behind. The order is the order
+                       the rows arrive in, which is the order they are tried
+                       in -- so moving a row up the table in the interface is
+                       what gives it priority. *)
+                    let routes =
+                        to_list (fun row ->
+                            (* A field typed into. Blank is a field nobody
+                               filled in, which reads as one left out: an empty
+                               test is no test. Read through [to_field] rather
+                               than after it, so that whatever [f] refuses is
+                               refused under this field's name. *)
+                            let text what f =
+                                to_field what (function
+                                    | `Null -> None
+                                    | v ->
+                                        let s = String.trim (to_string v) in
+                                        if s = "" then None else Some (f s)
+                                ) row in
+                            let num what f = to_field what (to_option f) row in
+                            let iface what =
+                                num what (to_int_range ~min:0
+                                                       ~max:(num_ifaces - 1)) in
+                            let cidr s =
+                                match Ip.Cidr.of_string s with
+                                | exception _ ->
+                                    bad_value "%S is not a network \
+                                               (address/width)" s
+                                | cidr -> cidr in
+                            (* A MAC when it reads as one, an IP otherwise: the
+                               two things a gateway can be named by. *)
+                            let gateway s =
+                                match Eth.Addr.of_string s with
+                                | exception _ ->
+                                    (match Ip.Addr.of_dotted_string_opt s with
+                                    | Some ip -> Eth.Gateway.IPv4 ip
+                                    | None ->
+                                        bad_value "%S is neither a MAC nor an \
+                                                   IP address" s)
+                                | mac -> Eth.Gateway.Mac mac in
+                            let in_iface = iface "input port"
+                            and src_mask = text "src mask" cidr
+                            and dst_mask = text "dst mask" cidr
+                            and ip_proto =
+                                num "ip proto" (fun v ->
+                                    Ip.Proto.o (to_int_range ~min:0 ~max:255 v))
+                            and src_port = text "src port" Route.port_range_of_string
+                            and dst_port = text "dst port" Route.port_range_of_string
+                            and out_iface = iface "output port"
+                            and via = text "via" gateway in
+                            (* No way out is not a route that goes nowhere: it
+                               is a route to the router itself, which is what
+                               [Admin] is. The gateway goes with the way out,
+                               so with no way out there is nothing for it to
+                               qualify and it is dropped -- the getter will say
+                               so on the next read. *)
+                            let target =
+                                match out_iface with
+                                | None -> Route.Admin
+                                | Some out_iface -> Route.Forward { out_iface ; via } in
+                            Route.{ in_iface ; src_mask ; dst_mask ; ip_proto ;
+                                    src_port ; dst_port ; target }
+                        ) v in
+                    t.routes <- routes) ;
+            property "load balancing" ~kind:(Enum all_load_balancing)
+                ~descr:"Load balancing between matching routes."
+                ~getter:(fun () -> `Int (load_balancing_to_enum t.load_balancing))
+                ~setter:(fun v ->
+                    match load_balancing_of_enum (to_int v) with
+                    | None -> bad_value "Invalid enum for load_balancing: %s"
+                                (Yojson.Basic.to_string v)
+                    | Some lb -> t.load_balancing <- lb) ;
+            property "reroute admin" ~kind:Bool
+                ~descr:"Answers from the admin interface go through routing \
+                        instead of returning via the same interface it came from."
+                ~getter:(fun () -> `Bool t.admin_reroute)
+                ~setter:(fun v -> t.admin_reroute <- to_bool v) ;
             metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
                 (Metric.Counter.T t.ingress) ;
             metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
                 (Metric.Counter.T t.egress) ;
             property "tot ports" ~kind:Int ~descr:"Total number of ports."
-                ~getter:(fun () -> `Int (Array.length t.ifaces)) ] ;
+                ~getter:(fun () -> `Int num_ifaces) ] ;
         Array.iteri (fun n iface ->
             if iface.eth.my_addresses <> [] then (
                 (* Make that interface a host with an IP stack on top of eth: *)

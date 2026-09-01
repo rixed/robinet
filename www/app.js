@@ -22,6 +22,12 @@ const asText = (v) =>
  * the value it may hold. */
 const baseKind = (kind) => kind.type === 'optional' ? kind.of : kind
 
+/* An example of how the value is written, for the input to show while it is
+ * empty -- a port range as "min-max", a network as "192.168.0.0/24". Read from
+ * either side of an [optional], since a hint may be given for the value or for
+ * the possibility of it and both mean the same thing here. */
+const hintOf = (kind) => baseKind(kind).placeholder || kind.placeholder || ''
+
 /* What the field must show for a value that came from the simulator. A value
  * that is not set keeps whatever was in the field: the input is only disabled,
  * so ticking the box back hands the reader what they had. */
@@ -47,6 +53,13 @@ const cellValue = (c) => {
     switch (baseKind(c.kind).type) {
         case 'bool':
             return c.draft === true || c.draft === 'true'
+        /* Which of the choices, by its place among them: that is what the
+         * simulator keeps (see [Widget.Enum]), and the select holds it as the
+         * string an option's value attribute always is. */
+        case 'enum': {
+            const n = Number(c.draft)
+            return Number.isInteger(n) ? n : String(c.draft)
+        }
         case 'int': case 'float': case 'range': {
             const n = Number(c.draft)
             /* Send what was typed rather than guessing, and let the setter say
@@ -1475,9 +1488,37 @@ document.addEventListener('alpine:init', () => {
             return 'text'
         },
 
+        /* An example of how to write it, shown in the empty input: see
+         * [hintOf]. */
+        hint(x) {
+            return hintOf(x.kind)
+        },
+
+        /* The choice an enum's value stands for. Falls back to the number
+         * when there is no such choice, which is the interface and the
+         * simulator disagreeing about how many there are -- worth showing as
+         * it is rather than as a blank. */
+        choice(kind, i) {
+            const cs = baseKind(kind).choices
+            return cs && cs[i] !== undefined ? cs[i] : String(i)
+        },
+
+        /* What a property reads as when it is only read. An enum travels as
+         * the index of its choice, a number that means nothing on its own, so
+         * it reads as the choice. */
+        shown(p) {
+            if (p.value === null) return 'unset'
+            return baseKind(p.kind).type === 'enum' ? this.choice(p.kind, p.value)
+                                                    : p.text
+        },
+
         /* What one cell of a read-only table says. */
         cellText(c) {
-            return this.set(c) ? c.draft : 'unset'
+            if (!this.set(c)) return 'unset'
+            if (baseKind(c.kind).type !== 'enum') return c.draft
+            /* A cell of a row nobody has filled in yet has no choice, and no
+               index either: [choice] would answer for the first one. */
+            return c.draft === '' ? '' : this.choice(c.kind, Number(c.draft))
         },
 
         /* A table means something only once every cell of it has been filled:

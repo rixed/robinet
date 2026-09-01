@@ -362,8 +362,11 @@
                                                     <template x-if="base(f).type === 'enum'">
                                                         <select :disabled="!online" :class="{ unset: !set(f) }"
                                                                 x-model="f.draft" @change="enable(f)">
-                                                            <template x-for="c in base(f).choices" :key="c">
-                                                                <option :value="c" x-text="c"></option>
+                                                            <!-- Worth its place among the choices, not
+                                                                 its own text: that is what the
+                                                                 simulator keeps. -->
+                                                            <template x-for="(c, i) in base(f).choices" :key="i">
+                                                                <option :value="i" x-text="c"></option>
                                                             </template>
                                                         </select>
                                                     </template>
@@ -373,7 +376,7 @@
                                                                :class="{ unset: !set(f) }"
                                                                :min="base(f).min" :max="base(f).max"
                                                                :step="base(f).int ? 1 : 'any'"
-                                                               :placeholder="f.placeholder"
+                                                               :placeholder="f.placeholder || hint(f)"
                                                                x-model="f.draft" @input="enable(f)"/>
                                                     </template>
 
@@ -381,14 +384,14 @@
                                                         <input type="number" :disabled="!online"
                                                                :class="{ unset: !set(f) }"
                                                                :step="base(f).type === 'int' ? 1 : 'any'"
-                                                               :placeholder="f.placeholder"
+                                                               :placeholder="f.placeholder || hint(f)"
                                                                x-model="f.draft" @input="enable(f)"/>
                                                     </template>
 
                                                     <template x-if="base(f).type === 'string'">
                                                         <input type="text" :disabled="!online"
                                                                :class="{ unset: !set(f) }"
-                                                               :placeholder="f.placeholder"
+                                                               :placeholder="f.placeholder || hint(f)"
                                                                x-model="f.draft" @input="enable(f)"/>
                                                     </template>
 
@@ -550,7 +553,7 @@
                                                                && !structured(p)"
                                                       class="ro" :class="{ changed: fresh(p.changedAt),
                                                                            unset: p.value === null }"
-                                                      x-text="p.value === null ? 'unset' : p.text"></span>
+                                                      x-text="shown(p)"></span>
 
                                                 <template x-if="!p.read_only && base(p).type === 'bool'">
                                                     <input type="checkbox" :disabled="!online" :class="{ unset: !set(p) }"
@@ -562,8 +565,8 @@
                                                 <template x-if="!p.read_only && base(p).type === 'enum'">
                                                     <select :disabled="!online" :class="{ unset: !set(p) }"
                                                             x-model="p.draft" @change="enable(p) ; save(p)">
-                                                        <template x-for="c in base(p).choices" :key="c">
-                                                            <option :value="c" x-text="c"></option>
+                                                        <template x-for="(c, i) in base(p).choices" :key="i">
+                                                            <option :value="i" x-text="c"></option>
                                                         </template>
                                                     </select>
                                                 </template>
@@ -591,12 +594,14 @@
                                                     <input type="number" :disabled="!online"
                                                            :class="{ unset: !set(p) }"
                                                            :step="base(p).type === 'int' ? 1 : 'any'"
+                                                           :placeholder="hint(p)"
                                                            x-model="p.draft" @input="enable(p)"
                                                            @keydown.enter="save(p)" @blur="save(p)"/>
                                                 </template>
 
                                                 <template x-if="!p.read_only && base(p).type === 'string'">
                                                     <input type="text" :disabled="!online" :class="{ unset: !set(p) }"
+                                                           :placeholder="hint(p)"
                                                            x-model="p.draft" @input="enable(p)"
                                                            @keydown.enter="save(p)" @blur="save(p)"/>
                                                 </template>
@@ -663,8 +668,8 @@
                                                                                 <template x-if="!p.read_only && cellInput(c) === 'enum'">
                                                                                     <select :disabled="!online" :class="{ unset: !set(c) }"
                                                                                             x-model="c.draft" @change="enable(c) ; touch(p)">
-                                                                                        <template x-for="ch in base(c).choices" :key="ch">
-                                                                                            <option :value="ch" x-text="ch"></option>
+                                                                                        <template x-for="(ch, i) in base(c).choices" :key="i">
+                                                                                            <option :value="i" x-text="ch"></option>
                                                                                         </template>
                                                                                     </select>
                                                                                 </template>
@@ -681,6 +686,7 @@
                                                                                            :step="base(c).type === 'int' ||
                                                                                                   (base(c).type === 'range' && base(c).int)
                                                                                                   ? 1 : 'any'"
+                                                                                           :placeholder="hint(c)"
                                                                                            x-model="c.draft"
                                                                                            @input="enable(c) ; touch(p)"/>
                                                                                 </template>
@@ -688,6 +694,7 @@
                                                                                 <template x-if="!p.read_only && cellInput(c) === 'text'">
                                                                                     <input type="text" :disabled="!online"
                                                                                            :class="{ unset: !set(c) }"
+                                                                                           :placeholder="hint(c)"
                                                                                            x-model="c.draft"
                                                                                            @input="enable(c) ; touch(p)"/>
                                                                                 </template>
