@@ -93,7 +93,7 @@ struct
        mutable nat_pings : bool ;                       (** whether to NAT outgoing PINGs or to drop them *)
        mutable send_errs : bool ;                       (** whether to send ICMP/TCP errors on bad incoming packets *)
     mutable answer_pings : bool ;                       (** whether to answer incoming pings in absence of port forwarding *)
-           port_forwards : port_forward list ;
+   mutable port_forwards : port_forward list ;
                     cnxs : cnx OrdArray.t ;             (** all the cnxs we remember, either port or ICMP based *)
               inc_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets INComing from the outside (the value is the index in [cnxs]) *)
               out_cnxs_h : (socket, int) Hashtbl.t ;    (** the hash to retrieve cnxs of packets OUTgoing to the outside *)
@@ -151,6 +151,38 @@ struct
                 ~kind:Int
                 ~getter:(fun () -> `Int t.min_port)
                 ~setter:(fun v -> t.min_port <- checked_min_port (to_int v)) ;
+            property "port forwards"
+                ~kind:(list (record [| "protocol", IRange (0, 255) ;
+                                       "external port", IRange (1, 65535) ;
+                                       "internal IP", String ;
+                                       "internal port", IRange (1, 65535) |]))
+                ~descr:"Inbound connections to those ports can be forwarded to \
+                        specific addresses and ports."
+                ~getter:(fun () ->
+                    `List (
+                        List.map (fun pf ->
+                            `Assoc [
+                                "protocol", `Int (pf.proto :> int) ;
+                                "external port", `Int pf.ext_port ;
+                                "internal IP",
+                                    `String (Ip.Addr.to_dotted_string pf.internal_ip) ;
+                                "internal port", `Int pf.internal_port ]
+                        ) t.port_forwards))
+                ~setter:(fun v ->
+                    t.port_forwards <-
+                        to_list (fun row ->
+                            let port what =
+                                to_field what (to_int_range ~min:1 ~max:65535) row in
+                            let proto =
+                                to_field "protocol" (fun v ->
+                                    Ip.Proto.o (to_int_range ~min:0 ~max:255 v)) row
+                            and ext_port = port "external port"
+                            and internal_ip =
+                                to_field "internal ip" (fun v ->
+                                    Ip.Addr.of_string (to_string v)) row
+                            and internal_port = port "internal port" in
+                            { proto ; ext_port ; internal_ip ; internal_port }
+                        ) v) ;
             property "NAT pings"
                 ~descr:"Whether to NAT outgoing pings or to drop them."
                 ~kind:Bool

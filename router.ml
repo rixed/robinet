@@ -556,7 +556,7 @@ struct
                        the rows arrive in, which is the order they are tried
                        in -- so moving a row up the table in the interface is
                        what gives it priority. *)
-                    let routes =
+                    t.routes <-
                         to_list (fun row ->
                             (* A field typed into. Blank is a field nobody
                                filled in, which reads as one left out: an empty
@@ -613,8 +613,7 @@ struct
                                 | Some out_iface -> Route.Forward { out_iface ; via } in
                             Route.{ in_iface ; src_mask ; dst_mask ; ip_proto ;
                                     src_port ; dst_port ; target }
-                        ) v in
-                    t.routes <- routes) ;
+                        ) v) ;
             property "load balancing" ~kind:(Enum all_load_balancing)
                 ~descr:"Load balancing between matching routes."
                 ~getter:(fun () -> `Int (load_balancing_to_enum t.load_balancing))
