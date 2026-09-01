@@ -85,8 +85,12 @@ let sniffer (power : Simulation.power) iface rx =
             Simulation.synch sim ;
             (* Metric.Atomic.fire packets_sniffed_ok ;
                Metric.Counter.add bytes_in (Payload.length pdu.Pcap.Pdu.payload) ; *)
+            (* [sniff] dates a packet by the wall clock, having no simulation
+               to ask; this does, and the two are not the same instant unless
+               they were never parted (see [Simulation.make_realtime]). *)
+            let ts = Simulation.of_wall_clock sim pdu.ts in
             if debug then Printf.printf "Tap(%s): Got packet for ts %s\n%!"
-                iface.name (Clock.Time.to_string pdu.ts) ;
-            Simulation.at power pdu.ts rx (pdu.payload :> bitstring) ;
+                iface.name (Clock.Time.to_string ts) ;
+            Simulation.at power ts rx (pdu.payload :> bitstring) ;
             if Simulation.is_running sim then loop () in
     Thread.create loop ()

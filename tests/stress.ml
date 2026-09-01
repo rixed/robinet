@@ -150,7 +150,7 @@ let test_clock net =
     Thread.delay 0.05 ;
     let after_step = Simulation.now net in
     check_between "step advanced by exactly 5 ticks" 0.49 0.51
-        (Clock.Time.sub after_step paused_at :> float) ;
+        (Clock.Time.diff after_step paused_at :> float) ;
     check "still paused after stepping" net.Simulation.paused ;
 
     (* Resuming must account for the wall clock time spent paused, or every
@@ -171,7 +171,7 @@ let test_clock net =
 let measure_speed net wall =
     let t0 = Simulation.now net in
     Thread.delay wall ;
-    (Clock.Time.sub (Simulation.now net) t0 :> float) /. wall
+    (Clock.Time.diff (Simulation.now net) t0 :> float) /. wall
 
 let test_speed net =
     section "Clock: speed against the wall clock" ;
@@ -213,7 +213,7 @@ let test_speed net =
         (wait_for (fun () -> net.Simulation.steps = 0)) ;
     Thread.delay 0.05 ;
     check_between "and stepped by exactly five ticks" 0.49 0.51
-        (Clock.Time.sub (Simulation.now net) before :> float) ;
+        (Clock.Time.diff (Simulation.now net) before :> float) ;
     Simulation.resume net () ;
 
     (* Back to what the other tests expect. *)
@@ -293,7 +293,7 @@ let test_metric_samples () =
        simulation dispatches anything and the grid only starts after it. *)
     let gaps_of l =
         List.map2 (fun (a : Simulation.sample) (b : Simulation.sample) ->
-            (Clock.Time.sub b.Simulation.taken a.Simulation.taken :> float)
+            (Clock.Time.diff b.Simulation.taken a.Simulation.taken :> float)
         ) (List.take (List.length l - 1) l) (List.tl l) in
     let gaps = gaps_of samples in
     check "the samples after the baseline are a simulated second apart"

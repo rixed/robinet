@@ -32,7 +32,8 @@ module rec Time : sig
     val print_date : bool ref
     include Private.S with type t = private float and type outer_t = float
     val add : t -> Interval.t -> t
-    val sub : t -> t -> Interval.t
+    val sub : t -> Interval.t -> t
+    val diff : t -> t -> Interval.t
     val wall_clock : unit -> t
     val to_ints : t -> int * int
     val compare : t -> t -> int
@@ -69,8 +70,11 @@ end = struct
     (** Adds a time and an interval. *)
     let add (t : t) (i : Interval.t) = o ((t :> float) +. (i :> float))
 
+    (** subtract an interval from a time. *)
+    let sub (t : t) (i : Interval.t) = o ((t :> float) -. (i :> float))
+
     (** Substract two time and returns an interval. *)
-    let sub (a : t) (b : t) = Interval.o ((a :> float) -. (b :> float))
+    let diff (a : t) (b : t) = Interval.o ((a :> float) -. (b :> float))
 
     (** Get the current wall clock (through {Unix.gettimeofday}). *)
     let wall_clock () = o (Unix.gettimeofday ())

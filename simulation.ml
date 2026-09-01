@@ -113,6 +113,20 @@ type t =
        * the outside world must; a closed one need not, and then runs as fast as
        * it can. *)
       mutable realtime : bool ;
+      (* What must be added to a reading of the wall clock to place it on this
+       * simulation's own timeline.
+       *
+       * Zero for a simulation that has followed the wall clock since it was
+       * made -- the two are then the same clock. It is not zero for one that
+       * was tied to the wall clock later (see [make_realtime]): a simulation
+       * left to run as fast as it could is not at the same instant as the
+       * world outside, and the gap it had reached when it was tied down is
+       * what this holds, for good.
+       *
+       * Everything the outside world dates has to cross that gap before this
+       * simulation can use it -- the timestamp libpcap puts on a captured
+       * packet, most of all. See [of_wall_clock]. *)
+      mutable clock_offset : Interval.t ;
       (* [continue] and [paused] both mean "not running", but differ in kind.
        * Clearing [continue] *ends* the simulation: [run] returns, its thread
        * finishes, and nothing sets it back -- that is what SIGINT and [stop]
@@ -350,7 +364,7 @@ let at (p : power) (ts : Time.t) f x =
             if Events.mem ts t.events then (
                 loop (Time.add ts epsilon)
             ) else (
-                if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.sub ts (now t))) ;
+                if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.diff ts (now t))) ;
                 t.events <- Events.add ts (p, (fun () -> f x)) t.events
             ) in
         with_lock t loop ts ;
@@ -386,9 +400,29 @@ let power_down (p : power) =
                 "Dropped %d event(s) powered by %s" dropped p.name)))) () ;
     signal_me t ()
 
-(* The wall clock, less however long this simulation has been paused. *)
+(** Place an instant read off the real world -- the timestamp libpcap put on a
+ * captured packet -- on [t]'s own timeline.
+ *
+ * The two are the same instant for a simulation that has always followed the
+ * wall clock and never been paused. Every other one is somewhere else, and an
+ * instant taken from the world outside has to be brought across before it can
+ * be scheduled: used as it stands it would land in the simulation's past, and
+ * be dispatched at once, or in its future, and wait there. *)
+let of_wall_clock t (ts : Time.t) =
+    Time.add ts (Interval.sub t.clock_offset t.paused_total)
+
+(** The other way: what the wall clock will read when [t] calls it [ts].
+ *
+ * For whoever has to wait, by a clock of the real world, for an instant named
+ * on the simulation's -- which the run loop does every time it sleeps until
+ * its next event. *)
+let to_wall_clock t (ts : Time.t) =
+    Time.sub ts (Interval.sub t.clock_offset t.paused_total)
+
+(* The wall clock, on this simulation's timeline: shifted by whatever it is
+ * from the world outside, and less however long it has stood paused. *)
 let unpaused_wall_clock t =
-    Time.o (Unix.gettimeofday () -. (t.paused_total :> float))
+    of_wall_clock t (Time.wall_clock ())
 
 let synch_locked t =
     assert t.realtime (* Synch with real clock in non-realtime mode!? *) ;
@@ -467,6 +501,77 @@ let set_speed_ratio t ratio =
         reanchor t) () ;
     Condition.signal t.cond
 
+(** Tie [t] to the wall clock from here on. Nothing to do if it already is.
+ *
+ * A simulation that talks to the outside world has to run at the speed of the
+ * outside world, so this is what opening a real interface on one asks of it.
+ *
+ * Its clock must not jump as it happens. A simulation that has been running as
+ * fast as it could is hours from the world outside, and everything already
+ * scheduled on it is dated in its own time; moving the present would fire all
+ * of that at once, or strand it. So the gap between the two clocks is measured
+ * at this instant and kept ([clock_offset]), and from here on the simulation's
+ * time is the wall clock plus that gap: advancing at the rate of the wall
+ * clock, as asked, with the present exactly where it was.
+ *
+ * Anything the outside world dates then has to cross the same gap; that is
+ * what [of_wall_clock] is for.
+ *
+ * Whatever speed it had been asked to run at goes with it: a simulation
+ * following the wall clock runs at the speed of the wall clock, which is why
+ * [set_speed_ratio] refuses one. *)
+let make_realtime t =
+    with_lock t (fun () ->
+        if not t.realtime then (
+            (* Read from the simulated time as it stands, before anything is
+               flipped: this is the number that will hold it there once [now]
+               starts being read off the wall clock. Undoing [paused_total],
+               which [of_wall_clock] takes off again. *)
+            t.clock_offset <-
+                Interval.add Time.(diff !(t.now) (wall_clock ())) t.paused_total ;
+            t.realtime <- true ;
+            t.speed_ratio <- None ;
+            (* Both belong to pacing a simulation that sets its own pace, which
+               this one no longer does. *)
+            t.pace_anchor <- None ;
+            t.late <- Interval.zero ;
+            Log.(log t.root.Widget.logger Debug (lazy (Printf.sprintf
+                "Following the wall clock, offset by %s"
+                (Interval.to_string t.clock_offset))))
+        )) () ;
+    (* The run loop may be asleep in the branch for a simulation that paces
+       itself; it has to wake up and take the other one. *)
+    signal_me t ()
+
+(* A simulation that has run ahead of the world keeps the time it has reached,
+   and goes on from there at the pace of the wall clock. *)
+(*$T make_realtime
+  let t = make ~realtime:false "ahead" in \
+  t.now := Clock.Time.o (Unix.gettimeofday () +. 3600.) ; \
+  let before = now t in \
+  make_realtime t ; \
+  t.realtime && t.speed_ratio = None && \
+  Clock.Interval.(compare (abs (Clock.Time.diff (now t) before)) (sec 1.)) < 0
+ *)
+
+(* And a reading of the wall clock now lands where that simulation is, which is
+   what a sniffed packet needs. *)
+(*$T make_realtime
+  let t = make ~realtime:false "across" in \
+  t.now := Clock.Time.o (Unix.gettimeofday () +. 3600.) ; \
+  make_realtime t ; \
+  Clock.Interval.(compare \
+    (abs (Clock.Time.diff (of_wall_clock t (Clock.Time.wall_clock ())) (now t))) \
+    (sec 1.)) < 0
+ *)
+
+(* One that already follows the wall clock is left exactly as it was. *)
+(*$T make_realtime
+  let t = make "already" in \
+  make_realtime t ; \
+  t.clock_offset = Clock.Interval.zero && t.realtime
+ *)
+
 (* When, by the wall clock, the event at [ts] is due at that speed. *)
 let due_at t ratio ts =
     match t.pace_anchor with
@@ -474,7 +579,7 @@ let due_at t ratio ts =
         reanchor t ;
         Unix.gettimeofday ()
     | Some (wall0, sim0) ->
-        wall0 +. (Time.sub ts sim0 :> float) /. ratio
+        wall0 +. (Time.diff ts sim0 :> float) /. ratio
 
 (** Run [n] events then pause again. *)
 let step ?(n=1) t () =
@@ -501,7 +606,11 @@ let dispatched t =
 (* Wait on [cond], which hands the mutex back for the duration. Must be called
  * with the lock held. The mutex is not ours while we wait, so [lock_owner] is
  * cleared and restored around it -- otherwise a thread that acquired it
- * meanwhile would find it claimed by us. *)
+ * meanwhile would find it claimed by us.
+ *
+ * [until] is by the wall clock, since that is the clock the sleeper is woken
+ * by; a caller holding an instant of the simulation's own has to put it
+ * through [to_wall_clock] first. *)
 let wait_on_cond ?until t =
     let me = me () in
     t.lock_owner <- None ;
@@ -672,6 +781,12 @@ let make =
               cond = Condition.create () ;
               lock_owner = None ;
               realtime ;
+              (* A simulation is made either following the wall clock, and then
+                 it is on the wall clock's own timeline, or not following it at
+                 all -- and then nothing has yet asked the two to agree. Either
+                 way there is no gap between them until [make_realtime] opens
+                 one. *)
+              clock_offset = Interval.zero ;
               continue = true ;
               paused = false ;
               paused_since = None ;
@@ -740,11 +855,14 @@ let next_event t =
                         match Events.min_binding t.events with
                         | exception Not_found -> Time.add (now t) max_sleep_time
                         | ts, _ -> ts in
-                let wait_time = Time.sub until (now t) in
+                let wait_time = Time.diff until (now t) in
                 if not (may_dispatch t) ||
                    Interval.compare wait_time min_ts_for_sleep > 0 then (
                     if debug then Printf.printf "Clock: next_event: waiting until %s since we're too early\n%!" (Time.to_string until) ;
-                    wait_on_cond ~until t ;
+                    (* [until] names an instant of this simulation, which is
+                       not where the wall clock is unless the two were never
+                       parted (see [make_realtime]). *)
+                    wait_on_cond ~until:(to_wall_clock t until) t ;
                     (* If we timed out we need to wait longer.
                      * If we have been signaled we still need to wait for the
                      * next event, which may be a different one. *)

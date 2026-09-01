@@ -411,7 +411,7 @@ struct
             Atomic.fire ~now:start_time ~params t.starts ;
             Atomic.fire ~now ~params t.stops ;
             Gauge.pred ~now ~params t.simult ;
-            let duration = Clock.Time.sub now start_time in
+            let duration = Clock.Time.diff now start_time in
             record t params duration
 
     (* [clock] rather than a timestamp: this one spans the call to [f], so it
@@ -431,7 +431,7 @@ struct
             Atomic.fire ~now:start_time ~params t.starts ;
             Atomic.fire ~now ~params t.stops ;
             Gauge.pred ~now ~params t.simult ;
-            let duration = Clock.Time.sub now start_time in
+            let duration = Clock.Time.diff now start_time in
             record t params duration ;
             res
 

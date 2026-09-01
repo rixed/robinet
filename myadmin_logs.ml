@@ -497,7 +497,7 @@ let logs _mth _matches vars _qry_body resp =
                     | None ->
                         Clock.Time.printf oc t
                     | Some pt ->
-                        let i = Clock.Time.sub t pt in
+                        let i = Clock.Time.diff t pt in
                         Clock.Interval.printf oc i) ;
                     prev_t := Some t in
             let print_log =

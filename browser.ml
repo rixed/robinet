@@ -225,7 +225,7 @@ let find_vacant_cnx t addr port =
 let clean_vacant_cnxs t =
     let count = ref 0
     and now = Simulation.now (Simulation.of_widget t.widget) in
-    let age t = Clock.Time.sub now t in
+    let age t = Clock.Time.diff now t in
     t.vacant_cnxs <- Hashtbl.filter (fun v ->
         incr count ;
         if v.tcp.Tcp.TRX.is_closed () then (

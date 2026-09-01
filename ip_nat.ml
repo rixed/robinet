@@ -249,7 +249,7 @@ v}
         let prev = OrdArray.get st.cnxs last_idx in
         let now_ = Simulation.now (Simulation.of_widget st.widget) in
         if prev.keys <> State.None then
-            Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Recycling an old connection last used %s ago" Clock.(Interval.to_string Time.(sub now_ prev.last_used))))) ;
+            Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Recycling an old connection last used %s ago" Clock.(Interval.to_string Time.(diff now_ prev.last_used))))) ;
         State.unkey_cnx st (OrdArray.get st.cnxs last_idx).keys ;
         OrdArray.set st.cnxs last_idx
             { orig_addr ; orig_num ; nat_num ; keys ; last_used = now_ } ;

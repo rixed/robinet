@@ -441,8 +441,10 @@ let play power tx fname =
         match Enum.get packets with
             | None -> () (* pcap file is over *)
             | Some pdu ->
-                let d = match last_ts with None     -> Clock.Interval.o 0.
-                                         | Some lts -> Clock.Time.sub pdu.Pdu.ts lts in
+                let d =
+                    match last_ts with
+                    | None     -> Clock.Interval.o 0.
+                    | Some lts -> Clock.Time.diff pdu.Pdu.ts lts in
                 Simulation.delay power d (fun () ->
                     tx (pdu.Pdu.payload :> bitstring) ;
                     read_next_pkt (Some pdu.Pdu.ts)) ()
@@ -476,10 +478,8 @@ let openif ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
             65535
         else
             Option.default_delayed (fun () -> mtu_of_iface ifname) caplen in
-    (* TODO: a real interface only makes sense in a realtime simulation; either
-     * refuse a simulation that is not, or switch it to realtime. *)
     let widget = Widget.make ~parent ?location ifname in
-    let t = {
+    let iface = {
         handler = openif_ ifname promisc filter caplen ;
         name = ifname ;
         caplen = caplen ;
@@ -488,20 +488,31 @@ let openif ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
     Widget.add_properties widget Widget.[
         property "name" ~kind:String
             ~descr:"Interface name."
-            ~getter:(fun () -> `String t.name) ;
+            ~getter:(fun () -> `String iface.name) ;
         property "caplen" ~kind:Int ~units:"bytes"
             ~descr:"Capture length, fixed when the interface was opened."
-            ~getter:(fun () -> `Int t.caplen) ] ;
-    t
+            ~getter:(fun () -> `Int iface.caplen) ] ;
+    (* A real interface only makes sense in a realtime simulation: *)
+    Simulation.make_realtime (Simulation.of_widget widget) ;
+    iface
 
-(** [sniff iface] will return the next available packet as a Pcap.Pdu.t. *)
+(** [sniff iface] will return the next available packet as a Pcap.Pdu.t.
+ *
+ * Dated on the simulation's clock, not on the one libpcap read: a simulation
+ * that was tied to the wall clock after having run at its own speed is some
+ * distance from it, and a packet still carrying the real world's timestamp
+ * would be scheduled that far into its past or its future. See
+ * [Simulation.of_wall_clock]. *)
 let sniff ?dlt ?timeout iface =
     let sniffed = sniff_ ?timeout iface.handler in
     Log.(log iface.widget.logger Debug (lazy (Printf.sprintf "Captured %d/%d bytes" sniffed.sniffed_caplen sniffed.sniffed_wirelen))) ;
+    let ts =
+        Simulation.of_wall_clock (Simulation.of_widget iface.widget)
+                                 sniffed.sniffed_timestamp in
     Pdu.make iface.name ?dlt
         ~caplen:sniffed.sniffed_caplen
         ~wirelen:sniffed.sniffed_wirelen
-        sniffed.sniffed_timestamp
+        ts
         (bitstring_of_string sniffed.sniffed_bytes)
 
 (** {2 Packet injection} *)
