@@ -28,21 +28,113 @@ const baseKind = (kind) => kind.type === 'optional' ? kind.of : kind
 const draftFor = (p, text) =>
     p.kind.type === 'optional' && p.value === null ? p.draft : text
 
-const encode = (p) => {
+/* Whether a kind takes more than one input to edit: a list and a record are
+ * drawn as a table of cells, everything else as a single field. */
+const isStructured = (kind) => {
+    const t = baseKind(kind).type
+    return t === 'list' || t === 'record'
+}
+
+/* What one input is worth, in the JSON a setter reads.
+ *
+ * A property of a plain kind, a field of a record and an element of a list are
+ * all edited the same way and read back the same way: each is a [cell], which
+ * is anything carrying the [kind] it holds, the [draft] of what is typed for
+ * it, and whether it has a value at all. */
+const cellValue = (c) => {
     /* Unticked is a value in itself: there is none. */
-    if (p.kind.type === 'optional' && !p.enabled) return 'null'
-    switch (baseKind(p.kind).type) {
+    if (c.kind.type === 'optional' && !c.enabled) return null
+    switch (baseKind(c.kind).type) {
         case 'bool':
-            return JSON.stringify(p.draft === true || p.draft === 'true')
+            return c.draft === true || c.draft === 'true'
         case 'int': case 'float': case 'range': {
-            const n = Number(p.draft)
+            const n = Number(c.draft)
             /* Send what was typed rather than guessing, and let the setter say
              * what is wrong with it. */
-            return JSON.stringify(Number.isNaN(n) || p.draft === '' ? String(p.draft) : n)
+            return Number.isNaN(n) || c.draft === '' ? String(c.draft) : n
         }
         default:
-            return JSON.stringify(String(p.draft))
+            return String(c.draft)
     }
+}
+
+/* Rows come and go under Alpine's feet, and it keeps the inputs of a row with
+ * that row only if the row says which one it is: keyed by position, dropping
+ * one would shift the contents of every row below it up by one. */
+let rowSeq = 0
+
+const cellOf = (name, kind, value) => ({
+    name, kind,
+    draft: asText(value),
+    enabled: value !== null && value !== undefined
+})
+
+/* The cells one value of [kind] is edited through: one per field when it is a
+ * record -- in the order the simulator named them, which is the order of the
+ * columns -- and a single unnamed one otherwise. */
+const cellsOf = (kind, value) =>
+    kind.type === 'record'
+        ? kind.fields.map(f => cellOf(f.name, f.kind,
+                                      value == null ? null : value[f.name]))
+        : [ cellOf(null, kind, value) ]
+
+const rowOf = (kind, value) => ({ key: ++rowSeq, cells: cellsOf(kind, value) })
+
+/* A cell nobody has put anything in: no value at all, or nothing but blanks.
+ * A tick box that is off is one of those, whatever the field beside it still
+ * shows -- that is what the box says. */
+const cellIsBlank = (c) =>
+    (c.kind.type === 'optional' && !c.enabled) || String(c.draft).trim() === ''
+
+/* A row where every cell is blank is not an element of the list: it is the
+ * empty row the reader was given to fill in, and it goes out of the value the
+ * same way it came in -- unsaid. */
+const rowIsBlank = (row) => row.cells.every(cellIsBlank)
+
+const rowValue = (kind, row) =>
+    kind.type === 'record'
+        ? Object.fromEntries(row.cells.map(c => [ c.name, cellValue(c) ]))
+        : cellValue(row.cells[0])
+
+/* Where the reader's edits of a property live: a [draft] for a plain value, or
+ * the [rows] of the table a list or a record is drawn as -- a record being a
+ * table of one row, which is what makes the two the same thing to draw and the
+ * same thing to read back. */
+const rowsOf = (p) => {
+    const k = baseKind(p.kind)
+    return k.type === 'list' ? (p.value || []).map(v => rowOf(k.of, v))
+                             : [ rowOf(k, p.value) ]
+}
+
+/* Put back into the inputs what the simulator last said this property is.
+ *
+ * A table is rebuilt only when there is something new to show, or when the
+ * reader asks for it back ([force]): a read-only table rebuilt on every poll
+ * would be redrawn from scratch once a second, taking the reader's selection
+ * with it, to show exactly what was already there. */
+const resetDraft = (p, force) => {
+    p.enabled = p.value !== null
+    if (isStructured(p.kind)) {
+        const from = asText(p.value)
+        if (!force && p.rows && p.rowsFrom === from) return
+        p.rowsFrom = from
+        p.rows = rowsOf(p)
+    } else {
+        /* A value that is not set keeps whatever was in the field: see
+         * [draftFor]. */
+        p.draft = draftFor(p, asText(p.value))
+    }
+}
+
+const encode = (p) => {
+    if (p.kind.type === 'optional' && !p.enabled) return 'null'
+    const k = baseKind(p.kind)
+    if (k.type === 'list')
+        return JSON.stringify(p.rows.filter(r => !rowIsBlank(r))
+                                    .map(r => rowValue(k.of, r)))
+    if (k.type === 'record')
+        return JSON.stringify(rowValue(k, p.rows[0]))
+    return JSON.stringify(cellValue(p))
 }
 
 /* A count reads better with its thousands apart, and a duration in the unit it
@@ -831,6 +923,8 @@ document.addEventListener('alpine:init', () => {
         /* The metric being dragged, and the chart the cursor is over. */
         dragging: null,
         dragOver: null,
+        /* The key of the row a drag is carrying, when one is: see [grabRow]. */
+        dragRow: null,
         /* The metric whose chart menu is open, by property name, and the chart
          * that menu is pointing at as the pointer moves down it. Dragging is
          * the quicker way to put a metric on a chart, but not one to depend
@@ -1210,9 +1304,9 @@ document.addEventListener('alpine:init', () => {
                 if (!old) {
                     p.text = asText(p.value)
                     p.draft = p.text
-                    p.enabled = p.value !== null
                     p.dirty = false
                     p.error = null
+                    resetDraft(p)
                     p.metric = p.kind.type === 'metric'
                         ? metricRows(p.value, p.units) : null
                     return p
@@ -1240,8 +1334,7 @@ document.addEventListener('alpine:init', () => {
                 /* Something typed but not accepted yet outlives even an
                  * explicit refresh: it is the reader's, not ours to drop. */
                 if (!old.dirty) {
-                    old.draft = draftFor(old, old.text)
-                    old.enabled = p.value !== null
+                    resetDraft(old)
                     old.error = null
                 }
                 return old
@@ -1339,10 +1432,145 @@ document.addEventListener('alpine:init', () => {
             return baseKind(p.kind)
         },
 
-        /* Has this property a value to edit at all? Anything that cannot be
-         * absent always has one. */
+        /* Has this property (or one cell of it) a value to edit at all?
+         * Anything that cannot be absent always has one. */
         set(p) {
             return p.kind.type !== 'optional' || p.enabled
+        },
+
+        /* Several inputs rather than one: see [isStructured]. */
+        structured(p) {
+            return isStructured(p.kind)
+        },
+
+        /* The columns of the table a list or a record is drawn as: the fields
+         * of the record, or none when what is repeated is a bare value and
+         * there is nothing to head the single column with. */
+        cols(p) {
+            const k = baseKind(p.kind)
+            const el = k.type === 'list' ? k.of : k
+            return el.type === 'record' ? el.fields : null
+        },
+
+        /* Rows are added and dropped from a list; a record has the one row it
+         * has, and always will. */
+        growable(p) {
+            return !p.read_only && baseKind(p.kind).type === 'list'
+        },
+
+        /* Is there a row waiting to be filled in? It is not sent (see
+         * [rowIsBlank]), and handing out a second one while the first is still
+         * empty only grows a table of nothing. */
+        hasBlank(p) {
+            return (p.rows || []).some(rowIsBlank)
+        },
+
+        /* Which input a cell gets. Anything else is typed, which is what a
+         * string is -- and what a widget id is until this offers them by
+         * name, as the map already does. */
+        cellInput(c) {
+            const t = baseKind(c.kind).type
+            if (t === 'bool' || t === 'enum') return t
+            if (t === 'int' || t === 'float' || t === 'range') return 'number'
+            return 'text'
+        },
+
+        /* What one cell of a read-only table says. */
+        cellText(c) {
+            return this.set(c) ? c.draft : 'unset'
+        },
+
+        /* A table means something only once every cell of it has been filled:
+         * a half-typed row would be refused, and refusing it at every
+         * keystroke says nothing anyone can act on. So it is sent when the
+         * reader says so, not on the way out of a field -- and until then this
+         * is what says there is something to send. */
+        touch(p) {
+            p.dirty = true
+            p.error = null
+        },
+
+        /* Touching the input of a value that is not set is asking for it to
+         * be: the box in front of it ticks itself. Nobody wants the detour of
+         * ticking a box before they may type, and nothing is lost -- untick it
+         * again and the value goes back to being absent.
+         *
+         * Bound to what the reader does to the value (typing, picking,
+         * dragging), never to the field merely gaining focus: clicking into a
+         * field to read it must leave it exactly as it was found. */
+        enable(x) {
+            if (x.kind.type === 'optional' && !x.enabled) x.enabled = true
+        },
+
+        /* Move a row [by] places, up when that is negative. The order of a
+         * list is part of its value -- the first route that matches is the one
+         * taken -- so this is an edit like any other, and waits for Apply like
+         * any other.
+         *
+         * The row keeps its key, which is what carries its inputs with it
+         * rather than leaving them at the position they were at. */
+        moveRow(p, row, by) {
+            const i = p.rows.findIndex(r => r.key === row.key)
+            const j = i + by
+            if (i < 0 || j < 0 || j >= p.rows.length) return
+            const rows = p.rows.slice()
+            rows.splice(j, 0, rows.splice(i, 1)[0])
+            p.rows = rows
+            this.touch(p)
+        },
+
+        /* Carry a row up or down the table by its handle.
+         *
+         * Pointer events rather than HTML5 drag and drop, as the divider and
+         * the map already do: nothing is being handed to anywhere else -- the
+         * row never leaves the table it is in -- and this works with a finger.
+         *
+         * The rows are laid out in order, so where the pointer is says which
+         * one it is over; the row moves there as it is passed, so what is on
+         * screen during the drag is what letting go will leave. */
+        grabRow(p, row, ev) {
+            if (!this.online || p.read_only) return
+            if (ev.pointerType === 'mouse' && ev.button !== 0) return
+            const tbody = ev.currentTarget.closest('tbody')
+            if (!tbody) return
+            this.dragRow = row.key
+            const move = (e) => {
+                const at = p.rows.findIndex(r => r.key === this.dragRow)
+                if (at < 0) return
+                const rows = [ ...tbody.querySelectorAll(':scope > tr') ]
+                const over = rows.findIndex(el => {
+                    const b = el.getBoundingClientRect()
+                    return e.clientY >= b.top && e.clientY < b.bottom
+                })
+                if (over >= 0 && over !== at) this.moveRow(p, p.rows[at], over - at)
+            }
+            const done = () => {
+                this.dragRow = null
+                document.body.classList.remove('carrying')
+                window.removeEventListener('pointermove', move)
+                window.removeEventListener('pointerup', done)
+                window.removeEventListener('pointercancel', done)
+            }
+            /* Said on the whole page rather than on the handle: the pointer
+               spends the drag over the rows, not over what it took hold of. */
+            document.body.classList.add('carrying')
+            window.addEventListener('pointermove', move)
+            window.addEventListener('pointerup', done)
+            /* A drag the browser takes away from us -- a call coming in, a
+               touch turned into a scroll -- ends it too, or the page would be
+               left holding a row nobody is carrying. */
+            window.addEventListener('pointercancel', done)
+            ev.preventDefault()
+        },
+
+        addRow(p) {
+            p.rows.push(rowOf(baseKind(p.kind).of, null))
+            this.touch(p)
+        },
+
+        dropRow(p, row) {
+            p.rows = p.rows.filter(r => r.key !== row.key)
+            this.touch(p)
         },
 
         paramsText(params) {
@@ -1361,8 +1589,17 @@ document.addEventListener('alpine:init', () => {
         },
 
         async save(p) {
-            /* Neither the value nor its presence has moved: nothing to say. */
+            /* Neither the value nor its presence has moved: nothing to say.
+             * A table is not compared cell by cell: rows come and go as well,
+             * so what says it has been touched is [dirty], which every one of
+             * its inputs sets. */
             const unchanged =
+                isStructured(p.kind) ? !p.dirty :
+                /* Not set, and still not set. What is in the field is only
+                 * what was there before it was unset, and means nothing until
+                 * the box is ticked again -- so a field one merely clicked in
+                 * and left has nothing to say. */
+                (p.kind.type === 'optional' && !p.enabled) ? p.value === null :
                 p.draft === p.text &&
                 (p.kind.type !== 'optional' || p.enabled === (p.value !== null))
             if (p.read_only || unchanged) { p.dirty = false ; return }
@@ -1382,8 +1619,11 @@ document.addEventListener('alpine:init', () => {
             }
             p.value = r.value.value
             p.text = asText(r.value.value)
-            p.draft = draftFor(p, p.text)
-            p.enabled = r.value.value !== null
+            /* From the answer rather than from what was typed: a setter may
+             * well hold something other than what it was handed -- an address
+             * written another way, rows in another order -- and what it holds
+             * is what the reader must be looking at. */
+            resetDraft(p, true)
             p.dirty = false
             p.error = null
         },
@@ -2177,21 +2417,11 @@ document.addEventListener('alpine:init', () => {
         /* What one field is worth, in the JSON the API expects. */
         fieldValue(f) {
             if (f.picked !== null) return f.picked
-            /* Left out is a value in itself: there is none. */
-            if (f.kind.type === 'optional' && !f.enabled) return null
-            switch (baseKind(f.kind).type) {
-                case 'bool':
-                    return f.draft === true || f.draft === 'true'
-                case 'int': case 'float': case 'range': {
-                    const n = Number(f.draft)
-                    /* Send what was typed rather than guessing: the catalogue
-                     * says what is wrong with it better than this could. */
-                    return Number.isNaN(n) || f.draft === ''
-                               ? String(f.draft) : n
-                }
-                default:
-                    return String(f.draft)
-            }
+            /* A field of the form is read exactly as a property's input is:
+             * see [cellValue]. No parameter of any device is a list or a
+             * record so far; the day one is, this form has a table to grow
+             * as the property panel did. */
+            return cellValue(f)
         },
 
         async submitAdd() {

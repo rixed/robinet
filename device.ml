@@ -127,6 +127,28 @@ let rec coerce name (kind : Widget.kind) v =
         `String s
     | Optional k ->
         (match v with `Null -> `Null | v -> coerce name k v)
+    | List k ->
+        `List (Widget.to_list (coerce name k) v)
+    | Record fields ->
+        (* Every field the record declares, in that order, and nothing else: a
+           name it does not know is a misspelling, and quietly dropping it
+           would build something other than what was asked for -- the same
+           reason [args_of] refuses an unknown parameter. *)
+        (match v with
+        | `Assoc given ->
+            List.iter (fun (n, _) ->
+                if not (Array.exists (fun (n', _) -> n' = n) fields) then
+                    Widget.bad_value "%s has no field %S" name n
+            ) given ;
+            `Assoc (
+                Array.to_list fields |>
+                List.map (fun (fname, k) ->
+                    match List.assoc_opt fname given with
+                    | None -> Widget.bad_value "%s has no %S" name fname
+                    | Some v -> fname, coerce (name ^"."^ fname) k v))
+        | v ->
+            Widget.bad_value "%s must be a record, not %s" name
+                (Yojson.Basic.to_string v))
     | Metric ->
         (* Nothing has one, and nothing should: a metric is what a device has
          * counted, which at birth is nothing. *)

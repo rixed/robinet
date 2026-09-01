@@ -426,9 +426,9 @@ struct
                 ) in
         (* This router minted the supply above, so the switch for it goes on its
            widget, and so does stopping it for good. *)
-        widget.Widget.device <- Some "router" ;
-        widget.Widget.on_delete <- (fun () -> switch false) ;
-        widget.Widget.ports <- Widget.{
+        widget.device <- Some "router" ;
+        widget.on_delete <- (fun () -> switch false) ;
+        widget.ports <- Widget.{
             count = (fun () -> Array.length t.ifaces) ;
             is_connected = (fun n -> t.ifaces.(n).widget.ports.is_connected 0) ;
             dev = (fun n -> t.ifaces.(n).widget.ports.dev 0) ;

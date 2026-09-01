@@ -108,6 +108,16 @@ module Addr = struct
             o addr in
         Scanf.sscanf str "%x:%x:%x:%x:%x:%x" pack_addr
 
+    (** The plain hexadecimal notation, which is what [of_string] reads back:
+     * [to_string] may name the vendor instead ("Dell:e6:15:fa"), which is for
+     * reading and not for typing in again. Whatever is offered to be edited
+     * must be written this way. *)
+    let to_hexstring (t : t) =
+        hexstring ~sep:":" (string_of_bitstring (t :> bitstring))
+    (*$= to_hexstring & ~printer:identity
+      (to_hexstring (of_string "a4:ba:db:e6:15:fa")) "A4:BA:DB:E6:15:FA"
+     *)
+
     (** Constant for Ethernet broadcast address. *)
     let broadcast = of_string "FF:FF:FF:FF:FF:FF"
 
@@ -300,8 +310,9 @@ struct
            * clock. *)
           power : Simulation.power ;
           mac : Addr.t ;
-          (* Eth knows how to pick a gateways according to the destination IP: *)
-          gateways : (gw_selector * Gateway.t option) list ;
+          (* Eth knows how to pick a gateways according to the destination IP.
+           * Editable, and read afresh on every send. *)
+          mutable gateways : (gw_selector * Gateway.t option) list ;
           (* Which can be overridden for one packet in routers with: *)
           mutable via : Gateway.t option ;
           proto : Proto.t ;
@@ -402,6 +413,63 @@ struct
             property "ARP cache size" ~kind:Int
                 ~descr:"Current size of the ARP cache"
                 ~getter:(fun () -> `Int (BitHash.length t.arp_cache)) ;
+            property "gateways"
+                ~descr:"Where to send what is not on this LAN."
+                ~kind:(list (record [| "destination", String ;
+                                       "mask", String ;
+                                       "via", optional String |]))
+                ~getter:(fun () ->
+                    (* Dotted rather than [Ip.Addr.to_string], and plain hex
+                       rather than [Addr.to_string]: both of those may hand
+                       back a name, and a name is not something the setter can
+                       read again. *)
+                    `List (
+                        List.map (fun ({ dest_ip ; mask }, gw) ->
+                            `Assoc [
+                                "destination",
+                                    `String (Ip.Addr.to_dotted_string dest_ip) ;
+                                "mask",
+                                    `String (Ip.Addr.to_dotted_string mask) ;
+                                "via",
+                                    (match gw with
+                                    | None -> `Null
+                                    | Some (Gateway.Mac mac) ->
+                                        `String (Addr.to_hexstring mac)
+                                    | Some (Gateway.IPv4 ip) ->
+                                        `String (Ip.Addr.to_dotted_string ip)) ]
+                        ) t.gateways))
+                ~setter:(fun v ->
+                    (* Every row is read before any of them is installed, so
+                       that a table with one bad row leaves the old one alone
+                       rather than a half-replaced one behind. *)
+                    let ip what s =
+                        match Ip.Addr.of_dotted_string_opt s with
+                        | Some ip -> ip
+                        | None ->
+                            bad_value "%s: %S is not an IP address" what s in
+                    let gateways =
+                        to_list (fun row ->
+                            let addr what =
+                                to_field what (fun v -> ip what (to_string v))
+                                          row in
+                            let via =
+                                to_field "via" (to_option (fun v ->
+                                    let s = to_string v in
+                                    (* A MAC when it reads as one, an IP
+                                       otherwise: that is the choice
+                                       [Gateway.t] offers. *)
+                                    match Addr.of_string s with
+                                    | exception _ ->
+                                        (match Ip.Addr.of_dotted_string_opt s with
+                                        | Some ip -> Gateway.IPv4 ip
+                                        | None ->
+                                            bad_value "via: %S is neither a \
+                                                       MAC nor an IP address" s)
+                                    | mac -> Gateway.Mac mac)) row in
+                            { dest_ip = addr "destination" ;
+                              mask = addr "mask" }, via
+                        ) v in
+                    t.gateways <- gateways) ;
             property "delay" ~kind:Float ~units:"secs"
                 ~descr:"Average delay to add to transmissions."
                 ~setter:(fun v -> t.delay <- to_float v)

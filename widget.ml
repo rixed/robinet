@@ -203,21 +203,118 @@ and kind =
      * [optional] rather than by hand, so that the combinations that mean
      * nothing cannot be written. *)
     | Optional of kind
+    (* Any number of values of the same kind, in order, which is a [`List] on
+     * the wire. The interface draws it as a column of inputs, or as a table
+     * when what is repeated is a record. Build one with [list]. *)
+    | List of kind
+    (* A fixed set of named values, which is an [`Assoc] on the wire. The
+     * interface draws it as a row of named inputs, and as one row of the table
+     * when it is what a list repeats.
+     *
+     * An array rather than an association list because the order is the order
+     * of the columns: it is decided once, by whoever declares the property,
+     * and every value of that property is then laid out the same way. Build
+     * one with [record]. *)
+    | Record of (string * kind) array
+
+(* What a kind is called when a refusal has to name it. *)
+let rec kind_name = function
+    | String -> "a string"
+    | Int -> "a whole number"
+    | Float -> "a number"
+    | Bool -> "a boolean"
+    | Enum _ -> "a choice"
+    | Widget_id -> "a widget"
+    | FRange _ | IRange _ -> "a range"
+    | Metric -> "a metric"
+    | Optional k -> "an optional value ("^ kind_name k ^")"
+    | List k -> "a list of "^ kind_name k
+    | Record _ -> "a record"
 
 (* Only a value can be absent, and only once: [Optional (Optional _)] has no
  * second absence to describe, and a metric is a table that is always there --
- * an empty one when nothing has happened yet. *)
+ * an empty one when nothing has happened yet. A list has none either: a list
+ * that is not there and an empty one would read the same in the interface,
+ * and mean the same to every setter. *)
 let optional = function
-    | (Optional _ | Metric) as k ->
+    | (Optional _ | Metric | List _) as k ->
         invalid_arg ("Widget.optional: nothing to make optional in "^
-                     (match k with Metric -> "a metric"
-                                 | _ -> "an optional value"))
+                     kind_name k)
     | k -> Optional k
 
 (*$T optional
   optional Int = Optional Int
   (try ignore (optional (Optional Int)) ; false with Invalid_argument _ -> true)
   (try ignore (optional Metric) ; false with Invalid_argument _ -> true)
+  (try ignore (optional (list Int)) ; false with Invalid_argument _ -> true)
+ *)
+
+(** A list of [k]. What may be repeated is a value the interface has a single
+ * input for, or a record of those: those are the two shapes it can draw, a
+ * column and a table.
+ *
+ * A list of lists has no such shape, and neither has a list of values that may
+ * each be absent -- an element that is not there is one the list does not
+ * hold. *)
+let list = function
+    | (Optional _ | Metric | List _) as k ->
+        invalid_arg ("Widget.list: cannot repeat "^ kind_name k)
+    | k -> List k
+
+(*$T list
+  list Int = List Int
+  (try ignore (list (list Int)) ; false with Invalid_argument _ -> true)
+  (try ignore (list (optional Int)) ; false with Invalid_argument _ -> true)
+  (try ignore (list Metric) ; false with Invalid_argument _ -> true)
+ *)
+
+(** A record of those named fields, in the order the interface must lay them
+ * out.
+ *
+ * A field is a value with a single input, or one that may be absent: a record
+ * is a row, and a row is made of cells. A field that is itself a record or a
+ * list is not a cell, and would have to be drawn inside one.
+ *
+ * Names are what the fields are keyed by on the wire, so there must be no two
+ * alike, and none empty. *)
+let record fields =
+    if Array.length fields = 0 then
+        invalid_arg "Widget.record: a record with no field describes nothing" ;
+    Array.iter (fun (name, k) ->
+        if name = "" then
+            invalid_arg "Widget.record: a field must have a name" ;
+        match k with
+        | List _ | Record _ | Metric ->
+            invalid_arg ("Widget.record: field "^ name ^" cannot be "^
+                         kind_name k)
+        | _ -> ()
+    ) fields ;
+    Array.iteri (fun i (name, _) ->
+        Array.iteri (fun j (name', _) ->
+            if j > i && name = name' then
+                invalid_arg ("Widget.record: two fields named "^ name)
+        ) fields
+    ) fields ;
+    Record fields
+
+(*$T record
+  record [| "a", Int ; "b", optional String |] = \
+      Record [| "a", Int ; "b", Optional String |]
+  (try ignore (record [||]) ; false with Invalid_argument _ -> true)
+  (try ignore (record [| "a", Int ; "a", Int |]) ; \
+   false with Invalid_argument _ -> true)
+  (try ignore (record [| "", Int |]) ; false with Invalid_argument _ -> true)
+  (try ignore (record [| "a", list Int |]) ; \
+   false with Invalid_argument _ -> true)
+  (try ignore (record [| "a", record [| "b", Int |] |]) ; \
+   false with Invalid_argument _ -> true)
+ *)
+
+(* A table of records is the one that is worth having, and the reason for both:
+   see the routing tables. *)
+(*$T list
+  list (record [| "dest", String ; "via", optional String |]) = \
+      List (Record [| "dest", String ; "via", Optional String |])
  *)
 
 let property ?(descr="") ?(units="") ?metric ?setter ?(kind=String)
@@ -294,6 +391,29 @@ let to_int_range ?(min=min_int) ?(max=max_int) v =
 let to_option f = function
     | `Null -> None
     | v -> Some (f v)
+
+(** Read a list of values, each with [f]. The counterpart of a [List] kind.
+ *
+ * The whole list is what a setter is handed: the interface sends what the
+ * table holds after the edit, not the edit itself, so a setter replaces its
+ * list rather than patching it. *)
+let to_list f = function
+    | `List l -> List.map f l
+    | v -> bad_value "expected a list, not %s" (Yojson.Basic.to_string v)
+
+(** Read the field [name] of a record with [f]. The counterpart of a [Record]
+ * kind, one field at a time, which is how a setter rebuilds its own record:
+ * it knows what it wants out of it, and in what order.
+ *
+ * A field that is not there is refused rather than read as absent: absence is
+ * [`Null], and only for a field whose kind says it may be. *)
+let to_field name f = function
+    | `Assoc l as v ->
+        (match List.assoc name l with
+        | exception Not_found ->
+            bad_value "no field %S in %s" name (Yojson.Basic.to_string v)
+        | v -> f v)
+    | v -> bad_value "expected a record, not %s" (Yojson.Basic.to_string v)
 
 let to_bool = function
     | `Bool b -> b

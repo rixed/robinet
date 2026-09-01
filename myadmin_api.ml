@@ -154,6 +154,21 @@ let rec json_of_kind = function
        box in front of it; the value itself is null when there is none. *)
     | Optional k ->
         `Assoc [ "type", `String "optional" ; "of", json_of_kind k ]
+    (* Any number of values of the same kind: the interface repeats the input
+       for one of them, as a column, or as a table when what is repeated is a
+       record. *)
+    | List k ->
+        `Assoc [ "type", `String "list" ; "of", json_of_kind k ]
+    (* Named values, in the order they are to be laid out: an array rather than
+       an object, since JSON says nothing about the order of an object's keys
+       and that order is what the columns are. *)
+    | Record fields ->
+        `Assoc [ "type", `String "record" ;
+                 "fields",
+                 `List (Array.to_list fields |>
+                        List.map (fun (name, k) ->
+                            `Assoc [ "name", `String name ;
+                                     "kind", json_of_kind k ])) ]
 
 let json_of_property (p : Widget.property) =
     (* The value is read through the getter, which may fail on us: *)

@@ -299,6 +299,10 @@ article.empty { color: var(--pico-muted-color); }
  * and text selecting through the whole page is not what was meant. */
 body.splitting { user-select: none; cursor: col-resize; }
 body.splitting.rows { cursor: row-resize; }
+/* A row of a table being carried to another place in it: the same refusal to
+ * select text as above, and the cursor of a thing held rather than of an edge
+ * being pushed. */
+body.carrying { user-select: none; cursor: grabbing; }
 
 /* ------------------------------------------------------------------- the map */
 
@@ -737,6 +741,125 @@ button.metric-reset {
     padding: .1rem .5rem;
     font-size: .7rem;
 }
+/* A list or a record, as the table it is drawn as.
+ *
+ * The panel's own table is laid out by fixed proportions, which are the
+ * proportions of the panel and mean nothing here: this one is sized by what it
+ * holds, which is what tells a netmask column from an address column. Every
+ * rule below therefore has to outrank one written as `article.properties
+ * table', which is why they all name the panel too.
+ *
+ * Three columns of addresses do not fit in half of half a window, and the
+ * answer is neither to clip them nor to wrap every cell onto two lines: the
+ * table scrolls sideways, and widening the panel (the divider is right there)
+ * brings the rest of it back. */
+article.properties .listing { overflow-x: auto; }
+article.properties .listing table {
+    table-layout: auto;
+    /* As wide as the panel, and wider when what it holds will not fit in it:
+       the columns then share out whatever room there is, and the reader who
+       wants more of it has the divider. */
+    width: 100%;
+    margin: 0;
+    font-size: .95em;
+}
+article.properties .listing th, article.properties .listing td {
+    width: auto;
+    padding: .15rem .4rem .15rem 0;
+    border: none;
+    vertical-align: middle;
+    /* A cell is one line: the box that says whether there is a value belongs
+       beside the input for it, not above it. */
+    white-space: nowrap;
+}
+article.properties .listing th {
+    font-weight: normal;
+    font-size: .75rem;
+    color: var(--pico-muted-color);
+    /* The columns and their heads share an edge and nothing else: a rule under
+       the heads is enough to say which is which. */
+    border-bottom: 1px solid var(--pico-muted-border-color);
+}
+/* A cell is a line: the box that says whether there is a value at the left of
+ * it, the input taking whatever room is left. Not so little that an address
+ * cannot be read, and not so much that three of them side by side push the
+ * button that drops the row off the panel. */
+article.properties .listing .cell {
+    display: flex;
+    align-items: center;
+    gap: .3rem;
+    /* Never narrower than what is in it: a column asked to give room back to
+       its neighbours would otherwise hand over the width its own text needs,
+       and print that text over the column beside it. */
+    min-width: min-content;
+}
+article.properties .listing .cell input[type=text],
+article.properties .listing .cell input[type=number] {
+    width: 100%;
+    min-width: 4rem;
+    max-width: 9rem;
+}
+article.properties .listing .cell select {
+    width: 100%;
+    /* Enough for the choice itself and not only for the arrow that opens
+       them: a select squeezed by its neighbours shows neither. */
+    min-width: 5rem;
+    max-width: 9rem;
+}
+article.properties .listing .cell input[type=checkbox] { flex: none; margin: 0; }
+/* Narrow, and asked for by name: the columns are shared out by what they
+ * hold, and what this one holds -- a handle and a button -- must not be
+ * squeezed out by three address fields. */
+article.properties .listing th.row-tools,
+article.properties .listing td.row-tools { width: 2.4rem; padding-right: 0; }
+article.properties .listing .row-tools button {
+    margin: 0;
+    width: auto;
+    padding: 0 .4rem;
+    font-size: .8rem;
+    line-height: 1.2;
+    border-color: transparent;
+}
+/* What a row is carried by. [touch-action] so that a finger on it moves the
+ * row rather than scrolling the page under it. */
+article.properties .listing .grab {
+    display: inline-block;
+    vertical-align: middle;
+    padding: .2rem .15rem;
+    cursor: grab;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    color: var(--pico-muted-color);
+}
+article.properties .listing .grab:active { cursor: grabbing; }
+article.properties .listing .grab svg {
+    display: block;
+    width: .45rem;
+    height: .75rem;
+    fill: currentColor;
+}
+/* The row under the pointer, while it is being carried. */
+article.properties .listing tr.dragged {
+    background-color: var(--pico-mark-background-color);
+}
+article.properties .listing .list-foot {
+    display: flex;
+    align-items: baseline;
+    gap: .5rem;
+    margin-top: .4rem;
+}
+article.properties .listing .list-foot button {
+    margin: 0;
+    width: auto;
+    padding: .1rem .6rem;
+    font-size: .75rem;
+}
+/* Nothing has been typed into it yet, so the buttons that would send it are
+ * out anyway; once something has, the table stops agreeing with the simulator
+ * and says so until it is applied or given back. */
+article.properties .listing.dirty > table { box-shadow: -.4rem 0 0 var(--pico-mark-background-color); }
+
 /* Inline, so that the unit that follows stays on the same line. */
 .range { display: inline-flex; align-items: center; gap: .5rem;
          vertical-align: middle; }
@@ -745,6 +868,15 @@ small.units { margin-left: .3rem; color: var(--pico-muted-color); }
 /* The box that says whether there is a value, in front of the input for it. */
 input[type=checkbox].enabler { margin-right: .4rem; vertical-align: middle; }
 .ro.unset { color: var(--pico-muted-color); font-style: italic; }
+/* An input whose value is not set. Live, not disabled: typing into it is how
+ * one sets it, and having to tick the box first was a detour. Dashed, because
+ * what it holds is only what was there before it was unset -- an offer, not a
+ * value the simulator has. */
+input.unset, select.unset {
+    color: var(--pico-muted-color);
+    border-style: dashed;
+}
+input[type=checkbox].unset, input[type=range].unset { opacity: .5; }
 tr.has-error input { border-color: var(--pico-del-color); }
 small.error { display: block; color: var(--pico-del-color); }
 

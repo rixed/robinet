@@ -352,13 +352,16 @@
                                                     </template>
 
                                                     <template x-if="base(f).type === 'bool'">
-                                                        <input type="checkbox" :disabled="!online || !set(f)"
+                                                        <input type="checkbox" :disabled="!online"
+                                                               :class="{ unset: !set(f) }"
                                                                :checked="f.draft === 'true'"
-                                                               @change="f.draft = $event.target.checked ? 'true' : 'false'"/>
+                                                               @change="f.draft = $event.target.checked ? 'true' : 'false' ;
+                                                                        enable(f)"/>
                                                     </template>
 
                                                     <template x-if="base(f).type === 'enum'">
-                                                        <select :disabled="!online || !set(f)" x-model="f.draft">
+                                                        <select :disabled="!online" :class="{ unset: !set(f) }"
+                                                                x-model="f.draft" @change="enable(f)">
                                                             <template x-for="c in base(f).choices" :key="c">
                                                                 <option :value="c" x-text="c"></option>
                                                             </template>
@@ -366,24 +369,27 @@
                                                     </template>
 
                                                     <template x-if="base(f).type === 'range'">
-                                                        <input type="number" :disabled="!online || !set(f)"
+                                                        <input type="number" :disabled="!online"
+                                                               :class="{ unset: !set(f) }"
                                                                :min="base(f).min" :max="base(f).max"
                                                                :step="base(f).int ? 1 : 'any'"
                                                                :placeholder="f.placeholder"
-                                                               x-model="f.draft"/>
+                                                               x-model="f.draft" @input="enable(f)"/>
                                                     </template>
 
                                                     <template x-if="base(f).type === 'int' || base(f).type === 'float'">
-                                                        <input type="number" :disabled="!online || !set(f)"
+                                                        <input type="number" :disabled="!online"
+                                                               :class="{ unset: !set(f) }"
                                                                :step="base(f).type === 'int' ? 1 : 'any'"
                                                                :placeholder="f.placeholder"
-                                                               x-model="f.draft"/>
+                                                               x-model="f.draft" @input="enable(f)"/>
                                                     </template>
 
                                                     <template x-if="base(f).type === 'string'">
-                                                        <input type="text" :disabled="!online || !set(f)"
+                                                        <input type="text" :disabled="!online"
+                                                               :class="{ unset: !set(f) }"
                                                                :placeholder="f.placeholder"
-                                                               x-model="f.draft"/>
+                                                               x-model="f.draft" @input="enable(f)"/>
                                                     </template>
 
                                                     <small class="units" x-show="f.units" x-text="f.units"></small>
@@ -540,18 +546,22 @@
                                                            @change="toggleOptional(p, $event.target)"/>
                                                 </template>
 
-                                                <span x-show="p.read_only && base(p).type !== 'metric'"
+                                                <span x-show="p.read_only && base(p).type !== 'metric'
+                                                               && !structured(p)"
                                                       class="ro" :class="{ changed: fresh(p.changedAt),
                                                                            unset: p.value === null }"
                                                       x-text="p.value === null ? 'unset' : p.text"></span>
 
                                                 <template x-if="!p.read_only && base(p).type === 'bool'">
-                                                    <input type="checkbox" :disabled="!online || !set(p)" :checked="p.draft === 'true'"
-                                                           @change="p.draft = $event.target.checked ? 'true' : 'false' ; save(p)"/>
+                                                    <input type="checkbox" :disabled="!online" :class="{ unset: !set(p) }"
+                                                           :checked="p.draft === 'true'"
+                                                           @change="p.draft = $event.target.checked ? 'true' : 'false' ;
+                                                                    enable(p) ; save(p)"/>
                                                 </template>
 
                                                 <template x-if="!p.read_only && base(p).type === 'enum'">
-                                                    <select :disabled="!online || !set(p)" x-model="p.draft" @change="save(p)">
+                                                    <select :disabled="!online" :class="{ unset: !set(p) }"
+                                                            x-model="p.draft" @change="enable(p) ; save(p)">
                                                         <template x-for="c in base(p).choices" :key="c">
                                                             <option :value="c" x-text="c"></option>
                                                         </template>
@@ -561,28 +571,183 @@
                                                 <template x-if="!p.read_only && base(p).type === 'range'">
                                                     <span class="range">
                                                         <template x-if="hasSlider(base(p))">
-                                                            <input type="range" :disabled="!online || !set(p)"
+                                                            <input type="range" :disabled="!online"
+                                                                   :class="{ unset: !set(p) }"
                                                                    :min="base(p).min" :max="base(p).max"
                                                                    :step="sliderStep(base(p))"
-                                                                   x-model="p.draft" @change="save(p)"/>
+                                                                   x-model="p.draft" @input="enable(p)"
+                                                                   @change="save(p)"/>
                                                         </template>
-                                                        <input type="number" :disabled="!online || !set(p)"
+                                                        <input type="number" :disabled="!online"
+                                                               :class="{ unset: !set(p) }"
                                                                :min="base(p).min" :max="base(p).max"
                                                                :step="base(p).int ? 1 : 'any'" x-model="p.draft"
+                                                               @input="enable(p)"
                                                                @keydown.enter="save(p)" @blur="save(p)"/>
                                                     </span>
                                                 </template>
 
                                                 <template x-if="!p.read_only && (base(p).type === 'int' || base(p).type === 'float')">
-                                                    <input type="number" :disabled="!online || !set(p)"
+                                                    <input type="number" :disabled="!online"
+                                                           :class="{ unset: !set(p) }"
                                                            :step="base(p).type === 'int' ? 1 : 'any'"
-                                                           x-model="p.draft"
+                                                           x-model="p.draft" @input="enable(p)"
                                                            @keydown.enter="save(p)" @blur="save(p)"/>
                                                 </template>
 
                                                 <template x-if="!p.read_only && base(p).type === 'string'">
-                                                    <input type="text" :disabled="!online || !set(p)" x-model="p.draft"
+                                                    <input type="text" :disabled="!online" :class="{ unset: !set(p) }"
+                                                           x-model="p.draft" @input="enable(p)"
                                                            @keydown.enter="save(p)" @blur="save(p)"/>
+                                                </template>
+
+                                                <!-- A list or a record: a table of cells.
+
+                                                     A record is the table of a
+                                                     single row -- its fields are
+                                                     the columns, in the order the
+                                                     simulator named them -- and a
+                                                     list of records is that row
+                                                     repeated. A list of bare values
+                                                     is one column, with nothing to
+                                                     head it with.
+
+                                                     Sent when the reader says so
+                                                     rather than on the way out of a
+                                                     cell: half a row is not a value
+                                                     anything could accept. -->
+                                                <template x-if="structured(p)">
+                                                    <div class="listing" :class="{ dirty: p.dirty }">
+                                                        <table>
+                                                            <thead x-show="cols(p)">
+                                                                <tr>
+                                                                    <template x-for="f in cols(p) || []" :key="f.name">
+                                                                        <th x-text="f.name"></th>
+                                                                    </template>
+                                                                    <th class="row-tools" x-show="growable(p)"></th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                <template x-for="row in p.rows" :key="row.key">
+                                                                    <tr :class="{ dragged: dragRow === row.key }">
+                                                                        <template x-for="(c, i) in row.cells" :key="i">
+                                                                            <!-- The cell is a line of its own: the box
+                                                                                 that says whether there is a value
+                                                                                 keeps its place at the left of it,
+                                                                                 and the input takes what room is
+                                                                                 left. -->
+                                                                            <td><span class="cell">
+                                                                                <span x-show="p.read_only" class="ro"
+                                                                                      :class="{ unset: !set(c) }"
+                                                                                      x-text="cellText(c)"></span>
+
+                                                                                <!-- Same box as anywhere else a value
+                                                                                     may be left out, in front of the
+                                                                                     input for it. -->
+                                                                                <template x-if="!p.read_only && c.kind.type === 'optional'">
+                                                                                    <input type="checkbox" class="enabler"
+                                                                                           :disabled="!online" x-model="c.enabled"
+                                                                                           @change="touch(p)"
+                                                                                           :title="c.enabled ? 'leave this out'
+                                                                                                             : 'give it a value'"/>
+                                                                                </template>
+
+                                                                                <template x-if="!p.read_only && cellInput(c) === 'bool'">
+                                                                                    <input type="checkbox" :disabled="!online"
+                                                                                           :class="{ unset: !set(c) }"
+                                                                                           :checked="c.draft === 'true'"
+                                                                                           @change="c.draft = $event.target.checked ? 'true' : 'false' ;
+                                                                                                    enable(c) ; touch(p)"/>
+                                                                                </template>
+
+                                                                                <template x-if="!p.read_only && cellInput(c) === 'enum'">
+                                                                                    <select :disabled="!online" :class="{ unset: !set(c) }"
+                                                                                            x-model="c.draft" @change="enable(c) ; touch(p)">
+                                                                                        <template x-for="ch in base(c).choices" :key="ch">
+                                                                                            <option :value="ch" x-text="ch"></option>
+                                                                                        </template>
+                                                                                    </select>
+                                                                                </template>
+
+                                                                                <!-- No slider in a cell: a column of
+                                                                                     tracks is unreadable, and there is
+                                                                                     no room for one beside the number
+                                                                                     anyway. The bounds still hold. -->
+                                                                                <template x-if="!p.read_only && cellInput(c) === 'number'">
+                                                                                    <input type="number" :disabled="!online"
+                                                                                           :class="{ unset: !set(c) }"
+                                                                                           :min="base(c).type === 'range' ? base(c).min : null"
+                                                                                           :max="base(c).type === 'range' ? base(c).max : null"
+                                                                                           :step="base(c).type === 'int' ||
+                                                                                                  (base(c).type === 'range' && base(c).int)
+                                                                                                  ? 1 : 'any'"
+                                                                                           x-model="c.draft"
+                                                                                           @input="enable(c) ; touch(p)"/>
+                                                                                </template>
+
+                                                                                <template x-if="!p.read_only && cellInput(c) === 'text'">
+                                                                                    <input type="text" :disabled="!online"
+                                                                                           :class="{ unset: !set(c) }"
+                                                                                           x-model="c.draft"
+                                                                                           @input="enable(c) ; touch(p)"/>
+                                                                                </template>
+                                                                            </span></td>
+                                                                        </template>
+                                                                        <td class="row-tools" x-show="growable(p)">
+                                                                            <!-- Where a row is in the list is part of
+                                                                                 what the list says -- the first route
+                                                                                 that matches is the one taken -- so
+                                                                                 the rows can be carried about. Drawn
+                                                                                 rather than written, since a glyph
+                                                                                 for it is not in every font. -->
+                                                                            <span class="grab" title="Drag to move this row"
+                                                                                  @pointerdown="grabRow(p, row, $event)">
+                                                                                <svg viewBox="0 0 6 10" aria-hidden="true">
+                                                                                    <circle cx="2" cy="2" r="1"/>
+                                                                                    <circle cx="2" cy="5" r="1"/>
+                                                                                    <circle cx="2" cy="8" r="1"/>
+                                                                                    <circle cx="5" cy="2" r="1"/>
+                                                                                    <circle cx="5" cy="5" r="1"/>
+                                                                                    <circle cx="5" cy="8" r="1"/>
+                                                                                </svg>
+                                                                            </span>
+                                                                            <button class="outline secondary" :disabled="!online"
+                                                                                    title="Drop this row"
+                                                                                    @click="dropRow(p, row)">&times;</button>
+                                                                        </td>
+                                                                    </tr>
+                                                                </template>
+                                                            </tbody>
+                                                        </table>
+
+                                                        <!-- An empty table is a table
+                                                             with no rows, which is a
+                                                             thin line of nothing: say
+                                                             it in words. -->
+                                                        <p class="ro" x-show="!p.rows.length"><small>empty</small></p>
+
+                                                        <div class="list-foot" x-show="!p.read_only">
+                                                            <!-- Out while a row is still
+                                                                 empty: that row is not
+                                                                 part of the value, and
+                                                                 handing out another one
+                                                                 would only grow a table
+                                                                 of nothing. -->
+                                                            <button class="outline secondary" x-show="growable(p)"
+                                                                    :disabled="!online || hasBlank(p)"
+                                                                    :title="hasBlank(p)
+                                                                            ? 'there is an empty row to fill in first'
+                                                                            : 'Add a row'"
+                                                                    @click="addRow(p)">Add a row</button>
+                                                            <!-- Lit only once there is
+                                                                 something to send, so
+                                                                 that the table says
+                                                                 whether it agrees with
+                                                                 the simulator. -->
+                                                            <button :disabled="!online || !p.dirty"
+                                                                    @click="save(p)">Apply</button>
+                                                        </div>
+                                                    </div>
                                                 </template>
 
                                                 <!-- What the value is counted in, kept
