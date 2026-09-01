@@ -6,8 +6,13 @@
     /* Pico grows the root font with the viewport, up to 21px, which is right
      * for prose and wasteful here: this is an instrument panel, and there is
      * already more worth showing than there is room for. Everything below is
-     * in rem, so this one number sets the density of the whole page. */
-    font-size: 87.5%;
+     * in rem, so this one number sets the density of the whole page -- and so
+     * do the boxes of the map, which read it back (see [rem] in app.js).
+     *
+     * A share of the reader's own default rather than a count of pixels, so
+     * that someone who has told their browser to use larger text still gets
+     * larger text here, in the same proportion. */
+    font-size: 65.625%;
     --pico-line-height: 1.4;
     /* Pico derives most of its paddings and margins from this. */
     --pico-spacing: .7rem;

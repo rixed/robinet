@@ -706,13 +706,20 @@ const clipSeg = (x0, y0, x1, y1, w, h) => {
  * every render, and it only changes when the view does. */
 let coastMemo = { sig: null, value: '' }
 
-/* A box is a fixed size in pixels, not in world units: zooming out must bring
+/* The page's own unit, as the stylesheet set it: everything laid out here is
+ * a multiple of it, so that the one number that sets the density of the page
+ * sets the size of the map's boxes too, rather than leaving them the size they
+ * were around text that has shrunk. Read once -- the stylesheet is in the
+ * document head and this script is deferred, so it is applied by now. */
+const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+
+/* A box is a fixed size on screen, not in world units: zooming out must bring
  * more of the network into view, not shrink its labels until they cannot be
  * read. Only positions are projected. */
-const boxW = 104, boxH = 30    /* a box with nothing shown inside it */
-const boxPad = 8               /* between a box's border and its contents */
-const boxGap = 10              /* between two boxes side by side */
-const boxHead = 17             /* the name of a box that is showing its insides */
+const boxW = 7.4 * rem, boxH = 2.1 * rem  /* a box with nothing shown inside it */
+const boxPad = .55 * rem       /* between a box's border and its contents */
+const boxGap = .7 * rem        /* between two boxes side by side */
+const boxHead = 1.2 * rem      /* the name of a box that is showing its insides */
 
 /* Watching the pane rather than the window: it also changes size when the
  * divider is dragged and when the dock is folded away. One at a time. */
