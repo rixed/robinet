@@ -341,6 +341,9 @@ let get_device_types _mth _matches _vars _qry_body resp =
                               "descr", `String p.descr ;
                               "units", `String p.units ;
                               "kind", json_of_kind p.kind ;
+                              (* What an empty input is to show: an example of
+                                 the value, or what leaving it out will do. *)
+                              "placeholder", `String p.placeholder ;
                               (* What the dialog offers before anything is
                                  typed. Null for a parameter that has no value
                                  of its own until one is given. *)

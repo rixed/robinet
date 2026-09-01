@@ -24,7 +24,8 @@
     <script defer src="app.js"></script>
     <script defer src="alpine.min.js"></script>
 </head>
-<body x-data="admin" x-init="start()">
+<body x-data="admin" x-init="start()"
+      @keydown.escape.window="cancelAdd()">
 
 <!-- Across the top, not tucked away in a corner: if these numbers are no
      longer live, that is the most important thing on the page. -->
@@ -216,7 +217,7 @@
                     <div class="pane detail" x-show="split > 0" x-cloak
                          :style="`flex-basis: ${split * 100}%`"
                          @scroll="repositionMenu()">
-                        <div class="schematic">
+                        <div class="schematic" x-show="!adding">
                             <!-- ancestors, as a straight line, always -->
                             <nav class="breadcrumb" aria-label="ancestors">
                                 <template x-for="(a, i) in ancestors()" :key="a.id">
@@ -236,6 +237,19 @@
                                                 ? 'Stop following what this widget logs'
                                                 : 'Follow what this widget logs'"
                                         @click="toggleLogged()">logs</button>
+                                <!-- Only where it would work: a part of a device
+                                     is not a device, and what this interface
+                                     cannot build back it does not offer to take
+                                     away. Asked twice, since it cannot be
+                                     undone. -->
+                                <button class="outline delete" x-show="selected.deletable"
+                                        x-cloak :disabled="!online"
+                                        :class="{ arming: confirmDelete }"
+                                        :title="confirmDelete
+                                                ? 'This cannot be undone'
+                                                : 'Take this device out of the simulation, with the cables that reach it'"
+                                        @click="deleteSelected()"
+                                        x-text="confirmDelete ? 'really?' : 'delete'"></button>
                                 <small class="error" x-show="logError" x-text="logError"></small>
                             </nav>
 
@@ -290,8 +304,110 @@
 
                         </div>
 
+                        <!-- ================= what is being built =================
+
+                             In the schematic's place rather than over it: what
+                             is being built has no schematic yet, and a form
+                             laid over the map could not be filled in from the
+                             map, which is where a cable's two ends are
+                             clicked. -->
+                        <form class="creator" x-show="adding" x-cloak
+                              @submit.prevent="submitAdd()">
+                            <template x-if="adding">
+                                <div>
+                                    <header>
+                                        <strong x-text="'New ' + adding.type"></strong>
+                                        <small x-text="adding.descr"></small>
+                                    </header>
+
+                                    <label class="field">
+                                        <span class="what">name</span>
+                                        <input type="text" x-model="adding.name"
+                                               :disabled="!online" x-ref="newName"
+                                               placeholder="what to call it"/>
+                                    </label>
+
+                                    <template x-for="f in adding.fields" :key="f.name">
+                                        <label class="field">
+                                            <span class="what" x-text="f.name"></span>
+
+                                            <!-- An end that was clicked on the map.
+                                                 Shown rather than edited: it is
+                                                 what the reader pointed at. -->
+                                            <template x-if="f.picked !== null">
+                                                <strong class="picked" x-text="nameOf(f.picked)"></strong>
+                                            </template>
+
+                                            <template x-if="f.picked === null">
+                                                <span class="input">
+                                                    <!-- Something that may be left
+                                                         out: the box says whether it
+                                                         is, the input keeps what was
+                                                         typed either way. -->
+                                                    <template x-if="f.kind.type === 'optional'">
+                                                        <input type="checkbox" class="enabler"
+                                                               x-model="f.enabled" :disabled="!online"
+                                                               :title="f.enabled ? 'leave this out'
+                                                                                 : 'give it a value'"/>
+                                                    </template>
+
+                                                    <template x-if="base(f).type === 'bool'">
+                                                        <input type="checkbox" :disabled="!online || !set(f)"
+                                                               :checked="f.draft === 'true'"
+                                                               @change="f.draft = $event.target.checked ? 'true' : 'false'"/>
+                                                    </template>
+
+                                                    <template x-if="base(f).type === 'enum'">
+                                                        <select :disabled="!online || !set(f)" x-model="f.draft">
+                                                            <template x-for="c in base(f).choices" :key="c">
+                                                                <option :value="c" x-text="c"></option>
+                                                            </template>
+                                                        </select>
+                                                    </template>
+
+                                                    <template x-if="base(f).type === 'range'">
+                                                        <input type="number" :disabled="!online || !set(f)"
+                                                               :min="base(f).min" :max="base(f).max"
+                                                               :step="base(f).int ? 1 : 'any'"
+                                                               :placeholder="f.placeholder"
+                                                               x-model="f.draft"/>
+                                                    </template>
+
+                                                    <template x-if="base(f).type === 'int' || base(f).type === 'float'">
+                                                        <input type="number" :disabled="!online || !set(f)"
+                                                               :step="base(f).type === 'int' ? 1 : 'any'"
+                                                               :placeholder="f.placeholder"
+                                                               x-model="f.draft"/>
+                                                    </template>
+
+                                                    <template x-if="base(f).type === 'string'">
+                                                        <input type="text" :disabled="!online || !set(f)"
+                                                               :placeholder="f.placeholder"
+                                                               x-model="f.draft"/>
+                                                    </template>
+
+                                                    <small class="units" x-show="f.units" x-text="f.units"></small>
+                                                </span>
+                                            </template>
+
+                                            <small class="descr" x-text="f.descr"></small>
+                                        </label>
+                                    </template>
+
+                                    <footer>
+                                        <small class="error" x-show="adding.error"
+                                               x-text="adding.error"></small>
+                                        <button type="button" class="outline secondary"
+                                                @click="cancelAdd()">Cancel</button>
+                                        <button type="submit" :disabled="!online || adding.busy"
+                                                x-text="adding.busy ? 'Building...' : 'Build'"></button>
+                                    </footer>
+                                </div>
+                            </template>
+                        </form>
+
                         <!-- ================= properties ================= -->
-                        <article class="properties">
+                        <article class="properties" x-show="!adding">
                             <header>
                                 <strong>Properties</strong>
                                 <!-- The live refresh deliberately leaves the fields
@@ -505,6 +621,7 @@
                          lump because a <template> inside an <svg> is parsed as an
                          SVG element with no content, which x-for cannot use. -->
                     <div class="pane map" x-show="split < 1" x-cloak
+                         :class="{ picking: !!picking }"
                          x-ref="mapPane" x-init="watchMap()"
                          @wheel="zoomMap($event)" @pointerdown="panMap($event)"
                          @resize.window="measureMap()">
@@ -541,7 +658,10 @@
                             <div class="box"
                                  :class="{ selected: isSelected(selected.sim, b.id),
                                            holds: b.holds,
-                                           open: b.open, unplaced: b.nowhere }"
+                                           open: b.open, unplaced: b.nowhere,
+                                           picked: picking && picking.ends.includes(b.id),
+                                           unpluggable: picking &&
+                                                        !canTakeCable(get(selected.sim, b.id)) }"
                                  :style="`left:${b.x}px; top:${b.y}px;
                                           width:${b.w}px; height:${b.h}px`"
                                  @pointerdown.stop="dragBox(b.id, $event)">
@@ -565,7 +685,30 @@
                         <!-- Everything with no place of its own. It is not at 0,0
                              -- it is nowhere, and this is where nowhere is drawn;
                              dragging a box back down here takes it off the map. -->
+                        <!-- Nowhere, and therefore also where a new device
+                             appears: nothing is built with a place, and this is
+                             the one part of the map that says so. -->
                         <div class="tray-line" :style="`top:${mapScene().trayTop}px`">
+                            <div class="adder" @pointerdown.stop @wheel.stop>
+                                <template x-if="picking">
+                                    <span class="picking">
+                                        <small x-text="`click ${endsOf(picking.type).length - picking.ends.length} more device(s) to join with a ${picking.type.type}`"></small>
+                                        <button class="outline secondary stop"
+                                                @click="cancelAdd()">stop</button>
+                                    </span>
+                                </template>
+                                <button class="outline secondary add" x-show="!picking"
+                                        :disabled="!online || !!adding"
+                                        title="Build a new device. It arrives here, with no place of its own; drag it onto the map to give it one"
+                                        @click="toggleTypeMenu()">+ add</button>
+                                <div class="type-menu" x-show="typeMenu" x-cloak
+                                     @click.outside="typeMenu = false">
+                                    <template x-for="t in deviceTypes" :key="t.type">
+                                        <button class="outline secondary" :title="t.descr"
+                                                @click="startAdd(t)" x-text="t.type"></button>
+                                    </template>
+                                </div>
+                            </div>
                             <small x-text="mapScene().trayCount
                                            ? 'not placed'
                                            : 'drop a box here to take it off the map'"></small>

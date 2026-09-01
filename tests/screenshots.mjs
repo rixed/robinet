@@ -1404,6 +1404,180 @@ if (await page.locator('.pane.map .port').count() !== 4)
     problems.push('the four ports must be drawn')
 await page.screenshot({ path: `${OUT}/h-map-ports.png` })
 
+/* ------------------------------------------------------------------
+ * Building a device, cabling it, and taking it out again.
+ *
+ * The whole point of the Add button: what is built has no place of its own, so
+ * it arrives in the strip under the map for the reader to drag out. A cable is
+ * the exception, its two ends being other devices, so it asks for them first.
+ * ------------------------------------------------------------------ */
+
+/* Both panes on screen: the form stands in the detail pane and the ends are
+ * clicked on the map, so this needs the two of them at once. */
+await page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    d.split = 0.45
+    d.mapOpen = []
+    d.fitMap()
+})
+await page.waitForTimeout(300)
+
+const names = () => page.evaluate(() =>
+    Alpine.$data(document.body).mapScene().boxes.map(b => b.name))
+const trayNames = () => page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    const s = d.mapScene()
+    return s.boxes.filter(b => b.y > s.trayTop).map(b => b.name)
+})
+
+await page.locator('.pane.map .tray-line .adder button.add').click()
+await page.waitForTimeout(300)
+const offered = await page.locator('.pane.map .type-menu button').allTextContents()
+for (const t of [ 'host', 'switch', 'hub', 'router', 'gateway', 'cable' ])
+    if (!offered.includes(t))
+        problems.push(`the Add menu must offer a ${t}: ` + JSON.stringify(offered))
+await page.screenshot({ path: `${OUT}/j-add-menu.png` })
+
+/* A hub: no end to pick, so the form comes straight up, in the schematic's
+ * place rather than over the map. */
+await page.locator('.pane.map .type-menu button', { hasText: 'hub' }).click()
+await page.waitForTimeout(300)
+if (await page.locator('.schematic').isVisible())
+    problems.push('the schematic must give way to the form')
+if (await page.locator('article.properties').isVisible())
+    problems.push('and so must the properties of whatever was selected')
+/* The catalogue's default, offered before anything is typed. */
+const portsField = page.locator('.creator .field', { hasText: 'ports' })
+                       .locator('input[type=number]')
+if (await portsField.inputValue() !== '8')
+    problems.push('a field must open on the default the catalogue gives: ' +
+                  await portsField.inputValue())
+await page.locator('.creator input[type=text]').first().fill('built-hub')
+await portsField.fill('3')
+await page.screenshot({ path: `${OUT}/j-add-form.png` })
+await page.locator('.creator button[type=submit]').click()
+await page.waitForTimeout(800)
+
+if (await page.locator('.creator').isVisible())
+    problems.push('the form must close once the device is built')
+const built = await page.evaluate(() => Alpine.$data(document.body).selected.name)
+if (built !== 'built-hub')
+    problems.push('what was built is what one is left looking at: ' + built)
+if (!(await trayNames()).includes('built-hub'))
+    problems.push('a device is built with no place of its own, so it belongs ' +
+                  'in the strip below the map: ' + JSON.stringify(await trayNames()))
+await page.screenshot({ path: `${OUT}/j-built.png` })
+
+/* A cable, which asks for its two ends on the map before it offers a form. */
+await page.locator('.pane.map .tray-line .adder button.add').click()
+await page.waitForTimeout(200)
+await page.locator('.pane.map .type-menu button', { hasText: 'cable' }).click()
+await page.waitForTimeout(200)
+if (!await page.locator('.pane.map .tray-line .picking').isVisible())
+    problems.push('a cable must say it is waiting for its ends')
+/* A host is full -- one adapter, one cable already on it -- and says so by
+ * being drawn out of the way. */
+const dim = await page.evaluate(() =>
+    [ ...document.querySelectorAll('.pane.map .box.unpluggable .name') ]
+        .map(e => e.textContent))
+if (!dim.includes('host0'))
+    problems.push('a device with no port left must be shown as no target: ' +
+                  JSON.stringify(dim))
+if (dim.includes('built-hub'))
+    problems.push('a device with ports left must stay a target: ' +
+                  JSON.stringify(dim))
+await page.screenshot({ path: `${OUT}/j-picking.png` })
+
+/* Dispatched rather than clicked: two devices a few hundred metres apart
+ * overlap at this zoom, so which box a click at a point lands on is the map's
+ * business and not this test's. What is being tried here is that a pointer on
+ * a box is an end being picked rather than a box being dragged. */
+const pickBox = async (n) => {
+    await page.locator('.pane.map .box')
+              .filter({ has: page.locator(`.name:text-is("${n}")`) })
+              .dispatchEvent('pointerdown', { button: 0 })
+    await page.waitForTimeout(300)
+}
+await pickBox('built-hub')
+await pickBox('switch')
+if (!await page.locator('.creator').isVisible())
+    problems.push('the form must open once both ends are picked')
+const picked = await page.locator('.creator .picked').allTextContents()
+mapSay('the two ends the form was opened with', picked, [ 'built-hub', 'switch' ])
+/* A parameter the catalogue has no default for says in the empty box itself
+ * what leaving it that way will do, rather than in a line of help under it. */
+const portHint = await page.locator('.creator .field', { hasText: 'from port' })
+                           .locator('input[type=number]')
+                           .getAttribute('placeholder')
+if (portHint !== 'the first free one')
+    problems.push('an empty field must show the catalogue\'s placeholder: ' +
+                  JSON.stringify(portHint))
+await page.locator('.creator input[type=text]').first().fill('built-cable')
+await page.screenshot({ path: `${OUT}/j-cable-form.png` })
+await page.locator('.creator button[type=submit]').click()
+await page.waitForTimeout(800)
+
+const cabled = await page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    const byId = d.widgetsOf(d.selected.sim)
+    const hub = Object.values(byId).find(w => w.name === 'built-hub')
+    return { selected: d.selected.name,
+             /* Peered through the new cable, and so drawn as an edge. */
+             edges: d.mapScene().edges.filter(e => e.name === 'built-cable').length,
+             taken: hub ? hub.ports.filter(t => t).length : -1 }
+})
+if (cabled.selected !== 'built-cable')
+    problems.push('one is left on the cable that was built: ' + cabled.selected)
+if (cabled.edges !== 1)
+    problems.push('a cable that was built must be drawn: ' + cabled.edges)
+if (cabled.taken !== 1)
+    problems.push('and the port it took must say it is taken: ' + cabled.taken)
+await page.screenshot({ path: `${OUT}/j-cabled.png` })
+
+/* Taking the hub out takes the cable with it: a cable is the link, and a link
+ * with one end missing is nothing. Asked twice, since it cannot be undone. */
+await page.locator('nav.tree a', { hasText: 'built-hub' }).click()
+await page.waitForTimeout(400)
+const del = page.locator('nav.breadcrumb button.delete')
+if (!await del.isVisible())
+    problems.push('a device this interface built must be one it will remove')
+await del.click()
+await page.waitForTimeout(200)
+if (await del.textContent() !== 'really?')
+    problems.push('deleting must ask before it does it')
+await page.screenshot({ path: `${OUT}/j-delete.png` })
+await del.click()
+await page.waitForTimeout(800)
+
+const after = await page.evaluate(() => {
+    const d = Alpine.$data(document.body)
+    const byId = d.widgetsOf(d.selected.sim)
+    const named = (n) => Object.values(byId).filter(w => w.name === n).length
+    const sw = Object.values(byId).find(w => w.name === 'switch')
+    return { hub: named('built-hub'), cable: named('built-cable'),
+             free: sw ? sw.ports.filter(t => !t).length : -1 }
+})
+if (after.hub || after.cable)
+    problems.push('the device and the cable that reached it must both be ' +
+                  'gone: ' + JSON.stringify(after))
+if (after.free !== 1)
+    problems.push('and the port that cable was on must be free again: ' +
+                  after.free)
+if (!(await names()).includes('switch'))
+    problems.push('while what was at the other end stays')
+await page.screenshot({ path: `${OUT}/j-deleted.png` })
+
+/* Only a device: a part of one is not offered. */
+await page.locator('nav.tree a', { hasText: 'host1' }).click()
+await page.waitForTimeout(400)
+if (!await page.locator('nav.breadcrumb button.delete').isVisible())
+    problems.push('a host is a device and may be removed')
+/* Down into it through the schematic, which lists what it is made of. */
+await page.locator('.children a.child', { hasText: 'eth' }).first().click()
+await page.waitForTimeout(400)
+if (await page.locator('nav.breadcrumb button.delete').isVisible())
+    problems.push('a part of a device is not one, and must not offer to go')
+
 if (outside.length)
     problems.push('the page went looking outside the simulator for ' +
                   [ ...new Set(outside) ].join(', '))

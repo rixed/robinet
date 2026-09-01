@@ -46,13 +46,20 @@ type param =
       descr : string ;
       units : string ;
       kind : Widget.kind ;
+      (* What an empty input shows: an address of the shape expected, or what
+       * leaving the parameter out will do. It is the description's examples,
+       * moved to where they are read -- so keep it out of [descr]. Only ever
+       * seen by a parameter with no [default], since a default fills the input
+       * in. *)
+      placeholder : string ;
       (* What the dialog offers before anything is typed, and what is used when
        * the parameter is left out. [`Null] for a parameter with no value of its
        * own, which an [Optional] kind is then obliged to accept. *)
       default : Widget.value }
 
-let param ?(descr="") ?(units="") ?(default=`Null) ~kind name =
-    { name ; descr ; units ; kind ; default }
+let param ?(descr="") ?(units="") ?(placeholder="") ?(default=`Null) ~kind
+          name =
+    { name ; descr ; units ; kind ; placeholder ; default }
 
 (** A kind of device: what it is called, what it needs, and how to build one.
  *
@@ -231,18 +238,22 @@ let host =
            * the host is configured statically, without one it goes looking for
            * a DHCP server, and the two are different machines from here on. *)
           param "address" ~kind:(Widget.optional String)
-              ~descr:"Its IP address; leave it out to ask a DHCP server." ;
+              ~placeholder:"asked of a DHCP server"
+              ~descr:"Its IP address." ;
           param "netmask" ~kind:String ~default:(`String "255.255.255.0")
               ~descr:"Which addresses it can reach without a gateway." ;
           param "gateway" ~kind:(Widget.optional String)
+              ~placeholder:"192.168.0.1"
               ~descr:"Where to send what the netmask does not cover." ;
           param "nameserver" ~kind:(Widget.optional String)
+              ~placeholder:"192.168.0.1"
               ~descr:"Which DNS server to ask." ;
           param "search suffix" ~kind:(Widget.optional String)
+              ~placeholder:"example.com"
               ~descr:"Appended to the names it is asked to resolve." ;
           param "MAC" ~kind:(Widget.optional String)
-              ~descr:"Its hardware address. One is drawn at random if left \
-                      out." ] ;
+              ~placeholder:"drawn at random"
+              ~descr:"Its hardware address." ] ;
       make = fun ~parent name args ->
           let netmask = addr "netmask" (arg args "netmask")
           and gateways =
@@ -275,14 +286,15 @@ let cable =
           param "from" ~kind:Widget_id ~descr:"One end." ;
           param "to" ~kind:Widget_id ~descr:"The other." ;
           param "from port" ~kind:(Widget.optional Int)
-              ~descr:"Which port of it; the first free one if left out." ;
+              ~placeholder:"the first free one"
+              ~descr:"Which port of it." ;
           param "to port" ~kind:(Widget.optional Int)
+              ~placeholder:"the first free one"
               ~descr:"Likewise, at the other end." ;
           param "length" ~kind:(Widget.optional (FRange (0., infinity)))
-              ~units:"meters"
+              ~units:"meters" ~placeholder:"distance on the map"
               ~descr:"How long it is, and hence how long a frame takes to \
-                      cross it. Measured between the two ends when they are \
-                      both on the map." ;
+                      cross it." ;
           param "error rate" ~kind:(FRange (0., 1.)) ~default:(`Float 0.)
               ~descr:"Faulty bits per bit transmitted." ] ;
       make = fun ~parent name args ->
@@ -361,12 +373,14 @@ let macs_of args n =
  * it has, and how big its tables are. *)
 let mac_params = [
     param "MAC range" ~kind:String ~default:(`String "")
-        ~descr:"The leading octets every interface's address shares, \
-                \"00:11:22\" say, the rest being picked at random. \
-                Empty for addresses picked at random entirely." ;
+        ~placeholder:"00:11:22"
+        ~descr:"The leading octets every interface's address shares, the rest \
+                being picked at random. Empty for addresses picked at random \
+                entirely." ;
     param "MACs" ~kind:String ~default:(`String "")
-        ~descr:"The addresses themselves instead, comma separated, one per \
-                port, for when picking them is not good enough." ]
+        ~placeholder:"00:11:22:33:44:55, ..."
+        ~descr:"The addresses themselves instead, one per port, for when \
+                picking them is not good enough." ]
 
 let router =
     { name = "router" ;

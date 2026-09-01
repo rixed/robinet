@@ -461,6 +461,59 @@ body.splitting.rows { cursor: row-resize; }
     color: var(--pico-muted-color);
 }
 
+/* The tray is not in the way of the map, so it does not take clicks; what
+ * sits in it has to ask for them back. */
+/* On the right, beside the label and above the boxes: the strip fills from the
+ * left, and a box dropped in it would otherwise sit on top of this. */
+.pane.map .tray-line .adder {
+    position: relative;
+    z-index: 4;
+    pointer-events: auto;
+}
+.pane.map .tray-line .adder button {
+    width: auto;
+    margin: 0;
+    padding: .1rem .45rem;
+    font-size: .7rem;
+}
+.pane.map .tray-line .picking {
+    display: flex;
+    align-items: center;
+    gap: .3rem;
+}
+.pane.map .tray-line .picking small { color: var(--pico-primary); }
+/* Upwards: the tray is at the bottom of the map, and a menu below it would be
+ * off the pane. */
+.pane.map .type-menu {
+    position: absolute;
+    left: 0;
+    bottom: 100%;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    gap: .1rem;
+    padding: .2rem;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    background: var(--pico-card-background-color);
+}
+.pane.map .type-menu button { text-align: left; }
+
+/* While a cable is looking for its two ends, the only thing on the map worth
+ * clicking is a box. A cable's name sits at the middle of its line, which is
+ * often over one of the boxes it joins, and it would take the click. */
+.pane.map.picking .cable-label,
+.pane.map.picking .port { pointer-events: none; }
+
+/* While a cable is looking for its two ends: what it can be plugged into,
+ * what it cannot, and what it already has. */
+.pane.map .box.unpluggable { opacity: .4; cursor: not-allowed; }
+.pane.map .box.picked {
+    border-color: var(--pico-primary);
+    border-width: 2px;
+    border-style: solid;
+}
+
 .pane.map .map-tools { position: absolute; top: .3rem; right: .3rem; }
 .pane.map .map-tools button {
     width: auto;
@@ -474,6 +527,48 @@ body.splitting.rows { cursor: row-resize; }
     top: .3rem;
     font-size: .7rem;
 }
+
+/* The form for a device that does not exist yet, standing where the schematic
+ * of one that does would be. */
+.creator > div {
+    padding: .6rem .8rem;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+}
+.creator header { margin-bottom: .6rem; }
+.creator header small { display: block; color: var(--pico-muted-color); }
+.creator .field {
+    display: grid;
+    grid-template-columns: 8rem 1fr;
+    align-items: center;
+    gap: .2rem .6rem;
+    margin-bottom: .4rem;
+}
+.creator .field .what { font-size: .8rem; }
+.creator .field .input {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+}
+.creator .field input, .creator .field select { margin: 0; }
+/* One width for every box, whatever sits beside it: a units label must not
+   squeeze the input down to where its placeholder no longer fits. */
+.creator .field input[type=text], .creator .field input[type=number] {
+    flex: none;
+    width: 14rem;
+}
+.creator .field .enabler { flex: none; }
+.creator .field .picked { font-size: .8rem; }
+.creator .field .units, .creator .field .descr { color: var(--pico-muted-color); }
+/* Under the input it belongs to, in the second column. */
+.creator .field .descr { grid-column: 2; font-size: .7rem; }
+.creator footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .5rem;
+}
+.creator footer .error { margin-right: auto; }
+.creator footer button { width: auto; margin: 0; }
 
 nav.breadcrumb {
     font-size: .85rem;
@@ -913,6 +1008,22 @@ button.watch-logs {
 }
 button.watch-logs.watching {
     background: var(--pico-primary);
+    color: var(--pico-primary-inverse);
+}
+
+/* Beside it, and the same size: only offered where it would work, so where it
+ * is offered it is real. Armed, it says what it is about to do. */
+button.delete {
+    width: auto;
+    margin-left: .4rem;
+    padding: 0 .4rem;
+    font-size: .7rem;
+    line-height: 1.5;
+    border-color: var(--pico-del-color);
+    color: var(--pico-del-color);
+}
+button.delete.arming {
+    background: var(--pico-del-color);
     color: var(--pico-primary-inverse);
 }
 

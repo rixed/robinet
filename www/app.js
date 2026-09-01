@@ -893,6 +893,23 @@ document.addEventListener('alpine:init', () => {
         topoTock: 0,
         mapError: null,
 
+        /* The catalogue of what can be built, as /api/device-types gives it.
+         * Fetched the first time it is asked for: it is the same for every
+         * simulation and does not change while the program runs. */
+        deviceTypes: [],
+        typeMenu: false,
+        /* The device being built, or null. It stands where the schematic
+         * stands, there being no widget yet to draw a schematic of. */
+        adding: null,
+        /* While the ends of a cable are being clicked on the map. A cable is
+         * the one device whose parameters are two other devices, and it cannot
+         * be built without them: nothing here or in the simulator has any use
+         * for a cable with one end loose. */
+        picking: null,
+        /* Set by the first click on Delete and cleared by the second, or by
+         * looking at something else. Taking a device out cannot be undone. */
+        confirmDelete: false,
+
         /*
          * Connection state
          */
@@ -1073,6 +1090,8 @@ document.addEventListener('alpine:init', () => {
             const w = this.get(simId, id)
             if (!w) return
             this.selected = Object.assign({ sim: simId }, w)
+            /* Armed on the widget being left, and meaningless on this one. */
+            this.confirmDelete = false
             this.openToSelection()
             this.showSelection()
             /* It was opened on a property of the widget being left. */
@@ -2018,6 +2037,9 @@ document.addEventListener('alpine:init', () => {
         dragBox(id, ev) {
             if (ev.button !== 0 || !this.mapView.k) return
             ev.stopPropagation()
+            /* A box is an end to be picked, not a box to be moved, while a
+             * cable is waiting for its two ends. */
+            if (this.picking) { this.pickEnd(id) ; return }
             const pane = this.$refs.mapPane.getBoundingClientRect()
             const scene = this.mapScene()
             const r = scene.rects.get(id)
@@ -2065,6 +2087,149 @@ document.addEventListener('alpine:init', () => {
             const w = this.get(sim, id)
             if (w) w.location = r.value.location
             this.topoTock++
+        },
+
+        /*
+         * Building, and unbuilding
+         */
+
+        /* What a cable can be plugged into: a device with a port left. The
+         * widget listing answers port by port. */
+        canTakeCable(w) {
+            return !!w && w.ports.some(taken => !taken)
+        },
+
+        async toggleTypeMenu() {
+            if (this.typeMenu) { this.typeMenu = false ; return }
+            if (!this.deviceTypes.length) {
+                const r = await this.exchange(() => api('/device-types'))
+                if (!r.ok) { this.mapError = r.error.message ; return }
+                this.deviceTypes = r.value
+            }
+            this.mapError = null
+            this.typeMenu = true
+        },
+
+        /* The parameters of a kind of device that are other devices, and are
+         * therefore clicked on the map rather than typed. */
+        endsOf(t) {
+            return t.params.filter(p => baseKind(p.kind).type === 'widget')
+        },
+
+        startAdd(t) {
+            this.typeMenu = false
+            const sim = this.selected.sim
+            if (this.endsOf(t).length) this.picking = { sim, type: t, ends: [] }
+            else this.adding = this.formFor(sim, t, [])
+        },
+
+        /* One field per parameter, holding what will be sent. The catalogue
+         * says what each one may be worth, in the same words a property's kind
+         * does, so the inputs are the same inputs. */
+        formFor(sim, t, picked) {
+            const ends = this.endsOf(t)
+            const fields = t.params.map(p => {
+                const i = ends.indexOf(p)
+                return {
+                    name: p.name, descr: p.descr, units: p.units, kind: p.kind,
+                    /* What the input says while it is empty: an example, or
+                     * what will happen if it is left that way. */
+                    placeholder: p.placeholder,
+                    /* An end picked on the map is shown, not typed into. */
+                    picked: i >= 0 ? picked[i] : null,
+                    /* Something that may be left out starts left out, unless
+                     * the catalogue has something to offer for it. */
+                    enabled: p.kind.type !== 'optional' || p.default !== null,
+                    draft: p.default === null ? '' : String(p.default)
+                }
+            })
+            return { sim, type: t.type, descr: t.descr, name: '', fields,
+                     error: null, busy: false }
+        },
+
+        pickEnd(id) {
+            const p = this.picking
+            if (!p || p.sim !== this.selected.sim) return
+            const w = this.get(p.sim, id)
+            if (!this.canTakeCable(w)) {
+                this.mapError = `${w ? w.name : 'that'} has no port left`
+                return
+            }
+            if (p.ends.includes(id)) {
+                this.mapError = 'a cable joins two devices, not one to itself'
+                return
+            }
+            this.mapError = null
+            p.ends.push(id)
+            if (p.ends.length === this.endsOf(p.type).length) {
+                this.adding = this.formFor(p.sim, p.type, p.ends)
+                this.picking = null
+            }
+        },
+
+        cancelAdd() {
+            this.picking = null
+            this.adding = null
+            this.typeMenu = false
+            this.mapError = null
+        },
+
+        /* What one field is worth, in the JSON the API expects. */
+        fieldValue(f) {
+            if (f.picked !== null) return f.picked
+            /* Left out is a value in itself: there is none. */
+            if (f.kind.type === 'optional' && !f.enabled) return null
+            switch (baseKind(f.kind).type) {
+                case 'bool':
+                    return f.draft === true || f.draft === 'true'
+                case 'int': case 'float': case 'range': {
+                    const n = Number(f.draft)
+                    /* Send what was typed rather than guessing: the catalogue
+                     * says what is wrong with it better than this could. */
+                    return Number.isNaN(n) || f.draft === ''
+                               ? String(f.draft) : n
+                }
+                default:
+                    return String(f.draft)
+            }
+        },
+
+        async submitAdd() {
+            const a = this.adding
+            if (!a || a.busy) return
+            const params = {}
+            for (const f of a.fields) params[f.name] = this.fieldValue(f)
+            a.busy = true
+            const r = await this.exchange(() =>
+                api(`/simulations/${a.sim}/widgets`,
+                    { method: 'POST',
+                      body: JSON.stringify({ type: a.type, name: a.name,
+                                             params }) }))
+            a.busy = false
+            /* Whatever it refused, said beside the form it was refused for:
+             * the fields are still there to be corrected. */
+            if (!r.ok) { a.error = r.error.message ; return }
+            const id = r.value.id
+            this.adding = null
+            /* The tree has a new branch and the map a new box in the strip
+             * below it, since nothing built here is placed. The reader is left
+             * on what they built, which is where its properties are. */
+            await this.reload()
+            await this.select(a.sim, id)
+        },
+
+        async deleteSelected() {
+            if (!this.selected || !this.selected.deletable) return
+            if (!this.confirmDelete) { this.confirmDelete = true ; return }
+            this.confirmDelete = false
+            const r = await this.exchange(() =>
+                api(`/simulations/${this.selected.sim}/widgets/${this.selected.id}`,
+                    { method: 'DELETE' }))
+            if (!r.ok) { this.mapError = r.error.message ; return }
+            this.mapError = null
+            /* What was being looked at is gone, and [reload] settles on
+             * something that is not. */
+            await this.reload()
         },
 
         /* Bring the selection into view, if it is not already there.
