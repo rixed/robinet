@@ -928,14 +928,14 @@ small.error { display: block; color: var(--pico-del-color); }
     border-top: 1px solid var(--pico-muted-border-color);
     padding-top: .5rem;
     margin-top: .6rem;
-    /* A grid of equal rows rather than a column: two open panels then get half
-     * of the dock each, whatever they hold. Left to flexbox they would divide
-     * it by what is in them, and a chart -- which has a plot of a fixed height
-     * in it and cannot shrink far -- would take it all and leave the log a
-     * couple of lines. */
-    display: grid;
-    grid-auto-rows: minmax(3rem, 1fr);
-    align-content: start;
+    /* A column whose open panels share it equally, from a basis of zero:
+     * what they hold must not decide, or a chart -- which has a plot of a
+     * fixed height in it and cannot shrink far -- would take it all and leave
+     * the log a couple of lines. A folded panel is its header and nothing
+     * more, which is the whole point of folding one: the room goes to the
+     * panel beside it. */
+    display: flex;
+    flex-direction: column;
     gap: .5rem;
     /* No cap of its own: how much of the window it is worth is what the
      * divider above it says, and that is the reader's to set. Two open panels
@@ -945,13 +945,17 @@ small.error { display: block; color: var(--pico-del-color); }
 .dock .panel {
     display: flex;
     flex-direction: column;
-    /* Down to its header, and no further. */
-    min-height: 0;
+    flex: 1 1 0;
+    /* Never squeezed to nothing while it is open: a body of two pixels shows
+     * less than the header already says. */
+    min-height: 3rem;
     overflow: hidden;
     border: 1px solid var(--pico-muted-border-color);
     border-radius: var(--pico-border-radius);
     background: var(--pico-card-background-color);
 }
+/* Folded: the header, and none of the room. */
+.dock .panel.folded { flex: 0 0 auto; min-height: 0; }
 /* The header stays whether the body is shown or not: a folded panel still
  * says what it is watching. */
 .dock .panel > header {

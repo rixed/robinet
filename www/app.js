@@ -2063,6 +2063,14 @@ document.addEventListener('alpine:init', () => {
          * The dock
          */
 
+        /* Every panel the dock holds is folded away. There is then nothing to
+         * give its room to, so it gives it back to what is above: folding is
+         * for making room elsewhere, and the dock is somewhere else too. */
+        allFolded() {
+            return (!this.charts.length || this.collapsed.charts) &&
+                   (!this.logged.length || this.collapsed.logs)
+        },
+
         fold(what) {
             this.collapsed[what] = !this.collapsed[what]
             try {

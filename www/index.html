@@ -932,9 +932,11 @@
              watched is legible even when it is not shown. -->
         <section class="dock" x-cloak
                  x-show="(charts.length || logged.length) && dockShare > 0"
-                 :style="`flex-basis: ${dockShare * 100}%`">
+                 :style="allFolded() ? 'flex-basis: auto'
+                                     : `flex-basis: ${dockShare * 100}%`">
 
-        <section class="panel" x-show="charts.length">
+        <section class="panel" x-show="charts.length"
+                 :class="{ folded: collapsed.charts }">
             <header>
                 <button class="twisty" @click="fold('charts')"
                         :title="collapsed.charts ? 'Show them' : 'Fold them away'"
@@ -980,7 +982,8 @@
         </div>
         </section>
 
-        <section class="panel logs" x-show="logged.length">
+        <section class="panel logs" x-show="logged.length"
+                 :class="{ folded: collapsed.logs }">
             <header>
                 <button class="twisty" @click="fold('logs')"
                         :title="collapsed.logs ? 'Show them' : 'Fold them away'"
