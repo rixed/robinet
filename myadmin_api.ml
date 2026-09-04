@@ -36,8 +36,10 @@
     GET    /api/device-types               what can be built, and what each
                                             kind of device has to be told
     GET    /api/simulations/<s>/widgets    its widgets; ?path=/a/b to filter
-                                            (each carries "ports": one boolean
-                                             per port, true when it has a cable)
+                                            (each carries "ports" and
+                                             "free_ports": how many cables it
+                                             takes, and how many it has room
+                                             for)
     POST   /api/simulations/<s>/widgets    add a device to it; the body is
                                             {"type": ..., "name": ...,
                                              "params": {...}}
@@ -238,13 +240,15 @@ let json_of_widget (w : Widget.t) =
                 is not the same question: the repeater inside a switch is a
                 repeater, and still not something to be taken out on its own. *)
              "deletable", `Bool (Device.of_widget w <> None) ;
-             (* One answer per port a cable can be plugged into, saying whether
-                it has one already: how many there are is how many there are,
-                and which of them are still free is what the interface needs in
-                order to offer this widget as an end of a new cable. Empty for
-                most widgets, which are not things a cable reaches. *)
-             "ports", `List (List.map (fun connected -> `Bool connected)
-                                      (Widget.ports_connected w)) ;
+             (* How many cables this widget takes, and how many of those ports
+                are still free -- which is what the interface needs in order to
+                offer it as an end of a new cable. Two numbers rather than one
+                answer per port: a device may have a great many of them, this
+                listing is polled, and "is there room on it" is the whole of
+                what is asked. Zero for most widgets, which are not things a
+                cable reaches. *)
+             "ports", `Int (w.ports.count ()) ;
+             "free_ports", `Int (Widget.free_ports w) ;
              "location", json_of_location w.location ;
              (* Only the names here: values are a separate request, since they
               * are live and this listing is not. *)

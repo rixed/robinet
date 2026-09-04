@@ -787,8 +787,19 @@ let place t location =
     Option.may check_location location ;
     t.location <- location
 
-(** Which of [t]'s ports have a cable, in order. *)
-let ports_connected t = List.init (t.ports.count ()) t.ports.is_connected
+(** How many of [t]'s ports have no cable on them.
+ *
+ * A count rather than the ports themselves: what a reader is offered a device
+ * for is whether there is room on it, and a device may have a great many
+ * ports. Every [is_connected] is a lookup, so this is a walk that allocates
+ * nothing -- if that ever became too much in itself, the device would have to
+ * keep the tally as cables come and go. *)
+let free_ports t =
+    let ports = t.ports.count () in
+    let rec loop free n =
+        if n >= ports then free
+        else loop (if t.ports.is_connected n then free else free + 1) (n + 1) in
+    loop 0 0
 
 (** The first port of [t] with no cable, if it has one left. *)
 let first_free_port t =
@@ -815,6 +826,7 @@ let ports_of w =
 (* Siblings differ, cousins need not, and a move into a parent that has the
    name renames the arrival. *)
 (*$T unique_among
+  ignore unique_among ; (* Called by reparent *) \
   let r = make_root ~sim:0 ~now:(fun () -> Clock.Time.o 0.) "r" in \
   let h1 = make ~parent:r "h" and h2 = make ~parent:r "h" in \
   h1.name = "h" && h2.name = "h-2" && \

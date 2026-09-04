@@ -2382,9 +2382,9 @@ document.addEventListener('alpine:init', () => {
          */
 
         /* What a cable can be plugged into: a device with a port left. The
-         * widget listing answers port by port. */
+         * widget listing counts them, since that is all this asks. */
         canTakeCable(w) {
-            return !!w && w.ports.some(taken => !taken)
+            return !!w && w.free_ports > 0
         },
 
         async toggleTypeMenu() {

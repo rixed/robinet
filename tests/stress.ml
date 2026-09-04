@@ -1246,6 +1246,23 @@ let test_http net cable duration nthreads
         check "one cable too many for the ports it has is refused"
             (fst (post {|{"type":"cable","params":{"from":%d,"to":%d}}|}
                        switch_id host_c) = 400) ;
+        (* Counted, not listed port by port: a device may have a great many,
+           and whether there is room on it is the whole of what is asked. *)
+        check "and the interface counts the ports, and the free ones"
+            (match api "/api/simulations/%d/widgets/%d" net_id switch_id with
+            | 200, payload ->
+                let j = Yojson.Basic.from_string payload in
+                Yojson.Basic.Util.member "ports" j = `Int 3 &&
+                Yojson.Basic.Util.member "free_ports" j = `Int 0
+            | _ -> false) ;
+        check "and gives no ports to what takes no cable"
+            (match api "/api/simulations/%d/widgets/%d" net_id
+                       net.root.Widget.id with
+            | 200, payload ->
+                let j = Yojson.Basic.from_string payload in
+                Yojson.Basic.Util.member "ports" j = `Int 0 &&
+                Yojson.Basic.Util.member "free_ports" j = `Int 0
+            | _ -> false) ;
         check "and so is a second cable on a host's single adapter"
             (fst (post {|{"type":"cable","params":{"from":%d,"to":%d}}|}
                        host_a host_c) = 400) ;
