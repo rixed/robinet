@@ -835,7 +835,7 @@
                                  :class="{ selected: isSelected(selected.sim, b.id),
                                            holds: b.holds,
                                            open: b.open, unplaced: b.nowhere,
-                                           picked: picking && picking.ends.includes(b.id),
+                                           picked: pickedEnds().includes(b.id),
                                            unpluggable: picking &&
                                                         !canTakeCable(get(selected.sim, b.id)) }"
                                  :style="`left:${b.x}px; top:${b.y}px;
@@ -855,6 +855,15 @@
                                       :title="b.inside + (b.inside === 1 ? ' cable is' : ' cables are') +
                                               ' inside this box'"
                                       x-text="b.inside"></span>
+                                <!-- Which end of the cable being drawn this is:
+                                     the order the two are clicked in is what the
+                                     form reads as "from" and "to". It stays for
+                                     as long as that form is open: the form names
+                                     the two ends, the map is what says where
+                                     they are. -->
+                                <span class="end" x-show="pickedEnds().includes(b.id)"
+                                      :title="`end ${pickedEnds().indexOf(b.id) + 1} of the new ${buildingType()}`"
+                                      x-text="pickedEnds().indexOf(b.id) + 1"></span>
                             </div>
                         </template>
 

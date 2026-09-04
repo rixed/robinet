@@ -396,6 +396,8 @@ body.carrying { user-select: none; cursor: grabbing; }
  * being put somewhere and left to look placed. */
 .pane.map .box.unplaced { border-style: dashed; }
 .pane.map .box .name {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -490,7 +492,10 @@ body.carrying { user-select: none; cursor: grabbing; }
     align-items: center;
     gap: .3rem;
 }
-.pane.map .tray-line .picking small { color: var(--pico-primary); }
+/* The same green as the ends already picked on the map: while a cable is
+ * being drawn, everything about drawing it reads as one thing, and blue is
+ * left to mean "this is what the schematic is showing". */
+.pane.map .tray-line .picking small { color: var(--pico-ins-color); }
 /* Upwards: the tray is at the bottom of the map, and a menu below it would be
  * off the pane. */
 .pane.map .type-menu {
@@ -517,10 +522,37 @@ body.carrying { user-select: none; cursor: grabbing; }
 /* While a cable is looking for its two ends: what it can be plugged into,
  * what it cannot, and what it already has. */
 .pane.map .box.unpluggable { opacity: .4; cursor: not-allowed; }
+/* An outline rather than a border, and a colour of its own: an end of the
+ * cable being drawn and the widget the schematic is showing are two different
+ * things, and one box is often both. The outline is drawn around the border,
+ * so both are visible at once with nothing to arbitrate. */
 .pane.map .box.picked {
-    border-color: var(--pico-primary);
-    border-width: 2px;
-    border-style: solid;
+    outline: 2px solid var(--pico-ins-color);
+    outline-offset: 1px;
+}
+/* Which end it is. The order is what the form reads as "from" and "to", and
+ * what the cable is named after, so it is worth showing -- and it says what
+ * is picked without relying on the colour to say it. */
+.pane.map .box .end {
+    flex: none;
+    padding: 0 .25rem;
+    border: 1px solid var(--pico-ins-color);
+    border-radius: var(--pico-border-radius);
+    font-size: .65rem;
+    /* The colour it is drawn in rather than one it is drawn on: this is what
+     * Pico sets its text in, so it reads on the card background in either
+     * theme, where a filled pill would need a text colour of its own for
+     * each. */
+    color: var(--pico-ins-color);
+    background: var(--pico-card-background-color);
+}
+/* An open box draws its insides, so the badge is placed rather than laid out.
+ * At the bottom, the top right corner being where the count of folded cables
+ * sits. */
+.pane.map .box.open > .end {
+    position: absolute;
+    bottom: 1px;
+    right: .3rem;
 }
 
 .pane.map .map-tools { position: absolute; top: .3rem; right: .3rem; }

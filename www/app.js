@@ -2432,6 +2432,11 @@ document.addEventListener('alpine:init', () => {
                 }
             })
             return { sim, type: t.type, descr: t.descr, name: '', fields,
+                     /* The ends already clicked, kept as they were picked: the
+                      * map goes on marking them for as long as this form is
+                      * open, since where the cable will land is the one thing
+                      * the form cannot show. */
+                     ends: picked,
                      /* What it will be called if the name is left alone,
                       * shown in the box rather than filled into it: the name
                       * is not sent when it is empty, and the server picks it
@@ -2458,6 +2463,21 @@ document.addEventListener('alpine:init', () => {
                 const n = `${t.type}-${i}`
                 if (!siblings.some(w => w.name === n)) return n
             }
+        },
+
+        /* The ends of what is being built, while they are being clicked and then
+         * while the form that finishes it is open. Empty once it is built, or
+         * given up on. */
+        pickedEnds() {
+            const b = this.picking || this.adding
+            return b && b.ends ? b.ends : []
+        },
+
+        /* What is being built, named as the catalogue names it. [picking] holds
+         * the catalogue entry itself, the form only its name. */
+        buildingType() {
+            return this.picking ? this.picking.type.type
+                 : this.adding ? this.adding.type : ''
         },
 
         pickEnd(id) {
