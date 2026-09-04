@@ -322,9 +322,13 @@
 
                                     <label class="field">
                                         <span class="what">name</span>
+                                        <!-- Empty, and the server names it: the
+                                             box shows what it would be called,
+                                             the way a parameter's box shows
+                                             what leaving it out will do. -->
                                         <input type="text" x-model="adding.name"
                                                :disabled="!online" x-ref="newName"
-                                               placeholder="what to call it"/>
+                                               :placeholder="adding.nameHint"/>
                                     </label>
 
                                     <template x-for="f in adding.fields" :key="f.name">

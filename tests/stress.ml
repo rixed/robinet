@@ -1173,8 +1173,7 @@ let test_http net cable duration nthreads
         and host_b = created {|{"type":"host","name":"b",
                                 "params":{"address":"10.9.0.2"}}|} in
         let cable_of a b =
-            created {|{"type":"cable","name":"c","params":{"from":%d,"to":%d}}|}
-                    a b in
+            created {|{"type":"cable","params":{"from":%d,"to":%d}}|} a b in
         let joined = cable_of switch_id host_a in
         (* Peered with what the cable reaches, which is not always what was
            named to ask for it: a host is reached through its adapter, so that
@@ -1183,6 +1182,10 @@ let test_http net cable duration nthreads
         let adapter id =
             List.find (fun (c : Widget.t) -> c.name = "eth")
                       (widget id).Widget.children in
+        (* Named after what it joins, since "built-a" says what "cable-1"
+           cannot. *)
+        check "a cable with no name is named after its two ends"
+            ((widget joined).Widget.name = "built-a") ;
         check "a cable makes peers of the two ends it joins"
             (let c = widget joined in
              let end_of w =
@@ -1241,10 +1244,10 @@ let test_http net cable duration nthreads
         let host_c = created {|{"type":"host","name":"c",
                                 "params":{"address":"10.9.0.5"}}|} in
         check "one cable too many for the ports it has is refused"
-            (fst (post {|{"type":"cable","name":"c","params":{"from":%d,"to":%d}}|}
+            (fst (post {|{"type":"cable","params":{"from":%d,"to":%d}}|}
                        switch_id host_c) = 400) ;
         check "and so is a second cable on a host's single adapter"
-            (fst (post {|{"type":"cable","name":"c","params":{"from":%d,"to":%d}}|}
+            (fst (post {|{"type":"cable","params":{"from":%d,"to":%d}}|}
                        host_a host_c) = 400) ;
         check "an unknown kind of device is refused"
             (fst (post {|{"type":"firewall","name":"fw"}|}) = 400) ;
@@ -1260,14 +1263,22 @@ let test_http net cable duration nthreads
         check "and a name is not resolved into one"
             (fst (post {|{"type":"host","name":"x","params":{"address":"localhost"}}|})
              = 400) ;
-        check "a device with no name is refused"
-            (fst (post {|{"type":"hub"}|}) = 400) ;
+        (* The other way round: no name asks for one, which is the only way to
+           be sure of a free one -- a name checked beforehand and sent
+           afterwards is one something else may have taken in between. *)
+        check "a device with no name is given one"
+            ((widget (created {|{"type":"hub"}|})).Widget.name = "hub-1") ;
+        check "and the next of that kind is given the next number"
+            ((widget (created {|{"type":"hub","name":""}|})).Widget.name
+             = "hub-2") ;
+        check "while a name that was actually typed and is taken is refused"
+            (fst (post {|{"type":"hub","name":"hub-1"}|}) = 400) ;
         (* From a device with a port to spare, so that what is being refused is
            the far end and not the near one. *)
         let spare = created {|{"type":"host","name":"spare",
                                "params":{"address":"10.9.0.7"}}|} in
         check "a cable to something that takes none is refused"
-            (fst (post {|{"type":"cable","name":"c","params":{"from":%d,"to":%d}}|}
+            (fst (post {|{"type":"cable","params":{"from":%d,"to":%d}}|}
                        spare net.root.Widget.id) = 400) ;
         (* A host says nothing about ports itself: it is reached through its
            adapter, and answers with whatever adapters it has. Which is why the
@@ -1425,7 +1436,7 @@ let test_http net cable duration nthreads
         let plugged = created {|{"type":"host","name":"plugged",
                                  "params":{"address":"10.9.0.11"}}|} in
         check "a router can be cabled like anything else"
-            (fst (post {|{"type":"cable","name":"c","params":{"from":%d,"to":%d}}|}
+            (fst (post {|{"type":"cable","params":{"from":%d,"to":%d}}|}
                        r plugged) = 200 &&
              (widget r).ports.is_connected 0) ;
         let g = created {|{"type":"gateway","name":"gw",

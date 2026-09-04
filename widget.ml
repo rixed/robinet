@@ -38,10 +38,11 @@ type location = { lat : float ; lon : float }
 
 type t =
     { (* The stable identity of a widget.
-       * Names are neither unique nor stable: several siblings may share a name,
-       * and a widget can be moved elsewhere in the tree. The administration UI,
-       * the browser URL and (eventually) the saved topology all need a handle
-       * that survives those changes, so that handle is this id. *)
+       * Names are not stable: a widget can be moved elsewhere in the tree, and
+       * is renamed when it arrives among siblings that have its name (see
+       * [unique_among]). The administration UI, the browser URL and
+       * (eventually) the saved topology all need a handle that survives those
+       * changes, so that handle is this id. *)
       id : int ;
       (* Which simulation this widget belongs to. An id rather than the
        * simulation itself, because a simulation holds the root of its widget
@@ -50,8 +51,11 @@ type t =
        * clocks. *)
       sim : int ;
       (* A mere label. Must not contain '/' so that [full_name] stays
-       * unambiguous. *)
-      name : string ;
+       * unambiguous, and differs from every sibling's so that [full_name]
+       * names this widget and no other. Mutable because that second rule is
+       * enforced on arrival, and a widget arrives twice: when it is built and
+       * whenever it is moved. *)
+      mutable name : string ;
       (* We want to be able to navigate the logs/stats/characteristics of
        * every simulated things (aka "widgets").
        * Widgets are connected with TRX in various ways, sometime "vertically",
@@ -556,10 +560,34 @@ let check_location { lat ; lon } =
         invalid_arg (Printf.sprintf
             "Widget.location: longitude %g is not in (-180…180)" lon)
 
+(** The name a widget will answer to under [parent]: the one asked for, or that
+ * name with a number appended when a sibling has it already.
+ *
+ * Sibling names have to differ, and nothing wider than that is required: a path
+ * then names a single widget (see [find_by_path]), while two hosts are both
+ * free to call their adapter "eth", since the rest of the path tells those two
+ * apart.
+ *
+ * Callers that name a part after what it is -- "eth", "nat", "dhcpd" -- get the
+ * numbering for free, and are meant to: what they name is the kind of part,
+ * not the instance. A name that came from the reader is a different matter, and
+ * {!Device.make} refuses that one rather than quietly altering it. *)
+let unique_among parent name =
+    let taken n = List.exists (fun c -> c.name = n) parent.children in
+    if not (taken name) then name else
+    let rec loop i =
+        let n = Printf.sprintf "%s-%d" name i in
+        if taken n then loop (i + 1) else n in
+    loop 2
+
 (* The one place a widget is built. *)
 let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) name =
     if String.contains name '/' then
         invalid_arg ("Widget.make: name must not contain '/': "^ name) ;
+    let name =
+        match parent with
+        | None -> name
+        | Some p -> unique_among p name in
     Option.may check_location location ;
     let logger = Log.make ?size ?now () in
     let t = {
@@ -638,9 +666,10 @@ let find root id =
     with Not_found ->
         None
 
-(** Lookup widgets by their [full_name] within a tree. Since names are not
- * unique this may return any number of widgets (usually zero or one). The first
- * component of the path is the root's own name. *)
+(** Lookup a widget by its [full_name] within a tree. Siblings differ in name
+ * (see [unique_among]), so this returns at most one widget -- a list all the
+ * same, since a path that names nothing has to come back as something. The
+ * first component of the path is the root's own name. *)
 let find_by_path root path =
     let names =
         String.split_on_char '/' path |>
@@ -729,6 +758,10 @@ let destroy t =
 
 (** Move a widget (and therefore its whole subtree) elsewhere in the hierarchy.
  *
+ * It may be renamed on the way, if its new siblings include one of its name:
+ * what a widget is called is only ever unique where it sits, so a move is the
+ * other moment that has to be made to hold (see [unique_among]).
+ *
  * Nothing else has to be updated: the id is unchanged and [full_name] is
  * computed on demand. A widget cannot leave its simulation. *)
 let reparent t new_parent =
@@ -739,6 +772,9 @@ let reparent t new_parent =
         invalid_arg ("Widget.reparent: "^ full_name new_parent ^" is within "^
                      full_name t ^", that would create a cycle") ;
     unlink_from_parent t ;
+    (* After the unlinking, so that a widget moved to the parent it already has
+     * is not renamed after itself. *)
+    t.name <- unique_among new_parent t.name ;
     t.parent <- Some new_parent ;
     new_parent.children <- t :: new_parent.children
 
@@ -775,6 +811,18 @@ let ports_of w =
       dev = (fun n -> w.ports.dev n) ;
       owner = (fun n -> w.ports.owner n) ;
       disconnect = (fun n -> w.ports.disconnect n) }
+
+(* Siblings differ, cousins need not, and a move into a parent that has the
+   name renames the arrival. *)
+(*$T unique_among
+  let r = make_root ~sim:0 ~now:(fun () -> Clock.Time.o 0.) "r" in \
+  let h1 = make ~parent:r "h" and h2 = make ~parent:r "h" in \
+  h1.name = "h" && h2.name = "h-2" && \
+  (make ~parent:h1 "eth").name = "eth" && \
+  (make ~parent:h2 "eth").name = "eth" && \
+  (reparent (make ~parent:h1 "h") r ; List.length r.children = 3 && \
+   (List.nth r.children 0).name = "h-3")
+ *)
 
 (*$T check_location
   (try check_location { lat = 45.75 ; lon = 4.85 } ; true with _ -> false)

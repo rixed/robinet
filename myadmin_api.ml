@@ -379,6 +379,12 @@ let get_device_types _mth _matches _vars _qry_body resp =
  *
  *   { "type": "switch", "name": "sw1", "params": { "ports": 24 } }
  *
+ * The name may be left out, or left empty, for one to be picked that nothing
+ * else here answers to -- "switch-3", or, for a cable, the names of its two
+ * ends. That is what the interface sends when the reader did not type one, and
+ * it is the only way to be sure of a free name: a name checked beforehand and
+ * sent afterwards is one something else may have taken in between.
+ *
  * Only whole devices, at the top of the tree, with the few characteristics that
  * have to be settled before there is anything to configure. Everything else
  * about the new device is a property of it, edited afterwards -- which is also
@@ -395,13 +401,18 @@ let create_widget _mth matches _vars qry_body resp =
                          ..., \"params\": {...}})" qry_body
         | `Assoc _ as j -> j
         | j -> bad_request "Not a device: %s" (Yojson.Basic.to_string j) in
-    let field name =
+    let field ?absent name =
         match Yojson.Basic.Util.member name json with
         | `String s -> s
-        | `Null -> bad_request "A device needs a %S" name
+        | `Null ->
+            (match absent with
+            | Some s -> s
+            | None -> bad_request "A device needs a %S" name)
         | v -> bad_request "%S must be a string, not %s" name
                    (Yojson.Basic.to_string v) in
-    let type_ = field "type" and name = field "name" in
+    (* An absent name is an empty one, which is what [Device.make] reads as
+       "pick one". *)
+    let type_ = field "type" and name = field ~absent:"" "name" in
     if Device.find type_ = None then
         bad_request "There is no such thing as a %S. See /api/device-types \
                      for what there is" type_ ;

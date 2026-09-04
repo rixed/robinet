@@ -391,6 +391,10 @@ struct
              ?(promisc=ignore) ?(do_proxy_arp=(fun _ -> false))
              ?(my_addresses=[]) ?(proto=Proto.ip4) ~parent ~power
              () =
+        (* Every adapter is called "eth", so a device with several of them ends
+         * up with "eth", "eth-2"... courtesy of [Widget.unique_among]. Naming
+         * them "eth0".."ethN" as the machine itself would is the caller's to
+         * do, since the index is the caller's to know. *)
         let widget = Widget.make ~parent "eth" in
         let t = {
             widget ; power ; mac ; gateways ; proto ;

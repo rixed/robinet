@@ -2432,7 +2432,32 @@ document.addEventListener('alpine:init', () => {
                 }
             })
             return { sim, type: t.type, descr: t.descr, name: '', fields,
+                     /* What it will be called if the name is left alone,
+                      * shown in the box rather than filled into it: the name
+                      * is not sent when it is empty, and the server picks it
+                      * then, which is the only moment it can be sure the name
+                      * is free. */
+                     nameHint: this.nextName(sim, t, picked),
                      error: null, busy: false }
+        },
+
+        /* The name the server would pick, worked out the same way it does, so
+         * that the hint is what happens. Being one number behind -- something
+         * else built in between, a cable that is the second between the same
+         * pair -- costs nothing, since this is never sent. */
+        nextName(sim, t, picked) {
+            const byId = this.widgetsOf(sim)
+            const root = byId[this.roots[sim]]
+            const siblings = (root ? root.children : [])
+                .map(id => byId[id]).filter(w => w)
+            if (t.type === 'cable' && picked.length === 2) {
+                const ends = picked.map(id => byId[id])
+                if (ends.every(w => w)) return ends.map(w => w.name).join('-')
+            }
+            for (let i = 1 ;; i++) {
+                const n = `${t.type}-${i}`
+                if (!siblings.some(w => w.name === n)) return n
+            }
         },
 
         pickEnd(id) {

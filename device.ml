@@ -473,11 +473,60 @@ let all = [ host ; switch ; hub ; router ; gateway ; portal ; cable ]
 let find name =
     List.find_opt (fun t -> t.name = name) all
 
-(** Build one: [make "switch" ~parent "sw1" [ "ports", `Int 24 ]].
+(** {2 Naming a new device} *)
+
+(* The lowest "stem-N" no child of [parent] answers to. From 1 rather than from
+ * a bare "stem", since a name the machine picked is one of a series and reads
+ * better as one. *)
+let numbered_name (parent : Widget.t) stem =
+    let taken n =
+        List.exists (fun (w : Widget.t) -> w.name = n) parent.children in
+    let rec loop i =
+        let n = Printf.sprintf "%s-%d" stem i in
+        if taken n then loop (i + 1) else n in
+    loop 1
+
+(* A cable is better named after the two things it joins than after a number:
+ * "r1-sw1" says what "cable-7" cannot, and the ends are known here because
+ * they are parameters. Falls back to the numbering when either end is not a
+ * widget of this simulation -- [cable.make] is about to say so properly, and
+ * naming is not the place to raise that. *)
+let cable_name (parent : Widget.t) args =
+    let sim = Simulation.of_widget parent in
+    let end_ which =
+        match List.assoc_opt which args with
+        | None -> None
+        | Some v ->
+            (match Widget.to_int v with
+            | exception _ -> None
+            | id ->
+                Option.map (fun (w : Widget.t) -> w.name)
+                           (Widget.find sim.Simulation.root id)) in
+    match end_ "from", end_ "to" with
+    | Some a, Some b -> a ^"-"^ b
+    | _ -> numbered_name parent "cable"
+
+(** What a device is called when it is not given a name: what kind of thing it
+ * is, and the lowest free number.
  *
- * Raises {!Widget.Bad_value} for anything the caller got wrong -- an unknown
- * kind of device, a parameter that is not one, a value out of range -- which
- * the API answers with a 400. *)
+ * A cable is named after its two ends instead, which is the one name here that
+ * may be taken already -- by the second cable between the same pair.
+ * {!Widget.unique_among} numbers that one, as it does any name that is taken
+ * by the time the widget is built. *)
+let default_name parent t args =
+    (* Physical equality on the catalogue entry: there is one value per kind of
+     * device, and this is a property of the cable itself rather than of
+     * anything that happens to be called "cable". *)
+    if t == cable then cable_name parent args
+    else numbered_name parent t.name
+
+(*$T numbered_name
+  let r = Widget.make_root ~sim:0 ~now:(fun () -> Clock.Time.o 0.) "r" in \
+  numbered_name r "host" = "host-1" && \
+  (ignore (Widget.make ~parent:r "host-1") ; \
+   numbered_name r "host" = "host-2")
+ *)
+
 (** The catalogue entry a widget was built from, if this catalogue knows how to
  * build its kind at all.
  *
@@ -498,6 +547,16 @@ let of_widget (w : Widget.t) =
     if within_a_device w then None
     else Option.bind w.Widget.device find
 
+(** Build one: [make "switch" ~parent "sw1" [ "ports", `Int 24 ]].
+ *
+ * An empty name asks for one to be picked (see [default_name]), which is what
+ * the interface sends when the reader left the field alone. A name that was
+ * actually typed and is already a sibling's is refused instead of being
+ * numbered like a part's would be: what the reader named, the reader named.
+ *
+ * Raises {!Widget.Bad_value} for anything the caller got wrong -- an unknown
+ * kind of device, a parameter that is not one, a value out of range, a name
+ * that is taken -- which the API answers with a 400. *)
 let make type_ ~parent name args =
     match find type_ with
     | None ->
@@ -505,7 +564,19 @@ let make type_ ~parent name args =
     | Some t ->
         if String.contains name '/' then
             Widget.bad_value "a name must not contain '/': %S" name ;
-        t.make ~parent name (args_of t args)
+        (* Before the name, since a cable is named after the ends its arguments
+         * point at. *)
+        let args = args_of t args in
+        let name =
+            match String.trim name with
+            | "" -> default_name parent t args
+            | name ->
+                if List.exists (fun (w : Widget.t) -> w.name = name)
+                               parent.Widget.children then
+                    Widget.bad_value "there is already something called %S \
+                                      here" name ;
+                name in
+        t.make ~parent name args
 
 (*$= coerce & ~printer:Yojson.Basic.to_string
   (`Int 3) (coerce "n" Widget.Int (`String "3"))
