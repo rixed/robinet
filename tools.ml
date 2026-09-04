@@ -749,6 +749,47 @@ let string_of_timestamp ts =
 let quoted s =
     "\""^ String.escaped s ^"\""
 
+(** A file name standing for [str], safe to hand out.
+ *
+ * Every character outside [A-Za-z0-9._-] becomes "%XX", '%' included, so
+ * whatever [str] holds the result carries no separator, no NUL, no quote and
+ * no newline -- which is what makes it safe to put in a header, and what makes
+ * a browser percent-decode it back into the name that was typed (RFC 6266). A
+ * leading '.' is escaped as well, and an empty name gives "_", so it is also a
+ * single, ordinary path component should anyone want one.
+ *
+ * The names this is handed come from whoever is building the network, through
+ * a form, so none of that can be assumed away. Nothing derives a path to open
+ * from one: see [Pcap.next_recorder_file]. *)
+let escape_fname str =
+    let buf = BatBuffer.create (String.length str) in
+    String.iteri (fun i c ->
+        match c with
+        | 'A'..'Z' | 'a'..'z' | '0'..'9' | '_' | '-' -> BatBuffer.add_char buf c
+        | '.' when i > 0 -> BatBuffer.add_char buf c
+        | c -> BatBuffer.add_string buf (Printf.sprintf "%%%02X" (Char.code c))
+    ) str ;
+    if BatBuffer.length buf = 0 then "_" else BatBuffer.contents buf
+
+(*$= escape_fname & ~printer:identity
+  "recorder-1" (escape_fname "recorder-1")
+  "a%2Fb" (escape_fname "a/b")
+  "%2E." (escape_fname "..")
+  "_" (escape_fname "")
+  "my%20file.pcap" (escape_fname "my file.pcap")
+  "100%25" (escape_fname "100%")
+ *)
+(* Distinct names never collide, and nothing that comes out is a path. *)
+(*$T escape_fname
+  escape_fname "a b" <> escape_fname "a%20b"
+  escape_fname "a/b" <> escape_fname "a-b"
+  List.for_all (fun s -> \
+    let e = escape_fname s in \
+    not (String.contains e '/') && e <> "." && e <> ".." && e.[0] <> '.') \
+    [ "" ; "." ; ".." ; "../../etc/passwd" ; ".hidden" ; "a\000b" ; \
+      "say \"hi\"\nGET /" ]
+ *)
+
 module Infix =
 struct
     let (-->) = (-->)

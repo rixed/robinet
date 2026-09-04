@@ -112,7 +112,7 @@ let free_port (widget : Widget.t) port =
  * built happens here, once, rather than in each [make]. *)
 let rec coerce name (kind : Widget.kind) v =
     match kind with
-    | String -> `String (Widget.to_string v)
+    | String | FileName -> `String (Widget.to_string v)
     | Int -> `Int (Widget.to_int v)
     | Float -> `Float (Widget.to_float v)
     | Bool -> `Bool (Widget.to_bool v)
@@ -466,9 +466,24 @@ let portal =
           let portal = Pcap.portal ~parent ~promisc ~filter ?caplen name in
           portal.widget }
 
+let recorder =
+    { name = "recorder" ;
+      descr = "Save every received packet into a pcap file." ;
+      params = [
+          param "caplen" ~kind:(Optional (IRange (1, 65535))) ~default:`Null
+              ~descr:"Capture length (default to the interface MTU)." ;
+          param "DLT" ~kind:(Optional Int)
+              ~default:(`Int (Pcap.Dlt.to_int Pcap.default_dlt))
+              ~descr:"DLT to use to create the pcap file." ] ;
+      make = fun ~parent name args ->
+          let caplen = opt args "caplen" Widget.to_int in
+          let dlt = opt args "DLT" (Pcap.Dlt.o % Int32.of_int % Widget.to_int) in
+          let recorder = Pcap.recorder ~parent ?caplen ?dlt name in
+          recorder.widget }
+
 (** Every kind of device that can be asked for, in the order the interface
  * offers them: what a network is mostly made of first. *)
-let all = [ host ; switch ; hub ; router ; gateway ; portal ; cable ]
+let all = [ host ; switch ; hub ; router ; gateway ; portal ; recorder ; cable ]
 
 let find name =
     List.find_opt (fun t -> t.name = name) all

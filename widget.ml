@@ -184,6 +184,12 @@ and value = Yojson.Basic.t
 
 and kind =
     | String
+    (* A string that happens to name a file the widget has written, which the
+     * API will therefore hand over on request (see the property "file" route)
+     * and the interface offers to download. What a property of this kind
+     * returns is what gets served, so a widget puts a path here only if it
+     * means to give that file away. *)
+    | FileName
     | Int
     | Float
     (* "true" or "false", as the setter reads them *)
@@ -230,6 +236,7 @@ and kind =
 (* What a kind is called when a refusal has to name it. *)
 let rec kind_name = function
     | String -> "a string"
+    | FileName -> "a file name"
     | Int -> "a whole number"
     | Float -> "a number"
     | Bool -> "a boolean"
@@ -581,7 +588,7 @@ let unique_among parent name =
     loop 2
 
 (* The one place a widget is built. *)
-let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) name =
+let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) ?device name =
     if String.contains name '/' then
         invalid_arg ("Widget.make: name must not contain '/': "^ name) ;
     let name =
@@ -597,7 +604,7 @@ let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) name =
         parent ;
         children = [] ;
         peers = [] ;
-        device = None ;
+        device ;
         on_delete = ignore ;
         location ;
         logger ;
@@ -637,9 +644,9 @@ let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) name =
  * widget it is building this one under, or has the simulation, whose root is
  * one [Simulation.root] away. That is what keeps the root the only parentless
  * widget of a simulation, and hence keeps it a complete inventory. *)
-let make ~parent ?size ?location ?properties name =
+let make ~parent ?size ?location ?properties ?device name =
     make_ ~parent ~sim:parent.sim ~now:parent.logger.Log.now
-          ?size ?location ?properties name
+          ?size ?location ?properties ?device name
 
 (** Create the root of a simulation's widget tree: the only widget with no
  * parent, and the only one that has to be told which simulation it is in and

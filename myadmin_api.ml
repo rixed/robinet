@@ -58,6 +58,9 @@
                                             what that metric has been worth;
                                             ?since=<simulated time> for the
                                             points taken after that one
+    GET    /api/simulations/<s>/widgets/<w>/properties/<name>/file
+                                            the file that property names, for
+                                            a property of kind FileName
     GET    /api/simulations/<s>/widgets/<w>/logs
                                             what it logged; ?since=<simulated
                                             time> for what came after, and
@@ -122,6 +125,9 @@ let property_of_matches (widget : Widget.t) matches n =
  * from: the dialog that asks for the one is the panel that edits the other. *)
 let rec json_of_kind = function
     | Widget.String -> `Assoc [ "type", `String "string" ]
+    (* A string, and a file to go with it: the interface reads the value as it
+       reads any other string, and offers the download beside it. *)
+    | FileName -> `Assoc [ "type", `String "filename" ]
     | Int -> `Assoc [ "type", `String "int" ]
     | Float -> `Assoc [ "type", `String "float" ]
     | Bool -> `Assoc [ "type", `String "bool" ]
@@ -578,6 +584,70 @@ let get_property_history _mth matches vars _qry_body resp =
  * saying so would claim a continuity it does not have. It is a flag rather
  * than a count because what a reader can do about it is the same either way --
  * slow the simulation down. *)
+(* The bytes of the file a [FileName] property names.
+ *
+ * The path is the widget's own answer, never the caller's: this route names a
+ * widget and one of its properties, and what that property returns is what is
+ * served. Nothing sent by a client reaches the filesystem, which is why there
+ * is no traversal to guard against here -- and why a widget declares a
+ * property of that kind only for a file it means to hand over.
+ *
+ * Opened, and its length taken, while the simulation is held still; read
+ * afterwards. A recording grows as it is fetched, and what is served is the
+ * length it had when it was asked for: for a pcap flushed packet by packet
+ * (see [Pcap.Pdu.save]) that is a whole number of records, and so a file that
+ * can be read rather than one that stops in the middle of one. *)
+let get_property_file _mth matches _vars _qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    let ic, len, fname =
+        Simulation.borrow sim (fun () ->
+            let w = widget_of_matches sim matches 2 in
+            let p = property_of_matches w matches 3 in
+            let rec names_a_file = function
+                | Widget.FileName -> true
+                | Widget.Optional k | Widget.Hint (_, k) -> names_a_file k
+                | _ -> false in
+            if not (names_a_file p.kind) then
+                bad_request "Property %S of %s does not name a file"
+                    p.name (Widget.full_name w) ;
+            let path =
+                match p.getter () with
+                | `String path -> path
+                | `Null ->
+                    not_found "Property %S of %s names no file yet"
+                        p.name (Widget.full_name w)
+                | v ->
+                    bad_request "Property %S of %s is not a file name but %s"
+                        p.name (Widget.full_name w) (Yojson.Basic.to_string v) in
+            match Stdlib.open_in_bin path with
+            | exception Sys_error m -> not_found "%s" m
+            | ic ->
+                (* What to call it once it is saved: the widget's name, which
+                   is what the reader knows it by, and the extension of the
+                   file it really is. Not the file's own name -- that is an
+                   internal matter (see [Pcap.next_recorder_file]) and says
+                   nothing to whoever asked for it. *)
+                let fname = w.Widget.name ^ Filename.extension path in
+                ic, Stdlib.in_channel_length ic, fname) in
+    let body =
+        match Stdlib.really_input_string ic len with
+        | exception e ->
+            Stdlib.close_in_noerr ic ;
+            bad_request "Cannot read %s: %s" fname (Printexc.to_string e)
+        | body -> Stdlib.close_in ic ; body in
+    String.print resp body ;
+    (* Saved rather than shown. Percent-escaped, since the name came from
+       whoever built the widget and this is a header: a quote or a newline in
+       it would end this header and begin another. Given twice, as RFC 6266
+       has it -- the starred form is percent-decoded by the browser, and so
+       arrives back as the name that was typed, while the plain one is the
+       ASCII anything older falls back to. *)
+    let escaped = Tools.escape_fname fname in
+    200, [ "Content-Type", "application/octet-stream" ;
+           "Content-Disposition",
+           Printf.sprintf "attachment; filename=\"%s\"; filename*=UTF-8''%s"
+               escaped escaped ]
+
 let get_logs _mth matches vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
     let level =
@@ -693,6 +763,11 @@ let resources serving : (Str.regexp * Opache.resource) list =
         (fun mth matches vars qry_body resp ->
             match mth with
             | "GET" -> get_property_history mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/properties/\\(.+\\)/file$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "GET" -> get_property_file mth matches vars qry_body resp
             | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/properties/\\(.+\\)$",
         (fun mth matches vars qry_body resp ->

@@ -95,6 +95,19 @@ open Tools
 
 let debug = false
 
+let pcap_recorder_dir = ref "/tmp"
+
+(* Where the next recorder will write. A number and nothing else: no part of
+ * this comes from whoever is building the network, so there is no name to make
+ * safe and no way to be pointed at a file that was not meant to be written.
+ * What the recorder is called is the widget's business, and is used only where
+ * it is read -- in the interface, and in the header of a download. *)
+let next_recorder_file =
+    let seq = ref 0 in
+    fun () ->
+        incr seq ;
+        Printf.sprintf "%s/recorder-%d.pcap" !pcap_recorder_dir !seq
+
 (** {2 Libpcap low level wrappers} *)
 
 (** Libpcap network interface handler. *)
@@ -190,6 +203,8 @@ module Dlt = struct
     let linux_cooked = o 113l
 
     let random () = o (rand32 ())
+
+    let to_int (t : t) = Int32.to_int (t :> int32)
 end
 
 (** The global header of a pcap file. *)
@@ -224,13 +239,22 @@ struct
     (** Return the [bitstring] ready to be written into a pcap file (see {!Pcap.save}). *)
     let pack t =
         let sec, usec = Clock.Time.to_ints t.ts in
-        let wire_len = Payload.length t.payload in
+        let len = Payload.length t.payload in
+        (* What is saved of the packet, which is not all of it when the caplen
+         * is shorter than what is in hand. *)
+        let cap_len = min t.caplen len in
+        let payload =
+            if cap_len < len then takebytes cap_len (t.payload :> bitstring)
+            else (t.payload :> bitstring) in
         let%bitstring pkt_hdr = {|
             Int32.of_int sec  : 32 : littleendian ;
             Int32.of_int usec : 32 : littleendian ;
-            Int32.of_int (min t.caplen wire_len) : 32 : littleendian ;
-            Int32.of_int wire_len : 32 : littleendian |} in
-        concat [ pkt_hdr ; (t.payload :> bitstring) ]
+            Int32.of_int cap_len : 32 : littleendian ;
+            (* How long the packet was on the wire, which is more than is in
+             * hand whenever it was cut short -- by libpcap on the way in (see
+             * [sniffed_wirelen]), or by the caplen above. *)
+            Int32.of_int t.wirelen : 32 : littleendian |} in
+        concat [ pkt_hdr ; payload ]
 
     (** [output out] returns a function that will call [out] with the file header
      * and then the binary encoding of all passed pdus. *)
@@ -259,25 +283,88 @@ struct
      * and another one that will close this file.
      * @param caplen can be used to cap saved packet to a given number of bytes
      * @param dlt can be used to change the file's DLT (you probably do not want to do that) *)
-    let save ?caplen ?dlt fname =
+    let save ?(flush=true) ?caplen ?dlt fname =
         let out_chan = open_out_bin fname in
         let write_pdu = write ?caplen ?dlt out_chan in
+        let write_pdu =
+            if flush then
+                fun pdu -> write_pdu pdu ; Batteries.flush out_chan
+            else write_pdu in
         let close () = close_out out_chan in
         write_pdu, close
 end
+
+let default_dlt = Dlt.en10mb
 
 (** [save "file.pcap"] returns a function that will save passed bitstrings as
  * packets in ["file.pcap"], and another function that will close that file.
  * @param caplen can be used to cap saved packet to a given number of bytes
  * @param dlt can be used to change the file's DLT (required if you do not write Ethernet packets) *)
-let save sim ?caplen ?(dlt=Dlt.en10mb) fname =
+let save sim ?caplen ?(dlt=default_dlt) fname =
     let write_pdu, close = Pdu.save ?caplen ~dlt fname in
     let write_bits bits =
         let pdu = Pdu.make fname ?caplen ~dlt (Simulation.now sim) bits in
         write_pdu pdu in
     write_bits, close
 
-(* TODO: a pcap recorder widget *)
+(** Recorder: a widget to record pcap files and download them. *)
+
+type recorder = { fname : string ;
+                 caplen : int option ;
+                    dlt : Dlt.t ;
+                 widget : Widget.t ;
+          mutable write : bitstring -> unit ;
+                  close : unit -> unit ;
+      mutable recording : bool ;
+                packets : Metric.Counter.t }
+
+let recorder ~parent ?location ?caplen ?(dlt=default_dlt) name =
+    let widget = Widget.make ~parent ?location ~device:"recorder" name in
+    let sim = Simulation.of_widget widget in
+    let fname = next_recorder_file () in
+    let write, close = save sim ?caplen ~dlt fname in
+    let recorder =
+        { fname ; caplen ; dlt ; widget ; write ; close ; recording = true ;
+          packets = Metric.Counter.make () } in
+    recorder.write <- (fun bits ->
+        if recorder.recording then (
+            let now = Simulation.Widget.now widget in
+            write bits ;
+            Metric.Counter.inc recorder.packets ~now
+        )) ;
+    widget.on_delete <- (fun () -> recorder.close ()) ;
+    widget.ports <- Widget.{
+        count = (fun () -> 1) ;
+        is_connected = (fun _ -> false) ;
+        dev = (function _ -> { write = recorder.write ; set_read = ignore }) ;
+        owner = (fun _ -> widget) ;
+        disconnect = ignore } ;
+    Widget.add_properties widget Widget.[
+        property "recording" ~kind:Bool
+            ~descr:"Tells if the packets are currently saved in the file \
+                    (rather than dropped)."
+            ~getter:(fun () -> `Bool recorder.recording)
+            ~setter:(fun v ->
+                let v = to_bool v in
+                recorder.recording <- v ;
+                Log.(log recorder.widget.logger Info (lazy (Printf.sprintf
+                    "%s recording into %s"
+                    (if v then "Started" else "Stopped") recorder.fname)))) ;
+        (* A file name and not merely a string: the API hands this one over
+           on request, and the interface offers to download it. *)
+        property "file name" ~kind:FileName ~descr:"File name."
+            ~getter:(fun () -> `String recorder.fname) ;
+        property "caplen" ~kind:(Optional (IRange (1, 65535))) ~units:"bytes"
+            ~descr:"Capture length (or interface MTU)."
+            ~getter:(fun () ->
+                match recorder.caplen with None -> `Null
+                | Some i -> `Int i) ;
+        property "dlt" ~kind:Int
+            ~descr:"DLT used for the file."
+            ~getter:(fun () -> `Int (Int32.to_int (recorder.dlt :> int32))) ;
+        metric_property "packets" ~descr:"Packets recorded into the files"
+            (Metric.Counter.T recorder.packets) ] ;
+    recorder
 
 (** When trying to read packets from a file that doesn't look like a pcap file. *)
 exception Not_a_pcap_file
@@ -669,13 +756,12 @@ let power_up portal =
  * a device of the simulated network like any other, and has to be somewhere on
  * the map for the traffic coming out of it to have come from anywhere. *)
 let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
-    let widget = Widget.make ~parent ?location ifname in
+    let widget = Widget.make ~parent ?location ~device:"portal" ifname in
     let portal = {
         iface = None ;
         ifname ; widget ; promisc ; filter ; caplen ;
         emit = None ;
         reader = None } in
-    widget.device <- Some "portal" ;
     widget.on_delete <- (fun () -> power_down portal) ;
     widget.ports <- Widget.{
         count = (fun () -> 1) ;

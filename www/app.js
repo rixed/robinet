@@ -1501,6 +1501,16 @@ document.addEventListener('alpine:init', () => {
             return hintOf(x.kind)
         },
 
+        /* Where the bytes of a file property are: the property, and "/file"
+         * (see [get_property_file]). The path is not sent -- the widget
+         * answers with its own -- so there is nothing here but the name of the
+         * property to ask about. */
+        fileUrl(p) {
+            const { sim, id } = this.selected
+            return `/api/simulations/${sim}/widgets/${id}` +
+                   `/properties/${encodeURIComponent(p.name)}/file`
+        },
+
         /* The choice an enum's value stands for. Falls back to the number
          * when there is no such choice, which is the interface and the
          * simulator disagreeing about how many there are -- worth showing as

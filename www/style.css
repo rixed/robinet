@@ -1100,6 +1100,36 @@ button.metric-plot {
     cursor: grab;
 }
 .plot-menu + button.metric-reset { margin-left: .3rem; }
+
+/* The name of the file, and then, at the right edge of the cell where a metric
+ * keeps its buttons, what can be done with it. The cell is a row only when it
+ * holds a file: every other kind of value is drawn as its own block. */
+article.properties td.file {
+    display: flex;
+    align-items: baseline;
+    gap: .5rem;
+}
+a[role=button].download {
+    display: inline-flex;
+    align-items: center;
+    /* Last of the row whatever the markup order, so that what the cell says
+     * about the value -- its units, the reason a change was refused -- stays
+     * beside the name instead of being pushed out past the button. */
+    order: 1;
+    width: auto;
+    margin: 0 0 0 auto;
+    padding: .1rem .45rem;
+    line-height: 1;
+}
+a[role=button].download svg {
+    width: .9rem;
+    height: .8rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
 button.metric-plot svg {
     width: .9rem;
     height: .7rem;

@@ -626,7 +626,7 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget
     t
 
 let make ?gateways ?search_sfx ?nameserver ?on ~parent ?location ?mac ?init name =
-    let widget = Widget.make ~parent ?location name in
+    let widget = Widget.make ~parent ?location ~device:"host" name in
     let eth_state =
         (* FIXME: Don't use the GW for same net IP! *)
         Eth.State.make ?mac ?gateways ~parent:widget
@@ -638,7 +638,6 @@ let make ?gateways ?search_sfx ?nameserver ?on ~parent ?location ?mac ?init name
     (* This host minted the supply above, so the switch for it goes here, and
        so does stopping it for good. And it is a whole machine, unlike a host
        built on somebody else's adapter. *)
-    widget.device <- Some "host" ;
     widget.on_delete <- (fun () -> t.trx.power_off ()) ;
     Widget.add_properties widget Widget.[
         property "on" ~descr:"The host is powered on." ~kind:Bool

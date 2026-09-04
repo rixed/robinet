@@ -87,7 +87,7 @@ struct
                  connected" n)))
 
     let make ~parent ?location n name =
-        let widget = Widget.make ~parent ?location name in
+        let widget = Widget.make ~parent ?location ~device:"hub" name in
         let t = {
             ifaces = Array.make n (ignore_bits ~logger:widget.logger) ;
             is_connected = Array.make n false ;
@@ -97,7 +97,6 @@ struct
             egress = Metric.Counter.make () } in
         (* This repeater minted the supply above; a switch's inner one is a
            child of the switch, so deleting the switch reaches it. *)
-        widget.device <- Some "hub" ;
         widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
         widget.ports <- Widget.{
             count = (fun () -> n) ;
