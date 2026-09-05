@@ -883,6 +883,43 @@ const api = async (path, options) => {
     return body
 }
 
+/* The bytes of a file the API holds, rather than the JSON everything else
+ * speaks. A refusal is still JSON, and is read exactly as [api] reads it, so
+ * that a caller has one kind of error to deal with. */
+const fetchFile = async (path, options) => {
+    let resp
+    try {
+        resp = await fetch('/api' + path, options)
+    } catch (e) {
+        throw new ApiError('offline', 0, 'no answer from the simulator')
+    }
+    if (!resp.ok) {
+        let body = null
+        try { body = await resp.json() } catch (e) { /* no body, or not JSON */ }
+        throw new ApiError('refused', resp.status,
+                           (body && body.error) ||
+                           `${resp.status} ${resp.statusText}`)
+    }
+    return await resp.blob()
+}
+
+/* Save what we already hold under [name]. An anchor with a download attribute
+ * rather than a navigation: the bytes came back from a request the page had to
+ * make itself -- one that also changes what the simulator holds -- so there is
+ * nothing left for the browser to fetch, only something for it to write. */
+const saveBlob = (blob, name) => {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    /* Not at once: some browsers are still reading the blob when the click
+     * returns, and revoking it there truncates the file they save. */
+    setTimeout(() => URL.revokeObjectURL(url), 60000)
+}
+
 document.addEventListener('alpine:init', () => {
     Alpine.data('admin', () => ({
         sims: [],
@@ -1326,6 +1363,14 @@ document.addEventListener('alpine:init', () => {
                     p.draft = p.text
                     p.dirty = false
                     p.error = null
+                    /* Every flag a binding reads is set here, even the ones
+                     * that are only ever false to begin with: an expression
+                     * with a dot in it that comes out undefined is read by
+                     * Alpine as "", which is not nothing -- it *sets* a boolean
+                     * attribute. A missing [ejecting] is therefore a button
+                     * disabled for good, since every later reading of it is
+                     * undefined too and leaves the attribute where it is. */
+                    p.ejecting = false
                     resetDraft(p)
                     p.metric = p.kind.type === 'metric'
                         ? metricRows(p.value, p.units) : null
@@ -1507,8 +1552,41 @@ document.addEventListener('alpine:init', () => {
          * property to ask about. */
         fileUrl(p) {
             const { sim, id } = this.selected
-            return `/api/simulations/${sim}/widgets/${id}` +
+            return `/simulations/${sim}/widgets/${id}` +
                    `/properties/${encodeURIComponent(p.name)}/file`
+        },
+
+        /* Take the file the widget is holding: it is saved here, and the widget
+         * has none afterwards -- a recorder stops, closes it, and waits to be
+         * given the name of the next one.
+         *
+         * The one request does both (see the DELETE of the file route), so
+         * that nothing can be written into the file between what is served and
+         * the moment it is let go: what is saved is the whole of it.
+         *
+         * The properties are read again straight after rather than at the next
+         * poll: the file name has just become something to type in again, and
+         * the recorder has just stopped, and the panel would otherwise go on
+         * saying the opposite for up to a second. */
+        async eject(p) {
+            if (p.ejecting) return
+            /* What it is called here is what it is saved as, which is what the
+             * answer's Content-Disposition says too -- but a blob is saved
+             * under the name the page gives it, and the page knows it. */
+            const name = asText(p.value)
+            p.ejecting = true
+            const r = await this.exchange(() =>
+                fetchFile(this.fileUrl(p), { method: 'DELETE' }))
+            p.ejecting = false
+            if (!r.ok) {
+                p.error = r.error.kind === 'offline'
+                    ? 'not ejected: no answer from the simulator'
+                    : r.error.message
+                return
+            }
+            p.error = null
+            saveBlob(r.value, name)
+            await this.loadProps({ full: true })
         },
 
         /* The choice an enum's value stands for. Falls back to the number
@@ -1677,6 +1755,11 @@ document.addEventListener('alpine:init', () => {
             }
             p.value = r.value.value
             p.text = asText(r.value.value)
+            /* Setting a property can be what stops it being settable: a
+             * recorder takes a file name only while it holds no file. The
+             * answer says whether it still takes one, so the field it is typed
+             * in goes away at once rather than at the next poll. */
+            p.read_only = r.value.read_only
             /* From the answer rather than from what was typed: a setter may
              * well hold something other than what it was handed -- an address
              * written another way, rows in another order -- and what it holds

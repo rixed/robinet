@@ -61,6 +61,10 @@
     GET    /api/simulations/<s>/widgets/<w>/properties/<name>/file
                                             the file that property names, for
                                             a property of kind FileName
+    DELETE /api/simulations/<s>/widgets/<w>/properties/<name>/file
+                                            the same bytes, and the widget
+                                            gives that file up as it hands
+                                            them over
     GET    /api/simulations/<s>/widgets/<w>/logs
                                             what it logged; ?since=<simulated
                                             time> for what came after, and
@@ -202,7 +206,10 @@ let json_of_property (p : Widget.property) =
              (* What the figure is counted in, if anything: an empty string is
                 simply a property that has nothing to add to its number. *)
              "units", `String p.units ;
-             "read_only", `Bool (p.setter = None) ;
+             (* Now, that is: a property may be settable only at times (see
+                [Widget.can_set]), and this is asked afresh on every read for
+                that reason. *)
+             "read_only", `Bool (not (p.can_set ())) ;
              (* Say so even when there is a value to show: what the UI does
                 with a property must not depend on the moment it asked. *)
              "only_when_set", `Bool p.only_when_set ;
@@ -584,20 +591,33 @@ let get_property_history _mth matches vars _qry_body resp =
  * saying so would claim a continuity it does not have. It is a flag rather
  * than a count because what a reader can do about it is the same either way --
  * slow the simulation down. *)
-(* The bytes of the file a [FileName] property names.
+(* The bytes of the file a [FileName] property names, and -- when [eject] --
+ * the widget letting go of that file as it hands them over.
  *
- * The path is the widget's own answer, never the caller's: this route names a
+ * The name is the widget's own answer, never the caller's: this route names a
  * widget and one of its properties, and what that property returns is what is
- * served. Nothing sent by a client reaches the filesystem, which is why there
- * is no traversal to guard against here -- and why a widget declares a
- * property of that kind only for a file it means to hand over.
+ * served. Nothing arrives here from a client to be opened, which is why there
+ * is no traversal to guard against at this end -- and why a widget declares a
+ * property of that kind only for a file it means to hand over. A widget that
+ * lets the reader name its file guards that name where it takes it (see
+ * [Pcap.check_fname]), which is the only place the name is still an answer to
+ * a question rather than a fact about the widget.
  *
- * Opened, and its length taken, while the simulation is held still; read
- * afterwards. A recording grows as it is fetched, and what is served is the
- * length it had when it was asked for: for a pcap flushed packet by packet
- * (see [Pcap.Pdu.save]) that is a whole number of records, and so a file that
- * can be read rather than one that stops in the middle of one. *)
-let get_property_file _mth matches _vars _qry_body resp =
+ * That name is a name and not a path: the files widgets write live together in
+ * [!Pcap.pcap_dir], and are named relative to it, so that the same string is
+ * what the reader typed, what the property reads as, and what the file is
+ * called once it is saved. A widget that has a whole path to give away can
+ * still give it, and it is then served as it stands.
+ *
+ * Opened, and its length taken -- and, when ejecting, given up -- while the
+ * simulation is held still; read afterwards. A recording grows as it is
+ * fetched, and what is served is the length it had when it was asked for: for
+ * a pcap flushed packet by packet (see [Pcap.Pdu.save]) that is a whole number
+ * of records, and so a file that can be read rather than one that stops in the
+ * middle of one. Ejecting is that one exchange rather than a fetch and then a
+ * write, so that what is served is everything that was ever recorded: nothing
+ * can be written between the two. *)
+let get_property_file ?(eject=false) _mth matches _vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
     let ic, len, fname =
         Simulation.borrow sim (fun () ->
@@ -610,25 +630,57 @@ let get_property_file _mth matches _vars _qry_body resp =
             if not (names_a_file p.kind) then
                 bad_request "Property %S of %s does not name a file"
                     p.name (Widget.full_name w) ;
-            let path =
+            let name =
                 match p.getter () with
-                | `String path -> path
-                | `Null ->
+                | `String "" | `Null ->
                     not_found "Property %S of %s names no file yet"
                         p.name (Widget.full_name w)
+                | `String name -> name
                 | v ->
                     bad_request "Property %S of %s is not a file name but %s"
                         p.name (Widget.full_name w) (Yojson.Basic.to_string v) in
+            let path =
+                if Filename.is_relative name then
+                    Filename.concat !Pcap.pcap_dir name
+                else name in
             match Stdlib.open_in_bin path with
             | exception Sys_error m -> not_found "%s" m
             | ic ->
-                (* What to call it once it is saved: the widget's name, which
-                   is what the reader knows it by, and the extension of the
-                   file it really is. Not the file's own name -- that is an
-                   internal matter (see [Pcap.next_recorder_file]) and says
-                   nothing to whoever asked for it. *)
-                let fname = w.Widget.name ^ Filename.extension path in
-                ic, Stdlib.in_channel_length ic, fname) in
+                let len = Stdlib.in_channel_length ic in
+                (* Giving the file up is setting the property to "no file", the
+                   only value that means the same thing to every widget that
+                   has one to give. Not subject to [can_set], which says
+                   whether a *name* may be typed in: a recorder takes one only
+                   while it holds no file, so a file that could be ejected only
+                   when it can be replaced could never be ejected at all.
+
+                   Our own handle on the file is already open, so what is
+                   served is what was there whatever the widget does with it
+                   next -- closes it, or writes another in its place. *)
+                if eject then (
+                    match p.setter with
+                    | None ->
+                        Stdlib.close_in_noerr ic ;
+                        raise (Opache.ResourceError (
+                            405, Printf.sprintf
+                                "Property %S of %s cannot be given up"
+                                p.name (Widget.full_name w)))
+                    | Some setter ->
+                        (match setter `Null with
+                        | exception e ->
+                            Stdlib.close_in_noerr ic ;
+                            bad_request "Cannot eject %S of %s: %s"
+                                p.name (Widget.full_name w)
+                                (match e with
+                                | Widget.Bad_value m -> m
+                                | e -> Printexc.to_string e)
+                        | () ->
+                            Log.(log w.logger Info (lazy (
+                                Printf.sprintf "Ejected file %S" name))))) ;
+                (* What to call it once it is saved: what it is called here.
+                   The reader named it (see [Pcap.recorder]) and knows it by
+                   that name; the directory it sat in is ours, not theirs. *)
+                ic, len, Filename.basename name) in
     let body =
         match Stdlib.really_input_string ic len with
         | exception e ->
@@ -636,8 +688,8 @@ let get_property_file _mth matches _vars _qry_body resp =
             bad_request "Cannot read %s: %s" fname (Printexc.to_string e)
         | body -> Stdlib.close_in ic ; body in
     String.print resp body ;
-    (* Saved rather than shown. Percent-escaped, since the name came from
-       whoever built the widget and this is a header: a quote or a newline in
+    (* Saved rather than shown. Percent-escaped, since the name was typed by
+       whoever asked for the file and this is a header: a quote or a newline in
        it would end this header and begin another. Given twice, as RFC 6266
        has it -- the starred form is percent-decoded by the browser, and so
        arrives back as the name that was typed, while the plain one is the
@@ -714,6 +766,14 @@ let set_property _mth matches vars qry_body resp =
         raise (Opache.ResourceError (
             405, Printf.sprintf "Property %S of %s is read only"
                      p.name (Widget.full_name w)))
+    (* Settable, but not just now (see [Widget.can_set]): the same refusal, since
+     * from here there is nothing to be done about either. What can be done
+     * about this one is said by the widget -- a recorder wants its file
+     * ejected first -- so its own words are what go back. *)
+    | Some _ when not (p.can_set ()) ->
+        raise (Opache.ResourceError (
+            405, Printf.sprintf "Property %S of %s cannot be set now"
+                     p.name (Widget.full_name w)))
     | Some setter ->
         (match setter value with
         | exception e ->
@@ -768,6 +828,10 @@ let resources serving : (Str.regexp * Opache.resource) list =
         (fun mth matches vars qry_body resp ->
             match mth with
             | "GET" -> get_property_file mth matches vars qry_body resp
+            (* Serves the same bytes, and the widget has no file afterwards:
+               what the interface's eject button does. *)
+            | "DELETE" ->
+                get_property_file ~eject:true mth matches vars qry_body resp
             | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/properties/\\(.+\\)$",
         (fun mth matches vars qry_body resp ->

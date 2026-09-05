@@ -95,18 +95,40 @@ open Tools
 
 let debug = false
 
-let pcap_recorder_dir = ref "/tmp"
+(* Where the recorded files are kept: a library the reader saves into, picks
+ * from and (eventually) replays. Everything in it is named by a plain file
+ * name, never by a path -- see [check_fname]. *)
+let pcap_dir = ref "/tmp"
 
-(* Where the next recorder will write. A number and nothing else: no part of
- * this comes from whoever is building the network, so there is no name to make
- * safe and no way to be pointed at a file that was not meant to be written.
- * What the recorder is called is the widget's business, and is used only where
- * it is read -- in the interface, and in the header of a download. *)
-let next_recorder_file =
-    let seq = ref 0 in
-    fun () ->
-        incr seq ;
-        Printf.sprintf "%s/recorder-%d.pcap" !pcap_recorder_dir !seq
+let path_of_fname fname = Filename.concat !pcap_dir fname
+
+(* A name for a file in [pcap_dir], and nothing else.
+ *
+ * The reader chooses it, so it is checked here rather than trusted: a '/'
+ * would point at a file outside the library -- anywhere at all, given a few of
+ * them -- and a NUL would make the name the system is handed shorter than the
+ * one that was checked. Everything else is a matter of taste, and not ours:
+ * whatever the filesystem takes, the library holds.
+ *
+ * The empty name is not a name either. It is how a recorder says it has no
+ * file (see [recorder]), and cannot also be the way to ask for one. *)
+let check_fname fname =
+    if fname = "" then
+        Widget.bad_value "A file name is required" ;
+    if String.contains fname '/' then
+        Widget.bad_value
+            "A file name cannot contain '/': %S must name a file of %s, not a \
+             path" fname !pcap_dir ;
+    if String.contains fname '\000' then
+        Widget.bad_value "A file name cannot contain a NUL character" ;
+    fname
+
+(*$T check_fname
+  check_fname "foo.pcap" = "foo.pcap"
+  try ignore (check_fname "") ; false with Widget.Bad_value _ -> true
+  try ignore (check_fname "a/b") ; false with Widget.Bad_value _ -> true
+  try ignore (check_fname "a\000b") ; false with Widget.Bad_value _ -> true
+ *)
 
 (** {2 Libpcap low level wrappers} *)
 
@@ -307,32 +329,85 @@ let save sim ?caplen ?(dlt=default_dlt) fname =
         write_pdu pdu in
     write_bits, close
 
-(** Recorder: a widget to record pcap files and download them. *)
+(** Recorder: a widget to record pcap files and download them.
 
-type recorder = { fname : string ;
-                 caplen : int option ;
-                    dlt : Dlt.t ;
-                 widget : Widget.t ;
-          mutable write : bitstring -> unit ;
-                  close : unit -> unit ;
+   A recorder records one file after another, and they are told apart by what
+   they are called: the reader names the file, ejects it when it holds what
+   they wanted, and names the next one. The name of the recorder says where in
+   the network it is listening and has nothing to do with the names of the
+   files it writes -- the point of keeping a recorder is to record several
+   files from the same place. *)
+
+type recorder =
+    { (* What is being recorded, as a file of [pcap_dir], or "" when nothing
+       * is: a recorder with no file name has no file open and records
+       * nothing. That is how it waits, both before its first file and after
+       * each one is ejected. *)
+      mutable fname : string ;
+      caplen : int option ;
+      dlt : Dlt.t ;
+      widget : Widget.t ;
+      (* What the port writes into. The same function for the life of the
+       * recorder, since a cable is handed it once: which file it writes into,
+       * and whether it writes at all, are read at each packet. *)
+      mutable write : bitstring -> unit ;
+      (* The file of the moment, as what writes into it and what closes it, or
+       * [None] when there is none -- which is exactly when [fname] is "". *)
+      mutable file : ((bitstring -> unit) * (unit -> unit)) option ;
       mutable recording : bool ;
-                packets : Metric.Counter.t }
+      packets : Metric.Counter.t }
 
-let recorder ~parent ?location ?caplen ?(dlt=default_dlt) name =
+(* Open [fname] and record into it from now on.
+ *
+ * Recording starts with the file: naming one is asking for its contents, and a
+ * recorder that had to be started as well as named would quietly miss whatever
+ * happened in between. *)
+let recorder_open recorder fname =
+    let fname = check_fname fname in
+    let path = path_of_fname fname in
+    if Sys.file_exists path then
+        Log.(log recorder.widget.logger Warning (lazy (Printf.sprintf
+            "Overwriting %s" path))) ;
+    let sim = Simulation.of_widget recorder.widget in
+    let write, close =
+        (* The name was the reader's, so the refusal is theirs to read: a
+           directory that is not there, or not theirs to write in, is something
+           they can do something about once they are told which. *)
+        try save sim ?caplen:recorder.caplen ~dlt:recorder.dlt path
+        with Sys_error msg -> Widget.bad_value "Cannot record into %s" msg in
+    recorder.file <- Some (write, close) ;
+    recorder.fname <- fname ;
+    recorder.recording <- true ;
+    Log.(log recorder.widget.logger Info (lazy (
+        "Recording into "^ path)))
+
+(* Stop, and let go of the file. It stays in the library under its name, which
+ * is how it is downloaded (see [Myadmin_api.get_property_file]) and, one day,
+ * replayed. *)
+let recorder_eject recorder =
+    Option.may (fun (_write, close) ->
+        close () ;
+        Log.(log recorder.widget.logger Info (lazy (
+            "Ejecting "^ path_of_fname recorder.fname)))
+    ) recorder.file ;
+    recorder.file <- None ;
+    recorder.fname <- "" ;
+    recorder.recording <- false
+
+let recorder ~parent ?location ?caplen ?(dlt=default_dlt) ?fname name =
     let widget = Widget.make ~parent ?location ~device:"recorder" name in
-    let sim = Simulation.of_widget widget in
-    let fname = next_recorder_file () in
-    let write, close = save sim ?caplen ~dlt fname in
     let recorder =
-        { fname ; caplen ; dlt ; widget ; write ; close ; recording = true ;
-          packets = Metric.Counter.make () } in
+        { fname = "" ; caplen ; dlt ; widget ; write = ignore ; file = None ;
+          recording = false ; packets = Metric.Counter.make () } in
     recorder.write <- (fun bits ->
-        if recorder.recording then (
+        match recorder.file with
+        | Some (write, _close) when recorder.recording ->
             let now = Simulation.Widget.now widget in
             write bits ;
             Metric.Counter.inc recorder.packets ~now
-        )) ;
-    widget.on_delete <- (fun () -> recorder.close ()) ;
+        | _ -> ()) ;
+    Option.may (recorder_open recorder) fname ;
+    widget.on_delete <- (fun () -> recorder_eject recorder) ;
     widget.ports <- Widget.{
         count = (fun () -> 1) ;
         is_connected = (fun _ -> false) ;
@@ -343,17 +418,35 @@ let recorder ~parent ?location ?caplen ?(dlt=default_dlt) name =
         property "recording" ~kind:Bool
             ~descr:"Tells if the packets are currently saved in the file \
                     (rather than dropped)."
+            (* Nothing to record into, nothing to start: the file comes first. *)
+            ~can_set:(fun () -> recorder.file <> None)
             ~getter:(fun () -> `Bool recorder.recording)
             ~setter:(fun v ->
                 let v = to_bool v in
                 recorder.recording <- v ;
                 Log.(log recorder.widget.logger Info (lazy (Printf.sprintf
                     "%s recording into %s"
-                    (if v then "Started" else "Stopped") recorder.fname)))) ;
-        (* A file name and not merely a string: the API hands this one over
-           on request, and the interface offers to download it. *)
-        property "file name" ~kind:FileName ~descr:"File name."
-            ~getter:(fun () -> `String recorder.fname) ;
+                    (if v then "Started" else "Stopped")
+                    (path_of_fname recorder.fname))))) ;
+        (* Kind FileName to make it downloadable.
+         * Valid until ejected, when it's going to be downloaded and cleared
+         * (the filename not the file). *)
+        property "file name" ~kind:(Hint ("capture.pcap", FileName))
+            ~descr:(Printf.sprintf
+                "Name of the file being recorded, in %s." !pcap_dir)
+            ~can_set:(fun () -> recorder.file = None)
+            ~getter:(fun () ->
+                if recorder.fname = "" then `Null
+                else `String recorder.fname)
+            ~setter:(fun v ->
+                match to_option to_string v with
+                | None | Some "" -> recorder_eject recorder
+                | Some fname ->
+                    if recorder.file <> None then
+                        Widget.bad_value
+                            "Already recording into %s: eject it first"
+                            recorder.fname ;
+                    recorder_open recorder fname) ;
         property "caplen" ~kind:(Optional (IRange (1, 65535))) ~units:"bytes"
             ~descr:"Capture length (or interface MTU)."
             ~getter:(fun () ->

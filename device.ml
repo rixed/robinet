@@ -470,15 +470,21 @@ let recorder =
     { name = "recorder" ;
       descr = "Save every received packet into a pcap file." ;
       params = [
+          (* Where to record. If unset (after creation or eject) then do not
+           * record anything. *)
+          param "file name"
+              ~kind:(Optional (Hint ("capture.pcap", String))) ~default:`Null
+              ~descr:"Name of the first file to record, in the pcap library." ;
           param "caplen" ~kind:(Optional (IRange (1, 65535))) ~default:`Null
               ~descr:"Capture length (default to the interface MTU)." ;
           param "DLT" ~kind:(Optional Int)
               ~default:(`Int (Pcap.Dlt.to_int Pcap.default_dlt))
               ~descr:"DLT to use to create the pcap file." ] ;
       make = fun ~parent name args ->
-          let caplen = opt args "caplen" Widget.to_int in
+          let fname = opt args "file name" Widget.to_string
+          and caplen = opt args "caplen" Widget.to_int in
           let dlt = opt args "DLT" (Pcap.Dlt.o % Int32.of_int % Widget.to_int) in
-          let recorder = Pcap.recorder ~parent ?caplen ?dlt name in
+          let recorder = Pcap.recorder ~parent ?fname ?caplen ?dlt name in
           recorder.widget }
 
 (** Every kind of device that can be asked for, in the order the interface

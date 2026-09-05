@@ -464,10 +464,10 @@
                                                 <small class="descr" x-show="p.descr"
                                                        x-text="p.descr"></small>
                                             </td>
-                                            <!-- The file's download sits at the right
-                                                 edge of the cell, where a metric has
-                                                 its buttons: laid out as a row so that
-                                                 the name keeps the left. -->
+                                            <!-- The file's eject button sits at the
+                                                 right edge of the cell, where a metric
+                                                 has its buttons: laid out as a row so
+                                                 that the name keeps the left. -->
                                             <td :class="{ file: base(p).type === 'filename' && p.value }">
                                                 <!-- A metric: one row per parameter
                                                      combination, and when it was last
@@ -563,23 +563,24 @@
                                                                            unset: p.value === null }"
                                                       x-text="shown(p)"></span>
 
-                                                <!-- A file the widget has written: its name, and the
-                                                     way to fetch it. A link and not a button, since
-                                                     the answer says it is an attachment -- the
-                                                     browser saves it rather than showing it, under
-                                                     the name the simulator knows it by; boxed like
-                                                     the buttons of a metric, since that is what it
-                                                     is used as. -->
+                                                <!-- A file the widget is holding: its name, and
+                                                     the one thing to do with it. Ejecting saves it
+                                                     and hands it back in the same movement (see
+                                                     [eject]), which is why this is a button and not
+                                                     a link -- what it does is not only to fetch.
+                                                     Boxed like the buttons of a metric, since that
+                                                     is what it is used as. -->
                                                 <template x-if="base(p).type === 'filename' && p.value">
-                                                    <a role="button" class="outline secondary download"
-                                                       :href="fileUrl(p)"
-                                                       :title="'Download ' + p.value">
+                                                    <button class="outline secondary eject"
+                                                            :disabled="!online || p.ejecting"
+                                                            @click="eject(p)"
+                                                            :title="'Save ' + p.value +
+                                                                    ' and let the widget go on to another file'">
                                                         <svg viewBox="0 0 16 12" aria-hidden="true">
-                                                            <polyline points="8,1 8,8"/>
-                                                            <polyline points="4,5 8,9 12,5"/>
-                                                            <polyline points="2,11 14,11"/>
+                                                            <polygon points="8,1 14,7 2,7"/>
+                                                            <polyline points="2,10 14,10"/>
                                                         </svg>
-                                                    </a>
+                                                    </button>
                                                 </template>
 
                                                 <template x-if="!p.read_only && base(p).type === 'bool'">

@@ -1109,7 +1109,7 @@ article.properties td.file {
     align-items: baseline;
     gap: .5rem;
 }
-a[role=button].download {
+button.eject {
     display: inline-flex;
     align-items: center;
     /* Last of the row whatever the markup order, so that what the cell says
@@ -1121,7 +1121,7 @@ a[role=button].download {
     padding: .1rem .45rem;
     line-height: 1;
 }
-a[role=button].download svg {
+button.eject svg {
     width: .9rem;
     height: .8rem;
     fill: none;

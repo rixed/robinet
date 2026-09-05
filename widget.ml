@@ -146,6 +146,8 @@ and property = { name : string ;
                getter : (unit -> value) ;
                (* If that property can be set *)
                setter : (value -> unit) option ;
+               (* Some properties are settable only some of the time: *)
+              can_set : (unit -> bool) ;
                (* The metric this property reads, when it reads one. The getter
                 * renders it for display and the kind says so; this is the
                 * thing itself, for whoever wants its figures rather than their
@@ -186,9 +188,14 @@ and kind =
     | String
     (* A string that happens to name a file the widget has written, which the
      * API will therefore hand over on request (see the property "file" route)
-     * and the interface offers to download. What a property of this kind
-     * returns is what gets served, so a widget puts a path here only if it
-     * means to give that file away. *)
+     * and the interface offers to save. What a property of this kind
+     * returns is what gets served, so a widget puts a name here only if it
+     * means to give that file away.
+     *
+     * A name and not a path: the files widgets write live together in one
+     * directory ([Pcap.pcap_dir], which the API resolves them against), so
+     * that the name is the same string wherever it appears -- in the property,
+     * in the download, and in the library the reader picks from. *)
     | FileName
     | Int
     | Float
@@ -357,9 +364,17 @@ let record fields =
       List (Record [| "dest", String ; "via", Optional String |])
  *)
 
-let property ?(descr="") ?(units="") ?metric ?setter ?(kind=String)
+let property ?(descr="") ?(units="") ?metric ?setter ?can_set ?(kind=String)
              ?(only_when_set=false) ~getter name =
-    { name ; descr ; units ; getter ; setter ; kind ; metric ; only_when_set }
+    (* No setter, no setting, so there is one way to ask and callers need not
+     * check both. A setter with nothing said about when it applies is one that
+     * always applies. *)
+    let can_set =
+        match setter with
+        | None -> (fun () -> false)
+        | Some _ -> can_set |? (fun () -> true) in
+    { name ; descr ; units ; getter ; setter ; can_set ; kind ; metric ;
+      only_when_set }
 
 (* Add new properties before default ones: *)
 let add_properties t properties =
