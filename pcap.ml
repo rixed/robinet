@@ -355,7 +355,7 @@ type recorder =
        * [None] when there is none -- which is exactly when [fname] is "". *)
       mutable file : ((bitstring -> unit) * (unit -> unit)) option ;
       mutable recording : bool ;
-      packets : Metric.Counter.t }
+      packets_recvd : Metric.Counter.t }
 
 (* Open [fname] and record into it from now on.
  *
@@ -398,13 +398,13 @@ let recorder ~parent ?location ?caplen ?(dlt=default_dlt) ?fname name =
     let widget = Widget.make ~parent ?location ~device:"recorder" name in
     let recorder =
         { fname = "" ; caplen ; dlt ; widget ; write = ignore ; file = None ;
-          recording = false ; packets = Metric.Counter.make () } in
+          recording = false ; packets_recvd = Metric.Counter.make () } in
     recorder.write <- (fun bits ->
         match recorder.file with
         | Some (write, _close) when recorder.recording ->
             let now = Simulation.Widget.now widget in
             write bits ;
-            Metric.Counter.inc recorder.packets ~now
+            Metric.Counter.inc recorder.packets_recvd ~now
         | _ -> ()) ;
     Option.may (recorder_open recorder) fname ;
     widget.on_delete <- (fun () -> recorder_eject recorder) ;
@@ -418,9 +418,9 @@ let recorder ~parent ?location ?caplen ?(dlt=default_dlt) ?fname name =
         property "recording" ~kind:Bool
             ~descr:"Tells if the packets are currently saved in the file \
                     (rather than dropped)."
+            ~getter:(fun () -> `Bool recorder.recording)
             (* Nothing to record into, nothing to start: the file comes first. *)
             ~can_set:(fun () -> recorder.file <> None)
-            ~getter:(fun () -> `Bool recorder.recording)
             ~setter:(fun v ->
                 let v = to_bool v in
                 recorder.recording <- v ;
@@ -431,19 +431,20 @@ let recorder ~parent ?location ?caplen ?(dlt=default_dlt) ?fname name =
         (* Kind FileName to make it downloadable.
          * Valid until ejected, when it's going to be downloaded and cleared
          * (the filename not the file). *)
-        property "file name" ~kind:(Hint ("capture.pcap", FileName))
+        property "file name"
+            ~kind:(Optional (Hint ("capture.pcap", FileName)))
             ~descr:(Printf.sprintf
                 "Name of the file being recorded, in %s." !pcap_dir)
-            ~can_set:(fun () -> recorder.file = None)
             ~getter:(fun () ->
                 if recorder.fname = "" then `Null
                 else `String recorder.fname)
+            ~can_set:(fun () -> recorder.file = None)
             ~setter:(fun v ->
                 match to_option to_string v with
                 | None | Some "" -> recorder_eject recorder
                 | Some fname ->
                     if recorder.file <> None then
-                        Widget.bad_value
+                        bad_value
                             "Already recording into %s: eject it first"
                             recorder.fname ;
                     recorder_open recorder fname) ;
@@ -456,7 +457,7 @@ let recorder ~parent ?location ?caplen ?(dlt=default_dlt) ?fname name =
             ~descr:"DLT used for the file."
             ~getter:(fun () -> `Int (Int32.to_int (recorder.dlt :> int32))) ;
         metric_property "packets" ~descr:"Packets recorded into the files"
-            (Metric.Counter.T recorder.packets) ] ;
+            (Metric.Counter.T recorder.packets_recvd) ] ;
     recorder
 
 (** When trying to read packets from a file that doesn't look like a pcap file. *)
@@ -489,8 +490,19 @@ let global_header_of_bitstring name header =
  * given file, and returns both a {!Pcap.global_header} and the input channel. *)
 let read_global_header fname =
     let ic = open_in_bin fname in
-    let header = bitstring_of_string (IO.really_nread ic 24) ; in
-    global_header_of_bitstring fname header, ic
+    (* A file that turns out not to be a pcap is a file we opened and are not
+       going to read: whoever asked for it gets the exception, and must not
+       also be left holding the descriptor. *)
+    match bitstring_of_string (IO.really_nread ic 24) with
+    | exception e ->
+        close_in ic ;
+        (* Too short to hold even the header, which is one way of not being a
+           pcap file and reads better as that than as an end of input. *)
+        if e = IO.No_more_input then raise Not_a_pcap_file else raise e
+    | header ->
+        (match global_header_of_bitstring fname header with
+        | exception e -> close_in ic ; raise e
+        | header -> header, ic)
 
 (** [read_next_pkt global_header ic] will return the next {!Pcap.Pdu.t} that's to
  * be read from the input stream [ic]. *)
@@ -519,8 +531,11 @@ let enum_of_file fname =
     let global_header, ic = read_global_header fname in
     let next () =
         try read_next_pkt global_header ic
-        with IO.No_more_input | IO.Input_closed ->
-            raise Enum.No_more_elements in
+        with IO.No_more_input ->
+              close_in ic ;
+              raise Enum.No_more_elements
+           | IO.Input_closed ->
+              raise Enum.No_more_elements in
     Enum.from next
 
 (** [write_global_header filename] write a 'generic' pcap global header and
@@ -630,7 +645,7 @@ let play power tx fname =
             | Some pdu ->
                 let d =
                     match last_ts with
-                    | None     -> Clock.Interval.o 0.
+                    | None     -> Clock.Interval.zero
                     | Some lts -> Clock.Time.diff pdu.Pdu.ts lts in
                 Simulation.delay power d (fun () ->
                     tx (pdu.Pdu.payload :> bitstring) ;
@@ -638,7 +653,251 @@ let play power tx fname =
     in
     Simulation.asap power read_next_pkt None
 
-(* TODO: a pcap player widget *)
+(* Replayer: a widget to replay pcap files (dual of a recorder).
+ *
+ * Where a recorder has a single port and writes down what reaches it, a
+ * replayer has as many ports as it is given cables for and sends every packet
+ * into all of them: what it plays is a recording, and a recording is addressed
+ * to no one in particular.
+ *
+ * What it follows is the file's own timestamps, not the clock it is played
+ * into: two packets go out with the gap between them that the capture recorded,
+ * so a file is replayed at the speed it was recorded at. *)
+
+type replayer =
+    { (* The file being played, as a file of [pcap_dir], or "" when there is
+       * none: as for a recorder, that is how a replayer says it is waiting to
+       * be given one. *)
+      mutable fname : string ;
+      widget : Widget.t ;
+      (* One entry per port that has ever had a cable, in port order: the one
+       * at [n] is what port [n] emits into, or [None] since the cable that was
+       * there was unplugged. Unplugging leaves the slot to be filled by the
+       * next cable rather than dropping it, because the ports below it are
+       * numbered and cables remember which number they were given. *)
+      mutable readers : (bitstring -> unit) option ref list ;
+      mutable replaying : bool ;
+      mutable loop : bool ;
+      mutable file : (global_header * IO.input) option ;
+      (* When was the last packet played: *)
+      mutable last_ts : Clock.Time.t option ;
+      (* Which reading of the file the packets on their way belong to.
+       *
+       * A packet is read and scheduled before it is due, and between those two
+       * moments the reader can have paused, changed the file or taken it out.
+       * Everything that does one of those bumps this, and a packet that comes
+       * due bearing a number that is no longer the current one is dropped
+       * along with the chain it would have continued -- otherwise resuming
+       * would leave two chains reading the same file, each moving the other's
+       * position in it.
+       *
+       * The price is the one packet that had been read but not yet sent when
+       * the reader intervened: it is gone, since there is no unreading it. *)
+      mutable gen : int ;
+      packets_sent : Metric.Counter.t }
+
+(* Close the file, if one is open, and forget where in it we were.
+ *
+ * The name is kept: what a replayer is playing and whether it is playing are
+ * two different things, and a replayer that forgot the name whenever it
+ * stopped could never be started again. *)
+let replayer_close replayer =
+    (* We could just read all packets and the enum will close the file, but that
+     * might potentially be a very large file so instead we close the input stream
+     * that we have: *)
+    Option.may (fun (_global_header, ic) -> close_in ic) replayer.file ;
+    replayer.file <- None ;
+    replayer.last_ts <- None ;
+    replayer.gen <- replayer.gen + 1
+
+(* Open the file [fname] of the library, at its first packet. Also how a file
+ * already open is wound back to the beginning. *)
+let replayer_open replayer fname =
+    let fname = check_fname fname in
+    let path = path_of_fname fname in
+    replayer_close replayer ;
+    let global_header, ic =
+        try read_global_header path with
+        | Sys_error msg ->
+            Widget.bad_value "Cannot replay %s" msg
+        | Not_a_pcap_file ->
+            Widget.bad_value "%s is not a pcap file" path in
+    (* Said and not refused: what is plugged into a replayer decides what the
+       bytes mean, and only whoever wired it up knows whether that is Ethernet.
+       But a file of anything else is almost certainly a mistake, and one that
+       shows up as unintelligible frames rather than as an error. *)
+    if global_header.dlt <> default_dlt then
+        Log.(log replayer.widget.logger Warning (lazy (Printf.sprintf
+            "%s holds %s, not %s"
+            path (Dlt.to_string global_header.dlt)
+            (Dlt.to_string default_dlt)))) ;
+    replayer.file <- Some (global_header, ic) ;
+    replayer.fname <- fname
+
+(* Take the file out: nothing to play, and nothing playing. *)
+let replayer_eject replayer =
+    if replayer.file <> None then
+        Log.(log replayer.widget.logger Info (lazy (
+            "Ejecting "^ path_of_fname replayer.fname))) ;
+    replayer_close replayer ;
+    replayer.fname <- "" ;
+    replayer.replaying <- false
+
+(* Every cable plugged into this replayer gets every packet. *)
+let replayer_tx replayer bits =
+    let now = Simulation.Widget.now replayer.widget in
+    Metric.Counter.inc replayer.packets_sent ~now ;
+    List.iter (fun reader ->
+        Option.may (fun read -> read bits) !reader
+    ) replayer.readers
+
+(* Schedule the next packet of a replayer, until the file ends or replaying
+ * stops. *)
+let rec replay_next replayer =
+    match replayer.file with
+    | Some (global_header, ic) when replayer.replaying ->
+        (match read_next_pkt global_header ic with
+        | exception IO.No_more_input ->
+            replay_end replayer
+        | (pdu : Pdu.t) ->
+            let d =
+                match replayer.last_ts with
+                | None -> Clock.Interval.zero
+                | Some lts ->
+                    let d = Clock.Time.diff pdu.ts lts in
+                    (* A capture whose packets are not in order would otherwise
+                       ask for an event in the past, which is a moment this
+                       clock has no way back to. Such a packet is played as
+                       soon as the one before it. *)
+                    if Clock.Interval.compare d Clock.Interval.zero < 0 then
+                        Clock.Interval.zero
+                    else d in
+            replayer.last_ts <- Some pdu.ts ;
+            let sim = Simulation.of_widget replayer.widget in
+            let gen = replayer.gen in
+            Simulation.delay sim.power d (fun () ->
+                if gen = replayer.gen then (
+                    replayer_tx replayer (pdu.payload :> bitstring) ;
+                    replay_next replayer)) ())
+    | _ ->
+        ()
+
+(* The file is over. Wind it back either way, so that whatever starts it next
+ * -- the loop, or the reader pressing play again -- starts at the first
+ * packet. *)
+and replay_end replayer =
+    (* Nothing was played, so there is nothing to play again: a file with no
+     * packets in it would otherwise loop over its own emptiness for ever. *)
+    let played = replayer.last_ts <> None in
+    let fname = replayer.fname in
+    replayer_open replayer fname ;
+    if replayer.loop && played then
+        replay_next replayer
+    else (
+        replayer.replaying <- false ;
+        Log.(log replayer.widget.logger Info (lazy (Printf.sprintf
+            (if played then "Done replaying %S"
+                       else "Nothing to replay in %S") fname))))
+
+let replayer ~parent ?location ?fname ?(loop=false) name =
+    let widget = Widget.make ~parent ?location ~device:"replayer" name in
+    let replayer =
+        { fname = "" ; widget ; readers = [] ; replaying = false ; loop ;
+          file = None ; last_ts = None ; gen = 0 ;
+          packets_sent = Metric.Counter.make () } in
+    (* Named at birth is named by the reader: it plays at once, as a recorder
+       named at birth records at once. *)
+    Option.may (fun fname ->
+        replayer_open replayer fname ;
+        replayer.replaying <- true ;
+        replay_next replayer) fname ;
+    widget.on_delete <- (fun () -> replayer_eject replayer) ;
+    widget.ports <- Widget.{
+        count = (fun () -> List.length replayer.readers + 1) ;
+        is_connected = (fun n ->
+            if n = List.length replayer.readers then false else
+            match List.nth replayer.readers n with
+            | exception _ -> Widget.bad_value "No such port #%d" n
+            | reader -> !reader <> None) ;
+        dev = (fun n ->
+            { write = ignore ;
+              (* Into port [n] and no other: a freed slot when that is what was
+                 handed out, and a new one at the end otherwise. The port a
+                 cable was given is the one it asks to be disconnected from, so
+                 a reader that went in anywhere else would leave that cable
+                 unable to let go -- and the port it really took reading as
+                 free to the next cable. *)
+              set_read = (fun f ->
+                match List.nth replayer.readers n with
+                | exception _ ->
+                    replayer.readers <- replayer.readers @ [ ref (Some f) ]
+                | reader -> reader := Some f) }) ;
+        owner = (fun _ -> widget) ;
+        disconnect = (fun n ->
+            match List.nth replayer.readers n with
+            | exception _ -> Widget.bad_value "No such port #%d" n
+            | { contents = None } -> Widget.bad_value "Port #%d is not connected" n
+            | { contents = Some _ } as r -> r := None) } ;
+    Widget.add_properties widget Widget.[
+        property "replaying" ~kind:Bool
+            ~descr:"Tells if the packets are currently being replayed from \
+                    the file (or if the replay is on pause)"
+            ~getter:(fun () -> `Bool replayer.replaying)
+            (* Nothing to play, nothing to start: the file comes first. *)
+            ~can_set:(fun () -> replayer.file <> None)
+            ~setter:(fun v ->
+                let v = to_bool v in
+                if v <> replayer.replaying then (
+                    (* Whatever was already on its way belongs to the reading
+                       that is being interrupted here (see [gen]). *)
+                    replayer.gen <- replayer.gen + 1 ;
+                    replayer.replaying <- v ;
+                    if v then replay_next replayer ;
+                    Log.(log replayer.widget.logger Info (lazy (Printf.sprintf
+                        "%s replaying into %d readers"
+                        (if v then "Started" else "Stopped")
+                        List.(length (filter (function
+                            | { contents = Some _ } -> true
+                            | _ -> false
+                        ) replayer.readers))))))) ;
+        (* Named while there is no file, read while there is one, exactly as a
+           recorder's is (see [recorder]): the file being played cannot be
+           swapped under the replayer, and the way to be done with one is to
+           take it out -- which is what setting this to nothing does. *)
+        property "file name" ~kind:(Optional (Hint ("capture.pcap", FileName)))
+            ~descr:(Printf.sprintf
+                "Name of the file being replayed, from %s." !pcap_dir)
+            ~getter:(fun () ->
+                if replayer.fname = "" then `Null
+                else `String replayer.fname)
+            ~can_set:(fun () -> replayer.file = None)
+            ~setter:(fun v ->
+                match to_option to_string v with
+                | None | Some "" ->
+                    replayer_eject replayer
+                | Some fname ->
+                    if replayer.file <> None then
+                        bad_value "Already replaying %s: eject it first"
+                            replayer.fname ;
+                    replayer_open replayer fname ;
+                    replayer.replaying <- true ;
+                    replay_next replayer) ;
+        property "loop" ~kind:Bool
+            ~descr:"Restart from the beginning when done."
+            ~getter:(fun () -> `Bool replayer.loop)
+            ~setter:(fun v ->
+                let v = to_bool v in
+                replayer.loop <- v ;
+                (* A file that had been played to its end is wound back but not
+                   playing: asking for it to loop is asking for it to go on. *)
+                if v && not replayer.replaying && replayer.file <> None then (
+                    replayer.gen <- replayer.gen + 1 ;
+                    replayer.replaying <- true ;
+                    replay_next replayer)) ;
+        metric_property "packets" ~descr:"Packets replayed from the files"
+            (Metric.Counter.T replayer.packets_sent) ] ;
+    replayer
+
 
 (** {2 User friendly functions for capturing/injecting packets} *)
 

@@ -549,8 +549,18 @@
                                                      says whether there is one, and the
                                                      input keeps the last one, disabled,
                                                      so that ticking it back offers it
-                                                     again. -->
-                                                <template x-if="!p.read_only && p.kind.type === 'optional'">
+                                                     again.
+
+                                                     Never for a file name: it is absent
+                                                     when the widget holds no file, which
+                                                     is a state one reaches by ejecting
+                                                     the file, not by unticking its name
+                                                     -- and the name can only be typed
+                                                     while there is no file to eject, so
+                                                     the box would be offered exactly
+                                                     when it has nothing to say. -->
+                                                <template x-if="!p.read_only && p.kind.type === 'optional'
+                                                                 && base(p).type !== 'filename'">
                                                     <input type="checkbox" class="enabler" :disabled="!online"
                                                            x-model="p.enabled"
                                                            :title="p.enabled ? 'unset this value' : 'give it a value'"

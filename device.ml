@@ -470,8 +470,8 @@ let recorder =
     { name = "recorder" ;
       descr = "Save every received packet into a pcap file." ;
       params = [
-          (* Where to record. If unset (after creation or eject) then do not
-           * record anything. *)
+          (* What to play. If unset (as after creation, or after the file is
+           * taken out) then there is nothing to play and nothing is sent. *)
           param "file name"
               ~kind:(Optional (Hint ("capture.pcap", String))) ~default:`Null
               ~descr:"Name of the first file to record, in the pcap library." ;
@@ -487,9 +487,30 @@ let recorder =
           let recorder = Pcap.recorder ~parent ?fname ?caplen ?dlt name in
           recorder.widget }
 
+let replayer =
+    { name = "replayer" ;
+      descr = "Replay the packets from a pcap file." ;
+      params = [
+          (* Where to record. If unset (after creation or eject) then do not
+           * record anything. *)
+          param "file name"
+              ~kind:(Optional (Hint ("capture.pcap", String))) ~default:`Null
+              ~descr:"Name of the file to replay, in the pcap library." ;
+          param "loop"
+              ~kind:Bool ~default:(`Bool false)
+              ~descr:"Whether to restart replaying from the beginning at the \
+                      end." ] ;
+      make = fun ~parent name args ->
+          let fname = opt args "file name" Widget.to_string
+          and loop = bool args "loop" in
+          let replayer = Pcap.replayer ~parent ?fname ~loop name in
+          replayer.widget }
+
 (** Every kind of device that can be asked for, in the order the interface
  * offers them: what a network is mostly made of first. *)
-let all = [ host ; switch ; hub ; router ; gateway ; portal ; recorder ; cable ]
+let all =
+    [ host ; switch ; hub ; router ; gateway ; portal ; recorder ; replayer ;
+      cable ]
 
 let find name =
     List.find_opt (fun t -> t.name = name) all
