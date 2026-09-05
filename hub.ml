@@ -25,72 +25,71 @@ open Tools
    to several locations (but the one from which the frame came from) *)
 module Repeater =
 struct
-    type t = { ifaces : (bitstring -> unit) array ;
-         is_connected : bool array ;
-                power : Simulation.power ;
-               widget : Widget.t ;
-              ingress : Metric.Counter.t ;
-               egress : Metric.Counter.t }
+    type t = { ports : ((bitstring -> unit) * bool) array ;
+               speed : float ;  (* Fixed speed, in bps *)
+               power : Simulation.power ;
+              widget : Widget.t ;
+             ingress : Metric.Counter.t ;
+              egress : Metric.Counter.t }
 
     let print oc t =
-        Printf.fprintf oc "repeater %s with %d ifaces" t.widget.name (Array.length t.ifaces)
+        Printf.fprintf oc "repeater %s with %d ports" t.widget.name (Array.length t.ports)
+
+    (* Whether port [n] has something on the other end. Set by [set_read]. *)
+    let is_connected (t : t) n =
+        snd t.ports.(n)
 
     let forward_from (t : t) n pld =
         let now = Simulation.Widget.now t.widget in
-        Array.iteri (fun i emit ->
+        Array.iteri (fun i (emit, _is_conn) ->
             if i <> n then (
-                Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to iface %d/%d" i (Array.length t.ifaces)))) ;
+                Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to port %d/%d" i (Array.length t.ports)))) ;
                 Metric.(Counter.add t.egress ~now ~params:(Params.singleton "port" (Param.Int i)) (bytelength pld)) ;
                 Simulation.asap t.power emit pld
-            )) t.ifaces
+            )) t.ports
 
     let forward_to_single (t : t) n pld =
         let now = Simulation.Widget.now t.widget in
         Metric.(Counter.add t.egress ~now ~params:(Params.singleton "port" (Param.Int n)) (bytelength pld)) ;
-        Simulation.asap t.power t.ifaces.(n) pld
+        Simulation.asap t.power (fst t.ports.(n)) pld
 
     let write (t : t) n pld =
-        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.ifaces)))) ;
+        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx from port %d/%d" n (Array.length t.ports)))) ;
         let now = Simulation.Widget.now t.widget in
         Metric.(Counter.add t.ingress ~now ~params:(Params.singleton "port" (Param.Int n)) (bytelength pld)) ;
         forward_from t n pld
 
     let set_read (t : t) n f =
-        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting reader for iface %d" n))) ;
-        t.is_connected.(n) <- true ;
-        t.ifaces.(n) <- f
+        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting reader for port %d" n))) ;
+        t.ports.(n) <- (f, true)
 
-    (** Turns an iface into a device *)
-    let iface t n =
+    (** Turns a port into a device *)
+    let dev t n =
         { write = write t n ; set_read = set_read t n }
 
     let t_printer _paren oc t =
-        Printf.fprintf oc "%d" (Array.length t.ifaces)
+        Printf.fprintf oc "%d" (Array.length t.ports)
 
     let first_free_iface t =
-        try Some (Array.findi not t.is_connected)
+        try Some (Array.findi (fun (_emit, is_conn) -> not is_conn) t.ports)
         with Not_found -> None
 
-    (* Whether iface [n] has something on the other end. Set by [set_read]. *)
-    let is_connected (t : t) n = t.is_connected.(n)
-
-    (* And undoes it: nothing is emitted to iface [n] any more, and it is free
+    (* And undoes it: nothing is emitted to port [n] any more, and it is free
        for another cable. *)
     let disconnect (t : t) n =
-        if t.is_connected.(n) then (
-            t.ifaces.(n) <-
-                Eth.State.ignore_disconnected ~logger:t.widget.logger ;
-            t.is_connected.(n) <- false
-        ) else
+        if is_connected t n then
+            t.ports.(n) <-
+                (Eth.State.ignore_disconnected ~logger:t.widget.logger, false)
+        else
             Log.(log t.widget.logger Debug (lazy (Printf.sprintf
-                "Ignoring request to disconnect iface %d, which is not \
+                "Ignoring request to disconnect port %d, which is not \
                  connected" n)))
 
-    let make ~parent ?location n name =
+    let make ~parent ?location ?(speed=100e6) n name =
         let widget = Widget.make ~parent ?location ~device:"hub" name in
         let t = {
-            ifaces = Array.make n (ignore_bits ~logger:widget.logger) ;
-            is_connected = Array.make n false ;
+            ports = Array.make n (ignore_bits ~logger:widget.logger, false) ;
+            speed ;
             power = Simulation.make_power (Simulation.of_widget widget) name ;
             widget ;
             ingress = Metric.Counter.make () ;
@@ -100,19 +99,21 @@ struct
         widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
         widget.ports <- Widget.{
             count = (fun () -> n) ;
-            is_connected = (fun i -> t.is_connected.(i)) ;
-            dev = iface t ;
+            is_connected = (fun i -> is_connected t i) ;
+            dev = dev t ;
             (* Its ports are not widgets, and want no name: one is as good as
                another, so a cable is recorded as reaching the repeater. *)
             owner = (fun _ -> widget) ;
             disconnect = disconnect t } ;
         Widget.add_properties widget Widget.[
+            property "speed" ~kind:Float ~descr:"Fixed speed for this Hub."
+                ~units:"bps" ~getter:(fun () -> `Float t.speed) ;
             metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
                 (Metric.Counter.T t.ingress) ;
             metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
                 (Metric.Counter.T t.egress) ;
             property "tot ports" ~kind:Int ~descr:"Total number of ports."
-                ~getter:(fun () -> `Int (Array.length t.ifaces)) ] ;
+                ~getter:(fun () -> `Int (Array.length t.ports)) ] ;
         t
 end
 
@@ -137,7 +138,7 @@ struct
           mac_misses : Metric.Atomic.t }
 
     let print oc t =
-        Printf.fprintf oc "switch %s with %d ifaces" t.widget.name (Array.length t.hub.ifaces)
+        Printf.fprintf oc "switch %s with %d ifaces" t.widget.name (Array.length t.hub.ports)
 
     let update_macs t src ins =
         match BitHash.find_option t.macs_h src with
@@ -200,11 +201,11 @@ struct
             Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Drop incoming frame without destination")))
 
     let write (t : t) n pld =
-        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.hub.ifaces)))) ;
+        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.hub.ports)))) ;
         forward_from t n pld
 
     let set_read (t : t) n f =
-        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting emitter for iface %d/%d" n (Array.length t.hub.ifaces)))) ;
+        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting emitter for iface %d/%d" n (Array.length t.hub.ports)))) ;
         R.set_read t.hub n f
 
     (** Turns a iface into a device *)

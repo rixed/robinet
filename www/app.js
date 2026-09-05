@@ -164,6 +164,38 @@ const bytes = (n) => {
     return (n / (1024 * 1024 * 1024)).toFixed(1) + ' GB'
 }
 
+/* A link speed, in the unit that leaves it a small number. Powers of a
+ * thousand and not of 1024, unlike [bytes]: a 100 Mbps link carries a hundred
+ * million bits per second exactly, which is how such a speed is named and how
+ * the simulator is told it. */
+const bps = (n) => {
+    if (!Number.isFinite(n)) return String(n)
+    const prefixes = [ '', 'k', 'M', 'G', 'T', 'P' ]
+    let i = 0
+    while (Math.abs(n) >= 1000 ** (i + 1) && i < prefixes.length - 1) i++
+    /* Three decimals is a hundred kbps of a gigabit link: below that the
+     * figure is noise, and a trailing zero says nothing either. */
+    return Number((n / 1000 ** i).toFixed(3)) + ' ' + prefixes[i] + 'bps'
+}
+
+/* The units the page writes rather than merely appends, by the name the
+ * property gives them (see [units] in widget.ml). What travels and what is
+ * typed stays the bare number in the base unit whatever is done here: this is
+ * only how it reads.
+ *
+ * Without a prototype, so that a unit is looked up among these and nowhere
+ * else: every string is a property of a plain object, "constructor" included,
+ * and what those answer with is not a formatter. */
+const unitFormats = { __proto__: null, bps }
+
+/* What a figure counted in [units] reads as: the unit's own writing when it
+ * has one, and the plain number with the unit beside it otherwise. */
+const withUnits = (v, units) => {
+    const f = unitFormats[units]
+    return f && typeof v === 'number' ? f(v)
+                                      : num(v) + (units ? ' ' + units : '')
+}
+
 const dur = (s) => {
     if (s < 1e-3) return (s * 1e6).toFixed(0) + 'us'
     if (s < 1) return (s * 1e3).toFixed(s < 1e-2 ? 1 : 0) + 'ms'
@@ -221,9 +253,10 @@ const compareParams = (a, b) => {
 const metricView = (m, units) => {
     if (!m || !m.kind) return { rows: [], last: null }
     /* What the figures are counted in, when the property says: a counter of
-     * bytes reads "1,234 bytes". A duration already knows what it is and is
-     * written as one, so it has nothing to take from here. */
-    const suffix = units ? ' ' + units : ''
+     * bytes reads "1,234 bytes", a gauge of bps "2.5 Gbps". A duration already
+     * knows what it is and is written as one, so it has nothing to take from
+     * here. */
+    const figure = (v) => withUnits(v, units)
     const key = (params) => JSON.stringify(params)
     /* The sub-metrics are keyed the same way, so a row can be completed from
      * them. */
@@ -248,7 +281,7 @@ const metricView = (m, units) => {
             for (const e of m.values) {
                 const times = lookup(m.fired.counts, e.params)
                 push({ params: e.params,
-                            figure: num(e.value) + suffix,
+                            figure: figure(e.value),
                             /* How many times it was added to is worth saying
                              * only when it is not the total itself, which it
                              * is for anything counted one at a time. */
@@ -261,7 +294,7 @@ const metricView = (m, units) => {
         case 'gauge':
             for (const e of m.values)
                 push({ params: e.params,
-                            figure: num(e.value.current) + suffix,
+                            figure: figure(e.value.current),
                             detail: 'between ' + num(e.value.min) +
                                     ' and ' + num(e.value.max) })
             return { rows, last: last(m.first_last) }
@@ -1766,11 +1799,28 @@ document.addEventListener('alpine:init', () => {
 
         /* What a property reads as when it is only read. An enum travels as
          * the index of its choice, a number that means nothing on its own, so
-         * it reads as the choice. */
+         * it reads as the choice; a number in a unit the page writes itself
+         * reads in that writing (see [unitFormats]).
+         *
+         * [p.text] and not this is what the inputs are filled from: what is
+         * edited and sent must stay the bare value. */
         shown(p) {
             if (p.value === null) return 'unset'
+            const f = unitFormats[p.units]
+            if (f && typeof p.value === 'number') return f(p.value)
             return baseKind(p.kind).type === 'enum' ? this.choice(p.kind, p.value)
                                                     : p.text
+        },
+
+        /* The unit written after the value, when the value does not already
+         * carry it: "2.5 Gbps" would otherwise be followed by a second "bps".
+         * A metric's figures carry their own, and an editable value shows the
+         * bare number that is typed into it, so both keep the unit beside. */
+        unitsShown(p) {
+            if (!p.units || baseKind(p.kind).type === 'metric') return ''
+            if (p.read_only && unitFormats[p.units] &&
+                typeof p.value === 'number') return ''
+            return p.units
         },
 
         /* What one cell of a read-only table says. */

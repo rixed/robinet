@@ -918,9 +918,11 @@
                                                      beside the value rather than in it:
                                                      what is typed and what is sent must
                                                      stay the bare number. A metric's
-                                                     figures carry their own. -->
-                                                <small class="units" x-show="p.units && base(p).type !== 'metric'"
-                                                       x-text="p.units"></small>
+                                                     figures carry their own, and so does
+                                                     a read-only value in a unit the page
+                                                     writes itself: see [unitsShown]. -->
+                                                <small class="units" x-show="unitsShown(p)"
+                                                       x-text="unitsShown(p)"></small>
                                                 <!-- Beside the value it was refused
                                                      for, which is the only place it
                                                      means anything. -->

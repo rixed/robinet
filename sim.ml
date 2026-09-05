@@ -147,7 +147,7 @@ struct
         let r = Hub.Repeater.make ~parent:sim.root n name in
         let plugs = List.init n (fun i ->
             let iface_name = "iface#"^ string_of_int i in
-            Plug.make iface_name (Hub.Repeater.iface r i)) in
+            Plug.make iface_name (Hub.Repeater.dev r i)) in
         Simple { equip = [ Hub r ] ; plugs }
 
     (** Returns a net representing the external network via the given interface,
