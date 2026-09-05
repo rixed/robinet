@@ -186,16 +186,15 @@ and value = Yojson.Basic.t
 
 and kind =
     | String
-    (* A string that happens to name a file the widget has written, which the
-     * API will therefore hand over on request (see the property "file" route)
-     * and the interface offers to save. What a property of this kind
-     * returns is what gets served, so a widget puts a name here only if it
-     * means to give that file away.
+    (* A string naming a file of the pcap library ([Pcap.Library]): the one a
+     * recorder is writing, or the one a replayer is playing.
      *
-     * A name and not a path: the files widgets write live together in one
-     * directory ([Pcap.pcap_dir], which the API resolves them against), so
-     * that the name is the same string wherever it appears -- in the property,
-     * in the download, and in the library the reader picks from. *)
+     * A name and not a path -- the library is one flat directory, and a name
+     * is the same string wherever it appears: in the property, in the library
+     * listing, and in the file saved out of it. Fetching that file, adding one
+     * and removing one are the library's business and not the widget's, so
+     * what this kind tells the interface is which files to offer here, and
+     * that the value is one it can hand back (null) to be done with it. *)
     | FileName
     | Int
     | Float

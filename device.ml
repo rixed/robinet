@@ -473,7 +473,7 @@ let recorder =
           (* What to play. If unset (as after creation, or after the file is
            * taken out) then there is nothing to play and nothing is sent. *)
           param "file name"
-              ~kind:(Optional (Hint ("capture.pcap", String))) ~default:`Null
+              ~kind:(Optional (Hint ("capture.pcap", FileName))) ~default:`Null
               ~descr:"Name of the first file to record, in the pcap library." ;
           param "caplen" ~kind:(Optional (IRange (1, 65535))) ~default:`Null
               ~descr:"Capture length (default to the interface MTU)." ;
@@ -494,7 +494,7 @@ let replayer =
           (* Where to record. If unset (after creation or eject) then do not
            * record anything. *)
           param "file name"
-              ~kind:(Optional (Hint ("capture.pcap", String))) ~default:`Null
+              ~kind:(Optional (Hint ("capture.pcap", FileName))) ~default:`Null
               ~descr:"Name of the file to replay, in the pcap library." ;
           param "loop"
               ~kind:Bool ~default:(`Bool false)

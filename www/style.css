@@ -96,6 +96,117 @@ article.sim.folded > header {
 }
 article.sim.folded { padding: .4rem .6rem; }
 
+/* ------------------------------------------------------- pcap library */
+
+/* Above the simulations and built like one of them: the same box, the same
+ * twisty, so that the column reads as one list of things that fold. */
+article.library {
+    margin: 0 0 .8rem 0;
+    padding: .6rem;
+}
+article.library > header {
+    padding: 0 0 .4rem 0;
+    margin: 0 0 .4rem 0;
+    display: flex;
+    align-items: baseline;
+    gap: .5rem;
+}
+article.library.folded > header {
+    padding-bottom: 0;
+    margin-bottom: 0;
+    border-bottom: none;
+}
+article.library.folded { padding: .4rem .6rem; }
+/* A file is being carried over the panel. Said with the border rather than a
+ * word, since the pointer is already busy saying where it would land. */
+article.library.dropping {
+    border: 1px dashed var(--pico-primary);
+    background: var(--pico-code-background-color);
+}
+article.library .empty { margin: 0; color: var(--pico-muted-color); }
+
+nav.files .row {
+    display: flex;
+    align-items: baseline;
+    gap: .4rem;
+    padding: .1rem 0;
+}
+/* The name takes what room there is, and pushes the rest to the right edge --
+ * the sizes then line up down the column, which is what makes them worth
+ * showing at all. */
+nav.files .row > a {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+nav.files .size {
+    flex: 0 0 auto;
+    font-size: .75rem;
+    color: var(--pico-muted-color);
+    font-variant-numeric: tabular-nums;
+}
+/* A file a widget has open: something is happening to it, and the colour says
+ * what. Red is the one every recording light has ever been, so a capture being
+ * written wears it; one being replayed is merely busy, and takes the accent. */
+nav.files button.open {
+    flex: 0 0 auto;
+    width: auto;
+    margin: 0;
+    padding: 0 .1rem;
+    border: none;
+    background: none;
+    line-height: 1;
+    color: var(--pico-primary);
+    font-size: .7rem;
+}
+nav.files button.open.recording { color: var(--pico-del-color); }
+/* It leads somewhere -- to the widget holding the file -- so it says so the
+ * way the rest of the column does. */
+nav.files button.open:hover:not(:disabled) { opacity: .7; }
+nav.files button.drop {
+    flex: 0 0 auto;
+    width: auto;
+    margin: 0;
+    padding: 0 .3rem;
+    line-height: 1;
+    font-size: .8rem;
+    border: none;
+    background: none;
+    color: var(--pico-muted-color);
+}
+nav.files button.drop:hover:not(:disabled) { color: var(--pico-del-color); }
+/* Armed by the first click: it says what the second one will do, and it says
+ * it where the click will land. */
+nav.files button.drop.arming {
+    color: var(--pico-del-color);
+    font-size: .7rem;
+}
+article.library .replace, article.library .lib-error {
+    margin: .4rem 0 0 0;
+    display: flex;
+    align-items: baseline;
+    gap: .4rem;
+    flex-wrap: wrap;
+}
+article.library .lib-error { color: var(--pico-del-color); }
+article.library .replace button {
+    width: auto;
+    margin: 0;
+    padding: .1rem .4rem;
+    font-size: .7rem;
+}
+article.library > .body > footer {
+    padding: .4rem 0 0 0;
+    margin: .4rem 0 0 0;
+}
+article.library > .body > footer button {
+    width: 100%;
+    margin: 0;
+    padding: .2rem;
+    font-size: .8rem;
+}
+
 .badge {
     font-size: .7rem;
     color: var(--pico-muted-color);

@@ -58,18 +58,24 @@
                                             what that metric has been worth;
                                             ?since=<simulated time> for the
                                             points taken after that one
-    GET    /api/simulations/<s>/widgets/<w>/properties/<name>/file
-                                            the file that property names, for
-                                            a property of kind FileName
-    DELETE /api/simulations/<s>/widgets/<w>/properties/<name>/file
-                                            the same bytes, and the widget
-                                            gives that file up as it hands
-                                            them over
     GET    /api/simulations/<s>/widgets/<w>/logs
                                             what it logged; ?since=<simulated
                                             time> for what came after, and
                                             ?level=<name> for how deep to go
+    GET    /api/pcaps                       the pcap library: every capture in
+                                            it, with what its header says, what
+                                            has it open, and what an upload may
+                                            weigh
+    GET    /api/pcaps/<name>                the bytes of one of them
+    PUT    /api/pcaps/<name>                add it under that name, or replace
+                                            what is there; the body is the file
+    DELETE /api/pcaps/<name>                take it out of the library
   v}
+
+  The pcap library is where the recorders write and the replayers read (see
+  [Pcap.Library]). It belongs to no simulation -- there is one of it, and every
+  simulation's widgets name files in it -- which is why it hangs off /api
+  directly.
 
   Property names are used as-is in the URL (url-encoded): they are already
   unique within a widget and readable enough to serve as identifiers.
@@ -190,6 +196,13 @@ let rec json_of_kind = function
         (match json_of_kind k with
         | `Assoc l -> `Assoc (l @ [ "placeholder", `String h ])
         | j -> j)
+
+(* Whether a property of this kind names a file of the pcap library, whatever
+ * it wraps that name in. *)
+let rec names_a_file = function
+    | Widget.FileName -> true
+    | Widget.Optional k | Widget.Hint (_, k) -> names_a_file k
+    | _ -> false
 
 let json_of_property (p : Widget.property) =
     (* The value is read through the getter, which may fail on us: *)
@@ -442,9 +455,34 @@ let create_widget _mth matches _vars qry_body resp =
     Simulation.borrow sim (fun () ->
         (* Under the lock, since building a device wires it into a graph the
          * simulation is walking, and may schedule its first events. *)
+        (* What is under the root before, so that a device that fails halfway
+           through being built leaves nothing behind.
+         *
+         * A widget is made first and told what it is for afterwards -- it has
+         * to exist before it can be given a logger to complain into -- so a
+         * constructor that refuses one of its parameters has already put a
+         * widget in the tree. Half of one: no properties, no ports that work,
+         * and nothing that would make it obvious it is not a device. The
+         * caller is told the request failed, and a failed request must leave
+         * the simulation as it found it.
+         *
+         * Whatever a device is made of hangs under the device, and the device
+         * under the root, so the new children of the root are the whole of it
+         * -- and destroying one takes its parts and its cables with it. *)
+        let before = sim.root.children in
+        let rollback () =
+            (* The list is taken first: destroying a widget takes it out of its
+               parent's children, which is the list being walked. *)
+            List.filter (fun (w : Widget.t) -> not (List.memq w before))
+                sim.root.children |>
+            List.iter Widget.destroy in
         match Device.make type_ ~parent:sim.root name params with
         | exception Widget.Bad_value m ->
+            rollback () ;
             bad_request "Cannot make a %s: %s" type_ m
+        | exception e ->
+            rollback () ;
+            raise e
         | w ->
             Log.(log sim.root.logger Info (lazy (
                 Printf.sprintf "Added %s %S" type_ (Widget.full_name w)))) ;
@@ -591,114 +629,147 @@ let get_property_history _mth matches vars _qry_body resp =
  * saying so would claim a continuity it does not have. It is a flag rather
  * than a count because what a reader can do about it is the same either way --
  * slow the simulation down. *)
-(* The bytes of the file a [FileName] property names, and -- when [eject] --
- * the widget letting go of that file as it hands them over.
+(* Which widget, if any, is holding the library file [name].
  *
- * The name is the widget's own answer, never the caller's: this route names a
- * widget and one of its properties, and what that property returns is what is
- * served. Nothing arrives here from a client to be opened, which is why there
- * is no traversal to guard against at this end -- and why a widget declares a
- * property of that kind only for a file it means to hand over. A widget that
- * lets the reader name its file guards that name where it takes it (see
- * [Pcap.check_fname]), which is the only place the name is still an answer to
- * a question rather than a fact about the widget.
+ * Read off the widgets themselves rather than kept in a register beside them:
+ * a widget that has a file of the library open says so in a property of kind
+ * [FileName], and that is true of the recorder writing one and the replayer
+ * reading one without either having to announce itself here.
  *
- * That name is a name and not a path: the files widgets write live together in
- * [!Pcap.pcap_dir], and are named relative to it, so that the same string is
- * what the reader typed, what the property reads as, and what the file is
- * called once it is saved. A widget that has a whole path to give away can
- * still give it, and it is then served as it stands.
- *
- * Opened, and its length taken -- and, when ejecting, given up -- while the
- * simulation is held still; read afterwards. A recording grows as it is
- * fetched, and what is served is the length it had when it was asked for: for
- * a pcap flushed packet by packet (see [Pcap.Pdu.save]) that is a whole number
- * of records, and so a file that can be read rather than one that stops in the
- * middle of one. Ejecting is that one exchange rather than a fetch and then a
- * write, so that what is served is everything that was ever recorded: nothing
- * can be written between the two. *)
-let get_property_file ?(eject=false) _mth matches _vars _qry_body resp =
-    let sim = simulation_of_matches matches 1 in
-    let ic, len, fname =
-        Simulation.borrow sim (fun () ->
-            let w = widget_of_matches sim matches 2 in
-            let p = property_of_matches w matches 3 in
-            let rec names_a_file = function
-                | Widget.FileName -> true
-                | Widget.Optional k | Widget.Hint (_, k) -> names_a_file k
-                | _ -> false in
-            if not (names_a_file p.kind) then
-                bad_request "Property %S of %s does not name a file"
-                    p.name (Widget.full_name w) ;
-            let name =
-                match p.getter () with
-                | `String "" | `Null ->
-                    not_found "Property %S of %s names no file yet"
-                        p.name (Widget.full_name w)
-                | `String name -> name
-                | v ->
-                    bad_request "Property %S of %s is not a file name but %s"
-                        p.name (Widget.full_name w) (Yojson.Basic.to_string v) in
-            let path =
-                if Filename.is_relative name then
-                    Filename.concat !Pcap.pcap_dir name
-                else name in
-            match Stdlib.open_in_bin path with
-            | exception Sys_error m -> not_found "%s" m
-            | ic ->
-                let len = Stdlib.in_channel_length ic in
-                (* Giving the file up is setting the property to "no file", the
-                   only value that means the same thing to every widget that
-                   has one to give. Not subject to [can_set], which says
-                   whether a *name* may be typed in: a recorder takes one only
-                   while it holds no file, so a file that could be ejected only
-                   when it can be replaced could never be ejected at all.
+ * Every simulation, since the library is common to them all. *)
+let widget_holding name =
+    let holds (p : Widget.property) =
+        names_a_file p.kind &&
+        (match p.getter () with
+        | exception _ -> false
+        | `String n -> n = name
+        | _ -> false) in
+    List.fold_left (fun found (sim : Simulation.t) ->
+        match found with
+        | Some _ -> found
+        | None ->
+            Simulation.borrow sim (fun () ->
+                List.find_opt (fun (w : Widget.t) ->
+                    List.exists holds w.Widget.properties)
+                    (Simulation.widgets sim))
+    ) None (Simulation.all ())
 
-                   Our own handle on the file is already open, so what is
-                   served is what was there whatever the widget does with it
-                   next -- closes it, or writes another in its place. *)
-                if eject then (
-                    match p.setter with
-                    | None ->
-                        Stdlib.close_in_noerr ic ;
-                        raise (Opache.ResourceError (
-                            405, Printf.sprintf
-                                "Property %S of %s cannot be given up"
-                                p.name (Widget.full_name w)))
-                    | Some setter ->
-                        (match setter `Null with
-                        | exception e ->
-                            Stdlib.close_in_noerr ic ;
-                            bad_request "Cannot eject %S of %s: %s"
-                                p.name (Widget.full_name w)
-                                (match e with
-                                | Widget.Bad_value m -> m
-                                | e -> Printexc.to_string e)
-                        | () ->
-                            Log.(log w.logger Info (lazy (
-                                Printf.sprintf "Ejected file %S" name))))) ;
-                (* What to call it once it is saved: what it is called here.
-                   The reader named it (see [Pcap.recorder]) and knows it by
-                   that name; the directory it sat in is ours, not theirs. *)
-                ic, len, Filename.basename name) in
-    let body =
-        match Stdlib.really_input_string ic len with
-        | exception e ->
-            Stdlib.close_in_noerr ic ;
-            bad_request "Cannot read %s: %s" fname (Printexc.to_string e)
-        | body -> Stdlib.close_in ic ; body in
-    String.print resp body ;
-    (* Saved rather than shown. Percent-escaped, since the name was typed by
-       whoever asked for the file and this is a header: a quote or a newline in
-       it would end this header and begin another. Given twice, as RFC 6266
-       has it -- the starred form is percent-decoded by the browser, and so
-       arrives back as the name that was typed, while the plain one is the
-       ASCII anything older falls back to. *)
-    let escaped = Tools.escape_fname fname in
-    200, [ "Content-Type", "application/octet-stream" ;
-           "Content-Disposition",
-           Printf.sprintf "attachment; filename=\"%s\"; filename*=UTF-8''%s"
-               escaped escaped ]
+let json_of_library_entry (e : Pcap.Library.entry) =
+    let holder = widget_holding e.name in
+    `Assoc [ "name", `String e.name ;
+             "size", `Int e.size ;
+             (* Seconds since the epoch, as the filesystem keeps it: real time
+                and not any simulation's, since a file outlives the run that
+                wrote it. *)
+             "mtime", `Float e.mtime ;
+             "dlt", `Int (Int32.to_int (e.dlt :> int32)) ;
+             "dlt_name", `String (Pcap.Dlt.to_string e.dlt) ;
+             "snaplen", `Int e.snaplen ;
+             (* The widget that has it open, if one has: a file being recorded
+                is still growing, and one being replayed is being read from --
+                neither is a file to delete or write over.
+
+                Enough of that widget to name it, to say what kind of device it
+                is -- a capture being written and one being played are not the
+                same thing to a reader -- and to go to it: the pair
+                (simulation, id) is how a widget is addressed everywhere else,
+                and a file that says who has it may as well say where. What the
+                device is called is the widget's own answer (see
+                [Widget.device]), so this says "recorder" without knowing what
+                a recorder is. *)
+             "held_by",
+             (match holder with
+             | None -> `Null
+             | Some (w : Widget.t) ->
+                 `Assoc [ "sim", `Int w.sim ;
+                          "id", `Int w.id ;
+                          "name", `String (Widget.full_name w) ;
+                          "device", (match w.device with
+                                    | None -> `Null
+                                    | Some d -> `String d) ]) ]
+
+let get_pcaps _mth _matches _vars _qry_body resp =
+    respond resp
+        (`Assoc [ "files",
+                  `List (List.map json_of_library_entry (Pcap.Library.list ())) ;
+                  (* What an upload may weigh, said here rather than left for
+                     the caller to discover by being refused: the interface
+                     stops a file that is too big before sending it, which is
+                     the only moment at which the limit does any good (see
+                     [Pcap.Library.max_upload]). *)
+                  "max_upload", `Int !Pcap.Library.max_upload ])
+
+(* The name in the path, which is the only thing a caller says about a file of
+ * the library. Whatever it names, it names it in [Pcap.pcap_dir] and nowhere
+ * else: [Pcap.check_fname] refuses anything with a '/' in it, which is what
+ * keeps a caller from walking out of the library. *)
+let pcap_of_matches matches n =
+    let name = Url.decode (matched matches n) in
+    match Pcap.check_fname name with
+    | exception Widget.Bad_value m -> bad_request "%s" m
+    | name -> name
+
+let get_pcap _mth matches _vars _qry_body resp =
+    let name = pcap_of_matches matches 1 in
+    match Pcap.Library.read name with
+    | exception Sys_error m -> not_found "%s" m
+    | body ->
+        String.print resp body ;
+        (* Saved rather than shown, under the name it has in the library.
+           Percent-escaped, since a name is whatever a reader typed and this is
+           a header: a quote or a newline in it would end this header and begin
+           another. Given twice, as RFC 6266 has it -- the starred form is
+           percent-decoded by the browser, and so arrives back as the name that
+           was typed, while the plain one is the ASCII anything older falls
+           back to. *)
+        let escaped = Tools.escape_fname name in
+        200, [ "Content-Type", "application/vnd.tcpdump.pcap" ;
+               "Content-Disposition",
+               Printf.sprintf "attachment; filename=\"%s\"; filename*=UTF-8\'\'%s"
+                   escaped escaped ]
+
+(* Refuse to write over or delete a file a widget is in the middle of using:
+ * the recorder writing it would go on writing to a file nobody can find any
+ * more, and the replayer reading it would read the rest of something else. *)
+let not_while_held name doing =
+    match widget_holding name with
+    | Some w ->
+        raise (Opache.ResourceError (
+            409, Printf.sprintf "Cannot %s %s: %s has it open"
+                     doing name (Widget.full_name w)))
+    | None -> ()
+
+let put_pcap _mth matches _vars qry_body resp =
+    let name = pcap_of_matches matches 1 in
+    (* Said after the fact, since by the time a handler runs the body has been
+       parsed and is already in memory (see [Pcap.Library.max_upload]): what
+       this refuses is the writing of it. The interface says the same thing
+       before sending, which is where it does some good. *)
+    if String.length qry_body > !Pcap.Library.max_upload then
+        raise (Opache.ResourceError (
+            413, Printf.sprintf
+                "%s is %d bytes, and the library takes at most %d in one \
+                 upload" name (String.length qry_body)
+                !Pcap.Library.max_upload)) ;
+    not_while_held name "replace" ;
+    (match Pcap.Library.write name qry_body with
+    | exception Widget.Bad_value m -> bad_request "%s" m
+    | () -> ()) ;
+    match Pcap.Library.entry name with
+    | None ->
+        (* Written, and then not to be found or not readable as a capture:
+           nothing we can say about it beyond that it is there. *)
+        respond resp (`Assoc [ "name", `String name ])
+    | Some e -> respond resp (json_of_library_entry e)
+
+let delete_pcap _mth matches _vars _qry_body resp =
+    let name = pcap_of_matches matches 1 in
+    not_while_held name "delete" ;
+    if Pcap.Library.entry name = None then
+        not_found "The library holds no %s" name ;
+    match Pcap.Library.delete name with
+    | exception Widget.Bad_value m -> bad_request "%s" m
+    | () -> respond resp (`Assoc [ "deleted", `String name ])
 
 let get_logs _mth matches vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
@@ -769,8 +840,16 @@ let set_property _mth matches vars qry_body resp =
     (* Settable, but not just now (see [Widget.can_set]): the same refusal, since
      * from here there is nothing to be done about either. What can be done
      * about this one is said by the widget -- a recorder wants its file
-     * ejected first -- so its own words are what go back. *)
-    | Some _ when not (p.can_set ()) ->
+     * ejected first -- so its own words are what go back.
+     *
+     * Except for giving up the value there is: [can_set] says whether a value
+     * may be *given*, and a property that takes one only some of the time is
+     * usually one that is holding something the rest of the time -- a
+     * recorder's file name is settable only while it has no file, and the way
+     * it comes to have none is exactly this. What null means is the setter's
+     * business, and a setter with nothing to give up refuses it as it would
+     * refuse anything else it cannot use. *)
+    | Some _ when value <> `Null && not (p.can_set ()) ->
         raise (Opache.ResourceError (
             405, Printf.sprintf "Property %S of %s cannot be set now"
                      p.name (Widget.full_name w)))
@@ -824,15 +903,6 @@ let resources serving : (Str.regexp * Opache.resource) list =
             match mth with
             | "GET" -> get_property_history mth matches vars qry_body resp
             | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
-    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/properties/\\(.+\\)/file$",
-        (fun mth matches vars qry_body resp ->
-            match mth with
-            | "GET" -> get_property_file mth matches vars qry_body resp
-            (* Serves the same bytes, and the widget has no file afterwards:
-               what the interface's eject button does. *)
-            | "DELETE" ->
-                get_property_file ~eject:true mth matches vars qry_body resp
-            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/properties/\\(.+\\)$",
         (fun mth matches vars qry_body resp ->
             match mth with
@@ -860,4 +930,19 @@ let resources serving : (Str.regexp * Opache.resource) list =
             | "GET" -> get_widgets mth matches vars qry_body resp
             | "POST" -> create_widget mth matches vars qry_body resp
             | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
-    Str.regexp "/api/device-types$", get_device_types ]
+    Str.regexp "/api/device-types$", get_device_types ;
+    (* The pcap library, which belongs to no simulation. Before the listing,
+       whose regexp would otherwise not match anyway -- but the order of these
+       is what says which is which, and a reader should not have to check. *)
+    Str.regexp "/api/pcaps/\\(.+\\)$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "GET" -> get_pcap mth matches vars qry_body resp
+            | "PUT" | "POST" -> put_pcap mth matches vars qry_body resp
+            | "DELETE" -> delete_pcap mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
+    Str.regexp "/api/pcaps$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "GET" -> get_pcaps mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ]

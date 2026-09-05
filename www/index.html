@@ -57,6 +57,111 @@
             <p x-text="sims.length + ' simulation' + (sims.length === 1 ? '' : 's')"></p>
         </hgroup>
 
+        <!-- The pcap library: what the recorders write into and the replayers
+             read from. There is one of it for every simulation -- it is a
+             directory on the machine running this -- so it sits above them all
+             rather than inside any one of them.
+
+             Files are dropped onto it as well as chosen through the button:
+             the whole panel is the target, which is what a reader carrying a
+             capture aims at. -->
+        <article class="library" :class="{ folded: collapsed.pcaps, dropping }"
+                 @dragover.prevent="dropping = carriesFiles($event)"
+                 @dragleave.prevent="dropping = false"
+                 @drop.prevent="dropping = false ;
+                                if (carriesFiles($event))
+                                    uploadFiles($event.dataTransfer.files)">
+            <header>
+                <button class="twisty" @click="foldPcaps()"
+                        :title="collapsed.pcaps ? 'Show the pcap library'
+                                                : 'Fold it away'"
+                        x-text="collapsed.pcaps ? '\u25b8' : '\u25be'"></button>
+                <strong>pcap library</strong>
+                <span class="badge" x-show="pcaps.length"
+                      x-text="pcaps.length"></span>
+                <span class="badge" x-show="uploading" x-cloak>sending…</span>
+            </header>
+            <div class="body" x-show="!collapsed.pcaps" x-cloak>
+                <p class="empty" x-show="!pcaps.length && !pcapsError">
+                    <small>nothing in it yet</small></p>
+                <nav class="files">
+                    <template x-for="f in pcaps" :key="f.name">
+                        <div class="row" :class="{ held: f.held_by }">
+                            <!-- A link and not a button: the answer says it is
+                                 an attachment, so the browser saves it under
+                                 the name it has here.
+
+                                 Not draggable, though: what a browser drags
+                                 out of a link is its URL, which is not what
+                                 anyone dragging a capture name into a file
+                                 name field could want. The name is picked from
+                                 the list that field offers. -->
+                            <a :href="pcapUrl(f.name)" :title="pcapTitle(f)"
+                               draggable="false" x-text="f.name"></a>
+                            <span class="size" x-text="fileSize(f.size)"></span>
+                            <!-- Being written or being read: not a file to
+                                 delete, and the simulator would refuse to. -->
+                            <!-- Being written or being read: not a file to
+                                 delete, and the simulator would refuse to. Red
+                                 for a capture being recorded, as every
+                                 recording light has always been; the accent
+                                 for one being played.
+
+                                 A button, since what holds a file is a widget
+                                 like any other and this is the way to it:
+                                 clicking the light shows the recorder that is
+                                 filling this file. -->
+                            <button class="open" x-show="f.held_by"
+                                    :class="{ recording: f.held_by
+                                                         && f.held_by.device === 'recorder' }"
+                                    :disabled="!online"
+                                    @click="showHolder(f)"
+                                    :title="f.held_by
+                                            ? 'Open in ' + f.held_by.name + ' — show it'
+                                            : ''">●</button>
+                            <button class="drop" :disabled="!online || f.held_by"
+                                    :class="{ arming: pcapConfirm === f.name }"
+                                    @click="deletePcap(f)"
+                                    :title="f.held_by
+                                            ? f.held_by.name + ' has this file open'
+                                            : (pcapConfirm === f.name
+                                               ? 'Click again to delete it for good'
+                                               : 'Delete this capture')"
+                                    x-text="pcapConfirm === f.name ? 'really?' : '\u00d7'"></button>
+                        </div>
+                    </template>
+                </nav>
+                <!-- Dropped files whose names are already in the library: what
+                     is under that name may be the capture the reader meant to
+                     keep, so they wait here to be told. -->
+                <p class="replace" x-show="pcapReplace.length" x-cloak>
+                    <small>
+                        <span x-text="pcapReplace.map(f => f.name).join(', ')"></span>
+                        <span x-text="pcapReplace.length === 1 ? ' is already in the library.'
+                                                               : ' are already in the library.'"></span>
+                    </small>
+                    <button class="outline secondary" :disabled="!online"
+                            @click="replacePcaps()">Replace</button>
+                    <button class="outline secondary"
+                            @click="pcapReplace = []">Keep</button>
+                </p>
+                <!-- What the last add or remove was refused for, or that the
+                     library cannot be read at all: the first is about
+                     something the reader just did and outlasts a listing that
+                     works, so it is the one that shows. -->
+                <p class="lib-error" x-show="pcapNote || pcapsError" x-cloak>
+                    <small x-text="pcapNote || pcapsError"></small></p>
+                <footer>
+                    <button class="outline secondary" :disabled="!online"
+                            @click="$refs.pcapFile.click()">Add captures…</button>
+                    <input type="file" x-ref="pcapFile" multiple hidden
+                           accept=".pcap,.cap,application/vnd.tcpdump.pcap"
+                           @change="uploadFiles($event.target.files) ;
+                                    $event.target.value = ''"/>
+                </footer>
+            </div>
+        </article>
+
         <template x-for="s in sims" :key="s.id">
             <article class="sim" :class="{ 'is-serving': s.id === servingId,
                                            folded: simFolded.includes(s.id) }">
@@ -392,10 +497,19 @@
                                                                x-model="f.draft" @input="enable(f)"/>
                                                     </template>
 
-                                                    <template x-if="base(f).type === 'string'">
+                                                    <!-- A file name is typed like a string and,
+                                                         like the one in the property panel, is
+                                                         offered the library's own names: what is
+                                                         being built here is told which capture to
+                                                         read or write before it exists, and the
+                                                         reader should not have to remember how it
+                                                         was spelt. -->
+                                                    <template x-if="base(f).type === 'string' ||
+                                                                    base(f).type === 'filename'">
                                                         <input type="text" :disabled="!online"
                                                                :class="{ unset: !set(f) }"
                                                                :placeholder="f.placeholder || hint(f)"
+                                                               :list="base(f).type === 'filename' ? 'pcap-library' : null"
                                                                x-model="f.draft" @input="enable(f)"/>
                                                     </template>
 
@@ -574,18 +688,16 @@
                                                       x-text="shown(p)"></span>
 
                                                 <!-- A file the widget is holding: its name, and
-                                                     the one thing to do with it. Ejecting saves it
-                                                     and hands it back in the same movement (see
-                                                     [eject]), which is why this is a button and not
-                                                     a link -- what it does is not only to fetch.
-                                                     Boxed like the buttons of a metric, since that
-                                                     is what it is used as. -->
+                                                     the one thing to do with it here. Ejecting
+                                                     closes it and leaves it in the library, where
+                                                     it is saved, replayed or deleted from -- what
+                                                     this frees is the widget, not the file. -->
                                                 <template x-if="base(p).type === 'filename' && p.value">
                                                     <button class="outline secondary eject"
                                                             :disabled="!online || p.ejecting"
                                                             @click="eject(p)"
-                                                            :title="'Save ' + p.value +
-                                                                    ' and let the widget go on to another file'">
+                                                            :title="'Close ' + p.value +
+                                                                    ' and leave it in the library'">
                                                         <svg viewBox="0 0 16 12" aria-hidden="true">
                                                             <polygon points="8,1 14,7 2,7"/>
                                                             <polyline points="2,10 14,10"/>
@@ -637,10 +749,16 @@
                                                            @keydown.enter="save(p)" @blur="save(p)"/>
                                                 </template>
 
+                                                <!-- A file name is offered the library's own names
+                                                     rather than only accepting them: a replayer
+                                                     picks one that is there, a recorder writes one
+                                                     that is not, and a datalist is the input that
+                                                     suggests without insisting. -->
                                                 <template x-if="!p.read_only && (base(p).type === 'string' ||
                                                                                  base(p).type === 'filename')">
                                                     <input type="text" :disabled="!online" :class="{ unset: !set(p) }"
                                                            :placeholder="hint(p)"
+                                                           :list="base(p).type === 'filename' ? 'pcap-library' : null"
                                                            x-model="p.draft" @input="enable(p)"
                                                            @keydown.enter="save(p)" @blur="save(p)"/>
                                                 </template>
@@ -1069,5 +1187,12 @@
     </main>
 </div>
 
+    <!-- What every file name input offers: the captures the library holds.
+         One list for the page, since there is one library. -->
+    <datalist id="pcap-library">
+        <template x-for="f in pcaps" :key="f.name">
+            <option :value="f.name"></option>
+        </template>
+    </datalist>
 </body>
 </html>

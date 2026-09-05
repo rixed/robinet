@@ -308,6 +308,12 @@ struct
     let save ?(flush=true) ?caplen ?dlt fname =
         let out_chan = open_out_bin fname in
         let write_pdu = write ?caplen ?dlt out_chan in
+        (* The file's header is written as it is opened, but a buffered channel
+           leaves it nowhere until something else pushes it out. Out at once,
+           what is on disk from the start is a pcap that can be read -- an empty
+           one -- rather than nothing at all, which is what whoever looks at a
+           recording that has yet to catch a packet would otherwise find. *)
+        if flush then Batteries.flush out_chan ;
         let write_pdu =
             if flush then
                 fun pdu -> write_pdu pdu ; Batteries.flush out_chan
@@ -406,8 +412,12 @@ let recorder ~parent ?location ?caplen ?(dlt=default_dlt) ?fname name =
             write bits ;
             Metric.Counter.inc recorder.packets_recvd ~now
         | _ -> ()) ;
-    Option.may (recorder_open recorder) fname ;
+    (* Before the file is opened, not after: if anything from here on refuses
+       -- the name, or what the name refuses to open as -- whoever undoes the
+       half-built widget (see [Myadmin_api.create_widget]) closes the file
+       along with it. *)
     widget.on_delete <- (fun () -> recorder_eject recorder) ;
+    Option.may (recorder_open recorder) fname ;
     widget.ports <- Widget.{
         count = (fun () -> 1) ;
         is_connected = (fun _ -> false) ;
@@ -503,6 +513,118 @@ let read_global_header fname =
         (match global_header_of_bitstring fname header with
         | exception e -> close_in ic ; raise e
         | header -> header, ic)
+
+(** {2 The pcap library}
+
+   The directory the recorders write into and the replayers read from (see
+   [pcap_dir]), as something to browse: what is in it, and the way to add a
+   file to it, take one out, or fetch one.
+
+   Files are named and nothing else -- no paths, no directories within it (see
+   [check_fname]) -- so that the name a reader types, the name a widget holds,
+   and the name a file is downloaded under are all the same string. *)
+
+module Library = struct
+    (* What the library knows about one of its files: what a listing can say
+     * without reading more of it than its 24-byte header. Its length is what a
+     * reader judges a capture by, and its DLT is what says whether it can be
+     * replayed into an Ethernet network at all. *)
+    type entry =
+        { name : string ;
+          size : int ;
+          mtime : float ;
+          dlt : Dlt.t ;
+          snaplen : int }
+
+    (* A file of the library, or [None] when it is not one: a directory, or
+     * something that does not begin with a pcap header. The library holds
+     * captures, and [pcap_dir] may well be a directory that holds other things
+     * too -- it is /tmp until it is set to something else. *)
+    let entry name =
+        if name = "" || name.[0] = '.' then None else
+        match read_global_header (path_of_fname name) with
+        | exception _ -> None
+        | header, ic ->
+            close_in ic ;
+            (match Unix.stat (path_of_fname name) with
+            | exception _ -> None
+            | st ->
+                if st.Unix.st_kind <> Unix.S_REG then None else
+                Some { name ; size = st.Unix.st_size ; mtime = st.Unix.st_mtime ;
+                       dlt = header.dlt ;
+                       snaplen = Int32.to_int header.snaplen })
+
+    (** Every capture in the library, by name. *)
+    let list () =
+        match Sys.readdir !pcap_dir with
+        | exception _ -> []
+        | names ->
+            Array.to_list names |>
+            List.filter_map entry |>
+            List.sort (fun a b -> String.compare a.name b.name)
+
+    (** The bytes of one of them. *)
+    let read name =
+        let ic = open_in_bin (path_of_fname (check_fname name)) in
+        let s = IO.read_all ic in
+        close_in ic ;
+        s
+
+    (* The largest file the library will take in one upload.
+     *
+     * Not a disk limit but a memory one, and a low one for that reason: a
+     * request is parsed by the simulated HTTP stack (see [Http.Pdu.parzer]),
+     * which holds the body as a list of characters while it does so -- some
+     * forty bytes of heap per byte of file, briefly. Eight megabytes of
+     * capture is already a third of a gigabyte of parsing, and a capture worth
+     * replaying into a simulated network is rarely near that.
+     *
+     * A ref, so that a program that knows what it is doing can raise it. *)
+    let max_upload = ref (8 * 1024 * 1024)
+
+    (** Put [bytes] in the library under [name], replacing whatever was there.
+     *
+     * Written beside the real name and moved onto it, so that a replayer
+     * opening that name gets either the file that was there or the whole of
+     * the new one, never the half of it that has arrived so far. The temporary
+     * name begins with a dot, which is what keeps it out of listings. *)
+    let write name bytes =
+        let name = check_fname name in
+        (* A capture and not merely bytes: whoever uploads something else finds
+           out now, by being told, rather than later and by a replayer that
+           makes nothing of it. *)
+        if bytes = "" then
+            Widget.bad_value
+                "No file was sent for %s (a form-encoded body is read as \
+                 parameters, not as a file: send it as octet-stream)" name ;
+        if String.length bytes < 24 then
+            Widget.bad_value "%s is too short to be a pcap file" name ;
+        (match global_header_of_bitstring name
+                   (bitstring_of_string (String.sub bytes 0 24)) with
+        | exception Not_a_pcap_file ->
+            Widget.bad_value "%s is not a pcap file" name
+        | _ -> ()) ;
+        let path = path_of_fname name in
+        let tmp = path_of_fname ("."^ name ^".part") in
+        (match
+            let oc = open_out_bin tmp in
+            String.print oc bytes ;
+            close_out oc ;
+            Sys.rename tmp path
+        with
+        | exception e ->
+            (try Sys.remove tmp with _ -> ()) ;
+            (match e with
+            | Sys_error msg -> Widget.bad_value "Cannot write %s" msg
+            | e -> raise e)
+        | () -> ())
+
+    (** Take one out of the library, for good. *)
+    let delete name =
+        let path = path_of_fname (check_fname name) in
+        try Sys.remove path
+        with Sys_error msg -> Widget.bad_value "Cannot delete %s" msg
+end
 
 (** [read_next_pkt global_header ic] will return the next {!Pcap.Pdu.t} that's to
  * be read from the input stream [ic]. *)
@@ -805,13 +927,15 @@ let replayer ~parent ?location ?fname ?(loop=false) name =
         { fname = "" ; widget ; readers = [] ; replaying = false ; loop ;
           file = None ; last_ts = None ; gen = 0 ;
           packets_sent = Metric.Counter.make () } in
+    (* Before the file is opened, as for a recorder: a replayer that is undone
+       between opening its file and being finished must let go of it. *)
+    widget.on_delete <- (fun () -> replayer_eject replayer) ;
     (* Named at birth is named by the reader: it plays at once, as a recorder
        named at birth records at once. *)
     Option.may (fun fname ->
         replayer_open replayer fname ;
         replayer.replaying <- true ;
         replay_next replayer) fname ;
-    widget.on_delete <- (fun () -> replayer_eject replayer) ;
     widget.ports <- Widget.{
         count = (fun () -> List.length replayer.readers + 1) ;
         is_connected = (fun n ->

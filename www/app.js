@@ -154,6 +154,16 @@ const encode = (p) => {
  * happens to be in. */
 const num = (n) => Number(n).toLocaleString()
 
+/* A file size, in the unit that leaves it a small number: what a reader wants
+ * off a library listing is which captures are the big ones, not their length
+ * to the byte. */
+const bytes = (n) => {
+    if (n < 1024) return n + ' B'
+    if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' kB'
+    if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB'
+    return (n / (1024 * 1024 * 1024)).toFixed(1) + ' GB'
+}
+
 const dur = (s) => {
     if (s < 1e-3) return (s * 1e6).toFixed(0) + 'us'
     if (s < 1) return (s * 1e3).toFixed(s < 1e-2 ? 1 : 0) + 'ms'
@@ -883,43 +893,6 @@ const api = async (path, options) => {
     return body
 }
 
-/* The bytes of a file the API holds, rather than the JSON everything else
- * speaks. A refusal is still JSON, and is read exactly as [api] reads it, so
- * that a caller has one kind of error to deal with. */
-const fetchFile = async (path, options) => {
-    let resp
-    try {
-        resp = await fetch('/api' + path, options)
-    } catch (e) {
-        throw new ApiError('offline', 0, 'no answer from the simulator')
-    }
-    if (!resp.ok) {
-        let body = null
-        try { body = await resp.json() } catch (e) { /* no body, or not JSON */ }
-        throw new ApiError('refused', resp.status,
-                           (body && body.error) ||
-                           `${resp.status} ${resp.statusText}`)
-    }
-    return await resp.blob()
-}
-
-/* Save what we already hold under [name]. An anchor with a download attribute
- * rather than a navigation: the bytes came back from a request the page had to
- * make itself -- one that also changes what the simulator holds -- so there is
- * nothing left for the browser to fetch, only something for it to write. */
-const saveBlob = (blob, name) => {
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = name
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    /* Not at once: some browsers are still reading the blob when the click
-     * returns, and revoking it there truncates the file they save. */
-    setTimeout(() => URL.revokeObjectURL(url), 60000)
-}
-
 document.addEventListener('alpine:init', () => {
     Alpine.data('admin', () => ({
         sims: [],
@@ -1004,7 +977,41 @@ document.addEventListener('alpine:init', () => {
         /* Which panels of the dock are folded away. Remembered across
          * reloads: a reader who folds the graph away wants it folded away
          * tomorrow too. */
-        collapsed: { charts: false, logs: false },
+        collapsed: { charts: false, logs: false, pcaps: false },
+
+        /*
+         * The pcap library
+         */
+
+        /* What is in it: the captures the recorders write and the replayers
+         * read. There is one library for every simulation -- it is a directory
+         * on the machine running this -- which is why it sits above them in
+         * the column rather than inside one of them. */
+        pcaps: [],
+        /* The largest file it will take, as the simulator says (see
+         * [Pcap.Library.max_upload]). Nothing is sent until it is known. */
+        maxUpload: 0,
+        /* The library could not be read, which is about the panel as a whole
+         * and goes when a listing works again. Separately, what the last add
+         * or remove was refused for: that one is about something the reader
+         * did, and a listing that works says nothing about it. */
+        pcapsError: null,
+        pcapNote: null,
+        /* What the library looked like when that note was made. A note says
+         * why something was refused, and every reason is about the state the
+         * library was in -- the file was open, the name was taken -- so a
+         * library that has changed since is one the note may no longer be true
+         * of, and it goes. */
+        pcapNoteAt: null,
+        /* The file whose delete button has been clicked once: clicking that
+         * same one again is what removes it, as for a widget (see
+         * [confirmDelete]). */
+        pcapConfirm: null,
+        /* Uploads on their way, and files dropped whose names are already in
+         * the library -- those wait to be told whether to replace. */
+        uploading: 0,
+        dropping: false,
+        pcapReplace: [],
 
         /* How much of the top half the schematic gets, the map taking the
          * rest. Dragging the divider all the way to either side collapses that
@@ -1110,6 +1117,174 @@ document.addEventListener('alpine:init', () => {
         },
 
         /*
+         * The pcap library
+         */
+
+        /* Where a capture is, said the two ways it is asked for: [api] prepends
+         * /api to what it is given, while an href is the whole URL. A plain
+         * link is enough to save one, since the answer says it is an
+         * attachment and the browser writes it out under the name it has
+         * here. */
+        pcapPath(name) {
+            return '/pcaps/' + encodeURIComponent(name)
+        },
+
+        pcapUrl(name) {
+            return '/api' + this.pcapPath(name)
+        },
+
+        /* Whether the listing is worth asking for: it is a directory read plus
+         * a header off every file in it, which is nothing for a handful of
+         * captures and not free for a directory of a thousand. Worth it when
+         * the panel is open, and when what is selected has a file name to
+         * offer the library's names to. */
+        needPcaps() {
+            const names = (x) => baseKind(x.kind).type === 'filename'
+            return !this.collapsed.pcaps ||
+                   this.props.some(names) ||
+                   /* A device being built is told which capture to read or
+                    * write before it exists, and that field offers the same
+                    * names as the one in the property panel. */
+                   (this.adding !== null && this.adding.fields.some(names))
+        },
+
+        async loadPcaps({ force = false } = {}) {
+            if (!force && !this.needPcaps()) return
+            const r = await this.exchange(() => api('/pcaps'))
+            if (!r.ok) { this.pcapsError = r.error.message ; return }
+            this.pcaps = r.value.files
+            this.maxUpload = r.value.max_upload
+            this.pcapsError = null
+            /* A note outlives a listing that merely worked -- what a refusal
+             * said is still what the reader needs to read -- but not one that
+             * came back different (see [pcapNoteAt]). */
+            const sig = this.pcapsSig()
+            if (this.pcapNote && this.pcapNoteAt !== sig) this.pcapNote = null
+            /* A file that has gone is no longer the one being confirmed. */
+            if (!this.pcaps.some(f => f.name === this.pcapConfirm))
+                this.pcapConfirm = null
+        },
+
+        /* How big a capture is, and what else its header says about it, for
+         * the listing and for the tooltip that has room for the rest. */
+        fileSize(n) {
+            return bytes(n)
+        },
+
+        pcapTitle(f) {
+            const when = new Date(f.mtime * 1000).toLocaleString()
+            return `${f.name}\n${bytes(f.size)}, ${f.dlt_name}, ` +
+                   `snaplen ${num(f.snaplen)}\nwritten ${when}` +
+                   (f.held_by ? `\nopen in ${f.held_by}` : '\nclick to save it')
+        },
+
+        /* Show the widget that has this capture open: the recorder filling it,
+         * or the replayer reading it.
+         *
+         * A reload first when it is one we have not heard of: the library says
+         * who holds a file as soon as anyone does, while the widget trees are
+         * only read again when the shape of things may have changed -- so a
+         * recorder that has just been given this file may not be in them yet.
+         *
+         * Its simulation is unfolded if it was folded away: following this is
+         * asking to see that widget, and the column not showing where it went
+         * would be the answer to a different question. */
+        async showHolder(f) {
+            if (!f.held_by) return
+            const { sim, id } = f.held_by
+            if (!this.get(sim, id)) await this.reload()
+            const i = this.simFolded.indexOf(sim)
+            if (i >= 0) this.simFolded.splice(i, 1)
+            await this.select(sim, id)
+        },
+
+        /* Whether what is being dragged is files from outside the page. A link
+         * dragged from the library itself is not: it would arrive as its own
+         * URL, and there is nothing to add to the library in that. */
+        carriesFiles(ev) {
+            const t = ev.dataTransfer && ev.dataTransfer.types
+            return !!t && [ ...t ].includes('Files')
+        },
+
+        /* What the library holds and what is being done to it: enough to tell
+         * whether a refusal still stands, and no more. */
+        pcapsSig() {
+            return this.pcaps.map(f => f.name + ':' + (f.held_by || '')).join('|')
+        },
+
+        /* Say why something was refused, and remember the library it was
+         * refused against. */
+        note(msg) {
+            this.pcapNote = msg
+            this.pcapNoteAt = this.pcapsSig()
+        },
+
+        foldPcaps() {
+            this.fold('pcaps')
+            if (!this.collapsed.pcaps) this.loadPcaps()
+        },
+
+        /* Add files to the library, one PUT each.
+         *
+         * A name already in the library is not written over on the strength of
+         * a drop: those are held back and asked about (see [pcapReplace]),
+         * since what is under that name may be the capture the reader meant to
+         * keep. */
+        async uploadFiles(files, { replace = false } = {}) {
+            const held = []
+            this.pcapNote = null
+            for (const f of [ ...files ]) {
+                if (!replace && this.pcaps.some(p => p.name === f.name)) {
+                    held.push(f)
+                    continue
+                }
+                if (this.maxUpload && f.size > this.maxUpload) {
+                    this.note(
+                        `${f.name} is ${bytes(f.size)}, and the library takes ` +
+                        `at most ${bytes(this.maxUpload)} in one upload`)
+                    continue
+                }
+                this.uploading++
+                const r = await this.exchange(() => api(this.pcapPath(f.name), {
+                    method: 'PUT',
+                    /* Said outright, since a body the simulator's HTTP stack
+                     * takes for a form is read as parameters and never reaches
+                     * the file (see [Opache.multiplexer]). */
+                    headers: { 'Content-Type': 'application/octet-stream' },
+                    body: f }))
+                this.uploading--
+                if (!r.ok) { this.note(r.error.message) ; continue }
+            }
+            this.pcapReplace = held
+            await this.loadPcaps({ force: true })
+        },
+
+        /* The files whose names clashed, once the reader has said to go ahead.
+         * [pcapReplace] is emptied first: it is what the strip asking about
+         * them is drawn from, and those files are no longer waiting. */
+        async replacePcaps() {
+            const files = this.pcapReplace
+            this.pcapReplace = []
+            await this.uploadFiles(files, { replace: true })
+        },
+
+        /* Two clicks, as for deleting a widget: the first arms this file, the
+         * second removes it. Arming another disarms this one, so there is only
+         * ever one file a stray click can cost. */
+        async deletePcap(f) {
+            if (this.pcapConfirm !== f.name) {
+                this.pcapConfirm = f.name
+                return
+            }
+            this.pcapConfirm = null
+            this.pcapNote = null
+            const r = await this.exchange(() =>
+                api(this.pcapPath(f.name), { method: 'DELETE' }))
+            if (!r.ok) this.note(r.error.message)
+            await this.loadPcaps({ force: true })
+        },
+
+        /*
          * Polling
          */
 
@@ -1156,6 +1331,7 @@ document.addEventListener('alpine:init', () => {
              * skipping it would leave the panel reporting itself as loaded,
              * which is the one thing it must not do when it is not. */
             if (this.selected) await this.loadProps()
+            if (this.needPcaps()) await this.loadPcaps()
             if (this.charts.length) await this.pollCharts()
             if (this.logged.length) await this.pollLogs()
         },
@@ -1546,37 +1722,26 @@ document.addEventListener('alpine:init', () => {
             return hintOf(x.kind)
         },
 
-        /* Where the bytes of a file property are: the property, and "/file"
-         * (see [get_property_file]). The path is not sent -- the widget
-         * answers with its own -- so there is nothing here but the name of the
-         * property to ask about. */
-        fileUrl(p) {
-            const { sim, id } = this.selected
-            return `/simulations/${sim}/widgets/${id}` +
-                   `/properties/${encodeURIComponent(p.name)}/file`
-        },
-
-        /* Take the file the widget is holding: it is saved here, and the widget
-         * has none afterwards -- a recorder stops, closes it, and waits to be
-         * given the name of the next one.
+        /* Take the file the widget is holding out of it: a recorder stops
+         * and closes it, a replayer stops reading it. The file stays in the
+         * library under its name, to be fetched, replayed or deleted from
+         * there -- which is why this only says so and downloads nothing.
          *
-         * The one request does both (see the DELETE of the file route), so
-         * that nothing can be written into the file between what is served and
-         * the moment it is let go: what is saved is the whole of it.
+         * Saying so is writing nothing to the file name, the one value a
+         * property that holds something takes whether or not it would take a
+         * new one (see [set_property]).
          *
          * The properties are read again straight after rather than at the next
-         * poll: the file name has just become something to type in again, and
-         * the recorder has just stopped, and the panel would otherwise go on
-         * saying the opposite for up to a second. */
+         * poll: the name has just become something to type in again, and the
+         * widget has just stopped, and the panel would otherwise go on saying
+         * the opposite for up to a second. */
         async eject(p) {
             if (p.ejecting) return
-            /* What it is called here is what it is saved as, which is what the
-             * answer's Content-Disposition says too -- but a blob is saved
-             * under the name the page gives it, and the page knows it. */
-            const name = asText(p.value)
             p.ejecting = true
-            const r = await this.exchange(() =>
-                fetchFile(this.fileUrl(p), { method: 'DELETE' }))
+            const { sim, id } = this.selected
+            const r = await this.exchange(() => api(
+                `/simulations/${sim}/widgets/${id}/properties/${encodeURIComponent(p.name)}`,
+                { method: 'PUT', body: 'null' }))
             p.ejecting = false
             if (!r.ok) {
                 p.error = r.error.kind === 'offline'
@@ -1585,8 +1750,9 @@ document.addEventListener('alpine:init', () => {
                 return
             }
             p.error = null
-            saveBlob(r.value, name)
             await this.loadProps({ full: true })
+            /* Its length is final now that it is closed. */
+            await this.loadPcaps()
         },
 
         /* The choice an enum's value stands for. Falls back to the number
@@ -2516,6 +2682,10 @@ document.addEventListener('alpine:init', () => {
          * says what each one may be worth, in the same words a property's kind
          * does, so the inputs are the same inputs. */
         formFor(sim, t, picked) {
+            /* Straight away rather than at the next poll: the form is open
+             * now, and one of its fields may be about to offer the library's
+             * names (see [needPcaps]). */
+            this.$nextTick(() => this.loadPcaps())
             const ends = this.endsOf(t)
             const fields = t.params.map(p => {
                 const i = ends.indexOf(p)
