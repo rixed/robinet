@@ -54,7 +54,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx from port %d/%d" n (Array.length t.ports)))) ;
         let params = Metric.(Params.singleton "port" (Param.Int n)) in
         let now = Simulation.Widget.now t.widget in
-        if t.busy_until >= now then (
+        if t.busy_until > now then (
             Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Jammed frame on port %d" n))) ;
             (* Add 32bits of jam: *)
             t.busy_until <- max t.busy_until (Clock.Time.add now t.jamming_time) ;
@@ -62,7 +62,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
             Metric.Counter.inc t.collisions ~now ~params
         ) else (
             (* Mark the hub as busy and do transfers that frame *)
-            let ttime = Eth.Speed.transfert_time t.speed (bitstring_length pld) in
+            let ttime = Eth.Speed.duration t.speed (bitstring_length pld) in
             t.busy_until <- Clock.Time.add now ttime ;
             Metric.Counter.add t.ingress ~now ~params (bytelength pld) ;
             (* Forward to all ports but the incoming one: *)
@@ -86,16 +86,12 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
     let t_printer _paren oc t =
         Printf.fprintf oc "%d" (Array.length t.ports)
 
-    let first_free_iface t =
-        try Some (Array.findi (fun (_emit, is_conn) -> not is_conn) t.ports)
-        with Not_found -> None
-
     (* And undoes it: nothing is emitted to port [n] any more, and it is free
      * for another cable. *)
     let disconnect (t : t) n =
         if is_connected t n then
             t.ports.(n) <-
-                (Eth.State.ignore_disconnected ~logger:t.widget.logger, false)
+                (Eth.Iface.ignore_disconnected ~logger:t.widget.logger, false)
         else
             Log.(log t.widget.logger Debug (lazy (Printf.sprintf
                 "Ignoring request to disconnect port %d, which is not \
@@ -115,7 +111,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
             ports = Array.make n (ignore_bits ~logger:widget.logger, false) ;
             speed ;
             busy_until = Clock.beginning_of_time ;
-            jamming_time = Eth.Speed.transfert_time speed 32 ;
+            jamming_time = Eth.Speed.duration speed 32 ;
             power = Simulation.make_power (Simulation.of_widget widget) name ;
             widget ;
             ingress = Metric.Counter.make () ;
@@ -137,7 +133,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
                 ~getter:(fun () -> `Int (Array.findi ((=) t.speed) speeds))
                 ~setter:(fun v ->
                     t.speed <- speeds.(to_choice speed_names v) ;
-                    t.jamming_time <- Eth.Speed.transfert_time t.speed 32) ;
+                    t.jamming_time <- Eth.Speed.duration t.speed 32) ;
             metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
                 (Metric.Counter.T t.ingress) ;
             metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
@@ -160,55 +156,8 @@ struct
         { mutable addr : Eth.Addr.t option ;
           mutable iface : int }
 
-    (* Each interface is its own widget for easier configuration: *)
-    type iface =
-        { widget : Widget.t ;
-          mutable emit : bitstring -> unit ;
-          mutable is_connected : bool ;
-          (* It's very common for a single switch to have ports with different
-           * characteristics: *)
-          mutable speeds : Eth.Speed.t list ;
-          mutable full_duplex : bool ;
-          ingress : Metric.Counter.t ;
-          egress : Metric.Counter.t }
-
-    let default_speeds = Eth.Speed.[ Eth10Mbps ; Eth100Mbps ; Eth1Gbps ;
-                                     Eth2_5Gbps ; Eth5Gbps ]
-
-    let make_iface ~parent ~speeds ~full_duplex name =
-        let widget = Widget.make ~parent name in
-        let iface =
-            { widget ;
-              emit = ignore_bits ~logger:widget.logger ;
-              is_connected = false ;
-              speeds ; full_duplex ;
-              ingress = Metric.Counter.make () ;
-              egress = Metric.Counter.make () } in
-        Widget.add_properties widget Widget.[
-            property "connected" ~kind:Bool
-                ~descr:"Is this interface connected?"
-                ~getter:(fun () -> `Bool iface.is_connected) ;
-            property "speeds" ~kind:(Set Eth.Speed.names)
-                ~descr:"Accepted speeds for this interface"
-                ~getter:(fun () ->
-                    `List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
-                                    iface.speeds))
-                ~setter:(fun v ->
-                    iface.speeds <-
-                        List.map (fun i -> Eth.Speed.all.(i))
-                                 (to_choices Eth.Speed.names v)) ;
-            property "full-duplex" ~kind:Bool
-                ~descr:"If a port can receive and transmit at the same time."
-                ~getter:(fun () -> `Bool iface.full_duplex)
-                ~setter:(fun v -> iface.full_duplex <- to_bool v) ;
-            metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
-                (Metric.Counter.T iface.ingress) ;
-            metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
-                (Metric.Counter.T iface.egress) ] ;
-        iface
-
     type t =
-        { ifaces : iface array ;
+        { mutable ifaces : Eth.Iface.t array ; (* mutable for two stage construction *)
           (* If the switch is capable of cut-through: *)
           mutable cut_through : bool ;
           macs : mac_entry OrdArray.t ;
@@ -259,7 +208,7 @@ struct
             let do_broadcast () =
                 Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forwarding to all ifaces (but %d)" ins))) ;
                 let now = Simulation.Widget.now t.widget in
-                Array.iteri (fun i (iface : iface) ->
+                Array.iteri (fun i (iface : Eth.Iface.t) ->
                     if i <> ins && iface.is_connected then (
                         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to iface %d/%d" i (Array.length t.ifaces)))) ;
                         Metric.(Counter.add iface.egress ~now (bytelength bits)) ;
@@ -295,66 +244,35 @@ struct
         | {| _ |} ->
             Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Drop incoming frame without destination")))
 
-    let write (t : t) n pld =
-        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx from iface %d/%d" n (Array.length t.ifaces)))) ;
-        let now = Simulation.Widget.now t.widget in
-        Metric.(Counter.add t.ifaces.(n).ingress ~now (bytelength pld)) ;
-        forward_from t n pld
+    let write t n =
+        Eth.Iface.write t.ifaces.(n)
 
-    let set_read (t : t) n f =
-        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting emitter for iface %d/%d" n (Array.length t.ifaces)))) ;
-        t.ifaces.(n).emit <- f ;
-        t.ifaces.(n).is_connected <- true
+    let set_read t n =
+        Eth.Iface.set_read t.ifaces.(n)
 
-    (** Turns a iface into a device *)
-    let dev (t : t) n =
-        { write = write t n ; set_read = set_read t n }
-
-    let first_free_iface t =
-        try Some (Array.findi (fun iface -> not iface.is_connected) t.ifaces)
-        with Not_found -> None
-
-    let disconnect (t : t) n =
-        if t.ifaces.(n).is_connected then (
-            let iface = t.ifaces.(n) in
-            iface.emit <- Eth.State.ignore_disconnected ~logger:t.widget.logger ;
-            iface.is_connected <- false
-        ) else
-            Log.(log t.widget.logger Debug (lazy (Printf.sprintf
-                "Ignoring request to disconnect port %d, which is not \
-                 connected" n)))
+    let dev t n =
+        Eth.Iface.dev t.ifaces.(n)
 
     (* [num_macs] is the maximum number of remembered MACs. *)
-    let make ~parent ?location ?(speeds=default_speeds)
+    let make ~parent ?location ?(speeds=Eth.Iface.default_speeds)
              ?(full_duplex=true) ?(cut_through=true) num_ifaces num_macs name =
         let widget = Widget.make ~device:"switch" ~parent ?location name in
+        let power = Simulation.make_power (Simulation.of_widget widget) name in
         let t = {
-            ifaces =
-                Array.init num_ifaces (fun i ->
-                    let name = "#"^ string_of_int i in
-                    make_iface ~parent:widget ~speeds ~full_duplex name) ;
+            ifaces = [||] (* See below *) ;
             cut_through ;
             macs = OrdArray.init num_macs (fun _ -> { addr = None ; iface = 0 }) ;
             macs_h = BitHash.create (num_macs/10) ;
-            widget ;
-            power = Simulation.make_power (Simulation.of_widget widget) name ;
+            widget ; power ;
             mac_size = Metric.Gauge.make () ;
             mac_hits = Metric.Atomic.make () ;
             mac_misses = Metric.Atomic.make () } in
+        t.ifaces <-
+            Array.init num_ifaces (fun i ->
+                let name = "#"^ string_of_int i in
+                let recv = forward_from t i in
+                Eth.Iface.make ~parent:widget ~power ~speeds ~full_duplex ~recv name) ;
         widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
-        (* A port one can tell from the one beside it -- its own speeds, its own
-           counters -- is a port a cable must be able to name, so each interface
-           offers the one port it is. The switch then numbers those, as a router
-           numbers its interfaces: naming the switch and naming the interface
-           reach the same port. *)
-        Array.iteri (fun i (iface : iface) ->
-            iface.widget.Widget.ports <- Widget.{
-                count = (fun () -> 1) ;
-                is_connected = (fun _ -> iface.is_connected) ;
-                dev = (fun _ -> dev t i) ;
-                owner = (fun _ -> iface.widget) ;
-                disconnect = (fun _ -> disconnect t i) }
-        ) t.ifaces ;
         widget.Widget.ports <- Widget.{
             count = (fun () -> num_ifaces) ;
             is_connected = (fun i -> t.ifaces.(i).widget.ports.is_connected 0) ;

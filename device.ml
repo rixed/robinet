@@ -258,7 +258,7 @@ let switch =
               ~descr:"How many cables it takes." ;
           param "speeds" ~kind:(Set Eth.Speed.names)
               ~default:(`List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
-                                        Hub.Switch.default_speeds))
+                                        Eth.Iface.default_speeds))
               ~descr:"Speeds accepted by every ports (can be updated later)." ;
           param "full duplex" ~kind:Bool ~default:(`Bool true)
               ~descr:"Do ports support full-duplex by default?" ;

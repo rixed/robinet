@@ -66,7 +66,7 @@ let main =
                port the graph has to name. *)
             Widget.make_peers ~via:cable.widget
                 Widget.(switch.Hub.Switch.widget.ports.owner i)
-                h.Host.eth_state.Eth.State.widget ;
+                h.Host.eth_state.Eth.State.iface.widget ;
             h, ip) in
     (* Some traffic, so that the counters have something to count: every host
      * pings the next one, round and round. *)

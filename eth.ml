@@ -313,10 +313,140 @@ struct
      * type above is offered and read back without anything else to change. *)
     let all = Array.init (max + 1) (fun i -> Option.get (of_enum i))
     let names = Array.map to_string all
+
+    let duration speed num_bits =
+        Clock.Interval.o (float num_bits /. to_bps speed)
+
+    let max s1 s2 =
+        if s1 >= s2 then s1 else s2
 end
 
+(** {2 Transceiver: basic state, connection, speed, etc}
+ * An Iface is used by both address-less Ethernet switches as well as independent
+ * adapters with a MAC address etc.
+ * Its read and write functions update the ingress/egress metrics, while the
+ * write function (reception of a frame from the outside) account for
+ * deserialization delay. Which implies that the timestamp at which a frame
+ * is transmitted is the timestamp of the first bit on the wire (ie.
+ * serialization is instant). *)
+module Iface =
+struct
+    (* Each interface is its own widget for easier configuration: *)
+    type t =
+        { widget : Widget.t ;
+          (* What pays for the frames this adapter sends and receives: the
+           * device it is part of. A host that is switched off has an adapter
+           * that neither emits nor delivers, since both go through the
+           * clock. *)
+          power : Simulation.power ;
+          (* The function called with payload to emit, depends on what's
+           * plugged in: *)
+          mutable emit : bitstring -> unit ;
+          (* The function called with received frames, depends on what's
+           * hardwired behind the adapter. Unlike [emit], must not be called
+           * directly. Instead, call [write] to write to the adapter from the
+           * outside. *)
+          mutable recv : bitstring -> unit ;
+          mutable is_connected : bool ;
+          (* It's very common for a single switch to have ports with different
+           * characteristics: *)
+          mutable speeds : Speed.t list ;
+          mutable speed : Speed.t ; (* Negotiated *)
+          mutable full_duplex : bool ;
+          ingress : Metric.Counter.t ;
+          egress : Metric.Counter.t }
 
-(** {2 Transceiver State} *)
+    let write (t : t) pld =
+        let bitlen = bitstring_length pld in
+        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx %d bits" bitlen))) ;
+        let now = Simulation.Widget.now t.widget in
+        Metric.(Counter.add t.ingress ~now (bytelength pld)) ;
+        let ser_delay = Speed.duration t.speed bitlen in
+        Simulation.delay t.power ser_delay t.recv pld
+
+    let set_read (t : t) f =
+        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting emitter"))) ;
+        t.emit <- (fun pld ->
+            let bitlen = bitstring_length pld in
+            Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Tx %d bits" bitlen))) ;
+            let now = Simulation.Widget.now t.widget in
+            Metric.(Counter.add t.egress ~now (bytelength pld)) ;
+            f pld) ;
+        if not t.is_connected then (
+            t.is_connected <- true ;
+            Log.(log t.widget.logger Info (lazy (Printf.sprintf "Connected!")))
+        )
+
+    (** Turns an iface into a device *)
+    let dev (t : t) =
+        { write = write t ; set_read = set_read t }
+
+    let ignore_disconnected ~logger bits =
+        Log.(log logger Debug (lazy
+            (Printf.sprintf "Dropping %d bits sent to disconnected interface"
+                (bitstring_length bits))))
+
+    let disconnect t =
+        if t.is_connected then (
+            t.emit <- ignore_disconnected ~logger:t.widget.logger ;
+            t.is_connected <- false
+        ) else
+            Log.(log t.widget.logger Debug (lazy (Printf.sprintf
+                "Ignoring request to disconnect interface %s that is not connected"
+                t.widget.name)))
+
+    let default_speeds =
+        (* TODO: actual negociation *)
+        Speed.[ Eth10Mbps ; Eth100Mbps ; (*Eth1Gbps ; Eth2_5Gbps ; Eth5Gbps*) ]
+
+    let make ~parent ~power ?(speeds=default_speeds) ?(full_duplex=true) ?recv name =
+        if speeds = [] then
+            invalid_arg "Cannot build an iface supporting no speed" ;
+        let speed =
+            (* For now just take the fastest value *)
+            List.fold_left Speed.max (List.hd speeds) speeds in
+        let widget = Widget.make ~parent name in
+        let t =
+            { widget ; power ;
+              emit = ignore_disconnected ~logger:widget.logger ;
+              recv = recv |? ignore_bits ~logger:widget.logger ;
+              is_connected = false ;
+              speeds ; speed ; full_duplex ;
+              ingress = Metric.Counter.make () ;
+              egress = Metric.Counter.make () } in
+        Widget.add_properties widget Widget.[
+            property "connected" ~kind:Bool
+                ~descr:"Is there a cable plugged in?"
+                ~getter:(fun () -> `Bool t.is_connected) ;
+            property "speeds" ~kind:(Set Speed.names)
+                ~descr:"Accepted speeds for this interface"
+                ~getter:(fun () ->
+                    `List (List.map (fun s -> `Int (Speed.to_enum s))
+                                    t.speeds))
+                ~setter:(fun v ->
+                    (* TODO: Also renegotiate [speed] *)
+                    t.speeds <-
+                        List.map (fun i -> Speed.all.(i))
+                                 (to_choices Speed.names v)) ;
+            property "full-duplex" ~kind:Bool
+                ~descr:"If a port can receive and transmit at the same time."
+                ~getter:(fun () -> `Bool t.full_duplex)
+                ~setter:(fun v -> t.full_duplex <- to_bool v) ;
+            metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
+                (Metric.Counter.T t.ingress) ;
+            metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
+                (Metric.Counter.T t.egress) ] ;
+        (* An adapter is the one port of whatever owns it. *)
+        widget.ports <- Widget.{
+            count = (fun () -> 1) ;
+            is_connected = (fun _ -> t.is_connected) ;
+            dev = (fun _ -> dev t) ;
+            owner = (fun _ -> t.widget) ;
+            disconnect = (fun _ -> disconnect t) } ;
+        t
+end
+
+(** {2 Stateful Eth adapters} *)
 
 module State =
 struct
@@ -353,12 +483,10 @@ struct
         | Some gw -> Gateway.print oc gw
 
     type t =
-        { widget : Widget.t ;
-          (* What pays for the frames this adapter sends and receives: the
-           * device it is part of. A host that is switched off has an adapter
-           * that neither emits nor delivers, since both go through the
-           * clock. *)
-          power : Simulation.power ;
+        { iface : Iface.t ;
+          (* The function called with received payloads (some IP stack
+           * probably). *)
+          mutable recv : bitstring -> unit ;
           mac : Addr.t ;
           (* Eth knows how to pick a gateways according to the destination IP.
            * Editable, and read afresh on every send. *)
@@ -367,10 +495,7 @@ struct
           mutable via : Gateway.t option ;
           proto : Proto.t ;
           mtu : int ;
-          mutable connected : bool ;
           mutable my_addresses : my_address list ;
-          mutable emit : bitstring -> unit ;
-          mutable recv : bitstring -> unit ;
           mutable promisc : bitstring -> unit ;
           mutable do_proxy_arp : Arp.Pdu.t -> bool ;
           (* TODO: these two should be timeouted, requiring a clock *)
@@ -380,7 +505,7 @@ struct
           postponed : bitstring BitHash.t ;
           (* TODO: a gauge for how many packets are postponed *)
           (* Optional average delay to add to transmissions: *)
-          mutable delay : float ;
+          mutable delay : Clock.Interval.t ;
           (* Optional packet loss ratio: *)
           mutable loss : float }
 
@@ -397,10 +522,10 @@ struct
 
     let set_arp (t : t) iaddr = function
         | None      ->
-            Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Removing entry for iaddr %s from ARP table" (hexstring_of_bitstring iaddr)))) ;
+            Log.(log t.iface.widget.logger Debug (lazy (Printf.sprintf "Removing entry for iaddr %s from ARP table" (hexstring_of_bitstring iaddr)))) ;
             BitHash.remove_all t.arp_cache iaddr
         | haddr_opt ->
-            Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Adding entry for iaddr %s to MAC %s from ARP table" (hexstring_of_bitstring iaddr) (match haddr_opt with None -> "None" | Some haddr -> Addr.to_string haddr)))) ;
+            Log.(log t.iface.widget.logger Debug (lazy (Printf.sprintf "Adding entry for iaddr %s to MAC %s from ARP table" (hexstring_of_bitstring iaddr) (match haddr_opt with None -> "None" | Some haddr -> Addr.to_string haddr)))) ;
             BitHash.replace t.arp_cache iaddr haddr_opt
 
     (* What an adapter learnt about its neighbours, and what it was holding
@@ -415,19 +540,6 @@ struct
         BitHash.clear t.postponed ;
         t.via <- None
 
-    let ignore_disconnected ~logger bits =
-        Log.(log logger Debug (lazy
-            (Printf.sprintf "Dropping %d bits sent to disconnected interface"
-                (bitstring_length bits))))
-
-    let disconnect t =
-        if t.connected then (
-            t.emit <- ignore_disconnected ~logger:t.widget.logger ;
-            t.connected <- false
-        ) else
-            Log.(log t.widget.logger Debug (lazy (
-                Printf.sprintf "Ignoring request to disconnect interface %s that is not connected" t.widget.name)))
-
     (** Create the state machine for an Ethernet communication.
      * @param mtu the maximum transmit unit (ie. you won't be able to send longer payloads)
      * @param mac the source {!Eth.Addr.t}
@@ -437,7 +549,9 @@ struct
      * @param proto the {!Proto.t} we want to transmit/receive.
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
-    let make ?(mtu=1500) ?(delay=0.) ?(loss=0.) ?(mac=Addr.random ()) ?(gateways=[])
+    let make ?speeds ?full_duplex
+             ?(mtu=1500) ?(delay=Clock.Interval.zero) ?(loss=0.)
+             ?(mac=Addr.random ()) ?(gateways=[])
              ?(promisc=ignore) ?(do_proxy_arp=(fun _ -> false))
              ?(my_addresses=[]) ?(proto=Proto.ip4) ~parent ~power
              () =
@@ -445,26 +559,19 @@ struct
          * up with "eth", "eth-2"... courtesy of [Widget.unique_among]. Naming
          * them "eth0".."ethN" as the machine itself would is the caller's to
          * do, since the index is the caller's to know. *)
-        let widget = Widget.make ~parent "eth" in
+        let iface = Iface.make ~parent ~power ?speeds ?full_duplex "eth" in
         let t = {
-            widget ; power ; mac ; gateways ; proto ;
-            emit = ignore_disconnected ~logger:widget.logger ;
-            recv = ignore_bits ~logger:widget.logger ;
-            mtu ; promisc ; do_proxy_arp ;
-            my_addresses ;
-            via = None ;
-            connected = false ;
+            iface ; mac ; gateways ; proto ; mtu ; promisc ; do_proxy_arp ;
+            recv = ignore_bits ~logger:iface.widget.logger ;
+            my_addresses ; delay ; loss ; via = None ;
             arp_cache = BitHash.create 3 ;
-            postponed = BitHash.create 3 ;
-            delay ; loss } in
-        Widget.add_properties widget Widget.[
+            postponed = BitHash.create 3 } in
+        (* Enrich the underlying dumb adapter with more properties: *)
+        Widget.add_properties iface.widget Widget.[
             property "MAC" ~kind:String ~descr:"MAC address."
                 ~getter:(fun () -> `String (Addr.to_string t.mac)) ;
             property "MTU" ~kind:Int ~descr:"MTU of the interface."
                 ~getter:(fun () -> `Int t.mtu) ;
-            property "connected" ~kind:Bool
-                ~descr:"Is there a cable plugged in."
-                ~getter:(fun () -> `Bool t.connected) ;
             property "ARP cache size" ~kind:Int
                 ~descr:"Current size of the ARP cache"
                 ~getter:(fun () -> `Int (BitHash.length t.arp_cache)) ;
@@ -526,12 +633,12 @@ struct
                     t.gateways <- gateways) ;
             property "delay" ~kind:Float ~units:"secs"
                 ~descr:"Average delay to add to transmissions."
-                ~setter:(fun v -> t.delay <- to_float v)
-                ~getter:(fun () -> `Float t.delay) ;
+                ~getter:(fun () -> `Float (t.delay :> float))
+                ~setter:(fun v -> t.delay <- Clock.Interval.o (to_float v)) ;
             property "loss" ~kind:(FRange (0., 1.))
                 ~descr:"Packet loss ratio."
-                ~setter:(fun v -> t.loss <- to_float_range ~min:0. ~max:1. v)
-                ~getter:(fun () -> `Float t.loss) ] ;
+                ~getter:(fun () -> `Float t.loss)
+                ~setter:(fun v -> t.loss <- to_float_range ~min:0. ~max:1. v) ] ;
         t
 end
 
@@ -561,22 +668,22 @@ struct
      * for the user payload protocol and ARP protocol. *)
     let really_send (st : State.t) proto dst bits =
         let pdu = Pdu.make proto st.mac dst bits in
-        Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Emitting an Eth packet, proto %s, from %s to %s (content '%s')" (Proto.to_string proto) (Addr.to_string st.mac) (Addr.to_string dst) (hexstring_of_bitstring bits)))) ;
+        Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Emitting an Eth packet, proto %s, from %s to %s (content '%s')" (Proto.to_string proto) (Addr.to_string st.mac) (Addr.to_string dst) (hexstring_of_bitstring bits)))) ;
         let delay =
-            if proto <> Proto.arp && st.delay > 0. then
-                max 0. (jitter 0.1 st.delay)
-            else 0. in
-        Simulation.delay st.power (Clock.Interval.o delay) st.emit (Pdu.pack pdu)
+            if proto <> Proto.arp && (st.delay :> float) > 0. then
+                Clock.Interval.o (max 0. (jitter 0.1 (st.delay :> float)))
+            else Clock.Interval.zero in
+        Simulation.delay st.iface.power delay st.iface.emit (Pdu.pack pdu)
 
     let send (st : State.t) proto dst bits =
         if st.proto = Proto.arp || st.loss = 0. || Random.float 1. >= st.loss then
             really_send st proto dst bits
         else
-            Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Dropping packet of proto %s from %s" (Proto.to_string proto) (Addr.to_string st.mac))))
+            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Dropping packet of proto %s from %s" (Proto.to_string proto) (Addr.to_string st.mac))))
 
     let resolve_proto_addr (st : State.t) bits sender_proto_addr target_proto_addr =
         (* Add the msg to postponed messages _before_ sending the query *)
-        Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Postponing a msg for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
+        Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Postponing a msg for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
         BitHash.add st.postponed target_proto_addr bits ;
         let request = Arp.Pdu.make_request Arp.HwType.eth st.proto (st.mac :> bitstring) sender_proto_addr target_proto_addr in
         send st Proto.arp Addr.broadcast (Arp.Pdu.pack request)
@@ -586,15 +693,15 @@ struct
     let arp_resolve_ipv4 (st : State.t) bits sender_ip target_ip =
         match Option.get (BitHash.find st.arp_cache target_ip) with
         | dst ->
-            Log.(log st.widget.logger Debug (lazy (Printf.sprintf "found HW addr for '%s' in the ARP cache" (hexstring_of_bitstring target_ip)))) ;
+            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "found HW addr for '%s' in the ARP cache" (hexstring_of_bitstring target_ip)))) ;
             Dst dst
         | exception Not_found ->
-            Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Cannot find HW addr for '%s' in ARP cache" (hexstring_of_bitstring target_ip)))) ;
+            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Cannot find HW addr for '%s' in ARP cache" (hexstring_of_bitstring target_ip)))) ;
             BitHash.add st.arp_cache target_ip None ;
             resolve_proto_addr st bits sender_ip target_ip ;
             Postponed
         | exception Invalid_argument _ ->
-            Log.(log st.widget.logger Debug (lazy (Printf.sprintf "HW addr for '%s' is still resolving" (hexstring_of_bitstring target_ip)))) ;
+            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "HW addr for '%s' is still resolving" (hexstring_of_bitstring target_ip)))) ;
             Postponed
 
     let dst_for (st : State.t) bits =
@@ -630,19 +737,19 @@ struct
         | Ok dst_ip when dst_ip = Ip.Addr.broadcast ->
             Ok (Dst Addr.broadcast)
         | Ok dst_ip when same_net st.my_addresses (Ip.Addr.to_bitstring dst_ip) ->
-            Log.(log st.widget.logger Debug (lazy "Same network as me, sending directly")) ;
+            Log.(log st.iface.widget.logger Debug (lazy "Same network as me, sending directly")) ;
             arp_resolve_pld bits (* FIXME: should also tell us which source address to use *)
         | Ok dst_ip ->
-            Log.(log st.widget.logger Debug (lazy (Printf.sprintf2 "Not on my LAN (my addresses = %a)" (List.print State.print_my_address) st.my_addresses))) ;
+            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf2 "Not on my LAN (my addresses = %a)" (List.print State.print_my_address) st.my_addresses))) ;
             (match gw_for_ip st dst_ip with
             | None ->
-                Log.(log st.widget.logger Debug (lazy (Printf.sprintf "No GW, resolving with ARP"))) ;
+                Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "No GW, resolving with ARP"))) ;
                 arp_resolve_pld bits
             | Some (Mac addr) ->
-                Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Using GW MAC %s" (Addr.to_string addr)))) ;
+                Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Using GW MAC %s" (Addr.to_string addr)))) ;
                 Ok (Dst addr)
             | Some (IPv4 ip)  ->
-                Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Using GW IP %s" (Ip.Addr.to_string ip)))) ;
+                Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Using GW IP %s" (Ip.Addr.to_string ip)))) ;
                 let sender_ip = match st.my_addresses with
                     | my_ip::_ -> my_ip.addr
                     | []       -> Ip.Addr.zero |> Ip.Addr.to_bitstring (* maybe take the source IP from the payload? *) in
@@ -652,51 +759,51 @@ struct
 
     (** Transmit function. [tx t payload] Will send the payload. *)
     let tx (st : State.t) bits =
-        Log.(log st.widget.logger Debug (lazy (Printf.sprintf "TX a payload of %d bytes (while MTU=%d)" (bytelength bits) st.mtu))) ;
+        Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "TX a payload of %d bytes (while MTU=%d)" (bytelength bits) st.mtu))) ;
         if bytelength bits > st.mtu then
-            Log.(log st.widget.logger Warning (lazy (Printf.sprintf "Dropping a frame larger than MTU (%d > %d)" (bytelength bits) st.mtu)))
+            Log.(log st.iface.widget.logger Warning (lazy (Printf.sprintf "Dropping a frame larger than MTU (%d > %d)" (bytelength bits) st.mtu)))
         else
             match dst_for st bits with
             | Ok (Dst dst) -> send st st.proto dst bits
-            | Ok Postponed -> Log.(log st.widget.logger Debug (lazy (Printf.sprintf "...postponed")))
-            | Error s -> Log.(log st.widget.logger Debug s)
+            | Ok Postponed -> Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...postponed")))
+            | Error s -> Log.(log st.iface.widget.logger Debug s)
 
     (** Receive function, called to input an Ethernet frame into the TRX. *)
     let rx (st : State.t) bits =
         match Pdu.unpack bits with
         | Error s ->
-            Log.(log st.widget.logger Warning s)
+            Log.(log st.iface.widget.logger Warning s)
         | Ok frame ->
-            Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Got an eth frame of proto %s for %s" (Proto.to_string frame.Pdu.proto) (Addr.to_string frame.Pdu.dst)))) ;
+            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Got an eth frame of proto %s for %s" (Proto.to_string frame.Pdu.proto) (Addr.to_string frame.Pdu.dst)))) ;
             if frame.Pdu.proto = st.proto &&
                (Addr.eq frame.Pdu.dst st.mac || Addr.eq frame.Pdu.dst Addr.broadcast) then (
-                Log.(log st.widget.logger Debug (lazy (Printf.sprintf "...that's me!"))) ;
+                Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...that's me!"))) ;
                 if Payload.bitlength frame.Pdu.payload > 0 then (
                     (* Take note of the MAC/IP pair of the sender (TODO: with a short timeout) : *)
                     Pdu.extract_src_proto frame.proto (frame.payload :> bitstring) |>
                     Result.iter (fun ip_src ->
                         let src_proto_addr = Ip.Addr.to_bitstring ip_src in
                         BitHash.replace st.arp_cache src_proto_addr (Some frame.src)) ;
-                    Simulation.asap st.power st.recv (frame.Pdu.payload :> bitstring)
+                    Simulation.asap st.iface.power st.recv (frame.Pdu.payload :> bitstring)
                 )
             ) else if frame.Pdu.proto = Proto.arp then (
                 match Arp.Pdu.unpack (frame.Pdu.payload :> bitstring) with
                 | Error s ->
-                    Log.(log st.widget.logger Warning s)
+                    Log.(log st.iface.widget.logger Warning s)
                 | Ok (arp : Arp.Pdu.t) ->
-                    Log.(log st.widget.logger Debug (lazy (Printf.sprintf "...an ARP of opcode %s" (Arp.Op.to_string arp.operation)))) ;
+                    Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...an ARP of opcode %s" (Arp.Op.to_string arp.operation)))) ;
                     if arp.hw_type = Arp.HwType.eth then (
-                        Log.(log st.widget.logger Debug (lazy (Printf.sprintf "...regarding an ethernet device!"))) ;
+                        Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...regarding an ethernet device!"))) ;
                         let sender_hw = Addr.o arp.sender_hw (* will raise if not of the advertised type *)
                         and merge_flag = ref false in
                         if arp.proto_type = st.proto then (
-                            Log.(log st.widget.logger Debug (lazy (Printf.sprintf "...transporting same proto than me!"))) ;
+                            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...transporting same proto than me!"))) ;
                             if BitHash.mem st.arp_cache arp.sender_proto then (
-                                Log.(log st.widget.logger Debug (lazy (Printf.sprintf "...updating entry %s->%s in ARP cache" (hexstring_of_bitstring arp.sender_proto) (Addr.to_string sender_hw)))) ;
+                                Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...updating entry %s->%s in ARP cache" (hexstring_of_bitstring arp.sender_proto) (Addr.to_string sender_hw)))) ;
                                 merge_flag := true ;
                                 BitHash.replace st.arp_cache arp.sender_proto (Some sender_hw)
                             ) ;
-                            Log.(log st.widget.logger Debug (lazy (Printf.sprintf2 "...concerning '%s' (I'm %a)" (hexstring_of_bitstring arp.target_proto) (List.print (fun oc a -> String.print oc (hexstring_of_bitstring a.State.addr))) st.my_addresses))) ;
+                            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf2 "...concerning '%s' (I'm %a)" (hexstring_of_bitstring arp.target_proto) (List.print (fun oc a -> String.print oc (hexstring_of_bitstring a.State.addr))) st.my_addresses))) ;
                             let do_reply () =
                                 Arp.Pdu.make_reply arp.hw_type arp.proto_type
                                     (st.mac :> bitstring) arp.target_proto
@@ -704,26 +811,26 @@ struct
                                 Arp.Pdu.pack |>
                                 send st Proto.arp sender_hw in
                             if List.exists (fun my_addr -> Bitstring.equals arp.target_proto my_addr.State.addr) st.my_addresses then (
-                                Log.(log st.widget.logger Debug (lazy "...It's about me!!")) ;
+                                Log.(log st.iface.widget.logger Debug (lazy "...It's about me!!")) ;
                                 if not !merge_flag then (
                                     BitHash.add st.arp_cache arp.sender_proto (Some sender_hw) ;
-                                    Log.(log st.widget.logger Debug (lazy (Printf.sprintf "...adding %s->%s in ARP cache" (hexstring_of_bitstring arp.sender_proto) (Addr.to_string sender_hw)))) ;
+                                    Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...adding %s->%s in ARP cache" (hexstring_of_bitstring arp.sender_proto) (Addr.to_string sender_hw)))) ;
                                 ) ;
                                 if arp.operation = Arp.Op.request then (
-                                    Log.(log st.widget.logger Debug (lazy "...It's a request, let's reply!")) ;
+                                    Log.(log st.iface.widget.logger Debug (lazy "...It's a request, let's reply!")) ;
                                     do_reply ()
                                 )
                             ) else if arp.operation = Arp.Op.request &&
                                       st.do_proxy_arp arp then (
                                 (* Pretend that's me! *)
-                                Log.(log st.widget.logger Debug (lazy "...Let's impersonate the requested IP")) ;
+                                Log.(log st.iface.widget.logger Debug (lazy "...Let's impersonate the requested IP")) ;
                                 do_reply ()
                             ) ;
                             (* Now that we may have gained knowledge, try to send the msg in waiting queue *)
                             (* TODO: timeout some? *)
-                            Log.(log st.widget.logger Debug (lazy (Printf.sprintf "...Do I have a msg waiting for '%s'?" (hexstring_of_bitstring arp.sender_proto)))) ;
+                            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...Do I have a msg waiting for '%s'?" (hexstring_of_bitstring arp.sender_proto)))) ;
                             while BitHash.mem st.postponed arp.sender_proto do
-                                Log.(log st.widget.logger Debug (lazy (Printf.sprintf "...Yes!! Let's send it!"))) ;
+                                Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...Yes!! Let's send it!"))) ;
                                 let msg = BitHash.find st.postponed arp.sender_proto in
                                 send st st.proto sender_hw msg ;
                                 BitHash.remove st.postponed arp.sender_proto
@@ -731,37 +838,22 @@ struct
                         )
                     )
             ) else ( (* not for me, send to promisc function *)
-                Log.(log st.widget.logger Debug (lazy (Printf.sprintf "...not for me (for %s but I'm %s)!"
+                Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...not for me (for %s but I'm %s)!"
                     (Addr.to_string frame.Pdu.dst) (Addr.to_string st.mac)))) ;
                 if Payload.bitlength frame.Pdu.payload > 0 then st.promisc (frame.Pdu.payload :> bitstring)
             )
 
     (** Creates an {!Eth.TRX.t}. *)
     let make (st : State.t) =
-        Log.(log st.widget.logger Debug (lazy (Printf.sprintf2 "Creating an eth TRX with addresses mac: %s, IPs: %a and gateways: %a"
+        (* Pass the received frames to the TRX engine: *)
+        st.iface.recv <- rx st ;
+        Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf2 "Creating an eth TRX with addresses mac: %s, IPs: %a and gateways: %a"
             (Addr.to_string st.mac)
             (List.print State.print_my_address) st.my_addresses
             (List.print State.print_gw) st.gateways))) ;
-        let trx =
-            { ins = { write = tx st ;
-                      set_read = fun f -> st.recv <- f } ;
-              out = { write = rx st ;
-                      set_read = fun f ->
-                        st.emit <- f ;
-                        if not st.connected then (
-                            Log.(log st.widget.logger Info (lazy "Connected!")) ;
-                            st.connected <- true
-                        ) } } in
-        (* An adapter is the one port of whatever owns it. *)
-        st.widget.Widget.ports <- Widget.{
-            count = (fun () -> 1) ;
-            is_connected = (fun _ -> st.connected) ;
-            dev = (fun _ -> trx.out) ;
-            (* Where the chain ends: an adapter is a widget, and it is the one a
-             * cable reaches. *)
-            owner = (fun _ -> st.widget) ;
-            disconnect = (fun _ -> State.disconnect st) } ;
-        trx
+        { ins = { write = tx st ;
+                  set_read = fun f -> st.recv <- f } ;
+          out = Iface.dev st.iface }
 end
 
 (** {2 Ethernet Cables}

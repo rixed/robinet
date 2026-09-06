@@ -543,17 +543,17 @@ let on_init_nothing ?(on_ip:(t -> unit) option) (_t : t) =
     ignore on_ip
 
 let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget
-                  ?(init=on_init_nothing) eth_state eth_trx name =
+                  ?(init=on_init_nothing) (eth_state : Eth.State.t) eth_trx name =
     (* For the API a cable reaches a host but in reality it reaches its
        adapter. *)
-    widget.Widget.ports <- Widget.ports_of eth_state.Eth.State.widget ;
+    widget.Widget.ports <- Widget.ports_of eth_state.iface.widget ;
     (* The adapter's supply is the host's: they are the same machine, and an
        adapter that went on emitting after its host went down would be a host
        that is only half off. Taken from the adapter rather than made here
        because the adapter is built first, and something has to give it one --
        and a host built on somebody else's adapter, as a router's admin host
        is, shares that owner's switch, being the same box as well. *)
-    let power = eth_state.Eth.State.power in
+    let power = eth_state.iface.power in
     if not on then Simulation.power_down power ;
     let if_on t what f x =
         if t.trx.power.Simulation.on then f x else Log.(log widget.Widget.logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in

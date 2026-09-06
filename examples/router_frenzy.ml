@@ -142,7 +142,7 @@ let make_router name logger interfaces router_specs delays err_delays losses err
             mac
         ) interfaces in
     let addrs = Array.of_list lst in
-    let delay = List.assoc_opt name delays
+    let delay = Option.map Clock.Interval.o (List.assoc_opt name delays)
     and loss = List.assoc_opt name losses
     and load_balancing = List.assoc_opt name lb_configs
     and notify_errs = Router.{

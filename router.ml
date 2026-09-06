@@ -384,11 +384,7 @@ struct
         t.ifaces.(n).trx =-> f
 
     let is_connected iface =
-        iface.eth.Eth.State.connected
-
-    let first_free_iface t =
-        try Some (Array.findi (not % is_connected) t.ifaces)
-        with Not_found -> None
+        iface.eth.iface.is_connected
 
     (* TODO: similarly, a write n b = t.ifaces.(n).trx.write b *)
 
@@ -418,7 +414,7 @@ struct
                                  ~parent:widget ~power () in
         let trx = Eth.TRX.make eth in
         (* An interface is its adapter, as far as a cable is concerned. *)
-        widget.Widget.ports <- Widget.ports_of eth.Eth.State.widget ;
+        widget.Widget.ports <- Widget.ports_of eth.iface.widget ;
         { trx ; eth ; widget ; admin_host = None }
 
     let notify_never = { probability = 0. ; delay = 0. }
@@ -854,12 +850,10 @@ struct
       let w = Widget.make ~parent:sim.Simulation.root "r" in \
       let r = make 4 [] w in \
       w.ports.count () = 4 && \
-      List.for_all (fun n -> \
-          w.ports.dev n == r.ifaces.(n).widget.ports.dev 0) \
-          [ 0 ; 1 ; 2 ; 3 ] && \
       not (w.ports.is_connected 2) && \
       ((w.ports.dev 2).Tools.set_read ignore ; \
-       w.ports.is_connected 2) && \
+       w.ports.is_connected 2 && \
+       r.ifaces.(2).widget.ports.is_connected 0) && \
       (* A cable to port n reaches interface n's adapter, and that is what a
          cable joining it is recorded as reaching. *) \
       List.for_all (fun n -> \
@@ -977,7 +971,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     widget.Widget.ports <- Widget.{
         count = (fun () -> 2) ;
         is_connected = (function
-            | 0 -> router.Router.ifaces.(1).Router.eth.Eth.State.connected
+            | 0 -> router.Router.ifaces.(1).Router.eth.iface.is_connected
             | _ -> Hub.Repeater.is_connected hub 0) ;
         dev = (function 0 -> out_trx.out | _ -> in_trx) ;
         (* The outward socket is the router's second adapter; the LAN one is the
