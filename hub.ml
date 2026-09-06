@@ -27,10 +27,21 @@ module Repeater =
 struct
     type t = { ports : ((bitstring -> unit) * bool) array ;
        mutable speed : Eth.Speed.t ;  (* One of [speeds] *)
+  (* A Repeater can only transmit one frame at a time. If another is received
+   * while one is copied then both are garbage. The hub will emit a jamming
+   * signal for 32bits on all ports, and the hub is effectively unusable during
+   * that time.
+   * For us, since the bits of a payload are forwarded all at once we just
+   * mark the hub as "busy" until the end of the forward, and if any frame is
+   * received before that time it will be dropped and an additional jamming
+   * of 32bits added on top. *)
+  mutable busy_until : Clock.Time.t ;
+mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
                power : Simulation.power ;
               widget : Widget.t ;
              ingress : Metric.Counter.t ;
-              egress : Metric.Counter.t }
+              egress : Metric.Counter.t ;
+          collisions : Metric.Counter.t }
 
     let print oc t =
         Printf.fprintf oc "repeater %s with %d ports" t.widget.name (Array.length t.ports)
@@ -39,20 +50,30 @@ struct
     let is_connected (t : t) n =
         snd t.ports.(n)
 
-    let forward_from (t : t) n pld =
-        let now = Simulation.Widget.now t.widget in
-        Array.iteri (fun i (emit, _is_conn) ->
-            if i <> n then (
-                Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to port %d/%d" i (Array.length t.ports)))) ;
-                Metric.(Counter.add t.egress ~now ~params:(Params.singleton "port" (Param.Int i)) (bytelength pld)) ;
-                Simulation.asap t.power emit pld
-            )) t.ports
-
     let write (t : t) n pld =
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx from port %d/%d" n (Array.length t.ports)))) ;
+        let params = Metric.(Params.singleton "port" (Param.Int n)) in
         let now = Simulation.Widget.now t.widget in
-        Metric.(Counter.add t.ingress ~now ~params:(Params.singleton "port" (Param.Int n)) (bytelength pld)) ;
-        forward_from t n pld
+        if t.busy_until >= now then (
+            Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Jammed frame on port %d" n))) ;
+            (* Add 32bits of jam: *)
+            t.busy_until <- max t.busy_until (Clock.Time.add now t.jamming_time) ;
+            (* We can't take back the previous one, but this one is dropped. *)
+            Metric.Counter.inc t.collisions ~now ~params
+        ) else (
+            (* Mark the hub as busy and do transfers that frame *)
+            let ttime = Eth.Speed.transfert_time t.speed (bitstring_length pld) in
+            t.busy_until <- Clock.Time.add now ttime ;
+            Metric.Counter.add t.ingress ~now ~params (bytelength pld) ;
+            (* Forward to all ports but the incoming one: *)
+            Array.iteri (fun i (emit, _is_conn) ->
+                if i <> n then (
+                    Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to port %d/%d" i (Array.length t.ports)))) ;
+                    let params = Metric.(Params.singleton "port" (Param.Int i)) in
+                    Metric.Counter.add t.egress ~now ~params (bytelength pld) ;
+                    Simulation.asap t.power emit pld
+                )) t.ports
+        )
 
     let set_read (t : t) n f =
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting reader for port %d" n))) ;
@@ -70,7 +91,7 @@ struct
         with Not_found -> None
 
     (* And undoes it: nothing is emitted to port [n] any more, and it is free
-       for another cable. *)
+     * for another cable. *)
     let disconnect (t : t) n =
         if is_connected t n then
             t.ports.(n) <-
@@ -81,10 +102,7 @@ struct
                  connected" n)))
 
     (* What a repeater can be clocked at, and nothing else: a hub is a 10 or a
-       100Mbps device, the faster ones having never been built as repeaters.
-       Its own array rather than [Eth.Speed.all] because the value of the
-       property below is a place in the choices the property offers, so the
-       choices and what is read back have to be the same list. *)
+     * 100Mbps device, the faster ones having never been built as repeaters. *)
     let speeds = Eth.Speed.[| Eth10Mbps ; Eth100Mbps |]
     let speed_names = Array.map Eth.Speed.to_string speeds
 
@@ -96,19 +114,20 @@ struct
         let t = {
             ports = Array.make n (ignore_bits ~logger:widget.logger, false) ;
             speed ;
+            busy_until = Clock.beginning_of_time ;
+            jamming_time = Eth.Speed.transfert_time speed 32 ;
             power = Simulation.make_power (Simulation.of_widget widget) name ;
             widget ;
             ingress = Metric.Counter.make () ;
-            egress = Metric.Counter.make () } in
-        (* This repeater minted the supply above; a switch's inner one is a
-           child of the switch, so deleting the switch reaches it. *)
+            egress = Metric.Counter.make () ;
+            collisions = Metric.Counter.make () } in
         widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
         widget.ports <- Widget.{
             count = (fun () -> n) ;
             is_connected = (fun i -> is_connected t i) ;
             dev = dev t ;
             (* Its ports are not widgets, and want no name: one is as good as
-               another, so a cable is recorded as reaching the repeater. *)
+             * another, so a cable is recorded as reaching the repeater. *)
             owner = (fun _ -> widget) ;
             disconnect = disconnect t } ;
         Widget.add_properties widget Widget.[
@@ -116,11 +135,15 @@ struct
                 ~kind:(Enum speed_names)
                 ~descr:"Fixed speed for this Hub."
                 ~getter:(fun () -> `Int (Array.findi ((=) t.speed) speeds))
-                ~setter:(fun v -> t.speed <- speeds.(to_choice speed_names v)) ;
+                ~setter:(fun v ->
+                    t.speed <- speeds.(to_choice speed_names v) ;
+                    t.jamming_time <- Eth.Speed.transfert_time t.speed 32) ;
             metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
                 (Metric.Counter.T t.ingress) ;
             metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
                 (Metric.Counter.T t.egress) ;
+            metric_property "collisions" ~descr:"Dropped frames due to collisions."
+                (Metric.Counter.T t.collisions) ;
             property "tot ports" ~kind:Int ~descr:"Total number of ports."
                 ~getter:(fun () -> `Int (Array.length t.ports)) ] ;
         t
