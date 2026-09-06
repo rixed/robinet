@@ -709,6 +709,14 @@ body.carrying { user-select: none; cursor: grabbing; }
     width: 14rem;
 }
 .creator .field .enabler { flex: none; }
+/* A list or a record is edited in the same table as in the property panel.
+   Wide enough for what it holds and no wider: the panel's table fills the panel
+   because that is all the room there is, while here the row's buttons would end
+   up an inch away from the value they are for. */
+.creator .field .listing { flex: 1; min-width: 0; }
+.creator .field .listing table { width: auto; }
+/* Room to wrap into, rather than the fixed width of a plain input. */
+.creator .field .choices { flex: 1; min-width: 0; }
 .creator .field .picked { font-size: .8rem; }
 .creator .field .units, .creator .field .descr { color: var(--pico-muted-color); }
 /* Under the input it belongs to, in the second column. */
@@ -815,8 +823,12 @@ article.properties > header button {
 /* Fixed rather than sized from the content: the values refresh every second
  * and gain a digit now and then, and with an automatic layout every column in
  * the table shifts when they do. Proportions rather than lengths, so that they
- * still follow the width of the window. */
-article.properties table {
+ * still follow the width of the window.
+ *
+ * The panel's own table, and only it: a table drawn inside one of its cells is
+ * a value rather than the panel, and is laid out by what it holds (see
+ * [.listing]). */
+article.properties > table {
     margin: 0;
     font-size: .9rem;
     table-layout: fixed;
@@ -825,7 +837,7 @@ article.properties table {
  * description used to have one of its own, which cost the values half the
  * table for a line of prose that is read once -- and there is no room for a
  * third column in half a window. */
-article.properties th:nth-child(1) { width: 38%; }
+article.properties > table > thead th:nth-child(1) { width: 38%; }
 article.properties .descr {
     display: block;
     color: var(--pico-muted-color);
@@ -889,20 +901,19 @@ button.metric-reset {
     padding: .1rem .5rem;
     font-size: .7rem;
 }
-/* A list or a record, as the table it is drawn as.
+/* A list or a record, as the table it is drawn as -- in the property panel and
+ * in the form that builds a device, which edit one the same way.
  *
  * The panel's own table is laid out by fixed proportions, which are the
  * proportions of the panel and mean nothing here: this one is sized by what it
- * holds, which is what tells a netmask column from an address column. Every
- * rule below therefore has to outrank one written as `article.properties
- * table', which is why they all name the panel too.
+ * holds, which is what tells a netmask column from an address column.
  *
  * Three columns of addresses do not fit in half of half a window, and the
  * answer is neither to clip them nor to wrap every cell onto two lines: the
  * table scrolls sideways, and widening the panel (the divider is right there)
  * brings the rest of it back. */
-article.properties .listing { overflow-x: auto; }
-article.properties .listing table {
+.listing { overflow-x: auto; }
+.listing table {
     table-layout: auto;
     /* As wide as the panel, and wider when what it holds will not fit in it:
        the columns then share out whatever room there is, and the reader who
@@ -911,7 +922,7 @@ article.properties .listing table {
     margin: 0;
     font-size: .95em;
 }
-article.properties .listing th, article.properties .listing td {
+.listing th, .listing td {
     width: auto;
     padding: .15rem .4rem .15rem 0;
     border: none;
@@ -920,7 +931,7 @@ article.properties .listing th, article.properties .listing td {
        beside the input for it, not above it. */
     white-space: nowrap;
 }
-article.properties .listing th {
+.listing th {
     font-weight: normal;
     font-size: .75rem;
     color: var(--pico-muted-color);
@@ -932,7 +943,7 @@ article.properties .listing th {
  * it, the input taking whatever room is left. Not so little that an address
  * cannot be read, and not so much that three of them side by side push the
  * button that drops the row off the panel. */
-article.properties .listing .cell {
+.listing .cell {
     display: flex;
     align-items: center;
     gap: .3rem;
@@ -941,26 +952,26 @@ article.properties .listing .cell {
        and print that text over the column beside it. */
     min-width: min-content;
 }
-article.properties .listing .cell input[type=text],
-article.properties .listing .cell input[type=number] {
+.listing .cell input[type=text],
+.listing .cell input[type=number] {
     width: 100%;
     min-width: 4rem;
     max-width: 9rem;
 }
-article.properties .listing .cell select {
+.listing .cell select {
     width: 100%;
     /* Enough for the choice itself and not only for the arrow that opens
        them: a select squeezed by its neighbours shows neither. */
     min-width: 5rem;
     max-width: 9rem;
 }
-article.properties .listing .cell input[type=checkbox] { flex: none; margin: 0; }
+.listing .cell input[type=checkbox] { flex: none; margin: 0; }
 /* Narrow, and asked for by name: the columns are shared out by what they
  * hold, and what this one holds -- a handle and a button -- must not be
  * squeezed out by three address fields. */
-article.properties .listing th.row-tools,
-article.properties .listing td.row-tools { width: 2.4rem; padding-right: 0; }
-article.properties .listing .row-tools button {
+.listing th.row-tools,
+.listing td.row-tools { width: 2.4rem; padding-right: 0; }
+.listing .row-tools button {
     margin: 0;
     width: auto;
     padding: 0 .4rem;
@@ -970,7 +981,7 @@ article.properties .listing .row-tools button {
 }
 /* What a row is carried by. [touch-action] so that a finger on it moves the
  * row rather than scrolling the page under it. */
-article.properties .listing .grab {
+.listing .grab {
     display: inline-block;
     vertical-align: middle;
     padding: .2rem .15rem;
@@ -980,24 +991,24 @@ article.properties .listing .grab {
     user-select: none;
     color: var(--pico-muted-color);
 }
-article.properties .listing .grab:active { cursor: grabbing; }
-article.properties .listing .grab svg {
+.listing .grab:active { cursor: grabbing; }
+.listing .grab svg {
     display: block;
     width: .45rem;
     height: .75rem;
     fill: currentColor;
 }
 /* The row under the pointer, while it is being carried. */
-article.properties .listing tr.dragged {
+.listing tr.dragged {
     background-color: var(--pico-mark-background-color);
 }
-article.properties .listing .list-foot {
+.listing .list-foot {
     display: flex;
     align-items: baseline;
     gap: .5rem;
     margin-top: .4rem;
 }
-article.properties .listing .list-foot button {
+.listing .list-foot button {
     margin: 0;
     width: auto;
     padding: .1rem .6rem;
@@ -1006,7 +1017,29 @@ article.properties .listing .list-foot button {
 /* Nothing has been typed into it yet, so the buttons that would send it are
  * out anyway; once something has, the table stops agreeing with the simulator
  * and says so until it is applied or given back. */
-article.properties .listing.dirty > table { box-shadow: -.4rem 0 0 var(--pico-mark-background-color); }
+.listing.dirty > table { box-shadow: -.4rem 0 0 var(--pico-mark-background-color); }
+
+/* Any number of the choices, ticked: a box and its name, and as many of those
+ * as there are choices.
+ *
+ * They wrap rather than run off the panel, and each name is held to its own box
+ * -- a name that wrapped onto the line under the box it belongs to would read
+ * as the name of the box below it. */
+.choices {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .1rem .7rem;
+}
+.choices label {
+    display: inline-flex;
+    align-items: center;
+    gap: .25rem;
+    margin: 0;
+    font-size: .8rem;
+    white-space: nowrap;
+}
+.choices input[type=checkbox] { margin: 0; flex: none; }
 
 /* Inline, so that the unit that follows stays on the same line. */
 .range { display: inline-flex; align-items: center; gap: .5rem;

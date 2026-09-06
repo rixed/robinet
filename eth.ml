@@ -266,6 +266,56 @@ struct
         String.print oc (to_string a)
 end
 
+(** {2 Standard transceiver speeds} *)
+
+module Speed =
+struct
+    (* Possible adapter speeds: *)
+    type t =
+        | Eth10Mbps
+        | Eth100Mbps
+        | Eth1Gbps
+        | Eth2_5Gbps
+        | Eth5Gbps
+        | Eth10Gbps
+        | Eth25Gbps
+        | Eth40Gbps
+        | Eth100Gbps
+        [@@deriving enum]
+
+    let to_bps = function
+        | Eth10Mbps -> 10e6
+        | Eth100Mbps -> 100e6
+        | Eth1Gbps -> 1000e6
+        | Eth2_5Gbps -> 2.5e9
+        | Eth5Gbps -> 5e9
+        | Eth10Gbps -> 10e9
+        | Eth25Gbps -> 25e9
+        | Eth40Gbps -> 40e9
+        | Eth100Gbps -> 100e9
+
+    let to_string = function
+        | Eth10Mbps -> "10Mbps"
+        | Eth100Mbps -> "100Mbps"
+        | Eth1Gbps -> "1Gbps"
+        | Eth2_5Gbps -> "2.5Gbps"
+        | Eth5Gbps -> "5Gbps"
+        | Eth10Gbps -> "10Gbps"
+        | Eth25Gbps -> "25Gbps"
+        | Eth40Gbps -> "40Gbps"
+        | Eth100Gbps -> "100Gbps"
+
+    (* Every speed and its name, in the order the enum numbers them.
+     *
+     * That order is what a property of a speed is made of: an [Enum] kind
+     * offers [names], and the value of such a property is a place in it. The
+     * two arrays are built from the same enumeration, so a speed added to the
+     * type above is offered and read back without anything else to change. *)
+    let all = Array.init (max + 1) (fun i -> Option.get (of_enum i))
+    let names = Array.map to_string all
+end
+
+
 (** {2 Transceiver State} *)
 
 module State =

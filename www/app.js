@@ -22,6 +22,19 @@ const asText = (v) =>
  * the value it may hold. */
 const baseKind = (kind) => kind.type === 'optional' ? kind.of : kind
 
+/* A set of choices, as it is sent and as one is compared with another: the
+ * places of the ticked choices, in order and each at most once, which is what
+ * the simulator keeps and answers with (see [Set] in widget.ml). Ticking is
+ * therefore an edit that can be undone by unticking, and not one the panel is
+ * left thinking it still has to send. */
+const asSet = (l) => [ ...new Set(l || []) ].sort((a, b) => a - b)
+
+/* What the input for a value holds while it is edited: the ticked choices for
+ * a set -- an array, since that is what a row of boxes is -- and the value
+ * written out for everything else, which is text in a single field. */
+const draftOf = (kind, value) =>
+    baseKind(kind).type === 'set' ? asSet(value) : asText(value)
+
 /* An example of how the value is written, for the input to show while it is
  * empty -- a port range as "min-max", a network as "192.168.0.0/24". Read from
  * either side of an [optional], since a hint may be given for the value or for
@@ -60,6 +73,10 @@ const cellValue = (c) => {
             const n = Number(c.draft)
             return Number.isInteger(n) ? n : String(c.draft)
         }
+        /* Which of the choices are ticked, by their places among them: the
+         * same as an enum's value, of any number of them at once. */
+        case 'set':
+            return asSet(c.draft)
         case 'int': case 'float': case 'range': {
             const n = Number(c.draft)
             /* Send what was typed rather than guessing, and let the setter say
@@ -78,7 +95,7 @@ let rowSeq = 0
 
 const cellOf = (name, kind, value) => ({
     name, kind,
-    draft: asText(value),
+    draft: draftOf(kind, value),
     enabled: value !== null && value !== undefined
 })
 
@@ -135,20 +152,29 @@ const resetDraft = (p, force) => {
     } else {
         /* A value that is not set keeps whatever was in the field: see
          * [draftFor]. */
-        p.draft = draftFor(p, asText(p.value))
+        p.draft = draftFor(p, draftOf(p.kind, p.value))
     }
 }
 
-const encode = (p) => {
-    if (p.kind.type === 'optional' && !p.enabled) return 'null'
+/* What the inputs of one value are worth: the rows of the table for a list or
+ * a record, the single input for anything else.
+ *
+ * The same for a property being edited and for a parameter of a device that is
+ * being built: both are drawn from a kind, through the same inputs, so both are
+ * read back the same way. */
+const edited = (p) => {
+    /* Unticked is a value in itself: there is none. */
+    if (p.kind.type === 'optional' && !p.enabled) return null
     const k = baseKind(p.kind)
     if (k.type === 'list')
-        return JSON.stringify(p.rows.filter(r => !rowIsBlank(r))
-                                    .map(r => rowValue(k.of, r)))
+        return p.rows.filter(r => !rowIsBlank(r)).map(r => rowValue(k.of, r))
     if (k.type === 'record')
-        return JSON.stringify(rowValue(k, p.rows[0]))
-    return JSON.stringify(cellValue(p))
+        return rowValue(k, p.rows[0])
+    return cellValue(p)
 }
+
+/* What a setter is handed: [edited], on the wire. */
+const encode = (p) => JSON.stringify(edited(p))
 
 /* A count reads better with its thousands apart, and a duration in the unit it
  * happens to be in. */
@@ -187,6 +213,14 @@ const bps = (n) => {
  * else: every string is a property of a plain object, "constructor" included,
  * and what those answer with is not a formatter. */
 const unitFormats = { __proto__: null, bps }
+
+/* Whether the values of a kind are numbers a unit's own writing applies to.
+ * A list is whatever it is a list of. */
+const numericKind = (kind) => {
+    const k = baseKind(kind)
+    const t = k.type === 'list' ? baseKind(k.of).type : k.type
+    return t === 'int' || t === 'float' || t === 'range'
+}
 
 /* What a figure counted in [units] reads as: the unit's own writing when it
  * has one, and the plain number with the unit beside it otherwise. */
@@ -1744,7 +1778,7 @@ document.addEventListener('alpine:init', () => {
          * name, as the map already does. */
         cellInput(c) {
             const t = baseKind(c.kind).type
-            if (t === 'bool' || t === 'enum') return t
+            if (t === 'bool' || t === 'enum' || t === 'set') return t
             if (t === 'int' || t === 'float' || t === 'range') return 'number'
             return 'text'
         },
@@ -1797,6 +1831,27 @@ document.addEventListener('alpine:init', () => {
             return cs && cs[i] !== undefined ? cs[i] : String(i)
         },
 
+        /* Whether one choice of a set is ticked. */
+        ticked(x, i) {
+            return (x.draft || []).includes(i)
+        },
+
+        /* Tick a choice of a set, or untick it. What the boxes hold is the
+         * whole value -- the places of the ticked choices -- so this is the
+         * whole of the edit, and there is nothing half-typed to wait for. */
+        toggleChoice(x, i) {
+            x.draft = this.ticked(x, i) ? x.draft.filter(c => c !== i)
+                                        : asSet([ ...x.draft, i ])
+        },
+
+        /* The choices of a set, as they read: their names, in the order they
+         * are offered in. */
+        setText(kind, value) {
+            const l = asSet(value)
+            return l.length ? l.map(i => this.choice(kind, i)).join(', ')
+                            : 'none'
+        },
+
         /* What a property reads as when it is only read. An enum travels as
          * the index of its choice, a number that means nothing on its own, so
          * it reads as the choice; a number in a unit the page writes itself
@@ -1806,10 +1861,16 @@ document.addEventListener('alpine:init', () => {
          * edited and sent must stay the bare value. */
         shown(p) {
             if (p.value === null) return 'unset'
+            /* Guarded by the kind and not merely by the value being a number:
+             * an enum travels as the place of its choice, which is a number a
+             * unit would happily write as a speed. */
             const f = unitFormats[p.units]
-            if (f && typeof p.value === 'number') return f(p.value)
-            return baseKind(p.kind).type === 'enum' ? this.choice(p.kind, p.value)
-                                                    : p.text
+            if (f && numericKind(p.kind) && typeof p.value === 'number')
+                return f(p.value)
+            const t = baseKind(p.kind).type
+            if (t === 'enum') return this.choice(p.kind, p.value)
+            if (t === 'set') return this.setText(p.kind, p.value)
+            return p.text
         },
 
         /* The unit written after the value, when the value does not already
@@ -1818,14 +1879,21 @@ document.addEventListener('alpine:init', () => {
          * bare number that is typed into it, so both keep the unit beside. */
         unitsShown(p) {
             if (!p.units || baseKind(p.kind).type === 'metric') return ''
-            if (p.read_only && unitFormats[p.units] &&
-                typeof p.value === 'number') return ''
+            if (p.read_only && unitFormats[p.units] && numericKind(p.kind))
+                return ''
             return p.units
         },
 
-        /* What one cell of a read-only table says. */
-        cellText(c) {
+        /* What one cell of a read-only table says. [units] are the property's,
+         * every cell of a list being counted in the same thing. */
+        cellText(c, units) {
             if (!this.set(c)) return 'unset'
+            const f = unitFormats[units]
+            const n = Number(c.draft)
+            if (f && numericKind(c.kind) && c.draft !== '' &&
+                Number.isFinite(n)) return f(n)
+            if (baseKind(c.kind).type === 'set')
+                return this.setText(c.kind, c.draft)
             if (baseKind(c.kind).type !== 'enum') return c.draft
             /* A cell of a row nobody has filled in yet has no choice, and no
                index either: [choice] would answer for the first one. */
@@ -1952,6 +2020,13 @@ document.addEventListener('alpine:init', () => {
                  * the box is ticked again -- so a field one merely clicked in
                  * and left has nothing to say. */
                 (p.kind.type === 'optional' && !p.enabled) ? p.value === null :
+                /* Text is what a field holds and a set is not one: the boxes
+                 * hold the choices themselves, so it is the choices that say
+                 * whether anything changed -- ticking one and unticking it
+                 * again leaves nothing to send. */
+                baseKind(p.kind).type === 'set' ?
+                    JSON.stringify(asSet(p.draft)) ===
+                    JSON.stringify(asSet(p.value)) :
                 p.draft === p.text &&
                 (p.kind.type !== 'optional' || p.enabled === (p.value !== null))
             if (p.read_only || unchanged) { p.dirty = false ; return }
@@ -2749,7 +2824,13 @@ document.addEventListener('alpine:init', () => {
                     /* Something that may be left out starts left out, unless
                      * the catalogue has something to offer for it. */
                     enabled: p.kind.type !== 'optional' || p.default !== null,
-                    draft: p.default === null ? '' : String(p.default)
+                    /* A list or a record is edited in the table the property
+                     * panel edits one in, and so is filled in the same way --
+                     * [rowsOf] reads the value under that name. Everything else
+                     * has the single input, and the [draft] it is filled with. */
+                    rows: isStructured(p.kind)
+                            ? rowsOf({ kind: p.kind, value: p.default }) : null,
+                    draft: draftOf(p.kind, p.default)
                 }
             })
             return { sim, type: t.type, descr: t.descr, name: '', fields,
@@ -2831,11 +2912,9 @@ document.addEventListener('alpine:init', () => {
         /* What one field is worth, in the JSON the API expects. */
         fieldValue(f) {
             if (f.picked !== null) return f.picked
-            /* A field of the form is read exactly as a property's input is:
-             * see [cellValue]. No parameter of any device is a list or a
-             * record so far; the day one is, this form has a table to grow
-             * as the property panel did. */
-            return cellValue(f)
+            /* A field of the form is read exactly as a property's inputs are,
+             * table and all: see [edited]. */
+            return edited(f)
         },
 
         async submitAdd() {

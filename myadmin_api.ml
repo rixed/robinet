@@ -133,6 +133,11 @@ let property_of_matches (widget : Widget.t) matches n =
 (* What the value looks like, so that the interface can offer the right input.
  * Shared by the properties of a widget and by the parameters a device is built
  * from: the dialog that asks for the one is the panel that edits the other. *)
+(* What an [Enum] picks one of and a [Set] ticks any number of: their names, in
+   the order that gives each one the place the value names it by. *)
+let json_of_choices choices =
+    `List (Array.to_list choices |> List.map (fun c -> `String c))
+
 let rec json_of_kind = function
     | Widget.String -> `Assoc [ "type", `String "string" ]
     (* A string, and a file to go with it: the interface reads the value as it
@@ -143,9 +148,12 @@ let rec json_of_kind = function
     | Bool -> `Assoc [ "type", `String "bool" ]
     | Enum choices ->
         `Assoc [ "type", `String "enum" ;
-                 "choices",
-                    `List (Array.to_list choices |>
-                           List.map (fun c -> `String c)) ]
+                 "choices", json_of_choices choices ]
+    (* The same choices, ticked rather than picked: the interface offers all of
+       them and the value is the places of the ticked ones. *)
+    | Set choices ->
+        `Assoc [ "type", `String "set" ;
+                 "choices", json_of_choices choices ]
     (* Both ranges take the same shape, since the interface builds the same
      * input out of either one; [int] says which values are acceptable, and
      * therefore how the input must step.

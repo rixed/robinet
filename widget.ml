@@ -202,6 +202,16 @@ and kind =
     | Bool
     (* One of those values, and nothing else *)
     | Enum of string array
+    (* Any number of those values, each at most once, in no order of its own:
+     * the interface ticks them, and the value is the places of the ticked ones
+     * (as [Enum]'s is the place of the one), which is a [`List] on the wire.
+     *
+     * Not a [List (Enum ...)], although that is the same thing on the wire: a
+     * list is a sequence, and offers the reader what a sequence is for --
+     * carrying an element about, holding the same one twice -- neither of
+     * which means anything about a set. What the accepted speeds of an
+     * interface are is a set; what a routing table is, is a list. *)
+    | Set of string array
     (* The id of another widget of the same simulation: what a cable's two ends
      * are. Not an [Int], although that is what travels: the UI has the widgets
      * of the simulation in hand and can offer them by name, which no number box
@@ -247,6 +257,7 @@ let rec kind_name = function
     | Float -> "a number"
     | Bool -> "a boolean"
     | Enum _ -> "a choice"
+    | Set _ -> "a set of choices"
     | Widget_id -> "a widget"
     | FRange _ | IRange _ -> "a range"
     | Metric -> "a metric"
@@ -261,7 +272,7 @@ let rec kind_name = function
  * that is not there and an empty one would read the same in the interface,
  * and mean the same to every setter. *)
 let optional = function
-    | (Optional _ | Metric | List _) as k ->
+    | (Optional _ | Metric | List _ | Set _) as k ->
         invalid_arg ("Widget.optional: nothing to make optional in "^
                      kind_name k)
     | k -> Optional k
@@ -282,7 +293,7 @@ let optional = function
  * one input to show it in, and a value that may be absent is hinted through
  * the value it may hold: [optional (hint "min-max" String)]. *)
 let hint h = function
-    | (Optional _ | Metric | List _ | Record _ | Hint _) as k ->
+    | (Optional _ | Metric | List _ | Record _ | Hint _ | Set _) as k ->
         invalid_arg ("Widget.hint: nothing to write an example in for "^
                      kind_name k)
     | k -> Hint (h, k)
@@ -301,7 +312,7 @@ let hint h = function
  *
  * A list of lists has no such shape, and neither has a list of values that may
  * each be absent -- an element that is not there is one the list does not
- * hold. *)
+ * hold. A set has one: a cell of ticked choices. *)
 let list = function
     | (Optional _ | Metric | List _) as k ->
         invalid_arg ("Widget.list: cannot repeat "^ kind_name k)
@@ -439,6 +450,26 @@ let to_int_range ?(min=min_int) ?(max=max_int) v =
         bad_value "%d is not in range (%s…%s)" i (bound min) (bound max)
     else i
 
+(** Read which of [choices] a value names: the interface sends a choice by its
+ * place among them (see the [Enum] kind), and a number that is the place of
+ * none of them is refused rather than stored -- a property that answers with a
+ * value outside its own choices is one the interface can only show as a
+ * number. *)
+let to_choice choices v =
+    let i = to_int v in
+    let n = Array.length choices in
+    if i < 0 || i >= n then
+        bad_value "%d is none of the %d choices" i n
+    else i
+
+(*$T to_choice
+  to_choice [| "a" ; "b" |] (`Int 1) = 1
+  (try ignore (to_choice [| "a" ; "b" |] (`Int 2)) ; false \
+   with Bad_value m -> m = "2 is none of the 2 choices")
+  (try ignore (to_choice [| "a" ; "b" |] (`Int (-1))) ; false \
+   with Bad_value _ -> true)
+ *)
+
 (*$T to_field
   (try ignore (to_field "a" to_int (`Assoc [ "a", `String "x" ])) ; false \
    with Bad_value m -> m = "a: not a whole number: \"x\"")
@@ -451,6 +482,16 @@ let to_int_range ?(min=min_int) ?(max=max_int) v =
   (try ignore (to_list to_int (`List [ `Int 1 ; `String "x" ])) ; false \
    with Bad_value m -> m = "row 2: not a whole number: \"x\"")
   to_list to_int (`List [ `Int 1 ; `Int 2 ]) = [ 1 ; 2 ]
+ *)
+
+(*$T to_choices
+  to_choices [| "a" ; "b" ; "c" |] (`List [ `Int 2 ; `Int 0 ]) = [ 0 ; 2 ]
+  to_choices [| "a" ; "b" |] (`List [ `Int 1 ; `Int 1 ]) = [ 1 ]
+  to_choices [| "a" ; "b" |] (`List []) = []
+  (try ignore (to_choices [| "a" ; "b" |] (`List [ `Int 2 ])) ; false \
+   with Bad_value _ -> true)
+  (try ignore (to_choices [| "a" |] (`Int 0)) ; false \
+   with Bad_value _ -> true)
  *)
 
 (** Read a value that may be absent: [`Null] is the absence, anything else is
@@ -475,6 +516,24 @@ let to_list f = function
             with Bad_value msg -> bad_value "row %d: %s" (i + 1) msg
         ) l
     | v -> bad_value "expected a list, not %s" (Yojson.Basic.to_string v)
+
+(** Read which of [choices] a value names, any number of them: the counterpart
+ * of the [Set] kind, as [to_choice] is of [Enum].
+ *
+ * What comes back is in order and without repetition, whatever order the
+ * interface ticked them in and however many times: a set is what it holds, so
+ * two equal sets must read as equal values, and a setter reading its own
+ * property back must find what it wrote. *)
+let to_choices choices = function
+    (* Not [to_list], although a set travels as one: what that says when it
+     * refuses an element is which row of a table it was, and a set is not a
+     * table -- it is a row of boxes, and which choice is not one of the
+     * choices already names itself. *)
+    | `List l ->
+        List.map (to_choice choices) l |>
+        List.sort_unique compare
+    | v ->
+        bad_value "expected a set of choices, not %s" (Yojson.Basic.to_string v)
 
 (** Read the field [name] of a record with [f]. The counterpart of a [Record]
  * kind, one field at a time, which is how a setter rebuilds its own record:

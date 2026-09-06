@@ -167,7 +167,7 @@ struct
         let nb_ifaces = 10 in
         let sw = Hub.Switch.make ~parent:sim.root nb_ifaces 5000 "Internet" in
         let plugs = List.init nb_ifaces (fun i ->
-            Plug.make "" (Hub.Switch.iface sw i)) in
+            Plug.make "" (Hub.Switch.dev sw i)) in
         Simple { equip = [ Switch sw ] ; plugs }
 
     (* Build a single server (public static IP and name) as a Net.t: *)
@@ -215,7 +215,7 @@ struct
     let make_dc (sim : Simulation.t) ~dc_name ?nameserver ~cidr n =
         let sw = Hub.Switch.make ~parent:sim.root (n+1) (5*n) ("switch."^dc_name) in
         let local_ips = Ip.Cidr.local_addrs cidr in
-        let plug = Plug.make dc_name (Hub.Switch.iface sw n) in
+        let plug = Plug.make dc_name (Hub.Switch.dev sw n) in
         let net =
             { equip = [ Switch sw ] ; plugs = [ plug ] } in
         let num_hosts = ref 0 in

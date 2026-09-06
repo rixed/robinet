@@ -120,11 +120,14 @@ let rec coerce name (kind : Widget.kind) v =
     | IRange (min, max) -> `Int (Widget.to_int_range ~min ~max v)
     | FRange (min, max) -> `Float (Widget.to_float_range ~min ~max v)
     | Enum choices ->
-        let i = Widget.to_int v in
-        if i < 0 || i >= Array.length choices then
-            Widget.bad_value "Out of range value (%s) for %s"
-                (Yojson.Basic.to_string v) name ;
-        `Int i
+        (try `Int (Widget.to_choice choices v)
+        with Widget.Bad_value m -> Widget.bad_value "%s: %s" name m)
+    (* In order and without repetition, however it was sent: [make] is handed
+       the set itself, and has nothing left to check about it. *)
+    | Set choices ->
+        (try `List (Widget.to_choices choices v |>
+                    List.map (fun i -> `Int i))
+        with Widget.Bad_value m -> Widget.bad_value "%s: %s" name m)
     | Optional k ->
         (match v with `Null -> `Null | v -> coerce name k v)
     (* How a value is written is the interface's business; what arrives here is
@@ -185,6 +188,7 @@ let int args name = Widget.to_int (arg args name)
 let float args name = Widget.to_float (arg args name)
 let string args name = Widget.to_string (arg args name)
 let opt args name f = Widget.to_option f (arg args name)
+let list args name f = Widget.to_list f (arg args name)
 
 (* An address as one types it, and not as the resolver would have it:
  * [Ip.Addr.of_string] asks the system to look the name up, which would hold the
@@ -238,9 +242,12 @@ let hub =
       descr = "A repeater: whatever reaches one port leaves by every other." ;
       params = [
           param "ports" ~kind:(IRange (2, 1024)) ~default:(`Int 8)
-              ~descr:"How many cables it takes." ] ;
+              ~descr:"How many cables it takes." ;
+          param "speed" ~kind:(Enum Hub.Repeater.speed_names) ~default:(`Int 1)
+              ~descr:"Hub speed." ] ;
       make = fun ~parent name args ->
-          let t = Hub.Repeater.make ~parent (int args "ports") name in
+          let speed = Hub.Repeater.speeds.(int args "speed") in
+          let t = Hub.Repeater.make ~parent ~speed (int args "ports") name in
           t.Hub.Repeater.widget }
 
 let switch =
@@ -249,11 +256,21 @@ let switch =
       params = [
           param "ports" ~kind:(IRange (2, 1024)) ~default:(`Int 8)
               ~descr:"How many cables it takes." ;
+          param "speeds" ~kind:(Set Eth.Speed.names)
+              ~default:(`List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
+                                        Hub.Switch.default_speeds))
+              ~descr:"Speeds accepted by every ports (can be updated later)." ;
+          param "full duplex" ~kind:Bool ~default:(`Bool true)
+              ~descr:"Do ports support full-duplex by default?" ;
           param "MACs" ~kind:(IRange (1, 1_000_000)) ~default:(`Int 1024)
               ~descr:"How many addresses it can remember at once." ] ;
       make = fun ~parent name args ->
-          let t = Hub.Switch.make ~parent (int args "ports") (int args "MACs")
-                                  name in
+          let speeds =
+            list args "speeds" (fun v ->
+                Eth.Speed.all.(Widget.to_choice Eth.Speed.names v))
+          and full_duplex = bool args "full duplex" in
+          let t = Hub.Switch.make ~parent ~speeds ~full_duplex (int args "ports")
+                                  (int args "MACs") name in
           t.Hub.Switch.widget }
 
 let host =
