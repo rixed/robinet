@@ -551,7 +551,7 @@ let start_admin () =
 (* The one thing in a simulation that has to be undone by hand: everything
    inside a device goes away with it, but a cable reaches out of one device into
    another, so both ends have to be told. What each end has to be told differs
-   -- an adapter clears a flag, a repeater puts an iface back to a sink -- and
+   -- an adapter clears a flag, a switch puts a port back to a sink -- and
    the cable knows neither: it was handed the two undo functions when it was
    plugged in. *)
 let test_disconnect () =
@@ -690,11 +690,10 @@ let test_delete () =
     check "and taking its own parts with it"
         (Widget.find sim.Simulation.root sw_w.Widget.id = None &&
          sw_w.Widget.children = []) ;
-    (* Including their supply: the repeater inside a switch has one of its own,
-       and it is reached by the walk rather than by the switch knowing it is
-       there. *)
+    (* Including their supply: a switch has one of its own, and it is reached
+       by the walk rather than by the caller knowing it is there. *)
     check "which are stopped as well"
-        (not sw.Hub.Switch.hub.Hub.Repeater.power.Simulation.on)
+        (not sw.Hub.Switch.power.Simulation.on)
 
 (* Powering a host off is not a request that it stop: whatever it had planned
    to do ceases to exist. Everything it schedules -- its adapter, its sockets,
@@ -1160,13 +1159,13 @@ let test_http net cable duration nthreads
             | Some w -> w.Widget.name = "built"
             | None -> false) ;
         (* Made of the same parts as one an OCaml program would have built: a
-           switch is a hub that remembers, and the hub is a widget of its own. *)
+           switch is its interfaces, and each of them is a widget of its own --
+           which is what lets one be configured apart from its neighbours. *)
         check "and is made of what such a device is made of"
             (match Widget.find net.root switch_id with
             | Some w ->
-                (match w.Widget.children with
-                | [ c ] -> c.Widget.name = "hub"
-                | _ -> false)
+                List.map (fun (c : Widget.t) -> c.name) w.Widget.children
+                    = [ "#0" ; "#1" ; "#2" ]
             | None -> false) ;
         let host_a = created {|{"type":"host","name":"a",
                                 "params":{"address":"10.9.0.1"}}|}
@@ -1176,11 +1175,14 @@ let test_http net cable duration nthreads
             created {|{"type":"cable","params":{"from":%d,"to":%d}}|} a b in
         let joined = cable_of switch_id host_a in
         (* Peered with what the cable reaches, which is not always what was
-           named to ask for it: a host is reached through its adapter, so that
-           is the end the graph records. A switch is reached at the switch --
-           its ports are not widgets, one being as good as another. *)
+           named to ask for it: a host is reached through its adapter, and a
+           switch through the interface the cable landed on -- ports that are
+           configured apart are ports one has to be able to tell apart. *)
         let adapter id =
             List.find (fun (c : Widget.t) -> c.name = "eth")
+                      (widget id).Widget.children in
+        let iface id n =
+            List.find (fun (c : Widget.t) -> c.name = "#"^ string_of_int n)
                       (widget id).Widget.children in
         (* Named after what it joins, since "built-a" says what "cable-1"
            cannot. *)
@@ -1192,13 +1194,13 @@ let test_http net cable duration nthreads
                  List.find_opt (fun (p : Widget.peer) ->
                      match p.via with Some v -> v == c | None -> false)
                      w.Widget.peers in
-             match end_of (widget switch_id) with
+             match end_of (iface switch_id 0) with
              | Some p -> p.widget == adapter host_a
              | None -> false) ;
         check "and the far end says the same the other way round"
             (let c = widget joined in
              List.exists (fun (p : Widget.peer) ->
-                 p.widget.Widget.id = switch_id &&
+                 p.widget == iface switch_id 0 &&
                  (match p.via with Some v -> v == c | None -> false))
                  (adapter host_a).Widget.peers) ;
         (* And frames really cross it: a device added from the outside is on the
@@ -1225,20 +1227,26 @@ let test_http net cable duration nthreads
            switch forwards it, which is the whole of being connected. *)
         check "and the device at the other end of the switch hears it"
             (wait_for (fun () -> bits_across joined > 0)) ;
-        (* And it is a switch that is forwarding them, not the repeater it is
-           made of: the ports are the switch's own, so what arrives on one goes
-           through the address learning rather than straight out of every other
-           port. A switch that has learnt nothing has never seen a frame. *)
+        (* And it is a switch that is forwarding them, not a repeater: what
+           arrives on a port goes through the address learning rather than
+           straight out of every other port. A switch that has learnt nothing
+           has never seen a frame. *)
         let learnt id =
             match List.find (fun (p : Widget.property) -> p.name = "macs")
                             (widget id).Widget.properties with
             | exception Not_found -> false
             | p -> Yojson.Basic.Util.member "first_last" (p.getter ()) <> `Null in
-        check "and it is the switch forwarding them, not the repeater inside it"
+        check "and it is the switch learning where they went, not repeating them"
             (wait_for (fun () -> learnt switch_id)) ;
-        check "which is therefore no port of its own"
-            (List.for_all (fun (c : Widget.t) -> c.ports.count () = 0)
-                          (widget switch_id).Widget.children) ;
+        (* And each interface is one port of the switch, offering that one port
+           itself: a cable is asked for by naming the interface as readily as by
+           naming the switch, which is what makes an interface an end a saved
+           topology can write down. *)
+        check "while each of its interfaces is one of its ports"
+            (let w = widget switch_id in
+             List.length w.Widget.children = w.Widget.ports.count () &&
+             List.for_all (fun (c : Widget.t) -> c.ports.count () = 1)
+                          w.Widget.children) ;
         (* Three ports, and the third one takes the last of them. *)
         ignore (cable_of switch_id host_b) ;
         let host_c = created {|{"type":"host","name":"c",
@@ -1390,15 +1398,9 @@ let test_http net cable duration nthreads
              (widget switch_id).Widget.device = Some "switch") ;
         check "and a part of one says it is not a device at all"
             ((adapter far).Widget.device = None) ;
-        (* The repeater inside a switch *is* a repeater, and says so. What it
-           is not is a device of its own: one does not order or return the
-           parts of a machine separately. *)
-        check "while a part that is a device in its own right says so"
-            (List.exists (fun (c : Widget.t) -> c.device = Some "hub")
-                         (widget switch_id).Widget.children) ;
         check "so deleting a device's adapter is refused"
             (del (adapter far).Widget.id = 400 && not (gone far)) ;
-        check "and so is deleting the repeater inside a switch"
+        check "and so is deleting one of a switch's interfaces"
             (List.for_all (fun (c : Widget.t) -> del c.id = 400)
                           (widget switch_id).Widget.children) ;
         check "and the interface says as much before being asked"
@@ -1460,6 +1462,12 @@ let test_http net cable duration nthreads
                            "params":{"LAN":"10.42.0.0/24"}}|} in
         check "a gateway offers its two sides and nothing from inside"
             ((widget g).ports.count () = 2) ;
+        (* The router inside a gateway *is* a router, and says so. What it is
+           not is a device of its own: one does not order, or return, the parts
+           of a machine separately. *)
+        check "a part that is a device in its own right says so"
+            (List.exists (fun (c : Widget.t) -> c.device = Some "router")
+                         (widget g).Widget.children) ;
         check "and the router within it is not a device of its own"
             (List.for_all (fun (c : Widget.t) -> del c.id = 400)
                           (widget g).Widget.children) ;

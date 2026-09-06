@@ -801,7 +801,7 @@
                                                                             <td><span class="cell">
                                                                                 <span x-show="p.read_only" class="ro"
                                                                                       :class="{ unset: !set(c) }"
-                                                                                      x-text="cellText(c)"></span>
+                                                                                      x-text="cellText(c, p.units)"></span>
 
                                                                                 <!-- Same box as anywhere else a value
                                                                                      may be left out, in front of the

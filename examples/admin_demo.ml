@@ -57,14 +57,16 @@ let main =
                                      ~error_rate:0.0001
                                      ~name:(Printf.sprintf "cable%d" i) () in
             let trx = Eth.Cable.make cable in
-            Hub.Switch.iface switch i -=> trx <=-> h.Host.trx.dev ;
+            Hub.Switch.dev switch i -=> trx <=-> h.Host.trx.dev ;
             (* The cable reaches the host's adapter, and that is the end the
                graph records -- the same one the creation API would have
                recorded, so a network built by hand and one built from the
-               interface read alike. The switch end is the switch: its ports are
-               not widgets, one being as good as another. *)
+               interface read alike. The switch end is the interface the cable
+               is on, for the same reason: a port configured on its own is a
+               port the graph has to name. *)
             Widget.make_peers ~via:cable.widget
-                switch.Hub.Switch.widget h.Host.eth_state.Eth.State.widget ;
+                Widget.(switch.Hub.Switch.widget.ports.owner i)
+                h.Host.eth_state.Eth.State.widget ;
             h, ip) in
     (* Some traffic, so that the counters have something to count: every host
      * pings the next one, round and round. *)

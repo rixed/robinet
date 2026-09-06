@@ -188,6 +188,14 @@ const bps = (n) => {
  * and what those answer with is not a formatter. */
 const unitFormats = { __proto__: null, bps }
 
+/* Whether the values of a kind are numbers a unit's own writing applies to.
+ * A list is whatever it is a list of. */
+const numericKind = (kind) => {
+    const k = baseKind(kind)
+    const t = k.type === 'list' ? baseKind(k.of).type : k.type
+    return t === 'int' || t === 'float' || t === 'range'
+}
+
 /* What a figure counted in [units] reads as: the unit's own writing when it
  * has one, and the plain number with the unit beside it otherwise. */
 const withUnits = (v, units) => {
@@ -1818,14 +1826,18 @@ document.addEventListener('alpine:init', () => {
          * bare number that is typed into it, so both keep the unit beside. */
         unitsShown(p) {
             if (!p.units || baseKind(p.kind).type === 'metric') return ''
-            if (p.read_only && unitFormats[p.units] &&
-                typeof p.value === 'number') return ''
+            if (p.read_only && unitFormats[p.units] && numericKind(p.kind))
+                return ''
             return p.units
         },
 
-        /* What one cell of a read-only table says. */
-        cellText(c) {
+        /* What one cell of a read-only table says. [units] are the property's,
+         * every cell of a list being counted in the same thing. */
+        cellText(c, units) {
             if (!this.set(c)) return 'unset'
+            const f = unitFormats[units]
+            const n = Number(c.draft)
+            if (f && c.draft !== '' && Number.isFinite(n)) return f(n)
             if (baseKind(c.kind).type !== 'enum') return c.draft
             /* A cell of a row nobody has filled in yet has no choice, and no
                index either: [choice] would answer for the first one. */
