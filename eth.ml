@@ -382,14 +382,24 @@ struct
             (* Another frame arriving before rx_busy_until would be a collision.
              * We can't take back the previous frame with which this one collided,
              * but this one is dropped. *)
-            let dbl_recept = now < t.rx_busy_until in
-            let ser_delay = serialization_delay t bitlen in
-            let rx_stop = Clock.Time.add (max now t.rx_busy_until) ser_delay in
-            t.rx_busy_until <- rx_stop ;
+            let busy_until =
+                if t.full_duplex then t.rx_busy_until
+                else max t.rx_busy_until t.tx_busy_until in
+            let dbl_recept = now < busy_until in
+            let ser_delay = Speed.duration t.speed bitlen in
+            let rx_stop = Clock.Time.add now ser_delay in
+            t.rx_busy_until <- max t.rx_busy_until rx_stop ;
             if dbl_recept then
                 Metric.Counter.inc t.rx_crc_errs ~now
-            else
-                Simulation.at t.power rx_stop t.recv pld
+            else (
+                let recv_ts =
+                    match t.can_forward_after with
+                    | Some b when b < bitlen ->
+                        Clock.Time.add now (Speed.duration t.speed b)
+                    | _ ->
+                        rx_stop in
+                Simulation.at t.power recv_ts t.recv pld
+            )
         ) else
             Log.(log t.widget.logger Debug (lazy "Ignoring a frame (I'm off)"))
 
@@ -402,10 +412,13 @@ struct
             let now = Simulation.Widget.now t.widget in
             Metric.(Counter.add t.egress ~now (bytelength pld)) ;
             (* Frames must wait for each others when sending: *)
-            let ser_delay = serialization_delay t bitlen in
-            let tx_start = max now t.tx_busy_until in
+            let ser_delay = Speed.duration t.speed bitlen in
+            let busy_until =
+                if t.full_duplex then t.tx_busy_until
+                else max t.rx_busy_until t.tx_busy_until in
+            let tx_start = max now busy_until in
             t.tx_busy_until <- Clock.Time.add tx_start ser_delay ;
-            f pld) ;
+            Simulation.at t.power tx_start f pld) ;
         if not t.is_connected then (
             t.is_connected <- true ;
             Log.(log t.widget.logger Info (lazy (Printf.sprintf "Connected!")))
