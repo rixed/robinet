@@ -357,24 +357,43 @@ struct
           mutable speeds : Speed.t list ;
           mutable speed : Speed.t ; (* Negotiated *)
           mutable full_duplex : bool ;
+          mutable tx_busy_until : Clock.Time.t ;
+          mutable rx_busy_until : Clock.Time.t ;
           ingress : Metric.Counter.t ;
-          egress : Metric.Counter.t }
+          egress : Metric.Counter.t ;
+          rx_crc_errs : Metric.Counter.t }
 
+    let serialization_delay t bitlen =
+        (* If the interface can start forwarding as soon as some bits have
+         * been read: *)
+        let bitlen =
+            match t.can_forward_after with
+            | None -> bitlen
+            | Some b -> min bitlen b in
+        Speed.duration t.speed bitlen
+
+    (* Reception *)
     let write t pld =
-        let bitlen = bitstring_length pld in
-        Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx %d bits" bitlen))) ;
-        let now = Simulation.Widget.now t.widget in
-        Metric.(Counter.add t.ingress ~now (bytelength pld)) ;
-        let ser_delay =
-            (* If the interface can start forwarding as soon as some bits have
-             * been read: *)
-            let bitlen =
-                match t.can_forward_after with
-                | None -> bitlen
-                | Some b -> min bitlen b in
-            Speed.duration t.speed bitlen in
-        Simulation.delay t.power ser_delay t.recv pld
+        if t.power.on then (
+            let bitlen = bitstring_length pld in
+            Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx %d bits" bitlen))) ;
+            let now = Simulation.Widget.now t.widget in
+            Metric.(Counter.add t.ingress ~now (bytelength pld)) ;
+            (* Another frame arriving before rx_busy_until would be a collision.
+             * We can't take back the previous frame with which this one collided,
+             * but this one is dropped. *)
+            let dbl_recept = now < t.rx_busy_until in
+            let ser_delay = serialization_delay t bitlen in
+            let rx_stop = Clock.Time.add (max now t.rx_busy_until) ser_delay in
+            t.rx_busy_until <- rx_stop ;
+            if dbl_recept then
+                Metric.Counter.inc t.rx_crc_errs ~now
+            else
+                Simulation.at t.power rx_stop t.recv pld
+        ) else
+            Log.(log t.widget.logger Debug (lazy "Ignoring a frame (I'm off)"))
 
+    (* Emission *)
     let set_read t f =
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting emitter"))) ;
         t.emit <- (fun pld ->
@@ -382,6 +401,10 @@ struct
             Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Tx %d bits" bitlen))) ;
             let now = Simulation.Widget.now t.widget in
             Metric.(Counter.add t.egress ~now (bytelength pld)) ;
+            (* Frames must wait for each others when sending: *)
+            let ser_delay = serialization_delay t bitlen in
+            let tx_start = max now t.tx_busy_until in
+            t.tx_busy_until <- Clock.Time.add tx_start ser_delay ;
             f pld) ;
         if not t.is_connected then (
             t.is_connected <- true ;
@@ -423,9 +446,12 @@ struct
               emit = ignore_disconnected ~logger:widget.logger ;
               recv = recv |? ignore_bits ~logger:widget.logger ;
               is_connected = false ; can_forward_after ;
+              tx_busy_until = Clock.beginning_of_time ;
+              rx_busy_until = Clock.beginning_of_time ;
               speeds ; speed ; full_duplex ;
               ingress = Metric.Counter.make () ;
-              egress = Metric.Counter.make () } in
+              egress = Metric.Counter.make () ;
+              rx_crc_errs = Metric.Counter.make () } in
         Widget.add_properties widget Widget.[
             property "connected" ~kind:Bool
                 ~descr:"Is there a cable plugged in?"
@@ -447,7 +473,10 @@ struct
             metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
                 (Metric.Counter.T t.ingress) ;
             metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
-                (Metric.Counter.T t.egress) ] ;
+                (Metric.Counter.T t.egress) ;
+            metric_property "rx-crc-errors"
+                ~descr:"Dropped frames due to CRC errors on reception."
+                (Metric.Counter.T t.rx_crc_errs) ] ;
         (* An adapter is the one port of whatever owns it. *)
         widget.ports <- Widget.{
             count = (fun () -> 1) ;
