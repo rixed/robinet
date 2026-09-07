@@ -267,11 +267,21 @@ struct
             mac_size = Metric.Gauge.make () ;
             mac_hits = Metric.Atomic.make () ;
             mac_misses = Metric.Atomic.make () } in
+        (* Cut-through: make the interfaces pay only for deserializing the dest
+         * address: *)
         t.ifaces <-
             Array.init num_ifaces (fun i ->
                 let name = "#"^ string_of_int i in
                 let recv = forward_from t i in
-                Eth.Iface.make ~parent:widget ~power ~speeds ~full_duplex ~recv name) ;
+                Eth.Iface.make ~parent:widget ~power ~speeds ~full_duplex
+                               ~recv name) ;
+        let reset_cut_through () =
+            let can_forward_after =
+                if t.cut_through then Some (6 * 8) else None in
+            Array.iter (fun (i : Eth.Iface.t) ->
+                i.can_forward_after <- can_forward_after
+            ) t.ifaces in
+        reset_cut_through () ;
         widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
         widget.Widget.ports <- Widget.{
             count = (fun () -> num_ifaces) ;
@@ -283,7 +293,9 @@ struct
             property "cut-through" ~kind:Bool
                 ~descr:"If the switch starts transmitting without buffering."
                 ~getter:(fun () -> `Bool t.cut_through)
-                ~setter:(fun v -> t.cut_through <- to_bool v) ;
+                ~setter:(fun v ->
+                    t.cut_through <- to_bool v ;
+                    reset_cut_through ()) ;
             metric_property "macs"
                 ~descr:"Number of MAC addresses remembered."
                 (Metric.Gauge.T t.mac_size) ;

@@ -347,6 +347,10 @@ struct
            * directly. Instead, call [write] to write to the adapter from the
            * outside. *)
           mutable recv : bitstring -> unit ;
+          (* If the interface is able to forward the received frame as soon
+           * as that many bits have been deserialized (see cut-through switches
+           * and routers): *)
+          mutable can_forward_after : int option ;
           mutable is_connected : bool ;
           (* It's very common for a single switch to have ports with different
            * characteristics: *)
@@ -356,15 +360,22 @@ struct
           ingress : Metric.Counter.t ;
           egress : Metric.Counter.t }
 
-    let write (t : t) pld =
+    let write t pld =
         let bitlen = bitstring_length pld in
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx %d bits" bitlen))) ;
         let now = Simulation.Widget.now t.widget in
         Metric.(Counter.add t.ingress ~now (bytelength pld)) ;
-        let ser_delay = Speed.duration t.speed bitlen in
+        let ser_delay =
+            (* If the interface can start forwarding as soon as some bits have
+             * been read: *)
+            let bitlen =
+                match t.can_forward_after with
+                | None -> bitlen
+                | Some b -> min bitlen b in
+            Speed.duration t.speed bitlen in
         Simulation.delay t.power ser_delay t.recv pld
 
-    let set_read (t : t) f =
+    let set_read t f =
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting emitter"))) ;
         t.emit <- (fun pld ->
             let bitlen = bitstring_length pld in
@@ -396,10 +407,11 @@ struct
                 t.widget.name)))
 
     let default_speeds =
-        (* TODO: actual negociation *)
+        (* TODO: actual negotiation *)
         Speed.[ Eth10Mbps ; Eth100Mbps ; (*Eth1Gbps ; Eth2_5Gbps ; Eth5Gbps*) ]
 
-    let make ~parent ~power ?(speeds=default_speeds) ?(full_duplex=true) ?recv name =
+    let make ~parent ~power ?(speeds=default_speeds) ?(full_duplex=true)
+             ?can_forward_after ?recv name =
         if speeds = [] then
             invalid_arg "Cannot build an iface supporting no speed" ;
         let speed =
@@ -410,7 +422,7 @@ struct
             { widget ; power ;
               emit = ignore_disconnected ~logger:widget.logger ;
               recv = recv |? ignore_bits ~logger:widget.logger ;
-              is_connected = false ;
+              is_connected = false ; can_forward_after ;
               speeds ; speed ; full_duplex ;
               ingress = Metric.Counter.make () ;
               egress = Metric.Counter.make () } in
