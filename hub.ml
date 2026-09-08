@@ -71,6 +71,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
                     Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to port %d/%d" i (Array.length t.ports)))) ;
                     let params = Metric.(Params.singleton "port" (Param.Int i)) in
                     Metric.Counter.add t.egress ~now ~params (bytelength pld) ;
+                    (* Beware: the scheduler will separate simultaneous TX of ε *)
                     Simulation.asap t.power emit pld
                 )) t.ports
         )

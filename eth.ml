@@ -363,15 +363,6 @@ struct
           egress : Metric.Counter.t ;
           rx_crc_errs : Metric.Counter.t }
 
-    let serialization_delay t bitlen =
-        (* If the interface can start forwarding as soon as some bits have
-         * been read: *)
-        let bitlen =
-            match t.can_forward_after with
-            | None -> bitlen
-            | Some b -> min bitlen b in
-        Speed.duration t.speed bitlen
-
     (* Reception *)
     let write t pld =
         if t.power.on then (
@@ -445,6 +436,10 @@ struct
     let default_speeds =
         (* TODO: actual negotiation *)
         Speed.[ Eth10Mbps ; Eth100Mbps ; (*Eth1Gbps ; Eth2_5Gbps ; Eth5Gbps*) ]
+
+    let reset t =
+        t.tx_busy_until <- Clock.beginning_of_time ;
+        t.rx_busy_until <- Clock.beginning_of_time
 
     let make ~parent ~power ?(speeds=default_speeds) ?(full_duplex=true)
              ?can_forward_after ?recv name =
@@ -592,7 +587,8 @@ struct
     let reset t =
         BitHash.clear t.arp_cache ;
         BitHash.clear t.postponed ;
-        t.via <- None
+        t.via <- None ;
+        Iface.reset t.iface
 
     (** Create the state machine for an Ethernet communication.
      * @param mtu the maximum transmit unit (ie. you won't be able to send longer payloads)
@@ -1125,13 +1121,11 @@ struct
      * which port of which device each end went to, which is what [disconnect]
      * then needs. *)
     let plug (st : State.t) ((wa : Widget.t), pa) ((wb : Widget.t), pb) =
-        (match st.ends with
-        | Some _ ->
+        if st.ends <> None then
             (* Plugging it again would leave the first two ports emitting into
              * a cable nothing can unplug them from. *)
             invalid_arg ("Eth.Cable.plug: "^ Widget.full_name st.widget ^
-                         " is already plugged in")
-        | None -> ()) ;
+                         " is already plugged in") ;
         let trx = make st in
         wa.Widget.ports.dev pa -=> trx <=-> wb.Widget.ports.dev pb ;
         st.ends <- Some ((fun () -> wa.Widget.ports.disconnect pa),
