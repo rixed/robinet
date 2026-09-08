@@ -26,7 +26,7 @@ open Pcap
 let handle_file delay ifile ofile =
     let apply_delay a =
         let d = Clock.Interval.usec delay in
-        { a with Pdu.ts = Clock.Time.add a.Pdu.ts d } in
+        { a with Pdu.ts = Clock.Wall.add a.Pdu.ts d } in
     merge [ enum_of_file ifile ;
             enum_of_file ifile /@ apply_delay ] |>
     file_of_enum ofile

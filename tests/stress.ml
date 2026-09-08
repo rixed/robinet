@@ -150,15 +150,15 @@ let test_clock net =
     Thread.delay 0.05 ;
     let after_step = Simulation.now net in
     check_between "step advanced by exactly 5 ticks" 0.49 0.51
-        (Clock.Time.diff after_step paused_at :> float) ;
+        (Clock.Interval.to_secs (Clock.Time.diff after_step paused_at)) ;
     check "still paused after stepping" net.Simulation.paused ;
 
     (* Resuming must account for the wall clock time spent paused, or every
      * event scheduled during the pause fires at once. *)
-    let before = (net.Simulation.paused_total :> float) in
+    let before = (Clock.Interval.to_secs net.Simulation.paused_total) in
     Thread.delay 0.3 ;
     Simulation.resume net () ;
-    let spent = (net.Simulation.paused_total :> float) -. before in
+    let spent = (Clock.Interval.to_secs net.Simulation.paused_total) -. before in
     check_between "resume accounted for the time spent paused" 0.29 1.0 spent ;
     check "not paused any more" (not net.Simulation.paused) ;
     check "the clock advances again"
@@ -171,7 +171,7 @@ let test_clock net =
 let measure_speed net wall =
     let t0 = Simulation.now net in
     Thread.delay wall ;
-    (Clock.Time.diff (Simulation.now net) t0 :> float) /. wall
+    (Clock.Interval.to_secs (Clock.Time.diff (Simulation.now net) t0)) /. wall
 
 let test_speed net =
     section "Clock: speed against the wall clock" ;
@@ -189,19 +189,19 @@ let test_speed net =
     check_between "at a quarter, a quarter of one does" 0.15 0.35
         (measure_speed net 1.) ;
     check "keeping up is not being late"
-        ((net.Simulation.late :> float) < 0.1) ;
+        ((Clock.Interval.to_secs net.Simulation.late) < 0.1) ;
 
     (* Asked for more than any machine can do: it must say how far behind it
        is rather than pretend. *)
     Simulation.set_speed_ratio net (Some 1e9) ;
     Thread.delay 0.5 ;
-    let late = (net.Simulation.late :> float) in
+    let late = (Clock.Interval.to_secs net.Simulation.late) in
     check_between "an impossible speed is reported as lateness" 0.4 2.0 late ;
 
     (* Changing the speed is not the new speed being late. *)
     Simulation.set_speed_ratio net (Some 1.) ;
     check "changing the speed clears the lateness"
-        ((net.Simulation.late :> float) < 0.1) ;
+        ((Clock.Interval.to_secs net.Simulation.late) < 0.1) ;
 
     (* A step is asked for now, whatever the pace says. *)
     Simulation.set_speed_ratio net (Some 0.01) ;
@@ -213,7 +213,7 @@ let test_speed net =
         (wait_for (fun () -> net.Simulation.steps = 0)) ;
     Thread.delay 0.05 ;
     check_between "and stepped by exactly five ticks" 0.49 0.51
-        (Clock.Time.diff (Simulation.now net) before :> float) ;
+        (Clock.Interval.to_secs (Clock.Time.diff (Simulation.now net) before)) ;
     Simulation.resume net () ;
 
     (* Back to what the other tests expect. *)
@@ -293,7 +293,7 @@ let test_metric_samples () =
        simulation dispatches anything and the grid only starts after it. *)
     let gaps_of l =
         List.map2 (fun (a : Simulation.sample) (b : Simulation.sample) ->
-            (Clock.Time.diff b.Simulation.taken a.Simulation.taken :> float)
+            (Clock.Interval.to_secs (Clock.Time.diff b.Simulation.taken a.Simulation.taken))
         ) (List.take (List.length l - 1) l) (List.tl l) in
     let gaps = gaps_of samples in
     check "the samples after the baseline are a simulated second apart"
@@ -352,7 +352,7 @@ let test_metric_samples () =
          (root_prop "metrics samples kept").Widget.getter () = `Int 5) ;
     set "metrics sample rate" (`Float 0.5) ;
     check "and how often they are taken"
-        ((Simulation.metrics_sample_rate sim :> float) = 0.5 &&
+        ((Clock.Interval.to_secs (Simulation.metrics_sample_rate sim)) = 0.5 &&
          (root_prop "metrics sample rate").Widget.getter () = `Float 0.5) ;
     (* Five more simulated seconds, now sampled twice a second: more than
        enough to fill the shortened ring at the new pace. *)
@@ -376,7 +376,7 @@ let test_metric_samples () =
        made into an [Interval.t] in the first place.) *)
     check "a rate that is not a delay is refused"
         (List.for_all (fun r ->
-            try Simulation.set_metrics_sample_rate sim (Clock.Interval.o r) ;
+            try Simulation.set_metrics_sample_rate sim (Clock.Interval.sec r) ;
                 false
             with Invalid_argument _ -> true)
             [ 0. ; -1. ; infinity ]) ;

@@ -315,7 +315,7 @@ struct
     let names = Array.map to_string all
 
     let duration speed num_bits =
-        Clock.Interval.o (float num_bits /. to_bps speed)
+        Clock.Interval.of_secs (float num_bits /. to_bps speed)
 
     let max s1 s2 =
         if s1 >= s2 then s1 else s2
@@ -683,8 +683,8 @@ struct
                     t.gateways <- gateways) ;
             property "delay" ~kind:Float ~units:"secs"
                 ~descr:"Average delay to add to transmissions."
-                ~getter:(fun () -> `Float (t.delay :> float))
-                ~setter:(fun v -> t.delay <- Clock.Interval.o (to_float v)) ;
+                ~getter:(fun () -> `Float (Clock.Interval.to_secs t.delay))
+                ~setter:(fun v -> t.delay <- Clock.Interval.sec (to_float v)) ;
             property "loss" ~kind:(FRange (0., 1.))
                 ~descr:"Packet loss ratio."
                 ~getter:(fun () -> `Float t.loss)
@@ -720,8 +720,10 @@ struct
         let pdu = Pdu.make proto st.mac dst bits in
         Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Emitting an Eth packet, proto %s, from %s to %s (content '%s')" (Proto.to_string proto) (Addr.to_string st.mac) (Addr.to_string dst) (hexstring_of_bitstring bits)))) ;
         let delay =
-            if proto <> Proto.arp && (st.delay :> float) > 0. then
-                Clock.Interval.o (max 0. (jitter 0.1 (st.delay :> float)))
+            if proto <> Proto.arp &&
+               Clock.Interval.compare st.delay Clock.Interval.zero > 0 then
+                Clock.Interval.sec
+                    (max 0. (jitter 0.1 (Clock.Interval.to_secs st.delay)))
             else Clock.Interval.zero in
         Simulation.delay st.iface.power delay st.iface.emit (Pdu.pack pdu)
 
@@ -958,12 +960,14 @@ let maybe_record =
  * Also, notice that you can use the same [limited x y] in both directions,
  * thus having something similar to a half-duplex cable ;-) *)
 let limited power latency throughput =
-    let next_avlb = ref (Clock.Time.o 0.) in
+    let next_avlb = ref Clock.Time.zero in
     (fun emit bits ->
         let min_start = Clock.Time.add (Simulation.now power.Simulation.sim) latency in
         let start = max min_start !next_avlb
         and num_bits = float_of_int (min (bitstring_length bits) 368) in
-        let duration = max (Clock.Interval.usec 1.) (Clock.Interval.o (num_bits /. throughput)) in
+        let duration =
+            max (Clock.Interval.usec 1.)
+                (Clock.Interval.of_secs (num_bits /. throughput)) in
         next_avlb := Clock.Time.add start duration ;
         Simulation.at power start emit bits)
 

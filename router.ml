@@ -280,7 +280,7 @@ struct
                 let ip_pld = Icmp.Pdu.pack icmp in
                 let ip_pkt = Ip.Pdu.make Ip.Proto.icmp my_ip ip.Ip.Pdu.src ip_pld in
                 let bits = Ip.Pdu.pack ip_pkt in
-                Simulation.delay t.power (Clock.Interval.o delay) (route None t) bits
+                Simulation.delay t.power (Clock.Interval.sec delay) (route None t) bits
 
     (* The [route] function receives the IP packets from the Eth trx.
      * The integer [in_iface_opt] is the input interface number, unless

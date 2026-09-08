@@ -29,6 +29,10 @@
 
   {v
     GET    /api/simulations                 every simulation, with its clock
+                                            (every instant in this interface is
+                                             seconds of simulated time; add a
+                                             simulation's "epoch" to one to get
+                                             a date)
     GET    /api/simulations/<id>            one of them
     POST   /api/simulations/<id>/pause      freeze its clock
     POST   /api/simulations/<id>/resume     and let it run again
@@ -212,6 +216,14 @@ let rec names_a_file = function
     | Widget.Optional k | Widget.Hint (_, k) -> names_a_file k
     | _ -> false
 
+(* Every instant this interface hands out is a simulated one: seconds since
+ * the simulation began, which is what a simulation dates everything by and
+ * what comes back in a "since". What the world outside called that beginning
+ * is the "epoch" of the simulation (see /api/simulations), and adding the two
+ * is how a reader turns one of these into a date -- which only whoever
+ * displays it has to do. *)
+let json_of_time (t : Clock.Time.t) = `Float (Clock.Time.to_secs t)
+
 let json_of_property (p : Widget.property) =
     (* The value is read through the getter, which may fail on us: *)
     (* The value goes out as whatever it is -- a number stays a number -- so
@@ -297,18 +309,27 @@ let json_of_simulation (s : Simulation.t) =
         `Assoc [ "id", `Int s.id ;
              "name", `String s.name ;
              "root", `Int s.root.Widget.id ;
-             "now", `Float (Clock.Time.to_timestamp (Simulation.now s)) ;
-             "now_str", `String (Clock.Time.to_string (Simulation.now s)) ;
+             "now", json_of_time (Simulation.now s) ;
+             (* Where the world outside was when this simulation began: what a
+                reader adds to any instant of this simulation to get a date.
+                One left to run as fast as it can is at that date and not at
+                the reader's own, which is why it has to be said. *)
+             "epoch", `Float (Clock.Wall.to_secs s.Simulation.epoch) ;
+             (* The same instant as "now", written out, for whoever is reading
+                this by hand rather than drawing it. *)
+             "now_str",
+                `String (Clock.Wall.to_string
+                            (Simulation.to_wall_clock s (Simulation.now s))) ;
              "realtime", `Bool s.realtime ;
              (* Null is "as fast as it can", and is what a realtime simulation
               * reports too: its speed is not ours to choose. *)
              "speed_ratio", (match s.speed_ratio with
                             | None -> `Null
                             | Some r -> `Float r) ;
-             "late", `Float (s.late :> float) ;
+             "late", `Float (Clock.Interval.to_secs s.late) ;
              "running", `Bool s.continue ;
              "paused", `Bool s.paused ;
-             "paused_total", `Float (s.paused_total :> float) ;
+             "paused_total", `Float (Clock.Interval.to_secs s.paused_total) ;
              "pending_events", `Int (Simulation.Events.cardinal s.events) ]
 
 (* Reading a simulation's state means borrowing it from its own thread. *)
@@ -609,19 +630,19 @@ let get_property_history _mth matches vars _qry_body resp =
                 bad_request "since must be a simulated time, not %S" s
             | f when not (Float.is_finite f) ->
                 bad_request "since must be a simulated time, not %S" s
-            | f -> Some (Clock.Time.o f)) in
+            | f -> Some (Clock.Time.of_secs f)) in
     let series = Simulation.metric_history ?since sim w.id p.name in
     let json_of_point (t, v) =
-        `Assoc [ "t", `Float (t : Clock.Time.t :> float) ;
+        `Assoc [ "t", json_of_time t ;
                  "value", Metric.value_to_json v ] in
     let json_of_series (params, points) =
         `Assoc [ "params",
                  Yojson.Safe.to_basic (Metric.Params.to_yojson params) ;
                  "points", `List (List.map json_of_point points) ] in
     respond resp (`Assoc [
-        "now", `Float (Simulation.now sim : Clock.Time.t :> float) ;
-        "rate", `Float (Simulation.metrics_sample_rate sim :
-                            Clock.Interval.t :> float) ;
+        "now", json_of_time (Simulation.now sim) ;
+        "rate", `Float (Clock.Interval.to_secs
+                            (Simulation.metrics_sample_rate sim)) ;
         "kind", `String (Metric.kind_name metric) ;
         "units", `String p.units ;
         "series", `List (List.map json_of_series series) ])
@@ -802,7 +823,7 @@ let get_logs _mth matches vars _qry_body resp =
                 bad_request "since must be a simulated time, not %S" s
             | f when not (Float.is_finite f) ->
                 bad_request "since must be a simulated time, not %S" s
-            | f -> Some (Clock.Time.o f)) in
+            | f -> Some (Clock.Time.of_secs f)) in
     (* Held only while the messages are collected: a logger is written to by
        the dispatcher, and reading one halfway through a dispatch would give
        half of what that dispatch had to say. Forcing them into JSON afterwards
@@ -813,11 +834,11 @@ let get_logs _mth matches vars _qry_body resp =
             let lost, msgs = Log.messages ?since ~max_level:level w.logger in
             w, lost, msgs) in
     let json_of_msg (ts, lvl, text) =
-        `Assoc [ "t", `Float (ts : Clock.Time.t :> float) ;
+        `Assoc [ "t", json_of_time ts ;
                  "level", `String (Log.string_of_level lvl) ;
                  "text", `String text ] in
     respond resp (`Assoc [
-        "now", `Float (Simulation.now sim : Clock.Time.t :> float) ;
+        "now", json_of_time (Simulation.now sim) ;
         "widget", `Int w.id ;
         "lost", `Bool lost ;
         "messages", `List (List.map json_of_msg msgs) ])

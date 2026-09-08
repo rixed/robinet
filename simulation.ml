@@ -50,11 +50,10 @@
   works with real network devices and the outside world.
 
   If on the other hand the simulated network does not communicate with the
-  outside -- when the objective is to produce a pcap file, say -- then not
-  realtime mode plays the simulation at full speed and full CPU, and can produce
-  a pcap representing the workload of a day in minutes, or conversely a very
-  busy hour in several hours, with all packets present and their timestamps
-  accurate.
+  outside (when the objective is to produce a pcap file, say) then not realtime
+  mode plays the simulation at full speed and full CPU, and can produce a pcap
+  representing the workload of a day in minutes, or conversely a very busy hour
+  in several hours, with all packets present and their timestamps accurate.
 
   Only a simulation in realtime mode calls [synch]; a simulation that is not in
   realtime mode has no wall clock to synchronise against, and its time advances
@@ -69,7 +68,7 @@ let debug = false
 
 module Events = Map.Make (struct
     type t = Time.t
-    let compare (a : t) (b : t) = Float.compare (a :> float) (b :> float)
+    let compare (a : t) (b : t) = Time.compare a b
 end)
 
 type t =
@@ -113,20 +112,15 @@ type t =
        * the outside world must; a closed one need not, and then runs as fast as
        * it can. *)
       mutable realtime : bool ;
-      (* What must be added to a reading of the wall clock to place it on this
-       * simulation's own timeline.
+      (* The instant of the world outside that this simulation calls time
+       * zero. Every [Time.t] of this simulation is counted from here, in
+       * picoseconds.
+       * Read from the wall clock when the simulation is made, and moved only
+       * by [make_realtime].
        *
-       * Zero for a simulation that has followed the wall clock since it was
-       * made -- the two are then the same clock. It is not zero for one that
-       * was tied to the wall clock later (see [make_realtime]): a simulation
-       * left to run as fast as it could is not at the same instant as the
-       * world outside, and the gap it had reached when it was tied down is
-       * what this holds, for good.
-       *
-       * Everything the outside world dates has to cross that gap before this
-       * simulation can use it -- the timestamp libpcap puts on a captured
-       * packet, most of all. See [of_wall_clock]. *)
-      mutable clock_offset : Interval.t ;
+       * Everything the outside world dates (such as timestamps of captured
+       * traffic) has to cross that gap before this simulation can use it. *)
+      mutable epoch : Wall.t ;
       (* [continue] and [paused] both mean "not running", but differ in kind.
        * Clearing [continue] *ends* the simulation: [run] returns, its thread
        * finishes, and nothing sets it back -- that is what SIGINT and [stop]
@@ -137,7 +131,7 @@ type t =
       mutable continue : bool ;
       mutable paused : bool ;
       (* When paused, when (wall clock) we were paused: *)
-      mutable paused_since : float option ;
+      mutable paused_since : Wall.t option ;
       (* How much wall clock time this simulation has spent paused, in total.
        * Subtracted from the wall clock when synchronising, so that resuming
        * a realtime simulation does not make the simulation time leap forward
@@ -165,7 +159,7 @@ type t =
        * simulation that fell behind would stay behind instead of catching up.
        * Set afresh whenever the speed changes or the simulation resumes --
        * neither of which is the simulation being late. *)
-      mutable pace_anchor : (float * Time.t) option ;
+      mutable pace_anchor : (Wall.t * Time.t) option ;
       (* How far behind that pace the simulation is: zero while it keeps up,
        * growing while it cannot go as fast as it was asked to. *)
       mutable late : Interval.t ;
@@ -360,7 +354,7 @@ let at (p : power) (ts : Time.t) f x =
             "Not scheduling anything at %s: %s is off"
             (Time.to_string ts) p.name)))
     ) else (
-        let epsilon = Interval.usec 1. in
+        let epsilon = Interval.o 1 in
         let rec loop ts =
             (* If ts was already bound in t.events, its previous binding disappears.
                Also, we do not like the idea of several sequential events having the same TS. *)
@@ -380,7 +374,7 @@ let delay (p : power) d f x =
 
 let asap (p : power) f x =
     (* FIXME: would be more precise and fast to have a dedicated list for asap events *)
-    delay p (Interval.o 0.) f x
+    delay p Interval.zero f x
 
 (** Switch a power source back on. Whatever it used to power is gone for good;
  * this only makes it able to pay for events again. *)
@@ -412,8 +406,8 @@ let power_down (p : power) =
  * instant taken from the world outside has to be brought across before it can
  * be scheduled: used as it stands it would land in the simulation's past, and
  * be dispatched at once, or in its future, and wait there. *)
-let of_wall_clock t (ts : Time.t) =
-    Time.add ts (Interval.sub t.clock_offset t.paused_total)
+let of_wall_clock t (ts : Wall.t) =
+    Time.sub (Time.of_interval (Wall.diff ts t.epoch)) t.paused_total
 
 (** The other way: what the wall clock will read when [t] calls it [ts].
  *
@@ -421,12 +415,12 @@ let of_wall_clock t (ts : Time.t) =
  * on the simulation's -- which the run loop does every time it sleeps until
  * its next event. *)
 let to_wall_clock t (ts : Time.t) =
-    Time.sub ts (Interval.sub t.clock_offset t.paused_total)
+    Wall.add t.epoch (Interval.add (Time.to_interval ts) t.paused_total)
 
 (* The wall clock, on this simulation's timeline: shifted by whatever it is
  * from the world outside, and less however long it has stood paused. *)
 let unpaused_wall_clock t =
-    of_wall_clock t (Time.wall_clock ())
+    of_wall_clock t (Wall.now ())
 
 let synch_locked t =
     assert t.realtime (* Synch with real clock in non-realtime mode!? *) ;
@@ -452,7 +446,7 @@ let pause t () =
     with_lock t (fun () ->
         if not t.paused then (
             t.paused <- true ;
-            t.paused_since <- Some (Unix.gettimeofday ()) ;
+            t.paused_since <- Some (Wall.now ()) ;
             t.steps <- 0 ;
             (* Standing still is not falling behind. *)
             t.late <- Interval.zero
@@ -462,7 +456,7 @@ let pause t () =
 (* Measure the pace from here: this wall clock time, this simulated time. Also
  * clears the lateness, which was measured against the anchor being replaced. *)
 let reanchor t =
-    t.pace_anchor <- Some (Unix.gettimeofday (), !(t.now)) ;
+    t.pace_anchor <- Some (Wall.now (), !(t.now)) ;
     t.late <- Interval.zero
 
 (** Resume a paused simulation, accounting for the time it stood still so that
@@ -473,8 +467,7 @@ let resume t () =
         if t.paused then (
             Option.may (fun since ->
                 t.paused_total <-
-                    Interval.add t.paused_total
-                                 (Interval.o (Unix.gettimeofday () -. since))
+                    Interval.add t.paused_total (Wall.diff (Wall.now ()) since)
             ) t.paused_since ;
             t.paused_since <- None ;
             t.paused <- false ;
@@ -513,10 +506,10 @@ let set_speed_ratio t ratio =
  * Its clock must not jump as it happens. A simulation that has been running as
  * fast as it could is hours from the world outside, and everything already
  * scheduled on it is dated in its own time; moving the present would fire all
- * of that at once, or strand it. So the gap between the two clocks is measured
- * at this instant and kept ([clock_offset]), and from here on the simulation's
- * time is the wall clock plus that gap: advancing at the rate of the wall
- * clock, as asked, with the present exactly where it was.
+ * of that at once, or strand it. So its beginning is moved instead ([epoch]),
+ * to where the world outside says it must have been for the present to fall
+ * exactly where it already is; from here on the simulation's time is read off
+ * the wall clock, advancing at its rate, as asked.
  *
  * Anything the outside world dates then has to cross the same gap; that is
  * what [of_wall_clock] is for.
@@ -531,8 +524,9 @@ let make_realtime t =
                flipped: this is the number that will hold it there once [now]
                starts being read off the wall clock. Undoing [paused_total],
                which [of_wall_clock] takes off again. *)
-            t.clock_offset <-
-                Interval.add Time.(diff !(t.now) (wall_clock ())) t.paused_total ;
+            t.epoch <-
+                Wall.sub (Wall.now ())
+                    (Interval.add (Time.to_interval !(t.now)) t.paused_total) ;
             t.realtime <- true ;
             t.speed_ratio <- None ;
             (* Both belong to pacing a simulation that sets its own pace, which
@@ -540,8 +534,8 @@ let make_realtime t =
             t.pace_anchor <- None ;
             t.late <- Interval.zero ;
             Log.(log t.root.Widget.logger Debug (lazy (Printf.sprintf
-                "Following the wall clock, offset by %s"
-                (Interval.to_string t.clock_offset))))
+                "Following the wall clock, having begun at %s"
+                (Wall.to_string t.epoch))))
         )) () ;
     (* The run loop may be asleep in the branch for a simulation that paces
        itself; it has to wake up and take the other one. *)
@@ -551,7 +545,7 @@ let make_realtime t =
    and goes on from there at the pace of the wall clock. *)
 (*$T make_realtime
   let t = make ~realtime:false "ahead" in \
-  t.now := Clock.Time.o (Unix.gettimeofday () +. 3600.) ; \
+  t.now := Clock.Time.of_secs 3600. ; \
   let before = now t in \
   make_realtime t ; \
   t.realtime && t.speed_ratio = None && \
@@ -562,18 +556,19 @@ let make_realtime t =
    what a sniffed packet needs. *)
 (*$T make_realtime
   let t = make ~realtime:false "across" in \
-  t.now := Clock.Time.o (Unix.gettimeofday () +. 3600.) ; \
+  t.now := Clock.Time.of_secs 3600. ; \
   make_realtime t ; \
   Clock.Interval.(compare \
-    (abs (Clock.Time.diff (of_wall_clock t (Clock.Time.wall_clock ())) (now t))) \
+    (abs (Clock.Time.diff (of_wall_clock t (Clock.Wall.now ())) (now t))) \
     (sec 1.)) < 0
  *)
 
 (* One that already follows the wall clock is left exactly as it was. *)
 (*$T make_realtime
   let t = make "already" in \
+  let epoch = t.epoch in \
   make_realtime t ; \
-  t.clock_offset = Clock.Interval.zero && t.realtime
+  t.epoch = epoch && t.realtime
  *)
 
 (* When, by the wall clock, the event at [ts] is due at that speed. *)
@@ -581,16 +576,16 @@ let due_at t ratio ts =
     match t.pace_anchor with
     | None ->
         reanchor t ;
-        Unix.gettimeofday ()
+        Wall.now ()
     | Some (wall0, sim0) ->
-        wall0 +. (Time.diff ts sim0 :> float) /. ratio
+        Wall.add wall0 (Interval.div (Time.diff ts sim0) ratio)
 
 (** Run [n] events then pause again. *)
 let step ?(n=1) t () =
     with_lock t (fun () ->
         t.paused <- true ;
         if t.paused_since = None then
-            t.paused_since <- Some (Unix.gettimeofday ()) ;
+            t.paused_since <- Some (Wall.now ()) ;
         t.steps <- t.steps + n) () ;
     Condition.signal t.cond
 
@@ -621,8 +616,8 @@ let wait_on_cond ?until t =
     (match until with
     | None ->
         Condition.wait t.cond t.lock
-    | Some (until : Time.t) ->
-        (try Condvar.timed_wait t.cond t.lock (until :> float)
+    | Some (until : Wall.t) ->
+        (try Condvar.timed_wait t.cond t.lock (Wall.to_secs until)
         with Condvar.Timeout -> ())) ;
     t.lock_owner <- Some me
 
@@ -741,11 +736,12 @@ let sample_metrics_if_due t =
  * at once, so that the new cadence starts from a point rather than from a gap.
  *)
 let set_metrics_sample_rate t (rate : Interval.t) =
-    (* [Interval.o] has already refused a nan; an infinity it lets through, and
-     * a sample due at the end of time is never due at all. *)
-    if not (Float.is_finite (rate :> float)) || (rate :> float) <= 0. then
+    (* Whatever was not a length of time at all was refused when the interval
+     * was built (see [Interval.of_secs]); what is left to refuse here is a
+     * rate that would sample everything at once, or never. *)
+    if (rate :> int) <= 0 then
         invalid_arg "Simulation.set_metrics_sample_rate: not a delay: it must \
-                     be finite and above zero" ;
+                     be above zero" ;
     with_lock t (fun () ->
         t.metrics_sample_rate <- rate ;
         t.metric_samples_due <- Time.trunc (now t) rate) ()
@@ -771,7 +767,9 @@ let make =
     let seq = ref 0 in
     fun ?(realtime=true) name ->
         let id = !seq in
-        let now = ref (Time.o (Unix.gettimeofday ())) in
+        (* Every instant is counted from here, so the clock starts at zero
+           and [epoch] says what the world outside called that moment. *)
+        let now = ref Time.zero in
         let root = Widget.make_root ~sim:id ~now:(fun () -> !now) name in
         incr seq ;
         let rec t =
@@ -790,7 +788,7 @@ let make =
                  all -- and then nothing has yet asked the two to agree. Either
                  way there is no gap between them until [make_realtime] opens
                  one. *)
-              clock_offset = Interval.zero ;
+              epoch = Wall.now () ;
               continue = true ;
               paused = false ;
               paused_since = None ;
@@ -814,7 +812,7 @@ let make =
             property "metrics sample rate" ~kind:Float ~units:"secs"
               ~descr:"How often every metric of this simulation is written \
                       down, in its own simulated time."
-              ~getter:(fun () -> `Float (metrics_sample_rate t :> float))
+              ~getter:(fun () -> `Float (Interval.to_secs (metrics_sample_rate t)))
               ~setter:(fun v ->
                   let r = to_float v in
                   (* Said here rather than left to [set_metrics_sample_rate],
@@ -823,7 +821,7 @@ let make =
                   if not (Float.is_finite r) || r <= 0. then
                       bad_value
                           "a sample rate is a delay above zero, not %g" r ;
-                  set_metrics_sample_rate t (Interval.o r)) ;
+                  set_metrics_sample_rate t (Interval.sec r)) ;
             property "metrics samples kept" ~kind:(IRange (0, 1_000_000))
               ~descr:"How many of those snapshots to keep; none at all means \
                       no history."
@@ -902,17 +900,17 @@ let next_event t =
                 | Some ratio ->
                     let ts, _ = Events.min_binding t.events in
                     let due = due_at t ratio ts
-                    and wall = Unix.gettimeofday () in
-                    if wall >= due then (
+                    and wall = Wall.now () in
+                    if Wall.compare wall due >= 0 then (
                         (* Due already: run it, and say how far behind we are. *)
-                        t.late <- Interval.o (wall -. due) ;
+                        t.late <- Wall.diff wall due ;
                         true
                     ) else (
                         t.late <- Interval.zero ;
                         (* Sleeping on the condition rather than on the clock:
                          * whoever changes the speed, resumes or adds an event
                          * meanwhile wakes us to reconsider. *)
-                        wait_on_cond ~until:(Time.o due) t ;
+                        wait_on_cond ~until:due t ;
                         false
                     )) ()
         ) in

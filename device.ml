@@ -580,7 +580,7 @@ let default_name parent t args =
     else numbered_name parent t.name
 
 (*$T numbered_name
-  let r = Widget.make_root ~sim:0 ~now:(fun () -> Clock.Time.o 0.) "r" in \
+  let r = Widget.make_root ~sim:0 ~now:(fun () -> Clock.Time.zero) "r" in \
   numbered_name r "host" = "host-1" && \
   (ignore (Widget.make ~parent:r "host-1") ; \
    numbered_name r "host" = "host-2")

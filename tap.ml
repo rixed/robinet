@@ -61,7 +61,7 @@ external tap_read : int -> string = "wrap_tap_read"
 
 let sniff iface =
     let bytes = tap_read (int_of_fd iface.sock) in
-    let ts = Clock.Time.wall_clock () in
+    let ts = Clock.Wall.now () in
     Pcap.Pdu.make iface.name ts (bitstring_of_string bytes)
 
 (* Waiting for their widget, as above:

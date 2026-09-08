@@ -94,7 +94,7 @@ let console_log (t, lstr) =
 
 let make_queue size =
     { oldest = 0 ; len = 0 ; purged = None ;
-      msgs = Array.create size (Clock.Time.o 0., lazy "") }
+      msgs = Array.create size (Clock.Time.zero, lazy "") }
 
 let enqueue q m =
     if q.len >= Array.length q.msgs then
@@ -146,7 +146,7 @@ let queue_enum q =
   let queue_of_list ?(size=3) msgs =
     let q = make_queue size in
     List.iteri (fun i s ->
-        let t = Clock.Time.o (float_of_int i) in
+        let t = Clock.Time.of_secs (float_of_int i) in
         enqueue q (t, lazy s)
     ) msgs ;
     q
@@ -154,19 +154,19 @@ let queue_enum q =
 (*$= queue_enum & ~printer:(fun lst -> String.concat "," (List.map (Lazy.force % snd) lst))
   [] \
         (List.of_enum (queue_enum (queue_of_list [])))
-  [ Clock.Time.o 0., lazy "glop" ] \
+  [ Clock.Time.of_secs 0., lazy "glop" ] \
         (List.of_enum (queue_enum (queue_of_list [ "glop" ])))
-  [ Clock.Time.o 0., lazy "glop" ; \
-    Clock.Time.o 1., lazy "pas glop" ] \
+  [ Clock.Time.of_secs 0., lazy "glop" ; \
+    Clock.Time.of_secs 1., lazy "pas glop" ] \
         (List.of_enum (queue_enum (queue_of_list [ "glop" ; "pas glop" ])))
-  [ Clock.Time.o 0., lazy "glop" ; \
-    Clock.Time.o 1., lazy "glop glop" ; \
-    Clock.Time.o 2., lazy "pas glop" ] \
+  [ Clock.Time.of_secs 0., lazy "glop" ; \
+    Clock.Time.of_secs 1., lazy "glop glop" ; \
+    Clock.Time.of_secs 2., lazy "pas glop" ] \
         (List.of_enum (queue_enum (queue_of_list [ "glop" ; "glop glop" ; \
                                                    "pas glop" ])))
-  [ Clock.Time.o 1., lazy "glop glop" ; \
-    Clock.Time.o 2., lazy "pas glop" ; \
-    Clock.Time.o 3., lazy "glop pas glop" ] \
+  [ Clock.Time.of_secs 1., lazy "glop glop" ; \
+    Clock.Time.of_secs 2., lazy "pas glop" ; \
+    Clock.Time.of_secs 3., lazy "glop pas glop" ] \
         (List.of_enum (queue_enum (queue_of_list [ "glop" ; "glop glop" ; \
                                                    "pas glop" ; "glop pas glop" ])))
 *)
@@ -231,20 +231,20 @@ let messages ?since ?(max_level=max_level) t =
 
 (*$inject
   let logged ?since ?max_level msgs =
-    let t = make ~size:2 ~now:(fun () -> Clock.Time.o 0.) () in
+    let t = make ~size:2 ~now:(fun () -> Clock.Time.zero) () in
     List.iter (fun (ts, lvl, s) ->
-      enqueue t.queues.(int_of_level lvl) (Clock.Time.o ts, lazy s)) msgs ;
+      enqueue t.queues.(int_of_level lvl) (Clock.Time.of_secs ts, lazy s)) msgs ;
     let lost, msgs = messages ?since ?max_level t in
     lost, List.map (fun (ts, lvl, s) ->
-      (ts : Clock.Time.t :> float), string_of_level lvl, s) msgs
+      Clock.Time.to_secs ts, string_of_level lvl, s) msgs
  *)
 (*$= logged & ~printer:dump
   (false, []) (logged [])
   (false, [ 1., "info", "a" ; 2., "error", "b" ])     (logged [ 1., Info, "a" ; 2., Error, "b" ])
-  (* [since] is exclusive, and what it leaves out is not lost: it was read. *)   (false, [ 2., "error", "b" ])     (logged ~since:(Clock.Time.o 1.) [ 1., Info, "a" ; 2., Error, "b" ])
+  (* [since] is exclusive, and what it leaves out is not lost: it was read. *)   (false, [ 2., "error", "b" ])     (logged ~since:(Clock.Time.of_secs 1.) [ 1., Info, "a" ; 2., Error, "b" ])
   (* A level nobody asked for is not read at all. *)   (false, [ 2., "error", "b" ])     (logged ~max_level:(int_of_level Error) [ 1., Info, "a" ; 2., Error, "b" ])
-  (* Two of that level fit; the third pushes the first out, and a reader that      had asked for everything after it is told so. *)   (true, [ 2., "info", "b" ; 3., "info", "c" ])     (logged ~since:(Clock.Time.o 0.5)       [ 1., Info, "a" ; 2., Info, "b" ; 3., Info, "c" ])
-  (* But not one that had already read it. *)   (false, [ 3., "info", "c" ])     (logged ~since:(Clock.Time.o 2.)       [ 1., Info, "a" ; 2., Info, "b" ; 3., Info, "c" ])
+  (* Two of that level fit; the third pushes the first out, and a reader that      had asked for everything after it is told so. *)   (true, [ 2., "info", "b" ; 3., "info", "c" ])     (logged ~since:(Clock.Time.of_secs 0.5)       [ 1., Info, "a" ; 2., Info, "b" ; 3., Info, "c" ])
+  (* But not one that had already read it. *)   (false, [ 3., "info", "c" ])     (logged ~since:(Clock.Time.of_secs 2.)       [ 1., Info, "a" ; 2., Info, "b" ; 3., Info, "c" ])
   (* Of one instant, every level, most serious first. *)   (false, [ 1., "error", "b" ; 1., "info", "a" ; 1., "info", "c" ])     (logged [ 1., Info, "a" ; 1., Error, "b" ; 1., Info, "c" ])
  *)
 
@@ -267,7 +267,7 @@ let log_exceptions t ?(level=Warning) what f x =
                 (Printexc.to_string e)
                 what))
 
-let make ?(size=50) ?(now=Clock.Time.wall_clock) () =
+let make ?(size=50) ?(now=Clock.Time.since_start) () =
     { now ; queues = Array.init num_levels (fun _ -> make_queue size) }
 
 (* The logger that will adopt any others: *)

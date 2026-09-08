@@ -151,7 +151,7 @@ struct
     type t = t_ ref
 
     let empty =
-        let z = Clock.Time.o 0. in
+        let z = Clock.Time.zero in
         { first = z ; last = z }
 
     let make () =
@@ -495,14 +495,14 @@ let value_to_json v = Yojson.Safe.to_basic (value_to_yojson v)
 
 (*$T sample
   sample (Atomic.T (Atomic.make ())) = []
-  (let a = Atomic.make () in let params = Params.singleton "port" (Param.Int 2) in Atomic.fire ~now:(Clock.Time.o 1.) ~params a ; Atomic.fire ~now:(Clock.Time.o 3.) ~params a ; sample (Atomic.T a) = [ params, Count 2 ])
-  (let g = Gauge.make () in Gauge.set ~now:(Clock.Time.o 1.) g 5 ; sample (Gauge.T g) = [ Params.empty, Value { min = 5 ; current = 5 ; max = 5 ; sample_min = 5 ; sample_max = 5 } ])
+  (let a = Atomic.make () in let params = Params.singleton "port" (Param.Int 2) in Atomic.fire ~now:(Clock.Time.of_secs 1.) ~params a ; Atomic.fire ~now:(Clock.Time.of_secs 3.) ~params a ; sample (Atomic.T a) = [ params, Count 2 ])
+  (let g = Gauge.make () in Gauge.set ~now:(Clock.Time.of_secs 1.) g 5 ; sample (Gauge.T g) = [ Params.empty, Value { min = 5 ; current = 5 ; max = 5 ; sample_min = 5 ; sample_max = 5 } ])
   (* The window is what happened since the last sample; the extremes beside it are those since the metric began. *) \
-  (let now = Clock.Time.o 1. in let g = Gauge.make () in Gauge.set ~now g 5 ; Gauge.set ~now g 1 ; ignore (sample (Gauge.T g)) ; Gauge.set ~now g 3 ; sample (Gauge.T g) = [ Params.empty, Value { min = 1 ; current = 3 ; max = 5 ; sample_min = 1 ; sample_max = 3 } ])
+  (let now = Clock.Time.of_secs 1. in let g = Gauge.make () in Gauge.set ~now g 5 ; Gauge.set ~now g 1 ; ignore (sample (Gauge.T g)) ; Gauge.set ~now g 3 ; sample (Gauge.T g) = [ Params.empty, Value { min = 1 ; current = 3 ; max = 5 ; sample_min = 1 ; sample_max = 3 } ])
   (* Nothing having moved, the window is the value standing still. *) \
-  (let now = Clock.Time.o 1. in let g = Gauge.make () in Gauge.set ~now g 5 ; Gauge.set ~now g 2 ; ignore (sample (Gauge.T g)) ; sample (Gauge.T g) = [ Params.empty, Value { min = 2 ; current = 2 ; max = 5 ; sample_min = 2 ; sample_max = 2 } ])
+  (let now = Clock.Time.of_secs 1. in let g = Gauge.make () in Gauge.set ~now g 5 ; Gauge.set ~now g 2 ; ignore (sample (Gauge.T g)) ; sample (Gauge.T g) = [ Params.empty, Value { min = 2 ; current = 2 ; max = 5 ; sample_min = 2 ; sample_max = 2 } ])
   (* A duration's window holds nothing until one is measured in it, which is not the same as a duration of zero. *) \
-  (let t = Timed.make () in let stop = Timed.start ~now:(Clock.Time.o 1.) t in stop ~now:(Clock.Time.o 3.) Params.empty ; (match sample (Timed.T t) with [ _, Durations d ] -> d.count = 1 && d.sample_min = Some (Clock.Interval.o 2.) && d.sample_max = Some (Clock.Interval.o 2.) | _ -> false) && (match sample (Timed.T t) with [ _, Durations d ] -> d.count = 1 && d.sample_min = None && d.sample_max = None | _ -> false))
+  (let t = Timed.make () in let stop = Timed.start ~now:(Clock.Time.of_secs 1.) t in stop ~now:(Clock.Time.of_secs 3.) Params.empty ; (match sample (Timed.T t) with [ _, Durations d ] -> d.count = 1 && d.sample_min = Some (Clock.Interval.sec 2.) && d.sample_max = Some (Clock.Interval.sec 2.) | _ -> false) && (match sample (Timed.T t) with [ _, Durations d ] -> d.count = 1 && d.sample_min = None && d.sample_max = None | _ -> false))
  *)
 
 (* Which of them it is. A metric never changes kind, so this is what tells the
@@ -539,8 +539,8 @@ let to_json m = Yojson.Safe.to_basic (to_yojson m)
   (* A family, keyed by the parameters of the events. *) \
   (let a = Atomic.make () in \
    let params = Params.singleton "port" (Param.Int 2) in \
-   Atomic.fire ~now:(Clock.Time.o 1.) ~params a ; \
-   Atomic.fire ~now:(Clock.Time.o 3.) ~params a ; \
+   Atomic.fire ~now:(Clock.Time.of_secs 1.) ~params a ; \
+   Atomic.fire ~now:(Clock.Time.of_secs 3.) ~params a ; \
    match to_json (Atomic.T a) with \
    | `Assoc l -> \
        List.assoc "counts" l = \

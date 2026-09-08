@@ -427,7 +427,7 @@ let user t ?pause max_depth start =
                             let d = match pause with
                                 | None -> 0.
                                 | Some t -> Random.float (2.*.t) in
-                            Simulation.delay t.host.Host.power (Clock.Interval.o d) (fun () ->
+                            Simulation.delay t.host.Host.power (Clock.Interval.sec d) (fun () ->
                                 if debug then Printf.printf "Browser: user: fetching %s after %s\n" (Url.to_string url') (Url.to_string url) ;
                                 aux (max_depth-1) url' ;
                                 fetch_next ()) () in

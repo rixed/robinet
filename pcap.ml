@@ -144,7 +144,7 @@ external inject_ : iface_handler -> string -> unit = "wrap_pcap_inject"
  * seconds if no packets have been captured. It will raise End_of_file if the
  * file descriptor has been closed. *)
 type sniff_ret_ =
-    { sniffed_timestamp : Clock.Time.t ; sniffed_caplen : int ;
+    { sniffed_timestamp : Clock.Wall.t ; sniffed_caplen : int ;
       sniffed_wirelen : int ; sniffed_bytes : string }
 
 external sniff_ : ?timeout:float -> iface_handler -> sniff_ret_ = "wrap_pcap_read"
@@ -251,7 +251,11 @@ struct
     (** These informations are present as the first layer of every packet
      * read from a pcap file. *)
     type t = { source_name : string ; caplen : int ; wirelen : int ;
-               dlt : Dlt.t ; ts : Clock.Time.t ; payload : Payload.t }
+               (* When the packet was captured, by the clock of the world
+                  outside: that is what a pcap file holds, whoever wrote it.
+                  A simulation that wants to schedule it must bring it across
+                  first (see [Simulation.of_wall_clock]). *)
+               dlt : Dlt.t ; ts : Clock.Wall.t ; payload : Payload.t }
 
     let make source_name ?(caplen=65535) ?wirelen ?(dlt=Dlt.en10mb) ts bits =
         let wirelen = wirelen |? bytelength bits
@@ -260,7 +264,7 @@ struct
 
     (** Return the [bitstring] ready to be written into a pcap file (see {!Pcap.save}). *)
     let pack t =
-        let sec, usec = Clock.Time.to_ints t.ts in
+        let sec, usec = Clock.Wall.to_ints t.ts in
         let len = Payload.length t.payload in
         (* What is saved of the packet, which is not all of it when the caplen
          * is shorter than what is in hand. *)
@@ -331,7 +335,10 @@ let default_dlt = Dlt.en10mb
 let save sim ?caplen ?(dlt=default_dlt) fname =
     let write_pdu, close = Pdu.save ?caplen ~dlt fname in
     let write_bits bits =
-        let pdu = Pdu.make fname ?caplen ~dlt (Simulation.now sim) bits in
+        (* What goes into the file is dated as the world outside would have
+           dated it, since that is what everything reading it will assume. *)
+        let ts = Simulation.to_wall_clock sim (Simulation.now sim) in
+        let pdu = Pdu.make fname ?caplen ~dlt ts bits in
         write_pdu pdu in
     write_bits, close
 
@@ -641,7 +648,7 @@ let read_next_pkt global_header ic =
                    else (
                        concat [ bits ; zeroes_bitstring (Int32.to_int (Int32.sub wire_len caplen)*8) ]
                    ) in
-        let ts = Clock.Time.o (Int32.to_float sec +. (Int32.to_float usec) *. 0.000001) in
+        let ts = Clock.Wall.o (Int32.to_float sec +. (Int32.to_float usec) *. 0.000001) in
         Pdu.make global_header.name
                  ~caplen:(Int32.to_int caplen)
                  ~dlt:global_header.dlt
@@ -690,7 +697,7 @@ let file_of_enum ?(dlt=Dlt.en10mb) fname e =
 (** Informations on a pcap file. *)
 type infos = { filename : string ; data_link_type : Dlt.t ;
                num_packets : int ; data_size : int64 ;
-               start_time : Clock.Time.t ; stop_time : Clock.Time.t }
+               start_time : Clock.Wall.t ; stop_time : Clock.Wall.t }
 
 (** Return some informations about a pcap file (require to scan the whole file,
  * so depending on the file size it may take some time). *)
@@ -702,24 +709,24 @@ let infos_of filename =
     Enum.iter (fun pdu ->
         incr num_packets ;
         data_size := Int64.add !data_size (Int64.of_int (Payload.length pdu.Pdu.payload)) ;
-        min_ts := min !min_ts (pdu.Pdu.ts :> float);
-        max_ts := max !max_ts (pdu.Pdu.ts :> float)) pkts ;
+        min_ts := min !min_ts (Clock.Wall.to_secs pdu.Pdu.ts) ;
+        max_ts := max !max_ts (Clock.Wall.to_secs pdu.Pdu.ts)) pkts ;
     { filename ; data_link_type = dlt ;
       num_packets = !num_packets ; data_size = !data_size ;
-      start_time = Clock.Time.o !min_ts ; stop_time = Clock.Time.o !max_ts }
+      start_time = Clock.Wall.o !min_ts ; stop_time = Clock.Wall.o !max_ts }
 
 (* Check that we found the same values than capinfo *)
 (*$= infos_of & ~printer:BatPervasives.dump
     (infos_of "tests/someweb.pcap") ({ filename = "tests/someweb.pcap" ;\
                                        data_link_type = Dlt.en10mb ;\
                                        num_packets = 173 ; data_size = 149461L ;\
-                                       start_time = Clock.Time.o 1332451938.3774271 ;\
-                                       stop_time = Clock.Time.o 1332451941.92178106 })
+                                       start_time = Clock.Wall.o 1332451938.3774271 ;\
+                                       stop_time = Clock.Wall.o 1332451941.92178106 })
     (infos_of "tests/someweb_cut.pcap") ({ filename = "tests/someweb_cut.pcap" ;\
                                            data_link_type = Dlt.en10mb ;\
                                            num_packets = 173 ; data_size = 149461L ;\
-                                           start_time = Clock.Time.o 1332451938.3774271 ;\
-                                           stop_time = Clock.Time.o 1332451941.92178106 })
+                                           start_time = Clock.Wall.o 1332451938.3774271 ;\
+                                           stop_time = Clock.Wall.o 1332451941.92178106 })
  *)
 
 (** [merge [e1 ; e2 ; e3]] will merge the three [Enumt.t] of packets in chronological
@@ -768,7 +775,7 @@ let play power tx fname =
                 let d =
                     match last_ts with
                     | None     -> Clock.Interval.zero
-                    | Some lts -> Clock.Time.diff pdu.Pdu.ts lts in
+                    | Some lts -> Clock.Wall.diff pdu.Pdu.ts lts in
                 Simulation.delay power d (fun () ->
                     tx (pdu.Pdu.payload :> bitstring) ;
                     read_next_pkt (Some pdu.Pdu.ts)) ()
@@ -802,7 +809,7 @@ type replayer =
       mutable loop : bool ;
       mutable file : (global_header * IO.input) option ;
       (* When was the last packet played: *)
-      mutable last_ts : Clock.Time.t option ;
+      mutable last_ts : Clock.Wall.t option ;
       (* Which reading of the file the packets on their way belong to.
        *
        * A packet is read and scheduled before it is due, and between those two
@@ -886,7 +893,7 @@ let rec replay_next replayer =
                 match replayer.last_ts with
                 | None -> Clock.Interval.zero
                 | Some lts ->
-                    let d = Clock.Time.diff pdu.ts lts in
+                    let d = Clock.Wall.diff pdu.ts lts in
                     (* A capture whose packets are not in order would otherwise
                        ask for an event in the past, which is a moment this
                        clock has no way back to. Such a packet is played as
@@ -1074,13 +1081,10 @@ let closeif iface =
 let sniff ?dlt ?timeout iface =
     let sniffed = sniff_ ?timeout iface.handler in
     Log.(log iface.widget.logger Debug (lazy (Printf.sprintf "Captured %d/%d bytes" sniffed.sniffed_caplen sniffed.sniffed_wirelen))) ;
-    let ts =
-        Simulation.of_wall_clock (Simulation.of_widget iface.widget)
-                                 sniffed.sniffed_timestamp in
     Pdu.make iface.name ?dlt
         ~caplen:sniffed.sniffed_caplen
         ~wirelen:sniffed.sniffed_wirelen
-        ts
+        sniffed.sniffed_timestamp
         (bitstring_of_string sniffed.sniffed_bytes)
 
 (** {2 Packet injection} *)
@@ -1139,7 +1143,13 @@ let sniffer iface ?(while_=(fun () -> true)) rx =
                 Simulation.synch (Simulation.of_widget iface.widget) ;
                 (* Metric.Atomic.fire packets_sniffed_ok ;
                    Metric.Counter.add bytes_in (Payload.length pdu.Pdu.payload) ; *)
-                Simulation.at iface.power pdu.Pdu.ts rx (pdu.Pdu.payload :> bitstring) ;
+                (* The packet is dated by the world's clock, which is not
+                   where this simulation is unless the two were never parted
+                   (see [Simulation.make_realtime]). *)
+                let ts =
+                    Simulation.of_wall_clock
+                        (Simulation.of_widget iface.widget) pdu.Pdu.ts in
+                Simulation.at iface.power ts rx (pdu.Pdu.payload :> bitstring) ;
                 loop () in
     Thread.create loop ()
 

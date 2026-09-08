@@ -907,7 +907,7 @@ let ports_of w =
    name renames the arrival. *)
 (*$T unique_among
   ignore unique_among ; (* Called by reparent *) \
-  let r = make_root ~sim:0 ~now:(fun () -> Clock.Time.o 0.) "r" in \
+  let r = make_root ~sim:0 ~now:(fun () -> Clock.Time.zero) "r" in \
   let h1 = make ~parent:r "h" and h2 = make ~parent:r "h" in \
   h1.name = "h" && h2.name = "h-2" && \
   (make ~parent:h1 "eth").name = "eth" && \
@@ -927,7 +927,7 @@ let ports_of w =
 (* The properties read the field, not the location the widget was built with:
    a widget is placed, moved and taken off the map long after that. *)
 (*$T place
-  let w = make_root ~sim:0 ~now:(fun () -> Clock.Time.o 0.) "w" in \
+  let w = make_root ~sim:0 ~now:(fun () -> Clock.Time.zero) "w" in \
   let read n = (List.find (fun p -> p.name = n) w.properties).getter () in \
   read "latitude" = `Null && read "longitude" = `Null && \
   (place w (Some { lat = 45.75 ; lon = 4.85 }) ; \

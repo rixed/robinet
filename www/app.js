@@ -439,12 +439,16 @@ const mergeHistory = (m, answer) => {
  * ((sum - sum') / (count - count')), and both carry the extremes of that same
  * interval, which is what the band is drawn from. An interval in which nothing
  * was measured has no average and no extremes: a gap, honestly. */
-const lineOf = (kind, pts) => {
+const lineOf = (kind, pts, epoch) => {
     const xs = [], ys = [], los = [], his = []
     const banded = kind === 'gauge' || kind === 'timed'
     for (let i = 0; i < pts.length; i++) {
         const p = pts[i], prev = i > 0 ? pts[i - 1] : null
-        xs.push(p.t)
+        /* uPlot draws its x axis as dates, and the simulator dates its
+         * samples on its own clock: this is where the two meet. Only the
+         * axis crosses over -- a rate is a difference of instants, which is
+         * the same length of time on either clock. */
+        xs.push(epoch + p.t)
         if (kind === 'counter' || kind === 'atomic') {
             const dt = prev ? p.t - prev.t : 0
             ys.push(prev && dt > 0 && p.value >= prev.value
@@ -1702,12 +1706,21 @@ document.addEventListener('alpine:init', () => {
             return d <= 0 ? 'just now' : dur(d) + ' ago'
         },
 
+        /* Where a simulation's clock stands against the world's: what the
+         * world outside called that simulation's time zero. Every instant the
+         * simulator sends is counted from there, so this is what turns one
+         * into a date. */
+        epochOf(sim) {
+            const s = this.sims.find(s => s.id === sim)
+            return s ? s.epoch : 0
+        },
+
         /* A simulated time as a clock reads it. Three decimals rather than
          * the two the simulator shows for the present: a whole dispatch is
          * logged at one instant, and the reader is looking for the boundaries
          * between them. */
         clock(t) {
-            const d = new Date(t * 1000)
+            const d = new Date((this.epochOf(this.selected.sim) + t) * 1000)
             return d.toTimeString().slice(0, 8) + '.' +
                    String(d.getMilliseconds()).padStart(3, '0')
         },
@@ -2111,7 +2124,7 @@ document.addEventListener('alpine:init', () => {
                     const key = rowKey(m, row.params)
                     const color = palette[colour++ % palette.length]
                     if (chart.hidden.includes(key)) continue
-                    const l = lineOf(h.kind, row.pts)
+                    const l = lineOf(h.kind, row.pts, this.epochOf(m.sim))
                     const params = this.paramsText(row.params)
                     lines.push({ key, color, ...l,
                                  units: lineUnits(h.kind, h.units),
