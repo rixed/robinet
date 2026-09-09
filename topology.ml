@@ -375,3 +375,152 @@ let of_simulation (sim : Simulation.t) =
     (* And it all survives the trip through JSON: *)
     assert_equal ~printer:dump (to_json t) (to_json (of_string (to_string t)))
  *)
+
+(** {2 Building a simulation} *)
+
+(* The reverse of [params_of]: a parameter that names another widget arrives as
+ * a path and has to be turned back into the id this process gave that widget.
+ * An id is taken as it stands, for a document written by something other than
+ * a save, since that is what the parameter's kind says it is. *)
+let params_to_ids ~root (entry : Device.t) params =
+    List.map (fun (name, v) ->
+        let names_a_widget =
+            match List.find_opt (fun (p : Device.param) -> p.name = name)
+                                entry.params with
+            | Some p -> names_a_widget p.kind
+            | None -> false in
+        if not names_a_widget then name, v else
+        match v with
+        | `Null | `Int _ -> name, v
+        | `String path ->
+            (match find_within root path with
+            | Some w -> name, `Int w.Widget.id
+            | None ->
+                Widget.bad_value "%S names %S, which this network has not"
+                    name path)
+        | v ->
+            Widget.bad_value "%S must name a widget, and %s does not" name
+                (Yojson.Basic.to_string v)
+    ) params
+
+(* Where a device sits and what it is called: everything up to the last '/',
+ * and the rest. *)
+let parent_and_name path =
+    match String.rindex_opt path '/' with
+    | None -> "", path
+    | Some i ->
+        String.sub path 0 i,
+        String.sub path (i + 1) (String.length path - i - 1)
+
+let set_properties (device : Widget.t) properties =
+    List.concat_map (fun (path, values) ->
+        let where =
+            if path = "" then Widget.full_name device
+            else Widget.full_name device ^"/"^ path in
+        match find_within device path with
+        | None ->
+            [ Printf.sprintf "%s: there is no such part" where ]
+        | Some (w : Widget.t) ->
+            List.filter_map (fun (name, v) ->
+                let refused fmt =
+                    Printf.ksprintf (fun m ->
+                        Some (Printf.sprintf "%s: %S %s" where name m)) fmt in
+                match List.find_opt (fun (p : Widget.property) ->
+                          p.name = name) w.properties with
+                | None ->
+                    refused "is not one of its properties"
+                | Some p ->
+                    if p.setter = None then refused "cannot be set" else
+                    match p.getter () with
+                    (* Already what it is to be. Not merely quicker: a
+                     * property may be settable only some of the time, and one
+                     * that a parameter has already brought about would then be
+                     * reported as refused for having nothing left to do -- a
+                     * recorder opens its file as it is built, and will not be
+                     * told to open it again. *)
+                    | current when current = v -> None
+                    | exception _ | _ ->
+                        if not (p.can_set ()) then
+                            refused "cannot be set as things stand"
+                        else
+                        match (Option.get p.setter) v with
+                        | () -> None
+                        | exception Widget.Bad_value m -> refused "%s" m
+                        | exception e -> refused "%s" (Printexc.to_string e)
+            ) values
+    ) properties
+
+(** Build [t]'s network in [sim], in place of whatever it was running, and
+ * answer with the properties that would not take.
+ *
+ * The two kinds of failure want opposite treatment. A device that cannot be
+ * built raises {!Widget.Bad_value} and takes the whole load with it: half a
+ * topology is not a smaller topology, and a network missing a switch is not
+ * one anybody asked for. A property that will not take is collected and
+ * handed back instead, since the network is still the one that was asked for.
+ * A load that fails therefore leaves the simulation empty rather than half
+ * built -- what it replaced is gone from the moment it starts, which is what
+ * "in place of" means, and the file it came from is still on disk.
+ *
+ * Devices are built in the order the document lists them, which is the order
+ * they were built in the first place, and each is configured as soon as it is
+ * built. That is what makes a cable negotiate against what its two interfaces
+ * advertise rather than against what they were made with: negotiation happens
+ * when a cable is plugged and is not done again when the advertised speeds
+ * change, and a cable is always younger than both of its ends. Nothing can be
+ * sent while this goes on, whatever a device may have been switched on: it
+ * runs at one instant of the simulation's clock and holds its lock throughout,
+ * so what a device schedules on being built waits for the load to be over.
+ *
+ * Changes a simulation's state, so it belongs inside {!Simulation.borrow} like
+ * everything else that does. *)
+let to_simulation (sim : Simulation.t) t =
+    let root = sim.Simulation.root in
+    (* What can be told before anything is destroyed, is: a document naming a
+     * device this robinet does not have, or naming one twice, was never going
+     * to load, and finding that out costs nothing. *)
+    let entries =
+        List.map (fun d ->
+            match Device.find d.type_ with
+            | None ->
+                Widget.bad_value "%s: there is no such thing as a %S. See \
+                                  /api/device-types for what there is"
+                    d.path d.type_
+            | Some entry -> d, entry
+        ) t.devices in
+    ignore (
+        List.fold_left (fun seen (d, _) ->
+            if List.mem d.path seen then
+                Widget.bad_value "%S is in this document twice" d.path ;
+            d.path :: seen
+        ) [] entries) ;
+    (* Emptied one at a time rather than walked: destroying a device takes its
+     * cables with it, and they are on this list too. *)
+    let rec clear () =
+        match root.Widget.children with
+        | [] -> ()
+        | w :: _ -> Widget.destroy w ; clear () in
+    (* A document is the whole of a network, so loading one is not adding to
+     * what is there. *)
+    clear () ;
+    let refused = ref [] in
+    let make (d, entry) =
+        let parent_path, name = parent_and_name d.path in
+        let parent =
+            match find_within root parent_path with
+            | Some p -> p
+            | None ->
+                Widget.bad_value "%s: there is nothing called %S to put it in"
+                    d.path parent_path in
+        let params = params_to_ids ~root entry d.params in
+        let w =
+            match Device.make d.type_ ~parent name params with
+            | w -> w
+            | exception Widget.Bad_value m ->
+                Widget.bad_value "Cannot make %s, the %s of this network: %s"
+                    d.path d.type_ m in
+        Widget.place w d.location ;
+        refused := !refused @ set_properties w d.properties in
+    (try List.iter make entries
+    with e -> clear () ; raise e) ;
+    !refused
