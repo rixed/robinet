@@ -3,6 +3,7 @@ version: "2.0.0"
 name: "robinet"
 maintainer: "rixed-opam@happyleptic.org"
 authors: "rixed-opam@happyleptic.org"
+license: "AGPL-3.0-or-later"
 homepage: "https://github.com/rixed/robinet"
 bug-reports: "https://github.com/rixed/robinet/issues"
 dev-repo: "git+https://github.com/rixed/robinet.git"
@@ -21,6 +22,8 @@ depends: [
   "ppx_bitstring"
   "ppx_deriving" {build}
   "ppx_deriving_yojson"
+  "qcheck" {with-test}
+  "qtest" {with-test}
   "yojson"
 ]
 depexts: [
