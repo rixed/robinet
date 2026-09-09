@@ -524,3 +524,112 @@ let to_simulation (sim : Simulation.t) t =
     (try List.iter make entries
     with e -> clear () ; raise e) ;
     !refused
+
+(* [a_network] below builds one whose cables are not on the ports a plain
+ * replay would hand out: the first is unplugged and a third takes the port it
+ * leaves, so rebuilding what is left, in order, would put the second cable
+ * there instead and swap the two. Invisible on a switch, not on a router.
+ *
+ * [says] answers what a widget of a simulation reads a property of its as,
+ * whether or not a document would have carried it.
+ *
+ * Neither says so where it is written: qtest ends an injected block at the
+ * first comment terminator it meets, so a comment within one takes away the
+ * rest of the block. *)
+(*$inject
+  let a_network name =
+      let sim = Simulation.make ~realtime:false name in
+      let root = sim.Simulation.root in
+      let dev t n p = Device.make t ~parent:root n p in
+      let cable a b =
+          dev "cable" "" [ "from", `Int a.Widget.id ; "to", `Int b.Widget.id ] in
+      let h1 = dev "host" "h1" [ "address", `String "192.168.0.1" ] in
+      let h2 = dev "host" "h2" [ "address", `String "192.168.0.2" ] in
+      let sw = dev "switch" "sw" [ "ports", `Int 4 ] in
+      let c1 = cable h1 sw in
+      ignore (cable h2 sw) ;
+      Widget.destroy c1 ;
+      let h3 = dev "host" "h3" [ "address", `String "192.168.0.3" ] in
+      ignore (cable h3 sw) ;
+      sim
+
+  let says (sim : Simulation.t) path name =
+      match Topology.find_within sim.Simulation.root path with
+      | None -> `String ("no such widget: "^ path)
+      | Some w ->
+          (match List.find_opt (fun (p : Widget.property) -> p.name = name)
+                               w.Widget.properties with
+          | None -> `String ("no such property: "^ name)
+          | Some p -> p.Widget.getter ())
+ *)
+
+(*$R to_simulation
+    let a = a_network "a" in
+    let doc_a, skipped = of_simulation a in
+    assert_equal ~printer:dump [] skipped ;
+    let b = Simulation.make ~realtime:false "b" in
+    assert_equal ~printer:dump [] (to_simulation b doc_a) ;
+    let doc_b, _ = of_simulation b in
+    (* The whole document comes back, but for the name, which is the
+       simulation's and which loading does not go about changing. *)
+    assert_equal ~printer:Yojson.Basic.pretty_to_string
+                 (to_json { doc_a with name = doc_b.name }) (to_json doc_b) ;
+    (* The ports are the ones that were saved, and not the ones the first free
+       port would be a second time round: *)
+    assert_equal ~printer:dump (`Int 1) (says b "sw/#1" "connected" |> fun _ ->
+        (List.find (fun d -> d.path = "h2-sw") doc_b.devices).params |>
+        List.assoc "to port") ;
+    assert_equal ~printer:dump (`Int 0)
+        ((List.find (fun d -> d.path = "h3-sw") doc_b.devices).params |>
+         List.assoc "to port") ;
+    (* Every link negotiated again, from what the interfaces were configured
+       to advertise and not from what they were built with: *)
+    List.iter (fun path ->
+        assert_equal ~msg:path ~printer:dump (`String "5Gbps full-duplex")
+                     (says b path "link")
+    ) [ "h2/eth" ; "h3/eth" ; "sw/#0" ; "sw/#1" ] ;
+    (* And a choice a constructor made rather than was given -- an address
+       drawn at random, which no property would carry back -- is the same
+       choice, which is the whole of what recording it is for: *)
+    List.iter (fun path ->
+        assert_equal ~msg:path ~printer:dump (says a path "MAC")
+                     (says b path "MAC")
+    ) [ "h1/eth" ; "h2/eth" ; "h3/eth" ]
+ *)
+
+(*$R to_simulation
+    (* A document that was never going to load leaves the network it was aimed
+       at alone: what it names is looked up before anything is destroyed. *)
+    let sim = a_network "kept" in
+    let before, _ = of_simulation sim in
+    let doc =
+        of_string "{\"version\":1,\"name\":\"n\",\"devices\":[\
+                     {\"type\":\"toaster\",\"path\":\"t\",\"at\":null,\
+                      \"params\":{},\"properties\":{}}]}" in
+    assert_raises (Widget.Bad_value
+        "t: there is no such thing as a \"toaster\". See /api/device-types \
+         for what there is")
+        (fun () -> to_simulation sim doc) ;
+    let after, _ = of_simulation sim in
+    assert_equal ~printer:Yojson.Basic.pretty_to_string
+                 (to_json before) (to_json after)
+ *)
+
+(*$R to_simulation
+    (* A property that will not take is said rather than raised: the network is
+       still the one that was asked for. *)
+    let sim = Simulation.make ~realtime:false "refused" in
+    let doc =
+        of_string "{\"version\":1,\"name\":\"n\",\"devices\":[\
+                     {\"type\":\"switch\",\"path\":\"sw\",\"at\":null,\
+                      \"params\":{\"ports\":2},\
+                      \"properties\":{\"\":{\"cut-through\":false,\
+                                            \"colour\":\"red\"},\
+                                      \"#9\":{\"MTU\":1500}}}]}" in
+    let refused = to_simulation sim doc in
+    assert_equal ~printer:dump 2 (List.length refused) ;
+    (* And what could be done was done: *)
+    assert_equal ~printer:dump (`Bool false) (says sim "sw" "cut-through") ;
+    assert_equal ~printer:dump 1
+        (List.length (Widget.find_by_path sim.Simulation.root "refused/sw"))
+ *)

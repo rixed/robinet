@@ -737,9 +737,12 @@ let make type_ ~parent name args =
   find "Switch" = None
  *)
 
+(* A root to build under. A simulation's own and not a bare [Widget.make_root]:
+ * a device reaches for the simulation it is being built in, to draw its power
+ * and to schedule on its clock, and finds it by the number its root carries. *)
 (*$inject
   let root () =
-      Widget.make_root ~sim:0 ~now:(fun () -> Clock.Time.zero) "r"
+      (Simulation.make ~realtime:false "r").Simulation.root
  *)
 
 (*$= made_with & ~printer:dump

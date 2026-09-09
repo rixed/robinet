@@ -1486,6 +1486,56 @@ let test_http net cable duration nthreads
             (fst (post {|{"type":"gateway","name":"x","params":{"LAN":"nope"}}|})
                  = 400) ;
 
+        (* Saving a network and opening it again, through the API and not
+         * through the module: what the interface will do with the two routes,
+         * done the way the interface will do it. *)
+        let topology id = Printf.sprintf "/api/simulations/%d/topology" id in
+        let load id body =
+            fst (http ~meth:"PUT" ~body port (topology id)) in
+        let saved =
+            match api "%s" (topology net_id) with
+            | 200, body -> body
+            | _ -> "" in
+        check "GET a simulation's topology" (saved <> "") ;
+        (* Into a simulation of its own, so that what is checked afterwards is
+         * what the document held and not what was already there. *)
+        let empty = Simulation.make ~realtime:false "opened" in
+        ignore (Simulation.start empty) ;
+        let empty_id = Simulation.id empty in
+        check "PUT it into another simulation" (load empty_id saved = 200) ;
+        (* Everything the document held, and nothing the network it was taken
+         * from holds without saying so. *)
+        let devices id =
+            match api "%s" (topology id) with
+            | 200, body ->
+                Yojson.Basic.(
+                    from_string body |> Util.member "topology" |>
+                    Util.member "devices" |> Util.to_list |>
+                    List.map (fun d -> Util.(member "path" d |> to_string)) |>
+                    List.sort compare)
+            | _ -> [] in
+        check "which now holds the same devices"
+            (devices net_id = devices empty_id && devices empty_id <> []) ;
+        (* And again, over what it has just built: a document is the whole of a
+           network, so opening one is not adding to what is there. *)
+        check "PUT it again, over what it built"
+            (load empty_id saved = 200 && devices empty_id = devices net_id) ;
+        check "PUT a document that is not one is refused"
+            (load empty_id "{\"version\":1}" = 400) ;
+        check "PUT a document naming something unheard of is refused"
+            (load empty_id
+                {|{"version":1,"name":"n","devices":[
+                    {"type":"toaster","path":"t","at":null,
+                     "params":{},"properties":{}}]}|} = 400) ;
+        check "and the simulation it was aimed at kept its network"
+            (devices empty_id = devices net_id) ;
+        (* Emptying the simulation that serves this interface would take the
+           interface with it, leaving nothing to say so. *)
+        check "PUT into the serving simulation is refused"
+            (load (Simulation.id admin) saved = 400) ;
+        check "which is still answering"
+            (fst (api "/api/simulations") = 200) ;
+
         (* Then, that it keeps answering while hammered from all sides -- which
          * is the whole point of myadmin living in its own simulation. *)
         Printf.printf "  (hammering for %gs with %d threads)\n%!"
