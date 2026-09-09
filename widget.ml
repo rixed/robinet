@@ -92,6 +92,23 @@ type t =
        * these kinds it knows how to build -- and therefore, the API refusing
        * to remove what it could not put back, which ones it will delete. *)
       mutable device : string option ;
+      (* What this device was built from: every parameter the catalogue entry
+       * named by [device] declares, coerced, in the order it declares them.
+       * [None] until [Device.make] fills it in, and for ever after for a
+       * device wired up by hand, calling the constructors and [Eth.Cable.plug]
+       * directly.
+       *
+       * This and not [device] is what says whether a widget can be built
+       * again: the constructors set [device] themselves, so a hand-wired host
+       * answers "host" as much as any other, and what it cannot say is with
+       * which arguments. Hence the option, and hence a save that leaves such a
+       * device out rather than guessing.
+       *
+       * A constructor that *chooses* -- the first free port, an address drawn
+       * at random -- records what it chose here itself, and [Device.make]
+       * fills this in only when it was left empty: replaying the arguments as
+       * they were given would choose again, and differently. *)
+      mutable made_with : (string * value) list option ;
       (* How to stop the thing this widget stands for, called by [destroy]
        * before the widget leaves the tree: cut its power, unplug the cable.
        * Set by whoever built that thing, since nothing else knows how to stop
@@ -686,6 +703,7 @@ let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) ?device name =
         children = [] ;
         peers = [] ;
         device ;
+        made_with = None ;
         on_delete = ignore ;
         location ;
         logger ;

@@ -190,6 +190,23 @@ let string args name = Widget.to_string (arg args name)
 let opt args name f = Widget.to_option f (arg args name)
 let list args name f = Widget.to_list f (arg args name)
 
+(** Record on [widget] what it was really built with, for a [make] that had a
+ * choice to make: [changed] replaces those of [args] it names, and the rest
+ * stand as they were given.
+ *
+ * A choice that is not written down here is one that will be made again, and
+ * differently, when this device is built back from what was saved of it: the
+ * first free port of a device is not the same port once something has been
+ * unplugged from it, and an address drawn at random is never the same twice.
+ * [Device.make] records the arguments as they came for every device that had
+ * nothing to choose, and leaves alone the ones that came through here. *)
+let made_with (widget : Widget.t) args changed =
+    widget.Widget.made_with <-
+        Some (
+            List.map (fun (name, v) ->
+                name, (List.assoc_opt name changed |? v)
+            ) args)
+
 (* An address as one types it, and not as the resolver would have it:
  * [Ip.Addr.of_string] asks the system to look the name up, which would hold the
  * simulation still for as long as a DNS server feels like taking. *)
@@ -315,7 +332,16 @@ let host =
               | None ->
                   Host.make_dhcp ~parent ~gateways ?search_sfx ?nameserver
                                  ?mac ~netmask name in
-          t.Host.trx.Host.widget }
+          let widget = t.Host.trx.Host.widget in
+          (* The address it ended up with, drawn at random when it was not
+           * given one. Its "MAC" property is read-only, so nothing else would
+           * bring it back. In hex and not [Eth.Addr.to_string], which may name
+           * the vendor instead and is then not an address any more. *)
+          made_with widget args
+              [ "MAC",
+                `String (Eth.Addr.to_hexstring
+                            t.Host.eth_state.Eth.State.mac) ] ;
+          widget }
 
 (* A cable is built like any other device, from a form with two fields that
  * happen to name other devices. It is the only one that cannot exist on its
@@ -379,6 +405,12 @@ let cable =
                                    ~error_rate:(float args "error rate")
                                    ~name () in
           Eth.Cable.plug st (a, pa) (b, pb) ;
+          (* The ports it took and the length it ended up with, all three of
+           * which it may have been left to work out for itself. *)
+          made_with st.Eth.Cable.State.widget args
+              [ "from port", `Int pa ;
+                "to port", `Int pb ;
+                "length", `Float st.Eth.Cable.State.length ] ;
           st.Eth.Cable.State.widget }
 
 (*$T random_mac
@@ -439,6 +471,14 @@ let router =
           let macs = macs_of args n in
           let widget = Widget.make ~parent name in
           let (_ : Router.Router.t) = Router.Router.make ~macs n [] widget in
+          (* The addresses themselves, whether they were named or drawn from
+           * the range: a range that picks is a choice like any other, and once
+           * the addresses are written down it has nothing left to say. *)
+          made_with widget args
+              [ "MAC range", `String "" ;
+                "MACs", `String (Array.to_list macs |>
+                                 List.map Eth.Addr.to_hexstring |>
+                                 String.concat ", ") ] ;
           widget }
 
 let gateway =
@@ -635,7 +675,12 @@ let make type_ ~parent name args =
                     Widget.bad_value "there is already something called %S \
                                       here" name ;
                 name in
-        t.make ~parent name args
+        let w = t.make ~parent name args in
+        (* Unless it recorded a choice of its own on the way (see
+         * [made_with]), which is the fuller answer of the two. *)
+        if w.Widget.made_with = None then
+            w.Widget.made_with <- Some args ;
+        w
 
 (*$= coerce & ~printer:Yojson.Basic.to_string
   (`Int 3) (coerce "n" Widget.Int (`String "3"))
@@ -664,4 +709,34 @@ let make type_ ~parent name args =
 (*$T find
   find "switch" <> None
   find "Switch" = None
+ *)
+
+(*$inject
+  let root () =
+      Widget.make_root ~sim:0 ~now:(fun () -> Clock.Time.zero) "r"
+ *)
+
+(*$= made_with & ~printer:dump
+  (* What was chosen replaces what was asked for, and the parameters stay in \
+     the order the catalogue entry declares them: *) \
+  (Some [ "ports", `Int 8 ; "MACs", `String "one" ]) \
+    (let w = root () in \
+     made_with w [ "ports", `Int 8 ; "MACs", `String "" ] \
+                 [ "MACs", `String "one" ] ; \
+     w.Widget.made_with)
+  (* A choice about something that is not a parameter is not one: *) \
+  (Some [ "ports", `Int 8 ]) \
+    (let w = root () in \
+     made_with w [ "ports", `Int 8 ] [ "colour", `String "red" ] ; \
+     w.Widget.made_with)
+ *)
+
+(*$T made_with
+  (* Every device built through [make] says what it was built with, which is \
+     what a save needs and what a hand-wired one cannot answer: *) \
+  (let w = make "switch" ~parent:(root ()) "sw" [ "ports", `Int 24 ] in \
+   match w.Widget.made_with with \
+   | Some args -> List.assoc "ports" args = `Int 24 \
+   | None -> false)
+  (Widget.make ~parent:(root ()) "by hand").Widget.made_with = None
  *)
