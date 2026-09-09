@@ -496,13 +496,27 @@ let gateway =
                       hands out the rest." ;
           param "max connections" ~kind:(IRange (1, 1_000_000))
               ~default:(`Int 500)
-              ~descr:"How many translations its NAT holds at once." ] ;
+              ~descr:"How many translations its NAT holds at once." ;
+          param "MAC" ~kind:(Widget.optional String)
+              ~placeholder:"drawn at random"
+              ~descr:"Its hardware address on the side of the network it \
+                      serves, which is the one the machines behind it send \
+                      to." ] ;
       make = fun ~parent name args ->
           let public = addr "public address" (arg args "public address")
-          and lan = cidr "LAN" (arg args "LAN") in
+          and lan = cidr "LAN" (arg args "LAN")
+          (* Drawn here rather than left to the gateway to draw, so that what
+           * it ends up with can be written down: it keeps no property of its
+           * address, and a network whose machines come back sending to
+           * somewhere else is not the one that was saved. *)
+          and mac =
+              Option.default_delayed Eth.Addr.random
+                                     (opt args "MAC" (mac "MAC")) in
           let gw =
-              Router.make_gw ~parent ~name
+              Router.make_gw ~parent ~name ~mac
                   ~num_max_cnxs:(int args "max connections") public lan in
+          made_with gw.Router.widget args
+              [ "MAC", `String (Eth.Addr.to_hexstring mac) ] ;
           gw.Router.widget }
 
 let portal =
@@ -761,11 +775,13 @@ let make type_ ~parent name args =
  *)
 
 (*$T made_with
+  (ignore made_with ; \
   (* Every device built through [make] says what it was built with, which is \
      what a save needs and what a hand-wired one cannot answer: *) \
-  (let w = make "switch" ~parent:(root ()) "sw" [ "ports", `Int 24 ] in \
+  let w = make "switch" ~parent:(root ()) "sw" [ "ports", `Int 24 ] in \
    match w.Widget.made_with with \
    | Some args -> List.assoc "ports" args = `Int 24 \
    | None -> false)
-  (Widget.make ~parent:(root ()) "by hand").Widget.made_with = None
+  (ignore made_with ; \
+  Widget.make ~parent:(root ()) "by hand").Widget.made_with = None
  *)

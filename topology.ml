@@ -633,3 +633,21 @@ let to_simulation (sim : Simulation.t) t =
     assert_equal ~printer:dump 1
         (List.length (Widget.find_by_path sim.Simulation.root "refused/sw"))
  *)
+
+(* The address a gateway has on the side it serves is the one the machines
+ * behind it send their traffic to, and it keeps no property of it. Without a
+ * parameter to write it down, a reload would put another one there. *)
+(*$R to_simulation
+    let a = Simulation.make ~realtime:false "gw-a" in
+    ignore (Device.make "gateway" ~parent:a.Simulation.root "gw" []) ;
+    let doc, _ = of_simulation a in
+    let gw = List.hd doc.devices in
+    assert_bool "a gateway writes down the address it drew"
+        (match List.assoc "MAC" gw.params with
+        | `String _ -> true
+        | _ -> false) ;
+    let b = Simulation.make ~realtime:false "gw-b" in
+    assert_equal ~printer:dump [] (to_simulation b doc) ;
+    assert_equal ~printer:dump (says a "gw/router/#0/eth" "MAC")
+                               (says b "gw/router/#0/eth" "MAC")
+ *)
