@@ -347,6 +347,8 @@ struct
           mutable speeds : Speed.t list ;
           mutable full_duplex : bool ;
           mutable negotiated : (Speed.t * bool (* duplex *)) option ;
+          (* IFP: gap (in bits) to leave in between two frames. *)
+          mutable inter_frame_gap : int ;
           mutable tx_busy_until : Clock.Time.t ;
           mutable rx_busy_until : Clock.Time.t ;
           ingress : Metric.Counter.t ;
@@ -364,6 +366,8 @@ struct
     let write t pld =
         match t.power.on, t.negotiated with
         | true, Some (speed, full_duplex) ->
+            (* On reception, accept no inter-frame-gap. IFG is a discipline for
+             * the sender. *)
             let bitlen = bitstring_length pld in
             Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx %d bits" bitlen))) ;
             let now = Simulation.Widget.now t.widget in
@@ -409,7 +413,13 @@ struct
                 let busy_until =
                     if full_duplex then t.tx_busy_until
                     else max t.rx_busy_until t.tx_busy_until in
-                let tx_start = max now busy_until in
+                (* The IFG is a silence after the carrier stops (not a longer
+                 * carrier, or the link would appear busy when receiving in
+                 * half duplex). *)
+                let quiet_until =
+                    Clock.Time.add busy_until
+                                   (Speed.duration speed t.inter_frame_gap) in
+                let tx_start = max now quiet_until in
                 t.tx_busy_until <- Clock.Time.add tx_start ser_delay ;
                 Simulation.at t.power tx_start f pld
             | None ->
@@ -448,7 +458,9 @@ struct
     let default_speeds =
         Speed.[ Eth10Mbps ; Eth100Mbps ; Eth1Gbps ; Eth2_5Gbps ; Eth5Gbps ]
 
-    let make ~parent ~power ?speeds ?(full_duplex=true)
+    let ifg_min = 32
+
+    let make ~parent ~power ?speeds ?(full_duplex=true) ?(inter_frame_gap=96)
              ?can_forward_after ?recv name =
         (* Before negotiation, the interface is actually functional,
          * using conservative settings that go through most equipments.
@@ -464,6 +476,9 @@ struct
         let speeds = speeds |? default_speeds in
         if speeds = [] then
             invalid_arg "Cannot build an iface supporting no speed" ;
+        if inter_frame_gap < ifg_min then
+            Printf.sprintf "inter_frame_gap can't be below %d" ifg_min |>
+            invalid_arg ;
         let widget = Widget.make ~parent name in
         let t =
             { widget ; power ;
@@ -472,7 +487,7 @@ struct
               is_connected = false ; can_forward_after ;
               tx_busy_until = Clock.beginning_of_time ;
               rx_busy_until = Clock.beginning_of_time ;
-              speeds ; full_duplex ; negotiated ;
+              speeds ; full_duplex ; negotiated ; inter_frame_gap ;
               ingress = Metric.Counter.make () ;
               egress = Metric.Counter.make () ;
               rx_crc_errs = Metric.Counter.make () } in
@@ -506,6 +521,11 @@ struct
                 ~setter:(fun v ->
                     (* TODO: Also renegotiate [negotiated] *)
                     t.full_duplex <- to_bool v) ;
+            property "inter-frame-gap" ~kind:(IRange (ifg_min, max_int))
+                ~descr:"How many bits of silence to include after every frame."
+                ~getter:(fun () -> `Int t.inter_frame_gap)
+                ~setter:(fun v ->
+                    t.inter_frame_gap <- to_int_range ~min:ifg_min v) ;
             metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
                 (Metric.Counter.T t.ingress) ;
             metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
