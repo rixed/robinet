@@ -221,3 +221,157 @@ let of_string s =
                             \"params\":{},\"properties\":{}}]}") ; false \
    with Widget.Bad_value _ -> true)
  *)
+
+(** {2 Paths} *)
+
+(** Where [w] sits relative to [root], with the root itself at the empty path.
+ * [None] when [w] is not below [root] at all. *)
+let path_within root (w : Widget.t) =
+    let rec loop (w : Widget.t) =
+        if w == root then Some "" else
+        match w.parent with
+        | None -> None
+        | Some p ->
+            Option.map (fun prefix ->
+                if prefix = "" then w.name else prefix ^"/"^ w.name
+            ) (loop p) in
+    loop w
+
+(** The widget [path] names below [root], the empty path being the root.
+ *
+ * Siblings differ in name, so a path reaches at most one widget. *)
+let find_within (root : Widget.t) path =
+    let path = String.trim path in
+    if path = "" then Some root else
+    (* [Widget.find_by_path] wants the root's own name at the head, which a
+     * path within a simulation deliberately leaves out. *)
+    match Widget.find_by_path root (root.name ^"/"^ path) with
+    | [ w ] -> Some w
+    | _ -> None
+
+(** {2 Reading a simulation} *)
+
+(* Does a parameter of this kind name another widget? Such a parameter travels
+ * as a path and not as the number it is in this process, which the next one
+ * will hand to something else. *)
+let rec names_a_widget = function
+    | Widget.Widget_id -> true
+    | Widget.Optional k | Widget.Hint (_, k) -> names_a_widget k
+    | _ -> false
+
+let params_of ~root (entry : Device.t) params =
+    List.map (fun (name, v) ->
+        let names_a_widget =
+            match List.find_opt (fun (p : Device.param) -> p.name = name)
+                                entry.params with
+            | Some p -> names_a_widget p.kind
+            | None -> false in
+        if not names_a_widget then name, v else
+        match v with
+        | `Null -> name, `Null
+        | `Int id ->
+            (match Widget.find root id with
+            | Some w ->
+                (match path_within root w with
+                | Some p -> name, `String p
+                | None -> Widget.bad_value "%S names %s, which is not in this \
+                                            simulation" name
+                              (Widget.full_name w))
+            | None ->
+                Widget.bad_value "%S names widget %d, which is gone" name id)
+        | v ->
+            Widget.bad_value "%S must name a widget, and %s does not" name
+                (Yojson.Basic.to_string v)
+    ) params
+
+(* Every property of [device] and of its parts that can be set, keyed by the
+ * path of the widget carrying it relative to [device].
+ *
+ * On [setter] rather than on [can_set], which answers for the current instant:
+ * a property that happens to be locked as the file is written is still part of
+ * how this network is configured, and dropping it would be dropping it without
+ * a word. Metrics are left out: they are what a device has counted, which a
+ * network that is being described has not done yet. *)
+let properties_of (device : Widget.t) =
+    Widget.enum device |> List.of_enum |>
+    List.filter_map (fun (w : Widget.t) ->
+        let props =
+            List.filter_map (fun (p : Widget.property) ->
+                if p.setter = None || p.metric <> None then None else
+                match p.getter () with
+                | exception e ->
+                    Widget.bad_value "Cannot read property %S of %s: %s"
+                        p.name (Widget.full_name w) (Printexc.to_string e)
+                | v -> Some (p.name, v)
+            ) w.properties in
+        if props = [] then None else
+        Option.map (fun path -> path, props) (path_within device w))
+
+(** The network a simulation is running, as a document, and the devices that
+ * could not be written down.
+ *
+ * The second half is what was left out: a device the catalogue knows how to
+ * build but that was not built through it, and which therefore cannot say with
+ * which arguments (see {!Widget.made_with}). Handed back rather than passed
+ * over in silence, since the difference between the file and the network is
+ * the one thing a save must not keep to itself.
+ *
+ * Reads a simulation's state, so it belongs inside {!Simulation.borrow} like
+ * everything else that does. *)
+let of_simulation (sim : Simulation.t) =
+    let root = sim.Simulation.root in
+    let saved = ref [] and skipped = ref [] in
+    (* By id, which is the order they were built in: a cable is younger than
+     * both of its ends, since destroying a device destroys its cables, so
+     * this is an order they can be built back in. *)
+    Widget.enum root |> List.of_enum |>
+    List.sort (fun (a : Widget.t) b -> compare a.id b.id) |>
+    List.iter (fun (w : Widget.t) ->
+        match Device.of_widget w with
+        | None -> ()
+        | Some entry ->
+            (match w.made_with, path_within root w with
+            | Some params, Some path ->
+                saved := { type_ = entry.Device.name ; path ;
+                           location = w.location ;
+                           params = params_of ~root entry params ;
+                           properties = properties_of w } :: !saved
+            | _ ->
+                skipped := Widget.full_name w :: !skipped)) ;
+    { version = current_version ;
+      name = sim.Simulation.name ;
+      devices = List.rev !saved },
+    List.rev !skipped
+
+(*$R of_simulation
+    let sim = Simulation.make ~realtime:false "sim" in
+    let root = sim.Simulation.root in
+    let dev type_ name params = Device.make type_ ~parent:root name params in
+    let h1 = dev "host" "h1" [] in
+    let sw = dev "switch" "sw" [ "ports", `Int 4 ] in
+    ignore (dev "cable" "" [ "from", `Int h1.Widget.id ;
+                             "to", `Int sw.Widget.id ]) ;
+    (* Built by hand, and so not something the file can hold: *)
+    let hand = Hub.Switch.make ~parent:root 4 100 "by-hand" in
+    let t, skipped = of_simulation sim in
+    assert_equal ~printer:dump [ Widget.full_name hand.Hub.Switch.widget ]
+                 skipped ;
+    assert_equal ~printer:dump [ "host" ; "switch" ; "cable" ]
+                 (List.map (fun d -> d.type_) t.devices) ;
+    assert_equal ~printer:dump [ "h1" ; "sw" ; "h1-sw" ]
+                 (List.map (fun d -> d.path) t.devices) ;
+    (* A cable's ends name paths and not the numbers of this process: *)
+    let cable = List.find (fun d -> d.type_ = "cable") t.devices in
+    assert_equal ~printer:dump (`String "h1") (List.assoc "from" cable.params) ;
+    assert_equal ~printer:dump (`String "sw") (List.assoc "to" cable.params) ;
+    (* The configuration of the parts is there, and their counters are not: *)
+    let sw = List.find (fun d -> d.type_ = "switch") t.devices in
+    assert_bool "a switch's ports carry their own speeds"
+        (List.exists (fun (path, props) ->
+            path <> "" && List.mem_assoc "speeds" props) sw.properties) ;
+    assert_bool "and none of its metrics"
+        (List.for_all (fun (_, props) ->
+            not (List.mem_assoc "ingress" props)) sw.properties) ;
+    (* And it all survives the trip through JSON: *)
+    assert_equal ~printer:dump (to_json t) (to_json (of_string (to_string t)))
+ *)
