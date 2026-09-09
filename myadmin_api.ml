@@ -397,6 +397,58 @@ let control_simulation serving _mth matches vars _qry_body resp =
         bad_request "Unknown action %S (pause, resume, speed or step)" action) ;
     respond resp (Simulation.borrow s (fun () -> json_of_simulation s))
 
+(* The network a simulation is running, as a document one saves and opens
+ * again. What a document holds, and what it deliberately does not, is
+ * topology.ml's business; this is only the door.
+ *
+ * What could not be written down travels beside the document and not within
+ * it: a file naming the devices it is missing would not load. So this answers
+ * with the two, and it is the "topology" half that is the file. *)
+let get_topology _mth matches _vars _qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        let t, skipped = Topology.of_simulation sim in
+        respond resp
+            (`Assoc [ "topology", Topology.to_json t ;
+                      "skipped", `List (List.map (fun s -> `String s) skipped) ]))
+
+(* Build that network again, in place of whatever the simulation was running.
+ *
+ * Takes the document alone, as a file holds it, or the whole of what a GET
+ * hands back, so that what was read here can be sent straight back. *)
+let put_topology serving _mth matches _vars qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    (* Loading empties the simulation first, and emptying the one serving this
+     * API would take this interface with it, leaving nothing to say so. The
+     * same reason myadmin belongs in a simulation of its own. *)
+    if sim == serving then
+        bad_request "Simulation %s serves this API: loading a network into it \
+                     would take the interface with it" (Simulation.name sim) ;
+    let json =
+        match Yojson.Basic.from_string qry_body with
+        | exception _ -> bad_request "Not a topology: it is not even JSON"
+        | `Assoc l when List.mem_assoc "topology" l -> List.assoc "topology" l
+        | j -> j in
+    let t =
+        match Topology.of_json json with
+        | exception Widget.Bad_value m -> bad_request "%s" m
+        | t -> t in
+    Simulation.borrow sim (fun () ->
+        match Topology.to_simulation sim t with
+        | exception Widget.Bad_value m -> bad_request "%s" m
+        | refused ->
+            Log.(log sim.root.logger Info (lazy (Printf.sprintf
+                "Loaded network %S, of %d device(s)" t.Topology.name
+                (List.length t.Topology.devices)))) ;
+            respond resp
+                (`Assoc [ "name", `String t.Topology.name ;
+                          "devices", `Int (List.length t.Topology.devices) ;
+                          (* The properties that would not take. The network is
+                             still the one that was asked for, which is why
+                             this is an answer and not an error. *)
+                          "refused",
+                            `List (List.map (fun m -> `String m) refused) ]))
+
 let get_widgets _mth matches vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
     Simulation.borrow sim (fun () ->
@@ -923,6 +975,12 @@ let resources serving : (Str.regexp * Opache.resource) list =
     List.map (fun (re, f) -> re, json_errors f) [
     Str.regexp "/api/simulations/\\([0-9]+\\)/\\(pause\\|resume\\|speed\\|step\\)$",
         control_simulation serving ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)/topology$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "GET" -> get_topology mth matches vars qry_body resp
+            | "PUT" | "POST" -> put_topology serving mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     Str.regexp "/api/simulations/\\([0-9]+\\)$", get_simulation ;
     Str.regexp "/api/simulations$", get_simulations ;
     (* Before the property itself, whose [.+] would otherwise swallow the
