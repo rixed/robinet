@@ -1536,6 +1536,84 @@ let test_http net cable duration nthreads
         check "which is still answering"
             (fst (api "/api/simulations") = 200) ;
 
+        (* Simulations come and go through the API too, since a reader who can
+         * open a network has to have somewhere to open it into. *)
+        let post_sim body =
+            http ~meth:"POST" ~body port "/api/simulations" in
+        (* A POST answers with the new simulation and what its network refused;
+           a PUT with the simulation alone, as a GET of it does. *)
+        let sim_field body name =
+            Yojson.Basic.(from_string body |> Util.member "simulation" |>
+                          Util.member name) in
+        let field_of body name =
+            Yojson.Basic.(from_string body |> Util.member name) in
+        let made, made_name =
+            match post_sim {|{"name":"made-up"}|} with
+            | 200, body ->
+                Yojson.Basic.Util.to_int (sim_field body "id"),
+                Yojson.Basic.Util.to_string (sim_field body "name")
+            | _ -> -1, "" in
+        check "POST a new simulation" (made >= 0 && made_name = "made-up") ;
+        (* Two of a name are two the reader cannot tell apart in a column that
+           shows nothing else of them when they are folded away. *)
+        check "a name that is taken is numbered, as a widget's is"
+            (match post_sim {|{"name":"made-up"}|} with
+            | 200, body ->
+                Yojson.Basic.Util.to_string (sim_field body "name") = "made-up-2"
+            | _ -> false) ;
+        check "POST one with a network in it"
+            (match post_sim (Printf.sprintf {|{"name":"opened","topology":%s}|}
+                                (Yojson.Basic.to_string
+                                    (Yojson.Basic.from_string saved |>
+                                     Yojson.Basic.Util.member "topology"))) with
+            | 200, body ->
+                let id = Yojson.Basic.Util.to_int (sim_field body "id") in
+                devices id = devices net_id
+            | _ -> false) ;
+        check "one that will not load leaves no simulation behind"
+            (let before = List.length (Simulation.all ()) in
+             fst (post_sim {|{"name":"doomed","topology":
+                     {"version":1,"name":"n","devices":[
+                       {"type":"toaster","path":"t","at":null,
+                        "params":{},"properties":{}}]}}|}) = 400 &&
+             List.length (Simulation.all ()) = before) ;
+        check "PUT a new name"
+            (match http ~meth:"PUT" ~body:{|{"name":"renamed"}|} port
+                        (Printf.sprintf "/api/simulations/%d" made) with
+            | 200, body ->
+                Yojson.Basic.Util.to_string (field_of body "name") = "renamed"
+            | _ -> false) ;
+        check "renaming the serving simulation is refused"
+            (fst (http ~meth:"PUT" ~body:{|{"name":"x"}|} port
+                       (Printf.sprintf "/api/simulations/%d"
+                           (Simulation.id admin))) = 400) ;
+        check "DELETE a simulation"
+            (fst (http ~meth:"DELETE" port
+                       (Printf.sprintf "/api/simulations/%d" made)) = 200 &&
+             fst (api "/api/simulations/%d" made) = 404) ;
+        check "deleting the serving simulation is refused"
+            (fst (http ~meth:"DELETE" port
+                       (Printf.sprintf "/api/simulations/%d"
+                           (Simulation.id admin))) = 400) ;
+        (* Whether there is anything worth saving: what the save button reads
+           to know whether it has anything to do. *)
+        let unsaved id =
+            match api "/api/simulations/%d" id with
+            | 200, body ->
+                Yojson.Basic.(from_string body |> Util.member "unsaved" |>
+                              Util.to_bool)
+            | _ -> false in
+        check "a network just opened has nothing to save"
+            (not (unsaved empty_id)) ;
+        check "adding a device gives it something"
+            (fst (http ~meth:"POST" ~body:{|{"type":"hub","name":"h"}|} port
+                      (Printf.sprintf "/api/simulations/%d/widgets" empty_id))
+                 = 200 &&
+             unsaved empty_id) ;
+        check "and saving it takes it away"
+            (fst (api "%s" (topology empty_id)) = 200 &&
+             not (unsaved empty_id)) ;
+
         (* Then, that it keeps answering while hammered from all sides -- which
          * is the whole point of myadmin living in its own simulation. *)
         Printf.printf "  (hammering for %gs with %d threads)\n%!"

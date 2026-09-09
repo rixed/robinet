@@ -330,7 +330,13 @@ let json_of_simulation (s : Simulation.t) =
              "running", `Bool s.continue ;
              "paused", `Bool s.paused ;
              "paused_total", `Float (Clock.Interval.to_secs s.paused_total) ;
-             "pending_events", `Int (Simulation.Events.cardinal s.events) ]
+             "pending_events", `Int (Simulation.Events.cardinal s.events) ;
+             (* Whether its network has been changed since it was last written
+                out or read in, which is what says if there is anything to
+                save. Only what came through this interface is counted: a
+                program building a network is not asked whether it wants to
+                keep it. *)
+             "unsaved", `Bool (Simulation.unsaved s) ]
 
 (* Reading a simulation's state means borrowing it from its own thread. *)
 let simulation_of_matches matches n =
@@ -354,6 +360,110 @@ let get_simulations _mth _matches _vars _qry_body resp =
 let get_simulation _mth matches _vars _qry_body resp =
     let s = simulation_of_matches matches 1 in
     respond resp (Simulation.borrow s (fun () -> json_of_simulation s))
+
+(* A simulation of one's own to build a network in, empty or read from a
+ * document.
+ *
+ * It does not follow the wall clock: a network with nothing in it has nothing
+ * to keep in step with, and one that wants the outside world says so by having
+ * a portal in it, which turns its simulation realtime itself. It is started
+ * straight away, since a simulation nobody has started is one whose clock
+ * stands still for a reason the interface has no way to show.
+ *
+ * The document is taken here, rather than left to a PUT of its own afterwards,
+ * so that opening a file that turns out not to load leaves nothing behind. *)
+let create_simulation _mth _matches _vars qry_body resp =
+    let json =
+        match String.trim qry_body with
+        | "" -> `Assoc []
+        | body ->
+            (match Yojson.Basic.from_string body with
+            | exception _ ->
+                bad_request "Not a simulation: %S (expected {\"name\": ..., \
+                             \"topology\": ...})" qry_body
+            | `Assoc _ as j -> j
+            | j -> bad_request "Not a simulation: %s"
+                       (Yojson.Basic.to_string j)) in
+    let topology =
+        match Yojson.Basic.Util.member "topology" json with
+        | `Null -> None
+        | j ->
+            (match Topology.of_json j with
+            | exception Widget.Bad_value m -> bad_request "%s" m
+            | t -> Some t) in
+    let name =
+        match Yojson.Basic.Util.member "name" json with
+        | `String s when String.trim s <> "" -> String.trim s
+        | `Null ->
+            (* What the document calls itself, when there is one: a network
+               that was saved under a name comes back under it. *)
+            (match topology with
+            | Some t when String.trim t.Topology.name <> "" ->
+                String.trim t.Topology.name
+            | _ -> "network")
+        | v -> bad_request "%S must be a string, not %s" "name"
+                   (Yojson.Basic.to_string v) in
+    if String.contains name '/' then
+        bad_request "A name must not contain '/': %S" name ;
+    let sim = Simulation.make ~realtime:false (Simulation.unique_name name) in
+    let refused =
+        match topology with
+        | None -> []
+        | Some t ->
+            (match Simulation.borrow sim (fun () ->
+                       Topology.to_simulation sim t) with
+            | exception Widget.Bad_value m ->
+                (* A document that will not load leaves no simulation behind:
+                   what was asked for was the network, not somewhere to put
+                   it. *)
+                Simulation.delete sim ;
+                bad_request "%s" m
+            | refused -> refused) in
+    ignore (Simulation.start sim) ;
+    Log.(log sim.root.logger Info (lazy (Printf.sprintf
+        "Simulation %S is up" (Simulation.name sim)))) ;
+    respond resp
+        (`Assoc [ "simulation", Simulation.borrow sim (fun () ->
+                                    json_of_simulation sim) ;
+                  "refused", `List (List.map (fun m -> `String m) refused) ])
+
+(* Call it something else, or take it away for good.
+ *
+ * Deleting one is not merely forgetting it: a recorder in it holds a file
+ * open, a portal a real interface. Both are told, exactly as they are when a
+ * single device is deleted. *)
+let alter_simulation serving mth matches _vars qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    if sim == serving then
+        bad_request "Simulation %s serves this API and cannot be %s"
+            (Simulation.name sim)
+            (if mth = "DELETE" then "deleted" else "renamed") ;
+    if mth = "DELETE" then (
+        let name = Simulation.name sim in
+        Simulation.delete sim ;
+        respond resp (`Assoc [ "deleted", `String name ])
+    ) else (
+        let name =
+            match Yojson.Basic.from_string qry_body with
+            | exception _ -> String.trim qry_body
+            | `String s -> String.trim s
+            | `Assoc _ as j ->
+                (match Yojson.Basic.Util.member "name" j with
+                | `String s -> String.trim s
+                | v -> bad_request "%S must be a string, not %s" "name"
+                           (Yojson.Basic.to_string v))
+            | j -> bad_request "Not a name: %s" (Yojson.Basic.to_string j) in
+        if name = "" then
+            bad_request "A simulation has to be called something" ;
+        if String.contains name '/' then
+            bad_request "A name must not contain '/': %S" name ;
+        (* Renamed to what it is already called is not a clash with itself. *)
+        let name =
+            if name = Simulation.name sim then name
+            else Simulation.unique_name name in
+        Simulation.rename sim name ;
+        respond resp (Simulation.borrow sim (fun () -> json_of_simulation sim))
+    )
 
 (* Pause/resume/step. Note myadmin runs in its own realtime simulation, so it
  * stays responsive whatever it does to the others. *)
@@ -408,6 +518,9 @@ let get_topology _mth matches _vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
     Simulation.borrow sim (fun () ->
         let t, skipped = Topology.of_simulation sim in
+        (* Reading a network out is what saving it is: this is the request the
+           save button makes, and there is no other reason to ask for it. *)
+        Simulation.saved sim ;
         respond resp
             (`Assoc [ "topology", Topology.to_json t ;
                       "skipped", `List (List.map (fun s -> `String s) skipped) ]))
@@ -437,6 +550,9 @@ let put_topology serving _mth matches _vars qry_body resp =
         match Topology.to_simulation sim t with
         | exception Widget.Bad_value m -> bad_request "%s" m
         | refused ->
+            (* Nothing has been done to it that is not in the document it came
+               from, so there is nothing to save until something is. *)
+            Simulation.saved sim ;
             Log.(log sim.root.logger Info (lazy (Printf.sprintf
                 "Loaded network %S, of %d device(s)" t.Topology.name
                 (List.length t.Topology.devices)))) ;
@@ -565,6 +681,7 @@ let create_widget _mth matches _vars qry_body resp =
             rollback () ;
             raise e
         | w ->
+            Simulation.changed sim ;
             Log.(log sim.root.logger Info (lazy (
                 Printf.sprintf "Added %s %S" type_ (Widget.full_name w)))) ;
             respond resp (json_of_widget w))
@@ -588,6 +705,7 @@ let delete_widget _mth matches _vars _qry_body resp =
         (* Under the lock like every other change, and rather more so: this
          * stops devices and unplugs cables the simulation may be walking. *)
         Widget.destroy w ;
+        Simulation.changed sim ;
         Log.(log sim.root.logger Info (lazy (
             Printf.sprintf "Deleted %S" full_name))) ;
         respond resp (`Assoc [ "deleted", `String full_name ]))
@@ -627,6 +745,7 @@ let set_location _mth matches _vars qry_body resp =
         (match Widget.place w location with
         | exception Invalid_argument m -> bad_request "%s" m
         | () -> ()) ;
+        Simulation.changed sim ;
         Log.(log w.logger Info (lazy (
             match location with
             | None -> "Taken off the map"
@@ -943,6 +1062,7 @@ let set_property _mth matches vars qry_body resp =
                 | Widget.Bad_value m -> m
                 | e -> Printexc.to_string e)
         | () ->
+            Simulation.changed sim ;
             Log.(log w.logger Info (lazy (
                 Printf.sprintf "Property %S set to %s" p.name
                     (Yojson.Basic.to_string value)))) ;
@@ -981,8 +1101,19 @@ let resources serving : (Str.regexp * Opache.resource) list =
             | "GET" -> get_topology mth matches vars qry_body resp
             | "PUT" | "POST" -> put_topology serving mth matches vars qry_body resp
             | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
-    Str.regexp "/api/simulations/\\([0-9]+\\)$", get_simulation ;
-    Str.regexp "/api/simulations$", get_simulations ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "GET" -> get_simulation mth matches vars qry_body resp
+            | "PUT" | "DELETE" ->
+                alter_simulation serving mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
+    Str.regexp "/api/simulations$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "GET" -> get_simulations mth matches vars qry_body resp
+            | "POST" -> create_simulation mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     (* Before the property itself, whose [.+] would otherwise swallow the
        trailing /history. *)
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/properties/\\(.+\\)/history$",

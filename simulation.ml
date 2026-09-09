@@ -75,8 +75,9 @@ type t =
     { (* What identifies a simulation, and what a widget records to say which
        * one it belongs to. *)
       id : int ;
-      (* Only a label. The root widget of this simulation takes this name. *)
-      name : string ;
+      (* Only a label. The root widget of this simulation carries it too, and
+       * the two are renamed together (see [rename]). *)
+      mutable name : string ;
       (* The root of this simulation's widget tree, and its inventory: every
        * widget of this simulation is somewhere below it. *)
       root : Widget.t ;
@@ -139,6 +140,19 @@ type t =
       mutable paused_total : Interval.t ;
       (* When > 0, run that many events then pause again: *)
       mutable steps : int ;
+      (* How many times this simulation's network has been changed from the
+       * outside -- a device added or taken out, a property set, a whole
+       * network loaded into it -- and what that count was when it was last
+       * written out or read in.
+       *
+       * They answer the one question the administration interface asks about
+       * a network it did not build: is there anything in it worth saving? A
+       * count and not a flag, so that two readers cannot each clear what the
+       * other has yet to see. Only what comes through the interface is
+       * counted: a program building a network is not asked whether it wants
+       * to save it. *)
+      mutable changes : int ;
+      mutable changes_saved : int ;
       (* Non-realtime only: how fast simulated time is to advance compared to
        * the wall clock -- 1. for real time, .5 for half of it, 2. for twice as
        * fast. [None] is as fast as it can, which is what a closed simulation
@@ -266,6 +280,23 @@ let find id =
 
 let id t = t.id
 
+(** The name a new simulation will answer to: the one asked for, or that name
+ * with a number appended when another simulation has it already.
+ *
+ * The same numbering widgets get among their siblings, and for the same
+ * reason: two simulations called the same thing are two the reader has no way
+ * of telling apart, in a column that shows nothing else of them when they are
+ * folded away. Applied where a name comes from the reader rather than in
+ * [make], so that a program naming its own simulations gets the names it
+ * asked for or none at all. *)
+let unique_name name =
+    let taken n = List.exists (fun t -> t.name = n) (all ()) in
+    if not (taken name) then name else
+    let rec loop i =
+        let n = Printf.sprintf "%s-%d" name i in
+        if taken n then loop (i + 1) else n in
+    loop 2
+
 let name t = t.name
 
 (** The simulation a widget belongs to.
@@ -333,6 +364,46 @@ let stop t () =
 
 (** Stop every simulation. *)
 let stop_all () = List.iter (fun t -> stop t ()) (all ())
+
+(** Call this simulation, and the root widget standing for it, something else.
+ *
+ * The name is a label and nothing hangs off it, so there is nothing else to
+ * put right: a widget's place in the tree is its path, and the root's name is
+ * only the head of it. *)
+let rename t name =
+    if String.contains name '/' then
+        invalid_arg ("Simulation.rename: a name must not contain '/': "^ name) ;
+    with_lock t (fun () ->
+        t.name <- name ;
+        t.root.Widget.name <- name) ()
+
+(** Take a simulation out of this process for good: stop its clock, take apart
+ * everything it was running, and forget it.
+ *
+ * The taking apart is not housekeeping that could be left to the collector: a
+ * recorder holds a file open and a portal a real interface, and dropping the
+ * tree on the floor would leave both held. It is [Widget.destroy] that tells
+ * them, exactly as deleting one device does.
+ *
+ * The thread is not waited for. It is asleep on the condition [stop] has just
+ * signalled, and what it wakes to do is notice that it is to stop -- which
+ * touches nothing this has taken away. Waiting for it would be the interface
+ * blocking on a simulation, which is the one thing it must never do. *)
+let delete t =
+    stop t () ;
+    with_lock t (fun () -> Widget.destroy t.root) () ;
+    let a = !sims in
+    if t.id < Array.length a then a.(t.id) <- None
+
+(** Something about this simulation's network has been changed from outside. *)
+let changed t = t.changes <- t.changes + 1
+
+(** Its network has just been written out, or read in: whatever has been done
+ * to it up to now is safe somewhere. *)
+let saved t = t.changes_saved <- t.changes
+
+(** Whether anything has been done to it since. *)
+let unsaved t = t.changes <> t.changes_saved
 
 (** A power source drawing from [t], on behalf of whatever [name] names.
  *
@@ -794,6 +865,8 @@ let make =
               paused_since = None ;
               paused_total = Interval.zero ;
               steps = 0 ;
+              changes = 0 ;
+              changes_saved = 0 ;
               speed_ratio = None ;
               pace_anchor = None ;
               late = Interval.zero ;
