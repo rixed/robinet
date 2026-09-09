@@ -1414,3 +1414,49 @@ button.delete.arming {
 }
 
 p.sim-error { margin: .2rem 0 0 0; color: var(--pico-del-color); }
+
+/* Where a network comes from: the strip above the simulations that makes an
+ * empty one or opens a saved one. Two buttons of a width, so that the pair
+ * reads as one thing to do rather than two of unequal weight. */
+.sim-menu {
+    display: flex;
+    gap: .3rem;
+    margin-bottom: .6rem;
+}
+.sim-menu button {
+    flex: 1;
+    margin: 0;
+    padding: .2rem .5rem;
+    font-size: .75rem;
+}
+/* A network is being carried over it. Said with the border, as the library
+ * says it, since the pointer is already busy saying where it would land. */
+.sim-menu.dropping {
+    border: 1px dashed var(--pico-primary);
+    background: var(--pico-code-background-color);
+    border-radius: var(--pico-border-radius);
+}
+/* What the last thing done to a simulation had to say: a refusal, or the
+ * devices a save could not write down. */
+p.sim-note {
+    margin: -.4rem 0 .6rem 0;
+    color: var(--pico-del-color);
+}
+
+/* Renaming happens where the name is, so the field has to sit in the header
+ * without pushing anything about. */
+article.sim > header input.rename {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0 .2rem;
+    height: auto;
+    font-size: 1rem;
+    font-weight: bold;
+}
+
+/* What is done to the simulation itself rather than to its clock. */
+.controls.sim-actions { margin-bottom: .6rem; }
+/* Armed by a first click, and coloured like everything else that is one click
+ * from being gone for good. */
+.controls button.armed { color: var(--pico-del-color); }

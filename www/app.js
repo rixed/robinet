@@ -1139,6 +1139,16 @@ document.addEventListener('alpine:init', () => {
          * looking at something else. Taking a device out cannot be undone. */
         confirmDelete: false,
 
+        /* The simulation whose name is being typed, and what has been typed;
+         * the one armed for deletion; and how many files are on their way in.
+         * A count rather than a flag, since several can be opened at once. */
+        renaming: null,
+        renameDraft: '',
+        simConfirm: null,
+        opening: 0,
+        /* Whether a network is being dragged over the strip that opens one. */
+        droppingSim: false,
+
         /*
          * Connection state
          */
@@ -1353,6 +1363,166 @@ document.addEventListener('alpine:init', () => {
                 api(this.pcapPath(f.name), { method: 'DELETE' }))
             if (!r.ok) this.note(r.error.message)
             await this.loadPcaps({ force: true })
+        },
+
+        /*
+         * Simulations: making one, opening one, saving one, taking one away
+         */
+
+        /* What the last thing done to a simulation had to say for itself: a
+         * refusal, or the devices a save could not write down. One line under
+         * the two buttons, in the manner of the library's own. */
+        simNote: null,
+
+        /* Make an empty one and show it. The name is the server's to pick:
+         * what it calls a network nobody has named is not this page's
+         * business, and it is the one place that can tell whether a name is
+         * taken. */
+        async newSim() {
+            this.simNote = null
+            const r = await this.exchange(() => api('/simulations', {
+                method: 'POST',
+                /* Said outright, since a body the simulator's HTTP stack takes
+                 * for a form is read as parameters and never reaches the
+                 * handler (see [Opache.multiplexer]). */
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}' }))
+            if (!r.ok) { this.simNote = r.error.message ; return }
+            await this.showNewSim(r.value.simulation)
+        },
+
+        /* Open saved networks, one simulation each.
+         *
+         * The whole document goes to the server, which is the only thing that
+         * knows what a network may hold: this reads the file no further than
+         * telling whether it is JSON at all, and unwraps what a save wrote if
+         * it was the whole answer rather than the network alone. */
+        async openFiles(files) {
+            this.simNote = null
+            let last = null
+            for (const f of [ ...files ]) {
+                let doc
+                try {
+                    doc = JSON.parse(await f.text())
+                } catch (e) {
+                    this.simNote = `${f.name} is not a network: it is not even JSON`
+                    continue
+                }
+                if (doc && doc.topology) doc = doc.topology
+                this.opening++
+                const r = await this.exchange(() => api('/simulations', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ topology: doc }) }))
+                this.opening--
+                if (!r.ok) { this.simNote = `${f.name}: ${r.error.message}` ; continue }
+                /* What the network asked for and did not get. It loaded all
+                 * the same, which is why this is a note and not a refusal. */
+                const refused = r.value.refused || []
+                if (refused.length)
+                    this.simNote =
+                        `${f.name}: ${refused.length} setting` +
+                        `${refused.length === 1 ? '' : 's'} would not take: ` +
+                        `${refused.join('; ')}`
+                last = r.value.simulation
+            }
+            if (last) await this.showNewSim(last)
+        },
+
+        /* Bring a simulation that has just appeared into view: unfolded, since
+         * asking for it is asking to see it, and selected on its root so that
+         * the panels below are showing it rather than whatever came before. */
+        async showNewSim(s) {
+            await this.reload()
+            const i = this.simFolded.indexOf(s.id)
+            if (i >= 0) this.simFolded.splice(i, 1)
+            const root = this.roots[s.id]
+            if (root !== undefined) await this.select(s.id, root)
+        },
+
+        /* Write a network out. The browser saves it: the answer is JSON to be
+         * read back by this same API, not a file the server keeps, so there is
+         * nothing to link to the way a capture is linked to.
+         *
+         * Asking for it is what marks the network saved, server side, so the
+         * listing is read again: the button has just become disabled. */
+        async saveSim(s) {
+            this.simNote = null
+            const r = await this.exchange(() =>
+                api(`/simulations/${s.id}/topology`))
+            if (!r.ok) { this.simNote = r.error.message ; return }
+            const skipped = r.value.skipped || []
+            const text = JSON.stringify(r.value.topology, null, 2) + '\n'
+            const url = URL.createObjectURL(
+                new Blob([ text ], { type: 'application/json' }))
+            const a = document.createElement('a')
+            a.href = url
+            a.download = s.name + '.json'
+            document.body.appendChild(a)
+            a.click()
+            a.remove()
+            URL.revokeObjectURL(url)
+            /* Said after the file is on its way, not instead of it: what was
+             * left out is worth knowing, and the rest was still saved. */
+            if (skipped.length)
+                this.simNote =
+                    `${skipped.length} device` +
+                    `${skipped.length === 1 ? ' was' : 's were'} left out, ` +
+                    `having been built by hand rather than added here: ` +
+                    `${skipped.join(', ')}`
+            await this.loadSims()
+        },
+
+        /* Renaming, in place: the label becomes the field, so that there is
+         * nowhere else to look for what is being renamed. */
+        startRename(s, ev) {
+            this.renaming = s.id
+            this.renameDraft = s.name
+            this.simNote = null
+            /* Found from the button rather than through a ref: every
+             * simulation's panel is a copy of the same markup, so a ref would
+             * name all of them or none. */
+            const panel = ev && ev.target.closest('article.sim')
+            this.$nextTick(() => {
+                const el = panel && panel.querySelector('input.rename')
+                if (el) { el.focus() ; el.select() }
+            })
+        },
+
+        cancelRename() {
+            this.renaming = null
+            this.renameDraft = ''
+        },
+
+        async commitRename(s) {
+            const name = this.renameDraft.trim()
+            this.renaming = null
+            if (!name || name === s.name) return
+            const r = await this.exchange(() => api(`/simulations/${s.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name }) }))
+            if (!r.ok) { this.simNote = r.error.message ; return }
+            await this.loadSims()
+        },
+
+        /* Two clicks, as everywhere else something is taken away for good:
+         * the first arms this simulation, the second removes it. Arming
+         * another disarms this one, so there is only ever one a stray click
+         * can cost. */
+        async deleteSim(s) {
+            if (this.simConfirm !== s.id) {
+                this.simConfirm = s.id
+                this.simNote = null
+                return
+            }
+            this.simConfirm = null
+            const r = await this.exchange(() =>
+                api(`/simulations/${s.id}`, { method: 'DELETE' }))
+            if (!r.ok) { this.simNote = r.error.message ; return }
+            /* Whatever was selected in it is not there any more. */
+            if (this.selected && this.selected.sim === s.id) this.selected = null
+            await this.reload()
         },
 
         /*

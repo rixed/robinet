@@ -57,6 +57,36 @@
             <p x-text="sims.length + ' simulation' + (sims.length === 1 ? '' : 's')"></p>
         </hgroup>
 
+        <!-- Where a network comes from: one made here, or one saved earlier
+             and opened again. Above the simulations rather than within any of
+             them, since neither belongs to one -- the same reason the pcap
+             library sits where it does.
+
+             Files are dropped on this strip as well as chosen through the
+             button, which is what a reader carrying a network aims at. -->
+        <div class="sim-menu" :class="{ dropping: droppingSim }"
+             @dragover.prevent="droppingSim = carriesFiles($event)"
+             @dragleave.prevent="droppingSim = false"
+             @drop.prevent="droppingSim = false ;
+                            if (carriesFiles($event))
+                                openFiles($event.dataTransfer.files)">
+            <button class="outline secondary" :disabled="!online"
+                    title="An empty simulation to build a network in"
+                    @click="newSim()">New</button>
+            <button class="outline secondary" :disabled="!online || opening"
+                    title="Open a network saved earlier"
+                    @click="$refs.topoFile.click()"
+                    x-text="opening ? 'Opening…' : 'Open…'">Open…</button>
+            <input type="file" x-ref="topoFile" multiple hidden
+                   accept=".json,application/json"
+                   @change="openFiles($event.target.files) ;
+                            $event.target.value = ''"/>
+        </div>
+        <!-- What the last of those had to say: a refusal, or what a save could
+             not write down. -->
+        <p class="sim-note" x-show="simNote" x-cloak>
+            <small x-text="simNote"></small></p>
+
         <!-- The pcap library: what the recorders write into and the replayers
              read from. There is one of it for every simulation -- it is a
              directory on the machine running this -- so it sits above them all
@@ -170,7 +200,16 @@
                             :title="simFolded.includes(s.id)
                                     ? 'Show this simulation' : 'Fold it away'"
                             x-text="simFolded.includes(s.id) ? '\u25b8' : '\u25be'"></button>
-                    <strong x-text="s.name"></strong>
+                    <strong x-show="renaming !== s.id" x-text="s.name"></strong>
+                    <!-- In place, so that there is nowhere else to look for
+                         what is being renamed. Enter keeps it, Escape drops
+                         it, and clicking away keeps it as Enter does: a name
+                         typed and then clicked out of was still typed. -->
+                    <input class="rename" type="text" x-show="renaming === s.id"
+                           x-cloak x-model="renameDraft"
+                           @keydown.enter.prevent="commitRename(s)"
+                           @keydown.escape.prevent="cancelRename()"
+                           @blur="renaming === s.id && commitRename(s)"/>
                     <!-- Folded away, the header is all there is of it, so what
                          its clock is doing goes there: the reason to fold one
                          is that it is not the one being worked on, not that one
@@ -280,6 +319,34 @@
                 <p class="sim-error" x-show="simError[s.id]" x-cloak>
                     <small x-text="simError[s.id]"></small>
                 </p>
+
+                <!-- What can be done to the simulation itself rather than to
+                     its clock. Not offered on the one serving this page: it
+                     cannot be renamed or deleted, and it holds no network of
+                     the kind that is saved. -->
+                <div class="controls sim-actions" x-show="s.id !== servingId">
+                    <button class="outline secondary" :disabled="!online"
+                            title="Call it something else"
+                            @click="startRename(s, $event)">Rename</button>
+                    <!-- Disabled when there is nothing to save: what has been
+                         done to this network since it was last written out or
+                         read in is what the server counts, so the button knows
+                         without asking for the network itself. -->
+                    <button class="outline secondary"
+                            :disabled="!online || !s.unsaved"
+                            :title="s.unsaved ? 'Save this network to a file'
+                                              : 'Nothing has changed since it was last saved'"
+                            @click="saveSim(s)">Save</button>
+                    <!-- Twice, as everywhere else something goes for good. -->
+                    <button class="outline secondary"
+                            :class="{ armed: simConfirm === s.id }"
+                            :disabled="!online"
+                            :title="simConfirm === s.id
+                                    ? 'Click again to take it away for good'
+                                    : 'Take this simulation away'"
+                            @click="deleteSim(s)"
+                            x-text="simConfirm === s.id ? 'Sure?' : 'Delete'"></button>
+                </div>
 
                 <nav class="tree">
                     <template x-for="row in tree(s.id)" :key="row.w.id">
