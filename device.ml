@@ -563,11 +563,37 @@ let replayer =
           let replayer = Pcap.replayer ~parent ?fname ~loop name in
           replayer.widget }
 
+(* The one entry that is not a device at all: a label on the map, with no
+ * ports, no power and nothing to simulate. It is here because everything the
+ * interface offers to add, place, edit, delete and save goes through this
+ * catalogue, and a network one cannot write on is one the reader has to
+ * remember rather than read.
+ *
+ * The last thing left of net.ml, which had it and which nothing else replaced.
+ * Its text is a parameter as well as a property so that a note can be written
+ * as it is put down, rather than put down blank and then filled in. *)
+let note =
+    { name = "note" ;
+      descr = "Something written on the map: a name for a part of the \
+               network, a reminder, a question." ;
+      params = [
+          param "text" ~kind:String ~default:(`String "")
+              ~descr:"What it says." ] ;
+      make = fun ~parent name args ->
+          let widget = Widget.make ~parent ~device:"note" name in
+          let text = ref (string args "text") in
+          Widget.add_properties widget Widget.[
+              property "text" ~kind:String ~descr:"What it says."
+                  ~getter:(fun () -> `String !text)
+                  ~setter:(fun v -> text := to_string v) ] ;
+          widget }
+
 (** Every kind of device that can be asked for, in the order the interface
- * offers them: what a network is mostly made of first. *)
+ * offers them: what a network is mostly made of first, and what is not a
+ * device at all last. *)
 let all =
     [ host ; switch ; hub ; router ; gateway ; portal ; recorder ; replayer ;
-      cable ]
+      cable ; note ]
 
 let find name =
     List.find_opt (fun t -> t.name = name) all

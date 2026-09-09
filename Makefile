@@ -14,7 +14,6 @@ SOURCES  = \
 	simulation.ml \
 	ordArray.ml \
 	payload.ml \
-	persist.ml \
 	peg.ml \
 	pcap.ml \
 	url.ml \
@@ -40,7 +39,6 @@ SOURCES  = \
 	localhost.ml \
 	html.ml \
 	browser.ml \
-	net.ml \
 	dhcpd.ml \
 	ip_nat.ml \
 	router.ml \
