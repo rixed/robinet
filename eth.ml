@@ -271,20 +271,10 @@ end
 module Speed =
 struct
     (* Possible adapter speeds: *)
-    type t =
-        | Eth10Mbps
-        | Eth100Mbps
-        | Eth1Gbps
-        | Eth2_5Gbps
-        | Eth5Gbps
-        | Eth10Gbps
-        | Eth25Gbps
-        | Eth40Gbps
-        | Eth100Gbps
-        [@@deriving enum]
+    include Capabilities.EthSpeed
 
     let to_bps = function
-        | Eth10Mbps -> 10e6
+        | Capabilities.EthSpeed.Eth10Mbps -> 10e6
         | Eth100Mbps -> 100e6
         | Eth1Gbps -> 1000e6
         | Eth2_5Gbps -> 2.5e9
@@ -295,7 +285,7 @@ struct
         | Eth100Gbps -> 100e9
 
     let to_string = function
-        | Eth10Mbps -> "10Mbps"
+        | Capabilities.EthSpeed.Eth10Mbps -> "10Mbps"
         | Eth100Mbps -> "100Mbps"
         | Eth1Gbps -> "1Gbps"
         | Eth2_5Gbps -> "2.5Gbps"
@@ -311,14 +301,14 @@ struct
      * offers [names], and the value of such a property is a place in it. The
      * two arrays are built from the same enumeration, so a speed added to the
      * type above is offered and read back without anything else to change. *)
-    let all = Array.init (max + 1) (fun i -> Option.get (of_enum i))
+    let all = Array.init (t_max + 1) (fun i -> Option.get (of_enum i))
     let names = Array.map to_string all
 
     let duration speed num_bits =
         Clock.Interval.of_secs (float num_bits /. to_bps speed)
 
-    let max s1 s2 =
-        if s1 >= s2 then s1 else s2
+    let best speeds =
+        List.reduce max speeds
 end
 
 (** {2 Transceiver: basic state, connection, speed, etc}
@@ -355,17 +345,25 @@ struct
           (* It's very common for a single switch to have ports with different
            * characteristics: *)
           mutable speeds : Speed.t list ;
-          mutable speed : Speed.t ; (* Negotiated *)
           mutable full_duplex : bool ;
+          mutable negotiated : (Speed.t * bool (* duplex *)) option ;
           mutable tx_busy_until : Clock.Time.t ;
           mutable rx_busy_until : Clock.Time.t ;
           ingress : Metric.Counter.t ;
           egress : Metric.Counter.t ;
           rx_crc_errs : Metric.Counter.t }
 
+    let string_of_negotiated = function
+        | None ->
+            "down"
+        | Some (speed, full_duplex) ->
+            Speed.to_string speed ^" "^
+            (if full_duplex then "full" else "half")^ "-duplex"
+
     (* Reception *)
     let write t pld =
-        if t.power.on then (
+        match t.power.on, t.negotiated with
+        | true, Some (speed, full_duplex) ->
             let bitlen = bitstring_length pld in
             Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx %d bits" bitlen))) ;
             let now = Simulation.Widget.now t.widget in
@@ -374,10 +372,10 @@ struct
              * We can't take back the previous frame with which this one collided,
              * but this one is dropped. *)
             let busy_until =
-                if t.full_duplex then t.rx_busy_until
+                if full_duplex then t.rx_busy_until
                 else max t.rx_busy_until t.tx_busy_until in
             let dbl_recept = now < busy_until in
-            let ser_delay = Speed.duration t.speed bitlen in
+            let ser_delay = Speed.duration speed bitlen in
             let rx_stop = Clock.Time.add now ser_delay in
             t.rx_busy_until <- max t.rx_busy_until rx_stop ;
             if dbl_recept then
@@ -386,30 +384,37 @@ struct
                 let recv_ts =
                     match t.can_forward_after with
                     | Some b when b < bitlen ->
-                        Clock.Time.add now (Speed.duration t.speed b)
+                        Clock.Time.add now (Speed.duration speed b)
                     | _ ->
                         rx_stop in
                 Simulation.at t.power recv_ts t.recv pld
             )
-        ) else
-            Log.(log t.widget.logger Debug (lazy "Ignoring a frame (I'm off)"))
+        | _ ->
+            Log.(log t.widget.logger Warning (lazy
+                "Ignoring an RX frame (I'm off)"))
 
     (* Emission *)
     let set_read t f =
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting emitter"))) ;
         t.emit <- (fun pld ->
-            let bitlen = bitstring_length pld in
-            Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Tx %d bits" bitlen))) ;
-            let now = Simulation.Widget.now t.widget in
-            Metric.(Counter.add t.egress ~now (bytelength pld)) ;
-            (* Frames must wait for each others when sending: *)
-            let ser_delay = Speed.duration t.speed bitlen in
-            let busy_until =
-                if t.full_duplex then t.tx_busy_until
-                else max t.rx_busy_until t.tx_busy_until in
-            let tx_start = max now busy_until in
-            t.tx_busy_until <- Clock.Time.add tx_start ser_delay ;
-            Simulation.at t.power tx_start f pld) ;
+            match t.negotiated with
+            | Some (speed, full_duplex) ->
+                let bitlen = bitstring_length pld in
+                Log.(log t.widget.logger Debug (lazy (Printf.sprintf
+                    "Tx %d bits" bitlen))) ;
+                let now = Simulation.Widget.now t.widget in
+                Metric.(Counter.add t.egress ~now (bytelength pld)) ;
+                (* Frames must wait for each others when sending: *)
+                let ser_delay = Speed.duration speed bitlen in
+                let busy_until =
+                    if full_duplex then t.tx_busy_until
+                    else max t.rx_busy_until t.tx_busy_until in
+                let tx_start = max now busy_until in
+                t.tx_busy_until <- Clock.Time.add tx_start ser_delay ;
+                Simulation.at t.power tx_start f pld
+            | None ->
+                Log.(log t.widget.logger Warning (lazy
+                    "Ignoring a TX frame (I'm off)"))) ;
         if not t.is_connected then (
             t.is_connected <- true ;
             Log.(log t.widget.logger Info (lazy (Printf.sprintf "Connected!")))
@@ -424,30 +429,41 @@ struct
             (Printf.sprintf "Dropping %d bits sent to disconnected interface"
                 (bitstring_length bits))))
 
+    let reset t =
+        t.tx_busy_until <- Clock.beginning_of_time ;
+        t.rx_busy_until <- Clock.beginning_of_time
+
     let disconnect t =
         if t.is_connected then (
+            t.is_connected <- false ;
             t.emit <- ignore_disconnected ~logger:t.widget.logger ;
-            t.is_connected <- false
+            (* Code calling disconnect is call using cables and negotiation: *)
+            t.negotiated <- None ;
+            reset t
         ) else
             Log.(log t.widget.logger Debug (lazy (Printf.sprintf
                 "Ignoring request to disconnect interface %s that is not connected"
                 t.widget.name)))
 
     let default_speeds =
-        (* TODO: actual negotiation *)
-        Speed.[ Eth10Mbps ; Eth100Mbps ; (*Eth1Gbps ; Eth2_5Gbps ; Eth5Gbps*) ]
+        Speed.[ Eth10Mbps ; Eth100Mbps ; Eth1Gbps ; Eth2_5Gbps ; Eth5Gbps ]
 
-    let reset t =
-        t.tx_busy_until <- Clock.beginning_of_time ;
-        t.rx_busy_until <- Clock.beginning_of_time
-
-    let make ~parent ~power ?(speeds=default_speeds) ?(full_duplex=true)
+    let make ~parent ~power ?speeds ?(full_duplex=true)
              ?can_forward_after ?recv name =
+        (* Before negotiation, the interface is actually functional,
+         * using conservative settings that go through most equipments.
+         * This is not physical; This is to accommodate the many programs,
+         * examples and tests that wire eth adapters manually and expect
+         * them to work; at least, as long as no [speeds] were asked for.
+         * Passing [speeds] means planning for negotiation.
+         * Also half-duplex so a non negotiating iface can go through most
+         * repeaters. *)
+        let negotiated =
+            if speeds = None then Some (Speed.Eth100Mbps, false)
+            else None in
+        let speeds = speeds |? default_speeds in
         if speeds = [] then
             invalid_arg "Cannot build an iface supporting no speed" ;
-        let speed =
-            (* For now just take the fastest value *)
-            List.fold_left Speed.max (List.hd speeds) speeds in
         let widget = Widget.make ~parent name in
         let t =
             { widget ; power ;
@@ -456,7 +472,7 @@ struct
               is_connected = false ; can_forward_after ;
               tx_busy_until = Clock.beginning_of_time ;
               rx_busy_until = Clock.beginning_of_time ;
-              speeds ; speed ; full_duplex ;
+              speeds ; full_duplex ; negotiated ;
               ingress = Metric.Counter.make () ;
               egress = Metric.Counter.make () ;
               rx_crc_errs = Metric.Counter.make () } in
@@ -464,20 +480,32 @@ struct
             property "connected" ~kind:Bool
                 ~descr:"Is there a cable plugged in?"
                 ~getter:(fun () -> `Bool t.is_connected) ;
+            property "link" ~kind:String
+                ~descr:"Is the link up?"
+                ~getter:(fun () ->
+                    `String (string_of_negotiated t.negotiated)) ;
             property "speeds" ~kind:(Set Speed.names)
-                ~descr:"Accepted speeds for this interface"
+                ~descr:"Supported speeds"
                 ~getter:(fun () ->
                     `List (List.map (fun s -> `Int (Speed.to_enum s))
                                     t.speeds))
                 ~setter:(fun v ->
-                    (* TODO: Also renegotiate [speed] *)
-                    t.speeds <-
+                    (* TODO: Also renegotiate [negotiated] *)
+                    let speeds =
                         List.map (fun i -> Speed.all.(i))
-                                 (to_choices Speed.names v)) ;
+                                 (to_choices Speed.names v) in
+                    (* As [make] refuses to build one: an adapter that supports
+                     * no speed at all has nothing to negotiate with, and
+                     * nothing to fall back on either. *)
+                    if speeds = [] then
+                        bad_value "An interface must support some speed" ;
+                    t.speeds <- speeds) ;
             property "full-duplex" ~kind:Bool
-                ~descr:"If a port can receive and transmit at the same time."
+                ~descr:"Can the interface receive and transmit at the same time."
                 ~getter:(fun () -> `Bool t.full_duplex)
-                ~setter:(fun v -> t.full_duplex <- to_bool v) ;
+                ~setter:(fun v ->
+                    (* TODO: Also renegotiate [negotiated] *)
+                    t.full_duplex <- to_bool v) ;
             metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
                 (Metric.Counter.T t.ingress) ;
             metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
@@ -491,7 +519,24 @@ struct
             is_connected = (fun _ -> t.is_connected) ;
             dev = (fun _ -> dev t) ;
             owner = (fun _ -> t.widget) ;
-            disconnect = (fun _ -> disconnect t) } ;
+            disconnect = (fun _ -> disconnect t) ;
+            get_capabilities = (fun _ ->
+                Capabilities.Eth { speeds = t.speeds ;
+                                   full_duplex = t.full_duplex }) ;
+            set_capabilities = (fun _ -> function
+                | Capabilities.Eth { speeds ; full_duplex } when speeds <> [] ->
+                    t.negotiated <- Some (Speed.best speeds, full_duplex) ;
+                    Log.(log widget.logger Info (lazy (Printf.sprintf
+                        "Negotiated %s" (string_of_negotiated t.negotiated))))
+                | Any ->
+                    (* [t.speeds] and not the list this was built with: the
+                     * supported speeds are editable. *)
+                    t.negotiated <- Some (Speed.best t.speeds, t.full_duplex) ;
+                    Log.(log widget.logger Info (lazy "Using best performances"))
+                | _ ->
+                    t.negotiated <- None ;
+                    Log.(log widget.logger Warning (lazy "Failed negotiation")))
+        } ;
         t
 end
 
@@ -1131,9 +1176,13 @@ struct
             invalid_arg ("Eth.Cable.plug: "^ Widget.full_name st.widget ^
                          " is already plugged in") ;
         let trx = make st in
+        let c = Capabilities.negotiate (wa.ports.get_capabilities pa)
+                                       (wb.ports.get_capabilities pb) in
+        wa.ports.set_capabilities pa c ;
+        wb.ports.set_capabilities pb c ;
         wa.Widget.ports.dev pa -=> trx <=-> wb.Widget.ports.dev pb ;
-        st.ends <- Some ((fun () -> wa.Widget.ports.disconnect pa),
-                         (fun () -> wb.Widget.ports.disconnect pb)) ;
+        st.ends <- Some ((fun () -> wa.ports.disconnect pa),
+                         (fun () -> wb.ports.disconnect pb)) ;
         (* Deleting the cable is how one gets rid of it, from the interface as
            much as from a program, and a deleted cable that had not let go of
            its two ports would leave them emitting into nothing. *)

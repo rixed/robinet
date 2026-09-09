@@ -9,6 +9,7 @@ SOURCES  = \
 	metric.ml \
 	log.ml \
 	tools.ml \
+	capabilities.ml \
 	widget.ml \
 	simulation.ml \
 	ordArray.ml \

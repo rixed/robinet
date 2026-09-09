@@ -135,7 +135,13 @@ and ports =
        * and says it is free again. There is no way back through [dev], since
        * installing a reader is what marks a port connected in the first place,
        * so the device has to offer the way out as well as the way in. *)
-      disconnect : int -> unit }
+      disconnect : int -> unit ;
+      (* When connecting two devices, they oftentimes had a brief communication
+       * to negotiate some shared characteristics depending on each end's
+       * capabilities. This is performed instantly when connecting them thanks
+       * to those two functions: *)
+      get_capabilities : int -> Capabilities.t ;
+      set_capabilities : int -> Capabilities.t -> unit }
 
 and peer = { widget : t ;
              via : t option }
@@ -578,7 +584,9 @@ let no_ports = {
     is_connected = (fun _ -> assert false) ;
     dev = (fun _ -> assert false) ;
     owner = (fun _ -> assert false) ;
-    disconnect = (fun _ -> assert false) }
+    disconnect = (fun _ -> assert false) ;
+    get_capabilities = (fun _ -> Capabilities.Any) ;
+    set_capabilities = (fun _ _ -> ()) }
 
 (* Beware that the widget graph is cyclic (parent/children and peers point back
  * at each other), so widgets must never be compared with the polymorphic
@@ -901,7 +909,9 @@ let ports_of w =
       is_connected = (fun n -> w.ports.is_connected n) ;
       dev = (fun n -> w.ports.dev n) ;
       owner = (fun n -> w.ports.owner n) ;
-      disconnect = (fun n -> w.ports.disconnect n) }
+      disconnect = (fun n -> w.ports.disconnect n) ;
+      get_capabilities = (fun n -> w.ports.get_capabilities n) ;
+      set_capabilities = (fun n c -> w.ports.set_capabilities n c) }
 
 (* Siblings differ, cousins need not, and a move into a parent that has the
    name renames the arrival. *)

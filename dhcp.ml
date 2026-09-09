@@ -116,7 +116,7 @@ module Option = struct
            make ~len:1 ~name:"perform router discovery" 31 ;
            make ~len:4 ~name:"router solicitation" 32 ;
            make ~min_len:8 ~name:"static routes" 33 ;
-           make ~len:1 ~name:"negociate trailers" 34 ;
+           make ~len:1 ~name:"negotiate trailers" 34 ;
            make ~len:4 ~name:"ARP cache timeout" 35 ;
            make ~len:1 ~name:"Ethernet encapsulation" 36 ;
            make ~len:1 ~name:"default TCP TTL" 37 ;

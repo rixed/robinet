@@ -504,7 +504,11 @@ struct
             is_connected = (fun n -> t.ifaces.(n).widget.ports.is_connected 0) ;
             dev = (fun n -> t.ifaces.(n).widget.ports.dev 0) ;
             owner = (fun n -> t.ifaces.(n).widget.ports.owner 0) ;
-            disconnect = (fun n -> t.ifaces.(n).widget.ports.disconnect 0) } ;
+            disconnect = (fun n -> t.ifaces.(n).widget.ports.disconnect 0) ;
+            get_capabilities = (fun n ->
+                t.ifaces.(n).widget.ports.get_capabilities 0) ;
+            set_capabilities = (fun n c ->
+                t.ifaces.(n).widget.ports.set_capabilities 0 c) } ;
         Widget.add_properties widget Widget.[
             property "on" ~kind:Bool ~descr:"The router is powered on."
                 ~getter:(fun () -> `Bool t.power.Simulation.on)
@@ -732,13 +736,23 @@ struct
         done ;
         let reset_count () = Array.iteri (fun i _ -> counts.(i) <- 0) counts in
 
+        (* Frames are not written into an interface then and there: [run]
+         * returns as soon as the queue is empty, which is while the previous
+         * frame is still going out, and a half duplex port that is
+         * transmitting takes nothing in (as would a real one: whoever sent
+         * this would have sensed the carrier and waited). A millisecond
+         * later every wire is quiet again. *)
+        let send n bits =
+            Simulation.delay sim.Simulation.power (Clock.Interval.msec 1.)
+                             router.ifaces.(n).trx.out.write bits in
+
         (* We are going to send some IP packets with a given destination: *)
         let easy_send n dst =
             Ip.Pdu.{ (random ()) with dst = Ip.Addr.of_string dst ; ttl = 9 } |>
             Ip.Pdu.pack |>
             Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (snd addrs.(n)) |>
             Eth.Pdu.pack |>
-            router.ifaces.(n).trx.out.write in
+            send n in
 
         (* Let's play! *)
         easy_send 0 "1.2.3.4" ;
@@ -787,7 +801,7 @@ struct
         Ip.Pdu.pack |>
         Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (snd addrs.(0)) |>
         Eth.Pdu.pack |>
-        router.ifaces.(0).trx.out.write ;
+        send 0 ;
         Simulation.run sim false ;
         "the admin host answers for the router's own address" @?
             (admin_socks () = 1) ;
@@ -971,17 +985,24 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     widget.Widget.ports <- Widget.{
         count = (fun () -> 2) ;
         is_connected = (function
-            | 0 -> router.Router.ifaces.(1).Router.eth.iface.is_connected
+            | 0 -> router.ifaces.(1).eth.iface.is_connected
             | _ -> Hub.Repeater.is_connected hub 0) ;
         dev = (function 0 -> out_trx.out | _ -> in_trx) ;
         (* The outward socket is the router's second adapter; the LAN one is the
            repeater everything inside hangs off. *)
         owner = (function
-            | 0 -> router.Router.ifaces.(1).Router.widget.Widget.ports.owner 0
-            | _ -> hub.Hub.Repeater.widget) ;
+            | 0 -> router.ifaces.(1).widget.ports.owner 0
+            | _ -> hub.widget) ;
         disconnect = (function
-            | 0 -> router.Router.ifaces.(1).Router.widget.Widget.ports.disconnect 0
-            | _ -> Hub.Repeater.disconnect hub 0) } ;
+            | 0 -> router.ifaces.(1).widget.ports.disconnect 0
+            | _ -> Hub.Repeater.disconnect hub 0) ;
+        get_capabilities = (function
+            | 0 -> router.ifaces.(1).widget.ports.get_capabilities 0
+            | _ -> hub.widget.ports.get_capabilities 0) ;
+        set_capabilities = (fun n c ->
+            match n with
+            | 0 -> router.ifaces.(1).widget.ports.set_capabilities 0 c
+            | _ -> hub.widget.ports.set_capabilities 0 c) } ;
     let trx =
         { ins = in_trx ;
           out = out_trx.out } in

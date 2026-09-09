@@ -430,7 +430,9 @@ let recorder ~parent ?location ?caplen ?(dlt=default_dlt) ?fname name =
         is_connected = (fun _ -> false) ;
         dev = (function _ -> { write = recorder.write ; set_read = ignore }) ;
         owner = (fun _ -> widget) ;
-        disconnect = ignore } ;
+        disconnect = ignore ;
+        get_capabilities = (fun _ -> Capabilities.Any) ;
+        set_capabilities = (fun _ _ -> ()) } ;
     Widget.add_properties widget Widget.[
         property "recording" ~kind:Bool
             ~descr:"Tells if the packets are currently saved in the file \
@@ -968,7 +970,9 @@ let replayer ~parent ?location ?fname ?(loop=false) name =
             match List.nth replayer.readers n with
             | exception _ -> Widget.bad_value "No such port #%d" n
             | { contents = None } -> Widget.bad_value "Port #%d is not connected" n
-            | { contents = Some _ } as r -> r := None) } ;
+            | { contents = Some _ } as r -> r := None) ;
+        get_capabilities = (fun _ -> Capabilities.Any) ;
+        set_capabilities = (fun _ _ -> ()) } ;
     Widget.add_properties widget Widget.[
         property "replaying" ~kind:Bool
             ~descr:"Tells if the packets are currently being replayed from \
@@ -1254,7 +1258,9 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
         is_connected = (fun _ -> is_connected portal) ;
         dev = (fun _ -> dev portal) ;
         owner = (fun _ -> widget) ;
-        disconnect = (fun _ -> disconnect portal) } ;
+        disconnect = (fun _ -> disconnect portal) ;
+        get_capabilities = (fun _ -> Capabilities.Any) ;
+        set_capabilities = (fun _ _ -> ()) } ;
     Widget.add_properties widget Widget.[
         property "on" ~descr:"The interface is opened." ~kind:Bool
             ~getter:(fun () -> `Bool (portal.iface <> None))

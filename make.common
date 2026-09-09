@@ -22,7 +22,7 @@ CFLAGS     += -O2 -std=c99 -W -Wall -D_GNU_SOURCE
 
 all:
 
-.PHONY: all clean clean-spec install uninstall reinstall doc check clear
+.PHONY: all dep clean clean-spec install uninstall reinstall doc check clear
 
 ifdef PKG_NAME
 OBJECTS  = $(SOURCES:.ml=.cmo)
@@ -94,6 +94,10 @@ clean: clean-spec
 	rm -f *.cm[ioxa] *.cmxa *.a *.s *.o *.byte *.opt *.top *.annot .depend all_tests.* *.cache *.log
 
 # Dependencies
+dep:
+	@$(RM) .depend
+	@$(MAKE) .depend
+
 .depend:
 	$(OCAMLDEP) -package "$(REQUIRES)" -I .. *.ml *.mli */*.ml > $@
 

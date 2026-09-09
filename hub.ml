@@ -126,7 +126,10 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
             (* Its ports are not widgets, and want no name: one is as good as
              * another, so a cable is recorded as reaching the repeater. *)
             owner = (fun _ -> widget) ;
-            disconnect = disconnect t } ;
+            disconnect = disconnect t ;
+            get_capabilities = (fun _ ->
+                Capabilities.Eth { speeds = [ t.speed ] ; full_duplex = false }) ;
+            set_capabilities = (fun _ _ -> ()) } ;
         Widget.add_properties widget Widget.[
             property "speed"
                 ~kind:(Enum speed_names)
@@ -148,7 +151,7 @@ end
 
 (** A Switch is a device that will forward Ethernet frames based on the observed
   location of the destination.
-  Contrary to a simple Hub, it does have proper eth adapters that negociate a
+  Contrary to a simple Hub, it does have proper eth adapters that negotiate a
   speed, read eth headers etc; But don't have a full eth stack (no support for
   ARP, no addresses of their own, etc). *)
 module Switch =
@@ -255,8 +258,8 @@ struct
         Eth.Iface.dev t.ifaces.(n)
 
     (* [num_macs] is the maximum number of remembered MACs. *)
-    let make ~parent ?location ?(speeds=Eth.Iface.default_speeds)
-             ?(full_duplex=true) ?(cut_through=true) num_ifaces num_macs name =
+    let make ~parent ?location ?speeds ?full_duplex ?(cut_through=true)
+             num_ifaces num_macs name =
         let widget = Widget.make ~device:"switch" ~parent ?location name in
         let power = Simulation.make_power (Simulation.of_widget widget) name in
         let t = {
@@ -274,7 +277,7 @@ struct
             Array.init num_ifaces (fun i ->
                 let name = "#"^ string_of_int i in
                 let recv = forward_from t i in
-                Eth.Iface.make ~parent:widget ~power ~speeds ~full_duplex
+                Eth.Iface.make ~parent:widget ~power ?speeds ?full_duplex
                                ~recv name) ;
         let reset_cut_through () =
             let can_forward_after =
@@ -289,7 +292,11 @@ struct
             is_connected = (fun i -> t.ifaces.(i).widget.ports.is_connected 0) ;
             dev = (fun i -> t.ifaces.(i).widget.ports.dev 0) ;
             owner = (fun i -> t.ifaces.(i).widget.ports.owner 0) ;
-            disconnect = (fun i -> t.ifaces.(i).widget.ports.disconnect 0) } ;
+            disconnect = (fun i -> t.ifaces.(i).widget.ports.disconnect 0) ;
+            get_capabilities = (fun i ->
+                t.ifaces.(i).widget.ports.get_capabilities 0) ;
+            set_capabilities = (fun i c ->
+                t.ifaces.(i).widget.ports.set_capabilities 0 c) } ;
         Widget.add_properties widget Widget.[
             property "cut-through" ~kind:Bool
                 ~descr:"If the switch starts transmitting without buffering."
