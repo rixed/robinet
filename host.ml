@@ -101,13 +101,29 @@ and t = { mutable trx : host_trx ;
           (* the listening servers *)
           tcp_servers : (Tcp.Port.t, (Tcp.TRX.tcp_trx -> unit)) Hashtbl.t ;
           udp_servers : (Udp.Port.t, (Udp.TRX.udp_trx -> unit)) Hashtbl.t ;
-          (* the resolver *)
+          (* Whether this host has an IP configuration of its own to apply
+             when it boots. It has, unless it speaks through somebody else's
+             adapter -- a router's admin host does -- in which case the
+             address, the netmask and the reader belong to that owner and must
+             be left alone. *)
+          own_ip_config : bool ;
+          (* The configuration as the reader set it, which is a property of
+             the host and outlives any number of power cycles. What DHCP
+             grants is kept apart in the [leased_] fields below. *)
           mutable search_sfx : string option ;
           mutable nameserver : Ip.Addr.t option ;
-          (* If the host has a static IP configuration: *)
           mutable static_ip : Ip.Addr.t option ;
-          mutable host_name : string ; (* Might be overwritten by DHCP *)
+          mutable host_name : string ;
           mutable netmask : Ip.Addr.t option ;
+          (* What the current lease granted, if anything. A lease is not a
+             property of the host but of the moment: it goes when the power
+             does (see [reset]), and what it does not carry falls back on the
+             static configuration above. *)
+          mutable leased_netmask : Ip.Addr.t option ;
+          mutable leased_gateway : Ip.Addr.t option ;
+          mutable leased_nameserver : Ip.Addr.t option ;
+          mutable leased_search_sfx : string option ;
+          mutable leased_host_name : string option ;
           mutable resolv_trx : trx option ;
           dns_queries : (string, ((Ip.Addr.t list option -> unit) * Metric.Timed.stop_func option)) Hashtbl.t ;
           dns_cache   : (string, Ip.Addr.t list) Hashtbl.t ;
@@ -126,6 +142,16 @@ let of_widget (w : Widget.t) =
     match w.device with
     | Some (T t) -> Some t
     | _ -> None
+
+(* The configuration in use: what the current lease granted, or, for whatever
+   it did not grant, what the reader configured. *)
+let cur_netmask t = if t.leased_netmask <> None then t.leased_netmask
+                    else t.netmask
+let cur_nameserver t = if t.leased_nameserver <> None then t.leased_nameserver
+                       else t.nameserver
+let cur_search_sfx t = if t.leased_search_sfx <> None then t.leased_search_sfx
+                       else t.search_sfx
+let cur_host_name t = t.leased_host_name |? t.host_name
 
 let print oc trx = String.print oc trx.widget.Widget.name
 let make_tcp_socks ip = { ip_4_tcp = ip ; tcps = Hashtbl.create 3 }
@@ -278,7 +304,7 @@ let rec with_resolver_trx t cont =
             ) (* Else the waiters will eventually be timeouted *)
         )
     in
-    match t.resolv_trx, t.nameserver with
+    match t.resolv_trx, cur_nameserver t with
     | Some trx, _    ->
         Log.(log t.trx.widget.logger Debug (lazy "Use previous resolver trx")) ;
         cont (Some trx)
@@ -304,7 +330,7 @@ and do_gethostbyname t name cont =
     let dns_timeout_delay = Clock.Interval.sec 3. in
     let is_fqdn n = n.[String.length n - 1] = '.' in
     let is_complete n = is_fqdn n || String.exists n "." in
-    let name = match t.search_sfx with
+    let name = match cur_search_sfx t with
     | Some sfx ->
         (* send the query using host IPv4 stack, with as recv a decoding function *)
         if is_complete name then name else name ^ "." ^ sfx
@@ -533,6 +559,18 @@ let ip_recv t bits =
                 rx ip_trx bits
             ))
 
+(* The default route a lease installed on the adapter, taken off it again.
+ * There is at most one at a time, so this is for whoever grants another as
+ * much as for whoever cuts the power. Only the route that was added: the
+ * reader may have configured one that says the very same thing, and that one
+ * is not a lease's to remove. *)
+let drop_leased_gateway t =
+    Option.may (fun gw ->
+        let route = Eth.State.gw_selector (), Some (Eth.Gateway.IPv4 gw) in
+        t.eth_state.gateways <- List.remove t.eth_state.gateways route
+    ) t.leased_gateway ;
+    t.leased_gateway <- None
+
 (* Cutting the power is enough to stop the host doing anything further, since
  * everything it had planned goes with it. What is left is the state those
  * plans were about: sockets, servers, resolver cache. It has to go too, or a
@@ -546,11 +584,19 @@ let reset t =
        twice. Only for a host that has an address of its own to manage: one
        built on somebody else's adapter shares that owner's addresses and that
        owner's reader, and a router's admin host taking down either would stop
-       the router routing. Having no netmask is what says so; see [init]. *)
-    if t.netmask <> None then (
+       the router routing. See [own_ip_config]. *)
+    if t.own_ip_config then (
         t.eth_state.my_addresses <- [] ;
         ignore <-= t.eth_trx |> ignore
     ) ;
+    (* And so does everything else the lease brought, the default route it
+       installed included: a lease is granted to a running host, and this one
+       has stopped. *)
+    drop_leased_gateway t ;
+    t.leased_netmask <- None ;
+    t.leased_nameserver <- None ;
+    t.leased_search_sfx <- None ;
+    t.leased_host_name <- None ;
     Hashtbl.clear t.tcp_socks ;
     Hashtbl.clear t.udp_socks ;
     Hashtbl.clear t.icmp_socks ;
@@ -582,25 +628,76 @@ let set_ip t my_ip netmask =
                     sim.Simulation.root.Widget.children))
  *)
 
-(* A host with no netmask has no IP configuration to apply: it is somebody
-   else's adapter that it speaks through, and whoever owns that adapter hands
-   it its packets. Calling [set_ip] here would have it read the wire as well,
-   which is exactly what a router's admin host must not do. *)
+(* A host with no configuration of its own to apply is somebody else's
+   adapter that it speaks through, and whoever owns that adapter hands it its
+   packets. Calling [set_ip] here would have it read the wire as well, which
+   is exactly what a router's admin host must not do. *)
 let init_nothing ?(on_ip:(t -> unit) option) (_t : t) =
     ignore on_ip
 
 let init_static ?on_ip t =
-    match t.static_ip, t.netmask with
-    | Some static_ip, Some netmask ->
-        set_ip t static_ip netmask ;
+    match t.static_ip with
+    | Some static_ip ->
+        (* A static address given without a netmask is a host that knows only
+           itself: everything else is reached through a gateway. *)
+        set_ip t static_ip (t.netmask |? Ip.Addr.all_ones) ;
         (* TODO: Send a gratuitous ARP request? *)
         Option.may (fun on_ip -> Simulation.asap t.trx.power on_ip t) on_ip
-    | _ ->
-        (* [init] sends a host here only with both of them. *)
+    | None ->
+        (* [init] sends a host here only with one. *)
         assert false
 
+(* The parameters a client asks for, most wanted first. Whatever is asked for
+   here has to be applied by [apply_lease] below, and the other way about: a
+   server serves what it is asked for and nothing else. *)
+let dhcp_request_list =
+    Dhcp.Option.(make_request_list
+        [ subnet_mask ; routers ; domain_name_servers ; domain_name ;
+          host_name ])
+
+(* Take the parameters an accepted lease came with. Only those it carries: a
+   lease that says nothing about the name server leaves the one the reader
+   configured in use. *)
+let apply_lease t (dhcp : Dhcp.Pdu.t) =
+    let netmask =
+        match dhcp.subnet_mask with
+        | Some _ as m -> m
+        | None -> t.netmask in
+    let netmask =
+        match netmask with
+        | Some netmask -> netmask
+        | None ->
+            (* An address must have a netmask, and neither the lease nor the
+               reader gave one: this one reaches nobody but through a
+               gateway. *)
+            Log.(log t.trx.widget.logger Warning (lazy
+                "Leased an address with no netmask, assuming /32")) ;
+            Ip.Addr.all_ones in
+    t.leased_netmask <- Some netmask ;
+    Option.may (fun ns -> t.leased_nameserver <- Some ns)
+               dhcp.domain_name_server ;
+    Option.may (fun sfx -> t.leased_search_sfx <- Some sfx) dhcp.search_sfx ;
+    (* A server that names the client is naming this very host: the name it
+       goes by is the one it is given, and not the one it asked for. *)
+    Option.may (fun name -> t.leased_host_name <- Some name) dhcp.host_name ;
+    (* A default route, added after the ones the reader configured, which are
+       more specific and must keep the upper hand. [reset] takes it away
+       again. *)
+    drop_leased_gateway t ;
+    Option.may (fun gw ->
+        let route = Eth.State.gw_selector (), Some (Eth.Gateway.IPv4 gw) in
+        t.eth_state.gateways <- t.eth_state.gateways @ [ route ] ;
+        t.leased_gateway <- Some gw
+    ) dhcp.router ;
+    Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf
+        "Leased %s/%s, gateway %s, name server %s, name %s"
+            (Ip.Addr.to_string dhcp.yiaddr) (Ip.Addr.to_string netmask)
+            (Option.map_default Ip.Addr.to_string "none" t.leased_gateway)
+            (Option.map_default Ip.Addr.to_string "none" (cur_nameserver t))
+            (cur_host_name t)))) ;
+    set_ip t dhcp.yiaddr netmask
+
 let init_dhcp ?on_ip t =
-    let host_name = t.host_name in
     (* Will receive all eth frames until we got an IP address *)
     let dhcp_client bits = (match Ip.Pdu.unpack bits with
         | Error s ->
@@ -623,32 +720,31 @@ let init_dhcp ?on_ip t =
                         | Ok (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.offer ->
                             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Got DHCP OFFER from %s, accepting it" (Ip.Addr.to_string ip.src)))) ;
                             (* TODO: check the Xid? *)
-                            let pdu = Dhcp.Pdu.make_request ~chaddr:(t.eth_state.mac :> bitstring) ~xid:dhcp.xid ~host_name ?server_id:dhcp.server_id dhcp.yiaddr in
+                            let pdu = Dhcp.Pdu.make_request ~chaddr:(t.eth_state.mac :> bitstring) ~xid:dhcp.xid ~host_name:(cur_host_name t) ~request_list:dhcp_request_list ?server_id:dhcp.server_id dhcp.yiaddr in
                             let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
                             let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Udp.Pdu.pack pdu) in
                             tx t.eth_trx (Ip.Pdu.pack pdu)
                         | Ok (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.ack ->
                             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.src)))) ;
-                            (* TODO: set other params than IP, such as netmask! *)
-                            (* The netmask is there at boot, but a lease
-                               arrives later and nothing stops it being taken
-                               away in between. *)
-                            (match t.netmask with
-                            | None ->
-                                t.trx.signal_err
-                                    "Ignoring a DHCP ACK: I have no netmask"
-                            | Some netmask ->
-                                set_ip t dhcp.yiaddr netmask ;
-                                (* TODO: Send a gratuitous ARP request? *)
-                                Option.may (fun on_ip ->
-                                    Simulation.asap t.trx.power on_ip t) on_ip)
+                            apply_lease t dhcp ;
+                            (* TODO: Send a gratuitous ARP request? *)
+                            Option.may (fun on_ip ->
+                                Simulation.asap t.trx.power on_ip t) on_ip
+                        | Ok (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; message ; _ })
+                          when op = Dhcp.MsgType.nack ->
+                            (* Nothing to do but keep asking, which the
+                               discover timer is already seeing to. *)
+                            Log.(log t.trx.widget.logger Warning (lazy
+                                (Printf.sprintf "Got DHCP NAK from %s: %s"
+                                    (Ip.Addr.to_string ip.src)
+                                    (message |? "no reason given"))))
                         | Ok _ ->
                             (* TODO: print it *)
                             t.trx.signal_err "Ignoring a DHCP message"))) in
     let rec send_discover () =
         if not (ip_is_set t) then (
             Log.(log t.trx.widget.logger Debug (lazy "Sending DHCP DISCOVER")) ;
-            Dhcp.Pdu.make_discover ~chaddr:(t.eth_state.mac :> bitstring) ~host_name () |>
+            Dhcp.Pdu.make_discover ~chaddr:(t.eth_state.mac :> bitstring) ~host_name:(cur_host_name t) ~request_list:dhcp_request_list () |>
                 Dhcp.Pdu.pack |>
                 Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) |>
                 Udp.Pdu.pack |>
@@ -666,7 +762,8 @@ let init_dhcp ?on_ip t =
             (Clock.Interval.to_string delay)))) ;
     Simulation.delay t.trx.power delay send_discover ()
 
-let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(on=true) ~widget
+let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
+                  ?(own_ip_config=true) ?(on=true) ~widget
                   (eth_state : Eth.State.t) eth_trx name =
     (* For the API a cable reaches a host but in reality it reaches its
        adapter. *)
@@ -689,10 +786,16 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(on=true) ~widget
           icmp_socks    = Hashtbl.create 11 ;
           tcp_servers   = Hashtbl.create 11 ;
           udp_servers   = Hashtbl.create 11 ;
+          own_ip_config ;
           nameserver ;
           host_name     = name ;
           static_ip ;
           netmask ;
+          leased_netmask = None ;
+          leased_gateway = None ;
+          leased_nameserver = None ;
+          leased_search_sfx = None ;
+          leased_host_name = None ;
           resolv_trx    = None ;
           search_sfx    = search_sfx ;
           dns_queries   = Hashtbl.create 3 ;
@@ -704,7 +807,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(on=true) ~widget
        applies is a fact about the host as it stands, and the reader may have
        changed it since. *)
     and init () =
-        if t.netmask = None then init_nothing
+        if not t.own_ip_config then init_nothing
         else if t.static_ip = None then init_dhcp
         else init_static
     and host_trx =
@@ -748,10 +851,18 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(on=true) ~widget
     (* No "on" property here: the switch belongs to whoever minted the supply,
        which for a host built on somebody else's adapter is somebody else. See
        [make], and [Router.make] for the other case. *)
+    (* The configuration a host is running with is not always the one it was
+       given: a DHCP lease overrides the reader's own settings for as long as
+       it lasts. So these read as what is in use and write what the reader
+       configured, which is what comes back when the lease goes. *)
     Widget.add_properties widget Widget.[
+        property "hostname" ~kind:String
+            ~descr:"Name this host goes by (a DHCP lease may override it)."
+            ~getter:(fun () -> `String (cur_host_name t))
+            ~setter:(fun v -> t.host_name <- to_string v) ;
         property "search suffix" ~kind:String
-            ~descr:"Search suffix"
-            ~getter:(fun () -> `String (t.search_sfx |? ""))
+            ~descr:"Search suffix (a DHCP lease may override it)."
+            ~getter:(fun () -> `String (cur_search_sfx t |? ""))
             ~setter:(fun v -> t.search_sfx <- match to_string v with "" -> None | s -> Some s) ;
         metric_property "DNS resolutions" ~descr:"DNS resolution times."
             (Metric.Timed.T t.resolutions) ] ;
@@ -761,9 +872,6 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(on=true) ~widget
 
 let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
          ~parent ?location name =
-    (* FIXME: Until we get the netmask from the DHCP it's safer to make it mandatory! *)
-    if netmask = None then
-        invalid_arg "Host.make: For now netmask is mandatory" ;
     let widget = Widget.make ~parent ?location ~device_type:"host" name in
     let eth_state =
         (* FIXME: Don't use the GW for same net IP! *)
@@ -789,13 +897,17 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
             ~setter:(fun v ->
                 t.static_ip <- to_option (Ip.Addr.of_json "static-ip") v) ;
         property "static-netmask" ~kind:(Optional String)
-            ~descr:"Netmask of the statc IP configuration."
+            ~descr:"Netmask of the static IP configuration."
             ~getter:(fun () -> json_of_optional Ip.Addr.to_json t.netmask)
             ~setter:(fun v ->
                 t.netmask <- to_option (Ip.Addr.of_json "netmask") v) ;
+        property "netmask" ~kind:(Optional String)
+            ~descr:"Netmask in use (from the lease, if there is one)."
+            ~getter:(fun () -> json_of_optional Ip.Addr.to_json (cur_netmask t)) ;
         property "nameserver" ~kind:(Optional String)
-            ~descr:"Address of the DNS server."
-            ~getter:(fun () -> json_of_optional Ip.Addr.to_json t.nameserver)
+            ~descr:"Address of the DNS server (a DHCP lease may override it)."
+            ~getter:(fun () ->
+                json_of_optional Ip.Addr.to_json (cur_nameserver t))
             ~setter:(fun v ->
                 t.nameserver <- to_option (Ip.Addr.of_json "nameserver") v) ] ;
     t
@@ -839,8 +951,8 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
     reboot () ;
     assert_equal ~printer:identity "192.168.1.11" (address ()) ;
 
-    (* With no netmask there is no configuration of its own to apply, so a
-       reboot leaves the adapter alone instead of failing. *)
+    (* A static address given with no netmask is still applied: it is a host
+       that knows only itself, and reaches everything else through a gateway. *)
     set "static-netmask" `Null ;
     reboot () ;
     assert_equal ~printer:identity "192.168.1.11" (address ())

@@ -664,11 +664,12 @@ struct
                 let name = "admin@"^ string_of_int n in
                 let widget = Widget.make ~parent:iface.widget name in
                 iface.admin_host <-
-                    (* No netmask and no address: this host configures nothing
-                       at boot, neither statically nor over DHCP. It has the
-                       router's supply, through the router's adapter: one box,
-                       one switch. *)
-                    Some (Host.make_from_eth ~widget iface.eth trx name)
+                    (* This host configures nothing at boot, neither
+                       statically nor over DHCP: the address it speaks from is
+                       the router's own. It has the router's supply, through
+                       the router's adapter: one box, one switch. *)
+                    Some (Host.make_from_eth ~own_ip_config:false ~widget
+                                             iface.eth trx name)
             ) ;
             (* When packets are received from the outside, go to routing: *)
             iface.trx.ins.set_read (route (Some n) t)

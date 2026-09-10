@@ -43,16 +43,22 @@ struct
         { widget : Widget.t ;
           mutable authoritative : bool ;
           mutable lease_time_sec : int ;
-          netmask : Ip.Addr.t option ;
-          broadcast : Ip.Addr.t option ;
-          gw : Ip.Addr.t option ;
+          (* The network parameters served to clients. All editable, and
+           * whatever writes one of them must set [parameters] back to [None];
+           * see there. *)
+          mutable netmask : Ip.Addr.t option ;
+          mutable broadcast : Ip.Addr.t option ;
+          mutable gw : Ip.Addr.t option ;
           mutable mtu : int option ;
-          dns : Ip.Addr.t option ;
-          ntp : Ip.Addr.t option ;
+          mutable dns : Ip.Addr.t option ;
+          mutable domain_name : string option ;
+          mutable ntp : Ip.Addr.t option ;
           (* The whole range available. Must deduce those leased: *)
           ip_range : Ip.Range.t ;
           (* The state updated by the service: *)
           offers : (string, Ip.Addr.t) Hashtbl.t ;
+          (* Indexed by the client hardware address. Written through
+           * [set_lease], which keeps [num_leases] in step with it. *)
           leases : Lease.t BitHash.t ;
           mutable used_ips : Ip.Set.t ;
           (* The options served to clients, which are built once and then kept
@@ -61,6 +67,9 @@ struct
            * set this back to [None], or the server would go on offering what
            * it no longer holds. *)
           mutable parameters : parameters option ;
+          (* How many leases stand, as a metric rather than a plain count, so
+           * that the interface can plot how the pool fills up. *)
+          num_leases : Metric.Gauge.t ;
           queries : Metric.Atomic.t }
 
     (* The options every offer carries, and those a client may ask for (which
@@ -70,23 +79,32 @@ struct
           host : (int * bitstring) list }
 
     let make ?(authoritative=true) ?(lease_time_sec=3600) ?netmask ?broadcast
-             ?gw ?mtu ?dns ?ntp ~parent ip_range =
+             ?gw ?mtu ?dns ?domain_name ?ntp ~parent ip_range =
         let widget = Widget.make ~parent "dhcpd" in
         (* Offered IPs (and options), indexed by client-ids: *)
         let offers = Hashtbl.create 8 in
         let leases = BitHash.create 8 in
         let used_ips = Ip.Set.empty in
         let queries = Metric.Atomic.make () in
+        let num_leases = Metric.Gauge.make () in
         let t = {
             widget ; authoritative ; lease_time_sec ;
-            netmask ; broadcast ; gw ; mtu ; dns ; ntp ;
+            netmask ; broadcast ; gw ; mtu ; dns ; domain_name ; ntp ;
             ip_range ; offers ; leases ; used_ips ;
-            parameters = None ; queries } in
+            parameters = None ; num_leases ; queries } in
         (* Those options may have no value, which is what [`Null] says; an
          * empty string would be a value, and a nonsensical one at that. *)
         let json_of_ip_opt = function
             | None -> `Null
             | Some ip -> `String (Ip.Addr.to_string ip) in
+        (* An address the server may or may not have one of to offer. It is one
+         * of the options served, so setting it takes those away. *)
+        let ip_property name ~descr get set =
+            Widget.(property name ~kind:(optional (hint "1.2.3.4" String)) ~descr
+                ~getter:(fun () -> json_of_ip_opt (get ()))
+                ~setter:(fun v ->
+                    set (to_option (Ip.Addr.of_json name) v) ;
+                    t.parameters <- None)) in
         Widget.add_properties widget Widget.[
             property "authoritative" ~kind:Bool
                 ~descr:"Is this server authoritative"
@@ -99,16 +117,24 @@ struct
                     t.lease_time_sec <- to_int_range ~min:0 v ;
                     (* It is one of the options served: *)
                     t.parameters <- None) ;
-            property "netmask" ~kind:(optional String)
-                ~getter:(fun () -> json_of_ip_opt t.netmask) ;
-            property "broadcast" ~kind:(optional String)
-                ~getter:(fun () -> json_of_ip_opt t.broadcast) ;
-            property "gateway" ~kind:(optional String)
-                ~getter:(fun () -> json_of_ip_opt t.gw) ;
-            property "DNS" ~kind:(optional String)
-                ~getter:(fun () -> json_of_ip_opt t.dns) ;
-            property "NTP" ~kind:(optional String)
-                ~getter:(fun () -> json_of_ip_opt t.ntp) ;
+            ip_property "netmask" ~descr:"Netmask of the served network"
+                (fun () -> t.netmask) (fun v -> t.netmask <- v) ;
+            ip_property "broadcast" ~descr:"Broadcast address of that network"
+                (fun () -> t.broadcast) (fun v -> t.broadcast <- v) ;
+            ip_property "gateway" ~descr:"Default route to offer"
+                (fun () -> t.gw) (fun v -> t.gw <- v) ;
+            ip_property "DNS" ~descr:"Name server to offer"
+                (fun () -> t.dns) (fun v -> t.dns <- v) ;
+            ip_property "NTP" ~descr:"Time server to offer"
+                (fun () -> t.ntp) (fun v -> t.ntp <- v) ;
+            property "domain name" ~kind:(optional (hint "example.com" String))
+                ~descr:"Domain clients are to search names in"
+                ~getter:(fun () -> json_of_optional (fun s -> `String s)
+                                                    t.domain_name)
+                ~setter:(fun v ->
+                    t.domain_name <- to_option to_string v ;
+                    (* It is one of the options served: *)
+                    t.parameters <- None) ;
             (* Clients are told the MTU only when there is one to tell them
              * about, so this is the whole of [int option]: no value at all,
              * or one that must be a possible MTU. *)
@@ -120,8 +146,42 @@ struct
                     t.mtu <- to_option (to_int_range ~min:68 ~max:65535) v ;
                     (* It is one of the options served: *)
                     t.parameters <- None) ;
-            property "leases" ~descr:"Number of current leases" ~kind:Int
-                ~getter:(fun () -> `Int (BitHash.length t.leases)) ;
+            (* Who holds what, which is the whole of what this server has
+             * done. Read-only: a lease is not something to be written down
+             * here but the outcome of an exchange with the client that holds
+             * it. Ordered by address, so that a table read twice in a row
+             * reads the same way. *)
+            property "leases" ~descr:"The addresses currently leased"
+                ~kind:(list (record [| "client", String ;
+                                       "hostname", optional String ;
+                                       "address", String ;
+                                       "expires in (s)", Float |]))
+                ~getter:(fun () ->
+                    let now = Simulation.Widget.now t.widget in
+                    BitHash.fold (fun chaddr (l : Lease.t) rows ->
+                        (l.ip, chaddr, l) :: rows
+                    ) t.leases [] |>
+                    List.sort (fun (a, _, _) (b, _, _) -> Ip.Addr.compare a b) |>
+                    List.map (fun (ip, chaddr, (l : Lease.t)) ->
+                        `Assoc [
+                            "client",
+                                `String (Eth.Addr.to_hexstring
+                                            (Eth.Addr.o chaddr)) ;
+                            "hostname",
+                                json_of_optional (fun n -> `String n)
+                                                 l.Lease.hostname ;
+                            "address", `String (Ip.Addr.to_dotted_string ip) ;
+                            (* What is left of it, and not when it began: a
+                             * date in simulated time means nothing to a
+                             * reader, and a lease already over reads as the
+                             * negative it is. *)
+                            "expires in (s)",
+                                `Float (Interval.to_secs
+                                            (Time.diff l.Lease.until now)) ]) |>
+                    (fun rows -> `List rows)) ;
+            metric_property "leased addresses"
+                ~descr:"Number of addresses currently leased"
+                (Metric.Gauge.T t.num_leases) ;
             metric_property "queries" ~descr:"Count queries per status"
                 (Metric.Atomic.T t.queries) ] ;
         t
@@ -145,8 +205,9 @@ struct
                 add t.gw routers Ip.Addr.to_bitstring |>
                 add t.broadcast broadcast_address Ip.Addr.to_bitstring |>
                 add t.dns domain_name_servers Ip.Addr.to_bitstring |>
+                add t.domain_name domain_name bitstring_of_string |>
                 add t.mtu interface_mtu bitstring_of_int16 |>
-                add t.ntp time_servers Ip.Addr.to_bitstring in
+                add t.ntp ntp_servers Ip.Addr.to_bitstring in
             let p = { mandatory ; host } in
             t.parameters <- Some p ;
             p
@@ -158,11 +219,23 @@ struct
      * by the client. *)
     (* FIXME: instead of this, just add the min of lease_time_sec and the client's
      * requested lease_time! *)
-    let get_options t request_list =
+    (* [host_name] is the name of the very client being answered, which is not
+     * a parameter of the server but of that one exchange, and so is served
+     * beside those. *)
+    let get_options ?host_name t request_list =
         let parameters = get_parameters t in
+        let servable =
+            match host_name with
+            | None -> parameters.host
+            | Some n ->
+                (Dhcp.Option.host_name, bitstring_of_string n) ::
+                parameters.host in
         String.fold_right (fun c opts ->
             let c = int_of_char c in
-            match List.find (fun (code, _) -> code = c) parameters.host with
+            (* What is served in any case is served once: a client that asks
+             * for the lease time must not be sent two of them. *)
+            if List.mem_assoc c parameters.mandatory then opts else
+            match List.find (fun (code, _) -> code = c) servable with
             | exception Not_found -> opts
             | opt -> opt :: opts
         ) (request_list |? "") [] |>
@@ -204,6 +277,13 @@ struct
      *)
     (*$>*)
 
+    (* Grant a lease, or renew one. Whatever writes [leases] goes through here,
+     * so that the gauge and the table never disagree about what is held. *)
+    let set_lease t chaddr lease =
+        BitHash.replace t.leases chaddr lease ;
+        let now = Simulation.Widget.now t.widget in
+        Metric.Gauge.set ~now t.num_leases (BitHash.length t.leases)
+
     (* Returns the next unused IP from the range, and mark it as used: *)
     let get_free_ip t =
         Ip.Range.enum t.ip_range |>
@@ -244,7 +324,9 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                     let offer_key = Dhcp.Option.default_client_id ~htype chaddr in
                     Hashtbl.replace st.offers offer_key offered_ip ;
                     (* Send the offer *)
-                    let options = State.get_options st dhcp.request_list in
+                    let options =
+                        State.get_options ?host_name:dhcp.host_name st
+                                          dhcp.request_list in
                     Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Offering IP %s to %s" (Ip.Addr.to_string offered_ip) (hexstring_of_bitstring chaddr)))) ;
                     Pdu.make_offer ~chaddr ~xid:dhcp.Pdu.xid ~options ?client_id offered_ip |>
                     Pdu.pack |>
@@ -272,10 +354,17 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                     let until = Time.add now (Interval.sec (float_of_int st.lease_time_sec)) in
                     (* TODO: clean [leases] from time to time! *)
                     (* TODO: mask that previous leased IP as free, if any: *)
-                    BitHash.replace st.leases chaddr (Lease.make ~until offered_ip) ;
+                    (* The name is the client's own, which it gives with every
+                     * request: the server keeps it so that whoever looks at
+                     * the leases sees who holds them, and hands it back to
+                     * clients that ask for it. *)
+                    State.set_lease st chaddr
+                        (Lease.make ?hostname:dhcp.host_name ~until offered_ip) ;
                     Log.(log st.widget.logger Debug (lazy "ACKing it")) ;
                     count "ack" ;
-                    let options = State.get_options st dhcp.request_list in
+                    let options =
+                        State.get_options ?host_name:dhcp.host_name st
+                                          dhcp.request_list in
                     Pdu.make_ack ~chaddr ~xid ?client_id ~options offered_ip |>
                     Pdu.pack |>
                     host.Host.udp_send (Host.IPv4 offered_ip) ~src_port dst_port
@@ -348,4 +437,88 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
     assert_bool "and is leased one after a reboot" (Host.ip_is_set clt) ;
     assert_bool "from the server's range"
         (Eth.State.find_ip4 clt.eth_state |> Ip.Cidr.mem my_net)
+ *)
+
+(* An address alone is not a configuration: the parameters the lease carries
+   are the ones the client ends up running with, and it has to ask for them. *)
+(*$R serve
+    let sim = Simulation.make ~realtime:false "test-dhcpd-options" in
+    let srv : Host.t =
+        Host.make ~parent:sim.root ~netmask:Ip.Addr.all_ones
+                  ~static_ip:(Ip.Addr.of_dotted_string "192.168.42.1")
+                  "server" in
+    let my_net = Ip.Cidr.of_string "192.168.42.0/24"
+    and gw = Ip.Addr.of_dotted_string "192.168.42.254"
+    and dns = Ip.Addr.of_dotted_string "192.168.42.53" in
+    let st =
+        State.make ~parent:sim.root
+                   ~netmask:(Ip.Addr.of_dotted_string "255.255.255.0")
+                   ~gw ~dns ~domain_name:"example.com"
+                   (Ip.Range.of_cidr my_net) in
+    serve st srv.trx ;
+    (* No configuration of its own: all it runs with comes from the lease. *)
+    let clt : Host.t = Host.make ~parent:sim.root "client" in
+    srv.trx.dev.set_read clt.trx.dev.write ;
+    clt.trx.dev.set_read srv.trx.dev.write ;
+    Simulation.run sim false ;
+    assert_bool "the client is leased an address" (Host.ip_is_set clt) ;
+    assert_equal ~printer:identity "255.255.255.0"
+        (Option.map_default Ip.Addr.to_dotted_string "none"
+            (Host.cur_netmask clt)) ;
+    assert_equal ~printer:identity "192.168.42.53"
+        (Option.map_default Ip.Addr.to_dotted_string "none"
+            (Host.cur_nameserver clt)) ;
+    assert_equal ~printer:identity "example.com"
+        (Host.cur_search_sfx clt |? "none") ;
+    let default_route = Eth.State.gw_selector (), Some (Eth.Gateway.IPv4 gw) in
+    let has_default_route () =
+        List.mem default_route Eth.State.(clt.eth_state.gateways) in
+    assert_bool "and a default route to the offered gateway"
+        (has_default_route ()) ;
+    (* The netmask reaches the adapter, and not merely the host: it is what
+       tells apart a neighbour from something to send to that gateway. *)
+    assert_bool "the adapter holds that netmask"
+        (List.exists (fun (a : Eth.State.my_address) ->
+            Bitstring.equals a.Eth.State.netmask
+                (Ip.Addr.to_bitstring (Ip.Addr.of_dotted_string "255.255.255.0")))
+            Eth.State.(clt.eth_state.my_addresses)) ;
+    (* The name the client gave is the one the server knows it by, and the
+       lease table is where a reader of the interface sees it. *)
+    let lease = BitHash.find_option st.leases (clt.eth_state.Eth.State.mac :> bitstring) in
+    assert_equal ~printer:identity "client"
+        (Option.map_default (fun (l : Lease.t) -> l.Lease.hostname |? "none")
+                            "no lease" lease) ;
+    let prop name =
+        List.find (fun (p : Widget.property) -> p.Widget.name = name)
+                  st.widget.Widget.properties in
+    (match (prop "leases").Widget.getter () with
+    | `List [ `Assoc row ] ->
+        assert_equal ~printer:identity "client"
+            (match List.assoc "hostname" row with
+            | `String n -> n | _ -> "none") ;
+        assert_equal ~printer:identity
+            (Ip.Addr.to_dotted_string (Eth.State.find_ip4 clt.eth_state))
+            (match List.assoc "address" row with
+            | `String a -> a | _ -> "none")
+    | v ->
+        assert_failure ("one lease, not "^ Yojson.Basic.to_string v)) ;
+    (* And the gauge beside it is what a plot of the pool is drawn from. *)
+    assert_equal ~printer:string_of_int 1
+        (match (prop "leased addresses").Widget.getter () with
+        | `Assoc l ->
+            (match List.assoc "values" l with
+            | `List [ `Assoc row ] ->
+                (match List.assoc "value" row with
+                | `Assoc v ->
+                    (match List.assoc "current" v with `Int c -> c | _ -> -1)
+                | _ -> -1)
+            | _ -> -1)
+        | _ -> -1) ;
+    (* None of it outlives the power: a host coming back up is a host that has
+       been granted nothing yet. *)
+    clt.trx.power_off () ;
+    assert_bool "the netmask goes with the power" (Host.cur_netmask clt = None) ;
+    assert_bool "and so does the name server"
+        (Host.cur_nameserver clt = None) ;
+    assert_bool "and so does the default route" (not (has_default_route ()))
  *)

@@ -46,7 +46,8 @@ let main =
                 Device.make ~parent (Printf.sprintf "host%d" i)
                     (Device.THost { static_ip = Some ip ;
                                     netmask =
-                                        Ip.Addr.of_string "255.255.255.0" ;
+                                        Some (Ip.Addr.of_string
+                                                  "255.255.255.0") ;
                                     gateway = None ; nameserver = None ;
                                     search_sfx = None ; mac = None }) in
             (* Spread around the switch, each one further out than the last, so

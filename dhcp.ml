@@ -168,13 +168,27 @@ module Option = struct
     let time_servers = 4
     let domain_name_servers = 6
     let host_name = 12
+    let domain_name = 15
     let interface_mtu = 26
     let broadcast_address = 28
+    let ntp_servers = 42
     let requested_ip = 50
     let lease_time = 51
     let server_id = 54
     let request_list = 55
     let client_id = 61
+
+    (* The parameter request list (option 55) as it goes on the wire: the
+     * codes a client wants, one byte each, most wanted first. *)
+    let make_request_list codes =
+        String.of_list (List.map Char.chr codes)
+
+    (*$< Option *)
+    (*$= make_request_list & ~printer:identity
+      "\001\003" (make_request_list [ subnet_mask ; routers ])
+      "" (make_request_list [])
+     *)
+    (*$>*)
 
     let default_client_id ?(htype=Arp.HwType.eth) chaddr =
         let%bitstring client_id = {|
@@ -408,8 +422,12 @@ struct
         (* If some important parameters are given as options move them from the
          * anonymous option list onto the proper data structure. They take
          * precedence over parameters given explicitly though. *)
+        (* [set_option] measures a value the way the wire does, in bytes, and
+         * an option handed a length in bits is one it does not recognise: it
+         * would be sent all the same, from [other_options], but out of the
+         * order [pack_options] is careful about. *)
         List.iter (fun (code, v) ->
-            set_option t code (bitstring_length v) v
+            set_option t code (bytelength v) v
         ) options ;
         t
 
@@ -428,7 +446,7 @@ struct
         make_base ?chaddr ?xid ?client_id ?options ~yiaddr MsgType.ack
 
     let make_nak ?chaddr ?xid ?client_id ?options ?message () =
-        make_base ?chaddr ?xid ?client_id ?options ?message MsgType.ack
+        make_base ?chaddr ?xid ?client_id ?options ?message MsgType.nack
 
     let random () =
         let xid = rand32 () and host_name = rand_hostname () in
@@ -440,6 +458,27 @@ struct
 
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
+     *)
+
+    (* Options handed to a message reach the other end, whether or not the
+       message has a field of its own to hold them. *)
+    (*$R make_ack
+        let ip = Ip.Addr.of_dotted_string in
+        let options =
+            Dhcp.Option.[
+                subnet_mask, Ip.Addr.to_bitstring (ip "255.255.255.0") ;
+                domain_name_servers, Ip.Addr.to_bitstring (ip "192.168.0.53") ;
+                domain_name, bitstring_of_string "example.com" ] in
+        let ack = make_ack ~options (ip "192.168.0.10") |> pack |> unpack |>
+                  Result.get_ok in
+        let printer = identity in
+        assert_equal ~printer "255.255.255.0"
+            (BatOption.map_default Ip.Addr.to_dotted_string "none"
+                                   ack.subnet_mask) ;
+        assert_equal ~printer "192.168.0.53"
+            (BatOption.map_default Ip.Addr.to_dotted_string "none"
+                                   ack.domain_name_server) ;
+        assert_equal ~printer "example.com" (ack.search_sfx |? "none")
      *)
     (*$>*)
 
