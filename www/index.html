@@ -198,8 +198,9 @@
         </article>
 
         <template x-for="s in simsShown" :key="s.id">
-            <article class="sim" :class="{ 'is-serving': s.id === servingId,
-                                           folded: simFolded.includes(s.id) }">
+            <article class="sim"
+                     :class="{ 'is-showing': selected && selected.sim === s.id,
+                               folded: simFolded.includes(s.id) }">
                 <header>
                     <button class="twisty" @click="foldSim(s.id)"
                             :title="simFolded.includes(s.id)
@@ -215,6 +216,14 @@
                            @keydown.enter.prevent="commitRename(s)"
                            @keydown.escape.prevent="cancelRename()"
                            @blur="renaming === s.id && commitRename(s)"/>
+                    <!-- Said in a word rather than by a colour to be
+                         decoded. It is why this one has no clock controls and
+                         cannot be renamed, saved or deleted, and a reader who
+                         wonders why should not have to work it out from what
+                         is missing. -->
+                    <span class="badge serving" x-show="s.id === servingId"
+                          title="This simulation runs the administration
+                                 interface you are reading">serves this page</span>
                     <!-- Folded away, the header is all there is of it, so what
                          its clock is doing goes there: the reason to fold one
                          is that it is not the one being worked on, not that one

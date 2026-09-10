@@ -85,8 +85,16 @@ article.sim > header {
     align-items: baseline;
     gap: .5rem;
 }
-/* The simulation serving this page: it is the one that must keep running. */
-article.sim.is-serving { border-left: 3px solid var(--pico-primary); }
+/* The simulation being shown: the one the map, the schematic and the property
+ * panel are all about. Worth marking because those three are elsewhere on the
+ * screen and say nothing about which of several simulations they belong to,
+ * and because it holds while this one is folded away, which is when the tree
+ * below cannot show it by highlighting the selected widget.
+ *
+ * The one serving this page used to be marked here instead. That needed no
+ * colour: it is the panel with no clock controls and no buttons under them,
+ * and it now says so in a word (see the "serves this page" badge). */
+article.sim.is-showing { border-left: 3px solid var(--pico-primary); }
 /* Folded away, the header is all that is left of it, and it should not go on
  * looking like the top of something. */
 article.sim.folded > header {
@@ -1460,3 +1468,11 @@ article.sim > header input.rename {
 /* Armed by a first click, and coloured like everything else that is one click
  * from being gone for good. */
 .controls button.armed { color: var(--pico-del-color); }
+
+/* Not a state of the simulation, unlike the badges beside it, but a fact about
+ * which one of them this is: quieter than they are. */
+article.sim > header .badge.serving {
+    background: none;
+    border: 1px solid var(--pico-muted-border-color);
+    color: var(--pico-muted-color);
+}
