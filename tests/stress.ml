@@ -1394,10 +1394,10 @@ let test_http net cable duration nthreads
            a device is not a device, and deleting a host's adapter would leave a
            host whose port answers for a widget nobody can see. *)
         check "a device says what kind of device it is"
-            ((widget far).Widget.device = Some "host" &&
-             (widget switch_id).Widget.device = Some "switch") ;
+            ((widget far).Widget.device_type = Some "host" &&
+             (widget switch_id).Widget.device_type = Some "switch") ;
         check "and a part of one says it is not a device at all"
-            ((adapter far).Widget.device = None) ;
+            ((adapter far).Widget.device_type = None) ;
         check "so deleting a device's adapter is refused"
             (del (adapter far).Widget.id = 400 && not (gone far)) ;
         check "and so is deleting one of a switch's interfaces"
@@ -1466,7 +1466,7 @@ let test_http net cable duration nthreads
            not is a device of its own: one does not order, or return, the parts
            of a machine separately. *)
         check "a part that is a device in its own right says so"
-            (List.exists (fun (c : Widget.t) -> c.device = Some "router")
+            (List.exists (fun (c : Widget.t) -> c.device_type = Some "router")
                          (widget g).Widget.children) ;
         check "and the router within it is not a device of its own"
             (List.for_all (fun (c : Widget.t) -> del c.id = 400)

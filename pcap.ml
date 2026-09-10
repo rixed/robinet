@@ -370,6 +370,14 @@ type recorder =
       mutable recording : bool ;
       packets_recvd : Metric.Counter.t }
 
+type Widget.device += Recorder of recorder
+
+(* The recorder a widget stands for, when it stands for one. *)
+let recorder_of_widget (w : Widget.t) =
+    match w.Widget.device with
+    | Some (Recorder t) -> Some t
+    | _ -> None
+
 (* Open [fname] and record into it from now on.
  *
  * Recording starts with the file: naming one is asking for its contents, and a
@@ -408,7 +416,7 @@ let recorder_eject recorder =
     recorder.recording <- false
 
 let recorder ~parent ?location ?caplen ?(dlt=default_dlt) ?fname name =
-    let widget = Widget.make ~parent ?location ~device:"recorder" name in
+    let widget = Widget.make ~parent ?location ~device_type:"recorder" name in
     let recorder =
         { fname = "" ; caplen ; dlt ; widget ; write = ignore ; file = None ;
           recording = false ; packets_recvd = Metric.Counter.make () } in
@@ -423,6 +431,7 @@ let recorder ~parent ?location ?caplen ?(dlt=default_dlt) ?fname name =
        -- the name, or what the name refuses to open as -- whoever undoes the
        half-built widget (see [Myadmin_api.create_widget]) closes the file
        along with it. *)
+    widget.device <- Some (Recorder recorder) ;
     widget.on_delete <- (fun () -> recorder_eject recorder) ;
     Option.may (recorder_open recorder) fname ;
     widget.ports <- Widget.{
@@ -827,6 +836,14 @@ type replayer =
       mutable gen : int ;
       packets_sent : Metric.Counter.t }
 
+type Widget.device += Replayer of replayer
+
+(* The replayer a widget stands for, when it stands for one. *)
+let replayer_of_widget (w : Widget.t) =
+    match w.Widget.device with
+    | Some (Replayer t) -> Some t
+    | _ -> None
+
 (* Close the file, if one is open, and forget where in it we were.
  *
  * The name is kept: what a replayer is playing and whether it is playing are
@@ -931,13 +948,14 @@ and replay_end replayer =
                        else "Nothing to replay in %S") fname))))
 
 let replayer ~parent ?location ?fname ?(loop=false) name =
-    let widget = Widget.make ~parent ?location ~device:"replayer" name in
+    let widget = Widget.make ~parent ?location ~device_type:"replayer" name in
     let replayer =
         { fname = "" ; widget ; readers = [] ; replaying = false ; loop ;
           file = None ; last_ts = None ; gen = 0 ;
           packets_sent = Metric.Counter.make () } in
     (* Before the file is opened, as for a recorder: a replayer that is undone
        between opening its file and being finished must let go of it. *)
+    widget.device <- Some (Replayer replayer) ;
     widget.on_delete <- (fun () -> replayer_eject replayer) ;
     (* Named at birth is named by the reader: it plays at once, as a recorder
        named at birth records at once. *)
@@ -1176,6 +1194,14 @@ type portal = {
     mutable emit : (bitstring -> unit) option ;
   mutable reader : Thread.t option }
 
+type Widget.device += Portal of portal
+
+(* The portal a widget stands for, when it stands for one. *)
+let portal_of_widget (w : Widget.t) =
+    match w.Widget.device with
+    | Some (Portal t) -> Some t
+    | _ -> None
+
 let set_read (portal : portal) f =
     Log.(log portal.widget.logger Debug (lazy (Printf.sprintf "Setting emitter for portal %s" portal.ifname))) ;
     portal.emit <- Some f
@@ -1246,12 +1272,13 @@ let power_up portal =
  * a device of the simulated network like any other, and has to be somewhere on
  * the map for the traffic coming out of it to have come from anywhere. *)
 let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
-    let widget = Widget.make ~parent ?location ~device:"portal" ifname in
+    let widget = Widget.make ~parent ?location ~device_type:"portal" ifname in
     let portal = {
         iface = None ;
         ifname ; widget ; promisc ; filter ; caplen ;
         emit = None ;
         reader = None } in
+    widget.device <- Some (Portal portal) ;
     widget.on_delete <- (fun () -> power_down portal) ;
     widget.ports <- Widget.{
         count = (fun () -> 1) ;

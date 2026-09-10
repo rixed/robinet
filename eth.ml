@@ -1073,6 +1073,14 @@ struct
                      power : Simulation.power ;
                     widget : Widget.t }
 
+        type Widget.device += T of t
+
+        (* The cable a widget stands for, when it stands for one. *)
+        let of_widget (w : Widget.t) =
+            match w.Widget.device with
+            | Some (T t) -> Some t
+            | _ -> None
+
         let delay length = Clock.Interval.sec (length /. 3e9)
         let success_rate error_rate = int_of_float (1. /. error_rate)
 
@@ -1083,7 +1091,7 @@ struct
         let make ~parent ?(length=10.) ?(error_rate=0.) ?(history=10)
                  ?(name="cable") () =
             let widget = Widget.make ~parent name in
-            widget.Widget.device <- Some "cable" ;
+            widget.Widget.device_type <- Some "cable" ;
             let t = {
                 power = (Simulation.of_widget widget).Simulation.power ;
                 length ; delay = delay length ;
@@ -1094,6 +1102,7 @@ struct
                 ends = None ;
                 last_packets =
                     OrdArray.make history (false, empty_bitstring) } in
+            widget.Widget.device <- Some (T t) ;
             Widget.add_properties widget Widget.[
                 property "length" ~kind:Float ~units:"meters"
                     ~descr:"Length of the cable."

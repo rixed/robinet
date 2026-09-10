@@ -36,6 +36,19 @@ open Batteries
  * in the Gulf of Guinea. *)
 type location = { lat : float ; lon : float }
 
+(* The thing a widget stands for, so that whoever holds the widget can get back
+ * to it: the [Host.t] behind a host, the [Hub.Switch.t] behind a switch.
+ *
+ * Extensible, and not a variant listing them all, because this module is
+ * compiled long before any of them: each adds its own constructor where its
+ * type is defined (see [Metric.metric], which is arranged the same way), and
+ * offers an [of_widget] of its own so that a caller matches nothing itself.
+ *
+ * A match on this therefore always needs a default case. That costs nothing
+ * here: nobody wants to do the same thing to all the kinds of device there
+ * are -- what a caller asks is whether this one is a host. *)
+type device = ..
+
 type t =
     { (* The stable identity of a widget.
        * Names are not stable: a widget can be moved elsewhere in the tree, and
@@ -91,15 +104,25 @@ type t =
        * as one built through the API. What the catalogue then says is which of
        * these kinds it knows how to build -- and therefore, the API refusing
        * to remove what it could not put back, which ones it will delete. *)
-      mutable device : string option ;
+      mutable device_type : string option ;
+      (* The device itself, set by the same constructor that sets
+       * [device_type], so that a widget can be turned back into the thing it
+       * stands for -- a program that has just built a host through the
+       * catalogue gets a widget, and wants somewhere to run a ping.
+       *
+       * [None] for a widget that is a part rather than a whole, as
+       * [device_type] is, and for one whose module has nothing to hand back:
+       * the localhost has no host record of its own, only a transceiver. *)
+      mutable device : device option ;
       (* What this device was built from: every parameter the catalogue entry
-       * named by [device] declares, coerced, in the order it declares them.
+       * named by [device_type] declares, coerced, in the order it declares
+       * them.
        * [None] until [Device.make] fills it in, and for ever after for a
        * device wired up by hand, calling the constructors and [Eth.Cable.plug]
        * directly.
        *
-       * This and not [device] is what says whether a widget can be built
-       * again: the constructors set [device] themselves, so a hand-wired host
+       * This and not [device_type] is what says whether a widget can be built
+       * again: the constructors set [device_type] themselves, so a hand-wired host
        * answers "host" as much as any other, and what it cannot say is with
        * which arguments. Hence the option, and hence a save that leaves such a
        * device out rather than guessing.
@@ -686,7 +709,7 @@ let unique_among parent name =
     loop 2
 
 (* The one place a widget is built. *)
-let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) ?device name =
+let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) ?device_type name =
     if String.contains name '/' then
         invalid_arg ("Widget.make: name must not contain '/': "^ name) ;
     let name =
@@ -702,7 +725,8 @@ let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) ?device name =
         parent ;
         children = [] ;
         peers = [] ;
-        device ;
+        device_type ;
+        device = None ;
         made_with = None ;
         on_delete = ignore ;
         location ;
@@ -743,9 +767,9 @@ let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) ?device name =
  * widget it is building this one under, or has the simulation, whose root is
  * one [Simulation.root] away. That is what keeps the root the only parentless
  * widget of a simulation, and hence keeps it a complete inventory. *)
-let make ~parent ?size ?location ?properties ?device name =
+let make ~parent ?size ?location ?properties ?device_type name =
     make_ ~parent ~sim:parent.sim ~now:parent.logger.Log.now
-          ?size ?location ?properties ?device name
+          ?size ?location ?properties ?device_type name
 
 (** Create the root of a simulation's widget tree: the only widget with no
  * parent, and the only one that has to be told which simulation it is in and

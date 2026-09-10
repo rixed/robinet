@@ -251,6 +251,16 @@ struct
                      ingress : Metric.Counter.t ;
                       egress : Metric.Counter.t }
 
+    type Widget.device += T of t
+
+    (* The router a widget stands for, when it stands for one. A gateway's
+       widget stands for the gateway, not for the router inside it, and answers
+       [None] here; see [gw_of_widget]. *)
+    let of_widget (w : Widget.t) =
+        match w.Widget.device with
+        | Some (T t) -> Some t
+        | _ -> None
+
     (* Add a route (the added route becomes top priority *)
     let add_route (t : t) r =
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf2 "Adding route: %a" Route.print r))) ;
@@ -497,7 +507,8 @@ struct
                 ) in
         (* This router minted the supply above, so the switch for it goes on its
            widget, and so does stopping it for good. *)
-        widget.device <- Some "router" ;
+        widget.device_type <- Some "router" ;
+        widget.device <- Some (T t) ;
         widget.on_delete <- (fun () -> switch false) ;
         widget.ports <- Widget.{
             count = (fun () -> Array.length t.ifaces) ;
@@ -903,6 +914,14 @@ type gw_trx =
       dns_state : Named.State.t ;
       nat_state : Nat.State.t }
 
+type Widget.device += T of gw_trx
+
+(* The gateway a widget stands for, when it stands for one. *)
+let gw_of_widget (w : Widget.t) =
+    match w.Widget.device with
+    | Some (T t) -> Some t
+    | _ -> None
+
 (* Returns a [gw_trx] that gives access to the dhcpd leases, the named zones
  * and the NAT tables.
  * Unless [dhcp_range] is set, all local IPs (but those used by the GW itself)
@@ -914,7 +933,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     (* We want all parts inherit this widget: *)
     let widget = Widget.make ~parent ?location name in
     (* A whole machine, whatever it is made of inside. *)
-    widget.Widget.device <- Some "gateway" ;
+    widget.Widget.device_type <- Some "gateway" ;
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let broadcast = Ip.Cidr.all1s_addr local_cidr in
@@ -1014,7 +1033,9 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let trx =
         { ins = in_trx ;
           out = out_trx.out } in
-    { trx ; widget ; dhcp_state ; dns_state ; nat_state }
+    let gw = { trx ; widget ; dhcp_state ; dns_state ; nat_state } in
+    widget.Widget.device <- Some (T gw) ;
+    gw
 
 (* A gateway offers what a gateway has sockets for, and not one port per end
    that happens to exist within it: the router's two interfaces, the hub's three

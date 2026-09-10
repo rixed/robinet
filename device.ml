@@ -580,7 +580,7 @@ let note =
           param "text" ~kind:String ~default:(`String "")
               ~descr:"What it says." ] ;
       make = fun ~parent name args ->
-          let widget = Widget.make ~parent ~device:"note" name in
+          let widget = Widget.make ~parent ~device_type:"note" name in
           let text = ref (string args "text") in
           Widget.add_properties widget Widget.[
               property "text" ~kind:String ~descr:"What it says."
@@ -668,9 +668,9 @@ let of_widget (w : Widget.t) =
     let rec within_a_device (w : Widget.t) =
         match w.parent with
         | None -> false
-        | Some p -> p.Widget.device <> None || within_a_device p in
+        | Some p -> p.Widget.device_type <> None || within_a_device p in
     if within_a_device w then None
-    else Option.bind w.Widget.device find
+    else Option.bind w.Widget.device_type find
 
 (** Build one: [make "switch" ~parent "sw1" [ "ports", `Int 24 ]].
  *
@@ -770,4 +770,23 @@ let make type_ ~parent name args =
    | None -> false)
   (ignore made_with ; \
   Widget.make ~parent:(root ()) "by hand").Widget.made_with = None
+ *)
+
+(* A widget built here can be turned back into the thing it stands for, which
+   is what a program needs to run anything on a host it just asked for. Each
+   module answers for its own kind and for no other, so asking the wrong one is
+   how a caller finds out it has the wrong sort of device. *)
+(*$T make
+  (match Host.of_widget (make "host" ~parent:(root ()) "h" []) with \
+   | Some (h : Host.t) -> h.Host.trx.Host.widget.Widget.name = "h" \
+   | None -> false)
+  (match Hub.Switch.of_widget (make "switch" ~parent:(root ()) "sw" []) with \
+   | Some (s : Hub.Switch.t) -> Array.length s.Hub.Switch.ifaces = 8 \
+   | None -> false)
+  Hub.Switch.of_widget (make "host" ~parent:(root ()) "h" []) = None
+  (* A part of a device is not a device: the adapter within a host stands for \
+     nothing on its own. *) \
+  (match (make "host" ~parent:(root ()) "h" []).Widget.children with \
+   | [ eth ] -> Host.of_widget eth = None \
+   | _ -> false)
  *)

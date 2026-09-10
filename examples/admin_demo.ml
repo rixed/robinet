@@ -1,6 +1,11 @@
 (* A small network with an administration interface on top of it, to try the UI.
  *   ./examples/admin_demo.opt [port]
- * then point a browser at http://localhost:<port>/ *)
+ * then point a browser at http://localhost:<port>/
+ *
+ * Built through the device catalogue rather than by calling the constructors,
+ * so that it exercises the same path the interface itself takes when the
+ * reader adds a switch. What comes back is a widget, and the module of the
+ * kind asked for turns it back into the thing to run a program on. *)
 open Batteries
 open Tools
 
@@ -9,7 +14,6 @@ let main =
     (* The network under study: closed, so it can be paused at will. *)
     let net = Simulation.make ~realtime:false "wan" in
     let parent = net.root in
-    let netmask = Ip.Addr.of_string "255.255.255.0" in
     (* Where this little network is.
      *
      * The spot itself is arbitrary; that its parts have one at all is not. A
@@ -17,69 +21,57 @@ let main =
      * rather than put somewhere and left to look placed, so a simulation that
      * places nothing opens on a map with nothing on it.
      *
-     * The cables then take their length from the ground distance between the
-     * two ends they join, the way simwan's do, so that the picture and the
-     * delays it is supposed to explain are computed from the same numbers
-     * rather than merely agreeing by luck. *)
+     * It also decides the cables: one built with no length of its own takes
+     * the ground distance between the two ends it joins, the way simwan's do,
+     * so that the picture and the delays it is supposed to explain are
+     * computed from the same numbers rather than merely agreeing by luck. *)
     let switch_at = Widget.{ lat = 48.8566 ; lon = 2.3522 } in
-    let rad d = d *. Float.pi /. 180. in
-    (* Metres between two places, on a sphere. Good to a fraction of a percent,
-     * which is far past what a cable's delay is sensitive to -- and rounded to
-     * the metre where it is used, since the digits past that are the sphere's
-     * error rather than anything about the cable. *)
-    let ground_distance (a : Widget.location) (b : Widget.location) =
-        let hav x = let s = sin (x /. 2.) in s *. s in
-        let h = hav (rad (b.lat -. a.lat)) +.
-                cos (rad a.lat) *. cos (rad b.lat) *.
-                hav (rad (b.lon -. a.lon)) in
-        2. *. 6_371_000. *. asin (sqrt (min 1. h)) in
     (* [dist] metres from [c], on a [bearing] in degrees clockwise from north. *)
     let offset (c : Widget.location) ~bearing ~dist =
+        let rad d = d *. Float.pi /. 180. in
         let m_per_deg = 111_320. in
         Widget.{ lat = c.lat +. dist *. cos (rad bearing) /. m_per_deg ;
                  lon = c.lon +. dist *. sin (rad bearing) /.
                                 (m_per_deg *. cos (rad c.lat)) } in
-    let switch = Hub.Switch.make ~parent 4 64 "switch" in
-    Widget.place switch.Hub.Switch.widget (Some switch_at) ;
+    let switch = Device.make "switch" ~parent "switch"
+                     [ "ports", `Int 4 ; "MACs", `Int 64 ] in
+    Widget.place switch (Some switch_at) ;
     let hosts =
         List.init 3 (fun i ->
-            let ip = Ip.Addr.of_string (Printf.sprintf "192.168.1.%d" (i + 10)) in
-            let h = Host.make ~parent ~netmask ~static_ip:ip (Printf.sprintf "host%d" i) in
+            let ip = Printf.sprintf "192.168.1.%d" (i + 10) in
+            let w = Device.make "host" ~parent (Printf.sprintf "host%d" i)
+                        [ "static-ip", `String ip ;
+                          "netmask", `String "255.255.255.0" ] in
             (* Spread around the switch, each one further out than the last, so
-             * that the three cables are of three different lengths. *)
-            let at = offset switch_at ~bearing:(120. *. float_of_int i)
-                            ~dist:(300. *. float_of_int (i + 1)) in
-            Widget.place h.Host.trx.widget (Some at) ;
-            let cable =
-                Eth.Cable.State.make ~parent
-                                     ~length:(Float.round
-                                                  (ground_distance switch_at at))
-                                     ~error_rate:0.0001
-                                     ~name:(Printf.sprintf "cable%d" i) () in
-            let trx = Eth.Cable.make cable in
-            Hub.Switch.dev switch i -=> trx <=-> h.Host.trx.dev ;
-            (* The cable reaches the host's adapter, and that is the end the
-               graph records -- the same one the creation API would have
-               recorded, so a network built by hand and one built from the
-               interface read alike. The switch end is the interface the cable
-               is on, for the same reason: a port configured on its own is a
-               port the graph has to name. *)
-            Widget.make_peers ~via:cable.widget
-                Widget.(switch.Hub.Switch.widget.ports.owner i)
-                h.Host.eth_state.Eth.State.iface.widget ;
-            h, ip) in
+             * that the three cables are of three different lengths. Before the
+             * cable, since it is from these that it takes its own. *)
+            Widget.place w
+                (Some (offset switch_at ~bearing:(120. *. float_of_int i)
+                              ~dist:(300. *. float_of_int (i + 1)))) ;
+            ignore (
+                Device.make "cable" ~parent (Printf.sprintf "cable%d" i)
+                    [ "from", `Int switch.Widget.id ;
+                      "to", `Int w.Widget.id ;
+                      "error rate", `Float 0.0001 ]) ;
+            (* Something to run the pings on. A host built as a host has one,
+             * and this is the whole reason the demo can be written this way. *)
+            Option.get (Host.of_widget w), ip) in
     (* Some traffic, so that the counters have something to count: every host
      * pings the next one, round and round. *)
     let rec tick () =
-        List.iteri (fun i (h, _) ->
+        List.iteri (fun i ((h : Host.t), _) ->
             let _, dst = List.at hosts ((i + 1) mod List.length hosts) in
-            h.Host.trx.Host.ping (Host.IPv4 dst)) hosts ;
+            h.Host.trx.Host.ping (Host.IPv4 (Ip.Addr.of_dotted_string dst))
+        ) hosts ;
         Simulation.delay net.Simulation.power (Clock.Interval.msec 100.) tick () in
     (* A DHCP server on the first host, so that the interface has properties
-     * that may have no value to show (and one metric that has not fired). *)
+     * that may have no value to show (and one metric that has not fired).
+     * Not a device of its own: what the catalogue builds are machines, and
+     * what runs on one of them is a program. *)
     let first = fst (List.hd hosts) in
     let dhcpd =
-        Dhcpd.State.make ~parent:first.Host.trx.Host.widget ~netmask ~mtu:1500
+        Dhcpd.State.make ~parent:first.Host.trx.Host.widget
+            ~netmask:(Ip.Addr.of_string "255.255.255.0") ~mtu:1500
             (Ip.Range.of_cidr (Ip.Cidr.of_string "192.168.1.128/25")) in
     Dhcpd.serve dhcpd first.Host.trx ;
     tick () ;

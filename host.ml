@@ -116,6 +116,17 @@ and t = { mutable trx : host_trx ;
            * it here: *)
           mutable last_ip_packet : Ip.Pdu.t option }
 
+type Widget.device += T of t
+
+(* The host a widget stands for, when it stands for one. Set by [make] and not
+   by [make_from_eth]: a host built on somebody else's adapter, as a router's
+   admin host is, shares that owner's widget tree and is not what the widget
+   holding it stands for. *)
+let of_widget (w : Widget.t) =
+    match w.Widget.device with
+    | Some (T t) -> Some t
+    | _ -> None
+
 let print oc trx = String.print oc trx.widget.Widget.name
 let make_tcp_socks ip = { ip_4_tcp = ip ; tcps = Hashtbl.create 3 }
 let make_udp_socks ip = { ip_4_udp = ip ; udps = Hashtbl.create 3 }
@@ -753,7 +764,7 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
     (* FIXME: Until we get the netmask from the DHCP it's safer to make it mandatory! *)
     if netmask = None then
         invalid_arg "Host.make: For now netmask is mandatory" ;
-    let widget = Widget.make ~parent ?location ~device:"host" name in
+    let widget = Widget.make ~parent ?location ~device_type:"host" name in
     let eth_state =
         (* FIXME: Don't use the GW for same net IP! *)
         Eth.State.make ?mac ?gateways ~parent:widget
@@ -765,6 +776,7 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
     (* This host minted the supply above, so the switch for it goes here, and
        so does stopping it for good. And it is a whole machine, unlike a host
        built on somebody else's adapter. *)
+    widget.device <- Some (T t) ;
     widget.on_delete <- (fun () -> t.trx.power_off ()) ;
     Widget.add_properties widget Widget.[
         property "on" ~descr:"The host is powered on." ~kind:Bool

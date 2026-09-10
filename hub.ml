@@ -43,6 +43,14 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
               egress : Metric.Counter.t ;
           collisions : Metric.Counter.t }
 
+    type Widget.device += T of t
+
+    (* The repeater a widget stands for, when it stands for one. *)
+    let of_widget (w : Widget.t) =
+        match w.Widget.device with
+        | Some (T t) -> Some t
+        | _ -> None
+
     let print oc t =
         Printf.fprintf oc "repeater %s with %d ports" t.widget.name (Array.length t.ports)
 
@@ -107,7 +115,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
         if not (Array.mem speed speeds) then
             invalid_arg ("Hub.Repeater.make: no hub runs at "^
                          Eth.Speed.to_string speed) ;
-        let widget = Widget.make ~parent ?location ~device:"hub" name in
+        let widget = Widget.make ~parent ?location ~device_type:"hub" name in
         let t = {
             ports = Array.make n (ignore_bits ~logger:widget.logger, false) ;
             speed ;
@@ -118,6 +126,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
             ingress = Metric.Counter.make () ;
             egress = Metric.Counter.make () ;
             collisions = Metric.Counter.make () } in
+        widget.device <- Some (T t) ;
         widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
         widget.ports <- Widget.{
             count = (fun () -> n) ;
@@ -172,6 +181,14 @@ struct
           mac_size : Metric.Gauge.t ;
           mac_hits : Metric.Atomic.t ;
           mac_misses : Metric.Atomic.t }
+
+    type Widget.device += T of t
+
+    (* The switch a widget stands for, when it stands for one. *)
+    let of_widget (w : Widget.t) =
+        match w.Widget.device with
+        | Some (T t) -> Some t
+        | _ -> None
 
     let print oc t =
         Printf.fprintf oc "switch %s with %d ifaces" t.widget.name (Array.length t.ifaces)
@@ -260,7 +277,7 @@ struct
     (* [num_macs] is the maximum number of remembered MACs. *)
     let make ~parent ?location ?speeds ?full_duplex ?(cut_through=true)
              num_ifaces num_macs name =
-        let widget = Widget.make ~device:"switch" ~parent ?location name in
+        let widget = Widget.make ~device_type:"switch" ~parent ?location name in
         let power = Simulation.make_power (Simulation.of_widget widget) name in
         let t = {
             ifaces = [||] (* See below *) ;
@@ -286,6 +303,7 @@ struct
                 i.can_forward_after <- can_forward_after
             ) t.ifaces in
         reset_cut_through () ;
+        widget.device <- Some (T t) ;
         widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
         widget.Widget.ports <- Widget.{
             count = (fun () -> num_ifaces) ;

@@ -280,7 +280,7 @@ let json_of_widget (w : Widget.t) =
                 adapter, an interface -- and for a kind this interface cannot
                 build, so a name that is not in that catalogue is a device that
                 cannot be deleted here either. *)
-             "device", (match w.device with None -> `Null
+             "device", (match w.device_type with None -> `Null
                                           | Some d -> `String d) ;
              (* And whether that is a device this interface will remove, which
                 is not the same question: the repeater inside a switch is a
@@ -893,7 +893,7 @@ let json_of_library_entry (e : Pcap.Library.entry) =
                  `Assoc [ "sim", `Int w.sim ;
                           "id", `Int w.id ;
                           "name", `String (Widget.full_name w) ;
-                          "device", (match w.device with
+                          "device", (match w.device_type with
                                     | None -> `Null
                                     | Some d -> `String d) ]) ]
 
