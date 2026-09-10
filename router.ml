@@ -985,8 +985,12 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     (* FIXME: revisit that! Here we want a table (state must not contain functions
      * because we want to be able to serialize them) *)
     Named.serve dns_state h.trx ;
+    Widget.add_properties widget Widget.[
+        property "nat-max-cnxs" ~kind:Int
+            ~descr:"Max number of connections tracked by the NAT."
+            ~getter:(fun () -> `Int num_max_cnxs) ] ;
     (* Two visible ports only: outside, inside. *)
-    widget.Widget.ports <- Widget.{
+    widget.ports <- Widget.{
         count = (fun () -> 2) ;
         is_connected = (function
             | 0 -> router.ifaces.(1).eth.iface.is_connected
