@@ -1554,6 +1554,15 @@ let test_http net cable duration nthreads
                 Yojson.Basic.Util.to_string (sim_field body "name")
             | _ -> -1, "" in
         check "POST a new simulation" (made >= 0 && made_name = "made-up") ;
+        (* Standing still until it is asked to run: one that ran as fast as it
+           could would take a core to itself as soon as anything in it had
+           something to do, and nobody has asked it to run yet. *)
+        check "which arrives paused"
+            (match api "/api/simulations/%d" made with
+            | 200, body ->
+                Yojson.Basic.(from_string body |> Util.member "paused" |>
+                              Util.to_bool)
+            | _ -> false) ;
         (* Two of a name are two the reader cannot tell apart in a column that
            shows nothing else of them when they are folded away. *)
         check "a name that is taken is numbered, as a widget's is"

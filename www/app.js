@@ -1470,7 +1470,7 @@ document.addEventListener('alpine:init', () => {
                     `${skipped.length === 1 ? ' was' : 's were'} left out, ` +
                     `having been built by hand rather than added here: ` +
                     `${skipped.join(', ')}`
-            await this.loadSims()
+            await this.poll()
         },
 
         /* Renaming, in place: the label becomes the field, so that there is
@@ -1503,7 +1503,7 @@ document.addEventListener('alpine:init', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name }) }))
             if (!r.ok) { this.simNote = r.error.message ; return }
-            await this.loadSims()
+            await this.poll()
         },
 
         /* Two clicks, as everywhere else something is taken away for good:

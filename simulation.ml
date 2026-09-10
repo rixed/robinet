@@ -140,19 +140,15 @@ type t =
       mutable paused_total : Interval.t ;
       (* When > 0, run that many events then pause again: *)
       mutable steps : int ;
-      (* How many times this simulation's network has been changed from the
-       * outside -- a device added or taken out, a property set, a whole
-       * network loaded into it -- and what that count was when it was last
-       * written out or read in.
+      (* Whether this simulation's network has been changed -- a device added
+       * or taken out, a property set -- since it was last written out or read
+       * in. It answers the one question the administration interface asks
+       * about a network it did not build: is there anything in it worth
+       * saving?
        *
-       * They answer the one question the administration interface asks about
-       * a network it did not build: is there anything in it worth saving? A
-       * count and not a flag, so that two readers cannot each clear what the
-       * other has yet to see. Only what comes through the interface is
-       * counted: a program building a network is not asked whether it wants
-       * to save it. *)
-      mutable changes : int ;
-      mutable changes_saved : int ;
+       * Only what comes through that interface moves it: a program building a
+       * network is not asked whether it wants to keep it. *)
+      mutable unsaved : bool ;
       (* Non-realtime only: how fast simulated time is to advance compared to
        * the wall clock -- 1. for real time, .5 for half of it, 2. for twice as
        * fast. [None] is as fast as it can, which is what a closed simulation
@@ -396,14 +392,14 @@ let delete t =
     if t.id < Array.length a then a.(t.id) <- None
 
 (** Something about this simulation's network has been changed from outside. *)
-let changed t = t.changes <- t.changes + 1
+let changed t = t.unsaved <- true
 
-(** Its network has just been written out, or read in: whatever has been done
- * to it up to now is safe somewhere. *)
-let saved t = t.changes_saved <- t.changes
+(** Its network has just been written out, or read in: what it holds is safe
+ * somewhere else. *)
+let saved t = t.unsaved <- false
 
 (** Whether anything has been done to it since. *)
-let unsaved t = t.changes <> t.changes_saved
+let unsaved t = t.unsaved
 
 (** A power source drawing from [t], on behalf of whatever [name] names.
  *
@@ -865,8 +861,7 @@ let make =
               paused_since = None ;
               paused_total = Interval.zero ;
               steps = 0 ;
-              changes = 0 ;
-              changes_saved = 0 ;
+              unsaved = false ;
               speed_ratio = None ;
               pace_anchor = None ;
               late = Interval.zero ;

@@ -419,9 +419,18 @@ let create_simulation _mth _matches _vars qry_body resp =
                 Simulation.delete sim ;
                 bad_request "%s" m
             | refused -> refused) in
+    (* Standing still until the reader says otherwise. A simulation that ran as
+       fast as it could would take a core to itself the moment anything in it
+       had something to do, and nobody has asked it to run yet: what was asked
+       for is somewhere to build. Paused rather than started on the wall clock,
+       which would answer the same objection and settle a question that is not
+       ours: a simulation can be made to follow the wall clock later, which is
+       what a portal does to the one it is dropped into, and there is no way
+       back off it. *)
+    Simulation.pause sim () ;
     ignore (Simulation.start sim) ;
     Log.(log sim.root.logger Info (lazy (Printf.sprintf
-        "Simulation %S is up" (Simulation.name sim)))) ;
+        "Simulation %S is up, and paused" (Simulation.name sim)))) ;
     respond resp
         (`Assoc [ "simulation", Simulation.borrow sim (fun () ->
                                     json_of_simulation sim) ;
