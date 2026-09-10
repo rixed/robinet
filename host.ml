@@ -123,7 +123,7 @@ type Widget.device += T of t
    admin host is, shares that owner's widget tree and is not what the widget
    holding it stands for. *)
 let of_widget (w : Widget.t) =
-    match w.Widget.device with
+    match w.device with
     | Some (T t) -> Some t
     | _ -> None
 

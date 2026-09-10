@@ -682,7 +682,7 @@ let create_widget _mth matches _vars qry_body resp =
             List.filter (fun (w : Widget.t) -> not (List.memq w before))
                 sim.root.children |>
             List.iter Widget.destroy in
-        match Device.make type_ ~parent:sim.root name params with
+        match Device.make_from_params type_ ~parent:sim.root name params with
         | exception Widget.Bad_value m ->
             rollback () ;
             bad_request "Cannot make a %s: %s" type_ m

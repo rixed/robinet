@@ -33,15 +33,22 @@ let main =
         Widget.{ lat = c.lat +. dist *. cos (rad bearing) /. m_per_deg ;
                  lon = c.lon +. dist *. sin (rad bearing) /.
                                 (m_per_deg *. cos (rad c.lat)) } in
-    let switch = Device.make "switch" ~parent "switch"
-                     [ "ports", `Int 4 ; "MACs", `Int 64 ] in
+    let switch =
+        Device.make ~parent "switch"
+            (Device.TSwitch { ports = 4 ; macs = 64 ;
+                              speeds = Eth.Iface.default_speeds ;
+                              full_duplex = true }) in
     Widget.place switch (Some switch_at) ;
     let hosts =
         List.init 3 (fun i ->
-            let ip = Printf.sprintf "192.168.1.%d" (i + 10) in
-            let w = Device.make "host" ~parent (Printf.sprintf "host%d" i)
-                        [ "static-ip", `String ip ;
-                          "netmask", `String "255.255.255.0" ] in
+            let ip = Ip.Addr.of_string (Printf.sprintf "192.168.1.%d" (i + 10)) in
+            let w =
+                Device.make ~parent (Printf.sprintf "host%d" i)
+                    (Device.THost { static_ip = Some ip ;
+                                    netmask =
+                                        Ip.Addr.of_string "255.255.255.0" ;
+                                    gateway = None ; nameserver = None ;
+                                    search_sfx = None ; mac = None }) in
             (* Spread around the switch, each one further out than the last, so
              * that the three cables are of three different lengths. Before the
              * cable, since it is from these that it takes its own. *)
@@ -49,10 +56,12 @@ let main =
                 (Some (offset switch_at ~bearing:(120. *. float_of_int i)
                               ~dist:(300. *. float_of_int (i + 1)))) ;
             ignore (
-                Device.make "cable" ~parent (Printf.sprintf "cable%d" i)
-                    [ "from", `Int switch.Widget.id ;
-                      "to", `Int w.Widget.id ;
-                      "error rate", `Float 0.0001 ]) ;
+                Device.make ~parent (Printf.sprintf "cable%d" i)
+                    (Device.TCable { from_ = switch.Widget.id ;
+                                     to_ = w.Widget.id ;
+                                     from_port = None ; to_port = None ;
+                                     length = None ;
+                                     error_rate = 0.0001 })) ;
             (* Something to run the pings on. A host built as a host has one,
              * and this is the whole reason the demo can be written this way. *)
             Option.get (Host.of_widget w), ip) in
@@ -61,7 +70,7 @@ let main =
     let rec tick () =
         List.iteri (fun i ((h : Host.t), _) ->
             let _, dst = List.at hosts ((i + 1) mod List.length hosts) in
-            h.Host.trx.Host.ping (Host.IPv4 (Ip.Addr.of_dotted_string dst))
+            h.Host.trx.Host.ping (Host.IPv4 dst)
         ) hosts ;
         Simulation.delay net.Simulation.power (Clock.Interval.msec 100.) tick () in
     (* A DHCP server on the first host, so that the interface has properties

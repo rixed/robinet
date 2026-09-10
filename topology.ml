@@ -346,7 +346,8 @@ let of_simulation (sim : Simulation.t) =
 (*$R of_simulation
     let sim = Simulation.make ~realtime:false "sim" in
     let root = sim.Simulation.root in
-    let dev type_ name params = Device.make type_ ~parent:root name params in
+    let dev type_ name params =
+        Device.make_from_params type_ ~parent:root name params in
     let h1 = dev "host" "h1" [] in
     let sw = dev "switch" "sw" [ "ports", `Int 4 ] in
     ignore (dev "cable" "" [ "from", `Int h1.Widget.id ;
@@ -514,7 +515,7 @@ let to_simulation (sim : Simulation.t) t =
                     d.path parent_path in
         let params = params_to_ids ~root entry d.params in
         let w =
-            match Device.make d.type_ ~parent name params with
+            match Device.make_from_params d.type_ ~parent name params with
             | w -> w
             | exception Widget.Bad_value m ->
                 Widget.bad_value "Cannot make %s, the %s of this network: %s"
@@ -540,7 +541,7 @@ let to_simulation (sim : Simulation.t) t =
   let a_network name =
       let sim = Simulation.make ~realtime:false name in
       let root = sim.Simulation.root in
-      let dev t n p = Device.make t ~parent:root n p in
+      let dev t n p = Device.make_from_params t ~parent:root n p in
       let cable a b =
           dev "cable" "" [ "from", `Int a.Widget.id ; "to", `Int b.Widget.id ] in
       let h1 = dev "host" "h1" [ "static-ip", `String "192.168.0.1" ] in
@@ -639,7 +640,8 @@ let to_simulation (sim : Simulation.t) t =
  * parameter to write it down, a reload would put another one there. *)
 (*$R to_simulation
     let a = Simulation.make ~realtime:false "gw-a" in
-    ignore (Device.make "gateway" ~parent:a.Simulation.root "gw" []) ;
+    ignore (Device.make_from_params "gateway" ~parent:a.Simulation.root
+                                    "gw" []) ;
     let doc, _ = of_simulation a in
     let gw = List.hd doc.devices in
     assert_bool "a gateway writes down the address it drew"

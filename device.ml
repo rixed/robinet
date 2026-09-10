@@ -61,18 +61,66 @@ let param ?(descr="") ?(units="") ?(placeholder="") ?(default=`Null) ~kind
           name =
     { name ; descr ; units ; kind ; placeholder ; default }
 
-(** A kind of device: what it is called, what it needs, and how to build one.
+(** {2 What a device is built from} *)
+
+(** Everything one device needs to be told, at the type it is really wanted at.
  *
- * [make] is handed the parent to build under and the arguments already coerced
- * and bounds-checked against the [params] above, so it can read them without
- * checking them again. It raises {!Widget.Bad_value} for what only it can
- * refuse -- an address that is not one, an end that cannot take a cable. *)
+ * This is what an OCaml program builds a network out of, and what the
+ * interface's JSON is turned into before anything is built, so that a
+ * misspelt parameter or an address that is not one is refused in one place
+ * rather than in the middle of a constructor.
+ *
+ * A constructor that has a choice to make -- the first free port, an address
+ * drawn at random -- returns the model with that choice filled in, and it is
+ * that model, not the one it was handed, that is written down. A choice not
+ * written down is one that would be made again, and differently, the next time
+ * the network is built from what was saved of it.
+ *
+ * The [T] prefix keeps these apart from the modules of the same name, since a
+ * host model and the [Host] module are named after the same thing and read
+ * side by side here. *)
+type model =
+    | THub of { ports : int ; speed : Eth.Speed.t }
+    | TSwitch of { ports : int ; speeds : Eth.Speed.t list ;
+                   full_duplex : bool ; macs : int }
+    | THost of { static_ip : Ip.Addr.t option ; netmask : Ip.Addr.t ;
+                 gateway : Ip.Addr.t option ; nameserver : Ip.Addr.t option ;
+                 search_sfx : string option ; mac : Eth.Addr.t option }
+    (* The two ends are widget ids, which is what the interface has to name
+       them with, and what a topology turns into paths on the way out. *)
+    | TCable of { from_ : int ; to_ : int ;
+                  from_port : int option ; to_port : int option ;
+                  length : float option ; error_rate : float }
+    (* [mac_range] is what to draw the addresses from and [macs] the addresses
+       themselves. A model that has been built carries the addresses and an
+       empty range: once they are written down the range has nothing left to
+       say. *)
+    | TRouter of { ports : int ; mac_range : string ; macs : Eth.Addr.t list }
+    | TGateway of { public : Ip.Addr.t ; lan : Ip.Cidr.t ;
+                    max_cnxs : int ; mac : Eth.Addr.t option }
+    | TPortal of { promisc : bool ; filter : string ; caplen : int option }
+    | TRecorder of { fname : string option ; caplen : int option ;
+                     dlt : Pcap.Dlt.t option }
+    | TReplayer of { fname : string option ; loop : bool }
+    | TNote of { text : string }
+
+(** A kind of device: what it is called, what it needs, and how to read what it
+ * needs out of what was asked for.
+ *
+ * [of_params] is handed the arguments already coerced and bounds-checked
+ * against the [params] above, so it reads them without checking them again,
+ * and raises {!Widget.Bad_value} for what only it can refuse -- an address
+ * that is not one, a count of addresses that does not match a count of ports.
+ * What it returns is a {!model}, and building is [make]'s business from there.
+ *
+ * The two halves are declared together and belong read together: this is the
+ * one seam the compiler cannot check, since nothing ties a parameter named
+ * here to a field read there. See the round-trip tests at the end. *)
 type t =
     { name : string ;
       descr : string ;
       params : param list ;
-      make : parent:Widget.t -> string -> (string * Widget.value) list ->
-             Widget.t }
+      of_params : (string * Widget.value) list -> model }
 
 (** {2 Where a cable can be plugged} *)
 
@@ -198,7 +246,7 @@ let list args name f = Widget.to_list f (arg args name)
  * differently, when this device is built back from what was saved of it: the
  * first free port of a device is not the same port once something has been
  * unplugged from it, and an address drawn at random is never the same twice.
- * [Device.make] records the arguments as they came for every device that had
+ * [Device.make] records the model as it came back for every device that had
  * nothing to choose, and leaves alone the ones that came through here. *)
 let made_with (widget : Widget.t) args changed =
     widget.Widget.made_with <-
@@ -253,10 +301,9 @@ let hub =
               ~descr:"How many cables it takes." ;
           param "speed" ~kind:(Enum Hub.Repeater.speed_names) ~default:(`Int 1)
               ~descr:"Hub speed." ] ;
-      make = fun ~parent name args ->
-          let speed = Hub.Repeater.speeds.(int args "speed") in
-          let t = Hub.Repeater.make ~parent ~speed (int args "ports") name in
-          t.Hub.Repeater.widget }
+      of_params = fun args ->
+          THub { ports = int args "ports" ;
+                 speed = Hub.Repeater.speeds.(int args "speed") } }
 
 let switch =
     { name = "switch" ;
@@ -272,14 +319,14 @@ let switch =
               ~descr:"Do ports support full-duplex by default?" ;
           param "MACs" ~kind:(IRange (1, 1_000_000)) ~default:(`Int 1024)
               ~descr:"How many addresses it can remember at once." ] ;
-      make = fun ~parent name args ->
-          let speeds =
-            list args "speeds" (fun v ->
-                Eth.Speed.all.(Widget.to_choice Eth.Speed.names v))
-          and full_duplex = bool args "full duplex" in
-          let t = Hub.Switch.make ~parent ~speeds ~full_duplex (int args "ports")
-                                  (int args "MACs") name in
-          t.Hub.Switch.widget }
+      of_params = fun args ->
+          TSwitch {
+              ports = int args "ports" ;
+              speeds =
+                  list args "speeds" (fun v ->
+                      Eth.Speed.all.(Widget.to_choice Eth.Speed.names v)) ;
+              full_duplex = bool args "full duplex" ;
+              macs = int args "MACs" } }
 
 let host =
     { name = "host" ;
@@ -305,29 +352,14 @@ let host =
           param "MAC" ~kind:(Widget.optional String)
               ~placeholder:"drawn at random"
               ~descr:"Its hardware address." ] ;
-      make = fun ~parent name args ->
-          let netmask = Ip.Addr.of_json "netmask" (arg args "netmask")
-          and gateways =
-              match opt args "gateway" (fun v ->
-                        Eth.Gateway.IPv4 (Ip.Addr.of_json "gateway" v)) with
-              | None -> []
-              | Some gw -> [ Eth.State.gw_selector (), Some gw ]
-          and nameserver = opt args "nameserver" (Ip.Addr.of_json "nameserver")
-          and search_sfx = opt args "search suffix" Widget.to_string
-          and static_ip = opt args "static-ip" (Ip.Addr.of_json "static-ip")
-          and mac = opt args "MAC" (mac "MAC") in
-          let t = Host.make ~parent ~gateways ?search_sfx ?nameserver
-                            ?static_ip ~netmask ?mac name in
-          let widget = t.Host.trx.Host.widget in
-          (* The address it ended up with, drawn at random when it was not
-           * given one. Its "MAC" property is read-only, so nothing else would
-           * bring it back. In hex and not [Eth.Addr.to_string], which may name
-           * the vendor instead and is then not an address any more. *)
-          made_with widget args
-              [ "MAC",
-                `String (Eth.Addr.to_hexstring
-                            t.Host.eth_state.Eth.State.mac) ] ;
-          widget }
+      of_params = fun args ->
+          THost {
+              static_ip = opt args "static-ip" (Ip.Addr.of_json "static-ip") ;
+              netmask = Ip.Addr.of_json "netmask" (arg args "netmask") ;
+              gateway = opt args "gateway" (Ip.Addr.of_json "gateway") ;
+              nameserver = opt args "nameserver" (Ip.Addr.of_json "nameserver") ;
+              search_sfx = opt args "search suffix" Widget.to_string ;
+              mac = opt args "MAC" (mac "MAC") } }
 
 (* A cable is built like any other device, from a form with two fields that
  * happen to name other devices. It is the only one that cannot exist on its
@@ -352,52 +384,14 @@ let cable =
                       cross it." ;
           param "error rate" ~kind:(FRange (0., 1.)) ~default:(`Float 0.)
               ~descr:"Faulty bits per bit transmitted." ] ;
-      make = fun ~parent name args ->
-          let sim = Simulation.of_widget parent in
-          let end_ which =
-              let id = int args which in
-              match Widget.find sim.Simulation.root id with
-              | Some w -> w
-              | None ->
-                  Widget.bad_value "%s: no widget %d in this simulation"
-                      which id in
-          let a = end_ "from" and b = end_ "to" in
-          if a == b then
-              Widget.bad_value "a cable joins two devices, and %s is one"
-                  (Widget.full_name a) ;
-          (* What the reader said, or what the map already knows. Only when both
-           * ends are somewhere: one end placed and the other not says nothing
-           * about the distance between them. *)
-          let length =
-              match opt args "length" Widget.to_float with
-              | Some l -> Some l
-              | None ->
-                  (match a.location, b.location with
-                  | Some la, Some lb -> Some (Float.round (Widget.distance la lb))
-                  | _ -> None) in
-          (* Both ports before the cable, so that a refusal at the second end
-           * does not leave a cable hanging off the first. *)
-          let pa = free_port a (opt args "from port" Widget.to_int)
-          and pb = free_port b (opt args "to port" Widget.to_int) in
-          (* What the cable will really reach. "Port 2 of R1" is a convenient
-           * way of saying "R1's third adapter", and it is the adapter the
-           * graph records -- which is what lets a topology be written down and
-           * read back with no port numbers in it. *)
-          if a.ports.owner pa == b.ports.owner pb then
-              Widget.bad_value "both ends of this cable are %s"
-                  (Widget.full_name (a.ports.owner pa)) ;
-          let st =
-              Eth.Cable.State.make ~parent ?length
-                                   ~error_rate:(float args "error rate")
-                                   ~name () in
-          Eth.Cable.plug st (a, pa) (b, pb) ;
-          (* The ports it took and the length it ended up with, all three of
-           * which it may have been left to work out for itself. *)
-          made_with st.Eth.Cable.State.widget args
-              [ "from port", `Int pa ;
-                "to port", `Int pb ;
-                "length", `Float st.Eth.Cable.State.length ] ;
-          st.Eth.Cable.State.widget }
+      of_params = fun args ->
+          TCable {
+              from_ = int args "from" ;
+              to_ = int args "to" ;
+              from_port = opt args "from port" Widget.to_int ;
+              to_port = opt args "to port" Widget.to_int ;
+              length = opt args "length" Widget.to_float ;
+              error_rate = float args "error rate" } }
 
 (*$T random_mac
   let pfx m = Bitstring.subbitstring (m : Eth.Addr.t :> Bitstring.t) 0 24 in \
@@ -412,19 +406,26 @@ let cable =
 
 (* One address per interface: the ones that were named, or ones picked within
  * the range. *)
-let macs_of args n =
-    match String.trim (string args "MACs") with
-    | "" ->
-        let range = String.trim (string args "MAC range") in
-        Array.init n (fun _ -> random_mac range)
-    | s ->
-        let l =
-            String.split_on_char ',' s |>
-            List.map (fun a -> mac_of_string "MACs" (String.trim a)) in
+let macs_of ~range ~macs n =
+    match macs with
+    | [] -> List.init n (fun _ -> random_mac range)
+    | l ->
         if List.length l <> n then
             Widget.bad_value "MACs: %d address(es) for %d port(s)"
                 (List.length l) n ;
-        Array.of_list l
+        l
+
+(* The addresses a "MACs" parameter names, in order, or none at all when it is
+ * left empty and they are to be picked from the range instead. *)
+let macs_of_string name s =
+    match String.trim s with
+    | "" -> []
+    | s ->
+        String.split_on_char ',' s |>
+        List.map (fun a -> mac_of_string name (String.trim a))
+
+let string_of_macs macs =
+    List.map Eth.Addr.to_hexstring macs |> String.concat ", "
 
 (* The two entries below build a machine and nothing more. A router arrives
  * with an empty routing table and interfaces with no address, a gateway with
@@ -452,20 +453,11 @@ let router =
           param "ports" ~kind:(IRange (1, 1024)) ~default:(`Int 4)
               ~descr:"How many interfaces it has, each taking one cable." ::
           mac_params ;
-      make = fun ~parent name args ->
-          let n = int args "ports" in
-          let macs = macs_of args n in
-          let widget = Widget.make ~parent name in
-          let (_ : Router.Router.t) = Router.Router.make ~macs n [] widget in
-          (* The addresses themselves, whether they were named or drawn from
-           * the range: a range that picks is a choice like any other, and once
-           * the addresses are written down it has nothing left to say. *)
-          made_with widget args
-              [ "MAC range", `String "" ;
-                "MACs", `String (Array.to_list macs |>
-                                 List.map Eth.Addr.to_hexstring |>
-                                 String.concat ", ") ] ;
-          widget }
+      of_params = fun args ->
+          TRouter {
+              ports = int args "ports" ;
+              mac_range = String.trim (string args "MAC range") ;
+              macs = macs_of_string "MACs" (string args "MACs") } }
 
 let gateway =
     { name = "gateway" ;
@@ -488,22 +480,13 @@ let gateway =
               ~descr:"Its hardware address on the side of the network it \
                       serves, which is the one the machines behind it send \
                       to." ] ;
-      make = fun ~parent name args ->
-          let public = Ip.Addr.of_json "public address" (arg args "public address")
-          and lan = cidr "LAN" (arg args "LAN")
-          (* Drawn here rather than left to the gateway to draw, so that what
-           * it ends up with can be written down: it keeps no property of its
-           * address, and a network whose machines come back sending to
-           * somewhere else is not the one that was saved. *)
-          and mac =
-              Option.default_delayed Eth.Addr.random
-                                     (opt args "MAC" (mac "MAC")) in
-          let gw =
-              Router.make_gw ~parent ~name ~mac
-                  ~num_max_cnxs:(int args "max connections") public lan in
-          made_with gw.Router.widget args
-              [ "MAC", `String (Eth.Addr.to_hexstring mac) ] ;
-          gw.Router.widget }
+      of_params = fun args ->
+          TGateway {
+              public =
+                  Ip.Addr.of_json "public address" (arg args "public address") ;
+              lan = cidr "LAN" (arg args "LAN") ;
+              max_cnxs = int args "max connections" ;
+              mac = opt args "MAC" (mac "MAC") } }
 
 let portal =
     { name = "portal" ;
@@ -516,12 +499,10 @@ let portal =
               ~descr:"Filter to select packets to capture." ;
           param "caplen" ~kind:(Optional (IRange (1, 65535))) ~default:`Null
               ~descr:"Capture length (default to the interface MTU)." ] ;
-      make = fun ~parent name args ->
-          let promisc = bool args "promisc"
-          and filter = string args "filter"
-          and caplen = opt args "caplen" Widget.to_int in
-          let portal = Pcap.portal ~parent ~promisc ~filter ?caplen name in
-          portal.widget }
+      of_params = fun args ->
+          TPortal { promisc = bool args "promisc" ;
+                    filter = string args "filter" ;
+                    caplen = opt args "caplen" Widget.to_int } }
 
 let recorder =
     { name = "recorder" ;
@@ -537,12 +518,13 @@ let recorder =
           param "DLT" ~kind:(Optional Int)
               ~default:(`Int (Pcap.Dlt.to_int Pcap.default_dlt))
               ~descr:"DLT to use to create the pcap file." ] ;
-      make = fun ~parent name args ->
-          let fname = opt args "file name" Widget.to_string
-          and caplen = opt args "caplen" Widget.to_int in
-          let dlt = opt args "DLT" (Pcap.Dlt.o % Int32.of_int % Widget.to_int) in
-          let recorder = Pcap.recorder ~parent ?fname ?caplen ?dlt name in
-          recorder.widget }
+      of_params = fun args ->
+          TRecorder {
+              fname = opt args "file name" Widget.to_string ;
+              caplen = opt args "caplen" Widget.to_int ;
+              dlt =
+                  opt args "DLT"
+                      (Pcap.Dlt.o % Int32.of_int % Widget.to_int) } }
 
 let replayer =
     { name = "replayer" ;
@@ -557,11 +539,9 @@ let replayer =
               ~kind:Bool ~default:(`Bool false)
               ~descr:"Whether to restart replaying from the beginning at the \
                       end." ] ;
-      make = fun ~parent name args ->
-          let fname = opt args "file name" Widget.to_string
-          and loop = bool args "loop" in
-          let replayer = Pcap.replayer ~parent ?fname ~loop name in
-          replayer.widget }
+      of_params = fun args ->
+          TReplayer { fname = opt args "file name" Widget.to_string ;
+                      loop = bool args "loop" } }
 
 (* The one entry that is not a device at all: a label on the map, with no
  * ports, no power and nothing to simulate. It is here because everything the
@@ -579,15 +559,192 @@ let note =
       params = [
           param "text" ~kind:String ~default:(`String "")
               ~descr:"What it says." ] ;
-      make = fun ~parent name args ->
-          let widget = Widget.make ~parent ~device_type:"note" name in
-          let text = ref (string args "text") in
-          Widget.add_properties widget Widget.[
-              property "text" ~kind:String ~descr:"What it says."
-                  ~getter:(fun () -> `String !text)
-                  ~setter:(fun v -> text := to_string v) ] ;
-          widget }
+      of_params = fun args -> TNote { text = string args "text" } }
 
+(** {2 Building one} *)
+
+(** What kind of device a model describes, named as the catalogue names it. *)
+let type_of = function
+    | THub _ -> "hub"
+    | TSwitch _ -> "switch"
+    | THost _ -> "host"
+    | TCable _ -> "cable"
+    | TRouter _ -> "router"
+    | TGateway _ -> "gateway"
+    | TPortal _ -> "portal"
+    | TRecorder _ -> "recorder"
+    | TReplayer _ -> "replayer"
+    | TNote _ -> "note"
+
+(** A model written back out as the parameters it was read from, which is the
+ * shape a topology is saved in and the shape the interface speaks.
+ *
+ * Every parameter the kind declares, so that what comes back out can be read
+ * straight back in. The other half of each entry's [of_params], and the pair
+ * of them is what the round-trip test at the end of this file checks. *)
+let to_params =
+    let ip_opt = function
+        | None -> `Null
+        | Some ip -> `String (Ip.Addr.to_dotted_string ip)
+    and str_opt = function None -> `Null | Some s -> `String s
+    and int_opt = function None -> `Null | Some i -> `Int i
+    and float_opt = function None -> `Null | Some f -> `Float f
+    (* In hex and not [Eth.Addr.to_string], which may name the vendor instead
+       and is then not an address any more. *)
+    and mac_opt = function
+        | None -> `Null
+        | Some m -> `String (Eth.Addr.to_hexstring m) in
+    function
+    | THub { ports ; speed } ->
+        [ "ports", `Int ports ;
+          "speed", `Int (Array.findi ((=) speed) Hub.Repeater.speeds) ]
+    | TSwitch { ports ; speeds ; full_duplex ; macs } ->
+        [ "ports", `Int ports ;
+          "speeds", `List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
+                                    speeds) ;
+          "full duplex", `Bool full_duplex ;
+          "MACs", `Int macs ]
+    | THost { static_ip ; netmask ; gateway ; nameserver ; search_sfx ; mac } ->
+        [ "static-ip", ip_opt static_ip ;
+          "netmask", `String (Ip.Addr.to_dotted_string netmask) ;
+          "gateway", ip_opt gateway ;
+          "nameserver", ip_opt nameserver ;
+          "search suffix", str_opt search_sfx ;
+          "MAC", mac_opt mac ]
+    | TCable { from_ ; to_ ; from_port ; to_port ; length ; error_rate } ->
+        [ "from", `Int from_ ;
+          "to", `Int to_ ;
+          "from port", int_opt from_port ;
+          "to port", int_opt to_port ;
+          "length", float_opt length ;
+          "error rate", `Float error_rate ]
+    | TRouter { ports ; mac_range ; macs } ->
+        [ "ports", `Int ports ;
+          "MAC range", `String mac_range ;
+          "MACs", `String (string_of_macs macs) ]
+    | TGateway { public ; lan ; max_cnxs ; mac } ->
+        [ "public address", `String (Ip.Addr.to_dotted_string public) ;
+          "LAN", `String (Ip.Cidr.to_string lan) ;
+          "max connections", `Int max_cnxs ;
+          "MAC", mac_opt mac ]
+    | TPortal { promisc ; filter ; caplen } ->
+        [ "promisc", `Bool promisc ;
+          "filter", `String filter ;
+          "caplen", int_opt caplen ]
+    | TRecorder { fname ; caplen ; dlt } ->
+        [ "file name", str_opt fname ;
+          "caplen", int_opt caplen ;
+          "DLT", (match dlt with
+                 | None -> `Null
+                 | Some d -> `Int (Pcap.Dlt.to_int d)) ]
+    | TReplayer { fname ; loop } ->
+        [ "file name", str_opt fname ;
+          "loop", `Bool loop ]
+    | TNote { text } ->
+        [ "text", `String text ]
+
+(* Build the thing itself, and answer with the model that was really used: the
+ * one handed in, with whatever it left open filled in with what was chosen.
+ * See [model] for why that matters. *)
+let build ~parent name = function
+    | THub { ports ; speed } as m ->
+        let t = Hub.Repeater.make ~parent ~speed ports name in
+        t.Hub.Repeater.widget, m
+    | TSwitch { ports ; speeds ; full_duplex ; macs } as m ->
+        let t = Hub.Switch.make ~parent ~speeds ~full_duplex ports macs name in
+        t.Hub.Switch.widget, m
+    | THost ({ static_ip ; netmask ; gateway ; nameserver ; search_sfx ;
+               mac } as h) ->
+        let gateways =
+            match gateway with
+            | None -> []
+            | Some gw ->
+                [ Eth.State.gw_selector (), Some (Eth.Gateway.IPv4 gw) ] in
+        let t =
+            Host.make ~parent ~gateways ?search_sfx ?nameserver ?static_ip
+                      ~netmask ?mac name in
+        (* The address it ended up with, drawn at random when it was not given
+           one. Its "MAC" property is read-only, so nothing else would bring it
+           back. *)
+        t.Host.trx.Host.widget,
+        THost { h with mac = Some t.Host.eth_state.Eth.State.mac }
+    | TCable { from_ ; to_ ; from_port ; to_port ; length ; error_rate } ->
+        let sim = Simulation.of_widget parent in
+        let end_ which id =
+            match Widget.find sim.Simulation.root id with
+            | Some w -> w
+            | None ->
+                Widget.bad_value "%s: no widget %d in this simulation"
+                    which id in
+        let a = end_ "from" from_ and b = end_ "to" to_ in
+        if a == b then
+            Widget.bad_value "a cable joins two devices, and %s is one"
+                (Widget.full_name a) ;
+        (* What the reader said, or what the map already knows. Only when both
+         * ends are somewhere: one end placed and the other not says nothing
+         * about the distance between them. *)
+        let length =
+            match length with
+            | Some l -> Some l
+            | None ->
+                (match a.location, b.location with
+                | Some la, Some lb -> Some (Float.round (Widget.distance la lb))
+                | _ -> None) in
+        (* Both ports before the cable, so that a refusal at the second end
+         * does not leave a cable hanging off the first. *)
+        let pa = free_port a from_port
+        and pb = free_port b to_port in
+        (* What the cable will really reach. "Port 2 of R1" is a convenient
+         * way of saying "R1's third adapter", and it is the adapter the
+         * graph records -- which is what lets a topology be written down and
+         * read back with no port numbers in it. *)
+        if a.ports.owner pa == b.ports.owner pb then
+            Widget.bad_value "both ends of this cable are %s"
+                (Widget.full_name (a.ports.owner pa)) ;
+        let st =
+            Eth.Cable.State.make ~parent ?length ~error_rate ~name () in
+        Eth.Cable.plug st (a, pa) (b, pb) ;
+        (* The ports it took and the length it ended up with, all three of
+           which it may have been left to work out for itself. *)
+        st.Eth.Cable.State.widget,
+        TCable { from_ ; to_ ; from_port = Some pa ; to_port = Some pb ;
+                 length = Some st.Eth.Cable.State.length ; error_rate }
+    | TRouter { ports ; mac_range ; macs } ->
+        let macs = macs_of ~range:mac_range ~macs ports in
+        let widget = Widget.make ~parent name in
+        let (_ : Router.Router.t) =
+            Router.Router.make ~macs:(Array.of_list macs) ports [] widget in
+        (* The addresses themselves, whether they were named or drawn from the
+           range: a range that picks is a choice like any other, and once the
+           addresses are written down it has nothing left to say. *)
+        widget, TRouter { ports ; mac_range = "" ; macs }
+    | TGateway ({ public ; lan ; max_cnxs ; mac } as g) ->
+        (* Drawn here rather than left to the gateway to draw, so that what it
+           ends up with can be written down: it keeps no property of its
+           address, and a network whose machines come back sending to somewhere
+           else is not the one that was saved. *)
+        let mac = Option.default_delayed Eth.Addr.random mac in
+        let gw =
+            Router.make_gw ~parent ~name ~mac ~num_max_cnxs:max_cnxs public
+                           lan in
+        gw.Router.widget, TGateway { g with mac = Some mac }
+    | TPortal { promisc ; filter ; caplen } as m ->
+        let portal = Pcap.portal ~parent ~promisc ~filter ?caplen name in
+        portal.Pcap.widget, m
+    | TRecorder { fname ; caplen ; dlt } as m ->
+        let recorder = Pcap.recorder ~parent ?fname ?caplen ?dlt name in
+        recorder.Pcap.widget, m
+    | TReplayer { fname ; loop } as m ->
+        let replayer = Pcap.replayer ~parent ?fname ~loop name in
+        replayer.Pcap.widget, m
+    | TNote { text } as m ->
+        let widget = Widget.make ~parent ~device_type:"note" name in
+        let text = ref text in
+        Widget.add_properties widget Widget.[
+            property "text" ~kind:String ~descr:"What it says."
+                ~getter:(fun () -> `String !text)
+                ~setter:(fun v -> text := to_string v) ] ;
+        widget, m
 (** Every kind of device that can be asked for, in the order the interface
  * offers them: what a network is mostly made of first, and what is not a
  * device at all last. *)
@@ -614,20 +771,14 @@ let numbered_name (parent : Widget.t) stem =
 (* A cable is better named after the two things it joins than after a number:
  * "r1-sw1" says what "cable-7" cannot, and the ends are known here because
  * they are parameters. Falls back to the numbering when either end is not a
- * widget of this simulation -- [cable.make] is about to say so properly, and
- * naming is not the place to raise that. *)
-let cable_name (parent : Widget.t) args =
+ * widget of this simulation -- [build] is about to say so properly, and naming
+ * is not the place to raise that. *)
+let cable_name (parent : Widget.t) from_ to_ =
     let sim = Simulation.of_widget parent in
-    let end_ which =
-        match List.assoc_opt which args with
-        | None -> None
-        | Some v ->
-            (match Widget.to_int v with
-            | exception _ -> None
-            | id ->
-                Option.map (fun (w : Widget.t) -> w.name)
-                           (Widget.find sim.Simulation.root id)) in
-    match end_ "from", end_ "to" with
+    let end_ id =
+        Option.map (fun (w : Widget.t) -> w.name)
+                   (Widget.find sim.Simulation.root id) in
+    match end_ from_, end_ to_ with
     | Some a, Some b -> a ^"-"^ b
     | _ -> numbered_name parent "cable"
 
@@ -638,12 +789,9 @@ let cable_name (parent : Widget.t) args =
  * may be taken already -- by the second cable between the same pair.
  * {!Widget.unique_among} numbers that one, as it does any name that is taken
  * by the time the widget is built. *)
-let default_name parent t args =
-    (* Physical equality on the catalogue entry: there is one value per kind of
-     * device, and this is a property of the cable itself rather than of
-     * anything that happens to be called "cable". *)
-    if t == cable then cable_name parent args
-    else numbered_name parent t.name
+let default_name parent = function
+    | TCable { from_ ; to_ ; _ } -> cable_name parent from_ to_
+    | m -> numbered_name parent (type_of m)
 
 (*$T numbered_name
   let r = Widget.make_root ~sim:0 ~now:(fun () -> Clock.Time.zero) "r" in \
@@ -672,41 +820,52 @@ let of_widget (w : Widget.t) =
     if within_a_device w then None
     else Option.bind w.Widget.device_type find
 
-(** Build one: [make "switch" ~parent "sw1" [ "ports", `Int 24 ]].
+(** The model a set of parameters describes:
+ * [model_of_params "switch" [ "ports", `Int 24 ]].
+ *
+ * This is the whole of the untyped boundary. Past it a device is built from a
+ * {!model}, and nothing looks a parameter up by name again.
+ *
+ * Raises {!Widget.Bad_value} for anything the caller got wrong -- an unknown
+ * kind of device, a parameter that is not one, a value out of range -- which
+ * the API answers with a 400. *)
+let model_of_params type_ given =
+    match find type_ with
+    | None ->
+        Widget.bad_value "there is no such thing as a %S" type_
+    | Some t ->
+        t.of_params (args_of t given)
+
+(** Build one: [make ~parent "sw1" (TSwitch { ... })].
  *
  * An empty name asks for one to be picked (see [default_name]), which is what
  * the interface sends when the reader left the field alone. A name that was
  * actually typed and is already a sibling's is refused instead of being
  * numbered like a part's would be: what the reader named, the reader named.
  *
- * Raises {!Widget.Bad_value} for anything the caller got wrong -- an unknown
- * kind of device, a parameter that is not one, a value out of range, a name
- * that is taken -- which the API answers with a 400. *)
-let make type_ ~parent name args =
-    match find type_ with
-    | None ->
-        Widget.bad_value "there is no such thing as a %S" type_
-    | Some t ->
-        if String.contains name '/' then
-            Widget.bad_value "a name must not contain '/': %S" name ;
-        (* Before the name, since a cable is named after the ends its arguments
-         * point at. *)
-        let args = args_of t args in
-        let name =
-            match String.trim name with
-            | "" -> default_name parent t args
-            | name ->
-                if List.exists (fun (w : Widget.t) -> w.name = name)
-                               parent.Widget.children then
-                    Widget.bad_value "there is already something called %S \
-                                      here" name ;
-                name in
-        let w = t.make ~parent name args in
-        (* Unless it recorded a choice of its own on the way (see
-         * [made_with]), which is the fuller answer of the two. *)
-        if w.Widget.made_with = None then
-            w.Widget.made_with <- Some args ;
-        w
+ * What the widget is left carrying is the model as it was really built, so
+ * that a save writes down the choices the constructor made rather than the
+ * blanks it was handed. *)
+let make ~parent name model =
+    if String.contains name '/' then
+        Widget.bad_value "a name must not contain '/': %S" name ;
+    let name =
+        match String.trim name with
+        | "" -> default_name parent model
+        | name ->
+            if List.exists (fun (w : Widget.t) -> w.name = name)
+                           parent.Widget.children then
+                Widget.bad_value "there is already something called %S here"
+                    name ;
+            name in
+    let w, built = build ~parent name model in
+    w.Widget.made_with <- Some (to_params built) ;
+    w
+
+(** Both at once, for a caller that has parameters rather than a model: the
+ * interface, and a topology being read back. *)
+let make_from_params type_ ~parent name given =
+    make ~parent name (model_of_params type_ given)
 
 (*$= coerce & ~printer:Yojson.Basic.to_string
   (`Int 3) (coerce "n" Widget.Int (`String "3"))
@@ -745,48 +904,95 @@ let make type_ ~parent name args =
       (Simulation.make ~realtime:false "r").Simulation.root
  *)
 
-(*$= made_with & ~printer:dump
-  (* What was chosen replaces what was asked for, and the parameters stay in \
-     the order the catalogue entry declares them: *) \
-  (Some [ "ports", `Int 8 ; "MACs", `String "one" ]) \
-    (let w = root () in \
-     made_with w [ "ports", `Int 8 ; "MACs", `String "" ] \
-                 [ "MACs", `String "one" ] ; \
-     w.Widget.made_with)
-  (* A choice about something that is not a parameter is not one: *) \
-  (Some [ "ports", `Int 8 ]) \
-    (let w = root () in \
-     made_with w [ "ports", `Int 8 ] [ "colour", `String "red" ] ; \
-     w.Widget.made_with)
+(* A root to build under. A simulation's own and not a bare [Widget.make_root]:
+ * a device reaches for the simulation it is being built in, to draw its power
+ * and to schedule on its clock, and finds it by the number its root carries. *)
+(* [sample_params] below is every parameter of [t] at its declared default. A
+ * cable is the one kind with no complete set of those: a cable that joins
+ * nothing is not a cable, so its two ends have no default and are named here.
+ *
+ * Said out here because a comment inside an inject block ends it at the first
+ * comment terminator it meets. *)
+(*$inject
+  let root () =
+      (Simulation.make ~realtime:false "r").Simulation.root
+
+  let sample_params t =
+      args_of t (if t == cable then [ "from", `Int 1 ; "to", `Int 2 ] else [])
  *)
 
-(*$T made_with
-  (ignore made_with ; \
-  (* Every device built through [make] says what it was built with, which is \
-     what a save needs and what a hand-wired one cannot answer: *) \
-  let w = make "switch" ~parent:(root ()) "sw" [ "ports", `Int 24 ] in \
+(* The one seam the compiler cannot check: a parameter this file declares and a
+   field it reads are tied by a string and nothing else. So for each kind of
+   device, read its own declared parameters into a model and write that model
+   back out, and expect what was declared.
+
+   That catches a parameter renamed on one side only, one the reader forgets,
+   and one the writer invents, which between them are every way the two halves
+   can part company. *)
+(*$T all
+  List.for_all (fun t -> \
+      let declared = sample_params t in \
+      to_params (t.of_params declared) = declared \
+  ) all
+ *)
+
+(* And the other way about, which is what a save and a reload really do. *)
+(*$T all
+  List.for_all (fun t -> \
+      let m = t.of_params (sample_params t) in \
+      t.of_params (args_of t (to_params m)) = m \
+  ) all
+ *)
+
+(* Every kind the catalogue offers is a kind it can name back. *)
+(*$T type_of
+  List.for_all (fun t -> type_of (t.of_params (sample_params t)) = t.name) all
+ *)
+
+(* What a device is built with is written down, and what it chose for itself is
+   written down as chosen rather than as the blank it was handed. A choice that
+   went unrecorded would be made again, and differently, on the way back in. *)
+(*$T make
+  (let w = make ~parent:(root ()) "sw" (TSwitch { ports = 24 ; macs = 8 ; \
+               speeds = Eth.Iface.default_speeds ; full_duplex = true }) in \
    match w.Widget.made_with with \
    | Some args -> List.assoc "ports" args = `Int 24 \
    | None -> false)
-  (ignore made_with ; \
-  Widget.make ~parent:(root ()) "by hand").Widget.made_with = None
+  (* Handed no address, a host comes back with the one it drew: *) \
+  (let w = make ~parent:(root ()) "h" (THost { static_ip = None ; \
+               netmask = Ip.Addr.of_string "255.255.255.0" ; gateway = None ; \
+               nameserver = None ; search_sfx = None ; mac = None }) in \
+   match w.Widget.made_with with \
+   | Some args -> List.assoc "MAC" args <> `Null \
+   | None -> false)
+  (* And a hand-wired widget still answers nothing at all: *) \
+  (ignore make ; \
+   Widget.make ~parent:(root ()) "by hand").Widget.made_with = None
  *)
 
 (* A widget built here can be turned back into the thing it stands for, which
    is what a program needs to run anything on a host it just asked for. Each
    module answers for its own kind and for no other, so asking the wrong one is
    how a caller finds out it has the wrong sort of device. *)
-(*$T make
-  (match Host.of_widget (make "host" ~parent:(root ()) "h" []) with \
+(*$T make_from_params
+  (match Host.of_widget \
+             (make_from_params "host" ~parent:(root ()) "h" []) with \
    | Some (h : Host.t) -> h.Host.trx.Host.widget.Widget.name = "h" \
    | None -> false)
-  (match Hub.Switch.of_widget (make "switch" ~parent:(root ()) "sw" []) with \
+  (match Hub.Switch.of_widget \
+             (make_from_params "switch" ~parent:(root ()) "sw" []) with \
    | Some (s : Hub.Switch.t) -> Array.length s.Hub.Switch.ifaces = 8 \
    | None -> false)
-  Hub.Switch.of_widget (make "host" ~parent:(root ()) "h" []) = None
+  Hub.Switch.of_widget (make_from_params "host" ~parent:(root ()) "h" []) = None
   (* A part of a device is not a device: the adapter within a host stands for \
      nothing on its own. *) \
-  (match (make "host" ~parent:(root ()) "h" []).Widget.children with \
+  (match (make_from_params "host" ~parent:(root ()) "h" []).Widget.children \
+   with \
    | [ eth ] -> Host.of_widget eth = None \
    | _ -> false)
+  (* A misspelt parameter is refused rather than ignored, before anything is \
+     built: *) \
+  (try ignore (make_from_params "switch" ~parent:(root ()) "sw" \
+                   [ "port", `Int 4 ]) ; false \
+   with Widget.Bad_value _ -> true)
  *)
