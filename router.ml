@@ -652,9 +652,11 @@ struct
                  * [ip_recv] function whenever that's the routing decision. *)
                 let name = "admin@"^ string_of_int n in
                 let widget = Widget.make ~parent:iface.widget name in
-                (* It has the router's supply, through the router's adapter:
-                   one box, one switch. *)
                 iface.admin_host <-
+                    (* No netmask and no address: this host configures nothing
+                       at boot, neither statically nor over DHCP. It has the
+                       router's supply, through the router's adapter: one box,
+                       one switch. *)
                     Some (Host.make_from_eth ~widget iface.eth trx name)
             ) ;
             (* When packets are received from the outside, go to routing: *)
@@ -837,7 +839,7 @@ struct
         "an interface with no address has no admin host" @?
             (r.ifaces.(0).admin_host = None) ;
         Eth.State.set_arp eth
-            (Ip.Addr.to_bitstring (Ip.Addr.of_dotted_string_exc "1.2.3.4"))
+            (Ip.Addr.to_bitstring (Ip.Addr.of_dotted_string "1.2.3.4"))
             (Some (Eth.Addr.random ())) ;
         "and its adapter still learns" @?
             (Tools.BitHash.length eth.Eth.State.arp_cache = 1) ;
@@ -950,7 +952,8 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let srv_ip = Enum.get_exn local_ips in    (* second the dhcp/name servers *)
     let h : Host.t =
         let gateways = [ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw_mac) ] in
-        Host.make_static ?nameserver ~gateways ~netmask ~parent:widget srv_ip "srv" in
+        Host.make ?nameserver ~gateways ~netmask ~static_ip:srv_ip
+                  ~parent:widget "srv" in
     (* Now we need the repeater and the services: *)
     (* FIXME: instead of a Hub that forces us into having 2 IPs make a simple TRX directly, that inspects the protostack and if
      * the dest IP is gw_ip == src_iv then forward it to the host and if not forward it to the NAT. *)
@@ -1015,7 +1018,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
 (*$T make_gw
   let sim = Simulation.make ~realtime:false "gw-ports" in \
   let gw = make_gw ~parent:sim.Simulation.root \
-                   (Ip.Addr.of_dotted_string_exc "80.82.17.127") \
+                   (Ip.Addr.of_dotted_string "80.82.17.127") \
                    (Ip.Cidr.of_string "192.168.0.0/16") in \
   gw.widget.ports.count () = 2 && \
   gw.widget.ports.dev 0 == gw.trx.out && \
@@ -1036,7 +1039,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let gw_trx = make_gw ~parent:sim.root public_ip (Ip.Cidr.of_string "192.168.0.0/16") in
     let gateways = Eth.[ State.gw_selector (), Some (Gateway.of_string "192.168.0.1") ] in
     let netmask = Ip.Addr.of_string "255.255.255.0" in
-    let desktop : Host.t = Host.make_dhcp ~parent:sim.root ~netmask ~gateways "desktop" in
+    let desktop : Host.t = Host.make ~parent:sim.root ~netmask ~gateways "desktop" in
     desktop.trx.dev.set_read gw_trx.trx.ins.write ;
     ignore (desktop.trx.dev.write <-= gw_trx.trx) ;
     let server_ip = Ip.Addr.of_string "42.43.44.45" in

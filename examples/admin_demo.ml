@@ -44,7 +44,7 @@ let main =
     let hosts =
         List.init 3 (fun i ->
             let ip = Ip.Addr.of_string (Printf.sprintf "192.168.1.%d" (i + 10)) in
-            let h = Host.make_static ~parent ~netmask ip (Printf.sprintf "host%d" i) in
+            let h = Host.make ~parent ~netmask ~static_ip:ip (Printf.sprintf "host%d" i) in
             (* Spread around the switch, each one further out than the last, so
              * that the three cables are of three different lengths. *)
             let at = offset switch_at ~bearing:(120. *. float_of_int i)

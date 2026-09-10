@@ -51,14 +51,14 @@ let main =
     let gateways =
         (if !gw = "" then None else Some (Eth.Gateway.of_string !gw)) |>
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) in
-    let host : Host.t =
-        Host.make_static ~parent:sim.root ?gateways
-                         ~nameserver:(Ip.Addr.of_string !dst_ip)
-                         ~search_sfx:!search
-                         ~mac:(Eth.Addr.of_string !src_eth)
-                         ~netmask:(Ip.Addr.of_string !netmask)
-                         (Ip.Addr.of_string !src_ip)
-                         "requester" in
+    let host =
+        Host.make ~parent:sim.root ?gateways
+                  ~nameserver:(Ip.Addr.of_string !dst_ip)
+                  ~search_sfx:!search
+                  ~mac:(Eth.Addr.of_string !src_eth)
+                  ~netmask:(Ip.Addr.of_string !netmask)
+                  ~static_ip:(Ip.Addr.of_string !src_ip)
+                  "requester" in
     host.trx.dev.set_read emit ;
     List.iter (Simulation.asap sim.Simulation.power (fun name ->
         host.trx.gethostbyname name (function

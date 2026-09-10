@@ -207,15 +207,6 @@ let made_with (widget : Widget.t) args changed =
                 name, (List.assoc_opt name changed |? v)
             ) args)
 
-(* An address as one types it, and not as the resolver would have it:
- * [Ip.Addr.of_string] asks the system to look the name up, which would hold the
- * simulation still for as long as a DNS server feels like taking. *)
-let addr name v =
-    let s = Widget.to_string v in
-    match Ip.Addr.of_dotted_string_opt s with
-    | Some ip -> ip
-    | None -> Widget.bad_value "%s: %S is not an IP address" name s
-
 let mac_of_string name s =
     try Eth.Addr.of_string s
     with _ -> Widget.bad_value "%s: %S is not a MAC address" name s
@@ -297,9 +288,9 @@ let host =
           (* The one parameter that cannot be an afterthought: with an address
            * the host is configured statically, without one it goes looking for
            * a DHCP server, and the two are different machines from here on. *)
-          param "address" ~kind:(Widget.optional String)
-              ~placeholder:"asked of a DHCP server"
-              ~descr:"Its IP address." ;
+          param "static-ip" ~kind:(Widget.optional String)
+              ~placeholder:"static IP (or use DHCP)"
+              ~descr:"Its static IP address." ;
           param "netmask" ~kind:String ~default:(`String "255.255.255.0")
               ~descr:"Which addresses it can reach without a gateway." ;
           param "gateway" ~kind:(Widget.optional String)
@@ -315,23 +306,18 @@ let host =
               ~placeholder:"drawn at random"
               ~descr:"Its hardware address." ] ;
       make = fun ~parent name args ->
-          let netmask = addr "netmask" (arg args "netmask")
+          let netmask = Ip.Addr.of_json "netmask" (arg args "netmask")
           and gateways =
               match opt args "gateway" (fun v ->
-                        Eth.Gateway.IPv4 (addr "gateway" v)) with
+                        Eth.Gateway.IPv4 (Ip.Addr.of_json "gateway" v)) with
               | None -> []
               | Some gw -> [ Eth.State.gw_selector (), Some gw ]
-          and nameserver = opt args "nameserver" (addr "nameserver")
+          and nameserver = opt args "nameserver" (Ip.Addr.of_json "nameserver")
           and search_sfx = opt args "search suffix" Widget.to_string
+          and static_ip = opt args "static-ip" (Ip.Addr.of_json "static-ip")
           and mac = opt args "MAC" (mac "MAC") in
-          let t =
-              match opt args "address" (addr "address") with
-              | Some ip ->
-                  Host.make_static ~parent ~gateways ?search_sfx ?nameserver
-                                   ?mac ~netmask ip name
-              | None ->
-                  Host.make_dhcp ~parent ~gateways ?search_sfx ?nameserver
-                                 ?mac ~netmask name in
+          let t = Host.make ~parent ~gateways ?search_sfx ?nameserver
+                            ?static_ip ~netmask ?mac name in
           let widget = t.Host.trx.Host.widget in
           (* The address it ended up with, drawn at random when it was not
            * given one. Its "MAC" property is read-only, so nothing else would
@@ -503,7 +489,7 @@ let gateway =
                       serves, which is the one the machines behind it send \
                       to." ] ;
       make = fun ~parent name args ->
-          let public = addr "public address" (arg args "public address")
+          let public = Ip.Addr.of_json "public address" (arg args "public address")
           and lan = cidr "LAN" (arg args "LAN")
           (* Drawn here rather than left to the gateway to draw, so that what
            * it ends up with can be written down: it keeps no property of its

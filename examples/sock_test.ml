@@ -33,12 +33,12 @@ let server_f _h tcp bits =
     )
 
 let run (sim : Simulation.t) () =
-    let h1 = Host.make_static ~parent:sim.root ~mac:(Eth.Addr.of_string "12:34:56:78:90:ab")
-                              ~netmask:(Ip.Addr.of_string "255.255.255.0")
-                              (Ip.Addr.of_string "192.168.0.1") "server"
-    and h2 = Host.make_static ~parent:sim.root ~mac:(Eth.Addr.of_string "ab:cd:ef:01:23:45")
-                              ~netmask:(Ip.Addr.of_string "255.255.255.0")
-                              (Ip.Addr.of_string "192.168.0.2") "client"
+    let h1 = Host.make ~parent:sim.root ~mac:(Eth.Addr.of_string "12:34:56:78:90:ab")
+                       ~netmask:(Ip.Addr.of_string "255.255.255.0")
+                       ~static_ip:(Ip.Addr.of_string "192.168.0.1") "server"
+    and h2 = Host.make ~parent:sim.root ~mac:(Eth.Addr.of_string "ab:cd:ef:01:23:45")
+                       ~netmask:(Ip.Addr.of_string "255.255.255.0")
+                       ~static_ip:(Ip.Addr.of_string "192.168.0.2") "client"
     and hub = Hub.Repeater.make ~parent:sim.root 3 "hub"
     in
     let gigabit = Eth.limited sim.Simulation.power (Clock.Interval.msec 1.) 1_000_000_000. in

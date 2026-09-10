@@ -34,7 +34,7 @@ let run (sim : Simulation.t) ifname src_range num_srcs ?gateways ?search_sfx ?na
     let host_of_ip ip =
         let name = Ip.Addr.to_dotted_string ip
         and mac = mac_of_ip ip in
-        Host.make_static ~parent:sim.root ?gateways ?search_sfx ?nameserver ~netmask ~mac ip name in
+        Host.make ~parent:sim.root ?gateways ?search_sfx ?nameserver ~netmask ~mac ~static_ip:ip name in
     let hosts = List.of_enum (Ip.Cidr.random_addrs src_range num_srcs /@ host_of_ip)
     in
     (* Build the HUB and link it to hosts *)

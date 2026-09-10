@@ -103,7 +103,11 @@ and t = { mutable trx : host_trx ;
           udp_servers : (Udp.Port.t, (Udp.TRX.udp_trx -> unit)) Hashtbl.t ;
           (* the resolver *)
           mutable search_sfx : string option ;
-          nameserver : Ip.Addr.t option ;
+          mutable nameserver : Ip.Addr.t option ;
+          (* If the host has a static IP configuration: *)
+          mutable static_ip : Ip.Addr.t option ;
+          mutable host_name : string ; (* Might be overwritten by DHCP *)
+          mutable netmask : Ip.Addr.t option ;
           mutable resolv_trx : trx option ;
           dns_queries : (string, ((Ip.Addr.t list option -> unit) * Metric.Timed.stop_func option)) Hashtbl.t ;
           dns_cache   : (string, Ip.Addr.t list) Hashtbl.t ;
@@ -280,7 +284,7 @@ let rec with_resolver_trx t cont =
 
 and gethostbyname t name cont =
     (* If the name is already an IP do not try to resolve it, otherwise host without DNS server cannot use IP addresses neither *)
-    match Ip.Addr.of_dotted_string_exc name with
+    match Ip.Addr.of_dotted_string name with
     | exception _ -> do_gethostbyname t name cont
     | ip -> cont (Some [ip])
 
@@ -526,6 +530,16 @@ let ip_recv t bits =
 let reset t =
     Eth.State.reset t.eth_state ;
     t.resolv_trx <- None ;
+    (* The address and the reader go too, so that a host powered back on
+       configures itself afresh rather than keeping a lease nobody granted it
+       twice. Only for a host that has an address of its own to manage: one
+       built on somebody else's adapter shares that owner's addresses and that
+       owner's reader, and a router's admin host taking down either would stop
+       the router routing. Having no netmask is what says so; see [init]. *)
+    if t.netmask <> None then (
+        t.eth_state.my_addresses <- [] ;
+        ignore <-= t.eth_trx |> ignore
+    ) ;
     Hashtbl.clear t.tcp_socks ;
     Hashtbl.clear t.udp_socks ;
     Hashtbl.clear t.icmp_socks ;
@@ -539,11 +553,110 @@ let power_off t =
     Simulation.power_down t.trx.power ;
     reset t
 
-let on_init_nothing ?(on_ip:(t -> unit) option) (_t : t) =
+let set_ip t my_ip netmask =
+    Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Setting my IP to %s" (Ip.Addr.to_string my_ip)))) ;
+    t.eth_state.my_addresses <- [ Eth.State.make_my_ip_address ~netmask my_ip ] ;
+    ip_recv t <-= t.eth_trx |> ignore
+
+(* What a host is built from belongs within it, which is what the interface
+   being built under the host's own widget buys. *)
+(*$T make
+  (let sim = Simulation.make ~realtime:false "test-tree" in \
+   let h = \
+     make ~parent:sim.Simulation.root \
+          ~netmask:(Ip.Addr.of_string "255.255.255.0") \
+          ~static_ip:(Ip.Addr.of_string "192.168.1.1") "h" in \
+   List.exists (fun (w : Widget.t) -> w.name = "eth") h.trx.widget.Widget.children && \
+   not (List.exists (fun (w : Widget.t) -> w.name = "eth") \
+                    sim.Simulation.root.Widget.children))
+ *)
+
+(* A host with no netmask has no IP configuration to apply: it is somebody
+   else's adapter that it speaks through, and whoever owns that adapter hands
+   it its packets. Calling [set_ip] here would have it read the wire as well,
+   which is exactly what a router's admin host must not do. *)
+let init_nothing ?(on_ip:(t -> unit) option) (_t : t) =
     ignore on_ip
 
-let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget
-                  ?(init=on_init_nothing) (eth_state : Eth.State.t) eth_trx name =
+let init_static ?on_ip t =
+    match t.static_ip, t.netmask with
+    | Some static_ip, Some netmask ->
+        set_ip t static_ip netmask ;
+        (* TODO: Send a gratuitous ARP request? *)
+        Option.may (fun on_ip -> Simulation.asap t.trx.power on_ip t) on_ip
+    | _ ->
+        (* [init] sends a host here only with both of them. *)
+        assert false
+
+let init_dhcp ?on_ip t =
+    let host_name = t.host_name in
+    (* Will receive all eth frames until we got an IP address *)
+    let dhcp_client bits = (match Ip.Pdu.unpack bits with
+        | Error s ->
+            Log.(log t.trx.widget.logger Warning s)
+        | Ok (ip : Ip.Pdu.t) ->
+            if ip.proto <> Ip.Proto.udp then (
+                Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Ignoring IP packet of proto %s while waiting for DHCP offer" (Ip.Proto.to_string ip.proto))))
+            ) else (match Udp.Pdu.unpack (ip.payload :> bitstring) with
+                | Error s ->
+                    Log.(log t.trx.widget.logger Warning s)
+                | Ok (udp : Udp.Pdu.t) ->
+                    if udp.src_port <> (Udp.Port.o 67) || udp.dst_port <> (Udp.Port.o 68) then (
+                        Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Ignoring UDP packet from %s:%s to %s:%s while waiting for DHCP offer"
+                            (Ip.Addr.to_string ip.src) (Udp.Port.to_string udp.src_port)
+                            (Ip.Addr.to_string ip.dst) (Udp.Port.to_string udp.dst_port))))
+                    ) else (
+                        match Dhcp.Pdu.unpack (udp.payload :> bitstring) with
+                        | Error s ->
+                            Log.(log t.trx.widget.logger Warning s)
+                        | Ok (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.offer ->
+                            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Got DHCP OFFER from %s, accepting it" (Ip.Addr.to_string ip.src)))) ;
+                            (* TODO: check the Xid? *)
+                            let pdu = Dhcp.Pdu.make_request ~chaddr:(t.eth_state.mac :> bitstring) ~xid:dhcp.xid ~host_name ?server_id:dhcp.server_id dhcp.yiaddr in
+                            let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
+                            let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Udp.Pdu.pack pdu) in
+                            tx t.eth_trx (Ip.Pdu.pack pdu)
+                        | Ok (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.ack ->
+                            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.src)))) ;
+                            (* TODO: set other params than IP, such as netmask! *)
+                            (* The netmask is there at boot, but a lease
+                               arrives later and nothing stops it being taken
+                               away in between. *)
+                            (match t.netmask with
+                            | None ->
+                                t.trx.signal_err
+                                    "Ignoring a DHCP ACK: I have no netmask"
+                            | Some netmask ->
+                                set_ip t dhcp.yiaddr netmask ;
+                                (* TODO: Send a gratuitous ARP request? *)
+                                Option.may (fun on_ip ->
+                                    Simulation.asap t.trx.power on_ip t) on_ip)
+                        | Ok _ ->
+                            (* TODO: print it *)
+                            t.trx.signal_err "Ignoring a DHCP message"))) in
+    let rec send_discover () =
+        if not (ip_is_set t) then (
+            Log.(log t.trx.widget.logger Debug (lazy "Sending DHCP DISCOVER")) ;
+            Dhcp.Pdu.make_discover ~chaddr:(t.eth_state.mac :> bitstring) ~host_name () |>
+                Dhcp.Pdu.pack |>
+                Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) |>
+                Udp.Pdu.pack |>
+                Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast |>
+                Ip.Pdu.pack |>
+                tx t.eth_trx ;
+            Simulation.delay t.trx.power (Clock.Interval.sec (5.+.(Random.float 3.))) send_discover ()
+        ) in
+    ignore (dhcp_client <-= t.eth_trx) ;
+    (* The client should wait a random time between one and ten seconds to desynchronize
+       the use of DHCP at startup - RFC 2131 *)
+    let delay = Clock.Interval.sec (1.+.(Random.float 9.)) in
+    Log.(log t.trx.widget.logger Debug (lazy
+        (Printf.sprintf "Waiting %s before using DHCP..."
+            (Clock.Interval.to_string delay)))) ;
+    Simulation.delay t.trx.power delay send_discover ()
+
+let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask ?(on=true) ~widget
+                  (eth_state : Eth.State.t) eth_trx name =
     (* For the API a cable reaches a host but in reality it reaches its
        adapter. *)
     widget.Widget.ports <- Widget.ports_of eth_state.iface.widget ;
@@ -565,7 +678,10 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget
           icmp_socks    = Hashtbl.create 11 ;
           tcp_servers   = Hashtbl.create 11 ;
           udp_servers   = Hashtbl.create 11 ;
-          nameserver    = nameserver ;
+          nameserver ;
+          host_name     = name ;
+          static_ip ;
+          netmask ;
           resolv_trx    = None ;
           search_sfx    = search_sfx ;
           dns_queries   = Hashtbl.create 3 ;
@@ -573,6 +689,13 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget
           resolutions   = Metric.Timed.make () ;
           trx           = host_trx ;
           last_ip_packet = None }
+    (* Read afresh at every boot, and not chosen once here: which of the three
+       applies is a fact about the host as it stands, and the reader may have
+       changed it since. *)
+    and init () =
+        if t.netmask = None then init_nothing
+        else if t.static_ip = None then init_dhcp
+        else init_static
     and host_trx =
         { widget ;
           dev           = { write = (fun bits ->
@@ -600,14 +723,14 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget
                               else (
                                   Log.(log widget.logger Debug (lazy "Powering on")) ;
                                   Simulation.power_up t.trx.power ;
-                                  init ?on_ip t
+                                  init () ?on_ip t
                               )) ;
           power_off     = (fun () ->
                               if not t.trx.power.Simulation.on then
                                   Log.(log widget.logger Debug (lazy
                                       "Ignoring power off: already off"))
                               else power_off t) ;
-          start         = (fun ?on_ip () -> init ?on_ip t) ;
+          start         = (fun ?on_ip () -> init () ?on_ip t) ;
           reset         = (fun () -> reset t) ;
           power }
     in
@@ -622,10 +745,14 @@ let make_from_eth ?search_sfx ?nameserver ?(on=true) ~widget
         metric_property "DNS resolutions" ~descr:"DNS resolution times."
             (Metric.Timed.T t.resolutions) ] ;
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "New host '%s'" name))) ;
-    if t.trx.power.Simulation.on then init t ;
+    if t.trx.power.Simulation.on then init () t ;
     t
 
-let make ?gateways ?search_sfx ?nameserver ?on ~parent ?location ?mac ?init name =
+let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
+         ~parent ?location name =
+    (* FIXME: Until we get the netmask from the DHCP it's safer to make it mandatory! *)
+    if netmask = None then
+        invalid_arg "Host.make: For now netmask is mandatory" ;
     let widget = Widget.make ~parent ?location ~device:"host" name in
     let eth_state =
         (* FIXME: Don't use the GW for same net IP! *)
@@ -633,8 +760,8 @@ let make ?gateways ?search_sfx ?nameserver ?on ~parent ?location ?mac ?init name
                        ~power:(Simulation.make_power
                                    (Simulation.of_widget widget) name) () in
     let eth_trx = Eth.TRX.make eth_state in
-    let t = make_from_eth ?search_sfx ?nameserver ?on ~widget ?init eth_state
-                          eth_trx name in
+    let t = make_from_eth ?search_sfx ?nameserver ?on ~widget ?static_ip
+                          ?netmask eth_state eth_trx name in
     (* This host minted the supply above, so the switch for it goes here, and
        so does stopping it for good. And it is a whole machine, unlike a host
        built on somebody else's adapter. *)
@@ -643,96 +770,69 @@ let make ?gateways ?search_sfx ?nameserver ?on ~parent ?location ?mac ?init name
         property "on" ~descr:"The host is powered on." ~kind:Bool
             ~getter:(fun () -> `Bool t.trx.power.Simulation.on)
             ~setter:(fun v ->
-                if to_bool v then t.trx.power_on () else t.trx.power_off ()) ] ;
+                if to_bool v then t.trx.power_on () else t.trx.power_off ()) ;
+        property "static-ip" ~kind:(Optional String)
+            ~descr:"IP given at boot (if none, will use DHCP)."
+            ~getter:(fun () -> json_of_optional Ip.Addr.to_json t.static_ip)
+            ~setter:(fun v ->
+                t.static_ip <- to_option (Ip.Addr.of_json "static-ip") v) ;
+        property "static-netmask" ~kind:(Optional String)
+            ~descr:"Netmask of the statc IP configuration."
+            ~getter:(fun () -> json_of_optional Ip.Addr.to_json t.netmask)
+            ~setter:(fun v ->
+                t.netmask <- to_option (Ip.Addr.of_json "netmask") v) ;
+        property "nameserver" ~kind:(Optional String)
+            ~descr:"Address of the DNS server."
+            ~getter:(fun () -> json_of_optional Ip.Addr.to_json t.nameserver)
+            ~setter:(fun v ->
+                t.nameserver <- to_option (Ip.Addr.of_json "nameserver") v) ] ;
     t
 
-let set_ip t my_ip netmask =
-    Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Setting my IP to %s" (Ip.Addr.to_string my_ip)))) ;
-    t.eth_state.my_addresses <- [ Eth.State.make_my_ip_address ~netmask my_ip ] ;
-    ip_recv t <-= t.eth_trx |> ignore
+(* A host boots into the configuration it has at that moment, and not the one
+   it was built with: what the reader changed between two boots is the whole
+   point of keeping the configuration on the host rather than in the closure
+   that applies it. *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "test-reboot" in
+    let netmask = Ip.Addr.of_string "255.255.255.0" in
+    let h =
+        make ~parent:sim.Simulation.root ~netmask
+             ~static_ip:(Ip.Addr.of_string "192.168.1.10") "h" in
+    let prop name =
+        List.find (fun (p : Widget.property) -> p.Widget.name = name)
+                  h.trx.widget.Widget.properties in
+    let set name v = (Option.get (prop name).Widget.setter) v in
+    let reboot () = set "on" (`Bool false) ; set "on" (`Bool true) in
+    let address () =
+        match Eth.State.find_ip4 h.eth_state with
+        | exception Not_found -> "none"
+        | ip -> Ip.Addr.to_dotted_string ip in
+    assert_equal ~printer:identity "192.168.1.10" (address ()) ;
+    set "on" (`Bool false) ;
+    (* Its address goes with its power: an address it kept while off would be
+       one it had never been granted when it came back. *)
+    assert_equal ~printer:identity "none" (address ()) ;
+    set "on" (`Bool true) ;
+    assert_equal ~printer:identity "192.168.1.10" (address ()) ;
 
-(* What a host is built from belongs within it, which is what the interface
-   being built under the host's own widget buys. *)
-(*$T make_static
-  (let sim = Simulation.make ~realtime:false "test-tree" in \
-   let h = \
-     make_static ~parent:sim.Simulation.root \
-                 ~netmask:(Ip.Addr.of_string "255.255.255.0") \
-                 (Ip.Addr.of_string "192.168.1.1") "h" in \
-   List.exists (fun (w : Widget.t) -> w.name = "eth") h.trx.widget.Widget.children && \
-   not (List.exists (fun (w : Widget.t) -> w.name = "eth") \
-                    sim.Simulation.root.Widget.children))
+    (* Told to use DHCP instead, it must come back with nothing and go asking,
+       rather than with the address it used to have. *)
+    set "static-ip" `Null ;
+    reboot () ;
+    assert_equal ~printer:identity "none" (address ()) ;
+
+    (* And the other way about: a host that was left to DHCP takes the address
+       it is given here, without being rebuilt. *)
+    set "static-ip" (`String "192.168.1.11") ;
+    reboot () ;
+    assert_equal ~printer:identity "192.168.1.11" (address ()) ;
+
+    (* With no netmask there is no configuration of its own to apply, so a
+       reboot leaves the adapter alone instead of failing. *)
+    set "static-netmask" `Null ;
+    reboot () ;
+    assert_equal ~printer:identity "192.168.1.11" (address ())
  *)
-
-(* Safer to have the netmask mandatory here *)
-let make_static ?gateways ?search_sfx ?nameserver ?on ?mac ~parent ~netmask my_ip name =
-    let init ?on_ip t =
-        set_ip t my_ip netmask ;
-        (* TODO: Send a gratuitous ARP request? *)
-        Option.may (fun on_ip -> Simulation.asap t.trx.power on_ip t) on_ip
-    in
-    make ?gateways ?search_sfx ?nameserver ?mac ?on ~parent ~init name
-
-(* FIXME: Until we get the netmask from the DHCP it's safer to make it mandatory! *)
-let make_dhcp ?gateways ?search_sfx ?nameserver ?mac ?on ~parent ~netmask (*?(netmask==Ip.Addr.zero)*) host_name =
-    let init ?on_ip t =
-        (* Will receive all eth frames until we got an IP address *)
-        let dhcp_client bits = (match Ip.Pdu.unpack bits with
-            | Error s ->
-                Log.(log t.trx.widget.logger Warning s)
-            | Ok (ip : Ip.Pdu.t) ->
-                if ip.proto <> Ip.Proto.udp then (
-                    Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Ignoring IP packet of proto %s while waiting for DHCP offer" (Ip.Proto.to_string ip.proto))))
-                ) else (match Udp.Pdu.unpack (ip.payload :> bitstring) with
-                    | Error s ->
-                        Log.(log t.trx.widget.logger Warning s)
-                    | Ok (udp : Udp.Pdu.t) ->
-                        if udp.src_port <> (Udp.Port.o 67) || udp.dst_port <> (Udp.Port.o 68) then (
-                            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Ignoring UDP packet from %s:%s to %s:%s while waiting for DHCP offer"
-                                (Ip.Addr.to_string ip.src) (Udp.Port.to_string udp.src_port)
-                                (Ip.Addr.to_string ip.dst) (Udp.Port.to_string udp.dst_port))))
-                        ) else (
-                            match Dhcp.Pdu.unpack (udp.payload :> bitstring) with
-                            | Error s ->
-                                Log.(log t.trx.widget.logger Warning s)
-                            | Ok (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.offer ->
-                                Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Got DHCP OFFER from %s, accepting it" (Ip.Addr.to_string ip.src)))) ;
-                                (* TODO: check the Xid? *)
-                                let pdu = Dhcp.Pdu.make_request ~chaddr:(t.eth_state.mac :> bitstring) ~xid:dhcp.xid ~host_name ?server_id:dhcp.server_id dhcp.yiaddr in
-                                let pdu = Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) (Dhcp.Pdu.pack pdu) in
-                                let pdu = Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast (Udp.Pdu.pack pdu) in
-                                tx t.eth_trx (Ip.Pdu.pack pdu)
-                            | Ok (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; _ } as dhcp) when op = Dhcp.MsgType.ack ->
-                                Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.src)))) ;
-                                (* TODO: set other params than IP, such as netmask! *)
-                                set_ip t dhcp.yiaddr netmask ;
-                                (* TODO: Send a gratuitous ARP request? *)
-                                Option.may (fun on_ip -> Simulation.asap t.trx.power on_ip t) on_ip
-                            | Ok _ ->
-                                (* TODO: print it *)
-                                t.trx.signal_err "Ignoring a DHCP message"))) in
-        let rec send_discover () =
-            if not (ip_is_set t) then (
-                Log.(log t.trx.widget.logger Debug (lazy "Sending DHCP DISCOVER")) ;
-                Dhcp.Pdu.make_discover ~chaddr:(t.eth_state.mac :> bitstring) ~host_name () |>
-                    Dhcp.Pdu.pack |>
-                    Udp.Pdu.make ~src_port:(Udp.Port.o 68) ~dst_port:(Udp.Port.o 67) |>
-                    Udp.Pdu.pack |>
-                    Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast |>
-                    Ip.Pdu.pack |>
-                    tx t.eth_trx ;
-                Simulation.delay t.trx.power (Clock.Interval.sec (5.+.(Random.float 3.))) send_discover ()
-            ) in
-        ignore (dhcp_client <-= t.eth_trx) ;
-        (* The client should wait a random time between one and ten seconds to desynchronize
-           the use of DHCP at startup - RFC 2131 *)
-        let delay = Clock.Interval.sec (1.+.(Random.float 9.)) in
-        Log.(log t.trx.widget.logger Debug (lazy
-            (Printf.sprintf "Waiting %s before using DHCP..."
-                (Clock.Interval.to_string delay)))) ;
-        Simulation.delay t.trx.power delay send_discover ()
-    in
-    make ?gateways ?search_sfx ?nameserver ?mac ?on ~parent ~init host_name
 
 module Name = struct
     let random () =

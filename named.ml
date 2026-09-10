@@ -118,14 +118,14 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
     let sim = Simulation.make ~realtime:false "test-named" in
     (*Log.console_lvl := Log.Debug ;*)
     let netmask = Ip.Addr.all_ones in
-    let srv : Host.t = Host.make_static ~parent:sim.root ~netmask (Ip.Addr.of_dotted_string_exc "1.1.1.1") "server" in
+    let srv : Host.t = Host.make ~parent:sim.root ~netmask ~static_ip:(Ip.Addr.of_dotted_string "1.1.1.1") "server" in
     let lookup = function
-        | "popo" -> Some (Ip.Addr.of_dotted_string_exc "1.1.1.1")
+        | "popo" -> Some (Ip.Addr.of_dotted_string "1.1.1.1")
         | _ -> None in
     let st = State.make ~parent:sim.root lookup in
     serve st srv.trx ;
-    let nameserver = Ip.Addr.of_dotted_string_exc "1.1.1.1" in
-    let clt : Host.t = Host.make_static ~parent:sim.root ~nameserver ~netmask (Ip.Addr.random ()) "client" in
+    let nameserver = Ip.Addr.of_dotted_string "1.1.1.1" in
+    let clt : Host.t = Host.make ~parent:sim.root ~nameserver ~netmask ~static_ip:(Ip.Addr.random ()) "client" in
     srv.trx.dev.set_read clt.trx.dev.write ;
     clt.trx.dev.set_read srv.trx.dev.write ;
     let got_ip = ref false in

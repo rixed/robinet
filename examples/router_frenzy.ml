@@ -184,7 +184,8 @@ let build_network (widget : Widget.t) router_specs fst_router_name delays err_de
                     and ip = try Ip.Addr.of_string dest_name
                              with Invalid_argument _ -> Ip.Cidr.second_addr cidr in
                     dest_name,
-                    Host.(make_static ~parent:widget ~gateways ~netmask ip dest_name).trx.dev
+                    Host.(make ~parent:widget ~gateways ~netmask ~static_ip:ip
+                               dest_name).trx.dev
                 | dest_router ->
                     (* For each of connected routers, look for their corresponding
                      * interface by subnet name: *)

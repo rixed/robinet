@@ -305,14 +305,47 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
     let sim = Simulation.make ~realtime:false "test-dhcpd" in
     (*Log.console_lvl := Log.Debug ;*)
     let netmask = Ip.Addr.all_ones in
-    let srv : Host.t = Host.make_static ~parent:sim.root ~netmask (Ip.Addr.random ()) "server" in
+    let srv : Host.t = Host.make ~parent:sim.root ~netmask ~static_ip:(Ip.Addr.random ()) "server" in
     let my_net = Ip.Cidr.random () in
     let st = State.make ~parent:sim.root (Ip.Range.of_cidr my_net) in
     serve st srv.trx ;
-    let clt : Host.t = Host.make_dhcp ~parent:sim.root ~netmask "client" in
+    let clt : Host.t = Host.make ~parent:sim.root ~netmask "client" in
     srv.trx.dev.set_read clt.trx.dev.write ;
     clt.trx.dev.set_read srv.trx.dev.write ;
     Simulation.run sim false ;
     assert_bool "Client got an IP" (Host.ip_is_set clt) ;
     assert_bool "IP is within net" (Eth.State.find_ip4 clt.eth_state |> Ip.Cidr.mem my_net)
+ *)
+
+(* A host taken off its static address has to go and ask for one, and the
+   address it is still holding at the moment it is told must not be what stops
+   it: that address was granted by nobody. *)
+(*$R serve
+    let sim = Simulation.make ~realtime:false "test-dhcpd-reboot" in
+    let netmask = Ip.Addr.all_ones in
+    let srv : Host.t =
+        Host.make ~parent:sim.root ~netmask ~static_ip:(Ip.Addr.random ())
+                  "server" in
+    (* A range the client's own address is not in, so that a lease is telling. *)
+    let my_net = Ip.Cidr.of_string "192.168.42.0/24" in
+    let st = State.make ~parent:sim.root (Ip.Range.of_cidr my_net) in
+    serve st srv.trx ;
+    let clt : Host.t =
+        Host.make ~parent:sim.root ~netmask
+                  ~static_ip:(Ip.Addr.of_string "10.99.99.99") "client" in
+    srv.trx.dev.set_read clt.trx.dev.write ;
+    clt.trx.dev.set_read srv.trx.dev.write ;
+    assert_bool "the client starts on its static address"
+        (Eth.State.find_ip4 clt.eth_state |> Ip.Addr.to_dotted_string
+         = "10.99.99.99") ;
+    let static_ip =
+        List.find (fun (p : Widget.property) -> p.Widget.name = "static-ip")
+                  clt.Host.trx.Host.widget.Widget.properties in
+    (Option.get static_ip.Widget.setter) `Null ;
+    clt.trx.power_off () ;
+    clt.trx.power_on () ;
+    Simulation.run sim false ;
+    assert_bool "and is leased one after a reboot" (Host.ip_is_set clt) ;
+    assert_bool "from the server's range"
+        (Eth.State.find_ip4 clt.eth_state |> Ip.Cidr.mem my_net)
  *)

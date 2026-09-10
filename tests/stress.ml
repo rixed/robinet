@@ -89,9 +89,9 @@ let make_net () =
     let parent = net.root in
     let netmask = Ip.Addr.of_string "255.255.255.0" in
     let h1 =
-        Host.make_static ~parent ~netmask (Ip.Addr.of_string "192.168.1.1") "h1"
+        Host.make ~parent ~netmask ~static_ip:(Ip.Addr.of_string "192.168.1.1") "h1"
     and h2 =
-        Host.make_static ~parent ~netmask (Ip.Addr.of_string "192.168.1.2") "h2" in
+        Host.make ~parent ~netmask ~static_ip:(Ip.Addr.of_string "192.168.1.2") "h2" in
     let cable =
         Eth.Cable.State.make ~parent ~length:10. ~error_rate:0.001
                              ~name:"link" () in
@@ -558,11 +558,11 @@ let test_disconnect () =
     section "Unplugging a cable" ;
     let sim = Simulation.make ~realtime:false "unplug" in
     let parent = sim.Simulation.root in
-    let netmask = Ip.Addr.of_dotted_string_exc "255.255.255.0" in
+    let netmask = Ip.Addr.of_dotted_string "255.255.255.0" in
     let sw = Hub.Switch.make ~parent 2 8 "sw" in
     let h =
-        Host.make_static ~parent ~netmask
-                         (Ip.Addr.of_dotted_string_exc "10.1.0.1") "h" in
+        Host.make ~parent ~netmask
+                  ~static_ip:(Ip.Addr.of_dotted_string "10.1.0.1") "h" in
     let sw_w = sw.Hub.Switch.widget
     and h_w = h.Host.trx.Host.widget in
     (* Through the same call the creation API uses, which is the only place
@@ -638,12 +638,12 @@ let test_delete () =
     section "Deleting a device" ;
     let sim = Simulation.make ~realtime:false "delete" in
     let parent = sim.Simulation.root in
-    let netmask = Ip.Addr.of_dotted_string_exc "255.255.255.0" in
+    let netmask = Ip.Addr.of_dotted_string "255.255.255.0" in
     let sw = Hub.Switch.make ~parent 2 8 "sw" in
     let sw_w = sw.Hub.Switch.widget in
     let host port name ip =
-        let h = Host.make_static ~parent ~netmask
-                                 (Ip.Addr.of_dotted_string_exc ip) name in
+        let h = Host.make ~parent ~netmask
+                          ~static_ip:(Ip.Addr.of_dotted_string ip) name in
         let st = Eth.Cable.State.make ~parent ~name:("cable-"^ name) () in
         Eth.Cable.plug st (sw_w, port) (h.Host.trx.Host.widget, 0) ;
         h, st in
@@ -707,11 +707,11 @@ let test_power () =
     section "Powering a host off" ;
     let sim = Simulation.make ~realtime:false "power" in
     let parent = sim.Simulation.root in
-    let netmask = Ip.Addr.of_dotted_string_exc "255.255.255.0" in
+    let netmask = Ip.Addr.of_dotted_string "255.255.255.0" in
     let sw = Hub.Switch.make ~parent 2 8 "sw" in
     let host port name ip =
-        let h = Host.make_static ~parent ~netmask
-                                 (Ip.Addr.of_dotted_string_exc ip) name in
+        let h = Host.make ~parent ~netmask
+                          ~static_ip:(Ip.Addr.of_dotted_string ip) name in
         let st = Eth.Cable.State.make ~parent ~name:("cable-"^ name) () in
         Eth.Cable.plug st (sw.Hub.Switch.widget, port)
                           (h.Host.trx.Host.widget, 0) ;
@@ -753,7 +753,7 @@ let test_power () =
     let listen () =
         h2.Host.trx.Host.udp_server (Udp.Port.o 1234) (fun _ -> incr served) in
     let send () =
-        h1.Host.trx.Host.udp_send (Host.IPv4 (Ip.Addr.of_dotted_string_exc "10.2.0.2"))
+        h1.Host.trx.Host.udp_send (Host.IPv4 (Ip.Addr.of_dotted_string "10.2.0.2"))
                                   (Udp.Port.o 1234) (Bitstring.zeroes_bitstring 64) ;
         Simulation.run sim false in
     listen () ;
@@ -780,7 +780,7 @@ let test_power () =
         Tools.BitHash.length h2.Host.eth_state.Eth.State.postponed in
     let to_nowhere () =
         h2.Host.trx.Host.udp_send
-            (Host.IPv4 (Ip.Addr.of_dotted_string_exc "10.2.0.99"))
+            (Host.IPv4 (Ip.Addr.of_dotted_string "10.2.0.99"))
             (Udp.Port.o 1234) (Bitstring.zeroes_bitstring 64) ;
         Simulation.run sim false in
     to_nowhere () ;
@@ -1168,9 +1168,9 @@ let test_http net cable duration nthreads
                     = [ "#0" ; "#1" ; "#2" ]
             | None -> false) ;
         let host_a = created {|{"type":"host","name":"a",
-                                "params":{"address":"10.9.0.1"}}|}
+                                "params":{"static-ip":"10.9.0.1"}}|}
         and host_b = created {|{"type":"host","name":"b",
-                                "params":{"address":"10.9.0.2"}}|} in
+                                "params":{"static-ip":"10.9.0.2"}}|} in
         let cable_of a b =
             created {|{"type":"cable","params":{"from":%d,"to":%d}}|} a b in
         let joined = cable_of switch_id host_a in
@@ -1250,7 +1250,7 @@ let test_http net cable duration nthreads
         (* Three ports, and the third one takes the last of them. *)
         ignore (cable_of switch_id host_b) ;
         let host_c = created {|{"type":"host","name":"c",
-                                "params":{"address":"10.9.0.5"}}|} in
+                                "params":{"static-ip":"10.9.0.5"}}|} in
         check "one cable too many for the ports it has is refused"
             (fst (post {|{"type":"cable","params":{"from":%d,"to":%d}}|}
                        switch_id host_c) = 400) ;
@@ -1281,12 +1281,12 @@ let test_http net cable duration nthreads
         check "a value out of range is refused"
             (fst (post {|{"type":"switch","name":"x","params":{"ports":0}}|}) = 400) ;
         check "an address that is not one is refused"
-            (fst (post {|{"type":"host","name":"x","params":{"address":"nope"}}|})
+            (fst (post {|{"type":"host","name":"x","params":{"static-ip":"nope"}}|})
              = 400) ;
         (* [Ip.Addr.of_string] would have asked the resolver, which is a wait
            this holds the simulation's lock across. *)
         check "and a name is not resolved into one"
-            (fst (post {|{"type":"host","name":"x","params":{"address":"localhost"}}|})
+            (fst (post {|{"type":"host","name":"x","params":{"static-ip":"localhost"}}|})
              = 400) ;
         (* The other way round: no name asks for one, which is the only way to
            be sure of a free one -- a name checked beforehand and sent
@@ -1301,7 +1301,7 @@ let test_http net cable duration nthreads
         (* From a device with a port to spare, so that what is being refused is
            the far end and not the near one. *)
         let spare = created {|{"type":"host","name":"spare",
-                               "params":{"address":"10.9.0.7"}}|} in
+                               "params":{"static-ip":"10.9.0.7"}}|} in
         check "a cable to something that takes none is refused"
             (fst (post {|{"type":"cable","params":{"from":%d,"to":%d}}|}
                        spare net.root.Widget.id) = 400) ;
@@ -1323,7 +1323,7 @@ let test_http net cable duration nthreads
            anyone having had to say so. *)
         let lone =
             widget (created {|{"type":"host","name":"lone",
-                               "params":{"address":"10.9.0.6"}}|}) in
+                               "params":{"static-ip":"10.9.0.6"}}|}) in
         check "a port with nothing on it is free"
             (not (lone.ports.is_connected 0)) ;
         (lone.ports.dev 0).Tools.set_read ignore ;
@@ -1337,9 +1337,9 @@ let test_http net cable duration nthreads
                       (Printf.sprintf "/api/simulations/%d/widgets/%d/location"
                           net_id id)) in
         let paris = created {|{"type":"host","name":"paris",
-                               "params":{"address":"10.9.0.3"}}|}
+                               "params":{"static-ip":"10.9.0.3"}}|}
         and lyon = created {|{"type":"host","name":"lyon",
-                              "params":{"address":"10.9.0.4"}}|} in
+                              "params":{"static-ip":"10.9.0.4"}}|} in
         check "placing the two ends" (place paris 48.8566 2.3522 = 200 &&
                                       place lyon 45.764 4.8357 = 200) ;
         let long = cable_of paris lyon in
@@ -1382,9 +1382,9 @@ let test_http net cable duration nthreads
         check "and leaves the two devices it joined where they were"
             (not (gone paris) && not (gone lyon)) ;
         let near = created {|{"type":"host","name":"near",
-                              "params":{"address":"10.9.0.8"}}|}
+                              "params":{"static-ip":"10.9.0.8"}}|}
         and far = created {|{"type":"host","name":"far",
-                             "params":{"address":"10.9.0.9"}}|} in
+                             "params":{"static-ip":"10.9.0.9"}}|} in
         let between = cable_of near far in
         check "deleting a device takes the cable that reached it with it"
             (del near = 200 && gone near && gone between) ;
@@ -1453,7 +1453,7 @@ let test_http net cable duration nthreads
              List.length macs = 3 &&
              List.length (List.sort_unique compare macs) = 3) ;
         let plugged = created {|{"type":"host","name":"plugged",
-                                 "params":{"address":"10.9.0.11"}}|} in
+                                 "params":{"static-ip":"10.9.0.11"}}|} in
         check "a router can be cabled like anything else"
             (fst (post {|{"type":"cable","params":{"from":%d,"to":%d}}|}
                        r plugged) = 200 &&

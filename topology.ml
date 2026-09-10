@@ -543,13 +543,13 @@ let to_simulation (sim : Simulation.t) t =
       let dev t n p = Device.make t ~parent:root n p in
       let cable a b =
           dev "cable" "" [ "from", `Int a.Widget.id ; "to", `Int b.Widget.id ] in
-      let h1 = dev "host" "h1" [ "address", `String "192.168.0.1" ] in
-      let h2 = dev "host" "h2" [ "address", `String "192.168.0.2" ] in
+      let h1 = dev "host" "h1" [ "static-ip", `String "192.168.0.1" ] in
+      let h2 = dev "host" "h2" [ "static-ip", `String "192.168.0.2" ] in
       let sw = dev "switch" "sw" [ "ports", `Int 4 ] in
       let c1 = cable h1 sw in
       ignore (cable h2 sw) ;
       Widget.destroy c1 ;
-      let h3 = dev "host" "h3" [ "address", `String "192.168.0.3" ] in
+      let h3 = dev "host" "h3" [ "static-ip", `String "192.168.0.3" ] in
       ignore (cable h3 sw) ;
       sim
 

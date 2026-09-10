@@ -168,12 +168,23 @@ module Addr = struct
     *)
 
     (** Convert from dotted representation (useful to allow DNS-less hosts to 'resolve' some name) *)
-    let of_dotted_string_exc str =
+    let of_dotted_string str =
         o (Unix.inet_addr_of_string str)
 
     let of_dotted_string_opt str =
-        try Some (of_dotted_string_exc str)
+        try Some (of_dotted_string str)
         with Failure _ -> None
+
+    (* An address as one types it, and not as the resolver would have it:
+     * [Ip.Addr.of_string] asks the system to look the name up, which would hold the
+     * simulation still for as long as a DNS server feels like taking. *)
+    let of_json name v =
+        let s = Widget.to_string v in
+        try of_dotted_string s
+        with _ -> Widget.bad_value "%s: %S is not an IP address" name s
+
+    let to_json t =
+        `String (to_dotted_string t)
 
     (** Some predefined addresses *)
 

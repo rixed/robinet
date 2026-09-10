@@ -29,7 +29,7 @@ let tunnel (sim : Simulation.t) ifname tun_ip netmask mac gw search_sfx nameserv
     let iface = Pcap.openif ~widget ifname in
     let gateways =
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) gw in
-    let host = Host.make_static ~parent:sim.root ?gateways ?search_sfx ?nameserver ~mac ~netmask tun_ip "tun"
+    let host = Host.make ~parent:sim.root ?gateways ?search_sfx ?nameserver ~mac ~netmask ~static_ip:tun_ip "tun"
     and http = Http.TRX.make [ "Content-Type", "tun/eth" ] in
     host.trx.dev.set_read (Pcap.inject iface) ;
     let connect_tunnel tcp =

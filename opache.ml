@@ -57,12 +57,12 @@ let params_of_query q =
 
   {[
     (* Server *)
-    let server = Host.make_static "server" (Eth.Addr.random ()) (Ip.Addr.of_string "192.168.1.1");;
+    let server = Host.make "server" (Eth.Addr.random ()) ~static_ip:(Ip.Addr.of_string "192.168.1.1");;
     let content_of file = File.lines_of file |> List.of_enum |> String.concat "";;
     Opache.serve server (Tcp.Port.o 8080) (fun trx _msg _log ->
         Http.TRXtop.tx trx (Http.Pdu.make_response 200 ["Content-Type", "text/plain"] (content_of "test.ml")));;
     (* Our client *)
-    let client = Host.make_static "client" (Eth.Addr.random ()) (Ip.Addr.of_string "192.168.1.2");;
+    let client = Host.make "client" ~mac:(Eth.Addr.random ()) ~static_ip:(Ip.Addr.of_string "192.168.1.2");;
     let browser = Browser.make client;;
     (* Link with a tap in between *)
     let tap = Hub.Tap.make (Pcap.save "http.pcap");;

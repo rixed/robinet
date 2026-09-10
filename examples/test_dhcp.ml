@@ -24,8 +24,8 @@ open Batteries
 open Tools
 
 let run sim iface =
-    let netmask = Ip.Addr.of_string "255.255.255.0" in (* FIXME in make_dhcp *)
-    let host = Host.make_dhcp ~parent:sim.Simulation.root ~mac:(Eth.Addr.of_string "00:23:8b:5f:09:c1") ~netmask "tester" in
+    let netmask = Ip.Addr.of_string "255.255.255.0" in (* FIXME in Host.make *)
+    let host = Host.make ~parent:sim.Simulation.root ~mac:(Eth.Addr.of_string "00:23:8b:5f:09:c1") ~netmask "tester" in
     host.trx.dev.set_read (Pcap.inject iface) ;
     Pcap.sniffer iface host.trx.dev.write
 

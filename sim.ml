@@ -174,7 +174,8 @@ struct
     let make_server (sim : Simulation.t) ?on ?(name=Host.Name.random()) ?nameserver public_ip =
         let netmask = Ip.Addr.zero in (* Should this be the default? *)
         let host : Host.t =
-            Host.make_static ~parent:sim.root ?nameserver ?on ~netmask public_ip name in
+            Host.make ~parent:sim.root ?nameserver ?on ~netmask ~static_ip:public_ip
+                      name in
         let plug = Plug.make "itf" host.trx.dev in
         Simple { equip = [ Host host.trx ] ; plugs = [ plug ] }
 
@@ -202,7 +203,7 @@ struct
             let netmask = Ip.Addr.of_string "255.255.0.0" in
             let gateways = [ Eth.State.gw_selector (), Some (Eth.Gateway.IPv4 gw_ip) ] in
             let h :Host.t =
-                Host.make_dhcp ~parent:sim.root ?on ~gateways ~nameserver:srv_ip ~netmask name in
+                Host.make ~parent:sim.root ?on ~gateways ~nameserver:srv_ip ~netmask name in
             h.trx.dev.set_read (Hub.Switch.write sw !num_hosts) ;
             Hub.Switch.set_read sw !num_hosts h.trx.dev.write ;
             net.equip <- Equipment.Host h.trx :: net.equip ;
@@ -230,7 +231,7 @@ struct
                           failwith
             in
             let netmask = Ip.Addr.zero in
-            let h : Host.t = Host.make_static ~parent:sim.root ?on ?nameserver ~netmask ip name in
+            let h = Host.make ~parent:sim.root ?on ?nameserver ~netmask ~static_ip:ip name in
             h.trx.dev.set_read (Hub.Switch.write sw !num_hosts) ;
             Hub.Switch.set_read sw !num_hosts h.trx.dev.write ;
             net.equip <- Equipment.Host h.trx :: net.equip ;

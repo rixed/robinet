@@ -30,7 +30,7 @@ let perform_get (sim : Simulation.t) my_ip my_netmask mac peer_ip ?nameserver ?g
     let get   = Printf.sprintf "GET %s HTTP/1.0\r\n\r\n" url in
     let gateways =
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) gw in
-    let host : Host.t = Host.make_static ~parent:sim.root ?nameserver ?gateways ~mac ~netmask:my_netmask my_ip "tester" in
+    let host = Host.make ~parent:sim.root ?nameserver ?gateways ~mac ~netmask:my_netmask ~static_ip:my_ip "tester" in
     host.trx.dev.set_read (Pcap.inject iface) ;
     ignore (Pcap.sniffer iface host.trx.dev.write) ;
     host.trx.tcp_connect (Host.IPv4 peer_ip) (Tcp.Port.o 80) (function
