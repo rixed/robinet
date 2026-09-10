@@ -73,7 +73,12 @@
             <button class="outline secondary" :disabled="!online"
                     title="An empty simulation to build a network in"
                     @click="newSim()">New</button>
-            <button class="outline secondary" :disabled="!online || opening"
+            <!-- [opening > 0] and not [opening]: Alpine leaves a boolean
+                 attribute alone unless the value is null or false, so a count
+                 of nothing still sets it, and the button would be disabled
+                 from the start and for good. The same trap the property
+                 panel's flags are initialised against. -->
+            <button class="outline secondary" :disabled="!online || opening > 0"
                     title="Open a network saved earlier"
                     @click="$refs.topoFile.click()"
                     x-text="opening ? 'Opening…' : 'Open…'">Open…</button>
@@ -192,7 +197,7 @@
             </div>
         </article>
 
-        <template x-for="s in sims" :key="s.id">
+        <template x-for="s in simsShown" :key="s.id">
             <article class="sim" :class="{ 'is-serving': s.id === servingId,
                                            folded: simFolded.includes(s.id) }">
                 <header>

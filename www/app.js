@@ -1153,6 +1153,13 @@ document.addEventListener('alpine:init', () => {
          * Connection state
          */
 
+        /* The simulations as the left column shows them: newest first, so that
+         * one just made or just opened is at the top, where the reader who
+         * asked for it is looking, rather than below however many were there
+         * already. The API hands them over oldest first, which is the order
+         * they came into being and the right one for a listing. */
+        get simsShown() { return [ ...this.sims ].reverse() },
+
         get online() { return this.conn === 'online' },
         get offline() { return this.conn === 'offline' },
         /* Something is on screen, but we can no longer vouch for it. */
@@ -1657,10 +1664,18 @@ document.addEventListener('alpine:init', () => {
         async select(simId, id) {
             const w = this.get(simId, id)
             if (!w) return
+            /* Another network is another map, and the view left over from the
+             * last one was framed around boxes that are no longer on it: its
+             * middle is wherever they were and its zoom is how far apart they
+             * were. So frame this one, exactly as Fit does, and let
+             * [showSelection] do the rest -- which after a fit is usually
+             * nothing, the whole network being in view. */
+            const elsewhere = !this.selected || this.selected.sim !== simId
             this.selected = Object.assign({ sim: simId }, w)
             /* Armed on the widget being left, and meaningless on this one. */
             this.confirmDelete = false
             this.openToSelection()
+            if (elsewhere) this.fitMap()
             this.showSelection()
             /* It was opened on a property of the widget being left. */
             this.chartMenu = null
