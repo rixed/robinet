@@ -610,7 +610,8 @@ struct
           proto : Proto.t ;
           mtu : int ;
           mutable my_addresses : my_address list ;
-          mutable promisc : bitstring -> unit ;
+          mutable promisc : (bitstring -> unit) option ;
+          rx_otherhost_dropped : Metric.Counter.t ;
           mutable do_proxy_arp : Arp.Pdu.t -> bool ;
           (* TODO: these two should be timeouted, requiring a clock *)
           arp_cache : Addr.t option BitHash.t ;     (* proto_addr -> hw_addr option (None when resolving) *)
@@ -667,7 +668,7 @@ struct
     let make ?speeds ?full_duplex ?inter_frame_gap ?can_forward_after
              ?(mtu=1500) ?(delay=Clock.Interval.zero) ?(loss=0.)
              ?(mac=Addr.random ()) ?(gateways=[])
-             ?(promisc=ignore) ?(do_proxy_arp=(fun _ -> false))
+             ?promisc ?(do_proxy_arp=(fun _ -> false))
              ?(my_addresses=[]) ?(proto=Proto.ip4) ?(name="eth")
              ~parent ~power () =
         (* An adapter is called "eth" unless its owner names it, which a
@@ -680,6 +681,7 @@ struct
                        ?can_forward_after name in
         let t = {
             iface ; mac ; gateways ; proto ; mtu ; promisc ; do_proxy_arp ;
+            rx_otherhost_dropped = Metric.Counter.make () ;
             recv = ignore_bits ~logger:iface.widget.logger ;
             my_addresses ; delay ; loss ; via = None ;
             arp_cache = BitHash.create 3 ;
@@ -756,7 +758,10 @@ struct
             property "loss" ~kind:(FRange (0., 1.))
                 ~descr:"Packet loss ratio."
                 ~getter:(fun () -> `Float t.loss)
-                ~setter:(fun v -> t.loss <- to_float_range ~min:0. ~max:1. v) ] ;
+                ~setter:(fun v -> t.loss <- to_float_range ~min:0. ~max:1. v) ;
+            metric_property "rx-otherhost-dropped" ~units:"frames"
+                ~descr:"Number of frames dropped by the MAC recipient filter."
+                (Metric.Counter.T t.rx_otherhost_dropped) ] ;
         t
 end
 
@@ -960,7 +965,14 @@ struct
             ) else ( (* not for me, send to promisc function *)
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...not for me (for %s but I'm %s)!"
                     (Addr.to_string frame.Pdu.dst) (Addr.to_string st.mac)))) ;
-                if Payload.bitlength frame.Pdu.payload > 0 then st.promisc (frame.Pdu.payload :> bitstring)
+                if Payload.bitlength frame.payload > 0 then
+                    match st.promisc with
+                    | Some f ->
+                        (* In promiscuous mode we don't count that frame as dropped *)
+                        f (frame.payload :> bitstring)
+                    | None ->
+                        let now = Simulation.Widget.now st.iface.widget in
+                        Metric.Counter.inc ~now st.rx_otherhost_dropped
             )
 
     (** Creates an {!Eth.TRX.t}. *)
