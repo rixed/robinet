@@ -387,7 +387,7 @@ const metricRows = (m, units, previous) => {
  * which metric is in which chart -- and these hold the pixels and the numbers.
  */
 const plots = new Map()    /* chart id -> { u, el, signature } */
-const history = new Map()  /* metric key -> { last, kind, units, rows } */
+const history = new Map()  /* metric key -> { cursor, kind, units, rows } */
 /* The button the chart menu is hanging from, for the same reason: which menu
  * is open is a name the page reacts to, but the element it is pinned to is
  * one of the pixels. */
@@ -413,17 +413,17 @@ const palette = [ '#1f77b4', '#d62728', '#2ca02c', '#ff7f0e', '#9467bd',
 const mergeHistory = (m, answer) => {
     const key = metricKey(m)
     let h = history.get(key)
-    if (!h) { h = { last: null, rows: new Map() } ; history.set(key, h) }
+    if (!h) { h = { cursor: null, rows: new Map() } ; history.set(key, h) }
     h.kind = answer.kind
     h.units = answer.units
+    /* As the simulator gave it, and for the same reason as the logs': a
+     * point's [t] is what it is drawn at, not what it is asked from. */
+    h.cursor = answer.cursor
     for (const s of answer.series) {
         const k = JSON.stringify(s.params)
         let row = h.rows.get(k)
         if (!row) { row = { params: s.params, pts: [] } ; h.rows.set(k, row) }
-        for (const p of s.points) {
-            row.pts.push(p)
-            if (h.last === null || p.t > h.last) h.last = p.t
-        }
+        for (const p of s.points) row.pts.push(p)
         if (row.pts.length > maxPoints)
             row.pts.splice(0, row.pts.length - maxPoints)
     }
@@ -553,7 +553,7 @@ const drawChart = (id, lines) => {
  * of the reactive data for the same reason the chart points are: it is a lot
  * of it, and none of it is edited.
  */
-const logs = new Map()   /* "sim/widget" -> { last, level, lines } */
+const logs = new Map()   /* "sim/widget" -> { cursor, level, lines } */
 
 
 const widgetKey = (w) => `${w.sim}/${w.widget}`
@@ -575,7 +575,12 @@ const levels = [ 'fatal', 'critical', 'error', 'warning', 'info', 'debug' ]
 const mergeLogs = (w, answer) => {
     const key = widgetKey(w)
     let l = logs.get(key)
-    if (!l) { l = { last: null, lines: [] } ; logs.set(key, l) }
+    if (!l) { l = { cursor: null, lines: [] } ; logs.set(key, l) }
+    /* Where the simulator says we have got to, kept exactly as it said it: a
+     * message's [t] is seconds, which is what it is displayed in, and seconds
+     * cannot name an instant closely enough to ask from -- see
+     * [json_of_cursor] in myadmin_api.ml. */
+    l.cursor = answer.cursor
     const line = (m, lost) => ({
         t: m.t, level: lost ? 'lost' : m.level, text: m.text,
         who: w.name, color: w.color,
@@ -588,10 +593,7 @@ const mergeLogs = (w, answer) => {
                             text: 'some messages were overwritten before we ' +
                                   'asked for them -- slow the simulation down ' +
                                   'to follow this closely' }, true))
-    for (const m of answer.messages) {
-        l.lines.push(line(m, false))
-        if (l.last === null || m.t > l.last) l.last = m.t
-    }
+    for (const m of answer.messages) l.lines.push(line(m, false))
     if (l.lines.length > maxLogLines)
         l.lines.splice(0, l.lines.length - maxLogLines)
 }
@@ -2278,7 +2280,7 @@ document.addEventListener('alpine:init', () => {
         async pollCharts() {
             for (const m of this.wantedMetrics()) {
                 const h = history.get(metricKey(m))
-                const since = h && h.last !== null ? `?since=${h.last}` : ''
+                const since = h && h.cursor !== null ? `?since=${h.cursor}` : ''
                 const r = await this.exchange(() => api(
                     `/simulations/${m.sim}/widgets/${m.widget}` +
                     `/properties/${encodeURIComponent(m.property)}/history${since}`))
@@ -2563,7 +2565,7 @@ document.addEventListener('alpine:init', () => {
         async fetchLogs() {
             for (const w of this.logged) {
                 const l = logs.get(widgetKey(w))
-                const since = l && l.last !== null ? `&since=${l.last}` : ''
+                const since = l && l.cursor !== null ? `&since=${l.cursor}` : ''
                 const r = await this.exchange(() => api(
                     `/simulations/${w.sim}/widgets/${w.widget}` +
                     `/logs?level=${w.level}${since}`))

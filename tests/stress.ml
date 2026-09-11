@@ -264,7 +264,14 @@ let test_metric_samples () =
             Log.(log w.Widget.logger Warning (lazy "every fifth tick")) ;
         if n > 0 then
             Simulation.delay sim.Simulation.power (Clock.Interval.sec 0.25) (feed (n - 1)) () in
-    Simulation.delay sim.Simulation.power (Clock.Interval.sec 0.25) (feed 19) () ;
+    (* All of it happens a good way into the simulation, and at an odd
+       picosecond. The API hands out cursors made of these instants, and an
+       instant within a few seconds of the beginning is one a double can still
+       name to the picosecond: a cursor that lost a few of them on the way out
+       would pass for an exact one here and nowhere else. See [json_of_cursor]
+       in myadmin_api.ml. *)
+    Simulation.delay sim.Simulation.power
+                     (Clock.Interval.psec 400_000_000_000_000_017) (feed 19) () ;
     Simulation.run sim false ;
     let key = w.Widget.id, "bytes", Metric.Params.empty in
     (* A metric that has not fired yet has no row at all, which is not the
@@ -902,6 +909,12 @@ let test_http net cable duration nthreads
         (* What a metric has been worth, which is what the plots are drawn
            from. Asked of the simulation the sampling test left behind: it has
            stopped, so its ring holds exactly what that test put there. *)
+        (* A cursor is an instant of the simulation's own clock, in
+           picoseconds (see [json_of_cursor]): what an answer hands back for
+           the next call, and what a caller wanting to resume from somewhere
+           else names for itself. Seconds would not do: a double has not a bit
+           for every picosecond this far into a simulation. *)
+        let cursor_of (t : Clock.Time.t) = string_of_int (t :> int) in
         let history ?since () =
             let path =
                 Printf.sprintf
@@ -909,10 +922,11 @@ let test_http net cable duration nthreads
                     (Simulation.id hist_sim) hist_widget.Widget.id
                     (match since with
                      | None -> ""
-                     | Some t -> Printf.sprintf "?since=%.9f" t) in
+                     | Some c -> "?since=" ^ c) in
             match http port path with
             | 200, body -> Some (Yojson.Basic.from_string body)
             | _ -> None in
+        let cursor j = Yojson.Basic.Util.(member "cursor" j |> to_string) in
         let points j =
             Yojson.Basic.Util.(
                 member "series" j |> to_list |> List.map (fun s ->
@@ -940,33 +954,44 @@ let test_http net cable duration nthreads
                     (List.take (List.length ps - 1) ps) (List.tl ps)
             | _ -> false) ;
         check "since brings back what was taken after it, and nothing else"
-            (match Option.map points (history ()) with
-            | Some [ ps ] ->
-                let t, _ = List.nth ps 2 in
-                (match Option.map points (history ~since:t ()) with
-                | Some [ after ] ->
-                    List.length after = 2 &&
-                    List.for_all (fun (t', _) -> t' > t) after
-                | _ -> false)
-            | _ -> false) ;
-        check "since the last point brings back nothing at all"
-            (match Option.map points (history ()) with
-            | Some [ ps ] ->
-                let t, _ = List.last ps in
-                (match Option.map points (history ~since:t ()) with
+            (* The third of the instants the ring was written at, named from
+               the clock that wrote them. *)
+            (let taken =
+                List.map (fun (s : Simulation.sample) -> s.Simulation.taken)
+                         (Simulation.metric_samples hist_sim) in
+             match Option.map points (history ~since:(cursor_of
+                                          (List.nth taken 2)) ()) with
+             | Some [ after ] ->
+                 List.length after = 2 &&
+                 List.for_all (fun (t', _) ->
+                     t' > Clock.Time.to_secs (List.nth taken 2)) after
+             | _ -> false) ;
+        check "since the cursor of an answer brings back nothing at all"
+            (match history () with
+            | None -> false
+            | Some j ->
+                (match Option.map points (history ~since:(cursor j) ()) with
                  (* A row with nothing new to say does not appear: an empty
                     answer is "nothing has been written down since". *)
                  | Some [] -> true
-                 | _ -> false)
-            | _ -> false) ;
-        check "a since that is not a time is refused"
+                 | _ -> false)) ;
+        check "and hands that same cursor back, so a quiet metric stays put"
+            (match history () with
+            | None -> false
+            | Some j ->
+                (match history ~since:(cursor j) () with
+                 | Some j' -> cursor j' = cursor j
+                 | None -> false)) ;
+        check "a since that is not a cursor is refused"
             (List.for_all (fun since ->
                 fst (http port
                         (Printf.sprintf
                             "/api/simulations/%d/widgets/%d/properties/bytes/history?since=%s"
                             (Simulation.id hist_sim) hist_widget.Widget.id
                             since)) = 400)
-                [ "nonsense" ; "inf" ; "" ]) ;
+                (* A time in seconds is not one of them: it cannot name an
+                   instant closely enough to ask from. *)
+                [ "nonsense" ; "inf" ; "" ; "400000.5" ]) ;
         check "a property that is not a metric has no history"
             (fst (api "/api/simulations/%d/widgets/%d/properties/length/history"
                       net_id cable_id) = 400) ;
@@ -978,7 +1003,7 @@ let test_http net cable duration nthreads
                 Printf.sprintf "/api/simulations/%d/widgets/%d/logs"
                     (Simulation.id hist_sim) hist_widget.Widget.id ^
                 (match since with
-                 | None -> "" | Some t -> Printf.sprintf "?since=%.9f" t) ^
+                 | None -> "" | Some c -> "?since=" ^ c) ^
                 (match level with
                  | None -> "" | Some l -> (if since = None then "?" else "&") ^
                                           "level=" ^ l) in
@@ -987,6 +1012,7 @@ let test_http net cable duration nthreads
                 let j = Yojson.Basic.from_string body in
                 Yojson.Basic.Util.(
                     Some (member "lost" j |> to_bool,
+                          member "cursor" j |> to_string,
                           member "messages" j |> to_list |> List.map (fun m ->
                               member "t" m |> to_float,
                               member "level" m |> to_string,
@@ -995,37 +1021,45 @@ let test_http net cable duration nthreads
                 None in
         check "GET what a widget logged"
             (match logs () with
-            | Some (false, msgs) ->
+            | Some (false, _, msgs) ->
                 List.length msgs >= 20 &&
                 List.for_all (fun (_, l, _) -> l = "info" || l = "warning") msgs
             | _ -> false) ;
         check "oldest first"
             (match logs () with
-            | Some (_, msgs) ->
+            | Some (_, _, msgs) ->
                 List.for_all2 (fun (t1, _, _) (t2, _, _) -> t2 >= t1)
                     (List.take (List.length msgs - 1) msgs) (List.tl msgs)
             | None -> false) ;
         check "since brings back what was logged after it, and nothing else"
+            (* The fifth of the instants the widget logged at, named from the
+               clock that stamped them. *)
+            (let stamps =
+                let _lost, msgs = Log.messages hist_widget.Widget.logger in
+                List.map (fun (ts, _, _) -> ts) msgs in
+             match logs (), logs ~since:(cursor_of (List.nth stamps 4)) () with
+             | Some (_, _, msgs), Some (_, _, after) ->
+                 List.length after = List.length msgs - 5 &&
+                 List.for_all (fun (t', _, _) ->
+                     t' > Clock.Time.to_secs (List.nth stamps 4)) after
+             | _ -> false) ;
+        check "since the cursor of an answer brings back nothing"
             (match logs () with
-            | Some (_, msgs) ->
-                let t, _, _ = List.nth msgs 4 in
-                (match logs ~since:t () with
-                | Some (_, after) ->
-                    List.length after = List.length msgs - 5 &&
-                    List.for_all (fun (t', _, _) -> t' > t) after
-                | None -> false)
-            | None -> false) ;
-        check "since the last of them brings back nothing"
-            (match logs () with
-            | Some (_, msgs) ->
-                let t, _, _ = List.last msgs in
-                (match logs ~since:t () with
-                 | Some (false, []) -> true
+            | Some (_, c, _) ->
+                (match logs ~since:c () with
+                 | Some (false, _, []) -> true
                  | _ -> false)
+            | None -> false) ;
+        check "and hands that same cursor back, so a quiet widget stays put"
+            (match logs () with
+            | Some (_, c, _) ->
+                (match logs ~since:c () with
+                 | Some (_, c', _) -> c' = c
+                 | None -> false)
             | None -> false) ;
         check "a level is how deep to go, not which one to show"
             (match logs ~level:"warning" () with
-            | Some (_, msgs) ->
+            | Some (_, _, msgs) ->
                 msgs <> [] &&
                 List.for_all (fun (_, l, _) -> l = "warning") msgs
             | None -> false) ;
@@ -1034,11 +1068,14 @@ let test_http net cable duration nthreads
                      (Printf.sprintf
                          "/api/simulations/%d/widgets/%d/logs?level=chatty"
                          (Simulation.id hist_sim) hist_widget.Widget.id)) = 400) ;
-        check "and a since that is not a time"
-            (fst (http port
-                     (Printf.sprintf
-                         "/api/simulations/%d/widgets/%d/logs?since=nonsense"
-                         (Simulation.id hist_sim) hist_widget.Widget.id)) = 400) ;
+        check "and a since that is not a cursor"
+            (List.for_all (fun since ->
+                fst (http port
+                        (Printf.sprintf
+                            "/api/simulations/%d/widgets/%d/logs?since=%s"
+                            (Simulation.id hist_sim) hist_widget.Widget.id
+                            since)) = 400)
+                [ "nonsense" ; "" ; "400000.5" ]) ;
         (* The composition tree is what the interface draws: a server has to
            appear within the host running it, not beside it. *)
         check "a server is shown within the host that runs it"

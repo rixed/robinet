@@ -60,12 +60,13 @@
     PUT    /api/simulations/<s>/widgets/<w>/properties/<name>  body is the value
     GET    /api/simulations/<s>/widgets/<w>/properties/<name>/history
                                             what that metric has been worth;
-                                            ?since=<simulated time> for the
-                                            points taken after that one
+                                            ?since=<cursor> for the points
+                                            taken after the ones already held
     GET    /api/simulations/<s>/widgets/<w>/logs
-                                            what it logged; ?since=<simulated
-                                            time> for what came after, and
-                                            ?level=<name> for how deep to go
+                                            what it logged; ?since=<cursor> for
+                                            what came after what is already
+                                            held, and ?level=<name> for how
+                                            deep to go
     GET    /api/pcaps                       the pcap library: every capture in
                                             it, with what its header says, what
                                             has it open, and what an upload may
@@ -223,6 +224,56 @@ let rec names_a_file = function
  * is how a reader turns one of these into a date -- which only whoever
  * displays it has to do. *)
 let json_of_time (t : Clock.Time.t) = `Float (Clock.Time.to_secs t)
+
+(* The same instant for a reader that has to hand it back rather than read it:
+ * picoseconds since the simulation began, exactly as the simulation counts
+ * them, and written out because a JSON number is a double wherever it is read.
+ *
+ * Seconds are what a reader of times wants, which is why they are what
+ * [json_of_time] hands out; but a double has not a bit for every picosecond
+ * once a clock is an hour or two in, and a fast simulation is days in within a
+ * minute. An instant that goes out that way comes back a few picoseconds off,
+ * either way about. For something merely displayed that is nothing. For a
+ * cursor it is everything: a picosecond early is the last message served again
+ * on every poll, for as long as the widget stays quiet, and a picosecond late
+ * is the next one silently lost.
+ *
+ * So a cursor travels exact, and travels opaque: what an answer said, handed
+ * back as it was given. *)
+let json_of_cursor (t : Clock.Time.t) = `String (string_of_int (t :> int))
+
+let cursor_of_string name s =
+    match int_of_string (String.trim s) with
+    | exception _ ->
+        bad_request "%s must be a cursor from a previous answer \
+                    (picoseconds since the simulation began), not %S" name s
+    | ps -> Clock.Time.o ps
+
+(* An instant is picoseconds, and picoseconds are what comes back: no float
+   goes anywhere near a cursor. The two instants below are ones a fast
+   simulation reaches within a minute, and neither survives the trip through
+   seconds: the first comes back 19ps early, which is a message served twice,
+   and the second 1ps late, which is one nobody ever sees. *)
+(*$T json_of_cursor
+  List.for_all (fun ps -> \
+    let t = Clock.Time.o ps in \
+    let as_cursor = \
+      cursor_of_string "since" \
+        (match json_of_cursor t with `String s -> s | _ -> "") in \
+    let as_seconds = Clock.Time.of_secs (Clock.Time.to_secs t) in \
+    as_cursor = t && as_seconds <> t) \
+    [ 341274300000309267 ; 12345678901234567 ]
+ *)
+
+let cursor_of_vars vars name =
+    Option.map (cursor_of_string name) (Hashtbl.find_option vars name)
+
+(* The cursor of an answer, which is where the reader has got to: absent when
+ * that is nowhere -- a widget that has never logged, a metric nothing has been
+ * written down about -- and the next call then asks for everything again. *)
+let json_of_cursor_opt = function
+    | None -> `Null
+    | Some t -> json_of_cursor t
 
 let json_of_property (p : Widget.property) =
     (* The value is read through the getter, which may fail on us: *)
@@ -777,10 +828,11 @@ let get_property _mth matches _vars _qry_body resp =
 (* What a metric has been worth, as the simulation wrote it down: one list of
  * points per parameter row.
  *
- * [since] is the time of the last point the caller already has, and the answer
- * holds what was taken strictly after it -- so polling with the last [t] seen
- * asks exactly for what is missing, and asking with no [since] at all brings
- * back the whole history that is kept.
+ * [since] is the cursor of the last answer, and this one holds what was taken
+ * strictly after it -- so polling with the [cursor] just given asks exactly
+ * for what is missing, and asking with no [since] at all brings back the whole
+ * history that is kept. A point's [t] is for reading and not for asking with:
+ * see [json_of_cursor].
  *
  * [now] and [rate] come along because a plot needs to know where the present
  * is and how far apart the points were meant to be: a gap wider than the rate
@@ -801,17 +853,18 @@ let get_property_history _mth matches vars _qry_body resp =
                 bad_request "Property %S of %s is not a metric, and nothing \
                              is written down about it"
                     p.name (Widget.full_name w)) in
-    let since =
-        match Hashtbl.find_option vars "since" with
-        | None -> None
-        | Some s ->
-            (match float_of_string s with
-            | exception _ ->
-                bad_request "since must be a simulated time, not %S" s
-            | f when not (Float.is_finite f) ->
-                bad_request "since must be a simulated time, not %S" s
-            | f -> Some (Clock.Time.of_secs f)) in
+    let since = cursor_of_vars vars "since" in
     let series = Simulation.metric_history ?since sim w.id p.name in
+    (* The last point of the lot, whichever row it is in: the rows are written
+       to together and read together, so one cursor serves them all. *)
+    let cursor =
+        List.fold_left (fun cursor (_params, points) ->
+            List.fold_left (fun cursor (t, _) ->
+                match cursor with
+                | Some c when Clock.Time.compare t c <= 0 -> cursor
+                | _ -> Some t
+            ) cursor points
+        ) since series in
     let json_of_point (t, v) =
         `Assoc [ "t", json_of_time t ;
                  "value", Metric.value_to_json v ] in
@@ -821,6 +874,7 @@ let get_property_history _mth matches vars _qry_body resp =
                  "points", `List (List.map json_of_point points) ] in
     respond resp (`Assoc [
         "now", json_of_time (Simulation.now sim) ;
+        "cursor", json_of_cursor_opt cursor ;
         "rate", `Float (Clock.Interval.to_secs
                             (Simulation.metrics_sample_rate sim)) ;
         "kind", `String (Metric.kind_name metric) ;
@@ -829,9 +883,10 @@ let get_property_history _mth matches vars _qry_body resp =
 
 (* What a widget logged, oldest first.
  *
- * [since] is exclusive and is a simulated time, which is enough to ask for
- * exactly what one has not seen: see [Log.messages] for why one timestamp is
- * one dispatch and cannot be delivered by halves.
+ * [since] is exclusive and is the cursor of the last answer, which is enough
+ * to ask for exactly what one has not seen: see [Log.messages] for why one
+ * timestamp is one dispatch and cannot be delivered by halves. A message's [t]
+ * is for reading and not for asking with: see [json_of_cursor].
  *
  * [lost] says that something logged after [since] has since been overwritten:
  * the queues are small, and a window that just stopped showing lines without
@@ -994,16 +1049,7 @@ let get_logs _mth matches vars _qry_body resp =
                     (List.init Log.num_levels Log.string_of_int_level |>
                      String.join ", ")
             | lvl -> lvl) in
-    let since =
-        match Hashtbl.find_option vars "since" with
-        | None -> None
-        | Some s ->
-            (match float_of_string s with
-            | exception _ ->
-                bad_request "since must be a simulated time, not %S" s
-            | f when not (Float.is_finite f) ->
-                bad_request "since must be a simulated time, not %S" s
-            | f -> Some (Clock.Time.of_secs f)) in
+    let since = cursor_of_vars vars "since" in
     (* Held only while the messages are collected: a logger is written to by
        the dispatcher, and reading one halfway through a dispatch would give
        half of what that dispatch had to say. Forcing them into JSON afterwards
@@ -1017,8 +1063,15 @@ let get_logs _mth matches vars _qry_body resp =
         `Assoc [ "t", json_of_time ts ;
                  "level", `String (Log.string_of_level lvl) ;
                  "text", `String text ] in
+    (* The messages come oldest first, so the reader has got as far as the last
+       of them. *)
+    let cursor =
+        match msgs with
+        | [] -> since
+        | msgs -> let ts, _, _ = List.last msgs in Some ts in
     respond resp (`Assoc [
         "now", json_of_time (Simulation.now sim) ;
+        "cursor", json_of_cursor_opt cursor ;
         "widget", `Int w.id ;
         "lost", `Bool lost ;
         "messages", `List (List.map json_of_msg msgs) ])
