@@ -1,5 +1,6 @@
-top_srcdir = ./
 PKG_NAME = robinet
+
+MAKEFLAGS += -j5
 
 SOURCES  = \
 	distribution.ml \
@@ -125,8 +126,7 @@ UI_ASSETS = www/index.html www/app.js www/style.css $(COASTLINE) \
 #   tests/stress.opt <seconds> <threads>
 EXTRA_TESTS = tests/stress.opt
 
-
-include $(top_srcdir)make.common
+include make.common
 
 .PHONY: examples run vendor coastline
 
