@@ -1426,26 +1426,25 @@ let test_http net cable duration nthreads
                            "params":{"ports":3,"MAC range":"00:11:22"}}|} in
         check "a router is built with the ports it was ordered with"
             ((widget r).ports.count () = 3) ;
-        (* Unconfigured means unconfigured: an interface with no address of its
-           own has no admin host on it, so each of them is an adapter and
-           nothing else. *)
-        check "and arrives with nothing on its interfaces but their adapters"
-            (List.length (widget r).Widget.children = 3 &&
-             List.for_all (fun (c : Widget.t) ->
-                 List.map (fun (a : Widget.t) -> a.name) c.children = [ "eth" ])
-                 (widget r).Widget.children) ;
+        (* An interface is its adapter, named after the port it is: there is
+           nothing else to it. And unconfigured means unconfigured -- an
+           interface with no address of its own has no admin host hanging off
+           it, so each of them is bare. *)
+        check "and arrives with a bare adapter per interface"
+            (List.sort compare
+                (List.map (fun (c : Widget.t) -> c.name)
+                          (widget r).Widget.children) = [ "#0" ; "#1" ; "#2" ] &&
+             List.for_all (fun (c : Widget.t) -> c.children = [])
+                          (widget r).Widget.children) ;
         let macs_of id =
             List.filter_map (fun (c : Widget.t) ->
-                match c.children with
-                | [ eth ] ->
-                    (match http port
-                             (Printf.sprintf
-                                 "/api/simulations/%d/widgets/%d/properties/MAC"
-                                 net_id eth.Widget.id) with
-                    | 200, payload ->
-                        Some Yojson.Basic.(from_string payload |>
-                                           Util.member "value")
-                    | _ -> None)
+                match http port
+                        (Printf.sprintf
+                            "/api/simulations/%d/widgets/%d/properties/MAC"
+                            net_id c.Widget.id) with
+                | 200, payload ->
+                    Some Yojson.Basic.(from_string payload |>
+                                       Util.member "value")
                 | _ -> None
             ) (widget id).Widget.children in
         check "with one address per interface, and no two the same"

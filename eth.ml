@@ -668,15 +668,16 @@ struct
              ?(mtu=1500) ?(delay=Clock.Interval.zero) ?(loss=0.)
              ?(mac=Addr.random ()) ?(gateways=[])
              ?(promisc=ignore) ?(do_proxy_arp=(fun _ -> false))
-             ?(my_addresses=[]) ?(proto=Proto.ip4) ~parent ~power
-             () =
-        (* Every adapter is called "eth", so a device with several of them ends
-         * up with "eth", "eth-2"... courtesy of [Widget.unique_among]. Naming
-         * them "eth0".."ethN" as the machine itself would is the caller's to
-         * do, since the index is the caller's to know. *)
+             ?(my_addresses=[]) ?(proto=Proto.ip4) ?(name="eth")
+             ~parent ~power () =
+        (* An adapter is called "eth" unless its owner names it, which a
+         * device with several of them has to do: which one this is is the
+         * owner's to know, and a router names them after its ports. Two left
+         * with the default name under one parent end up "eth" and "eth-2",
+         * courtesy of [Widget.unique_among]. *)
         let iface =
             Iface.make ~parent ~power ?speeds ?full_duplex ?inter_frame_gap
-                       ?can_forward_after "eth" in
+                       ?can_forward_after name in
         let t = {
             iface ; mac ; gateways ; proto ; mtu ; promisc ; do_proxy_arp ;
             recv = ignore_bits ~logger:iface.widget.logger ;

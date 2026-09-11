@@ -210,7 +210,6 @@ struct
 
     type iface = { mutable trx : trx ; (** Can come handy to splice another trx there. *)
                            eth : Eth.State.t ;
-                        widget : Widget.t ;
         (** Any traffic arriving in this interface and directed to Admin is
          * forwarded to this host. There is one per interface so they have
          * totally independent IP stacks. If all the admin_hosts of a router
@@ -407,6 +406,9 @@ struct
     let is_connected iface =
         iface.eth.iface.is_connected
 
+    let ports iface =
+        iface.eth.iface.widget.ports
+
     (* TODO: similarly, a write n b = t.ifaces.(n).trx.write b *)
 
     let set_proxy_arp t n v =
@@ -429,17 +431,14 @@ struct
     let make_iface ?proto ?mtu ?delay ?loss ?inter_frame_gap ?can_forward_after
                    ?mac ?my_addresses ~parent ~power n =
         let name = "#"^ string_of_int n in
-        let widget = Widget.make ~parent name in
         (* For our ifaces we force the GW on a packet by packet basis according
          * to the dynamic (and likely still unset) routing table. *)
         let eth =
             Eth.State.make ?proto ?mtu ?delay ?loss ?inter_frame_gap
-                           ?can_forward_after ?mac ?my_addresses
-                           ~parent:widget ~power () in
+                           ?can_forward_after ?mac ?my_addresses ~name
+                           ~parent ~power () in
         let trx = Eth.TRX.make eth in
-        (* An interface is its adapter, as far as a cable is concerned. *)
-        widget.Widget.ports <- Widget.ports_of eth.iface.widget ;
-        { trx ; eth ; widget ; admin_host = None }
+        { trx ; eth ; admin_host = None }
 
     let notify_never = { probability = 0. ; delay = 0. }
     let notify_always ?(delay=0.) () = { probability = 1. ; delay }
@@ -528,14 +527,14 @@ struct
         widget.on_delete <- (fun () -> switch false) ;
         widget.ports <- Widget.{
             count = (fun () -> Array.length t.ifaces) ;
-            is_connected = (fun n -> t.ifaces.(n).widget.ports.is_connected 0) ;
-            dev = (fun n -> t.ifaces.(n).widget.ports.dev 0) ;
-            owner = (fun n -> t.ifaces.(n).widget.ports.owner 0) ;
-            disconnect = (fun n -> t.ifaces.(n).widget.ports.disconnect 0) ;
+            is_connected = (fun n -> (ports t.ifaces.(n)).is_connected 0) ;
+            dev = (fun n -> (ports t.ifaces.(n)).dev 0) ;
+            owner = (fun n -> (ports t.ifaces.(n)).owner 0) ;
+            disconnect = (fun n -> (ports t.ifaces.(n)).disconnect 0) ;
             get_capabilities = (fun n ->
-                t.ifaces.(n).widget.ports.get_capabilities 0) ;
+                (ports t.ifaces.(n)).get_capabilities 0) ;
             set_capabilities = (fun n c ->
-                t.ifaces.(n).widget.ports.set_capabilities 0 c) } ;
+                (ports t.ifaces.(n)).set_capabilities 0 c) } ;
         Widget.add_properties widget Widget.[
             property "on" ~kind:Bool ~descr:"The router is powered on."
                 ~getter:(fun () -> `Bool t.power.Simulation.on)
@@ -693,7 +692,7 @@ struct
                  * we don't have to do here. The router is going call the host
                  * [ip_recv] function whenever that's the routing decision. *)
                 let name = "admin@"^ string_of_int n in
-                let widget = Widget.make ~parent:iface.widget name in
+                let widget = Widget.make ~parent:iface.eth.iface.widget name in
                 iface.admin_host <-
                     (* This host configures nothing at boot, neither
                        statically nor over DHCP: the address it speaks from is
@@ -912,12 +911,14 @@ struct
       not (w.ports.is_connected 2) && \
       ((w.ports.dev 2).Tools.set_read ignore ; \
        w.ports.is_connected 2 && \
-       r.ifaces.(2).widget.ports.is_connected 0) && \
+       (ports r.ifaces.(2)).is_connected 0) && \
       (* A cable to port n reaches interface n's adapter, and that is what a
-         cable joining it is recorded as reaching. *) \
+         cable joining it is recorded as reaching. An interface is that
+         adapter and nothing else, so it is the adapter that carries the
+         interface's name. *) \
       List.for_all (fun n -> \
-          w.ports.owner n == r.ifaces.(n).widget.ports.owner 0 && \
-          (w.ports.owner n).Widget.name = "eth") [ 0 ; 1 ; 2 ; 3 ]
+          w.ports.owner n == (ports r.ifaces.(n)).owner 0 && \
+          (w.ports.owner n).Widget.name = "#"^ string_of_int n) [ 0 ; 1 ; 2 ; 3 ]
      *)
 
     (*$>*)
@@ -1050,17 +1051,17 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
         (* The outward socket is the router's second adapter; the LAN one is the
            repeater everything inside hangs off. *)
         owner = (function
-            | 0 -> router.ifaces.(1).widget.ports.owner 0
+            | 0 -> (Router.ports router.ifaces.(1)).owner 0
             | _ -> hub.widget) ;
         disconnect = (function
-            | 0 -> router.ifaces.(1).widget.ports.disconnect 0
+            | 0 -> (Router.ports router.ifaces.(1)).disconnect 0
             | _ -> Hub.Repeater.disconnect hub 0) ;
         get_capabilities = (function
-            | 0 -> router.ifaces.(1).widget.ports.get_capabilities 0
+            | 0 -> (Router.ports router.ifaces.(1)).get_capabilities 0
             | _ -> hub.widget.ports.get_capabilities 0) ;
         set_capabilities = (fun n c ->
             match n with
-            | 0 -> router.ifaces.(1).widget.ports.set_capabilities 0 c
+            | 0 -> (Router.ports router.ifaces.(1)).set_capabilities 0 c
             | _ -> hub.widget.ports.set_capabilities 0 c) } ;
     let trx =
         { ins = in_trx ;
@@ -1082,7 +1083,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
   gw.widget.ports.dev 1 == gw.trx.ins && \
   (* The outside socket is the router's second adapter, the LAN one the
      repeater everything inside it hangs off. *) \
-  (gw.widget.ports.owner 0).Widget.name = "eth" && \
+  (gw.widget.ports.owner 0).Widget.name = "#1" && \
   (gw.widget.ports.owner 1).Widget.name = "hub" && \
   gw.widget.ports.owner 0 != gw.widget.ports.owner 1 && \
   List.for_all (fun (c : Widget.t) -> c.ports.count() <= 3) \
