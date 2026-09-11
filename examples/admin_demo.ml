@@ -85,6 +85,13 @@ let main =
             (Ip.Range.of_cidr (Ip.Cidr.of_string "192.168.1.128/25")) in
     Dhcpd.serve dhcpd first.Host.trx ;
     tick () ;
+    (* At the speed of the world outside, rather than as fast as it can go.
+     * This demo is left running while somebody works on the interface, and a
+     * closed simulation with a ping every 100ms has something to do at every
+     * instant: told to go as fast as it can, it takes a core and keeps it.
+     * The reader can still ask for any other speed, or for no limit at all,
+     * from the clock in the corner. *)
+    Simulation.set_speed_ratio net (Some 1.) ;
     ignore (Simulation.start net) ;
     (* And the interface, in a simulation of its own so that pausing the one
      * above leaves it responsive. *)
