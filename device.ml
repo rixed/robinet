@@ -163,7 +163,7 @@ let free_port (widget : Widget.t) port =
  * built happens here, once, rather than in each [make]. *)
 let rec coerce name (kind : Widget.kind) v =
     match kind with
-    | String | FileName -> `String (Widget.to_string v)
+    | String | Text | FileName -> `String (Widget.to_string v)
     | Int -> `Int (Widget.to_int v)
     | Float -> `Float (Widget.to_float v)
     | Bool -> `Bool (Widget.to_bool v)
@@ -598,7 +598,7 @@ let note =
       descr = "Something written on the map: a name for a part of the \
                network, a reminder, a question." ;
       params = [
-          param "text" ~kind:String ~default:(`String "")
+          param "text" ~kind:Text ~default:(`String "")
               ~descr:"What it says." ] ;
       of_params = fun args -> TNote { text = string args "text" } }
 
@@ -790,7 +790,7 @@ let build ~parent name = function
         let widget = Widget.make ~parent ~device_type:"note" name in
         let text = ref text in
         Widget.add_properties widget Widget.[
-            property "text" ~kind:String ~descr:"What it says."
+            property "text" ~kind:Text ~descr:"What it says."
                 ~getter:(fun () -> `String !text)
                 ~setter:(fun v -> text := to_string v) ] ;
         widget, m

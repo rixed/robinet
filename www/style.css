@@ -21,6 +21,10 @@
     --pico-typography-spacing-vertical: .5rem;
     --cable: var(--pico-muted-border-color);
     --coast: var(--pico-muted-color);
+    /* A note is not a device but something written on the map, and what it is
+     * written on is what says so at a glance. */
+    --note: #fdf5c9;
+    --note-border: #ddcd7c;
 }
 
 /* A column: the banner takes the room it needs, the two panes share what is
@@ -474,6 +478,10 @@ body.carrying { user-select: none; cursor: grabbing; }
 .pane.map .box { z-index: 1; }
 .pane.map .port { z-index: 2; }
 .pane.map .cable-label { z-index: 3; }
+/* Except a note, which is written on the map rather than standing on it: it
+ * goes under the network it is about, and over the coast and the cables. A
+ * note that hides a router says less than no note at all. */
+.pane.map .box.note { z-index: 0; }
 
 .pane.map .box {
     position: absolute;
@@ -503,6 +511,32 @@ body.carrying { user-select: none; cursor: grabbing; }
 .pane.map .box.open > .twisty { left: .2rem; }
 .pane.map .box.open > .name { left: 1.4rem; }
 .pane.map .box.open > .folded { right: .3rem; }
+/* A note: a scrap of paper among the machines, saying what the network cannot.
+ * Shut, it is its name on a yellow box; unfolded, it is what it says, and the
+ * whole of it is in the tooltip either way. After the rules for an open box,
+ * whose background this takes the place of. */
+.pane.map .box.note {
+    background: var(--note);
+    border-color: var(--note-border);
+    cursor: grab;
+    /* An open note is as tall as what it says (see [boxStyle] in app.js), and
+     * this is where that stops: a note as tall as the Atlantic would hide the
+     * network it is about, and the rest of it is in the tooltip. The same
+     * twenty lines the layout reserves room for at most. */
+    max-height: 21.3rem;
+}
+/* Clear of the name above it, and a line as tall as the map counted on when
+ * it decided how big the box had to be (see [noteLine] in app.js). */
+.pane.map .box.note > .note-text {
+    display: block;
+    padding: 1.2rem .55rem .55rem;
+    line-height: .95rem;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    overflow: hidden;
+}
+.pane.map .box.note.open > .name { left: 1.4rem; right: .3rem; }
+
 .pane.map .box.selected {
     border-color: var(--pico-primary);
     border-width: 2px;

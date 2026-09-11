@@ -145,6 +145,8 @@ let json_of_choices choices =
 
 let rec json_of_kind = function
     | Widget.String -> `Assoc [ "type", `String "string" ]
+    (* The same string, in a box rather than on a line. *)
+    | Text -> `Assoc [ "type", `String "text" ]
     (* A string, and a file to go with it: the interface reads the value as it
        reads any other string, and offers the download beside it. *)
     | FileName -> `Assoc [ "type", `String "filename" ]
@@ -316,6 +318,18 @@ let json_of_peer (p : Widget.peer) =
              "via", (match p.via with None -> `Null
                                     | Some v -> `Int v.id) ]
 
+(* What a note says, for a widget that is one. The one property value in the
+ * listing below, because the map draws a note rather than merely naming it: a
+ * text fetched per note, after the listing, would arrive after the map was
+ * drawn. It belongs there for the same reason a location does -- the map wants
+ * every one of them at once -- and it is as still as a name is. *)
+let json_of_note_text (w : Widget.t) =
+    if w.Widget.device_type <> Some "note" then `Null else
+    match List.find_opt (fun (p : Widget.property) -> p.name = "text")
+                        w.Widget.properties with
+    | None -> `Null
+    | Some p -> (try p.getter () with _ -> `Null)
+
 let json_of_widget (w : Widget.t) =
     `Assoc [ "id", `Int w.id ;
              "sim", `Int w.sim ;
@@ -347,6 +361,8 @@ let json_of_widget (w : Widget.t) =
              "ports", `Int (w.ports.count ()) ;
              "free_ports", `Int (Widget.free_ports w) ;
              "location", json_of_location w.location ;
+             (* What it says, when it is a note and says something. *)
+             "text", json_of_note_text w ;
              (* Only the names here: values are a separate request, since they
               * are live and this listing is not. *)
              "properties", `List (List.map (fun (p : Widget.property) ->

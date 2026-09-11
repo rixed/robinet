@@ -54,6 +54,22 @@ const isStructured = (kind) => {
     return t === 'list' || t === 'record'
 }
 
+/* Beyond how many characters a string is no longer a line to be read at a
+ * glance, whatever it was declared as. Rather less than the input is wide, so
+ * that what turns into a box is what one would have had to scroll through. */
+const oneLine = 64
+
+/* Whether a value is written in a box rather than on a line: one the simulator
+ * declared as text, and any string with more in it than a line shows.
+ *
+ * Asked of the value and never of the draft, so that an input does not turn
+ * into a box under the reader's hands as they type past the threshold: what
+ * the simulator holds only changes when it accepts something. */
+const isMultiline = (kind, value) =>
+    baseKind(kind).type === 'text' ||
+    (typeof value === 'string' &&
+     (value.includes('\n') || value.length > oneLine))
+
 /* What one input is worth, in the JSON a setter reads.
  *
  * A property of a plain kind, a field of a record and an element of a list are
@@ -804,6 +820,46 @@ const boxPad = .55 * rem       /* between a box's border and its contents */
 const boxGap = .7 * rem        /* between two boxes side by side */
 const boxHead = 1.2 * rem      /* the name of a box that is showing its insides */
 
+/* An open note, which is as big as what it says: it has nothing inside it to
+ * make room for, and what it is there for is its text. The text is counted
+ * rather than measured -- it is not on screen yet when this has to know how
+ * much room to leave -- so these are the width the stylesheet gives the body,
+ * what a line of it holds at that width, and how tall a line is. Past
+ * [noteMax] lines the box stops growing and what is left is read in the
+ * tooltip, which holds all of it: a note as tall as the Atlantic hides the
+ * network it is about. */
+const noteW = 13 * rem
+const noteCols = 31
+const noteLine = .95 * rem
+const noteMax = 20
+
+/* How many lines one line of a note takes, wrapped as the browser will wrap
+ * it: word by word, since a line of long words holds far fewer of them than a
+ * count of characters would suggest. Words are counted and not measured --
+ * what the box is worth in pixels is known here, what a word is worth is not
+ * -- so this is close rather than exact, and the box it sizes is a floor
+ * rather than a ceiling (see [boxStyle]). */
+const wrapped = (line) => {
+    let n = 1, room = noteCols
+    for (const word of line.split(/\s+/)) {
+        if (!word) continue
+        if (word.length > room) { n++ ; room = noteCols }
+        room -= word.length + 1
+    }
+    return n
+}
+
+/* How many lines a note takes: its own, each wrapped to the width above. */
+const noteLines = (text) =>
+    Math.min(noteMax,
+             String(text || '').split('\n').reduce((n, l) => n + wrapped(l), 0))
+
+/* What a widget says, when it is a note and says something: the one property
+ * value the widget listing carries, since the map draws a note rather than
+ * merely naming it. */
+const noteText = (w) =>
+    w && typeof w.text === 'string' && w.text !== '' ? w.text : null
+
 /* Watching the pane rather than the window: it also changes size when the
  * divider is dragged and when the dock is folded away. One at a time. */
 let mapObserver = null
@@ -854,6 +910,13 @@ const minSpan = 30 / earth
  * with eight layers in a row would be a box wider than the network. */
 const boxTree = (byId, id, open, links) => {
     const w = byId[id]
+    /* A note that is open is one of those rectangles too, only bigger: what it
+     * holds is not widgets but what it says. */
+    const note = noteText(w)
+    if (note !== null && open.has(id))
+        return { id, w: noteW,
+                 h: boxHead + boxPad + noteLines(note) * noteLine + boxPad,
+                 open: true, kids: [] }
     const kids = !w || !open.has(id) ? [] :
         w.children.filter(c => byId[c] && !links.has(c))
     if (!kids.length) return { id, w: boxW, h: boxH, open: false, kids: [] }
@@ -1949,6 +2012,35 @@ document.addEventListener('alpine:init', () => {
         /* Several inputs rather than one: see [isStructured]. */
         structured(p) {
             return isStructured(p.kind)
+        },
+
+        /* A box rather than a line: see [isMultiline]. A field of the build
+         * dialog has no value yet -- nothing has been built -- so there only
+         * the kind can say, which is the whole reason a kind can. */
+        multiline(x) {
+            return isMultiline(x.kind, x.value === undefined ? null : x.value)
+        },
+
+        /* Where a box is drawn, and how big. An open note is given the room
+         * the layout reserved for it as a floor and not as a size: what it
+         * says was counted rather than measured (see [noteLines]), and a note
+         * a line taller than the count grows by that line rather than losing
+         * it. The stylesheet is what stops one growing without end. */
+        boxStyle(b) {
+            const size = b.note && b.open
+                ? `width:${b.w}px; min-height:${b.h}px`
+                : `width:${b.w}px; height:${b.h}px`
+            return `left:${b.x}px; top:${b.y}px; ${size}`
+        },
+
+        /* How tall that box is: as many lines as there are to show, within
+         * reason. It follows what is being typed, which is one attribute
+         * changing on a field that keeps its place -- and so keeps the
+         * caret -- and not the field turning into another one. */
+        rowsFor(draft) {
+            const lines = String(draft == null ? '' : draft).split('\n')
+                .reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 40)), 0)
+            return Math.min(12, Math.max(3, lines))
         },
 
         /* The columns of the table a list or a record is drawn as: the fields
@@ -3356,6 +3448,12 @@ document.addEventListener('alpine:init', () => {
                  * not silently vanish into it. */
                 inside: inside.get(r.id) || 0,
                 hasKids: byId[r.id].children.some(c => byId[c] && !links.has(c)),
+                /* A note is drawn as what it says rather than as a device,
+                 * and so has something to open even though it holds nothing.
+                 * The two are asked separately: a note nobody has written
+                 * anything on yet is still a note. */
+                note: byId[r.id].device === 'note',
+                text: noteText(byId[r.id]),
                 placed: !!byId[r.id].location,
                 /* Drawn as having no place of its own only where having one
                  * would mean something. What is inside a box is drawn where

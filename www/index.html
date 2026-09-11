@@ -729,13 +729,27 @@
                                                          read or write before it exists, and the
                                                          reader should not have to remember how it
                                                          was spelt. -->
-                                                    <template x-if="base(f).type === 'string' ||
-                                                                    base(f).type === 'filename'">
+                                                    <template x-if="!multiline(f) &&
+                                                                    (base(f).type === 'string' ||
+                                                                     base(f).type === 'text' ||
+                                                                     base(f).type === 'filename')">
                                                         <input type="text" :disabled="!online"
                                                                :class="{ unset: !set(f) }"
                                                                :placeholder="f.placeholder || hint(f)"
                                                                :list="base(f).type === 'filename' ? 'pcap-library' : null"
                                                                x-model="f.draft" @input="enable(f)"/>
+                                                    </template>
+
+                                                    <!-- Something written rather than filled in:
+                                                         the same box the property panel edits it
+                                                         in, so that a note is written where it
+                                                         is asked for. -->
+                                                    <template x-if="multiline(f)">
+                                                        <textarea :disabled="!online"
+                                                                  :class="{ unset: !set(f) }"
+                                                                  :placeholder="f.placeholder || hint(f)"
+                                                                  :rows="rowsFor(f.draft)"
+                                                                  x-model="f.draft" @input="enable(f)"></textarea>
                                                     </template>
 
                                                     <small class="units" x-show="f.units" x-text="f.units"></small>
@@ -1001,13 +1015,31 @@
                                                      picks one that is there, a recorder writes one
                                                      that is not, and a datalist is the input that
                                                      suggests without insisting. -->
-                                                <template x-if="!p.read_only && (base(p).type === 'string' ||
-                                                                                 base(p).type === 'filename')">
+                                                <template x-if="!p.read_only && !multiline(p) &&
+                                                                (base(p).type === 'string' ||
+                                                                 base(p).type === 'text' ||
+                                                                 base(p).type === 'filename')">
                                                     <input type="text" :disabled="!online" :class="{ unset: !set(p) }"
                                                            :placeholder="hint(p)"
                                                            :list="base(p).type === 'filename' ? 'pcap-library' : null"
                                                            x-model="p.draft" @input="enable(p)"
                                                            @keydown.enter="save(p)" @blur="save(p)"/>
+                                                </template>
+
+                                                <!-- The same value, in a box: what a note says,
+                                                     and any string with more in it than a line
+                                                     shows (see [isMultiline]).
+
+                                                     Enter is a newline here rather than the
+                                                     way to send, so what sends is leaving the
+                                                     field -- the one gesture that means "done"
+                                                     in a box of prose. -->
+                                                <template x-if="!p.read_only && multiline(p)">
+                                                    <textarea :disabled="!online" :class="{ unset: !set(p) }"
+                                                              :placeholder="hint(p)"
+                                                              :rows="rowsFor(p.draft)"
+                                                              x-model="p.draft" @input="enable(p)"
+                                                              @blur="save(p)"></textarea>
                                                 </template>
 
                                                 <!-- A list or a record: a table of cells.
@@ -1250,19 +1282,28 @@
                                  :class="{ selected: isSelected(selected.sim, b.id),
                                            holds: b.holds,
                                            open: b.open, unplaced: b.nowhere,
+                                           note: b.note,
                                            picked: pickedEnds().includes(b.id),
                                            unpluggable: picking &&
                                                         !canTakeCable(get(selected.sim, b.id)) }"
-                                 :style="`left:${b.x}px; top:${b.y}px;
-                                          width:${b.w}px; height:${b.h}px`"
+                                 :style="boxStyle(b)"
+                                 :title="b.text"
                                  @pointerdown.stop="dragBox(b.id, $event)">
-                                <button class="twisty" x-show="b.hasKids"
-                                        :title="isOpen(b.id) ? 'Hide what is inside'
-                                                             : 'Show what is inside'"
+                                <button class="twisty" x-show="b.hasKids || b.text !== null"
+                                        :title="b.note
+                                                ? (isOpen(b.id) ? 'Fold what it says away'
+                                                                : 'Read what it says')
+                                                : (isOpen(b.id) ? 'Hide what is inside'
+                                                                : 'Show what is inside')"
                                         @pointerdown.stop
                                         @click.stop="toggleBox(b.id)"
                                         x-text="isOpen(b.id) ? '−' : '+'"></button>
                                 <span class="name" x-text="b.name"></span>
+                                <!-- What a note says, once it is unfolded. A note is
+                                     not a device with insides: what it holds is this,
+                                     and a shut one says it in its tooltip. -->
+                                <span class="note-text" x-show="b.note && b.open"
+                                      x-text="b.text"></span>
                                 <!-- What a shut box is folding away: cables with
                                      both ends inside it, which would otherwise
                                      simply not be there. -->

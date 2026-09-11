@@ -232,6 +232,11 @@ and value = Yojson.Basic.t
 
 and kind =
     | String
+    (* A string of more than one line: what a note says, and anything else
+     * written in prose rather than filled in. The same string on the wire and
+     * to the setter as a [String] is; what it tells the interface is how much
+     * room to give it. *)
+    | Text
     (* A string naming a file of the pcap library ([Pcap.Library]): the one a
      * recorder is writing, or the one a replayer is playing.
      *
@@ -298,6 +303,7 @@ and kind =
 (* What a kind is called when a refusal has to name it. *)
 let rec kind_name = function
     | String -> "a string"
+    | Text -> "a text"
     | FileName -> "a file name"
     | Int -> "a whole number"
     | Float -> "a number"
