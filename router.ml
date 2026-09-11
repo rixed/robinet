@@ -392,6 +392,74 @@ struct
                     let n = Random.int rs_len in
                     forward targets.(n)
 
+    (* The address the routing table gives interface [n]: the one an [Admin]
+     * route names it by, since a route to the router itself is how the table
+     * says which address is the router's.
+     *
+     * The CIDR is read as the address and the netmask that goes with it, such
+     * as 34.35.36.37/16, and not as the network 34.35.0.0/16. *)
+    let my_addresses_of routes n =
+        List.find_map_opt (fun (r : Route.t) ->
+            match r.dst_mask with
+            | Some addr ->
+                if r.target = Admin &&
+                   (r.in_iface = None || r.in_iface = Some n) then
+                    let addr = Ip.Cidr.subnet addr |>
+                               Ip.Addr.to_bitstring
+                    and netmask = Ip.Cidr.to_netmask addr |>
+                                  Ip.Addr.to_bitstring in
+                    Some [ Eth.State.{ addr ; netmask } ]
+                else
+                    None
+            | _ -> None
+        ) routes
+
+    (* Give interface [n] the address its routing table names, and the host
+     * that answers for it -- or take both away, when the table has stopped
+     * naming one.
+     *
+     * Called whenever the table is set and not only when the router is built,
+     * because a router the catalogue builds arrives with an empty table: every
+     * address such a router answers for, replies to ARP for and sends its ICMP
+     * errors from is one a later [routes] gave it. *)
+    let configure_iface t n =
+        let iface = t.ifaces.(n) in
+        let my_addresses = my_addresses_of t.routes n |? [] in
+        if my_addresses <> iface.eth.my_addresses then (
+            iface.eth.my_addresses <- my_addresses ;
+            (* The one it had was for the address it no longer has. *)
+            Option.may (fun (h : Host.t) ->
+                Widget.destroy h.Host.trx.Host.widget
+            ) iface.admin_host ;
+            iface.admin_host <- None ;
+            if my_addresses <> [] then (
+                (* Make that interface a host with an IP stack on top of eth: *)
+                (* On output, the host will be able to write onto that TRX and that
+                 * will be output from that iface, properly updating the counters.
+                 * Unless we want to give a chance for the answer to go through
+                 * another route (usually safer): *)
+                let trx =
+                    if t.admin_reroute then
+                        { ins = { write = route None t ; set_read = ignore } ;
+                          out = { write = ignore_bits ; set_read = ignore } }
+                    else
+                        iface.trx in
+                (* On the other way around it's a bit more convoluted: the host
+                 * takes the reader callback only when set_ip is called, which
+                 * we don't have to do here. The router is going call the host
+                 * [ip_recv] function whenever that's the routing decision. *)
+                let name = "admin@"^ string_of_int n in
+                let widget = Widget.make ~parent:iface.eth.iface.widget name in
+                iface.admin_host <-
+                    (* This host configures nothing at boot, neither
+                       statically nor over DHCP: the address it speaks from is
+                       the router's own. It has the router's supply, through
+                       the router's adapter: one box, one switch. *)
+                    Some (Host.make_from_eth ~own_ip_config:false ~widget
+                                             iface.eth trx name)
+            )
+        )
+
     (** Change the emitter of iface N. *)
     let set_read (t : t) n f =
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "setting emitter for iface %d" n))) ;
@@ -470,29 +538,10 @@ struct
             invalid_arg ;
         let ifaces =
             Array.init num_ifaces (fun n ->
-                (* Look for my admin IP in the routing table: *)
-                let my_addresses =
-                    List.find_map_opt (fun (r : Route.t) ->
-                        match r.dst_mask with
-                        | Some addr ->
-                            if r.target = Admin &&
-                               (r.in_iface = None || r.in_iface = Some n) then
-                                (* We assume the Cidr is the actual IP and
-                                 * the actual netmask, such as for instance:
-                                 * 34.35.36.37/16 *)
-                                let addr = Ip.Cidr.subnet addr |>
-                                           Ip.Addr.to_bitstring
-                                and netmask = Ip.Cidr.to_netmask addr |>
-                                              Ip.Addr.to_bitstring in
-                                Some [ Eth.State.{ addr ; netmask } ]
-                            else
-                                None
-                        | _ -> None
-                    ) routes in
                 let mac =
                     (* Caller can set the MAC addresses: *)
                     if n >= Array.length macs then None else Some macs.(n) in
-                make_iface ?delay ?loss ?can_forward_after ?mtu ?mac ?my_addresses
+                make_iface ?delay ?loss ?can_forward_after ?mtu ?mac
                            ~parent:widget ~power n
             ) in
         let buffered = Metric.Gauge.make () in
@@ -639,7 +688,10 @@ struct
                                 | Some out_iface -> Route.Forward { out_iface ; via } in
                             Route.{ in_iface ; src_mask ; dst_mask ; ip_proto ;
                                     src_port ; dst_port ; target }
-                        ) v) ;
+                        ) v ;
+                    (* Which address is the router's is part of what the table
+                       says, so the interfaces are told again. *)
+                    Array.iteri (fun n _ -> configure_iface t n) t.ifaces) ;
             property "cut-through bytes" ~kind:(Optional (IRange (6, 256)))
                 ~descr:"If the router can forward a frame while still receiving it,
                         how many bytes of the header does it need to read."
@@ -675,32 +727,7 @@ struct
             property "tot ports" ~kind:Int ~descr:"Total number of ports."
                 ~getter:(fun () -> `Int num_ifaces) ] ;
         Array.iteri (fun n iface ->
-            if iface.eth.my_addresses <> [] then (
-                (* Make that interface a host with an IP stack on top of eth: *)
-                (* On output, the host will be able to write onto that TRX and that
-                 * will be output from that iface, properly updating the counters.
-                 * Unless we want to give a chance for the answer to go through
-                 * another route (usually safer): *)
-                let trx =
-                    if admin_reroute then
-                        { ins = { write = route None t ; set_read = ignore } ;
-                          out = { write = ignore_bits ; set_read = ignore } }
-                    else
-                        iface.trx in
-                (* On the other way around it's a bit more convoluted: the host
-                 * takes the reader callback only when set_ip is called, which
-                 * we don't have to do here. The router is going call the host
-                 * [ip_recv] function whenever that's the routing decision. *)
-                let name = "admin@"^ string_of_int n in
-                let widget = Widget.make ~parent:iface.eth.iface.widget name in
-                iface.admin_host <-
-                    (* This host configures nothing at boot, neither
-                       statically nor over DHCP: the address it speaks from is
-                       the router's own. It has the router's supply, through
-                       the router's adapter: one box, one switch. *)
-                    Some (Host.make_from_eth ~own_ip_config:false ~widget
-                                             iface.eth trx name)
-            ) ;
+            configure_iface t n ;
             (* When packets are received from the outside, go to routing: *)
             iface.trx.ins.set_read (route (Some n) t)
         ) t.ifaces ;
@@ -899,6 +926,51 @@ struct
             (not r.power.Simulation.on) ;
         "and out of the tree" @?
             (Widget.find sim.Simulation.root widget.Widget.id = None)
+     *)
+
+    (* Which address is a router's own is part of its routing table, so a
+       router that is handed one later -- which is every router the catalogue
+       builds, since those arrive with an empty table -- takes its address
+       from that table and not only from the one it was made with. *)
+    (*$R configure_iface
+        let sim = Simulation.make ~realtime:false "late-admin" in
+        let widget = Widget.make ~parent:sim.Simulation.root "r" in
+        let r = make 2 [] widget in
+        let set_routes rows =
+            match List.find_opt (fun (p : Widget.property) ->
+                      p.name = "routes") widget.Widget.properties with
+            | None -> "the router has a routing table" @? false
+            | Some p -> (Option.get p.setter) (`List rows) in
+        (* A route to the router itself: no way out, and the address it
+           answers on as the destination. *)
+        let admin = [ `Assoc [ "input port", `Null ;
+                               "src mask", `Null ;
+                               "dst mask", `String "1.2.3.4/24" ;
+                               "ip proto", `Null ;
+                               "src port", `Null ;
+                               "dst port", `Null ;
+                               "output port", `Null ;
+                               "via", `Null ] ] in
+        "a router made with no table has no address" @?
+            (r.ifaces.(0).eth.Eth.State.my_addresses = []) ;
+        set_routes admin ;
+        "the one its table names is the router's own" @?
+            (Eth.State.find_ip4 r.ifaces.(0).eth =
+             Ip.Addr.of_dotted_string "1.2.3.4") ;
+        "on every interface the route does not single out" @?
+            (Eth.State.find_ip4 r.ifaces.(1).eth =
+             Ip.Addr.of_dotted_string "1.2.3.4") ;
+        "and something answers for it" @?
+            (r.ifaces.(0).admin_host <> None) ;
+        (* Set again, to the same table: what is there is left alone. *)
+        let host = r.ifaces.(0).admin_host in
+        set_routes admin ;
+        "a table that says the same thing changes nothing" @?
+            (r.ifaces.(0).admin_host == host) ;
+        set_routes [] ;
+        "and a table that stops naming one takes it away" @?
+            (r.ifaces.(0).eth.Eth.State.my_addresses = [] &&
+             r.ifaces.(0).admin_host = None)
      *)
 
     (* A router's port n is its interface n, whatever order its parts were built

@@ -96,7 +96,10 @@ type model =
        empty range: once they are written down the range has nothing left to
        say. *)
     | TRouter of { ports : int ; mac_range : string ; macs : Eth.Addr.t list }
-    | TGateway of { public : Ip.Addr.t ; lan : Ip.Cidr.t ;
+    | TGateway of { public : Ip.Addr.t ;
+                    public_netmask : Ip.Addr.t option ;
+                    public_gw : Eth.Gateway.t option ;
+                    lan : Ip.Cidr.t ;
                     max_cnxs : int ; mac : Eth.Addr.t option }
     | TPortal of { promisc : bool ; filter : string ; caplen : int option }
     | TRecorder of { fname : string option ; caplen : int option ;
@@ -272,6 +275,20 @@ let cidr name v =
         | Some a, Some w when w >= 0 && w <= 32 -> Ip.Cidr.o (a, w)
         | _ -> Widget.bad_value "%s: %S is not a CIDR" name s)
     | _ -> Widget.bad_value "%s: %S is not a CIDR" name s
+
+(* A gateway is named by a MAC address when it reads as one and by an IP
+ * address otherwise, which is the choice {!Eth.Gateway.t} offers. Not
+ * [Eth.Gateway.of_string], which resolves anything that is neither, and
+ * resolving a name would hold the simulation's lock across a DNS lookup. *)
+let gateway_addr name v =
+    let s = Widget.to_string v in
+    match Eth.Addr.of_string s with
+    | exception _ ->
+        (match Ip.Addr.of_dotted_string_opt s with
+        | Some ip -> Eth.Gateway.IPv4 ip
+        | None ->
+            Widget.bad_value "%s: %S is neither a MAC nor an IP address" name s)
+    | mac -> Eth.Gateway.Mac mac
 
 (* An address within the range those leading octets describe, the rest picked
  * at random. An empty range means [Eth.Addr.random], which picks a locally
@@ -473,6 +490,21 @@ let gateway =
           param "public address" ~kind:String ~default:(`String "192.0.2.1")
               ~descr:"The address it is known by on the outside, and the one \
                       it translates its network's traffic to." ;
+          (* Left out, the netmask is all zeroes and every address is on the
+           * public side's own network: what the gateway sends out there it
+           * sends to the address itself, resolving it on the spot. That is
+           * what a gateway plugged into a LAN of real machines wants. One
+           * hanging off a router of this simulation wants a netmask and a
+           * gateway of its own instead, since a router answers for the
+           * addresses it holds and not for the world behind it. *)
+          param "public netmask" ~kind:(Widget.optional String)
+              ~placeholder:"everything is directly reachable"
+              ~descr:"Which addresses it can reach on its public side without \
+                      going through a gateway of its own." ;
+          param "public gateway" ~kind:(Widget.optional String)
+              ~placeholder:"192.0.2.254"
+              ~descr:"Where to send what the public netmask does not cover, \
+                      as an IP or a MAC address." ;
           param "LAN" ~kind:String ~default:(`String "192.168.0.0/24")
               ~descr:"The network behind it, in CIDR notation. Its first \
                       address is the gateway itself, the second the server that \
@@ -489,6 +521,10 @@ let gateway =
           TGateway {
               public =
                   Ip.Addr.of_json "public address" (arg args "public address") ;
+              public_netmask =
+                  opt args "public netmask" (Ip.Addr.of_json "public netmask") ;
+              public_gw =
+                  opt args "public gateway" (gateway_addr "public gateway") ;
               lan = cidr "LAN" (arg args "LAN") ;
               max_cnxs = int args "max connections" ;
               mac = opt args "MAC" (mac "MAC") } }
@@ -627,8 +663,15 @@ let to_params =
         [ "ports", `Int ports ;
           "MAC range", `String mac_range ;
           "MACs", `String (string_of_macs macs) ]
-    | TGateway { public ; lan ; max_cnxs ; mac } ->
+    | TGateway { public ; public_netmask ; public_gw ; lan ; max_cnxs ; mac } ->
         [ "public address", `String (Ip.Addr.to_dotted_string public) ;
+          "public netmask", ip_opt public_netmask ;
+          "public gateway",
+              (match public_gw with
+              | None -> `Null
+              | Some (Eth.Gateway.Mac m) -> `String (Eth.Addr.to_hexstring m)
+              | Some (Eth.Gateway.IPv4 ip) ->
+                  `String (Ip.Addr.to_dotted_string ip)) ;
           "LAN", `String (Ip.Cidr.to_string lan) ;
           "max connections", `Int max_cnxs ;
           "MAC", mac_opt mac ]
@@ -723,15 +766,16 @@ let build ~parent name = function
            range: a range that picks is a choice like any other, and once the
            addresses are written down it has nothing left to say. *)
         widget, TRouter { ports ; mac_range = "" ; macs }
-    | TGateway ({ public ; lan ; max_cnxs ; mac } as g) ->
+    | TGateway ({ public ; public_netmask ; public_gw ; lan ; max_cnxs ;
+                  mac } as g) ->
         (* Drawn here rather than left to the gateway to draw, so that what it
            ends up with can be written down: it keeps no property of its
            address, and a network whose machines come back sending to somewhere
            else is not the one that was saved. *)
         let mac = Option.default_delayed Eth.Addr.random mac in
         let gw =
-            Router.make_gw ~parent ~name ~mac ~num_max_cnxs:max_cnxs public
-                           lan in
+            Router.make_gw ~parent ~name ~mac ~num_max_cnxs:max_cnxs
+                           ?public_netmask ?public_gw public lan in
         gw.Router.widget, TGateway { g with mac = Some mac }
     | TPortal { promisc ; filter ; caplen } as m ->
         let portal = Pcap.portal ~parent ~promisc ~filter ?caplen name in
