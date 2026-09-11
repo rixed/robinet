@@ -242,12 +242,15 @@ struct
                (** Answers from admin should go through routing, as opposed
                 * to return via the same interface: *)
        mutable admin_reroute : bool ;
+   mutable can_forward_after : int option ;
               (* What the router's own delayed forwarding draws from, shared
                * with every interface and with the admin host, since they are
                * all the same box. *)
                        power : Simulation.power ;
                       widget : Widget.t ;
       mutable load_balancing : load_balancing ;
+              (** RAM used by all queued frames: *)
+                    buffered : Metric.Gauge.t ;
                      ingress : Metric.Counter.t ;
                       egress : Metric.Counter.t }
 
@@ -334,7 +337,9 @@ struct
                         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forwarding packet to iface %d" out_iface))) ;
                         let params = Metric.(Params.singleton "port" (Param.Int out_iface)) in
                         let now = Simulation.Widget.now t.widget in
-                        Metric.Counter.add t.egress ~now ~params (bytelength bits) ;
+                        let len = bytelength bits in
+                        Metric.Counter.add t.egress ~now ~params len ;
+                        Metric.Gauge.add t.buffered ~now len ;
                         let iface = t.ifaces.(out_iface) in
                         (* So we want to set the gateway for this packet but cannot
                          * call Etc.TRX.tx directly because some additional processing
@@ -391,6 +396,12 @@ struct
     (** Change the emitter of iface N. *)
     let set_read (t : t) n f =
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "setting emitter for iface %d" n))) ;
+        (* Also decrease memory usage on the router *)
+        let f bits =
+            let len = bytelength bits in
+            let now = Simulation.Widget.now t.widget in
+            Metric.Gauge.sub ~now t.buffered len ;
+            f bits in
         t.ifaces.(n).trx =-> f
 
     let is_connected iface =
@@ -415,13 +426,16 @@ struct
             else
                 fun _ -> false
 
-    let make_iface ?proto ?mtu ?delay ?loss ?mac ?my_addresses ~parent ~power n =
+    let make_iface ?proto ?mtu ?delay ?loss ?inter_frame_gap ?can_forward_after
+                   ?mac ?my_addresses ~parent ~power n =
         let name = "#"^ string_of_int n in
         let widget = Widget.make ~parent name in
         (* For our ifaces we force the GW on a packet by packet basis according
          * to the dynamic (and likely still unset) routing table. *)
-        let eth = Eth.State.make ?proto ?mtu ?delay ?loss ?mac ?my_addresses
-                                 ~parent:widget ~power () in
+        let eth =
+            Eth.State.make ?proto ?mtu ?delay ?loss ?inter_frame_gap
+                           ?can_forward_after ?mac ?my_addresses
+                           ~parent:widget ~power () in
         let trx = Eth.TRX.make eth in
         (* An interface is its adapter, as far as a cable is concerned. *)
         widget.Widget.ports <- Widget.ports_of eth.iface.widget ;
@@ -431,7 +445,7 @@ struct
     let notify_always ?(delay=0.) () = { probability = 1. ; delay }
 
     let make ?(notify_errs=notify_always ()) ?(admin_reroute=true)
-             ?(load_balancing=First)
+             ?(load_balancing=First) ?can_forward_after
              ?delay ?loss ?mtu ?(macs=[||])
              num_ifaces routes widget =
         let power =
@@ -479,13 +493,15 @@ struct
                 let mac =
                     (* Caller can set the MAC addresses: *)
                     if n >= Array.length macs then None else Some macs.(n) in
-                make_iface ?delay ?loss ?mtu ?mac ?my_addresses
+                make_iface ?delay ?loss ?can_forward_after ?mtu ?mac ?my_addresses
                            ~parent:widget ~power n
             ) in
+        let buffered = Metric.Gauge.make () in
         let ingress = Metric.Counter.make () in
         let egress = Metric.Counter.make () in
         let t = { ifaces ; routes ; widget ; notify_errs ; admin_reroute ;
-                  power ; load_balancing ; ingress ; egress } in
+                  can_forward_after ; power ; load_balancing ; buffered ;
+                  ingress ; egress } in
         (* Read when the switch is thrown, not now: the admin hosts are built
            further down, once the router they route for exists. *)
         let iter_admin_hosts f =
@@ -625,6 +641,18 @@ struct
                             Route.{ in_iface ; src_mask ; dst_mask ; ip_proto ;
                                     src_port ; dst_port ; target }
                         ) v) ;
+            property "cut-through bytes" ~kind:(Optional (IRange (6, 256)))
+                ~descr:"If the router can forward a frame while still receiving it,
+                        how many bytes of the header does it need to read."
+                ~getter:(fun () ->
+                    json_of_optional (fun i -> `Int i) t.can_forward_after)
+                ~setter:(fun v ->
+                    t.can_forward_after <-
+                        to_option (to_int_range ~min:6 ~max:256) v ;
+                    (* Propagate to all individual eth adapters: *)
+                    Array.iter (fun iface ->
+                        iface.eth.iface.can_forward_after <- t.can_forward_after
+                    ) t.ifaces) ;
             property "load balancing" ~kind:(Enum all_load_balancing)
                 ~descr:"Load balancing between matching routes."
                 ~getter:(fun () -> `Int (load_balancing_to_enum t.load_balancing))
@@ -642,6 +670,9 @@ struct
                 (Metric.Counter.T t.ingress) ;
             metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
                 (Metric.Counter.T t.egress) ;
+            metric_property "buffered" ~units:"bytes"
+                ~descr:"Volume of buffered packets, in bytes."
+                (Metric.Gauge.T t.buffered) ;
             property "tot ports" ~kind:Int ~descr:"Total number of ports."
                 ~getter:(fun () -> `Int num_ifaces) ] ;
         Array.iteri (fun n iface ->

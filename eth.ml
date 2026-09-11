@@ -664,7 +664,7 @@ struct
      * @param proto the {!Proto.t} we want to transmit/receive.
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
-    let make ?speeds ?full_duplex
+    let make ?speeds ?full_duplex ?inter_frame_gap ?can_forward_after
              ?(mtu=1500) ?(delay=Clock.Interval.zero) ?(loss=0.)
              ?(mac=Addr.random ()) ?(gateways=[])
              ?(promisc=ignore) ?(do_proxy_arp=(fun _ -> false))
@@ -674,7 +674,9 @@ struct
          * up with "eth", "eth-2"... courtesy of [Widget.unique_among]. Naming
          * them "eth0".."ethN" as the machine itself would is the caller's to
          * do, since the index is the caller's to know. *)
-        let iface = Iface.make ~parent ~power ?speeds ?full_duplex "eth" in
+        let iface =
+            Iface.make ~parent ~power ?speeds ?full_duplex ?inter_frame_gap
+                       ?can_forward_after "eth" in
         let t = {
             iface ; mac ; gateways ; proto ; mtu ; promisc ; do_proxy_arp ;
             recv = ignore_bits ~logger:iface.widget.logger ;

@@ -269,6 +269,9 @@ struct
             with Not_found -> 0 in
         set ~now ~params t (v + d)
 
+    let sub ~now ?params t d =
+        add ~now ?params t (-d)
+
     let succ ~now ?params t =
         add ~now ?params t 1
 
