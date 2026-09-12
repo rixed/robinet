@@ -1,0 +1,1840 @@
+# vim:sw=2 ts=2 sts=2 expandtab
+#
+# The REST API of robinet's administration interface, as myadmin_api.ml serves
+# it.  Written by hand and kept beside the code: when a route or a field moves,
+# this moves with it.
+#
+# Generated from nothing -- if it disagrees with myadmin_api.ml, myadmin_api.ml
+# is right.
+openapi: 3.1.0
+
+info:
+  title: RobiNet administration API
+  version: "1"
+  summary: Inspect, edit and drive a running network simulation.
+  description: |
+    The API the administration interface is built upon (see `myadmin_api.ml`).
+    It is what the pages under `/` use, and it is meant to be usable on its own
+    from a shell prompt.
+
+    ## What is addressed, and how
+
+    A robinet process runs one or more *simulations*, each with its own clock
+    and its own thread. Everything worth looking at inside one is a *widget*: a
+    named node of a tree, with a parent, children, peers, a logger and a list of
+    properties. The tree under a simulation's root is the whole inventory; there
+    is no registry beside it.
+
+    A widget is therefore addressed by the pair (simulation id, widget id), which
+    is what every path below takes. Both ids are stable for the life of the
+    object. Names are not unique and a widget can be moved, so a name is a label
+    and never an identifier.
+
+    The administration interface itself runs in a simulation of its own, which
+    follows the wall clock and is never paused. That simulation appears in the
+    listing like any other, and refuses to be paused, stepped, renamed, deleted,
+    or loaded into: doing any of those would take the interface down with it.
+
+    ## Time
+
+    Every instant handed out by this API is *simulated* time: seconds since the
+    simulation began, as a JSON number. Add a simulation's `epoch` to one to get
+    a wall-clock date. A simulation left to run as fast as it can is not at the
+    reader's date, which is why the epoch has to be said.
+
+    Cursors are different. A `cursor`, and the `since` parameter it feeds, is a
+    string of picoseconds since the simulation began: exact, opaque, and to be
+    handed back as it was given. A double has not a bit for every picosecond once
+    a clock is an hour or two in, so a cursor that went out as seconds would come
+    back a hair early (the last message served again on every poll) or a hair
+    late (the next one silently lost). Never build one; never parse one.
+
+    ## Property values
+
+    A property's value is arbitrary JSON, of whatever shape the property has: a
+    number stays a number, so there is nothing to parse and nothing to guess.
+    What sort of input to offer for it is said separately by its `kind`, which is
+    authoritative and is present before there is any value to inspect. The kind
+    carries what JSON cannot say: a range's bounds, an enum's choices, and the
+    shape of a record.
+
+    JSON has one number type where OCaml has two, so a whole number sent for a
+    float property arrives as an integer. Setters accept either, and a string
+    besides, so a value typed by hand at a shell prompt works.
+
+    ## Errors
+
+    Anything under `/api` answers errors as JSON: `{"status": ..., "error": ...}`
+    with that same status code. Anything a getter or a setter raises becomes a
+    400 with its message rather than being dropped, since the interface is
+    expected to validate beforehand and reaching that point means the value
+    really was refused.
+
+    A path that matches no route at all is answered by the HTTP multiplexer, not
+    by this API, and comes back as `404 text/plain`.
+
+    ## What is not here
+
+    Paths outside `/api` serve the interface itself: `/` and `/index.html`,
+    `/app.js`, `/style.css` and the vendored libraries beside them. They are
+    compiled into the binary and served one route per asset; there is no serving
+    of arbitrary files, and they are not described here.
+  license:
+    name: AGPL-3.0-or-later
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+
+servers:
+  - url: http://{host}:{port}
+    description: Wherever `Myadmin.make` was told to listen.
+    variables:
+      host:
+        default: localhost
+      port:
+        default: "80"
+
+# There is none. The administration interface has no authentication and no
+# authorization of any kind: it answers whoever reaches the port it listens on,
+# and everything it offers -- editing a network, driving a clock, reading and
+# writing capture files -- is offered to them. Serve it where only you can
+# reach it.
+security: []
+
+tags:
+  - name: simulations
+    description: The simulations this process runs, and their clocks.
+  - name: topology
+    description: A simulation's network, as a document one saves and opens again.
+  - name: widgets
+    description: What a simulation is made of, and where it is on the map.
+  - name: properties
+    description: Reading and editing what a widget is configured with.
+  - name: logs
+    description: What a widget had to say.
+  - name: catalogue
+    description: What can be built.
+  - name: pcaps
+    description: The capture library, shared by every simulation.
+
+paths:
+
+  #
+  # Simulations
+  #
+
+  /api/simulations:
+    get:
+      tags: [simulations]
+      summary: Every simulation, with the state of its clock.
+      operationId: getSimulations
+      responses:
+        "200":
+          description: In order of id.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Simulation" }
+        "500":
+          $ref: "#/components/responses/ServerError"
+    post:
+      tags: [simulations]
+      summary: A new simulation, empty or read from a topology document.
+      description: |
+        Created paused and started, so that its clock stands still until the
+        reader says otherwise: what was asked for is somewhere to build, and one
+        running as fast as it could would take a core to itself the moment
+        anything in it had something to do.
+
+        It does not follow the wall clock. A network with nothing in it has
+        nothing to keep in step with, and one that wants the outside world says
+        so by having a portal in it, which turns its simulation realtime itself.
+
+        The document is taken here rather than left to a later load, so that
+        opening a file that turns out not to load leaves nothing behind: a
+        document that is refused destroys the simulation it was going into.
+
+        An empty body is an empty simulation.
+      operationId: createSimulation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: |
+                    What to call it. Must not contain `/`. Made unique by
+                    suffixing if something already answers to it. Defaults to the
+                    document's own name, or to `network`.
+                topology:
+                  $ref: "#/components/schemas/Topology"
+            examples:
+              empty:
+                summary: Somewhere to build
+                value: { name: "lab" }
+              fromDocument:
+                summary: Open a saved network
+                value:
+                  name: "lab"
+                  topology:
+                    version: 1
+                    name: "lab"
+                    devices: []
+      responses:
+        "200":
+          description: The simulation, and what the document asked for that would not take.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [simulation, refused]
+                properties:
+                  simulation: { $ref: "#/components/schemas/Simulation" }
+                  refused: { $ref: "#/components/schemas/Refused" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/simulations/{sim}:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+    get:
+      tags: [simulations]
+      summary: One simulation.
+      operationId: getSimulation
+      responses:
+        "200":
+          description: Its state, as of now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Simulation" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [simulations]
+      summary: Call it something else.
+      description: |
+        The name is taken from the body: a JSON string, an object with a `name`,
+        or, failing both, the body itself as a bare string. Must not contain `/`,
+        and is made unique by suffixing unless it is the name it already has.
+
+        The simulation serving this API cannot be renamed.
+      operationId: renameSimulation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: string
+                - type: object
+                  required: [name]
+                  properties:
+                    name: { type: string }
+            examples:
+              asString: { value: "lab" }
+              asObject: { value: { name: "lab" } }
+          text/plain:
+            schema: { type: string }
+      responses:
+        "200":
+          description: The simulation, under its new name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Simulation" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [simulations]
+      summary: Take it away for good.
+      description: |
+        Not merely forgetting it: a recorder in it holds a file open, a portal a
+        real interface, and both are told, exactly as they are when a single
+        device is deleted.
+
+        The simulation serving this API cannot be deleted.
+      operationId: deleteSimulation
+      responses:
+        "200":
+          description: What was deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deleted" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/simulations/{sim}/pause:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+    post:
+      tags: [simulations]
+      summary: Freeze its clock.
+      description: |
+        The wall-clock time spent paused is accumulated in `paused_total` and
+        subtracted when synchronising, so that resuming does not make simulated
+        time leap forward and fire every pending event at once.
+
+        Pause is fully meaningful for a closed simulation. For one talking to the
+        outside world it is still useful, with the same caveat as freezing a
+        process in a debugger: the world moved on, and things may break at
+        resume.
+
+        The simulation serving this API refuses, since pausing the thread about
+        to answer would leave nothing to resume it. That is exactly why the
+        interface belongs in a simulation of its own.
+      operationId: pauseSimulation
+      responses:
+        "200":
+          $ref: "#/components/responses/SimulationState"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/simulations/{sim}/resume:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+    post:
+      tags: [simulations]
+      summary: Let it run again.
+      operationId: resumeSimulation
+      responses:
+        "200":
+          $ref: "#/components/responses/SimulationState"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/simulations/{sim}/step:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+    post:
+      tags: [simulations]
+      summary: Run a few events and stop again.
+      operationId: stepSimulation
+      parameters:
+        - name: "n"
+          in: query
+          required: false
+          description: How many events to run.
+          schema: { type: integer, default: 1 }
+      responses:
+        "200":
+          $ref: "#/components/responses/SimulationState"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/simulations/{sim}/speed:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+    post:
+      tags: [simulations]
+      summary: How fast to run.
+      description: |
+        Refused on a simulation that follows the wall clock, whose speed is not
+        ours to set.
+      operationId: setSimulationSpeed
+      parameters:
+        - name: ratio
+          in: query
+          required: false
+          description: |
+            How many seconds of simulated time to a second of wall clock, as a
+            positive finite number. `full`, or the parameter left out, is as fast
+            as it can.
+          schema:
+            oneOf:
+              - type: number
+                exclusiveMinimum: 0
+              - type: string
+                const: full
+      responses:
+        "200":
+          $ref: "#/components/responses/SimulationState"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  #
+  # Topology
+  #
+
+  /api/simulations/{sim}/topology:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+    get:
+      tags: [topology]
+      summary: Read the network out, as a document.
+      description: |
+        This *is* saving: it is the request the save button makes, and asking
+        marks the simulation saved (see `unsaved`).
+
+        What could not be written down travels beside the document rather than
+        within it -- a file naming the devices it is missing would not load -- so
+        the answer has two halves, and it is the `topology` half that is the
+        file.
+      operationId: getTopology
+      responses:
+        "200":
+          description: The document, and what was left out of it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [topology, skipped]
+                properties:
+                  topology: { $ref: "#/components/schemas/Topology" }
+                  skipped:
+                    type: array
+                    description: The devices this format cannot describe, named.
+                    items: { type: string }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [topology]
+      summary: Build that network, in place of whatever the simulation was running.
+      description: |
+        Takes the document alone, as a file holds it, or the whole of what `GET`
+        hands back, so that what was read here can be sent straight back.
+
+        The simulation is emptied first, which is why the one serving this API
+        refuses: loading into it would take the interface with it, leaving
+        nothing to say so.
+
+        `POST` does the same thing.
+      operationId: putTopology
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/Topology"
+                - type: object
+                  required: [topology]
+                  properties:
+                    topology: { $ref: "#/components/schemas/Topology" }
+      responses:
+        "200":
+          description: |
+            What was built. `refused` holds the properties that would not take:
+            the network is still the one that was asked for, which is why this is
+            an answer and not an error.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, devices, refused]
+                properties:
+                  name: { type: string }
+                  devices:
+                    type: integer
+                    description: How many devices the document held.
+                  refused: { $ref: "#/components/schemas/Refused" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [topology]
+      summary: As PUT.
+      operationId: postTopology
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/Topology"
+                - type: object
+                  required: [topology]
+                  properties:
+                    topology: { $ref: "#/components/schemas/Topology" }
+      responses:
+        "200":
+          description: As PUT.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  devices: { type: integer }
+                  refused: { $ref: "#/components/schemas/Refused" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  #
+  # Widgets
+  #
+
+  /api/simulations/{sim}/widgets:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+    get:
+      tags: [widgets]
+      summary: Everything in the simulation.
+      description: |
+        The tree, flattened and ordered by id. Only the *names* of each widget's
+        properties are here: their values are live and this listing is not, so
+        they are a separate request.
+
+        What is in the listing besides is what a map needs at once and cannot
+        fetch one box at a time: where each widget is, what a note says, and how
+        many cable ports it has free.
+      operationId: getWidgets
+      parameters:
+        - name: path
+          in: query
+          required: false
+          description: |
+            Keep only the widgets at this path, relative to the simulation's
+            root, e.g. `/hosts/h1`. A path is a location and not an identity: it
+            is a convenience for a caller that has a name and not an id.
+          schema: { type: string }
+      responses:
+        "200":
+          description: In order of id.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Widget" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [widgets]
+      summary: Add a device.
+      description: |
+        Only whole devices, at the top of the tree, with the few characteristics
+        that have to be settled before there is anything to configure. Everything
+        else about the new device is a property of it, edited afterwards -- which
+        is the only order that can work, since what properties it has is decided
+        by what is answered here. How many ports a switch has decides its
+        sub-widgets; whether a host has an address of its own decides whether it
+        runs a DHCP client at all.
+
+        See `/api/device-types` for the kinds there are and what each one has to
+        be told.
+
+        Leave the name out, or send an empty one, for one to be picked that
+        nothing else here answers to -- `switch-3`, or, for a cable, the names of
+        its two ends. That is the only way to be sure of a free name: one checked
+        beforehand and sent afterwards is one something else may have taken in
+        between.
+
+        A device that fails halfway through being built leaves nothing behind.
+      operationId: createWidget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type:
+                  type: string
+                  description: A `type` of `/api/device-types`.
+                name:
+                  type: string
+                  description: Empty or absent to have one picked.
+                params:
+                  type: object
+                  description: |
+                    The parameters that kind declares, by name. A parameter left
+                    out takes its declared default.
+                  additionalProperties: true
+            examples:
+              switch:
+                value: { type: "switch", name: "sw1", params: { ports: 24 } }
+              cable:
+                summary: A cable is a device like any other; its ends are widget ids
+                value: { type: "cable", params: { "end A": 12, "end B": 31 } }
+      responses:
+        "200":
+          description: The widget that was built, as `GET` would give it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Widget" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/simulations/{sim}/widgets/{widget}:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+      - $ref: "#/components/parameters/widget"
+    get:
+      tags: [widgets]
+      summary: One widget.
+      operationId: getWidget
+      responses:
+        "200":
+          description: Its relationships, its place, and the names of its properties.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Widget" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [widgets]
+      summary: Take it out of the simulation for good.
+      description: |
+        It, everything it is made of, and the cables that reached it.
+
+        Only whole devices: what cannot be built here cannot be removed here
+        either. A host's adapter is not a device, and deleting one would leave a
+        host whose port answers for a widget nobody can see. A simulation's root
+        cannot be deleted either, since it is the inventory.
+      operationId: deleteWidget
+      responses:
+        "200":
+          description: What was deleted, by full name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deleted" }
+        "400":
+          description: Not a device this interface can delete, or the root.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/simulations/{sim}/widgets/{widget}/location:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+      - $ref: "#/components/parameters/widget"
+    put:
+      tags: [widgets]
+      summary: Where it is in the world, or nowhere.
+      description: |
+        The one way to place a widget. The `latitude` and `longitude` properties
+        only read: a place is a pair, and setting one half at a time would put a
+        widget somewhere nobody asked for.
+
+        A body of `null` takes it off the map. `POST` does the same thing.
+      operationId: setLocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/Location"
+                - type: "null"
+      responses:
+        "200":
+          description: The widget, as the move left it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Widget" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [widgets]
+      summary: As PUT.
+      operationId: postLocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/Location"
+                - type: "null"
+      responses:
+        "200":
+          description: As PUT.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Widget" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  #
+  # Properties
+  #
+
+  /api/simulations/{sim}/widgets/{widget}/properties:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+      - $ref: "#/components/parameters/widget"
+    get:
+      tags: [properties]
+      summary: Every property of a widget, with its value read now.
+      operationId: getProperties
+      responses:
+        "200":
+          description: Values as of this request.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Property" }
+        "400":
+          description: A getter refused to read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/simulations/{sim}/widgets/{widget}/properties/{name}:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+      - $ref: "#/components/parameters/widget"
+      - $ref: "#/components/parameters/propertyName"
+    get:
+      tags: [properties]
+      summary: One property.
+      operationId: getProperty
+      responses:
+        "200":
+          description: Its value, read now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Property" }
+        "400":
+          description: The getter refused to read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [properties]
+      summary: Set it.
+      description: |
+        The body is the value, as JSON: `42.5` for a number, `"eth0"` for a
+        string, `null` for an absent one. A body that is not JSON at all is taken
+        to be a bare string, so a value typed by hand at a shell prompt still
+        works. The value may also be sent as a `value` query parameter, so that a
+        plain HTML form can be used.
+
+        A property may be settable only at times: a recorder's file name takes
+        one only while it has no file. Sending `null` is how such a property is
+        made to give up what it is holding, and is accepted even then -- what
+        `null` means is the setter's business.
+
+        `POST` does the same thing.
+      operationId: setProperty
+      parameters:
+        - name: value
+          in: query
+          required: false
+          description: The value, when it is not in the body.
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              description: Whatever the property's kind says it is.
+            examples:
+              number: { value: 0.01 }
+              string: { value: "eth0" }
+              clear: { value: null }
+      responses:
+        "200":
+          description: The property, read back after the change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Property" }
+        "400":
+          description: The setter refused the value; the message says why.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          description: Read only, or not settable just now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      tags: [properties]
+      summary: As PUT.
+      operationId: postProperty
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              description: Whatever the property's kind says it is.
+      responses:
+        "200":
+          description: As PUT.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Property" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "405":
+          description: Read only, or not settable just now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/simulations/{sim}/widgets/{widget}/properties/{name}/history:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+      - $ref: "#/components/parameters/widget"
+      - $ref: "#/components/parameters/propertyName"
+    get:
+      tags: [properties]
+      summary: What a metric has been worth.
+      description: |
+        One list of points per parameter row, oldest first, as the simulation
+        sampled them into its ring.
+
+        Poll with the `cursor` the last answer gave to ask for exactly what is
+        missing. Ask with no `since` at all for the whole history that is kept.
+
+        `now` and `rate` come along because a plot needs to know where the
+        present is and how far apart the points were meant to be: a gap wider
+        than the rate is a simulation that had nothing to do, not points that
+        went missing.
+
+        Only properties of kind `metric` have a history; anything else is a 400.
+      operationId: getPropertyHistory
+      parameters:
+        - $ref: "#/components/parameters/since"
+      responses:
+        "200":
+          description: The points taken strictly after `since`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MetricHistory" }
+        "400":
+          description: Not a metric.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  #
+  # Logs
+  #
+
+  /api/simulations/{sim}/widgets/{widget}/logs:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+      - $ref: "#/components/parameters/widget"
+    get:
+      tags: [logs]
+      summary: What a widget logged, oldest first.
+      description: |
+        Poll with the `cursor` the last answer gave. `since` is exclusive, and
+        one timestamp is one dispatch, which cannot be delivered by halves.
+
+        The per-widget queues are small. `lost` says that something logged after
+        `since` has since been overwritten: a window that quietly stopped showing
+        lines would claim a continuity it does not have. It is a flag and not a
+        count because what a reader can do about it is the same either way --
+        slow the simulation down.
+      operationId: getLogs
+      parameters:
+        - $ref: "#/components/parameters/since"
+        - name: level
+          in: query
+          required: false
+          description: How deep to go. Everything at this level and above it.
+          schema:
+            $ref: "#/components/schemas/LogLevel"
+      responses:
+        "200":
+          description: The messages logged strictly after `since`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Logs" }
+        "400":
+          description: No such level.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  #
+  # Catalogue
+  #
+
+  /api/device-types:
+    get:
+      tags: [catalogue]
+      summary: What can be built, and what each kind has to be told.
+      description: |
+        Independent of any simulation: the same catalogue builds into all of
+        them.
+
+        Parameters are described in the same `kind` vocabulary properties are, so
+        that the dialog offering them is rendered by the code the property panel
+        already has.
+      operationId: getDeviceTypes
+      responses:
+        "200":
+          description: In the order the interface offers them.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DeviceType" }
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  #
+  # Pcap library
+  #
+
+  /api/pcaps:
+    get:
+      tags: [pcaps]
+      summary: The capture library.
+      description: |
+        Where the recorders write and the replayers read. It belongs to no
+        simulation -- there is one of it, and every simulation's widgets name
+        files in it -- which is why it hangs off `/api` directly.
+      operationId: getPcaps
+      responses:
+        "200":
+          description: Every capture, and what an upload may weigh.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [files, max_upload]
+                properties:
+                  files:
+                    type: array
+                    items: { $ref: "#/components/schemas/PcapEntry" }
+                  max_upload:
+                    type: integer
+                    description: |
+                      The largest body `PUT` will write, in bytes. Said here
+                      rather than left to be discovered by being refused: the
+                      interface stops a file that is too big before sending it,
+                      which is the only moment at which the limit does any good.
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /api/pcaps/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: |
+          The file's name in the library, url-encoded. It names a file in the
+          library and nowhere else: a name with a `/` in it is refused, which is
+          what keeps a caller from walking out.
+        schema: { type: string }
+    get:
+      tags: [pcaps]
+      summary: The bytes of one capture.
+      operationId: getPcap
+      responses:
+        "200":
+          description: |
+            The file, as an attachment under the name it has in the library.
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+              description: |
+                `attachment`, with the name given twice as RFC 6266 has it.
+          content:
+            application/vnd.tcpdump.pcap:
+              schema: { type: string, format: binary }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [pcaps]
+      summary: Add a capture, or replace one.
+      description: |
+        The body is the file. `POST` does the same thing.
+
+        A file a widget has open is not one to write over: the recorder writing
+        it would go on writing to a file nobody can find any more.
+      operationId: putPcap
+      requestBody:
+        required: true
+        content:
+          application/vnd.tcpdump.pcap:
+            schema: { type: string, format: binary }
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: |
+            The entry as the library now holds it -- or just its name, when what
+            was written cannot be read back as a capture.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: "#/components/schemas/PcapEntry"
+                  - type: object
+                    required: [name]
+                    properties:
+                      name: { type: string }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: A widget has it open.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: Larger than `max_upload`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      tags: [pcaps]
+      summary: As PUT.
+      operationId: postPcap
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: As PUT.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: "#/components/schemas/PcapEntry"
+                  - type: object
+                    properties:
+                      name: { type: string }
+        "409":
+          description: A widget has it open.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: Larger than `max_upload`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [pcaps]
+      summary: Take a capture out of the library.
+      description: A file a widget has open is not one to delete.
+      operationId: deletePcap
+      responses:
+        "200":
+          description: What was deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deleted" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A widget has it open.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+
+  parameters:
+
+    sim:
+      name: sim
+      in: path
+      required: true
+      description: The simulation's id, as `/api/simulations` gives it.
+      schema: { type: integer, minimum: 0 }
+
+    widget:
+      name: widget
+      in: path
+      required: true
+      description: |
+        The widget's id, which is stable: names are not unique and a widget can
+        be moved.
+      schema: { type: integer, minimum: 0 }
+
+    propertyName:
+      name: name
+      in: path
+      required: true
+      description: |
+        The property's name, url-encoded. Names are unique within a widget and
+        readable enough to serve as identifiers, so they are used as they are --
+        spaces and all.
+      schema: { type: string }
+      example: "error rate"
+
+    since:
+      name: since
+      in: query
+      required: false
+      description: |
+        A `cursor` from a previous answer. What comes back is what was taken
+        strictly after it. Opaque: hand it back exactly as it was given, and
+        never build one out of a `t`.
+      schema: { type: string }
+      example: "341274300000309267"
+
+  responses:
+
+    ServerError:
+      description: |
+        Something in the simulator raised where it was not expected to. Every
+        operation can answer this; it is spelled out only where nothing else can
+        go wrong.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+    SimulationState:
+      description: The simulation, as the action left it.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Simulation" }
+
+    BadRequest:
+      description: |
+        Refused. Anything a getter or a setter raises arrives here with its own
+        message.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+    NotFound:
+      description: No such simulation, widget, property or file.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+
+    Error:
+      type: object
+      description: |
+        How everything under `/api` reports a failure. The status is in the body
+        as well as in the response, so that a caller reading one JSON document
+        per request needs no special case for errors.
+
+        A path matching no route at all never reaches this API and comes back as
+        `404 text/plain` instead.
+      required: [status, error]
+      properties:
+        status: { type: integer }
+        error: { type: string }
+      examples:
+        - status: 400
+          error: 'Cannot set property "error rate" to 2: must be between 0 and 1'
+
+    Deleted:
+      type: object
+      description: What went away, named.
+      required: [deleted]
+      properties:
+        deleted: { type: string }
+
+    Refused:
+      type: array
+      description: |
+        The properties a document asked for that would not take, each with the
+        reason. The network is still the one that was asked for, which is why
+        these come back beside it rather than instead of it.
+      items: { type: string }
+
+    SimTime:
+      type: number
+      description: |
+        An instant, in seconds of simulated time since the simulation began. Add
+        the simulation's `epoch` to get a wall-clock date. For reading, not for
+        asking with: see `Cursor`.
+
+    Interval:
+      type: number
+      description: A duration, in seconds.
+
+    Cursor:
+      type: [string, "null"]
+      description: |
+        Where a reader has got to: picoseconds since the simulation began,
+        written out because a JSON number is a double wherever it is read, and a
+        double has not a bit for every picosecond once a clock is an hour or two
+        in. A picosecond early is the last message served again on every poll; a
+        picosecond late is the next one silently lost.
+
+        Null when the reader is nowhere -- a widget that has never logged, a
+        metric nothing has been written down about -- and the next call then asks
+        for everything again.
+
+    Simulation:
+      type: object
+      description: A clock, a realtime flag and a widget tree, running in its own thread.
+      required:
+        - id
+        - name
+        - root
+        - now
+        - epoch
+        - now_str
+        - realtime
+        - speed_ratio
+        - late
+        - running
+        - paused
+        - paused_total
+        - pending_events
+        - unsaved
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        root:
+          type: integer
+          description: |
+            The id of the root widget. The tree under it is the whole inventory;
+            there is no table of widgets beside it.
+        now: { $ref: "#/components/schemas/SimTime" }
+        epoch:
+          type: number
+          description: |
+            Where the world outside was when this simulation began, in seconds
+            since the Unix epoch. What a reader adds to any instant of this
+            simulation to get a date. One left to run as fast as it can is not at
+            the reader's date, which is why this has to be said.
+        now_str:
+          type: string
+          description: The same instant as `now`, written out, for a reader rather than a plot.
+        realtime:
+          type: boolean
+          description: |
+            Whether it follows the wall clock. A simulation with a portal in it
+            is turned realtime by that portal, and there is no way back off it.
+        speed_ratio:
+          type: [number, "null"]
+          description: |
+            How many seconds of simulated time to a second of wall clock. Null is
+            as fast as it can, and is what a realtime simulation reports too: its
+            speed is not ours to choose.
+        late:
+          allOf: [ { $ref: "#/components/schemas/Interval" } ]
+          description: How far behind the pace it is asked to keep.
+        running:
+          type: boolean
+          description: Whether its thread is going round.
+        paused: { type: boolean }
+        paused_total:
+          allOf: [ { $ref: "#/components/schemas/Interval" } ]
+          description: |
+            The wall-clock time spent paused, accumulated and subtracted when
+            synchronising, so that resuming does not make simulated time leap
+            forward and fire every pending event at once.
+        pending_events:
+          type: integer
+          description: How many events are scheduled and not yet run.
+        unsaved:
+          type: boolean
+          description: |
+            Whether its network has been changed since it was last written out or
+            read in, which is what says if there is anything to save. Only what
+            came through this API is counted: a program building a network is not
+            asked whether it wants to keep it.
+
+    Location:
+      type: object
+      description: Where a widget is in the world.
+      required: [lat, lon]
+      properties:
+        lat: { type: number, description: Degrees north of the equator. }
+        lon: { type: number, description: Degrees east of Greenwich. }
+
+    Peer:
+      type: object
+      description: |
+        A widget this one is joined to, and what joins them. For two devices at
+        the ends of a cable, `via` is the cable: the cable *is* the link, so
+        deleting it drops the peering entirely.
+      required: [widget, via]
+      properties:
+        widget: { type: integer }
+        via: { type: [integer, "null"] }
+
+    Widget:
+      type: object
+      description: |
+        A node of a simulation's tree. The relationships are nominal, to help
+        visualisation and navigation; the simulator proper does not use them.
+      required:
+        - id
+        - sim
+        - name
+        - full_name
+        - parent
+        - children
+        - peers
+        - device
+        - deletable
+        - ports
+        - free_ports
+        - location
+        - text
+        - properties
+      properties:
+        id:
+          type: integer
+          description: Stable for the life of the widget, and unique within its simulation.
+        sim: { type: integer }
+        name:
+          type: string
+          description: |
+            A label, not an identifier: not unique, and never disambiguated. Must
+            not contain `/`, so that `full_name` stays parsable.
+        full_name:
+          type: string
+          description: Its path from the root, for display. A location, not an identity.
+        parent: { type: [integer, "null"] }
+        children:
+          type: array
+          items: { type: integer }
+        peers:
+          type: array
+          items: { $ref: "#/components/schemas/Peer" }
+        device:
+          type: [string, "null"]
+          description: |
+            What kind of device this is when it is a whole one, named as
+            `/api/device-types` names it. Null for a part of a device -- an
+            adapter, an interface -- and for a kind this API cannot build.
+        deletable:
+          type: boolean
+          description: |
+            Whether `DELETE` will remove it, which is not the same question: the
+            repeater inside a switch is a repeater, and still not something to be
+            taken out on its own.
+        ports:
+          type: integer
+          description: |
+            How many cables it takes. Zero for most widgets, which are not things
+            a cable reaches: offering ports is a claim to be the end a cable
+            should be remembered by.
+        free_ports:
+          type: integer
+          description: |
+            How many of those are still free. Two numbers rather than one answer
+            per port: a device may have a great many, this listing is polled, and
+            "is there room on it" is the whole of what is asked.
+        location:
+          oneOf:
+            - $ref: "#/components/schemas/Location"
+            - type: "null"
+          description: |
+            Null for the great many widgets that are nowhere, which the map
+            places itself. Set it through `/location`, never through the
+            read-only `latitude` and `longitude` properties.
+        text:
+          type: [string, "null"]
+          description: |
+            What it says, when it is a note and says something. Here rather than
+            fetched per note because the map draws a note rather than merely
+            naming it, and a text fetched after the listing would arrive after the
+            map was drawn.
+        properties:
+          type: array
+          description: |
+            The names only. Values are live and this listing is not, so they are a
+            separate request.
+          items: { type: string }
+
+    Kind:
+      type: object
+      description: |
+        What a value looks like, so that an interface can offer the right input
+        and refuse nonsense before submitting it. Authoritative and present
+        before there is any value to inspect, which is why it does not merely
+        repeat the value's JSON type -- and why it can say what JSON cannot: a
+        range's bounds, an enum's choices, the shape of a record.
+
+        Shared by a widget's properties and by the parameters a device is built
+        from: the dialog that asks for the one is the panel that edits the other.
+
+        Any kind may carry a `placeholder` besides: an example of how the value
+        is written, or what leaving it out will do.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum:
+            - string
+            - text
+            - filename
+            - int
+            - float
+            - bool
+            - enum
+            - set
+            - range
+            - metric
+            - widget
+            - optional
+            - list
+            - record
+          description: |
+            * `string` -- on a line.
+            * `text` -- the same string, in a box.
+            * `filename` -- a string naming a file of the pcap library, with the
+              download offered beside it.
+            * `int`, `float`, `bool`.
+            * `enum` -- one of `choices`; the value is the choice's place.
+            * `set` -- any number of `choices`; the value is the places of the
+              ticked ones.
+            * `range` -- a number between `min` and `max`; `int` says whether the
+              input must step by ones.
+            * `metric` -- a counter, gauge, atomic or timed. Which one is said by
+              the value itself, and by `/history`.
+            * `widget` -- another widget of the same simulation, by id.
+            * `optional` -- what is in `of`, or null.
+            * `list` -- any number of what is in `of`.
+            * `record` -- the named values in `fields`, in the order they are to
+              be laid out.
+        choices:
+          type: array
+          description: For `enum` and `set`, in the order that gives each one its place.
+          items: { type: string }
+        int:
+          type: boolean
+          description: "For `range`: whether only whole numbers are acceptable."
+        min:
+          type: [number, "null"]
+          description: |
+            For `range`. Null means unbounded: an infinity is not representable
+            in JSON, and `max_int` is both meaningless as a slider end and beyond
+            what a JSON number carries exactly.
+        max:
+          type: [number, "null"]
+          description: For `range`. Null means unbounded.
+        of:
+          allOf: [ { $ref: "#/components/schemas/Kind" } ]
+          description: "For `optional` and `list`: what is inside."
+        fields:
+          type: array
+          description: |
+            For `record`, in the order they are to be laid out. An array and not
+            an object, since JSON says nothing about the order of an object's
+            keys and that order is what the columns are.
+          items:
+            type: object
+            required: [name, kind]
+            properties:
+              name: { type: string }
+              kind: { $ref: "#/components/schemas/Kind" }
+        placeholder:
+          type: string
+          description: What an empty input shows.
+
+    Property:
+      type: object
+      description: |
+        One thing a widget can be asked or told, with its value read at the
+        moment of the request.
+      required: [name, descr, units, read_only, only_when_set, kind, value]
+      properties:
+        name:
+          type: string
+          description: |
+            Unique within the widget, and used as-is in the URL (url-encoded).
+        descr: { type: string }
+        units:
+          type: string
+          description: |
+            What the figure is counted in, if anything. Empty is a property with
+            nothing to add to its number.
+        read_only:
+          type: boolean
+          description: |
+            Now, that is. A property may be settable only at times -- a recorder's
+            file name takes one only while it has no file -- so this is asked
+            afresh on every read.
+        only_when_set:
+          type: boolean
+          description: |
+            Whether a row of the property panel is worth spending on this when it
+            reads as nothing. Absence usually says something, which is why this is
+            rare: it is for the properties every widget carries whether or not
+            they mean anything for it, such as where it is on the map. Said even
+            when there is a value to show, so that what the interface does with a
+            property does not depend on the moment it asked.
+        kind: { $ref: "#/components/schemas/Kind" }
+        value:
+          description: |
+            Whatever the property is, at whatever JSON type it is: a number stays
+            a number, so there is nothing to parse and nothing to guess. What
+            shape it has is said by `kind`.
+          anyOf:
+            - $ref: "#/components/schemas/Metric"
+              description: For kind `metric`.
+            - description: For every other kind.
+
+    DeviceType:
+      type: object
+      description: One entry of the catalogue of what can be built.
+      required: [type, descr, params]
+      properties:
+        type:
+          type: string
+          description: |
+            What to send as `type` when creating a widget, and what a widget's
+            `device` reads as.
+          examples: [host, switch, hub, router, gateway, portal, recorder, replayer, cable, note]
+        descr: { type: string }
+        params:
+          type: array
+          description: |
+            What this kind has to be told, once, when it is built. Only what has
+            to be settled before there is anything to configure: everything else
+            is a property, edited afterwards.
+          items:
+            type: object
+            required: [name, descr, units, kind, placeholder, default]
+            properties:
+              name: { type: string }
+              descr: { type: string }
+              units: { type: string }
+              kind: { $ref: "#/components/schemas/Kind" }
+              placeholder:
+                type: string
+                description: |
+                  What an empty input shows: an address of the shape expected, or
+                  what leaving the parameter out will do. Only ever seen by a
+                  parameter with no default, since a default fills the input in.
+              default:
+                description: |
+                  What the dialog offers before anything is typed, and what is
+                  used when the parameter is left out. Null for a parameter with
+                  no value of its own.
+
+    Topology:
+      type: object
+      description: |
+        A network, as a document one saves and opens again. What it holds is the
+        network and not the simulation: no clock, no counters, nothing that was
+        running.
+
+        Written indented when saved to a file, since it is meant to be read and
+        edited by hand as much as by the interface.
+      required: [version, name, devices]
+      properties:
+        version:
+          type: integer
+          description: |
+            Bumped only when a document written by an older robinet would be read
+            wrongly rather than merely incompletely, which is the only kind of
+            change a reader cannot absorb on its own. Currently 1.
+        name:
+          type: string
+          description: |
+            What the network is called: the name of the simulation it was saved
+            from, and no more than a label. Loading does not rename anything.
+        devices:
+          type: array
+          description: In the order they must be built, which is the order they were built in.
+          items:
+            type: object
+            required: [type, path, at, params, properties]
+            properties:
+              type:
+                type: string
+                description: The catalogue entry that builds this.
+              path:
+                type: string
+                description: |
+                  Where it sits, relative to the simulation's root: the file
+                  describes a network and not one instance of one, and must load
+                  into a simulation of another name. The last component is the
+                  device's own name, the rest its parent.
+              at:
+                oneOf:
+                  - $ref: "#/components/schemas/Location"
+                  - type: "null"
+                description: |
+                  Where it is in the world. Beside the properties rather than
+                  within them, because a place is not something a device is
+                  configured with.
+              params:
+                type: object
+                description: |
+                  The parameters its catalogue entry declares, as they were
+                  coerced when it was built -- with, for a device that had a
+                  choice to make, the choice it made rather than the freedom it
+                  was given.
+                additionalProperties: true
+              properties:
+                type: object
+                description: |
+                  Every property that can be set, of the device and of each of its
+                  parts, keyed by the path of the widget that carries it relative
+                  to the device itself -- the empty string being the device. The
+                  parts too, because that is where the configuration lives: a
+                  switch's speeds are on its interfaces, a router's addresses on
+                  its adapters.
+                additionalProperties:
+                  type: object
+                  additionalProperties: true
+
+    LogLevel:
+      type: string
+      enum: [fatal, critical, error, warning, info, debug]
+      description: |
+        In order of depth. Asking for one asks for it and everything above it.
+
+    Logs:
+      type: object
+      required: [now, cursor, widget, lost, messages]
+      properties:
+        now: { $ref: "#/components/schemas/SimTime" }
+        cursor: { $ref: "#/components/schemas/Cursor" }
+        widget: { type: integer }
+        lost:
+          type: boolean
+          description: |
+            Something logged after `since` has since been overwritten. The queues
+            are small, and a window that just stopped showing lines without saying
+            so would claim a continuity it does not have.
+        messages:
+          type: array
+          description: Oldest first.
+          items:
+            type: object
+            required: [t, level, text]
+            properties:
+              t: { $ref: "#/components/schemas/SimTime" }
+              level: { $ref: "#/components/schemas/LogLevel" }
+              text: { type: string }
+
+    MetricParams:
+      type: object
+      description: |
+        What distinguishes one row of a metric from another: the parameters of
+        the events it counts, such as a port number or a direction. Usually
+        empty, which is a metric with a single row.
+      additionalProperties:
+        type: [boolean, integer, string]
+
+    MetricFirstLast:
+      type: [object, "null"]
+      description: |
+        When the metric was first and last touched. Null while it has never
+        fired: "never" and "at the epoch" are not the same statement.
+      properties:
+        first: { $ref: "#/components/schemas/SimTime" }
+        last: { $ref: "#/components/schemas/SimTime" }
+
+    MetricTable:
+      type: array
+      description: |
+        A metric is a family, keyed by the parameters of its events. A JSON
+        object cannot hold that, its keys being strings, so the table travels as
+        a list of the pairs it holds.
+      items:
+        type: object
+        required: [params, value]
+        properties:
+          params: { $ref: "#/components/schemas/MetricParams" }
+          value: {}
+
+    GaugeValue:
+      type: object
+      description: |
+        `min` and `max` are the extremes since the metric was last reset, which
+        is what a reader looking at the figures wants. `sample_min` and
+        `sample_max` are those of the window that began when the metric was last
+        sampled, which is what a plot of the interval between two points wants
+        instead: the others only ever widen, and a band drawn from them would
+        swallow the plot within a minute.
+      required: [min, current, max, sample_min, sample_max]
+      properties:
+        min: { type: integer }
+        current: { type: integer }
+        max: { type: integer }
+        sample_min: { type: integer }
+        sample_max: { type: integer }
+
+    Duration:
+      type: object
+      description: |
+        How long something took, over however many times it was measured. As for
+        a gauge, `min` and `max` are since the last reset and the `sample_` pair
+        is the window since the last sample -- null when nothing at all was
+        measured in it, which is not a duration of zero.
+      required: [min, max, sum, count, sample_min, sample_max]
+      properties:
+        min: { $ref: "#/components/schemas/Interval" }
+        max: { $ref: "#/components/schemas/Interval" }
+        sum: { $ref: "#/components/schemas/Interval" }
+        count: { type: integer }
+        sample_min: { type: [number, "null"] }
+        sample_max: { type: [number, "null"] }
+
+    MetricAtomic:
+      type: object
+      description: How many times something happened.
+      required: [kind, counts, first_last]
+      properties:
+        kind: { type: string, const: atomic }
+        counts: { $ref: "#/components/schemas/MetricTable" }
+        first_last: { $ref: "#/components/schemas/MetricFirstLast" }
+
+    MetricCounter:
+      type: object
+      description: How much of something there has been.
+      required: [kind, values, fired]
+      properties:
+        kind: { type: string, const: counter }
+        values: { $ref: "#/components/schemas/MetricTable" }
+        fired:
+          allOf: [ { $ref: "#/components/schemas/MetricAtomic" } ]
+          description: |
+            How many times it was added to, which is not the same statement as
+            the total.
+
+    MetricGauge:
+      type: object
+      description: Some current capacity, which can go down as well as up.
+      required: [kind, values, first_last]
+      properties:
+        kind: { type: string, const: gauge }
+        values: { $ref: "#/components/schemas/MetricTable" }
+        first_last: { $ref: "#/components/schemas/MetricFirstLast" }
+
+    MetricTimed:
+      type: object
+      description: |
+        How long something takes. The three metrics beside the durations are
+        bookkeeping and are not offered as properties of their own.
+      required: [kind, durations, starts, stops, simult]
+      properties:
+        kind: { type: string, const: timed }
+        durations: { $ref: "#/components/schemas/MetricTable" }
+        starts: { $ref: "#/components/schemas/MetricAtomic" }
+        stops: { $ref: "#/components/schemas/MetricAtomic" }
+        simult:
+          allOf: [ { $ref: "#/components/schemas/MetricGauge" } ]
+          description: How many are running right now.
+
+    Metric:
+      description: |
+        The value of a property of kind `metric`: everything the metric holds
+        right now. `kind` says which of the four it is, and a metric never
+        changes kind, so it is what tells an interface how to display one before
+        and independently of its figures.
+      oneOf:
+        - $ref: "#/components/schemas/MetricAtomic"
+        - $ref: "#/components/schemas/MetricCounter"
+        - $ref: "#/components/schemas/MetricGauge"
+        - $ref: "#/components/schemas/MetricTimed"
+      discriminator:
+        propertyName: kind
+        mapping:
+          atomic: "#/components/schemas/MetricAtomic"
+          counter: "#/components/schemas/MetricCounter"
+          gauge: "#/components/schemas/MetricGauge"
+          timed: "#/components/schemas/MetricTimed"
+
+    MetricPoint:
+      type: object
+      required: [t, value]
+      properties:
+        t:
+          allOf: [ { $ref: "#/components/schemas/SimTime" } ]
+          description: |
+            For reading, not for asking with: poll with the answer's `cursor`
+            instead.
+        value:
+          description: |
+            What the metric was worth then: the bare figures, and not what
+            surrounds them. An integer for an `atomic` or a `counter`, a
+            `GaugeValue` for a `gauge`, a `Duration` for a `timed` -- the same
+            shapes a live metric's figures arrive in, so a point and a current
+            value read alike.
+          oneOf:
+            - type: integer
+            - $ref: "#/components/schemas/GaugeValue"
+            - $ref: "#/components/schemas/Duration"
+
+    MetricHistory:
+      type: object
+      required: [now, cursor, rate, kind, units, series]
+      properties:
+        now:
+          allOf: [ { $ref: "#/components/schemas/SimTime" } ]
+          description: Where the present is, so that a plot knows where to stop.
+        cursor: { $ref: "#/components/schemas/Cursor" }
+        rate:
+          allOf: [ { $ref: "#/components/schemas/Interval" } ]
+          description: |
+            How far apart the points were meant to be. A gap wider than this is a
+            simulation that had nothing to do, not points that went missing.
+        kind:
+          type: string
+          enum: [atomic, counter, gauge, timed]
+          description: Which sort of metric, and so how to read a point's value.
+        units: { type: string }
+        series:
+          type: array
+          description: One list of points per parameter row.
+          items:
+            type: object
+            required: [params, points]
+            properties:
+              params: { $ref: "#/components/schemas/MetricParams" }
+              points:
+                type: array
+                description: Oldest first.
+                items: { $ref: "#/components/schemas/MetricPoint" }
+
+    PcapEntry:
+      type: object
+      required: [name, size, mtime, dlt, dlt_name, snaplen, held_by]
+      properties:
+        name: { type: string }
+        size: { type: integer, description: In bytes. }
+        mtime:
+          type: number
+          description: |
+            Seconds since the Unix epoch, as the filesystem keeps it: real time
+            and not any simulation's, since a file outlives the run that wrote
+            it.
+        dlt:
+          type: integer
+          description: The link type the capture's header declares.
+        dlt_name: { type: string }
+        snaplen: { type: integer }
+        held_by:
+          type: [object, "null"]
+          description: |
+            The widget that has it open, if one has. A file being recorded is
+            still growing, and one being replayed is being read from: neither is a
+            file to delete or write over. Read off the widgets themselves rather
+            than kept in a register, so a capture a program opened counts as much
+            as one opened from here.
+          properties:
+            sim: { type: integer }
+            id: { type: integer }
+            name: { type: string, description: The widget's full name. }
+            device: { type: [string, "null"] }
