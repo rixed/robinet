@@ -60,8 +60,11 @@ let simul_webperf sim avg_group_size num_groups _duration ifname nameserver url 
     (* Power on everything: *)
     Log.(log logger Info (lazy "Starting browser on each host...")) ;
     Sim.Net.iter_equipments (function
-        Sim.Net.Equipment.Host h -> h.Host.power_on ~on_ip:(client_init url) ()
-        | _ -> ()
+        Sim.Net.Equipment.Host h ->
+            h.on_ip <- client_init url :: h.on_ip ;
+            h.Host.power_on ()
+        | _ ->
+            ()
     ) net
 
 let main =

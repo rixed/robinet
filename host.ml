@@ -24,8 +24,6 @@
   These makes the link between the network and programs such as browsers or http
   servers (see {!Browser} and {!Opache}).
 
-  Hosts also comes with a logger (see {!Log}).
-
   See also {!Localhost} for a special kind of host that's running on top of
   guest system real IP stack.
 *)
@@ -62,16 +60,11 @@ type host_trx = {
     signal_err    : string -> unit ;
     dev           : dev ; (* as seen from the outside *)
     arp_set       : Ip.Addr.t -> Eth.Addr.t option -> unit ;
-    power_on      : ?on_ip:(t -> unit) -> unit -> unit ;
+    (* List of things to do once this host gets its IP address *)
+    mutable on_ip : (t -> unit) list ;
+    (* Powering on-or off the host: *)
+    power_on      : unit -> unit ;
     power_off     : unit -> unit ;
-    (* The two halves of a power cycle, without the power: [start] runs the
-     * host's initialisation, [reset] throws away the state a cut invalidates.
-     * They are for whoever *shares* this host's supply with other hosts and
-     * therefore has to switch the supply itself, once for all of them -- a
-     * router does, its admin hosts being interfaces of the same box. A host
-     * that has a supply of its own wants [power_on] and [power_off]. *)
-    start         : ?on_ip:(t -> unit) -> unit -> unit ;
-    reset         : unit -> unit ;
     (* This host's power supply, which everything it schedules draws from: its
      * adapter, its sockets, its timers, and whatever process runs on it.
      * Switching it off is all there is to powering the host down -- what it
@@ -628,21 +621,17 @@ let set_ip t my_ip netmask =
                     sim.Simulation.root.Widget.children))
  *)
 
-(* A host with no configuration of its own to apply is somebody else's
-   adapter that it speaks through, and whoever owns that adapter hands it its
-   packets. Calling [set_ip] here would have it read the wire as well, which
-   is exactly what a router's admin host must not do. *)
-let init_nothing ?(on_ip:(t -> unit) option) (_t : t) =
-    ignore on_ip
-
-let init_static ?on_ip t =
+let init_static t =
     match t.static_ip with
     | Some static_ip ->
         (* A static address given without a netmask is a host that knows only
            itself: everything else is reached through a gateway. *)
         set_ip t static_ip (t.netmask |? Ip.Addr.all_ones) ;
         (* TODO: Send a gratuitous ARP request? *)
-        Option.may (fun on_ip -> Simulation.asap t.trx.power on_ip t) on_ip
+        (* Note: even if on_ip is unset, it might be set before [asap]! *)
+        Simulation.asap t.trx.power (fun () ->
+            List.iter (fun f -> f t) t.trx.on_ip
+        ) ()
     | None ->
         (* [init] sends a host here only with one. *)
         assert false
@@ -697,7 +686,7 @@ let apply_lease t (dhcp : Dhcp.Pdu.t) =
             (cur_host_name t)))) ;
     set_ip t dhcp.yiaddr netmask
 
-let init_dhcp ?on_ip t =
+let init_dhcp t =
     (* Will receive all eth frames until we got an IP address *)
     let dhcp_client bits = (match Ip.Pdu.unpack bits with
         | Error s ->
@@ -728,8 +717,9 @@ let init_dhcp ?on_ip t =
                             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.src)))) ;
                             apply_lease t dhcp ;
                             (* TODO: Send a gratuitous ARP request? *)
-                            Option.may (fun on_ip ->
-                                Simulation.asap t.trx.power on_ip t) on_ip
+                            Simulation.asap t.trx.power (fun () ->
+                                List.iter (fun f -> f t) t.trx.on_ip
+                            ) ()
                         | Ok (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; message ; _ })
                           when op = Dhcp.MsgType.nack ->
                             (* Nothing to do but keep asking, which the
@@ -807,7 +797,11 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
        applies is a fact about the host as it stands, and the reader may have
        changed it since. *)
     and init () =
-        if not t.own_ip_config then init_nothing
+        (* A host with no configuration of its own to apply is somebody else's
+           adapter that it speaks through, and whoever owns that adapter hands it its
+           packets. Calling [set_ip] here would have it read the wire as well, which
+           is exactly what a router's admin host must not do. *)
+        if not t.own_ip_config then ignore
         else if t.static_ip = None then init_dhcp
         else init_static
     and host_trx =
@@ -826,26 +820,25 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
           signal_err    = (fun str -> signal_err t str) ;
           (* This call is needed by dhcpd servers running on this host: *)
           arp_set       = (fun ip haddr_opt -> if_on t "arp_set" (Eth.State.set_arp t.eth_state (Ip.Addr.to_bitstring ip)) haddr_opt) ;
+          on_ip         = [] ;
           (* Guarded rather than asserted: with a shared supply, whether the
              power is on is a fact about the box, not about this host, so
              being asked to do again what has already been done is a
              possibility rather than a mistake. *)
-          power_on      = (fun ?on_ip () ->
-                              if t.trx.power.Simulation.on then
+          power_on      = (fun () ->
+                              if t.trx.power.on then
                                   Log.(log widget.logger Debug (lazy
                                       "Ignoring power on: already on"))
                               else (
                                   Log.(log widget.logger Debug (lazy "Powering on")) ;
                                   Simulation.power_up t.trx.power ;
-                                  init () ?on_ip t
+                                  init () t
                               )) ;
           power_off     = (fun () ->
-                              if not t.trx.power.Simulation.on then
+                              if not t.trx.power.on then
                                   Log.(log widget.logger Debug (lazy
                                       "Ignoring power off: already off"))
                               else power_off t) ;
-          start         = (fun ?on_ip () -> init () ?on_ip t) ;
-          reset         = (fun () -> reset t) ;
           power }
     in
     (* No "on" property here: the switch belongs to whoever minted the supply,
@@ -867,7 +860,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
         metric_property "DNS resolutions" ~descr:"DNS resolution times."
             (Metric.Timed.T t.resolutions) ] ;
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "New host '%s'" name))) ;
-    if t.trx.power.Simulation.on then init () t ;
+    if t.trx.power.on then init () t ;
     t
 
 let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask

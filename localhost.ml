@@ -227,13 +227,11 @@ let host ?location sim =
         todo "UDP server for localhost"
     and arp_set _ _ =
         todo "set ARP table of localhost"
-    and power_on ?on_ip () =
-        ignore on_ip
-    and power_off () = ()
-    and start ?on_ip () = ignore on_ip
-    and reset () = () in
+    and power_on ?on_ip () = ignore on_ip
+    and power_off () = () in
     { Host.widget = ctx.widget ;
       tcp_connect ; udp_connect ; udp_send ; ping ;
-      gethostbyname = gethostbyname ctx ; tcp_server = tcp_server ctx ; udp_server ; signal_err ;
+      gethostbyname = gethostbyname ctx ;
+      tcp_server = tcp_server ctx ; udp_server ; signal_err ;
       dev = { write = ignore ; set_read = ignore } ;
-      arp_set ; power_on ; power_off ; start ; reset ; power = ctx.power }
+      arp_set ; on_ip = [] ; power_on ; power_off ; power = ctx.power }

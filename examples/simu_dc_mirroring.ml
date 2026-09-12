@@ -69,27 +69,28 @@ let tcp_write_continuously power ~throughput tcp_trx =
     send_next ()
 
 (* This one is supposedly provided in Sim *)
-class host _sim h = object (self)
+class host _sim (h : Host.host_trx) = object (self)
     inherit equipment
 
     method power_on =
-        h.Host.power_on ~on_ip:(fun _ -> self#powered_on) ()
+        h.on_ip <- (fun _ -> self#powered_on) :: h.on_ip ;
+        h.power_on ()
     method power_off =
-        h.Host.power_off ()
+        h.power_off ()
     method powered_on = ()
 
     method tcp_serve ~port ~throughput () =
-        h.Host.tcp_server port (fun tcp_trx ->
+        h.tcp_server port (fun tcp_trx ->
             (* TODO: Host should automatically close all established connections
              * at power-off. *)
-            tcp_write_continuously h.Host.power ~throughput tcp_trx)
+            tcp_write_continuously h.power ~throughput tcp_trx)
 
     method tcp_traffic ?src_port ?port ?(num_connections=1) ~throughput to_ =
         let random_traffic throughput = function
             | Some tcp_trx ->
-                tcp_write_continuously h.Host.power ~throughput tcp_trx
+                tcp_write_continuously h.power ~throughput tcp_trx
             | None ->
-                Log.(log h.Host.widget.logger Error (lazy "Cannot traffic"))
+                Log.(log h.widget.logger Error (lazy "Cannot traffic"))
         in
         if num_connections > 1 then
             let throughput = throughput /. (float_of_int num_connections) in
@@ -98,7 +99,7 @@ class host _sim h = object (self)
             done
         else
             let port = Option.default_delayed Tcp.Port.random port in
-            h.Host.tcp_connect to_ ?src_port port (random_traffic throughput)
+            h.tcp_connect to_ ?src_port port (random_traffic throughput)
 
     method browse ~from ~(read_time : Distribution.t) =
         (* In order to have an implicit host [h] we could either define this
@@ -107,8 +108,8 @@ class host _sim h = object (self)
          * where access require a dispatch but allows for customization from
          * child classes, which users might find useful. *)
         ignore (read_time ()) ; (* TODO *)
-        Log.(log h.Host.widget.logger Info (lazy "Starting a web browser")) ;
-        let browser = Browser.make ~parent:h.Host.widget h in
+        Log.(log h.widget.logger Info (lazy "Starting a web browser")) ;
+        let browser = Browser.make ~parent:h.widget h in
         Browser.user browser ~pause:5. 1000 from
 
     method http_serve ?port () =
@@ -130,13 +131,13 @@ class host _sim h = object (self)
 end
 
 (* DEBUG *)
-class pinger sim h = object
+class pinger sim (h : Host.host_trx) = object
     inherit host sim h
 
     method powered_on =
         let dst = Host.IPv4 (Ip.Addr.of_string "8.8.8.8") in
-        Log.(log h.Host.widget.logger Debug (lazy "Pinging!")) ;
-        h.Host.ping dst
+        Log.(log h.widget.logger Debug (lazy "Pinging!")) ;
+        h.ping dst
 end
 
 class web_client sim h = object (self)

@@ -293,8 +293,9 @@ struct
             t.used_ips <- Ip.Set.add ip t.used_ips)
 end
 
-(** [serve host ips] listen on host DHCP port and allocate the
- * given ips to any requester. *)
+(** [serve state host] listens on host DHCP port and allocate the given ips (as
+ * specified in the Dhcp.State.t) to any requester.
+ * Also adds a property in the host widget to start/stop this service *)
 let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
     let count cmd =
         let now = Simulation.Widget.now st.widget in

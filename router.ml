@@ -562,10 +562,10 @@ struct
             if on <> t.power.Simulation.on then
                 if on then (
                     Simulation.power_up t.power ;
-                    iter_admin_hosts (fun h -> h.Host.trx.Host.start ())
+                    iter_admin_hosts (fun h -> h.Host.trx.Host.power_on ())
                 ) else (
                     Simulation.power_down t.power ;
-                    iter_admin_hosts (fun h -> h.Host.trx.Host.reset ()) ;
+                    iter_admin_hosts (fun h -> h.Host.trx.Host.power_off ()) ;
                     (* Including the interfaces no admin host was built on,
                        which no [Host.reset] would have reached. *)
                     Array.iter (fun iface -> Eth.State.reset iface.eth) t.ifaces
@@ -588,7 +588,7 @@ struct
         Widget.add_properties widget Widget.[
             property "on" ~kind:Bool ~action:true
                 ~descr:"The router is powered on."
-                ~getter:(fun () -> `Bool t.power.Simulation.on)
+                ~getter:(fun () -> `Bool t.power.on)
                 ~setter:(fun v -> switch (to_bool v)) ;
             property "errors probability" ~kind:(FRange (0., 1.))
                 ~descr:"Probability to report errors with ICMP."
@@ -1015,8 +1015,9 @@ end
 type gw_trx =
     { trx : trx ;
       widget : Widget.t ;
-      dhcp_state : Dhcpd.State.t ;
-      dns_state : Named.State.t ;
+      power : Simulation.power ;
+      mutable dhcp_state : Dhcpd.State.t option ;
+      mutable dns_state : Named.State.t option ;
       nat_state : Nat.State.t }
 
 type Widget.device += T of gw_trx
@@ -1089,25 +1090,44 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     (* The entrance of the hub (iface 0) is also the entrance of the whole TRX: *)
     let in_trx = { write = (fun bits -> Hub.Repeater.write hub 0 bits) ;
                    set_read = fun f -> Hub.Repeater.set_read hub 0 f } in
+    let trx =
+        { ins = in_trx ;
+          out = out_trx.out } in
+    let power = Simulation.make_power (Simulation.of_widget widget) name in
+    let gw = { trx ; widget ; power ; dhcp_state = None ; dns_state = None ;
+               nat_state } in
     (* Now prepare the services that will run on the host [h]: *)
     (* TODO: local named could serve the local names according to the dhcp
      * leases and hostname options *)
     (* [nameserver] is the nameserver for the gateway but the nameserver for the
      * local machines is the gateway itself: *)
-    let dns = srv_ip
-    and dhcp_range =
+    (* TODO: save this dhcp_range into the state, and make it an editable property
+     * so that we can change the range and restart dhcpd. *)
+    let dhcp_range =
         Option.default_delayed (fun () ->
+            (* Default range: from first available IP to the all-ones: *)
             [ Enum.get_exn local_ips, Ip.Cidr.all1s_addr local_cidr ]
         ) dhcp_range in
-    let dhcp_state =
-        Dhcpd.State.make ~netmask ~broadcast ~gw:gw_ip ?mtu:dhcp_mtu ~dns
-                         ?lease_time_sec ~parent:h.trx.widget dhcp_range in
-    (* TODO: register a callback when leasing/releasing that updates the dns lookup function *)
-    Dhcpd.serve dhcp_state h.trx ;
-    let dns_state = Named.State.make ~parent:h.trx.widget (fun _ -> None) in (* Delegate everything to nameserver *)
-    (* FIXME: revisit that! Here we want a table (state must not contain functions
-     * because we want to be able to serialize them) *)
-    Named.serve dns_state h.trx ;
+    let start_dhcpd gw =
+        (* Get from the host what could be edited there (TODO: dhcp_mtu,
+         * lease_time_sec etc could also be part of the config) *)
+        let netmask = h.netmask in
+        let st =
+            Dhcpd.State.make
+                ?netmask ~broadcast ~gw:gw_ip ?mtu:dhcp_mtu ~dns:srv_ip
+                ?lease_time_sec ~parent:h.trx.widget dhcp_range in
+        gw.dhcp_state <- Some st ;
+        (* TODO: register a callback when leasing/releasing that updates the dns lookup function *)
+        Dhcpd.serve st h.trx in
+    let start_dns gw =
+        let st =
+            Named.State.make ~parent:h.trx.widget (fun _ -> None) in (* Delegate everything to nameserver *)
+        gw.dns_state <- Some st ;
+        (* FIXME: revisit that! Here we want a table (state must not contain functions
+         * because we want to be able to serialize them) *)
+        Named.serve st h.trx in
+    (* Make the host [h] start dhcpd and dns when it is powered on: *)
+    h.trx.on_ip <- (fun _h -> start_dhcpd gw ; start_dns gw) :: h.trx.on_ip ;
     Widget.add_properties widget Widget.[
         property "nat-max-cnxs" ~kind:Int
             ~descr:"Max number of connections tracked by the NAT."
@@ -1134,11 +1154,22 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
             match n with
             | 0 -> (Router.ports router.ifaces.(1)).set_capabilities 0 c
             | _ -> hub.widget.ports.set_capabilities 0 c) } ;
-    let trx =
-        { ins = in_trx ;
-          out = out_trx.out } in
-    let gw = { trx ; widget ; dhcp_state ; dns_state ; nat_state } in
-    widget.Widget.device <- Some (T gw) ;
+    widget.device <- Some (T gw) ;
+    Widget.add_properties widget Widget.[
+        property "on" ~kind:Bool ~action:true
+            ~descr:"The gateway is powered on."
+            ~getter:(fun () -> `Bool gw.power.on)
+            ~setter:(fun v ->
+                let v = to_bool v in
+                if v <> gw.power.on then
+                if v then (
+                    Simulation.power_up gw.power ;
+                    start_dhcpd gw ;
+                    start_dns gw
+                ) else (
+                    Simulation.power_down gw.power ;
+                    h.trx.power_off ()
+                )) ] ;
     gw
 
 (* A gateway offers what a gateway has sockets for, and not one port per end

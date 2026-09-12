@@ -1192,7 +1192,8 @@ type portal = {
   mutable filter : string ;
   mutable caplen : int option ;
     mutable emit : (bitstring -> unit) option ;
-  mutable reader : Thread.t option }
+  mutable reader : Thread.t option ;
+  (* TODO: metrics for in/out volume *) }
 
 type Widget.device += Portal of portal
 
