@@ -25,22 +25,23 @@ all:
 .PHONY: all dep clean clean-spec install uninstall reinstall doc check clear
 
 ifdef PKG_NAME
-OBJECTS  = $(SOURCES:.ml=.cmo)
-XOBJECTS = $(OBJECTS:.cmo=.cmx)
+SOURCES_CMO = $(SOURCES:.ml=.cmo)
+SOURCES_CMX = $(SOURCES:.ml=.cmx)
+SOURCES_CMI = $(SOURCES:.ml=.cmi)
 ARCHIVE  = $(PKG_NAME).cma
 XARCHIVE = $(ARCHIVE:.cma=.cmxa)
 
-$(ARCHIVE): $(OBJECTS) $(CLIB)
-	$(OCAMLC) $(CLIB) -package "$(REQUIRES)" -custom -linkpkg $(OCAMLFLAGS) $(OBJECTS) $(LIBS) -a -o $@
+$(ARCHIVE): $(SOURCES_CMO) $(CLIB)
+	$(OCAMLC) $(CLIB) -package "$(REQUIRES)" -custom -linkpkg $(OCAMLFLAGS) $(SOURCES_CMO) $(LIBS) -a -o $@
 
 # Note: CLIB_SHORT is required for the lib to be recorded in the cmxa file
 # (ocamlopt does not record required C libs unless -cclib is used)
-$(XARCHIVE): $(XOBJECTS) $(CLIB)
-	$(OCAMLOPT) -cclib -l$(CLIB_SHORT) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $(XOBJECTS) $(LIBS) -a -o $@
+$(XARCHIVE): $(SOURCES_CMX) $(CLIB)
+	$(OCAMLOPT) -cclib -l$(CLIB_SHORT) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $(SOURCES_CMX) $(LIBS) -a -o $@
 
 install: $(ARCHIVE)
 	if test -f "$(XARCHIVE)" ; then extra="$(XARCHIVE) $(XARCHIVE:.cmxa=.a)" ; fi ; \
-	ocamlfind install "$(PKG_NAME)" *.cmi *.cmx *.cmo $(PKG_NAME).a $(CLIB) "$(ARCHIVE)" META $$extra
+	ocamlfind install "$(PKG_NAME)" $(SOURCES_CMI) $(SOURCES_CMX) $(SOURCES_CMO) $(PKG_NAME).a $(CLIB) "$(ARCHIVE)" META $$extra
 
 uninstall:
 	ocamlfind remove $(PKG_NAME)
@@ -71,13 +72,13 @@ endif
 all_tests.byte: all_tests.cmo $(ARCHIVE)
 	$(OCAMLC)   -o $@ -package "$(REQUIRES) qcheck" $(ARCHIVE) -linkpkg $(OCAMLFLAGS) $<
 
-all_tests.cmo: all_tests.ml $(OBJECTS)
+all_tests.cmo: all_tests.ml $(SOURCES_CMO)
 	$(OCAMLC) -package "$(REQUIRES) qcheck" $(OCAMLFLAGS) -w -33 -c -impl $<
 
 all_tests.opt: all_tests.cmx $(XARCHIVE)
 	$(OCAMLOPT) -I . -o $@ -package "$(REQUIRES) qcheck" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
 
-all_tests.cmx: all_tests.ml $(XOBJECTS)
+all_tests.cmx: all_tests.ml $(SOURCES_CMX)
 	$(OCAMLOPT) -package "$(REQUIRES) qcheck" $(OCAMLOPTFLAGS) -w -33 -c -impl $<
 
 all_tests.ml: $(SOURCES)
@@ -91,7 +92,7 @@ check: all_tests.opt $(EXTRA_TESTS)
 
 # Clean up
 clean: clean-spec
-	rm -f *.cm[ioxa] *.cmxa *.a *.s *.o *.byte *.opt *.top *.annot .depend all_tests.* *.cache *.log
+	$(RM) *.cm[ioxa] *.cmxa *.a *.s *.o *.byte *.opt *.top *.annot .depend all_tests.* *.cache *.log
 
 # Dependencies
 dep:
@@ -99,7 +100,7 @@ dep:
 	@$(MAKE) .depend
 
 .depend:
-	$(OCAMLDEP) -package "$(REQUIRES)" -I .. *.ml *.mli */*.ml > $@
+	$(OCAMLDEP) -package "$(REQUIRES)" *.ml *.mli */*.ml > $@
 
 doc: $(SOURCES)
 	@echo "Building doc in $(DOCDIR)..."
@@ -107,8 +108,5 @@ doc: $(SOURCES)
 	$(OCAMLDOC) -package "$(REQUIRES)" -d $(DOCDIR) $^
 	#sed -i -e '/^<head>/a<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">' $(DOCDIR)/*.html
 	#sed -i -e 's|<center><h1></h1></center>|<h1>$(PKG_NAME)</h1>|' $(DOCDIR)/index.html
-
-clear: $(SOURCES)
-	sed -i -e 's/[ 	]\+$$//' $^
 
 -include .depend
