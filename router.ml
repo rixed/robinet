@@ -585,7 +585,8 @@ struct
             set_capabilities = (fun n c ->
                 (ports t.ifaces.(n)).set_capabilities 0 c) } ;
         Widget.add_properties widget Widget.[
-            property "on" ~kind:Bool ~descr:"The router is powered on."
+            property "on" ~kind:Bool ~action:true
+                ~descr:"The router is powered on."
                 ~getter:(fun () -> `Bool t.power.Simulation.on)
                 ~setter:(fun v -> switch (to_bool v)) ;
             property "errors probability" ~kind:(FRange (0., 1.))

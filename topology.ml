@@ -413,6 +413,31 @@ let parent_and_name path =
         String.sub path 0 i,
         String.sub path (i + 1) (String.length path - i - 1)
 
+(* Set one property, answering with a refusal or with nothing.
+ *
+ * [where] is what a refusal calls the widget. The path the document used,
+ * where there is one: a refusal is read next to the file it came from. *)
+let set_property ~where (p : Widget.property) v =
+    let refused fmt =
+        Printf.ksprintf (fun m ->
+            Some (Printf.sprintf "%s: %S %s" where p.Widget.name m)) fmt in
+    if p.setter = None then refused "cannot be set" else
+    match p.getter () with
+    (* Already what it is to be. Not merely quicker: a property may be
+     * settable only some of the time, and one that a parameter has already
+     * brought about would then be reported as refused for having nothing left
+     * to do -- a recorder opens its file as it is built, and will not be told
+     * to open it again. *)
+    | current when current = v -> None
+    | exception _ | _ ->
+        if not (p.can_set ()) then
+            refused "cannot be set as things stand"
+        else
+        match (Option.get p.setter) v with
+        | () -> None
+        | exception Widget.Bad_value m -> refused "%s" m
+        | exception e -> refused "%s" (Printexc.to_string e)
+
 let set_properties (device : Widget.t) properties =
     List.concat_map (fun (path, values) ->
         let where =
@@ -423,33 +448,48 @@ let set_properties (device : Widget.t) properties =
             [ Printf.sprintf "%s: there is no such part" where ]
         | Some (w : Widget.t) ->
             List.filter_map (fun (name, v) ->
-                let refused fmt =
-                    Printf.ksprintf (fun m ->
-                        Some (Printf.sprintf "%s: %S %s" where name m)) fmt in
                 match List.find_opt (fun (p : Widget.property) ->
                           p.name = name) w.properties with
                 | None ->
-                    refused "is not one of its properties"
-                | Some p ->
-                    if p.setter = None then refused "cannot be set" else
-                    match p.getter () with
-                    (* Already what it is to be. Not merely quicker: a
-                     * property may be settable only some of the time, and one
-                     * that a parameter has already brought about would then be
-                     * reported as refused for having nothing left to do -- a
-                     * recorder opens its file as it is built, and will not be
-                     * told to open it again. *)
-                    | current when current = v -> None
-                    | exception _ | _ ->
-                        if not (p.can_set ()) then
-                            refused "cannot be set as things stand"
-                        else
-                        match (Option.get p.setter) v with
-                        | () -> None
-                        | exception Widget.Bad_value m -> refused "%s" m
-                        | exception e -> refused "%s" (Printexc.to_string e)
+                    Some (Printf.sprintf "%s: %S is not one of its properties"
+                              where name)
+                (* Left to [power_up], which comes after the whole network
+                 * stands. What the document says such a property was is not
+                 * read at all: it is a boolean that is meant to be true once
+                 * there is a network, and the file has a reading of some
+                 * instant of the one it was written from. *)
+                | Some p when p.action -> None
+                | Some p -> set_property ~where p v
             ) values
     ) properties
+
+(* Every action property of [root]'s subtree, set to [v], in the order the
+ * widgets were built in. *)
+let set_actions v (root : Widget.t) =
+    Widget.enum root |> List.of_enum |>
+    List.sort (fun (a : Widget.t) b -> compare a.Widget.id b.Widget.id) |>
+    List.concat_map (fun (w : Widget.t) ->
+        List.filter_map (fun (p : Widget.property) ->
+            if p.Widget.action then
+                set_property ~where:(Widget.full_name w) p (`Bool v)
+            else None
+        ) w.Widget.properties)
+
+(** Everything in [root]'s subtree that can be switched on, switched on, and
+ * whatever would not answer.
+ *
+ * This is the second phase of a load, and what the first one was careful not
+ * to do: a host switched on looks for a DHCP server, a portal switched on
+ * opens an interface of the machine, and neither has any business happening
+ * while the network is still being built. It is a phase of its own rather than
+ * an ordering, because what has to be there first is not always in the network
+ * at all -- robinet makes the interfaces its portals name, between the two.
+ *
+ * The order is the order the widgets were built in, which is a fair guess at
+ * the order they want -- a server before what asks it -- and nothing more than
+ * a guess: dependencies between devices are not recorded, and are not going to
+ * be. *)
+let power_up = set_actions true
 
 (** Build [t]'s network in [sim], in place of whatever it was running, and
  * answer with the properties that would not take.
@@ -463,6 +503,23 @@ let set_properties (device : Widget.t) properties =
  * built -- what it replaced is gone from the moment it starts, which is what
  * "in place of" means, and the file it came from is still on disk.
  *
+ * Nothing is switched on until all of it stands: an action property is left
+ * alone as its device is built, whatever the document says of it, and set at
+ * the end by {!power_up} -- which [power] holds back for a caller with
+ * something of its own to do in between, robinet having the interfaces its
+ * portals name to make.
+ *
+ * Left alone, and not switched off first, which is what this did to begin
+ * with: switching a device off is not the opposite of switching it on. A
+ * device's parts are walked along with it, and a gateway's parts include a
+ * host -- "srv", which is where [Router.make_gw] registers its DHCP and DNS
+ * servers as it builds it. Powering that host down runs [Host.reset], which
+ * clears the servers registered on it, and nothing registers them a second
+ * time. So a load that powered everything down and up again handed back
+ * gateways that routed and answered nothing else. What a device is born as is
+ * its constructor's business; this only declines to bring forward what the
+ * document says it became.
+ *
  * Devices are built in the order the document lists them, which is the order
  * they were built in the first place, and each is configured as soon as it is
  * built. That is what makes a cable negotiate against what its two interfaces
@@ -475,7 +532,7 @@ let set_properties (device : Widget.t) properties =
  *
  * Changes a simulation's state, so it belongs inside {!Simulation.borrow} like
  * everything else that does. *)
-let to_simulation (sim : Simulation.t) t =
+let to_simulation ?(power=true) (sim : Simulation.t) t =
     let root = sim.Simulation.root in
     (* What can be told before anything is destroyed, is: a document naming a
      * device this robinet does not have, or naming one twice, was never going
@@ -495,15 +552,9 @@ let to_simulation (sim : Simulation.t) t =
                 Widget.bad_value "%S is in this document twice" d.path ;
             d.path :: seen
         ) [] entries) ;
-    (* Emptied one at a time rather than walked: destroying a device takes its
-     * cables with it, and they are on this list too. *)
-    let rec clear () =
-        match root.Widget.children with
-        | [] -> ()
-        | w :: _ -> Widget.destroy w ; clear () in
     (* A document is the whole of a network, so loading one is not adding to
      * what is there. *)
-    clear () ;
+    Simulation.clear sim ;
     let refused = ref [] in
     let make (d, entry) =
         let parent_path, name = parent_and_name d.path in
@@ -523,8 +574,44 @@ let to_simulation (sim : Simulation.t) t =
         Widget.place w d.location ;
         refused := !refused @ set_properties w d.properties in
     (try List.iter make entries
-    with e -> clear () ; raise e) ;
+    with e -> Simulation.clear sim ; raise e) ;
+    if power then refused := !refused @ power_up root ;
     !refused
+
+(** A simulation of its own for a network: made, loaded from [topology] if
+ * there is one, and started.
+ *
+ * Every simulation a reader asks for comes through here -- the interface's New
+ * and Open, the binary's command line -- so that what a new simulation is is
+ * settled once. Its own clock, not following the wall clock, since a network
+ * with nothing in it has nothing to keep in step with and one that wants the
+ * world outside says so by having a portal in it, which turns its simulation
+ * realtime itself; paced at the speed of that world all the same, which is the
+ * pace its delays and its rates are written in, and which leaves the machine
+ * alone -- told to go as fast as it can it takes a core the moment anything in
+ * it has something to do; and running, since a simulation nobody started is
+ * one whose clock stands still for a reason the interface cannot show.
+ *
+ * [paused] is the caller's, and only the caller's: the interface pauses what
+ * it creates because what was asked for is somewhere to build, and the binary
+ * was asked to run a network.
+ *
+ * A document that will not load leaves nothing behind, not even the simulation
+ * it was going to be: what was asked for was the network. *)
+let new_simulation ?topology ?(paused=false) ?(power=true) name =
+    let sim = Simulation.make ~realtime:false (Simulation.unique_name name) in
+    Simulation.set_speed_ratio sim (Some 1.) ;
+    let refused =
+        match topology with
+        | None -> []
+        | Some t ->
+            (match Simulation.borrow sim (fun () ->
+                       to_simulation ~power sim t) with
+            | exception e -> Simulation.delete sim ; raise e
+            | refused -> refused) in
+    if paused then Simulation.pause sim () ;
+    ignore (Simulation.start sim) ;
+    sim, refused
 
 (* [a_network] below builds one whose cables are not on the ports a plain
  * replay would hand out: the first is unplugged and a third takes the port it

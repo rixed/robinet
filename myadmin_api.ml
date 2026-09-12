@@ -431,11 +431,9 @@ let get_simulation _mth matches _vars _qry_body resp =
 (* A simulation of one's own to build a network in, empty or read from a
  * document.
  *
- * It does not follow the wall clock: a network with nothing in it has nothing
- * to keep in step with, and one that wants the outside world says so by having
- * a portal in it, which turns its simulation realtime itself. It is started
- * straight away, since a simulation nobody has started is one whose clock
- * stands still for a reason the interface has no way to show.
+ * What such a simulation is -- its clock, its speed, that it is started at
+ * all -- is said once, in [Topology.new_simulation], and this handler only
+ * reads the request and answers it.
  *
  * The document is taken here, rather than left to a PUT of its own afterwards,
  * so that opening a file that turns out not to load leaves nothing behind. *)
@@ -472,30 +470,15 @@ let create_simulation _mth _matches _vars qry_body resp =
                    (Yojson.Basic.to_string v) in
     if String.contains name '/' then
         bad_request "A name must not contain '/': %S" name ;
-    let sim = Simulation.make ~realtime:false (Simulation.unique_name name) in
-    let refused =
-        match topology with
-        | None -> []
-        | Some t ->
-            (match Simulation.borrow sim (fun () ->
-                       Topology.to_simulation sim t) with
-            | exception Widget.Bad_value m ->
-                (* A document that will not load leaves no simulation behind:
-                   what was asked for was the network, not somewhere to put
-                   it. *)
-                Simulation.delete sim ;
-                bad_request "%s" m
-            | refused -> refused) in
-    (* Standing still until the reader says otherwise. A simulation that ran as
-       fast as it could would take a core to itself the moment anything in it
-       had something to do, and nobody has asked it to run yet: what was asked
-       for is somewhere to build. Paused rather than started on the wall clock,
-       which would answer the same objection and settle a question that is not
-       ours: a simulation can be made to follow the wall clock later, which is
-       what a portal does to the one it is dropped into, and there is no way
-       back off it. *)
-    Simulation.pause sim () ;
-    ignore (Simulation.start sim) ;
+    (* Standing still until the reader says otherwise: what was asked for is
+       somewhere to build, and nobody has asked it to run yet. Everything else
+       about a new simulation -- its clock, its speed, that it is started at
+       all -- is [Topology.new_simulation]'s, which the command line goes
+       through as well. *)
+    let sim, refused =
+        match Topology.new_simulation ?topology ~paused:true name with
+        | exception Widget.Bad_value m -> bad_request "%s" m
+        | res -> res in
     Log.(log sim.root.logger Info (lazy (Printf.sprintf
         "Simulation %S is up, and paused" (Simulation.name sim)))) ;
     respond resp

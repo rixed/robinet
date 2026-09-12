@@ -1290,6 +1290,7 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
         set_capabilities = (fun _ _ -> ()) } ;
     Widget.add_properties widget Widget.[
         property "on" ~descr:"The interface is opened." ~kind:Bool
+            ~action:true
             ~getter:(fun () -> `Bool (portal.iface <> None))
             ~setter:(fun v ->
                 let v = to_bool v in

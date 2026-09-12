@@ -887,7 +887,7 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
     widget.device <- Some (T t) ;
     widget.on_delete <- (fun () -> t.trx.power_off ()) ;
     Widget.add_properties widget Widget.[
-        property "on" ~descr:"The host is powered on." ~kind:Bool
+        property "on" ~descr:"The host is powered on." ~kind:Bool ~action:true
             ~getter:(fun () -> `Bool t.trx.power.Simulation.on)
             ~setter:(fun v ->
                 if to_bool v then t.trx.power_on () else t.trx.power_off ()) ;

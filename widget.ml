@@ -215,7 +215,28 @@ and property = { name : string ;
                 * says nothing at all when it is absent, and there are two of
                 * those on every widget in the tree. Those are the ones this is
                 * for. *)
-               only_when_set : bool }
+               only_when_set : bool ;
+               (* Whether setting this is asking the widget to do something,
+                * rather than telling it what it is.
+                *
+                * There is one of these so far: "on", on a host, a router and a
+                * portal, and setting it powers the thing up or down. Such a
+                * property is a boolean that is meant to read true once the
+                * network is whole, and what it takes to get there is rarely on
+                * its own widget: a host switched on looks for a DHCP server,
+                * and a portal switched on opens an interface of the machine.
+                * Nothing records those dependencies and nothing is going to,
+                * so loading a network does not switch anything on until all of
+                * it stands (see {!Topology.power_up}).
+                *
+                * A field rather than the name "on", since a name is what the
+                * API calls a property by and somebody will one day want an
+                * "on" that means enabled rather than running.
+                *
+                * This is where actions begin -- what a widget can be told to
+                * do, as against what it holds -- and the whole of them for
+                * now. *)
+                 action : bool }
 
 (* A property value, in the shape the administration interface speaks.
  *
@@ -427,7 +448,7 @@ let record fields =
  *)
 
 let property ?(descr="") ?(units="") ?metric ?setter ?can_set ?(kind=String)
-             ?(only_when_set=false) ~getter name =
+             ?(only_when_set=false) ?(action=false) ~getter name =
     (* No setter, no setting, so there is one way to ask and callers need not
      * check both. A setter with nothing said about when it applies is one that
      * always applies. *)
@@ -436,7 +457,7 @@ let property ?(descr="") ?(units="") ?metric ?setter ?can_set ?(kind=String)
         | None -> (fun () -> false)
         | Some _ -> can_set |? (fun () -> true) in
     { name ; descr ; units ; getter ; setter ; can_set ; kind ; metric ;
-      only_when_set }
+      only_when_set ; action }
 
 (* Add new properties before default ones: *)
 let add_properties t properties =

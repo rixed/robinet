@@ -371,7 +371,7 @@ let rename t name =
         invalid_arg ("Simulation.rename: a name must not contain '/': "^ name) ;
     with_lock t (fun () ->
         t.name <- name ;
-        t.root.Widget.name <- name) ()
+        t.root.name <- name) ()
 
 (** Take a simulation out of this process for good: stop its clock, take apart
  * everything it was running, and forget it.
@@ -390,6 +390,12 @@ let delete t =
     with_lock t (fun () -> Widget.destroy t.root) () ;
     let a = !sims in
     if t.id < Array.length a then a.(t.id) <- None
+
+(* Empty the root widget. One widget at a time because of cascading deletions. *)
+let rec clear t =
+    match t.root.children with
+    | [] -> ()
+    | w :: _ -> Widget.destroy w ; clear t
 
 (** Something about this simulation's network has been changed from outside. *)
 let changed t = t.unsaved <- true
@@ -678,15 +684,24 @@ let dispatched t =
  * by; a caller holding an instant of the simulation's own has to put it
  * through [to_wall_clock] first. *)
 let wait_on_cond ?until t =
-    let me = me () in
-    t.lock_owner <- None ;
-    (match until with
-    | None ->
-        Condition.wait t.cond t.lock
-    | Some (until : Wall.t) ->
-        (try Condvar.timed_wait t.cond t.lock (Wall.to_secs until)
-        with Condvar.Timeout -> ())) ;
-    t.lock_owner <- Some me
+    (* A simulation that has been stopped has nothing left to wait for, and the
+     * signal that stopped it may already have gone by: [stop] writes the flag
+     * and signals the condition under the lock, so a thread that has the lock
+     * but has not yet reached its wait misses that signal and then sleeps to
+     * its deadline -- as far off as the next event, with whoever asked it to
+     * quit waiting on it all that time. Reading the flag here rather than at
+     * each of the waits below, which is where it would be forgotten. *)
+    if t.continue then (
+        let me = me () in
+        t.lock_owner <- None ;
+        (match until with
+        | None ->
+            Condition.wait t.cond t.lock
+        | Some (until : Wall.t) ->
+            (try Condvar.timed_wait t.cond t.lock (Wall.to_secs until)
+            with Condvar.Timeout -> ())) ;
+        t.lock_owner <- Some me
+    )
 
 (*
  * Metric history
@@ -1033,10 +1048,35 @@ let with_trapped signals f =
         List.map (fun s ->
             let open Sys in
             signal s (Signal_handle (fun _n ->
-                Printf.printf "Quitting...\n%!" ;
-                stop_all ()))
+                (* From a thread of its own, and nothing else here. A handler
+                 * runs wherever the process happened to be, which is as likely
+                 * as not to be in the middle of a dispatch -- holding a
+                 * simulation's lock, or halfway through the bookkeeping
+                 * [with_lock] does around it, having taken the mutex and not
+                 * yet written down whose it is. Stopping a simulation wants
+                 * that same lock, and asking for it from there either takes a
+                 * mutex the thread already holds or, worse, is handed one it
+                 * only appears to own and gives it back twice. So the handler
+                 * does the one thing that needs no lock at all: it starts a
+                 * thread, which then queues for them like anybody else. *)
+                ignore (Thread.create (fun () ->
+                    Printf.printf "Quitting...\n%!" ;
+                    stop_all ()) ())))
         ) signals in
-    finally (fun () -> List.iter2 Sys.set_signal signals prev_sigs) f ()
+    (* Somewhere for that handler to run. A signal handler is OCaml code, and
+     * OCaml code runs where the program next polls; a program whose every
+     * thread sits in a system call -- a simulation waiting on its next event,
+     * the thread waiting on that simulation -- polls nowhere at all, and the
+     * signal stays pending until something happens to wake one of them, which
+     * can be as far off as the quietest moment of the network. This thread
+     * wakes every second and does nothing else, so that there is always one
+     * place to run it after at most 1s. *)
+    let ticking = ref true in
+    let ticker = Thread.create (fun () -> while !ticking do Thread.delay 1. done) () in
+    finally (fun () ->
+        ticking := false ;
+        Thread.join ticker ;
+        List.iter2 Sys.set_signal signals prev_sigs) f ()
 
 (** Start this simulation in its own thread. [wait] has the meaning it has for
  * [run]: keep going even with an empty event queue. *)

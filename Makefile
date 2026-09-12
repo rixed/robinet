@@ -45,6 +45,7 @@ SOURCES  = \
 	router.ml \
 	device.ml \
 	topology.ml \
+	netns.ml \
 	opache.ml \
 	search.ml \
 	myadmin_common.ml \
@@ -55,7 +56,8 @@ SOURCES  = \
 	myadmin_ui.ml \
 	myadmin.ml \
 	sim.ml \
-	wrapper.ml
+	wrapper.ml \
+	cli.ml
 
 C_SOURCES = \
 	pcap_wrap.c \
@@ -130,7 +132,7 @@ include make.common
 
 .PHONY: examples run vendor coastline
 
-all: robinet.top examples $(EXTRA_TESTS)
+all: robinet robinet.top examples $(EXTRA_TESTS)
 
 run: robinet.top
 	rlwrap ./robinet.top -init robinet.init
@@ -222,7 +224,14 @@ robinet.top: $(ARCHIVE)
 	   echo "sudo setcap cap_net_raw,cap_net_admin=eip $@" ;\
 	 fi
 
+robinet: robinet.opt
+	@ln -f $< $@
+	@if which setcap > /dev/null 2>&1 ; then \
+	   echo "You should run:" ;\
+	   echo "sudo setcap cap_net_raw,cap_net_admin=eip $@" ;\
+	 fi
+
 clean-spec:
 	$(RM) examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
 	$(RM) tests/*.cm[ioxa] tests/*.o tests/*.annot $(EXTRA_TESTS)
-	$(RM) myadmin_assets.ml
+	$(RM) myadmin_assets.ml robinet
