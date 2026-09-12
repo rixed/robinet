@@ -933,6 +933,7 @@ struct
        builds, since those arrive with an empty table -- takes its address
        from that table and not only from the one it was made with. *)
     (*$R configure_iface
+        ignore configure_iface ;
         let sim = Simulation.make ~realtime:false "late-admin" in
         let widget = Widget.make ~parent:sim.Simulation.root "r" in
         let r = make 2 [] widget in
