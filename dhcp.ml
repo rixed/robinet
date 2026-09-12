@@ -227,7 +227,7 @@ struct
           mutable server_id : Ip.Addr.t option ;
           mutable requested_ip : Ip.Addr.t option ;
           mutable message : string option ;
-          mutable max_dhcp_msg_size : int32 option ;
+          mutable max_dhcp_msg_size : int option ;
           mutable vendor_class_id : string option ;
           mutable client_id : string option ;
           mutable request_list : string option ;
@@ -256,8 +256,8 @@ struct
                    t.request_list <- Some (string_of_bitstring v)
         | 56, l when l > 0 ->
                    t.message <- Some (string_of_bitstring v)
-        | 57, l when l > 0 ->
-                   t.max_dhcp_msg_size <- Some (int32_of_bitstring v)
+        | 57, 2 ->
+                   t.max_dhcp_msg_size <- Some (int16_of_bitstring v)
         | 60, l when l > 0 ->
                    t.vendor_class_id <- Some (string_of_bitstring v)
         | 61, l when l >= 2 ->
@@ -327,6 +327,7 @@ struct
 
     let pack_options t =
         let may_pack_msgtyp t v = BatOption.map (fun (v : MsgType.t) -> let%bitstring b = {| t : 8 ; 1 : 8 ; (v :> int) : 8 |} in b) v
+        and may_pack_int16  t v = BatOption.map (fun v -> let%bitstring b = {| t : 8 ; 2 : 8 ; v : 16 |} in b) v
         and may_pack_int32  t v = BatOption.map (fun v -> let%bitstring b = {| t : 8 ; 4 : 8 ; v : 32 |} in b) v
         and may_pack_ip     t v = BatOption.map (fun (v : Ip.Addr.t) -> let%bitstring b = {| t : 8 ; 4 : 8 ; (Ip.Addr.to_int32 v) : 32 |} in b) v
         and may_pack_string t v = BatOption.map (fun v -> let%bitstring b = {| t : 8 ; String.length v : 8 ; v : -1 : string |} in b) v
@@ -345,7 +346,7 @@ struct
             may_pack_ip 50 t.requested_ip ;
             may_pack_ip 54 t.server_id ;
             may_pack_string 56 t.message ;
-            may_pack_int32 57 t.max_dhcp_msg_size ;
+            may_pack_int16 57 t.max_dhcp_msg_size ;
             may_pack_string 60 t.vendor_class_id ;
             may_pack_string 61 t.client_id ;
             may_pack_string 55 t.request_list

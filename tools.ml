@@ -264,9 +264,20 @@ let int_of_bitstring bs =
     2 (int_of_bitstring (let%bitstring b = {| 2 : 30 : littleendian |} in b))
 *)
 
+let not_enough_bits func exp_bits bits =
+    Printf.sprintf "%s: %s has less than %d bits!"
+        func (hexstring_of_bitstring bits) exp_bits |>
+    invalid_arg
+
 let int32_of_bitstring bits =
     match%bitstring bits with
     | {| n : 32 ; _ : -1 : bitstring |} -> n
+    | {| _ |} -> not_enough_bits "int32_of_bitstring" 32 bits
+
+let int16_of_bitstring bits =
+    match%bitstring bits with
+    | {| n : 16 ; _ : -1 : bitstring |} -> n
+    | {| _ |} -> not_enough_bits "int16_of_bitstring" 16 bits
 
 let bitstring_of_int8 n =
     let%bitstring s = {| n : 8 |} in
