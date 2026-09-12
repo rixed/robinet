@@ -759,13 +759,13 @@ let build ~parent name = function
                  length = Some st.Eth.Cable.State.length ; error_rate }
     | TRouter { ports ; mac_range ; macs } ->
         let macs = macs_of ~range:mac_range ~macs ports in
-        let widget = Widget.make ~parent name in
-        let (_ : Router.Router.t) =
-            Router.Router.make ~macs:(Array.of_list macs) ports [] widget in
+        let r =
+            Router.Router.make ~parent ~macs:(Array.of_list macs) ports [] name in
         (* The addresses themselves, whether they were named or drawn from the
            range: a range that picks is a choice like any other, and once the
            addresses are written down it has nothing left to say. *)
-        widget, TRouter { ports ; mac_range = "" ; macs }
+        r.Router.Router.widget,
+        TRouter { ports ; mac_range = "" ; macs }
     | TGateway ({ public ; public_netmask ; public_gw ; lan ; max_cnxs ;
                   mac } as g) ->
         (* Drawn here rather than left to the gateway to draw, so that what it

@@ -511,10 +511,11 @@ struct
     let notify_never = { probability = 0. ; delay = 0. }
     let notify_always ?(delay=0.) () = { probability = 1. ; delay }
 
-    let make ?(notify_errs=notify_always ()) ?(admin_reroute=true)
+    let make ~parent ?(notify_errs=notify_always ()) ?(admin_reroute=true)
              ?(load_balancing=First) ?can_forward_after
              ?delay ?loss ?mtu ?(macs=[||])
-             num_ifaces routes widget =
+             num_ifaces routes name =
+        let widget = Widget.make ~parent name in
         let power =
             Simulation.make_power (Simulation.of_widget widget)
                                   (Widget.full_name widget) in
@@ -782,13 +783,14 @@ struct
      * if no ethernet gateway is defined for this route).  *)
     (* [addrs] also, for each iface, has the MAC address of the router on that
      * iface. *)
-    let make_from_addrs ?notify_errs ?admin_reroute ?load_balancing ?delay ?loss
-                        addrs widget =
+    let make_from_addrs
+            ~parent ?notify_errs ?admin_reroute ?load_balancing ?delay ?loss
+            addrs name =
         let routes = routes_of_addrs addrs in
         let num_ifaces = Array.length addrs in
         let macs = Array.map snd addrs in
-        make ?notify_errs ?admin_reroute ?load_balancing ?delay ?loss ~macs
-             num_ifaces routes widget
+        make ~parent ?notify_errs ?admin_reroute ?load_balancing ?delay ?loss ~macs
+             num_ifaces routes name
 
     (*$R make_from_addrs
         (* Suppose we have a router for these 3 networks: *)
@@ -797,8 +799,7 @@ struct
                [ Ip.Addr.of_string "192.168.2.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () ;
                [ Ip.Addr.of_string "192.168.3.254", Ip.Addr.of_string "255.255.255.0", None ], Eth.Addr.random () |] in
         let sim = Simulation.make ~realtime:false "test-router" in
-        let widget = Widget.make ~parent:sim.root "test" in
-        let router = make_from_addrs addrs widget in
+        let router = make_from_addrs ~parent:sim.root addrs "test" in
 
         (* Now we will count incoming packets from each iface (ARP requests, actually) : *)
         let counts = Array.create 3 0 in
@@ -853,7 +854,7 @@ struct
         let switch_of (w : Widget.t) =
             List.find_opt (fun (p : Widget.property) -> p.name = "on")
                           w.properties in
-        "the switch is on the router" @? (switch_of widget <> None) ;
+        "the switch is on the router" @? (switch_of router.widget <> None) ;
         "and not on any of its admin hosts" @?
             Array.for_all (fun iface ->
                 match iface.admin_host with
@@ -879,7 +880,7 @@ struct
             (admin_socks () = 1) ;
 
         let flip on =
-            match switch_of widget with
+            match switch_of router.widget with
             | None -> assert false
             | Some p -> (Option.get p.setter) (`Bool on) in
 
@@ -903,8 +904,7 @@ struct
      * else would clear what its adapter learnt when the box is switched off. *)
     (*$R make
         let sim = Simulation.make ~realtime:false "router-off" in
-        let widget = Widget.make ~parent:sim.Simulation.root "r" in
-        let r = make 2 [] widget in
+        let r = make ~parent:sim.root 2 [] "r" in
         let eth = r.ifaces.(0).eth in
         "an interface with no address has no admin host" @?
             (r.ifaces.(0).admin_host = None) ;
@@ -915,18 +915,18 @@ struct
             (Tools.BitHash.length eth.Eth.State.arp_cache = 1) ;
         let flip on =
             match List.find_opt (fun (p : Widget.property) -> p.name = "on")
-                                widget.Widget.properties with
+                                r.widget.properties with
             | None -> "the router has a switch" @? false
             | Some p -> (Option.get p.setter) (`Bool on) in
         flip false ;
         "which the box forgets when it is switched off" @?
             (Tools.BitHash.length eth.Eth.State.arp_cache = 0) ;
         flip true ;
-        Widget.destroy widget ;
+        Widget.destroy r.widget ;
         "and a deleted router is stopped for good" @?
-            (not r.power.Simulation.on) ;
+            (not r.power.on) ;
         "and out of the tree" @?
-            (Widget.find sim.Simulation.root widget.Widget.id = None)
+            (Widget.find sim.root r.widget.id = None)
      *)
 
     (* Which address is a router's own is part of its routing table, so a
@@ -936,11 +936,10 @@ struct
     (*$R configure_iface
         ignore configure_iface ;
         let sim = Simulation.make ~realtime:false "late-admin" in
-        let widget = Widget.make ~parent:sim.Simulation.root "r" in
-        let r = make 2 [] widget in
+        let r = make ~parent:sim.root 2 [] "r" in
         let set_routes rows =
             match List.find_opt (fun (p : Widget.property) ->
-                      p.name = "routes") widget.Widget.properties with
+                      p.name = "routes") r.widget.properties with
             | None -> "the router has a routing table" @? false
             | Some p -> (Option.get p.setter) (`List rows) in
         (* A route to the router itself: no way out, and the address it
@@ -979,20 +978,19 @@ struct
        in, and whether it has a cable is the adapter's own answer. *)
     (*$T make
       let sim = Simulation.make ~realtime:false "router-ports" in \
-      let w = Widget.make ~parent:sim.Simulation.root "r" in \
-      let r = make 4 [] w in \
-      w.ports.count () = 4 && \
-      not (w.ports.is_connected 2) && \
-      ((w.ports.dev 2).Tools.set_read ignore ; \
-       w.ports.is_connected 2 && \
+      let r = make ~parent:sim.root 4 [] "r" in \
+      r.widget.ports.count () = 4 && \
+      not (r.widget.ports.is_connected 2) && \
+      ((r.widget.ports.dev 2).Tools.set_read ignore ; \
+       r.widget.ports.is_connected 2 && \
        (ports r.ifaces.(2)).is_connected 0) && \
       (* A cable to port n reaches interface n's adapter, and that is what a
          cable joining it is recorded as reaching. An interface is that
          adapter and nothing else, so it is the adapter that carries the
          interface's name. *) \
       List.for_all (fun n -> \
-          w.ports.owner n == (ports r.ifaces.(n)).owner 0 && \
-          (w.ports.owner n).Widget.name = "#"^ string_of_int n) [ 0 ; 1 ; 2 ; 3 ]
+          r.widget.ports.owner n == (ports r.ifaces.(n)).owner 0 && \
+          (r.widget.ports.owner n).Widget.name = "#"^ string_of_int n) [ 0 ; 1 ; 2 ; 3 ]
      *)
 
     (*$>*)
@@ -1045,9 +1043,8 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let broadcast = Ip.Cidr.all1s_addr local_cidr in
     (* Build the output router *)
-    let router_widget = Widget.make ~parent:widget "router" in
     let router =
-        Router.(make ?delay ?loss ?mtu ?notify_errs ?admin_reroute
+        Router.(make ~parent:widget ?delay ?loss ?mtu ?notify_errs ?admin_reroute
                      ?macs:(Option.map (Array.make 1) mac) 2
             [ (* route everything from anywhere to LAN if dest fits local_cidr *)
               Route.forward ~dst_mask:local_cidr 0 ;
@@ -1055,7 +1052,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
               Route.forward ~src_mask:(Ip.Cidr.single Ip.Addr.zero) 0 ;
               (* route everything else toward the outside *)
               Route.forward ?via:public_gw 1 ]
-            router_widget) in
+            "router") in
     (* Configure those 2 ifaces: *)
     (* 1st iface is for the GW: *)
     let gw_mac = router.ifaces.(0).eth.mac in
@@ -1075,7 +1072,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let out_trx = router.ifaces.(1).trx in
     (* Create the "host" and configure its gateway, although we probably don't
      * want this host on the internet: *)
-    let srv_ip = Enum.get_exn local_ips in    (* second the dhcp/name servers *)
+    let srv_ip = Enum.get_exn local_ips in (* second IP is the dhcp/name servers *)
     let h : Host.t =
         let gateways = [ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw_mac) ] in
         Host.make ?nameserver ~gateways ~netmask ~static_ip:srv_ip

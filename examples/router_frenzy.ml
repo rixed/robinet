@@ -51,7 +51,7 @@ let forward_traffic (widget : Widget.t) ifname input_dev =
  * otherwise the iface is left unconnected.
  * Hosts must have been created beforehand with as many interfaces as
  * required. *)
-let make_router name logger interfaces router_specs delays err_delays losses err_losses lb_configs =
+let make_router parent name interfaces router_specs delays err_delays losses err_losses lb_configs =
     let addr_of_interface ?via cidr =
         (* [make_from_addrs] wants ip address, ip mask and MAC: *)
         match String.split ~by:"/" cidr with
@@ -148,7 +148,8 @@ let make_router name logger interfaces router_specs delays err_delays losses err
     and notify_errs = Router.{
         probability = List.assoc_opt name err_losses |? 0. ;
         delay = List.assoc_opt name err_delays |? 0. } in
-    Router.make_from_addrs ~notify_errs ?delay ?loss ?load_balancing addrs logger
+    Router.make_from_addrs
+        ~parent ~notify_errs ?delay ?loss ?load_balancing addrs name
 
 (* Build the network described in the [routers] hash and returns the device
  * representing the entry point of the network: *)
@@ -159,9 +160,8 @@ let build_network (widget : Widget.t) router_specs fst_router_name delays err_de
     (* Build all routers *)
     let routers =
         Hashtbl.map (fun name ifaces ->
-            let widget = Widget.make ~parent:widget name in
             if debug then Printf.printf "Build router %s\n%!" name ;
-            make_router name widget ifaces router_specs delays err_delays losses err_losses lb_configs
+            make_router widget name ifaces router_specs delays err_delays losses err_losses lb_configs
         ) router_specs in
     (* Connect all routers together. *)
     Hashtbl.iter (fun name ifaces ->
