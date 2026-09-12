@@ -414,6 +414,13 @@
                                     </span>
                                 </template>
                                 <strong x-text="selected.name"></strong>
+                                <!-- What sort of thing it is, since its name does not
+                                     say: "dallas" is as much a name for a router as
+                                     for a host. Nothing for a part of a device -- an
+                                     adapter, a server running on a host -- which is
+                                     not a kind of device and has none to give. -->
+                                <small class="kind" x-show="selected.device" x-cloak
+                                       x-text="'(' + selected.device + ')'"></small>
                                 <!-- The one thing about the selected widget that is not
                                      shown below but somewhere else: the log window keeps
                                      what it is given, whatever is being looked at. -->

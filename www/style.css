@@ -779,6 +779,9 @@ nav.breadcrumb {
 }
 nav.breadcrumb a { text-decoration: none; }
 nav.breadcrumb .sep { color: var(--pico-muted-color); margin: 0 .2rem; }
+/* What kind of device the one being looked at is, beside its name: said
+ * quietly, since it is what the name is short for and not a second name. */
+nav.breadcrumb .kind { color: var(--pico-muted-color); margin-left: .25rem; }
 
 /* The picture: peers to either side, the widget in the middle, children
  * below. Fixed slots, so that revisiting a widget shows it the same way. */
