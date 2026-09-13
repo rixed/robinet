@@ -56,7 +56,6 @@ SOURCES  = \
 	myadmin_assets.ml \
 	myadmin_ui.ml \
 	myadmin.ml \
-	sim.ml \
 	wrapper.ml \
 	cli.ml
 
@@ -91,8 +90,6 @@ EXAMPLES_BYTE = \
 	examples/capecho.byte \
 	examples/load_tester.byte \
 	examples/pcap_reorder.byte \
-	examples/simu_perfweb.byte \
-	examples/simu_dc_mirroring.byte \
 	examples/admin_demo.byte
 
 EXAMPLES_OPT = $(EXAMPLES_BYTE:.byte=.opt)
