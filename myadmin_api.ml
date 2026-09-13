@@ -271,6 +271,25 @@ let cursor_of_string name s =
 let cursor_of_vars vars name =
     Option.map (cursor_of_string name) (Hashtbl.find_option vars name)
 
+(* A log reader keeps its place by the number of the last message it was given,
+ * and not by its instant: see [Log.messages]. It travels as a string all the
+ * same, so that a cursor is a cursor wherever it comes from and the page has
+ * nothing to tell apart. *)
+let json_of_log_cursor n = `String (string_of_int n)
+
+let json_of_log_cursor_opt = function
+    | None -> `Null
+    | Some n -> json_of_log_cursor n
+
+let log_cursor_of_vars vars name =
+    Option.map (fun s ->
+        match int_of_string (String.trim s) with
+        | exception _ ->
+            bad_request "%s must be a cursor from a previous answer, not %S"
+                name s
+        | n -> n
+    ) (Hashtbl.find_option vars name)
+
 (* The cursor of an answer, which is where the reader has got to: absent when
  * that is nowhere -- a widget that has never logged, a metric nothing has been
  * written down about -- and the next call then asks for everything again. *)
@@ -1088,7 +1107,7 @@ let get_logs _mth matches vars _qry_body resp =
                     (List.init Log.num_levels Log.string_of_int_level |>
                      String.join ", ")
             | lvl -> lvl) in
-    let since = cursor_of_vars vars "since" in
+    let since = log_cursor_of_vars vars "since" in
     (* Held only while the messages are collected: a logger is written to by
        the dispatcher, and reading one halfway through a dispatch would give
        half of what that dispatch had to say. Forcing them into JSON afterwards
@@ -1098,7 +1117,7 @@ let get_logs _mth matches vars _qry_body resp =
             let w = widget_of_matches sim matches 2 in
             let lost, msgs = Log.messages ?since ~max_level:level w.logger in
             w, lost, msgs) in
-    let json_of_msg (ts, lvl, text) =
+    let json_of_msg (_seq, ts, lvl, text) =
         `Assoc [ "t", json_of_time ts ;
                  "level", `String (Log.string_of_level lvl) ;
                  "text", `String text ] in
@@ -1107,10 +1126,10 @@ let get_logs _mth matches vars _qry_body resp =
     let cursor =
         match msgs with
         | [] -> since
-        | msgs -> let ts, _, _ = List.last msgs in Some ts in
+        | msgs -> let seq, _, _, _ = List.last msgs in Some seq in
     respond resp (`Assoc [
         "now", json_of_time (Simulation.now sim) ;
-        "cursor", json_of_cursor_opt cursor ;
+        "cursor", json_of_log_cursor_opt cursor ;
         "widget", `Int w.id ;
         "lost", `Bool lost ;
         "messages", `List (List.map json_of_msg msgs) ])

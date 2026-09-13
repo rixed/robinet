@@ -1032,16 +1032,16 @@ let test_http net cable duration nthreads
                     (List.take (List.length msgs - 1) msgs) (List.tl msgs)
             | None -> false) ;
         check "since brings back what was logged after it, and nothing else"
-            (* The fifth of the instants the widget logged at, named from the
-               clock that stamped them. *)
-            (let stamps =
+            (* The fifth message the widget logged, by the number it carries:
+               a cursor names a message and not an instant, since a clock that
+               stands still stamps several with one. *)
+            (let seqs =
                 let _lost, msgs = Log.messages hist_widget.Widget.logger in
-                List.map (fun (ts, _, _) -> ts) msgs in
-             match logs (), logs ~since:(cursor_of (List.nth stamps 4)) () with
+                List.map (fun (seq, _, _, _) -> seq) msgs in
+             match logs (),
+                   logs ~since:(string_of_int (List.nth seqs 4)) () with
              | Some (_, _, msgs), Some (_, _, after) ->
-                 List.length after = List.length msgs - 5 &&
-                 List.for_all (fun (t', _, _) ->
-                     t' > Clock.Time.to_secs (List.nth stamps 4)) after
+                 List.length after = List.length msgs - 5
              | _ -> false) ;
         check "since the cursor of an answer brings back nothing"
             (match logs () with

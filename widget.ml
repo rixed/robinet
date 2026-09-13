@@ -776,7 +776,7 @@ let mint_power t =
     t.power <- { on = false ; name = full_name t ; sim = t.sim } ;
     t.owns_power <- true
 
-let make_ ?parent ~sim ?power ?(own_power=false) ?now ?size ?location
+let make_ ?parent ~sim ?power ?(own_power=false) ?now ?seq ?size ?location
           ?(properties=[]) ?device_type name =
     if String.contains name '/' then
         invalid_arg ("Widget.make: name must not contain '/': "^ name) ;
@@ -785,7 +785,7 @@ let make_ ?parent ~sim ?power ?(own_power=false) ?now ?size ?location
         | None -> name
         | Some p -> unique_among p name in
     Option.may check_location location ;
-    let logger = Log.make ?size ?now () in
+    let logger = Log.make ?size ?now ?seq () in
     (* What it draws on until [own_power] says otherwise: what it was handed,
      * or what its parent draws on. The root has neither and mints its own,
      * which is the mains of its simulation. *)
@@ -860,14 +860,21 @@ let make_ ?parent ~sim ?power ?(own_power=false) ?now ?size ?location
  * widget of a simulation, and hence keeps it a complete inventory. *)
 let make ~parent ?power ?own_power ?size ?location ?properties ?device_type
          name =
+    (* Its parent's clock, and its parent's counter of messages: a simulation
+       numbers what its widgets log in one sequence, so that two of them can be
+       read side by side. *)
     make_ ~parent ~sim:parent.sim ~now:parent.logger.Log.now
+          ~seq:parent.logger.Log.seq
           ?power ?own_power ?size ?location ?properties ?device_type name
 
 (** Create the root of a simulation's widget tree: the only widget with no
- * parent, and the only one that has to be told which simulation it is in and
- * where to read the time. Called by [Simulation.make], and nowhere else. *)
-let make_root ~sim ~now ?size ?location ?properties name =
-    make_ ~sim ~now ?size ?location ?properties name
+ * parent, and the only one that has to be told which simulation it is in,
+ * where to read the time, and where to take the numbers it stamps its messages
+ * with -- every widget below it takes all three from its parent. Called by
+ * [Simulation.make], and nowhere else; [seq] is optional only so that a test
+ * can build a root without a simulation behind it. *)
+let make_root ~sim ~now ?seq ?size ?location ?properties name =
+    make_ ~sim ~now ?seq ?size ?location ?properties name
 
 (** Enumerate [t] and all of its descendants, depth first. *)
 let rec enum t =

@@ -88,6 +88,9 @@ type t =
        * share it: the logger has to be given a way to read the time when the
        * widget is built, which is before this record exists. *)
       now : Time.t ref ;
+      (* The number the next message logged anywhere in this simulation will
+       * carry, which is what a reader of its logs keeps its place by. *)
+      log_seq : int ref ;
       (* Every event waiting to happen, soonest first, each with the power
        * source that pays for it. *)
       mutable events : (Widget.power * (unit -> unit)) Events.t ;
@@ -894,7 +897,19 @@ let make =
         (* Every instant is counted from here, so the clock starts at zero
            and [epoch] says what the world outside called that moment. *)
         let now = ref Time.zero in
-        let root = Widget.make_root ~sim:id ~now:(fun () -> !now) name in
+        (* What numbers the messages of every logger in this simulation, so
+           that a reader can keep its place in one: see [Log.messages]. Shared
+           with the closure the loggers hold, as [now] is, since the root is
+           built before the record that holds them both.
+
+           Incremented without taking the lock, which is how [now] is read:
+           logging happens under it in the ordinary case -- within a dispatch,
+           or within a borrow -- and where it does not, OCaml's own lock is
+           what makes the read and the write of one word indivisible. *)
+        let log_seq = ref 0 in
+        let root =
+            Widget.make_root ~sim:id ~now:(fun () -> !now)
+                             ~seq:(fun () -> incr log_seq ; !log_seq) name in
         incr seq ;
         let t =
             { id ;
@@ -902,6 +917,7 @@ let make =
               root ;
               thread = None ;
               now ;
+              log_seq ;
               events = Events.empty ;
               lock = Mutex.create () ;
               cond = Condition.create () ;

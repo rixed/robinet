@@ -29,18 +29,26 @@ open Batteries
 (* TODO: several Debug level? *)
 type level  = Fatal | Critical | Error | Warning | Info | Debug
 
-type msg = Clock.Time.t * (string Lazy.t)
+(* A message is a number, an instant and what it says.
+ *
+ * The number is what a reader keeps its place by, and the reason it is not the
+ * instant: a simulation's clock stands still between two events, so several
+ * messages share one, and "everything after that instant" then loses the ones
+ * logged at it -- which is exactly what a thread outside the dispatcher does,
+ * the administration interface every time it switches something. The instant
+ * is a label on a message; this is its identity. *)
+type msg = int * Clock.Time.t * (string Lazy.t)
 
 type queue  =
     { mutable oldest : int ; (* points to the next to be overwritten *)
       (* How many of [msgs] hold a message: the array fills up once, and from
        * then on every write overwrites an older message. *)
       mutable len : int ;
-      (* When the message that was overwritten last had been logged, if any.
-       * A reader asking for everything logged after some time can then be told
-       * that part of what it asked for is already gone -- which a log window
-       * must say, or it quietly claims a continuity it does not have. *)
-      mutable purged : Clock.Time.t option ;
+      (* Which message was overwritten last, if any. A reader asking for
+       * everything logged after some message can then be told that part of
+       * what it asked for is already gone -- which a log window must say, or
+       * it quietly claims a continuity it does not have. *)
+      mutable purged : int option ;
       msgs : msg array }
 
 type t =
@@ -50,6 +58,13 @@ type t =
        * simulation's clock -- their own, note, not whichever simulation the
        * thread doing the logging happens to be running. *)
       now : unit -> Clock.Time.t ;
+      (* Where it takes the number to stamp the next message with. One counter
+       * per simulation, handed down from its root widget to every logger
+       * below, so that the numbers of two widgets of one simulation can be
+       * compared -- and so that nothing has to be unique across a process
+       * that runs several. A logger belonging to no simulation counts on its
+       * own. *)
+      seq : unit -> int ;
       queues : queue array }
 
 (* log level <-> queue index *)
@@ -87,22 +102,22 @@ let string_of_int_level = string_of_level % level_of_int
 (* output to console happen based on a constant current loglevel *)
 
 let console_lvl = ref Error
-let console_log (t, lstr) =
+let console_log (_seq, t, lstr) =
     Printf.printf "%a: %s\n%!" Clock.Time.printf t (Lazy.force lstr)
 
 (* queue management *)
 
 let make_queue size =
     { oldest = 0 ; len = 0 ; purged = None ;
-      msgs = Array.create size (Clock.Time.zero, lazy "") }
+      msgs = Array.create size (0, Clock.Time.zero, lazy "") }
 
 let enqueue q m =
     if q.len >= Array.length q.msgs then
-        (* What is about to be overwritten is lost from here on: remember when
-         * it was logged. Only the time, and only the last one: what a reader
-         * needs to know is whether anything is missing from what it asked
-         * for, not how much. *)
-        q.purged <- Some (fst q.msgs.(q.oldest))
+        (* What is about to be overwritten is lost from here on: remember
+         * which one it was. Only the number, and only of the last one: what a
+         * reader needs to know is whether anything is missing from what it
+         * asked for, not how much. *)
+        q.purged <- Some (let seq, _, _ = q.msgs.(q.oldest) in seq)
     else
         q.len <- q.len + 1 ;
     q.msgs.(q.oldest) <- m ;
@@ -140,33 +155,33 @@ let queue_enum q =
     let cursor = { next = q.oldest ; wrapped = false } in
     let e = make cursor in
     (* Advance cursor as strings are empty or we moved back to oldest: *)
-    Enum.drop_while (fun (_, s) -> Lazy.force s = "") e
+    Enum.drop_while (fun (_, _, s) -> Lazy.force s = "") e
 
 (*$inject
   let queue_of_list ?(size=3) msgs =
     let q = make_queue size in
     List.iteri (fun i s ->
         let t = Clock.Time.of_secs (float_of_int i) in
-        enqueue q (t, lazy s)
+        enqueue q (i + 1, t, lazy s)
     ) msgs ;
     q
  *)
-(*$= queue_enum & ~printer:(fun lst -> String.concat "," (List.map (Lazy.force % snd) lst))
+(*$= queue_enum & ~printer:(fun lst -> String.concat "," (List.map (fun (_, _, s) -> Lazy.force s) lst))
   [] \
         (List.of_enum (queue_enum (queue_of_list [])))
-  [ Clock.Time.of_secs 0., lazy "glop" ] \
+  [ 1, Clock.Time.of_secs 0., lazy "glop" ] \
         (List.of_enum (queue_enum (queue_of_list [ "glop" ])))
-  [ Clock.Time.of_secs 0., lazy "glop" ; \
-    Clock.Time.of_secs 1., lazy "pas glop" ] \
+  [ 1, Clock.Time.of_secs 0., lazy "glop" ; \
+    2, Clock.Time.of_secs 1., lazy "pas glop" ] \
         (List.of_enum (queue_enum (queue_of_list [ "glop" ; "pas glop" ])))
-  [ Clock.Time.of_secs 0., lazy "glop" ; \
-    Clock.Time.of_secs 1., lazy "glop glop" ; \
-    Clock.Time.of_secs 2., lazy "pas glop" ] \
+  [ 1, Clock.Time.of_secs 0., lazy "glop" ; \
+    2, Clock.Time.of_secs 1., lazy "glop glop" ; \
+    3, Clock.Time.of_secs 2., lazy "pas glop" ] \
         (List.of_enum (queue_enum (queue_of_list [ "glop" ; "glop glop" ; \
                                                    "pas glop" ])))
-  [ Clock.Time.of_secs 1., lazy "glop glop" ; \
-    Clock.Time.of_secs 2., lazy "pas glop" ; \
-    Clock.Time.of_secs 3., lazy "glop pas glop" ] \
+  [ 2, Clock.Time.of_secs 1., lazy "glop glop" ; \
+    3, Clock.Time.of_secs 2., lazy "pas glop" ; \
+    4, Clock.Time.of_secs 3., lazy "glop pas glop" ] \
         (List.of_enum (queue_enum (queue_of_list [ "glop" ; "glop glop" ; \
                                                    "pas glop" ; "glop pas glop" ])))
 *)
@@ -182,28 +197,33 @@ let queue_enum q =
 *)
 
 (** Everything a logger holds, oldest first: the messages of every level up to
- * [max_level] that were logged strictly after [since], and whether anything
- * that would have answered has already been overwritten.
+ * [max_level] that were logged after the message numbered [since], and whether
+ * anything that would have answered has already been overwritten.
  *
- * [since] is exclusive and needs no more than a time to be exact. A logger
- * belonging to a simulation is stamped with that simulation's clock, which
- * stands still for the whole of an event dispatch, and no two events are ever
- * scheduled at the same instant (see [Simulation.at]); so one timestamp is one
- * dispatch, a reader holding the simulation's lock sees all of a dispatch's
- * messages or none of them, and "everything after t" cannot cut a dispatch in
- * half. What can slip through is a message logged by another thread at the
- * current time, out of any dispatch, after a reader has already been given
- * that instant -- a ping asked for from the outside, say.
+ * [since] is exclusive, and is a message and not an instant. It used to be an
+ * instant, and that lost messages: a simulation's clock stands still between
+ * two events, so everything logged within one dispatch shares a timestamp, and
+ * so does everything a thread outside the dispatcher logs while the clock
+ * waits. A reader given the last message of an instant, asking for what came
+ * after it, was then never shown the rest of that instant -- which the
+ * administration interface hit every time it switched a device: the line
+ * saying so was logged from its own thread, at a time the reader already had.
+ * It showed up at one log level and not at the next, since a level that
+ * delivers more messages is a level whose reader is more likely to be holding
+ * the current instant already.
  *
- * Messages logged at the same instant keep the order they were logged in
- * within one level, and are ordered by level between them: the queues are per
- * level, so the true interleaving of a debug and an info message logged one
- * after the other is not recorded anywhere. *)
+ * A reader holding the simulation's lock still sees all of a dispatch or none
+ * of it, which is what matters for reading one: the numbers within a dispatch
+ * are consecutive, and nothing else can log in the middle of one.
+ *
+ * Messages come back in the order they were logged, whatever their level: the
+ * queues are per level, and these numbers are the only record of how the two
+ * interleaved. *)
 let messages ?since ?(max_level=max_level) t =
-    let after (ts, _) =
+    let after (seq, _, _) =
         match since with
         | None -> true
-        | Some (since : Clock.Time.t) -> Clock.Time.compare ts since > 0 in
+        | Some since -> seq > since in
     let lost =
         match since with
         | None ->
@@ -214,38 +234,65 @@ let messages ?since ?(max_level=max_level) t =
             Enum.range 0 ~until:max_level |>
             Enum.exists (fun lvl ->
                 match t.queues.(lvl).purged with
-                | Some p -> Clock.Time.compare p since > 0
+                | Some p -> p > since
                 | None -> false) in
     let msgs =
         Enum.range 0 ~until:max_level |>
         Enum.map (fun lvl ->
             queue_enum t.queues.(lvl) //
             after /@
-            (fun (ts, lstr) -> ts, level_of_int lvl, Lazy.force lstr)) |>
+            (fun (seq, ts, lstr) ->
+                seq, ts, level_of_int lvl, Lazy.force lstr)) |>
         Enum.flatten |>
         List.of_enum in
-    (* Stable, so that the messages of one level stay in the order they were
-     * logged in when they share a timestamp. *)
-    lost, List.stable_sort (fun (t1, _, _) (t2, _, _) ->
-              Clock.Time.compare t1 t2) msgs
+    (* By the order they were logged in, which is what the numbers are: the
+     * queues are per level, so this is the only place the interleaving of a
+     * debug and an info message logged one after the other is recovered. *)
+    lost, List.sort (fun (s1, _, _, _) (s2, _, _, _) -> compare s1 s2) msgs
 
 (*$inject
   let logged ?since ?max_level msgs =
     let t = make ~size:2 ~now:(fun () -> Clock.Time.zero) () in
-    List.iter (fun (ts, lvl, s) ->
-      enqueue t.queues.(int_of_level lvl) (Clock.Time.of_secs ts, lazy s)) msgs ;
+    List.iteri (fun i (ts, lvl, s) ->
+      enqueue t.queues.(int_of_level lvl)
+              (i + 1, Clock.Time.of_secs ts, lazy s)) msgs ;
     let lost, msgs = messages ?since ?max_level t in
-    lost, List.map (fun (ts, lvl, s) ->
+    lost, List.map (fun (_seq, ts, lvl, s) ->
       Clock.Time.to_secs ts, string_of_level lvl, s) msgs
  *)
 (*$= logged & ~printer:dump
   (false, []) (logged [])
-  (false, [ 1., "info", "a" ; 2., "error", "b" ])     (logged [ 1., Info, "a" ; 2., Error, "b" ])
-  (* [since] is exclusive, and what it leaves out is not lost: it was read. *)   (false, [ 2., "error", "b" ])     (logged ~since:(Clock.Time.of_secs 1.) [ 1., Info, "a" ; 2., Error, "b" ])
-  (* A level nobody asked for is not read at all. *)   (false, [ 2., "error", "b" ])     (logged ~max_level:(int_of_level Error) [ 1., Info, "a" ; 2., Error, "b" ])
-  (* Two of that level fit; the third pushes the first out, and a reader that      had asked for everything after it is told so. *)   (true, [ 2., "info", "b" ; 3., "info", "c" ])     (logged ~since:(Clock.Time.of_secs 0.5)       [ 1., Info, "a" ; 2., Info, "b" ; 3., Info, "c" ])
-  (* But not one that had already read it. *)   (false, [ 3., "info", "c" ])     (logged ~since:(Clock.Time.of_secs 2.)       [ 1., Info, "a" ; 2., Info, "b" ; 3., Info, "c" ])
-  (* Of one instant, every level, most serious first. *)   (false, [ 1., "error", "b" ; 1., "info", "a" ; 1., "info", "c" ])     (logged [ 1., Info, "a" ; 1., Error, "b" ; 1., Info, "c" ])
+  (false, [ 1., "info", "a" ; 2., "error", "b" ]) \
+    (logged [ 1., Info, "a" ; 2., Error, "b" ])
+  (* [since] is exclusive, and names a message: what it leaves out is not \
+     lost, it was read. *) \
+  (false, [ 2., "error", "b" ]) \
+    (logged ~since:1 [ 1., Info, "a" ; 2., Error, "b" ])
+  (* A level nobody asked for is not read at all. *) \
+  (false, [ 2., "error", "b" ]) \
+    (logged ~max_level:(int_of_level Error) [ 1., Info, "a" ; 2., Error, "b" ])
+  (* Two of that level fit; the third pushes the first out, and a reader that \
+     had asked for everything is told so. *) \
+  (true, [ 2., "info", "b" ; 3., "info", "c" ]) \
+    (logged ~since:0 [ 1., Info, "a" ; 2., Info, "b" ; 3., Info, "c" ])
+  (* But not one that had already read it. *) \
+  (false, [ 3., "info", "c" ]) \
+    (logged ~since:2 [ 1., Info, "a" ; 2., Info, "b" ; 3., Info, "c" ])
+  (* Of one instant, in the order they were logged, whatever their level: \
+     that is what the numbers are for, and what an instant cannot say. *) \
+  (false, [ 1., "info", "a" ; 1., "error", "b" ; 1., "info", "c" ]) \
+    (logged [ 1., Info, "a" ; 1., Error, "b" ; 1., Info, "c" ])
+ *)
+
+(* And the failure this cursor exists for: a clock that stands still stamps
+   several messages with one instant, so a reader given the first of them and
+   asking for what came after used to be shown none of the rest. Which is what
+   the administration interface does every time it switches something: the
+   line saying so is logged from its own thread, at an instant the reader
+   already has. *)
+(*$= logged & ~printer:dump
+  (false, [ 1., "info", "b" ]) \
+    (logged ~since:1 [ 1., Info, "a" ; 1., Info, "b" ])
  *)
 
 (* log *)
@@ -253,7 +300,7 @@ let messages ?since ?(max_level=max_level) t =
 let log t level lstr =
     let lvl = int_of_level level in
     let now = t.now () in
-    let msg = now, lstr in
+    let msg = t.seq (), now, lstr in
     enqueue t.queues.(lvl) msg ;
     if lvl <= int_of_level !console_lvl then console_log msg ;
     assert (level <> Fatal)
@@ -267,8 +314,15 @@ let log_exceptions t ?(level=Warning) what f x =
                 (Printexc.to_string e)
                 what))
 
-let make ?(size=50) ?(now=Clock.Time.since_start) () =
-    { now ; queues = Array.init num_levels (fun _ -> make_queue size) }
+let make ?(size=50) ?(now=Clock.Time.since_start) ?seq () =
+    let seq =
+        match seq with
+        | Some seq -> seq
+        | None ->
+            (* A logger belonging to no simulation, counting for itself. *)
+            let n = ref 0 in
+            fun () -> incr n ; !n in
+    { now ; seq ; queues = Array.init num_levels (fun _ -> make_queue size) }
 
 (* The logger that will adopt any others: *)
 

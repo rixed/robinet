@@ -109,7 +109,9 @@ let get_logs ?(max_level=Log.max_level) widgets =
     let e = List.fold_left collect_logger (Enum.empty ()) widgets in
     let a = Array.of_enum e in
     Array.fast_sort
-        (fun (_, _, (t1, _)) (_, _, (t2, _)) -> Clock.Time.compare t1 t2) a ;
+        (* By the order they were logged in, which is what a message's number
+         * is: two logged at one instant are told apart by nothing else. *)
+        (fun (_, _, (s1, _, _)) (_, _, (s2, _, _)) -> compare s1 s2) a ;
     Array.enum a
 
 let logs_menu resp selected_id also_selected ignored_widgets =
@@ -505,7 +507,7 @@ let logs _mth _matches vars _qry_body resp =
                     [| "fatal" ; "crit" ; "err" ; "wrn" ; "nfo" ; "dbg" |] in
                 let prev_src = ref "" in
                 let prev_lvl = ref ~-1 in
-                fun oc (widget, lvl, (t, msg)) ->
+                fun oc (widget, lvl, (_seq, t, msg)) ->
                     let src = Widget.full_name widget in
                     let with_border =
                         if !prev_src <> src then (

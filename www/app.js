@@ -592,10 +592,12 @@ const mergeLogs = (w, answer) => {
     const key = widgetKey(w)
     let l = logs.get(key)
     if (!l) { l = { cursor: null, lines: [] } ; logs.set(key, l) }
-    /* Where the simulator says we have got to, kept exactly as it said it: a
-     * message's [t] is seconds, which is what it is displayed in, and seconds
-     * cannot name an instant closely enough to ask from -- see
-     * [json_of_cursor] in myadmin_api.ml. */
+    /* Where the simulator says we have got to, kept exactly as it said it and
+     * handed back as it was given. It names the last message we were shown,
+     * not the instant it was logged at: a clock that stands still stamps
+     * several messages with one instant, and asking from an instant loses the
+     * rest of it -- see [json_of_log_cursor] in myadmin_api.ml and [messages]
+     * in log.ml. */
     l.cursor = answer.cursor
     const line = (m, lost) => ({
         t: m.t, level: lost ? 'lost' : m.level, text: m.text,
