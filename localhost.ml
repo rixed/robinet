@@ -102,11 +102,13 @@ let rec reader t =
         let s = Bytes.sub buf 0 r |> Bytes.to_string in
         Log.(log (logger t.ctx) Debug (lazy (Printf.sprintf "Received '%s'" s))) ;
         (* Use the Clock so that the recv function is called in main thread *)
-        Simulation.asap t.ctx.power t.recv (bitstring_of_string s) ;
+        Simulation.asap t.ctx.power t.recv
+                        (bitstring_of_string s) ;
         reader t
     ) else if r = 0 then (
         Log.(log (logger t.ctx) Debug (lazy (Printf.sprintf "Received EOF"))) ;
-        Simulation.asap t.ctx.power t.recv empty_bitstring ;
+        Simulation.asap t.ctx.power t.recv
+                        empty_bitstring ;
         close t ()
     )
 
@@ -165,7 +167,8 @@ let tcp_connect ctx ?(wait_for_server=true) ?ttl ?tos
                 if wait_for_server then
                     (* More luck later: *)
                     let d = jitter 0.1 !wait_server_delay in
-                    Simulation.delay ctx.power (Clock.Interval.sec d) try_connect ()
+                    Simulation.delay ctx.power
+                                     (Clock.Interval.sec d) try_connect ()
                 else
                     raise e
             | () ->

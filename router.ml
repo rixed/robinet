@@ -293,7 +293,8 @@ struct
                 let ip_pld = Icmp.Pdu.pack icmp in
                 let ip_pkt = Ip.Pdu.make Ip.Proto.icmp my_ip ip.Ip.Pdu.src ip_pld in
                 let bits = Ip.Pdu.pack ip_pkt in
-                Simulation.delay t.power (Clock.Interval.sec delay) (route None t) bits
+                Simulation.delay t.power
+                             (Clock.Interval.sec delay) (route None t) bits
 
     (* The [route] function receives the IP packets from the Eth trx.
      * The integer [in_iface_opt] is the input interface number, unless
@@ -430,7 +431,7 @@ struct
             iface.eth.my_addresses <- my_addresses ;
             (* The one it had was for the address it no longer has. *)
             Option.may (fun (h : Host.t) ->
-                Widget.destroy h.Host.trx.Host.widget
+                Simulation.remove_widget h.Host.trx.Host.widget
             ) iface.admin_host ;
             iface.admin_host <- None ;
             if my_addresses <> [] then (
@@ -559,10 +560,6 @@ struct
             Array.iter (fun iface -> Eth.State.reset iface.eth) t.ifaces) ;
         widget.device_type <- Some "router" ;
         widget.device <- Some (T t) ;
-        (* A router that minted the supply stops for good by cutting it; one
-           built as part of something larger leaves that to the box. *)
-        if widget.owns_power then
-            widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
         widget.ports <- Widget.{
             count = (fun () -> Array.length t.ifaces) ;
             is_connected = (fun n -> (ports t.ifaces.(n)).is_connected 0) ;
@@ -920,9 +917,13 @@ struct
         "which the box forgets when it is switched off" @?
             (Tools.BitHash.length eth.Eth.State.arp_cache = 0) ;
         flip true ;
-        Widget.destroy r.widget ;
-        "and a deleted router is stopped for good" @?
-            (not r.power.on) ;
+        (* Deleting it takes its future with it, which is what stops a deleted
+           thing for good. Not its destructor's doing: what a widget holds of
+           its own is one thing, and what it has scheduled is another. *)
+        Simulation.delay r.power (Clock.Interval.sec 1.) ignore () ;
+        Simulation.remove_widget r.widget ;
+        "a deleted router has nothing left scheduled" @?
+            (Events.for_all (fun _ (p, _) -> p != r.power) sim.events) ;
         "and out of the tree" @?
             (Widget.find sim.root r.widget.id = None)
      *)
@@ -1114,7 +1115,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
          * configuration has become; the one it replaces goes with it, or a
          * gateway switched off and on again would grow another pair of parts
          * every time. *)
-        Option.may (fun (st : Dhcpd.State.t) -> Widget.destroy st.Dhcpd.State.widget)
+        Option.may (fun (st : Dhcpd.State.t) -> Simulation.remove_widget st.Dhcpd.State.widget)
                    gw.dhcp_state ;
         (* Get from the host what could be edited there (TODO: dhcp_mtu,
          * lease_time_sec etc could also be part of the config) *)
@@ -1127,7 +1128,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
         (* TODO: register a callback when leasing/releasing that updates the dns lookup function *)
         Dhcpd.serve st h.trx in
     let start_dns gw =
-        Option.may (fun (st : Named.State.t) -> Widget.destroy st.Named.State.widget)
+        Option.may (fun (st : Named.State.t) -> Simulation.remove_widget st.Named.State.widget)
                    gw.dns_state ;
         let st =
             Named.State.make ~parent:h.trx.widget (fun _ -> None) in (* Delegate everything to nameserver *)

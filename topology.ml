@@ -611,7 +611,7 @@ let new_simulation ?topology ?(paused=false) ?(power=true) name =
       let sw = dev "switch" "sw" [ "ports", `Int 4 ] in
       let c1 = cable h1 sw in
       ignore (cable h2 sw) ;
-      Widget.destroy c1 ;
+      Simulation.remove_widget c1 ;
       let h3 = dev "host" "h3" [ "static-ip", `String "192.168.0.3" ] in
       ignore (cable h3 sw) ;
       sim

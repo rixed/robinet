@@ -669,7 +669,7 @@ let test_delete () =
     let fired = ref 0 in
     Simulation.delay h2.Host.trx.Host.power (Clock.Interval.sec 1.)
                      (fun () -> incr fired) () ;
-    Widget.destroy h2_w ;
+    Simulation.remove_widget h2_w ;
     Simulation.run sim false ;
     check "a deleted device stops running" (!fired = 0) ;
     check "and is out of the tree, with everything it was made of"
@@ -690,7 +690,7 @@ let test_delete () =
 
     (* And from the other side: deleting what a host was cabled to leaves the
        host, minus the cable. *)
-    Widget.destroy sw_w ;
+    Simulation.remove_widget sw_w ;
     check "deleting a device unplugs what was still on it"
         (not (h1_w.ports.is_connected 0)) ;
     check "leaving the device at the far end behind"
@@ -698,10 +698,12 @@ let test_delete () =
     check "and taking its own parts with it"
         (Widget.find sim.root sw_w.id = None &&
          sw_w.children = []) ;
-    (* Including their supply: a switch has one of its own, and it is reached
-       by the walk rather than by the caller knowing it is there. *)
-    check "which are stopped as well"
-        (not sw.Hub.Switch.power.on)
+    (* And their future with them: deleting a widget purges the events drawing
+       on the sources the doomed own. The source itself is left switched on,
+       which says nothing about anything -- it is out of the tree with the
+       widget that owned it, and nothing can schedule on it again. *)
+    check "and their future with them"
+        (Events.for_all (fun _ (p, _) -> p != sw.Hub.Switch.power) sim.events)
 
 (* Powering a host off is not a request that it stop: whatever it had planned
    to do ceases to exist. Everything it schedules -- its adapter, its sockets,

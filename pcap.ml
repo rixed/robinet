@@ -923,7 +923,8 @@ let rec replay_next replayer =
                     else d in
             replayer.last_ts <- Some pdu.ts ;
             let gen = replayer.gen in
-            Simulation.delay replayer.widget.power d (fun () ->
+            Simulation.delay replayer.widget.power d
+                             (fun () ->
                 if gen = replayer.gen then (
                     replayer_tx replayer (pdu.payload :> bitstring) ;
                     replay_next replayer)) ())
@@ -1171,7 +1172,8 @@ let sniffer iface ?(while_=(fun () -> true)) rx =
                 let ts =
                     Simulation.of_wall_clock
                         (Simulation.of_widget iface.widget) pdu.Pdu.ts in
-                Simulation.at iface.power ts rx (pdu.Pdu.payload :> bitstring) ;
+                Simulation.at iface.power ts rx
+                              (pdu.Pdu.payload :> bitstring) ;
                 loop () in
     Thread.create loop ()
 
@@ -1308,7 +1310,8 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
      * switching it off closes it. *)
     widget.power_up <- (fun () -> power_up portal) ;
     widget.power_down <- (fun () -> power_down portal) ;
-    widget.on_delete <- (fun () -> Simulation.power_down widget.power) ;
+    (* What it has of the machine's, and what nothing else will close. *)
+    widget.on_delete <- (fun () -> power_down portal) ;
     widget.ports <- Widget.{
         count = (fun () -> 1) ;
         is_connected = (fun _ -> is_connected portal) ;

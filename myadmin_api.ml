@@ -764,7 +764,7 @@ let create_widget _mth matches _vars qry_body resp =
                parent's children, which is the list being walked. *)
             List.filter (fun (w : Widget.t) -> not (List.memq w before))
                 sim.root.children |>
-            List.iter Widget.destroy in
+            List.iter Simulation.remove_widget in
         match Device.make_from_params type_ ~parent:sim.root name params with
         | exception Widget.Bad_value m ->
             rollback () ;
@@ -796,7 +796,7 @@ let delete_widget _mth matches _vars _qry_body resp =
         let full_name = Widget.full_name w in
         (* Under the lock like every other change, and rather more so: this
          * stops devices and unplugs cables the simulation may be walking. *)
-        Widget.destroy w ;
+        Simulation.remove_widget w ;
         Simulation.changed sim ;
         Log.(log sim.root.logger Info (lazy (
             Printf.sprintf "Deleted %S" full_name))) ;

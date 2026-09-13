@@ -131,7 +131,6 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
             egress = Metric.Counter.make () ;
             collisions = Metric.Counter.make () } in
         widget.device <- Some (T t) ;
-        widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
         widget.ports <- Widget.{
             count = (fun () -> n) ;
             is_connected = (fun i -> is_connected t i) ;
@@ -311,7 +310,6 @@ struct
             ) t.ifaces in
         reset_cut_through () ;
         widget.device <- Some (T t) ;
-        widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
         widget.ports <- Widget.{
             count = (fun () -> num_ifaces) ;
             is_connected = (fun i -> t.ifaces.(i).widget.ports.is_connected 0) ;

@@ -946,6 +946,30 @@ let make_from_params type_ ~parent name given =
   find "Switch" = None
  *)
 
+(* What is still travelling down a cable goes with the cable. Deleting one used
+ * to unplug its two ends and leave the frames in flight scheduled, which then
+ * arrived at a port that had been told it was free: a cable draws on the mains,
+ * so there was no supply to cut that would not have stopped the whole network,
+ * and cutting a supply was how a deleted thing was stopped. *)
+(*$R make_from_params
+    let sim = Simulation.make ~realtime:false "cable-gone" in
+    let dev t n p = make_from_params t ~parent:sim.root n p in
+    let h1 = dev "host" "h1" [ "static-ip", `String "192.168.0.1" ]
+    and h2 = dev "host" "h2" [ "static-ip", `String "192.168.0.2" ] in
+    let c = dev "cable" "" [ "from", `Int h1.id ; "to", `Int h2.id ] in
+    let st = Option.get (Eth.Cable.State.of_widget c) in
+    (* Long enough that it is certainly still on its way. *)
+    st.Eth.Cable.State.delay <- Clock.Interval.sec 10. ;
+    "a cable draws on a source of its own" @? c.owns_power ;
+    let travelling () =
+        Events.exists (fun _ (p, _) ->
+            p == st.Eth.Cable.State.power) sim.events in
+    (Eth.Cable.make st).ins.write (Bitstring.create_bitstring 64) ;
+    "a frame crossing a cable is an event of the cable's" @? travelling () ;
+    Simulation.remove_widget c ;
+    "and a deleted cable takes it with it" @? not (travelling ())
+ *)
+
 (* A root to build under: a simulation's, which is the only kind there is --
  * a root is built with the simulation it belongs to, being what its mains
  * draws on. *)

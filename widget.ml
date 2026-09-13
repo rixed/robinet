@@ -630,36 +630,19 @@ let rec delete t =
     unlink_from_parent t ;
     t.parent <- None
 
-(** Take out of the simulation, for good, the thing a widget stands for.
+(** Every cable reaching into [doomed] from outside it, which is where a cable
+ * usually sits: under the root, or under whatever groups the two ends it
+ * joins, and so out of reach of a walk of the subtree itself.
  *
- * Where [delete] takes the picture apart, this takes the thing apart first:
- * everything within the doomed subtree is stopped (see [on_delete]), and every
- * cable reaching into it from outside is unplugged and deleted as well -- a
- * cable *is* the link, so it cannot outlive either of the two things it
- * joined.
- *
- * It lives here rather than with the devices because none of them can see the
- * whole of what is being deleted; each of them left behind an [on_delete]
- * saying how to stop itself, and this walks them. *)
-let destroy t =
-    let doomed = descendants t in
-    (* A cable's widget usually sits outside the subtree -- under the root, or
-     * under whatever groups the two ends -- so the walk above does not reach
-     * it. Both of its ends name it when both are doomed, hence the [memq]. *)
-    let cables =
-        List.fold_left (fun cables (d : t) ->
-            List.fold_left (fun cables p ->
-                match p.via with
-                | Some v when not (List.memq v cables) -> v :: cables
-                | _ -> cables
-            ) cables d.peers
-        ) [] doomed in
-    List.iter (fun (c : t) -> c.on_delete ()) cables ;
-    List.iter (fun (d : t) -> d.on_delete ()) doomed ;
-    (* After the cables have been unplugged, so that a port is told it is free
-     * before the widget that owns it stops being reachable. *)
-    List.iter delete cables ;
-    delete t
+ * Both of its ends name it when both are doomed, hence the [memq]. *)
+let cables_of doomed =
+    List.fold_left (fun cables (d : t) ->
+        List.fold_left (fun cables p ->
+            match p.via with
+            | Some v when not (List.memq v cables) -> v :: cables
+            | _ -> cables
+        ) cables d.peers
+    ) [] doomed
 
 (** Move a widget (and therefore its whole subtree) elsewhere in the hierarchy.
  *

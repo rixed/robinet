@@ -799,7 +799,8 @@ struct
                 Clock.Interval.sec
                     (max 0. (jitter 0.1 (Clock.Interval.to_secs st.delay)))
             else Clock.Interval.zero in
-        Simulation.delay st.iface.power delay st.iface.emit (Pdu.pack pdu)
+        Simulation.delay st.iface.power delay
+                         st.iface.emit (Pdu.pack pdu)
 
     let send (st : State.t) proto dst bits =
         if st.proto = Proto.arp || st.loss = 0. || Random.float 1. >= st.loss then
@@ -910,7 +911,8 @@ struct
                     Result.iter (fun ip_src ->
                         let src_proto_addr = Ip.Addr.to_bitstring ip_src in
                         BitHash.replace st.arp_cache src_proto_addr (Some frame.src)) ;
-                    Simulation.asap st.iface.power st.recv (frame.Pdu.payload :> bitstring)
+                    Simulation.asap st.iface.power
+                                    st.recv (frame.Pdu.payload :> bitstring)
                 )
             ) else if frame.Pdu.proto = Proto.arp then (
                 match Arp.Pdu.unpack (frame.Pdu.payload :> bitstring) with
@@ -1103,10 +1105,17 @@ struct
         (* A cable has no natural parent; hang it off the root of the
          * simulation it connects things within. It takes no location: it is
          * drawn as the line between the two ends it joins, so where it is on
-         * the map is a consequence of where they are. *)
+         * the map is a consequence of where they are.
+         *
+         * A source of its own, like any other device: what is travelling down
+         * a cable is scheduled on it, and it is the only thing that is, so
+         * switching one off is a cut link and deleting one takes what was
+         * still on its way. Sharing the mains -- which is what it did, having
+         * the root for a parent -- meant neither could be done without
+         * stopping the whole network. *)
         let make ~parent ?(length=10.) ?(error_rate=0.) ?(history=10)
                  ?(name="cable") () =
-            let widget = Widget.make ~parent name in
+            let widget = Widget.make ~parent ~own_power:true name in
             widget.device_type <- Some "cable" ;
             let t = {
                 power = widget.power ;
@@ -1139,6 +1148,9 @@ struct
                     (Metric.Counter.T t.tot_bits) ;
                 metric_property "bit shifts" ~descr:"Number of flipped bits"
                     (Metric.Counter.T t.bit_shifts) ] ;
+            (* Minted switched off, as every source is, and switched on here:
+               a cable carries nothing until it is plugged in anyway. *)
+            Simulation.power_up widget.power ;
             t
     end
 

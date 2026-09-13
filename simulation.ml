@@ -225,12 +225,55 @@ let rename (t : t) name =
         t.name <- name ;
         t.root.name <- name) ()
 
+(** Take out of the simulation, for good, the thing a widget stands for: the
+ * whole of its subtree, and every cable reaching into it from outside -- a
+ * cable *is* the link, so it cannot outlive either of the two things it
+ * joined.
+ *
+ * Three things are done, in this order. What each doomed widget has to give
+ * up, which is its [on_delete] and is a destructor and nothing else: close a
+ * file, close an interface of the machine, let go of a port. Then the events
+ * they had scheduled. Then the tree surgery.
+ *
+ * The events are why this is here rather than in widget.ml, and they are not
+ * something a destructor can do: an event outliving what scheduled it fires
+ * into something that has been taken apart, and a frame still travelling down
+ * a cable that has just been unplugged is delivered to a port that has been
+ * told it is free.
+ *
+ * What goes is every event drawing on a source the doomed own. That is enough
+ * because everything that schedules draws on the source of the box it is part
+ * of, and a source owned within the subtree has nobody outside it drawing on
+ * it: it takes nothing that was not going anyway. What it does not reach is a
+ * part that owns no source and is deleted while its box lives on -- a router's
+ * admin host, dropped when its interface loses its address, whose pending work
+ * is a timeout that fires into nothing.
+ *
+ * A destructor must not schedule anything: what it scheduled would be purged
+ * a moment later. *)
+let remove_widget (w : widget) =
+    let t = Widget.sim w in
+    with_lock t (fun () ->
+        let doomed = Widget.descendants w in
+        let cables = Widget.cables_of doomed in
+        List.iter (fun (c : widget) -> c.on_delete ()) cables ;
+        List.iter (fun (d : widget) -> d.on_delete ()) doomed ;
+        List.iter (fun (d : widget) ->
+            if d.owns_power then
+                t.events <-
+                    Events.filter (fun _ (p, _) -> p != d.power) t.events
+        ) (cables @ doomed) ;
+        (* After the cables have been unplugged, so that a port is told it is
+           free before the widget that owns it stops being reachable. *)
+        List.iter Widget.delete cables ;
+        Widget.delete w) ()
+
 (** Take a simulation out of this process for good: stop its clock, take apart
  * everything it was running, and forget it.
  *
  * The taking apart is not housekeeping that could be left to the collector: a
  * recorder holds a file open and a portal a real interface, and dropping the
- * tree on the floor would leave both held. It is [Widget.destroy] that tells
+ * tree on the floor would leave both held. It is [remove_widget] that tells
  * them, exactly as deleting one device does.
  *
  * The thread is not waited for. It is asleep on the condition [stop] has just
@@ -238,16 +281,27 @@ let rename (t : t) name =
  * touches nothing this has taken away. Waiting for it would be the interface
  * blocking on a simulation, which is the one thing it must never do. *)
 let delete (t : t) =
+    (* Which empties the queue, so that the purging [remove_widget] does on the
+       way down finds nothing left to look at. *)
     stop t () ;
-    with_lock t (fun () -> Widget.destroy t.root) () ;
+    remove_widget t.root ;
     let a = !sims in
     if t.id < Array.length a then a.(t.id) <- None
 
-(* Empty the root widget. One widget at a time because of cascading deletions. *)
-let rec clear (t : t) =
-    match t.root.children with
-    | [] -> ()
-    | w :: _ -> Widget.destroy w ; clear t
+(* Empty the root widget. One widget at a time because of cascading deletions:
+ * taking a device away takes its cables with it.
+ *
+ * The queue goes first, in one stroke rather than once per widget on the way
+ * down: what is left when this is done is the root alone, which has nothing
+ * scheduled, so everything in it is going anyway. *)
+let clear (t : t) =
+    with_lock t (fun () ->
+        t.events <- Events.empty ;
+        let rec loop () =
+            match t.root.children with
+            | [] -> ()
+            | w :: _ -> remove_widget w ; loop () in
+        loop ()) ()
 
 (** Something about this simulation's network has been changed from outside. *)
 let changed (t : t) = t.unsaved <- true

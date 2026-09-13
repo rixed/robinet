@@ -42,6 +42,10 @@ module Events = Map.Make (struct
     let compare (a : t) (b : t) = Time.compare a b
 end)
 
+(* An event is what to do and the source that pays for it. Switching that
+ * source off withdraws it, which is what powering a box down means and what
+ * taking one out of the simulation ends up doing: everything that schedules
+ * draws on the source of the box it is part of. *)
 type event = power * (unit -> unit)
 
 (** {2 Simulation}
@@ -380,12 +384,17 @@ and widget =
        * fills this in only when it was left empty: replaying the arguments as
        * they were given would choose again, and differently. *)
       mutable made_with : (string * value) list option ;
-      (* How to stop the thing this widget stands for, called by [destroy]
-       * before the widget leaves the tree: cut its power, unplug the cable.
-       * Set by whoever built that thing, since nothing else knows how to stop
-       * it -- and only by whoever gave it its own power supply, so that
-       * deleting one of several devices sharing a supply does not switch off
-       * the others.
+      (* What this widget has of its own to give up when it is taken out of
+       * the simulation, called by [Simulation.remove_widget] before it leaves
+       * the tree: close a file, close an interface of the machine, let go of
+       * the two ports a cable holds. Set by whoever built the thing, since
+       * nothing else knows what it holds, and most widgets hold nothing and
+       * set none.
+       *
+       * A destructor and nothing else: what it had scheduled is taken by
+       * [remove_widget] itself, which is not something a widget can do for
+       * itself -- its source is the box's, and cutting that would stop
+       * everything else in the box as well.
        *
        * Nothing here undoes the wiring *within* a device: its trxs point at
        * one another and at nothing else, so they go when the last reference to

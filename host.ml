@@ -356,7 +356,8 @@ and do_gethostbyname t name cont =
                 Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Add a query for resolution of '%s' (%s)" name (if pending then "one was already pending" else "first one")))) ;
                 if not pending then (
                     (* add a timeout event that will awake all waiters for this name after some time *)
-                    Simulation.delay t.trx.power dns_timeout_delay dns_timeout () ;
+                    Simulation.delay t.trx.power
+                                     dns_timeout_delay dns_timeout () ;
                     (* Then actually sends the query *)
                     let now = Simulation.Widget.now t.trx.widget in
                     let params = Metric.(Params.singleton "name" (Param.String name)) in
@@ -715,7 +716,8 @@ let init_dhcp t =
                             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.src)))) ;
                             apply_lease t dhcp ;
                             (* TODO: Send a gratuitous ARP request? *)
-                            Simulation.asap t.trx.power (fun () ->
+                            Simulation.asap t.trx.power
+                                            (fun () ->
                                 List.iter (fun f -> f t) t.trx.on_ip
                             ) ()
                         | Ok (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; message ; _ })
@@ -739,7 +741,9 @@ let init_dhcp t =
                 Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast |>
                 Ip.Pdu.pack |>
                 tx t.eth_trx ;
-            Simulation.delay t.trx.power (Clock.Interval.sec (5.+.(Random.float 3.))) send_discover ()
+            Simulation.delay t.trx.power
+                             (Clock.Interval.sec (5.+.(Random.float 3.)))
+                             send_discover ()
         ) in
     ignore (dhcp_client <-= t.eth_trx) ;
     (* The client should wait a random time between one and ten seconds to desynchronize
@@ -872,8 +876,6 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
        so does stopping it for good. And it is a whole machine, unlike a host
        built on somebody else's adapter. *)
     widget.device <- Some (T t) ;
-    (* Its own supply, so stopping it for good is cutting it. *)
-    if own_power then widget.on_delete <- (fun () -> Simulation.power_down power) ;
     Widget.add_properties widget Widget.[
         property "static-ip" ~kind:(Optional String)
             ~descr:"IP given at boot (if none, will use DHCP)."
