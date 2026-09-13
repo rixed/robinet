@@ -90,7 +90,7 @@ type t =
       now : Time.t ref ;
       (* Every event waiting to happen, soonest first, each with the power
        * source that pays for it. *)
-      mutable events : (power * (unit -> unit)) Events.t ;
+      mutable events : (Widget.power * (unit -> unit)) Events.t ;
       mutable thread : Thread.t option ;
       (* Protects everything this simulation owns. It is held for the whole of
        * an event dispatch, which is what gives a thread borrowing this
@@ -197,8 +197,9 @@ type t =
       (* The simulated time the next snapshot is due at. *)
       mutable metric_samples_due : Time.t ;
       (* The mains: what powers everything in this simulation that is not
-       * powered by something more specific. It is never switched off. *)
-      power : power }
+       * powered by something more specific. It is the root widget's, minted
+       * with it, and is never switched off. *)
+      power : Widget.power }
 
 (* What is needed in order to act in a simulation: a clock to schedule on, and
  * something to draw the energy from.
@@ -210,24 +211,16 @@ type t =
  * simulated power-off is: not a machine that goes down gracefully, but one
  * whose pending work ceases to exist.
  *
+ * The source itself is [Widget.power], declared there because a widget names
+ * the one it draws on: a widget that mints one makes a box of its subtree,
+ * every widget below it taking its parent's. Everything that acts on a source
+ * is here all the same, this being where the events are.
+ *
  * Sources are unrelated to one another: switching one off leaves every other
- * one alone, since a host is the only thing that is ever switched off and
- * nothing is plugged into a host. Should a group of them ever need to go down
- * together, [power_down] is the only place that would have to know -- and it
- * is deliberately not the case today, since matching a source against a chain
- * of parents would put a walk on [at], which every packet goes through. *)
-and power =
-    { (* Whether this source may pay for events.
-       *
-       * Flip it only through [power_up] and [power_down]: the dispatcher does
-       * not look at this field, so switching it off without withdrawing the
-       * queued events leaves them to fire. *)
-      mutable on : bool ;
-      (* Whose power this is, for the logs. Sources are told apart by identity,
-       * so this is the only way to name one. *)
-      name : string ;
-      (* The simulation those events are scheduled on. *)
-      sim : t }
+ * one alone. A box within a box -- a gateway's router, were it to mint a
+ * source of its own -- would need [power_down] to know about that nesting,
+ * and nothing needs it to yet: matching a source against a chain of parents
+ * would put a walk on [at], which every packet goes through. *)
 
 (* What every metric of a simulation was worth at one instant, keyed by the
  * widget that owns it, the property it is read through, and the parameters of
@@ -333,6 +326,10 @@ let with_lock t f x =
 let signal_me t () =
     Condition.signal t.cond
 
+(** The power source of {!Widget}, named here as well: this is where it is
+ * switched, and where the events it pays for are kept. *)
+type power = Widget.power
+
 (** Return the current simulation time. *)
 (** The current simulated time.
  *
@@ -411,7 +408,24 @@ let unsaved t = t.unsaved
  *
  * It comes switched on. Nothing keeps track of it: it is kept alive by the
  * events it pays for and by whoever schedules them. *)
-let make_power t name = { on = true ; name ; sim = t }
+(* The simulation that pays for what a source buys. A source holds its id, as
+ * a widget does, since the type is declared before the simulation. *)
+let sim_of (p : power) =
+    match find p.Widget.sim with
+    | Some t -> t
+    | None ->
+        (* A source outliving its simulation would be one held by something
+         * that outlived it too, and nothing does: deleting a simulation takes
+         * its widget tree apart. *)
+        invalid_arg ("Simulation.sim_of: no simulation "^
+                     string_of_int p.Widget.sim)
+
+(* Sources are minted with a widget, by [Widget.make ~own_power:true]: a source
+ * with nothing drawing on it can pay for nothing. This is what the mains is
+ * made with, and the mains alone. *)
+let make_power t name =
+    let sim = t.id in
+    Widget.{ on = true ; name ; sim }
 
 (** [at p ts f x] will execute [f x] when the clock of [p]'s simulation reaches
  * time [ts] -- or never, if [p] is switched off by then.
@@ -420,7 +434,7 @@ let make_power t name = { on = true ; name ; sim = t }
  * what it had already scheduled, which is why the dispatcher never has to look
  * at a power source: everything left in the queue is powered. *)
 let at (p : power) (ts : Time.t) f x =
-    let t = p.sim in
+    let t = sim_of p in
     if not p.on then (
         if debug then Printf.printf "Clock: dropping an event for time %s: %s is off\n%!" (Time.to_string ts) p.name ;
         Log.(log t.root.Widget.logger Debug (lazy (Printf.sprintf
@@ -443,7 +457,7 @@ let at (p : power) (ts : Time.t) f x =
 
 (** [delay d f x] will delay the execution of [f x] by the interval [d]. *)
 let delay (p : power) d f x =
-    at p (Time.add (now p.sim) d) f x
+    at p (Time.add (now (sim_of p)) d) f x
 
 let asap (p : power) f x =
     (* FIXME: would be more precise and fast to have a dedicated list for asap events *)
@@ -451,8 +465,20 @@ let asap (p : power) f x =
 
 (** Switch a power source back on. Whatever it used to power is gone for good;
  * this only makes it able to pay for events again. *)
+(* The widgets drawing on [p], in tree order: found by walking rather than by
+ * registration, so that a widget destroyed or moved needs no unregistering and
+ * cannot be called after it is gone. Walked on switching only, which is a
+ * human-scale event -- [power_down] already walks the whole event queue. *)
+let users (p : power) =
+    Widget.enum (sim_of p).root |> List.of_enum |>
+    List.filter (fun (w : Widget.t) -> w.Widget.power == p)
+
 let power_up (p : power) =
-    p.on <- true
+    if not p.Widget.on then (
+        p.Widget.on <- true ;
+        (* In tree order, a box before what is inside it. *)
+        List.iter (fun (w : Widget.t) -> w.Widget.power_up ()) (users p)
+    )
 
 (** Switch a power source off, and forget every event it had paid for.
  *
@@ -460,16 +486,25 @@ let power_up (p : power) =
  * still be there to fire on the next power-up, and a host that comes back
  * would resume the conversations it was having when it went down. *)
 let power_down (p : power) =
-    let t = p.sim in
-    p.on <- false ;
-    with_lock t (fun () ->
-        let before = Events.cardinal t.events in
-        t.events <- Events.filter (fun _ (p', _) -> p' != p) t.events ;
-        let dropped = before - Events.cardinal t.events in
-        if dropped > 0 then
-            Log.(log t.root.Widget.logger Debug (lazy (Printf.sprintf
-                "Dropped %d event(s) powered by %s" dropped p.name)))) () ;
-    signal_me t ()
+    if p.Widget.on then (
+        let t = sim_of p in
+        with_lock t (fun () ->
+            (* The flag first, so that nothing woken below can schedule
+               anything; then the events, so that nothing already scheduled
+               survives; then the widgets, which therefore have nothing to add
+               to the queue and are told in the reverse of the order they came
+               up in, what is inside a box before the box. *)
+            p.Widget.on <- false ;
+            let before = Events.cardinal t.events in
+            t.events <- Events.filter (fun _ (p', _) -> p' != p) t.events ;
+            let dropped = before - Events.cardinal t.events in
+            if dropped > 0 then
+                Log.(log t.root.Widget.logger Debug (lazy (Printf.sprintf
+                    "Dropped %d event(s) powered by %s" dropped p.Widget.name))) ;
+            List.iter (fun (w : Widget.t) -> w.Widget.power_down ())
+                      (List.rev (users p))) () ;
+        signal_me t ()
+    )
 
 (** Place an instant read off the real world -- the timestamp libpcap put on a
  * captured packet -- on [t]'s own timeline.
@@ -854,7 +889,7 @@ let make =
         let now = ref Time.zero in
         let root = Widget.make_root ~sim:id ~now:(fun () -> !now) name in
         incr seq ;
-        let rec t =
+        let t =
             { id ;
               name ;
               root ;
@@ -886,11 +921,9 @@ let make =
               (* Due at once, so that a simulation has a first point to be
                * plotted from rather than a rate's worth of nothing. *)
               metric_samples_due = !now ;
-              power = mains }
-        (* The simulation and its mains refer to one another: a source has to
-         * say which clock it schedules on, and the simulation has to hand one
-         * out to everything that is not powered by a host. *)
-        and mains = { on = true ; name = "the mains of "^ name ; sim = t } in
+              (* The root widget minted it, being the one widget with no
+                 parent to take one from. *)
+              power = root.Widget.power } in
         Widget.add_properties root Widget.[
             property "metrics sample rate" ~kind:Float ~units:"secs"
               ~descr:"How often every metric of this simulation is written \

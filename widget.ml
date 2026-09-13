@@ -144,6 +144,28 @@ type t =
        * them does. Only cables cross from one device to another, and only they
        * have to be told. *)
       mutable on_delete : unit -> unit ;
+      (* The power source this widget draws on: its own if it minted one, and
+       * otherwise its parent's, which is the mains of its simulation unless
+       * something between the two minted one. A box is therefore a subtree
+       * that shares a source, without anybody having to hand it down.
+       *
+       * Everything this widget schedules must draw on this one, or switching
+       * it off would leave events behind. *)
+      mutable power : power ;
+      (* Whether this widget is the one that minted [power], as against having
+       * it from above. Only an owner gets a switch in the interface: two
+       * switches for one source is the confusion this whole arrangement is
+       * there to end. *)
+      mutable owns_power : bool ;
+      (* What this widget does when its source is switched on and off. Called
+       * by [Simulation.power_up] and [Simulation.power_down], which find the
+       * widgets of a source by walking the tree: nothing registers, and
+       * nothing has to be unregistered when a widget is destroyed or moved.
+       *
+       * A [power_down] must not schedule anything: by the time it is called
+       * the source is off and [Simulation.at] refuses it. *)
+      mutable power_up : unit -> unit ;
+      mutable power_down : unit -> unit ;
       (* Setter and getter of configurable properties: *)
       mutable properties : property list }
 
@@ -182,6 +204,25 @@ and ports =
        * to those two functions: *)
       get_capabilities : int -> Capabilities.t ;
       set_capabilities : int -> Capabilities.t -> unit }
+
+(* What a widget schedules on, and what deciding it is off withdraws.
+ *
+ * It lives here, and not in simulation.ml where everything that acts on it
+ * lives, because a widget names the source it draws on and this module is
+ * compiled first. For the same reason it holds the simulation's id rather than
+ * the simulation itself, exactly as a widget does. *)
+and power =
+    { (* Whether this source may pay for events.
+       *
+       * Flip it only through [Simulation.power_up] and
+       * [Simulation.power_down]: the dispatcher does not look at this field,
+       * so switching it off without withdrawing the queued events leaves them
+       * to fire, and the widgets drawing on it are not told. *)
+      mutable on : bool ;
+      (* What to call it, which is the full name of the widget that minted it,
+       * and is what the logs say when an event is dropped for want of it. *)
+      name : string ;
+      sim : int }
 
 and peer = { widget : t ;
              via : t option }
@@ -736,7 +777,14 @@ let unique_among parent name =
     loop 2
 
 (* The one place a widget is built. *)
-let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) ?device_type name =
+(* A source of its own for [t], named after it, and switched off: a network is
+ * built dark and lit when it stands (see [Simulation.power_up]). *)
+let mint_power t =
+    t.power <- { on = false ; name = full_name t ; sim = t.sim } ;
+    t.owns_power <- true
+
+let make_ ?parent ~sim ?power ?(own_power=false) ?now ?size ?location
+          ?(properties=[]) ?device_type name =
     if String.contains name '/' then
         invalid_arg ("Widget.make: name must not contain '/': "^ name) ;
     let name =
@@ -745,6 +793,17 @@ let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) ?device_type name =
         | Some p -> unique_among p name in
     Option.may check_location location ;
     let logger = Log.make ?size ?now () in
+    (* What it draws on until [own_power] says otherwise: what it was handed,
+     * or what its parent draws on. The root has neither and mints its own,
+     * which is the mains of its simulation. *)
+    let power =
+        match power, parent with
+        | Some p, _ -> p
+        | None, Some p -> p.power
+        (* The root of a simulation, whose source is its mains: what powers
+           everything that nothing more particular powers, and the one source
+           that is never switched off. *)
+        | None, None -> { on = true ; name = "the mains of "^ name ; sim } in
     let t = {
         id = next_id () ;
         sim ;
@@ -756,10 +815,15 @@ let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) ?device_type name =
         device = None ;
         made_with = None ;
         on_delete = ignore ;
+        power ;
+        owns_power = parent = None ;
+        power_up = ignore ;
+        power_down = ignore ;
         location ;
         logger ;
         ports = no_ports ;
         properties } in
+    if own_power then mint_power t ;
     (* Linking it to its parent is all the registration there is: a simulation's
      * inventory of widgets is that tree, reachable from its root.
      * Appended rather than prepended so that children stay in creation order,
@@ -794,9 +858,10 @@ let make_ ?parent ~sim ?now ?size ?location ?(properties=[]) ?device_type name =
  * widget it is building this one under, or has the simulation, whose root is
  * one [Simulation.root] away. That is what keeps the root the only parentless
  * widget of a simulation, and hence keeps it a complete inventory. *)
-let make ~parent ?size ?location ?properties ?device_type name =
+let make ~parent ?power ?own_power ?size ?location ?properties ?device_type
+         name =
     make_ ~parent ~sim:parent.sim ~now:parent.logger.Log.now
-          ?size ?location ?properties ?device_type name
+          ?power ?own_power ?size ?location ?properties ?device_type name
 
 (** Create the root of a simulation's widget tree: the only widget with no
  * parent, and the only one that has to be told which simulation it is in and

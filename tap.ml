@@ -77,7 +77,7 @@ let bytes_in           = Metric.Counter.make "Tap/Bytes/In" "bytes"
 (** [sniffer iface rx] returns a thread that continuously sniff packets
  * and pass them to the [rx] function (via the Clock). *)
 let sniffer (power : Simulation.power) iface rx =
-    let sim = power.Simulation.sim in
+    let sim = Simulation.sim_of power in
     let rec loop () =
         match none_if_exception sniff iface with
         | None -> ()

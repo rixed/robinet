@@ -1042,7 +1042,8 @@ let maybe_record =
 let limited power latency throughput =
     let next_avlb = ref Clock.Time.zero in
     (fun emit bits ->
-        let min_start = Clock.Time.add (Simulation.now power.Simulation.sim) latency in
+        let min_start =
+            Clock.Time.add (Simulation.now (Simulation.sim_of power)) latency in
         let start = max min_start !next_avlb
         and num_bits = float_of_int (min (bitstring_length bits) 368) in
         let duration =

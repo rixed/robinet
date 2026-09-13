@@ -700,7 +700,7 @@ let test_delete () =
     (* Including their supply: a switch has one of its own, and it is reached
        by the walk rather than by the caller knowing it is there. *)
     check "which are stopped as well"
-        (not sw.Hub.Switch.power.Simulation.on)
+        (not sw.Hub.Switch.power.Widget.on)
 
 (* Powering a host off is not a request that it stop: whatever it had planned
    to do ceases to exist. Everything it schedules -- its adapter, its sockets,

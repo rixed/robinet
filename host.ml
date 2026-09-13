@@ -380,7 +380,7 @@ and do_gethostbyname t name cont =
 
 and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
     (* Fail if we do not have an IP yet *)
-    if not (t.trx.power.Simulation.on && ip_is_set t) then cont None else
+    if not (t.trx.power.Widget.on && ip_is_set t) then cont None else
     let my_ip = Eth.State.find_ip4 t.eth_state in
     let connect dst_ip =
         Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Connecting to %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
@@ -446,7 +446,7 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
 
 and udp_connect t dst ?src_port dst_port client_f cont =
     (* Fail if we do not have an IP yet *)
-    if not (t.trx.power.Simulation.on && ip_is_set t) then cont None else
+    if not (t.trx.power.Widget.on && ip_is_set t) then cont None else
     let my_ip = Eth.State.find_ip4 t.eth_state in
     let connect dst_ip =
         let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
@@ -481,7 +481,7 @@ and udp_connect t dst ?src_port dst_port client_f cont =
                 connect (List.hd dst_ips))
 
 let with_my_ip t f =
-    if t.trx.power.Simulation.on then
+    if t.trx.power.Widget.on then
         match Eth.State.find_ip4 t.eth_state with
         | exception Not_found -> ()
         | my_ip -> f my_ip
@@ -780,7 +780,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
      * same supply. Whoever minted the supply cuts it if it should be cut, and
      * [Host.make] does exactly that. *)
     let if_on t what f x =
-        if t.running && t.trx.power.Simulation.on then f x
+        if t.running && t.trx.power.Widget.on then f x
         else Log.(log widget.Widget.logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
     let rec t =
         { eth_state ;
@@ -794,7 +794,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
           (* [on] is what was asked for, and the supply may be off regardless:
              an interface configured on a router that is switched off gets an
              admin host that is not running either. *)
-          running = on && power.Simulation.on ;
+          running = on && power.Widget.on ;
           nameserver ;
           host_name     = name ;
           static_ip ;
