@@ -420,13 +420,6 @@ let sim_of (p : power) =
         invalid_arg ("Simulation.sim_of: no simulation "^
                      string_of_int p.Widget.sim)
 
-(* Sources are minted with a widget, by [Widget.make ~own_power:true]: a source
- * with nothing drawing on it can pay for nothing. This is what the mains is
- * made with, and the mains alone. *)
-let make_power t name =
-    let sim = t.id in
-    Widget.{ on = true ; name ; sim }
-
 (** [at p ts f x] will execute [f x] when the clock of [p]'s simulation reaches
  * time [ts] -- or never, if [p] is switched off by then.
  *

@@ -1109,7 +1109,7 @@ struct
             let widget = Widget.make ~parent name in
             widget.Widget.device_type <- Some "cable" ;
             let t = {
-                power = (Simulation.of_widget widget).Simulation.power ;
+                power = widget.Widget.power ;
                 length ; delay = delay length ;
                 error_rate ; success_rate = success_rate error_rate ;
                 tot_bits = Metric.Counter.make () ;

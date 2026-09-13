@@ -115,13 +115,15 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
         if not (Array.mem speed speeds) then
             invalid_arg ("Hub.Repeater.make: no hub runs at "^
                          Eth.Speed.to_string speed) ;
-        let widget = Widget.make ~parent ?location ~device_type:"hub" name in
+        let widget =
+            Widget.make ~parent ?location ~device_type:"hub" ~own_power:true
+                        name in
         let t = {
             ports = Array.make n (ignore_bits ~logger:widget.logger, false) ;
             speed ;
             busy_until = Clock.beginning_of_time ;
             jamming_time = Eth.Speed.duration speed 32 ;
-            power = Simulation.make_power (Simulation.of_widget widget) name ;
+            power = widget.Widget.power ;
             widget ;
             ingress = Metric.Counter.make () ;
             egress = Metric.Counter.make () ;
@@ -277,8 +279,10 @@ struct
     (* [num_macs] is the maximum number of remembered MACs. *)
     let make ~parent ?location ?speeds ?full_duplex ?(cut_through=true)
              num_ifaces num_macs name =
-        let widget = Widget.make ~device_type:"switch" ~parent ?location name in
-        let power = Simulation.make_power (Simulation.of_widget widget) name in
+        let widget =
+            Widget.make ~device_type:"switch" ~parent ?location
+                        ~own_power:true name in
+        let power = widget.Widget.power in
         let t = {
             ifaces = [||] (* See below *) ;
             cut_through ;

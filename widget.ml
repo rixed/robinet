@@ -777,10 +777,9 @@ let unique_among parent name =
     loop 2
 
 (* The one place a widget is built. *)
-(* A source of its own for [t], named after it, and switched off: a network is
- * built dark and lit when it stands (see [Simulation.power_up]). *)
-let mint_power t =
-    t.power <- { on = false ; name = full_name t ; sim = t.sim } ;
+(* A source of its own for [t], named after it. *)
+let mint_power ?(on=true) t =
+    t.power <- { on ; name = full_name t ; sim = t.sim } ;
     t.owns_power <- true
 
 let make_ ?parent ~sim ?power ?(own_power=false) ?now ?size ?location

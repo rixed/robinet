@@ -515,12 +515,9 @@ struct
              ?(admin_reroute=true) ?(load_balancing=First)
              ?can_forward_after ?delay ?loss ?mtu ?(macs=[||])
              num_ifaces routes name =
-        let widget = Widget.make ~parent name in
-        let power =
-            Option.default_delayed (fun () ->
-                Simulation.make_power (Simulation.of_widget widget)
-                                      (Widget.full_name widget)
-            ) power in
+        let widget =
+            Widget.make ~parent ?power ~own_power:(power = None) name in
+        let power = widget.Widget.power in
         (* Display the routing table (debug) *)
         Log.(log widget.Widget.logger Debug (lazy
             (Printf.sprintf2 "Creating a router with routing table:%a"
@@ -1050,13 +1047,13 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
             ?(name="gw") ?notify_errs ?admin_reroute ~parent ?location
             ?public_netmask ?public_gw ?port_forwards public_ip local_cidr =
     (* We want all parts inherit this widget: *)
-    let widget = Widget.make ~parent ?location name in
+    let widget = Widget.make ~parent ?location ~own_power:true name in
     (* A whole machine, whatever it is made of inside. *)
     widget.Widget.device_type <- Some "gateway" ;
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let broadcast = Ip.Cidr.all1s_addr local_cidr in
-    let power = Simulation.make_power (Simulation.of_widget widget) name in
+    let power = widget.Widget.power in
     (* Build the output router *)
     let router =
         Router.(make ~parent:widget ~power ?delay ?loss ?mtu ?notify_errs

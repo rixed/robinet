@@ -894,13 +894,13 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
 
 let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
          ~parent ?power ?location name =
-    let widget = Widget.make ~parent ?location ~device_type:"host" name in
-    (* A host can take it's power source from some larger equipment: *)
+    (* A host can take it's power source from some larger equipment, and
+       mints one of its own when it is a machine in its own right. *)
     let own_power = power = None in
-    let power =
-        Option.default_delayed (fun () ->
-            Simulation.make_power (Simulation.of_widget widget) name
-        ) power in
+    let widget =
+        Widget.make ~parent ?location ~device_type:"host" ?power ~own_power
+                    name in
+    let power = widget.Widget.power in
     let eth_state =
         (* FIXME: Don't use the GW for same net IP! *)
         Eth.State.make ?mac ?gateways ~parent:widget ~power () in
