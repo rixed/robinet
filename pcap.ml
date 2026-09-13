@@ -1256,7 +1256,7 @@ let disconnect portal =
             "Ignoring request to disconnect portal %s, which is not \
              connected" portal.ifname)))
 
-let power_down portal =
+let close_portal portal =
     match portal.iface with
     | Some iface ->
         Log.(log iface.widget.logger Info (lazy ("Closing portal to "^ iface.name))) ;
@@ -1267,7 +1267,7 @@ let power_down portal =
         Option.may (fun reader_thread ->
             Thread.create (fun reader_thread ->
                 Thread.join reader_thread ;
-                (* Even if power_up have been called already on the same portal,
+                (* Even if open_portal have been called already on the same portal,
                  * the new iface will be a new pcap handle so we can still close
                  * this one safely: *)
                 closeif iface
@@ -1279,9 +1279,9 @@ let power_down portal =
         Log.(log portal.widget.logger Debug (lazy
             "Ignoring request to close closed portal."))
 
-let power_up portal =
+let open_portal portal =
     Log.(log portal.widget.logger Info (lazy ("Opening portal to "^ portal.ifname))) ;
-    if portal.iface <> None then power_down portal ;
+    if portal.iface <> None then close_portal portal ;
     let iface =
         openif ~widget:portal.widget ~promisc:portal.promisc
                ~filter:portal.filter ?caplen:portal.caplen portal.ifname in
@@ -1299,7 +1299,7 @@ let power_up portal =
                 let params =
                     Metric.(Params.singleton "dir" Param.(String dir)) in
                 Metric.Counter.add portal.volume ~now ~params len ;
-                (* Use the current emit function not the one at power_up: *)
+                (* Use the current emit function not the one at open_portal: *)
                 Option.may (fun emit -> emit bits) portal.emit))
 
 (* Create a portal.
@@ -1323,10 +1323,10 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
     widget.device <- Some (Portal portal) ;
     (* Switching this one on opens the interface of the machine it names, and
      * switching it off closes it. *)
-    widget.power_up <- (fun () -> power_up portal) ;
-    widget.power_down <- (fun () -> power_down portal) ;
+    widget.power_up <- (fun () -> open_portal portal) ;
+    widget.power_down <- (fun () -> close_portal portal) ;
     (* What it has of the machine's, and what nothing else will close. *)
-    widget.on_delete <- (fun () -> power_down portal) ;
+    widget.on_delete <- (fun () -> close_portal portal) ;
     widget.ports <- Widget.{
         count = (fun () -> 1) ;
         is_connected = (fun _ -> is_connected portal) ;
