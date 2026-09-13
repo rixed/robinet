@@ -130,6 +130,9 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
             collisions = Metric.Counter.make () } in
         widget.device <- Some (T t) ;
         widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
+        (* Minted switched off, as every source is; a hub has nothing to do
+           before it is whole, but it has to be on to repeat anything. *)
+        Simulation.power_up t.power ;
         widget.ports <- Widget.{
             count = (fun () -> n) ;
             is_connected = (fun i -> is_connected t i) ;
@@ -335,6 +338,8 @@ struct
             metric_property "cache misses"
                 ~descr:"Number of MAC cache misses."
                 (Metric.Atomic.T t.mac_misses) ] ;
+        (* Minted switched off, as every source is. *)
+        Simulation.power_up t.power ;
         t
 end
 

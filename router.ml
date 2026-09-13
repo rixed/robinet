@@ -550,30 +550,19 @@ struct
         let t = { ifaces ; routes ; widget ; notify_errs ; admin_reroute ;
                   can_forward_after ; power ; load_balancing ; buffered ;
                   ingress ; egress } in
-        (* Read when the switch is thrown, not now: the admin hosts are built
-           further down, once the router they route for exists. *)
-        let iter_admin_hosts f =
-            Array.iter (fun iface -> Option.may f iface.admin_host) t.ifaces in
-        (* One supply for the whole box, so it is switched here once; each admin
-           host is then told to start over, or to forget what it knew, on its
-           own. *)
-        let switch on =
-            if on <> t.power.on then
-                if on then (
-                    Simulation.power_up t.power ;
-                    iter_admin_hosts (fun h -> h.trx.power_on ())
-                ) else (
-                    Simulation.power_down t.power ;
-                    iter_admin_hosts (fun h -> h.trx.power_off ()) ;
-                    (* Including the interfaces no admin host was built on,
-                       which no [Host.reset] would have reached. *)
-                    Array.iter (fun iface -> Eth.State.reset iface.eth) t.ifaces
-                ) in
-        (* This router minted the supply above, so the switch for it goes on its
-           widget, and so does stopping it for good. *)
+        (* One supply for the whole box, and this is what the router itself
+           does when it is cut: what its admin hosts do about it is their own,
+           and the supply asks each of them in turn. Every interface is reset,
+           including the ones no admin host was built on, which nothing else
+           would reach. *)
+        widget.Widget.power_down <- (fun () ->
+            Array.iter (fun iface -> Eth.State.reset iface.eth) t.ifaces) ;
         widget.device_type <- Some "router" ;
         widget.device <- Some (T t) ;
-        widget.on_delete <- (fun () -> switch false) ;
+        (* A router that minted the supply stops for good by cutting it; one
+           built as part of something larger leaves that to the box. *)
+        if widget.owns_power then
+            widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
         widget.ports <- Widget.{
             count = (fun () -> Array.length t.ifaces) ;
             is_connected = (fun n -> (ports t.ifaces.(n)).is_connected 0) ;
@@ -585,10 +574,6 @@ struct
             set_capabilities = (fun n c ->
                 (ports t.ifaces.(n)).set_capabilities 0 c) } ;
         Widget.add_properties widget Widget.[
-            property "on" ~kind:Bool ~action:true
-                ~descr:"The router is powered on."
-                ~getter:(fun () -> `Bool t.power.on)
-                ~setter:(fun v -> switch (to_bool v)) ;
             property "errors probability" ~kind:(FRange (0., 1.))
                 ~descr:"Probability to report errors with ICMP."
                 ~getter:(fun () -> `Float t.notify_errs.probability)
@@ -732,6 +717,10 @@ struct
             (* When packets are received from the outside, go to routing: *)
             iface.trx.ins.set_read (route (Some n) t)
         ) t.ifaces ;
+        (* And now it may run. A router built as a part of something larger --
+           a gateway's -- draws on the box's supply and leaves the switching
+           to it. *)
+        if widget.owns_power then Simulation.power_up t.power ;
         t
 
     (* Returns both the router and the eth trxs (ins is inside router) created for you *)
@@ -847,18 +836,18 @@ struct
         Simulation.run sim false ;
         "no revert" @? (counts = [| 0;0;0 |]) ;
 
-        (* One box, one switch. This router has three admin hosts, one per
-         * addressed interface, and they all draw from the router's supply, so
-         * the switch is on the router and nowhere else. *)
-        let switch_of (w : Widget.t) =
-            List.find_opt (fun (p : Widget.property) -> p.name = "on")
-                          w.properties in
-        "the switch is on the router" @? (switch_of router.widget <> None) ;
-        "and not on any of its admin hosts" @?
+        (* One box, one supply, one switch. This router has three admin hosts,
+         * one per addressed interface, and all of them draw on the router's,
+         * which is what puts the switch on the router and nowhere else. *)
+        "the router owns the supply" @? router.widget.Widget.owns_power ;
+        "and its admin hosts draw on that one" @?
             Array.for_all (fun iface ->
                 match iface.admin_host with
                 | None -> false
-                | Some h -> switch_of h.Host.trx.Host.widget = None
+                | Some h ->
+                    let w = h.Host.trx.Host.widget in
+                    not w.Widget.owns_power &&
+                    w.Widget.power == router.widget.Widget.power
             ) router.ifaces ;
 
         (* A packet for the router itself goes to that interface's admin host,
@@ -890,9 +879,8 @@ struct
             (admin_socks () = 3) ;
 
         let flip on =
-            match switch_of router.widget with
-            | None -> assert false
-            | Some p -> (Option.get p.setter) (`Bool on) in
+            (if on then Simulation.power_up else Simulation.power_down)
+                router.widget.Widget.power in
 
         (* Switched off, the box stops routing: what it had scheduled went with
          * its power, and it takes on nothing new. *)
@@ -923,11 +911,11 @@ struct
             (Some (Eth.Addr.random ())) ;
         "and its adapter still learns" @?
             (Tools.BitHash.length eth.Eth.State.arp_cache = 1) ;
+        "a router of its own mints the supply it draws on" @?
+            r.widget.Widget.owns_power ;
         let flip on =
-            match List.find_opt (fun (p : Widget.property) -> p.name = "on")
-                                r.widget.properties with
-            | None -> "the router has a switch" @? false
-            | Some p -> (Option.get p.setter) (`Bool on) in
+            (if on then Simulation.power_up else Simulation.power_down)
+                r.widget.Widget.power in
         flip false ;
         "which the box forgets when it is switched off" @?
             (Tools.BitHash.length eth.Eth.State.arp_cache = 0) ;
@@ -1087,12 +1075,12 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let srv_ip = Enum.get_exn local_ips in (* second IP is the dhcp/name servers *)
     let h : Host.t =
         let gateways = [ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw_mac) ] in
-        (* Switched off, and switched on at the end of this function: a host
-         * that is running does its boot-time configuration then and there,
-         * and what it is to do once it has an address is hung on it a few
-         * lines further down. *)
+        (* On the box's supply, which is switched off until the end of this
+         * function: a host that is running does its boot-time configuration
+         * then and there, and what it is to do once it has an address is hung
+         * on it a few lines further down. *)
         Host.make ?nameserver ~gateways ~netmask ~static_ip:srv_ip
-                  ~parent:widget ~power ~on:false "srv" in
+                  ~parent:widget ~power "srv" in
     (* Now we need the repeater and the services: *)
     (* FIXME: instead of a Hub that forces us into having 2 IPs make a simple TRX directly, that inspects the protostack and if
      * the dest IP is gw_ip == src_iv then forward it to the host and if not forward it to the NAT. *)
@@ -1150,9 +1138,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
         Named.serve st h.trx in
     (* Make the host [h] start dhcpd and dns when it is powered on: *)
     h.trx.on_ip <- (fun _h -> start_dhcpd gw ; start_dns gw) :: h.trx.on_ip ;
-    (* And now it may run. Everything it is to do on being switched on is in
-     * place, which is the whole reason it was built switched off. *)
-    h.trx.power_on () ;
+
     Widget.add_properties widget Widget.[
         property "nat-max-cnxs" ~kind:Int
             ~descr:"Max number of connections tracked by the NAT."
@@ -1180,25 +1166,12 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
             | 0 -> (Router.ports router.ifaces.(1)).set_capabilities 0 c
             | _ -> hub.widget.ports.set_capabilities 0 c) } ;
     widget.device <- Some (T gw) ;
-    Widget.add_properties widget Widget.[
-        property "on" ~kind:Bool ~action:true
-            ~descr:"The gateway is powered on."
-            ~getter:(fun () -> `Bool gw.power.on)
-            ~setter:(fun v ->
-                let v = to_bool v in
-                if v <> gw.power.on then
-                if v then (
-                    Simulation.power_up gw.power ;
-                    (* The services come back with the host that runs them: it
-                     * starts them itself, from [on_ip], once it has its
-                     * address again. Starting them here would register them on
-                     * a host that is still switched off, which registers
-                     * nothing at all. *)
-                    h.trx.power_on ()
-                ) else (
-                    Simulation.power_down gw.power ;
-                    h.trx.power_off ()
-                )) ] ;
+    (* And now the whole box may run: its supply is the one its router and its
+       server draw on, and switching it on is what starts them -- the server
+       then starts the services above, from [on_ip], once it has its address.
+       Everything that was to be hung on them is hung on them by now, which is
+       why a source is minted switched off. *)
+    Simulation.power_up power ;
     gw
 
 (* A gateway offers what a gateway has sockets for, and not one port per end

@@ -100,14 +100,6 @@ and t = { mutable trx : host_trx ;
              address, the netmask and the reader belong to that owner and must
              be left alone. *)
           own_ip_config : bool ;
-          (* Whether this host is running, which is not always what its supply
-             says. A host that shares a box's supply -- a router's admin host
-             does, being an interface of the same machine -- is switched by the
-             box, which powers the supply down and then tells each of its hosts
-             to stop. Read the supply there and the first of those two steps
-             makes the second a no-op: the host would keep the sockets and the
-             caches that a power cut is meant to take with it. *)
-          mutable running : bool ;
           (* The configuration as the reader set it, which is a property of
              the host and outlives any number of power cycles. What DHCP
              grants is kept apart in the [leased_] fields below. *)
@@ -761,7 +753,7 @@ let init_dhcp t =
     Simulation.delay t.trx.power delay send_discover ()
 
 let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
-                  ?(own_ip_config=true) ?(on=true) ~widget
+                  ?(own_ip_config=true) ~widget
                   (eth_state : Eth.State.t) eth_trx name =
     (* For the API a cable reaches a host but in reality it reaches its
        adapter. *)
@@ -773,14 +765,10 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
        and a host built on somebody else's adapter, as a router's admin host
        is, shares that owner's switch, being the same box as well. *)
     let power = eth_state.iface.power in
-    (* A host built switched off is not a supply switched off: the supply may
-     * be the box's, and a host is not the one to cut it -- the gateway builds
-     * its [srv] off, so that it does nothing until the services it is to run
-     * have been hung on it, while the router beside it goes on sharing that
-     * same supply. Whoever minted the supply cuts it if it should be cut, and
-     * [Host.make] does exactly that. *)
+    (* Whether this host runs is whether its supply is on, and nothing else:
+     * one flag, in the source, however many widgets draw on it. *)
     let if_on t what f x =
-        if t.running && t.trx.power.Widget.on then f x
+        if t.trx.power.Widget.on then f x
         else Log.(log widget.Widget.logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
     let rec t =
         { eth_state ;
@@ -791,10 +779,6 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
           tcp_servers   = Hashtbl.create 11 ;
           udp_servers   = Hashtbl.create 11 ;
           own_ip_config ;
-          (* [on] is what was asked for, and the supply may be off regardless:
-             an interface configured on a router that is switched off gets an
-             admin host that is not running either. *)
-          running = on && power.Widget.on ;
           nameserver ;
           host_name     = name ;
           static_ip ;
@@ -839,35 +823,14 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
           (* This call is needed by dhcpd servers running on this host: *)
           arp_set       = (fun ip haddr_opt -> if_on t "arp_set" (Eth.State.set_arp t.eth_state (Ip.Addr.to_bitstring ip)) haddr_opt) ;
           on_ip         = [] ;
-          (* Guarded on [running] rather than on the supply, and guarded
-             rather than asserted. Rather than on the supply, because with a
-             shared one the supply answers for the box and not for this host:
-             a box switching itself off cuts the supply and then tells each of
-             its hosts to stop, and a guard reading the supply would find the
-             first of those two steps had already made the second a no-op.
-             Guarded, because being asked to do again what has been done is
-             then a possibility rather than a mistake. *)
-          power_on      = (fun () ->
-                              if t.running then
-                                  Log.(log widget.logger Debug (lazy
-                                      "Ignoring power on: already on"))
-                              else (
-                                  Log.(log widget.logger Debug (lazy "Powering on")) ;
-                                  t.running <- true ;
-                                  (* Whoever shares this supply may have
-                                     switched it on already, and [power_up] is
-                                     the same either way. *)
-                                  Simulation.power_up t.trx.power ;
-                                  init () t
-                              )) ;
-          power_off     = (fun () ->
-                              if not t.running then
-                                  Log.(log widget.logger Debug (lazy
-                                      "Ignoring power off: already off"))
-                              else (
-                                  t.running <- false ;
-                                  power_off t
-                              )) ;
+          (* Switching the supply, which is what switches the host: what this
+             host does about it is on the widget, [power_up] and [power_down]
+             below, and the supply calls those along with every other widget's
+             drawing on it, which is the point of the arrangement. A host
+             sharing a box's supply therefore switches the box: there is no
+             such thing as a part running inside a box that is off. *)
+          power_on      = (fun () -> Simulation.power_up t.trx.power) ;
+          power_off     = (fun () -> Simulation.power_down t.trx.power) ;
           power }
     in
     (* No "on" property here: the switch belongs to whoever minted the supply,
@@ -888,8 +851,17 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
             ~setter:(fun v -> t.search_sfx <- match to_string v with "" -> None | s -> Some s) ;
         metric_property "DNS resolutions" ~descr:"DNS resolution times."
             (Metric.Timed.T t.resolutions) ] ;
+    (* What this host does when its supply is switched: boot, and forget what
+       a cut invalidates. Called by [Simulation.power_up] and
+       [Simulation.power_down], which find it by walking the tree. *)
+    widget.Widget.power_up <- (fun () -> init () t) ;
+    widget.Widget.power_down <- (fun () -> reset t) ;
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "New host '%s'" name))) ;
-    if t.running then init () t ;
+    (* A host built into a box that is already running -- an admin host on an
+       interface configured after the fact -- boots now, since the supply will
+       not be switched again to tell it to. One built with a supply of its own
+       is still dark, and boots when [make] switches that on. *)
+    if t.trx.power.Widget.on then init () t ;
     t
 
 let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
@@ -905,25 +877,16 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
         (* FIXME: Don't use the GW for same net IP! *)
         Eth.State.make ?mac ?gateways ~parent:widget ~power () in
     let eth_trx = Eth.TRX.make eth_state in
-    let t = make_from_eth ?search_sfx ?nameserver ?on ~widget ?static_ip
+    let t = make_from_eth ?search_sfx ?nameserver ~widget ?static_ip
                           ?netmask eth_state eth_trx name in
-    (* This supply is this host's own, so a host built switched off takes it
-       down, and its adapter with it: a machine that is off does not answer an
-       ARP request either. A host handed somebody else's supply leaves it
-       alone -- see [make_from_eth]. *)
-    if own_power && not t.running then Simulation.power_down power ;
+
     (* This host minted the supply above, so the switch for it goes here, and
        so does stopping it for good. And it is a whole machine, unlike a host
        built on somebody else's adapter. *)
     widget.device <- Some (T t) ;
-    widget.on_delete <- (fun () -> t.trx.power_off ()) ;
+    (* Its own supply, so stopping it for good is cutting it. *)
+    if own_power then widget.on_delete <- (fun () -> Simulation.power_down power) ;
     Widget.add_properties widget Widget.[
-        property "on" ~descr:"The host is powered on." ~kind:Bool ~action:true
-            (* What this host is, not what its supply is: with a shared supply
-               those are two questions, and this switch answers for the host. *)
-            ~getter:(fun () -> `Bool t.running)
-            ~setter:(fun v ->
-                if to_bool v then t.trx.power_on () else t.trx.power_off ()) ;
         property "static-ip" ~kind:(Optional String)
             ~descr:"IP given at boot (if none, will use DHCP)."
             ~getter:(fun () -> json_of_optional Ip.Addr.to_json t.static_ip)
@@ -943,6 +906,11 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
                 json_of_optional Ip.Addr.to_json (cur_nameserver t))
             ~setter:(fun v ->
                 t.nameserver <- to_option (Ip.Addr.of_json "nameserver") v) ] ;
+    (* And now it may run: its supply is its own and was minted switched off,
+       so that nothing it does at boot happens before the machine is whole.
+       A host built as a part of something larger leaves that to the box,
+       whose supply it shares and cannot switch. *)
+    if own_power && on <> Some false then Simulation.power_up power ;
     t
 
 (* A host boots into the configuration it has at that moment, and not the one
@@ -959,17 +927,21 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
         List.find (fun (p : Widget.property) -> p.Widget.name = name)
                   h.trx.widget.Widget.properties in
     let set name v = (Option.get (prop name).Widget.setter) v in
-    let reboot () = set "on" (`Bool false) ; set "on" (`Bool true) in
+    (* Through its supply, which a host of its own mints and owns: there is no
+       switch on the widget any more. *)
+    let reboot () =
+        Simulation.power_down h.trx.widget.Widget.power ;
+        Simulation.power_up h.trx.widget.Widget.power in
     let address () =
         match Eth.State.find_ip4 h.eth_state with
         | exception Not_found -> "none"
         | ip -> Ip.Addr.to_dotted_string ip in
     assert_equal ~printer:identity "192.168.1.10" (address ()) ;
-    set "on" (`Bool false) ;
+    Simulation.power_down h.trx.widget.Widget.power ;
     (* Its address goes with its power: an address it kept while off would be
        one it had never been granted when it came back. *)
     assert_equal ~printer:identity "none" (address ()) ;
-    set "on" (`Bool true) ;
+    Simulation.power_up h.trx.widget.Widget.power ;
     assert_equal ~printer:identity "192.168.1.10" (address ()) ;
 
     (* Told to use DHCP instead, it must come back with nothing and go asking,

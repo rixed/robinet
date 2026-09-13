@@ -1273,14 +1273,24 @@ let power_up portal =
  * a device of the simulated network like any other, and has to be somewhere on
  * the map for the traffic coming out of it to have come from anywhere. *)
 let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
-    let widget = Widget.make ~parent ?location ~device_type:"portal" ifname in
+    (* A supply of its own, and left switched off: opening the interface is
+     * what this one means, and an interface is opened when the network it
+     * belongs to is up -- and, when robinet is the one making those
+     * interfaces, not before it has made them. *)
+    let widget =
+        Widget.make ~parent ?location ~device_type:"portal" ~own_power:true
+                    ifname in
     let portal = {
         iface = None ;
         ifname ; widget ; promisc ; filter ; caplen ;
         emit = None ;
         reader = None } in
     widget.device <- Some (Portal portal) ;
-    widget.on_delete <- (fun () -> power_down portal) ;
+    (* Switching this one on opens the interface of the machine it names, and
+     * switching it off closes it. *)
+    widget.Widget.power_up <- (fun () -> power_up portal) ;
+    widget.Widget.power_down <- (fun () -> power_down portal) ;
+    widget.on_delete <- (fun () -> Simulation.power_down widget.Widget.power) ;
     widget.ports <- Widget.{
         count = (fun () -> 1) ;
         is_connected = (fun _ -> is_connected portal) ;
@@ -1290,17 +1300,6 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
         get_capabilities = (fun _ -> Capabilities.Any) ;
         set_capabilities = (fun _ _ -> ()) } ;
     Widget.add_properties widget Widget.[
-        property "on" ~descr:"The interface is opened." ~kind:Bool
-            ~action:true
-            ~getter:(fun () -> `Bool (portal.iface <> None))
-            ~setter:(fun v ->
-                let v = to_bool v in
-                try
-                    (if v then power_up else power_down) portal
-                with e ->
-                    bad_value "Cannot power %s interface %s: %s"
-                        (if v then "up" else "down") portal.ifname
-                        (Printexc.to_string e)) ;
         property "name" ~kind:String
             ~descr:"Interface name."
             ~getter:(fun () -> `String portal.ifname) ;

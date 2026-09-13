@@ -166,6 +166,17 @@ type t =
        * the source is off and [Simulation.at] refuses it. *)
       mutable power_up : unit -> unit ;
       mutable power_down : unit -> unit ;
+      (* What went wrong the last time this widget was switched, if anything.
+       *
+       * Switching a source is not an operation that can be refused: it is a
+       * switch. But what a widget does about it can fail -- a portal opens an
+       * interface of the machine, which may not be there -- and the failure
+       * has to go somewhere other than out of the switch. So it lands here,
+       * and is read through the "error" property beside it: nothing in the
+       * simulator has an error to handle, the interface has something to show
+       * against the widget, and the reader can try the switch again as often
+       * as they like. Cleared by a switching that goes through. *)
+      mutable error : string option ;
       (* Setter and getter of configurable properties: *)
       mutable properties : property list }
 
@@ -256,28 +267,7 @@ and property = { name : string ;
                 * says nothing at all when it is absent, and there are two of
                 * those on every widget in the tree. Those are the ones this is
                 * for. *)
-               only_when_set : bool ;
-               (* Whether setting this is asking the widget to do something,
-                * rather than telling it what it is.
-                *
-                * There is one of these so far: "on", on a host, a router and a
-                * portal, and setting it powers the thing up or down. Such a
-                * property is a boolean that is meant to read true once the
-                * network is whole, and what it takes to get there is rarely on
-                * its own widget: a host switched on looks for a DHCP server,
-                * and a portal switched on opens an interface of the machine.
-                * Nothing records those dependencies and nothing is going to,
-                * so loading a network does not switch anything on until all of
-                * it stands (see {!Topology.power_up}).
-                *
-                * A field rather than the name "on", since a name is what the
-                * API calls a property by and somebody will one day want an
-                * "on" that means enabled rather than running.
-                *
-                * This is where actions begin -- what a widget can be told to
-                * do, as against what it holds -- and the whole of them for
-                * now. *)
-                 action : bool }
+               only_when_set : bool }
 
 (* A property value, in the shape the administration interface speaks.
  *
@@ -489,7 +479,7 @@ let record fields =
  *)
 
 let property ?(descr="") ?(units="") ?metric ?setter ?can_set ?(kind=String)
-             ?(only_when_set=false) ?(action=false) ~getter name =
+             ?(only_when_set=false) ~getter name =
     (* No setter, no setting, so there is one way to ask and callers need not
      * check both. A setter with nothing said about when it applies is one that
      * always applies. *)
@@ -498,7 +488,7 @@ let property ?(descr="") ?(units="") ?metric ?setter ?can_set ?(kind=String)
         | None -> (fun () -> false)
         | Some _ -> can_set |? (fun () -> true) in
     { name ; descr ; units ; getter ; setter ; can_set ; kind ; metric ;
-      only_when_set ; action }
+      only_when_set }
 
 (* Add new properties before default ones: *)
 let add_properties t properties =
@@ -777,9 +767,13 @@ let unique_among parent name =
     loop 2
 
 (* The one place a widget is built. *)
-(* A source of its own for [t], named after it. *)
-let mint_power ?(on=true) t =
-    t.power <- { on ; name = full_name t ; sim = t.sim } ;
+(* A source of its own for [t], named after it, and switched off: a network is
+ * built dark and lit once it stands, so that nothing in it goes looking for
+ * what is not there yet -- a host for a DHCP server, a gateway's server for
+ * the address it serves from. Whoever mints one switches it on as the last
+ * thing it does, unless it was asked for a device that is to stay off. *)
+let mint_power t =
+    t.power <- { on = false ; name = full_name t ; sim = t.sim } ;
     t.owns_power <- true
 
 let make_ ?parent ~sim ?power ?(own_power=false) ?now ?size ?location
@@ -818,6 +812,7 @@ let make_ ?parent ~sim ?power ?(own_power=false) ?now ?size ?location
         owns_power = parent = None ;
         power_up = ignore ;
         power_down = ignore ;
+        error = None ;
         location ;
         logger ;
         ports = no_ports ;
@@ -847,7 +842,13 @@ let make_ ?parent ~sim ?power ?(own_power=false) ?now ?size ?location
             ~getter:(coord (fun l -> l.lat)) ;
         property "longitude" ~units:"deg" ~kind:(optional Float) ~only_when_set:true
             ~descr:"Where it is, east of Greenwich."
-            ~getter:(coord (fun l -> l.lon)) ] ;
+            ~getter:(coord (fun l -> l.lon)) ;
+        (* Read-only, and therefore not written into a saved network: what
+         * went wrong here is a fact about this run. *)
+        property "error" ~kind:(optional String) ~only_when_set:true
+            ~descr:"What went wrong the last time it was switched."
+            ~getter:(fun () ->
+                match t.error with None -> `Null | Some m -> `String m) ] ;
     t
 
 (** Create a widget below [parent], in [parent]'s simulation and reading the

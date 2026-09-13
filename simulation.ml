@@ -466,11 +466,25 @@ let users (p : power) =
     Widget.enum (sim_of p).root |> List.of_enum |>
     List.filter (fun (w : Widget.t) -> w.Widget.power == p)
 
+(* Tell one widget that its source has been switched, and put what it has to
+ * say about it where it can be read: a switch cannot be refused, so a widget
+ * that cannot do what switching means for it says so and the rest of the
+ * network carries on. *)
+let tell (w : Widget.t) what f =
+    match f () with
+    | () -> w.Widget.error <- None
+    | exception e ->
+        let m = Printexc.to_string e in
+        w.Widget.error <- Some m ;
+        Log.(log w.Widget.logger Error (lazy (Printf.sprintf
+            "Cannot power %s: %s" what m)))
+
 let power_up (p : power) =
     if not p.Widget.on then (
         p.Widget.on <- true ;
         (* In tree order, a box before what is inside it. *)
-        List.iter (fun (w : Widget.t) -> w.Widget.power_up ()) (users p)
+        List.iter (fun (w : Widget.t) -> tell w "up" w.Widget.power_up)
+                  (users p)
     )
 
 (** Switch a power source off, and forget every event it had paid for.
@@ -494,7 +508,7 @@ let power_down (p : power) =
             if dropped > 0 then
                 Log.(log t.root.Widget.logger Debug (lazy (Printf.sprintf
                     "Dropped %d event(s) powered by %s" dropped p.Widget.name))) ;
-            List.iter (fun (w : Widget.t) -> w.Widget.power_down ())
+            List.iter (fun (w : Widget.t) -> tell w "down" w.Widget.power_down)
                       (List.rev (users p))) () ;
         signal_me t ()
     )

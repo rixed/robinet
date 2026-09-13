@@ -453,30 +453,12 @@ let set_properties (device : Widget.t) properties =
                 | None ->
                     Some (Printf.sprintf "%s: %S is not one of its properties"
                               where name)
-                (* Left to [power_up], which comes after the whole network
-                 * stands. What the document says such a property was is not
-                 * read at all: it is a boolean that is meant to be true once
-                 * there is a network, and the file has a reading of some
-                 * instant of the one it was written from. *)
-                | Some p when p.action -> None
                 | Some p -> set_property ~where p v
             ) values
     ) properties
 
-(* Every action property of [root]'s subtree, set to [v], in the order the
- * widgets were built in. *)
-let set_actions v (root : Widget.t) =
-    Widget.enum root |> List.of_enum |>
-    List.sort (fun (a : Widget.t) b -> compare a.Widget.id b.Widget.id) |>
-    List.concat_map (fun (w : Widget.t) ->
-        List.filter_map (fun (p : Widget.property) ->
-            if p.Widget.action then
-                set_property ~where:(Widget.full_name w) p (`Bool v)
-            else None
-        ) w.Widget.properties)
-
-(** Everything in [root]'s subtree that can be switched on, switched on, and
- * whatever would not answer.
+(** Switch on every power source owned within [root]'s subtree, in the order
+ * the widgets were built in.
  *
  * This is the second phase of a load, and what the first one was careful not
  * to do: a host switched on looks for a DHCP server, a portal switched on
@@ -489,7 +471,11 @@ let set_actions v (root : Widget.t) =
  * the order they want -- a server before what asks it -- and nothing more than
  * a guess: dependencies between devices are not recorded, and are not going to
  * be. *)
-let power_up = set_actions true
+let power_up (root : Widget.t) =
+    Widget.enum root |> List.of_enum |>
+    List.sort (fun (a : Widget.t) b -> compare a.Widget.id b.Widget.id) |>
+    List.iter (fun (w : Widget.t) ->
+        if w.Widget.owns_power then Simulation.power_up w.Widget.power)
 
 (** Build [t]'s network in [sim], in place of whatever it was running, and
  * answer with the properties that would not take.
@@ -503,22 +489,10 @@ let power_up = set_actions true
  * built -- what it replaced is gone from the moment it starts, which is what
  * "in place of" means, and the file it came from is still on disk.
  *
- * Nothing is switched on until all of it stands: an action property is left
- * alone as its device is built, whatever the document says of it, and set at
- * the end by {!power_up} -- which [power] holds back for a caller with
- * something of its own to do in between, robinet having the interfaces its
- * portals name to make.
- *
- * Left alone, and not switched off first, which is what this did to begin
- * with: switching a device off is not the opposite of switching it on. A
- * device's parts are walked along with it, and a gateway's parts include a
- * host -- "srv", which is where [Router.make_gw] registers its DHCP and DNS
- * servers as it builds it. Powering that host down runs [Host.reset], which
- * clears the servers registered on it, and nothing registers them a second
- * time. So a load that powered everything down and up again handed back
- * gateways that routed and answered nothing else. What a device is born as is
- * its constructor's business; this only declines to bring forward what the
- * document says it became.
+ * Nothing is switched on until all of it stands: every device is built with
+ * its supply switched off, and {!power_up} switches them all on at the end --
+ * which [power] holds back for a caller with something of its own to do in
+ * between, robinet having the interfaces its portals name to make.
  *
  * Devices are built in the order the document lists them, which is the order
  * they were built in the first place, and each is configured as soon as it is
@@ -575,7 +549,7 @@ let to_simulation ?(power=true) (sim : Simulation.t) t =
         refused := !refused @ set_properties w d.properties in
     (try List.iter make entries
     with e -> Simulation.clear sim ; raise e) ;
-    if power then refused := !refused @ power_up root ;
+    if power then power_up root ;
     !refused
 
 (** A simulation of its own for a network: made, loaded from [topology] if

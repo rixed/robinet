@@ -91,12 +91,11 @@ let set_speed (sim, (clock : Cli.clock)) =
     | Some Cli.Real -> Simulation.make_realtime sim
 
 (* Phase two of every load, now that all of it stands and the interfaces are
- * there. *)
+ * there: every supply the network owns, switched on. *)
 let power_up (sim, (clock : Cli.clock)) =
     if clock.Cli.power then
         Simulation.borrow sim (fun () ->
-            Topology.power_up sim.Simulation.root) |>
-        List.iter (Printf.eprintf "%s: %s\n%!" (Simulation.name sim))
+            Topology.power_up sim.Simulation.root)
 
 let main =
     Printexc.record_backtrace true ;
