@@ -1213,7 +1213,7 @@ type portal = {
   mutable caplen : int option ;
     mutable emit : (bitstring -> unit) option ;
   mutable reader : Thread.t option ;
-  (* TODO: metrics for in/out volume *) }
+          volume : Metric.Counter.t }
 
 type Widget.device += Portal of portal
 
@@ -1224,7 +1224,8 @@ let portal_of_widget (w : Widget.t) =
     | _ -> None
 
 let set_read (portal : portal) f =
-    Log.(log portal.widget.logger Debug (lazy (Printf.sprintf "Setting emitter for portal %s" portal.ifname))) ;
+    Log.(log portal.widget.logger Debug (lazy (Printf.sprintf
+        "Setting emitter for portal %s" portal.ifname))) ;
     portal.emit <- Some f
 
 let is_connected portal =
@@ -1232,11 +1233,17 @@ let is_connected portal =
 
 let dev (portal : portal) =
     { write = (fun bits ->
+        let len = bytelength bits in
         (* Any writer will hold the simulation lock so iface is not going to be
          * closed before we are done writing *)
-        match portal.iface with
-        | Some iface -> inject iface bits
-        | None -> ()) ;
+        let dir =
+            match portal.iface with
+            | Some iface -> inject iface bits ; "egress"
+            | None -> "dropped-tx" in
+        let now = Simulation.Widget.now portal.widget in
+        let params =
+            Metric.(Params.singleton "dir" Param.(String dir)) in
+        Metric.Counter.add portal.volume ~now ~params len) ;
       set_read = set_read portal }
 
 let disconnect portal =
@@ -1285,6 +1292,13 @@ let power_up portal =
                 (* Continue as long as we uses the same iface: *)
                 match portal.iface with None -> false | Some i -> i == iface)
             (fun bits ->
+                let len = bytelength bits in
+                let now = Simulation.Widget.now portal.widget in
+                let dir =
+                    if portal.emit = None then "dropped-rx" else "ingress" in
+                let params =
+                    Metric.(Params.singleton "dir" Param.(String dir)) in
+                Metric.Counter.add portal.volume ~now ~params len ;
                 (* Use the current emit function not the one at power_up: *)
                 Option.may (fun emit -> emit bits) portal.emit))
 
@@ -1304,7 +1318,8 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
         iface = None ;
         ifname ; widget ; promisc ; filter ; caplen ;
         emit = None ;
-        reader = None } in
+        reader = None ;
+        volume = Metric.Counter.make () } in
     widget.device <- Some (Portal portal) ;
     (* Switching this one on opens the interface of the machine it names, and
      * switching it off closes it. *)
@@ -1338,5 +1353,8 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
                 match portal.caplen with None -> `Null
                 | Some i -> `Int i)
             ~setter:(fun v ->
-                portal.caplen <- to_option (to_int_range ~min:1 ~max:65535) v) ] ;
+                portal.caplen <- to_option (to_int_range ~min:1 ~max:65535) v) ;
+        metric_property "volume" ~units:"bytes"
+            ~descr:"Volume of traffic that went through the portal."
+            (Metric.Counter.T portal.volume) ] ;
     portal
