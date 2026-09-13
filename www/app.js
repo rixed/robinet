@@ -3247,6 +3247,30 @@ document.addEventListener('alpine:init', () => {
             await this.reload()
         },
 
+        /* Switch the power source this widget owns.
+         *
+         * Only an owner has one to switch: a gateway's server and its router
+         * draw on the gateway's source, and it is the gateway that is
+         * switched -- one box, one switch. What a widget could not do about
+         * being switched is not a failure of the switch, and comes back in
+         * its "error" property rather than here. */
+        async togglePower() {
+            if (!this.selected || !this.selected.power ||
+                !this.selected.power.owner) return
+            const on = !this.selected.power.on
+            const r = await this.exchange(() =>
+                api(`/simulations/${this.selected.sim}/widgets/` +
+                    `${this.selected.id}/power`,
+                    { method: 'PUT', body: JSON.stringify(on) }))
+            if (!r.ok) { this.mapError = r.error.message ; return }
+            this.mapError = null
+            /* What it now reads as, and what the properties beside it now say:
+             * a machine that has just been switched on has an address it did
+             * not have a moment ago, and may have an error it did not have
+             * either. */
+            await this.reload()
+        },
+
         /* Bring the selection into view, if it is not already there.
          *
          * Only if: the whole promise of this map is that things stay where they

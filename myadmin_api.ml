@@ -56,6 +56,7 @@
                                             is {"lat": ..., "lon": ...}, or
                                             null to take it off the map
     GET    /api/simulations/<s>/widgets/<w>/properties
+    PUT    /api/simulations/<s>/widgets/<w>/power    body is true or false
     GET    /api/simulations/<s>/widgets/<w>/properties/<name>
     PUT    /api/simulations/<s>/widgets/<w>/properties/<name>  body is the value
     GET    /api/simulations/<s>/widgets/<w>/properties/<name>/history
@@ -360,6 +361,16 @@ let json_of_widget (w : Widget.t) =
                 cable reaches. *)
              "ports", `Int (w.ports.count ()) ;
              "free_ports", `Int (Widget.free_ports w) ;
+             (* The source this widget draws on: what it is called, whether
+                it is on, and whether this widget is the one that minted it.
+                Only an owner has a switch to draw, which is what makes one
+                switch per box rather than one per part -- a gateway's server
+                and its router draw on the gateway's, and it is the gateway
+                that is switched. There is no listing of sources of their own:
+                a source is known by the widgets that name it. *)
+             "power", `Assoc [ "name", `String w.power.Widget.name ;
+                               "on", `Bool w.power.Widget.on ;
+                               "owner", `Bool w.owns_power ] ;
              "location", json_of_location w.location ;
              (* What it says, when it is a note and says something. *)
              "text", json_of_note_text w ;
@@ -811,6 +822,35 @@ let set_location _mth matches _vars qry_body resp =
             | Some l -> Printf.sprintf "Placed at %g, %g" l.lat l.lon))) ;
         respond resp (json_of_widget w))
 
+(* Switch the source a widget owns, which is what switching a device on and off
+ * is: there is no property for it any more, and no switch anywhere but on the
+ * owner. Refused for a widget that merely draws on somebody else's -- two
+ * switches for one source is the confusion this arrangement ended.
+ *
+ * What a widget cannot do about being switched is not an error here: the
+ * switch went through, and what went wrong is on the widget, in its "error"
+ * property. *)
+let set_power _mth matches _vars qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        let w = widget_of_matches sim matches 2 in
+        if not w.Widget.owns_power then
+            bad_request "%s draws on %s, which is not its to switch"
+                (Widget.full_name w) w.Widget.power.Widget.name ;
+        let on =
+            match Yojson.Basic.from_string qry_body with
+            | exception _ | `Null ->
+                bad_request "Not a switch: %S (expected true or false)" qry_body
+            | j ->
+                (match Widget.to_bool j with
+                | exception Widget.Bad_value m -> bad_request "%s" m
+                | b -> b) in
+        (if on then Simulation.power_up else Simulation.power_down)
+            w.Widget.power ;
+        Log.(log w.Widget.logger Info (lazy (Printf.sprintf
+            "Switched %s" (if on then "on" else "off")))) ;
+        respond resp (json_of_widget w))
+
 let get_properties _mth matches _vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
     Simulation.borrow sim (fun () ->
@@ -1192,6 +1232,11 @@ let resources serving : (Str.regexp * Opache.resource) list =
         get_properties ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/logs$",
         get_logs ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/power$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "PUT" | "POST" -> set_power mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/location$",
         (fun mth matches vars qry_body resp ->
             match mth with

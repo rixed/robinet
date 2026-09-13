@@ -421,6 +421,23 @@
                                      not a kind of device and has none to give. -->
                                 <small class="kind" x-show="selected.device" x-cloak
                                        x-text="'(' + selected.device + ')'"></small>
+                                <!-- The switch of the power source this widget
+                                     minted, and only of that one: everything
+                                     inside a box draws on the box's source, so
+                                     there is one switch per box and it is on
+                                     the box. What a part could not do about
+                                     being switched shows up in its own "error"
+                                     property, below. -->
+                                <button class="outline power" x-cloak
+                                        x-show="selected.power && selected.power.owner"
+                                        :disabled="!online"
+                                        :class="{ on: selected.power && selected.power.on }"
+                                        :title="selected.power && selected.power.on
+                                                ? 'Switch it off: what it had scheduled goes with the power'
+                                                : 'Switch it on'"
+                                        @click="togglePower()"
+                                        x-text="selected.power && selected.power.on
+                                                ? 'on' : 'off'"></button>
                                 <!-- The one thing about the selected widget that is not
                                      shown below but somewhere else: the log window keeps
                                      what it is given, whatever is being looked at. -->

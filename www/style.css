@@ -1403,6 +1403,24 @@ button.watch-logs.watching {
     color: var(--pico-primary-inverse);
 }
 
+/* The switch of the source this widget owns, before the rest and the same
+ * size. It reads as what the box is, not as what pressing it would do: a
+ * switch that says "on" is a box that is on. */
+button.power {
+    width: auto;
+    margin-left: .6rem;
+    padding: 0 .4rem;
+    font-size: .7rem;
+    line-height: 1.5;
+    border-color: var(--pico-muted-border-color);
+    color: var(--pico-muted-color);
+}
+button.power.on {
+    background: var(--pico-ins-color);
+    border-color: var(--pico-ins-color);
+    color: var(--pico-primary-inverse);
+}
+
 /* Beside it, and the same size: only offered where it would work, so where it
  * is offered it is real. Armed, it says what it is about to do. */
 button.delete {
