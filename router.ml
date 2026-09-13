@@ -1174,6 +1174,47 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     Simulation.power_up power ;
     gw
 
+(* A gateway serves DHCP from a host built inside it, which goes down and comes
+ * back with the box. That has broken twice, in two different ways -- a load
+ * that powered everything down and up again, and a switch that powered the
+ * host off and never back on -- and neither was caught by anything here, since
+ * nothing here asked the gateway for an address after switching it. This does.
+ *)
+(*$R make_gw
+    let sim = Simulation.make ~realtime:false "gw-dhcp" in
+    let gw =
+        make_gw ~parent:sim.Simulation.root
+                (Ip.Addr.of_string "80.82.17.127")
+                (Ip.Cidr.of_string "192.168.0.0/24") in
+    (* No address of its own, so it asks for one. *)
+    let client : Host.t = Host.make ~parent:sim.Simulation.root "client" in
+    client.Host.trx.Host.dev.set_read gw.trx.ins.write ;
+    ignore (client.Host.trx.Host.dev.write <-= gw.trx) ;
+    let address () =
+        match Eth.State.find_ip4 client.Host.eth_state with
+        | exception Not_found -> "none"
+        | ip -> Ip.Addr.to_dotted_string ip in
+    Simulation.run sim false ;
+    assert_bool ("a client on the LAN is leased an address, not "^ address ())
+                (address () <> "none") ;
+    (* The box off and on again, which takes its server with it both ways. *)
+    let flip w on =
+        (if on then Simulation.power_up else Simulation.power_down)
+            w.Widget.power in
+    flip gw.widget false ;
+    flip gw.widget true ;
+    (* And a client that asks afterwards has to be answered. It is rebooted
+       rather than believed: the address it holds is one it was granted before
+       any of this. *)
+    flip client.Host.trx.Host.widget false ;
+    assert_equal ~printer:identity "none" (address ()) ;
+    flip client.Host.trx.Host.widget true ;
+    Simulation.run sim false ;
+    assert_bool ("a client asking after the gateway was switched off and on \
+                  again is leased one, not "^ address ())
+                (address () <> "none")
+ *)
+
 (* A gateway offers what a gateway has sockets for, and not one port per end
    that happens to exist within it: the router's two interfaces, the hub's three
    and the server's adapter are all spoken for inside. *)

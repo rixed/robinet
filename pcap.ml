@@ -1175,6 +1175,24 @@ let sniffer iface ?(while_=(fun () -> true)) rx =
                 loop () in
     Thread.create loop ()
 
+(* Switching a source on is a switch and cannot be refused; a widget that
+ * cannot do what that means for it says so on itself instead, and the rest of
+ * the network carries on. A portal is what can fail -- the interface it names
+ * may not be there -- and a document naming one that is not used to take the
+ * whole program down on the way up. *)
+(*$R portal
+    let sim = Simulation.make ~realtime:false "no-such-iface" in
+    let p = portal ~parent:sim.Simulation.root "robinet-no-such-iface" in
+    assert_bool "a portal mints a source of its own" p.widget.Widget.owns_power ;
+    assert_bool "and is built with it switched off"
+                (not p.widget.Widget.power.Widget.on) ;
+    Simulation.power_up p.widget.Widget.power ;
+    assert_bool "one onto an interface that is not there says what went wrong"
+                (p.widget.Widget.error <> None) ;
+    assert_bool "and the switch it was given went through all the same"
+                p.widget.Widget.power.Widget.on
+ *)
+
 (** A Pcap.portal is a widget representing a real network interface form the
  * host, that can be added to a simulation and will have a single pluggable
  * port where to attach cables, to exchange packets with a real interface. *)
