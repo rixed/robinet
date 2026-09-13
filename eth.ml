@@ -1073,7 +1073,7 @@ struct
              mutable delay : Clock.Interval.t ; (** Computed from the length *)
         mutable error_rate : float ;  (** In faulty bits per transmitted bits *)
       mutable success_rate : int ;    (** The inverse of the above *)
-          mutable tot_bits : Metric.Counter.t ; (** Both ways. *)
+          mutable tot_bits : Metric.Counter.t ; (** Per direction. *)
         mutable bit_shifts : Metric.Counter.t ; (** Casualties in individual bits *)
            (** Boolean: true if from [a] to [b] (see [Cable.make] *)
               last_packets : (bool * bitstring) OrdArray.t ;
@@ -1144,7 +1144,7 @@ struct
                         t.success_rate <- success_rate r)
                     ~getter:(fun () -> `Float t.error_rate) ;
                 metric_property "total bits"
-                    ~descr:"Total number of transmitted bits (both ways)"
+                    ~descr:"Total number of transmitted bits."
                     (Metric.Counter.T t.tot_bits) ;
                 metric_property "bit shifts" ~descr:"Number of flipped bits"
                     (Metric.Counter.T t.bit_shifts) ] ;
@@ -1157,10 +1157,11 @@ struct
     (* Transfer some bits along the cable *)
     let pass (st : State.t) dir bits =
         let len = bitstring_length bits in
-        let prev_tot_bits = Metric.Counter.get st.tot_bits in
+        let params = Metric.(Params.singleton "dir" Param.(Bool dir)) in
+        let prev_tot_bits = Metric.Counter.get ~params st.tot_bits in
         let now = Simulation.Widget.now st.widget in
-        Metric.Counter.add st.tot_bits ~now len ;
-        if prev_tot_bits > Metric.Counter.get st.tot_bits then (
+        Metric.Counter.add st.tot_bits ~now ~params len ;
+        if prev_tot_bits > Metric.Counter.get ~params st.tot_bits then (
             Log.(log st.widget.logger Warning (lazy "Bit count wrapped around 0")) ;
             (* For better stats: *)
             Metric.Counter.reset st.bit_shifts
@@ -1170,7 +1171,7 @@ struct
             if st.success_rate > 0 then
                 let shift_pos = Random.int st.success_rate in
                 if shift_pos < len then (
-                    Metric.Counter.inc st.bit_shifts ~now ;
+                    Metric.Counter.inc st.bit_shifts ~now ~params ;
                     let bits' = bitstring_copy bits in
                     bitstring_shift shift_pos bits' ;
                     bits'
