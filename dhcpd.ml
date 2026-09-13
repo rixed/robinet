@@ -18,6 +18,7 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 open Batteries
+open SimTypes
 open Bitstring
 
 open Clock
@@ -254,18 +255,18 @@ struct
         assert_bool "the lease time is offered as it was given"
             (Bitstring.equals (offered ()) (bitstring_of_int32 3600)) ;
         let set_lease_time =
-            List.find (fun (p : Widget.property) -> p.Widget.name = "lease time")
-                      st.widget.Widget.properties |>
-            (fun p -> Option.get p.Widget.setter) in
+            List.find (fun (p : Widget.property) -> p.name = "lease time")
+                      st.widget.properties |>
+            (fun p -> Option.get p.setter) in
         set_lease_time (`Int 60) ;
         assert_bool "and follows when it is changed"
             (Bitstring.equals (offered ()) (bitstring_of_int32 60)) ;
         (* Same for an option that may be there or not: asking for it when
            there is none must bring nothing back. *)
         let set_mtu =
-            List.find (fun (p : Widget.property) -> p.Widget.name = "MTU")
-                      st.widget.Widget.properties |>
-            (fun p -> Option.get p.Widget.setter) in
+            List.find (fun (p : Widget.property) -> p.name = "MTU")
+                      st.widget.properties |>
+            (fun p -> Option.get p.setter) in
         let mtu_asked () =
             let request = String.of_char (Char.chr Dhcp.Option.interface_mtu) in
             List.mem_assoc Dhcp.Option.interface_mtu (get_options st (Some request)) in
@@ -428,11 +429,11 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
         (Eth.State.find_ip4 clt.eth_state |> Ip.Addr.to_dotted_string
          = "10.99.99.99") ;
     let static_ip =
-        List.find (fun (p : Widget.property) -> p.Widget.name = "static-ip")
-                  clt.Host.trx.Host.widget.Widget.properties in
-    (Option.get static_ip.Widget.setter) `Null ;
-    clt.trx.power_off () ;
-    clt.trx.power_on () ;
+        List.find (fun (p : Widget.property) -> p.name = "static-ip")
+                  clt.Host.trx.Host.widget.properties in
+    (Option.get static_ip.setter) `Null ;
+    Simulation.power_down clt.trx.power ;
+    Simulation.power_up clt.trx.power ;
     Simulation.run sim false ;
     assert_bool "and is leased one after a reboot" (Host.ip_is_set clt) ;
     assert_bool "from the server's range"
@@ -489,9 +490,9 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
         (Option.map_default (fun (l : Lease.t) -> l.Lease.hostname |? "none")
                             "no lease" lease) ;
     let prop name =
-        List.find (fun (p : Widget.property) -> p.Widget.name = name)
-                  st.widget.Widget.properties in
-    (match (prop "leases").Widget.getter () with
+        List.find (fun (p : Widget.property) -> p.name = name)
+                  st.widget.properties in
+    (match (prop "leases").getter () with
     | `List [ `Assoc row ] ->
         assert_equal ~printer:identity "client"
             (match List.assoc "hostname" row with
@@ -504,7 +505,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
         assert_failure ("one lease, not "^ Yojson.Basic.to_string v)) ;
     (* And the gauge beside it is what a plot of the pool is drawn from. *)
     assert_equal ~printer:string_of_int 1
-        (match (prop "leased addresses").Widget.getter () with
+        (match (prop "leased addresses").getter () with
         | `Assoc l ->
             (match List.assoc "values" l with
             | `List [ `Assoc row ] ->
@@ -516,7 +517,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
         | _ -> -1) ;
     (* None of it outlives the power: a host coming back up is a host that has
        been granted nothing yet. *)
-    clt.trx.power_off () ;
+    Simulation.power_down clt.trx.power ;
     assert_bool "the netmask goes with the power" (Host.cur_netmask clt = None) ;
     assert_bool "and so does the name server"
         (Host.cur_nameserver clt = None) ;

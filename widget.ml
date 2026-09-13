@@ -21,336 +21,32 @@
   Any object that can be visualized and manipulated via the API
  *)
 open Batteries
+open SimTypes
 
-(* Where a widget is in the world, when it is anywhere.
- *
- * Degrees of latitude and longitude, as GeoIP hands them out and as simwan
- * reads them to derive a cable's length and hence its latency: the picture and
- * the timings it is supposed to explain must be computed from the same
- * numbers, or the picture explains nothing.
- *
- * Only what the map draws on its plane -- routers, LANs, hosts -- has a place
- * of its own. What is inside one of those boxes is at the same place as the
- * box, and a TCP layer is nowhere at all, so a widget's location is an option
- * and [None] means "no place of its own". It is not 0,0, which is a real spot
- * in the Gulf of Guinea. *)
-type location = { lat : float ; lon : float }
+type t = widget
 
-(* The thing a widget stands for, so that whoever holds the widget can get back
- * to it: the [Host.t] behind a host, the [Hub.Switch.t] behind a switch.
- *
- * Extensible, and not a variant listing them all, because this module is
- * compiled long before any of them: each adds its own constructor where its
- * type is defined (see [Metric.metric], which is arranged the same way), and
- * offers an [of_widget] of its own so that a caller matches nothing itself.
- *
- * A match on this therefore always needs a default case. That costs nothing
- * here: nobody wants to do the same thing to all the kinds of device there
- * are -- what a caller asks is whether this one is a host. *)
-type device = ..
+(* The types this module is about are declared in {!SimTypes}, with the
+ * simulation and the power source they refer to and that refer back to them.
+ * Named here as well, where a caller looks for them: an alias for each, and a
+ * re-export for the extensible one, so that a module can still add its own
+ * device without knowing where the type came from. *)
+type device = SimTypes.device = ..
+type location = SimTypes.location
+type power = SimTypes.power
+type property = SimTypes.property
+type value = SimTypes.value
+type kind = SimTypes.kind
+type peer = SimTypes.peer
+type ports = SimTypes.ports
 
-type t =
-    { (* The stable identity of a widget.
-       * Names are not stable: a widget can be moved elsewhere in the tree, and
-       * is renamed when it arrives among siblings that have its name (see
-       * [unique_among]). The administration UI, the browser URL and
-       * (eventually) the saved topology all need a handle that survives those
-       * changes, so that handle is this id. *)
-      id : int ;
-      (* Which simulation this widget belongs to. An id rather than the
-       * simulation itself, because a simulation holds the root of its widget
-       * tree and this module is therefore compiled before it. A widget only
-       * ever relates to widgets of its own simulation: a cable cannot span two
-       * clocks. *)
-      sim : int ;
-      (* A mere label. Must not contain '/' so that [full_name] stays
-       * unambiguous, and differs from every sibling's so that [full_name]
-       * names this widget and no other. Mutable because that second rule is
-       * enforced on arrival, and a widget arrives twice: when it is built and
-       * whenever it is moved. *)
-      mutable name : string ;
-      (* We want to be able to navigate the logs/stats/characteristics of
-       * every simulated things (aka "widgets").
-       * Widgets are connected with TRX in various ways, sometime "vertically",
-       * as a stack of layers to assemble composed objects (ex: a service with
-       * a host with an HTTP layer with a TCP layer with an IP layer with an
-       * ETH layer), and sometimes "horizontally" as connections between various
-       * objects, mostly via cables.
-       * From the point of view of the simulator, all these are just trxs
-       * connected together.
-       * Those relationships are indicated at construction time.
-       *
-       * Parent / children: widgets form a hierarchical tree. The full_name of a
-       * widget indicates that hierarchy. *)
-      mutable parent : t option ;
-      mutable children : t list ;
-      (* Siblings: When widgets are connected "horizontally" to others.
-       * Widget names are then unrelated. *)
-      mutable peers : peer list ;
-      (* Where it is, if it is anywhere: see [location]. Mutable because
-       * placing a box is something the reader does, from the map. *)
-      mutable location : location option ;
-      logger : Log.t ;
-      (* Where a cable reaches the device this widget stands for, if anywhere *)
-      mutable ports : ports ;
-      (* What kind of device this widget stands for -- "host", "switch" --
-       * named the way the catalogue of buildable devices names it (see
-       * [Device.all]), or [None] when the widget is a *part* of a device
-       * rather than a whole one: an adapter, a router's interface, a server
-       * running on a host.
-       *
-       * Set by the constructor of the device itself, not by the catalogue, so
-       * that a network wired up by an OCaml program is described the same way
-       * as one built through the API. What the catalogue then says is which of
-       * these kinds it knows how to build -- and therefore, the API refusing
-       * to remove what it could not put back, which ones it will delete. *)
-      mutable device_type : string option ;
-      (* The device itself, set by the same constructor that sets
-       * [device_type], so that a widget can be turned back into the thing it
-       * stands for -- a program that has just built a host through the
-       * catalogue gets a widget, and wants somewhere to run a ping.
-       *
-       * [None] for a widget that is a part rather than a whole, as
-       * [device_type] is, and for one whose module has nothing to hand back:
-       * the localhost has no host record of its own, only a transceiver. *)
-      mutable device : device option ;
-      (* What this device was built from: every parameter the catalogue entry
-       * named by [device_type] declares, coerced, in the order it declares
-       * them.
-       * [None] until [Device.make] fills it in, and for ever after for a
-       * device wired up by hand, calling the constructors and [Eth.Cable.plug]
-       * directly.
-       *
-       * This and not [device_type] is what says whether a widget can be built
-       * again: the constructors set [device_type] themselves, so a hand-wired host
-       * answers "host" as much as any other, and what it cannot say is with
-       * which arguments. Hence the option, and hence a save that leaves such a
-       * device out rather than guessing.
-       *
-       * A constructor that *chooses* -- the first free port, an address drawn
-       * at random -- records what it chose here itself, and [Device.make]
-       * fills this in only when it was left empty: replaying the arguments as
-       * they were given would choose again, and differently. *)
-      mutable made_with : (string * value) list option ;
-      (* How to stop the thing this widget stands for, called by [destroy]
-       * before the widget leaves the tree: cut its power, unplug the cable.
-       * Set by whoever built that thing, since nothing else knows how to stop
-       * it -- and only by whoever gave it its own power supply, so that
-       * deleting one of several devices sharing a supply does not switch off
-       * the others.
-       *
-       * Nothing here undoes the wiring *within* a device: its trxs point at
-       * one another and at nothing else, so they go when the last reference to
-       * them does. Only cables cross from one device to another, and only they
-       * have to be told. *)
-      mutable on_delete : unit -> unit ;
-      (* The power source this widget draws on: its own if it minted one, and
-       * otherwise its parent's, which is the mains of its simulation unless
-       * something between the two minted one. A box is therefore a subtree
-       * that shares a source, without anybody having to hand it down.
-       *
-       * Everything this widget schedules must draw on this one, or switching
-       * it off would leave events behind. *)
-      mutable power : power ;
-      (* Whether this widget is the one that minted [power], as against having
-       * it from above. Only an owner gets a switch in the interface: two
-       * switches for one source is the confusion this whole arrangement is
-       * there to end. *)
-      mutable owns_power : bool ;
-      (* What this widget does when its source is switched on and off. Called
-       * by [Simulation.power_up] and [Simulation.power_down], which find the
-       * widgets of a source by walking the tree: nothing registers, and
-       * nothing has to be unregistered when a widget is destroyed or moved.
-       *
-       * A [power_down] must not schedule anything: by the time it is called
-       * the source is off and [Simulation.at] refuses it. *)
-      mutable power_up : unit -> unit ;
-      mutable power_down : unit -> unit ;
-      (* What went wrong the last time this widget was switched, if anything.
-       *
-       * Switching a source is not an operation that can be refused: it is a
-       * switch. But what a widget does about it can fail -- a portal opens an
-       * interface of the machine, which may not be there -- and the failure
-       * has to go somewhere other than out of the switch. So it lands here,
-       * and is read through the "error" property beside it: nothing in the
-       * simulator has an error to handle, the interface has something to show
-       * against the widget, and the reader can try the switch again as often
-       * as they like. Cleared by a switching that goes through. *)
-      mutable error : string option ;
-      (* Setter and getter of configurable properties: *)
-      mutable properties : property list }
-
-(* From a high-level perspective (the API), a cable reaches "port n of device d",
- * not some internal TRX. Ports are a way to designate and reach those user
- * visible sockets where a cable can be attached.
+(** Which simulation a widget belongs to: the one its power source schedules
+ * on. It is not a field of its own -- there would then be two answers to keep
+ * in step -- and a widget is never without one, since it takes its parent's
+ * source and the root of a tree is built with its simulation's mains.
  *
- * A device made of other devices answers by calling theirs, and in doing so
- * decides which of its parts each of its port numbers reaches. That decision is
- * the point. A gateway is a router, a hub and a server wired together, and
- * offers two ports -- the outside and the LAN -- while every other end inside it
- * is already spoken for.
- *
- * Most widgets have none. *)
-and ports =
-    { (* How many cables the device takes. *)
-      count : unit -> int ;
-      (* Whether port [n] has one already. *)
-      is_connected : int -> bool ;
-      (* Port [n], as something to plug a cable into. *)
-      dev : int -> Tools.dev ;
-      (* The widget port [n] really belongs to, which is what a cable joining it
-       * is recorded as reaching: a host's adapter rather than the host, a
-       * router's interface rather than the router. Itself, for a device whose
-       * ports are not widgets of their own -- a hub's and a switch's are
-       * interchangeable, and a number for them would mean nothing. *)
-      owner : int -> t ;
-      (* Undo what plugging a cable into port [n] did: the port stops emitting
-       * and says it is free again. There is no way back through [dev], since
-       * installing a reader is what marks a port connected in the first place,
-       * so the device has to offer the way out as well as the way in. *)
-      disconnect : int -> unit ;
-      (* When connecting two devices, they oftentimes had a brief communication
-       * to negotiate some shared characteristics depending on each end's
-       * capabilities. This is performed instantly when connecting them thanks
-       * to those two functions: *)
-      get_capabilities : int -> Capabilities.t ;
-      set_capabilities : int -> Capabilities.t -> unit }
-
-(* What a widget schedules on, and what deciding it is off withdraws.
- *
- * It lives here, and not in simulation.ml where everything that acts on it
- * lives, because a widget names the source it draws on and this module is
- * compiled first. For the same reason it holds the simulation's id rather than
- * the simulation itself, exactly as a widget does. *)
-and power =
-    { (* Whether this source may pay for events.
-       *
-       * Flip it only through [Simulation.power_up] and
-       * [Simulation.power_down]: the dispatcher does not look at this field,
-       * so switching it off without withdrawing the queued events leaves them
-       * to fire, and the widgets drawing on it are not told. *)
-      mutable on : bool ;
-      (* What to call it, which is the full name of the widget that minted it,
-       * and is what the logs say when an event is dropped for want of it. *)
-      name : string ;
-      sim : int }
-
-and peer = { widget : t ;
-             via : t option }
-
-and property = { name : string ;
-                descr : string ;
-                units : string ;
-               getter : (unit -> value) ;
-               (* If that property can be set *)
-               setter : (value -> unit) option ;
-               (* Some properties are settable only some of the time: *)
-              can_set : (unit -> bool) ;
-               (* The metric this property reads, when it reads one. The getter
-                * renders it for display and the kind says so; this is the
-                * thing itself, for whoever wants its figures rather than their
-                * rendering -- the sampler that keeps a history of them does,
-                * and reading them back out of the getter's JSON would be
-                * absurd. *)
-               metric : Metric.metric option ;
-               (* What the value looks like, so that the UI can offer the right
-                * input and reject nonsense before submitting it. Values still
-                * travel as strings: this only says how to render one. *)
-                 kind : kind ;
-               (* Whether a row of the property panel is worth spending on this
-                * when it reads as nothing.
-                *
-                * Absence usually says something: a DHCP server that serves no
-                * gateway is configured that way, and the reader has to be able
-                * to see it. But a property every widget carries whether or not
-                * it means anything for that widget -- where it is on the map --
-                * says nothing at all when it is absent, and there are two of
-                * those on every widget in the tree. Those are the ones this is
-                * for. *)
-               only_when_set : bool }
-
-(* A property value, in the shape the administration interface speaks.
- *
- * Not a string: properties exist only for that interface, so its own type is
- * their natural one, and keeping values typed all the way to the setter spares
- * every property author from inventing a string encoding -- and from getting it
- * wrong, which is easier than it sounds (string_of_float renders 5. as "5.",
- * which is not a number any browser will accept).
- *
- * [Basic] rather than [Safe]: the three extra constructors Safe carries --
- * Intlit, Tuple, Variant -- cannot mean anything here, and would only show up
- * as dead branches, or worse, be swallowed by a catch-all. *)
-and value = Yojson.Basic.t
-
-and kind =
-    | String
-    (* A string of more than one line: what a note says, and anything else
-     * written in prose rather than filled in. The same string on the wire and
-     * to the setter as a [String] is; what it tells the interface is how much
-     * room to give it. *)
-    | Text
-    (* A string naming a file of the pcap library ([Pcap.Library]): the one a
-     * recorder is writing, or the one a replayer is playing.
-     *
-     * A name and not a path -- the library is one flat directory, and a name
-     * is the same string wherever it appears: in the property, in the library
-     * listing, and in the file saved out of it. Fetching that file, adding one
-     * and removing one are the library's business and not the widget's, so
-     * what this kind tells the interface is which files to offer here, and
-     * that the value is one it can hand back (null) to be done with it. *)
-    | FileName
-    | Int
-    | Float
-    (* "true" or "false", as the setter reads them *)
-    | Bool
-    (* One of those values, and nothing else *)
-    | Enum of string array
-    (* Any number of those values, each at most once, in no order of its own:
-     * the interface ticks them, and the value is the places of the ticked ones
-     * (as [Enum]'s is the place of the one), which is a [`List] on the wire.
-     *
-     * Not a [List (Enum ...)], although that is the same thing on the wire: a
-     * list is a sequence, and offers the reader what a sequence is for --
-     * carrying an element about, holding the same one twice -- neither of
-     * which means anything about a set. What the accepted speeds of an
-     * interface are is a set; what a routing table is, is a list. *)
-    | Set of string array
-    (* The id of another widget of the same simulation: what a cable's two ends
-     * are. Not an [Int], although that is what travels: the UI has the widgets
-     * of the simulation in hand and can offer them by name, which no number box
-     * can do. *)
-    | Widget_id
-    (* A number known to lie within those bounds *)
-    | FRange of float * float
-    | IRange of int * int
-    (* A family of counts or measures, keyed by the parameters of the events
-     * they come from: it reads as a small table, and the only thing a write
-     * does is reset it. Which sort of metric it is comes with the value, which
-     * a metric, unlike a range, describes itself. *)
-    | Metric
-    (* A value that may be absent, which is [`Null] on the wire. Build one with
-     * [optional] rather than by hand, so that the combinations that mean
-     * nothing cannot be written. *)
-    | Optional of kind
-    (* Any number of values of the same kind, in order, which is a [`List] on
-     * the wire. The interface draws it as a column of inputs, or as a table
-     * when what is repeated is a record. Build one with [list]. *)
-    | List of kind
-    (* A fixed set of named values, which is an [`Assoc] on the wire. The
-     * interface draws it as a row of named inputs, and as one row of the table
-     * when it is what a list repeats.
-     *
-     * An array rather than an association list because the order is the order
-     * of the columns: it is decided once, by whoever declares the property,
-     * and every value of that property is then laid out the same way. Build
-     * one with [record]. *)
-    | Record of (string * kind) array
-    (* A value written a particular way, with an example of it: what the
-     * interface shows in the input while it is empty. Not a kind of its own --
-     * it is one more thing said about the value inside it -- and where a
-     * description explains what a value is for, this shows what one looks
-     * like. Build one with [hint]. *)
-    | Hint of string * kind
+ * A widget only ever relates to widgets of its own simulation: a cable cannot
+ * span two clocks. *)
+let sim (t : t) = t.power.sim
 
 (* What a kind is called when a refusal has to name it. *)
 let rec kind_name = function
@@ -690,10 +386,10 @@ let no_ports = {
  * at each other), so widgets must never be compared with the polymorphic
  * equality; use physical equality throughout. *)
 
-let full_name t =
+let full_name (t : t) =
     let rec loop full_name = function
         | None -> full_name
-        | Some p -> loop ("/"^ p.name ^ full_name) p.parent in
+        | Some (p : t) -> loop ("/"^ p.name ^ full_name) p.parent in
     loop ("/"^ t.name) t.parent
 
 (* Ids are unique across the whole process rather than merely within a
@@ -758,8 +454,8 @@ let check_location { lat ; lon } =
  * numbering for free, and are meant to: what they name is the kind of part,
  * not the instance. A name that came from the reader is a different matter, and
  * {!Device.make} refuses that one rather than quietly altering it. *)
-let unique_among parent name =
-    let taken n = List.exists (fun c -> c.name = n) parent.children in
+let unique_among (parent : t) name =
+    let taken n = List.exists (fun (c : t) -> c.name = n) parent.children in
     if not (taken name) then name else
     let rec loop i =
         let n = Printf.sprintf "%s-%d" name i in
@@ -772,44 +468,72 @@ let unique_among parent name =
  * what is not there yet -- a host for a DHCP server, a gateway's server for
  * the address it serves from. Whoever mints one switches it on as the last
  * thing it does, unless it was asked for a device that is to stay off. *)
-let mint_power t =
-    t.power <- { on = false ; name = full_name t ; sim = t.sim } ;
+let mint_power (t : t) =
+    t.power <- { on = false ; name = full_name t ; sim = sim t } ;
     t.owns_power <- true
 
-let make_ ?parent ~sim ?power ?(own_power=false) ?now ?seq ?size ?location
-          ?(properties=[]) ?device_type name =
+(* The properties every widget carries, whatever it stands for. Applied here
+ * rather than written into the record, since a root widget is built by
+ * [Simulation.make] and not by [make] (see there) and must carry them too.
+ *
+ * Read through [t] rather than off the arguments it was built with: what they
+ * read moves, and a widget is placed, moved and taken off the map long after
+ * it is built. *)
+let add_common_properties (t : t) =
+    let coord f () =
+        match t.location with None -> `Null | Some l -> `Float (f l) in
+    add_properties t [
+        (* Every widget gets the pair, whether it is placed or not: a property
+         * list that changed as one was placed would be one the UI could not
+         * keep a place for. An unplaced widget reads as null, which is why the
+         * kind is optional -- and why the UI leaves it out until there is
+         * something to show. *)
+        property "latitude" ~units:"deg" ~kind:(optional Float) ~only_when_set:true
+            ~descr:"Where it is, north of the equator."
+            ~getter:(coord (fun l -> l.lat)) ;
+        property "longitude" ~units:"deg" ~kind:(optional Float) ~only_when_set:true
+            ~descr:"Where it is, east of Greenwich."
+            ~getter:(coord (fun l -> l.lon)) ;
+        (* Read-only, and therefore not written into a saved network: what
+         * went wrong here is a fact about this run. *)
+        property "error" ~kind:(optional String) ~only_when_set:true
+            ~descr:"What went wrong the last time it was switched."
+            ~getter:(fun () ->
+                match t.error with None -> `Null | Some m -> `String m) ]
+
+(** Create a widget below [parent]: in [parent]'s simulation, reading the time
+ * and numbering its messages from [parent]'s clock, and drawing on [parent]'s
+ * power source unless it is handed one ([power]) or mints one of its own
+ * ([own_power]).
+ *
+ * A parent is always required, and always available: a caller either has the
+ * widget it is building this one under, or has the simulation, whose root is
+ * one [Simulation.root] away. That is what keeps the root the only parentless
+ * widget of a simulation, and hence keeps it a complete inventory -- and the
+ * root is the one widget this does not build, since it cannot be built before
+ * the simulation it belongs to (see [Simulation.make]). *)
+let make ~parent ?power ?(own_power=false) ?size ?location
+         ?(properties=[]) ?device_type name =
     if String.contains name '/' then
         invalid_arg ("Widget.make: name must not contain '/': "^ name) ;
-    let name =
-        match parent with
-        | None -> name
-        | Some p -> unique_among p name in
+    let name = unique_among parent name in
     Option.may check_location location ;
-    let logger = Log.make ?size ?now ?seq () in
-    (* What it draws on until [own_power] says otherwise: what it was handed,
-     * or what its parent draws on. The root has neither and mints its own,
-     * which is the mains of its simulation. *)
-    let power =
-        match power, parent with
-        | Some p, _ -> p
-        | None, Some p -> p.power
-        (* The root of a simulation, whose source is its mains: what powers
-           everything that nothing more particular powers, and the one source
-           that is never switched off. *)
-        | None, None -> { on = true ; name = "the mains of "^ name ; sim } in
+    let logger =
+        Log.make ?size ~now:parent.logger.Log.now ~seq:parent.logger.Log.seq () in
     let t = {
         id = next_id () ;
-        sim ;
         name ;
-        parent ;
+        parent = Some parent ;
         children = [] ;
         peers = [] ;
         device_type ;
         device = None ;
         made_with = None ;
         on_delete = ignore ;
-        power ;
-        owns_power = parent = None ;
+        (* What it draws on until [own_power] says otherwise: what it was
+         * handed, or what its parent draws on. *)
+        power = (match power with Some p -> p | None -> parent.power) ;
+        owns_power = false ;
         power_up = ignore ;
         power_down = ignore ;
         error = None ;
@@ -824,57 +548,9 @@ let make_ ?parent ~sim ?power ?(own_power=false) ?now ?seq ?size ?location
      * which is the order they are then enumerated, listed by the API and shown
      * in the UI. Quadratic in the number of siblings, which is irrelevant:
      * widgets are created once, at set-up. *)
-    Option.may (fun p -> p.children <- p.children @ [ t ]) parent ;
-    (* Where it is, as something to read in the property panel. Every widget
-     * gets the pair, whether it is placed or not: a widget is placed and taken
-     * off the map long after it is built, and a property list that changed as
-     * that happened would be one the UI could not keep a place for. An unplaced
-     * widget reads as null, which is why the kind is optional -- and why the UI
-     * leaves it out until there is something to show.
-     *
-     * Read through [t] rather than off the [location] argument, for the same
-     * reason: the field moves, the argument does not. *)
-    let coord f () =
-        match t.location with None -> `Null | Some l -> `Float (f l) in
-    add_properties t [
-        property "latitude" ~units:"deg" ~kind:(optional Float) ~only_when_set:true
-            ~descr:"Where it is, north of the equator."
-            ~getter:(coord (fun l -> l.lat)) ;
-        property "longitude" ~units:"deg" ~kind:(optional Float) ~only_when_set:true
-            ~descr:"Where it is, east of Greenwich."
-            ~getter:(coord (fun l -> l.lon)) ;
-        (* Read-only, and therefore not written into a saved network: what
-         * went wrong here is a fact about this run. *)
-        property "error" ~kind:(optional String) ~only_when_set:true
-            ~descr:"What went wrong the last time it was switched."
-            ~getter:(fun () ->
-                match t.error with None -> `Null | Some m -> `String m) ] ;
+    parent.children <- parent.children @ [ t ] ;
+    add_common_properties t ;
     t
-
-(** Create a widget below [parent], in [parent]'s simulation and reading the
- * time from [parent]'s clock.
- *
- * A parent is always required, and always available: a caller either has the
- * widget it is building this one under, or has the simulation, whose root is
- * one [Simulation.root] away. That is what keeps the root the only parentless
- * widget of a simulation, and hence keeps it a complete inventory. *)
-let make ~parent ?power ?own_power ?size ?location ?properties ?device_type
-         name =
-    (* Its parent's clock, and its parent's counter of messages: a simulation
-       numbers what its widgets log in one sequence, so that two of them can be
-       read side by side. *)
-    make_ ~parent ~sim:parent.sim ~now:parent.logger.Log.now
-          ~seq:parent.logger.Log.seq
-          ?power ?own_power ?size ?location ?properties ?device_type name
-
-(** Create the root of a simulation's widget tree: the only widget with no
- * parent, and the only one that has to be told which simulation it is in,
- * where to read the time, and where to take the numbers it stamps its messages
- * with -- every widget below it takes all three from its parent. Called by
- * [Simulation.make], and nowhere else; [seq] is optional only so that a test
- * can build a root without a simulation behind it. *)
-let make_root ~sim ~now ?seq ?size ?location ?properties name =
-    make_ ~sim ~now ?seq ?size ?location ?properties name
 
 (** Enumerate [t] and all of its descendants, depth first. *)
 let rec enum t =
@@ -904,12 +580,12 @@ let find_by_path root path =
         String.split_on_char '/' path |>
         List.filter (fun n -> n <> "") in
     let matching name widgets =
-        List.filter (fun w -> w.name = name) widgets in
+        List.filter (fun (w : t) -> w.name = name) widgets in
     let rec loop candidates = function
         | [] -> candidates
         | name :: rest ->
             let children =
-                List.concat (List.map (fun w -> w.children) candidates) in
+                List.concat (List.map (fun (w : t) -> w.children) candidates) in
             loop (matching name children) rest in
     match names with
     | [] -> []
@@ -992,9 +668,15 @@ let destroy t =
  * other moment that has to be made to hold (see [unique_among]).
  *
  * Nothing else has to be updated: the id is unchanged and [full_name] is
- * computed on demand. A widget cannot leave its simulation. *)
+ * computed on demand. A widget cannot leave its simulation.
+ *
+ * It keeps the power source it draws on, which is its old parent's unless it
+ * minted one. Moving a part of one box into another is not something anything
+ * does today -- what moves is a whole device, which has its own source -- and
+ * the day something does, this is where the question is: a part is switched by
+ * the box it is in, and after a move it is in another one. *)
 let reparent t new_parent =
-    if new_parent.sim <> t.sim then
+    if sim new_parent != sim t then
         invalid_arg ("Widget.reparent: "^ full_name new_parent ^
                      " belongs to another simulation") ;
     if is_ancestor t new_parent then
@@ -1058,7 +740,7 @@ let ports_of w =
    name renames the arrival. *)
 (*$T unique_among
   ignore unique_among ; (* Called by reparent *) \
-  let r = make_root ~sim:0 ~now:(fun () -> Clock.Time.zero) "r" in \
+  let r = (Simulation.make ~realtime:false "r").root in \
   let h1 = make ~parent:r "h" and h2 = make ~parent:r "h" in \
   h1.name = "h" && h2.name = "h-2" && \
   (make ~parent:h1 "eth").name = "eth" && \
@@ -1078,8 +760,9 @@ let ports_of w =
 (* The properties read the field, not the location the widget was built with:
    a widget is placed, moved and taken off the map long after that. *)
 (*$T place
-  let w = make_root ~sim:0 ~now:(fun () -> Clock.Time.zero) "w" in \
-  let read n = (List.find (fun p -> p.name = n) w.properties).getter () in \
+  let w = (Simulation.make ~realtime:false "w").root in \
+  let read n = \
+      (List.find (fun (p : property) -> p.name = n) w.properties).getter () in \
   read "latitude" = `Null && read "longitude" = `Null && \
   (place w (Some { lat = 45.75 ; lon = 4.85 }) ; \
    read "latitude" = `Float 45.75 && read "longitude" = `Float 4.85) && \
@@ -1096,11 +779,11 @@ let has_peer t peer via =
     List.exists (fun p -> p.widget == peer && same_via p.via via) t.peers
 
 let make_peers ?via t1 t2 =
-    if t1.sim <> t2.sim then
+    if sim t1 != sim t2 then
         invalid_arg ("Widget.make_peers: "^ full_name t1 ^" and "^ full_name t2 ^
                      " belong to different simulations") ;
     (match via with
-    | Some v when v.sim <> t1.sim ->
+    | Some v when sim v != sim t1 ->
         invalid_arg ("Widget.make_peers: "^ full_name v ^
                      " belongs to another simulation")
     | _ -> ()) ;

@@ -38,6 +38,7 @@
     tests/stress.opt 60 32
 *)
 open Batteries
+open SimTypes
 
 (*
  * Reporting
@@ -103,20 +104,20 @@ let make_net () =
     let count = ref 0 and nickname = ref None in
     Widget.add_properties cable.widget
         [ Widget.property "sealed" ~descr:"Cannot be written."
-              ~kind:Widget.Int ~getter:(fun () -> `Int 1) ;
+              ~kind:Int ~getter:(fun () -> `Int 1) ;
           Widget.property "count" ~descr:"Any number of things."
-              ~kind:(Widget.IRange (0, max_int))
+              ~kind:(IRange (0, max_int))
               ~getter:(fun () -> `Int !count)
               ~setter:(fun v -> count := Widget.to_int_range ~min:0 v) ;
           (* And one that may have no value at all. *)
           Widget.property "nickname" ~descr:"A name, or none."
-              ~kind:(Widget.optional Widget.String)
+              ~kind:(Widget.optional String)
               ~getter:(fun () ->
                   match !nickname with None -> `Null | Some s -> `String s)
               ~setter:(fun v ->
                   nickname := Widget.to_option Widget.to_string v) ] ;
     (* Something to keep its clock busy for ever: *)
-    let rec ticking () = Simulation.delay net.Simulation.power tick ticking () in
+    let rec ticking () = Simulation.delay net.root.power tick ticking () in
     ticking () ;
     net, cable
 
@@ -145,22 +146,22 @@ let test_clock net =
     (* [step] must run exactly that many events, no more. *)
     Simulation.step ~n:5 net () ;
     let stepped =
-        wait_for (fun () -> net.Simulation.steps = 0) in
+        wait_for (fun () -> net.steps = 0) in
     check "step consumed its budget" stepped ;
     Thread.delay 0.05 ;
     let after_step = Simulation.now net in
     check_between "step advanced by exactly 5 ticks" 0.49 0.51
         (Clock.Interval.to_secs (Clock.Time.diff after_step paused_at)) ;
-    check "still paused after stepping" net.Simulation.paused ;
+    check "still paused after stepping" net.paused ;
 
     (* Resuming must account for the wall clock time spent paused, or every
      * event scheduled during the pause fires at once. *)
-    let before = (Clock.Interval.to_secs net.Simulation.paused_total) in
+    let before = (Clock.Interval.to_secs net.paused_total) in
     Thread.delay 0.3 ;
     Simulation.resume net () ;
-    let spent = (Clock.Interval.to_secs net.Simulation.paused_total) -. before in
+    let spent = (Clock.Interval.to_secs net.paused_total) -. before in
     check_between "resume accounted for the time spent paused" 0.29 1.0 spent ;
-    check "not paused any more" (not net.Simulation.paused) ;
+    check "not paused any more" (not net.paused) ;
     check "the clock advances again"
         (let t0 = Simulation.now net in
          Thread.delay 0.05 ;
@@ -189,19 +190,19 @@ let test_speed net =
     check_between "at a quarter, a quarter of one does" 0.15 0.35
         (measure_speed net 1.) ;
     check "keeping up is not being late"
-        ((Clock.Interval.to_secs net.Simulation.late) < 0.1) ;
+        ((Clock.Interval.to_secs net.late) < 0.1) ;
 
     (* Asked for more than any machine can do: it must say how far behind it
        is rather than pretend. *)
     Simulation.set_speed_ratio net (Some 1e9) ;
     Thread.delay 0.5 ;
-    let late = (Clock.Interval.to_secs net.Simulation.late) in
+    let late = (Clock.Interval.to_secs net.late) in
     check_between "an impossible speed is reported as lateness" 0.4 2.0 late ;
 
     (* Changing the speed is not the new speed being late. *)
     Simulation.set_speed_ratio net (Some 1.) ;
     check "changing the speed clears the lateness"
-        ((Clock.Interval.to_secs net.Simulation.late) < 0.1) ;
+        ((Clock.Interval.to_secs net.late) < 0.1) ;
 
     (* A step is asked for now, whatever the pace says. *)
     Simulation.set_speed_ratio net (Some 0.01) ;
@@ -210,7 +211,7 @@ let test_speed net =
     let before = Simulation.now net in
     Simulation.step ~n:5 net () ;
     check "stepping does not wait for the pace"
-        (wait_for (fun () -> net.Simulation.steps = 0)) ;
+        (wait_for (fun () -> net.steps = 0)) ;
     Thread.delay 0.05 ;
     check_between "and stepped by exactly five ticks" 0.49 0.51
         (Clock.Interval.to_secs (Clock.Time.diff (Simulation.now net) before)) ;
@@ -242,7 +243,7 @@ let test_speed net =
 let test_metric_samples () =
     section "Metrics: the history the plots are drawn from" ;
     let sim = Simulation.make ~realtime:false "samples" in
-    let w = Widget.make ~parent:sim.Simulation.root "thing" in
+    let w = Widget.make ~parent:sim.root "thing" in
     let c = Metric.Counter.make ()
     (* A gauge as well, whose value moves within every sampling window: the
        point of the windows is that they say what happened between two points,
@@ -259,25 +260,25 @@ let test_metric_samples () =
         (* Something to read back through the logs endpoint, at one instant per
            event and at two levels, so that both what [since] and what [level]
            leave out can be told apart from what they keep. *)
-        Log.(log w.Widget.logger Info (lazy (Printf.sprintf "tick %d" n))) ;
+        Log.(log w.logger Info (lazy (Printf.sprintf "tick %d" n))) ;
         if n mod 5 = 0 then
-            Log.(log w.Widget.logger Warning (lazy "every fifth tick")) ;
+            Log.(log w.logger Warning (lazy "every fifth tick")) ;
         if n > 0 then
-            Simulation.delay sim.Simulation.power (Clock.Interval.sec 0.25) (feed (n - 1)) () in
+            Simulation.delay sim.root.power (Clock.Interval.sec 0.25) (feed (n - 1)) () in
     (* All of it happens a good way into the simulation, and at an odd
        picosecond. The API hands out cursors made of these instants, and an
        instant within a few seconds of the beginning is one a double can still
        name to the picosecond: a cursor that lost a few of them on the way out
        would pass for an exact one here and nowhere else. See [json_of_cursor]
        in myadmin_api.ml. *)
-    Simulation.delay sim.Simulation.power
+    Simulation.delay sim.root.power
                      (Clock.Interval.psec 400_000_000_000_000_017) (feed 19) () ;
     Simulation.run sim false ;
-    let key = w.Widget.id, "bytes", Metric.Params.empty in
+    let key = w.id, "bytes", Metric.Params.empty in
     (* A metric that has not fired yet has no row at all, which is not the
        same as a row worth zero -- but it plots the same. *)
     let count (s : Simulation.sample) =
-        match Hashtbl.find_opt s.Simulation.values key with
+        match Hashtbl.find_opt s.values key with
         | Some (Metric.Count c) -> c
         | _ -> 0 in
     let samples = Simulation.metric_samples sim in
@@ -290,17 +291,17 @@ let test_metric_samples () =
        first event runs: at that point the counter has never been added to and
        has nothing to say. *)
     check "the first sample holds what there was to hold: nothing"
-        (Hashtbl.length (List.hd samples).Simulation.values = 0) ;
+        (Hashtbl.length (List.hd samples).values = 0) ;
     check "and every one after it holds the metric"
         (List.for_all (fun (s : Simulation.sample) ->
-            Hashtbl.mem s.Simulation.values key) (List.tl samples)) ;
+            Hashtbl.mem s.values key) (List.tl samples)) ;
     (* Each is taken at the first event at or after its due time, and those
        are multiples of the rate, so the gaps are a second give or take one
        event -- all but the first, since the baseline is taken as soon as the
        simulation dispatches anything and the grid only starts after it. *)
     let gaps_of l =
         List.map2 (fun (a : Simulation.sample) (b : Simulation.sample) ->
-            (Clock.Interval.to_secs (Clock.Time.diff b.Simulation.taken a.Simulation.taken))
+            (Clock.Interval.to_secs (Clock.Time.diff b.taken a.taken))
         ) (List.take (List.length l - 1) l) (List.tl l) in
     let gaps = gaps_of samples in
     check "the samples after the baseline are a simulated second apart"
@@ -323,7 +324,7 @@ let test_metric_samples () =
     check "keeping fewer keeps that many" (List.length kept = 2) ;
     check "and keeps the newest" (count (List.last kept) = last) ;
     (* And the ring wraps rather than growing. *)
-    Simulation.delay sim.Simulation.power (Clock.Interval.sec 0.25) (feed 19) () ;
+    Simulation.delay sim.root.power (Clock.Interval.sec 0.25) (feed 19) () ;
     Simulation.run sim false ;
     let after = Simulation.metric_samples sim in
     check "the ring never grows past what it may keep" (List.length after = 2) ;
@@ -332,8 +333,8 @@ let test_metric_samples () =
     (* The windows: each sample says what the gauge did since the one before,
        while the figures beside them say what it has done since it started. *)
     let level (s : Simulation.sample) =
-        Hashtbl.find_option s.Simulation.values
-            (w.Widget.id, "level", Metric.Params.empty) in
+        Hashtbl.find_option s.values
+            (w.id, "level", Metric.Params.empty) in
     let levels =
         List.filter_map (fun s ->
             match level s with
@@ -350,20 +351,20 @@ let test_metric_samples () =
        turn them while the simulation runs without knowing anything about
        rings. *)
     let root_prop name =
-        List.find (fun (p : Widget.property) -> p.Widget.name = name)
-                  sim.Simulation.root.Widget.properties in
-    let set name v = (Option.get (root_prop name).Widget.setter) v in
+        List.find (fun (p : Widget.property) -> p.name = name)
+                  sim.root.properties in
+    let set name v = (Option.get (root_prop name).setter) v in
     set "metrics samples kept" (`Int 5) ;
     check "the root widget says how many samples are kept"
         (Simulation.metrics_max_samples sim = 5 &&
-         (root_prop "metrics samples kept").Widget.getter () = `Int 5) ;
+         (root_prop "metrics samples kept").getter () = `Int 5) ;
     set "metrics sample rate" (`Float 0.5) ;
     check "and how often they are taken"
         ((Clock.Interval.to_secs (Simulation.metrics_sample_rate sim)) = 0.5 &&
-         (root_prop "metrics sample rate").Widget.getter () = `Float 0.5) ;
+         (root_prop "metrics sample rate").getter () = `Float 0.5) ;
     (* Five more simulated seconds, now sampled twice a second: more than
        enough to fill the shortened ring at the new pace. *)
-    Simulation.delay sim.Simulation.power (Clock.Interval.sec 0.25) (feed 19) () ;
+    Simulation.delay sim.root.power (Clock.Interval.sec 0.25) (feed 19) () ;
     Simulation.run sim false ;
     let dense = Simulation.metric_samples sim in
     check "the sampler follows what the properties say"
@@ -564,7 +565,7 @@ let start_admin () =
 let test_disconnect () =
     section "Unplugging a cable" ;
     let sim = Simulation.make ~realtime:false "unplug" in
-    let parent = sim.Simulation.root in
+    let parent = sim.root in
     let netmask = Ip.Addr.of_dotted_string "255.255.255.0" in
     let sw = Hub.Switch.make ~parent 2 8 "sw" in
     let h =
@@ -578,18 +579,18 @@ let test_disconnect () =
     Eth.Cable.plug st (sw_w, 1) (h_w, 0) ;
 
     check "both ends report a cable"
-        (sw_w.Widget.ports.is_connected 1 &&
-         h_w.Widget.ports.is_connected 0) ;
+        (sw_w.ports.is_connected 1 &&
+         h_w.ports.is_connected 0) ;
     (* Only the port it was plugged into: the one beside it was never taken. *)
     check "and the ports beside them are untouched"
-        (not (sw_w.Widget.ports.is_connected 0)) ;
+        (not (sw_w.ports.is_connected 0)) ;
 
     (* What the cable has carried, which is how "still plugged in" is told from
        "no longer": a frame into the switch's other port is flooded to this one,
        and crosses -- or does not. *)
     let carried () =
         match List.find (fun (p : Widget.property) -> p.name = "total bits")
-                        st.Eth.Cable.State.widget.Widget.properties with
+                        st.Eth.Cable.State.widget.properties with
         | exception Not_found -> -1
         | p ->
             Yojson.Basic.Util.(
@@ -616,9 +617,9 @@ let test_disconnect () =
     Eth.Cable.disconnect st ;
     flood () ;
     check "and none does once it is unplugged" (carried () = before) ;
-    check "unplugging frees the adapter" (not (h_w.Widget.ports.is_connected 0)) ;
+    check "unplugging frees the adapter" (not (h_w.ports.is_connected 0)) ;
     check "and the switch port, which is not an adapter at all"
-        (not (sw_w.Widget.ports.is_connected 1)) ;
+        (not (sw_w.ports.is_connected 1)) ;
     check "so the port can be asked for again"
         (Widget.first_free_port sw_w = Some 0 &&
          Widget.first_free_port h_w = Some 0) ;
@@ -626,7 +627,7 @@ let test_disconnect () =
        why [disconnect] does not have to. *)
     Widget.delete st.Eth.Cable.State.widget ;
     check "and deleting its widget unpairs the two ends"
-        (sw_w.Widget.peers = [] && (h_w.Widget.ports.owner 0).Widget.peers = []) ;
+        (sw_w.peers = [] && (h_w.ports.owner 0).peers = []) ;
 
     (* Those two ports are free, so another cable may take them -- and then the
        first one must not be able to unplug it. Which is what forgetting the
@@ -635,7 +636,7 @@ let test_disconnect () =
     Eth.Cable.plug st2 (sw_w, 1) (h_w, 0) ;
     Eth.Cable.disconnect st ;
     check "unplugging a cable a second time leaves the next one alone"
-        (sw_w.Widget.ports.is_connected 1 && h_w.Widget.ports.is_connected 0)
+        (sw_w.ports.is_connected 1 && h_w.ports.is_connected 0)
 
 (* Deleting a device is deleting the thing, not the picture of it: what it is
    made of goes with it, it stops running, and the cables that reached it are
@@ -644,7 +645,7 @@ let test_disconnect () =
 let test_delete () =
     section "Deleting a device" ;
     let sim = Simulation.make ~realtime:false "delete" in
-    let parent = sim.Simulation.root in
+    let parent = sim.root in
     let netmask = Ip.Addr.of_dotted_string "255.255.255.0" in
     let sw = Hub.Switch.make ~parent 2 8 "sw" in
     let sw_w = sw.Hub.Switch.widget in
@@ -658,9 +659,9 @@ let test_delete () =
     and h2, cable2 = host 1 "h2" "10.3.0.2" in
     let h1_w = h1.Host.trx.Host.widget
     and h2_w = h2.Host.trx.Host.widget in
-    let h1_id = h1_w.Widget.id
-    and h2_id = h2_w.Widget.id
-    and cable2_id = cable2.Eth.Cable.State.widget.Widget.id in
+    let h1_id = h1_w.id
+    and h2_id = h2_w.id
+    and cable2_id = cable2.Eth.Cable.State.widget.id in
     Simulation.run sim false ;
 
     (* Something it was going to do, to tell a device that has stopped from one
@@ -672,35 +673,35 @@ let test_delete () =
     Simulation.run sim false ;
     check "a deleted device stops running" (!fired = 0) ;
     check "and is out of the tree, with everything it was made of"
-        (Widget.find sim.Simulation.root h2_id = None) ;
+        (Widget.find sim.root h2_id = None) ;
     check "so is the cable that reached it"
-        (Widget.find sim.Simulation.root cable2_id = None) ;
+        (Widget.find sim.root cable2_id = None) ;
     check "the port it was plugged into is free again"
-        (not (sw_w.Widget.ports.is_connected 1)) ;
+        (not (sw_w.ports.is_connected 1)) ;
     check "and nothing is peered with what is gone"
         (List.for_all (fun (p : Widget.peer) ->
              p.widget != h2_w && p.via <> Some cable2.Eth.Cable.State.widget)
-             sw_w.Widget.peers) ;
+             sw_w.peers) ;
     (* The other end of the switch never noticed. *)
     check "the rest of the network is untouched"
-        (sw_w.Widget.ports.is_connected 0 &&
-         h1_w.Widget.ports.is_connected 0 &&
-         Widget.find sim.Simulation.root h1_id <> None) ;
+        (sw_w.ports.is_connected 0 &&
+         h1_w.ports.is_connected 0 &&
+         Widget.find sim.root h1_id <> None) ;
 
     (* And from the other side: deleting what a host was cabled to leaves the
        host, minus the cable. *)
     Widget.destroy sw_w ;
     check "deleting a device unplugs what was still on it"
-        (not (h1_w.Widget.ports.is_connected 0)) ;
+        (not (h1_w.ports.is_connected 0)) ;
     check "leaving the device at the far end behind"
-        (Widget.find sim.Simulation.root h1_id <> None) ;
+        (Widget.find sim.root h1_id <> None) ;
     check "and taking its own parts with it"
-        (Widget.find sim.Simulation.root sw_w.Widget.id = None &&
-         sw_w.Widget.children = []) ;
+        (Widget.find sim.root sw_w.id = None &&
+         sw_w.children = []) ;
     (* Including their supply: a switch has one of its own, and it is reached
        by the walk rather than by the caller knowing it is there. *)
     check "which are stopped as well"
-        (not sw.Hub.Switch.power.Widget.on)
+        (not sw.Hub.Switch.power.on)
 
 (* Powering a host off is not a request that it stop: whatever it had planned
    to do ceases to exist. Everything it schedules -- its adapter, its sockets,
@@ -713,7 +714,7 @@ let test_delete () =
 let test_power () =
     section "Powering a host off" ;
     let sim = Simulation.make ~realtime:false "power" in
-    let parent = sim.Simulation.root in
+    let parent = sim.root in
     let netmask = Ip.Addr.of_dotted_string "255.255.255.0" in
     let sw = Hub.Switch.make ~parent 2 8 "sw" in
     let host port name ip =
@@ -734,10 +735,10 @@ let test_power () =
         for i = 1 to 5 do
             let d = Clock.Interval.sec (float_of_int i) in
             Simulation.delay h2.Host.trx.Host.power d (fun () -> incr mine) () ;
-            Simulation.delay sim.Simulation.power d (fun () -> incr theirs) ()
+            Simulation.delay sim.root.power d (fun () -> incr theirs) ()
         done in
     plan () ;
-    h2.Host.trx.Host.power_off () ;
+    Simulation.power_down h2.trx.power ;
     Simulation.run sim false ;
     check "powering a host off drops what it had scheduled" (!mine = 0) ;
     check "and leaves everybody else's events alone" (!theirs = 5) ;
@@ -749,7 +750,7 @@ let test_power () =
     check "an off host schedules nothing more" (!mine = 0) ;
     check "while the rest of the simulation carries on" (!theirs = 10) ;
 
-    h2.Host.trx.Host.power_on () ;
+    Simulation.power_up h2.trx.power ;
     plan () ;
     Simulation.run sim false ;
     check "and it schedules again once powered back on" (!mine = 5) ;
@@ -766,12 +767,12 @@ let test_power () =
     listen () ;
     send () ;
     check "a live host answers for the ports it listens on" (!served = 1) ;
-    h2.Host.trx.Host.power_off () ;
+    Simulation.power_down h2.trx.power ;
     send () ;
     check "an off host does not" (!served = 1) ;
     (* Its servers are gone with the rest of its state, so coming back up is
        coming back up empty rather than resuming. *)
-    h2.Host.trx.Host.power_on () ;
+    Simulation.power_up h2.trx.power ;
     send () ;
     check "and does not remember them when it comes back" (!served = 1) ;
     listen () ;
@@ -793,18 +794,18 @@ let test_power () =
     to_nowhere () ;
     check "a frame for nobody leaves the adapter waiting on an ARP"
         (waiting () > 0) ;
-    h2.Host.trx.Host.power_off () ;
+    Simulation.power_down h2.trx.power ;
     check "which a power cut clears" (waiting () = 0) ;
     (* And having forgotten, it asks again rather than queueing in silence. *)
     let carried () =
         match List.find (fun (p : Widget.property) -> p.name = "total bits")
-                        cable2.Eth.Cable.State.widget.Widget.properties with
+                        cable2.Eth.Cable.State.widget.properties with
         | exception Not_found -> -1
         | p ->
             Yojson.Basic.Util.(
                 p.getter () |> member "values" |> to_list |>
                 List.fold_left (fun n v -> n + (member "value" v |> to_int)) 0) in
-    h2.Host.trx.Host.power_on () ;
+    Simulation.power_up h2.trx.power ;
     let before = carried () in
     to_nowhere () ;
     check "so the adapter asks again once it is back" (carried () > before)
@@ -818,7 +819,7 @@ let test_http net cable duration nthreads
         Printf.printf "  FAIL could not start the admin interface\n%!"
     | Some (admin, port) ->
         let net_id = Simulation.id net
-        and cable_id = cable.Eth.Cable.State.widget.Widget.id in
+        and cable_id = cable.Eth.Cable.State.widget.id in
         let api fmt = Printf.ksprintf (fun p -> http port p) fmt in
         (* First, that each route answers what it should: *)
         check "GET /api/simulations" (fst (api "/api/simulations") = 200) ;
@@ -919,7 +920,7 @@ let test_http net cable duration nthreads
             let path =
                 Printf.sprintf
                     "/api/simulations/%d/widgets/%d/properties/bytes/history%s"
-                    (Simulation.id hist_sim) hist_widget.Widget.id
+                    (Simulation.id hist_sim) hist_widget.id
                     (match since with
                      | None -> ""
                      | Some c -> "?since=" ^ c) in
@@ -957,7 +958,7 @@ let test_http net cable duration nthreads
             (* The third of the instants the ring was written at, named from
                the clock that wrote them. *)
             (let taken =
-                List.map (fun (s : Simulation.sample) -> s.Simulation.taken)
+                List.map (fun (s : Simulation.sample) -> s.taken)
                          (Simulation.metric_samples hist_sim) in
              match Option.map points (history ~since:(cursor_of
                                           (List.nth taken 2)) ()) with
@@ -987,7 +988,7 @@ let test_http net cable duration nthreads
                 fst (http port
                         (Printf.sprintf
                             "/api/simulations/%d/widgets/%d/properties/bytes/history?since=%s"
-                            (Simulation.id hist_sim) hist_widget.Widget.id
+                            (Simulation.id hist_sim) hist_widget.id
                             since)) = 400)
                 (* A time in seconds is not one of them: it cannot name an
                    instant closely enough to ask from. *)
@@ -1001,7 +1002,7 @@ let test_http net cable duration nthreads
         let logs ?since ?level () =
             let path =
                 Printf.sprintf "/api/simulations/%d/widgets/%d/logs"
-                    (Simulation.id hist_sim) hist_widget.Widget.id ^
+                    (Simulation.id hist_sim) hist_widget.id ^
                 (match since with
                  | None -> "" | Some c -> "?since=" ^ c) ^
                 (match level with
@@ -1036,7 +1037,7 @@ let test_http net cable duration nthreads
                a cursor names a message and not an instant, since a clock that
                stands still stamps several with one. *)
             (let seqs =
-                let _lost, msgs = Log.messages hist_widget.Widget.logger in
+                let _lost, msgs = Log.messages hist_widget.logger in
                 List.map (fun (seq, _, _, _) -> seq) msgs in
              match logs (),
                    logs ~since:(string_of_int (List.nth seqs 4)) () with
@@ -1067,13 +1068,13 @@ let test_http net cable duration nthreads
             (fst (http port
                      (Printf.sprintf
                          "/api/simulations/%d/widgets/%d/logs?level=chatty"
-                         (Simulation.id hist_sim) hist_widget.Widget.id)) = 400) ;
+                         (Simulation.id hist_sim) hist_widget.id)) = 400) ;
         check "and a since that is not a cursor"
             (List.for_all (fun since ->
                 fst (http port
                         (Printf.sprintf
                             "/api/simulations/%d/widgets/%d/logs?since=%s"
-                            (Simulation.id hist_sim) hist_widget.Widget.id
+                            (Simulation.id hist_sim) hist_widget.id
                             since)) = 400)
                 [ "nonsense" ; "" ; "400000.5" ]) ;
         (* The composition tree is what the interface draws: a server has to
@@ -1139,7 +1140,7 @@ let test_http net cable duration nthreads
         check "a simulation's root cannot be deleted"
             (fst (http ~meth:"DELETE" port
                       (Printf.sprintf "/api/simulations/%d/widgets/%d"
-                          net_id net.root.Widget.id)) = 400) ;
+                          net_id net.root.id)) = 400) ;
 
         (* Building a network from the outside. The catalogue says what can be
            asked for, and what each of them has to be told; a POST asks for one.
@@ -1193,7 +1194,7 @@ let test_http net cable duration nthreads
                                    "params":{"ports":3,"MACs":8}}|} in
         check "a device built from the API is in the tree"
             (match Widget.find net.root switch_id with
-            | Some w -> w.Widget.name = "built"
+            | Some w -> w.name = "built"
             | None -> false) ;
         (* Made of the same parts as one an OCaml program would have built: a
            switch is its interfaces, and each of them is a widget of its own --
@@ -1201,7 +1202,7 @@ let test_http net cable duration nthreads
         check "and is made of what such a device is made of"
             (match Widget.find net.root switch_id with
             | Some w ->
-                List.map (fun (c : Widget.t) -> c.name) w.Widget.children
+                List.map (fun (c : Widget.t) -> c.name) w.children
                     = [ "#0" ; "#1" ; "#2" ]
             | None -> false) ;
         let host_a = created {|{"type":"host","name":"a",
@@ -1217,20 +1218,20 @@ let test_http net cable duration nthreads
            configured apart are ports one has to be able to tell apart. *)
         let adapter id =
             List.find (fun (c : Widget.t) -> c.name = "eth")
-                      (widget id).Widget.children in
+                      (widget id).children in
         let iface id n =
             List.find (fun (c : Widget.t) -> c.name = "#"^ string_of_int n)
-                      (widget id).Widget.children in
+                      (widget id).children in
         (* Named after what it joins, since "built-a" says what "cable-1"
            cannot. *)
         check "a cable with no name is named after its two ends"
-            ((widget joined).Widget.name = "built-a") ;
+            ((widget joined).name = "built-a") ;
         check "a cable makes peers of the two ends it joins"
             (let c = widget joined in
              let end_of w =
                  List.find_opt (fun (p : Widget.peer) ->
                      match p.via with Some v -> v == c | None -> false)
-                     w.Widget.peers in
+                     w.peers in
              match end_of (iface switch_id 0) with
              | Some p -> p.widget == adapter host_a
              | None -> false) ;
@@ -1239,7 +1240,7 @@ let test_http net cable duration nthreads
              List.exists (fun (p : Widget.peer) ->
                  p.widget == iface switch_id 0 &&
                  (match p.via with Some v -> v == c | None -> false))
-                 (adapter host_a).Widget.peers) ;
+                 (adapter host_a).peers) ;
         (* And frames really cross it: a device added from the outside is on the
            network, not merely in the picture of it. A host with no address of
            its own starts asking a DHCP server for one the moment it is built,
@@ -1251,7 +1252,7 @@ let test_http net cable duration nthreads
             | None -> 0
             | Some c ->
                 (match List.find (fun (p : Widget.property) ->
-                           p.name = "total bits") c.Widget.properties with
+                           p.name = "total bits") c.properties with
                 | exception Not_found -> 0
                 | p ->
                     Yojson.Basic.Util.(
@@ -1270,7 +1271,7 @@ let test_http net cable duration nthreads
            has never seen a frame. *)
         let learnt id =
             match List.find (fun (p : Widget.property) -> p.name = "macs")
-                            (widget id).Widget.properties with
+                            (widget id).properties with
             | exception Not_found -> false
             | p -> Yojson.Basic.Util.member "first_last" (p.getter ()) <> `Null in
         check "and it is the switch learning where they went, not repeating them"
@@ -1281,9 +1282,9 @@ let test_http net cable duration nthreads
            topology can write down. *)
         check "while each of its interfaces is one of its ports"
             (let w = widget switch_id in
-             List.length w.Widget.children = w.Widget.ports.count () &&
+             List.length w.children = w.ports.count () &&
              List.for_all (fun (c : Widget.t) -> c.ports.count () = 1)
-                          w.Widget.children) ;
+                          w.children) ;
         (* Three ports, and the third one takes the last of them. *)
         ignore (cable_of switch_id host_b) ;
         let host_c = created {|{"type":"host","name":"c",
@@ -1302,7 +1303,7 @@ let test_http net cable duration nthreads
             | _ -> false) ;
         check "and gives no ports to what takes no cable"
             (match api "/api/simulations/%d/widgets/%d" net_id
-                       net.root.Widget.id with
+                       net.root.id with
             | 200, payload ->
                 let j = Yojson.Basic.from_string payload in
                 Yojson.Basic.Util.member "ports" j = `Int 0 &&
@@ -1329,9 +1330,9 @@ let test_http net cable duration nthreads
            be sure of a free one -- a name checked beforehand and sent
            afterwards is one something else may have taken in between. *)
         check "a device with no name is given one"
-            ((widget (created {|{"type":"hub"}|})).Widget.name = "hub-1") ;
+            ((widget (created {|{"type":"hub"}|})).name = "hub-1") ;
         check "and the next of that kind is given the next number"
-            ((widget (created {|{"type":"hub","name":""}|})).Widget.name
+            ((widget (created {|{"type":"hub","name":""}|})).name
              = "hub-2") ;
         check "while a name that was actually typed and is taken is refused"
             (fst (post {|{"type":"hub","name":"hub-1"}|}) = 400) ;
@@ -1341,7 +1342,7 @@ let test_http net cable duration nthreads
                                "params":{"static-ip":"10.9.0.7"}}|} in
         check "a cable to something that takes none is refused"
             (fst (post {|{"type":"cable","params":{"from":%d,"to":%d}}|}
-                       spare net.root.Widget.id) = 400) ;
+                       spare net.root.id) = 400) ;
         (* A host says nothing about ports itself: it is reached through its
            adapter, and answers with whatever adapters it has. Which is why the
            root of a simulation, which is reached through nothing, has none --
@@ -1350,7 +1351,7 @@ let test_http net cable duration nthreads
             ((widget host_a).ports.count () = 1 &&
              List.exists (fun (c : Widget.t) ->
                  c.name = "eth" && c.ports.count () = 1)
-                 (widget host_a).Widget.children) ;
+                 (widget host_a).children) ;
         check "and a simulation's root has none of its children's"
             (net.root.ports.count () = 0) ;
         (* Nothing writes down which ports are taken. The device is asked, and
@@ -1386,10 +1387,10 @@ let test_http net cable duration nthreads
            difference there is a widget for it, and where there is none the
            ports are interchangeable. *)
         check "and both ends are things a cable can be asked for again"
-            (match (widget joined).Widget.peers with
+            (match (widget joined).peers with
             | [ x ; y ] ->
-                x.widget.Widget.ports.count () > 0 &&
-                y.widget.Widget.ports.count () > 0
+                x.widget.ports.count () > 0 &&
+                y.widget.ports.count () > 0
             | _ -> false) ;
 
         check "a cable between two places is as long as the way between them"
@@ -1431,26 +1432,26 @@ let test_http net cable duration nthreads
            a device is not a device, and deleting a host's adapter would leave a
            host whose port answers for a widget nobody can see. *)
         check "a device says what kind of device it is"
-            ((widget far).Widget.device_type = Some "host" &&
-             (widget switch_id).Widget.device_type = Some "switch") ;
+            ((widget far).device_type = Some "host" &&
+             (widget switch_id).device_type = Some "switch") ;
         check "and a part of one says it is not a device at all"
-            ((adapter far).Widget.device_type = None) ;
+            ((adapter far).device_type = None) ;
         check "so deleting a device's adapter is refused"
-            (del (adapter far).Widget.id = 400 && not (gone far)) ;
+            (del (adapter far).id = 400 && not (gone far)) ;
         check "and so is deleting one of a switch's interfaces"
             (List.for_all (fun (c : Widget.t) -> del c.id = 400)
-                          (widget switch_id).Widget.children) ;
+                          (widget switch_id).children) ;
         check "and the interface says as much before being asked"
             (match api "/api/simulations/%d/widgets/%d" net_id switch_id with
             | 200, payload ->
                 Yojson.Basic.(from_string payload |> Util.member "deletable")
                     = `Bool true &&
                 List.for_all (fun (c : Widget.t) ->
-                    match api "/api/simulations/%d/widgets/%d" net_id c.Widget.id with
+                    match api "/api/simulations/%d/widgets/%d" net_id c.id with
                     | 200, payload ->
                         Yojson.Basic.(from_string payload |>
                                       Util.member "deletable") = `Bool false
-                    | _ -> false) (widget switch_id).Widget.children
+                    | _ -> false) (widget switch_id).children
             | _ -> false) ;
         check "while the whole device goes"
             (del far = 200 && gone far) ;
@@ -1470,20 +1471,20 @@ let test_http net cable duration nthreads
         check "and arrives with a bare adapter per interface"
             (List.sort compare
                 (List.map (fun (c : Widget.t) -> c.name)
-                          (widget r).Widget.children) = [ "#0" ; "#1" ; "#2" ] &&
+                          (widget r).children) = [ "#0" ; "#1" ; "#2" ] &&
              List.for_all (fun (c : Widget.t) -> c.children = [])
-                          (widget r).Widget.children) ;
+                          (widget r).children) ;
         let macs_of id =
             List.filter_map (fun (c : Widget.t) ->
                 match http port
                         (Printf.sprintf
                             "/api/simulations/%d/widgets/%d/properties/MAC"
-                            net_id c.Widget.id) with
+                            net_id c.id) with
                 | 200, payload ->
                     Some Yojson.Basic.(from_string payload |>
                                        Util.member "value")
                 | _ -> None
-            ) (widget id).Widget.children in
+            ) (widget id).children in
         check "with one address per interface, and no two the same"
             (let macs = macs_of r in
              List.length macs = 3 &&
@@ -1503,10 +1504,10 @@ let test_http net cable duration nthreads
            of a machine separately. *)
         check "a part that is a device in its own right says so"
             (List.exists (fun (c : Widget.t) -> c.device_type = Some "router")
-                         (widget g).Widget.children) ;
+                         (widget g).children) ;
         check "and the router within it is not a device of its own"
             (List.for_all (fun (c : Widget.t) -> del c.id = 400)
-                          (widget g).Widget.children) ;
+                          (widget g).children) ;
         check "but the gateway itself is"
             (del g = 200 && gone g) ;
         check "and so is the router"

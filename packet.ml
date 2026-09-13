@@ -136,6 +136,7 @@ Now imagine you want to edit a pcap to change the TCP source/dest port from 21 t
 
 *)
 open Batteries
+open SimTypes
 open Bitstring
 open Tools
 
@@ -391,7 +392,7 @@ let enum_of_file fname = Pcap.enum_of_file fname /@ Pdu.unpack
 let to_file fname e = Enum.map Pdu.pack e |> Pcap.file_of_enum fname
 
 let capture sim ?promisc ?filter ifname =
-    let widget = Widget.make ~parent:sim.Simulation.root ifname in
+    let widget = Widget.make ~parent:sim.root ifname in
     let iface = Pcap.openif ~widget ?promisc ?filter ifname in
     let pkts = ref [] in
     let rec aux () =

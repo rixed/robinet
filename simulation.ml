@@ -61,148 +61,11 @@
 *)
 open Batteries
 open Clock
+open SimTypes
 
 let debug = false
 
-(** {2 Current running time} *)
-
-module Events = Map.Make (struct
-    type t = Time.t
-    let compare (a : t) (b : t) = Time.compare a b
-end)
-
-type t =
-    { (* What identifies a simulation, and what a widget records to say which
-       * one it belongs to. *)
-      id : int ;
-      (* Only a label. The root widget of this simulation carries it too, and
-       * the two are renamed together (see [rename]). *)
-      mutable name : string ;
-      (* The root of this simulation's widget tree, and its inventory: every
-       * widget of this simulation is somewhere below it. *)
-      root : Widget.t ;
-      (* The clock: the current simulated time, and everything waiting to
-       * happen, soonest first.
-       *
-       * [now] is a ref rather than a field so that the root widget's logger can
-       * share it: the logger has to be given a way to read the time when the
-       * widget is built, which is before this record exists. *)
-      now : Time.t ref ;
-      (* The number the next message logged anywhere in this simulation will
-       * carry, which is what a reader of its logs keeps its place by. *)
-      log_seq : int ref ;
-      (* Every event waiting to happen, soonest first, each with the power
-       * source that pays for it. *)
-      mutable events : (Widget.power * (unit -> unit)) Events.t ;
-      mutable thread : Thread.t option ;
-      (* Protects everything this simulation owns. It is held for the whole of
-       * an event dispatch, which is what gives a thread borrowing this
-       * simulation (see [Simulation.with_lock]) a consistent view: it never
-       * observes a state halfway through a handler.
-       *
-       * It is *re-entrant* (see [lock_owner] and [with_lock]). It has to be:
-       * a handler runs holding it and goes on to call [now] and [at], which
-       * want it too, and a handler that walks every simulation necessarily
-       * reaches its own, which it is already dispatching. Re-entrance also
-       * makes those inner calls free -- they take no mutex at all -- while
-       * still letting a thread from outside acquire it in the ordinary way,
-       * with no invariant for callers to remember. *)
-      lock : Mutex.t ;
-      cond : Condition.t ;
-      (* Which thread holds [lock], if any. Must be cleared before releasing the
-       * mutex to wait on [cond], and restored on waking. *)
-      mutable lock_owner : int option ;
-      (* Whether this simulation follows the wall clock. A simulation talking to
-       * the outside world must; a closed one need not, and then runs as fast as
-       * it can. *)
-      mutable realtime : bool ;
-      (* The instant of the world outside that this simulation calls time
-       * zero. Every [Time.t] of this simulation is counted from here, in
-       * picoseconds.
-       * Read from the wall clock when the simulation is made, and moved only
-       * by [make_realtime].
-       *
-       * Everything the outside world dates (such as timestamps of captured
-       * traffic) has to cross that gap before this simulation can use it. *)
-      mutable epoch : Wall.t ;
-      (* [continue] and [paused] both mean "not running", but differ in kind.
-       * Clearing [continue] *ends* the simulation: [run] returns, its thread
-       * finishes, and nothing sets it back -- that is what SIGINT and [stop]
-       * do. Setting [paused] merely *suspends* it: the thread stays inside
-       * [run] dispatching nothing, simulated time stands still, the wall clock
-       * time spent that way accumulates in [paused_total] so that resuming does
-       * not make time leap forward, and [resume] undoes it. *)
-      mutable continue : bool ;
-      mutable paused : bool ;
-      (* When paused, when (wall clock) we were paused: *)
-      mutable paused_since : Wall.t option ;
-      (* How much wall clock time this simulation has spent paused, in total.
-       * Subtracted from the wall clock when synchronising, so that resuming
-       * a realtime simulation does not make the simulation time leap forward
-       * and fire every pending event at once. *)
-      mutable paused_total : Interval.t ;
-      (* When > 0, run that many events then pause again: *)
-      mutable steps : int ;
-      (* Whether this simulation's network has been changed -- a device added
-       * or taken out, a property set -- since it was last written out or read
-       * in. It answers the one question the administration interface asks
-       * about a network it did not build: is there anything in it worth
-       * saving?
-       *
-       * Only what comes through that interface moves it: a program building a
-       * network is not asked whether it wants to keep it. *)
-      mutable unsaved : bool ;
-      (* Non-realtime only: how fast simulated time is to advance compared to
-       * the wall clock -- 1. for real time, .5 for half of it, 2. for twice as
-       * fast. [None] is as fast as it can, which is what a closed simulation
-       * does when nobody asks for anything else.
-       *
-       * Pausing leaves it alone, so that unpausing goes back to the speed that
-       * was in use: it is the simulation that remembers it, not whoever paused
-       * it. *)
-      mutable speed_ratio : float option ;
-      (* Where the pace is measured from: the wall clock time (the float, as
-       * [Unix.gettimeofday] gives it) and the simulated time (the [Time.t]),
-       * both read at the same instant when the anchor was set. An event due at
-       * simulated time [ts] is then due, by the wall clock, at
-       * [wall +. (ts -. sim) /. ratio].
-       *
-       * Measured from an anchor rather than event by event: per event, every
-       * dispatch that ran late would push the next one later still, and a
-       * simulation that fell behind would stay behind instead of catching up.
-       * Set afresh whenever the speed changes or the simulation resumes --
-       * neither of which is the simulation being late. *)
-      mutable pace_anchor : (Wall.t * Time.t) option ;
-      (* How far behind that pace the simulation is: zero while it keeps up,
-       * growing while it cannot go as fast as it was asked to. *)
-      mutable late : Interval.t ;
-      (* How often, in *simulated* time, every metric of this simulation is
-       * written down. A plot of a simulation is drawn against that
-       * simulation's own clock, so the samples must be spaced along it too: a
-       * simulation running as fast as it can would otherwise be sampled at
-       * whatever irregular intervals the wall clock happened to catch it at.
-       *
-       * The cost follows from that: a simulation running N times faster than
-       * real time writes N/rate snapshots per wall second, each proportional
-       * to the number of metric rows it has. Lower the rate for a big network
-       * watched at speed. *)
-      mutable metrics_sample_rate : Interval.t ;
-      (* The snapshots kept, oldest overwritten first, [None] where none has
-       * been written yet. How many are kept is the length of this array --
-       * there is no second field to disagree with it; see
-       * [set_metrics_max_samples].
-       *
-       * Memory is that count times the number of metric rows, so one or the
-       * other has to give on a large network. *)
-      mutable metric_samples : sample option array ;
-      (* Where the next snapshot goes, which is also the oldest one. *)
-      mutable metric_samples_next : int ;
-      (* The simulated time the next snapshot is due at. *)
-      mutable metric_samples_due : Time.t ;
-      (* The mains: what powers everything in this simulation that is not
-       * powered by something more specific. It is the root widget's, minted
-       * with it, and is never switched off. *)
-      power : Widget.power }
+type t = simulation
 
 (* What is needed in order to act in a simulation: a clock to schedule on, and
  * something to draw the energy from.
@@ -214,10 +77,11 @@ type t =
  * simulated power-off is: not a machine that goes down gracefully, but one
  * whose pending work ceases to exist.
  *
- * The source itself is [Widget.power], declared there because a widget names
- * the one it draws on: a widget that mints one makes a box of its subtree,
- * every widget below it taking its parent's. Everything that acts on a source
- * is here all the same, this being where the events are.
+ * The source itself is [SimTypes.power], declared there with the simulation
+ * and the widget because the three name one another: a source says which
+ * simulation pays, a simulation says which widget is the root of its tree, and
+ * a widget says which source it draws on. Everything that acts on a source is
+ * here all the same, this being where the events are.
  *
  * Sources are unrelated to one another: switching one off leaves every other
  * one alone. A box within a box -- a gateway's router, were it to mint a
@@ -225,26 +89,16 @@ type t =
  * and nothing needs it to yet: matching a source against a chain of parents
  * would put a walk on [at], which every packet goes through. *)
 
-(* What every metric of a simulation was worth at one instant, keyed by the
- * widget that owns it, the property it is read through, and the parameters of
- * the events it counts -- a hub counts its bytes per port, so that triple is
- * what identifies one series among the rest.
+(* Every simulation of this process, indexed by id, which is handed out in
+ * sequence -- a plain array rather than a hash, since ids are dense and few.
  *
- * [taken] is the simulated time the snapshot was taken at, which is the time
- * of the event about to be dispatched: everything strictly before it has
- * happened, and nothing at it has. It is on or after the instant the snapshot
- * was due, never before, and the two differ by however long the simulation had
- * nothing to do. *)
-and sample =
-    { taken : Time.t ;
-      values : (int * string * Metric.Params.t, Metric.value) Hashtbl.t }
-
-(* Indexed by id, which is handed out in sequence, so this is a plain array
- * rather than a hash: resolving the simulation a widget belongs to happens
- * once per scheduled event and must cost nothing. *)
+ * This is a register, not a way of reaching one: a widget names its power
+ * source and a source names its simulation, so nothing has to look one up in
+ * order to act. What it is for is answering "which simulations are there",
+ * which the interface asks and nothing else can. *)
 let sims : t option array ref = ref (Array.make 4 None)
 
-let register t =
+let register (t : t) =
     let a = !sims in
     let a =
         if t.id < Array.length a then a else (
@@ -270,7 +124,7 @@ let find id =
     let a = !sims in
     if id >= 0 && id < Array.length a then a.(id) else None
 
-let id t = t.id
+let id (t : t) = t.id
 
 (** The name a new simulation will answer to: the one asked for, or that name
  * with a number appended when another simulation has it already.
@@ -282,39 +136,32 @@ let id t = t.id
  * [make], so that a program naming its own simulations gets the names it
  * asked for or none at all. *)
 let unique_name name =
-    let taken n = List.exists (fun t -> t.name = n) (all ()) in
+    let taken n = List.exists (fun (t : t) -> t.name = n) (all ()) in
     if not (taken name) then name else
     let rec loop i =
         let n = Printf.sprintf "%s-%d" name i in
         if taken n then loop (i + 1) else n in
     loop 2
 
-let name t = t.name
+let name (t : t) = t.name
 
-(** The simulation a widget belongs to.
- *
- * A widget records only the id, since a simulation holds the root of its widget
- * tree and this module is therefore compiled after Widget. Resolving it is an
- * array access, which is why no state record bothers to cache it. *)
-let of_widget (w : Widget.t) =
-    match find w.Widget.sim with
-    | Some t -> t
-    | None ->
-        invalid_arg ("Simulation.of_widget: "^ Widget.full_name w ^
-                     " belongs to no simulation")
+(** The simulation a widget belongs to: the one its power source schedules on,
+ * which is [Widget.sim] and is named here as well, this being where a caller
+ * with a widget in hand looks for it. *)
+let of_widget = Widget.sim
 
 (** Every widget of this simulation. *)
-let widgets t = Widget.descendants t.root
+let widgets (t : t) = Widget.descendants t.root
 
 (** Lookup one of its widgets by id. *)
-let find_widget t id = Widget.find t.root id
+let find_widget (t : t) id = Widget.find t.root id
 
 (** Lookup its widgets by path. *)
-let find_widgets_by_path t path = Widget.find_by_path t.root path
+let find_widgets_by_path (t : t) path = Widget.find_by_path t.root path
 
 let me () = Thread.(id (self ()))
 
-let with_lock t f x =
+let with_lock (t : t) f x =
     let me = me () in
     if t.lock_owner = Some me then
         (* Already ours, and by construction consistent: we are the one who made
@@ -326,12 +173,15 @@ let with_lock t f x =
             finally (fun () -> t.lock_owner <- None) f x
         ) x
 
-let signal_me t () =
+let signal_me (t : t) () =
     Condition.signal t.cond
 
 (** The power source of {!Widget}, named here as well: this is where it is
  * switched, and where the events it pays for are kept. *)
-type power = Widget.power
+type power = SimTypes.power
+
+(** What every metric of this simulation was worth at one instant. *)
+type sample = SimTypes.sample
 
 (** Return the current simulation time. *)
 (** The current simulated time.
@@ -347,14 +197,16 @@ type power = Widget.power
  *
  * (This is the same unsynchronised read the root logger's clock closure does on
  * every log line.) *)
-let now t = !(t.now)
+let now (t : t) = !(t.now)
 
-let is_running t = t.continue
+let is_running (t : t) = t.continue
 
-let stop t () =
+let stop (t : t) () =
     with_lock t (fun () ->
         t.continue <- false ;
-        t.power.on <- false ;
+        (* The mains, which is the root widget's: a simulation that has been
+           stopped pays for nothing more. *)
+        t.root.power.on <- false ;
         t.events <- Events.empty) () ;
     Condition.signal t.cond
 
@@ -366,7 +218,7 @@ let stop_all () = List.iter (fun t -> stop t ()) (all ())
  * The name is a label and nothing hangs off it, so there is nothing else to
  * put right: a widget's place in the tree is its path, and the root's name is
  * only the head of it. *)
-let rename t name =
+let rename (t : t) name =
     if String.contains name '/' then
         invalid_arg ("Simulation.rename: a name must not contain '/': "^ name) ;
     with_lock t (fun () ->
@@ -385,43 +237,27 @@ let rename t name =
  * signalled, and what it wakes to do is notice that it is to stop -- which
  * touches nothing this has taken away. Waiting for it would be the interface
  * blocking on a simulation, which is the one thing it must never do. *)
-let delete t =
+let delete (t : t) =
     stop t () ;
     with_lock t (fun () -> Widget.destroy t.root) () ;
     let a = !sims in
     if t.id < Array.length a then a.(t.id) <- None
 
 (* Empty the root widget. One widget at a time because of cascading deletions. *)
-let rec clear t =
+let rec clear (t : t) =
     match t.root.children with
     | [] -> ()
     | w :: _ -> Widget.destroy w ; clear t
 
 (** Something about this simulation's network has been changed from outside. *)
-let changed t = t.unsaved <- true
+let changed (t : t) = t.unsaved <- true
 
 (** Its network has just been written out, or read in: what it holds is safe
  * somewhere else. *)
-let saved t = t.unsaved <- false
+let saved (t : t) = t.unsaved <- false
 
 (** Whether anything has been done to it since. *)
-let unsaved t = t.unsaved
-
-(** A power source drawing from [t], on behalf of whatever [name] names.
- *
- * It comes switched on. Nothing keeps track of it: it is kept alive by the
- * events it pays for and by whoever schedules them. *)
-(* The simulation that pays for what a source buys. A source holds its id, as
- * a widget does, since the type is declared before the simulation. *)
-let sim_of (p : power) =
-    match find p.Widget.sim with
-    | Some t -> t
-    | None ->
-        (* A source outliving its simulation would be one held by something
-         * that outlived it too, and nothing does: deleting a simulation takes
-         * its widget tree apart. *)
-        invalid_arg ("Simulation.sim_of: no simulation "^
-                     string_of_int p.Widget.sim)
+let unsaved (t : t) = t.unsaved
 
 (** [at p ts f x] will execute [f x] when the clock of [p]'s simulation reaches
  * time [ts] -- or never, if [p] is switched off by then.
@@ -430,10 +266,10 @@ let sim_of (p : power) =
  * what it had already scheduled, which is why the dispatcher never has to look
  * at a power source: everything left in the queue is powered. *)
 let at (p : power) (ts : Time.t) f x =
-    let t = sim_of p in
+    let t = p.sim in
     if not p.on then (
         if debug then Printf.printf "Clock: dropping an event for time %s: %s is off\n%!" (Time.to_string ts) p.name ;
-        Log.(log t.root.Widget.logger Debug (lazy (Printf.sprintf
+        Log.(log t.root.logger Debug (lazy (Printf.sprintf
             "Not scheduling anything at %s: %s is off"
             (Time.to_string ts) p.name)))
     ) else (
@@ -453,41 +289,39 @@ let at (p : power) (ts : Time.t) f x =
 
 (** [delay d f x] will delay the execution of [f x] by the interval [d]. *)
 let delay (p : power) d f x =
-    at p (Time.add (now (sim_of p)) d) f x
+    at p (Time.add (now p.sim) d) f x
 
 let asap (p : power) f x =
     (* FIXME: would be more precise and fast to have a dedicated list for asap events *)
     delay p Interval.zero f x
 
-(** Switch a power source back on. Whatever it used to power is gone for good;
- * this only makes it able to pay for events again. *)
 (* The widgets drawing on [p], in tree order: found by walking rather than by
  * registration, so that a widget destroyed or moved needs no unregistering and
  * cannot be called after it is gone. Walked on switching only, which is a
  * human-scale event -- [power_down] already walks the whole event queue. *)
 let users (p : power) =
-    Widget.enum (sim_of p).root |> List.of_enum |>
-    List.filter (fun (w : Widget.t) -> w.Widget.power == p)
+    Widget.enum p.sim.root //
+    (fun (w : widget) -> w.power == p)
 
 (* Tell one widget that its source has been switched, and put what it has to
  * say about it where it can be read: a switch cannot be refused, so a widget
  * that cannot do what switching means for it says so and the rest of the
  * network carries on. *)
-let tell (w : Widget.t) what f =
+let tell (w : widget) what f =
     match f () with
-    | () -> w.Widget.error <- None
+    | () -> w.error <- None
     | exception e ->
         let m = Printexc.to_string e in
-        w.Widget.error <- Some m ;
-        Log.(log w.Widget.logger Error (lazy (Printf.sprintf
+        w.error <- Some m ;
+        Log.(log w.logger Error (lazy (Printf.sprintf
             "Cannot power %s: %s" what m)))
 
 let power_up (p : power) =
-    if not p.Widget.on then (
-        p.Widget.on <- true ;
+    if not p.on then (
+        p.on <- true ;
         (* In tree order, a box before what is inside it. *)
-        List.iter (fun (w : Widget.t) -> tell w "up" w.Widget.power_up)
-                  (users p)
+        users p |>
+        Enum.iter (fun (w : widget) -> tell w "up" w.power_up)
     )
 
 (** Switch a power source off, and forget every event it had paid for.
@@ -496,23 +330,23 @@ let power_up (p : power) =
  * still be there to fire on the next power-up, and a host that comes back
  * would resume the conversations it was having when it went down. *)
 let power_down (p : power) =
-    if p.Widget.on then (
-        let t = sim_of p in
+    if p.on then (
+        let t = p.sim in
         with_lock t (fun () ->
             (* The flag first, so that nothing woken below can schedule
                anything; then the events, so that nothing already scheduled
                survives; then the widgets, which therefore have nothing to add
                to the queue and are told in the reverse of the order they came
                up in, what is inside a box before the box. *)
-            p.Widget.on <- false ;
+            p.on <- false ;
             let before = Events.cardinal t.events in
             t.events <- Events.filter (fun _ (p', _) -> p' != p) t.events ;
             let dropped = before - Events.cardinal t.events in
             if dropped > 0 then
-                Log.(log t.root.Widget.logger Debug (lazy (Printf.sprintf
-                    "Dropped %d event(s) powered by %s" dropped p.Widget.name))) ;
-            List.iter (fun (w : Widget.t) -> tell w "down" w.Widget.power_down)
-                      (List.rev (users p))) () ;
+                Log.(log t.root.logger Debug (lazy (Printf.sprintf
+                    "Dropped %d event(s) powered by %s" dropped p.name))) ;
+            users p |> List.of_enum |> List.rev |>
+            List.iter (fun (w : widget) -> tell w "down" w.power_down)) () ;
         signal_me t ()
     )
 
@@ -524,7 +358,7 @@ let power_down (p : power) =
  * instant taken from the world outside has to be brought across before it can
  * be scheduled: used as it stands it would land in the simulation's past, and
  * be dispatched at once, or in its future, and wait there. *)
-let of_wall_clock t (ts : Wall.t) =
+let of_wall_clock (t : t) (ts : Wall.t) =
     Time.sub (Time.of_interval (Wall.diff ts t.epoch)) t.paused_total
 
 (** The other way: what the wall clock will read when [t] calls it [ts].
@@ -532,15 +366,15 @@ let of_wall_clock t (ts : Wall.t) =
  * For whoever has to wait, by a clock of the real world, for an instant named
  * on the simulation's -- which the run loop does every time it sleeps until
  * its next event. *)
-let to_wall_clock t (ts : Time.t) =
+let to_wall_clock (t : t) (ts : Time.t) =
     Wall.add t.epoch (Interval.add (Time.to_interval ts) t.paused_total)
 
 (* The wall clock, on this simulation's timeline: shifted by whatever it is
  * from the world outside, and less however long it has stood paused. *)
-let unpaused_wall_clock t =
+let unpaused_wall_clock (t : t) =
     of_wall_clock t (Wall.now ())
 
-let synch_locked t =
+let synch_locked (t : t) =
     assert t.realtime (* Synch with real clock in non-realtime mode!? *) ;
     (* While paused, time must stand still: the pause duration has not been
      * accounted into paused_total yet. *)
@@ -552,7 +386,7 @@ let synch_locked t =
 (** Synchronize internal clock with realtime clock.
  * You must call this after real time passes (for instance after a blocking call).
  * Otherwise, time jumps from one registered event to the next. *)
-let synch t =
+let synch (t : t) =
     with_lock t synch_locked t
 
 (*
@@ -560,7 +394,7 @@ let synch t =
  *)
 
 (** Stop dispatching events. The simulation time stands still until [resume]. *)
-let pause t () =
+let pause (t : t) () =
     with_lock t (fun () ->
         if not t.paused then (
             t.paused <- true ;
@@ -573,14 +407,14 @@ let pause t () =
 
 (* Measure the pace from here: this wall clock time, this simulated time. Also
  * clears the lateness, which was measured against the anchor being replaced. *)
-let reanchor t =
+let reanchor (t : t) =
     t.pace_anchor <- Some (Wall.now (), !(t.now)) ;
     t.late <- Interval.zero
 
 (** Resume a paused simulation, accounting for the time it stood still so that
  * its clock does not leap forward. It goes back to the speed it was running at:
  * pausing does not disturb that. *)
-let resume t () =
+let resume (t : t) () =
     with_lock t (fun () ->
         if t.paused then (
             Option.may (fun since ->
@@ -598,7 +432,7 @@ let resume t () =
  * fast as it can, [Some r] at [r] times real time -- 1. for real time, .5 for
  * half of it. Meaningless for a simulation that follows the wall clock, and
  * refused for one. *)
-let set_speed_ratio t ratio =
+let set_speed_ratio (t : t) ratio =
     if t.realtime then
         invalid_arg ("Simulation.set_speed_ratio: "^ t.name ^
                      " follows the wall clock") ;
@@ -635,7 +469,7 @@ let set_speed_ratio t ratio =
  * Whatever speed it had been asked to run at goes with it: a simulation
  * following the wall clock runs at the speed of the wall clock, which is why
  * [set_speed_ratio] refuses one. *)
-let make_realtime t =
+let make_realtime (t : t) =
     with_lock t (fun () ->
         if not t.realtime then (
             (* Read from the simulated time as it stands, before anything is
@@ -651,7 +485,7 @@ let make_realtime t =
                this one no longer does. *)
             t.pace_anchor <- None ;
             t.late <- Interval.zero ;
-            Log.(log t.root.Widget.logger Debug (lazy (Printf.sprintf
+            Log.(log t.root.logger Debug (lazy (Printf.sprintf
                 "Following the wall clock, having begun at %s"
                 (Wall.to_string t.epoch))))
         )) () ;
@@ -690,7 +524,7 @@ let make_realtime t =
  *)
 
 (* When, by the wall clock, the event at [ts] is due at that speed. *)
-let due_at t ratio ts =
+let due_at (t : t) ratio ts =
     match t.pace_anchor with
     | None ->
         reanchor t ;
@@ -708,11 +542,11 @@ let step ?(n=1) t () =
     Condition.signal t.cond
 
 (* Whether an event may be dispatched now. Must be called with the lock held. *)
-let may_dispatch t =
+let may_dispatch (t : t) =
     not t.paused || t.steps > 0
 
 (* Account for one dispatched event. Must be called with the lock held. *)
-let dispatched t =
+let dispatched (t : t) =
     if t.paused && t.steps > 0 then (
         t.steps <- t.steps - 1 ;
         (* Stepping does not make time pass for the pause accounting: we are
@@ -759,13 +593,13 @@ let wait_on_cond ?until t =
  *)
 
 (** How many snapshots are kept at most. *)
-let metrics_max_samples t = Array.length t.metric_samples
+let metrics_max_samples (t : t) = Array.length t.metric_samples
 
 (** How often, in simulated time, they are taken. *)
-let metrics_sample_rate t = t.metrics_sample_rate
+let metrics_sample_rate (t : t) = t.metrics_sample_rate
 
 (** The snapshots kept, oldest first. *)
-let metric_samples t =
+let metric_samples (t : t) =
     with_lock t (fun () ->
         let n = Array.length t.metric_samples in
         let rec loop acc i =
@@ -780,20 +614,20 @@ let metric_samples t =
  * Every metric is reached through the widget tree, which is the whole
  * inventory of a simulation; a metric that belongs to no widget is not part of
  * the simulation as far as anything here is concerned. *)
-let take_metric_sample t =
+let take_metric_sample (t : t) =
     let n = Array.length t.metric_samples in
     if n > 0 then (
         let values = Hashtbl.create 64 in
         Widget.enum t.root |>
-        Enum.iter (fun (w : Widget.t) ->
-            List.iter (fun (p : Widget.property) ->
+        Enum.iter (fun (w : widget) ->
+            List.iter (fun (p : property) ->
                 Option.may (fun m ->
                     List.iter (fun (params, v) ->
                         Hashtbl.replace values
-                            (w.Widget.id, p.Widget.name, params) v
+                            (w.id, p.name, params) v
                     ) (Metric.sample m)
-                ) p.Widget.metric
-            ) w.Widget.properties) ;
+                ) p.metric
+            ) w.properties) ;
         t.metric_samples.(t.metric_samples_next) <-
             Some { taken = now t ; values } ;
         t.metric_samples_next <- (t.metric_samples_next + 1) mod n
@@ -851,7 +685,7 @@ let metric_history ?since t widget_id property_name =
  *
  * Must be called with the lock held, and with [now] already advanced to the
  * event about to be dispatched. *)
-let sample_metrics_if_due t =
+let sample_metrics_if_due (t : t) =
     if Time.is_after (now t) t.metric_samples_due then (
         take_metric_sample t ;
         t.metric_samples_due <-
@@ -862,7 +696,7 @@ let sample_metrics_if_due t =
 (** How often to take a snapshot, in simulated time. Changing it makes one due
  * at once, so that the new cadence starts from a point rather than from a gap.
  *)
-let set_metrics_sample_rate t (rate : Interval.t) =
+let set_metrics_sample_rate (t : t) (rate : Interval.t) =
     (* Whatever was not a length of time at all was refused when the interval
      * was built (see [Interval.of_secs]); what is left to refuse here is a
      * rate that would sample everything at once, or never. *)
@@ -875,7 +709,7 @@ let set_metrics_sample_rate t (rate : Interval.t) =
 
 (** How many snapshots to keep. The most recent ones are kept when there is
  * suddenly room for fewer, since those are the ones anybody is looking at. *)
-let set_metrics_max_samples t n =
+let set_metrics_max_samples (t : t) n =
     if n < 0 then
         invalid_arg "Simulation.set_metrics_max_samples: cannot keep fewer \
                      than no samples at all" ;
@@ -907,11 +741,23 @@ let make =
            or within a borrow -- and where it does not, OCaml's own lock is
            what makes the read and the write of one word indivisible. *)
         let log_seq = ref 0 in
-        let root =
-            Widget.make_root ~sim:id ~now:(fun () -> !now)
-                             ~seq:(fun () -> incr log_seq ; !log_seq) name in
+        let logger =
+            Log.make ~now:(fun () -> !now)
+                     ~seq:(fun () -> incr log_seq ; !log_seq) () in
         incr seq ;
-        let t =
+        (* The one knot in the program, and the reason the three types are
+           declared together: a source says which simulation pays for what it
+           buys, a simulation says which widget is the root of its tree, and
+           that root draws on the mains, which is a source. None of the three
+           can be built before the other two.
+
+           Which is why the root widget is a record here rather than something
+           [Widget.make] returns: OCaml ties a knot of records in one [let
+           rec], and only of records -- a function call in there is refused.
+           Everything a widget needs beyond its fields is done to it just
+           below, by the same [Widget.add_common_properties] every other widget
+           goes through. *)
+        let rec t =
             { id ;
               name ;
               root ;
@@ -943,10 +789,31 @@ let make =
               metric_samples_next = 0 ;
               (* Due at once, so that a simulation has a first point to be
                * plotted from rather than a rate's worth of nothing. *)
-              metric_samples_due = !now ;
-              (* The root widget minted it, being the one widget with no
-                 parent to take one from. *)
-              power = root.Widget.power } in
+              metric_samples_due = !now }
+        and root =
+            { id = Widget.next_id () ;
+              name ;
+              parent = None ;
+              children = [] ;
+              peers = [] ;
+              location = None ;
+              logger ;
+              ports = Widget.no_ports ;
+              device_type = None ;
+              device = None ;
+              made_with = None ;
+              on_delete = ignore ;
+              power = mains ;
+              owns_power = true ;
+              power_up = ignore ;
+              power_down = ignore ;
+              error = None ;
+              properties = [] }
+        (* What powers everything in this simulation that nothing more
+           particular powers, and the one source that is never switched off:
+           switching it off is stopping the simulation (see [stop]). *)
+        and mains = { on = true ; name = "the mains of "^ name ; sim = t } in
+        Widget.add_common_properties root ;
         Widget.add_properties root Widget.[
             property "metrics sample rate" ~kind:Float ~units:"secs"
               ~descr:"How often every metric of this simulation is written \
@@ -975,7 +842,7 @@ let make =
         t
 
 (** Will process the next event *)
-let next_event t =
+let next_event (t : t) =
     let min_ts_for_sleep = Interval.msec 10. in
     (* Time to sleep while waiting for an event to be added in the queue.
      * Must be > min_ts_for_sleep *)
@@ -1086,7 +953,7 @@ let next_event t =
  * events are waiting.  If you choose to not run forever, beware that waiting
  * for an answer from the outside world is _not_ a clock event. You should
  * probably run forever whenever you communicate with the outside. *)
-let run t wait =
+let run (t : t) wait =
     if debug then Printf.printf "clock: running the clock!\n%!" ;
     while t.continue && (wait || not (Events.is_empty t.events)) do
         next_event t ;
@@ -1158,7 +1025,7 @@ let run_here ?(wait=true) t =
  * [f] must not wait for that simulation to advance: it holds the very lock the
  * simulation needs in order to dispatch. Read state, change a parameter,
  * schedule an event for later, and return. *)
-let borrow t f = with_lock t f ()
+let borrow (t : t) f = with_lock t f ()
 
 (** Helpers for reaching the simulation of a widget: *)
 module Widget =

@@ -21,11 +21,12 @@
   This test program performs an HTTP GET from an unknown IP and an unknown MAC addr,
   which is correct enough to get an actual response from the server.
 *)
+open SimTypes
 open Bitstring
 open Tools
 
 let perform_get (sim : Simulation.t) my_ip my_netmask mac peer_ip ?nameserver ?gw ifname url =
-    let widget = Widget.make ~parent:sim.Simulation.root ifname in
+    let widget = Widget.make ~parent:sim.root ifname in
     let iface = Pcap.openif ~widget ifname in
     let get   = Printf.sprintf "GET %s HTTP/1.0\r\n\r\n" url in
     let gateways =
@@ -42,7 +43,7 @@ let perform_get (sim : Simulation.t) my_ip my_netmask mac peer_ip ?nameserver ?g
         tx tcp.Tcp.TRX.trx (bitstring_of_string get) ;
         let rec wait_close () =
             if not (tcp.Tcp.TRX.is_closed ()) then
-                Simulation.delay sim.Simulation.power (Clock.Interval.sec 1.) wait_close ()
+                Simulation.delay sim.root.power (Clock.Interval.sec 1.) wait_close ()
             else (
                 Printf.printf "We are done with the GET...\n" ;
                 exit 0

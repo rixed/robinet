@@ -62,7 +62,7 @@ let simul_webperf sim avg_group_size num_groups _duration ifname nameserver url 
     Sim.Net.iter_equipments (function
         Sim.Net.Equipment.Host h ->
             h.on_ip <- client_init url :: h.on_ip ;
-            h.Host.power_on ()
+            Simulation.power_up h.power
         | _ ->
             ()
     ) net

@@ -22,6 +22,7 @@
   which is correct enough to get an actual response from the server.
 *)
 open Batteries
+open SimTypes
 open Tools
 
 let main =
@@ -60,7 +61,7 @@ let main =
                   ~static_ip:(Ip.Addr.of_string !src_ip)
                   "requester" in
     host.trx.dev.set_read emit ;
-    List.iter (Simulation.asap sim.Simulation.power (fun name ->
+    List.iter (Simulation.asap sim.root.power (fun name ->
         host.trx.gethostbyname name (function
         | None -> ()
         | Some ips ->

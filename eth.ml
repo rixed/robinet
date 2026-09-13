@@ -23,6 +23,7 @@
  * TODO: (r)STP, optional padding
  *)
 open Batteries
+open SimTypes
 open Bitstring
 open Tools
 
@@ -1042,8 +1043,7 @@ let maybe_record =
 let limited power latency throughput =
     let next_avlb = ref Clock.Time.zero in
     (fun emit bits ->
-        let min_start =
-            Clock.Time.add (Simulation.now (Simulation.sim_of power)) latency in
+        let min_start = Clock.Time.add (Simulation.now power.sim) latency in
         let start = max min_start !next_avlb
         and num_bits = float_of_int (min (bitstring_length bits) 368) in
         let duration =
@@ -1093,7 +1093,7 @@ struct
 
         (* The cable a widget stands for, when it stands for one. *)
         let of_widget (w : Widget.t) =
-            match w.Widget.device with
+            match w.device with
             | Some (T t) -> Some t
             | _ -> None
 
@@ -1107,9 +1107,9 @@ struct
         let make ~parent ?(length=10.) ?(error_rate=0.) ?(history=10)
                  ?(name="cable") () =
             let widget = Widget.make ~parent name in
-            widget.Widget.device_type <- Some "cable" ;
+            widget.device_type <- Some "cable" ;
             let t = {
-                power = widget.Widget.power ;
+                power = widget.power ;
                 length ; delay = delay length ;
                 error_rate ; success_rate = success_rate error_rate ;
                 tot_bits = Metric.Counter.make () ;
@@ -1118,7 +1118,7 @@ struct
                 ends = None ;
                 last_packets =
                     OrdArray.make history (false, empty_bitstring) } in
-            widget.Widget.device <- Some (T t) ;
+            widget.device <- Some (T t) ;
             Widget.add_properties widget Widget.[
                 property "length" ~kind:Float ~units:"meters"
                     ~descr:"Length of the cable."
@@ -1225,14 +1225,14 @@ struct
                                        (wb.ports.get_capabilities pb) in
         wa.ports.set_capabilities pa c ;
         wb.ports.set_capabilities pb c ;
-        wa.Widget.ports.dev pa -=> trx <=-> wb.Widget.ports.dev pb ;
+        wa.ports.dev pa -=> trx <=-> wb.ports.dev pb ;
         st.ends <- Some ((fun () -> wa.ports.disconnect pa),
                          (fun () -> wb.ports.disconnect pb)) ;
         (* Deleting the cable is how one gets rid of it, from the interface as
            much as from a program, and a deleted cable that had not let go of
            its two ports would leave them emitting into nothing. *)
-        st.widget.Widget.on_delete <- (fun () -> disconnect st) ;
+        st.widget.on_delete <- (fun () -> disconnect st) ;
         Widget.make_peers ~via:st.widget
-            (wa.Widget.ports.owner pa) (wb.Widget.ports.owner pb)
+            (wa.ports.owner pa) (wb.ports.owner pb)
 
 end

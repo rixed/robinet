@@ -23,6 +23,7 @@
  a reservation at a decent time. Many hours of sleep saved thanks to RobiNet! ;->)
 *)
 open Batteries
+open SimTypes
 open Tools
 
 (* At each step, we:
@@ -33,7 +34,7 @@ open Tools
    - if ok, return the result of the action so we can use it for next one *)
 let step (sim : Simulation.t) title action cont =
     Printf.printf "%s: %!" title ;
-    Simulation.delay sim.Simulation.power (Clock.Interval.sec 1.) (fun () ->
+    Simulation.delay sim.root.power (Clock.Interval.sec 1.) (fun () ->
         action (function
         | None   -> error "Fail!"
         | Some x -> Printf.printf "Ok!\n%!" ;

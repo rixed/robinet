@@ -29,6 +29,7 @@
  * See [Cli.usage] for the whole of the command line.
  *)
 open Batteries
+open SimTypes
 
 (* A document, as the simulation it describes, running.
  *
@@ -71,7 +72,7 @@ let open_document (path, (clock : Cli.clock)) =
 let portal_ifnames sims =
     List.concat_map (fun (sim, _) ->
         Simulation.borrow sim (fun () ->
-            Widget.enum sim.Simulation.root //@ (fun (w : Widget.t) ->
+            Widget.enum sim.root //@ (fun (w : Widget.t) ->
                 Option.map (fun (p : Pcap.portal) -> p.ifname)
                            (Pcap.portal_of_widget w)) |>
             List.of_enum)
@@ -95,7 +96,7 @@ let set_speed (sim, (clock : Cli.clock)) =
 let power_up (sim, (clock : Cli.clock)) =
     if clock.Cli.power then
         Simulation.borrow sim (fun () ->
-            Topology.power_up sim.Simulation.root)
+            Topology.power_up sim.root)
 
 let main =
     Printexc.record_backtrace true ;
@@ -133,7 +134,7 @@ let main =
                  * in, which is what a program parked in [Thread.join] cannot
                  * offer it. *)
                 List.iter (fun (sim, _) ->
-                    Option.may Thread.join sim.Simulation.thread) sims
+                    Option.may Thread.join sim.thread) sims
             | Some port ->
                 (* In a simulation of its own, following the wall clock, so
                  * that pausing a network leaves the interface answering. *)

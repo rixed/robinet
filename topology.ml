@@ -38,6 +38,7 @@
    with (see {!Widget.made_with}) and a save leaves it out rather than guessing.
  *)
 open Batteries
+open SimTypes
 
 (** {2 The document} *)
 
@@ -255,8 +256,8 @@ let find_within (root : Widget.t) path =
  * as a path and not as the number it is in this process, which the next one
  * will hand to something else. *)
 let rec names_a_widget = function
-    | Widget.Widget_id -> true
-    | Widget.Optional k | Widget.Hint (_, k) -> names_a_widget k
+    | Widget_id -> true
+    | Optional k | Hint (_, k) -> names_a_widget k
     | _ -> false
 
 let params_of ~root (entry : Device.t) params =
@@ -319,7 +320,7 @@ let properties_of (device : Widget.t) =
  * Reads a simulation's state, so it belongs inside {!Simulation.borrow} like
  * everything else that does. *)
 let of_simulation (sim : Simulation.t) =
-    let root = sim.Simulation.root in
+    let root = sim.root in
     let saved = ref [] and skipped = ref [] in
     (* By id, which is the order they were built in: a cable is younger than
      * both of its ends, since destroying a device destroys its cables, so
@@ -339,19 +340,19 @@ let of_simulation (sim : Simulation.t) =
             | _ ->
                 skipped := Widget.full_name w :: !skipped)) ;
     { version = current_version ;
-      name = sim.Simulation.name ;
+      name = sim.name ;
       devices = List.rev !saved },
     List.rev !skipped
 
 (*$R of_simulation
     let sim = Simulation.make ~realtime:false "sim" in
-    let root = sim.Simulation.root in
+    let root = sim.root in
     let dev type_ name params =
         Device.make_from_params type_ ~parent:root name params in
     let h1 = dev "host" "h1" [] in
     let sw = dev "switch" "sw" [ "ports", `Int 4 ] in
-    ignore (dev "cable" "" [ "from", `Int h1.Widget.id ;
-                             "to", `Int sw.Widget.id ]) ;
+    ignore (dev "cable" "" [ "from", `Int h1.id ;
+                             "to", `Int sw.id ]) ;
     (* Built by hand, and so not something the file can hold: *)
     let hand = Hub.Switch.make ~parent:root 4 100 "by-hand" in
     let t, skipped = of_simulation sim in
@@ -395,7 +396,7 @@ let params_to_ids ~root (entry : Device.t) params =
         | `Null | `Int _ -> name, v
         | `String path ->
             (match find_within root path with
-            | Some w -> name, `Int w.Widget.id
+            | Some w -> name, `Int w.id
             | None ->
                 Widget.bad_value "%S names %S, which this network has not"
                     name path)
@@ -420,7 +421,7 @@ let parent_and_name path =
 let set_property ~where (p : Widget.property) v =
     let refused fmt =
         Printf.ksprintf (fun m ->
-            Some (Printf.sprintf "%s: %S %s" where p.Widget.name m)) fmt in
+            Some (Printf.sprintf "%s: %S %s" where p.name m)) fmt in
     if p.setter = None then refused "cannot be set" else
     match p.getter () with
     (* Already what it is to be. Not merely quicker: a property may be
@@ -473,9 +474,9 @@ let set_properties (device : Widget.t) properties =
  * be. *)
 let power_up (root : Widget.t) =
     Widget.enum root |> List.of_enum |>
-    List.sort (fun (a : Widget.t) b -> compare a.Widget.id b.Widget.id) |>
+    List.sort (fun (a : Widget.t) b -> compare a.id b.id) |>
     List.iter (fun (w : Widget.t) ->
-        if w.Widget.owns_power then Simulation.power_up w.Widget.power)
+        if w.owns_power then Simulation.power_up w.power)
 
 (** Build [t]'s network in [sim], in place of whatever it was running, and
  * answer with the properties that would not take.
@@ -507,7 +508,7 @@ let power_up (root : Widget.t) =
  * Changes a simulation's state, so it belongs inside {!Simulation.borrow} like
  * everything else that does. *)
 let to_simulation ?(power=true) (sim : Simulation.t) t =
-    let root = sim.Simulation.root in
+    let root = sim.root in
     (* What can be told before anything is destroyed, is: a document naming a
      * device this robinet does not have, or naming one twice, was never going
      * to load, and finding that out costs nothing. *)
@@ -601,10 +602,10 @@ let new_simulation ?topology ?(paused=false) ?(power=true) name =
 (*$inject
   let a_network name =
       let sim = Simulation.make ~realtime:false name in
-      let root = sim.Simulation.root in
+      let root = sim.root in
       let dev t n p = Device.make_from_params t ~parent:root n p in
       let cable a b =
-          dev "cable" "" [ "from", `Int a.Widget.id ; "to", `Int b.Widget.id ] in
+          dev "cable" "" [ "from", `Int a.id ; "to", `Int b.id ] in
       let h1 = dev "host" "h1" [ "static-ip", `String "192.168.0.1" ] in
       let h2 = dev "host" "h2" [ "static-ip", `String "192.168.0.2" ] in
       let sw = dev "switch" "sw" [ "ports", `Int 4 ] in
@@ -616,13 +617,13 @@ let new_simulation ?topology ?(paused=false) ?(power=true) name =
       sim
 
   let says (sim : Simulation.t) path name =
-      match Topology.find_within sim.Simulation.root path with
+      match Topology.find_within sim.root path with
       | None -> `String ("no such widget: "^ path)
       | Some w ->
           (match List.find_opt (fun (p : Widget.property) -> p.name = name)
-                               w.Widget.properties with
+                               w.properties with
           | None -> `String ("no such property: "^ name)
-          | Some p -> p.Widget.getter ())
+          | Some p -> p.getter ())
  *)
 
 (*$R to_simulation
@@ -693,7 +694,7 @@ let new_simulation ?topology ?(paused=false) ?(power=true) name =
     (* And what could be done was done: *)
     assert_equal ~printer:dump (`Bool false) (says sim "sw" "cut-through") ;
     assert_equal ~printer:dump 1
-        (List.length (Widget.find_by_path sim.Simulation.root "refused/sw"))
+        (List.length (Widget.find_by_path sim.root "refused/sw"))
  *)
 
 (* The address a gateway has on the side it serves is the one the machines
@@ -701,7 +702,7 @@ let new_simulation ?topology ?(paused=false) ?(power=true) name =
  * parameter to write it down, a reload would put another one there. *)
 (*$R to_simulation
     let a = Simulation.make ~realtime:false "gw-a" in
-    ignore (Device.make_from_params "gateway" ~parent:a.Simulation.root
+    ignore (Device.make_from_params "gateway" ~parent:a.root
                                     "gw" []) ;
     let doc, _ = of_simulation a in
     let gw = List.hd doc.devices in

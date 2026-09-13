@@ -36,6 +36,7 @@
    nowhere else.
  *)
 open Batteries
+open SimTypes
 open Tools
 
 (** {2 What a device has to be told} *)
@@ -252,7 +253,7 @@ let list args name f = Widget.to_list f (arg args name)
  * [Device.make] records the model as it came back for every device that had
  * nothing to choose, and leaves alone the ones that came through here. *)
 let made_with (widget : Widget.t) args changed =
-    widget.Widget.made_with <-
+    widget.made_with <-
         Some (
             List.map (fun (name, v) ->
                 name, (List.assoc_opt name changed |? v)
@@ -719,7 +720,7 @@ let build ~parent name = function
     | TCable { from_ ; to_ ; from_port ; to_port ; length ; error_rate } ->
         let sim = Simulation.of_widget parent in
         let end_ which id =
-            match Widget.find sim.Simulation.root id with
+            match Widget.find sim.root id with
             | Some w -> w
             | None ->
                 Widget.bad_value "%s: no widget %d in this simulation"
@@ -826,7 +827,7 @@ let cable_name (parent : Widget.t) from_ to_ =
     let sim = Simulation.of_widget parent in
     let end_ id =
         Option.map (fun (w : Widget.t) -> w.name)
-                   (Widget.find sim.Simulation.root id) in
+                   (Widget.find sim.root id) in
     match end_ from_, end_ to_ with
     | Some a, Some b -> a ^"-"^ b
     | _ -> numbered_name parent "cable"
@@ -843,7 +844,7 @@ let default_name parent = function
     | m -> numbered_name parent (type_of m)
 
 (*$T numbered_name
-  let r = Widget.make_root ~sim:0 ~now:(fun () -> Clock.Time.zero) "r" in \
+  let r = (Simulation.make ~realtime:false "r").root in \
   numbered_name r "host" = "host-1" && \
   (ignore (Widget.make ~parent:r "host-1") ; \
    numbered_name r "host" = "host-2")
@@ -865,9 +866,9 @@ let of_widget (w : Widget.t) =
     let rec within_a_device (w : Widget.t) =
         match w.parent with
         | None -> false
-        | Some p -> p.Widget.device_type <> None || within_a_device p in
+        | Some p -> p.device_type <> None || within_a_device p in
     if within_a_device w then None
-    else Option.bind w.Widget.device_type find
+    else Option.bind w.device_type find
 
 (** The model a set of parameters describes:
  * [model_of_params "switch" [ "ports", `Int 24 ]].
@@ -903,12 +904,12 @@ let make ~parent name model =
         | "" -> default_name parent model
         | name ->
             if List.exists (fun (w : Widget.t) -> w.name = name)
-                           parent.Widget.children then
+                           parent.children then
                 Widget.bad_value "there is already something called %S here"
                     name ;
             name in
     let w, built = build ~parent name model in
-    w.Widget.made_with <- Some (to_params built) ;
+    w.made_with <- Some (to_params built) ;
     w
 
 (** Both at once, for a caller that has parameters rather than a model: the
@@ -917,17 +918,17 @@ let make_from_params type_ ~parent name given =
     make ~parent name (model_of_params type_ given)
 
 (*$= coerce & ~printer:Yojson.Basic.to_string
-  (`Int 3) (coerce "n" Widget.Int (`String "3"))
-  (`Int 3) (coerce "n" (Widget.IRange (0, 5)) (`Int 3))
-  `Null (coerce "n" (Widget.optional Widget.Int) `Null)
-  (`Int 3) (coerce "n" (Widget.optional Widget.Int) (`Int 3))
+  (`Int 3) (coerce "n" Int (`String "3"))
+  (`Int 3) (coerce "n" (IRange (0, 5)) (`Int 3))
+  `Null (coerce "n" (Widget.optional Int) `Null)
+  (`Int 3) (coerce "n" (Widget.optional Int) (`Int 3))
  *)
 (*$T coerce
-  (try ignore (coerce "n" (Widget.IRange (0, 5)) (`Int 9)) ; false \
+  (try ignore (coerce "n" (IRange (0, 5)) (`Int 9)) ; false \
    with Widget.Bad_value _ -> true)
-  (try ignore (coerce "n" (Widget.Enum [| "a" |]) (`Int 9)) ; false \
+  (try ignore (coerce "n" (Enum [| "a" |]) (`Int 9)) ; false \
    with Widget.Bad_value _ -> true)
-  (try ignore (coerce "n" Widget.Metric (`Int 0)) ; false \
+  (try ignore (coerce "n" Metric (`Int 0)) ; false \
    with Widget.Bad_value _ -> true)
  *)
 
@@ -945,17 +946,14 @@ let make_from_params type_ ~parent name given =
   find "Switch" = None
  *)
 
-(* A root to build under. A simulation's own and not a bare [Widget.make_root]:
- * a device reaches for the simulation it is being built in, to draw its power
- * and to schedule on its clock, and finds it by the number its root carries. *)
+(* A root to build under: a simulation's, which is the only kind there is --
+ * a root is built with the simulation it belongs to, being what its mains
+ * draws on. *)
 (*$inject
   let root () =
-      (Simulation.make ~realtime:false "r").Simulation.root
+      (Simulation.make ~realtime:false "r").root
  *)
 
-(* A root to build under. A simulation's own and not a bare [Widget.make_root]:
- * a device reaches for the simulation it is being built in, to draw its power
- * and to schedule on its clock, and finds it by the number its root carries. *)
 (* [sample_params] below is every parameter of [t] at its declared default. A
  * cable is the one kind with no complete set of those: a cable that joins
  * nothing is not a cable, so its two ends have no default and are named here.
@@ -964,7 +962,7 @@ let make_from_params type_ ~parent name given =
  * comment terminator it meets. *)
 (*$inject
   let root () =
-      (Simulation.make ~realtime:false "r").Simulation.root
+      (Simulation.make ~realtime:false "r").root
 
   let sample_params t =
       args_of t (if t == cable then [ "from", `Int 1 ; "to", `Int 2 ] else [])
@@ -1004,7 +1002,7 @@ let make_from_params type_ ~parent name given =
 (*$T make
   (let w = make ~parent:(root ()) "sw" (TSwitch { ports = 24 ; macs = 8 ; \
                speeds = Eth.Iface.default_speeds ; full_duplex = true }) in \
-   match w.Widget.made_with with \
+   match w.made_with with \
    | Some args -> List.assoc "ports" args = `Int 24 \
    | None -> false)
   (* Handed no address, a host comes back with the one it drew: *) \
@@ -1012,12 +1010,12 @@ let make_from_params type_ ~parent name given =
                netmask = Some (Ip.Addr.of_string "255.255.255.0") ; \
                gateway = None ; \
                nameserver = None ; search_sfx = None ; mac = None }) in \
-   match w.Widget.made_with with \
+   match w.made_with with \
    | Some args -> List.assoc "MAC" args <> `Null \
    | None -> false)
   (* And a hand-wired widget still answers nothing at all: *) \
   (ignore make ; \
-   Widget.make ~parent:(root ()) "by hand").Widget.made_with = None
+   Widget.make ~parent:(root ()) "by hand").made_with = None
  *)
 
 (* A widget built here can be turned back into the thing it stands for, which
@@ -1027,7 +1025,7 @@ let make_from_params type_ ~parent name given =
 (*$T make_from_params
   (match Host.of_widget \
              (make_from_params "host" ~parent:(root ()) "h" []) with \
-   | Some (h : Host.t) -> h.Host.trx.Host.widget.Widget.name = "h" \
+   | Some (h : Host.t) -> h.Host.trx.Host.widget.name = "h" \
    | None -> false)
   (match Hub.Switch.of_widget \
              (make_from_params "switch" ~parent:(root ()) "sw" []) with \
@@ -1036,7 +1034,7 @@ let make_from_params type_ ~parent name given =
   Hub.Switch.of_widget (make_from_params "host" ~parent:(root ()) "h" []) = None
   (* A part of a device is not a device: the adapter within a host stands for \
      nothing on its own. *) \
-  (match (make_from_params "host" ~parent:(root ()) "h" []).Widget.children \
+  (match (make_from_params "host" ~parent:(root ()) "h" []).children \
    with \
    | [ eth ] -> Host.of_widget eth = None \
    | _ -> false)

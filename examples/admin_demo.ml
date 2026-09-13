@@ -7,6 +7,7 @@
  * reader adds a switch. What comes back is a widget, and the module of the
  * kind asked for turns it back into the thing to run a program on. *)
 open Batteries
+open SimTypes
 open Tools
 
 let main =
@@ -58,8 +59,8 @@ let main =
                               ~dist:(300. *. float_of_int (i + 1)))) ;
             ignore (
                 Device.make ~parent (Printf.sprintf "cable%d" i)
-                    (Device.TCable { from_ = switch.Widget.id ;
-                                     to_ = w.Widget.id ;
+                    (Device.TCable { from_ = switch.id ;
+                                     to_ = w.id ;
                                      from_port = None ; to_port = None ;
                                      length = None ;
                                      error_rate = 0.0001 })) ;
@@ -73,7 +74,7 @@ let main =
             let _, dst = List.at hosts ((i + 1) mod List.length hosts) in
             h.Host.trx.Host.ping (Host.IPv4 dst)
         ) hosts ;
-        Simulation.delay net.Simulation.power (Clock.Interval.msec 100.) tick () in
+        Simulation.delay net.root.power (Clock.Interval.msec 100.) tick () in
     (* A DHCP server on the first host, so that the interface has properties
      * that may have no value to show (and one metric that has not fired).
      * Not a device of its own: what the catalogue builds are machines, and

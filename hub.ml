@@ -18,6 +18,7 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 open Batteries
+open SimTypes
 open Bitstring
 open Tools
 
@@ -47,7 +48,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
 
     (* The repeater a widget stands for, when it stands for one. *)
     let of_widget (w : Widget.t) =
-        match w.Widget.device with
+        match w.device with
         | Some (T t) -> Some t
         | _ -> None
 
@@ -111,28 +112,26 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
     let speeds = Eth.Speed.[| Eth10Mbps ; Eth100Mbps |]
     let speed_names = Array.map Eth.Speed.to_string speeds
 
-    let make ~parent ?location ?(speed=Eth.Speed.Eth100Mbps) n name =
+    let make ~parent ?(own_power=true) ?location ?(speed=Eth.Speed.Eth100Mbps)
+             n name =
         if not (Array.mem speed speeds) then
             invalid_arg ("Hub.Repeater.make: no hub runs at "^
                          Eth.Speed.to_string speed) ;
         let widget =
-            Widget.make ~parent ?location ~device_type:"hub" ~own_power:true
+            Widget.make ~parent ?location ~device_type:"hub" ~own_power
                         name in
         let t = {
             ports = Array.make n (ignore_bits ~logger:widget.logger, false) ;
             speed ;
             busy_until = Clock.beginning_of_time ;
             jamming_time = Eth.Speed.duration speed 32 ;
-            power = widget.Widget.power ;
+            power = widget.power ;
             widget ;
             ingress = Metric.Counter.make () ;
             egress = Metric.Counter.make () ;
             collisions = Metric.Counter.make () } in
         widget.device <- Some (T t) ;
         widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
-        (* Minted switched off, as every source is; a hub has nothing to do
-           before it is whole, but it has to be on to repeat anything. *)
-        Simulation.power_up t.power ;
         widget.ports <- Widget.{
             count = (fun () -> n) ;
             is_connected = (fun i -> is_connected t i) ;
@@ -160,6 +159,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
                 (Metric.Counter.T t.collisions) ;
             property "tot ports" ~kind:Int ~descr:"Total number of ports."
                 ~getter:(fun () -> `Int (Array.length t.ports)) ] ;
+        Simulation.power_up t.power ;
         t
 end
 
@@ -191,7 +191,7 @@ struct
 
     (* The switch a widget stands for, when it stands for one. *)
     let of_widget (w : Widget.t) =
-        match w.Widget.device with
+        match w.device with
         | Some (T t) -> Some t
         | _ -> None
 
@@ -285,7 +285,7 @@ struct
         let widget =
             Widget.make ~device_type:"switch" ~parent ?location
                         ~own_power:true name in
-        let power = widget.Widget.power in
+        let power = widget.power in
         let t = {
             ifaces = [||] (* See below *) ;
             cut_through ;
@@ -312,7 +312,7 @@ struct
         reset_cut_through () ;
         widget.device <- Some (T t) ;
         widget.on_delete <- (fun () -> Simulation.power_down t.power) ;
-        widget.Widget.ports <- Widget.{
+        widget.ports <- Widget.{
             count = (fun () -> num_ifaces) ;
             is_connected = (fun i -> t.ifaces.(i).widget.ports.is_connected 0) ;
             dev = (fun i -> t.ifaces.(i).widget.ports.dev 0) ;
@@ -338,7 +338,6 @@ struct
             metric_property "cache misses"
                 ~descr:"Number of MAC cache misses."
                 (Metric.Atomic.T t.mac_misses) ] ;
-        (* Minted switched off, as every source is. *)
         Simulation.power_up t.power ;
         t
 end

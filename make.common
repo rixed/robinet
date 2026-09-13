@@ -82,7 +82,7 @@ all_tests.cmx: all_tests.ml $(SOURCES_CMX)
 	$(OCAMLOPT) -package "$(REQUIRES) qcheck" $(OCAMLOPTFLAGS) -w -33 -c -impl $<
 
 all_tests.ml: $(SOURCES)
-	$(QTEST) --shuffle --preamble 'open Batteries;; open Bitstring;; open Tools' -o $@ extract $^
+	$(QTEST) --shuffle --preamble 'open Batteries;; open Bitstring;; open Tools;; open SimTypes' -o $@ extract $^
 
 check: all_tests.opt $(EXTRA_TESTS)
 	@for t in $^; do \

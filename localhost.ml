@@ -21,6 +21,7 @@
   A special host that access the physical network through the OS network stack.
 *)
 open Batteries
+open SimTypes
 open Bitstring
 open Tools
 
@@ -36,7 +37,7 @@ type ctx =
       power : Simulation.power ;
       widget : Widget.t }
 
-let logger ctx = ctx.widget.Widget.logger
+let logger ctx = ctx.widget.logger
 
 let signal_err e =
     Printf.fprintf stderr "Localhost: %s\n%!" e
@@ -208,7 +209,7 @@ let tcp_server ctx src_port server_f =
  * machine running the simulation, joining it from outside, and the map has to
  * be able to show where that is. *)
 let make_ctx ?location sim =
-    { sim ; power = sim.Simulation.power ;
+    { sim ; power = sim.root.power ;
       widget = Widget.make ~parent:sim.root ?location "localhost" }
 
 let host ?location sim =
@@ -226,9 +227,7 @@ let host ?location sim =
     and udp_server _ _ =
         todo "UDP server for localhost"
     and arp_set _ _ =
-        todo "set ARP table of localhost"
-    and power_on () = ()
-    and power_off () = () in
+        todo "set ARP table of localhost" in
     { Host.widget = ctx.widget ;
       tcp_connect ; udp_connect ; udp_send ; ping ;
       gethostbyname = gethostbyname ctx ;
@@ -236,4 +235,4 @@ let host ?location sim =
       dev = { write = ignore ; set_read = ignore } ;
       (* Nothing here waits for an address: this host has the one the machine
          running the simulation has, and had it before the simulation began. *)
-      arp_set ; on_ip = [] ; power_on ; power_off ; power = ctx.power }
+      arp_set ; on_ip = [] ; power = ctx.power }

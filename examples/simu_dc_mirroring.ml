@@ -74,9 +74,9 @@ class host _sim (h : Host.host_trx) = object (self)
 
     method power_on =
         h.on_ip <- (fun _ -> self#powered_on) :: h.on_ip ;
-        h.power_on ()
+        Simulation.power_up h.power
     method power_off =
-        h.power_off ()
+        Simulation.power_down h.power
     method powered_on = ()
 
     method tcp_serve ~port ~throughput () =

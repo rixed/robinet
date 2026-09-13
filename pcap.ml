@@ -90,6 +90,7 @@ Pcap.enum_of_file "input.pcap" |>
 
  *)
 open Batteries
+open SimTypes
 open Bitstring
 open Tools
 
@@ -374,7 +375,7 @@ type Widget.device += Recorder of recorder
 
 (* The recorder a widget stands for, when it stands for one. *)
 let recorder_of_widget (w : Widget.t) =
-    match w.Widget.device with
+    match w.device with
     | Some (Recorder t) -> Some t
     | _ -> None
 
@@ -840,7 +841,7 @@ type Widget.device += Replayer of replayer
 
 (* The replayer a widget stands for, when it stands for one. *)
 let replayer_of_widget (w : Widget.t) =
-    match w.Widget.device with
+    match w.device with
     | Some (Replayer t) -> Some t
     | _ -> None
 
@@ -921,9 +922,8 @@ let rec replay_next replayer =
                         Clock.Interval.zero
                     else d in
             replayer.last_ts <- Some pdu.ts ;
-            let sim = Simulation.of_widget replayer.widget in
             let gen = replayer.gen in
-            Simulation.delay sim.power d (fun () ->
+            Simulation.delay replayer.widget.power d (fun () ->
                 if gen = replayer.gen then (
                     replayer_tx replayer (pdu.payload :> bitstring) ;
                     replay_next replayer)) ())
@@ -1075,14 +1075,14 @@ let default_caplen ifname =
  * device will be chosen.
  *
  * Pass it a widget to log and pay for events. *)
-let openif ~widget ?(promisc=true) ?(filter="") ?caplen ifname =
+let openif ~(widget : Widget.t) ?(promisc=true) ?(filter="") ?caplen ifname =
     let caplen =
         Option.default_delayed (fun () -> default_caplen ifname) caplen in
     let iface = {
         handler = openif_ ifname promisc filter caplen ;
         name = ifname ;
         caplen ;
-        power = (Simulation.of_widget widget).Simulation.power ;
+        power = widget.power ;
         widget } in
     (* A real interface only makes sense in a realtime simulation: *)
     Simulation.make_realtime (Simulation.of_widget widget) ;
@@ -1182,15 +1182,15 @@ let sniffer iface ?(while_=(fun () -> true)) rx =
  * whole program down on the way up. *)
 (*$R portal
     let sim = Simulation.make ~realtime:false "no-such-iface" in
-    let p = portal ~parent:sim.Simulation.root "robinet-no-such-iface" in
-    assert_bool "a portal mints a source of its own" p.widget.Widget.owns_power ;
+    let p = portal ~parent:sim.root "robinet-no-such-iface" in
+    assert_bool "a portal mints a source of its own" p.widget.owns_power ;
     assert_bool "and is built with it switched off"
-                (not p.widget.Widget.power.Widget.on) ;
-    Simulation.power_up p.widget.Widget.power ;
+                (not p.widget.power.on) ;
+    Simulation.power_up p.widget.power ;
     assert_bool "one onto an interface that is not there says what went wrong"
-                (p.widget.Widget.error <> None) ;
+                (p.widget.error <> None) ;
     assert_bool "and the switch it was given went through all the same"
-                p.widget.Widget.power.Widget.on
+                p.widget.power.on
  *)
 
 (** A Pcap.portal is a widget representing a real network interface form the
@@ -1217,7 +1217,7 @@ type Widget.device += Portal of portal
 
 (* The portal a widget stands for, when it stands for one. *)
 let portal_of_widget (w : Widget.t) =
-    match w.Widget.device with
+    match w.device with
     | Some (Portal t) -> Some t
     | _ -> None
 
@@ -1306,9 +1306,9 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
     widget.device <- Some (Portal portal) ;
     (* Switching this one on opens the interface of the machine it names, and
      * switching it off closes it. *)
-    widget.Widget.power_up <- (fun () -> power_up portal) ;
-    widget.Widget.power_down <- (fun () -> power_down portal) ;
-    widget.on_delete <- (fun () -> Simulation.power_down widget.Widget.power) ;
+    widget.power_up <- (fun () -> power_up portal) ;
+    widget.power_down <- (fun () -> power_down portal) ;
+    widget.on_delete <- (fun () -> Simulation.power_down widget.power) ;
     widget.ports <- Widget.{
         count = (fun () -> 1) ;
         is_connected = (fun _ -> is_connected portal) ;

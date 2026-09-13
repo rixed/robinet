@@ -21,6 +21,7 @@
   Equipment for routing traffic
  *)
 open Batteries
+open SimTypes
 
 open Bitstring
 open Tools
@@ -259,7 +260,7 @@ struct
        widget stands for the gateway, not for the router inside it, and answers
        [None] here; see [gw_of_widget]. *)
     let of_widget (w : Widget.t) =
-        match w.Widget.device with
+        match w.device with
         | Some (T t) -> Some t
         | _ -> None
 
@@ -511,15 +512,14 @@ struct
     let notify_never = { probability = 0. ; delay = 0. }
     let notify_always ?(delay=0.) () = { probability = 1. ; delay }
 
-    let make ~parent ?power ?(notify_errs=notify_always ())
+    let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
              ?(admin_reroute=true) ?(load_balancing=First)
              ?can_forward_after ?delay ?loss ?mtu ?(macs=[||])
              num_ifaces routes name =
-        let widget =
-            Widget.make ~parent ?power ~own_power:(power = None) name in
-        let power = widget.Widget.power in
+        let widget = Widget.make ~parent ~own_power name in
+        let power = widget.power in
         (* Display the routing table (debug) *)
-        Log.(log widget.Widget.logger Debug (lazy
+        Log.(log widget.logger Debug (lazy
             (Printf.sprintf2 "Creating a router with routing table:%a"
                 (List.print ~first:(if routes=[] then "" else "\n\t")
                             ~sep:"\n\t" ~last:"" Route.print) routes))) ;
@@ -555,7 +555,7 @@ struct
            and the supply asks each of them in turn. Every interface is reset,
            including the ones no admin host was built on, which nothing else
            would reach. *)
-        widget.Widget.power_down <- (fun () ->
+        widget.power_down <- (fun () ->
             Array.iter (fun iface -> Eth.State.reset iface.eth) t.ifaces) ;
         widget.device_type <- Some "router" ;
         widget.device <- Some (T t) ;
@@ -804,7 +804,7 @@ struct
          * this would have sensed the carrier and waited). A millisecond
          * later every wire is quiet again. *)
         let send n bits =
-            Simulation.delay sim.Simulation.power (Clock.Interval.msec 1.)
+            Simulation.delay sim.root.power (Clock.Interval.msec 1.)
                              router.ifaces.(n).trx.out.write bits in
 
         (* We are going to send some IP packets with a given destination: *)
@@ -839,15 +839,15 @@ struct
         (* One box, one supply, one switch. This router has three admin hosts,
          * one per addressed interface, and all of them draw on the router's,
          * which is what puts the switch on the router and nowhere else. *)
-        "the router owns the supply" @? router.widget.Widget.owns_power ;
+        "the router owns the supply" @? router.widget.owns_power ;
         "and its admin hosts draw on that one" @?
             Array.for_all (fun iface ->
                 match iface.admin_host with
                 | None -> false
                 | Some h ->
                     let w = h.Host.trx.Host.widget in
-                    not w.Widget.owns_power &&
-                    w.Widget.power == router.widget.Widget.power
+                    not w.owns_power &&
+                    w.power == router.widget.power
             ) router.ifaces ;
 
         (* A packet for the router itself goes to that interface's admin host,
@@ -880,7 +880,7 @@ struct
 
         let flip on =
             (if on then Simulation.power_up else Simulation.power_down)
-                router.widget.Widget.power in
+                router.widget.power in
 
         (* Switched off, the box stops routing: what it had scheduled went with
          * its power, and it takes on nothing new. *)
@@ -912,10 +912,10 @@ struct
         "and its adapter still learns" @?
             (Tools.BitHash.length eth.Eth.State.arp_cache = 1) ;
         "a router of its own mints the supply it draws on" @?
-            r.widget.Widget.owns_power ;
+            r.widget.owns_power ;
         let flip on =
             (if on then Simulation.power_up else Simulation.power_down)
-                r.widget.Widget.power in
+                r.widget.power in
         flip false ;
         "which the box forgets when it is switched off" @?
             (Tools.BitHash.length eth.Eth.State.arp_cache = 0) ;
@@ -988,7 +988,7 @@ struct
          interface's name. *) \
       List.for_all (fun n -> \
           r.widget.ports.owner n == (ports r.ifaces.(n)).owner 0 && \
-          (r.widget.ports.owner n).Widget.name = "#"^ string_of_int n) [ 0 ; 1 ; 2 ; 3 ]
+          (r.widget.ports.owner n).name = "#"^ string_of_int n) [ 0 ; 1 ; 2 ; 3 ]
      *)
 
     (*$>*)
@@ -1013,7 +1013,6 @@ end
 type gw_trx =
     { trx : trx ;
       widget : Widget.t ;
-      power : Simulation.power ;
       mutable dhcp_state : Dhcpd.State.t option ;
       mutable dns_state : Named.State.t option ;
       nat_state : Nat.State.t }
@@ -1022,7 +1021,7 @@ type Widget.device += T of gw_trx
 
 (* The gateway a widget stands for, when it stands for one. *)
 let gw_of_widget (w : Widget.t) =
-    match w.Widget.device with
+    match w.device with
     | Some (T t) -> Some t
     | _ -> None
 
@@ -1032,19 +1031,19 @@ let gw_of_widget (w : Widget.t) =
  * will be distributed via DHCP. *)
 let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
             ?dhcp_range ?dhcp_mtu ?lease_time_sec ?mac
-            ?(name="gw") ?notify_errs ?admin_reroute ~parent ?location
+            ?(name="gw") ?notify_errs ?admin_reroute
+            ~parent ?location ?(own_power=true)
             ?public_netmask ?public_gw ?port_forwards public_ip local_cidr =
     (* We want all parts inherit this widget: *)
-    let widget = Widget.make ~parent ?location ~own_power:true name in
+    let widget = Widget.make ~parent ?location ~own_power name in
     (* A whole machine, whatever it is made of inside. *)
-    widget.Widget.device_type <- Some "gateway" ;
+    widget.device_type <- Some "gateway" ;
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let broadcast = Ip.Cidr.all1s_addr local_cidr in
-    let power = widget.Widget.power in
     (* Build the output router *)
     let router =
-        Router.(make ~parent:widget ~power ?delay ?loss ?mtu ?notify_errs
+        Router.(make ~parent:widget ~own_power:false ?delay ?loss ?mtu ?notify_errs
                      ?admin_reroute ?macs:(Option.map (Array.make 1) mac) 2
             [ (* route everything from anywhere to LAN if dest fits local_cidr *)
               Route.forward ~dst_mask:local_cidr 0 ;
@@ -1080,11 +1079,11 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
          * then and there, and what it is to do once it has an address is hung
          * on it a few lines further down. *)
         Host.make ?nameserver ~gateways ~netmask ~static_ip:srv_ip
-                  ~parent:widget ~power "srv" in
+                  ~parent:widget ~own_power:false "srv" in
     (* Now we need the repeater and the services: *)
     (* FIXME: instead of a Hub that forces us into having 2 IPs make a simple TRX directly, that inspects the protostack and if
      * the dest IP is gw_ip == src_iv then forward it to the host and if not forward it to the NAT. *)
-    let hub = Hub.Repeater.make ~parent:widget 3 "hub" in
+    let hub = Hub.Repeater.make ~parent:widget ~own_power:false 3 "hub" in
     Hub.Repeater.set_read hub 1 h.trx.dev.write ;
     h.trx.dev.set_read (Hub.Repeater.write hub 1) ;
     (* Connect the first iface of our router *)
@@ -1096,8 +1095,8 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let trx =
         { ins = in_trx ;
           out = out_trx.out } in
-    let gw = { trx ; widget ; power ; dhcp_state = None ; dns_state = None ;
-               nat_state } in
+    let gw =
+        { trx ; widget ; dhcp_state = None ; dns_state = None ; nat_state } in
     (* Now prepare the services that will run on the host [h]: *)
     (* TODO: local named could serve the local names according to the dhcp
      * leases and hostname options *)
@@ -1138,7 +1137,6 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
         Named.serve st h.trx in
     (* Make the host [h] start dhcpd and dns when it is powered on: *)
     h.trx.on_ip <- (fun _h -> start_dhcpd gw ; start_dns gw) :: h.trx.on_ip ;
-
     Widget.add_properties widget Widget.[
         property "nat-max-cnxs" ~kind:Int
             ~descr:"Max number of connections tracked by the NAT."
@@ -1171,7 +1169,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
        then starts the services above, from [on_ip], once it has its address.
        Everything that was to be hung on them is hung on them by now, which is
        why a source is minted switched off. *)
-    Simulation.power_up power ;
+    if own_power then Simulation.power_up gw.widget.power ;
     gw
 
 (* A gateway serves DHCP from a host built inside it, which goes down and comes
@@ -1183,11 +1181,11 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
 (*$R make_gw
     let sim = Simulation.make ~realtime:false "gw-dhcp" in
     let gw =
-        make_gw ~parent:sim.Simulation.root
+        make_gw ~parent:sim.root
                 (Ip.Addr.of_string "80.82.17.127")
                 (Ip.Cidr.of_string "192.168.0.0/24") in
     (* No address of its own, so it asks for one. *)
-    let client : Host.t = Host.make ~parent:sim.Simulation.root "client" in
+    let client : Host.t = Host.make ~parent:sim.root "client" in
     client.Host.trx.Host.dev.set_read gw.trx.ins.write ;
     ignore (client.Host.trx.Host.dev.write <-= gw.trx) ;
     let address () =
@@ -1198,9 +1196,9 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     assert_bool ("a client on the LAN is leased an address, not "^ address ())
                 (address () <> "none") ;
     (* The box off and on again, which takes its server with it both ways. *)
-    let flip w on =
+    let flip (w : Widget.t) on =
         (if on then Simulation.power_up else Simulation.power_down)
-            w.Widget.power in
+            w.power in
     flip gw.widget false ;
     flip gw.widget true ;
     (* And a client that asks afterwards has to be answered. It is rebooted
@@ -1220,7 +1218,7 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
    and the server's adapter are all spoken for inside. *)
 (*$T make_gw
   let sim = Simulation.make ~realtime:false "gw-ports" in \
-  let gw = make_gw ~parent:sim.Simulation.root \
+  let gw = make_gw ~parent:sim.root \
                    (Ip.Addr.of_dotted_string "80.82.17.127") \
                    (Ip.Cidr.of_string "192.168.0.0/16") in \
   gw.widget.ports.count () = 2 && \
@@ -1228,11 +1226,11 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
   gw.widget.ports.dev 1 == gw.trx.ins && \
   (* The outside socket is the router's second adapter, the LAN one the
      repeater everything inside it hangs off. *) \
-  (gw.widget.ports.owner 0).Widget.name = "#1" && \
-  (gw.widget.ports.owner 1).Widget.name = "hub" && \
+  (gw.widget.ports.owner 0).name = "#1" && \
+  (gw.widget.ports.owner 1).name = "hub" && \
   gw.widget.ports.owner 0 != gw.widget.ports.owner 1 && \
   List.for_all (fun (c : Widget.t) -> c.ports.count() <= 3) \
-               gw.widget.Widget.children
+               gw.widget.children
  *)
 
 (*$R make_gw
@@ -1246,14 +1244,14 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     desktop.trx.dev.set_read gw_trx.trx.ins.write ;
     ignore (desktop.trx.dev.write <-= gw_trx.trx) ;
     let server_ip = Ip.Addr.of_string "42.43.44.45" in
-    let server_eth = Eth.(TRX.make State.(make ~parent:sim.root ~power:sim.Simulation.power ~my_addresses:[ make_my_ip_address server_ip ] ())) in
+    let server_eth = Eth.(TRX.make State.(make ~parent:sim.root ~power:sim.root.power ~my_addresses:[ make_my_ip_address server_ip ] ())) in
     let src = ref None in
     let server_recv bits = (* check source IP is the public one (NATed) *)
         let ip = Ip.Pdu.unpack bits |> Result.get_ok in
         src := Some ip.Ip.Pdu.src in
     ignore (server_recv <-= server_eth) ;
     gw_trx.trx <==> server_eth ;
-    Simulation.delay sim.Simulation.power (Clock.Interval.sec 10.) (fun () ->
+    Simulation.delay sim.root.power (Clock.Interval.sec 10.) (fun () ->
         Log.(log desktop.trx.widget.logger Debug (lazy "Sending UDP packet to server")) ;
         desktop.trx.udp_send (Host.IPv4 server_ip) (Udp.Port.o 80) empty_bitstring) () ;
     Simulation.run sim false ;

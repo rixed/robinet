@@ -20,6 +20,7 @@
 (** This module puts together all the modules required to build
  * networks and run a simulation. *)
 open Batteries
+open SimTypes
 open Tools
 
 (** A network is a set of equipments, and some optionally named "plugs"
@@ -153,7 +154,7 @@ struct
     (** Returns a net representing the external network via the given interface,
      * and the thread that sniffs packets. *)
     let make_real_net (sim : Simulation.t) iface_name =
-        let widget = Widget.make ~parent:sim.Simulation.root iface_name in
+        let widget = Widget.make ~parent:sim.root iface_name in
         let iface = Pcap.openif ~widget ~caplen:1800 iface_name in
         let emit = ref (fun _bits -> ()) in
         let plug = Plug.make iface_name { write = Pcap.inject iface ;

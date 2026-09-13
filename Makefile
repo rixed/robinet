@@ -11,6 +11,7 @@ SOURCES  = \
 	log.ml \
 	tools.ml \
 	capabilities.ml \
+	simTypes.ml \
 	widget.ml \
 	simulation.ml \
 	ordArray.ml \

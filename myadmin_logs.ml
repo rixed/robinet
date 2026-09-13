@@ -23,6 +23,7 @@
   Kept as a reference while the new UI is designed; meant to disappear.
 *)
 open Batteries
+open SimTypes
 open Tools
 open Myadmin_common
 
@@ -35,7 +36,7 @@ let find_widget id =
     (* Batteries' find_map raises rather than returning an option: *)
     try
         Simulation.all () |>
-        List.find_map (fun s -> Widget.find s.Simulation.root id) |>
+        List.find_map (fun s -> Widget.find s.root id) |>
         Option.some
     with Not_found -> None
 
@@ -117,17 +118,17 @@ let get_logs ?(max_level=Log.max_level) widgets =
 let logs_menu resp selected_id also_selected ignored_widgets =
     (* The root layer is composed of all widgets without parents: *)
     let roots =
-        Simulation.all () |> List.map (fun s -> s.Simulation.root) in
+        Simulation.all () |> List.map (fun s -> s.root) in
     let rec num_descendants widget =
         List.fold_left (fun num child ->
             num + num_descendants child
-        ) 0 widget.Widget.children |> max 1 in
+        ) 0 widget.children |> max 1 in
     (* Memoize those for the duration of this function call: *)
     let num_descendants = memoize num_descendants in
     let rec max_depth widget =
         List.fold_left (fun depth child ->
             max depth (1 + max_depth child)
-        ) 1 widget.Widget.children in
+        ) 1 widget.children in
     let onmouseover (w : Widget.t) =
         let peers =
             List.fold_left (fun peers (peer : Widget.peer) ->
@@ -341,7 +342,7 @@ let logs _mth _matches vars _qry_body resp =
     page_head_close resp ;
     let all_widgets =
         Simulation.all () |>
-        List.map (fun s -> Widget.descendants s.Simulation.root) |>
+        List.map (fun s -> Widget.descendants s.root) |>
         List.concat |> Array.of_list in
     Array.fast_sort (fun (a : Widget.t) b ->
         String.compare (Widget.full_name a) (Widget.full_name b)) all_widgets ;

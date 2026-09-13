@@ -20,6 +20,7 @@
 (*
   This test program test communications between two hosts
 *)
+open SimTypes
 open Bitstring
 open Tools
 
@@ -41,7 +42,7 @@ let run (sim : Simulation.t) () =
                        ~static_ip:(Ip.Addr.of_string "192.168.0.2") "client"
     and hub = Hub.Repeater.make ~parent:sim.root 3 "hub"
     in
-    let gigabit = Eth.limited sim.Simulation.power (Clock.Interval.msec 1.) 1_000_000_000. in
+    let gigabit = Eth.limited sim.root.power (Clock.Interval.msec 1.) 1_000_000_000. in
     h1.trx.dev.set_read (gigabit (Hub.Repeater.write hub 0)) ;
     Hub.Repeater.set_read hub 0 (gigabit h1.trx.dev.write) ;
     h2.trx.dev.set_read (gigabit (Hub.Repeater.write hub 1)) ;

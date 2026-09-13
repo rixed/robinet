@@ -1438,11 +1438,7 @@
         "filter": "",
         "caplen": null
       },
-      "properties": {
-        "": {
-          "on": false
-        }
-      }
+      "properties": {}
     },
     {
       "type": "portal",
@@ -1456,11 +1452,7 @@
         "filter": "",
         "caplen": null
       },
-      "properties": {
-        "": {
-          "on": false
-        }
-      }
+      "properties": {}
     },
     {
       "type": "cable",

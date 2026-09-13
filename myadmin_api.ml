@@ -85,8 +85,11 @@
 
   Property names are used as-is in the URL (url-encoded): they are already
   unique within a widget and readable enough to serve as identifiers.
+
+  WARNING: remember to update doc/openapi.yaml when modifying the API!
 *)
 open Batteries
+open SimTypes
 
 (* Anything a getter or a setter raises is reported to the caller as a 400
  * rather than dropped: the UI is expected to validate beforehand, so reaching
@@ -145,7 +148,7 @@ let json_of_choices choices =
     `List (Array.to_list choices |> List.map (fun c -> `String c))
 
 let rec json_of_kind = function
-    | Widget.String -> `Assoc [ "type", `String "string" ]
+    | String -> `Assoc [ "type", `String "string" ]
     (* The same string, in a box rather than on a line. *)
     | Text -> `Assoc [ "type", `String "text" ]
     (* A string, and a file to go with it: the interface reads the value as it
@@ -216,8 +219,8 @@ let rec json_of_kind = function
 (* Whether a property of this kind names a file of the pcap library, whatever
  * it wraps that name in. *)
 let rec names_a_file = function
-    | Widget.FileName -> true
-    | Widget.Optional k | Widget.Hint (_, k) -> names_a_file k
+    | FileName -> true
+    | Optional k | Hint (_, k) -> names_a_file k
     | _ -> false
 
 (* Every instant this interface hands out is a simulated one: seconds since
@@ -344,15 +347,15 @@ let json_of_peer (p : Widget.peer) =
  * drawn. It belongs there for the same reason a location does -- the map wants
  * every one of them at once -- and it is as still as a name is. *)
 let json_of_note_text (w : Widget.t) =
-    if w.Widget.device_type <> Some "note" then `Null else
+    if w.device_type <> Some "note" then `Null else
     match List.find_opt (fun (p : Widget.property) -> p.name = "text")
-                        w.Widget.properties with
+                        w.properties with
     | None -> `Null
     | Some p -> (try p.getter () with _ -> `Null)
 
 let json_of_widget (w : Widget.t) =
     `Assoc [ "id", `Int w.id ;
-             "sim", `Int w.sim ;
+             "sim", `Int (Widget.sim w).id ;
              "name", `String w.name ;
              "full_name", `String (Widget.full_name w) ;
              "parent", (match w.parent with None -> `Null
@@ -387,8 +390,8 @@ let json_of_widget (w : Widget.t) =
                 and its router draw on the gateway's, and it is the gateway
                 that is switched. There is no listing of sources of their own:
                 a source is known by the widgets that name it. *)
-             "power", `Assoc [ "name", `String w.power.Widget.name ;
-                               "on", `Bool w.power.Widget.on ;
+             "power", `Assoc [ "name", `String w.power.name ;
+                               "on", `Bool w.power.on ;
                                "owner", `Bool w.owns_power ] ;
              "location", json_of_location w.location ;
              (* What it says, when it is a note and says something. *)
@@ -405,13 +408,13 @@ let json_of_widget (w : Widget.t) =
 let json_of_simulation (s : Simulation.t) =
         `Assoc [ "id", `Int s.id ;
              "name", `String s.name ;
-             "root", `Int s.root.Widget.id ;
+             "root", `Int s.root.id ;
              "now", json_of_time (Simulation.now s) ;
              (* Where the world outside was when this simulation began: what a
                 reader adds to any instant of this simulation to get a date.
                 One left to run as fast as it can is at that date and not at
                 the reader's own, which is why it has to be said. *)
-             "epoch", `Float (Clock.Wall.to_secs s.Simulation.epoch) ;
+             "epoch", `Float (Clock.Wall.to_secs s.epoch) ;
              (* The same instant as "now", written out, for whoever is reading
                 this by hand rather than drawing it. *)
              "now_str",
@@ -427,7 +430,7 @@ let json_of_simulation (s : Simulation.t) =
              "running", `Bool s.continue ;
              "paused", `Bool s.paused ;
              "paused_total", `Float (Clock.Interval.to_secs s.paused_total) ;
-             "pending_events", `Int (Simulation.Events.cardinal s.events) ;
+             "pending_events", `Int (Events.cardinal s.events) ;
              (* Whether its network has been changed since it was last written
                 out or read in, which is what says if there is anything to
                 save. Only what came through this interface is counted: a
@@ -449,7 +452,7 @@ let get_simulations _mth _matches _vars _qry_body resp =
     let sims =
         Simulation.all () |>
         List.sort (fun (a : Simulation.t) b ->
-            Int.compare a.Simulation.id b.Simulation.id) in
+            Int.compare a.id b.id) in
     respond resp
         (`List (List.map (fun s ->
             Simulation.borrow s (fun () -> json_of_simulation s)) sims))
@@ -564,14 +567,14 @@ let control_simulation serving _mth matches vars _qry_body resp =
      * why myadmin belongs in a simulation of its own. *)
     if s == serving then
         bad_request "Simulation %s serves this API and cannot control itself"
-            s.Simulation.name ;
+            s.name ;
     (match action with
     | "pause" -> Simulation.pause s ()
     | "resume" -> Simulation.resume s ()
     | "speed" ->
-        if s.Simulation.realtime then
+        if s.realtime then
             bad_request "Simulation %s follows the wall clock: its speed is \
-                         not ours to set" s.Simulation.name ;
+                         not ours to set" s.name ;
         let ratio =
             match Hashtbl.find_option vars "ratio" with
             | None | Some "full" -> None
@@ -853,9 +856,9 @@ let set_power _mth matches _vars qry_body resp =
     let sim = simulation_of_matches matches 1 in
     Simulation.borrow sim (fun () ->
         let w = widget_of_matches sim matches 2 in
-        if not w.Widget.owns_power then
+        if not w.owns_power then
             bad_request "%s draws on %s, which is not its to switch"
-                (Widget.full_name w) w.Widget.power.Widget.name ;
+                (Widget.full_name w) w.power.name ;
         let on =
             match Yojson.Basic.from_string qry_body with
             | exception _ | `Null ->
@@ -865,8 +868,8 @@ let set_power _mth matches _vars qry_body resp =
                 | exception Widget.Bad_value m -> bad_request "%s" m
                 | b -> b) in
         (if on then Simulation.power_up else Simulation.power_down)
-            w.Widget.power ;
-        Log.(log w.Widget.logger Info (lazy (Printf.sprintf
+            w.power ;
+        Log.(log w.logger Info (lazy (Printf.sprintf
             "Switched %s" (if on then "on" else "off")))) ;
         respond resp (json_of_widget w))
 
@@ -972,7 +975,7 @@ let widget_holding name =
         | None ->
             Simulation.borrow sim (fun () ->
                 List.find_opt (fun (w : Widget.t) ->
-                    List.exists holds w.Widget.properties)
+                    List.exists holds w.properties)
                     (Simulation.widgets sim))
     ) None (Simulation.all ())
 
@@ -1003,7 +1006,7 @@ let json_of_library_entry (e : Pcap.Library.entry) =
              (match holder with
              | None -> `Null
              | Some (w : Widget.t) ->
-                 `Assoc [ "sim", `Int w.sim ;
+                 `Assoc [ "sim", `Int (Widget.sim w).id ;
                           "id", `Int w.id ;
                           "name", `String (Widget.full_name w) ;
                           "device", (match w.device_type with

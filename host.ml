@@ -28,6 +28,7 @@
   guest system real IP stack.
 *)
 open Batteries
+open SimTypes
 open Bitstring
 open Tools
 
@@ -62,9 +63,6 @@ type host_trx = {
     arp_set       : Ip.Addr.t -> Eth.Addr.t option -> unit ;
     (* List of things to do once this host gets its IP address *)
     mutable on_ip : (t -> unit) list ;
-    (* Powering on-or off the host: *)
-    power_on      : unit -> unit ;
-    power_off     : unit -> unit ;
     (* This host's power supply, which everything it schedules draws from: its
      * adapter, its sockets, its timers, and whatever process runs on it.
      * Switching it off is all there is to powering the host down -- what it
@@ -146,7 +144,7 @@ let cur_search_sfx t = if t.leased_search_sfx <> None then t.leased_search_sfx
                        else t.search_sfx
 let cur_host_name t = t.leased_host_name |? t.host_name
 
-let print oc trx = String.print oc trx.widget.Widget.name
+let print oc trx = String.print oc trx.widget.name
 let make_tcp_socks ip = { ip_4_tcp = ip ; tcps = Hashtbl.create 3 }
 let make_udp_socks ip = { ip_4_udp = ip ; udps = Hashtbl.create 3 }
 
@@ -372,7 +370,7 @@ and do_gethostbyname t name cont =
 
 and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
     (* Fail if we do not have an IP yet *)
-    if not (t.trx.power.Widget.on && ip_is_set t) then cont None else
+    if not (t.trx.power.on && ip_is_set t) then cont None else
     let my_ip = Eth.State.find_ip4 t.eth_state in
     let connect dst_ip =
         Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Connecting to %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
@@ -438,7 +436,7 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
 
 and udp_connect t dst ?src_port dst_port client_f cont =
     (* Fail if we do not have an IP yet *)
-    if not (t.trx.power.Widget.on && ip_is_set t) then cont None else
+    if not (t.trx.power.on && ip_is_set t) then cont None else
     let my_ip = Eth.State.find_ip4 t.eth_state in
     let connect dst_ip =
         let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
@@ -473,7 +471,7 @@ and udp_connect t dst ?src_port dst_port client_f cont =
                 connect (List.hd dst_ips))
 
 let with_my_ip t f =
-    if t.trx.power.Widget.on then
+    if t.trx.power.on then
         match Eth.State.find_ip4 t.eth_state with
         | exception Not_found -> ()
         | my_ip -> f my_ip
@@ -613,12 +611,12 @@ let set_ip t my_ip netmask =
 (*$T make
   (let sim = Simulation.make ~realtime:false "test-tree" in \
    let h = \
-     make ~parent:sim.Simulation.root \
+     make ~parent:sim.root \
           ~netmask:(Ip.Addr.of_string "255.255.255.0") \
           ~static_ip:(Ip.Addr.of_string "192.168.1.1") "h" in \
-   List.exists (fun (w : Widget.t) -> w.name = "eth") h.trx.widget.Widget.children && \
+   List.exists (fun (w : Widget.t) -> w.name = "eth") h.trx.widget.children && \
    not (List.exists (fun (w : Widget.t) -> w.name = "eth") \
-                    sim.Simulation.root.Widget.children))
+                    sim.root.children))
  *)
 
 let init_static t =
@@ -757,7 +755,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
                   (eth_state : Eth.State.t) eth_trx name =
     (* For the API a cable reaches a host but in reality it reaches its
        adapter. *)
-    widget.Widget.ports <- Widget.ports_of eth_state.iface.widget ;
+    widget.ports <- Widget.ports_of eth_state.iface.widget ;
     (* The adapter's supply is the host's: they are the same machine, and an
        adapter that went on emitting after its host went down would be a host
        that is only half off. Taken from the adapter rather than made here
@@ -768,8 +766,8 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
     (* Whether this host runs is whether its supply is on, and nothing else:
      * one flag, in the source, however many widgets draw on it. *)
     let if_on t what f x =
-        if t.trx.power.Widget.on then f x
-        else Log.(log widget.Widget.logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
+        if t.trx.power.on then f x
+        else Log.(log widget.logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
     let rec t =
         { eth_state ;
           eth_trx ;
@@ -823,14 +821,6 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
           (* This call is needed by dhcpd servers running on this host: *)
           arp_set       = (fun ip haddr_opt -> if_on t "arp_set" (Eth.State.set_arp t.eth_state (Ip.Addr.to_bitstring ip)) haddr_opt) ;
           on_ip         = [] ;
-          (* Switching the supply, which is what switches the host: what this
-             host does about it is on the widget, [power_up] and [power_down]
-             below, and the supply calls those along with every other widget's
-             drawing on it, which is the point of the arrangement. A host
-             sharing a box's supply therefore switches the box: there is no
-             such thing as a part running inside a box that is off. *)
-          power_on      = (fun () -> Simulation.power_up t.trx.power) ;
-          power_off     = (fun () -> Simulation.power_down t.trx.power) ;
           power }
     in
     (* No "on" property here: the switch belongs to whoever minted the supply,
@@ -854,25 +844,23 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
     (* What this host does when its supply is switched: boot, and forget what
        a cut invalidates. Called by [Simulation.power_up] and
        [Simulation.power_down], which find it by walking the tree. *)
-    widget.Widget.power_up <- (fun () -> init () t) ;
-    widget.Widget.power_down <- (fun () -> reset t) ;
+    widget.power_up <- (fun () -> init () t) ;
+    widget.power_down <- (fun () -> reset t) ;
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "New host '%s'" name))) ;
     (* A host built into a box that is already running -- an admin host on an
        interface configured after the fact -- boots now, since the supply will
        not be switched again to tell it to. One built with a supply of its own
        is still dark, and boots when [make] switches that on. *)
-    if t.trx.power.Widget.on then init () t ;
+    if t.trx.power.on then init () t ;
     t
 
-let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
-         ~parent ?power ?location name =
-    (* A host can take it's power source from some larger equipment, and
+let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
+         ~parent ?(own_power=true) ?location name =
+    (* A host can take its power source from some larger equipment, and
        mints one of its own when it is a machine in its own right. *)
-    let own_power = power = None in
     let widget =
-        Widget.make ~parent ?location ~device_type:"host" ?power ~own_power
-                    name in
-    let power = widget.Widget.power in
+        Widget.make ~parent ?location ~device_type:"host" ~own_power name in
+    let power = widget.power in
     let eth_state =
         (* FIXME: Don't use the GW for same net IP! *)
         Eth.State.make ?mac ?gateways ~parent:widget ~power () in
@@ -910,7 +898,7 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
        so that nothing it does at boot happens before the machine is whole.
        A host built as a part of something larger leaves that to the box,
        whose supply it shares and cannot switch. *)
-    if own_power && on <> Some false then Simulation.power_up power ;
+    if own_power && on then Simulation.power_up power ;
     t
 
 (* A host boots into the configuration it has at that moment, and not the one
@@ -921,27 +909,27 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
     let sim = Simulation.make ~realtime:false "test-reboot" in
     let netmask = Ip.Addr.of_string "255.255.255.0" in
     let h =
-        make ~parent:sim.Simulation.root ~netmask
+        make ~parent:sim.root ~netmask
              ~static_ip:(Ip.Addr.of_string "192.168.1.10") "h" in
     let prop name =
-        List.find (fun (p : Widget.property) -> p.Widget.name = name)
-                  h.trx.widget.Widget.properties in
-    let set name v = (Option.get (prop name).Widget.setter) v in
+        List.find (fun (p : Widget.property) -> p.name = name)
+                  h.trx.widget.properties in
+    let set name v = (Option.get (prop name).setter) v in
     (* Through its supply, which a host of its own mints and owns: there is no
        switch on the widget any more. *)
     let reboot () =
-        Simulation.power_down h.trx.widget.Widget.power ;
-        Simulation.power_up h.trx.widget.Widget.power in
+        Simulation.power_down h.trx.widget.power ;
+        Simulation.power_up h.trx.widget.power in
     let address () =
         match Eth.State.find_ip4 h.eth_state with
         | exception Not_found -> "none"
         | ip -> Ip.Addr.to_dotted_string ip in
     assert_equal ~printer:identity "192.168.1.10" (address ()) ;
-    Simulation.power_down h.trx.widget.Widget.power ;
+    Simulation.power_down h.trx.widget.power ;
     (* Its address goes with its power: an address it kept while off would be
        one it had never been granted when it came back. *)
     assert_equal ~printer:identity "none" (address ()) ;
-    Simulation.power_up h.trx.widget.Widget.power ;
+    Simulation.power_up h.trx.widget.power ;
     assert_equal ~printer:identity "192.168.1.10" (address ()) ;
 
     (* Told to use DHCP instead, it must come back with nothing and go asking,
