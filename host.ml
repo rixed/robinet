@@ -100,6 +100,14 @@ and t = { mutable trx : host_trx ;
              address, the netmask and the reader belong to that owner and must
              be left alone. *)
           own_ip_config : bool ;
+          (* Whether this host is running, which is not always what its supply
+             says. A host that shares a box's supply -- a router's admin host
+             does, being an interface of the same machine -- is switched by the
+             box, which powers the supply down and then tells each of its hosts
+             to stop. Read the supply there and the first of those two steps
+             makes the second a no-op: the host would keep the sockets and the
+             caches that a power cut is meant to take with it. *)
+          mutable running : bool ;
           (* The configuration as the reader set it, which is a property of
              the host and outlives any number of power cycles. What DHCP
              grants is kept apart in the [leased_] fields below. *)
@@ -765,9 +773,15 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
        and a host built on somebody else's adapter, as a router's admin host
        is, shares that owner's switch, being the same box as well. *)
     let power = eth_state.iface.power in
-    if not on then Simulation.power_down power ;
+    (* A host built switched off is not a supply switched off: the supply may
+     * be the box's, and a host is not the one to cut it -- the gateway builds
+     * its [srv] off, so that it does nothing until the services it is to run
+     * have been hung on it, while the router beside it goes on sharing that
+     * same supply. Whoever minted the supply cuts it if it should be cut, and
+     * [Host.make] does exactly that. *)
     let if_on t what f x =
-        if t.trx.power.Simulation.on then f x else Log.(log widget.Widget.logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
+        if t.running && t.trx.power.Simulation.on then f x
+        else Log.(log widget.Widget.logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
     let rec t =
         { eth_state ;
           eth_trx ;
@@ -777,6 +791,10 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
           tcp_servers   = Hashtbl.create 11 ;
           udp_servers   = Hashtbl.create 11 ;
           own_ip_config ;
+          (* [on] is what was asked for, and the supply may be off regardless:
+             an interface configured on a router that is switched off gets an
+             admin host that is not running either. *)
+          running = on && power.Simulation.on ;
           nameserver ;
           host_name     = name ;
           static_ip ;
@@ -821,24 +839,35 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
           (* This call is needed by dhcpd servers running on this host: *)
           arp_set       = (fun ip haddr_opt -> if_on t "arp_set" (Eth.State.set_arp t.eth_state (Ip.Addr.to_bitstring ip)) haddr_opt) ;
           on_ip         = [] ;
-          (* Guarded rather than asserted: with a shared supply, whether the
-             power is on is a fact about the box, not about this host, so
-             being asked to do again what has already been done is a
-             possibility rather than a mistake. *)
+          (* Guarded on [running] rather than on the supply, and guarded
+             rather than asserted. Rather than on the supply, because with a
+             shared one the supply answers for the box and not for this host:
+             a box switching itself off cuts the supply and then tells each of
+             its hosts to stop, and a guard reading the supply would find the
+             first of those two steps had already made the second a no-op.
+             Guarded, because being asked to do again what has been done is
+             then a possibility rather than a mistake. *)
           power_on      = (fun () ->
-                              if t.trx.power.on then
+                              if t.running then
                                   Log.(log widget.logger Debug (lazy
                                       "Ignoring power on: already on"))
                               else (
                                   Log.(log widget.logger Debug (lazy "Powering on")) ;
+                                  t.running <- true ;
+                                  (* Whoever shares this supply may have
+                                     switched it on already, and [power_up] is
+                                     the same either way. *)
                                   Simulation.power_up t.trx.power ;
                                   init () t
                               )) ;
           power_off     = (fun () ->
-                              if not t.trx.power.on then
+                              if not t.running then
                                   Log.(log widget.logger Debug (lazy
                                       "Ignoring power off: already off"))
-                              else power_off t) ;
+                              else (
+                                  t.running <- false ;
+                                  power_off t
+                              )) ;
           power }
     in
     (* No "on" property here: the switch belongs to whoever minted the supply,
@@ -860,20 +889,29 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
         metric_property "DNS resolutions" ~descr:"DNS resolution times."
             (Metric.Timed.T t.resolutions) ] ;
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "New host '%s'" name))) ;
-    if t.trx.power.on then init () t ;
+    if t.running then init () t ;
     t
 
 let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
-         ~parent ?location name =
+         ~parent ?power ?location name =
     let widget = Widget.make ~parent ?location ~device_type:"host" name in
+    (* A host can take it's power source from some larger equipment: *)
+    let own_power = power = None in
+    let power =
+        Option.default_delayed (fun () ->
+            Simulation.make_power (Simulation.of_widget widget) name
+        ) power in
     let eth_state =
         (* FIXME: Don't use the GW for same net IP! *)
-        Eth.State.make ?mac ?gateways ~parent:widget
-                       ~power:(Simulation.make_power
-                                   (Simulation.of_widget widget) name) () in
+        Eth.State.make ?mac ?gateways ~parent:widget ~power () in
     let eth_trx = Eth.TRX.make eth_state in
     let t = make_from_eth ?search_sfx ?nameserver ?on ~widget ?static_ip
                           ?netmask eth_state eth_trx name in
+    (* This supply is this host's own, so a host built switched off takes it
+       down, and its adapter with it: a machine that is off does not answer an
+       ARP request either. A host handed somebody else's supply leaves it
+       alone -- see [make_from_eth]. *)
+    if own_power && not t.running then Simulation.power_down power ;
     (* This host minted the supply above, so the switch for it goes here, and
        so does stopping it for good. And it is a whole machine, unlike a host
        built on somebody else's adapter. *)
@@ -881,7 +919,9 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?on ?static_ip ?netmask
     widget.on_delete <- (fun () -> t.trx.power_off ()) ;
     Widget.add_properties widget Widget.[
         property "on" ~descr:"The host is powered on." ~kind:Bool ~action:true
-            ~getter:(fun () -> `Bool t.trx.power.Simulation.on)
+            (* What this host is, not what its supply is: with a shared supply
+               those are two questions, and this switch answers for the host. *)
+            ~getter:(fun () -> `Bool t.running)
             ~setter:(fun v ->
                 if to_bool v then t.trx.power_on () else t.trx.power_off ()) ;
         property "static-ip" ~kind:(Optional String)

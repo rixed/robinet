@@ -227,11 +227,13 @@ let host ?location sim =
         todo "UDP server for localhost"
     and arp_set _ _ =
         todo "set ARP table of localhost"
-    and power_on ?on_ip () = ignore on_ip
+    and power_on () = ()
     and power_off () = () in
     { Host.widget = ctx.widget ;
       tcp_connect ; udp_connect ; udp_send ; ping ;
       gethostbyname = gethostbyname ctx ;
       tcp_server = tcp_server ctx ; udp_server ; signal_err ;
       dev = { write = ignore ; set_read = ignore } ;
+      (* Nothing here waits for an address: this host has the one the machine
+         running the simulation has, and had it before the simulation began. *)
       arp_set ; on_ip = [] ; power_on ; power_off ; power = ctx.power }

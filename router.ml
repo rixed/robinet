@@ -511,14 +511,16 @@ struct
     let notify_never = { probability = 0. ; delay = 0. }
     let notify_always ?(delay=0.) () = { probability = 1. ; delay }
 
-    let make ~parent ?(notify_errs=notify_always ()) ?(admin_reroute=true)
-             ?(load_balancing=First) ?can_forward_after
-             ?delay ?loss ?mtu ?(macs=[||])
+    let make ~parent ?power ?(notify_errs=notify_always ())
+             ?(admin_reroute=true) ?(load_balancing=First)
+             ?can_forward_after ?delay ?loss ?mtu ?(macs=[||])
              num_ifaces routes name =
         let widget = Widget.make ~parent name in
         let power =
-            Simulation.make_power (Simulation.of_widget widget)
-                                  (Widget.full_name widget) in
+            Option.default_delayed (fun () ->
+                Simulation.make_power (Simulation.of_widget widget)
+                                      (Widget.full_name widget)
+            ) power in
         (* Display the routing table (debug) *)
         Log.(log widget.Widget.logger Debug (lazy
             (Printf.sprintf2 "Creating a router with routing table:%a"
@@ -559,13 +561,13 @@ struct
            host is then told to start over, or to forget what it knew, on its
            own. *)
         let switch on =
-            if on <> t.power.Simulation.on then
+            if on <> t.power.on then
                 if on then (
                     Simulation.power_up t.power ;
-                    iter_admin_hosts (fun h -> h.Host.trx.Host.power_on ())
+                    iter_admin_hosts (fun h -> h.trx.power_on ())
                 ) else (
                     Simulation.power_down t.power ;
-                    iter_admin_hosts (fun h -> h.Host.trx.Host.power_off ()) ;
+                    iter_admin_hosts (fun h -> h.trx.power_off ()) ;
                     (* Including the interfaces no admin host was built on,
                        which no [Host.reset] would have reached. *)
                     Array.iter (fun iface -> Eth.State.reset iface.eth) t.ifaces
@@ -864,20 +866,31 @@ struct
 
         (* A packet for the router itself goes to that interface's admin host,
          * which remembers the peer it came from -- state that must not survive
-         * the box being switched off. *)
+         * the box being switched off.
+         *
+         * Every interface is given one, and every one of them is counted: they
+         * share the box's supply, so whatever switching the box off does to
+         * them it has to do to all of them, and a check on the first alone
+         * passes just as well when only the first is reached. *)
         let admin_socks () =
-            match router.ifaces.(0).admin_host with
-            | None -> -1
-            | Some h -> Hashtbl.length h.Host.udp_socks in
-        Ip.Pdu.{ (random ()) with dst = Ip.Addr.of_string "192.168.1.254" ;
-                                  proto = Ip.Proto.udp ; ttl = 9 } |>
-        Ip.Pdu.pack |>
-        Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (snd addrs.(0)) |>
-        Eth.Pdu.pack |>
-        send 0 ;
+            Array.fold_left (fun n iface ->
+                match iface.admin_host with
+                | None -> n
+                | Some h -> n + Hashtbl.length h.Host.udp_socks
+            ) 0 router.ifaces in
+        let poke n =
+            Ip.Pdu.{ (random ()) with
+                     dst = Ip.Addr.of_string
+                               (Printf.sprintf "192.168.%d.254" (n + 1)) ;
+                     proto = Ip.Proto.udp ; ttl = 9 } |>
+            Ip.Pdu.pack |>
+            Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (snd addrs.(n)) |>
+            Eth.Pdu.pack |>
+            send n in
+        poke 0 ; poke 1 ; poke 2 ;
         Simulation.run sim false ;
-        "the admin host answers for the router's own address" @?
-            (admin_socks () = 1) ;
+        "every admin host answers for its interface's own address" @?
+            (admin_socks () = 3) ;
 
         let flip on =
             match switch_of router.widget with
@@ -1043,10 +1056,11 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let local_ips = Ip.Cidr.local_addrs local_cidr in
     let netmask = Ip.Cidr.to_netmask local_cidr in
     let broadcast = Ip.Cidr.all1s_addr local_cidr in
+    let power = Simulation.make_power (Simulation.of_widget widget) name in
     (* Build the output router *)
     let router =
-        Router.(make ~parent:widget ?delay ?loss ?mtu ?notify_errs ?admin_reroute
-                     ?macs:(Option.map (Array.make 1) mac) 2
+        Router.(make ~parent:widget ~power ?delay ?loss ?mtu ?notify_errs
+                     ?admin_reroute ?macs:(Option.map (Array.make 1) mac) 2
             [ (* route everything from anywhere to LAN if dest fits local_cidr *)
               Route.forward ~dst_mask:local_cidr 0 ;
               (* or zero IP address *)
@@ -1076,8 +1090,12 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let srv_ip = Enum.get_exn local_ips in (* second IP is the dhcp/name servers *)
     let h : Host.t =
         let gateways = [ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw_mac) ] in
+        (* Switched off, and switched on at the end of this function: a host
+         * that is running does its boot-time configuration then and there,
+         * and what it is to do once it has an address is hung on it a few
+         * lines further down. *)
         Host.make ?nameserver ~gateways ~netmask ~static_ip:srv_ip
-                  ~parent:widget "srv" in
+                  ~parent:widget ~power ~on:false "srv" in
     (* Now we need the repeater and the services: *)
     (* FIXME: instead of a Hub that forces us into having 2 IPs make a simple TRX directly, that inspects the protostack and if
      * the dest IP is gw_ip == src_iv then forward it to the host and if not forward it to the NAT. *)
@@ -1093,7 +1111,6 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let trx =
         { ins = in_trx ;
           out = out_trx.out } in
-    let power = Simulation.make_power (Simulation.of_widget widget) name in
     let gw = { trx ; widget ; power ; dhcp_state = None ; dns_state = None ;
                nat_state } in
     (* Now prepare the services that will run on the host [h]: *)
@@ -1109,6 +1126,12 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
             [ Enum.get_exn local_ips, Ip.Cidr.all1s_addr local_cidr ]
         ) dhcp_range in
     let start_dhcpd gw =
+        (* Built afresh on every start, so that it takes up what the host's
+         * configuration has become; the one it replaces goes with it, or a
+         * gateway switched off and on again would grow another pair of parts
+         * every time. *)
+        Option.may (fun (st : Dhcpd.State.t) -> Widget.destroy st.Dhcpd.State.widget)
+                   gw.dhcp_state ;
         (* Get from the host what could be edited there (TODO: dhcp_mtu,
          * lease_time_sec etc could also be part of the config) *)
         let netmask = h.netmask in
@@ -1120,6 +1143,8 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
         (* TODO: register a callback when leasing/releasing that updates the dns lookup function *)
         Dhcpd.serve st h.trx in
     let start_dns gw =
+        Option.may (fun (st : Named.State.t) -> Widget.destroy st.Named.State.widget)
+                   gw.dns_state ;
         let st =
             Named.State.make ~parent:h.trx.widget (fun _ -> None) in (* Delegate everything to nameserver *)
         gw.dns_state <- Some st ;
@@ -1128,6 +1153,9 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
         Named.serve st h.trx in
     (* Make the host [h] start dhcpd and dns when it is powered on: *)
     h.trx.on_ip <- (fun _h -> start_dhcpd gw ; start_dns gw) :: h.trx.on_ip ;
+    (* And now it may run. Everything it is to do on being switched on is in
+     * place, which is the whole reason it was built switched off. *)
+    h.trx.power_on () ;
     Widget.add_properties widget Widget.[
         property "nat-max-cnxs" ~kind:Int
             ~descr:"Max number of connections tracked by the NAT."
@@ -1164,8 +1192,12 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
                 if v <> gw.power.on then
                 if v then (
                     Simulation.power_up gw.power ;
-                    start_dhcpd gw ;
-                    start_dns gw
+                    (* The services come back with the host that runs them: it
+                     * starts them itself, from [on_ip], once it has its
+                     * address again. Starting them here would register them on
+                     * a host that is still switched off, which registers
+                     * nothing at all. *)
+                    h.trx.power_on ()
                 ) else (
                     Simulation.power_down gw.power ;
                     h.trx.power_off ()
