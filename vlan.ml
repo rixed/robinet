@@ -70,6 +70,29 @@ module Pdu = struct
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
+
+    (** What a tag says, which is a priority, a bit nobody sets any more, the
+     * tag itself and what is under it. *)
+    let kind_of (_ : t) =
+        let open SimTypes in
+        Widget.record
+            [| "priority", IRange (0, 7) ;
+               "canonical format", Bool ;
+               "vlan", IRange (0, 0xfff) ;
+               "protocol",
+               Widget.one_of ~range:(0, 0xffff) Arp.HwProto.choices ;
+               "payload", Bytes |]
+
+    let to_json (t : t) =
+        `Assoc [ "priority", `Int t.prio ;
+                 "canonical format", `Bool t.cfi ;
+                 "vlan", `Int t.id ;
+                 "protocol", `Int (t.proto :> int) ;
+                 "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    (*$T kind_of
+      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
+     *)
     (*$>*)
 end
 

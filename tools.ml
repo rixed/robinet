@@ -274,6 +274,17 @@ let int32_of_bitstring bits =
     | {| n : 32 ; _ : -1 : bitstring |} -> n
     | {| _ |} -> not_enough_bits "int32_of_bitstring" 32 bits
 
+(** The number an [int32] stands for when it is read unsigned, which is how
+ * every protocol field of that width is meant: a sequence number of all ones
+ * is 4294967295 and not -1. OCaml's own [int] is wider, so nothing is lost. *)
+let uint32 n = Int32.to_int n land 0xffff_ffff
+
+(*$= uint32 & ~printer:string_of_int
+  (uint32 0l) 0
+  (uint32 (-1l)) 0xffff_ffff
+  (uint32 0x7fff_ffffl) 0x7fff_ffff
+ *)
+
 let int16_of_bitstring bits =
     match%bitstring bits with
     | {| n : 16 ; _ : -1 : bitstring |} -> n

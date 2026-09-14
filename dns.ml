@@ -54,6 +54,12 @@ module QType = struct
     let aaaa  = o 28
 
     let random () = randi 16
+
+    (** The record types this module has a name for, as the choices of a kind
+     * (see [Widget.one_of]), labelled by [to_string]. There are many more. *)
+    let choices =
+        [| 1 ; 2 ; 5 ; 12 ; 13 ; 15 ; 28 |] |>
+        Array.map (fun v -> v, to_string (o v))
 end
 
 let qclass_inet = 1
@@ -260,6 +266,83 @@ struct
 
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
+     *)
+
+    (* The four sections of a message are four tables of the same shape, bar
+       the three columns only a resource record has. *)
+    let qtype = Widget.one_of ~range:(0, 0xffff) QType.choices
+    let qclass = Widget.one_of ~range:(0, 0xffff) [| 1, "IN" |]
+
+    let question_kind =
+        let open SimTypes in
+        Widget.row
+            [| "name", Widget.hint "www.example.com" String ;
+               "type", qtype ;
+               "class", qclass |]
+
+    let rr_kind =
+        let open SimTypes in
+        Widget.row
+            [| "name", Widget.hint "www.example.com" String ;
+               "type", qtype ;
+               "class", qclass ;
+               "TTL", IRange (0, 0xffff_ffff) ;
+               "data", Bytes |]
+
+    (** What a message says. No payload: DNS is where a packet ends.
+     *
+     * The counts of the four sections are not here either, being the lengths
+     * of the four lists below -- which is what [pack] writes them from. *)
+    let kind_of (_ : t) =
+        let open SimTypes in
+        Widget.record
+            [| "id", IRange (0, 0xffff) ;
+               "query", Bool ;
+               "opcode",
+               Widget.one_of ~range:(0, 0xf)
+                   [| 0, "query" ; 1, "inverse query" ; 2, "status request" |] ;
+               "authoritative", Bool ;
+               "truncated", Bool ;
+               "recursion desired", Bool ;
+               "recursion available", Bool ;
+               "authentic data", Bool ;
+               "checking disabled", Bool ;
+               "status", IRange (0, 0xf) ;
+               "questions", Widget.list question_kind ;
+               "answers", Widget.list rr_kind ;
+               "authority", Widget.list rr_kind ;
+               "additional", Widget.list rr_kind |]
+
+    let to_json (t : t) =
+        let json_of_question (name, qtype, qclass) =
+            `Assoc [ "name", `String name ;
+                     "type", `Int (qtype : QType.t :> int) ;
+                     "class", `Int qclass ] in
+        let json_of_rr (name, qtype, qclass, ttl, data) =
+            `Assoc [ "name", `String name ;
+                     "type", `Int (qtype : QType.t :> int) ;
+                     "class", `Int qclass ;
+                     "TTL", `Int (uint32 ttl) ;
+                     "data", Widget.json_of_bytes
+                                 (bitstring_of_string (Bytes.to_string data)) ] in
+        let section f l = `List (List.map f l) in
+        `Assoc [ "id", `Int t.id ;
+                 "query", `Bool t.is_query ;
+                 "opcode", `Int t.opcode ;
+                 "authoritative", `Bool t.is_auth ;
+                 "truncated", `Bool t.truncated ;
+                 "recursion desired", `Bool t.rec_desired ;
+                 "recursion available", `Bool t.rec_avlb ;
+                 "authentic data", `Bool t.authentic_data ;
+                 "checking disabled", `Bool t.checking_disabled ;
+                 "status", `Int t.status ;
+                 "questions", section json_of_question t.questions ;
+                 "answers", section json_of_rr t.answer_rrs ;
+                 "authority", section json_of_rr t.authority_rrs ;
+                 "additional", section json_of_rr t.additional_rrs ]
+
+    (*$T kind_of
+      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
      *)
     (*$>*)
 end

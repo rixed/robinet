@@ -58,6 +58,12 @@ module Op = struct
     let inarp_request = o 8
     let inarp_reply   = o 9
     let arp_nack      = o 10
+
+    (** The operations this module has a name for, as the choices of a kind
+     * (see [Widget.one_of]), labelled by [to_string]. *)
+    let choices =
+        Array.init 10 (fun i -> i + 1) |>
+        Array.map (fun v -> v, to_string (o v))
 end
 
 (** Arp identifiers for MAC types.
@@ -89,6 +95,11 @@ module HwType = struct
     let rec random () =
         let p = randi 3 in
         if Inner.is_valid p then o p else random ()
+
+    (** The hardware types this module has a name for (see [Arp.Op.choices]). *)
+    let choices =
+        Array.init 7 (fun i -> i + 1) |>
+        Array.map (fun v -> v, to_string (o v))
 end
 
 (** Arp Protocol Types.
@@ -111,6 +122,13 @@ module HwProto = struct
     let ieee8021q = o 0x8100
 
     let random () = o (randi 16)
+
+    (** The protocols this module has a name for (see [Arp.Op.choices]). These
+     * are the numbers an Ethernet frame carries to say what is in it, so
+     * everything above uses them too. *)
+    let choices =
+        [| 0x0800 ; 0x0806 ; 0x8100 ; 0x86DD |] |>
+        Array.map (fun v -> v, to_string (o v))
 end
 
 (** Pack/Unpack an ARP message *)
@@ -174,6 +192,43 @@ module Pdu = struct
             Error (lazy "Not ARP")
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
+     *)
+
+    (** What a message says.
+     *
+     * The four addresses are bytes and not strings, because this module cannot
+     * know what they are: what a hardware address looks like is what [hw_type]
+     * says, and the module that can read one is above this one. Their lengths
+     * are not here either -- [pack] writes them from the addresses
+     * themselves. *)
+    let kind_of (_ : t) =
+        let open SimTypes in
+        Widget.record
+            [| "hardware type",
+               Widget.one_of ~range:(0, 0xffff) HwType.choices ;
+               "protocol type",
+               Widget.one_of ~range:(0, 0xffff) HwProto.choices ;
+               "operation", Widget.one_of ~range:(0, 0xffff) Op.choices ;
+               "sender hardware address", Bytes ;
+               "sender protocol address", Bytes ;
+               "target hardware address", Bytes ;
+               "target protocol address", Bytes |]
+
+    let to_json (t : t) =
+        `Assoc [ "hardware type", `Int (t.hw_type :> int) ;
+                 "protocol type", `Int (t.proto_type :> int) ;
+                 "operation", `Int (t.operation :> int) ;
+                 "sender hardware address",
+                 Widget.json_of_bytes t.sender_hw ;
+                 "sender protocol address",
+                 Widget.json_of_bytes t.sender_proto ;
+                 "target hardware address",
+                 Widget.json_of_bytes t.target_hw ;
+                 "target protocol address",
+                 Widget.json_of_bytes t.target_proto ]
+
+    (*$T kind_of
+      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
      *)
     (*$>*)
 end

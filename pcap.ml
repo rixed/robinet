@@ -228,6 +228,14 @@ module Dlt = struct
     let random () = o (rand32 ())
 
     let to_int (t : t) = Int32.to_int (t :> int32)
+
+    (** The link types this module has a name for, as the choices of a kind
+     * (see [Widget.one_of]). Labelled by [to_string] rather than written out
+     * again here, so that a name is spelt in one place. A capture may of
+     * course be of any other. *)
+    let choices =
+        [| 0l ; 1l ; 2l ; 3l ; 4l ; 5l ; 6l ; 7l ; 8l ; 9l ; 10l ; 113l |] |>
+        Array.map (fun v -> Int32.to_int v, to_string (o v))
 end
 
 (** The global header of a pcap file. *)
@@ -249,6 +257,7 @@ type global_header = { name          : string ; (** The file name. *)
  * afterward. *)
 module Pdu =
 struct
+    (*$< Pdu *)
     (** These informations are present as the first layer of every packet
      * read from a pcap file. *)
     type t = { source_name : string ; caplen : int ; wirelen : int ;
@@ -325,6 +334,40 @@ struct
             else write_pdu in
         let close () = close_out out_chan in
         write_pdu, close
+
+    (** What this pseudo-header says, for the interface to show: everything
+     * libpcap told us about the capture.
+     *
+     * Nothing here is worth an editor: the packet was captured, and saying
+     * otherwise now changes nothing about it. It is described all the same,
+     * because it is a layer like any other and a reader looking at a replayed
+     * frame wants to know when it was caught and how much of it was kept. *)
+    let kind_of (_ : t) =
+        let open SimTypes in
+        Widget.record
+            [| "source", String ;
+               (* Of the world outside, which is what a pcap file dates its
+                  packets by -- not an instant of the simulation, so not a
+                  [Time]: written out as it reads. *)
+               "captured at", String ;
+               "caplen", Int ;
+               "wirelen", Int ;
+               "dlt", Widget.one_of ~range:(0, 0xffff) Dlt.choices ;
+               "payload", Bytes |]
+
+    let to_json (t : t) =
+        `Assoc [ "source", `String t.source_name ;
+                 "captured at", `String (Clock.Wall.to_string t.ts) ;
+                 "caplen", `Int t.caplen ;
+                 "wirelen", `Int t.wirelen ;
+                 "dlt", `Int (Dlt.to_int t.dlt) ;
+                 "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    (*$T kind_of
+      let p = make "f" (Clock.Wall.o 1.) (randbs 10) in \
+      Widget.check_value (kind_of p) (to_json p) = ()
+     *)
+    (*$>*)
 end
 
 let default_dlt = Dlt.en10mb

@@ -242,6 +242,30 @@ module Pdu = struct
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
+
+    (** What a frame's header says, which is little enough: where from, where
+     * to, and what is inside. No preamble and no trailing checksum -- neither
+     * is in [t], both being the wire's business and not the frame's. *)
+    let kind_of (_ : t) =
+        let open SimTypes in
+        Widget.record
+            [| "source", Widget.hint "a4:ba:db:e6:15:fa" String ;
+               "destination", Widget.hint "a4:ba:db:e6:15:fa" String ;
+               "protocol", Widget.one_of ~range:(0, 0xffff) Proto.choices ;
+               "payload", Bytes |]
+
+    let to_json (t : t) =
+        (* The plain hexadecimal and not [Addr.to_string], which may name the
+           vendor instead ("Dell:e6:15:fa"): what is shown is what can be typed
+           back. *)
+        `Assoc [ "source", `String (Addr.to_hexstring t.src) ;
+                 "destination", `String (Addr.to_hexstring t.dst) ;
+                 "protocol", `Int (t.proto :> int) ;
+                 "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    (*$T kind_of
+      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
+     *)
     (*$>*)
 end
 

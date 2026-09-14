@@ -541,6 +541,100 @@ let to_string = function
      * declared as a string still gets something usable when handed a number. *)
     | v -> Yojson.Basic.to_string v
 
+(** Whether [v] is a value of [k], raising [Bad_value] naming what is not.
+
+ * Not {!Device.coerce}, although the two walk the same language. That one
+ * reads what a reader typed and is lenient on purpose -- a number arrives as
+ * the string of it, and a field is coerced rather than merely looked at. This
+ * one checks what a program wrote against the kind that same program wrote to
+ * describe it, which is a pair kept in step by hand: every protocol describes
+ * its own PDU twice over, once as a kind and once as a value, and nothing else
+ * would catch a field renamed in one half and not in the other.
+ *
+ * A metric is the exception: it says what it is in its own value, and there is
+ * nothing in the kind to check it against. *)
+let rec check_value ?(name="value") k v =
+    let wrong () =
+        bad_value "%s should be %s, not %s" name (kind_name k)
+            (Yojson.Basic.to_string v)
+    and within what mi ma x =
+        if x < mi || x > ma then
+            bad_value "%s is %s, outside %s..%s" name (what x) (what mi)
+                (what ma) in
+    let field_named fields n =
+        Array.exists (fun (n', _) -> n' = n) fields in
+    match k, v with
+    | (String | Text | FileName | Bytes), `String _ -> ()
+    | Int, `Int _ -> ()
+    (* Both, since JSON has one number type and Yojson two: a round float
+     * written out and read back is an [`Int] again. *)
+    | Float, (`Float _ | `Int _) -> ()
+    | Bool, `Bool _ -> ()
+    | Widget_id, `Int _ -> ()
+    | Time, (`Float _ | `Int _) -> ()
+    | IRange (mi, ma), `Int i -> within string_of_int mi ma i
+    | FRange (mi, ma), `Float f -> within string_of_float mi ma f
+    | FRange (mi, ma), `Int i -> within string_of_float mi ma (float_of_int i)
+    | Enum (choices, range), (`Int _ as v) ->
+        (try ignore (to_choice ?range choices v)
+         with Bad_value m -> bad_value "%s: %s" name m)
+    | Set choices, (`List _ as v) ->
+        (try ignore (to_choices choices v)
+         with Bad_value m -> bad_value "%s: %s" name m)
+    (* Its bytes and what they amount to, which is what [json_of_packet]
+     * writes. *)
+    | Packet, `Assoc [ "bits", `String _ ; "descr", `String _ ] -> ()
+    | Metric, _ -> ()
+    | Optional _, `Null -> ()
+    | Optional k, v -> check_value ~name k v
+    | Hint (_, k), v -> check_value ~name k v
+    | List k, `List l ->
+        List.iteri (fun i v ->
+            check_value ~name:(Printf.sprintf "%s[%d]" name i) k v
+        ) l
+    (* The same on the wire whichever way they are drawn: every field the kind
+     * names, and no other. *)
+    | (Row fields | Record fields), `Assoc given ->
+        List.iter (fun (n, _) ->
+            if not (field_named fields n) then
+                bad_value "%s has no field %S" name n
+        ) given ;
+        Array.iter (fun (fname, k) ->
+            match List.assoc_opt fname given with
+            | None -> bad_value "%s has no %S" name fname
+            | Some v -> check_value ~name:(name ^"."^ fname) k v
+        ) fields
+    | Variant cases, (`Assoc [ _ ] as v) ->
+        to_case (fun case v ->
+            match Array.find_opt (fun (c, _) -> c = case) cases with
+            | None ->
+                bad_value "%s: %S is none of its %d shapes" name case
+                    (Array.length cases)
+            | Some (_, k) -> check_value ~name:(name ^"."^ case) k v
+        ) v
+    | _ -> wrong ()
+
+(*$T check_value
+  check_value Int (`Int 1) = ()
+  check_value (optional Int) `Null = ()
+  check_value Bytes (`String "de ad") = ()
+  check_value (record [| "a", Int |]) (`Assoc [ "a", `Int 1 ]) = ()
+  check_value (list (row [| "a", Int |])) (`List [ `Assoc [ "a", `Int 1 ] ]) = ()
+  check_value (variant [| "a", Int |]) (`Assoc [ "a", `Int 1 ]) = ()
+  check_value (one_of ~range:(0, 9) [| 3, "c" |]) (`Int 7) = ()
+  (try check_value Int (`String "1") ; false with Bad_value _ -> true)
+  (try check_value (IRange (0, 9)) (`Int 10) ; false with Bad_value _ -> true)
+  (try check_value (one_of [| 3, "c" |]) (`Int 7) ; false \
+   with Bad_value _ -> true)
+  (try check_value (record [| "a", Int |]) (`Assoc [ "b", `Int 1 ]) ; false \
+   with Bad_value _ -> true)
+  (try check_value (record [| "a", Int |]) \
+         (`Assoc [ "a", `Int 1 ; "b", `Int 2 ]) ; false \
+   with Bad_value _ -> true)
+  (try check_value (variant [| "a", Int |]) (`Assoc [ "b", `Int 1 ]) ; false \
+   with Bad_value _ -> true)
+ *)
+
 (* Some common encoder to JSON: *)
 
 let json_of_optional sub = function

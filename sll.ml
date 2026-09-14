@@ -92,5 +92,38 @@ module Pdu = struct
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
+
+    (** The five directions, as the choices of a kind: numbered as they are on
+     * the wire, which is what [int_of_pkt_type] says. *)
+    let pkt_type_choices =
+        [| UnicastIn, "unicast to us" ; BroadcastIn, "broadcast" ;
+           MulticastIn, "multicast" ; OutToOut, "between two others" ;
+           SentByUs, "sent by us" |] |>
+        Array.map (fun (t, name) -> int_of_pkt_type t, name)
+
+    (** What the pseudo-header libpcap writes in front of a cooked capture
+     * says. No local address: a cooked capture does not carry one, which is
+     * the whole reason it exists. *)
+    let kind_of (_ : t) =
+        let open SimTypes in
+        Widget.record
+            [| "direction", Widget.one_of pkt_type_choices ;
+               "address type",
+               Widget.one_of ~range:(0, 0xffff) Arp.HwType.choices ;
+               "address", Bytes ;
+               "protocol",
+               Widget.one_of ~range:(0, 0xffff) Arp.HwProto.choices ;
+               "payload", Bytes |]
+
+    let to_json (t : t) =
+        `Assoc [ "direction", `Int (int_of_pkt_type t.pkt_type) ;
+                 "address type", `Int t.ll_addr_type ;
+                 "address", Widget.json_of_bytes t.ll_addr ;
+                 "protocol", `Int (t.proto :> int) ;
+                 "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    (*$T kind_of
+      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
+     *)
     (*$>*)
 end

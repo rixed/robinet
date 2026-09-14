@@ -98,6 +98,38 @@ module Pdu = struct
 
     (* TODO: unpack with ports a la ip.ml? *)
 
+    (** What a datagram's header says. No payload length: [t] has none, it
+     * being however long the payload is; and no version, that being what this
+     * module is.
+     *
+     * The traffic class is split in two here, unlike IPv4's type of service,
+     * because [t] holds it split. *)
+    let kind_of (_ : t) =
+        let open SimTypes in
+        Widget.record
+            [| "differentiated services", IRange (0, 0x3f) ;
+               "explicit congestion notification", IRange (0, 3) ;
+               "flow label", IRange (0, 0xfffff) ;
+               "next header", Widget.one_of ~range:(0, 0xff) Ip.Proto.choices ;
+               "hop limit", IRange (0, 0xff) ;
+               "source", Widget.hint "2001:db8::1" String ;
+               "destination", Widget.hint "2001:db8::1" String ;
+               "payload", Bytes |]
+
+    let to_json (t : t) =
+        `Assoc [ "differentiated services", `Int t.diff_serv ;
+                 "explicit congestion notification", `Int t.ecn ;
+                 "flow label", `Int t.flow_label ;
+                 "next header", `Int (t.proto :> int) ;
+                 "hop limit", `Int t.ttl ;
+                 "source", Ip.Addr.to_json t.src ;
+                 "destination", Ip.Addr.to_json t.dst ;
+                 "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    (*$T kind_of
+      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
+     *)
+
     (*$>*)
 end
 

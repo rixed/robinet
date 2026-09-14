@@ -145,6 +145,52 @@ struct
     let has_payload t =
         Payload.length t.payload = 0
 
+    (** The six flags, as the choices of a set: which of them are raised is
+     * what a segment says, and any of them may be. Numbered by their places,
+     * having no numbers of their own -- each is a bit of the header, and a bit
+     * is not a value. *)
+    let flag_choices =
+        Widget.choices [| "Urg" ; "Ack" ; "Psh" ; "Rst" ; "Syn" ; "Fin" |]
+
+    (** What a segment holds, for the interface to show and, later, to edit.
+     *
+     * No checksum: it is not in [t] either, being computed over fields of the
+     * IP header below (see [Ip.Pdu.pack]), so there is nothing here to show.
+     * The options are bytes until somebody writes the kind that describes
+     * them, which is the day the NOP option makes a variant case that carries
+     * nothing. *)
+    let kind_of (_ : t) =
+        let open SimTypes in
+        Widget.record
+            [| "source port", IRange (0, 0xffff) ;
+               "destination port", IRange (0, 0xffff) ;
+               "sequence number", IRange (0, 0xffff_ffff) ;
+               "acknowledgment number", IRange (0, 0xffff_ffff) ;
+               "flags", Set flag_choices ;
+               "window size", IRange (0, 0xffff) ;
+               "urgent pointer", IRange (0, 0xffff) ;
+               "options", Bytes ;
+               "payload", Bytes |]
+
+    let to_json (t : t) =
+        let raised =
+            [ t.flags.urg ; t.flags.ack ; t.flags.psh ;
+              t.flags.rst ; t.flags.syn ; t.flags.fin ] |>
+            List.filteri_map (fun i up -> if up then Some (`Int i) else None) in
+        `Assoc [ "source port", `Int (t.src_port :> int) ;
+                 "destination port", `Int (t.dst_port :> int) ;
+                 "sequence number", `Int (uint32 (t.seq_num :> int32)) ;
+                 "acknowledgment number", `Int (uint32 (t.ack_num :> int32)) ;
+                 "flags", `List raised ;
+                 "window size", `Int t.win_size ;
+                 "urgent pointer", `Int t.urg_ptr ;
+                 "options", Widget.json_of_bytes t.options ;
+                 "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    (*$T kind_of
+      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
+     *)
+
     (*$>*)
 end
 

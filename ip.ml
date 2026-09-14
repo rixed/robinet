@@ -105,6 +105,14 @@ module Proto = struct
     let icmpv6 = o 58
 
     let random () = o (randi 8)
+
+    (** The protocols this module has a name for, as the choices of a kind
+     * (see [Widget.one_of]), labelled by [to_string] -- which is to say by
+     * [/etc/protocols], the same names the rest of the program prints. A
+     * datagram may of course carry any of the 256. *)
+    let choices =
+        [| 1 ; 6 ; 17 ; 41 ; 58 |] |>
+        Array.map (fun v -> v, to_string (o v))
 end
 
 (** {3 Addresses} *)
@@ -815,6 +823,53 @@ module Pdu = struct
             flip Result.bind \
                 (fun (_, src, dst) -> Ok (src, dst)) \
         )
+     *)
+
+    (** What a datagram's header says.
+     *
+     * The version and the header length are not in [t]: the first is what this
+     * module is, and the second follows from the options. Neither is the
+     * checksum, which [pack_header] computes. The total length is, and is
+     * shown as the number it is -- computing it is what an editor would offer,
+     * and the editor is still to come.
+     *
+     * The type of service is one byte and is shown as one, rather than split
+     * into the six bits of a DSCP and the two of an ECN: [t] holds the byte,
+     * and a reader who wants it read out has [ToS.to_dscp_string]. *)
+    let kind_of (_ : t) =
+        let open SimTypes in
+        Widget.record
+            [| "type of service", IRange (0, 0xff) ;
+               "total length", IRange (0, 0xffff) ;
+               "id", IRange (0, 0xffff) ;
+               "don't fragment", Bool ;
+               "more fragments", Bool ;
+               "fragment offset", IRange (0, 0x1fff) ;
+               "time to live", IRange (0, 0xff) ;
+               "protocol", Widget.one_of ~range:(0, 0xff) Proto.choices ;
+               "source", Widget.hint "192.168.0.1" String ;
+               "destination", Widget.hint "192.168.0.1" String ;
+               "options", Bytes ;
+               "payload", Bytes |]
+
+    let to_json (t : t) =
+        `Assoc [ "type of service", `Int (t.tos :> int) ;
+                 "total length", `Int t.tot_len ;
+                 "id", `Int t.id ;
+                 "don't fragment", `Bool t.dont_frag ;
+                 "more fragments", `Bool t.more_frags ;
+                 "fragment offset", `Int t.frag_offset ;
+                 "time to live", `Int t.ttl ;
+                 "protocol", `Int (t.proto :> int) ;
+                 (* The dotted form and not [to_string]'s, which may name the
+                    host instead: what is shown is what can be typed back. *)
+                 "source", Addr.to_json t.src ;
+                 "destination", Addr.to_json t.dst ;
+                 "options", Widget.json_of_bytes t.options ;
+                 "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    (*$T kind_of
+      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
      *)
     (*$>*)
 end

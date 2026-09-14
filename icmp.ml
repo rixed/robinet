@@ -140,6 +140,45 @@ struct
        let r = o (8, 0) in is_echo_request r && is_echo_reply (reply_of r)
      *)
 
+    (** What each message type is called, as the choices of a kind (see
+     * [Widget.one_of]).
+     *
+     * Written out here rather than taken from [to_string], which names a type
+     * and a code together and has no name for a type on its own: "Host
+     * Unreachable" is type 3 code 1, while type 3 is "Destination
+     * Unreachable". *)
+    let type_choices =
+        [|  0, "Echo Reply" ;
+            3, "Destination Unreachable" ;
+            4, "Source Quench" ;
+            5, "Redirect" ;
+            8, "Echo Request" ;
+            9, "Router Advertisement" ;
+           10, "Router Solicitation" ;
+           11, "Time Exceeded" ;
+           12, "Parameter Problem" ;
+           13, "Timestamp" ;
+           14, "Timestamp Reply" ;
+           15, "Information Request" ;
+           16, "Information Reply" ;
+           17, "Address Mask Request" ;
+           18, "Address Mask Reply" ;
+           30, "Traceroute" |]
+
+    (** Those types only, named as above: what the shape of a message narrows
+     * them down to (see [Icmp.Pdu.kind_of]). *)
+    let types typs =
+        Array.map (fun typ ->
+            match Array.find_opt (fun (t, _) -> t = typ) type_choices with
+            | Some c -> c
+            | None -> typ, Printf.sprintf "Type(%d)" typ
+        ) typs
+
+    (** The codes of one type, labelled by [to_string] -- which is where the
+     * name of a type and a code together is spelt, and is spelt once. *)
+    let codes typ codes =
+        Array.map (fun cod -> cod, to_string (o (typ, cod))) codes
+
     (*$>*)
 end
 
@@ -250,6 +289,98 @@ module Pdu = struct
             Error (lazy "Not ICMP")
     (*$Q pack
       (Q.make ~print:(fun pdu -> hexstring_of_bitstring (pdu :> bitstring)) (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
+     *)
+
+    (** What a message holds, which depends on what message it is: a variant
+     * over the four shapes, and not a record of a type beside a payload.
+     *
+     * The shape follows from the type -- see [random_payload] and [unpack],
+     * which agree on which types carry what -- so a record would let an editor
+     * offer an echo request carrying a redirect. Here the type is *inside* the
+     * case, narrowed to what that shape can be: choosing the case is choosing
+     * the message, which is the edit.
+     *
+     * Which is also why two of the cases have no type of their own. A redirect
+     * is type 5 and nothing else, an unreachable is type 3, and there is
+     * nothing there for an editor to ask about; what varies is the code, and
+     * for those two the codes are named.
+     *
+     * No checksum: [pack] computes it over the whole message, so [t] does not
+     * carry one. *)
+    let kind_of (_ : t) =
+        let open SimTypes in
+        Widget.variant
+            [| (* Echo, timestamp, information: the types [unpack] reads an
+                  identifier and a sequence number for, and no others -- which
+                  is why this one choice is closed. *)
+               "identifiers",
+               Widget.record
+                   [| "type",
+                      Widget.one_of
+                          (MsgType.types [| 0 ; 8 ; 13 ; 14 ; 15 ; 16 |]) ;
+                      "code", IRange (0, 0xff) ;
+                      "id", IRange (0, 0xffff) ;
+                      "sequence", IRange (0, 0xffff) ;
+                      "payload", Bytes |] ;
+               "redirect",
+               Widget.record
+                   [| "code",
+                      Widget.one_of ~range:(0, 0xff)
+                          (MsgType.codes 5 [| 0 ; 1 ; 2 ; 3 |]) ;
+                      "gateway", Widget.hint "192.168.0.1" String ;
+                      "payload", Bytes |] ;
+               "unreachable",
+               Widget.record
+                   [| "code",
+                      Widget.one_of ~range:(0, 0xff)
+                          (MsgType.codes 3 (Array.init 16 identity)) ;
+                      "next hop MTU", IRange (0, 0xffff) ;
+                      "payload", Bytes |] ;
+               (* Everything else, which quotes the datagram that caused it
+                  and points into it. *)
+               "quoted header",
+               Widget.record
+                   [| "type",
+                      Widget.one_of ~range:(0, 0xff) MsgType.type_choices ;
+                      "code", IRange (0, 0xff) ;
+                      "pointer", IRange (0, 0xff) ;
+                      "MTU", IRange (0, 0xffff) ;
+                      "payload", Bytes |] |]
+
+    let to_json (t : t) =
+        let typ = MsgType.type_of t.msg_type
+        and cod = MsgType.code_of t.msg_type in
+        let bytes (pld : Payload.t) = Widget.json_of_bytes (pld :> bitstring) in
+        let case name fields = `Assoc [ name, `Assoc fields ] in
+        match t.payload with
+        | Ids (id, seq, pld) ->
+            case "identifiers"
+                [ "type", `Int typ ; "code", `Int cod ;
+                  "id", `Int id ; "sequence", `Int seq ;
+                  "payload", bytes pld ]
+        | Redirect (ip, pld) ->
+            case "redirect"
+                [ "code", `Int cod ; "gateway", Ip.Addr.to_json ip ;
+                  "payload", bytes pld ]
+        | DestUnreachable (next_hop_mtu, pld) ->
+            case "unreachable"
+                [ "code", `Int cod ; "next hop MTU", `Int next_hop_mtu ;
+                  "payload", bytes pld ]
+        | Header { ptr ; mtu ; pld } ->
+            case "quoted header"
+                [ "type", `Int typ ; "code", `Int cod ;
+                  "pointer", `Int ptr ; "MTU", `Int mtu ;
+                  "payload", bytes pld ]
+
+    (* Every shape of message, and not merely whichever one a single random
+       draw happened to be: which types carry which shape is the one thing
+       these two halves have to agree on, and the disagreement would be in the
+       shape that was not drawn. *)
+    (*$T kind_of
+      Enum.range 0 ~until:255 |> Enum.for_all (fun typ -> \
+          let p = { msg_type = MsgType.o (typ, 0) ; \
+                    payload = random_payload (MsgType.o (typ, 0)) } in \
+          Widget.check_value (kind_of p) (to_json p) = ())
      *)
     (*$>*)
 end

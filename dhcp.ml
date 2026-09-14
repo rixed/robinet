@@ -65,6 +65,13 @@ module MsgType = struct
     let rec random () =
         let p = randi 3 + 1 in
         if Inner.is_valid p then p else random ()
+
+    (** The eight message types, as the choices of a kind (see
+     * [Widget.one_of]), labelled by [to_string]. There are no others: option
+     * 53 carries one of these and [Inner.is_valid] says so. *)
+    let choices =
+        Array.init 8 (fun i -> i + 1) |>
+        Array.map (fun v -> v, to_string (o v))
 end
 
 
@@ -162,6 +169,14 @@ module Option = struct
 
     let () =
         Array.iteri (fun i opt -> assert (i = opt.code)) all_options
+
+    (** The options this module has a name for, as the choices of a kind (see
+     * [Widget.one_of]): the ones above, less the holes. A message may carry
+     * any code at all, which is what the bounds of that kind say. *)
+    let choices =
+        Array.filter_map (fun opt ->
+            if opt.name = "dummy" then None else Some (opt.code, opt.name)
+        ) all_options
 
     let subnet_mask = 1
     let routers = 3
@@ -480,6 +495,116 @@ struct
             (BatOption.map_default Ip.Addr.to_dotted_string "none"
                                    ack.domain_name_server) ;
         assert_equal ~printer "example.com" (ack.search_sfx |? "none")
+     *)
+
+    (** What a message says: the BOOTP header it has always been, and then the
+     * options.
+     *
+     * Every option this module decodes is described, whether or not this
+     * message carries it, and an option it does not carry reads as absent --
+     * which is what [Optional] is for, and what an editor adding one needs to
+     * find here. The rest travel as they came, by their code, in a table of
+     * their own.
+     *
+     * A few of them are strings in [t] and bytes here: a client identifier and
+     * a request list are not written down by anyone, and showing them as text
+     * would show mojibake. *)
+    let kind_of (_ : t) =
+        let open SimTypes in
+        let address = Widget.hint "192.168.0.1" String in
+        Widget.record
+            [| "operation",
+               Widget.one_of [| 1, "BOOTREQUEST" ; 2, "BOOTREPLY" |] ;
+               "hardware type",
+               Widget.one_of ~range:(0, 0xff) Arp.HwType.choices ;
+               "hardware address length", IRange (0, 0xff) ;
+               "hops", IRange (0, 0xff) ;
+               "transaction id", IRange (0, 0xffff_ffff) ;
+               "seconds", IRange (0, 0xffff) ;
+               "broadcast", Bool ;
+               "client address", address ;
+               "your address", address ;
+               "server address", address ;
+               "relay address", address ;
+               "client hardware address", Bytes ;
+               "server name", String ;
+               "boot file", String ;
+               "message type",
+               Widget.optional
+                   (Widget.one_of ~range:(0, 0xff) MsgType.choices) ;
+               "subnet mask", Widget.optional address ;
+               "router", Widget.optional address ;
+               "NTP server", Widget.optional address ;
+               "SMTP server", Widget.optional address ;
+               "POP3 server", Widget.optional address ;
+               "name server", Widget.optional address ;
+               "host name", Widget.optional String ;
+               "domain name", Widget.optional String ;
+               "lease time", Widget.optional (IRange (0, 0xffff_ffff)) ;
+               "server identifier", Widget.optional address ;
+               "requested address", Widget.optional address ;
+               "message", Widget.optional Text ;
+               "max message size", Widget.optional (IRange (0, 0xffff)) ;
+               "vendor class", Widget.optional String ;
+               "client identifier", Widget.optional Bytes ;
+               "request list", Widget.optional Bytes ;
+               "other options",
+               Widget.list
+                   (Widget.row
+                       [| "code",
+                          Widget.one_of ~range:(0, 0xff) Option.choices ;
+                          "value", Bytes |]) |]
+
+    let to_json (t : t) =
+        let bytes s = Widget.json_of_bytes (bitstring_of_string s) in
+        let address = Widget.json_of_optional Ip.Addr.to_json
+        and str = Widget.json_of_optional (fun s -> `String s)
+        and opaque = Widget.json_of_optional bytes
+        and count = Widget.json_of_optional (fun i -> `Int i) in
+        `Assoc [ "operation",
+                 `Int (match t.op with BootRequest -> 1 | BootReply -> 2) ;
+                 "hardware type", `Int (t.htype :> int) ;
+                 "hardware address length", `Int t.hlen ;
+                 "hops", `Int t.hops ;
+                 "transaction id", `Int (uint32 t.xid) ;
+                 "seconds", `Int t.secs ;
+                 "broadcast", `Bool t.broadcast ;
+                 "client address", Ip.Addr.to_json t.ciaddr ;
+                 "your address", Ip.Addr.to_json t.yiaddr ;
+                 "server address", Ip.Addr.to_json t.siaddr ;
+                 "relay address", Ip.Addr.to_json t.giaddr ;
+                 "client hardware address", Widget.json_of_bytes t.chaddr ;
+                 "server name", `String t.sname ;
+                 "boot file", `String t.file ;
+                 "message type",
+                 Widget.json_of_optional (fun m -> `Int (m : MsgType.t :> int))
+                                         t.msg_type ;
+                 "subnet mask", address t.subnet_mask ;
+                 "router", address t.router ;
+                 "NTP server", address t.ntp_server ;
+                 "SMTP server", address t.smtp_server ;
+                 "POP3 server", address t.pop3_server ;
+                 "name server", address t.domain_name_server ;
+                 "host name", str t.host_name ;
+                 "domain name", str t.search_sfx ;
+                 "lease time",
+                 Widget.json_of_optional (fun l -> `Int (uint32 l))
+                                         t.lease_time ;
+                 "server identifier", address t.server_id ;
+                 "requested address", address t.requested_ip ;
+                 "message", str t.message ;
+                 "max message size", count t.max_dhcp_msg_size ;
+                 "vendor class", str t.vendor_class_id ;
+                 "client identifier", opaque t.client_id ;
+                 "request list", opaque t.request_list ;
+                 "other options",
+                 `List (List.map (fun (code, v) ->
+                            `Assoc [ "code", `Int code ;
+                                     "value", Widget.json_of_bytes v ]
+                        ) t.other_options) ]
+
+    (*$T kind_of
+      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
      *)
     (*$>*)
 

@@ -66,6 +66,31 @@ struct
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
+
+    (** What a datagram holds. The length counts the header as well as the
+     * payload, and the checksum is over fields of the IP header below: both
+     * are computed on the way out (see [make] and [Ip.Pdu.pack]) and are shown
+     * here as the plain numbers they are. Offering to compute them is
+     * something an editor does, and there is no editor yet. *)
+    let kind_of (_ : t) =
+        let open SimTypes in
+        Widget.record
+            [| "source port", IRange (0, 0xffff) ;
+               "destination port", IRange (0, 0xffff) ;
+               "length", IRange (0, 0xffff) ;
+               "checksum", IRange (0, 0xffff) ;
+               "payload", Bytes |]
+
+    let to_json (t : t) =
+        `Assoc [ "source port", `Int (t.src_port :> int) ;
+                 "destination port", `Int (t.dst_port :> int) ;
+                 "length", `Int t.length ;
+                 "checksum", `Int t.checksum ;
+                 "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    (*$T kind_of
+      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
+     *)
     (*$>*)
 end
 

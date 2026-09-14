@@ -149,6 +149,7 @@ open Tools
  * two representations, without loss of information.
  * Typically you want to unpack then update, then pack back to [bitstring]. *)
 module Pdu = struct
+    (*$< Pdu *)
     (** Each layer can be of any one of these known protocol. *)
     type layer = Raw  of bitstring (** the fallback when the actual protocol is not known *)
                | Dhcp of Dhcp.Pdu.t | Eth  of Eth.Pdu.t | Arp  of Arp.Pdu.t
@@ -362,6 +363,94 @@ module Pdu = struct
                     u)
 
         ) u t
+
+    (** {2 A packet, in the kind language}
+     *
+     * What a packet is is not a fixed shape -- which layers it has follows
+     * from what is in it -- so its kind is computed for the packet at hand,
+     * layer by layer, and travels beside its value exactly as a property's
+     * kind travels beside its own. Nothing has to describe every packet there
+     * could be.
+     *
+     * Each layer is one field of a record, drawn one under the next: the
+     * layers of a packet are what a reader unwraps, and each of them opens
+     * into its own fields. *)
+
+    let kind_of_layer = function
+        | Raw _ -> Bytes
+        | Dhcp p -> Dhcp.Pdu.kind_of p
+        | Eth  p -> Eth.Pdu.kind_of p
+        | Arp  p -> Arp.Pdu.kind_of p
+        | Ip   p -> Ip.Pdu.kind_of p
+        | Ip6  p -> Ip6.Pdu.kind_of p
+        | Udp  p -> Udp.Pdu.kind_of p
+        | Tcp  p -> Tcp.Pdu.kind_of p
+        | Dns  p -> Dns.Pdu.kind_of p
+        | Sll  p -> Sll.Pdu.kind_of p
+        | Vlan p -> Vlan.Pdu.kind_of p
+        | Icmp p -> Icmp.Pdu.kind_of p
+        | Pcap p -> Pcap.Pdu.kind_of p
+
+    let json_of_layer = function
+        | Raw bits -> Widget.json_of_bytes bits
+        | Dhcp p -> Dhcp.Pdu.to_json p
+        | Eth  p -> Eth.Pdu.to_json p
+        | Arp  p -> Arp.Pdu.to_json p
+        | Ip   p -> Ip.Pdu.to_json p
+        | Ip6  p -> Ip6.Pdu.to_json p
+        | Udp  p -> Udp.Pdu.to_json p
+        | Tcp  p -> Tcp.Pdu.to_json p
+        | Dns  p -> Dns.Pdu.to_json p
+        | Sll  p -> Sll.Pdu.to_json p
+        | Vlan p -> Vlan.Pdu.to_json p
+        | Icmp p -> Icmp.Pdu.to_json p
+        | Pcap p -> Pcap.Pdu.to_json p
+
+    (* What each layer is called, which is a field name and so must be its own:
+     * a packet carrying the same protocol twice -- a VLAN within a VLAN --
+     * numbers the second. The fallback layer has no protocol to be named by
+     * and is named for what it is.
+     *
+     * A packet of no layers at all is one of a single empty one: [unpack]
+     * never returns one, always giving the pcap pseudo-header at least, but a
+     * list is a list and a record must have a field. *)
+    let field_names t =
+        let seen = Hashtbl.create 8 in
+        List.map (fun layer ->
+            let name =
+                match name_of_layer layer with "" -> "Data" | n -> n in
+            let n = (Hashtbl.find_opt seen name |? 0) + 1 in
+            Hashtbl.replace seen name n ;
+            if n = 1 then name else Printf.sprintf "%s %d" name n
+        ) t
+
+    let layers = function
+        | [] -> [ Raw empty_bitstring ]
+        | t -> t
+
+    let kind_of t =
+        let t = layers t in
+        List.map2 (fun name layer -> name, kind_of_layer layer)
+                  (field_names t) t |>
+        Array.of_list |> Widget.record
+
+    let to_json t =
+        let t = layers t in
+        `Assoc (List.map2 (fun name layer -> name, json_of_layer layer)
+                          (field_names t) t)
+
+    (* Every packet of a capture of real traffic, which is a good many shapes
+       of packet and every layer these two halves know how to describe. *)
+    (*$T kind_of
+      Pcap.enum_of_file "tests/someweb.pcap" /@ unpack |> \
+      Enum.for_all (fun p -> Widget.check_value (kind_of p) (to_json p) = ())
+      Pcap.enum_of_file "tests/someweb_sll.pcap" /@ unpack |> \
+      Enum.for_all (fun p -> Widget.check_value (kind_of p) (to_json p) = ())
+      Pcap.enum_of_file "tests/various_vlans.pcap" /@ unpack |> \
+      Enum.for_all (fun p -> Widget.check_value (kind_of p) (to_json p) = ())
+      kind_of [] = Record [| "Data", Bytes |]
+     *)
+    (*$>*)
 end
 
 (** {2 Shorthands} *)
