@@ -1310,6 +1310,28 @@ button.eject {
     padding: .1rem .45rem;
     line-height: 1;
 }
+/* The button that opens a cell holding more than it shows: as small as a
+ * label of two characters can be, and out of the way until the eye is on the
+ * row it is in. What it opens is meant to be selected, so what it opens into
+ * wraps and is monospaced -- a run of bytes read a nibble out of step is worse
+ * than no bytes at all. */
+button.reveal {
+    flex: none;
+    width: auto;
+    margin: 0;
+    padding: 0 .3rem;
+    font-size: .7rem;
+    font-family: var(--pico-font-family-monospace, monospace);
+    line-height: 1.4;
+}
+.listing .cell .ro.revealed {
+    font-family: var(--pico-font-family-monospace, monospace);
+    font-size: .75rem;
+    white-space: normal;
+    word-break: break-all;
+    user-select: all;
+}
+
 button.eject svg {
     width: .9rem;
     height: .8rem;

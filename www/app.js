@@ -1906,6 +1906,12 @@ document.addEventListener('alpine:init', () => {
                      * disabled for good, since every later reading of it is
                      * undefined too and leaves the attribute where it is. */
                     p.ejecting = false
+                    /* Which frames and which runs of bytes the reader has
+                       asked to see in full (see [revealKey]). Kept on the
+                       property and not on the cell: a table is rebuilt
+                       whenever its value changes, and a cable's last packets
+                       change with every frame it carries. */
+                    p.revealed = new Set()
                     resetDraft(p)
                     p.metric = p.kind.type === 'metric'
                         ? metricRows(p.value, p.units) : null
@@ -2231,10 +2237,60 @@ document.addEventListener('alpine:init', () => {
             return p.units
         },
 
-        /* What one cell of a read-only table says. [units] are the property's,
-         * every cell of a list being counted in the same thing. */
-        cellText(c, units) {
+        /* Whether this cell holds more than it shows, and so is worth a
+         * button: a frame, whose bytes are there beside what it amounts to,
+         * and a run of octets longer than the two ends of it that fit. */
+        revealable(c) {
+            const t = baseKind(c.kind).type
+            if (t === 'packet') return !!(c.value && c.value.bits)
+            if (t === 'bytes')
+                return abbrevBytes(c.draft) !== String(c.draft || '')
+            return false
+        },
+
+        /* Which cell this is, as something that survives the table being
+         * rebuilt under it: the bytes themselves. Two cells holding the same
+         * frame open together, which is what a reader who opened one of them
+         * meant anyway. */
+        revealKey(c) {
+            return baseKind(c.kind).type === 'packet'
+                ? (c.value && c.value.bits) || '' : String(c.draft || '')
+        },
+
+        revealed(p, c) {
+            return !!(p.revealed && p.revealed.has(this.revealKey(c)))
+        },
+
+        /* Open this cell, or close it again. The bytes are the point of
+         * opening one: a reader who wants them wants to select them, and what
+         * a tooltip says cannot be selected. */
+        reveal(p, c) {
+            if (!p.revealed) p.revealed = new Set()
+            const key = this.revealKey(c)
+            if (p.revealed.has(key)) p.revealed.delete(key)
+            else p.revealed.add(key)
+        },
+
+        /* What the button says: hexadecimal for a frame, which is the other
+         * thing it could show, and "all of it" for bytes already shown in
+         * part. */
+        revealLabel(c) {
+            return baseKind(c.kind).type === 'packet' ? '0x' : '\u2026'
+        },
+
+        revealTitle(p, c) {
+            if (this.revealed(p, c))
+                return baseKind(c.kind).type === 'packet'
+                           ? 'Show what the frame is' : 'Show the two ends only'
+            return 'Show the bytes'
+        },
+
+        /* What one cell of a read-only table says. [p] is the property it
+         * belongs to: its units, every cell of a list being counted in the
+         * same thing, and what the reader has asked to see in full. */
+        cellText(c, p) {
             if (!this.set(c)) return 'unset'
+            const units = p && p.units
             const f = unitFormats[units]
             const n = Number(c.draft)
             if (f && numericKind(c.kind) && c.draft !== '' &&
@@ -2248,11 +2304,14 @@ document.addEventListener('alpine:init', () => {
                there too and are what the tooltip shows, until there is a
                button to switch between the two. */
             if (baseKind(c.kind).type === 'packet')
-                return (c.value && (c.value.descr || c.value.bits)) || ''
-            /* Octets, by their two ends: the whole of the run is what the
-               tooltip holds. */
+                return (c.value &&
+                        (this.revealed(p, c) ? c.value.bits
+                                             : c.value.descr || c.value.bits)) || ''
+            /* Octets, by their two ends until the reader asks for the rest:
+               the whole of the run is what the tooltip holds meanwhile. */
             if (baseKind(c.kind).type === 'bytes')
-                return abbrevBytes(c.draft)
+                return this.revealed(p, c) ? String(c.draft || '')
+                                           : abbrevBytes(c.draft)
             if (baseKind(c.kind).type === 'set')
                 return this.setText(c.kind, c.draft)
             if (baseKind(c.kind).type !== 'enum') return c.draft
@@ -2264,7 +2323,8 @@ document.addEventListener('alpine:init', () => {
         /* What a cell has to say that does not fit in it. A frame is shown as
          * the protocols it is made of, and its bytes are what the reader came
          * for when they stopped on one. */
-        cellTitle(c) {
+        cellTitle(c, p) {
+            if (this.revealed(p, c)) return ''
             if (baseKind(c.kind).type === 'packet')
                 return (c.value && c.value.bits) || ''
             if (baseKind(c.kind).type === 'bytes') return c.draft || ''

@@ -1163,9 +1163,26 @@
                                                                                      [cellInput]). -->
                                                                                 <span x-show="p.read_only || cellInput(c) === 'bytes'"
                                                                                       class="ro"
-                                                                                      :class="{ unset: !set(c) }"
-                                                                                      :title="cellTitle(c)"
-                                                                                      x-text="cellText(c, p.units)"></span>
+                                                                                      :class="{ unset: !set(c),
+                                                                                                revealed: revealed(p, c) }"
+                                                                                      :title="cellTitle(c, p)"
+                                                                                      x-text="cellText(c, p)"></span>
+
+                                                                                <!-- A cell holding more than it shows:
+                                                                                     a frame, which is also its bytes,
+                                                                                     and a run of octets shown by its
+                                                                                     two ends. The tooltip says the
+                                                                                     rest, but a tooltip cannot be
+                                                                                     selected, and selecting is what a
+                                                                                     reader who asked for bytes is
+                                                                                     about to do. -->
+                                                                                <template x-if="revealable(c)">
+                                                                                    <button class="outline secondary reveal"
+                                                                                            :aria-pressed="revealed(p, c)"
+                                                                                            :title="revealTitle(p, c)"
+                                                                                            @click="reveal(p, c)"
+                                                                                            x-text="revealLabel(c)"></button>
+                                                                                </template>
 
                                                                                 <!-- Same box as anywhere else a value
                                                                                      may be left out, in front of the
