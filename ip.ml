@@ -107,12 +107,18 @@ module Proto = struct
     let random () = o (randi 8)
 
     (** The protocols this module has a name for, as the choices of a kind
-     * (see [Widget.one_of]), labelled by [to_string] -- which is to say by
-     * [/etc/protocols], the same names the rest of the program prints. A
-     * datagram may of course carry any of the 256. *)
+     * (see [Widget.one_of]). A datagram may of course carry any of the 256.
+     *
+     * Spelt out rather than taken from [to_string], which asks the system and
+     * gets [/etc/protocols] back: those names are lower case by convention and
+     * differ from one machine to another, and what belongs beside "IP" and
+     * "ARP" in the same interface is "UDP", not "udp". *)
     let choices =
-        [| icmp ; tcp ; udp ; ipv6 ; icmpv6 |] |>
-        Array.map (fun (p : t) -> (p :> int), to_string p)
+        [| (icmp :> int), "ICMP" ;
+           (tcp :> int), "TCP" ;
+           (udp :> int), "UDP" ;
+           (ipv6 :> int), "IPv6" ;
+           (icmpv6 :> int), "ICMPv6" |]
 end
 
 (** {3 Addresses} *)

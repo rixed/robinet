@@ -510,6 +510,22 @@ struct
      * A few of them are strings in [t] and bytes here: a client identifier and
      * a request list are not written down by anyone, and showing them as text
      * would show mojibake. *)
+    (* What [pack]'s own [string_extend] put there: these two fields are a
+     * fixed 64 and 128 bytes on the wire and hold a null terminated string, so
+     * what is past the terminator is padding and not a string at all. A reader
+     * shown it gets a screenful of nothing. *)
+    let trim_padding s =
+        match String.index s '\000' with
+        | exception Not_found -> s
+        | i -> String.sub s 0 i
+
+    (*$= trim_padding & ~printer:identity
+      (trim_padding "boot.img") "boot.img"
+      (trim_padding "boot.img\000\000\000") "boot.img"
+      (trim_padding "\000\000") ""
+      (trim_padding "") ""
+     *)
+
     let kind_of (_ : t) =
         let open SimTypes in
         let address = Widget.hint "192.168.0.1" String in
@@ -575,8 +591,8 @@ struct
                  "server address", Ip.Addr.to_json t.siaddr ;
                  "relay address", Ip.Addr.to_json t.giaddr ;
                  "client hardware address", Widget.json_of_bytes t.chaddr ;
-                 "server name", `String t.sname ;
-                 "boot file", `String t.file ;
+                 "server name", `String (trim_padding t.sname) ;
+                 "boot file", `String (trim_padding t.file) ;
                  "message type",
                  Widget.json_of_optional (fun m -> `Int (m : MsgType.t :> int))
                                          t.msg_type ;
