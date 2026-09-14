@@ -1104,6 +1104,7 @@
                                                                             <td><span class="cell">
                                                                                 <span x-show="p.read_only" class="ro"
                                                                                       :class="{ unset: !set(c) }"
+                                                                                      :title="cellTitle(c)"
                                                                                       x-text="cellText(c, p.units)"></span>
 
                                                                                 <!-- Same box as anywhere else a value

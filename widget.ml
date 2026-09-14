@@ -60,6 +60,8 @@ let rec kind_name = function
     | Set _ -> "a set of choices"
     | Widget_id -> "a widget"
     | FRange _ | IRange _ -> "a range"
+    | Time -> "a timestamp"
+    | Packet -> "a packet"
     | Metric -> "a metric"
     | Optional k -> "an optional value ("^ kind_name k ^")"
     | List k -> "a list of "^ kind_name k
@@ -370,6 +372,38 @@ let to_string = function
 let json_of_optional sub = function
     | None -> `Null
     | Some v -> sub v
+
+(* Every instant this interface hands out is a simulated one: seconds since
+ * the simulation began, which is what a simulation dates everything by and
+ * what comes back in a "since". What the world outside called that beginning
+ * is the "epoch" of the simulation (see /api/simulations), and adding the two
+ * is how a reader turns one of these into a date -- which only whoever
+ * displays it has to do. *)
+let json_of_time (t : Clock.Time.t) =
+    `Float (Clock.Time.to_secs t)
+
+(** A frame in a few words -- "Icmp/Ip/Eth" -- which is what the interface
+ * shows for a packet before the reader asks to see more of it.
+ *
+ * A forward reference, because the module that can answer is {!Packet}, and
+ * {!Packet} knows every protocol there is while every protocol knows this one:
+ * it is compiled long after. Whoever wants packets described sets this (see
+ * myadmin_api.ml), and until something does, a packet is its bytes and nothing
+ * else -- which is what a program that never links {!Packet} gets. *)
+let describe_packet : (Bitstring.bitstring -> string) ref =
+    ref (fun _ -> "")
+
+(** A frame, as the interface reads one: the bytes themselves, and what they
+ * amount to.
+ *
+ * Both, and not one or the other, because they answer different questions and
+ * neither can be had from the other where it is asked: the description is what
+ * a reader skims a list of frames by, and the bytes are what a reader who has
+ * found the one they wanted goes on to look at -- and what the packet editor
+ * will be handed when it comes to open one. *)
+let json_of_packet bits =
+    `Assoc [ "bits", `String (Tools.hexstring_of_bitstring bits) ;
+             "descr", `String (!describe_packet bits) ]
 
 (* Most widgets have no ports: *)
 let no_ports = {

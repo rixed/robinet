@@ -111,6 +111,11 @@ let rowSeq = 0
 
 const cellOf = (name, kind, value) => ({
     name, kind,
+    /* What the simulator said, beside the draft of what is typed for it. Kept
+     * because a few kinds are read rather than typed -- a packet is an object
+     * with the bytes on one side and what they amount to on the other -- and
+     * what such a cell shows cannot be got back out of the text of a draft. */
+    value,
     draft: draftOf(kind, value),
     enabled: value !== null && value !== undefined
 })
@@ -2186,12 +2191,31 @@ document.addEventListener('alpine:init', () => {
             const n = Number(c.draft)
             if (f && numericKind(c.kind) && c.draft !== '' &&
                 Number.isFinite(n)) return f(n)
+            /* An instant of the simulation, read as the clock in the log
+               window reads one: seconds since the simulation began are what
+               travels, and a time of day is what anybody wants to see. */
+            if (baseKind(c.kind).type === 'time')
+                return c.draft === '' ? '' : this.clock(Number(c.draft))
+            /* A frame, as what it amounts to: "Icmp/Ip/Eth". The bytes are
+               there too and are what the tooltip shows, until there is a
+               button to switch between the two. */
+            if (baseKind(c.kind).type === 'packet')
+                return (c.value && (c.value.descr || c.value.bits)) || ''
             if (baseKind(c.kind).type === 'set')
                 return this.setText(c.kind, c.draft)
             if (baseKind(c.kind).type !== 'enum') return c.draft
             /* A cell of a row nobody has filled in yet has no choice, and no
                index either: [choice] would answer for the first one. */
             return c.draft === '' ? '' : this.choice(c.kind, Number(c.draft))
+        },
+
+        /* What a cell has to say that does not fit in it. A frame is shown as
+         * the protocols it is made of, and its bytes are what the reader came
+         * for when they stopped on one. */
+        cellTitle(c) {
+            if (baseKind(c.kind).type === 'packet')
+                return (c.value && c.value.bits) || ''
+            return ''
         },
 
         /* A table means something only once every cell of it has been filled:

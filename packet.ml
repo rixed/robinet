@@ -366,6 +366,25 @@ end
 
 (** {2 Shorthands} *)
 
+(** [of_frame bits] is what a frame off a wire is made of, outermost layer
+ * first.
+ *
+ * [Pdu.unpack] reads what came out of a capture file and therefore begins with
+ * a [Pcap] layer; a frame that came off a cable has no such thing around it,
+ * so one is put there to unpack with and taken off again. The timestamp given
+ * to it is never read: what is wanted here is the layers below it. *)
+let of_frame bits =
+    match Pdu.unpack (Pcap.Pdu.make "" (Clock.Wall.now ()) bits) with
+    | _pcap :: layers -> layers
+    | [] -> []
+
+(** A frame in a few words: the protocols it is made of, innermost first --
+ * "Icmp/Ip/Eth". What the administration interface shows for a packet before
+ * the reader asks to see more of it, and what it sets
+ * {!Widget.describe_packet} to. *)
+let describe bits =
+    Pdu.to_short_string (of_frame bits)
+
 (** [Packet.enum_of_file filename] reads a pcap file and returns an [Enum.t] of {!Packet.Pdu.t}. *)
 let enum_of_file fname = Pcap.enum_of_file fname /@ Pdu.unpack
 

@@ -181,6 +181,14 @@ let rec json_of_kind = function
             if i = min_int || i = max_int then `Null else `Int i in
         `Assoc [ "type", `String "range" ; "int", `Bool true ;
                  "min", bound mi ; "max", bound ma ]
+    (* An instant of the simulation, in seconds since it began, as every other
+       instant this interface hands out (see [Widget.json_of_time]). What the
+       reader sees is a clock, which is the page's business: it has the epoch
+       of the simulation and this does not. *)
+    | Time -> `Assoc [ "type", `String "time" ]
+    (* A frame: its bytes, and what they amount to (see
+       [Widget.json_of_packet]). *)
+    | Packet -> `Assoc [ "type", `String "packet" ]
     (* Counter, gauge or timed comes with the value: the metric says what
      * it is. *)
     | Metric ->
@@ -222,14 +230,6 @@ let rec names_a_file = function
     | FileName -> true
     | Optional k | Hint (_, k) -> names_a_file k
     | _ -> false
-
-(* Every instant this interface hands out is a simulated one: seconds since
- * the simulation began, which is what a simulation dates everything by and
- * what comes back in a "since". What the world outside called that beginning
- * is the "epoch" of the simulation (see /api/simulations), and adding the two
- * is how a reader turns one of these into a date -- which only whoever
- * displays it has to do. *)
-let json_of_time (t : Clock.Time.t) = `Float (Clock.Time.to_secs t)
 
 (* The same instant for a reader that has to hand it back rather than read it:
  * picoseconds since the simulation began, exactly as the simulation counts
@@ -401,6 +401,13 @@ let json_of_widget (w : Widget.t) =
              "properties", `List (List.map (fun (p : Widget.property) ->
                                      `String p.name) w.properties) ]
 
+(* What a packet is described as, which {!Widget} leaves to whoever knows about
+ * protocols: this module is compiled after {!Packet}, and is where the answer
+ * is wanted. A program using the library without this interface gets packets
+ * as their bytes and nothing more, which is all it asked for. *)
+let () =
+    Widget.describe_packet := Packet.describe
+
 (*
  * Handlers
  *)
@@ -409,7 +416,7 @@ let json_of_simulation (s : Simulation.t) =
         `Assoc [ "id", `Int s.id ;
              "name", `String s.name ;
              "root", `Int s.root.id ;
-             "now", json_of_time (Simulation.now s) ;
+             "now", Widget.json_of_time (Simulation.now s) ;
              (* Where the world outside was when this simulation began: what a
                 reader adds to any instant of this simulation to get a date.
                 One left to run as fast as it can is at that date and not at
@@ -927,14 +934,14 @@ let get_property_history _mth matches vars _qry_body resp =
             ) cursor points
         ) since series in
     let json_of_point (t, v) =
-        `Assoc [ "t", json_of_time t ;
+        `Assoc [ "t", Widget.json_of_time t ;
                  "value", Metric.value_to_json v ] in
     let json_of_series (params, points) =
         `Assoc [ "params",
                  Yojson.Safe.to_basic (Metric.Params.to_yojson params) ;
                  "points", `List (List.map json_of_point points) ] in
     respond resp (`Assoc [
-        "now", json_of_time (Simulation.now sim) ;
+        "now", Widget.json_of_time (Simulation.now sim) ;
         "cursor", json_of_cursor_opt cursor ;
         "rate", `Float (Clock.Interval.to_secs
                             (Simulation.metrics_sample_rate sim)) ;
@@ -1121,7 +1128,7 @@ let get_logs _mth matches vars _qry_body resp =
             let lost, msgs = Log.messages ?since ~max_level:level w.logger in
             w, lost, msgs) in
     let json_of_msg (_seq, ts, lvl, text) =
-        `Assoc [ "t", json_of_time ts ;
+        `Assoc [ "t", Widget.json_of_time ts ;
                  "level", `String (Log.string_of_level lvl) ;
                  "text", `String text ] in
     (* The messages come oldest first, so the reader has got as far as the last
@@ -1131,7 +1138,7 @@ let get_logs _mth matches vars _qry_body resp =
         | [] -> since
         | msgs -> let seq, _, _, _ = List.last msgs in Some seq in
     respond resp (`Assoc [
-        "now", json_of_time (Simulation.now sim) ;
+        "now", Widget.json_of_time (Simulation.now sim) ;
         "cursor", json_of_log_cursor_opt cursor ;
         "widget", `Int w.id ;
         "lost", `Bool lost ;

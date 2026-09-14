@@ -26,6 +26,7 @@ open Batteries
 open SimTypes
 open Bitstring
 open Tools
+open Clock
 
 (** {2 Private Types} *)
 
@@ -306,7 +307,7 @@ struct
     let names = Array.map to_string all
 
     let duration speed num_bits =
-        Clock.Interval.of_secs (float num_bits /. to_bps speed)
+        Interval.of_secs (float num_bits /. to_bps speed)
 
     let best speeds =
         List.reduce max speeds
@@ -350,8 +351,8 @@ struct
           mutable negotiated : (Speed.t * bool (* duplex *)) option ;
           (* IFP: gap (in bits) to leave in between two frames. *)
           mutable inter_frame_gap : int ;
-          mutable tx_busy_until : Clock.Time.t ;
-          mutable rx_busy_until : Clock.Time.t ;
+          mutable tx_busy_until : Time.t ;
+          mutable rx_busy_until : Time.t ;
           ingress : Metric.Counter.t ;
           egress : Metric.Counter.t ;
           rx_crc_errs : Metric.Counter.t }
@@ -381,7 +382,7 @@ struct
                 else max t.rx_busy_until t.tx_busy_until in
             let dbl_recept = now < busy_until in
             let ser_delay = Speed.duration speed bitlen in
-            let rx_stop = Clock.Time.add now ser_delay in
+            let rx_stop = Time.add now ser_delay in
             t.rx_busy_until <- max t.rx_busy_until rx_stop ;
             if dbl_recept then
                 Metric.Counter.inc t.rx_crc_errs ~now
@@ -389,7 +390,7 @@ struct
                 let recv_ts =
                     match t.can_forward_after with
                     | Some b when b < bitlen ->
-                        Clock.Time.add now (Speed.duration speed b)
+                        Time.add now (Speed.duration speed b)
                     | _ ->
                         rx_stop in
                 Simulation.at t.power recv_ts t.recv pld
@@ -418,10 +419,10 @@ struct
                  * carrier, or the link would appear busy when receiving in
                  * half duplex). *)
                 let quiet_until =
-                    Clock.Time.add busy_until
+                    Time.add busy_until
                                    (Speed.duration speed t.inter_frame_gap) in
                 let tx_start = max now quiet_until in
-                t.tx_busy_until <- Clock.Time.add tx_start ser_delay ;
+                t.tx_busy_until <- Time.add tx_start ser_delay ;
                 Simulation.at t.power tx_start f pld
             | None ->
                 Log.(log t.widget.logger Warning (lazy
@@ -441,8 +442,8 @@ struct
                 (bitstring_length bits))))
 
     let reset t =
-        t.tx_busy_until <- Clock.beginning_of_time ;
-        t.rx_busy_until <- Clock.beginning_of_time
+        t.tx_busy_until <- beginning_of_time ;
+        t.rx_busy_until <- beginning_of_time
 
     let disconnect t =
         if t.is_connected then (
@@ -486,8 +487,8 @@ struct
               emit = ignore_disconnected ~logger:widget.logger ;
               recv = recv |? ignore_bits ~logger:widget.logger ;
               is_connected = false ; can_forward_after ;
-              tx_busy_until = Clock.beginning_of_time ;
-              rx_busy_until = Clock.beginning_of_time ;
+              tx_busy_until = beginning_of_time ;
+              rx_busy_until = beginning_of_time ;
               speeds ; full_duplex ; negotiated ; inter_frame_gap ;
               ingress = Metric.Counter.make () ;
               egress = Metric.Counter.make () ;
@@ -621,7 +622,7 @@ struct
           postponed : bitstring BitHash.t ;
           (* TODO: a gauge for how many packets are postponed *)
           (* Optional average delay to add to transmissions: *)
-          mutable delay : Clock.Interval.t ;
+          mutable delay : Interval.t ;
           (* Optional packet loss ratio: *)
           mutable loss : float }
 
@@ -667,7 +668,7 @@ struct
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
     let make ?speeds ?full_duplex ?inter_frame_gap ?can_forward_after
-             ?(mtu=1500) ?(delay=Clock.Interval.zero) ?(loss=0.)
+             ?(mtu=1500) ?(delay=Interval.zero) ?(loss=0.)
              ?(mac=Addr.random ()) ?(gateways=[])
              ?promisc ?(do_proxy_arp=(fun _ -> false))
              ?(my_addresses=[]) ?(proto=Proto.ip4) ?(name="eth")
@@ -754,8 +755,8 @@ struct
                     t.gateways <- gateways) ;
             property "delay" ~kind:Float ~units:"secs"
                 ~descr:"Average delay to add to transmissions."
-                ~getter:(fun () -> `Float (Clock.Interval.to_secs t.delay))
-                ~setter:(fun v -> t.delay <- Clock.Interval.sec (to_float v)) ;
+                ~getter:(fun () -> `Float (Interval.to_secs t.delay))
+                ~setter:(fun v -> t.delay <- Interval.sec (to_float v)) ;
             property "loss" ~kind:(FRange (0., 1.))
                 ~descr:"Packet loss ratio."
                 ~getter:(fun () -> `Float t.loss)
@@ -795,10 +796,10 @@ struct
         Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Emitting an Eth packet, proto %s, from %s to %s (content '%s')" (Proto.to_string proto) (Addr.to_string st.mac) (Addr.to_string dst) (hexstring_of_bitstring bits)))) ;
         let delay =
             if proto <> Proto.arp &&
-               Clock.Interval.compare st.delay Clock.Interval.zero > 0 then
-                Clock.Interval.sec
-                    (max 0. (jitter 0.1 (Clock.Interval.to_secs st.delay)))
-            else Clock.Interval.zero in
+               Interval.compare st.delay Interval.zero > 0 then
+                Interval.sec
+                    (max 0. (jitter 0.1 (Interval.to_secs st.delay)))
+            else Interval.zero in
         Simulation.delay st.iface.power delay
                          st.iface.emit (Pdu.pack pdu)
 
@@ -1043,15 +1044,15 @@ let maybe_record =
  * Also, notice that you can use the same [limited x y] in both directions,
  * thus having something similar to a half-duplex cable ;-) *)
 let limited power latency throughput =
-    let next_avlb = ref Clock.Time.zero in
+    let next_avlb = ref Time.zero in
     (fun emit bits ->
-        let min_start = Clock.Time.add (Simulation.now power.sim) latency in
+        let min_start = Time.add (Simulation.now power.sim) latency in
         let start = max min_start !next_avlb
         and num_bits = float_of_int (min (bitstring_length bits) 368) in
         let duration =
-            max (Clock.Interval.usec 1.)
-                (Clock.Interval.of_secs (num_bits /. throughput)) in
-        next_avlb := Clock.Time.add start duration ;
+            max (Interval.usec 1.)
+                (Interval.of_secs (num_bits /. throughput)) in
+        next_avlb := Time.add start duration ;
         Simulation.at power start emit bits)
 
 
@@ -1070,13 +1071,13 @@ struct
     struct
         type t = {
             mutable length : float ;  (** In meters. *)
-             mutable delay : Clock.Interval.t ; (** Computed from the length *)
+             mutable delay : Interval.t ; (** Computed from the length *)
         mutable error_rate : float ;  (** In faulty bits per transmitted bits *)
       mutable success_rate : int ;    (** The inverse of the above *)
           mutable tot_bits : Metric.Counter.t ; (** Per direction. *)
         mutable bit_shifts : Metric.Counter.t ; (** Casualties in individual bits *)
            (** Boolean: true if from [a] to [b] (see [Cable.make] *)
-              last_packets : (bool * bitstring) OrdArray.t ;
+              last_packets : (Time.t * bool * bitstring) option OrdArray.t ;
             (* How to tell each of the two ends that it is no longer
              * connected, recorded by whoever plugged this cable in -- which is
              * the only place that knows which port of which device each end
@@ -1099,7 +1100,7 @@ struct
             | Some (T t) -> Some t
             | _ -> None
 
-        let delay length = Clock.Interval.sec (length /. 3e9)
+        let delay length = Interval.sec (length /. 3e9)
         let success_rate error_rate = int_of_float (1. /. error_rate)
 
         (* A cable has no natural parent; hang it off the root of the
@@ -1125,8 +1126,7 @@ struct
                 bit_shifts = Metric.Counter.make () ;
                 widget ;
                 ends = None ;
-                last_packets =
-                    OrdArray.make history (false, empty_bitstring) } in
+                last_packets = OrdArray.make history None } in
             widget.device <- Some (T t) ;
             Widget.add_properties widget Widget.[
                 property "length" ~kind:Float ~units:"meters"
@@ -1143,11 +1143,31 @@ struct
                         t.error_rate <- r ;
                         t.success_rate <- success_rate r)
                     ~getter:(fun () -> `Float t.error_rate) ;
+                property "last packets"
+                    ~kind:(List (Record [| "time", Time ;
+                                           "dir", Enum [|"→";"←"|] ;
+                                           "frame", Packet |]))
+                    ~descr:"Last packets transmitted."
+                    (* Most recent first, and the slots nothing has reached
+                     * yet left out: a cable that has carried three frames has
+                     * three rows and not ten. *)
+                    ~getter:(fun () ->
+                        `List (
+                            OrdArray.fold_left (fun lst -> function
+                                | None -> lst
+                                | Some (ts, dir, bits) ->
+                                    `Assoc [ "time", json_of_time ts ;
+                                             "dir", `Int (if dir then 0 else 1) ;
+                                             "frame", json_of_packet bits ] ::
+                                    lst
+                            ) [] t.last_packets |>
+                            List.rev)) ;
                 metric_property "total bits"
                     ~descr:"Total number of transmitted bits."
                     (Metric.Counter.T t.tot_bits) ;
                 metric_property "bit shifts" ~descr:"Number of flipped bits"
                     (Metric.Counter.T t.bit_shifts) ] ;
+
             (* Minted switched off, as every source is, and switched on here:
                a cable carries nothing until it is plugged in anyway. *)
             Simulation.power_up widget.power ;
@@ -1178,7 +1198,7 @@ struct
                 ) else bits
             else bits in
         maybe_record (Simulation.of_widget st.widget) bits ;
-        OrdArray.prepend st.last_packets (dir, bits) ;
+        OrdArray.prepend st.last_packets (Some (now, dir, bits)) ;
         bits
 
     (** Return a TRX representing an imperfect network link. *)
@@ -1196,6 +1216,35 @@ struct
         in
         { ins = { write = ins_write ; set_read = ins_set_read } ;
           out = { write = out_write ; set_read = out_set_read } }
+
+    (* What the reader is shown of a cable: the frames that have gone by, most
+     * recent first, one row per frame and not one per slot it remembers. A
+     * cable that has carried three frames therefore answers with three rows,
+     * and one that has carried more than it remembers answers with what it
+     * still has -- which is what walking a ring has to be careful about, since
+     * a full ring has no empty slot left to stop at. *)
+    (*$< Cable *)
+    (*$R make
+        let sim = Simulation.make ~realtime:false "last-packets" in
+        let st = State.make ~parent:sim.root ~history:3 () in
+        let trx = make st in
+        let rows () =
+            let p =
+                List.find (fun (p : property) -> p.name = "last packets")
+                          st.State.widget.properties in
+            match p.getter () with
+            | `List l -> List.length l
+            | _ -> -1 in
+        assert_equal ~printer:string_of_int ~msg:"a fresh cable has carried none"
+            0 (rows ()) ;
+        List.iter (fun n ->
+            trx.ins.write (Bitstring.create_bitstring 64) ;
+            assert_equal ~printer:string_of_int
+                ~msg:("after "^ string_of_int n ^" frame(s)")
+                (min n 3) (rows ())
+        ) [ 1 ; 2 ; 3 ; 4 ; 5 ]
+     *)
+    (*$>*)
 
     let connect (st : State.t) a widget_a b widget_b =
         let trx = make st in

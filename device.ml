@@ -171,6 +171,10 @@ let rec coerce name (kind : Widget.kind) v =
     | Widget_id -> `Int (Widget.to_int v)
     | IRange (min, max) -> `Int (Widget.to_int_range ~min ~max v)
     | FRange (min, max) -> `Float (Widget.to_float_range ~min ~max v)
+    | Time | Packet ->
+        (* As for a metric below: these are what a device has seen, and a
+         * device that has not been built yet has seen nothing. *)
+        Widget.bad_value "%s cannot be given when building a device" name
     | Enum choices ->
         (try `Int (Widget.to_choice choices v)
         with Widget.Bad_value m -> Widget.bad_value "%s: %s" name m)

@@ -302,6 +302,8 @@ and kind =
     (* A number known to lie within those bounds *)
     | FRange of float * float
     | IRange of int * int
+    | Time
+    | Packet
     (* A family of counts or measures, keyed by the parameters of the events
      * they come from: it reads as a small table, and the only thing a write
      * does is reset it. Which sort of metric it is comes with the value, which

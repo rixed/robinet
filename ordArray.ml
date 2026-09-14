@@ -22,6 +22,7 @@
 *)
 open Batteries
 
+(* In all the following type definitions, a negative index means; end of array *)
 type entry = { mutable prev : int ;
                mutable next : int }
 type 'a t =
@@ -50,6 +51,22 @@ let last t = t.last
 (** So that [get t (first t)] will return the first data item in the queue *)
 let get t n = t.data.(n)
 let set t n x = t.data.(n) <- x
+
+(** Walk the queue from the most recently used to the least, folding over the
+ * data as it goes.
+ *
+ * Here rather than at the caller because the end of the walk is the end
+ * marker, and that is this module's business: a caller following [next]
+ * itself runs into -1 the moment the array is full, which is exactly when it
+ * first has something interesting to say. *)
+let fold_left f init t =
+    let rec loop acc n =
+        if n < 0 then acc
+        else loop (f acc t.data.(n)) t.last_used.(n).next in
+    loop init t.first
+
+(** The data, most recently used first. *)
+let to_list t = List.rev (fold_left (fun l x -> x :: l) [] t)
 
 let unlink t n =
     if t.last_used.(n).prev <> -1 then
