@@ -167,6 +167,49 @@ let test_clock net =
          Thread.delay 0.05 ;
          Simulation.now net > t0)
 
+(* A realtime simulation that stands paused: its own clock stops while the wall
+ * clock does not, so the gap between the two widens for as long as the pause
+ * lasts, and everything converting between them has to count that pause in.
+ * Missing it had the run loop spinning: it slept until what it took for three
+ * seconds ahead, which was three seconds after the pause *began* -- already
+ * past, once the pause had lasted that long -- and then went round again.
+ *
+ * Stepping is the other half: the clock stands still, so an event that is not
+ * due yet never becomes due, and a step that waited for its event to come due
+ * would wait for ever. *)
+let test_realtime_pause () =
+    section "Clock: a paused realtime simulation" ;
+    let sim = Simulation.make ~realtime:true "paused-realtime" in
+    ignore (Simulation.start sim) ;
+    let fired = ref false in
+    let t0 = Simulation.now sim in
+    Simulation.delay sim.root.power (Clock.Interval.sec 0.5)
+        (fun () -> fired := true) () ;
+    Simulation.pause sim () ;
+    Thread.delay 0.05 ;
+    let paused_at = Simulation.now sim in
+    Thread.delay 0.3 ;
+    check "its clock stands still" (Simulation.now sim = paused_at) ;
+    let wall_ahead ts =
+        Clock.Wall.to_secs (Simulation.to_wall_clock sim ts) -.
+        Clock.Wall.to_secs (Clock.Wall.now ()) in
+    check_between "where its clock stands is still now on the wall clock"
+        (-0.05) 0.05 (wall_ahead paused_at) ;
+    check_between "and three seconds of it are three seconds from now"
+        2.95 3.05 (wall_ahead (Clock.Time.add paused_at (Clock.Interval.sec 3.))) ;
+
+    Simulation.step sim () ;
+    check "a step runs its event though the clock stands still"
+        (wait_for (fun () -> sim.steps = 0 && !fired)) ;
+    let stepped = Simulation.now sim in
+    check_between "and carries the clock to it" 0.45 0.55
+        (Clock.Interval.to_secs (Clock.Time.diff stepped t0)) ;
+    Simulation.resume sim () ;
+    Thread.delay 0.05 ;
+    check "resuming does not take the clock back to where the pause found it"
+        (Simulation.now sim >= stepped) ;
+    Simulation.stop sim ()
+
 (* How fast a simulation runs against the wall clock, in simulated seconds per
    wall second, measured over [wall]. *)
 let measure_speed net wall =
@@ -1732,6 +1775,7 @@ let main =
     ignore (Simulation.start net) ;
     test_clock net ;
     test_speed net ;
+    test_realtime_pause () ;
     let samples_sim, samples_widget = test_metric_samples () in
     test_concurrency net cable duration nthreads ;
     test_disconnect () ;

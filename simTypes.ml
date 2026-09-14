@@ -122,7 +122,11 @@ and simulation =
       (* How much wall clock time this simulation has spent paused, in total.
        * Subtracted from the wall clock when synchronising, so that resuming
        * a realtime simulation does not make the simulation time leap forward
-       * and fire every pending event at once. *)
+       * and fire every pending event at once.
+       *
+       * The pause it is in right now is not in here until [resume] ends it, so
+       * whoever compares the two clocks wants [Simulation.paused_so_far] and
+       * not this. *)
       mutable paused_total : Interval.t ;
       (* When > 0, run that many events then pause again: *)
       mutable steps : int ;

@@ -404,6 +404,17 @@ let power_down (p : power) =
         signal_me t ()
     )
 
+(* How long this simulation has stood paused, the pause it is in right now
+ * included: [paused_total] only gets that one when [resume] ends it, yet the
+ * gap between the two clocks is already that much wider -- the simulation's
+ * stands still while the wall clock does not. Every conversion between the two
+ * goes through here, or it would place an instant of a paused simulation as
+ * far off as the pause is long. *)
+let paused_so_far (t : t) =
+    match t.paused_since with
+    | None -> t.paused_total
+    | Some since -> Interval.add t.paused_total (Wall.diff (Wall.now ()) since)
+
 (** Place an instant read off the real world -- the timestamp libpcap put on a
  * captured packet -- on [t]'s own timeline.
  *
@@ -413,7 +424,7 @@ let power_down (p : power) =
  * be scheduled: used as it stands it would land in the simulation's past, and
  * be dispatched at once, or in its future, and wait there. *)
 let of_wall_clock (t : t) (ts : Wall.t) =
-    Time.sub (Time.of_interval (Wall.diff ts t.epoch)) t.paused_total
+    Time.sub (Time.of_interval (Wall.diff ts t.epoch)) (paused_so_far t)
 
 (** The other way: what the wall clock will read when [t] calls it [ts].
  *
@@ -421,7 +432,7 @@ let of_wall_clock (t : t) (ts : Wall.t) =
  * on the simulation's -- which the run loop does every time it sleeps until
  * its next event. *)
 let to_wall_clock (t : t) (ts : Time.t) =
-    Wall.add t.epoch (Interval.add (Time.to_interval ts) t.paused_total)
+    Wall.add t.epoch (Interval.add (Time.to_interval ts) (paused_so_far t))
 
 (* The wall clock, on this simulation's timeline: shifted by whatever it is
  * from the world outside, and less however long it has stood paused. *)
@@ -471,10 +482,20 @@ let reanchor (t : t) =
 let resume (t : t) () =
     with_lock t (fun () ->
         if t.paused then (
-            Option.may (fun since ->
-                t.paused_total <-
-                    Interval.add t.paused_total (Wall.diff (Wall.now ()) since)
-            ) t.paused_since ;
+            (* How much of the pause counts as time stood still. A simulation
+             * following the wall clock keeps whatever leaves its clock where it
+             * stands now that it runs again: a step dispatched during the pause
+             * has moved that clock on, and so much of the pause was spent
+             * rather than stood through -- without which [synch] would take the
+             * clock straight back to where the pause found it. One with a clock
+             * of its own has no such mapping to keep, and merely adds the pause
+             * up. *)
+            t.paused_total <-
+                if t.realtime then
+                    Interval.sub (Wall.diff (Wall.now ()) t.epoch)
+                                 (Time.to_interval !(t.now))
+                else
+                    paused_so_far t ;
             t.paused_since <- None ;
             t.paused <- false ;
             (* Standing still is not being late. *)
@@ -909,6 +930,13 @@ let next_event (t : t) =
             with_lock t (fun () ->
             (* Wait until there is an event to process now: *)
             let rec wait_loop () =
+                if t.steps > 0 then
+                    (* A step is asked for: waiting for its event to come due
+                     * would be waiting for ever, since a paused clock never
+                     * reaches it. The step runs it and carries the clock to it
+                     * (see [resume] for what that does to the pause account). *)
+                    ()
+                else
                 let until =
                     if not (may_dispatch t) then
                         (* Paused: nothing to run, wake up only when signalled *)
