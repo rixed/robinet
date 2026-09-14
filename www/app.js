@@ -1086,13 +1086,15 @@ let sceneMemo = { sig: null, value: null }
  * holds back are the panel's own [cellText] and [revealable] and not a second
  * set of rules.
  *
- * [skipAbsent] leaves out what is not there, which is what a reader wants: a
- * DHCP message describes every option it could carry and carries five of them,
- * and forty lines of "unset" bury the five. An editor will want them back --
- * an option one is about to fill in has to be there to be filled in -- which
- * is why this is asked for rather than assumed. */
-const kindLines = (kind, value, opts) => {
-    const skipAbsent = !!(opts && opts.skipAbsent)
+ * [editable] is the one thing to say about how these are being drawn, and
+ * everything else follows from it. Reading, a value that is not there is left
+ * out: a DHCP message describes every option it could carry and carries five,
+ * and forty lines of "unset" bury the five. Editing, it is kept, an option one
+ * is about to fill in having to be on the page to be filled in. So the two are
+ * not separately choosable -- which mode this is, is decided by whichever link
+ * opened the pane, and nothing below asks again. */
+const kindLines = (kind, value, editable) => {
+    const skipAbsent = !editable
     const out = []
     const walk = (name, kind, value, depth, path) => {
         const k = baseKind(kind)
@@ -3543,13 +3545,21 @@ document.addEventListener('alpine:init', () => {
          *
          * Not decoded here. Every protocol this program knows is written in
          * OCaml, and asking is a great deal less work than a second
-         * implementation that would go out of step with the first. */
-        async openFrame(bits) {
+         * implementation that would go out of step with the first.
+         *
+         * [editable] is the mode this opens in, and it is the caller's to say:
+         * a frame reached from a cable's last packets is something that has
+         * already been carried and is there to be read, while the generator
+         * this pane is to become will reach it to be written. Everything the
+         * pane does differently in one mode or the other follows from this one
+         * answer, which is why it is a way in and not a switch on the page. */
+        async openFrame(bits, editable) {
             if (!bits) return
             /* The column it opens in may have been shut over the map: bring
                it back rather than leaving the click to do nothing. */
             if (this.split === 1) this.split = this.splitLast || 0.45
-            this.frame = { bits, kind: null, value: null, error: null,
+            this.frame = { bits, editable: !!editable,
+                           kind: null, value: null, error: null,
                            busy: true, folded: new Set() }
             const held = this.frame
             const r = await this.exchange(() =>
@@ -3576,7 +3586,7 @@ document.addEventListener('alpine:init', () => {
         frameLines() {
             const f = this.frame
             if (!f || !f.kind) return []
-            const lines = kindLines(f.kind, f.value, { skipAbsent: true })
+            const lines = kindLines(f.kind, f.value, f.editable)
             if (!f.folded || !f.folded.size) return lines
             return lines.filter(l => {
                 for (const p of f.folded)
