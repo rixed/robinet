@@ -153,10 +153,10 @@ struct
              * it. Ordered by address, so that a table read twice in a row
              * reads the same way. *)
             property "leases" ~descr:"The addresses currently leased"
-                ~kind:(list (record [| "client", String ;
-                                       "hostname", optional String ;
-                                       "address", String ;
-                                       "expires in (s)", Float |]))
+                ~kind:(list (row [| "client", String ;
+                                    "hostname", optional String ;
+                                    "address", String ;
+                                    "expires in (s)", Float |]))
                 ~getter:(fun () ->
                     let now = Simulation.Widget.now t.widget in
                     BitHash.fold (fun chaddr (l : Lease.t) rows ->

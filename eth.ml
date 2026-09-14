@@ -699,9 +699,9 @@ struct
                 ~getter:(fun () -> `Int (BitHash.length t.arp_cache)) ;
             property "gateways"
                 ~descr:"Where to send what is not on this LAN."
-                ~kind:(list (record [| "destination", String ;
-                                       "mask", String ;
-                                       "via", optional String |]))
+                ~kind:(list (row [| "destination", String ;
+                                    "mask", String ;
+                                    "via", optional String |]))
                 ~getter:(fun () ->
                     (* Dotted rather than [Ip.Addr.to_string], and plain hex
                        rather than [Addr.to_string]: both of those may hand
@@ -1144,9 +1144,9 @@ struct
                         t.success_rate <- success_rate r)
                     ~getter:(fun () -> `Float t.error_rate) ;
                 property "last packets"
-                    ~kind:(List (Record [| "time", Time ;
-                                           "dir", Enum [|"→";"←"|] ;
-                                           "frame", Packet |]))
+                    ~kind:(List (Row [| "time", Time ;
+                                        "dir", Enum [| "→" ; "←" |] ;
+                                        "frame", Packet |]))
                     ~descr:"Last packets transmitted."
                     (* Most recent first, and the slots nothing has reached
                      * yet left out: a cable that has carried three frames has

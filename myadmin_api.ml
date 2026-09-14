@@ -147,7 +147,12 @@ let property_of_matches (widget : Widget.t) matches n =
 let json_of_choices choices =
     `List (Array.to_list choices |> List.map (fun c -> `String c))
 
-let rec json_of_kind = function
+let rec json_of_fields fields =
+    `List (Array.to_list fields |>
+           List.map (fun (name, k) ->
+               `Assoc [ "name", `String name ; "kind", json_of_kind k ]))
+
+and json_of_kind = function
     | String -> `Assoc [ "type", `String "string" ]
     (* The same string, in a box rather than on a line. *)
     | Text -> `Assoc [ "type", `String "text" ]
@@ -208,14 +213,15 @@ let rec json_of_kind = function
         `Assoc [ "type", `String "list" ; "of", json_of_kind k ]
     (* Named values, in the order they are to be laid out: an array rather than
        an object, since JSON says nothing about the order of an object's keys
-       and that order is what the columns are. *)
+       and that order is what the columns, or the lines, are.
+
+       The two differ only in how they are drawn -- a row across, a record down
+       -- and are the same thing on the wire, which is why they are encoded by
+       one function and told apart by their "type". *)
+    | Row fields ->
+        `Assoc [ "type", `String "row" ; "fields", json_of_fields fields ]
     | Record fields ->
-        `Assoc [ "type", `String "record" ;
-                 "fields",
-                 `List (Array.to_list fields |>
-                        List.map (fun (name, k) ->
-                            `Assoc [ "name", `String name ;
-                                     "kind", json_of_kind k ])) ]
+        `Assoc [ "type", `String "record" ; "fields", json_of_fields fields ]
     (* Not a shape of its own on the wire: an example of how the value inside
        is written, said alongside what that value is, so that the interface
        reads it off whatever input it was going to build anyway. *)

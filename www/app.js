@@ -47,11 +47,14 @@ const hintOf = (kind) => baseKind(kind).placeholder || kind.placeholder || ''
 const draftFor = (p, text) =>
     p.kind.type === 'optional' && p.value === null ? p.draft : text
 
-/* Whether a kind takes more than one input to edit: a list and a record are
- * drawn as a table of cells, everything else as a single field. */
+/* Whether a kind takes more than one input to edit: a list and a row are
+ * drawn as a table of cells, everything else as a single field.
+ *
+ * A record is neither, being a form of its own and drawn down rather than
+ * across; nothing declares one yet (see [Record] in simTypes.ml). */
 const isStructured = (kind) => {
     const t = baseKind(kind).type
-    return t === 'list' || t === 'record'
+    return t === 'list' || t === 'row'
 }
 
 /* Beyond how many characters a string is no longer a line to be read at a
@@ -121,10 +124,10 @@ const cellOf = (name, kind, value) => ({
 })
 
 /* The cells one value of [kind] is edited through: one per field when it is a
- * record -- in the order the simulator named them, which is the order of the
+ * row -- in the order the simulator named them, which is the order of the
  * columns -- and a single unnamed one otherwise. */
 const cellsOf = (kind, value) =>
-    kind.type === 'record'
+    kind.type === 'row'
         ? kind.fields.map(f => cellOf(f.name, f.kind,
                                       value == null ? null : value[f.name]))
         : [ cellOf(null, kind, value) ]
@@ -143,13 +146,13 @@ const cellIsBlank = (c) =>
 const rowIsBlank = (row) => row.cells.every(cellIsBlank)
 
 const rowValue = (kind, row) =>
-    kind.type === 'record'
+    kind.type === 'row'
         ? Object.fromEntries(row.cells.map(c => [ c.name, cellValue(c) ]))
         : cellValue(row.cells[0])
 
 /* Where the reader's edits of a property live: a [draft] for a plain value, or
- * the [rows] of the table a list or a record is drawn as -- a record being a
- * table of one row, which is what makes the two the same thing to draw and the
+ * the [rows] of the table a list or a row is drawn as -- a bare row being a
+ * table of one, which is what makes the two the same thing to draw and the
  * same thing to read back. */
 const rowsOf = (p) => {
     const k = baseKind(p.kind)
@@ -178,7 +181,7 @@ const resetDraft = (p, force) => {
 }
 
 /* What the inputs of one value are worth: the rows of the table for a list or
- * a record, the single input for anything else.
+ * a row, the single input for anything else.
  *
  * The same for a property being edited and for a parameter of a device that is
  * being built: both are drawn from a kind, through the same inputs, so both are
@@ -189,7 +192,7 @@ const edited = (p) => {
     const k = baseKind(p.kind)
     if (k.type === 'list')
         return p.rows.filter(r => !rowIsBlank(r)).map(r => rowValue(k.of, r))
-    if (k.type === 'record')
+    if (k.type === 'row')
         return rowValue(k, p.rows[0])
     return cellValue(p)
 }
@@ -2050,17 +2053,17 @@ document.addEventListener('alpine:init', () => {
             return Math.min(12, Math.max(3, lines))
         },
 
-        /* The columns of the table a list or a record is drawn as: the fields
-         * of the record, or none when what is repeated is a bare value and
+        /* The columns of the table a list or a row is drawn as: the fields
+         * of the row, or none when what is repeated is a bare value and
          * there is nothing to head the single column with. */
         cols(p) {
             const k = baseKind(p.kind)
             const el = k.type === 'list' ? k.of : k
-            return el.type === 'record' ? el.fields : null
+            return el.type === 'row' ? el.fields : null
         },
 
-        /* Rows are added and dropped from a list; a record has the one row it
-         * has, and always will. */
+        /* Rows are added and dropped from a list; a bare row is the one row
+         * it is, and always will be. */
         growable(p) {
             return !p.read_only && baseKind(p.kind).type === 'list'
         },

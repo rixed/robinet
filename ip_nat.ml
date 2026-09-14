@@ -152,10 +152,10 @@ struct
                 ~getter:(fun () -> `Int t.min_port)
                 ~setter:(fun v -> t.min_port <- checked_min_port (to_int v)) ;
             property "port forwards"
-                ~kind:(list (record [| "protocol", IRange (0, 255) ;
-                                       "external port", IRange (1, 65535) ;
-                                       "internal IP", String ;
-                                       "internal port", IRange (1, 65535) |]))
+                ~kind:(list (row [| "protocol", IRange (0, 255) ;
+                                    "external port", IRange (1, 65535) ;
+                                    "internal IP", String ;
+                                    "internal port", IRange (1, 65535) |]))
                 ~descr:"Inbound connections to those ports can be forwarded to \
                         specific addresses and ports."
                 ~getter:(fun () ->

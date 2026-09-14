@@ -191,11 +191,12 @@ let rec coerce name (kind : Widget.kind) v =
     | Hint (_, k) -> coerce name k v
     | List k ->
         `List (Widget.to_list (coerce name k) v)
-    | Record fields ->
-        (* Every field the record declares, in that order, and nothing else: a
-           name it does not know is a misspelling, and quietly dropping it
-           would build something other than what was asked for -- the same
-           reason [args_of] refuses an unknown parameter. *)
+    (* The same on the wire, whichever way the interface draws them. *)
+    | Row fields | Record fields ->
+        (* Every field declared, in that order, and nothing else: a name it
+           does not know is a misspelling, and quietly dropping it would build
+           something other than what was asked for -- the same reason
+           [args_of] refuses an unknown parameter. *)
         (match v with
         | `Assoc given ->
             List.iter (fun (n, _) ->
@@ -209,7 +210,7 @@ let rec coerce name (kind : Widget.kind) v =
                     | None -> Widget.bad_value "%s has no %S" name fname
                     | Some v -> fname, coerce (name ^"."^ fname) k v))
         | v ->
-            Widget.bad_value "%s must be a record, not %s" name
+            Widget.bad_value "%s must be a set of named fields, not %s" name
                 (Yojson.Basic.to_string v))
     | Metric ->
         (* Nothing has one, and nothing should: a metric is what a device has

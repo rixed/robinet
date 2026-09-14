@@ -315,16 +315,26 @@ and kind =
     | Optional of kind
     (* Any number of values of the same kind, in order, which is a [`List] on
      * the wire. The interface draws it as a column of inputs, or as a table
-     * when what is repeated is a record. Build one with [list]. *)
+     * when what is repeated is a row. Build one with [list]. *)
     | List of kind
-    (* A fixed set of named values, which is an [`Assoc] on the wire. The
-     * interface draws it as a row of named inputs, and as one row of the table
-     * when it is what a list repeats.
+    (* A fixed set of named values, which is an [`Assoc] on the wire, drawn as
+     * one row of a table: a cell per field, laid out left to right.
      *
-     * An array rather than an association list because the order is the order
-     * of the columns: it is decided once, by whoever declares the property,
-     * and every value of that property is then laid out the same way. Build
-     * one with [record]. *)
+     * A row is therefore flat -- its fields are values with a single input
+     * each, since that is what a cell holds -- and what wants to nest is a
+     * [Record]. An array rather than an association list because the order is
+     * the order of the columns: it is decided once, by whoever declares the
+     * property, and every value of that property is then laid out the same
+     * way. Build one with [row]. *)
+    | Row of (string * kind) array
+    (* The same on the wire, and the other way to draw it: a field per line,
+     * one under the next, and a field that is itself a record or a list
+     * indented under the line that names it.
+     *
+     * Which is what a form is, and what a thing with an inside is: a packet's
+     * layers, and the fields of each of them. Where a [Row] is what a table
+     * repeats, this is what is read and filled in on its own. Build one with
+     * [record]. *)
     | Record of (string * kind) array
     (* A value written a particular way, with an example of it: what the
      * interface shows in the input while it is empty. Not a kind of its own --

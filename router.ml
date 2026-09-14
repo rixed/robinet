@@ -136,7 +136,7 @@ struct
      * of it (see [Widget.hint]): "src mask" is a network and not an address,
      * and a port range is written in a way nobody would guess. *)
     let kind num_ports =
-        Widget.(Record [|
+        Widget.(Row [|
             "input port", optional (IRange (0, num_ports-1)) ;
             "src mask", optional (hint "192.168.0.0/24" String) ;
             "dst mask", optional (hint "192.168.0.0/24" String) ;

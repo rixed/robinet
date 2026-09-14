@@ -65,6 +65,7 @@ let rec kind_name = function
     | Metric -> "a metric"
     | Optional k -> "an optional value ("^ kind_name k ^")"
     | List k -> "a list of "^ kind_name k
+    | Row _ -> "a row"
     | Record _ -> "a record"
     | Hint (_, k) -> kind_name k
 
@@ -95,7 +96,7 @@ let optional = function
  * one input to show it in, and a value that may be absent is hinted through
  * the value it may hold: [optional (hint "min-max" String)]. *)
 let hint h = function
-    | (Optional _ | Metric | List _ | Record _ | Hint _ | Set _) as k ->
+    | (Optional _ | Metric | List _ | Row _ | Record _ | Hint _ | Set _) as k ->
         invalid_arg ("Widget.hint: nothing to write an example in for "^
                      kind_name k)
     | k -> Hint (h, k)
@@ -109,12 +110,12 @@ let hint h = function
  *)
 
 (** A list of [k]. What may be repeated is a value the interface has a single
- * input for, or a record of those: those are the two shapes it can draw, a
- * column and a table.
+ * input for, a row of those, or a record: a column, a table, and a form drawn
+ * again for each element.
  *
- * A list of lists has no such shape, and neither has a list of values that may
- * each be absent -- an element that is not there is one the list does not
- * hold. A set has one: a cell of ticked choices. *)
+ * A list of lists has none of those shapes, and neither has a list of values
+ * that may each be absent -- an element that is not there is one the list does
+ * not hold. A set has one: a cell of ticked choices. *)
 let list = function
     | (Optional _ | Metric | List _) as k ->
         invalid_arg ("Widget.list: cannot repeat "^ kind_name k)
@@ -127,53 +128,97 @@ let list = function
   (try ignore (list Metric) ; false with Invalid_argument _ -> true)
  *)
 
-(** A record of those named fields, in the order the interface must lay them
- * out.
- *
- * A field is a value with a single input, or one that may be absent: a record
- * is a row, and a row is made of cells. A field that is itself a record or a
- * list is not a cell, and would have to be drawn inside one.
- *
- * Names are what the fields are keyed by on the wire, so there must be no two
- * alike, and none empty. *)
-let record fields =
+(* The fields a row or a record is made of, named and in the order the
+ * interface lays them out: no two alike, since names are what they are keyed
+ * by on the wire, and none empty. [what] says which of the two is being built,
+ * so that a refusal names it. *)
+let check_fields what fields =
     if Array.length fields = 0 then
-        invalid_arg "Widget.record: a record with no field describes nothing" ;
-    Array.iter (fun (name, k) ->
+        invalid_arg ("Widget."^ what ^": one with no field describes nothing") ;
+    Array.iter (fun (name, _) ->
         if name = "" then
-            invalid_arg "Widget.record: a field must have a name" ;
-        match k with
-        | List _ | Record _ | Metric ->
-            invalid_arg ("Widget.record: field "^ name ^" cannot be "^
-                         kind_name k)
-        | _ -> ()
+            invalid_arg ("Widget."^ what ^": a field must have a name")
     ) fields ;
     Array.iteri (fun i (name, _) ->
         Array.iteri (fun j (name', _) ->
             if j > i && name = name' then
-                invalid_arg ("Widget.record: two fields named "^ name)
+                invalid_arg ("Widget."^ what ^": two fields named "^ name)
         ) fields
+    ) fields
+
+(** One row of a table: those named fields, laid out left to right, a cell
+ * each.
+ *
+ * A field is therefore a value with a single input, or one that may be absent.
+ * A field that is itself a row, a record or a list is not a cell, and what
+ * wants to hold one of those is a [record]. *)
+let row fields =
+    check_fields "row" fields ;
+    Array.iter (fun (name, k) ->
+        match k with
+        | List _ | Row _ | Record _ | Metric ->
+            invalid_arg ("Widget.row: field "^ name ^" cannot be "^
+                         kind_name k)
+        | _ -> ()
+    ) fields ;
+    Row fields
+
+(*$T row
+  row [| "a", Int ; "b", optional String |] = \
+      Row [| "a", Int ; "b", Optional String |]
+  (try ignore (row [||]) ; false with Invalid_argument _ -> true)
+  (try ignore (row [| "a", Int ; "a", Int |]) ; \
+   false with Invalid_argument _ -> true)
+  (try ignore (row [| "", Int |]) ; false with Invalid_argument _ -> true)
+  (try ignore (row [| "a", list Int |]) ; \
+   false with Invalid_argument _ -> true)
+  (try ignore (row [| "a", row [| "b", Int |] |]) ; \
+   false with Invalid_argument _ -> true)
+ *)
+
+(* A table of rows is what the two are for, and the reason a row is flat: see
+   the routing tables. *)
+(*$T list
+  list (row [| "dest", String ; "via", optional String |]) = \
+      List (Row [| "dest", String ; "via", Optional String |])
+ *)
+
+(** Those named fields, one to a line, one under the next: a form, and what a
+ * thing with an inside reads as -- a packet's layers, and the fields of each
+ * of them.
+ *
+ * A field may be anything at all, a record or a list included: those are drawn
+ * indented under the line that names them, which is what a row cannot do and
+ * the whole difference between the two. A metric is still not one: it is what
+ * a widget has counted, and it belongs to the widget and not to a value of
+ * its. *)
+let record fields =
+    check_fields "record" fields ;
+    Array.iter (fun (name, k) ->
+        match k with
+        | Metric ->
+            invalid_arg ("Widget.record: field "^ name ^" cannot be "^
+                         kind_name k)
+        | _ -> ()
     ) fields ;
     Record fields
 
+(* The second and third are what a row refuses and this is for: a field with an
+   inside of its own. Said here rather than within the block, since qtest ends
+   an injected block at the first comment terminator it meets. *)
 (*$T record
   record [| "a", Int ; "b", optional String |] = \
       Record [| "a", Int ; "b", Optional String |]
+  record [| "a", record [| "b", Int |] |] = \
+      Record [| "a", Record [| "b", Int |] |]
+  record [| "a", list (row [| "b", Int |]) |] = \
+      Record [| "a", List (Row [| "b", Int |]) |]
   (try ignore (record [||]) ; false with Invalid_argument _ -> true)
   (try ignore (record [| "a", Int ; "a", Int |]) ; \
    false with Invalid_argument _ -> true)
   (try ignore (record [| "", Int |]) ; false with Invalid_argument _ -> true)
-  (try ignore (record [| "a", list Int |]) ; \
+  (try ignore (record [| "a", Metric |]) ; \
    false with Invalid_argument _ -> true)
-  (try ignore (record [| "a", record [| "b", Int |] |]) ; \
-   false with Invalid_argument _ -> true)
- *)
-
-(* A table of records is the one that is worth having, and the reason for both:
-   see the routing tables. *)
-(*$T list
-  list (record [| "dest", String ; "via", optional String |]) = \
-      List (Record [| "dest", String ; "via", Optional String |])
  *)
 
 let property ?(descr="") ?(units="") ?metric ?setter ?can_set ?(kind=String)
