@@ -1157,7 +1157,12 @@
                                                                                  and the input takes what room is
                                                                                  left. -->
                                                                             <td><span class="cell">
-                                                                                <span x-show="p.read_only" class="ro"
+                                                                                <!-- Read, whatever the property
+                                                                                     around it allows: octets have no
+                                                                                     input of their own (see
+                                                                                     [cellInput]). -->
+                                                                                <span x-show="p.read_only || cellInput(c) === 'bytes'"
+                                                                                      class="ro"
                                                                                       :class="{ unset: !set(c) }"
                                                                                       :title="cellTitle(c)"
                                                                                       x-text="cellText(c, p.units)"></span>

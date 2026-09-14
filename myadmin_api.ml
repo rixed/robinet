@@ -204,6 +204,11 @@ and json_of_kind = function
     (* A frame: its bytes, and what they amount to (see
        [Widget.json_of_packet]). *)
     | Packet -> `Assoc [ "type", `String "packet" ]
+    (* Octets, as the hexadecimal of them and all of it (see
+       [Widget.json_of_bytes]): the interface shows the two ends and holds out
+       the rest, since a payload is longer than a cell and is read rather than
+       edited. *)
+    | Bytes -> `Assoc [ "type", `String "bytes" ]
     (* Counter, gauge or timed comes with the value: the metric says what
      * it is. *)
     | Metric ->

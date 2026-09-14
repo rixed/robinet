@@ -324,6 +324,15 @@ and kind =
     | IRange of int * int
     | Time
     | Packet
+    (* A run of octets with nothing said about what is in them, read as a
+     * hexstring and never edited: what a payload is, and what the options of
+     * an IP header are until somebody writes the kind that describes them.
+     *
+     * Read only because there is nothing here to edit. The bytes of a payload
+     * are whatever the layers above it wrote, and the way to change them is to
+     * change those; the interface therefore shows the two ends of the run and
+     * offers the whole of it to be read, rather than an input. *)
+    | Bytes
     (* A family of counts or measures, keyed by the parameters of the events
      * they come from: it reads as a small table, and the only thing a write
      * does is reset it. Which sort of metric it is comes with the value, which

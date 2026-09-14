@@ -63,6 +63,7 @@ let rec kind_name = function
     | FRange _ | IRange _ -> "a range"
     | Time -> "a timestamp"
     | Packet -> "a packet"
+    | Bytes -> "some bytes"
     | Metric -> "a metric"
     | Optional k -> "an optional value ("^ kind_name k ^")"
     | List k -> "a list of "^ kind_name k
@@ -162,7 +163,7 @@ let one_of ?range choices =
  * the value it may hold: [optional (hint "min-max" String)]. *)
 let hint h = function
     | (Optional _ | Metric | List _ | Row _ | Record _ | Variant _ | Hint _
-      | Set _) as k ->
+      | Set _ | Bytes) as k ->
         invalid_arg ("Widget.hint: nothing to write an example in for "^
                      kind_name k)
     | k -> Hint (h, k)
@@ -173,6 +174,7 @@ let hint h = function
   (try ignore (hint "x" (optional Int)) ; false with Invalid_argument _ -> true)
   (try ignore (hint "x" (hint "y" Int)) ; false with Invalid_argument _ -> true)
   (try ignore (hint "x" (list Int)) ; false with Invalid_argument _ -> true)
+  (try ignore (hint "de ad" Bytes) ; false with Invalid_argument _ -> true)
  *)
 
 (** A list of [k]. What may be repeated is a value the interface has a single
@@ -576,6 +578,15 @@ let describe_packet : (Bitstring.bitstring -> string) ref =
 let json_of_packet bits =
     `Assoc [ "bits", `String (Tools.hexstring_of_bitstring bits) ;
              "descr", `String (!describe_packet bits) ]
+
+(** A run of octets, as the interface reads one: the hexadecimal of it, which
+ * is the same string a packet's bytes travel as.
+ *
+ * All of it, however long: which two ends of it to show, and how much of it a
+ * reader can be handed at once, is the interface's to decide and not the
+ * simulator's. *)
+let json_of_bytes bits =
+    `String (Tools.hexstring_of_bitstring bits)
 
 (* Most widgets have no ports: *)
 let no_ports = {

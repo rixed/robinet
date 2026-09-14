@@ -22,6 +22,20 @@ const asText = (v) =>
  * the value it may hold. */
 const baseKind = (kind) => kind.type === 'optional' ? kind.of : kind
 
+/* The two ends of a run of octets, with however much of the middle a cell has
+ * no room for left out: a payload is read to see what is in it, and what is in
+ * it is at the ends -- the rest is in the tooltip and behind the button beside
+ * it. Counted in octets and not in characters, so that the cut falls between
+ * two of them. */
+const bytesEnds = 6
+
+const abbrevBytes = (hex) => {
+    const b = String(hex || '').split(' ').filter(x => x !== '')
+    if (b.length <= bytesEnds * 2 + 1) return b.join(' ')
+    return b.slice(0, bytesEnds).join(' ') + ' … ' +
+           b.slice(-bytesEnds).join(' ')
+}
+
 /* A set of choices, as it is sent and as one is compared with another: the
  * numbers of the ticked choices, in order and each at most once, which is what
  * the simulator keeps and answers with (see [Set] in simTypes.ml). Ticking is
@@ -2097,6 +2111,10 @@ document.addEventListener('alpine:init', () => {
             /* A choice that is not the whole story is a number with
              * suggestions, not a list to pick from. */
             if (t === 'enum') return isOpenChoice(c.kind) ? 'choice' : 'enum'
+            /* Octets are read and never typed, whether or not the property
+             * around them takes anything else (see [Bytes] in simTypes.ml), so
+             * this is the one input that is none. */
+            if (t === 'bytes') return 'bytes'
             if (t === 'bool' || t === 'set') return t
             if (t === 'int' || t === 'float' || t === 'range') return 'number'
             return 'text'
@@ -2231,6 +2249,10 @@ document.addEventListener('alpine:init', () => {
                button to switch between the two. */
             if (baseKind(c.kind).type === 'packet')
                 return (c.value && (c.value.descr || c.value.bits)) || ''
+            /* Octets, by their two ends: the whole of the run is what the
+               tooltip holds. */
+            if (baseKind(c.kind).type === 'bytes')
+                return abbrevBytes(c.draft)
             if (baseKind(c.kind).type === 'set')
                 return this.setText(c.kind, c.draft)
             if (baseKind(c.kind).type !== 'enum') return c.draft
@@ -2245,6 +2267,7 @@ document.addEventListener('alpine:init', () => {
         cellTitle(c) {
             if (baseKind(c.kind).type === 'packet')
                 return (c.value && c.value.bits) || ''
+            if (baseKind(c.kind).type === 'bytes') return c.draft || ''
             return ''
         },
 
