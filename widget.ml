@@ -523,9 +523,6 @@ let to_field name f = function
         (match List.assoc name l with
         | exception Not_found ->
             bad_value "no field %S in %s" name (Yojson.Basic.to_string v)
-        (* Whatever [f] refuses, it refuses about this field, and a record of
-         * eight of them has to say which one. Named here, once, rather than by
-         * the reader of every field of every record. *)
         | v ->
             (try f v with Bad_value msg -> bad_value "%s: %s" name msg))
     | v -> bad_value "expected a record, not %s" (Yojson.Basic.to_string v)
