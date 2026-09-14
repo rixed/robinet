@@ -726,6 +726,45 @@ let get_device_types _mth _matches _vars _qry_body resp =
                               "default", p.default ]) t.params) ]
     ) Device.all))
 
+(* What a frame amounts to, laid out layer by layer: its bytes in, and a kind
+ * and a value out -- the same pair a property travels as, so that the panel
+ * draws this with what it already has.
+ *
+ *   { "bits": "FF FF FF FF FF FF 00 1C ..." }
+ *
+ * Not a property of anything. What is decoded is whatever bytes the reader is
+ * looking at, and soon whatever bytes they paste in; and this module is
+ * compiled after {!Packet}, which makes it the one place here that can answer.
+ *
+ * The pcap pseudo-header is not among the layers: what is handed in is a
+ * frame, and dating it would be inventing something. *)
+let decode_packet _mth _matches _vars qry_body resp =
+    let json =
+        match Yojson.Basic.from_string qry_body with
+        | exception _ -> bad_request "Not a frame: it is not even JSON"
+        | j -> j in
+    let bits =
+        match Yojson.Basic.Util.member "bits" json with
+        | `String s ->
+            (* [Tools.bitstring_of_hexstring] skips whatever it cannot read, so
+               a frame with a typo in it would arrive shorter than it was, or
+               empty, and nothing would say so. Here is where somebody is
+               typing, so here is where that is refused. *)
+            String.iter (fun c ->
+                match c with
+                | '0'..'9' | 'a'..'f' | 'A'..'F'
+                | ' ' | '\t' | '\n' | '\r' | ':' | '-' | '.' -> ()
+                | _ ->
+                    bad_request "A frame is written in hexadecimal, and %C is \
+                                 not one of its digits" c
+            ) s ;
+            Tools.bitstring_of_hexstring s
+        | _ -> bad_request "Expected a \"bits\" field holding the frame" in
+    let pdu = Packet.of_frame bits in
+    respond resp
+        (`Assoc [ "kind", json_of_kind (Packet.Pdu.kind_of pdu) ;
+                  "value", Packet.Pdu.to_json pdu ])
+
 (* Add a device to a simulation: the body says which kind, what to call it, and
  * the characteristics that kind is built from (see [get_device_types]).
  *
@@ -1310,6 +1349,12 @@ let resources serving : (Str.regexp * Opache.resource) list =
             | "POST" -> create_widget mth matches vars qry_body resp
             | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     Str.regexp "/api/device-types$", get_device_types ;
+    (* Belongs to no simulation: a frame is a frame wherever it was caught. *)
+    Str.regexp "/api/packets/decode$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "PUT" | "POST" -> decode_packet mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     (* The pcap library, which belongs to no simulation. Before the listing,
        whose regexp would otherwise not match anyway -- but the order of these
        is what says which is which, and a reader should not have to check. *)

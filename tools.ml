@@ -159,6 +159,7 @@ let hexstring ?(sep=" ") s =
 let hexstring_of_bitstring =
     hexstring % string_of_bitstring
 
+
 let hexstring_of_bitstring_abbrev ?(bits=64) bs =
     if bitstring_length bs <= bits then hexstring_of_bitstring bs
     else hexstring_of_bitstring (takebits (bits-8) bs) ^ "..."
@@ -421,7 +422,7 @@ let bitstring_of_hexstring str =
         let c = str.[n] in
         c >= '0' && c <= '9' ||
         c >= 'a' && c <= 'f' ||
-        c >= 'A' && c <= 'A' in
+        c >= 'A' && c <= 'F' in
     let rec loop s d =
         let rec skip s =
             if s < String.length str - 1 && not (is_digit s) then
@@ -449,6 +450,13 @@ let bitstring_of_hexstring str =
   Bitstring.equals (bitstring_of_hexstring "0") (zeroes_bitstring 8)
   Bitstring.equals (bitstring_of_hexstring "12 34 56") \
                    (bitstring_of_hexstring " 12--34--56")
+*)
+
+(* The way back from [hexstring], which writes its digits in upper case: what
+   the interface hands a run of bytes over as, and hands back. *)
+(*$= hexstring_of_bitstring & ~printer:identity
+  (hexstring_of_bitstring (bitstring_of_hexstring "42 AF 0B")) "42 AF 0B"
+  (hexstring_of_bitstring (bitstring_of_hexstring "42af0b")) "42 AF 0B"
 *)
 
 let may_default v_opt f = match v_opt with Some v -> v | None -> f ()
