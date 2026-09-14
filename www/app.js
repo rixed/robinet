@@ -1043,6 +1043,70 @@ const borderPoint = (r, tx, ty) => {
  * pixels rather than anything the page reacts to. */
 let sceneMemo = { sig: null, value: null }
 
+/* A record drawn the way a record is meant to be: a field per line, one under
+ * the next, and a field with an inside of its own indented under the line that
+ * names it. Which is what a packet reads as -- its layers, and the fields of
+ * each of them.
+ *
+ * Flattened into lines each carrying its depth rather than drawn as a tree,
+ * because Alpine has no way to recurse; the widget tree in the left column is
+ * drawn the same way.
+ *
+ * A line is either a head -- something with an inside, whose fields follow --
+ * or a leaf, and a leaf carries a [cell], so that what it says and what it
+ * holds back are the panel's own [cellText] and [revealable] and not a second
+ * set of rules.
+ *
+ * A value that may be absent and is stops there: there is nothing inside a
+ * field that is not there, whatever its kind says it would hold. */
+const kindLines = (name, kind, value, depth, out) => {
+    const k = baseKind(kind)
+    const absent = value === null || value === undefined
+    const leaf = () =>
+        out.push({ key: out.length, depth, name, leaf: true,
+                   cell: cellOf(name, kind, value) })
+    if (absent) return leaf(), out
+    switch (k.type) {
+        case 'record':
+        case 'row':
+            out.push({ key: out.length, depth, name })
+            k.fields.forEach(f =>
+                kindLines(f.name, f.kind, value[f.name], depth + 1, out))
+            break
+        /* Which shape it is, said on the line that names it: a value of a
+           variant is an object of one field, and that field's name is the
+           case. */
+        case 'variant': {
+            const which = Object.keys(value)[0]
+            const c = (k.cases || []).find(c => c.name === which)
+            out.push({ key: out.length, depth, name, note: which })
+            if (!c) break
+            /* The fields of the case, under the line that already named it: a
+               head of its own would say the case's name a second time, one
+               line under the first. */
+            const ck = baseKind(c.kind)
+            const held = value[which]
+            if ((ck.type === 'record' || ck.type === 'row') && held)
+                ck.fields.forEach(f =>
+                    kindLines(f.name, f.kind, held[f.name], depth + 1, out))
+            else
+                kindLines(which, c.kind, held, depth + 1, out)
+            break
+        }
+        case 'list': {
+            const l = value || []
+            out.push({ key: out.length, depth, name,
+                       note: l.length === 1 ? '1 entry' : `${l.length} entries` })
+            l.forEach((v, i) =>
+                kindLines(`#${i + 1}`, k.of, v, depth + 1, out))
+            break
+        }
+        default:
+            leaf()
+    }
+    return out
+}
+
 /* How many whole values a slider may span before dragging it becomes a game
  * of chance and the number input is the only honest control. */
 const sliderValues = 10000
@@ -1241,6 +1305,17 @@ document.addEventListener('alpine:init', () => {
         /* Set by the first click on Delete and cleared by the second, or by
          * looking at something else. Taking a device out cannot be undone. */
         confirmDelete: false,
+
+        /* The frame being read, laid out: its bytes, and the kind and value
+         * the simulator decoded them into (see /api/packets/decode). It takes
+         * the room the map has, since a reader looking into a packet is not
+         * looking at the map -- and it outlives the selection, a frame being
+         * worth carrying from one widget to the next.
+         *
+         * It also stands in for a property wherever the panel wants one: it
+         * has the [revealed] set its lines' cells are opened through, and no
+         * units, every field of a packet carrying its own. */
+        frame: null,
 
         /* The simulation whose name is being typed, and what has been typed;
          * the one armed for deletion; and how many files are on their way in.
@@ -3393,6 +3468,57 @@ document.addEventListener('alpine:init', () => {
          * switched -- one box, one switch. What a widget could not do about
          * being switched is not a failure of the switch, and comes back in
          * its "error" property rather than here. */
+        /* Open a frame: its bytes go to the simulator, which is the only
+         * thing here that can read them, and what comes back is a kind and a
+         * value -- the same pair a property travels as, and drawn with the
+         * same [cellText] (see /api/packets/decode).
+         *
+         * Not decoded here. Every protocol this program knows is written in
+         * OCaml, and asking is a great deal less work than a second
+         * implementation that would go out of step with the first. */
+        async openFrame(bits) {
+            if (!bits) return
+            /* The column it opens in may have been shut over the map: bring
+               it back rather than leaving the click to do nothing. */
+            if (this.split === 1) this.split = this.splitLast || 0.45
+            this.frame = { bits, kind: null, value: null, error: null,
+                           busy: true, revealed: new Set() }
+            const held = this.frame
+            const r = await this.exchange(() =>
+                api('/packets/decode',
+                    { method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ bits }) }))
+            /* Another frame was opened while this one was being read: that one
+             * is the one the reader is waiting for. */
+            if (this.frame !== held) return
+            held.busy = false
+            if (!r.ok) { held.error = r.error.message ; return }
+            held.kind = r.value.kind
+            held.value = r.value.value
+        },
+
+        closeFrame() {
+            this.frame = null
+        },
+
+        /* The lines of the frame being read: every layer, and the fields of
+         * each (see [kindLines]). Computed on the way out rather than kept,
+         * since nothing about a frame that has been opened changes. */
+        frameLines() {
+            const f = this.frame
+            if (!f || !f.kind) return []
+            return kindLines(null, f.kind, f.value, -1, []).slice(1)
+        },
+
+        /* What the frame amounts to, for the header of the pane: the layers it
+         * is made of, innermost first, as a cable's table says it. */
+        frameName() {
+            const f = this.frame
+            if (!f || !f.kind || f.kind.type !== 'record') return 'frame'
+            return f.kind.fields.map(x => x.name).reverse().join('/')
+        },
+
         async togglePower() {
             if (!this.selected || !this.selected.power ||
                 !this.selected.power.owner) return

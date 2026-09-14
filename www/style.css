@@ -373,6 +373,90 @@ article.empty { color: var(--pico-muted-color); }
  * in rem. Only the picture: the properties below have their own, and stacking
  * the two reductions would leave the values too small to read. */
 .pane.detail .schematic { font-size: .85rem; }
+/* A frame, opened, where the map would be: the same box, and the same room,
+ * since a reader looking into a packet is not looking at the map. */
+.pane.frame {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    background: var(--pico-card-background-color);
+}
+.pane.frame > header {
+    display: flex;
+    align-items: baseline;
+    gap: .4rem;
+    padding: .25rem .5rem;
+    margin: 0;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+}
+.pane.frame > header strong { font-size: .85rem; }
+.pane.frame > header small { color: var(--pico-muted-color); }
+.pane.frame > header button.close {
+    width: auto;
+    margin: 0 0 0 auto;
+    padding: 0 .4rem;
+    line-height: 1.2;
+}
+.pane.frame .layers {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: .3rem 0;
+    font-size: .8rem;
+}
+/* One line per field, indented by how deep in the packet it is: a nested thing
+ * flattened into lines that each carry their depth (see [kindLines]), since
+ * there is no way to recurse in a template. */
+.pane.frame .line {
+    display: flex;
+    align-items: baseline;
+    gap: .4rem;
+    padding: .05rem .5rem .05rem 0;
+    padding-left: calc(.5rem + var(--depth) * .9rem);
+}
+.pane.frame .line:hover { background: var(--pico-code-background-color); }
+.pane.frame .line .fname { color: var(--pico-muted-color); }
+/* What a layer is: the line that opens one stands out, and the lines under it
+ * are read as belonging to it. */
+.pane.frame .line.head .fname {
+    color: var(--pico-color);
+    font-weight: bold;
+}
+.pane.frame .line .note {
+    color: var(--pico-muted-color);
+    font-style: italic;
+}
+/* The value, against the right of the line, so that a column of them reads as
+ * a column whatever the names beside them are. */
+.pane.frame .line .val {
+    margin-left: auto;
+    text-align: right;
+    font-family: var(--pico-font-family-monospace, monospace);
+    font-size: .75rem;
+    word-break: break-all;
+}
+.pane.frame .line .val.unset {
+    font-family: inherit;
+    font-style: italic;
+    color: var(--pico-muted-color);
+}
+.pane.frame .line .val.revealed { user-select: all; }
+.pane.frame .line /* What a frame amounts to, and the way into it. Underlined on hover only: a
+ * table of ten of them underlined throughout would read as a wall of links
+ * rather than as a list of frames. */
+.listing .cell a.frame-link {
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+}
+.listing .cell a.frame-link:hover { text-decoration: underline; }
+
+button.reveal { margin-left: 0; }
+
 /* Sticky rather than scrolling with the column beside it: the map is not part
  * of that list, it is what the list is about. */
 .pane.map {

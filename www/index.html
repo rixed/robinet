@@ -1161,7 +1161,22 @@
                                                                                      around it allows: octets have no
                                                                                      input of their own (see
                                                                                      [cellInput]). -->
-                                                                                <span x-show="p.read_only || cellInput(c) === 'bytes'"
+                                                                                <!-- A frame is the way into itself:
+                                                                                     clicking what it amounts to opens
+                                                                                     it, layer by layer, where the map
+                                                                                     is. -->
+                                                                                <template x-if="base(c).type === 'packet'">
+                                                                                    <a href="#" class="ro frame-link"
+                                                                                       :class="{ unset: !set(c),
+                                                                                                 revealed: revealed(p, c) }"
+                                                                                       :title="'Open this frame' +
+                                                                                               (cellTitle(c, p) ? ' — ' + cellTitle(c, p) : '')"
+                                                                                       @click.prevent="openFrame(c.value && c.value.bits)"
+                                                                                       x-text="cellText(c, p)"></a>
+                                                                                </template>
+
+                                                                                <span x-show="(p.read_only || cellInput(c) === 'bytes')
+                                                                                              && base(c).type !== 'packet'"
                                                                                       class="ro"
                                                                                       :class="{ unset: !set(c),
                                                                                                 revealed: revealed(p, c) }"
@@ -1358,12 +1373,63 @@
                               x-text="split === 1 ? '\u2039' : '\u203a'"></span>
                     </div>
 
+                    <!-- A frame, opened, in the room the map has: a reader
+                         looking into a packet is not looking at the map, and
+                         the two are the only things that want this much of the
+                         screen. Shutting it gives the map back.
+
+                         Every layer, and under each of them its fields, one to
+                         a line and indented by how deep in the packet they are
+                         (see [kindLines]). Read only for now: what it will
+                         become is the editor half of a packet generator, which
+                         is why its lines are drawn from a kind -- the same
+                         kinds the property panel already edits values through
+                         -- rather than from anything of its own. -->
+                    <div class="pane frame" x-show="split < 1 && frame" x-cloak>
+                        <header>
+                            <strong x-text="frameName()"></strong>
+                            <small x-show="frame && frame.busy">reading…</small>
+                            <button class="outline secondary close"
+                                    title="Shut it and bring the map back"
+                                    @click="closeFrame()">×</button>
+                        </header>
+                        <small class="error" x-show="frame && frame.error"
+                               x-text="frame && frame.error"></small>
+                        <div class="layers">
+                            <template x-for="l in frameLines()" :key="l.key">
+                                <div class="line" :class="{ head: !l.leaf }"
+                                     :style="`--depth:${l.depth}`">
+                                    <span class="fname" x-text="l.name"></span>
+                                    <!-- What a thing with an inside says for
+                                         itself: which shape it is, or how many
+                                         entries it holds. -->
+                                    <span class="note" x-show="l.note"
+                                          x-text="l.note"></span>
+                                    <template x-if="l.leaf">
+                                        <span class="val"
+                                              :class="{ unset: !set(l.cell),
+                                                        revealed: revealed(frame, l.cell) }"
+                                              :title="cellTitle(l.cell, frame)"
+                                              x-text="cellText(l.cell, frame)"></span>
+                                    </template>
+                                    <template x-if="l.leaf && revealable(l.cell)">
+                                        <button class="outline secondary reveal"
+                                                :aria-pressed="revealed(frame, l.cell)"
+                                                :title="revealTitle(frame, l.cell)"
+                                                @click="reveal(frame, l.cell)"
+                                                x-text="revealLabel(l.cell)"></button>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
                     <!-- The map. Everything one can click is HTML, absolutely
                          positioned, so that it is styled and handled like the rest
                          of the page; only the cables are SVG, and they go in as one
                          lump because a <template> inside an <svg> is parsed as an
                          SVG element with no content, which x-for cannot use. -->
-                    <div class="pane map" x-show="split < 1" x-cloak
+                    <div class="pane map" x-show="split < 1 && !frame" x-cloak
                          :class="{ picking: !!picking }"
                          x-ref="mapPane" x-init="watchMap()"
                          @wheel="zoomMap($event)" @pointerdown="panMap($event)"
