@@ -35,6 +35,19 @@ const asSet = (l) => [ ...new Set(l || []) ].sort((a, b) => a - b)
 const draftOf = (kind, value) =>
     baseKind(kind).type === 'set' ? asSet(value) : asText(value)
 
+/* Whether a choice is one of a closed set or merely a number with some known
+ * names: an open one carries the bounds any other number must lie within (see
+ * [Enum] in simTypes.ml), and is typed into rather than picked from. */
+const isOpenChoice = (kind) => baseKind(kind).max !== undefined
+
+/* The id a <datalist> is hung off, an input naming the list its suggestions
+ * come from. Built from what is already unique where it is drawn -- a
+ * property's name, a row and a column -- rather than from a counter, so that
+ * redrawing a table does not hand its inputs new lists. */
+const dlId = (...parts) =>
+    'choices-' + parts.map(p => String(p).replace(/[^A-Za-z0-9_-]/g, '_'))
+                      .join('-')
+
 /* An example of how the value is written, for the input to show while it is
  * empty -- a port range as "min-max", a network as "192.168.0.0/24". Read from
  * either side of an [optional], since a hint may be given for the value or for
@@ -2081,9 +2094,21 @@ document.addEventListener('alpine:init', () => {
          * name, as the map already does. */
         cellInput(c) {
             const t = baseKind(c.kind).type
-            if (t === 'bool' || t === 'enum' || t === 'set') return t
+            /* A choice that is not the whole story is a number with
+             * suggestions, not a list to pick from. */
+            if (t === 'enum') return isOpenChoice(c.kind) ? 'choice' : 'enum'
+            if (t === 'bool' || t === 'set') return t
             if (t === 'int' || t === 'float' || t === 'range') return 'number'
             return 'text'
+        },
+
+        /* See [isOpenChoice] and [dlId]. */
+        openChoice(x) {
+            return isOpenChoice(x.kind)
+        },
+
+        dl(...parts) {
+            return dlId(...parts)
         },
 
         /* An example of how to write it, shown in the empty input: see

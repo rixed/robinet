@@ -688,7 +688,7 @@ struct
                         iface.eth.iface.can_forward_after <- t.can_forward_after
                     ) t.ifaces) ;
             property "load balancing"
-                ~kind:(Enum (choices all_load_balancing))
+                ~kind:(one_of (choices all_load_balancing))
                 ~descr:"Load balancing between matching routes."
                 ~getter:(fun () -> `Int (load_balancing_to_enum t.load_balancing))
                 ~setter:(fun v ->

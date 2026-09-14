@@ -144,7 +144,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
             set_capabilities = (fun _ _ -> ()) } ;
         Widget.add_properties widget Widget.[
             property "speed"
-                ~kind:(Enum (choices speed_names))
+                ~kind:(one_of (choices speed_names))
                 ~descr:"Fixed speed for this Hub."
                 ~getter:(fun () -> `Int (Array.findi ((=) t.speed) speeds))
                 ~setter:(fun v ->

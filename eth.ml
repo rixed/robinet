@@ -1145,7 +1145,7 @@ struct
                     ~getter:(fun () -> `Float t.error_rate) ;
                 property "last packets"
                     ~kind:(List (Row [| "time", Time ;
-                                        "dir", Enum (choices [| "→" ; "←" |]) ;
+                                        "dir", one_of (choices [| "→" ; "←" |]) ;
                                         "frame", Packet |]))
                     ~descr:"Last packets transmitted."
                     (* Most recent first, and the slots nothing has reached

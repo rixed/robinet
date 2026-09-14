@@ -282,16 +282,25 @@ and kind =
     | Float
     (* "true" or "false", as the setter reads them *)
     | Bool
-    (* One of those values, and nothing else: a number and what to call it,
-     * which is what a <select> has always been -- an option's value and the
-     * text of it.
+    (* A number, of those known ones or of any other within those bounds.
      *
-     * The number is what travels and what a setter reads, and it is the
-     * caller's to choose: a protocol number names itself (0x0800 is IP), and a
-     * set of alternatives with nothing of its own to be numbered by is
-     * numbered by the places of its choices, which is what [Widget.choices]
-     * does. *)
-    | Enum of (int * string) array
+     * A choice is a number and what to call it, which is what a <select> has
+     * always been -- an option's value and the text of it. The number is what
+     * travels and what a setter reads, and it is the caller's to choose: a
+     * protocol number names itself (0x0800 is IP), while a set of alternatives
+     * with nothing of its own to be numbered by is numbered by the places of
+     * its choices, which is what [Widget.choices] does.
+     *
+     * The bounds are what makes the set open, and are there because a set of
+     * protocol numbers is never closed: a module names the four protocols it
+     * knows and a frame may carry any of 65536. Without them the choices are
+     * all there is and anything else is refused, which is right for a load
+     * balancing policy -- there are three, and a fourth would be a mistake.
+     *
+     * The two are drawn differently and that is the point of saying which:
+     * closed is a <select>, open is an input with the known ones suggested
+     * beside it. Build one with [Widget.one_of]. *)
+    | Enum of (int * string) array * (int * int) option
     (* Any number of those values, each at most once, in no order of its own:
      * the interface ticks them, and the value is the places of the ticked ones
      * (as [Enum]'s is the place of the one), which is a [`List] on the wire.

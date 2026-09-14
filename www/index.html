@@ -608,6 +608,25 @@
                                                                                     </select>
                                                                                 </template>
 
+                                                                                <!-- A number with some known names: typed
+                                                                                     into, with those offered beside it,
+                                                                                     since the names are not all there is
+                                                                                     (a frame may carry any protocol). -->
+                                                                                <template x-if="cellInput(c) === 'choice'">
+                                                                                    <span class="cell">
+                                                                                        <input type="number" :disabled="!online"
+                                                                                               :class="{ unset: !set(c) }"
+                                                                                               :min="base(c).min" :max="base(c).max"
+                                                                                               :list="dl('f', f.name, row.key, i)"
+                                                                                               x-model="c.draft" @change="enable(c)"/>
+                                                                                        <datalist :id="dl('f', f.name, row.key, i)">
+                                                                                            <template x-for="ch in base(c).choices" :key="ch.value">
+                                                                                                <option :value="ch.value" x-text="ch.label"></option>
+                                                                                            </template>
+                                                                                        </datalist>
+                                                                                    </span>
+                                                                                </template>
+
                                                                                 <template x-if="cellInput(c) === 'set'">
                                                                                     <span class="choices">
                                                                                         <template x-for="ch in base(c).choices" :key="ch.value">
@@ -701,7 +720,7 @@
                                                                         enable(f)"/>
                                                     </template>
 
-                                                    <template x-if="base(f).type === 'enum'">
+                                                    <template x-if="base(f).type === 'enum' && !openChoice(f)">
                                                         <select :disabled="!online" :class="{ unset: !set(f) }"
                                                                 x-model="f.draft" @change="enable(f)">
                                                             <!-- Worth the choice's own number, not its
@@ -711,6 +730,23 @@
                                                                 <option :value="c.value" x-text="c.label"></option>
                                                             </template>
                                                         </select>
+                                                    </template>
+
+                                                    <!-- The same number, where the known ones are not
+                                                         all there is: offered, not imposed. -->
+                                                    <template x-if="base(f).type === 'enum' && openChoice(f)">
+                                                        <span>
+                                                            <input type="number" :disabled="!online"
+                                                                   :class="{ unset: !set(f) }"
+                                                                   :min="base(f).min" :max="base(f).max"
+                                                                   :list="dl('param', f.name)"
+                                                                   x-model="f.draft" @change="enable(f)"/>
+                                                            <datalist :id="dl('param', f.name)">
+                                                                <template x-for="c in base(f).choices" :key="c.value">
+                                                                    <option :value="c.value" x-text="c.label"></option>
+                                                                </template>
+                                                            </datalist>
+                                                        </span>
                                                     </template>
 
                                                     <!-- Any number of them, ticked: the same input as
@@ -975,13 +1011,32 @@
                                                                     enable(p) ; save(p)"/>
                                                 </template>
 
-                                                <template x-if="!p.read_only && base(p).type === 'enum'">
+                                                <template x-if="!p.read_only && base(p).type === 'enum'
+                                                                && !openChoice(p)">
                                                     <select :disabled="!online" :class="{ unset: !set(p) }"
                                                             x-model="p.draft" @change="enable(p) ; save(p)">
                                                         <template x-for="c in base(p).choices" :key="c.value">
                                                             <option :value="c.value" x-text="c.label"></option>
                                                         </template>
                                                     </select>
+                                                </template>
+
+                                                <!-- A number of which some are known by name: typed
+                                                     in, with those offered beside it. -->
+                                                <template x-if="!p.read_only && base(p).type === 'enum'
+                                                                && openChoice(p)">
+                                                    <span>
+                                                        <input type="number" :disabled="!online"
+                                                               :class="{ unset: !set(p) }"
+                                                               :min="base(p).min" :max="base(p).max"
+                                                               :list="dl('prop', p.name)"
+                                                               x-model="p.draft" @change="enable(p) ; save(p)"/>
+                                                        <datalist :id="dl('prop', p.name)">
+                                                            <template x-for="c in base(p).choices" :key="c.value">
+                                                                <option :value="c.value" x-text="c.label"></option>
+                                                            </template>
+                                                        </datalist>
+                                                    </span>
                                                 </template>
 
                                                 <!-- Any number of the choices: a box for each of
@@ -1133,6 +1188,24 @@
                                                                                             <option :value="ch.value" x-text="ch.label"></option>
                                                                                         </template>
                                                                                     </select>
+                                                                                </template>
+
+                                                                                <!-- See the same input in the device form:
+                                                                                     a number whose known values are
+                                                                                     offered rather than imposed. -->
+                                                                                <template x-if="!p.read_only && cellInput(c) === 'choice'">
+                                                                                    <span class="cell">
+                                                                                        <input type="number" :disabled="!online"
+                                                                                               :class="{ unset: !set(c) }"
+                                                                                               :min="base(c).min" :max="base(c).max"
+                                                                                               :list="dl('p', p.name, row.key, i)"
+                                                                                               x-model="c.draft" @change="enable(c) ; touch(p)"/>
+                                                                                        <datalist :id="dl('p', p.name, row.key, i)">
+                                                                                            <template x-for="ch in base(c).choices" :key="ch.value">
+                                                                                                <option :value="ch.value" x-text="ch.label"></option>
+                                                                                            </template>
+                                                                                        </datalist>
+                                                                                    </span>
                                                                                 </template>
 
                                                                                 <template x-if="!p.read_only && cellInput(c) === 'set'">

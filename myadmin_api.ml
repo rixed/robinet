@@ -165,9 +165,16 @@ and json_of_kind = function
     | Int -> `Assoc [ "type", `String "int" ]
     | Float -> `Assoc [ "type", `String "float" ]
     | Bool -> `Assoc [ "type", `String "bool" ]
-    | Enum choices ->
-        `Assoc [ "type", `String "enum" ;
-                 "choices", json_of_choices choices ]
+    (* The known choices, and the bounds any other number must lie within when
+       there are others to be had: their absence is what says the choices are
+       all there is, and the interface draws a list to pick from rather than a
+       field to type in. *)
+    | Enum (choices, range) ->
+        `Assoc ([ "type", `String "enum" ;
+                  "choices", json_of_choices choices ] @
+                (match range with
+                | None -> []
+                | Some (mi, ma) -> [ "min", `Int mi ; "max", `Int ma ]))
     (* The same choices, ticked rather than picked: the interface offers all of
        them and the value is the numbers of the ticked ones. *)
     | Set choices ->

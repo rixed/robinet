@@ -175,8 +175,8 @@ let rec coerce name (kind : Widget.kind) v =
         (* As for a metric below: these are what a device has seen, and a
          * device that has not been built yet has seen nothing. *)
         Widget.bad_value "%s cannot be given when building a device" name
-    | Enum choices ->
-        (try `Int (Widget.to_choice choices v)
+    | Enum (choices, range) ->
+        (try `Int (Widget.to_choice ?range choices v)
         with Widget.Bad_value m -> Widget.bad_value "%s: %s" name m)
     (* In order and without repetition, however it was sent: [make] is handed
        the set itself, and has nothing left to check about it. *)
@@ -335,7 +335,8 @@ let hub =
       params = [
           param "ports" ~kind:(IRange (2, 1024)) ~default:(`Int 8)
               ~descr:"How many cables it takes." ;
-          param "speed" ~kind:(Enum (Widget.choices Hub.Repeater.speed_names))
+          param "speed"
+              ~kind:(Widget.one_of (Widget.choices Hub.Repeater.speed_names))
               ~default:(`Int 1)
               ~descr:"Hub speed." ] ;
       of_params = fun args ->
@@ -946,7 +947,8 @@ let make_from_params type_ ~parent name given =
 (*$T coerce
   (try ignore (coerce "n" (IRange (0, 5)) (`Int 9)) ; false \
    with Widget.Bad_value _ -> true)
-  (try ignore (coerce "n" (Enum (Widget.choices [| "a" |])) (`Int 9)) ; false \
+  (try ignore (coerce "n" (Widget.one_of (Widget.choices [| "a" |])) (`Int 9)) ; \
+   false \
    with Widget.Bad_value _ -> true)
   (try ignore (coerce "n" Metric (`Int 0)) ; false \
    with Widget.Bad_value _ -> true)
@@ -956,10 +958,11 @@ let make_from_params type_ ~parent name given =
    a protocol number needs: what travels for IP is 0x0800. *)
 (*$= coerce & ~printer:Yojson.Basic.to_string
   (`Int 0x0800) \
-    (coerce "p" (Enum [| 0x0800, "IP" ; 0x0806, "ARP" |]) (`Int 0x0800))
+    (coerce "p" (Widget.one_of [| 0x0800, "IP" ; 0x0806, "ARP" |]) (`Int 0x0800))
  *)
 (*$T coerce
-  (try ignore (coerce "p" (Enum [| 0x0800, "IP" |]) (`Int 0)) ; false \
+  (try ignore (coerce "p" (Widget.one_of [| 0x0800, "IP" |]) (`Int 0)) ; \
+   false \
    with Widget.Bad_value _ -> true)
  *)
 
