@@ -836,13 +836,32 @@
                         <article class="properties" x-show="!adding">
                             <header>
                                 <strong>Properties</strong>
-                                <!-- The live refresh deliberately leaves the fields
-                                     below alone; this is how one asks for their true
-                                     values back. -->
-                                <button class="outline secondary"
+                                <!-- Whether the values below follow what the
+                                     simulator is doing, or hold still. A table
+                                     that is a window on something moving --
+                                     the last packets of a busy cable -- cannot
+                                     be read while it moves. -->
+                                <button class="refresh-auto"
+                                        :class="autoProps ? '' : 'outline secondary'"
+                                        :aria-pressed="autoProps"
+                                        :title="autoProps
+                                                ? 'Following: the values are read again every second. Click to hold them still'
+                                                : 'Held still. Click to follow again'"
+                                        @click="toggleAutoProps()">Refresh</button>
+
+                                <!-- Whatever the switch beside it says. The
+                                     live refresh deliberately leaves the fields
+                                     one types in alone; this is how one asks
+                                     for their true values back. -->
+                                <button class="outline secondary refresh-now"
                                         :disabled="!online || !shownProps().length"
-                                        title="Read every value again, the editable ones included"
-                                        @click="loadProps({ full: true })">Refresh</button>
+                                        title="Read every value again now, the editable ones included"
+                                        @click="loadProps({ full: true })">
+                                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                                        <path d="M13.7 8a5.7 5.7 0 1 1-1.7-4"/>
+                                        <polyline points="12.6,1.2 12.6,4.4 9.4,4.4"/>
+                                    </svg>
+                                </button>
                             </header>
 
                             <p x-show="propsState === 'loading'" x-cloak>
@@ -1080,7 +1099,8 @@
                                                     </span>
                                                 </template>
 
-                                                <template x-if="!p.read_only && (base(p).type === 'int' || base(p).type === 'float')">
+                                                <template x-if="!p.read_only && (base(p).type === 'int' || base(p).type === 'float'
+                                                                 || base(p).type === 'duration')">
                                                     <input type="number" :disabled="!online"
                                                            :class="{ unset: !set(p) }"
                                                            :step="base(p).type === 'int' ? 1 : 'any'"
@@ -1168,9 +1188,9 @@
                                                                                 <template x-if="base(c).type === 'packet'">
                                                                                     <a href="#" class="ro frame-link"
                                                                                        :class="{ unset: !set(c),
-                                                                                                 revealed: revealed(p, c) }"
+                                                                                                 revealed: revealed(c) }"
                                                                                        :title="'Open this frame' +
-                                                                                               (cellTitle(c, p) ? ' — ' + cellTitle(c, p) : '')"
+                                                                                               (cellTitle(c) ? ' — ' + cellTitle(c) : '')"
                                                                                        @click.prevent="openFrame(c.value && c.value.bits)"
                                                                                        x-text="cellText(c, p)"></a>
                                                                                 </template>
@@ -1179,8 +1199,8 @@
                                                                                               && base(c).type !== 'packet'"
                                                                                       class="ro"
                                                                                       :class="{ unset: !set(c),
-                                                                                                revealed: revealed(p, c) }"
-                                                                                      :title="cellTitle(c, p)"
+                                                                                                revealed: revealed(c) }"
+                                                                                      :title="cellTitle(c)"
                                                                                       x-text="cellText(c, p)"></span>
 
                                                                                 <!-- A cell holding more than it shows:
@@ -1193,9 +1213,9 @@
                                                                                      about to do. -->
                                                                                 <template x-if="revealable(c)">
                                                                                     <button class="outline secondary reveal"
-                                                                                            :aria-pressed="revealed(p, c)"
-                                                                                            :title="revealTitle(p, c)"
-                                                                                            @click="reveal(p, c)"
+                                                                                            :aria-pressed="revealed(c)"
+                                                                                            :title="revealTitle(c)"
+                                                                                            @click="reveal(c)"
                                                                                             x-text="revealLabel(c)"></button>
                                                                                 </template>
 
@@ -1397,8 +1417,22 @@
                                x-text="frame && frame.error"></small>
                         <div class="layers">
                             <template x-for="l in frameLines()" :key="l.key">
-                                <div class="line" :class="{ head: !l.leaf }"
+                                <div class="line"
+                                     :class="{ head: !l.leaf,
+                                               folded: isFolded(l) }"
                                      :style="`--depth:${l.depth}`">
+                                    <!-- A layer folds away, as a box on the
+                                         map does: a packet is read one layer
+                                         at a time, and the one being read is
+                                         easier to see with the others out of
+                                         the way. -->
+                                    <button class="twisty"
+                                            :class="{ blank: !l.kids }"
+                                            :disabled="!l.kids"
+                                            :title="isFolded(l) ? 'Show what is inside'
+                                                                : 'Fold it away'"
+                                            @click="foldLine(l)"
+                                            x-text="l.kids ? (isFolded(l) ? '▸' : '▾') : ''"></button>
                                     <span class="fname" x-text="l.name"></span>
                                     <!-- What a thing with an inside says for
                                          itself: which shape it is, or how many
@@ -1408,15 +1442,15 @@
                                     <template x-if="l.leaf">
                                         <span class="val"
                                               :class="{ unset: !set(l.cell),
-                                                        revealed: revealed(frame, l.cell) }"
-                                              :title="cellTitle(l.cell, frame)"
+                                                        revealed: revealed(l.cell) }"
+                                              :title="cellTitle(l.cell)"
                                               x-text="cellText(l.cell, frame)"></span>
                                     </template>
                                     <template x-if="l.leaf && revealable(l.cell)">
                                         <button class="outline secondary reveal"
-                                                :aria-pressed="revealed(frame, l.cell)"
-                                                :title="revealTitle(frame, l.cell)"
-                                                @click="reveal(frame, l.cell)"
+                                                :aria-pressed="revealed(l.cell)"
+                                                :title="revealTitle(l.cell)"
+                                                @click="reveal(l.cell)"
                                                 x-text="revealLabel(l.cell)"></button>
                                     </template>
                                 </div>

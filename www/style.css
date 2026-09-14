@@ -419,6 +419,20 @@ article.empty { color: var(--pico-muted-color); }
     padding-left: calc(.5rem + var(--depth) * .9rem);
 }
 .pane.frame .line:hover { background: var(--pico-code-background-color); }
+/* The twisty keeps its place whether or not a line has one, so that the names
+ * of a layer's fields line up under each other. */
+.pane.frame .line > .twisty {
+    flex: none;
+    width: 1rem;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--pico-muted-color);
+    font-size: .7rem;
+    line-height: 1;
+}
+.pane.frame .line > .twisty.blank { cursor: default; }
 .pane.frame .line .fname { color: var(--pico-muted-color); }
 /* What a layer is: the line that opens one stands out, and the lines under it
  * are read as belonging to it. */
@@ -1419,6 +1433,33 @@ button.reveal {
     white-space: normal;
     word-break: break-all;
     user-select: all;
+}
+
+/* The switch that says whether the panel follows the simulator, and the button
+ * that reads the values once whatever the switch says. Small, and side by side
+ * at the right of the header: together they are one control with two halves. */
+button.refresh-auto,
+button.refresh-now {
+    width: auto;
+    margin: 0;
+    padding: .1rem .5rem;
+    font-size: .75rem;
+    line-height: 1.3;
+}
+button.refresh-auto { margin-left: auto; }
+button.refresh-now {
+    display: inline-flex;
+    align-items: center;
+    padding: .1rem .45rem;
+}
+button.refresh-now svg {
+    width: .9rem;
+    height: .9rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
 button.eject svg {

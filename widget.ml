@@ -62,6 +62,7 @@ let rec kind_name = function
     | Widget_id -> "a widget"
     | FRange _ | IRange _ -> "a range"
     | Time -> "a timestamp"
+    | Duration -> "a length of time"
     | Packet -> "a packet"
     | Bytes -> "some bytes"
     | Metric -> "a metric"
@@ -571,7 +572,7 @@ let rec check_value ?(name="value") k v =
     | Float, (`Float _ | `Int _) -> ()
     | Bool, `Bool _ -> ()
     | Widget_id, `Int _ -> ()
-    | Time, (`Float _ | `Int _) -> ()
+    | (Time | Duration), (`Float _ | `Int _) -> ()
     | IRange (mi, ma), `Int i -> within string_of_int mi ma i
     | FRange (mi, ma), `Float f -> within string_of_float mi ma f
     | FRange (mi, ma), `Int i -> within string_of_float mi ma (float_of_int i)
@@ -649,6 +650,12 @@ let json_of_optional sub = function
  * displays it has to do. *)
 let json_of_time (t : Clock.Time.t) =
     `Float (Clock.Time.to_secs t)
+
+(** A length of time, in seconds, as [json_of_time] hands out an instant: the
+ * interface writes it out as a length -- "38min 25s" -- which is the whole
+ * difference between the two. *)
+let json_of_duration (i : Clock.Interval.t) =
+    `Float (Clock.Interval.to_secs i)
 
 (** A frame in a few words -- "Icmp/Ip/Eth" -- which is what the interface
  * shows for a packet before the reader asks to see more of it.

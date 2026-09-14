@@ -323,6 +323,10 @@ and kind =
     | FRange of float * float
     | IRange of int * int
     | Time
+    (* A length of time, in seconds, as against [Time]'s instant. Both travel
+     * as a number of seconds and the difference is what it is a number of, so
+     * the interface shows one on a clock and the other as "38min 25s". *)
+    | Duration
     | Packet
     (* A run of octets with nothing said about what is in them, read as a
      * hexstring and never edited: what a payload is, and what the options of

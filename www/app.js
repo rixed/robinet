@@ -148,7 +148,11 @@ const cellOf = (name, kind, value) => ({
      * what such a cell shows cannot be got back out of the text of a draft. */
     value,
     draft: draftOf(kind, value),
-    enabled: value !== null && value !== undefined
+    enabled: value !== null && value !== undefined,
+    /* Whether the reader has asked to see what this cell holds back: the bytes
+     * of a frame, the whole of a run of octets. Set here even though it starts
+     * false, so that the binding reading it has something to read. */
+    shown: false
 })
 
 /* The cells one value of [kind] is edited through: one per field when it is a
@@ -161,6 +165,29 @@ const cellsOf = (kind, value) =>
         : [ cellOf(null, kind, value) ]
 
 const rowOf = (kind, value) => ({ key: ++rowSeq, cells: cellsOf(kind, value) })
+
+/* What a row holds, as one string. Two rows are the same row when they say the
+ * same thing: a value has no id to go by, and its place in the table is no
+ * identity either -- a cable's last packets are a ring, and every frame that
+ * arrives shifts every row along by one. */
+const rowIdent = (row) => row.cells.map(c => String(c.draft)).join('\u0001')
+
+/* Rebuilding a table must not shut the cells the reader opened. */
+const carryShown = (rows, was) => {
+    if (!was || !was.length) return rows
+    const open = new Set()
+    for (const r of was) {
+        const id = rowIdent(r)
+        for (const c of r.cells) if (c.shown) open.add(id + '\u0000' + c.name)
+    }
+    if (!open.size) return rows
+    for (const r of rows) {
+        const id = rowIdent(r)
+        for (const c of r.cells)
+            if (open.has(id + '\u0000' + c.name)) c.shown = true
+    }
+    return rows
+}
 
 /* A cell nobody has put anything in: no value at all, or nothing but blanks.
  * A tick box that is off is one of those, whatever the field beside it still
@@ -200,7 +227,7 @@ const resetDraft = (p, force) => {
         const from = asText(p.value)
         if (!force && p.rows && p.rowsFrom === from) return
         p.rowsFrom = from
-        p.rows = rowsOf(p)
+        p.rows = carryShown(rowsOf(p), p.rows)
     } else {
         /* A value that is not set keeps whatever was in the field: see
          * [draftFor]. */
@@ -271,7 +298,7 @@ const unitFormats = { __proto__: null, bps }
 const numericKind = (kind) => {
     const k = baseKind(kind)
     const t = k.type === 'list' ? baseKind(k.of).type : k.type
-    return t === 'int' || t === 'float' || t === 'range'
+    return t === 'int' || t === 'float' || t === 'range' || t === 'duration'
 }
 
 /* What a figure counted in [units] reads as: the unit's own writing when it
@@ -1050,61 +1077,85 @@ let sceneMemo = { sig: null, value: null }
  *
  * Flattened into lines each carrying its depth rather than drawn as a tree,
  * because Alpine has no way to recurse; the widget tree in the left column is
- * drawn the same way.
+ * drawn the same way. Each line also carries the [path] down to it, which is
+ * what folding one away is keyed by, and [kids], which is whether there is
+ * anything under it to fold.
  *
  * A line is either a head -- something with an inside, whose fields follow --
  * or a leaf, and a leaf carries a [cell], so that what it says and what it
  * holds back are the panel's own [cellText] and [revealable] and not a second
  * set of rules.
  *
- * A value that may be absent and is stops there: there is nothing inside a
- * field that is not there, whatever its kind says it would hold. */
-const kindLines = (name, kind, value, depth, out) => {
-    const k = baseKind(kind)
-    const absent = value === null || value === undefined
-    const leaf = () =>
-        out.push({ key: out.length, depth, name, leaf: true,
-                   cell: cellOf(name, kind, value) })
-    if (absent) return leaf(), out
-    switch (k.type) {
-        case 'record':
-        case 'row':
-            out.push({ key: out.length, depth, name })
-            k.fields.forEach(f =>
-                kindLines(f.name, f.kind, value[f.name], depth + 1, out))
-            break
-        /* Which shape it is, said on the line that names it: a value of a
-           variant is an object of one field, and that field's name is the
-           case. */
-        case 'variant': {
-            const which = Object.keys(value)[0]
-            const c = (k.cases || []).find(c => c.name === which)
-            out.push({ key: out.length, depth, name, note: which })
-            if (!c) break
-            /* The fields of the case, under the line that already named it: a
-               head of its own would say the case's name a second time, one
-               line under the first. */
-            const ck = baseKind(c.kind)
-            const held = value[which]
-            if ((ck.type === 'record' || ck.type === 'row') && held)
-                ck.fields.forEach(f =>
-                    kindLines(f.name, f.kind, held[f.name], depth + 1, out))
-            else
-                kindLines(which, c.kind, held, depth + 1, out)
-            break
+ * [skipAbsent] leaves out what is not there, which is what a reader wants: a
+ * DHCP message describes every option it could carry and carries five of them,
+ * and forty lines of "unset" bury the five. An editor will want them back --
+ * an option one is about to fill in has to be there to be filled in -- which
+ * is why this is asked for rather than assumed. */
+const kindLines = (kind, value, opts) => {
+    const skipAbsent = !!(opts && opts.skipAbsent)
+    const out = []
+    const walk = (name, kind, value, depth, path) => {
+        const k = baseKind(kind)
+        const absent = value === null || value === undefined
+        const line = (extra) =>
+            out.push(Object.assign({ key: out.length, depth, name, path },
+                                   extra))
+        if (absent) {
+            if (!skipAbsent)
+                line({ leaf: true, cell: cellOf(name, kind, value) })
+            return
         }
-        case 'list': {
-            const l = value || []
-            out.push({ key: out.length, depth, name,
-                       note: l.length === 1 ? '1 entry' : `${l.length} entries` })
-            l.forEach((v, i) =>
-                kindLines(`#${i + 1}`, k.of, v, depth + 1, out))
-            break
+        switch (k.type) {
+            case 'record':
+            case 'row':
+                line({})
+                k.fields.forEach(f =>
+                    walk(f.name, f.kind, value[f.name], depth + 1,
+                         path + '/' + f.name))
+                break
+            /* Which shape it is, said on the line that names it: a value of a
+               variant is an object of one field, and that field's name is the
+               case. */
+            case 'variant': {
+                const which = Object.keys(value)[0]
+                const c = (k.cases || []).find(c => c.name === which)
+                line({ note: which })
+                if (!c) break
+                /* The fields of the case, under the line that already named
+                   it: a head of its own would say the case's name a second
+                   time, one line under the first. */
+                const ck = baseKind(c.kind)
+                const held = value[which]
+                if ((ck.type === 'record' || ck.type === 'row') && held)
+                    ck.fields.forEach(f =>
+                        walk(f.name, f.kind, held[f.name], depth + 1,
+                             path + '/' + which + '/' + f.name))
+                else
+                    walk(which, c.kind, held, depth + 1,
+                         path + '/' + which)
+                break
+            }
+            case 'list': {
+                const l = value || []
+                line({ note: l.length === 1 ? '1 entry'
+                                            : `${l.length} entries` })
+                l.forEach((v, i) =>
+                    walk(`#${i + 1}`, k.of, v, depth + 1,
+                         path + '/' + i))
+                break
+            }
+            default:
+                line({ leaf: true, cell: cellOf(name, kind, value) })
         }
-        default:
-            leaf()
     }
-    return out
+    walk(null, kind, value, -1, '')
+    /* Whether anything is indented under this line, which is whether it is
+     * worth a twisty: read off the shape rather than counted as it was built,
+     * a head whose every field was absent having nothing under it. */
+    for (let i = 0 ; i < out.length ; i++)
+        out[i].kids = i + 1 < out.length && out[i + 1].depth > out[i].depth
+    /* The first line stands for the whole value and names nothing. */
+    return out.slice(1)
 }
 
 /* How many whole values a slider may span before dragging it becomes a game
@@ -1143,6 +1194,20 @@ document.addEventListener('alpine:init', () => {
         selected: null,
 
         props: [],
+        /* Whether the poll reads the selected widget's values again every
+         * second.
+         *
+         * Off, the panel holds still. Which is the only way to read a table
+         * that is a window on something moving -- a cable's last packets are a
+         * ring the traffic pushes through, and a reader who has found the
+         * frame they wanted needs it to stop being pushed along while they
+         * look at it.
+         *
+         * Only the values: the clocks, the logs and the charts go on, so a
+         * held panel is plainly a held panel and not a program that has
+         * stopped. And selecting a widget still reads its values, held or not
+         * -- what is held is the refreshing, not the reading. */
+        autoProps: true,
         /* 'loading' until we know, so that "this widget has none" is only ever
          * said about a widget we actually managed to ask about. */
         propsState: 'loading',
@@ -1312,9 +1377,9 @@ document.addEventListener('alpine:init', () => {
          * looking at the map -- and it outlives the selection, a frame being
          * worth carrying from one widget to the next.
          *
-         * It also stands in for a property wherever the panel wants one: it
-         * has the [revealed] set its lines' cells are opened through, and no
-         * units, every field of a packet carrying its own. */
+         * It also stands in for a property wherever the panel wants one, having
+         * no units of its own: every field of a packet carries what it is
+         * counted in, and none of them is counted in the same thing. */
         frame: null,
 
         /* The simulation whose name is being typed, and what has been typed;
@@ -1756,7 +1821,7 @@ document.addEventListener('alpine:init', () => {
             /* Ask for the properties even when the first call just failed:
              * skipping it would leave the panel reporting itself as loaded,
              * which is the one thing it must not do when it is not. */
-            if (this.selected) await this.loadProps()
+            if (this.selected && this.autoProps) await this.loadProps()
             if (this.needPcaps()) await this.loadPcaps()
             if (this.charts.length) await this.pollCharts()
             if (this.logged.length) await this.pollLogs()
@@ -1981,12 +2046,6 @@ document.addEventListener('alpine:init', () => {
                      * disabled for good, since every later reading of it is
                      * undefined too and leaves the attribute where it is. */
                     p.ejecting = false
-                    /* Which frames and which runs of bytes the reader has
-                       asked to see in full (see [revealKey]). Kept on the
-                       property and not on the cell: a table is rebuilt
-                       whenever its value changes, and a cable's last packets
-                       change with every frame it carries. */
-                    p.revealed = new Set()
                     resetDraft(p)
                     p.metric = p.kind.type === 'metric'
                         ? metricRows(p.value, p.units) : null
@@ -2107,6 +2166,15 @@ document.addEventListener('alpine:init', () => {
             this.unlightTimer = setTimeout(() => this.tock++, highlightMs + 30)
         },
 
+        /* Hold the panel still, or let it follow again. Letting it follow
+         * reads the values at once rather than at the next tick: the button
+         * has just been pressed, and a second of nothing would read as a
+         * button that did nothing. */
+        toggleAutoProps() {
+            this.autoProps = !this.autoProps
+            if (this.autoProps && this.selected) this.loadProps()
+        },
+
         /* The properties worth a row of the panel.
          *
          * Absence is usually itself the answer -- a DHCP server serving no
@@ -2197,7 +2265,8 @@ document.addEventListener('alpine:init', () => {
              * this is the one input that is none. */
             if (t === 'bytes') return 'bytes'
             if (t === 'bool' || t === 'set') return t
-            if (t === 'int' || t === 'float' || t === 'range') return 'number'
+            if (t === 'int' || t === 'float' || t === 'range' ||
+                t === 'duration') return 'number'
             return 'text'
         },
 
@@ -2298,6 +2367,8 @@ document.addEventListener('alpine:init', () => {
             const t = baseKind(p.kind).type
             if (t === 'enum') return this.choice(p.kind, p.value)
             if (t === 'set') return this.setText(p.kind, p.value)
+            if (t === 'duration' && typeof p.value === 'number')
+                return dur(p.value)
             return p.text
         },
 
@@ -2323,27 +2394,21 @@ document.addEventListener('alpine:init', () => {
             return false
         },
 
-        /* Which cell this is, as something that survives the table being
-         * rebuilt under it: the bytes themselves. Two cells holding the same
-         * frame open together, which is what a reader who opened one of them
-         * meant anyway. */
-        revealKey(c) {
-            return baseKind(c.kind).type === 'packet'
-                ? (c.value && c.value.bits) || '' : String(c.draft || '')
+        revealed(c) {
+            return !!c.shown
         },
 
-        revealed(p, c) {
-            return !!(p.revealed && p.revealed.has(this.revealKey(c)))
-        },
-
-        /* Open this cell, or close it again. The bytes are the point of
-         * opening one: a reader who wants them wants to select them, and what
-         * a tooltip says cannot be selected. */
-        reveal(p, c) {
-            if (!p.revealed) p.revealed = new Set()
-            const key = this.revealKey(c)
-            if (p.revealed.has(key)) p.revealed.delete(key)
-            else p.revealed.add(key)
+        /* Open this cell, or shut it again. The bytes are the point of opening
+         * one: a reader who wants them wants to select them, and what a
+         * tooltip says cannot be selected.
+         *
+         * This one cell and no other. The flag is the cell's own, and a table
+         * rebuilt under it hands it back to the row that still says the same
+         * thing (see [carryShown]) -- so two frames that happen to be byte for
+         * byte alike, which a host pinging the same host every second sends
+         * plenty of, stay two frames. */
+        reveal(c) {
+            c.shown = !c.shown
         },
 
         /* What the button says: hexadecimal for a frame, which is the other
@@ -2353,8 +2418,8 @@ document.addEventListener('alpine:init', () => {
             return baseKind(c.kind).type === 'packet' ? '0x' : '\u2026'
         },
 
-        revealTitle(p, c) {
-            if (this.revealed(p, c))
+        revealTitle(c) {
+            if (c.shown)
                 return baseKind(c.kind).type === 'packet'
                            ? 'Show what the frame is' : 'Show the two ends only'
             return 'Show the bytes'
@@ -2375,18 +2440,21 @@ document.addEventListener('alpine:init', () => {
                travels, and a time of day is what anybody wants to see. */
             if (baseKind(c.kind).type === 'time')
                 return c.draft === '' ? '' : this.clock(Number(c.draft))
+            /* A length of time rather than an instant: seconds are what
+               travels either way, and this is what they are a number of. */
+            if (baseKind(c.kind).type === 'duration')
+                return c.draft === '' ? '' : dur(Number(c.draft))
             /* A frame, as what it amounts to: "Icmp/Ip/Eth". The bytes are
                there too and are what the tooltip shows, until there is a
                button to switch between the two. */
             if (baseKind(c.kind).type === 'packet')
                 return (c.value &&
-                        (this.revealed(p, c) ? c.value.bits
-                                             : c.value.descr || c.value.bits)) || ''
+                        (c.shown ? c.value.bits
+                                 : c.value.descr || c.value.bits)) || ''
             /* Octets, by their two ends until the reader asks for the rest:
                the whole of the run is what the tooltip holds meanwhile. */
             if (baseKind(c.kind).type === 'bytes')
-                return this.revealed(p, c) ? String(c.draft || '')
-                                           : abbrevBytes(c.draft)
+                return c.shown ? String(c.draft || '') : abbrevBytes(c.draft)
             if (baseKind(c.kind).type === 'set')
                 return this.setText(c.kind, c.draft)
             if (baseKind(c.kind).type !== 'enum') return c.draft
@@ -2398,8 +2466,8 @@ document.addEventListener('alpine:init', () => {
         /* What a cell has to say that does not fit in it. A frame is shown as
          * the protocols it is made of, and its bytes are what the reader came
          * for when they stopped on one. */
-        cellTitle(c, p) {
-            if (this.revealed(p, c)) return ''
+        cellTitle(c) {
+            if (c.shown) return ''
             if (baseKind(c.kind).type === 'packet')
                 return (c.value && c.value.bits) || ''
             if (baseKind(c.kind).type === 'bytes') return c.draft || ''
@@ -3482,7 +3550,7 @@ document.addEventListener('alpine:init', () => {
                it back rather than leaving the click to do nothing. */
             if (this.split === 1) this.split = this.splitLast || 0.45
             this.frame = { bits, kind: null, value: null, error: null,
-                           busy: true, revealed: new Set() }
+                           busy: true, folded: new Set() }
             const held = this.frame
             const r = await this.exchange(() =>
                 api('/packets/decode',
@@ -3508,7 +3576,29 @@ document.addEventListener('alpine:init', () => {
         frameLines() {
             const f = this.frame
             if (!f || !f.kind) return []
-            return kindLines(null, f.kind, f.value, -1, []).slice(1)
+            const lines = kindLines(f.kind, f.value, { skipAbsent: true })
+            if (!f.folded || !f.folded.size) return lines
+            return lines.filter(l => {
+                for (const p of f.folded)
+                    if (l.path.startsWith(p + '/')) return false
+                return true
+            })
+        },
+
+        /* Fold a layer away, or open it again. Keyed by the path down to the
+         * line and not by where it is in the list, so that folding one layer
+         * does not move the folds of the others. */
+        foldLine(l) {
+            const f = this.frame
+            if (!f) return
+            if (!f.folded) f.folded = new Set()
+            if (f.folded.has(l.path)) f.folded.delete(l.path)
+            else f.folded.add(l.path)
+        },
+
+        isFolded(l) {
+            const f = this.frame
+            return !!(f && f.folded && f.folded.has(l.path))
         },
 
         /* What the frame amounts to, for the header of the pane: the layers it

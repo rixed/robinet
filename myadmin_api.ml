@@ -201,6 +201,9 @@ and json_of_kind = function
        reader sees is a clock, which is the page's business: it has the epoch
        of the simulation and this does not. *)
     | Time -> `Assoc [ "type", `String "time" ]
+    (* A length of time, in seconds: shown as one -- "38min 25s" -- which is
+       what tells it from the instant above. *)
+    | Duration -> `Assoc [ "type", `String "duration" ]
     (* A frame: its bytes, and what they amount to (see
        [Widget.json_of_packet]). *)
     | Packet -> `Assoc [ "type", `String "packet" ]

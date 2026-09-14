@@ -156,7 +156,7 @@ struct
                 ~kind:(list (row [| "client", String ;
                                     "hostname", optional String ;
                                     "address", String ;
-                                    "expires in (s)", Float |]))
+                                    "expires in", Duration |]))
                 ~getter:(fun () ->
                     let now = Simulation.Widget.now t.widget in
                     BitHash.fold (fun chaddr (l : Lease.t) rows ->
@@ -176,9 +176,9 @@ struct
                              * date in simulated time means nothing to a
                              * reader, and a lease already over reads as the
                              * negative it is. *)
-                            "expires in (s)",
-                                `Float (Interval.to_secs
-                                            (Time.diff l.Lease.until now)) ]) |>
+                            "expires in",
+                                json_of_duration
+                                    (Time.diff l.Lease.until now) ]) |>
                     (fun rows -> `List rows)) ;
             metric_property "leased addresses"
                 ~descr:"Number of addresses currently leased"

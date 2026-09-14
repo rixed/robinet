@@ -167,6 +167,8 @@ let rec coerce name (kind : Widget.kind) v =
     | String | Text | FileName -> `String (Widget.to_string v)
     | Int -> `Int (Widget.to_int v)
     | Float -> `Float (Widget.to_float v)
+    (* A number of seconds, and only its rendering sets it apart. *)
+    | Duration -> `Float (Widget.to_float v)
     | Bool -> `Bool (Widget.to_bool v)
     | Widget_id -> `Int (Widget.to_int v)
     | IRange (min, max) -> `Int (Widget.to_int_range ~min ~max v)
