@@ -58,12 +58,14 @@ module Op = struct
     let inarp_request = o 8
     let inarp_reply   = o 9
     let arp_nack      = o 10
+    let num_ops       = 10
 
     (** The operations this module has a name for, as the choices of a kind
      * (see [Widget.one_of]), labelled by [to_string]. *)
     let choices =
-        Array.init 10 (fun i -> i + 1) |>
-        Array.map (fun v -> v, to_string (o v))
+        Array.init num_ops (fun i ->
+            let i = i + 1 in
+            i, to_string (o i))
 end
 
 (** Arp identifiers for MAC types.
@@ -91,6 +93,7 @@ module HwType = struct
     let chaos    = o 5
     let ieee_802 = o 6
     let arcnet   = o 7
+    let num_typs = 7
 
     let rec random () =
         let p = randi 3 in
@@ -98,8 +101,9 @@ module HwType = struct
 
     (** The hardware types this module has a name for (see [Arp.Op.choices]). *)
     let choices =
-        Array.init 7 (fun i -> i + 1) |>
-        Array.map (fun v -> v, to_string (o v))
+        Array.init num_typs (fun i ->
+            let i = i + 1 in
+            i, to_string (o i))
 end
 
 (** Arp Protocol Types.
@@ -127,8 +131,8 @@ module HwProto = struct
      * are the numbers an Ethernet frame carries to say what is in it, so
      * everything above uses them too. *)
     let choices =
-        [| 0x0800 ; 0x0806 ; 0x8100 ; 0x86DD |] |>
-        Array.map (fun v -> v, to_string (o v))
+        [| ip4 ; ip6 ; arp ; ieee8021q |] |>
+        Array.map (fun (p : t) -> (p :> int), to_string p)
 end
 
 (** Pack/Unpack an ARP message *)
@@ -227,9 +231,10 @@ module Pdu = struct
                  "target protocol address",
                  Widget.json_of_bytes t.target_proto ]
 
-    (*$T kind_of
-      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
+    (*$Q kind_of
+      (Q.make (fun _ -> random ())) (fun t -> \
+        try Widget.check_value (kind_of t) (to_json t) ; true \
+        with _ -> false)
      *)
     (*$>*)
 end
-

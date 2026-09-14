@@ -111,8 +111,8 @@ module Proto = struct
      * [/etc/protocols], the same names the rest of the program prints. A
      * datagram may of course carry any of the 256. *)
     let choices =
-        [| 1 ; 6 ; 17 ; 41 ; 58 |] |>
-        Array.map (fun v -> v, to_string (o v))
+        [| icmp ; tcp ; udp ; ipv6 ; icmpv6 |] |>
+        Array.map (fun (p : t) -> (p :> int), to_string p)
 end
 
 (** {3 Addresses} *)
@@ -868,8 +868,10 @@ module Pdu = struct
                  "options", Widget.json_of_bytes t.options ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
 
-    (*$T kind_of
-      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
+    (*$Q kind_of
+      (Q.make (fun _ -> random ())) (fun t -> \
+        try Widget.check_value (kind_of t) (to_json t) ; true \
+        with _ -> false)
      *)
     (*$>*)
 end

@@ -58,8 +58,8 @@ module QType = struct
     (** The record types this module has a name for, as the choices of a kind
      * (see [Widget.one_of]), labelled by [to_string]. There are many more. *)
     let choices =
-        [| 1 ; 2 ; 5 ; 12 ; 13 ; 15 ; 28 |] |>
-        Array.map (fun v -> v, to_string (o v))
+        [| a ; ns ; cname ; ptr ; hinfo ; mx ; aaaa |] |>
+        Array.map (fun (q : t) -> (q :> int), to_string q)
 end
 
 let qclass_inet = 1
@@ -341,8 +341,10 @@ struct
                  "authority", section json_of_rr t.authority_rrs ;
                  "additional", section json_of_rr t.additional_rrs ]
 
-    (*$T kind_of
-      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
+    (*$Q kind_of
+      (Q.make (fun _ -> random ())) (fun t -> \
+        try Widget.check_value (kind_of t) (to_json t) ; true \
+        with _ -> false)
      *)
     (*$>*)
 end

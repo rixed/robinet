@@ -70,8 +70,9 @@ module MsgType = struct
      * [Widget.one_of]), labelled by [to_string]. There are no others: option
      * 53 carries one of these and [Inner.is_valid] says so. *)
     let choices =
-        Array.init 8 (fun i -> i + 1) |>
-        Array.map (fun v -> v, to_string (o v))
+        [| discover ; offer ; request ; decline ; ack ; nack ; release ;
+           inform |] |>
+        Array.map (fun (m : t) -> (m :> int), to_string m)
 end
 
 
@@ -603,8 +604,10 @@ struct
                                      "value", Widget.json_of_bytes v ]
                         ) t.other_options) ]
 
-    (*$T kind_of
-      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
+    (*$Q kind_of
+      (Q.make (fun _ -> random ())) (fun t -> \
+        try Widget.check_value (kind_of t) (to_json t) ; true \
+        with _ -> false)
      *)
     (*$>*)
 

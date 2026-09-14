@@ -372,10 +372,16 @@ module Pdu = struct
                   "pointer", `Int ptr ; "MTU", `Int mtu ;
                   "payload", bytes pld ]
 
-    (* Every shape of message, and not merely whichever one a single random
-       draw happened to be: which types carry which shape is the one thing
-       these two halves have to agree on, and the disagreement would be in the
-       shape that was not drawn. *)
+    (*$Q kind_of
+      (Q.make (fun _ -> random ())) (fun t -> \
+        try Widget.check_value (kind_of t) (to_json t) ; true \
+        with _ -> false)
+     *)
+
+    (* And every type there is, which random draws do not promise to reach:
+       which types carry which shape is the one thing these two halves have to
+       agree on, and the disagreement would be in the type that was not
+       drawn. *)
     (*$T kind_of
       Enum.range 0 ~until:255 |> Enum.for_all (fun typ -> \
           let p = { msg_type = MsgType.o (typ, 0) ; \

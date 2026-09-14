@@ -234,8 +234,9 @@ module Dlt = struct
      * again here, so that a name is spelt in one place. A capture may of
      * course be of any other. *)
     let choices =
-        [| 0l ; 1l ; 2l ; 3l ; 4l ; 5l ; 6l ; 7l ; 8l ; 9l ; 10l ; 113l |] |>
-        Array.map (fun v -> Int32.to_int v, to_string (o v))
+        [| null ; en10mb ; en3mb ; ax25 ; pronet ; chaos ; ieee802 ; arcnet ;
+           slip ; ppp ; fddi ; linux_cooked |] |>
+        Array.map (fun (d : t) -> uint32 (d :> int32), to_string d)
 end
 
 (** The global header of a pcap file. *)
@@ -352,7 +353,9 @@ struct
                "captured at", String ;
                "caplen", Int ;
                "wirelen", Int ;
-               "dlt", Widget.one_of ~range:(0, 0xffff) Dlt.choices ;
+               (* A whole 32 bits of it, as the file header holds it (see
+                  [Pcap.Dlt]), and read unsigned as that field is. *)
+               "dlt", Widget.one_of ~range:(0, 0xffff_ffff) Dlt.choices ;
                "payload", Bytes |]
 
     let to_json (t : t) =
@@ -360,12 +363,15 @@ struct
                  "captured at", `String (Clock.Wall.to_string t.ts) ;
                  "caplen", `Int t.caplen ;
                  "wirelen", `Int t.wirelen ;
-                 "dlt", `Int (Dlt.to_int t.dlt) ;
+                 "dlt", `Int (uint32 (t.dlt :> int32)) ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
 
-    (*$T kind_of
-      let p = make "f" (Clock.Wall.o 1.) (randbs 10) in \
-      Widget.check_value (kind_of p) (to_json p) = ()
+    (*$Q kind_of
+      (Q.make (fun _ -> \
+          make "f" ~dlt:(Dlt.random ()) (Clock.Wall.o (Random.float 1e9)) \
+               (randbs (Random.int 40)))) (fun t -> \
+        try Widget.check_value (kind_of t) (to_json t) ; true \
+        with _ -> false)
      *)
     (*$>*)
 end

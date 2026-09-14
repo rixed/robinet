@@ -126,8 +126,10 @@ module Pdu = struct
                  "destination", Ip.Addr.to_json t.dst ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
 
-    (*$T kind_of
-      let p = random () in Widget.check_value (kind_of p) (to_json p) = ()
+    (*$Q kind_of
+      (Q.make (fun _ -> random ())) (fun t -> \
+        try Widget.check_value (kind_of t) (to_json t) ; true \
+        with _ -> false)
      *)
 
     (*$>*)
