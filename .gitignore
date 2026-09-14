@@ -16,6 +16,7 @@ gmon.out
 *.byte
 *.opt
 *.top
+tags
 _build
 doc/*.html
 doc/doc.txt
