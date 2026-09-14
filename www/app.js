@@ -3546,7 +3546,10 @@ document.addEventListener('alpine:init', () => {
         showSelection() {
             if (!this.selected || !this.mapView.k) return
             const scene = this.mapScene()
-            let box = scene.rects.get(this.selected.id)
+            /* Which widget the box on screen stands for, so that the strip can
+             * be asked about that one rather than about where it landed. */
+            let shown = this.selected.id
+            let box = scene.rects.get(shown)
             if (!box) {
                 /* Not drawn as a box. A cable is a line, and the point of it
                  * is where its name is written; anything else is shown by the
@@ -3554,12 +3557,13 @@ document.addEventListener('alpine:init', () => {
                 const line = scene.edges.find(e => e.via === this.selected.id)
                 if (line) {
                     box = { x: line.mx, y: line.my, w: 0, h: 0 }
+                    shown = null
                 } else {
                     const byId = this.widgetsOf(this.selected.sim)
                     let w = byId[this.selected.id]
                     for (w = w && byId[w.parent] ; w ; w = byId[w.parent])
                         if (scene.rects.has(w.id)) {
-                            box = scene.rects.get(w.id) ; break
+                            box = scene.rects.get(w.id) ; shown = w.id ; break
                         }
                 }
             }
@@ -3567,8 +3571,14 @@ document.addEventListener('alpine:init', () => {
             const at = { x: box.x + box.w / 2, y: box.y + box.h / 2 }
             /* In the strip below the map, which is pinned to the pane rather
              * than laid over the world: it is in view already, and panning
-             * could not bring it into view if it were not. */
-            if (at.y > scene.trayTop) return
+             * could not bring it into view if it were not.
+             *
+             * Asked of the scene and not of where the box sits, which is the
+             * difference between a widget that is in the strip and one that is
+             * merely off the bottom of the view -- and at any zoom worth
+             * panning at, most of the network is off the bottom of the
+             * view. */
+            if (shown !== null && scene.inTray.has(shown)) return
             const m = 8
             if (box.x >= m && box.y >= m &&
                 box.x + box.w <= this.mapSize.w - m &&
@@ -3601,7 +3611,7 @@ document.addEventListener('alpine:init', () => {
         buildScene(sim, drag) {
             const { w: paneW, h: paneH } = this.mapSize
             const empty = { boxes: [], edges: [], ports: [], rects: new Map(),
-                            trayTop: paneH, trayCount: 0 }
+                            trayTop: paneH, inTray: new Set(), trayCount: 0 }
             if (sim === null || !paneW || !paneH) return empty
             const byId = this.widgetsOf(sim)
             const root = this.roots[sim]
@@ -3649,6 +3659,13 @@ document.addEventListener('alpine:init', () => {
                 }
                 y += rowHeight(row) + boxGap
             }
+            /* Everything the strip holds, taken now that it is laid out and
+             * before anything is placed on the map proper: a widget that is
+             * *in* the strip is not the same as one that merely projects below
+             * where the strip begins, and telling the two apart is
+             * [showSelection]'s whole difficulty. */
+            const inTray = new Set(rects.keys())
+
             for (const p of placed) {
                 const l = byId[p.id].location
                 const m = mercator(l.lat, l.lon)
@@ -3751,7 +3768,7 @@ document.addEventListener('alpine:init', () => {
                 nowhere: r.depth === 0 && !byId[r.id].location,
             })).sort((a, b) => a.depth - b.depth)
 
-            return { boxes, edges: lines, ports, rects, trayTop,
+            return { boxes, edges: lines, ports, rects, trayTop, inTray,
                      trayCount: unplaced.length }
         },
 

@@ -624,6 +624,11 @@ body.carrying { user-select: none; cursor: grabbing; }
 .pane.map .box.selected {
     border-color: var(--pico-primary);
     border-width: 2px;
+    /* Over every other box, and over the ports and cable labels with them: at
+     * a zoom where the whole network fits, the thing that was just clicked is
+     * as likely as not to be under a pile of its neighbours, and the one box
+     * that must be findable is that one. */
+    z-index: 4;
 }
 /* The selected widget is somewhere in here. Fainter than the thing itself, and
  * it stacks: a box inside a box inside the one that is selected reads as the
