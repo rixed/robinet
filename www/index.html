@@ -602,20 +602,20 @@
                                                                                 <template x-if="cellInput(c) === 'enum'">
                                                                                     <select :disabled="!online" :class="{ unset: !set(c) }"
                                                                                             x-model="c.draft" @change="enable(c)">
-                                                                                        <template x-for="(ch, i) in base(c).choices" :key="i">
-                                                                                            <option :value="i" x-text="ch"></option>
+                                                                                        <template x-for="ch in base(c).choices" :key="ch.value">
+                                                                                            <option :value="ch.value" x-text="ch.label"></option>
                                                                                         </template>
                                                                                     </select>
                                                                                 </template>
 
                                                                                 <template x-if="cellInput(c) === 'set'">
                                                                                     <span class="choices">
-                                                                                        <template x-for="(ch, i) in base(c).choices" :key="i">
+                                                                                        <template x-for="ch in base(c).choices" :key="ch.value">
                                                                                             <label>
                                                                                                 <input type="checkbox" :disabled="!online"
-                                                                                                       :checked="ticked(c, i)"
-                                                                                                       @change="toggleChoice(c, i)"/>
-                                                                                                <span x-text="ch"></span>
+                                                                                                       :checked="ticked(c, ch.value)"
+                                                                                                       @change="toggleChoice(c, ch.value)"/>
+                                                                                                <span x-text="ch.label"></span>
                                                                                             </label>
                                                                                         </template>
                                                                                     </span>
@@ -704,11 +704,11 @@
                                                     <template x-if="base(f).type === 'enum'">
                                                         <select :disabled="!online" :class="{ unset: !set(f) }"
                                                                 x-model="f.draft" @change="enable(f)">
-                                                            <!-- Worth its place among the choices, not
-                                                                 its own text: that is what the
-                                                                 simulator keeps. -->
-                                                            <template x-for="(c, i) in base(f).choices" :key="i">
-                                                                <option :value="i" x-text="c"></option>
+                                                            <!-- Worth the choice's own number, not its
+                                                                 text and not its place: that number is
+                                                                 what the simulator keeps. -->
+                                                            <template x-for="c in base(f).choices" :key="c.value">
+                                                                <option :value="c.value" x-text="c.label"></option>
                                                             </template>
                                                         </select>
                                                     </template>
@@ -718,12 +718,12 @@
                                                          kind of value. Nothing is sent until Build. -->
                                                     <template x-if="base(f).type === 'set'">
                                                         <span class="choices">
-                                                            <template x-for="(c, i) in base(f).choices" :key="i">
+                                                            <template x-for="c in base(f).choices" :key="c.value">
                                                                 <label>
                                                                     <input type="checkbox" :disabled="!online"
-                                                                           :checked="ticked(f, i)"
-                                                                           @change="toggleChoice(f, i) ; enable(f)"/>
-                                                                    <span x-text="c"></span>
+                                                                           :checked="ticked(f, c.value)"
+                                                                           @change="toggleChoice(f, c.value) ; enable(f)"/>
+                                                                    <span x-text="c.label"></span>
                                                                 </label>
                                                             </template>
                                                         </span>
@@ -978,8 +978,8 @@
                                                 <template x-if="!p.read_only && base(p).type === 'enum'">
                                                     <select :disabled="!online" :class="{ unset: !set(p) }"
                                                             x-model="p.draft" @change="enable(p) ; save(p)">
-                                                        <template x-for="(c, i) in base(p).choices" :key="i">
-                                                            <option :value="i" x-text="c"></option>
+                                                        <template x-for="c in base(p).choices" :key="c.value">
+                                                            <option :value="c.value" x-text="c.label"></option>
                                                         </template>
                                                     </select>
                                                 </template>
@@ -995,12 +995,12 @@
                                                      value, not half of a typed one. -->
                                                 <template x-if="!p.read_only && base(p).type === 'set'">
                                                     <span class="choices">
-                                                        <template x-for="(c, i) in base(p).choices" :key="i">
+                                                        <template x-for="c in base(p).choices" :key="c.value">
                                                             <label>
                                                                 <input type="checkbox" :disabled="!online"
-                                                                       :checked="ticked(p, i)"
-                                                                       @change="toggleChoice(p, i) ; save(p)"/>
-                                                                <span x-text="c"></span>
+                                                                       :checked="ticked(p, c.value)"
+                                                                       @change="toggleChoice(p, c.value) ; save(p)"/>
+                                                                <span x-text="c.label"></span>
                                                             </label>
                                                         </template>
                                                     </span>
@@ -1129,20 +1129,20 @@
                                                                                 <template x-if="!p.read_only && cellInput(c) === 'enum'">
                                                                                     <select :disabled="!online" :class="{ unset: !set(c) }"
                                                                                             x-model="c.draft" @change="enable(c) ; touch(p)">
-                                                                                        <template x-for="(ch, i) in base(c).choices" :key="i">
-                                                                                            <option :value="i" x-text="ch"></option>
+                                                                                        <template x-for="ch in base(c).choices" :key="ch.value">
+                                                                                            <option :value="ch.value" x-text="ch.label"></option>
                                                                                         </template>
                                                                                     </select>
                                                                                 </template>
 
                                                                                 <template x-if="!p.read_only && cellInput(c) === 'set'">
                                                                                     <span class="choices">
-                                                                                        <template x-for="(ch, i) in base(c).choices" :key="i">
+                                                                                        <template x-for="ch in base(c).choices" :key="ch.value">
                                                                                             <label>
                                                                                                 <input type="checkbox" :disabled="!online"
-                                                                                                       :checked="ticked(c, i)"
-                                                                                                       @change="toggleChoice(c, i) ; touch(p)"/>
-                                                                                                <span x-text="ch"></span>
+                                                                                                       :checked="ticked(c, ch.value)"
+                                                                                                       @change="toggleChoice(c, ch.value) ; touch(p)"/>
+                                                                                                <span x-text="ch.label"></span>
                                                                                             </label>
                                                                                         </template>
                                                                                     </span>

@@ -142,10 +142,13 @@ let property_of_matches (widget : Widget.t) matches n =
 (* What the value looks like, so that the interface can offer the right input.
  * Shared by the properties of a widget and by the parameters a device is built
  * from: the dialog that asks for the one is the panel that edits the other. *)
-(* What an [Enum] picks one of and a [Set] ticks any number of: their names, in
-   the order that gives each one the place the value names it by. *)
+(* What an [Enum] picks one of and a [Set] ticks any number of: each the value
+   that travels for it and the text to offer it by, in the order they are to be
+   offered in -- which is an option's value and label, and is drawn as one. *)
 let json_of_choices choices =
-    `List (Array.to_list choices |> List.map (fun c -> `String c))
+    `List (Array.to_list choices |>
+           List.map (fun (v, label) ->
+               `Assoc [ "value", `Int v ; "label", `String label ]))
 
 let rec json_of_fields fields =
     `List (Array.to_list fields |>
@@ -166,7 +169,7 @@ and json_of_kind = function
         `Assoc [ "type", `String "enum" ;
                  "choices", json_of_choices choices ]
     (* The same choices, ticked rather than picked: the interface offers all of
-       them and the value is the places of the ticked ones. *)
+       them and the value is the numbers of the ticked ones. *)
     | Set choices ->
         `Assoc [ "type", `String "set" ;
                  "choices", json_of_choices choices ]
@@ -225,6 +228,11 @@ and json_of_kind = function
     (* Not a shape of its own on the wire: an example of how the value inside
        is written, said alongside what that value is, so that the interface
        reads it off whatever input it was going to build anyway. *)
+    (* One of those shapes, each named and each carrying what its own kind says:
+       the interface offers the names, and what it draws below is the kind of
+       the one that is picked. *)
+    | Variant cases ->
+        `Assoc [ "type", `String "variant" ; "cases", json_of_fields cases ]
     | Hint (h, k) ->
         (match json_of_kind k with
         | `Assoc l -> `Assoc (l @ [ "placeholder", `String h ])

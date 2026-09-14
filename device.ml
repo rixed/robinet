@@ -212,6 +212,19 @@ let rec coerce name (kind : Widget.kind) v =
         | v ->
             Widget.bad_value "%s must be a set of named fields, not %s" name
                 (Yojson.Basic.to_string v))
+    (* Which shape it is, and then that shape: a value of a variant is an
+       object of a single field whose name says the case (see [Variant]). A
+       name that is none of the cases is a misspelling, as an unknown field of
+       a record is. *)
+    | Variant cases ->
+        Widget.to_case (fun case v ->
+            match Array.find_opt (fun (c, _) -> c = case) cases with
+            | None ->
+                Widget.bad_value "%s: %S is none of its %d shapes" name case
+                    (Array.length cases)
+            | Some (_, k) ->
+                `Assoc [ case, coerce (name ^"."^ case) k v ]
+        ) v
     | Metric ->
         (* Nothing has one, and nothing should: a metric is what a device has
          * counted, which at birth is nothing. *)
@@ -322,7 +335,8 @@ let hub =
       params = [
           param "ports" ~kind:(IRange (2, 1024)) ~default:(`Int 8)
               ~descr:"How many cables it takes." ;
-          param "speed" ~kind:(Enum Hub.Repeater.speed_names) ~default:(`Int 1)
+          param "speed" ~kind:(Enum (Widget.choices Hub.Repeater.speed_names))
+              ~default:(`Int 1)
               ~descr:"Hub speed." ] ;
       of_params = fun args ->
           THub { ports = int args "ports" ;
@@ -334,7 +348,7 @@ let switch =
       params = [
           param "ports" ~kind:(IRange (2, 1024)) ~default:(`Int 8)
               ~descr:"How many cables it takes." ;
-          param "speeds" ~kind:(Set Eth.Speed.names)
+          param "speeds" ~kind:(Set (Widget.choices Eth.Speed.names))
               ~default:(`List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
                                         Eth.Iface.default_speeds))
               ~descr:"Speeds accepted by every ports (can be updated later)." ;
@@ -347,7 +361,8 @@ let switch =
               ports = int args "ports" ;
               speeds =
                   list args "speeds" (fun v ->
-                      Eth.Speed.all.(Widget.to_choice Eth.Speed.names v)) ;
+                      Eth.Speed.all.(Widget.to_choice
+                                         (Widget.choices Eth.Speed.names) v)) ;
               full_duplex = bool args "full duplex" ;
               macs = int args "MACs" } }
 
@@ -931,10 +946,41 @@ let make_from_params type_ ~parent name given =
 (*$T coerce
   (try ignore (coerce "n" (IRange (0, 5)) (`Int 9)) ; false \
    with Widget.Bad_value _ -> true)
-  (try ignore (coerce "n" (Enum [| "a" |]) (`Int 9)) ; false \
+  (try ignore (coerce "n" (Enum (Widget.choices [| "a" |])) (`Int 9)) ; false \
    with Widget.Bad_value _ -> true)
   (try ignore (coerce "n" Metric (`Int 0)) ; false \
    with Widget.Bad_value _ -> true)
+ *)
+
+(* A choice is its own number and not its place among the others, which is what
+   a protocol number needs: what travels for IP is 0x0800. *)
+(*$= coerce & ~printer:Yojson.Basic.to_string
+  (`Int 0x0800) \
+    (coerce "p" (Enum [| 0x0800, "IP" ; 0x0806, "ARP" |]) (`Int 0x0800))
+ *)
+(*$T coerce
+  (try ignore (coerce "p" (Enum [| 0x0800, "IP" |]) (`Int 0)) ; false \
+   with Widget.Bad_value _ -> true)
+ *)
+
+(* One shape of several, which is an object of a single field named after the
+   case: what it carries is then read as that case's own kind says. *)
+(*$= coerce & ~printer:Yojson.Basic.to_string
+  (`Assoc [ "ids", `Assoc [ "id", `Int 1 ] ]) \
+    (coerce "v" (Widget.variant [| "ids", Widget.row [| "id", Int |] ; \
+                                   "mtu", Int |]) \
+                (`Assoc [ "ids", `Assoc [ "id", `String "1" ] ]))
+ *)
+(*$T coerce
+  (try ignore (coerce "v" (Widget.variant [| "a", Int |]) \
+                          (`Assoc [ "z", `Int 1 ])) ; \
+   false with Widget.Bad_value _ -> true)
+  (try ignore (coerce "v" (Widget.variant [| "a", Int |]) \
+                          (`Assoc [ "a", `Int 1 ; "b", `Int 2 ])) ; \
+   false with Widget.Bad_value _ -> true)
+  (try ignore (coerce "v" (Widget.variant [| "a", IRange (0, 5) |]) \
+                          (`Assoc [ "a", `Int 9 ])) ; \
+   false with Widget.Bad_value _ -> true)
  *)
 
 (*$T args_of

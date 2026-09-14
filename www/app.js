@@ -23,8 +23,8 @@ const asText = (v) =>
 const baseKind = (kind) => kind.type === 'optional' ? kind.of : kind
 
 /* A set of choices, as it is sent and as one is compared with another: the
- * places of the ticked choices, in order and each at most once, which is what
- * the simulator keeps and answers with (see [Set] in widget.ml). Ticking is
+ * numbers of the ticked choices, in order and each at most once, which is what
+ * the simulator keeps and answers with (see [Set] in simTypes.ml). Ticking is
  * therefore an edit that can be undone by unticking, and not one the panel is
  * left thinking it still has to send. */
 const asSet = (l) => [ ...new Set(l || []) ].sort((a, b) => a - b)
@@ -85,15 +85,16 @@ const cellValue = (c) => {
     switch (baseKind(c.kind).type) {
         case 'bool':
             return c.draft === true || c.draft === 'true'
-        /* Which of the choices, by its place among them: that is what the
-         * simulator keeps (see [Widget.Enum]), and the select holds it as the
-         * string an option's value attribute always is. */
+        /* Which choice, by its own number rather than by its place among
+         * them -- 0x0800 is IP and that is what travels (see [Enum] in
+         * simTypes.ml). The select holds it as the string an option's value
+         * attribute always is. */
         case 'enum': {
             const n = Number(c.draft)
             return Number.isInteger(n) ? n : String(c.draft)
         }
-        /* Which of the choices are ticked, by their places among them: the
-         * same as an enum's value, of any number of them at once. */
+        /* Which of the choices are ticked, by their numbers: the same as an
+         * enum's value, of any number of them at once. */
         case 'set':
             return asSet(c.draft)
         case 'int': case 'float': case 'range': {
@@ -2124,40 +2125,41 @@ document.addEventListener('alpine:init', () => {
             await this.loadPcaps()
         },
 
-        /* The choice an enum's value stands for. Falls back to the number
-         * when there is no such choice, which is the interface and the
-         * simulator disagreeing about how many there are -- worth showing as
-         * it is rather than as a blank. */
-        choice(kind, i) {
-            const cs = baseKind(kind).choices
-            return cs && cs[i] !== undefined ? cs[i] : String(i)
+        /* What an enum's value is called. Falls back to the number itself
+         * when it is none of the choices, which is the interface and the
+         * simulator disagreeing about what there is to choose from -- worth
+         * showing as it is rather than as a blank. */
+        choice(kind, v) {
+            const cs = baseKind(kind).choices || []
+            const c = cs.find(c => c.value === v)
+            return c ? c.label : String(v)
         },
 
-        /* Whether one choice of a set is ticked. */
-        ticked(x, i) {
-            return (x.draft || []).includes(i)
+        /* Whether one choice of a set is ticked, by its number. */
+        ticked(x, v) {
+            return (x.draft || []).includes(v)
         },
 
         /* Tick a choice of a set, or untick it. What the boxes hold is the
-         * whole value -- the places of the ticked choices -- so this is the
+         * whole value -- the numbers of the ticked choices -- so this is the
          * whole of the edit, and there is nothing half-typed to wait for. */
-        toggleChoice(x, i) {
-            x.draft = this.ticked(x, i) ? x.draft.filter(c => c !== i)
-                                        : asSet([ ...x.draft, i ])
+        toggleChoice(x, v) {
+            x.draft = this.ticked(x, v) ? x.draft.filter(c => c !== v)
+                                        : asSet([ ...x.draft, v ])
         },
 
-        /* The choices of a set, as they read: their names, in the order they
+        /* The choices of a set, as they read: their labels, in the order they
          * are offered in. */
         setText(kind, value) {
             const l = asSet(value)
-            return l.length ? l.map(i => this.choice(kind, i)).join(', ')
+            return l.length ? l.map(v => this.choice(kind, v)).join(', ')
                             : 'none'
         },
 
-        /* What a property reads as when it is only read. An enum travels as
-         * the index of its choice, a number that means nothing on its own, so
-         * it reads as the choice; a number in a unit the page writes itself
-         * reads in that writing (see [unitFormats]).
+        /* What a property reads as when it is only read. An enum travels as a
+         * number, which on its own says nothing to a reader, so it reads as
+         * what that number is called; a number in a unit the page writes
+         * itself reads in that writing (see [unitFormats]).
          *
          * [p.text] and not this is what the inputs are filled from: what is
          * edited and sent must stay the bare value. */

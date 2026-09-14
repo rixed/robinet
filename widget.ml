@@ -58,6 +58,7 @@ let rec kind_name = function
     | Bool -> "a boolean"
     | Enum _ -> "a choice"
     | Set _ -> "a set of choices"
+    | Variant _ -> "one of several shapes"
     | Widget_id -> "a widget"
     | FRange _ | IRange _ -> "a range"
     | Time -> "a timestamp"
@@ -87,6 +88,21 @@ let optional = function
   (try ignore (optional (list Int)) ; false with Invalid_argument _ -> true)
  *)
 
+(** Those names as choices, numbered by their places among them.
+ *
+ * What an [Enum] or a [Set] of alternatives with no numbers of its own is
+ * built from: which link speeds an interface offers, which way a router
+ * balances its load. A caller whose choices have numbers of their own -- a
+ * protocol number, an ICMP type -- writes the pairs itself, since that number
+ * is what has to travel. *)
+let choices names =
+    Array.mapi (fun i name -> i, name) names
+
+(*$T choices
+  choices [| "a" ; "b" |] = [| 0, "a" ; 1, "b" |]
+  choices [||] = [||]
+ *)
+
 (** [k], with an example of how it is written: a port range as "min-max", an
  * address as "192.168.0.1". It is shown in the input while that input is
  * empty, so it is worth having wherever the name of a field does not say how
@@ -96,7 +112,8 @@ let optional = function
  * one input to show it in, and a value that may be absent is hinted through
  * the value it may hold: [optional (hint "min-max" String)]. *)
 let hint h = function
-    | (Optional _ | Metric | List _ | Row _ | Record _ | Hint _ | Set _) as k ->
+    | (Optional _ | Metric | List _ | Row _ | Record _ | Variant _ | Hint _
+      | Set _) as k ->
         invalid_arg ("Widget.hint: nothing to write an example in for "^
                      kind_name k)
     | k -> Hint (h, k)
@@ -156,7 +173,7 @@ let row fields =
     check_fields "row" fields ;
     Array.iter (fun (name, k) ->
         match k with
-        | List _ | Row _ | Record _ | Metric ->
+        | List _ | Row _ | Record _ | Variant _ | Metric ->
             invalid_arg ("Widget.row: field "^ name ^" cannot be "^
                          kind_name k)
         | _ -> ()
@@ -218,6 +235,34 @@ let record fields =
    false with Invalid_argument _ -> true)
   (try ignore (record [| "", Int |]) ; false with Invalid_argument _ -> true)
   (try ignore (record [| "a", Metric |]) ; \
+   false with Invalid_argument _ -> true)
+ *)
+
+(** A value that is one of those named shapes, each carrying what its own kind
+ * says.
+ *
+ * Names are what a case is known by on the wire, so there must be no two alike
+ * and none empty -- the same rule as a record's fields, and for the same
+ * reason. A case may carry anything a record field may. *)
+let variant cases =
+    check_fields "variant" cases ;
+    Array.iter (fun (name, k) ->
+        match k with
+        | Metric ->
+            invalid_arg ("Widget.variant: case "^ name ^" cannot be "^
+                         kind_name k)
+        | _ -> ()
+    ) cases ;
+    Variant cases
+
+(*$T variant
+  variant [| "a", Int ; "b", record [| "c", Int |] |] = \
+      Variant [| "a", Int ; "b", Record [| "c", Int |] |]
+  (try ignore (variant [||]) ; false with Invalid_argument _ -> true)
+  (try ignore (variant [| "a", Int ; "a", Float |]) ; \
+   false with Invalid_argument _ -> true)
+  (try ignore (variant [| "", Int |]) ; false with Invalid_argument _ -> true)
+  (try ignore (variant [| "a", Metric |]) ; \
    false with Invalid_argument _ -> true)
  *)
 
@@ -297,23 +342,23 @@ let to_int_range ?(min=min_int) ?(max=max_int) v =
         bad_value "%d is not in range (%s…%s)" i (bound min) (bound max)
     else i
 
-(** Read which of [choices] a value names: the interface sends a choice by its
- * place among them (see the [Enum] kind), and a number that is the place of
- * none of them is refused rather than stored -- a property that answers with a
- * value outside its own choices is one the interface can only show as a
- * number. *)
+(** Read which of [choices] a value names: the interface sends the number of
+ * the choice (see the [Enum] kind), and a number that is none of theirs is
+ * refused rather than stored -- a property that answers with a value outside
+ * its own choices is one the interface can only show as a number. *)
 let to_choice choices v =
     let i = to_int v in
-    let n = Array.length choices in
-    if i < 0 || i >= n then
-        bad_value "%d is none of the %d choices" i n
-    else i
+    if Array.exists (fun (i', _) -> i' = i) choices then i
+    else bad_value "%d is none of the %d choices" i (Array.length choices)
 
 (*$T to_choice
-  to_choice [| "a" ; "b" |] (`Int 1) = 1
-  (try ignore (to_choice [| "a" ; "b" |] (`Int 2)) ; false \
+  to_choice (choices [| "a" ; "b" |]) (`Int 1) = 1
+  to_choice [| 0x0800, "IP" ; 0x0806, "ARP" |] (`Int 0x0806) = 0x0806
+  (try ignore (to_choice (choices [| "a" ; "b" |]) (`Int 2)) ; false \
    with Bad_value m -> m = "2 is none of the 2 choices")
-  (try ignore (to_choice [| "a" ; "b" |] (`Int (-1))) ; false \
+  (try ignore (to_choice (choices [| "a" ; "b" |]) (`Int (-1))) ; false \
+   with Bad_value _ -> true)
+  (try ignore (to_choice [| 0x0800, "IP" |] (`Int 0)) ; false \
    with Bad_value _ -> true)
  *)
 
@@ -332,12 +377,12 @@ let to_choice choices v =
  *)
 
 (*$T to_choices
-  to_choices [| "a" ; "b" ; "c" |] (`List [ `Int 2 ; `Int 0 ]) = [ 0 ; 2 ]
-  to_choices [| "a" ; "b" |] (`List [ `Int 1 ; `Int 1 ]) = [ 1 ]
-  to_choices [| "a" ; "b" |] (`List []) = []
-  (try ignore (to_choices [| "a" ; "b" |] (`List [ `Int 2 ])) ; false \
+  to_choices (choices [| "a" ; "b" ; "c" |]) (`List [ `Int 2 ; `Int 0 ]) = [ 0 ; 2 ]
+  to_choices (choices [| "a" ; "b" |]) (`List [ `Int 1 ; `Int 1 ]) = [ 1 ]
+  to_choices (choices [| "a" ; "b" |]) (`List []) = []
+  (try ignore (to_choices (choices [| "a" ; "b" |]) (`List [ `Int 2 ])) ; false \
    with Bad_value _ -> true)
-  (try ignore (to_choices [| "a" |] (`Int 0)) ; false \
+  (try ignore (to_choices (choices [| "a" |]) (`Int 0)) ; false \
    with Bad_value _ -> true)
  *)
 
@@ -381,6 +426,26 @@ let to_choices choices = function
         List.sort_unique compare
     | v ->
         bad_value "expected a set of choices, not %s" (Yojson.Basic.to_string v)
+
+(** Read a value that is one of several shapes: [f] is given the name of the
+ * case and what it carries, and answers with whatever the caller wants of it.
+ *
+ * The counterpart of a [Variant] kind, as [to_field] is of a record's: a value
+ * of one is an object of a single field, whose name says which case it is. *)
+let to_case f = function
+    | `Assoc [ name, v ] -> f name v
+    | v ->
+        bad_value "expected one named shape, not %s" (Yojson.Basic.to_string v)
+
+(*$T to_case
+  to_case (fun n v -> n, to_int v) (`Assoc [ "a", `Int 1 ]) = ("a", 1)
+  (try ignore (to_case (fun n _ -> n) (`Assoc [])) ; false \
+   with Bad_value _ -> true)
+  (try ignore (to_case (fun n _ -> n) (`Assoc [ "a", `Int 1 ; "b", `Int 2 ])) ; \
+   false with Bad_value _ -> true)
+  (try ignore (to_case (fun n _ -> n) (`Int 1)) ; false \
+   with Bad_value _ -> true)
+ *)
 
 (** Read the field [name] of a record with [f]. The counterpart of a [Record]
  * kind, one field at a time, which is how a setter rebuilds its own record:

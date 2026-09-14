@@ -501,7 +501,7 @@ struct
                 ~descr:"Is the link up?"
                 ~getter:(fun () ->
                     `String (string_of_negotiated t.negotiated)) ;
-            property "speeds" ~kind:(Set Speed.names)
+            property "speeds" ~kind:(Set (choices Speed.names))
                 ~descr:"Supported speeds"
                 ~getter:(fun () ->
                     `List (List.map (fun s -> `Int (Speed.to_enum s))
@@ -510,7 +510,7 @@ struct
                     (* TODO: Also renegotiate [negotiated] *)
                     let speeds =
                         List.map (fun i -> Speed.all.(i))
-                                 (to_choices Speed.names v) in
+                                 (to_choices (choices Speed.names) v) in
                     (* As [make] refuses to build one: an adapter that supports
                      * no speed at all has nothing to negotiate with, and
                      * nothing to fall back on either. *)
@@ -1145,7 +1145,7 @@ struct
                     ~getter:(fun () -> `Float t.error_rate) ;
                 property "last packets"
                     ~kind:(List (Row [| "time", Time ;
-                                        "dir", Enum [| "→" ; "←" |] ;
+                                        "dir", Enum (choices [| "→" ; "←" |]) ;
                                         "frame", Packet |]))
                     ~descr:"Last packets transmitted."
                     (* Most recent first, and the slots nothing has reached

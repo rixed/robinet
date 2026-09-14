@@ -282,8 +282,16 @@ and kind =
     | Float
     (* "true" or "false", as the setter reads them *)
     | Bool
-    (* One of those values, and nothing else *)
-    | Enum of string array
+    (* One of those values, and nothing else: a number and what to call it,
+     * which is what a <select> has always been -- an option's value and the
+     * text of it.
+     *
+     * The number is what travels and what a setter reads, and it is the
+     * caller's to choose: a protocol number names itself (0x0800 is IP), and a
+     * set of alternatives with nothing of its own to be numbered by is
+     * numbered by the places of its choices, which is what [Widget.choices]
+     * does. *)
+    | Enum of (int * string) array
     (* Any number of those values, each at most once, in no order of its own:
      * the interface ticks them, and the value is the places of the ticked ones
      * (as [Enum]'s is the place of the one), which is a [`List] on the wire.
@@ -292,8 +300,11 @@ and kind =
      * list is a sequence, and offers the reader what a sequence is for --
      * carrying an element about, holding the same one twice -- neither of
      * which means anything about a set. What the accepted speeds of an
-     * interface are is a set; what a routing table is, is a list. *)
-    | Set of string array
+     * interface are is a set; what a routing table is, is a list.
+     *
+     * The choices are numbered as an [Enum]'s are, and what travels is those
+     * numbers. *)
+    | Set of (int * string) array
     (* The id of another widget of the same simulation: what a cable's two ends
      * are. Not an [Int], although that is what travels: the UI has the widgets
      * of the simulation in hand and can offer them by name, which no number box
@@ -336,6 +347,18 @@ and kind =
      * repeats, this is what is read and filled in on its own. Build one with
      * [record]. *)
     | Record of (string * kind) array
+    (* A value that is one of several shapes, each with a name and with what it
+     * carries: which shape it is travels with it, as a single-field object
+     * whose one name is the case's.
+     *
+     * Which is what a thing whose fields depend on what it is needs, and what
+     * a record of a tag beside a payload cannot say: an ICMP message is four
+     * shapes and which one follows from its type, so a record would let an
+     * editor offer an echo request carrying a redirect, while a variant over
+     * the kinds of message cannot. Choosing the case is then the edit.
+     *
+     * Every case carries a kind. Build one with [variant]. *)
+    | Variant of (string * kind) array
     (* A value written a particular way, with an example of it: what the
      * interface shows in the input while it is empty. Not a kind of its own --
      * it is one more thing said about the value inside it -- and where a
