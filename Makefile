@@ -35,6 +35,7 @@ LIB_SOURCES  = \
 	sll.ml \
 	tap.ml \
 	packet.ml \
+	synth.ml \
 	sockopt.ml \
 	hub.ml \
 	host.ml \

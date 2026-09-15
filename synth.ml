@@ -1,0 +1,234 @@
+(* vim:sw=4 ts=4 sts=4 expandtab spell spelllang=en
+*)
+(* Copyright 2026, Cedric Cellier
+ *
+ * This file is part of RobiNet.
+ *
+ * RobiNet is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * RobiNet is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
+ *)
+(** Packet synthesizer
+
+Packet synthesizer are special devices that can generate streams of packets
+with a given shape.
+
+The protocol stack and the various field values can be chosen precisely, or
+generated at random, or set to "automatic".
+*)
+open Batteries
+open SimTypes
+open Tools
+
+type 'a synth =
+    | Value of 'a
+    | Generator of int (* in the array of generators *)
+    | Automatic
+
+type stream = {
+    stop_after : int option ;
+    (* Distance between two packets: *)
+    distance : int synth ;
+    distance_from_end : bool ;
+}
+
+type t = {
+    seed : int ;
+    (* Generators will be referenced by index in this array: *)
+    generators : Generator.t array ;
+    stream : stream ;
+    (* We need to specify a Packet.Pdu.t with synth types everywhere where
+     * we can have a field value. We are not going to write two versions of
+     * each Pdu, so instead we take the description of the stack in a more
+     * dynamical representation, using yojson. At each step we can turn
+     * this json description of a packet into a real one. Maybe the
+     * Widget.kind of the Pdu that we have already can be used to make this
+     * generation partially automatic. *)
+    packet : Yojson.Basic.t ;
+}
+
+(** {2 Packet synthesis} *)
+
+module Packet =
+struct
+    (*$< Packet *)
+
+    module Pdu = Packet.Pdu
+
+    (* The protocol of a layer, by its name as [Packet.Pdu.field_names] writes
+     * it: "Vlan 2" is a Vlan. *)
+    let protocol_of_name name =
+        try String.sub name 0 (String.index name ' ')
+        with Not_found -> name
+
+    (*$= protocol_of_name & ~printer:identity
+      "Vlan" (protocol_of_name "Vlan 2")
+      "Eth" (protocol_of_name "Eth")
+     *)
+
+    let pack_layer = function
+        | Pdu.Raw bits -> bits
+        | Pdu.Dhcp t -> Dhcp.Pdu.pack t
+        | Pdu.Eth t -> Eth.Pdu.pack t
+        | Pdu.Arp t -> Arp.Pdu.pack t
+        | Pdu.Ip t -> Ip.Pdu.pack t
+        | Pdu.Ip6 t -> Ip6.Pdu.pack t
+        | Pdu.Udp t -> Udp.Pdu.pack t
+        | Pdu.Tcp t -> Tcp.Pdu.pack t
+        | Pdu.Dns t -> Dns.Pdu.pack t
+        | Pdu.Sll t -> Sll.Pdu.pack t
+        | Pdu.Vlan t -> Vlan.Pdu.pack t
+        | Pdu.Icmp t -> Icmp.Pdu.pack t
+        | Pdu.Pcap t -> Pcap.Pdu.pack t
+
+    (* The layer named [name], synthesized from [js] above [upper] -- the name
+     * and the packed bits of the layer above -- and after [prev], this layer
+     * in the previous packet. *)
+    let layer_of_synth js ?upper prev gen_values name : Pdu.layer =
+        match protocol_of_name name with
+        | "Data" ->
+            let kind = Bytes in
+            Pdu.Raw (Widget.to_bitstring (
+                match Generator.value_of_synth gen_values kind js with
+                | Some v -> v
+                | None -> Generator.coerce kind (Generator.random_int ())))
+        | "Dhcp" ->
+            Pdu.Dhcp (Dhcp.Pdu.of_synth js ?upper gen_values
+                ?prev:(match prev with Some (Pdu.Dhcp p) -> Some p | _ -> None))
+        | "Eth" ->
+            Pdu.Eth (Eth.Pdu.of_synth js ?upper gen_values
+                ?prev:(match prev with Some (Pdu.Eth p) -> Some p | _ -> None))
+        | "Arp" ->
+            Pdu.Arp (Arp.Pdu.of_synth js ?upper gen_values
+                ?prev:(match prev with Some (Pdu.Arp p) -> Some p | _ -> None))
+        | "Ip" ->
+            Pdu.Ip (Ip.Pdu.of_synth js ?upper gen_values
+                ?prev:(match prev with Some (Pdu.Ip p) -> Some p | _ -> None))
+        | "Ip6" ->
+            Pdu.Ip6 (Ip6.Pdu.of_synth js ?upper gen_values
+                ?prev:(match prev with Some (Pdu.Ip6 p) -> Some p | _ -> None))
+        | "Udp" ->
+            Pdu.Udp (Udp.Pdu.of_synth js ?upper gen_values
+                ?prev:(match prev with Some (Pdu.Udp p) -> Some p | _ -> None))
+        | "Tcp" ->
+            Pdu.Tcp (Tcp.Pdu.of_synth js ?upper gen_values
+                ?prev:(match prev with Some (Pdu.Tcp p) -> Some p | _ -> None))
+        | "Dns" ->
+            Pdu.Dns (Dns.Pdu.of_synth js ?upper gen_values
+                ?prev:(match prev with Some (Pdu.Dns p) -> Some p | _ -> None))
+        | "Sll" ->
+            Pdu.Sll (Sll.Pdu.of_synth js ?upper gen_values
+                ?prev:(match prev with Some (Pdu.Sll p) -> Some p | _ -> None))
+        | "Vlan" ->
+            Pdu.Vlan (Vlan.Pdu.of_synth js ?upper gen_values
+                ?prev:(match prev with Some (Pdu.Vlan p) -> Some p | _ -> None))
+        | "Icmp" ->
+            Pdu.Icmp (Icmp.Pdu.of_synth js ?upper gen_values
+                ?prev:(match prev with Some (Pdu.Icmp p) -> Some p | _ -> None))
+        | "Pcap" ->
+            Pdu.Pcap (Pcap.Pdu.of_synth js ?upper gen_values
+                ?prev:(match prev with Some (Pdu.Pcap p) -> Some p | _ -> None))
+        | p ->
+            Widget.bad_value "no protocol is named %S" p
+
+    (** The packet a synth says: its layers, named as [Packet.Pdu.to_json]
+     * names them and outer first, synthesized from the top down, each above
+     * the one synthesized before it and after the layer at the same place in
+     * [prev]. *)
+    let of_synth js ?prev gen_values : Pdu.t =
+        let prevs = prev |? [] in
+        match js with
+        | `Assoc layers ->
+            List.mapi (fun i (name, js) -> i, name, js) layers |>
+            List.rev |>
+            List.fold_left (fun (upper, layers) (i, name, js) ->
+                let prev = try Some (List.nth prevs i) with _ -> None in
+                let layer =
+                    try layer_of_synth js ?upper prev gen_values name
+                    with Widget.Bad_value msg ->
+                        Widget.bad_value "%s: %s" name msg in
+                Some (Pdu.name_of_layer layer, pack_layer layer),
+                layer :: layers
+            ) (None, []) |>
+            snd
+        | js ->
+            Widget.bad_value "expected a stack of layers, not %s"
+                (Yojson.Basic.to_string js)
+
+    (* Real traffic, every value a constant: what is read back is the packet,
+       but for the payloads, which below the top layer are the layers above
+       packed afresh, and the capture time, which can only be automatic. *)
+    (*$R of_synth
+      let map_layers f = function
+        | `Assoc layers -> `Assoc (List.map (fun (name, js) -> name, f name js) layers)
+        | js -> js in
+      let map_fields f = function
+        | `Assoc fields -> `Assoc (List.filter_map f fields)
+        | js -> js in
+      let auto_ts =
+        map_layers (fun name js ->
+          if name <> "Pcap" then js else
+          map_fields (fun (n, v) ->
+            Some (n, if n = "captured at" then `Null else v)) js) in
+      let comparable =
+        map_layers (fun _ ->
+          map_fields (fun (n, v) ->
+            if n = "payload" || n = "captured at" then None else Some (n, v))) in
+      List.iter (fun file ->
+        Pcap.enum_of_file file /@ Pdu.unpack |>
+        Enum.iter (fun p ->
+          let js = Pdu.to_json p in
+          let synth = Generator.wrap (Pdu.kind_of p) Generator.const js |> auto_ts in
+          assert_equal ~printer:Yojson.Basic.to_string
+            (comparable js) (comparable (Pdu.to_json (of_synth synth [||]))))
+      ) [ "tests/someweb.pcap" ; "tests/someweb_sll.pcap" ;
+          "tests/various_vlans.pcap" ]
+     *)
+
+    (* What the layers above say, and what the previous packet does. *)
+    (*$R of_synth
+      let layer_synth f l = Generator.wrap (Pdu.kind_of_layer l) f (Pdu.json_of_layer l) in
+      let autos = layer_synth (fun _ -> `Null) in
+      let auto_id = function
+        | `Assoc fields ->
+            `Assoc (List.map (fun (n, v) -> n, if n = "id" then `Null else v) fields)
+        | js -> js in
+      let synth =
+        `Assoc [ "Eth", autos (Pdu.Eth (Eth.Pdu.random ())) ;
+                 "Ip", autos (Pdu.Ip (Ip.Pdu.random ())) ;
+                 "Udp", autos (Pdu.Udp (Udp.Pdu.random ())) ;
+                 "Dns", layer_synth Generator.const (Pdu.Dns (Dns.Pdu.random ())) |>
+                        auto_id ] in
+      let p1 = of_synth synth [||] in
+      let p2 = of_synth synth ~prev:p1 [||] in
+      let printer = string_of_int in
+      match p1, p2 with
+      | [ Pdu.Eth eth ; Pdu.Ip ip ; Pdu.Udp udp ; Pdu.Dns dns ],
+        [ _ ; Pdu.Ip ip2 ; _ ; Pdu.Dns dns2 ] ->
+          assert_equal ~printer (Arp.HwProto.ip4 :> int) (eth.Eth.Pdu.proto :> int) ;
+          assert_equal ~printer (Ip.Proto.udp :> int) (ip.Ip.Pdu.proto :> int) ;
+          assert_equal ~printer 53 (udp.Udp.Pdu.dst_port :> int) ;
+          assert_equal ~printer (bytelength (Dns.Pdu.pack dns))
+            (Payload.length udp.Udp.Pdu.payload) ;
+          assert_equal ~printer (8 + Payload.length udp.Udp.Pdu.payload)
+            udp.Udp.Pdu.length ;
+          assert_equal ~printer
+            (20 + bytelength ip.Ip.Pdu.options + Payload.length ip.Ip.Pdu.payload)
+            ip.Ip.Pdu.tot_len ;
+          assert_equal ~printer ((ip.Ip.Pdu.id + 1) land 0xffff) ip2.Ip.Pdu.id ;
+          assert_equal ~printer ((dns.Dns.Pdu.id + 1) land 0xffff) dns2.Dns.Pdu.id
+      | _ ->
+          assert_failure "not the layers the synth says"
+     *)
+
+    (*$>*)
+end
