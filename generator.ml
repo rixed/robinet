@@ -86,6 +86,15 @@ let get t n =
 open SimTypes
 open Tools
 
+(* Another integer as random as [x], and as good as independent from it for
+ * each [salt]: what the parts of a value are coerced from, so that the same
+ * [x] always gives the same whole. *)
+let derive x salt =
+    let h = x lxor (salt * 0x2545F4914F6CDD1D) in
+    let h = (h lxor (h lsr 31)) * 0x3F58476D1CE4E5B9 in
+    let h = (h lxor (h lsr 27)) * 0x14D049BB133111EB in
+    (h lxor (h lsr 31)) land max_int
+
 let rec coerce kind x =
     let max_string_len = 50_000 in
     (* Not [abs], which leaves [min_int] negative: *)
@@ -133,17 +142,64 @@ let rec coerce kind x =
         if x land 1 = 0 then `Null else coerce kind (x lsr 1)
     | Variant variants ->
         let n = Array.length variants in
-        let var = x mod n in
-        let x = x / n in
-        coerce (snd variants.(var)) x
+        let case, kind = variants.(x mod n) in
+        `Assoc [ case, coerce kind (x / n) ]
     | Hint (_, kind) ->
         coerce kind x
-    | _ ->
-        failwith "Cannot assign a random value to this kind"
+    | BRange (mi, ma) ->
+        let ma = min ma (mi + max_string_len) in
+        let len = if ma < mi then mi else mi + x mod (ma - mi + 1) in
+        `String (hexstring_of_bitstring (randbs len))
+    | Ipv4 ->
+        `String (Printf.sprintf "%d.%d.%d.%d"
+                    ((x lsr 24) land 0xff) ((x lsr 16) land 0xff)
+                    ((x lsr 8) land 0xff) (x land 0xff))
+    | Ipv6 ->
+        (* The low 64 bits, under the documentation prefix: *)
+        `String (Printf.sprintf "2001:db8::%x:%x:%x:%x"
+                    ((x lsr 48) land 0xffff) ((x lsr 32) land 0xffff)
+                    ((x lsr 16) land 0xffff) (x land 0xffff))
+    | Mac ->
+        `String (Printf.sprintf "%02x:%02x:%02x:%02x:%02x:%02x"
+                    ((x lsr 40) land 0xff) ((x lsr 32) land 0xff)
+                    ((x lsr 24) land 0xff) ((x lsr 16) land 0xff)
+                    ((x lsr 8) land 0xff) (x land 0xff))
+    | Time ->
+        `Float (float_of_int x)
+    | Row fields | Record fields ->
+        `Assoc (Array.to_list fields |>
+                List.map (fun (name, k) ->
+                    name, coerce k (derive x (Hashtbl.hash name))))
+    | List kind ->
+        let max_list_len = 4 in
+        let len = x mod (max_list_len + 1) in
+        `List (List.init len (fun i -> coerce kind (derive x (i + 1))))
+    | Widget_id | Packet | Metric ->
+        Widget.bad_value "cannot generate %s" (Widget.kind_name kind)
 
 (*$T coerce
   coerce Int min_int = `Int 0
   coerce (FRange (1., 1.)) 42 = `Float 1.
+  let k = Widget.record [| "a", Int ; "b", Widget.list Int |] in \
+  coerce k 42 = coerce k 42
+  (try ignore (coerce Widget_id 1) ; false with Widget.Bad_value _ -> true)
+  (try ignore (coerce (Optional Packet) 3) ; false with Widget.Bad_value _ -> true)
+  (try ignore (coerce Metric 1) ; false with Widget.Bad_value _ -> true)
+*)
+(*$Q coerce
+  Q.int (fun x -> List.for_all (fun k -> \
+    try Widget.check_value k (coerce k x) ; true with _ -> false) \
+    [ String ; Text ; FileName ; Int ; Float ; Bool ; Time ; Duration ; \
+      Bytes ; Ipv4 ; Ipv6 ; Mac ; BRange (0, 0) ; BRange (4, 16) ; \
+      IRange (-5, 5) ; IRange (min_int, max_int) ; FRange (0., 1.) ; \
+      Widget.one_of [| 1, "a" ; 7, "b" |] ; \
+      Widget.one_of ~range:(0, 9) [| 1, "a" |] ; \
+      Set (Widget.choices [| "a" ; "b" ; "c" |]) ; \
+      Widget.optional Int ; Widget.hint "x" Ipv4 ; \
+      Widget.list (Widget.row [| "a", Mac ; "b", Widget.optional Bytes |]) ; \
+      Widget.record [| "a", Widget.list Int ; \
+                       "b", Widget.record [| "c", Bool |] |] ; \
+      Widget.variant [| "a", Int ; "b", Widget.record [| "c", Ipv6 |] |] ])
 *)
 (*$Q coerce
   Q.int (fun x -> match coerce (IRange (3, 7)) x with \
