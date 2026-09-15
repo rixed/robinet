@@ -72,14 +72,22 @@ struct
      * are computed on the way out (see [make] and [Ip.Pdu.pack]) and are shown
      * here as the plain numbers they are. Offering to compute them is
      * something an editor does, and there is no editor yet. *)
+    module Kinds =
+    struct
+        open SimTypes
+        let port = IRange (0, 0xffff)
+        let length = IRange (0, 0xffff)
+        let checksum = IRange (0, 0xffff)
+        let payload = BRange (0, 0xffff - 8)
+    end
+
     let kind_of (_ : t) =
-        let open SimTypes in
         Widget.record
-            [| "source port", IRange (0, 0xffff) ;
-               "destination port", IRange (0, 0xffff) ;
-               "length", IRange (0, 0xffff) ;
-               "checksum", IRange (0, 0xffff) ;
-               "payload", BRange (0, 0xffff - 8) |]
+            [| "source port", Kinds.port ;
+               "destination port", Kinds.port ;
+               "length", Kinds.length ;
+               "checksum", Kinds.checksum ;
+               "payload", Kinds.payload |]
 
     let to_json (t : t) =
         `Assoc [ "source port", `Int (t.src_port :> int) ;
@@ -87,6 +95,43 @@ struct
                  "length", `Int t.length ;
                  "checksum", `Int t.checksum ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    let of_synth js ?upper ?prev gen_values =
+        let open Generator in
+        let payload = payload_of_field ?upper gen_values Kinds.payload js in
+        (* The ports DNS and DHCP are known by, under those; otherwise those of
+         * the previous datagram, mostly. *)
+        let known_src, known_dst =
+            match upper with
+            | Some ("Dns", _) -> None, Some 53
+            | Some ("Dhcp", _) -> Some 68, Some 67
+            | _ -> None, None in
+        let port fname known prev_port =
+            let auto =
+                match known with
+                | Some p -> Some (fun () -> Port.o p)
+                | None -> mostly_same prev_port Port.random in
+            int_of_field fname gen_values ?auto Kinds.port Port.o js in
+        { src_port = port "source port" known_src
+                          (Option.map (fun p -> p.src_port) prev) ;
+          dst_port = port "destination port" known_dst
+                          (Option.map (fun p -> p.dst_port) prev) ;
+          length = int_of_field "length" gen_values
+                       ~auto:(fun () -> 8 + bytelength payload)
+                       Kinds.length identity js ;
+          (* 0, which is the only checksum [Ip.Pdu.pack] computes: *)
+          checksum = int_of_field "checksum" gen_values ~auto:(fun () -> 0)
+                         Kinds.checksum identity js ;
+          payload = Payload.o payload }
+
+    (*$Q of_synth
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+     *)
 
     (*$Q kind_of
       (Q.make (fun _ -> random ())) (fun t -> \

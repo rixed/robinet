@@ -159,18 +159,29 @@ struct
      * The options are bytes until somebody writes the kind that describes
      * them, which is the day the NOP option makes a variant case that carries
      * nothing. *)
+    module Kinds =
+    struct
+        open SimTypes
+        let port = IRange (0, 0xffff)
+        let seq_num = IRange (0, 0xffff_ffff)
+        let flags = Set flag_choices
+        let win_size = IRange (0, 0xffff)
+        let urg_ptr = IRange (0, 0xffff)
+        let options = BRange (0, 40)
+        let payload = BRange (0, 0xffff)
+    end
+
     let kind_of (_ : t) =
-        let open SimTypes in
         Widget.record
-            [| "source port", IRange (0, 0xffff) ;
-               "destination port", IRange (0, 0xffff) ;
-               "sequence number", IRange (0, 0xffff_ffff) ;
-               "acknowledgment number", IRange (0, 0xffff_ffff) ;
-               "flags", Set flag_choices ;
-               "window size", IRange (0, 0xffff) ;
-               "urgent pointer", IRange (0, 0xffff) ;
-               "options", BRange (0, 40) ;
-               "payload", BRange (0, 0xffff) |]
+            [| "source port", Kinds.port ;
+               "destination port", Kinds.port ;
+               "sequence number", Kinds.seq_num ;
+               "acknowledgment number", Kinds.seq_num ;
+               "flags", Kinds.flags ;
+               "window size", Kinds.win_size ;
+               "urgent pointer", Kinds.urg_ptr ;
+               "options", Kinds.options ;
+               "payload", Kinds.payload |]
 
     let to_json (t : t) =
         let raised =
@@ -186,6 +197,52 @@ struct
                  "urgent pointer", `Int t.urg_ptr ;
                  "options", Widget.json_of_bytes t.options ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    let of_synth js ?upper ?prev gen_values =
+        let open Generator in
+        let int fname ?auto kind =
+            int_of_field fname gen_values ?auto kind identity js in
+        let port fname prev_port =
+            int_of_field fname gen_values ?auto:(mostly_same prev_port Port.random)
+                         Kinds.port Port.o js in
+        let flags =
+            of_field "flags" gen_values Kinds.flags
+                     (Widget.to_choices flag_choices) js in
+        let raised i = List.mem i flags in
+        let seq32 (n : SeqNum.t) = uint32 (n :> int32) in
+        (* Given the previous segment: the sequence number that follows it, and
+         * an acknowledgment number that moves on now and then, what goes the
+         * other way being unknown. *)
+        let seq_num =
+            int "sequence number" Kinds.seq_num ?auto:(Option.map (fun p () ->
+                let one b = if b then 1 else 0 in
+                (seq32 p.seq_num + Payload.length p.payload +
+                 one p.flags.syn + one p.flags.fin) land 0xffff_ffff) prev)
+        and ack_num =
+            int "acknowledgment number" Kinds.seq_num ?auto:(Option.map (fun p () ->
+                let ack = seq32 p.ack_num in
+                if Random.bool () then ack
+                else (ack + 1000 + Random.int 2000) land 0xffff_ffff) prev) in
+        { src_port = port "source port" (Option.map (fun p -> p.src_port) prev) ;
+          dst_port = port "destination port" (Option.map (fun p -> p.dst_port) prev) ;
+          seq_num = SeqNum.o (Int32.of_int seq_num) ;
+          ack_num = SeqNum.o (Int32.of_int ack_num) ;
+          win_size = int "window size" Kinds.win_size ;
+          flags = { urg = raised 0 ; ack = raised 1 ; psh = raised 2 ;
+                    rst = raised 3 ; syn = raised 4 ; fin = raised 5 } ;
+          urg_ptr = int "urgent pointer" Kinds.urg_ptr ;
+          options = bs_of_field "options" gen_values Kinds.options js ;
+          payload =
+              Payload.o (payload_of_field ?upper gen_values Kinds.payload js) }
+
+    (*$Q of_synth
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+     *)
 
     (*$Q kind_of
       (Q.make (fun _ -> random ())) (fun t -> \

@@ -132,6 +132,15 @@ module HwProto = struct
 
     let random () = o (randi 16)
 
+    (** The protocol of the layer named [name] (see
+     * [Packet.Pdu.name_of_layer]), when it is one of these. *)
+    let of_layer = function
+        | "Ip" -> Some ip4
+        | "Ip6" -> Some ip6
+        | "Arp" -> Some arp
+        | "Vlan" -> Some ieee8021q
+        | _ -> None
+
     (** The protocols this module has a name for (see [Arp.Op.choices]). These
      * are the numbers an Ethernet frame carries to say what is in it, so
      * everything above uses them too. *)
@@ -276,18 +285,12 @@ module Pdu = struct
 
     (*$Q of_synth
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
-              (fun _ -> random ())) (fun t -> \
-        of_synth (Generator.wrap (fun js -> `Assoc [ "const", js ]) (to_json t)) [||] = t)
-    *)
-
-    (*$Q of_synth
+              (fun _ -> random ())) \
+        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
-              (fun _ -> random ())) (fun t -> \
-        let js = to_json t |> Generator.wrap (fun _ -> `Null) in \
-        match of_synth js [||] with \
-        | exception _ -> false \
-        | t -> (try Widget.check_value (kind_of t) (to_json t) ; true with _ -> false))
-    *)
+              (fun _ -> random ())) \
+        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+     *)
 
     (*$>*)
 end

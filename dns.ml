@@ -270,24 +270,27 @@ struct
 
     (* The four sections of a message are four tables of the same shape, bar
        the three columns only a resource record has. *)
-    let qtype = Widget.one_of ~range:(0, 0xffff) QType.choices
-    let qclass = Widget.one_of ~range:(0, 0xffff) [| 1, "IN" |]
-
-    let question_kind =
-        let open SimTypes in
-        Widget.row
-            [| "name", Widget.hint "www.example.com" String ;
-               "type", qtype ;
-               "class", qclass |]
-
-    let rr_kind =
-        let open SimTypes in
-        Widget.row
-            [| "name", Widget.hint "www.example.com" String ;
-               "type", qtype ;
-               "class", qclass ;
-               "TTL", IRange (0, 0xffff_ffff) ;
-               "data", BRange (0, 0xffff) |]
+    module Kinds =
+    struct
+        open SimTypes
+        let id = IRange (0, 0xffff)
+        let opcode =
+            Widget.one_of ~range:(0, 0xf)
+                [| 0, "query" ; 1, "inverse query" ; 2, "status request" |]
+        let status = IRange (0, 0xf)
+        let name = Widget.hint "www.example.com" String
+        let qtype = Widget.one_of ~range:(0, 0xffff) QType.choices
+        let qclass = Widget.one_of ~range:(0, 0xffff) [| 1, "IN" |]
+        let ttl = IRange (0, 0xffff_ffff)
+        let data = BRange (0, 0xffff)
+        let questions =
+            Widget.list
+                (Widget.row [| "name", name ; "type", qtype ; "class", qclass |])
+        let rrs =
+            Widget.list
+                (Widget.row [| "name", name ; "type", qtype ; "class", qclass ;
+                               "TTL", ttl ; "data", data |])
+    end
 
     (** What a message says. No payload: DNS is where a packet ends.
      *
@@ -296,22 +299,20 @@ struct
     let kind_of (_ : t) =
         let open SimTypes in
         Widget.record
-            [| "id", IRange (0, 0xffff) ;
+            [| "id", Kinds.id ;
                "query", Bool ;
-               "opcode",
-               Widget.one_of ~range:(0, 0xf)
-                   [| 0, "query" ; 1, "inverse query" ; 2, "status request" |] ;
+               "opcode", Kinds.opcode ;
                "authoritative", Bool ;
                "truncated", Bool ;
                "recursion desired", Bool ;
                "recursion available", Bool ;
                "authentic data", Bool ;
                "checking disabled", Bool ;
-               "status", IRange (0, 0xf) ;
-               "questions", Widget.list question_kind ;
-               "answers", Widget.list rr_kind ;
-               "authority", Widget.list rr_kind ;
-               "additional", Widget.list rr_kind |]
+               "status", Kinds.status ;
+               "questions", Kinds.questions ;
+               "answers", Kinds.rrs ;
+               "authority", Kinds.rrs ;
+               "additional", Kinds.rrs |]
 
     let to_json (t : t) =
         let json_of_question (name, qtype, qclass) =
@@ -340,6 +341,50 @@ struct
                  "answers", section json_of_rr t.answer_rrs ;
                  "authority", section json_of_rr t.authority_rrs ;
                  "additional", section json_of_rr t.additional_rrs ]
+
+    let of_synth js ?upper ?prev gen_values =
+        ignore upper ;
+        let open Generator in
+        let int fname ?auto kind f js =
+            int_of_field fname gen_values ?auto kind f js
+        and bool fname =
+            of_field fname gen_values SimTypes.Bool Widget.to_bool js in
+        let name js = of_field "name" gen_values Kinds.name Widget.to_string js
+        and qtype js = int "type" Kinds.qtype QType.o js
+        and qclass js = int "class" Kinds.qclass identity js in
+        let question js = name js, qtype js, qclass js
+        and rr js =
+            name js, qtype js, qclass js,
+            Int32.of_int (int "TTL" Kinds.ttl identity js),
+            Bytes.of_string (string_of_bitstring
+                                 (bs_of_field "data" gen_values Kinds.data js)) in
+        let section fname kind f =
+            sub_of_field fname gen_values kind (Widget.to_list f) js in
+        { id = int "id" ?auto:(Option.map (fun p () ->
+                                  (p.id + 1) land 0xffff) prev)
+                   Kinds.id identity js ;
+          is_query = bool "query" ;
+          opcode = int "opcode" Kinds.opcode identity js ;
+          is_auth = bool "authoritative" ;
+          truncated = bool "truncated" ;
+          rec_desired = bool "recursion desired" ;
+          rec_avlb = bool "recursion available" ;
+          authentic_data = bool "authentic data" ;
+          checking_disabled = bool "checking disabled" ;
+          status = int "status" Kinds.status identity js ;
+          questions = section "questions" Kinds.questions question ;
+          answer_rrs = section "answers" Kinds.rrs rr ;
+          authority_rrs = section "authority" Kinds.rrs rr ;
+          additional_rrs = section "additional" Kinds.rrs rr }
+
+    (*$Q of_synth
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+     *)
 
     (*$Q kind_of
       (Q.make (fun _ -> random ())) (fun t -> \

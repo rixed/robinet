@@ -106,6 +106,15 @@ module Proto = struct
 
     let random () = o (randi 8)
 
+    (** The protocol of the layer named [name] (see
+     * [Packet.Pdu.name_of_layer]), when it is one of these. *)
+    let of_layer = function
+        | "Icmp" -> Some icmp
+        | "Tcp" -> Some tcp
+        | "Udp" -> Some udp
+        | "Ip6" -> Some ipv6
+        | _ -> None
+
     (** The protocols this module has a name for, as the choices of a kind
      * (see [Widget.one_of]). A datagram may of course carry any of the 256.
      *
@@ -842,21 +851,35 @@ module Pdu = struct
      * The type of service is one byte and is shown as one, rather than split
      * into the six bits of a DSCP and the two of an ECN: [t] holds the byte,
      * and a reader who wants it read out has [ToS.to_dscp_string]. *)
+    module Kinds =
+    struct
+        open SimTypes
+        let tos = IRange (0, 0xff)
+        let tot_len = IRange (0, 0xffff)
+        let id = IRange (0, 0xffff)
+        let frag_offset = IRange (0, 0x1fff)
+        let ttl = IRange (0, 0xff)
+        let proto = Widget.one_of ~range:(0, 0xff) Proto.choices
+        let addr = Widget.hint "192.168.0.1" Ipv4
+        let options = BRange (0, 40)
+        let payload = BRange (0, 0xffff - 20)
+    end
+
     let kind_of (_ : t) =
         let open SimTypes in
         Widget.record
-            [| "type of service", IRange (0, 0xff) ;
-               "total length", IRange (0, 0xffff) ;
-               "id", IRange (0, 0xffff) ;
+            [| "type of service", Kinds.tos ;
+               "total length", Kinds.tot_len ;
+               "id", Kinds.id ;
                "don't fragment", Bool ;
                "more fragments", Bool ;
-               "fragment offset", IRange (0, 0x1fff) ;
-               "time to live", IRange (0, 0xff) ;
-               "protocol", Widget.one_of ~range:(0, 0xff) Proto.choices ;
-               "source", Widget.hint "192.168.0.1" Ipv4 ;
-               "destination", Widget.hint "192.168.0.1" Ipv4 ;
-               "options", BRange (0, 40) ;
-               "payload", BRange (0, 0xffff - 20) |]
+               "fragment offset", Kinds.frag_offset ;
+               "time to live", Kinds.ttl ;
+               "protocol", Kinds.proto ;
+               "source", Kinds.addr ;
+               "destination", Kinds.addr ;
+               "options", Kinds.options ;
+               "payload", Kinds.payload |]
 
     let to_json (t : t) =
         `Assoc [ "type of service", `Int (t.tos :> int) ;
@@ -873,6 +896,45 @@ module Pdu = struct
                  "destination", Addr.to_json t.dst ;
                  "options", Widget.json_of_bytes t.options ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    let of_synth js ?upper ?prev gen_values =
+        let open Generator in
+        let int fname ?auto kind f =
+            int_of_field fname gen_values ?auto kind f js
+        and bool fname =
+            of_field fname gen_values SimTypes.Bool Widget.to_bool js
+        and addr fname =
+            of_field fname gen_values Kinds.addr
+                     (Addr.of_dotted_string % Widget.to_string) js in
+        let options = bs_of_field "options" gen_values Kinds.options js
+        and payload = payload_of_field ?upper gen_values Kinds.payload js in
+        { tos = int "type of service" Kinds.tos ToS.o ;
+          tot_len = int "total length"
+                        ~auto:(fun () ->
+                            20 + bytelength options + bytelength payload)
+                        Kinds.tot_len identity ;
+          id = int "id" ?auto:(Option.map (fun p () ->
+                                  (p.id + 1) land 0xffff) prev)
+                   Kinds.id identity ;
+          dont_frag = bool "don't fragment" ;
+          more_frags = bool "more fragments" ;
+          frag_offset = int "fragment offset" Kinds.frag_offset identity ;
+          ttl = int "time to live" Kinds.ttl identity ;
+          proto = int "protocol" ?auto:(from_upper upper Proto.of_layer)
+                      Kinds.proto Proto.o ;
+          src = addr "source" ;
+          dst = addr "destination" ;
+          options ;
+          payload = Payload.o payload }
+
+    (*$Q of_synth
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+     *)
 
     (*$Q kind_of
       (Q.make (fun _ -> random ())) (fun t -> \

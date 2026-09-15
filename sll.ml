@@ -104,16 +104,23 @@ module Pdu = struct
     (** What the pseudo-header libpcap writes in front of a cooked capture
      * says. No local address: a cooked capture does not carry one, which is
      * the whole reason it exists. *)
+    module Kinds =
+    struct
+        open SimTypes
+        let direction = Widget.one_of pkt_type_choices
+        let addr_type = Widget.one_of ~range:(0, 0xffff) Arp.HwType.choices
+        let addr = BRange (0, 8)
+        let proto = Widget.one_of ~range:(0, 0xffff) Arp.HwProto.choices
+        let payload = BRange (0, 0xffff_ffff)
+    end
+
     let kind_of (_ : t) =
-        let open SimTypes in
         Widget.record
-            [| "direction", Widget.one_of pkt_type_choices ;
-               "address type",
-               Widget.one_of ~range:(0, 0xffff) Arp.HwType.choices ;
-               "address", BRange (0, 8) ;
-               "protocol",
-               Widget.one_of ~range:(0, 0xffff) Arp.HwProto.choices ;
-               "payload", BRange (0, 0xffff_ffff) |]
+            [| "direction", Kinds.direction ;
+               "address type", Kinds.addr_type ;
+               "address", Kinds.addr ;
+               "protocol", Kinds.proto ;
+               "payload", Kinds.payload |]
 
     let to_json (t : t) =
         `Assoc [ "direction", `Int (int_of_pkt_type t.pkt_type) ;
@@ -121,6 +128,29 @@ module Pdu = struct
                  "address", Widget.json_of_bytes t.ll_addr ;
                  "protocol", `Int (t.proto :> int) ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    let of_synth js ?upper ?prev gen_values =
+        ignore prev ;
+        let open Generator in
+        { pkt_type = int_of_field "direction" gen_values Kinds.direction
+                                  pkt_type_of_int js ;
+          ll_addr_type = int_of_field "address type" gen_values Kinds.addr_type
+                                      identity js ;
+          ll_addr = bs_of_field "address" gen_values Kinds.addr js ;
+          proto = int_of_field "protocol" gen_values
+                      ?auto:(from_upper upper Arp.HwProto.of_layer)
+                      Kinds.proto Arp.HwProto.o js ;
+          payload =
+              Payload.o (payload_of_field ?upper gen_values Kinds.payload js) }
+
+    (*$Q of_synth
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+     *)
 
     (*$Q kind_of
       (Q.make (fun _ -> random ())) (fun t -> \

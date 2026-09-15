@@ -282,9 +282,96 @@ let bs_of_field fname gen_values ?auto kind js =
   ) (List.init 100 identity)
 *)
 
-(* Helper for tests: turn a JSON representation of a Packet.Pdu.t into one where
- * every immediate value is a synthesized "const". *)
-let rec wrap f : Yojson.Basic.t -> Yojson.Basic.t = function
-    | `Assoc lst -> `Assoc (List.map (fun (n, js) -> n, wrap f js) lst)
-    | `List lst -> `List (List.map (wrap f) lst)
-    | js -> f js
+(* Turn the value [js] of [kind] into a synth, by applying [f] to each value a
+ * single synth stands for: down through the fields of records and rows, the
+ * elements of lists and what a variant's case carries, to what is none of
+ * those. *)
+let rec wrap kind f (js : Yojson.Basic.t) : Yojson.Basic.t =
+    let kind_of_part parts name =
+        Array.find_opt (fun (n, _) -> n = name) parts |> Option.map snd in
+    match kind, js with
+    | Hint (_, k), _ ->
+        wrap k f js
+    | (Row fields | Record fields), `Assoc given ->
+        `Assoc (List.map (fun (name, v) ->
+            name, (match kind_of_part fields name with
+                  | Some k -> wrap k f v
+                  | None -> f v)
+        ) given)
+    | List k, `List l ->
+        `List (List.map (wrap k f) l)
+    | Variant cases, `Assoc [ case, v ] ->
+        (match kind_of_part cases case with
+        | Some k -> `Assoc [ case, wrap k f v ]
+        | None -> f js)
+    | _ ->
+        f js
+
+let const v : Yojson.Basic.t = `Assoc [ "const", v ]
+
+(*$T wrap
+  wrap (Set (Widget.choices [| "a" |])) const (`List [ `Int 0 ]) = \
+    `Assoc [ "const", `List [ `Int 0 ] ]
+  wrap (Widget.record [| "a", Int ; "b", Widget.list Int |]) const \
+    (`Assoc [ "a", `Int 1 ; "b", `List [ `Int 2 ] ]) = \
+    `Assoc [ "a", `Assoc [ "const", `Int 1 ] ; \
+             "b", `List [ `Assoc [ "const", `Int 2 ] ] ]
+*)
+
+(* A synth of [kind] structured as the kind is: a constant, a generated value
+ * or an automatic one given for the whole of a record, a list or a variant
+ * becomes a constant for each of its parts. *)
+let expand gen_values kind js =
+    match js with
+    | `Null | `Assoc [ ("const" | "gen"), _ ] ->
+        let v =
+            match value_of_synth gen_values kind js with
+            | Some v -> v
+            | None -> coerce kind (random_int ()) in
+        wrap kind const v
+    | js ->
+        js
+
+(*$T expand
+  expand [||] (Widget.list Int) (`Assoc [ "const", `List [ `Int 2 ] ]) = \
+    `List [ `Assoc [ "const", `Int 2 ] ]
+  expand [| 3 |] (Widget.variant [| "a", Int |]) (`Assoc [ "gen", `Int 0 ]) = \
+    `Assoc [ "a", `Assoc [ "const", `Int 3 ] ]
+  expand [||] (Widget.list Int) (`List []) = `List []
+*)
+
+(* Read the field [fname] of [kind] -- a record, a list or a variant -- with
+ * [f], which is given a synth of that kind structured as the kind is. *)
+let sub_of_field fname gen_values kind f js =
+    Widget.to_field fname (fun js -> f (expand gen_values kind js)) js
+
+(* A layer's payload: the layer above, packed, when there is one, and what the
+ * synth says otherwise. *)
+let payload_of_field ?upper gen_values kind js =
+    match upper with
+    | Some (_, bits) -> bits
+    | None -> bs_of_field "payload" gen_values kind js
+
+(* The automatic value the name of the layer above says, when [f] knows what
+ * to make of that name. *)
+let from_upper upper f =
+    Option.bind upper (fun (name, _) -> f name) |> Option.map (fun v () -> v)
+
+(* The automatic value of what lasts from one packet to the next, such as a
+ * port: what it was in the previous packet 99 times out of 100, and [fresh ()]
+ * otherwise. None without a previous packet. *)
+let mostly_same prev fresh =
+    Option.map (fun v () -> if Random.int 100 = 0 then fresh () else v) prev
+
+(* For tests, given a Pdu [t]: whether [of_synth] reads [t] back from a synth
+ * where every value is a constant, *)
+let reads_consts of_synth kind_of to_json t =
+    let synth = wrap (kind_of t) const (to_json t) in
+    to_json (of_synth synth [||]) = to_json t
+
+(* and whether a synth where every value is automatic reads as a value of its
+ * kind. *)
+let reads_autos of_synth kind_of to_json t =
+    let t = of_synth (wrap (kind_of t) (fun _ -> `Null) (to_json t)) [||] in
+    Widget.check_value (kind_of t) (to_json t) ;
+    true

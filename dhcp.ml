@@ -526,51 +526,66 @@ struct
       (trim_padding "") ""
      *)
 
+    module Kinds =
+    struct
+        open SimTypes
+        let op = Widget.one_of [| 1, "BOOTREQUEST" ; 2, "BOOTREPLY" |]
+        let htype = Widget.one_of ~range:(0, 0xff) Arp.HwType.choices
+        let byte = IRange (0, 0xff)
+        let xid = IRange (0, 0xffff_ffff)
+        let secs = IRange (0, 0xffff)
+        let address = Widget.hint "192.168.0.1" Ipv4
+        let chaddr = BRange (0, 16)
+        let msg_type =
+            Widget.optional (Widget.one_of ~range:(0, 0xff) MsgType.choices)
+        let opt_address = Widget.optional address
+        let opt_string = Widget.optional String
+        let lease_time = Widget.optional (IRange (0, 0xffff_ffff))
+        let message = Widget.optional Text
+        let max_size = Widget.optional (IRange (0, 0xffff))
+        let opaque = Widget.optional (BRange (0, 255))
+        let option_code = Widget.one_of ~range:(0, 0xff) Option.choices
+        let option_value = BRange (0, 255)
+        let other_options =
+            Widget.list
+                (Widget.row [| "code", option_code ; "value", option_value |])
+    end
+
     let kind_of (_ : t) =
         let open SimTypes in
-        let address = Widget.hint "192.168.0.1" Ipv4 in
         Widget.record
-            [| "operation",
-               Widget.one_of [| 1, "BOOTREQUEST" ; 2, "BOOTREPLY" |] ;
-               "hardware type",
-               Widget.one_of ~range:(0, 0xff) Arp.HwType.choices ;
-               "hardware address length", IRange (0, 0xff) ;
-               "hops", IRange (0, 0xff) ;
-               "transaction id", IRange (0, 0xffff_ffff) ;
-               "seconds", IRange (0, 0xffff) ;
+            [| "operation", Kinds.op ;
+               "hardware type", Kinds.htype ;
+               "hardware address length", Kinds.byte ;
+               "hops", Kinds.byte ;
+               "transaction id", Kinds.xid ;
+               "seconds", Kinds.secs ;
                "broadcast", Bool ;
-               "client address", address ;
-               "your address", address ;
-               "server address", address ;
-               "relay address", address ;
-               "client hardware address", BRange (0, 16) ;
+               "client address", Kinds.address ;
+               "your address", Kinds.address ;
+               "server address", Kinds.address ;
+               "relay address", Kinds.address ;
+               "client hardware address", Kinds.chaddr ;
                "server name", String ;
                "boot file", String ;
-               "message type",
-               Widget.optional
-                   (Widget.one_of ~range:(0, 0xff) MsgType.choices) ;
-               "subnet mask", Widget.optional address ;
-               "router", Widget.optional address ;
-               "NTP server", Widget.optional address ;
-               "SMTP server", Widget.optional address ;
-               "POP3 server", Widget.optional address ;
-               "name server", Widget.optional address ;
-               "host name", Widget.optional String ;
-               "domain name", Widget.optional String ;
-               "lease time", Widget.optional (IRange (0, 0xffff_ffff)) ;
-               "server identifier", Widget.optional address ;
-               "requested address", Widget.optional address ;
-               "message", Widget.optional Text ;
-               "max message size", Widget.optional (IRange (0, 0xffff)) ;
-               "vendor class", Widget.optional String ;
-               "client identifier", Widget.optional (BRange (0, 255)) ;
-               "request list", Widget.optional (BRange (0, 255)) ;
-               "other options",
-               Widget.list
-                   (Widget.row
-                       [| "code",
-                          Widget.one_of ~range:(0, 0xff) Option.choices ;
-                          "value", BRange (0, 255) |]) |]
+               "message type", Kinds.msg_type ;
+               "subnet mask", Kinds.opt_address ;
+               "router", Kinds.opt_address ;
+               "NTP server", Kinds.opt_address ;
+               "SMTP server", Kinds.opt_address ;
+               "POP3 server", Kinds.opt_address ;
+               "name server", Kinds.opt_address ;
+               "host name", Kinds.opt_string ;
+               "domain name", Kinds.opt_string ;
+               "lease time", Kinds.lease_time ;
+               "server identifier", Kinds.opt_address ;
+               "requested address", Kinds.opt_address ;
+               "message", Kinds.message ;
+               "max message size", Kinds.max_size ;
+               "vendor class", Kinds.opt_string ;
+               "client identifier", Kinds.opaque ;
+               "request list", Kinds.opaque ;
+               "other options", Kinds.other_options |]
 
     let to_json (t : t) =
         let bytes s = Widget.json_of_bytes (bitstring_of_string s) in
@@ -619,6 +634,70 @@ struct
                             `Assoc [ "code", `Int code ;
                                      "value", Widget.json_of_bytes v ]
                         ) t.other_options) ]
+
+    let of_synth js ?upper ?prev gen_values =
+        ignore upper ; ignore prev ;
+        let open Generator in
+        let field fname kind f = of_field fname gen_values kind f js in
+        let int fname kind f = field fname kind (f % Widget.to_int)
+        and opt fname kind f = field fname kind (Widget.to_option f) in
+        let address = Ip.Addr.of_dotted_string % Widget.to_string
+        and opaque = string_of_bitstring % Widget.to_bitstring in
+        { op = int "operation" Kinds.op (function
+                   | 1 -> BootRequest
+                   | 2 -> BootReply
+                   | n -> Widget.bad_value "no operation is %d" n) ;
+          htype = int "hardware type" Kinds.htype Arp.HwType.o ;
+          hlen = int "hardware address length" Kinds.byte identity ;
+          hops = int "hops" Kinds.byte identity ;
+          xid = int "transaction id" Kinds.xid Int32.of_int ;
+          secs = int "seconds" Kinds.secs identity ;
+          broadcast = field "broadcast" SimTypes.Bool Widget.to_bool ;
+          ciaddr = field "client address" Kinds.address address ;
+          yiaddr = field "your address" Kinds.address address ;
+          siaddr = field "server address" Kinds.address address ;
+          giaddr = field "relay address" Kinds.address address ;
+          chaddr = field "client hardware address" Kinds.chaddr
+                         Widget.to_bitstring ;
+          sname = field "server name" SimTypes.String Widget.to_string ;
+          file = field "boot file" SimTypes.String Widget.to_string ;
+          msg_type = opt "message type" Kinds.msg_type
+                         (MsgType.o % Widget.to_int) ;
+          subnet_mask = opt "subnet mask" Kinds.opt_address address ;
+          router = opt "router" Kinds.opt_address address ;
+          ntp_server = opt "NTP server" Kinds.opt_address address ;
+          smtp_server = opt "SMTP server" Kinds.opt_address address ;
+          pop3_server = opt "POP3 server" Kinds.opt_address address ;
+          domain_name_server = opt "name server" Kinds.opt_address address ;
+          host_name = opt "host name" Kinds.opt_string Widget.to_string ;
+          search_sfx = opt "domain name" Kinds.opt_string Widget.to_string ;
+          lease_time = opt "lease time" Kinds.lease_time
+                           (Int32.of_int % Widget.to_int) ;
+          server_id = opt "server identifier" Kinds.opt_address address ;
+          requested_ip = opt "requested address" Kinds.opt_address address ;
+          message = opt "message" Kinds.message Widget.to_string ;
+          max_dhcp_msg_size = opt "max message size" Kinds.max_size
+                                  Widget.to_int ;
+          vendor_class_id = opt "vendor class" Kinds.opt_string
+                                Widget.to_string ;
+          client_id = opt "client identifier" Kinds.opaque opaque ;
+          request_list = opt "request list" Kinds.opaque opaque ;
+          other_options =
+              sub_of_field "other options" gen_values Kinds.other_options
+                  (Widget.to_list (fun js ->
+                      of_field "code" gen_values Kinds.option_code
+                               Widget.to_int js,
+                      bs_of_field "value" gen_values Kinds.option_value js))
+                  js }
+
+    (*$Q of_synth
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+     *)
 
     (*$Q kind_of
       (Q.make (fun _ -> random ())) (fun t -> \

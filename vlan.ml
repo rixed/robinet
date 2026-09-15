@@ -73,15 +73,23 @@ module Pdu = struct
 
     (** What a tag says, which is a priority, a bit nobody sets any more, the
      * tag itself and what is under it. *)
+    module Kinds =
+    struct
+        open SimTypes
+        let prio = IRange (0, 7)
+        let cfi = Bool
+        let id = IRange (0, 0xfff)
+        let proto = Widget.one_of ~range:(0, 0xffff) Arp.HwProto.choices
+        let payload = BRange (0, 0xffff_ffff)
+    end
+
     let kind_of (_ : t) =
-        let open SimTypes in
         Widget.record
-            [| "priority", IRange (0, 7) ;
-               "canonical format", Bool ;
-               "vlan", IRange (0, 0xfff) ;
-               "protocol",
-               Widget.one_of ~range:(0, 0xffff) Arp.HwProto.choices ;
-               "payload", BRange (0, 0xffff_ffff) |]
+            [| "priority", Kinds.prio ;
+               "canonical format", Kinds.cfi ;
+               "vlan", Kinds.id ;
+               "protocol", Kinds.proto ;
+               "payload", Kinds.payload |]
 
     let to_json (t : t) =
         `Assoc [ "priority", `Int t.prio ;
@@ -89,6 +97,27 @@ module Pdu = struct
                  "vlan", `Int t.id ;
                  "protocol", `Int (t.proto :> int) ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    let of_synth js ?upper ?prev gen_values =
+        ignore prev ;
+        let open Generator in
+        { prio = int_of_field "priority" gen_values Kinds.prio identity js ;
+          cfi = of_field "canonical format" gen_values Kinds.cfi Widget.to_bool js ;
+          id = int_of_field "vlan" gen_values Kinds.id identity js ;
+          proto = int_of_field "protocol" gen_values
+                      ?auto:(from_upper upper Arp.HwProto.of_layer)
+                      Kinds.proto Arp.HwProto.o js ;
+          payload =
+              Payload.o (payload_of_field ?upper gen_values Kinds.payload js) }
+
+    (*$Q of_synth
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+     *)
 
     (*$Q kind_of
       (Q.make (fun _ -> random ())) (fun t -> \

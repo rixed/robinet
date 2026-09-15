@@ -246,13 +246,20 @@ module Pdu = struct
     (** What a frame's header says, which is little enough: where from, where
      * to, and what is inside. No preamble and no trailing checksum -- neither
      * is in [t], both being the wire's business and not the frame's. *)
+    module Kinds =
+    struct
+        let src = Widget.hint "a4:ba:db:e6:15:fa" Mac
+        let dst = src
+        let proto = Widget.one_of ~range:(0, 0xffff) Proto.choices
+        let payload = BRange (0, 0xffff_ffff)
+    end
+
     let kind_of (_ : t) =
-        let open SimTypes in
         Widget.record
-            [| "source", Widget.hint "a4:ba:db:e6:15:fa" Mac ;
-               "destination", Widget.hint "a4:ba:db:e6:15:fa" Mac ;
-               "protocol", Widget.one_of ~range:(0, 0xffff) Proto.choices ;
-               "payload", BRange (0, 0xffff_ffff) |]
+            [| "source", Kinds.src ;
+               "destination", Kinds.dst ;
+               "protocol", Kinds.proto ;
+               "payload", Kinds.payload |]
 
     let to_json (t : t) =
         (* The plain hexadecimal and not [Addr.to_string], which may name the
@@ -262,6 +269,28 @@ module Pdu = struct
                  "destination", `String (Addr.to_hexstring t.dst) ;
                  "protocol", `Int (t.proto :> int) ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    let of_synth js ?upper ?prev gen_values =
+        ignore prev ;
+        let open Generator in
+        let addr fname kind =
+            of_field fname gen_values kind (Addr.of_string % Widget.to_string) js in
+        { src = addr "source" Kinds.src ;
+          dst = addr "destination" Kinds.dst ;
+          proto = int_of_field "protocol" gen_values
+                      ?auto:(from_upper upper Proto.of_layer)
+                      Kinds.proto Proto.o js ;
+          payload =
+              Payload.o (payload_of_field ?upper gen_values Kinds.payload js) }
+
+    (*$Q of_synth
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+     *)
 
     (*$Q kind_of
       (Q.make (fun _ -> random ())) (fun t -> \

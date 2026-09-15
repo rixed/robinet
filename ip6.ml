@@ -104,17 +104,28 @@ module Pdu = struct
      *
      * The traffic class is split in two here, unlike IPv4's type of service,
      * because [t] holds it split. *)
+    module Kinds =
+    struct
+        open SimTypes
+        let diff_serv = IRange (0, 0x3f)
+        let ecn = IRange (0, 3)
+        let flow_label = IRange (0, 0xfffff)
+        let proto = Widget.one_of ~range:(0, 0xff) Ip.Proto.choices
+        let ttl = IRange (0, 0xff)
+        let addr = Widget.hint "2001:db8::1" Ipv6
+        let payload = BRange (0, 0xffff)
+    end
+
     let kind_of (_ : t) =
-        let open SimTypes in
         Widget.record
-            [| "differentiated services", IRange (0, 0x3f) ;
-               "explicit congestion notification", IRange (0, 3) ;
-               "flow label", IRange (0, 0xfffff) ;
-               "next header", Widget.one_of ~range:(0, 0xff) Ip.Proto.choices ;
-               "hop limit", IRange (0, 0xff) ;
-               "source", Widget.hint "2001:db8::1" Ipv6 ;
-               "destination", Widget.hint "2001:db8::1" Ipv6 ;
-               "payload", BRange (0, 0xffff) |]
+            [| "differentiated services", Kinds.diff_serv ;
+               "explicit congestion notification", Kinds.ecn ;
+               "flow label", Kinds.flow_label ;
+               "next header", Kinds.proto ;
+               "hop limit", Kinds.ttl ;
+               "source", Kinds.addr ;
+               "destination", Kinds.addr ;
+               "payload", Kinds.payload |]
 
     let to_json (t : t) =
         `Assoc [ "differentiated services", `Int t.diff_serv ;
@@ -125,6 +136,34 @@ module Pdu = struct
                  "source", Ip.Addr.to_json t.src ;
                  "destination", Ip.Addr.to_json t.dst ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    let of_synth js ?upper ?prev gen_values =
+        ignore prev ;
+        let open Generator in
+        let int fname ?auto kind f =
+            int_of_field fname gen_values ?auto kind f js
+        and addr fname =
+            of_field fname gen_values Kinds.addr
+                     (Ip.Addr.of_dotted_string % Widget.to_string) js in
+        { diff_serv = int "differentiated services" Kinds.diff_serv identity ;
+          ecn = int "explicit congestion notification" Kinds.ecn identity ;
+          flow_label = int "flow label" Kinds.flow_label identity ;
+          proto = int "next header" ?auto:(from_upper upper Ip.Proto.of_layer)
+                      Kinds.proto Ip.Proto.o ;
+          ttl = int "hop limit" Kinds.ttl identity ;
+          src = addr "source" ;
+          dst = addr "destination" ;
+          payload =
+              Payload.o (payload_of_field ?upper gen_values Kinds.payload js) }
+
+    (*$Q of_synth
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+     *)
 
     (*$Q kind_of
       (Q.make (fun _ -> random ())) (fun t -> \

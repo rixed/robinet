@@ -307,45 +307,52 @@ module Pdu = struct
      *
      * No checksum: [pack] computes it over the whole message, so [t] does not
      * carry one. *)
-    let kind_of (_ : t) =
-        let open SimTypes in
-        Widget.variant
-            [| (* Echo, timestamp, information: the types [unpack] reads an
-                  identifier and a sequence number for, and no others -- which
-                  is why this one choice is closed. *)
-               "identifiers",
-               Widget.record
-                   [| "type",
-                      Widget.one_of
-                          (MsgType.types [| 0 ; 8 ; 13 ; 14 ; 15 ; 16 |]) ;
-                      "code", IRange (0, 0xff) ;
-                      "id", IRange (0, 0xffff) ;
-                      "sequence", IRange (0, 0xffff) ;
-                      "payload", BRange (0, 0xffff) |] ;
-               "redirect",
-               Widget.record
-                   [| "code",
-                      Widget.one_of ~range:(0, 0xff)
-                          (MsgType.codes 5 [| 0 ; 1 ; 2 ; 3 |]) ;
-                      "gateway", Widget.hint "192.168.0.1" Ipv4 ;
-                      "payload", BRange (0, 0xffff) |] ;
-               "unreachable",
-               Widget.record
-                   [| "code",
-                      Widget.one_of ~range:(0, 0xff)
-                          (MsgType.codes 3 (Array.init 16 identity)) ;
-                      "next hop MTU", IRange (0, 0xffff) ;
-                      "payload", BRange (0, 0xffff) |] ;
-               (* Everything else, which quotes the datagram that caused it
-                  and points into it. *)
-               "quoted header",
-               Widget.record
-                   [| "type",
-                      Widget.one_of ~range:(0, 0xff) MsgType.type_choices ;
-                      "code", IRange (0, 0xff) ;
-                      "pointer", IRange (0, 0xff) ;
-                      "MTU", IRange (0, 0xffff) ;
-                      "payload", BRange (0, 0xffff) |] |]
+    module Kinds =
+    struct
+        open SimTypes
+        (* Echo, timestamp, information: the types [unpack] reads an identifier
+           and a sequence number for, and no others -- which is why this one
+           choice is closed. *)
+        let ids_type =
+            Widget.one_of (MsgType.types [| 0 ; 8 ; 13 ; 14 ; 15 ; 16 |])
+        let redirect_code =
+            Widget.one_of ~range:(0, 0xff) (MsgType.codes 5 [| 0 ; 1 ; 2 ; 3 |])
+        let unreachable_code =
+            Widget.one_of ~range:(0, 0xff)
+                (MsgType.codes 3 (Array.init 16 identity))
+        let header_type = Widget.one_of ~range:(0, 0xff) MsgType.type_choices
+        let code = IRange (0, 0xff)
+        let id = IRange (0, 0xffff)
+        let seq = IRange (0, 0xffff)
+        let pointer = IRange (0, 0xff)
+        let mtu = IRange (0, 0xffff)
+        let gateway = Widget.hint "192.168.0.1" Ipv4
+        let payload = BRange (0, 0xffff)
+
+        let message =
+            Widget.variant
+                [| "identifiers",
+                   Widget.record
+                       [| "type", ids_type ; "code", code ; "id", id ;
+                          "sequence", seq ; "payload", payload |] ;
+                   "redirect",
+                   Widget.record
+                       [| "code", redirect_code ; "gateway", gateway ;
+                          "payload", payload |] ;
+                   "unreachable",
+                   Widget.record
+                       [| "code", unreachable_code ; "next hop MTU", mtu ;
+                          "payload", payload |] ;
+                   (* Everything else, which quotes the datagram that caused it
+                      and points into it. *)
+                   "quoted header",
+                   Widget.record
+                       [| "type", header_type ; "code", code ;
+                          "pointer", pointer ; "MTU", mtu ;
+                          "payload", payload |] |]
+    end
+
+    let kind_of (_ : t) = Kinds.message
 
     let to_json (t : t) =
         let typ = MsgType.type_of t.msg_type
@@ -371,6 +378,49 @@ module Pdu = struct
                 [ "type", `Int typ ; "code", `Int cod ;
                   "pointer", `Int ptr ; "MTU", `Int mtu ;
                   "payload", bytes pld ]
+
+    let of_synth js ?upper ?prev gen_values =
+        ignore prev ;
+        let open Generator in
+        let int fname kind js = int_of_field fname gen_values kind identity js
+        and payload js =
+            Payload.o (payload_of_field ?upper gen_values Kinds.payload js) in
+        expand gen_values Kinds.message js |>
+        Widget.to_case (fun case js ->
+            match case with
+            | "identifiers" ->
+                { msg_type = MsgType.o (int "type" Kinds.ids_type js,
+                                        int "code" Kinds.code js) ;
+                  payload = Ids (int "id" Kinds.id js,
+                                 int "sequence" Kinds.seq js, payload js) }
+            | "redirect" ->
+                { msg_type = MsgType.o (5, int "code" Kinds.redirect_code js) ;
+                  payload =
+                      Redirect (of_field "gateway" gen_values Kinds.gateway
+                                    (Ip.Addr.of_dotted_string % Widget.to_string)
+                                    js,
+                                payload js) }
+            | "unreachable" ->
+                { msg_type = MsgType.o (3, int "code" Kinds.unreachable_code js) ;
+                  payload = DestUnreachable (int "next hop MTU" Kinds.mtu js,
+                                             payload js) }
+            | "quoted header" ->
+                { msg_type = MsgType.o (int "type" Kinds.header_type js,
+                                        int "code" Kinds.code js) ;
+                  payload = Header { ptr = int "pointer" Kinds.pointer js ;
+                                     mtu = int "MTU" Kinds.mtu js ;
+                                     pld = payload js } }
+            | case ->
+                Widget.bad_value "no ICMP message is %S" case)
+
+    (*$Q of_synth
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) \
+        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+     *)
 
     (*$Q kind_of
       (Q.make (fun _ -> random ())) (fun t -> \

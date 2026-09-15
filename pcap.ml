@@ -343,20 +343,29 @@ struct
      * otherwise now changes nothing about it. It is described all the same,
      * because it is a layer like any other and a reader looking at a replayed
      * frame wants to know when it was caught and how much of it was kept. *)
+    module Kinds =
+    struct
+        open SimTypes
+        let source = String
+        (* Of the world outside, which is what a pcap file dates its packets by
+           -- not an instant of the simulation, so not a [Time]: written out as
+           it reads. *)
+        let captured_at = String
+        let len = Int
+        (* A whole 32 bits of it, as the file header holds it (see
+           [Pcap.Dlt]), and read unsigned as that field is. *)
+        let dlt = Widget.one_of ~range:(0, 0xffff_ffff) Dlt.choices
+        let payload = BRange (0, 0xffff_ffff)
+    end
+
     let kind_of (_ : t) =
-        let open SimTypes in
         Widget.record
-            [| "source", String ;
-               (* Of the world outside, which is what a pcap file dates its
-                  packets by -- not an instant of the simulation, so not a
-                  [Time]: written out as it reads. *)
-               "captured at", String ;
-               "caplen", Int ;
-               "wirelen", Int ;
-               (* A whole 32 bits of it, as the file header holds it (see
-                  [Pcap.Dlt]), and read unsigned as that field is. *)
-               "dlt", Widget.one_of ~range:(0, 0xffff_ffff) Dlt.choices ;
-               "payload", BRange (0, 0xffff_ffff) |]
+            [| "source", Kinds.source ;
+               "captured at", Kinds.captured_at ;
+               "caplen", Kinds.len ;
+               "wirelen", Kinds.len ;
+               "dlt", Kinds.dlt ;
+               "payload", Kinds.payload |]
 
     let to_json (t : t) =
         `Assoc [ "source", `String t.source_name ;
@@ -365,6 +374,52 @@ struct
                  "wirelen", `Int t.wirelen ;
                  "dlt", `Int (uint32 (t.dlt :> int32)) ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
+
+    let of_synth js ?upper ?prev gen_values =
+        ignore prev ;
+        let open Generator in
+        let payload = payload_of_field ?upper gen_values Kinds.payload js in
+        let len fname =
+            int_of_field fname gen_values ~auto:(fun () -> bytelength payload)
+                         Kinds.len identity js in
+        { source_name =
+              of_field "source" gen_values Kinds.source Widget.to_string js ;
+          (* Automatic and nothing else: what [to_json] writes of an instant
+           * cannot be read back, and a synthesized packet is captured when it
+           * is made. *)
+          ts = Widget.to_field "captured at" (function
+                   | `Null -> Clock.Wall.now ()
+                   | v -> Widget.bad_value "can only be automatic, not %s"
+                              (Yojson.Basic.to_string v)) js ;
+          caplen = len "caplen" ;
+          wirelen = len "wirelen" ;
+          (* The link type the layer above says when it does, Ethernet
+           * otherwise: *)
+          dlt = int_of_field "dlt" gen_values
+                    ~auto:(fun () ->
+                        match upper with
+                        | Some ("Sll", _) -> Dlt.linux_cooked
+                        | _ -> Dlt.en10mb)
+                    Kinds.dlt (Dlt.o % Int32.of_int) js ;
+          payload = Payload.o payload }
+
+    (*$Q of_synth
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) (fun _ -> \
+          make "f" ~dlt:(Dlt.random ()) (Clock.Wall.o (Random.float 1e9)) \
+               (randbs (Random.int 40)))) (fun t -> \
+        let auto_ts = function \
+          | `Assoc l -> \
+              `Assoc (List.map (function \
+                  | "captured at", _ -> "captured at", `Null \
+                  | f -> f) l) \
+          | js -> js in \
+        let synth = Generator.wrap (kind_of t) Generator.const (to_json t) in \
+        auto_ts (to_json (of_synth (auto_ts synth) [||])) = auto_ts (to_json t))
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) (fun _ -> \
+          make "f" ~dlt:(Dlt.random ()) (Clock.Wall.o (Random.float 1e9)) \
+               (randbs (Random.int 40)))) \
+        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+     *)
 
     (*$Q kind_of
       (Q.make (fun _ -> \
