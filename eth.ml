@@ -249,10 +249,10 @@ module Pdu = struct
     let kind_of (_ : t) =
         let open SimTypes in
         Widget.record
-            [| "source", Widget.hint "a4:ba:db:e6:15:fa" String ;
-               "destination", Widget.hint "a4:ba:db:e6:15:fa" String ;
+            [| "source", Widget.hint "a4:ba:db:e6:15:fa" Mac ;
+               "destination", Widget.hint "a4:ba:db:e6:15:fa" Mac ;
                "protocol", Widget.one_of ~range:(0, 0xffff) Proto.choices ;
-               "payload", Bytes |]
+               "payload", BRange (0, 0xffff_ffff) |]
 
     let to_json (t : t) =
         (* The plain hexadecimal and not [Addr.to_string], which may name the

@@ -528,7 +528,7 @@ struct
 
     let kind_of (_ : t) =
         let open SimTypes in
-        let address = Widget.hint "192.168.0.1" String in
+        let address = Widget.hint "192.168.0.1" Ipv4 in
         Widget.record
             [| "operation",
                Widget.one_of [| 1, "BOOTREQUEST" ; 2, "BOOTREPLY" |] ;
@@ -543,7 +543,7 @@ struct
                "your address", address ;
                "server address", address ;
                "relay address", address ;
-               "client hardware address", Bytes ;
+               "client hardware address", BRange (0, 16) ;
                "server name", String ;
                "boot file", String ;
                "message type",
@@ -563,14 +563,14 @@ struct
                "message", Widget.optional Text ;
                "max message size", Widget.optional (IRange (0, 0xffff)) ;
                "vendor class", Widget.optional String ;
-               "client identifier", Widget.optional Bytes ;
-               "request list", Widget.optional Bytes ;
+               "client identifier", Widget.optional (BRange (0, 255)) ;
+               "request list", Widget.optional (BRange (0, 255)) ;
                "other options",
                Widget.list
                    (Widget.row
                        [| "code",
                           Widget.one_of ~range:(0, 0xff) Option.choices ;
-                          "value", Bytes |]) |]
+                          "value", BRange (0, 255) |]) |]
 
     let to_json (t : t) =
         let bytes s = Widget.json_of_bytes (bitstring_of_string s) in

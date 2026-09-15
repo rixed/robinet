@@ -287,7 +287,7 @@ struct
                "type", qtype ;
                "class", qclass ;
                "TTL", IRange (0, 0xffff_ffff) ;
-               "data", Bytes |]
+               "data", BRange (0, 0xffff) |]
 
     (** What a message says. No payload: DNS is where a packet ends.
      *

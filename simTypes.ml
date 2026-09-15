@@ -332,15 +332,25 @@ and kind =
      * the interface shows one on a clock and the other as "38min 25s". *)
     | Duration
     | Packet
-    (* A run of octets with nothing said about what is in them, read as a
-     * hexstring and never edited: what a payload is, and what the options of
-     * an IP header are until somebody writes the kind that describes them.
+    (* A run of octets with nothing said about what is in them, as a
+     * hexstring: what a payload is, and what the options of an IP header are
+     * until somebody writes the kind that describes them.
      *
-     * Read only because there is nothing here to edit. The bytes of a payload
+     * The interface shows the two ends of the run and offers the whole of it
+     * to be read, rather than an input: the bytes of a payload that was sent
      * are whatever the layers above it wrote, and the way to change them is to
-     * change those; the interface therefore shows the two ends of the run and
-     * offers the whole of it to be read, rather than an input. *)
+     * change those. *)
     | Bytes
+    (* The same, of a length in bytes known to lie within those bounds: what a
+     * header says of how long the run may be, and so what a random one must
+     * obey. *)
+    | BRange of int * int
+    (* Addresses, strings on the wire, written as they are typed --
+     * "192.168.0.1", "2001:db8::1", "a4:ba:db:e6:15:fa" -- and never as a
+     * resolver or a vendor database would name them. *)
+    | Ipv4
+    | Ipv6
+    | Mac
     (* A family of counts or measures, keyed by the parameters of the events
      * they come from: it reads as a small table, and the only thing a write
      * does is reset it. Which sort of metric it is comes with the value, which

@@ -212,6 +212,13 @@ and json_of_kind = function
        the rest, since a payload is longer than a cell and is read rather than
        edited. *)
     | Bytes -> `Assoc [ "type", `String "bytes" ]
+    (* The same octets, drawn the same way, with the bounds of their length. *)
+    | BRange (mi, ma) ->
+        `Assoc [ "type", `String "bytes" ; "min", `Int mi ; "max", `Int ma ]
+    (* Typed as a string is; the type says which strings are addresses. *)
+    | Ipv4 -> `Assoc [ "type", `String "ipv4" ]
+    | Ipv6 -> `Assoc [ "type", `String "ipv6" ]
+    | Mac -> `Assoc [ "type", `String "mac" ]
     (* Counter, gauge or timed comes with the value: the metric says what
      * it is. *)
     | Metric ->

@@ -218,10 +218,10 @@ module Pdu = struct
         let hw_type = one_of ~range:(0, 0xffff) HwType.choices
         let proto_type = one_of ~range:(0, 0xffff) HwProto.choices
         let operation = one_of ~range:(0, 0xffff) Op.choices
-        let sender_hw = Bytes
-        let sender_proto = Bytes
-        let target_hw = Bytes
-        let target_proto = Bytes
+        let sender_hw = BRange (0, 255)
+        let sender_proto = BRange (0, 255)
+        let target_hw = BRange (0, 255)
+        let target_proto = BRange (0, 255)
     end
 
     let kind_of (_ : t) =

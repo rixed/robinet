@@ -112,9 +112,9 @@ module Pdu = struct
                "flow label", IRange (0, 0xfffff) ;
                "next header", Widget.one_of ~range:(0, 0xff) Ip.Proto.choices ;
                "hop limit", IRange (0, 0xff) ;
-               "source", Widget.hint "2001:db8::1" String ;
-               "destination", Widget.hint "2001:db8::1" String ;
-               "payload", Bytes |]
+               "source", Widget.hint "2001:db8::1" Ipv6 ;
+               "destination", Widget.hint "2001:db8::1" Ipv6 ;
+               "payload", BRange (0, 0xffff) |]
 
     let to_json (t : t) =
         `Assoc [ "differentiated services", `Int t.diff_serv ;

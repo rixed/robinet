@@ -81,7 +81,7 @@ module Pdu = struct
                "vlan", IRange (0, 0xfff) ;
                "protocol",
                Widget.one_of ~range:(0, 0xffff) Arp.HwProto.choices ;
-               "payload", Bytes |]
+               "payload", BRange (0, 0xffff_ffff) |]
 
     let to_json (t : t) =
         `Assoc [ "priority", `Int t.prio ;

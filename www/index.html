@@ -790,7 +790,7 @@
                                                          reader should not have to remember how it
                                                          was spelt. -->
                                                     <template x-if="!multiline(f) &&
-                                                                    (base(f).type === 'string' ||
+                                                                    (base(f).type === 'string' || ['ipv4', 'ipv6', 'mac'].includes(base(f).type) ||
                                                                      base(f).type === 'text' ||
                                                                      base(f).type === 'filename')">
                                                         <input type="text" :disabled="!online"
@@ -1115,7 +1115,7 @@
                                                      that is not, and a datalist is the input that
                                                      suggests without insisting. -->
                                                 <template x-if="!p.read_only && !multiline(p) &&
-                                                                (base(p).type === 'string' ||
+                                                                (base(p).type === 'string' || ['ipv4', 'ipv6', 'mac'].includes(base(p).type) ||
                                                                  base(p).type === 'text' ||
                                                                  base(p).type === 'filename')">
                                                     <input type="text" :disabled="!online" :class="{ unset: !set(p) }"

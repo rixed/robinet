@@ -79,7 +79,7 @@ struct
                "destination port", IRange (0, 0xffff) ;
                "length", IRange (0, 0xffff) ;
                "checksum", IRange (0, 0xffff) ;
-               "payload", Bytes |]
+               "payload", BRange (0, 0xffff - 8) |]
 
     let to_json (t : t) =
         `Assoc [ "source port", `Int (t.src_port :> int) ;

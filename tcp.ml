@@ -169,8 +169,8 @@ struct
                "flags", Set flag_choices ;
                "window size", IRange (0, 0xffff) ;
                "urgent pointer", IRange (0, 0xffff) ;
-               "options", Bytes ;
-               "payload", Bytes |]
+               "options", BRange (0, 40) ;
+               "payload", BRange (0, 0xffff) |]
 
     let to_json (t : t) =
         let raised =

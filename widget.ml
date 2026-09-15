@@ -66,6 +66,10 @@ let rec kind_name = function
     | Duration -> "a length of time"
     | Packet -> "a packet"
     | Bytes -> "some bytes"
+    | BRange (mi, ma) -> Printf.sprintf "%d to %d bytes" mi ma
+    | Ipv4 -> "an IPv4 address"
+    | Ipv6 -> "an IPv6 address"
+    | Mac -> "a MAC address"
     | Metric -> "a metric"
     | Optional k -> "an optional value ("^ kind_name k ^")"
     | List k -> "a list of "^ kind_name k
@@ -165,7 +169,7 @@ let one_of ?range choices =
  * the value it may hold: [optional (hint "min-max" String)]. *)
 let hint h = function
     | (Optional _ | Metric | List _ | Row _ | Record _ | Variant _ | Hint _
-      | Set _ | Bytes) as k ->
+      | Set _ | Bytes | BRange _) as k ->
         invalid_arg ("Widget.hint: nothing to write an example in for "^
                      kind_name k)
     | k -> Hint (h, k)
@@ -620,7 +624,41 @@ let rec check_value ?(name="value") k v =
                     (Array.length cases)
             | Some (_, k) -> check_value ~name:(name ^"."^ case) k v
         ) v
+    | (Ipv4 | Ipv6), `String s ->
+        let family = if k = Ipv4 then Unix.PF_INET else Unix.PF_INET6 in
+        (match Unix.inet_addr_of_string s with
+        | exception Failure _ -> wrong ()
+        | a ->
+            if Unix.domain_of_sockaddr (Unix.ADDR_INET (a, 0)) <> family then
+                wrong ())
+    | Mac, `String s ->
+        let is_hex c =
+            (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+            (c >= 'A' && c <= 'F') in
+        let is_byte p =
+            let n = String.length p in
+            n >= 1 && n <= 2 && is_hex p.[0] && is_hex p.[n - 1] in
+        (match String.split_on_char ':' s with
+        | [ _ ; _ ; _ ; _ ; _ ; _ ] as bytes when List.for_all is_byte bytes -> ()
+        | _ -> wrong ())
+    | BRange (mi, ma), `String s ->
+        let len = Bitstring.bitstring_length (bitstring_of_hexstring s) / 8 in
+        if len < mi || len > ma then
+            bad_value "%s is %d bytes long, outside %d..%d" name len mi ma
     | _ -> wrong ()
+
+(*$T check_value
+  check_value Ipv4 (`String "192.168.0.1") = ()
+  check_value Ipv6 (`String "2001:db8::1") = ()
+  check_value Mac (`String "a4:BA:db:e6:15:fa") = ()
+  check_value (BRange (2, 3)) (`String "de ad") = ()
+  (try check_value Ipv4 (`String "2001:db8::1") ; false with Bad_value _ -> true)
+  (try check_value Ipv4 (`String "www.example.com") ; false with Bad_value _ -> true)
+  (try check_value Ipv6 (`String "192.168.0.1") ; false with Bad_value _ -> true)
+  (try check_value Mac (`String "a4:ba:db:e6:15") ; false with Bad_value _ -> true)
+  (try check_value Mac (`String "a4:ba:db:e6:15:fa0") ; false with Bad_value _ -> true)
+  (try check_value (BRange (2, 3)) (`String "de") ; false with Bad_value _ -> true)
+ *)
 
 (*$T check_value
   check_value Int (`Int 1) = ()

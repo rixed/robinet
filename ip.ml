@@ -853,10 +853,10 @@ module Pdu = struct
                "fragment offset", IRange (0, 0x1fff) ;
                "time to live", IRange (0, 0xff) ;
                "protocol", Widget.one_of ~range:(0, 0xff) Proto.choices ;
-               "source", Widget.hint "192.168.0.1" String ;
-               "destination", Widget.hint "192.168.0.1" String ;
-               "options", Bytes ;
-               "payload", Bytes |]
+               "source", Widget.hint "192.168.0.1" Ipv4 ;
+               "destination", Widget.hint "192.168.0.1" Ipv4 ;
+               "options", BRange (0, 40) ;
+               "payload", BRange (0, 0xffff - 20) |]
 
     let to_json (t : t) =
         `Assoc [ "type of service", `Int (t.tos :> int) ;

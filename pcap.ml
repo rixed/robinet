@@ -356,7 +356,7 @@ struct
                (* A whole 32 bits of it, as the file header holds it (see
                   [Pcap.Dlt]), and read unsigned as that field is. *)
                "dlt", Widget.one_of ~range:(0, 0xffff_ffff) Dlt.choices ;
-               "payload", Bytes |]
+               "payload", BRange (0, 0xffff_ffff) |]
 
     let to_json (t : t) =
         `Assoc [ "source", `String t.source_name ;

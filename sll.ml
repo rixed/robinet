@@ -110,10 +110,10 @@ module Pdu = struct
             [| "direction", Widget.one_of pkt_type_choices ;
                "address type",
                Widget.one_of ~range:(0, 0xffff) Arp.HwType.choices ;
-               "address", Bytes ;
+               "address", BRange (0, 8) ;
                "protocol",
                Widget.one_of ~range:(0, 0xffff) Arp.HwProto.choices ;
-               "payload", Bytes |]
+               "payload", BRange (0, 0xffff_ffff) |]
 
     let to_json (t : t) =
         `Assoc [ "direction", `Int (int_of_pkt_type t.pkt_type) ;

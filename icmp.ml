@@ -321,21 +321,21 @@ module Pdu = struct
                       "code", IRange (0, 0xff) ;
                       "id", IRange (0, 0xffff) ;
                       "sequence", IRange (0, 0xffff) ;
-                      "payload", Bytes |] ;
+                      "payload", BRange (0, 0xffff) |] ;
                "redirect",
                Widget.record
                    [| "code",
                       Widget.one_of ~range:(0, 0xff)
                           (MsgType.codes 5 [| 0 ; 1 ; 2 ; 3 |]) ;
-                      "gateway", Widget.hint "192.168.0.1" String ;
-                      "payload", Bytes |] ;
+                      "gateway", Widget.hint "192.168.0.1" Ipv4 ;
+                      "payload", BRange (0, 0xffff) |] ;
                "unreachable",
                Widget.record
                    [| "code",
                       Widget.one_of ~range:(0, 0xff)
                           (MsgType.codes 3 (Array.init 16 identity)) ;
                       "next hop MTU", IRange (0, 0xffff) ;
-                      "payload", Bytes |] ;
+                      "payload", BRange (0, 0xffff) |] ;
                (* Everything else, which quotes the datagram that caused it
                   and points into it. *)
                "quoted header",
@@ -345,7 +345,7 @@ module Pdu = struct
                       "code", IRange (0, 0xff) ;
                       "pointer", IRange (0, 0xff) ;
                       "MTU", IRange (0, 0xffff) ;
-                      "payload", Bytes |] |]
+                      "payload", BRange (0, 0xffff) |] |]
 
     let to_json (t : t) =
         let typ = MsgType.type_of t.msg_type
