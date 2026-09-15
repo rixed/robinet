@@ -30,7 +30,7 @@ let debug = false
 
 (** ARP Operations Codes *)
 module Op = struct
-    include Private.Make (struct
+    module Inner = struct
         type t = int
         let to_string = function
             |  1 -> "request"
@@ -46,7 +46,8 @@ module Op = struct
             |  x -> string_of_int x
         let is_valid t = t >= 1 && t < 0x10000
         let repl_tag = "code"
-    end)
+    end
+    include Private.Make (Inner)
 
     let request       = o 1
     let reply         = o 2
@@ -59,6 +60,10 @@ module Op = struct
     let inarp_reply   = o 9
     let arp_nack      = o 10
     let num_ops       = 10
+
+    let rec random () =
+        let p = Random.int num_ops + 1 in
+        if Inner.is_valid p then o p else random ()
 
     (** The operations this module has a name for, as the choices of a kind
      * (see [Widget.one_of]), labelled by [to_string]. *)
@@ -159,6 +164,7 @@ module Pdu = struct
         and sender_hw = randbs 6
         and sender_proto = randbs 4
         and target_proto = randbs 4 in
+        (* TODO: other ARP types, esp Nack *)
         if randb () then
             make_request hw_type proto_type sender_hw sender_proto target_proto
         else
@@ -205,18 +211,28 @@ module Pdu = struct
      * says, and the module that can read one is above this one. Their lengths
      * are not here either -- [pack] writes them from the addresses
      * themselves. *)
+    module Kinds =
+    struct
+        open SimTypes
+        open Widget
+        let hw_type = one_of ~range:(0, 0xffff) HwType.choices
+        let proto_type = one_of ~range:(0, 0xffff) HwProto.choices
+        let operation = one_of ~range:(0, 0xffff) Op.choices
+        let sender_hw = Bytes
+        let sender_proto = Bytes
+        let target_hw = Bytes
+        let target_proto = Bytes
+    end
+
     let kind_of (_ : t) =
-        let open SimTypes in
         Widget.record
-            [| "hardware type",
-               Widget.one_of ~range:(0, 0xffff) HwType.choices ;
-               "protocol type",
-               Widget.one_of ~range:(0, 0xffff) HwProto.choices ;
-               "operation", Widget.one_of ~range:(0, 0xffff) Op.choices ;
-               "sender hardware address", Bytes ;
-               "sender protocol address", Bytes ;
-               "target hardware address", Bytes ;
-               "target protocol address", Bytes |]
+            [| "hardware type", Kinds.hw_type ;
+               "protocol type", Kinds.proto_type ;
+               "operation", Kinds.operation ;
+               "sender hardware address", Kinds.sender_hw ;
+               "sender protocol address", Kinds.sender_proto ;
+               "target hardware address", Kinds.target_hw ;
+               "target protocol address", Kinds.target_proto |]
 
     let to_json (t : t) =
         `Assoc [ "hardware type", `Int (t.hw_type :> int) ;
@@ -236,5 +252,42 @@ module Pdu = struct
         try Widget.check_value (kind_of t) (to_json t) ; true \
         with _ -> false)
      *)
+
+    let of_synth js ?upper ?prev gen_values =
+        (* No auto variables in here: *)
+        ignore upper ; ignore prev ;
+        let open Generator in
+        {
+            hw_type = int_of_field "hardware type" ~auto:HwType.random gen_values
+                                   Kinds.hw_type HwType.o js ;
+            proto_type = int_of_field "protocol type" ~auto:HwProto.random
+                                      gen_values Kinds.proto_type HwProto.o js ;
+            operation = int_of_field "operation" ~auto:Op.random gen_values
+                                     Kinds.operation Op.o js ;
+            sender_hw = bs_of_field "sender hardware address" gen_values
+                                    Kinds.sender_hw js ;
+            sender_proto = bs_of_field "sender protocol address" gen_values
+                                       Kinds.sender_proto js ;
+            target_hw = bs_of_field "target hardware address" gen_values
+                                    Kinds.target_hw js ;
+            target_proto = bs_of_field "target protocol address" gen_values
+                                       Kinds.target_proto js ;
+        }
+
+    (*$Q of_synth
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) (fun t -> \
+        of_synth (Generator.wrap (fun js -> `Assoc [ "const", js ]) (to_json t)) [||] = t)
+    *)
+
+    (*$Q of_synth
+      (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
+              (fun _ -> random ())) (fun t -> \
+        let js = to_json t |> Generator.wrap (fun _ -> `Null) in \
+        match of_synth js [||] with \
+        | exception _ -> false \
+        | t -> (try Widget.check_value (kind_of t) (to_json t) ; true with _ -> false))
+    *)
+
     (*$>*)
 end

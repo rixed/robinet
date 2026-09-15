@@ -25,23 +25,23 @@ all:
 .PHONY: all dep clean clean-spec install uninstall reinstall doc check clear
 
 ifdef PKG_NAME
-SOURCES_CMO = $(SOURCES:.ml=.cmo)
-SOURCES_CMX = $(SOURCES:.ml=.cmx)
-SOURCES_CMI = $(SOURCES:.ml=.cmi)
+LIB_SOURCES_CMO = $(LIB_SOURCES:.ml=.cmo)
+LIB_SOURCES_CMX = $(LIB_SOURCES:.ml=.cmx)
+LIB_SOURCES_CMI = $(LIB_SOURCES:.ml=.cmi)
 ARCHIVE  = $(PKG_NAME).cma
 XARCHIVE = $(ARCHIVE:.cma=.cmxa)
 
-$(ARCHIVE): $(SOURCES_CMO) $(CLIB)
-	$(OCAMLC) $(CLIB) -package "$(REQUIRES)" -custom -linkpkg $(OCAMLFLAGS) $(SOURCES_CMO) $(LIBS) -a -o $@
+$(ARCHIVE): $(LIB_SOURCES_CMO) $(CLIB)
+	$(OCAMLC) $(CLIB) -package "$(REQUIRES)" -custom -linkpkg $(OCAMLFLAGS) $(LIB_SOURCES_CMO) $(LIBS) -a -o $@
 
 # Note: CLIB_SHORT is required for the lib to be recorded in the cmxa file
 # (ocamlopt does not record required C libs unless -cclib is used)
-$(XARCHIVE): $(SOURCES_CMX) $(CLIB)
-	$(OCAMLOPT) -cclib -l$(CLIB_SHORT) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $(SOURCES_CMX) $(LIBS) -a -o $@
+$(XARCHIVE): $(LIB_SOURCES_CMX) $(CLIB)
+	$(OCAMLOPT) -cclib -l$(CLIB_SHORT) -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $(LIB_SOURCES_CMX) $(LIBS) -a -o $@
 
 install: $(ARCHIVE)
 	if test -f "$(XARCHIVE)" ; then extra="$(XARCHIVE) $(XARCHIVE:.cmxa=.a)" ; fi ; \
-	ocamlfind install "$(PKG_NAME)" $(SOURCES_CMI) $(SOURCES_CMX) $(SOURCES_CMO) $(PKG_NAME).a $(CLIB) "$(ARCHIVE)" META $$extra
+	ocamlfind install "$(PKG_NAME)" $(LIB_SOURCES_CMI) $(LIB_SOURCES_CMX) $(LIB_SOURCES_CMO) $(PKG_NAME).a $(CLIB) "$(ARCHIVE)" META $$extra
 
 uninstall:
 	ocamlfind remove $(PKG_NAME)
@@ -72,16 +72,16 @@ endif
 all_tests.byte: all_tests.cmo $(ARCHIVE)
 	$(OCAMLC)   -o $@ -package "$(REQUIRES) qcheck" $(ARCHIVE) -linkpkg $(OCAMLFLAGS) $<
 
-all_tests.cmo: all_tests.ml $(SOURCES_CMO)
+all_tests.cmo: all_tests.ml $(LIB_SOURCES_CMO)
 	$(OCAMLC) -package "$(REQUIRES) qcheck" $(OCAMLFLAGS) -w -33 -c -impl $<
 
 all_tests.opt: all_tests.cmx $(XARCHIVE)
 	$(OCAMLOPT) -I . -o $@ -package "$(REQUIRES) qcheck" $(XARCHIVE) -linkpkg $(OCAMLOPTFLAGS) $<
 
-all_tests.cmx: all_tests.ml $(SOURCES_CMX)
+all_tests.cmx: all_tests.ml $(LIB_SOURCES_CMX)
 	$(OCAMLOPT) -package "$(REQUIRES) qcheck" $(OCAMLOPTFLAGS) -w -33 -c -impl $<
 
-all_tests.ml: $(SOURCES)
+all_tests.ml: $(LIB_SOURCES)
 	$(QTEST) --shuffle --preamble 'open Batteries;; open Bitstring;; open Tools;; open SimTypes' -o $@ extract $^
 
 check: all_tests.opt $(EXTRA_TESTS)
@@ -100,9 +100,9 @@ dep:
 	@$(MAKE) .depend
 
 .depend:
-	$(OCAMLDEP) -package "$(REQUIRES)" *.ml *.mli */*.ml > $@
+	$(OCAMLDEP) -package "$(REQUIRES)" $(SOURCES) > $@
 
-doc: $(SOURCES)
+doc: $(LIB_SOURCES)
 	@echo "Building doc in $(DOCDIR)..."
 	mkdir -p $(DOCDIR)
 	$(OCAMLDOC) -package "$(REQUIRES)" -d $(DOCDIR) $^

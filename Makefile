@@ -2,7 +2,7 @@ PKG_NAME = robinet
 
 MAKEFLAGS += -j5
 
-SOURCES  = \
+LIB_SOURCES  = \
 	distribution.ml \
 	private.ml \
 	condvar.ml \
@@ -13,6 +13,7 @@ SOURCES  = \
 	capabilities.ml \
 	simTypes.ml \
 	widget.ml \
+	generator.ml \
 	simulation.ml \
 	ordArray.ml \
 	payload.ml \
@@ -59,6 +60,29 @@ SOURCES  = \
 	wrapper.ml \
 	cli.ml
 
+EXAMPLE_SOURCES = \
+	examples/admin_demo.ml \
+	examples/arp_query.ml \
+	examples/beautify_html.ml \
+	examples/beautify_mac.ml \
+	examples/capecho.ml \
+	examples/dns_query.ml \
+	examples/http_echo_server.ml \
+	examples/http_load.ml \
+	examples/http_static_server.ml \
+	examples/load_tester.ml \
+	examples/pcap_reorder.ml \
+	examples/router_frenzy.ml \
+	examples/sock_test.ml \
+	examples/tcp_test.ml \
+	examples/test_dhcp.ml \
+	examples/test_ping.ml \
+	examples/tunnel.ml \
+	examples/wanaplay.ml
+
+TEST_SOURCES = \
+	tests/stress.ml
+
 C_SOURCES = \
 	pcap_wrap.c \
 	eth_vendors.c \
@@ -66,6 +90,8 @@ C_SOURCES = \
 	iface_wrap.c \
 	sockopt_wrap.c \
 	condvar_wrap.c
+
+SOURCES = $(LIB_SOURCES) $(EXAMPLE_SOURCES) $(TEST_SOURCES) robinet.ml
 
 CLIB_SHORT = robinetext
 CLIB = lib$(CLIB_SHORT).a

@@ -361,7 +361,6 @@ module Pdu = struct
                             u))
                 | _ ->
                     u)
-
         ) u t
 
     (** {2 A packet, in the kind language}

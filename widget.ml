@@ -22,6 +22,7 @@
  *)
 open Batteries
 open SimTypes
+open Tools
 
 type t = widget
 
@@ -394,6 +395,12 @@ let to_int_range ?(min=min_int) ?(max=max_int) v =
         bad_value "%d is not in range (%s…%s)" i (bound min) (bound max)
     else i
 
+let to_bitstring = function
+    | `String s ->
+        (try bitstring_of_hexstring s
+        with _ -> bad_value "not a bitstring: %S" s)
+    | v -> bad_value "expected a bitstring, not %s" (Yojson.Basic.to_string v)
+
 (** Read which number a value names, of [choices] or of [range] (see the [Enum]
  * kind).
  *
@@ -512,20 +519,23 @@ let to_case f = function
    with Bad_value _ -> true)
  *)
 
+(** Retrieve the JSON value of field [name] of record [t]. *)
+let json_of_field name = function
+    | `Assoc l as v ->
+        (try List.assoc name l
+        with Not_found ->
+            bad_value "no field %S in %s" name (Yojson.Basic.to_string v))
+    | v -> bad_value "expected a record, not %s" (Yojson.Basic.to_string v)
+
 (** Read the field [name] of a record with [f]. The counterpart of a [Record]
  * kind, one field at a time, which is how a setter rebuilds its own record:
  * it knows what it wants out of it, and in what order.
  *
  * A field that is not there is refused rather than read as absent: absence is
  * [`Null], and only for a field whose kind says it may be. *)
-let to_field name f = function
-    | `Assoc l as v ->
-        (match List.assoc name l with
-        | exception Not_found ->
-            bad_value "no field %S in %s" name (Yojson.Basic.to_string v)
-        | v ->
-            (try f v with Bad_value msg -> bad_value "%s: %s" name msg))
-    | v -> bad_value "expected a record, not %s" (Yojson.Basic.to_string v)
+let to_field name f js =
+    let v = json_of_field name js in
+    try f v with Bad_value msg -> bad_value "%s: %s" name msg
 
 let to_bool = function
     | `Bool b -> b
