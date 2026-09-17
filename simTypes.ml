@@ -332,6 +332,11 @@ and kind =
      * the interface shows one on a clock and the other as "38min 25s". *)
     | Duration
     | Packet
+    (* A packet as a packet synthesizer describes it: a stack of layers whose
+     * every field is a constant, a generator or nothing at all (see
+     * {!Synth}). Shaped like the packet it describes, so what draws it is the
+     * kinds of the protocols themselves rather than anything said here. *)
+    | Synth
     (* A run of octets with nothing said about what is in them, as a
      * hexstring: what a payload is, and what the options of an IP header are
      * until somebody writes the kind that describes them.

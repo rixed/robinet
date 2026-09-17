@@ -106,6 +106,7 @@ type model =
     | TRecorder of { fname : string option ; caplen : int option ;
                      dlt : Pcap.Dlt.t option }
     | TReplayer of { fname : string option ; loop : bool }
+    | TSynth of { adapters : int ; speed : Eth.Speed.t ; independent : bool }
     | TNote of { text : string }
 
 (** A kind of device: what it is called, what it needs, and how to read what it
@@ -176,7 +177,7 @@ let rec coerce name (kind : Widget.kind) v =
     | Ipv4 | Ipv6 | Mac ->
         Widget.check_value ~name kind v ;
         v
-    | Time | Packet | Bytes | BRange _ ->
+    | Time | Packet | Bytes | BRange _ | Synth ->
         (* As for a metric below: these are what a device has seen, and a
          * device that has not been built yet has seen nothing. Bytes joins
          * them for a reason of its own -- they are read and never written,
@@ -613,6 +614,32 @@ let replayer =
           TReplayer { fname = opt args "file name" Widget.to_string ;
                       loop = bool args "loop" } }
 
+let synthesizer =
+    { name = "synthesizer" ;
+      descr = "Emit a stream of synthesized packets, as a traffic generator \
+               does." ;
+      params = [
+          (* Every adapter is driven by the same generators, so several ports
+           * of a router are saturated by one machine. What it emits through
+           * each of them is either the very same packets or values of its
+           * own. *)
+          param "adapters" ~kind:(IRange (1, 1024)) ~default:(`Int 1)
+              ~descr:"How many Ethernet adapters it has." ;
+          param "speed"
+              ~kind:(Widget.one_of (Widget.choices Eth.Speed.names))
+              ~default:(`Int (Eth.Speed.to_enum Eth.Speed.Eth5Gbps))
+              ~descr:"Speed of every adapter." ;
+          param "independent" ~kind:Bool ~default:(`Bool false)
+              ~descr:"Whether every adapter draws its own values, rather \
+                      than emitting the very same packets." ] ;
+      of_params = fun args ->
+          TSynth {
+              adapters = int args "adapters" ;
+              speed =
+                  Eth.Speed.all.(Widget.to_choice (Widget.choices Eth.Speed.names)
+                                     (arg args "speed")) ;
+              independent = bool args "independent" } }
+
 (* The one entry that is not a device at all: a label on the map, with no
  * ports, no power and nothing to simulate. It is here because everything the
  * interface offers to add, place, edit, delete and save goes through this
@@ -644,6 +671,7 @@ let type_of = function
     | TPortal _ -> "portal"
     | TRecorder _ -> "recorder"
     | TReplayer _ -> "replayer"
+    | TSynth _ -> "synthesizer"
     | TNote _ -> "note"
 
 (** A model written back out as the parameters it was read from, which is the
@@ -717,6 +745,10 @@ let to_params =
     | TReplayer { fname ; loop } ->
         [ "file name", str_opt fname ;
           "loop", `Bool loop ]
+    | TSynth { adapters ; speed ; independent } ->
+        [ "adapters", `Int adapters ;
+          "speed", `Int (Eth.Speed.to_enum speed) ;
+          "independent", `Bool independent ]
     | TNote { text } ->
         [ "text", `String text ]
 
@@ -815,6 +847,9 @@ let build ~parent name = function
     | TReplayer { fname ; loop } as m ->
         let replayer = Pcap.replayer ~parent ?fname ~loop name in
         replayer.Pcap.widget, m
+    | TSynth { adapters ; speed ; independent } as m ->
+        let t = Synth.make ~parent ~adapters ~speed ~independent name in
+        t.Synth.widget, m
     | TNote { text } as m ->
         let widget = Widget.make ~parent ~device_type:"note" name in
         let text = ref text in
@@ -828,7 +863,7 @@ let build ~parent name = function
  * device at all last. *)
 let all =
     [ host ; switch ; hub ; router ; gateway ; portal ; recorder ; replayer ;
-      cable ; note ]
+      synthesizer ; cable ; note ]
 
 let find name =
     List.find_opt (fun t -> t.name = name) all
@@ -1117,6 +1152,11 @@ let make_from_params type_ ~parent name given =
    | Some (s : Hub.Switch.t) -> Array.length s.Hub.Switch.ifaces = 8 \
    | None -> false)
   Hub.Switch.of_widget (make_from_params "host" ~parent:(root ()) "h" []) = None
+  (match Synth.of_widget \
+             (make_from_params "synthesizer" ~parent:(root ()) "g" \
+                  [ "adapters", `Int 2 ]) with \
+   | Some (t : Synth.synthesizer) -> Array.length t.Synth.ifaces = 2 \
+   | None -> false)
   (* A part of a device is not a device: the adapter within a host stands for \
      nothing on its own. *) \
   (match (make_from_params "host" ~parent:(root ()) "h" []).children \

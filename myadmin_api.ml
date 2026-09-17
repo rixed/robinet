@@ -207,6 +207,10 @@ and json_of_kind = function
     (* A frame: its bytes, and what they amount to (see
        [Widget.json_of_packet]). *)
     | Packet -> `Assoc [ "type", `String "packet" ]
+    (* A whole packet of a synthesizer, drawn from the kinds of the protocols
+       it is made of, as a frame in the packet pane is. The interface has no
+       input for one yet. *)
+    | Synth -> `Assoc [ "type", `String "synth" ]
     (* Octets, as the hexadecimal of them and all of it (see
        [Widget.json_of_bytes]): the interface shows the two ends and holds out
        the rest, since a payload is longer than a cell and is read rather than

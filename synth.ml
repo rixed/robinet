@@ -85,6 +85,18 @@ struct
 
     type t = stream
 
+    (* A distance is a synth of its own: a number of bits, a generator by name,
+     * or nothing at all for back to back (see [bits_to_next]). *)
+    let distance_kind =
+        Widget.optional (Widget.variant [| "const", IRange (0, max_int) ;
+                                           "gen", String |])
+
+    let kind =
+        Widget.record [|
+            "stop after", Widget.optional (IRange (0, max_int)) ;
+            "distance", distance_kind ;
+            "distance from end", Bool |]
+
     let to_json t : Yojson.Basic.t =
         `Assoc [
             "stop after",
@@ -150,8 +162,8 @@ struct
 end
 
 type t = {
-    seed : int ;
-    (* Generators will be referenced by index in this array: *)
+    (* Generators will be referenced by index in this array (they carry the
+     * name they are known by from the outside): *)
     generators : Generator.t array ;
     stream : stream ;
     (* We need to specify a Packet.Pdu.t with synth types everywhere where
@@ -162,6 +174,10 @@ type t = {
      * Widget.kind of the Pdu that we have already can be used to make this
      * generation partially automatic. *)
     packet : Yojson.Basic.t ;
+    (* If true, the adapters of this synthesizer have their own distinct seed
+     * for the generators. If false, every adapter will emit exactly the same
+     * packets at the same time. *)
+    independent : bool ;
 }
 
 (** {2 Packet synthesis} *)
@@ -360,3 +376,288 @@ struct
 
     (*$>*)
 end
+
+(** {2 A synthesizer, as the interface edits it} *)
+
+(* Generators are named in what the API and the interface exchange, and
+ * numbered in what [Packet.of_synth] reads: a generator is named, renamed and
+ * reordered from the outside, while reading a field must not look a name up
+ * for every packet. So names become indexes on the way in and names again on
+ * the way out, in the packet and in the stream alike. *)
+let index_of_name generators name =
+    match Array.findi (fun (g : Generator.t) -> g.name = name) generators with
+    | exception Not_found ->
+        Widget.bad_value "no generator is named %S" name
+    | i -> i
+
+let name_of_index generators i =
+    if i < 0 || i >= Array.length generators then
+        Widget.bad_value "generator #%d does not exist" i ;
+    generators.(i).Generator.name
+
+(* Every generator a synth references, its name or number passed through [f].
+ * A synth leaf is an object of the single field "gen" whichever kind it has
+ * (see [Generator.value_of_synth]), and no protocol has a field of that name,
+ * so this walks a packet without knowing anything of the layers in it. *)
+let rec map_gens f (js : Yojson.Basic.t) : Yojson.Basic.t =
+    match js with
+    | `Assoc [ "gen", v ] -> `Assoc [ "gen", f v ]
+    | `Assoc fields -> `Assoc (List.map (fun (n, v) -> n, map_gens f v) fields)
+    | `List vs -> `List (List.map (map_gens f) vs)
+    | js -> js
+
+let kind =
+    Widget.record [|
+        "generators", Widget.list Generator.named_kind ;
+        "stream", Stream.kind ;
+        "packet", Synth ;
+        "independent", Bool |]
+
+let to_json t : Yojson.Basic.t =
+    let named =
+        map_gens (fun v ->
+            `String (name_of_index t.generators (Widget.to_int v))) in
+    `Assoc [
+        "generators",
+            `List (Array.to_list t.generators |> List.map Generator.to_json) ;
+        "stream", named (Stream.to_json t.stream) ;
+        "packet", named t.packet ;
+        "independent", `Bool t.independent ]
+
+let of_json js =
+    let generators =
+        Widget.to_field "generators" (Widget.to_list Generator.of_json) js |>
+        Array.of_list in
+    Array.iteri (fun i (g : Generator.t) ->
+        if Array.exists (fun (g' : Generator.t) -> g'.name = g.name)
+                        (Array.sub generators 0 i) then
+            Widget.bad_value "two generators are named %S" g.name
+    ) generators ;
+    let numbered =
+        map_gens (fun v ->
+            `Int (index_of_name generators (Widget.to_string v))) in
+    { generators ;
+      stream = Widget.to_field "stream" (Stream.of_json % numbered) js ;
+      packet = Widget.to_field "packet" numbered js ;
+      independent = Widget.to_field "independent" Widget.to_bool js }
+
+(* A packet of TCP over IP over Ethernet with every field automatic: what a
+ * synthesizer is born with, and the shape a reader edits rather than types
+ * from nothing. *)
+let default_packet () : Yojson.Basic.t =
+    let layer l =
+        Generator.wrap (Packet.Pdu.kind_of_layer l) (fun _ -> `Null)
+            (Packet.Pdu.json_of_layer l) in
+    `Assoc [ "Eth", layer (Packet.Pdu.Eth (Eth.Pdu.random ())) ;
+             "Ip", layer (Packet.Pdu.Ip (Ip.Pdu.random ())) ;
+             "Tcp", layer (Packet.Pdu.Tcp (Tcp.Pdu.random ())) ]
+
+let make_default ?(independent=false) () =
+    { generators = [||] ;
+      stream = { stop_after = None ; distance = Automatic ;
+                 distance_from_end = true } ;
+      packet = default_packet () ;
+      independent }
+
+(* A synth is worth what a packet made of it is worth: whatever the interface
+ * sends is read once, here, rather than at the next packet and into the log.
+ * The values the generators are at have nothing to do with it, so any will
+ * do. *)
+let check t =
+    let gen_values = Array.map (fun g -> Generator.get g 0) t.generators in
+    ignore (Packet.of_synth (Packet.to_array_top_to_bottom t.packet)
+                            gen_values) ;
+    ignore (Stream.bits_to_next t.stream gen_values ~ifg:Eth.Iface.ifg_min 0)
+
+(*$Q of_json
+  Q.unit (fun () -> \
+    let t = make_default () in \
+    Widget.check_value kind (to_json t) ; \
+    check t ; \
+    of_json (to_json t) = t)
+ *)
+
+(* Generators are named outside and numbered inside, and a name that is none of
+   theirs is refused rather than read as a number. *)
+(*$R of_json
+  let t = make_default () in
+  let gen name = Generator.make name (Generator.Constant 42) in
+  let t =
+    { t with generators = [| gen "a" ; gen "b" |] ;
+             stream = { t.stream with distance = Generator 1 } } in
+  let js = to_json t in
+  assert_equal ~printer:Yojson.Basic.to_string
+    (`Assoc [ "gen", `String "b" ])
+    (Widget.json_of_field "distance" (Widget.json_of_field "stream" js)) ;
+  assert_equal ~printer:Yojson.Basic.to_string (to_json (of_json js)) js ;
+  let js' =
+    map_gens (fun _ -> `String "c") js in
+  assert_raises (Widget.Bad_value "stream: no generator is named \"c\"")
+    (fun () -> of_json js')
+ *)
+
+(** {2 The synthesizer device} *)
+
+(* A real packet synthesizer is a machine with real Ethernet adapters, and this
+ * simulates one: what it sends goes out through an adapter, which is what
+ * knows the speed of the link and the silence to leave between two frames --
+ * both of which a stream needs, its distances being counted in bits.
+ *
+ * It has as many adapters as it was asked for, all driven by the same
+ * generators, so that saturating several ports of a router asks for one
+ * machine and not several. *)
+type synthesizer =
+    { widget : Widget.t ;
+      (* In port order: port [n] is adapter [n]. *)
+      ifaces : Eth.Iface.t array ;
+      mutable synth : t ;
+      (* Whether it is emitting. A synthesizer is born stopped: what it is born
+       * with is a packet nobody has looked at yet. *)
+      mutable running : bool ;
+      packets_sent : Metric.Counter.t }
+
+type Widget.device += Synthesizer of synthesizer
+
+(* The synthesizer a widget stands for, when it stands for one. *)
+let of_widget (w : Widget.t) =
+    match w.device with
+    | Some (Synthesizer t) -> Some t
+    | _ -> None
+
+(* Nothing is emitted yet: see the stream behavior. *)
+let start t =
+    t.running <- true
+
+let stop t =
+    t.running <- false
+
+(* Replace the synth with [f] of it, once it is known to make a packet: a synth
+ * the interface sent that cannot be read is refused as it arrives, so that the
+ * synthesizer is never left holding one it cannot use. *)
+let set_synth t f =
+    let synth = f t.synth in
+    check synth ;
+    t.synth <- synth
+
+let make ~parent ?location ?(speed=Eth.Speed.Eth5Gbps) ?(adapters=1)
+         ?(independent=false) name =
+    if adapters < 1 then
+        Widget.bad_value "a synthesizer has at least one adapter" ;
+    let widget =
+        Widget.make ~parent ?location ~device_type:"synthesizer"
+                    ~own_power:true name in
+    let ifaces =
+        Array.init adapters (fun i ->
+            Eth.Iface.make ~parent:widget ~power:widget.power ~speeds:[ speed ]
+                           (Printf.sprintf "eth%d" i)) in
+    let t =
+        { widget ; ifaces ; synth = make_default ~independent () ;
+          running = false ; packets_sent = Metric.Counter.make () } in
+    widget.device <- Some (Synthesizer t) ;
+    (* Its adapters are its ports, as a switch's are. *)
+    widget.ports <- Widget.{
+        count = (fun () -> Array.length t.ifaces) ;
+        is_connected = (fun i -> t.ifaces.(i).widget.ports.is_connected 0) ;
+        dev = (fun i -> t.ifaces.(i).widget.ports.dev 0) ;
+        owner = (fun i -> t.ifaces.(i).widget.ports.owner 0) ;
+        disconnect = (fun i -> t.ifaces.(i).widget.ports.disconnect 0) ;
+        get_capabilities = (fun i ->
+            t.ifaces.(i).widget.ports.get_capabilities 0) ;
+        set_capabilities = (fun i c ->
+            t.ifaces.(i).widget.ports.set_capabilities 0 c) } ;
+    Widget.add_properties widget Widget.[
+        property "running" ~kind:Bool
+            ~descr:"Whether packets are being emitted."
+            ~getter:(fun () -> `Bool t.running)
+            ~setter:(fun v ->
+                let v = to_bool v in
+                if v <> t.running then (
+                    if v then start t else stop t ;
+                    Log.(log widget.logger Info (lazy (
+                        (if v then "Started" else "Stopped") ^" emitting"))))) ;
+        (* The three halves of a synth, edited apart: the packet is what the
+           generators are read from, so a generator the packet references
+           cannot be taken away (see [check]). Generators come first because
+           they are what the other two are read against, and a topology
+           restores properties in this order. *)
+        property "generators" ~kind:(list Generator.named_kind)
+            ~descr:"The named value generators the packet is filled from."
+            ~getter:(fun () ->
+                `List (Array.to_list t.synth.generators |>
+                       List.map Generator.to_json))
+            ~setter:(fun v ->
+                let generators =
+                    to_list Generator.of_json v |> Array.of_list in
+                set_synth t (fun synth -> { synth with generators })) ;
+        property "stream" ~kind:Stream.kind
+            ~descr:"How many packets to emit, and how far apart."
+            ~getter:(fun () ->
+                map_gens (fun v ->
+                    `String (name_of_index t.synth.generators (to_int v)))
+                    (Stream.to_json t.synth.stream))
+            ~setter:(fun v ->
+                let stream =
+                    Stream.of_json (
+                        map_gens (fun v ->
+                            `Int (index_of_name t.synth.generators
+                                      (to_string v))) v) in
+                set_synth t (fun synth -> { synth with stream })) ;
+        property "packet" ~kind:Synth
+            ~descr:"The packet to emit: a stack of layers, each field a \
+                    constant, a generator or automatic."
+            ~getter:(fun () ->
+                map_gens (fun v ->
+                    `String (name_of_index t.synth.generators (to_int v)))
+                    t.synth.packet)
+            ~setter:(fun v ->
+                let packet =
+                    map_gens (fun v ->
+                        `Int (index_of_name t.synth.generators (to_string v)))
+                        v in
+                set_synth t (fun synth -> { synth with packet })) ;
+        property "independent" ~kind:Bool
+            ~descr:"Whether every adapter draws its own values, rather than \
+                    emitting the very same packets."
+            ~getter:(fun () -> `Bool t.synth.independent)
+            ~setter:(fun v ->
+                let independent = to_bool v in
+                set_synth t (fun synth -> { synth with independent })) ;
+        metric_property "packets" ~descr:"Packets emitted."
+            (Metric.Counter.T t.packets_sent) ] ;
+    Simulation.power_up widget.power ;
+    t
+
+(* Born with a packet it can make, one adapter for every port, and stopped. *)
+(*$R make
+  let sim = Simulation.make ~realtime:false "synth" in
+  let t = make ~parent:sim.root ~adapters:3 "gen" in
+  assert_equal ~printer:string_of_int 3 (t.widget.ports.count ()) ;
+  "a synthesizer is born stopped" @? not t.running ;
+  "and with a packet of its own" @? (check t.synth ; true) ;
+  "which is what its widget stands for" @?
+    (match of_widget t.widget with Some t' -> t' == t | None -> false) ;
+  let prop name =
+    List.find (fun (p : Widget.property) -> p.name = name)
+              t.widget.properties in
+  let set name v = (Option.get (prop name).setter) v in
+  let get name = (prop name).getter () in
+  set "running" (`Bool true) ;
+  "it starts when told to" @? t.running ;
+  (* A generator is named from the outside, and referenced by that name. *)
+  set "generators"
+    (`List [ Generator.to_json (Generator.make "len" (Generator.Constant 3)) ]) ;
+  set "stream"
+    (`Assoc [ "stop after", `Int 10 ;
+              "distance", `Assoc [ "gen", `String "len" ] ;
+              "distance from end", `Bool false ]) ;
+  assert_equal ~printer:Yojson.Basic.to_string
+    (`Assoc [ "gen", `String "len" ])
+    (Widget.json_of_field "distance" (get "stream")) ;
+  "a generator the stream needs cannot be dropped" @?
+    (try set "generators" (`List []) ; false
+     with Widget.Bad_value _ -> true) ;
+  "and a packet that cannot be read is refused" @?
+    (try set "packet" (`Assoc [ "Eth", `Assoc [ "src", `Assoc [ "const", `String "nope" ] ] ]) ;
+         false
+     with Widget.Bad_value _ -> true)
+ *)

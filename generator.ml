@@ -37,12 +37,19 @@ type t =
     { name : string ; kind : kind }
 
 (* A [Uniform] range must be neither empty nor wider than [max_int]; either
- * makes [stop_excl - start_incl] non positive. *)
+ * makes [stop_excl - start_incl] non positive. A [Normal] must be a
+ * distribution: a spread is a distance, and neither it nor the mean it is
+ * around can be infinite or not a number. *)
 let make name kind =
     (match kind with
     | Uniform { start_incl ; stop_excl } when stop_excl - start_incl <= 0 ->
         Widget.bad_value "generator %S: cannot draw from [%d, %d["
             name start_incl stop_excl
+    | Normal { mean ; scale }
+      when Float.is_nan mean || Float.is_special mean ||
+           Float.is_nan scale || Float.is_special scale || scale < 0. ->
+        Widget.bad_value "generator %S: cannot draw around %g within %g"
+            name mean scale
     | _ -> ()) ;
     { name ; kind }
 
@@ -50,6 +57,10 @@ let make name kind =
   try ignore (make "g" (Uniform { start_incl = 3 ; stop_excl = 3 })) ; false \
   with Widget.Bad_value _ -> true
   try ignore (make "g" (Uniform { start_incl = min_int ; stop_excl = max_int })) ; false \
+  with Widget.Bad_value _ -> true
+  try ignore (make "g" (Normal { mean = 0. ; scale = -1. })) ; false \
+  with Widget.Bad_value _ -> true
+  try ignore (make "g" (Normal { mean = nan ; scale = 1. })) ; false \
   with Widget.Bad_value _ -> true
 *)
 
@@ -174,7 +185,7 @@ let rec coerce kind x =
         let max_list_len = 4 in
         let len = x mod (max_list_len + 1) in
         `List (List.init len (fun i -> coerce kind (derive x (i + 1))))
-    | Widget_id | Packet | Metric ->
+    | Widget_id | Packet | Synth | Metric ->
         Widget.bad_value "cannot generate %s" (Widget.kind_name kind)
 
 (*$T coerce
@@ -375,3 +386,83 @@ let reads_autos of_synth kind_of to_json t =
     let t = of_synth (wrap (kind_of t) (fun _ -> `Null) (to_json t)) [||] in
     Widget.check_value (kind_of t) (to_json t) ;
     true
+
+(** {2 Generators, as the interface edits them} *)
+
+(* Which shape a generator has, and then that shape's own parameters. The
+ * names are those of the fields above, spelled as they are read. *)
+let kind =
+    Widget.variant [|
+        "constant", Int ;
+        "increment", Widget.row [| "start", Int ; "step", Int |] ;
+        "uniform", Widget.row [| "from", Int ; "up to (excluded)", Int |] ;
+        "normal", Widget.row [| "mean", Float ;
+                                "standard deviation", Float |] |]
+
+(* A generator and the name it is known by, which is how it is referenced
+ * (see {!Synth}). *)
+let named_kind = Widget.record [| "name", String ; "generator", kind |]
+
+let json_of_kind k : Yojson.Basic.t =
+    match k with
+    | Constant x ->
+        `Assoc [ "constant", `Int x ]
+    | Increment { start ; step } ->
+        `Assoc [ "increment", `Assoc [ "start", `Int start ;
+                                       "step", `Int step ] ]
+    | Uniform { start_incl ; stop_excl } ->
+        `Assoc [ "uniform", `Assoc [ "from", `Int start_incl ;
+                                     "up to (excluded)", `Int stop_excl ] ]
+    | Normal { mean ; scale } ->
+        `Assoc [ "normal", `Assoc [ "mean", `Float mean ;
+                                    "standard deviation", `Float scale ] ]
+
+let kind_of_json =
+    Widget.to_case (fun case v ->
+        let int f = Widget.to_field f Widget.to_int v
+        and float f = Widget.to_field f Widget.to_float v in
+        match case with
+        | "constant" ->
+            Constant (Widget.to_int v)
+        | "increment" ->
+            Increment { start = int "start" ; step = int "step" }
+        | "uniform" ->
+            Uniform { start_incl = int "from" ;
+                      stop_excl = int "up to (excluded)" }
+        | "normal" ->
+            Normal { mean = float "mean" ;
+                     scale = float "standard deviation" }
+        | case ->
+            Widget.bad_value "no generator is a %S" case)
+
+let to_json (g : t) : Yojson.Basic.t =
+    `Assoc [ "name", `String g.name ; "generator", json_of_kind g.kind ]
+
+(* Whatever [make] refuses is refused here too: what the interface sends is
+ * read with this. *)
+let of_json js =
+    make (Widget.to_field "name" Widget.to_string js)
+         (Widget.to_field "generator" kind_of_json js)
+
+(*$Q of_json
+  Q.(oneof [ map (fun x -> Constant x) int ; \
+             map (fun (a, b) -> Increment { start = a ; step = b }) \
+                 (pair int int) ; \
+             map (fun (a, b) -> Uniform { start_incl = a ; \
+                                          stop_excl = a + 1 + abs b }) \
+                 (pair small_int small_nat) ; \
+             map (fun (a, b) -> Normal { mean = float_of_int a ; \
+                                         scale = float_of_int (abs b) }) \
+                 (pair small_int small_int) ]) \
+    (fun k -> \
+      let t = make "g" k in \
+      Widget.check_value named_kind (to_json t) ; \
+      of_json (to_json t) = t)
+ *)
+
+(*$T of_json
+  try ignore (of_json (`Assoc [ "name", `String "g" ; \
+                                "generator", `Assoc [ "flat", `Int 1 ] ])) ; \
+      false \
+  with Widget.Bad_value _ -> true
+ *)

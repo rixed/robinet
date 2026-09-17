@@ -65,6 +65,7 @@ let rec kind_name = function
     | Time -> "a timestamp"
     | Duration -> "a length of time"
     | Packet -> "a packet"
+    | Synth -> "a synthesized packet"
     | Bytes -> "some bytes"
     | BRange (mi, ma) -> Printf.sprintf "%d to %d bytes" mi ma
     | Ipv4 -> "an IPv4 address"
@@ -169,7 +170,7 @@ let one_of ?range choices =
  * the value it may hold: [optional (hint "min-max" String)]. *)
 let hint h = function
     | (Optional _ | Metric | List _ | Row _ | Record _ | Variant _ | Hint _
-      | Set _ | Bytes | BRange _) as k ->
+      | Set _ | Bytes | BRange _ | Synth) as k ->
         invalid_arg ("Widget.hint: nothing to write an example in for "^
                      kind_name k)
     | k -> Hint (h, k)
@@ -230,7 +231,7 @@ let row fields =
     check_fields "row" fields ;
     Array.iter (fun (name, k) ->
         match k with
-        | List _ | Row _ | Record _ | Variant _ | Metric ->
+        | List _ | Row _ | Record _ | Variant _ | Metric | Synth ->
             invalid_arg ("Widget.row: field "^ name ^" cannot be "^
                          kind_name k)
         | _ -> ()
@@ -596,6 +597,18 @@ let rec check_value ?(name="value") k v =
     (* Its bytes and what they amount to, which is what [json_of_packet]
      * writes. *)
     | Packet, `Assoc [ "bits", `String _ ; "descr", `String _ ] -> ()
+    (* A layer to each field, and no more than that: what is inside one is a
+     * field of some protocol, and which fields those are is [Packet]'s answer
+     * and not this module's (see [describe_packet]). What checks them is
+     * [Synth.Packet.of_synth], reading them. *)
+    | Synth, `Assoc layers ->
+        List.iter (fun (lname, v) ->
+            match v with
+            | `Assoc _ -> ()
+            | v ->
+                bad_value "%s.%s should be the fields of a layer, not %s" name
+                    lname (Yojson.Basic.to_string v)
+        ) layers
     | Metric, _ -> ()
     | Optional _, `Null -> ()
     | Optional k, v -> check_value ~name k v
