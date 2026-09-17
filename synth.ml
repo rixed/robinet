@@ -34,12 +34,120 @@ type 'a synth =
     | Generator of int (* in the array of generators *)
     | Automatic
 
+(* In JSON, as a field of a packet synth is: *)
+let synth_to_json to_json = function
+    | Const v -> Generator.const (to_json v)
+    | Generator g -> `Assoc [ "gen", `Int g ]
+    | Automatic -> `Null
+
+let synth_of_json of_json = function
+    | `Assoc [ "const", v ] -> Const (of_json v)
+    | `Assoc [ "gen", `Int g ] when g >= 0 -> Generator g
+    | `Null -> Automatic
+    | js ->
+        Widget.bad_value "expected a constant, a generator or null, not %s"
+            (Yojson.Basic.to_string js)
+
+(*$Q synth_of_json
+  Q.(option (option small_nat)) (fun s -> \
+    let s = match s with \
+      | None -> Automatic \
+      | Some None -> Generator 3 \
+      | Some (Some v) -> Const v in \
+    synth_of_json Widget.to_int (synth_to_json (fun v -> `Int v) s) = s)
+ *)
+
+(*$T synth_of_json
+  try ignore (synth_of_json Widget.to_int (`Assoc [ "gen", `Int ~-1 ])) ; false \
+  with Widget.Bad_value _ -> true
+ *)
+
+(* The value of a synth given the values the generators are at, [of_int]
+ * turning one of those into a value. *)
+let synth_value ~of_int ~auto gen_values = function
+    | Const v -> v
+    | Generator g ->
+        if g >= Array.length gen_values then
+            Widget.bad_value "generator #%d does not exist" g ;
+        of_int gen_values.(g)
+    | Automatic -> auto ()
+
 type stream = {
     stop_after : int option ;
     (* Distance between two packets: *)
     distance : int synth ;
     distance_from_end : bool ;
 }
+
+module Stream =
+struct
+    (*$< Stream *)
+
+    type t = stream
+
+    let to_json t : Yojson.Basic.t =
+        `Assoc [
+            "stop after",
+                (match t.stop_after with Some n -> `Int n | None -> `Null) ;
+            "distance", synth_to_json (fun d -> `Int d) t.distance ;
+            "distance from end", `Bool t.distance_from_end ]
+
+    let of_json js =
+        let count = Widget.to_int_range ~min:0 in
+        { stop_after =
+            Widget.to_field "stop after" (Widget.to_option count) js ;
+          distance = Widget.to_field "distance" (synth_of_json count) js ;
+          distance_from_end =
+            Widget.to_field "distance from end" Widget.to_bool js }
+
+    (*$Q of_json
+      Q.(triple (option small_nat) (option small_nat) bool) \
+        (fun (stop_after, d, distance_from_end) -> \
+          let distance = match d with None -> Automatic | Some d -> Const d in \
+          let t = { stop_after ; distance ; distance_from_end } in \
+          of_json (to_json t) = t)
+     *)
+
+    (* Whether the stream is over once [count] packets are emitted: *)
+    let is_over t count =
+        match t.stop_after with
+        | Some n -> count >= n
+        | None -> false
+
+    (*$T is_over
+      not (is_over { stop_after = None ; distance = Automatic ; distance_from_end = true } max_int)
+      not (is_over { stop_after = Some 2 ; distance = Automatic ; distance_from_end = true } 1)
+      is_over { stop_after = Some 2 ; distance = Automatic ; distance_from_end = true } 2
+     *)
+
+    (** How many bits from the first bit of a packet of [bits] bits to the
+     * first bit of the next one, on a link leaving [ifg] bits between frames.
+     * The distance is never negative, and is 0 when automatic: packets are
+     * back to back. *)
+    let bits_to_next t gen_values ~ifg bits =
+        let from_end d = bits + ifg + d in
+        match t.distance with
+        | Automatic -> from_end 0
+        | d ->
+            let d = synth_value ~of_int:identity ~auto:(fun () -> 0) gen_values d
+                    |> max 0 in
+            if t.distance_from_end then from_end d else d
+
+    (*$= bits_to_next & ~printer:string_of_int
+      (1000 + 96 + 10) \
+        (bits_to_next { stop_after = None ; distance = Const 10 ; distance_from_end = true } [||] ~ifg:96 1000)
+      10 \
+        (bits_to_next { stop_after = None ; distance = Const 10 ; distance_from_end = false } [||] ~ifg:96 1000)
+      (1000 + 96) \
+        (bits_to_next { stop_after = None ; distance = Automatic ; distance_from_end = false } [||] ~ifg:96 1000)
+      (1000 + 96 + 42) \
+        (bits_to_next { stop_after = None ; distance = Generator 1 ; distance_from_end = true } [| 0 ; 42 |] ~ifg:96 1000)
+      0 \
+        (bits_to_next { stop_after = None ; distance = Generator 0 ; distance_from_end = false } [| -5 |] ~ifg:96 1000)
+     *)
+
+    (*$>*)
+end
 
 type t = {
     seed : int ;
