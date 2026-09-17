@@ -27,6 +27,7 @@ generated at random, or set to "automatic".
 *)
 open Batteries
 open SimTypes
+open Bitstring
 open Tools
 
 type 'a synth =
@@ -506,6 +507,17 @@ let check t =
  * It has as many adapters as it was asked for, all driven by the same
  * generators, so that saturating several ports of a router asks for one
  * machine and not several. *)
+(* How far a stream has got: which step the generators are read at, and the
+ * packet the next one follows. There is one per adapter when the generators
+ * are independent, and a single one for the whole machine otherwise -- which
+ * is what makes every adapter emit the very same packets, the values of a
+ * step being drawn once and not recomputable afterwards. *)
+type state =
+    { (* Which adapters this stream feeds: one of them, or all of them. *)
+      ifaces : Eth.Iface.t array ;
+      mutable count : int ;
+      mutable prev : Packet.Pdu.layer array option }
+
 type synthesizer =
     { widget : Widget.t ;
       (* In port order: port [n] is adapter [n]. *)
@@ -514,6 +526,13 @@ type synthesizer =
       (* Whether it is emitting. A synthesizer is born stopped: what it is born
        * with is a packet nobody has looked at yet. *)
       mutable running : bool ;
+      mutable states : state list ;
+      (* Which run of the stream the packets on their way belong to, as a
+       * replayer's does: everything that stops or restarts the emission bumps
+       * it, and a packet that comes due bearing an older number is dropped
+       * along with the chain it would have continued. Otherwise starting twice
+       * would leave two chains reading the same stream. *)
+      mutable gen : int ;
       packets_sent : Metric.Counter.t }
 
 type Widget.device += Synthesizer of synthesizer
@@ -524,20 +543,86 @@ let of_widget (w : Widget.t) =
     | Some (Synthesizer t) -> Some t
     | _ -> None
 
-(* Nothing is emitted yet: see the stream behavior. *)
+(* One packet of [state], out of every adapter it feeds, and the next one
+ * scheduled -- until the stream is over or the emission is stopped.
+ *
+ * The values of the step are drawn once and used for the packet and for the
+ * distance to the next one, so that a stream whose distance is a generator
+ * reads the same value the packet did. *)
+let rec emit_next t gen state =
+    if gen = t.gen && t.running &&
+       not (Stream.is_over t.synth.stream state.count) then (
+        let gen_values =
+            Array.map (fun g -> Generator.get g state.count)
+                      t.synth.generators in
+        let layers =
+            Packet.of_synth (Packet.to_array_top_to_bottom t.synth.packet)
+                            ?prev:state.prev gen_values in
+        state.prev <- Some layers ;
+        state.count <- state.count + 1 ;
+        (* The frame itself: the bottom layer, whose payload is everything
+         * above it (see [Packet.of_synth]). *)
+        let bits = Packet.pack_layer layers.(Array.length layers - 1) in
+        let now = Simulation.Widget.now t.widget in
+        Metric.Counter.add t.packets_sent ~now (Array.length state.ifaces) ;
+        Array.iter (fun (iface : Eth.Iface.t) -> iface.emit bits) state.ifaces ;
+        (* Timed on the first adapter it feeds: the others have ports of their
+         * own, and what they make of a frame handed to them is their own
+         * business (see [Eth.Iface.set_read]). A link that has not negotiated
+         * yet is paced at the best speed it offers, that being what it will
+         * settle on with something at least as fast at the other end. *)
+        let iface = state.ifaces.(0) in
+        let speed =
+            match iface.negotiated with
+            | Some (speed, _) -> speed
+            | None -> Eth.Speed.best iface.speeds in
+        let bitlen = bitstring_length bits in
+        let d =
+            Stream.bits_to_next t.synth.stream gen_values
+                                ~ifg:iface.inter_frame_gap bitlen in
+        (* No faster than back to back, whatever the stream says: a port cannot
+         * emit a frame before it has finished the one before it, and a
+         * distance of nothing at all would be an unending run of packets at
+         * one instant of the clock. *)
+        let d = max d (bitlen + iface.inter_frame_gap) in
+        Simulation.delay t.widget.power (Eth.Speed.duration speed d)
+                         (emit_next t gen) state)
+
+(* Start the stream, from its first packet: a synthesizer emits a stream, and
+ * what "start" means is that stream and not the one that was interrupted. *)
 let start t =
-    t.running <- true
+    t.running <- true ;
+    t.gen <- t.gen + 1 ;
+    t.states <-
+        (if t.synth.independent then
+            Array.to_list t.ifaces |>
+            List.map (fun iface ->
+                { ifaces = [| iface |] ; count = 0 ; prev = None })
+        else
+            [ { ifaces = t.ifaces ; count = 0 ; prev = None } ]) ;
+    List.iter (fun state ->
+        Simulation.asap t.widget.power (emit_next t t.gen) state
+    ) t.states
 
 let stop t =
-    t.running <- false
+    t.running <- false ;
+    t.gen <- t.gen + 1 ;
+    t.states <- []
 
 (* Replace the synth with [f] of it, once it is known to make a packet: a synth
  * the interface sent that cannot be read is refused as it arrives, so that the
- * synthesizer is never left holding one it cannot use. *)
+ * synthesizer is never left holding one it cannot use.
+ *
+ * What is emitting reads the new synth from its next packet on, as a replayer
+ * plays the file as it is rather than as it was. Only [independent] cannot be
+ * taken that way -- it says how many streams there are -- so changing it
+ * starts the stream again. *)
 let set_synth t f =
     let synth = f t.synth in
     check synth ;
-    t.synth <- synth
+    let was_independent = t.synth.independent in
+    t.synth <- synth ;
+    if t.running && synth.independent <> was_independent then start t
 
 let make ~parent ?location ?(speed=Eth.Speed.Eth5Gbps) ?(adapters=1)
          ?(independent=false) name =
@@ -552,7 +637,8 @@ let make ~parent ?location ?(speed=Eth.Speed.Eth5Gbps) ?(adapters=1)
                            (Printf.sprintf "eth%d" i)) in
     let t =
         { widget ; ifaces ; synth = make_default ~independent () ;
-          running = false ; packets_sent = Metric.Counter.make () } in
+          running = false ; states = [] ; gen = 0 ;
+          packets_sent = Metric.Counter.make () } in
     widget.device <- Some (Synthesizer t) ;
     (* Its adapters are its ports, as a switch's are. *)
     widget.ports <- Widget.{
@@ -624,6 +710,11 @@ let make ~parent ?location ?(speed=Eth.Speed.Eth5Gbps) ?(adapters=1)
                 set_synth t (fun synth -> { synth with independent })) ;
         metric_property "packets" ~descr:"Packets emitted."
             (Metric.Counter.T t.packets_sent) ] ;
+    (* A machine switched off emits nothing, and one switched back on goes on
+     * emitting if that is what it was doing: its events were dropped with the
+     * supply (see [Simulation.at]), so the chain has to be started again. *)
+    widget.power_up <- (fun () -> if t.running then start t) ;
+    widget.on_delete <- (fun () -> stop t) ;
     Simulation.power_up widget.power ;
     t
 
@@ -660,4 +751,92 @@ let make ~parent ?location ?(speed=Eth.Speed.Eth5Gbps) ?(adapters=1)
     (try set "packet" (`Assoc [ "Eth", `Assoc [ "src", `Assoc [ "const", `String "nope" ] ] ]) ;
          false
      with Widget.Bad_value _ -> true)
+ *)
+
+(* A stream of three packets, out of every adapter, through real cables: what
+ * the other end receives is what the synthesizer sent, and a stream that is
+ * over leaves nothing scheduled -- which is what lets this simulation run to
+ * its end. *)
+(*$R start
+  let sim = Simulation.make ~realtime:false "synth-run" in
+  let t = make ~parent:sim.root ~adapters:2 "gen" in
+  (* Something at the other end of every adapter, to negotiate with and to
+     count what arrives. *)
+  let got = Array.make 2 [] in
+  Array.iteri (fun i (iface : Eth.Iface.t) ->
+    let sink =
+      Eth.Iface.make ~parent:sim.root ~power:sim.root.power
+                     ~recv:(fun bits -> got.(i) <- bits :: got.(i))
+                     (Printf.sprintf "sink%d" i) in
+    let cable =
+      Eth.Cable.State.make ~parent:sim.root ~name:(Printf.sprintf "c%d" i) () in
+    Eth.Cable.plug cable (iface.widget, 0) (sink.widget, 0)
+  ) t.ifaces ;
+  let emit n =
+    set_synth t (fun synth ->
+      { synth with stream = { stop_after = Some n ; distance = Const 1000 ;
+                              distance_from_end = true } }) ;
+    Array.fill got 0 2 [] ;
+    start t ;
+    Simulation.run sim false in
+  emit 3 ;
+  let printer = string_of_int in
+  assert_equal ~printer 3 (List.length got.(0)) ;
+  assert_equal ~printer 3 (List.length got.(1)) ;
+  "the same packets out of every adapter" @?
+    (List.map hexstring_of_bitstring got.(0) =
+     List.map hexstring_of_bitstring got.(1)) ;
+  "and the stream stops after those" @? not (Stream.is_over t.synth.stream 2) ;
+  (* Every adapter drawing its own values emits packets of its own. *)
+  set_synth t (fun synth -> { synth with independent = true }) ;
+  emit 3 ;
+  assert_equal ~printer 3 (List.length got.(0)) ;
+  assert_equal ~printer 3 (List.length got.(1)) ;
+  "distinct packets, one adapter to the next" @?
+    (List.map hexstring_of_bitstring got.(0) <>
+     List.map hexstring_of_bitstring got.(1))
+ *)
+
+(* A generator is read at the step the stream is at, which is what tells one
+ * packet from the next: the source addresses of these walk up. *)
+(*$R start
+  let sim = Simulation.make ~realtime:false "synth-gen" in
+  let t = make ~parent:sim.root "gen" in
+  let got = ref [] in
+  let sink =
+    Eth.Iface.make ~parent:sim.root ~power:sim.root.power
+                   ~recv:(fun bits -> got := bits :: !got) "sink" in
+  let cable = Eth.Cable.State.make ~parent:sim.root ~name:"c" () in
+  Eth.Cable.plug cable (t.ifaces.(0).widget, 0) (sink.widget, 0) ;
+  (* The IP source address of every packet, from the generator. *)
+  let from_gen = function
+    | `Assoc layers ->
+        `Assoc (List.map (fun (lname, layer) ->
+          lname,
+          match lname, layer with
+          | "Ip", `Assoc fields ->
+              `Assoc (List.map (fun (fname, v) ->
+                fname,
+                if fname = "source" then `Assoc [ "gen", `Int 0 ] else v) fields)
+          | _ -> layer) layers)
+    | js -> js in
+  set_synth t (fun synth ->
+    { synth with
+      generators = [| Generator.make "src"
+                          (Generator.Increment { start = 1 ; step = 1 }) |] ;
+      stream = { stop_after = Some 3 ; distance = Automatic ;
+                 distance_from_end = true } ;
+      packet = from_gen synth.packet }) ;
+  start t ;
+  Simulation.run sim false ;
+  let sources =
+    List.rev !got |>
+    List.map (fun bits ->
+      let pcap = Pcap.Pdu.make "" (Clock.Wall.now ()) bits in
+      match Packet.Pdu.unpack pcap with
+      | _pcap :: _eth :: Packet.Pdu.Ip ip :: _ ->
+          Ip.Addr.to_dotted_string ip.Ip.Pdu.src
+      | _ -> "?") in
+  assert_equal ~printer:(String.concat ",")
+    [ "0.0.0.1" ; "0.0.0.2" ; "0.0.0.3" ] sources
  *)
