@@ -1155,7 +1155,7 @@ let make_from_params type_ ~parent name given =
   (match Synth.of_widget \
              (make_from_params "synthesizer" ~parent:(root ()) "g" \
                   [ "adapters", `Int 2 ]) with \
-   | Some (t : Synth.synthesizer) -> Array.length t.Synth.ifaces = 2 \
+   | Some (t : Synth.t) -> Array.length t.Synth.ifaces = 2 \
    | None -> false)
   (* A part of a device is not a device: the adapter within a host stands for \
      nothing on its own. *) \
