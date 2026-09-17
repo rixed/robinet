@@ -30,7 +30,7 @@ open SimTypes
 open Tools
 
 type 'a synth =
-    | Value of 'a
+    | Const of 'a
     | Generator of int (* in the array of generators *)
     | Automatic
 
@@ -66,13 +66,13 @@ struct
 
     (* The protocol of a layer, by its name as [Packet.Pdu.field_names] writes
      * it: "Vlan 2" is a Vlan. *)
-    let protocol_of_name name =
+    let layer_name_of_field_name name =
         try String.sub name 0 (String.index name ' ')
         with Not_found -> name
 
-    (*$= protocol_of_name & ~printer:identity
-      "Vlan" (protocol_of_name "Vlan 2")
-      "Eth" (protocol_of_name "Eth")
+    (*$= layer_name_of_field_name & ~printer:identity
+      "Vlan" (layer_name_of_field_name "Vlan 2")
+      "Eth" (layer_name_of_field_name "Eth")
      *)
 
     let pack_layer = function
@@ -90,11 +90,11 @@ struct
         | Pdu.Icmp t -> Icmp.Pdu.pack t
         | Pdu.Pcap t -> Pcap.Pdu.pack t
 
-    (* The layer named [name], synthesized from [js] above [upper] -- the name
-     * and the packed bits of the layer above -- and after [prev], this layer
+    (* The layer named [layer_name], synthesized from [js] above [upper] (the name
+     * and the packed bits of the layer above) and after [prev], this layer
      * in the previous packet. *)
-    let layer_of_synth js ?upper prev gen_values name : Pdu.layer =
-        match protocol_of_name name with
+    let layer_of_synth js ?upper prev gen_values layer_name : Pdu.layer =
+        match layer_name with
         | "Data" ->
             let kind = Bytes in
             Pdu.Raw (Widget.to_bitstring (
@@ -140,29 +140,45 @@ struct
         | p ->
             Widget.bad_value "no protocol is named %S" p
 
-    (** The packet a synth says: its layers, named as [Packet.Pdu.to_json]
-     * names them and outer first, synthesized from the top down, each above
-     * the one synthesized before it and after the layer at the same place in
-     * [prev]. *)
-    let of_synth js ?prev gen_values : Pdu.t =
-        let prevs = prev |? [] in
-        match js with
-        | `Assoc layers ->
-            List.mapi (fun i (name, js) -> i, name, js) layers |>
-            List.rev |>
-            List.fold_left (fun (upper, layers) (i, name, js) ->
-                let prev = try Some (List.nth prevs i) with _ -> None in
-                let layer =
-                    try layer_of_synth js ?upper prev gen_values name
-                    with Widget.Bad_value msg ->
-                        Widget.bad_value "%s: %s" name msg in
-                Some (Pdu.name_of_layer layer, pack_layer layer),
-                layer :: layers
-            ) (None, []) |>
-            snd
+    (** From an array of proto names and synthesized layers as JSON, top to
+     * bottom, describing the packet to generate, create an array of actual
+     * layers as Pdu.layer, from which a [Packet.Pdu.t] is easily formed
+     * (array to list, in reverse order, see [pdu_of_array_top_to_bottom]).
+     * Note that the proto names are proper names as given by
+     * [Packet.Pdu.name_of_layer] (or [layer_name_of_field_name]), not
+     * field names.
+     * [prev] is the previous such packet, if any. It is needed, along with
+     * the upper layer, to generate some default values. *)
+    let of_synth layers ?prev gen_values =
+        let upper = ref None in
+        Array.init (Array.length layers) (fun i ->
+            let layer_name, js = layers.(i) in
+            let prev_layer =
+                (* Just in case the packet generator was edited while running,
+                 * which should never happen. *)
+                Option.bind prev (fun prev -> try Some prev.(i) with _ -> None) in
+            let layer =
+                try layer_of_synth js ?upper:!upper prev_layer gen_values layer_name
+                with Widget.Bad_value msg ->
+                    Widget.bad_value "%s: %s" layer_name msg in
+            upper := Some (layer_name, pack_layer layer) ;
+            layer)
+
+    (* Helper to transform a list of layers as JSON into the array format expected
+     * by [of_synth]: *)
+    let to_array_top_to_bottom = function
+        | `Assoc lst ->
+            List.rev_map (fun (field_name, layer) ->
+                layer_name_of_field_name field_name, layer
+            ) lst |>
+            Array.of_list
         | js ->
             Widget.bad_value "expected a stack of layers, not %s"
                 (Yojson.Basic.to_string js)
+
+    (* Similarly, transform the output of [of_synth] into a [Packet.Pdu.t]: *)
+    let pdu_of_array_top_to_bottom a =
+        Array.fold_left (fun lst layer -> layer :: lst) [] a
 
     (* Real traffic, every value a constant: what is read back is the packet,
        but for the payloads, which below the top layer are the layers above
@@ -187,9 +203,13 @@ struct
         Pcap.enum_of_file file /@ Pdu.unpack |>
         Enum.iter (fun p ->
           let js = Pdu.to_json p in
-          let synth = Generator.wrap (Pdu.kind_of p) Generator.const js |> auto_ts in
+          let synth =
+            Generator.wrap (Pdu.kind_of p) Generator.const js |> auto_ts |>
+            to_array_top_to_bottom in
+          let js' =
+            Pdu.to_json (pdu_of_array_top_to_bottom (of_synth synth [||])) in
           assert_equal ~printer:Yojson.Basic.to_string
-            (comparable js) (comparable (Pdu.to_json (of_synth synth [||]))))
+            (comparable js) (comparable js'))
       ) [ "tests/someweb.pcap" ; "tests/someweb_sll.pcap" ;
           "tests/various_vlans.pcap" ]
      *)
@@ -203,17 +223,17 @@ struct
             `Assoc (List.map (fun (n, v) -> n, if n = "id" then `Null else v) fields)
         | js -> js in
       let synth =
-        `Assoc [ "Eth", autos (Pdu.Eth (Eth.Pdu.random ())) ;
-                 "Ip", autos (Pdu.Ip (Ip.Pdu.random ())) ;
-                 "Udp", autos (Pdu.Udp (Udp.Pdu.random ())) ;
-                 "Dns", layer_synth Generator.const (Pdu.Dns (Dns.Pdu.random ())) |>
-                        auto_id ] in
+        [| "Dns", layer_synth Generator.const (Pdu.Dns (Dns.Pdu.random ())) |>
+                     auto_id ;
+           "Udp", autos (Pdu.Udp (Udp.Pdu.random ())) ;
+           "Ip", autos (Pdu.Ip (Ip.Pdu.random ())) ;
+           "Eth", autos (Pdu.Eth (Eth.Pdu.random ())) |] in
       let p1 = of_synth synth [||] in
       let p2 = of_synth synth ~prev:p1 [||] in
       let printer = string_of_int in
       match p1, p2 with
-      | [ Pdu.Eth eth ; Pdu.Ip ip ; Pdu.Udp udp ; Pdu.Dns dns ],
-        [ _ ; Pdu.Ip ip2 ; _ ; Pdu.Dns dns2 ] ->
+      | [| Pdu.Dns dns ; Pdu.Udp udp ; Pdu.Ip ip ; Pdu.Eth eth |],
+        [| Pdu.Dns dns2 ;          _ ; Pdu.Ip ip2 ; _ |] ->
           assert_equal ~printer (Arp.HwProto.ip4 :> int) (eth.Eth.Pdu.proto :> int) ;
           assert_equal ~printer (Ip.Proto.udp :> int) (ip.Ip.Pdu.proto :> int) ;
           assert_equal ~printer 53 (udp.Udp.Pdu.dst_port :> int) ;
