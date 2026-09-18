@@ -597,17 +597,24 @@ let rec check_value ?(name="value") k v =
     (* Its bytes and what they amount to, which is what [json_of_packet]
      * writes. *)
     | Packet, `Assoc [ "bits", `String _ ; "descr", `String _ ] -> ()
-    (* A layer to each field, and no more than that: what is inside one is a
-     * field of some protocol, and which fields those are is [Packet]'s answer
-     * and not this module's (see [describe_packet]). What checks them is
-     * [Synth.Packet.of_synth], reading them. *)
-    | Synth, `Assoc layers ->
-        List.iter (fun (lname, v) ->
-            match v with
-            | `Assoc _ -> ()
-            | v ->
-                bad_value "%s.%s should be the fields of a layer, not %s" name
-                    lname (Yojson.Basic.to_string v)
+    (* A named layer to each entry, outermost first, and no more than that:
+     * what is inside one is a field of some protocol, and which fields those
+     * are is [Packet]'s answer and not this module's (see [describe_packet]).
+     * What checks them is [Synth.Packet.of_synth], reading them. *)
+    | Synth, `List layers ->
+        List.iteri (fun i layer ->
+            let wrong what =
+                bad_value "%s[%d] should be %s" name i what in
+            match layer with
+            | `Assoc _ ->
+                (match json_of_field "name" layer with
+                | `String _ -> ()
+                | _ -> wrong "a layer named by its protocol") ;
+                (match json_of_field "fields" layer with
+                | `Assoc _ -> ()
+                | _ -> wrong "a layer and the fields it is made of")
+            | _ ->
+                wrong "a layer and the fields it is made of"
         ) layers
     | Metric, _ -> ()
     | Optional _, `Null -> ()

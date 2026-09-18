@@ -172,13 +172,13 @@ struct
 
     (* The protocol of a layer, by its name as [Packet.Pdu.field_names] writes
      * it: "Vlan 2" is a Vlan. *)
-    let layer_name_of_field_name name =
+    let protocol_of_field_name name =
         try String.sub name 0 (String.index name ' ')
         with Not_found -> name
 
-    (*$= layer_name_of_field_name & ~printer:identity
-      "Vlan" (layer_name_of_field_name "Vlan 2")
-      "Eth" (layer_name_of_field_name "Eth")
+    (*$= protocol_of_field_name & ~printer:identity
+      "Vlan" (protocol_of_field_name "Vlan 2")
+      "Eth" (protocol_of_field_name "Eth")
      *)
 
     let pack_layer = function
@@ -251,8 +251,7 @@ struct
      * layers as Pdu.layer, from which a [Packet.Pdu.t] is easily formed
      * (array to list, in reverse order, see [pdu_of_array_top_to_bottom]).
      * Note that the proto names are proper names as given by
-     * [Packet.Pdu.name_of_layer] (or [layer_name_of_field_name]), not
-     * field names.
+     * [Packet.Pdu.name_of_layer], not field names.
      * [prev] is the previous such packet, if any. It is needed, along with
      * the upper layer, to generate some default values. *)
     let of_synth layers ?prev gen_values =
@@ -270,16 +269,36 @@ struct
             upper := Some (layer_name, pack_layer layer) ;
             layer)
 
-    (* Helper to transform a list of layers as JSON into the array format expected
-     * by [of_synth]: *)
+    (* Helper to transform the layers of a synth into the array format expected
+     * by [of_synth].
+     *
+     * A synth names its layers in a list, outermost first, each
+     * [{ "name": <protocol>, "fields": {...} }]: a list and not an object
+     * keyed by the name, since a packet may well carry the same protocol
+     * twice and nothing then has to number the second (see
+     * [synth_of_packet_json]). *)
     let to_array_top_to_bottom = function
-        | `Assoc lst ->
-            List.rev_map (fun (field_name, layer) ->
-                layer_name_of_field_name field_name, layer
-            ) lst |>
+        | `List layers ->
+            List.rev_map (fun layer ->
+                Widget.to_field "name" Widget.to_string layer,
+                Widget.json_of_field "fields" layer
+            ) layers |>
             Array.of_list
         | js ->
             Widget.bad_value "expected a stack of layers, not %s"
+                (Yojson.Basic.to_string js)
+
+    (* A packet as [Packet.Pdu.to_json] writes it -- one field per layer, the
+     * second of a protocol numbered -- as the layers of a synth: what turns a
+     * packet that was captured into one a generator can be given. *)
+    let synth_of_packet_json = function
+        | `Assoc layers ->
+            `List (List.map (fun (field_name, fields) ->
+                `Assoc [ "name", `String (protocol_of_field_name field_name) ;
+                         "fields", fields ]
+            ) layers)
+        | js ->
+            Widget.bad_value "expected a packet, not %s"
                 (Yojson.Basic.to_string js)
 
     (* Similarly, transform the output of [of_synth] into a [Packet.Pdu.t]: *)
@@ -311,7 +330,7 @@ struct
           let js = Pdu.to_json p in
           let synth =
             Generator.wrap (Pdu.kind_of p) Generator.const js |> auto_ts |>
-            to_array_top_to_bottom in
+            synth_of_packet_json |> to_array_top_to_bottom in
           let js' =
             Pdu.to_json (pdu_of_array_top_to_bottom (of_synth synth [||])) in
           assert_equal ~printer:Yojson.Basic.to_string
@@ -417,12 +436,14 @@ let generators_of_json js =
  * synthesizer is born with, and the shape a reader edits rather than types
  * from nothing. *)
 let default_packet () : Yojson.Basic.t =
-    let layer l =
-        Generator.wrap (Packet.Pdu.kind_of_layer l) (fun _ -> `Null)
-            (Packet.Pdu.json_of_layer l) in
-    `Assoc [ "Eth", layer (Packet.Pdu.Eth (Eth.Pdu.random ())) ;
-             "Ip", layer (Packet.Pdu.Ip (Ip.Pdu.random ())) ;
-             "Tcp", layer (Packet.Pdu.Tcp (Tcp.Pdu.random ())) ]
+    let layer name l : Yojson.Basic.t =
+        `Assoc [ "name", `String name ;
+                 "fields",
+                     Generator.wrap (Packet.Pdu.kind_of_layer l) (fun _ -> `Null)
+                         (Packet.Pdu.json_of_layer l) ] in
+    `List [ layer "Eth" (Packet.Pdu.Eth (Eth.Pdu.random ())) ;
+            layer "Ip" (Packet.Pdu.Ip (Ip.Pdu.random ())) ;
+            layer "Tcp" (Packet.Pdu.Tcp (Tcp.Pdu.random ())) ]
 
 (* Check that the stream and packet definitions match the available generators.
  * Called whenever one is updated. *)
@@ -772,15 +793,15 @@ let make ~parent ?location ?speeds ?(adapters=1) ?(independent=false) name =
   Eth.Cable.plug cable (t.ifaces.(0).widget, 0) (sink.widget, 0) ;
   (* The IP source address of every packet, from the generator. *)
   let from_gen = function
-    | `Assoc layers ->
-        `Assoc (List.map (fun (lname, layer) ->
-          lname,
-          match lname, layer with
-          | "Ip", `Assoc fields ->
-              `Assoc (List.map (fun (fname, v) ->
-                fname,
-                if fname = "source" then `Assoc [ "gen", `Int 0 ] else v) fields)
-          | _ -> layer) layers)
+    | `List layers ->
+        `List (List.map (function
+          | `Assoc [ "name", `String "Ip" ; "fields", `Assoc fields ] ->
+              `Assoc [ "name", `String "Ip" ;
+                       "fields", `Assoc (List.map (fun (fname, v) ->
+                           fname,
+                           if fname = "source" then `Assoc [ "gen", `Int 0 ]
+                                               else v) fields) ]
+          | layer -> layer) layers)
     | js -> js in
   set_generators t
     [| Generator.make "src" (Generator.Increment { start = 1 ; step = 1 }) |] ;
