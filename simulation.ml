@@ -1009,6 +1009,9 @@ let next_event (t : t) =
                 match Events.min_binding t.events with
                 | exception Not_found -> None
                 | ts, (_power, f) ->
+                    (* powering down a power source clears its events (or a
+                     * rapid power cycle would leave them), so no need to check
+                     * [power] here *)
                     if debug then Printf.printf "Clock: next_event: executing since it's %s\n%!" (Time.to_string ts) ;
                     t.events <- Events.remove ts t.events ;
                     t.now := ts ;

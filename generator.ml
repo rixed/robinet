@@ -450,10 +450,10 @@ let of_json js =
                  (pair int int) ; \
              map (fun (a, b) -> Uniform { start_incl = a ; \
                                           stop_excl = a + 1 + abs b }) \
-                 (pair small_int small_nat) ; \
+                 (pair nat_small nat_small) ; \
              map (fun (a, b) -> Normal { mean = float_of_int a ; \
                                          scale = float_of_int (abs b) }) \
-                 (pair small_int small_int) ]) \
+                 (pair nat_small nat_small) ]) \
     (fun k -> \
       let t = make "g" k in \
       Widget.check_value named_kind (to_json t) ; \

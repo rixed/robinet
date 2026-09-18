@@ -839,14 +839,6 @@ let unique_among (parent : t) name =
     loop 2
 
 (* The one place a widget is built. *)
-(* A source of its own for [t], named after it, and switched off: a network is
- * built dark and lit once it stands, so that nothing in it goes looking for
- * what is not there yet -- a host for a DHCP server, a gateway's server for
- * the address it serves from. Whoever mints one switches it on as the last
- * thing it does, unless it was asked for a device that is to stay off. *)
-let mint_power (t : t) =
-    t.power <- { on = false ; name = full_name t ; sim = sim t } ;
-    t.owns_power <- true
 
 (* The properties every widget carries, whatever it stands for. Applied here
  * rather than written into the record, since a root widget is built by
@@ -905,19 +897,25 @@ let make ~parent ?power ?(own_power=false) ?size ?location
         device_type ;
         device = None ;
         made_with = None ;
+        (* "destructor" for the few widgets that hold resources that are not
+         * garbage collected, such as file handlers, or that need to "unlink"
+         * themselves from some data structure on deletion: *)
         on_delete = ignore ;
         (* What it draws on until [own_power] says otherwise: what it was
          * handed, or what its parent draws on. *)
-        power = (match power with Some p -> p | None -> parent.power) ;
-        owns_power = false ;
+        power = power |? parent.power ; (* altered below if [own_power] *)
+        owns_power = own_power ;
+        (* Behavior on power-up: *)
         power_up = ignore ;
+        (* Behavior on power-down: *)
         power_down = ignore ;
         error = None ;
         location ;
         logger ;
         ports = no_ports ;
         properties } in
-    if own_power then mint_power t ;
+    (* power starts off by default: *)
+    if own_power then t.power <- { on = false ; name = full_name t ; sim = sim t } ;
     (* Linking it to its parent is all the registration there is: a simulation's
      * inventory of widgets is that tree, reachable from its root.
      * Appended rather than prepended so that children stay in creation order,

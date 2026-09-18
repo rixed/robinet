@@ -106,7 +106,8 @@ type model =
     | TRecorder of { fname : string option ; caplen : int option ;
                      dlt : Pcap.Dlt.t option }
     | TReplayer of { fname : string option ; loop : bool }
-    | TSynth of { adapters : int ; speed : Eth.Speed.t ; independent : bool }
+    | TSynth of { adapters : int ; speeds : Eth.Speed.t list ;
+                  independent : bool }
     | TNote of { text : string }
 
 (** A kind of device: what it is called, what it needs, and how to read what it
@@ -625,19 +626,20 @@ let synthesizer =
            * own. *)
           param "adapters" ~kind:(IRange (1, 1024)) ~default:(`Int 1)
               ~descr:"How many Ethernet adapters it has." ;
-          param "speed"
-              ~kind:(Widget.one_of (Widget.choices Eth.Speed.names))
-              ~default:(`Int (Eth.Speed.to_enum Eth.Speed.Eth5Gbps))
-              ~descr:"Speed of every adapter." ;
+          param "speeds" ~kind:(Set (Widget.choices Eth.Speed.names))
+              ~default:(`List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
+                                        Eth.Iface.default_speeds))
+              ~descr:"Speeds accepted by every adapters." ;
           param "independent" ~kind:Bool ~default:(`Bool false)
               ~descr:"Whether every adapter draws its own values, rather \
                       than emitting the very same packets." ] ;
       of_params = fun args ->
           TSynth {
               adapters = int args "adapters" ;
-              speed =
-                  Eth.Speed.all.(Widget.to_choice (Widget.choices Eth.Speed.names)
-                                     (arg args "speed")) ;
+              speeds =
+                  list args "speeds" (fun v ->
+                      Eth.Speed.all.(Widget.to_choice
+                                         (Widget.choices Eth.Speed.names) v)) ;
               independent = bool args "independent" } }
 
 (* The one entry that is not a device at all: a label on the map, with no
@@ -745,9 +747,10 @@ let to_params =
     | TReplayer { fname ; loop } ->
         [ "file name", str_opt fname ;
           "loop", `Bool loop ]
-    | TSynth { adapters ; speed ; independent } ->
+    | TSynth { adapters ; speeds ; independent } ->
         [ "adapters", `Int adapters ;
-          "speed", `Int (Eth.Speed.to_enum speed) ;
+          "speeds", `List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
+                                    speeds) ;
           "independent", `Bool independent ]
     | TNote { text } ->
         [ "text", `String text ]
@@ -847,8 +850,8 @@ let build ~parent name = function
     | TReplayer { fname ; loop } as m ->
         let replayer = Pcap.replayer ~parent ?fname ~loop name in
         replayer.Pcap.widget, m
-    | TSynth { adapters ; speed ; independent } as m ->
-        let t = Synth.make ~parent ~adapters ~speed ~independent name in
+    | TSynth { adapters ; speeds ; independent } as m ->
+        let t = Synth.make ~parent ~adapters ~speeds ~independent name in
         t.Synth.widget, m
     | TNote { text } as m ->
         let widget = Widget.make ~parent ~device_type:"note" name in

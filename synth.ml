@@ -50,7 +50,7 @@ let synth_of_json of_json = function
             (Yojson.Basic.to_string js)
 
 (*$Q synth_of_json
-  Q.(option (option small_nat)) (fun s -> \
+  Q.(option (option nat_small)) (fun s -> \
     let s = match s with \
       | None -> Automatic \
       | Some None -> Generator 3 \
@@ -114,7 +114,7 @@ struct
             Widget.to_field "distance from end" Widget.to_bool js }
 
     (*$Q of_json
-      Q.(triple (option small_nat) (option small_nat) bool) \
+      Q.(triple (option nat_small) (option nat_small) bool) \
         (fun (stop_after, d, distance_from_end) -> \
           let distance = match d with None -> Automatic | Some d -> Const d in \
           let t = { stop_after ; distance ; distance_from_end } in \
@@ -424,12 +424,8 @@ let default_packet () : Yojson.Basic.t =
              "Ip", layer (Packet.Pdu.Ip (Ip.Pdu.random ())) ;
              "Tcp", layer (Packet.Pdu.Tcp (Tcp.Pdu.random ())) ]
 
-(* A synth is worth what a packet made of it is worth: whatever the interface
- * sends is read once, here, rather than at the next packet and into the log.
- * The three go together -- what the packet and the stream reference are those
- * generators -- so they are checked together, before any of them is installed
- * (see [set_generators] and the others). The values the generators are at
- * have nothing to do with it, so any will do. *)
+(* Check that the stream and packet definitions match the available generators.
+ * Called whenever one is updated. *)
 let check ~generators ~stream ~packet =
     let gen_values = Array.map (fun g -> Generator.get g 0) generators in
     ignore (Packet.of_synth (Packet.to_array_top_to_bottom packet)
@@ -445,7 +441,7 @@ let check ~generators ~stream ~packet =
  * step being drawn once and not recomputable afterwards. *)
 type state =
     { (* Which adapters this stream feeds: one of them, or all of them. *)
-      ifaces : Eth.Iface.t array ;
+      ifaces : int array ; (* indexes in t.ifaces *)
       mutable count : int ;
       mutable prev : Packet.Pdu.layer array option }
 
@@ -479,14 +475,12 @@ type t =
       mutable independent : bool ;
       (* Whether it is emitting. A synthesizer is born stopped: what it is born
        * with is a packet nobody has looked at yet. *)
-      mutable running : bool ;
-      mutable states : state list ;
-      (* Which run of the stream the packets on their way belong to, as a
-       * replayer's does: everything that stops or restarts the emission bumps
-       * it, and a packet that comes due bearing an older number is dropped
-       * along with the chain it would have continued. Otherwise starting twice
-       * would leave two chains reading the same stream. *)
+      mutable emitting : bool ;
+      mutable states : state array ;
+      (* Generation number, used by [emit_next] to stop calling itself back when
+       * the synthesizer config has been changed: *)
       mutable gen : int ;
+      (* FIXME: If we wanted to count packets we should do this in the Iface. *)
       packets_sent : Metric.Counter.t }
 
 type Widget.device += Synthesizer of t
@@ -504,7 +498,7 @@ let of_widget (w : Widget.t) =
  * distance to the next one, so that a stream whose distance is a generator
  * reads the same value the packet did. *)
 let rec emit_next t gen state =
-    if gen = t.gen && t.running &&
+    if gen = t.gen && t.emitting &&
        not (Stream.is_over t.stream state.count) then (
         let gen_values =
             Array.map (fun g -> Generator.get g state.count) t.generators in
@@ -518,13 +512,13 @@ let rec emit_next t gen state =
         let bits = Packet.pack_layer layers.(Array.length layers - 1) in
         let now = Simulation.Widget.now t.widget in
         Metric.Counter.add t.packets_sent ~now (Array.length state.ifaces) ;
-        Array.iter (fun (iface : Eth.Iface.t) -> iface.emit bits) state.ifaces ;
+        Array.iter (fun i -> t.ifaces.(i).emit bits) state.ifaces ;
         (* Timed on the first adapter it feeds: the others have ports of their
          * own, and what they make of a frame handed to them is their own
          * business (see [Eth.Iface.set_read]). A link that has not negotiated
          * yet is paced at the best speed it offers, that being what it will
          * settle on with something at least as fast at the other end. *)
-        let iface = state.ifaces.(0) in
+        let iface = t.ifaces.(state.ifaces.(0)) in
         let speed =
             match iface.negotiated with
             | Some (speed, _) -> speed
@@ -541,33 +535,32 @@ let rec emit_next t gen state =
         Simulation.delay t.widget.power (Eth.Speed.duration speed d)
                          (emit_next t gen) state)
 
-(* Start the stream, from its first packet: a synthesizer emits a stream, and
- * what "start" means is that stream and not the one that was interrupted. *)
+(* Stop/start act on the stream as opposed to merely pausing packet generation.
+ * When it's restarted, a stream reset its generators from step 1 (which
+ * matters for incrementing values). *)
 let start t =
-    t.running <- true ;
+    t.emitting <- true ;
     t.gen <- t.gen + 1 ;
+    (* Recreate the states from scratch rather than reseting them because we
+     * might have changed the [independent] flag: *)
     t.states <-
         (if t.independent then
-            Array.to_list t.ifaces |>
-            List.map (fun iface ->
-                { ifaces = [| iface |] ; count = 0 ; prev = None })
+            (* One state per iface: *)
+            Array.(init (length t.ifaces) (fun i ->
+                { ifaces = [| i |] ; count = 0 ; prev = None }))
         else
-            [ { ifaces = t.ifaces ; count = 0 ; prev = None } ]) ;
-    List.iter (fun state ->
+            (* One state with all ifaces: *)
+            [| { ifaces = Array.(init (length t.ifaces) identity) ;
+                 count = 0 ; prev = None } |]) ;
+    Array.iter (fun state ->
         Simulation.asap t.widget.power (emit_next t t.gen) state
     ) t.states
 
 let stop t =
-    t.running <- false ;
-    t.gen <- t.gen + 1 ;
-    t.states <- []
+    t.emitting <- false ;
+    t.states <- [||]
 
-(* The three halves of a synth, each installed only once the three of them
- * read together (see [check]): what the interface sends that cannot be used
- * is refused as it arrives, leaving the synthesizer holding what it had.
- *
- * What is emitting reads them from its next packet on, as a replayer plays the
- * file as it is rather than as it was. *)
+(* Called by the UI when updating any of those interdependent properties: *)
 let set_generators t generators =
     check ~generators ~stream:t.stream ~packet:t.packet ;
     t.generators <- generators
@@ -579,13 +572,6 @@ let set_stream t stream =
 let set_packet t packet =
     check ~generators:t.generators ~stream:t.stream ~packet ;
     t.packet <- packet
-
-(* Unlike the three above, this one says how many streams there are, which is
- * settled when the emission starts -- so changing it starts it again. *)
-let set_independent t independent =
-    if independent <> t.independent then (
-        t.independent <- independent ;
-        if t.running then start t)
 
 let to_json t : Yojson.Basic.t =
     let named = named t.generators in
@@ -608,25 +594,23 @@ let set_json t js =
     t.generators <- generators ;
     t.stream <- stream ;
     t.packet <- packet ;
-    set_independent t independent
+    t.independent <- independent
 
-let make ~parent ?location ?(speed=Eth.Speed.Eth5Gbps) ?(adapters=1)
-         ?(independent=false) name =
-    if adapters < 1 then
-        Widget.bad_value "a synthesizer has at least one adapter" ;
+let make ~parent ?location ?speeds ?(adapters=1) ?(independent=false) name =
+    if adapters < 1 then invalid_arg "Synth.make" ;
     let widget =
         Widget.make ~parent ?location ~device_type:"synthesizer"
                     ~own_power:true name in
     let ifaces =
         Array.init adapters (fun i ->
-            Eth.Iface.make ~parent:widget ~power:widget.power ~speeds:[ speed ]
-                           (Printf.sprintf "eth%d" i)) in
+            Eth.Iface.make ~parent:widget ~power:widget.power ?speeds
+                           ("eth"^ string_of_int i)) in
     let t =
         { widget ; ifaces ; generators = [||] ;
           stream = { stop_after = None ; distance = Automatic ;
                      distance_from_end = true } ;
           packet = default_packet () ; independent ;
-          running = false ; states = [] ; gen = 0 ;
+          emitting = false ; states = [||] ; gen = 0 ;
           packets_sent = Metric.Counter.make () } in
     widget.device <- Some (Synthesizer t) ;
     (* Its adapters are its ports, as a switch's are. *)
@@ -641,12 +625,12 @@ let make ~parent ?location ?(speed=Eth.Speed.Eth5Gbps) ?(adapters=1)
         set_capabilities = (fun i c ->
             t.ifaces.(i).widget.ports.set_capabilities 0 c) } ;
     Widget.add_properties widget Widget.[
-        property "running" ~kind:Bool
+        property "emitting" ~kind:Bool
             ~descr:"Whether packets are being emitted."
-            ~getter:(fun () -> `Bool t.running)
+            ~getter:(fun () -> `Bool t.emitting)
             ~setter:(fun v ->
                 let v = to_bool v in
-                if v <> t.running then (
+                if v <> t.emitting then (
                     if v then start t else stop t ;
                     Log.(log widget.logger Info (lazy (
                         (if v then "Started" else "Stopped") ^" emitting"))))) ;
@@ -671,16 +655,15 @@ let make ~parent ?location ?(speed=Eth.Speed.Eth5Gbps) ?(adapters=1)
             ~setter:(fun v -> set_packet t (numbered t.generators v)) ;
         property "independent" ~kind:Bool
             ~descr:"Whether every adapter draws its own values, rather than \
-                    emitting the very same packets."
+                    emitting the very same packets (requires restart)."
             ~getter:(fun () -> `Bool t.independent)
-            ~setter:(fun v -> set_independent t (to_bool v)) ;
+            ~setter:(fun v -> t.independent <- to_bool v) ;
         metric_property "packets" ~descr:"Packets emitted."
             (Metric.Counter.T t.packets_sent) ] ;
     (* A machine switched off emits nothing, and one switched back on goes on
      * emitting if that is what it was doing: its events were dropped with the
      * supply (see [Simulation.at]), so the chain has to be started again. *)
-    widget.power_up <- (fun () -> if t.running then start t) ;
-    widget.on_delete <- (fun () -> stop t) ;
+    widget.power_up <- (fun () -> if t.emitting then start t) ;
     Simulation.power_up widget.power ;
     t
 
@@ -689,7 +672,7 @@ let make ~parent ?location ?(speed=Eth.Speed.Eth5Gbps) ?(adapters=1)
   let sim = Simulation.make ~realtime:false "synth" in
   let t = make ~parent:sim.root ~adapters:3 "gen" in
   assert_equal ~printer:string_of_int 3 (t.widget.ports.count ()) ;
-  "a synthesizer is born stopped" @? not t.running ;
+  "a synthesizer is born stopped" @? not t.emitting ;
   "and with a packet of its own" @?
     (check ~generators:t.generators ~stream:t.stream ~packet:t.packet ; true) ;
   "which is what its widget stands for" @?
@@ -699,8 +682,8 @@ let make ~parent ?location ?(speed=Eth.Speed.Eth5Gbps) ?(adapters=1)
               t.widget.properties in
   let set name v = (Option.get (prop name).setter) v in
   let get name = (prop name).getter () in
-  set "running" (`Bool true) ;
-  "it starts when told to" @? t.running ;
+  set "emitting" (`Bool true) ;
+  "it starts when told to" @? t.emitting ;
   (* A generator is named from the outside, and referenced by that name. *)
   set "generators"
     (`List [ Generator.to_json (Generator.make "len" (Generator.Constant 3)) ]) ;
@@ -774,7 +757,7 @@ let make ~parent ?location ?(speed=Eth.Speed.Eth5Gbps) ?(adapters=1)
      List.map hexstring_of_bitstring got.(1)) ;
   "and the stream stops after those" @? not (Stream.is_over t.stream 2) ;
   (* Every adapter drawing its own values emits packets of its own. *)
-  set_independent t true ;
+  t.independent <- true ;
   emit 3 ;
   assert_equal ~printer 3 (List.length got.(0)) ;
   assert_equal ~printer 3 (List.length got.(1)) ;
