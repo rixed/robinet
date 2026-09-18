@@ -37,6 +37,10 @@
     POST   /api/simulations/<id>/pause      freeze its clock
     POST   /api/simulations/<id>/resume     and let it run again
     POST   /api/simulations/<id>/step       run one event (?n= for more)
+    GET    /api/protocols                   what a layer of each protocol is
+                                            made of, as a kind: what draws the
+                                            fields of a packet, one a
+                                            synthesizer is being given included
     GET    /api/device-types               what can be built, and what each
                                             kind of device has to be told
     GET    /api/simulations/<s>/widgets    its widgets; ?path=/a/b to filter
@@ -720,6 +724,16 @@ let get_widget _mth matches _vars _qry_body resp =
     Simulation.borrow sim (fun () ->
         respond resp (json_of_widget (widget_of_matches sim matches 2)))
 
+(* What a layer of each protocol is made of. Independent of any packet: a
+ * protocol's kind is a constant (see [Packet.Pdu.kinds_of_protocols]), which is
+ * what lets the interface draw the fields of a layer that does not exist yet --
+ * the packet a synthesizer is being given. Asked for once and kept, since
+ * nothing here ever changes. *)
+let get_protocols _mth _matches _vars _qry_body resp =
+    respond resp (`List (List.map (fun (name, kind) ->
+        `Assoc [ "name", `String name ; "kind", json_of_kind kind ]
+    ) Packet.Pdu.kinds_of_protocols))
+
 (* What can be built, and what each of them has to be told. Independent of any
  * simulation: the same catalogue builds into all of them. *)
 let get_device_types _mth _matches _vars _qry_body resp =
@@ -1362,6 +1376,7 @@ let resources serving : (Str.regexp * Opache.resource) list =
             | "GET" -> get_widgets mth matches vars qry_body resp
             | "POST" -> create_widget mth matches vars qry_body resp
             | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
+    Str.regexp "/api/protocols$", get_protocols ;
     Str.regexp "/api/device-types$", get_device_types ;
     (* Belongs to no simulation: a frame is a frame wherever it was caught. *)
     Str.regexp "/api/packets/decode$",
