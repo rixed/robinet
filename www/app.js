@@ -81,7 +81,31 @@ const draftFor = (p, text) =>
  * across; nothing declares one yet (see [Record] in simTypes.ml). */
 const isStructured = (kind) => {
     const t = baseKind(kind).type
-    return t === 'list' || t === 'row'
+    return t === 'list' || t === 'row' || t === 'record'
+}
+
+/* The fields one value is made of, or none for a value that is a single input:
+ * a row and a record differ in how the simulator means them to be laid out and
+ * not in what they hold (see [Row] and [Record] in simTypes.ml), and a table of
+ * cells is what both are drawn as here. */
+const fieldsOf = (kind) => {
+    const k = baseKind(kind)
+    return k.type === 'row' || k.type === 'record' ? k.fields : null
+}
+
+/* Which shape a variant holds, of the ones it offers: the single field of the
+ * value names it (see [Variant] in simTypes.ml). Falls back to the first case,
+ * which is what an empty cell offers to fill in. */
+const caseOf = (kind, value) => {
+    const cases = baseKind(kind).cases || []
+    const held = value && typeof value === 'object' ? Object.keys(value)[0] : null
+    return cases.some(c => c.name === held) ? held
+                                            : (cases.length ? cases[0].name : null)
+}
+
+const caseKind = (kind, name) => {
+    const c = (baseKind(kind).cases || []).find(c => c.name === name)
+    return c ? c.kind : null
 }
 
 /* Beyond how many characters a string is no longer a line to be read at a
@@ -110,6 +134,13 @@ const cellValue = (c) => {
     /* Unticked is a value in itself: there is none. */
     if (c.kind.type === 'optional' && !c.enabled) return null
     switch (baseKind(c.kind).type) {
+        /* The case it holds, named, carrying what its own kind says: the
+         * fields of a row, or the single value of anything else. */
+        case 'variant':
+            return { [c.case]:
+                fieldsOf(caseKind(c.kind, c.case))
+                    ? Object.fromEntries(c.sub.map(s => [ s.name, cellValue(s) ]))
+                    : cellValue(c.sub[0]) }
         case 'bool':
             return c.draft === true || c.draft === 'true'
         /* Which choice, by its own number rather than by its place among
@@ -140,7 +171,19 @@ const cellValue = (c) => {
  * one would shift the contents of every row below it up by one. */
 let rowSeq = 0
 
-const cellOf = (name, kind, value) => ({
+const cellOf = (name, kind, value) => {
+    const c = plainCellOf(name, kind, value)
+    if (baseKind(kind).type !== 'variant') return c
+    /* Which shape it holds, and the inputs of that shape: a variant is a
+     * choice and then whatever the chosen case carries, so a cell of one is a
+     * select and the cells of that case (see [pickCase]). */
+    c.case = caseOf(kind, value)
+    c.sub = cellsOf(caseKind(kind, c.case),
+                    value == null ? null : value[c.case])
+    return c
+}
+
+const plainCellOf = (name, kind, value) => ({
     name, kind,
     /* What the simulator said, beside the draft of what is typed for it. Kept
      * because a few kinds are read rather than typed -- a packet is an object
@@ -158,11 +201,13 @@ const cellOf = (name, kind, value) => ({
 /* The cells one value of [kind] is edited through: one per field when it is a
  * row -- in the order the simulator named them, which is the order of the
  * columns -- and a single unnamed one otherwise. */
-const cellsOf = (kind, value) =>
-    kind.type === 'row'
-        ? kind.fields.map(f => cellOf(f.name, f.kind,
-                                      value == null ? null : value[f.name]))
+const cellsOf = (kind, value) => {
+    const fields = fieldsOf(kind)
+    return fields
+        ? fields.map(f => cellOf(f.name, f.kind,
+                                 value == null ? null : value[f.name]))
         : [ cellOf(null, kind, value) ]
+}
 
 const rowOf = (kind, value) => ({ key: ++rowSeq, cells: cellsOf(kind, value) })
 
@@ -170,7 +215,10 @@ const rowOf = (kind, value) => ({ key: ++rowSeq, cells: cellsOf(kind, value) })
  * same thing: a value has no id to go by, and its place in the table is no
  * identity either -- a cable's last packets are a ring, and every frame that
  * arrives shifts every row along by one. */
-const rowIdent = (row) => row.cells.map(c => String(c.draft)).join('\u0001')
+const cellIdent = (c) =>
+    c.sub ? c.case + '(' + c.sub.map(cellIdent).join(',') + ')' : String(c.draft)
+
+const rowIdent = (row) => row.cells.map(cellIdent).join('\u0001')
 
 /* Rebuilding a table must not shut the cells the reader opened. */
 const carryShown = (rows, was) => {
@@ -193,7 +241,8 @@ const carryShown = (rows, was) => {
  * A tick box that is off is one of those, whatever the field beside it still
  * shows -- that is what the box says. */
 const cellIsBlank = (c) =>
-    (c.kind.type === 'optional' && !c.enabled) || String(c.draft).trim() === ''
+    (c.kind.type === 'optional' && !c.enabled) ||
+    (c.sub ? c.sub.every(cellIsBlank) : String(c.draft).trim() === '')
 
 /* A row where every cell is blank is not an element of the list: it is the
  * empty row the reader was given to fill in, and it goes out of the value the
@@ -201,7 +250,7 @@ const cellIsBlank = (c) =>
 const rowIsBlank = (row) => row.cells.every(cellIsBlank)
 
 const rowValue = (kind, row) =>
-    kind.type === 'row'
+    fieldsOf(kind)
         ? Object.fromEntries(row.cells.map(c => [ c.name, cellValue(c) ]))
         : cellValue(row.cells[0])
 
@@ -247,7 +296,7 @@ const edited = (p) => {
     const k = baseKind(p.kind)
     if (k.type === 'list')
         return p.rows.filter(r => !rowIsBlank(r)).map(r => rowValue(k.of, r))
-    if (k.type === 'row')
+    if (k.type === 'row' || k.type === 'record')
         return rowValue(k, p.rows[0])
     return cellValue(p)
 }
@@ -2237,8 +2286,7 @@ document.addEventListener('alpine:init', () => {
          * there is nothing to head the single column with. */
         cols(p) {
             const k = baseKind(p.kind)
-            const el = k.type === 'list' ? k.of : k
-            return el.type === 'row' ? el.fields : null
+            return fieldsOf(k.type === 'list' ? k.of : k)
         },
 
         /* Rows are added and dropped from a list; a bare row is the one row
@@ -2266,10 +2314,33 @@ document.addEventListener('alpine:init', () => {
              * around them takes anything else (see [Bytes] in simTypes.ml), so
              * this is the one input that is none. */
             if (t === 'bytes') return 'bytes'
+            /* A choice of shapes, and then the inputs of the one chosen:
+             * see [pickCase]. */
+            if (t === 'variant') return 'variant'
             if (t === 'bool' || t === 'set') return t
             if (t === 'int' || t === 'float' || t === 'range' ||
                 t === 'duration') return 'number'
             return 'text'
+        },
+
+        /* The shapes a variant cell offers, and the one it holds. */
+        cases(c) {
+            return baseKind(c.kind).cases || []
+        },
+
+        /* Picking another shape gives it that shape's own inputs, empty: what
+         * one case holds says nothing about what another would. */
+        pickCase(p, c, name) {
+            c.case = name
+            c.sub = cellsOf(caseKind(c.kind, name), null)
+            this.touch(p)
+        },
+
+        /* The input one of those takes: the same kinds as any other cell, save
+         * that a case carrying a table of its own is left to be typed. */
+        subInput(s) {
+            const i = this.cellInput(s)
+            return i === 'number' || i === 'bool' ? i : 'text'
         },
 
         /* See [isOpenChoice] and [dlId]. */

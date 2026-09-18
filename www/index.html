@@ -658,6 +658,31 @@
                                                                                            :placeholder="hint(c)"
                                                                                            x-model="c.draft" @input="enable(c)"/>
                                                                                 </template>
+
+                                                                                <!-- The same choice of shapes as in
+                                                                                     the panel, nothing being built
+                                                                                     yet: see there. -->
+                                                                                <template x-if="cellInput(c) === 'variant'">
+                                                                                    <span class="variant">
+                                                                                        <select :disabled="!online"
+                                                                                                @change="pickCase(f, c, $event.target.value)">
+                                                                                            <template x-for="cs in cases(c)" :key="cs.name">
+                                                                                                <option :value="cs.name"
+                                                                                                        :selected="cs.name === c.case"
+                                                                                                        x-text="cs.name"></option>
+                                                                                            </template>
+                                                                                        </select>
+                                                                                        <template x-for="(s, j) in c.sub" :key="j">
+                                                                                            <label>
+                                                                                                <span x-show="s.name" x-text="s.name"></span>
+                                                                                                <input :type="subInput(s) === 'number' ? 'number' : 'text'"
+                                                                                                       :disabled="!online"
+                                                                                                       :placeholder="hint(s)"
+                                                                                                       x-model="s.draft"/>
+                                                                                            </label>
+                                                                                        </template>
+                                                                                    </span>
+                                                                                </template>
                                                                             </span></td>
                                                                         </template>
                                                                         <!-- Buttons of a form say what they
@@ -1301,6 +1326,48 @@
                                                                                            :placeholder="hint(c)"
                                                                                            x-model="c.draft"
                                                                                            @input="enable(c) ; touch(p)"/>
+                                                                                </template>
+
+                                                                                <!-- One of several shapes: which one,
+                                                                                     and then what that one carries --
+                                                                                     the fields of a row, or a single
+                                                                                     value. Picking another shape
+                                                                                     empties the inputs beside it (see
+                                                                                     [pickCase]): what one case holds
+                                                                                     says nothing about another. -->
+                                                                                <template x-if="!p.read_only && cellInput(c) === 'variant'">
+                                                                                    <span class="variant">
+                                                                                        <select :disabled="!online"
+                                                                                                @change="pickCase(p, c, $event.target.value)">
+                                                                                            <template x-for="cs in cases(c)" :key="cs.name">
+                                                                                                <option :value="cs.name"
+                                                                                                        :selected="cs.name === c.case"
+                                                                                                        x-text="cs.name"></option>
+                                                                                            </template>
+                                                                                        </select>
+                                                                                        <template x-for="(s, j) in c.sub" :key="j">
+                                                                                            <label>
+                                                                                                <span x-show="s.name" x-text="s.name"></span>
+                                                                                                <template x-if="subInput(s) === 'bool'">
+                                                                                                    <input type="checkbox" :disabled="!online"
+                                                                                                           :checked="s.draft === 'true'"
+                                                                                                           @change="s.draft = $event.target.checked ? 'true' : 'false' ;
+                                                                                                                    touch(p)"/>
+                                                                                                </template>
+                                                                                                <template x-if="subInput(s) !== 'bool'">
+                                                                                                    <input :type="subInput(s) === 'number' ? 'number' : 'text'"
+                                                                                                           :disabled="!online"
+                                                                                                           :min="base(s).type === 'range' ? base(s).min : null"
+                                                                                                           :max="base(s).type === 'range' ? base(s).max : null"
+                                                                                                           :step="base(s).type === 'int' ||
+                                                                                                                  (base(s).type === 'range' && base(s).int)
+                                                                                                                  ? 1 : 'any'"
+                                                                                                           :placeholder="hint(s)"
+                                                                                                           x-model="s.draft" @input="touch(p)"/>
+                                                                                                </template>
+                                                                                            </label>
+                                                                                        </template>
+                                                                                    </span>
                                                                                 </template>
                                                                             </span></td>
                                                                         </template>

@@ -1189,6 +1189,28 @@ button.metric-reset {
 }
 .choices input[type=checkbox] { margin: 0; flex: none; }
 
+/* Which shape a value has, and then the inputs of that shape, on one line:
+   the select says what the fields beside it mean, so they read as one value
+   and not as a row of their own. */
+.variant {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .1rem .5rem;
+    vertical-align: middle;
+}
+.variant select { width: auto; margin: 0; padding: .1rem 1.6rem .1rem .4rem;
+                  font-size: .8rem; }
+.variant label {
+    display: inline-flex;
+    align-items: center;
+    gap: .25rem;
+    margin: 0;
+    font-size: .8rem;
+    white-space: nowrap;
+}
+.variant label input { margin: 0; width: 6rem; }
+
 /* Inline, so that the unit that follows stays on the same line. */
 .range { display: inline-flex; align-items: center; gap: .5rem;
          vertical-align: middle; }
