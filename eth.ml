@@ -440,6 +440,9 @@ struct
             let bitlen = bitstring_length pld in
             Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx %d bits" bitlen))) ;
             let now = Simulation.Widget.now t.widget in
+            (* Every byte that arrived, whether or not the frame survives the
+             * collision below, as SNMP's ifInOctets counts them -- "packets"
+             * counts what was delivered instead. *)
             Metric.Counter.add t.volume ~now ~params:(dir_params "ingress")
                                (bytelength pld) ;
             (* Another frame arriving before rx_busy_until would be a collision.
