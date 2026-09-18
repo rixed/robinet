@@ -1119,6 +1119,79 @@ const borderPoint = (r, tx, ty) => {
  * pixels rather than anything the page reacts to. */
 let sceneMemo = { sig: null, value: null }
 
+/* A field of a synth is one of three things: a constant, a generator by the
+ * name it is known by, or nothing at all -- "automatic", which is the
+ * simulator's to fill in (see [Generator.value_of_synth] in generator.ml). */
+const synthModeOf = (leaf) =>
+    leaf === null || leaf === undefined ? 'auto' :
+    (typeof leaf === 'object' && 'gen' in leaf) ? 'gen' : 'const'
+
+/* A cell for one such field: the constant it holds, if it holds one, edited
+ * through the very inputs the panel edits a value of that kind through, with
+ * which of the three it is beside it. */
+const synthCellOf = (name, kind, leaf) => {
+    const mode = synthModeOf(leaf)
+    const c = cellOf(name, kind, mode === 'const' ? leaf.const : null)
+    c.mode = mode
+    c.gen = mode === 'gen' ? leaf.gen : ''
+    return c
+}
+
+/* What that cell is worth, back in the synth. */
+const synthLeaf = (c) =>
+    c.mode === 'auto' ? null :
+    c.mode === 'gen' ? { gen: c.gen } :
+    { const: cellValue(c) }
+
+/* Every part of a synth made explicit, so that each of its leaves has
+ * somewhere to be written back to.
+ *
+ * A subtree that is not there at all is one of automatic fields, and a
+ * constant standing for a whole subtree is that constant in each of its fields
+ * -- which is what the simulator itself makes of them (see [Generator.expand]
+ * and [Generator.wrap]). A generator standing for a whole subtree is left
+ * whole: it is one number coerced into one value, and pushing it down into the
+ * fields would make it several. */
+const materialiseSynth = (kind, value) => {
+    const k = baseKind(kind)
+    const composite = k.type === 'record' || k.type === 'row' ||
+                      k.type === 'variant' || k.type === 'list'
+    if (!composite) return value === undefined ? null : value
+    const obj = value !== null && typeof value === 'object'
+    if (obj && 'gen' in value) return value
+    /* Pushed down one level at a time: a field that is composite in turn is
+     * handed its own slice as a constant and does the same with it. */
+    const asConst = obj && 'const' in value
+    const held = asConst ? value.const : value
+    const of_ = (v) => asConst ? { const: v === undefined ? null : v } : v
+    const at = (o, key) => o === null || o === undefined ? null : o[key]
+    switch (k.type) {
+        case 'record': case 'row': {
+            const out = {}
+            k.fields.forEach(f => {
+                out[f.name] = materialiseSynth(f.kind, of_(at(held, f.name)))
+            })
+            return out
+        }
+        /* Which shape it holds is what the value says, and a synth that says
+         * nothing says nothing about the shape either: it stays a single
+         * automatic line, since picking a shape for the reader would be
+         * inventing a packet nobody asked for. */
+        case 'variant': {
+            if (held === null || held === undefined) return null
+            const which = Object.keys(held)[0]
+            const c = (k.cases || []).find(c => c.name === which)
+            if (!c) return null
+            return { [which]: materialiseSynth(c.kind, of_(held[which])) }
+        }
+        case 'list':
+            return Array.isArray(held)
+                ? held.map(v => materialiseSynth(k.of, of_(v))) : null
+        default:
+            return value
+    }
+}
+
 /* A record drawn the way a record is meant to be: a field per line, one under
  * the next, and a field with an inside of its own indented under the line that
  * names it. Which is what a packet reads as -- its layers, and the fields of
@@ -1141,19 +1214,38 @@ let sceneMemo = { sig: null, value: null }
  * and forty lines of "unset" bury the five. Editing, it is kept, an option one
  * is about to fill in having to be on the page to be filled in. So the two are
  * not separately choosable -- which mode this is, is decided by whichever link
- * opened the pane, and nothing below asks again. */
-const kindLines = (kind, value, editable) => {
+ * opened the pane, and nothing below asks again.
+ *
+ * [synth] says the value is a packet a synthesizer is being given rather than
+ * one that was carried: the walk is the same walk, since a synth is shaped
+ * like the packet it describes, and what differs is the leaves -- each a
+ * constant, a generator or automatic (see [synthCellOf]). Such a leaf carries
+ * [into] and [ikey], which are where what is typed goes back
+ * ([materialiseSynth] having made sure there is somewhere). */
+const kindLines = (kind, value, editable, synth) => {
     const skipAbsent = !editable
     const out = []
-    const walk = (name, kind, value, depth, path) => {
+    const walk = (name, kind, value, depth, path, into, ikey) => {
         const k = baseKind(kind)
         const absent = value === null || value === undefined
         const line = (extra) =>
             out.push(Object.assign({ key: out.length, depth, name, path },
                                    extra))
-        if (absent) {
-            if (!skipAbsent)
-                line({ leaf: true, cell: cellOf(name, kind, value) })
+        const leafLine = (whole) =>
+            line({ leaf: true, whole: !!whole, into, ikey,
+                   cell: synth ? synthCellOf(name, kind, value)
+                               : cellOf(name, kind, value) })
+        if (synth) {
+            const composite = k.type === 'record' || k.type === 'row' ||
+                              k.type === 'variant' || k.type === 'list'
+            /* One value for a whole subtree -- a generator for a layer, a
+             * shape nobody has picked yet -- is one line, and not one the
+             * fields of anything hang under. */
+            if (!composite) { leafLine(false) ; return }
+            if (absent || typeof value !== 'object' ||
+                'gen' in value || 'const' in value) { leafLine(true) ; return }
+        } else if (absent) {
+            if (!skipAbsent) leafLine(false)
             return
         }
         switch (k.type) {
@@ -1162,7 +1254,7 @@ const kindLines = (kind, value, editable) => {
                 line({})
                 k.fields.forEach(f =>
                     walk(f.name, f.kind, value[f.name], depth + 1,
-                         path + '/' + f.name))
+                         path + '/' + f.name, value, f.name))
                 break
             /* Which shape it is, said on the line that names it: a value of a
                variant is an object of one field, and that field's name is the
@@ -1180,10 +1272,10 @@ const kindLines = (kind, value, editable) => {
                 if ((ck.type === 'record' || ck.type === 'row') && held)
                     ck.fields.forEach(f =>
                         walk(f.name, f.kind, held[f.name], depth + 1,
-                             path + '/' + which + '/' + f.name))
+                             path + '/' + which + '/' + f.name, held, f.name))
                 else
                     walk(which, c.kind, held, depth + 1,
-                         path + '/' + which)
+                         path + '/' + which, value, which)
                 break
             }
             case 'list': {
@@ -1192,11 +1284,11 @@ const kindLines = (kind, value, editable) => {
                                             : `${l.length} entries` })
                 l.forEach((v, i) =>
                     walk(`#${i + 1}`, k.of, v, depth + 1,
-                         path + '/' + i))
+                         path + '/' + i, l, i))
                 break
             }
             default:
-                line({ leaf: true, cell: cellOf(name, kind, value) })
+                leafLine(false)
         }
     }
     walk(null, kind, value, -1, '')
@@ -1421,6 +1513,10 @@ document.addEventListener('alpine:init', () => {
         /* Set by the first click on Delete and cleared by the second, or by
          * looking at something else. Taking a device out cannot be undone. */
         confirmDelete: false,
+
+        /* What each protocol is made of, once it has been asked for: see
+         * [protocolKinds]. */
+        protocols: null,
 
         /* The frame being read, laid out: its bytes, and the kind and value
          * the simulator decoded them into (see /api/packets/decode). It takes
@@ -3662,13 +3758,108 @@ document.addEventListener('alpine:init', () => {
             this.frame = null
         },
 
+        /* What each protocol is made of, asked for once and kept: a protocol's
+         * kind is a constant (see /api/protocols), which is what lets this
+         * draw the fields of a layer that does not exist yet -- the packet a
+         * synthesizer is being given. */
+        async protocolKinds() {
+            if (!this.protocols) {
+                const r = await this.exchange(() => api('/protocols'))
+                if (!r.ok) return null
+                this.protocols =
+                    Object.fromEntries(r.value.map(p => [ p.name, p.kind ]))
+            }
+            return this.protocols
+        },
+
+        /* Open that packet in the pane a frame is read in: the same lines,
+         * drawn from the same kinds, with each leaf a constant, a generator or
+         * automatic.
+         *
+         * The lines are built once and kept, unlike a frame's: they hold what
+         * is being typed, and a pane that rebuilt them would take the reader's
+         * edit with it. */
+        async openSynth(p) {
+            if (this.split === 1) this.split = this.splitLast || 0.45
+            const protos = await this.protocolKinds()
+            if (!protos) return
+            const gens = this.props.find(x => x.name === 'generators')
+            this.frame = {
+                synth: true, editable: true, prop: p,
+                /* The generators a field may be filled from, by name: what the
+                   simulator refuses anything else against. */
+                gens: ((gens && gens.value) || []).map(g => g.name),
+                widget: this.selected,
+                layers: null, lines: [], folded: new Set(),
+                busy: false, error: null, dirty: false }
+            this.synthReset()
+        },
+
+        /* The lines, from what the simulator last said the packet is: how the
+         * pane opens, and what Revert goes back to. */
+        synthReset() {
+            const f = this.frame
+            if (!f || !f.synth) return
+            const protos = this.protocols || {}
+            f.layers = JSON.parse(JSON.stringify(f.prop.value || []))
+            f.lines = []
+            f.error = null
+            f.dirty = false
+            f.layers.forEach((layer, i) => {
+                const kind = protos[layer.name]
+                const at = '/' + i
+                f.lines.push({ key: 'l' + i, depth: 0, name: layer.name,
+                               path: at, kids: !!kind,
+                               note: kind ? '' : 'no such protocol' })
+                if (!kind) return
+                layer.fields = materialiseSynth(kind, layer.fields)
+                kindLines(kind, layer.fields, true, true).forEach(l => {
+                    f.lines.push(Object.assign({}, l, {
+                        key: 'l' + i + '.' + l.key,
+                        depth: l.depth + 1,
+                        path: at + l.path }))
+                })
+            })
+        },
+
+        /* Which of the three a field is. Picking another leaves what was typed
+         * where it is: going from a constant to automatic and back should not
+         * cost the reader what they had typed. */
+        setSynthMode(l, mode) {
+            l.cell.mode = mode
+            this.touch(this.frame)
+        },
+
+        /* The packet as the lines have it, sent whole: a field of a packet is
+         * not a value on its own, and half an edited packet is not one
+         * either. */
+        async applySynth() {
+            const f = this.frame
+            if (!f || !f.synth) return
+            for (const l of f.lines)
+                if (l.leaf && l.into) l.into[l.ikey] = synthLeaf(l.cell)
+            const w = f.widget
+            const r = await this.exchange(() => api(
+                `/simulations/${w.sim}/widgets/${w.id}/properties/` +
+                `${encodeURIComponent(f.prop.name)}`,
+                { method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(f.layers) }))
+            if (!r.ok) { f.error = r.error.message ; return }
+            f.error = null
+            f.dirty = false
+            f.prop.value = r.value.value
+            this.synthReset()
+        },
+
         /* The lines of the frame being read: every layer, and the fields of
          * each (see [kindLines]). Computed on the way out rather than kept,
          * since nothing about a frame that has been opened changes. */
         frameLines() {
             const f = this.frame
-            if (!f || !f.kind) return []
-            const lines = kindLines(f.kind, f.value, f.editable)
+            if (!f || (!f.kind && !f.synth)) return []
+            const lines = f.synth ? f.lines
+                                  : kindLines(f.kind, f.value, f.editable)
             if (!f.folded || !f.folded.size) return lines
             return lines.filter(l => {
                 for (const p of f.folded)
@@ -3697,8 +3888,24 @@ document.addEventListener('alpine:init', () => {
          * is made of, innermost first, as a cable's table says it. */
         frameName() {
             const f = this.frame
+            if (f && f.synth)
+                return (f.layers || []).map(l => l.name).reverse().join('/')
             if (!f || !f.kind || f.kind.type !== 'record') return 'frame'
             return f.kind.fields.map(x => x.name).reverse().join('/')
+        },
+
+        /* What the panel says of a packet it does not draw: the layers it is
+         * made of, innermost first, as a frame's header says them. */
+        synthSummary(p) {
+            const l = (p.value || []).map(x => x.name)
+            return l.length ? l.slice().reverse().join('/') : 'empty'
+        },
+
+        /* What a line of a synth offers: the three, and the generators there
+         * are to pick from. A field standing for a whole subtree takes no
+         * constant, there being no single input for a layer. */
+        synthModes(l) {
+            return l.whole ? [ 'gen', 'auto' ] : [ 'const', 'gen', 'auto' ]
         },
 
         async togglePower() {

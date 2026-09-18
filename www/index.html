@@ -1070,6 +1070,19 @@
                                                               @blur="save(p)"></textarea>
                                                 </template>
 
+                                                <!-- A packet a synthesizer is being
+                                                     given: read and written in the pane
+                                                     a frame is read in, which is the one
+                                                     place that draws a packet layer by
+                                                     layer (see [openSynth]). -->
+                                                <template x-if="base(p).type === 'synth'">
+                                                    <a href="#" class="ro frame-link"
+                                                       :title="p.read_only ? 'Look into this packet'
+                                                                           : 'Edit this packet'"
+                                                       @click.prevent="openSynth(p)"
+                                                       x-text="synthSummary(p)"></a>
+                                                </template>
+
                                                 <!-- A list or a row: a table of cells.
 
                                                      A record is the table of a
@@ -1264,6 +1277,16 @@
                         </header>
                         <small class="error" x-show="frame && frame.error"
                                x-text="frame && frame.error"></small>
+                        <!-- Sent when the reader says so, as a table is: half an
+                             edited packet is not a packet. -->
+                        <div class="list-foot" x-show="frame && frame.synth">
+                            <button class="outline secondary"
+                                    :disabled="!online || !(frame && frame.dirty)"
+                                    title="Back to the packet the simulator holds"
+                                    @click="synthReset()">Revert</button>
+                            <button :disabled="!online || !(frame && frame.dirty)"
+                                    @click="applySynth()">Apply</button>
+                        </div>
                         <div class="layers">
                             <template x-for="l in frameLines()" :key="l.key">
                                 <div class="line"
@@ -1288,12 +1311,48 @@
                                          entries it holds. -->
                                     <span class="note" x-show="l.note"
                                           x-text="l.note"></span>
-                                    <template x-if="l.leaf">
+                                    <template x-if="l.leaf && !(frame && frame.synth)">
                                         <span class="val"
                                               :class="{ unset: !set(l.cell),
                                                         revealed: revealed(l.cell) }"
                                               :title="cellTitle(l.cell)"
                                               x-text="cellText(l.cell, frame)"></span>
+                                    </template>
+
+                                    <!-- A field of a packet being written: which of the
+                                         three it is, and then what that one needs -- the
+                                         very inputs the panel edits a value of this kind
+                                         through, a generator by name, or nothing at all
+                                         for a field the simulator fills in. -->
+                                    <template x-if="l.leaf && frame && frame.synth">
+                                        <span class="val synth"
+                                              x-data="{ c: l.cell, owner: frame,
+                                                        get dlid() { return dl('line', l.path) } }">
+                                            <select :disabled="!online"
+                                                    @change="setSynthMode(l, $event.target.value)">
+                                                <template x-for="m in synthModes(l)" :key="m">
+                                                    <option :value="m" :selected="m === l.cell.mode"
+                                                            x-text="m"></option>
+                                                </template>
+                                            </select>
+                                            <template x-if="l.cell.mode === 'const'">
+                                                <span class="cell">
+#include "cell-input.html"
+                                                </span>
+                                            </template>
+                                            <template x-if="l.cell.mode === 'gen'">
+                                                <select :disabled="!online"
+                                                        :class="{ unset: !l.cell.gen }"
+                                                        @change="l.cell.gen = $event.target.value ;
+                                                                 touch(frame)">
+                                                    <option value="">which generator?</option>
+                                                    <template x-for="g in frame.gens" :key="g">
+                                                        <option :value="g" :selected="g === l.cell.gen"
+                                                                x-text="g"></option>
+                                                    </template>
+                                                </select>
+                                            </template>
+                                        </span>
                                     </template>
                                     <template x-if="l.leaf && revealable(l.cell)">
                                         <button class="outline secondary reveal"

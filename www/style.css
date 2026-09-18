@@ -459,15 +459,40 @@ article.empty { color: var(--pico-muted-color); }
     color: var(--pico-muted-color);
 }
 .pane.frame .line .val.revealed { user-select: all; }
-.pane.frame .line /* What a frame amounts to, and the way into it. Underlined on hover only: a
+
+/* A field of a packet being written: which of the three it is, and then what
+   that one takes -- kept on the one line, and given the room the value column
+   has. */
+.pane.frame .line .val.synth {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .2rem .4rem;
+    font-family: inherit;
+}
+.pane.frame .line .val.synth > select { width: auto; min-width: 5rem; }
+.pane.frame .line .val.synth select,
+.pane.frame .line .val.synth input {
+    margin: 0;
+    padding: .05rem 1.4rem .05rem .3rem;
+    font-size: .75rem;
+    height: auto;
+}
+.pane.frame .line .val.synth input { padding-right: .3rem; }
+.pane.frame .line .val.synth select.unset { color: var(--pico-muted-color); }
+.pane.frame .line .val.synth .cell { display: inline-flex; align-items: center;
+                                     gap: .3rem; }
+
+/* What a frame amounts to, and the way into it. Underlined on hover only: a
  * table of ten of them underlined throughout would read as a wall of links
  * rather than as a list of frames. */
-.listing .cell a.frame-link {
+a.frame-link {
     color: inherit;
     text-decoration: none;
     cursor: pointer;
 }
-.listing .cell a.frame-link:hover { text-decoration: underline; }
+a.frame-link:hover { text-decoration: underline; }
 
 button.reveal { margin-left: 0; }
 
