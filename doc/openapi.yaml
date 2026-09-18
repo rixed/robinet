@@ -112,6 +112,8 @@ tags:
     description: What a widget had to say.
   - name: catalogue
     description: What can be built.
+  - name: packets
+    description: What a frame is made of, and what each protocol is made of.
   - name: pcaps
     description: The capture library, shared by every simulation.
 
@@ -665,6 +667,62 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  /api/simulations/{sim}/widgets/{widget}/power:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+      - $ref: "#/components/parameters/widget"
+    put:
+      tags: [widgets]
+      summary: Switch a widget on, or off.
+      description: |
+        The body is `true` or `false`.
+
+        Only a widget that owns its supply may be switched: a host and a cable
+        mint one, an adapter draws on the one its host minted, and switching a
+        part on its own would be switching half a machine. What a widget answers
+        with says which it is (`power.owner`).
+
+        Switching off forgets every event that supply had paid for, so what was
+        in flight is gone rather than waiting to fire on the way back up.
+      operationId: setPower
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: boolean }
+      responses:
+        "200":
+          description: The widget, switched.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Widget" }
+        "400":
+          description: |
+            Not a body of `true` or `false`, or a widget that does not own its
+            supply.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [widgets]
+      summary: As PUT.
+      operationId: postPower
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: boolean }
+      responses:
+        "200":
+          description: As PUT.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Widget" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   #
   # Properties
   #
@@ -897,6 +955,82 @@ paths:
                 items: { $ref: "#/components/schemas/DeviceType" }
         "500":
           $ref: "#/components/responses/ServerError"
+
+  #
+  # Packets
+  #
+
+  /api/packets/decode:
+    post:
+      tags: [packets]
+      summary: What a frame amounts to, layer by layer.
+      description: |
+        The bytes in, and a `kind` and a `value` out -- the same pair a property
+        travels as, so that what draws one draws the other.
+
+        Which layers a packet has follows from what is in it, so its kind is
+        computed for the packet at hand and carries one field per layer,
+        outermost first. A second layer of a protocol is numbered ("Vlan 2"),
+        those being the fields of a record.
+
+        Nothing is decoded by the interface: every protocol this program knows is
+        written in OCaml, and asking is a great deal less work than a second
+        implementation that would go out of step with the first.
+      operationId: decodePacket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bits]
+              properties:
+                bits:
+                  type: string
+                  description: The frame, as a hexstring ("FF FF FF FF ...").
+      responses:
+        "200":
+          description: What those bytes are.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [kind, value]
+                properties:
+                  kind: { $ref: "#/components/schemas/Kind" }
+                  value:
+                    description: The layers, shaped as the kind says.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/protocols:
+    get:
+      tags: [packets]
+      summary: What a layer of each protocol is made of.
+      description: |
+        A protocol's kind is a constant -- what a PDU of it holds is the same for
+        every PDU of it -- so this is asked for once and kept. It is what draws
+        the fields of a layer that does not exist yet: the packet a synthesizer
+        is being given (see the `synth` kind), whose layers name the protocols
+        listed here.
+
+        "Data" is the fallback layer: bytes no protocol claimed.
+      operationId: getProtocols
+      responses:
+        "200":
+          description: Every protocol a packet can be made of.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [name, kind]
+                  properties:
+                    name:
+                      type: string
+                      description: As a layer of it is named, e.g. "Ip" or "Vlan".
+                    kind: { $ref: "#/components/schemas/Kind" }
 
   #
   # Pcap library
@@ -1390,11 +1524,21 @@ components:
             - enum
             - set
             - range
+            - time
+            - duration
+            - packet
+            - synth
+            - bytes
+            - ipv4
+            - ipv6
+            - mac
             - metric
             - widget
             - optional
             - list
+            - row
             - record
+            - variant
           description: |
             * `string` -- on a line.
             * `text` -- the same string, in a box.
@@ -1406,13 +1550,34 @@ components:
               ticked ones.
             * `range` -- a number between `min` and `max`; `int` says whether the
               input must step by ones.
+            * `time` -- an instant of the simulation, in seconds since it began.
+            * `duration` -- a length of time, in seconds. The same number as a
+              `time`, and what it is a number of is the whole difference.
+            * `packet` -- a frame: an object of its `bits` (a hexstring) and the
+              `descr` of what they amount to. Read rather than typed; `POST
+              /api/packets/decode` opens one.
+            * `synth` -- a packet as a synthesizer describes it: an array of
+              layers, outermost first, each `{ "name": <protocol>, "fields":
+              {...} }`, where every field is `{"const": v}`, `{"gen": <generator
+              name>}` or null for automatic. An array and not an object, since a
+              packet may carry the same protocol twice. What the fields of a
+              layer are is `GET /api/protocols`.
+            * `bytes` -- a run of octets as a hexstring, with `min` and `max`
+              when the length is bounded. Read and never written: the bytes of a
+              payload are whatever the layers above it wrote.
+            * `ipv4`, `ipv6`, `mac` -- an address, written as it is typed. A
+              string, and the type says which strings are addresses.
             * `metric` -- a counter, gauge, atomic or timed. Which one is said by
               the value itself, and by `/history`.
             * `widget` -- another widget of the same simulation, by id.
             * `optional` -- what is in `of`, or null.
             * `list` -- any number of what is in `of`.
-            * `record` -- the named values in `fields`, in the order they are to
-              be laid out.
+            * `row` -- the named values in `fields`, side by side: a line of a
+              table, and so of scalars only.
+            * `record` -- the same named values, one under the next, a field with
+              an inside of its own indented under the line that names it.
+            * `variant` -- one of the shapes in `cases`; the value is an object
+              of a single field, named by the case it holds.
         choices:
           type: array
           description: For `enum` and `set`, in the order that gives each one its place.
@@ -1423,21 +1588,35 @@ components:
         min:
           type: [number, "null"]
           description: |
-            For `range`. Null means unbounded: an infinity is not representable
-            in JSON, and `max_int` is both meaningless as a slider end and beyond
-            what a JSON number carries exactly.
+            For `range`, for `bytes` of a bounded length, and for an `enum` whose
+            known choices are not all there is -- a protocol number is any of
+            65536 and a handful of them have names. Null means unbounded: an
+            infinity is not representable in JSON, and `max_int` is both
+            meaningless as a slider end and beyond what a JSON number carries
+            exactly.
         max:
           type: [number, "null"]
-          description: For `range`. Null means unbounded.
+          description: As `min`. Null means unbounded.
         of:
           allOf: [ { $ref: "#/components/schemas/Kind" } ]
           description: "For `optional` and `list`: what is inside."
         fields:
           type: array
           description: |
-            For `record`, in the order they are to be laid out. An array and not
-            an object, since JSON says nothing about the order of an object's
-            keys and that order is what the columns are.
+            For `row` and `record`, in the order they are to be laid out. An
+            array and not an object, since JSON says nothing about the order of
+            an object's keys and that order is what the columns are.
+          items:
+            type: object
+            required: [name, kind]
+            properties:
+              name: { type: string }
+              kind: { $ref: "#/components/schemas/Kind" }
+        cases:
+          type: array
+          description: |
+            For `variant`: the shapes it may hold, each carrying what its own
+            kind says. The name is what the value's single field is called.
           items:
             type: object
             required: [name, kind]
