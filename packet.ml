@@ -375,20 +375,52 @@ module Pdu = struct
      * layers of a packet are what a reader unwraps, and each of them opens
      * into its own fields. *)
 
+    (* What a PDU of each protocol is made of, by the name that protocol's
+     * layer goes by (see [name_of_layer]). A protocol's kind says nothing
+     * about any one packet, so this is all anybody needs to draw the fields of
+     * a layer -- or of one that is not there yet, which is what a packet
+     * generator is editing (see {!Synth}). "Data" is the fallback layer: bytes
+     * nothing claimed. *)
+    let kinds_of_protocols =
+        [ "Data", Bytes ;
+          "Dhcp", Dhcp.Pdu.kind ;
+          "Eth", Eth.Pdu.kind ;
+          "Arp", Arp.Pdu.kind ;
+          "Ip", Ip.Pdu.kind ;
+          "Ip6", Ip6.Pdu.kind ;
+          "Udp", Udp.Pdu.kind ;
+          "Tcp", Tcp.Pdu.kind ;
+          "Dns", Dns.Pdu.kind ;
+          "Sll", Sll.Pdu.kind ;
+          "Vlan", Vlan.Pdu.kind ;
+          "Icmp", Icmp.Pdu.kind ;
+          "Pcap", Pcap.Pdu.kind ]
+
+    let kind_of_protocol name = List.assoc_opt name kinds_of_protocols
+
     let kind_of_layer = function
         | Raw _ -> Bytes
-        | Dhcp p -> Dhcp.Pdu.kind_of p
-        | Eth  p -> Eth.Pdu.kind_of p
-        | Arp  p -> Arp.Pdu.kind_of p
-        | Ip   p -> Ip.Pdu.kind_of p
-        | Ip6  p -> Ip6.Pdu.kind_of p
-        | Udp  p -> Udp.Pdu.kind_of p
-        | Tcp  p -> Tcp.Pdu.kind_of p
-        | Dns  p -> Dns.Pdu.kind_of p
-        | Sll  p -> Sll.Pdu.kind_of p
-        | Vlan p -> Vlan.Pdu.kind_of p
-        | Icmp p -> Icmp.Pdu.kind_of p
-        | Pcap p -> Pcap.Pdu.kind_of p
+        | Dhcp _ -> Dhcp.Pdu.kind
+        | Eth  _ -> Eth.Pdu.kind
+        | Arp  _ -> Arp.Pdu.kind
+        | Ip   _ -> Ip.Pdu.kind
+        | Ip6  _ -> Ip6.Pdu.kind
+        | Udp  _ -> Udp.Pdu.kind
+        | Tcp  _ -> Tcp.Pdu.kind
+        | Dns  _ -> Dns.Pdu.kind
+        | Sll  _ -> Sll.Pdu.kind
+        | Vlan _ -> Vlan.Pdu.kind
+        | Icmp _ -> Icmp.Pdu.kind
+        | Pcap _ -> Pcap.Pdu.kind
+
+    (* Every layer a packet can be made of is a protocol that can be named, and
+       every name is one [kind_of_protocol] answers for. *)
+    (*$T kind_of_protocol
+      Pcap.enum_of_file "tests/various_vlans.pcap" /@ unpack |> \
+      Enum.for_all (List.for_all (fun l -> \
+          kind_of_protocol (match name_of_layer l with "" -> "Data" | n -> n) = \
+          Some (kind_of_layer l)))
+     *)
 
     let json_of_layer = function
         | Raw bits -> Widget.json_of_bytes bits

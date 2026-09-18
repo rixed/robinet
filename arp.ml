@@ -233,7 +233,7 @@ module Pdu = struct
         let target_proto = BRange (0, 255)
     end
 
-    let kind_of (_ : t) =
+    let kind =
         Widget.record
             [| "hardware type", Kinds.hw_type ;
                "protocol type", Kinds.proto_type ;
@@ -256,9 +256,9 @@ module Pdu = struct
                  "target protocol address",
                  Widget.json_of_bytes t.target_proto ]
 
-    (*$Q kind_of
+    (*$Q kind
       (Q.make (fun _ -> random ())) (fun t -> \
-        try Widget.check_value (kind_of t) (to_json t) ; true \
+        try Widget.check_value kind (to_json t) ; true \
         with _ -> false)
      *)
 
@@ -286,10 +286,10 @@ module Pdu = struct
     (*$Q of_synth
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
+        (Generator.reads_consts (fun js g -> of_synth js g) kind to_json)
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+        (Generator.reads_autos (fun js g -> of_synth js g) kind to_json)
      *)
 
     (*$>*)

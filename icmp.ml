@@ -166,7 +166,7 @@ struct
            30, "Traceroute" |]
 
     (** Those types only, named as above: what the shape of a message narrows
-     * them down to (see [Icmp.Pdu.kind_of]). *)
+     * them down to (see [Icmp.Pdu.kind]). *)
     let types typs =
         Array.map (fun typ ->
             match Array.find_opt (fun (t, _) -> t = typ) type_choices with
@@ -352,7 +352,7 @@ module Pdu = struct
                           "payload", payload |] |]
     end
 
-    let kind_of (_ : t) = Kinds.message
+    let kind = Kinds.message
 
     let to_json (t : t) =
         let typ = MsgType.type_of t.msg_type
@@ -416,15 +416,15 @@ module Pdu = struct
     (*$Q of_synth
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
+        (Generator.reads_consts (fun js g -> of_synth js g) kind to_json)
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+        (Generator.reads_autos (fun js g -> of_synth js g) kind to_json)
      *)
 
-    (*$Q kind_of
+    (*$Q kind
       (Q.make (fun _ -> random ())) (fun t -> \
-        try Widget.check_value (kind_of t) (to_json t) ; true \
+        try Widget.check_value kind (to_json t) ; true \
         with _ -> false)
      *)
 
@@ -432,11 +432,11 @@ module Pdu = struct
        which types carry which shape is the one thing these two halves have to
        agree on, and the disagreement would be in the type that was not
        drawn. *)
-    (*$T kind_of
+    (*$T kind
       Enum.range 0 ~until:255 |> Enum.for_all (fun typ -> \
           let p = { msg_type = MsgType.o (typ, 0) ; \
                     payload = random_payload (MsgType.o (typ, 0)) } in \
-          Widget.check_value (kind_of p) (to_json p) = ())
+          Widget.check_value kind (to_json p) = ())
      *)
     (*$>*)
 end

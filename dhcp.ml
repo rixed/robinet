@@ -551,7 +551,7 @@ struct
                 (Widget.row [| "code", option_code ; "value", option_value |])
     end
 
-    let kind_of (_ : t) =
+    let kind =
         let open SimTypes in
         Widget.record
             [| "operation", Kinds.op ;
@@ -693,15 +693,15 @@ struct
     (*$Q of_synth
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_consts (fun js g -> of_synth js g) kind_of to_json)
+        (Generator.reads_consts (fun js g -> of_synth js g) kind to_json)
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+        (Generator.reads_autos (fun js g -> of_synth js g) kind to_json)
      *)
 
-    (*$Q kind_of
+    (*$Q kind
       (Q.make (fun _ -> random ())) (fun t -> \
-        try Widget.check_value (kind_of t) (to_json t) ; true \
+        try Widget.check_value kind (to_json t) ; true \
         with _ -> false)
      *)
     (*$>*)

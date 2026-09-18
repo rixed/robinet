@@ -376,15 +376,15 @@ let mostly_same prev fresh =
 
 (* For tests, given a Pdu [t]: whether [of_synth] reads [t] back from a synth
  * where every value is a constant, *)
-let reads_consts of_synth kind_of to_json t =
-    let synth = wrap (kind_of t) const (to_json t) in
+let reads_consts of_synth kind to_json t =
+    let synth = wrap kind const (to_json t) in
     to_json (of_synth synth [||]) = to_json t
 
 (* and whether a synth where every value is automatic reads as a value of its
  * kind. *)
-let reads_autos of_synth kind_of to_json t =
-    let t = of_synth (wrap (kind_of t) (fun _ -> `Null) (to_json t)) [||] in
-    Widget.check_value (kind_of t) (to_json t) ;
+let reads_autos of_synth kind to_json t =
+    let t = of_synth (wrap kind (fun _ -> `Null) (to_json t)) [||] in
+    Widget.check_value kind (to_json t) ;
     true
 
 (** {2 Generators, as the interface edits them} *)

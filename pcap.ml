@@ -358,7 +358,7 @@ struct
         let payload = BRange (0, 0xffff_ffff)
     end
 
-    let kind_of (_ : t) =
+    let kind =
         Widget.record
             [| "source", Kinds.source ;
                "captured at", Kinds.captured_at ;
@@ -413,19 +413,19 @@ struct
                   | "captured at", _ -> "captured at", `Null \
                   | f -> f) l) \
           | js -> js in \
-        let synth = Generator.wrap (kind_of t) Generator.const (to_json t) in \
+        let synth = Generator.wrap kind Generator.const (to_json t) in \
         auto_ts (to_json (of_synth (auto_ts synth) [||])) = auto_ts (to_json t))
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) (fun _ -> \
           make "f" ~dlt:(Dlt.random ()) (Clock.Wall.o (Random.float 1e9)) \
                (randbs (Random.int 40)))) \
-        (Generator.reads_autos (fun js g -> of_synth js g) kind_of to_json)
+        (Generator.reads_autos (fun js g -> of_synth js g) kind to_json)
      *)
 
-    (*$Q kind_of
+    (*$Q kind
       (Q.make (fun _ -> \
           make "f" ~dlt:(Dlt.random ()) (Clock.Wall.o (Random.float 1e9)) \
                (randbs (Random.int 40)))) (fun t -> \
-        try Widget.check_value (kind_of t) (to_json t) ; true \
+        try Widget.check_value kind (to_json t) ; true \
         with _ -> false)
      *)
     (*$>*)
