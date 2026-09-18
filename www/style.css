@@ -663,12 +663,16 @@ body.carrying { user-select: none; cursor: grabbing; }
 .pane.map .box.selected {
     border-color: var(--pico-primary);
     border-width: 2px;
-    /* Over every other box, and over the ports and cable labels with them: at
-     * a zoom where the whole network fits, the thing that was just clicked is
-     * as likely as not to be under a pile of its neighbours, and the one box
-     * that must be findable is that one. */
-    z-index: 4;
 }
+/* The selection and everything inside it, over the rest of the map: at a zoom
+   where the whole network fits, the thing that was just clicked is as likely as
+   not to be under a pile of its neighbours, and the one box that must be
+   findable is that one. The three layers of the map again, in the same order,
+   so that a router raised this way keeps its ports on top of itself rather
+   than under it. */
+.pane.map .box.raised { z-index: 11; }
+.pane.map .port.raised { z-index: 12; }
+.pane.map .cable-label.raised { z-index: 13; }
 /* The selected widget is somewhere in here. Fainter than the thing itself, and
  * it stacks: a box inside a box inside the one that is selected reads as the
  * way down to it. */

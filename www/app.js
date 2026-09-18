@@ -4093,12 +4093,35 @@ document.addEventListener('alpine:init', () => {
             }
             spreadEnds(ends, rects)
 
+            /* The selected widget and everything inside it, which is what is
+             * drawn over the rest of the map rather than the one box: a router
+             * that hid its own ports and the boxes it holds as it was selected
+             * would be a router one could no longer plug anything into. What
+             * stays true inside it is the order everything else is drawn in --
+             * a box under its ports, both under the names of the cables (see
+             * the stylesheet). */
+            const raised = new Set()
+            if (this.selected) {
+                const down = (id) => {
+                    if (raised.has(id) || byId[id] === undefined) return
+                    raised.add(id)
+                    byId[id].children.forEach(down)
+                }
+                down(this.selected.id)
+            }
+
             const lines = [], ports = []
             for (let i = 0 ; i < ends.length ; i += 2) {
                 const e = ends[i].edge
                 const p1 = ends[i].pt, p2 = ends[i + 1].pt
                 lines.push({ key: e.key, via: e.via,
                              name: e.via === null ? '' : this.nameOf(e.via),
+                             /* A cable of the selection, or one running
+                              * between two things inside it: its name would
+                              * otherwise be painted over by what it joins. */
+                             raised: (e.via !== null && raised.has(e.via)) ||
+                                     (raised.has(ends[i].box) &&
+                                      raised.has(ends[i + 1].box)),
                              /* A cable is a widget one can be looking at, and
                               * it is a line here rather than a box, so this is
                               * the only thing there is to mark. */
@@ -4122,6 +4145,7 @@ document.addEventListener('alpine:init', () => {
                 if (e.port === null) continue
                 ports.push({ key: `${e.edge.key}:${e.first ? 'a' : 'b'}`,
                              id: e.port, name: this.nameOf(e.port),
+                             raised: raised.has(e.port),
                              x: e.pt.x, y: e.pt.y })
             }
 
@@ -4139,6 +4163,7 @@ document.addEventListener('alpine:init', () => {
             const boxes = [ ...rects.values() ].map(r => Object.assign({}, r, {
                 name: this.nameOf(r.id),
                 holds: held.has(r.id),
+                raised: raised.has(r.id),
                 /* What a shut box is folding away, so that connectivity does
                  * not silently vanish into it. */
                 inside: inside.get(r.id) || 0,

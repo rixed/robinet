@@ -1387,7 +1387,8 @@
                         <!-- A cable is a widget with properties of its own, so its
                              name on the line is the way to it. -->
                         <template x-for="e in mapScene().edges" :key="e.key">
-                            <a href="#" class="cable-label" :class="{ on: e.on }"
+                            <a href="#" class="cable-label"
+                               :class="{ on: e.on, raised: e.raised }"
                                x-show="e.name && e.room"
                                :style="`left:${e.mx}px; top:${e.my}px`"
                                @pointerdown.stop
@@ -1398,7 +1399,7 @@
                         <!-- Where a cable really lands, when what it lands on is
                              inside a box that is shut. -->
                         <template x-for="p in mapScene().ports" :key="p.key">
-                            <a href="#" class="port"
+                            <a href="#" class="port" :class="{ raised: p.raised }"
                                :style="`left:${p.x}px; top:${p.y}px`"
                                @pointerdown.stop
                                @click.prevent.stop="select(selected.sim, p.id)"
@@ -1408,7 +1409,7 @@
                         <template x-for="b in mapScene().boxes" :key="b.id">
                             <div class="box"
                                  :class="{ selected: isSelected(selected.sim, b.id),
-                                           holds: b.holds,
+                                           holds: b.holds, raised: b.raised,
                                            open: b.open, unplaced: b.nowhere,
                                            note: b.note,
                                            picked: pickedEnds().includes(b.id),
