@@ -901,14 +901,21 @@ module Pdu = struct
         let open Generator in
         let int fname ?auto kind f =
             int_of_field fname gen_values ?auto kind f js
-        and bool fname =
-            of_field fname gen_values SimTypes.Bool Widget.to_bool js
+        and bool ?auto fname =
+            of_field fname gen_values ?auto SimTypes.Bool Widget.to_bool js
         and addr fname =
             of_field fname gen_values Kinds.addr
                      (Addr.of_dotted_string % Widget.to_string) js in
-        let options = bs_of_field "options" gen_values Kinds.options js
+        (* An automatic value is what a packet would plausibly carry and not
+         * any value the field could hold: a random fragment offset makes a
+         * fragment of every packet, and random option bytes a header nothing
+         * can read past -- either way what is above is no longer a segment
+         * anybody recognises. *)
+        let options =
+            bs_of_field "options" gen_values ~auto:(fun () -> empty_bitstring)
+                        Kinds.options js
         and payload = payload_of_field ?upper gen_values Kinds.payload js in
-        { tos = int "type of service" Kinds.tos ToS.o ;
+        { tos = int "type of service" ~auto:(fun () -> ToS.o 0) Kinds.tos ToS.o ;
           tot_len = int "total length"
                         ~auto:(fun () ->
                             20 + bytelength options + bytelength payload)
@@ -917,9 +924,12 @@ module Pdu = struct
                                   (p.id + 1) land 0xffff) prev)
                    Kinds.id identity ;
           dont_frag = bool "don't fragment" ;
-          more_frags = bool "more fragments" ;
-          frag_offset = int "fragment offset" Kinds.frag_offset identity ;
-          ttl = int "time to live" Kinds.ttl identity ;
+          more_frags = bool ~auto:(fun () -> false) "more fragments" ;
+          frag_offset = int "fragment offset" ~auto:(fun () -> 0)
+                            Kinds.frag_offset identity ;
+          (* Enough hops to cross any simulated network, and not the 0 that a
+           * random one is 1 time in 256, which no router would forward. *)
+          ttl = int "time to live" ~auto:(fun () -> 64) Kinds.ttl identity ;
           proto = int "protocol" ?auto:(from_upper upper Proto.of_layer)
                       Kinds.proto Proto.o ;
           src = addr "source" ;

@@ -453,6 +453,67 @@ let check ~generators ~stream ~packet =
                             gen_values) ;
     ignore (Stream.bits_to_next stream gen_values ~ifg:Eth.Iface.ifg_min 0)
 
+(* What a synthesizer is born with, twenty times over: a packet where every
+   field is automatic is one that reads as what it was meant to be.
+   [Packet.Pdu.unpack] goes by the protocol numbers alone, so the layers coming
+   back are only half the answer -- the other half is that nothing in them says
+   the layer below should not be read as it was: a fragment of something
+   larger, a header with options nobody can read past. That is what makes an
+   automatic value a plausible one rather than any one (see the [of_synth] of
+   each protocol). *)
+(*$R default_packet
+  let names p =
+    List.map (fun l -> match Packet.Pdu.name_of_layer l with
+                       | "" -> "Data" | n -> n) p in
+  for _ = 1 to 20 do
+    let layers =
+      Packet.of_synth (Packet.to_array_top_to_bottom (default_packet ())) [||] in
+    let bits = Packet.pack_layer layers.(Array.length layers - 1) in
+    let read = Packet.Pdu.unpack (Pcap.Pdu.make "" (Clock.Wall.now ()) bits) in
+    match read with
+    | _pcap :: Packet.Pdu.Eth _ :: Packet.Pdu.Ip ip :: Packet.Pdu.Tcp tcp :: _ ->
+        "a packet whole rather than a fragment of one" @?
+          (ip.Ip.Pdu.frag_offset = 0 && not ip.Ip.Pdu.more_frags) ;
+        "a header with nothing in the way of what follows it" @?
+          bitstring_is_empty ip.Ip.Pdu.options ;
+        "hops enough to get anywhere" @? (ip.Ip.Pdu.ttl > 0) ;
+        "a segment with no options either" @?
+          bitstring_is_empty tcp.Tcp.Pdu.options ;
+        "flags of a segment somebody would send" @?
+          (tcp.Tcp.Pdu.flags.Tcp.Pdu.ack &&
+           not tcp.Tcp.Pdu.flags.Tcp.Pdu.rst &&
+           not (tcp.Tcp.Pdu.flags.Tcp.Pdu.syn && tcp.Tcp.Pdu.flags.Tcp.Pdu.fin))
+    | p ->
+        assert_failure ("not the layers the synth says: " ^
+                        String.concat "/" (names p))
+  done ;
+  (* And a stack whose top layer carries a list of things of its own: every
+     question a synth says is a question the message carries, rather than one
+     [Dns.Pdu.pack] dropped for a name it could not write. *)
+  let layer name l : Yojson.Basic.t =
+    `Assoc [ "name", `String name ;
+             "fields",
+                 Generator.wrap (Packet.Pdu.kind_of_layer l) (fun _ -> `Null)
+                     (Packet.Pdu.json_of_layer l) ] in
+  for _ = 1 to 10 do
+    let synth =
+      `List [ layer "Eth" (Packet.Pdu.Eth (Eth.Pdu.random ())) ;
+              layer "Ip" (Packet.Pdu.Ip (Ip.Pdu.random ())) ;
+              layer "Udp" (Packet.Pdu.Udp (Udp.Pdu.random ())) ;
+              layer "Dns" (Packet.Pdu.Dns (Dns.Pdu.random ())) ] in
+    let layers = Packet.of_synth (Packet.to_array_top_to_bottom synth) [||] in
+    let bits = Packet.pack_layer layers.(Array.length layers - 1) in
+    match layers.(0),
+          Packet.Pdu.unpack (Pcap.Pdu.make "" (Clock.Wall.now ()) bits) with
+    | Packet.Pdu.Dns sent, [ _ ; _ ; _ ; _ ; Packet.Pdu.Dns read ] ->
+        assert_equal ~printer:string_of_int
+          (List.length sent.Dns.Pdu.questions)
+          (List.length read.Dns.Pdu.questions)
+    | _, p ->
+        assert_failure ("not read back as DNS: " ^ String.concat "/" (names p))
+  done
+ *)
+
 (** {2 The synthesizer device} *)
 
 (* How far a stream has got: which step the generators are read at, and the

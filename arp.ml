@@ -263,24 +263,29 @@ module Pdu = struct
      *)
 
     let of_synth js ?upper ?prev gen_values =
-        (* No auto variables in here: *)
+        (* Nothing above or before an ARP says anything about it: *)
         ignore upper ; ignore prev ;
         let open Generator in
+        (* Automatic is Ethernet and IPv4, with addresses of the length those
+         * two call for: the header says how long its addresses are, so a
+         * random type with a random length is a message nothing can read --
+         * and every ARP anybody has seen is this pair anyway. *)
+        let hw fname = bs_of_field fname gen_values ~auto:(fun () -> randbs 6)
+                                   Kinds.sender_hw js
+        and proto fname = bs_of_field fname gen_values ~auto:(fun () -> randbs 4)
+                                      Kinds.sender_proto js in
         {
-            hw_type = int_of_field "hardware type" ~auto:HwType.random gen_values
-                                   Kinds.hw_type HwType.o js ;
-            proto_type = int_of_field "protocol type" ~auto:HwProto.random
+            hw_type = int_of_field "hardware type" ~auto:(fun () -> HwType.eth)
+                                   gen_values Kinds.hw_type HwType.o js ;
+            proto_type = int_of_field "protocol type"
+                                      ~auto:(fun () -> HwProto.ip4)
                                       gen_values Kinds.proto_type HwProto.o js ;
             operation = int_of_field "operation" ~auto:Op.random gen_values
                                      Kinds.operation Op.o js ;
-            sender_hw = bs_of_field "sender hardware address" gen_values
-                                    Kinds.sender_hw js ;
-            sender_proto = bs_of_field "sender protocol address" gen_values
-                                       Kinds.sender_proto js ;
-            target_hw = bs_of_field "target hardware address" gen_values
-                                    Kinds.target_hw js ;
-            target_proto = bs_of_field "target protocol address" gen_values
-                                       Kinds.target_proto js ;
+            sender_hw = hw "sender hardware address" ;
+            sender_proto = proto "sender protocol address" ;
+            target_hw = hw "target hardware address" ;
+            target_proto = proto "target protocol address" ;
         }
 
     (*$Q of_synth

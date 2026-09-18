@@ -132,11 +132,16 @@ module Pdu = struct
     let of_synth js ?upper ?prev gen_values =
         ignore prev ;
         let open Generator in
+        (* Ethernet and an address of the six bytes it calls for, as for ARP:
+         * a random type with an address of another length is a header that
+         * says one thing and holds another. *)
         { pkt_type = int_of_field "direction" gen_values Kinds.direction
                                   pkt_type_of_int js ;
-          ll_addr_type = int_of_field "address type" gen_values Kinds.addr_type
-                                      identity js ;
-          ll_addr = bs_of_field "address" gen_values Kinds.addr js ;
+          ll_addr_type = int_of_field "address type"
+                                      ~auto:(fun () -> (Arp.HwType.eth :> int))
+                                      gen_values Kinds.addr_type identity js ;
+          ll_addr = bs_of_field "address" gen_values
+                                ~auto:(fun () -> randbs 6) Kinds.addr js ;
           proto = int_of_field "protocol" gen_values
                       ?auto:(from_upper upper Arp.HwProto.of_layer)
                       Kinds.proto Arp.HwProto.o js ;

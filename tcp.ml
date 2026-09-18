@@ -205,9 +205,13 @@ struct
         let port fname prev_port =
             int_of_field fname gen_values ?auto:(mostly_same prev_port Port.random)
                          Kinds.port Port.o js in
+        (* An automatic value is what a segment would plausibly carry: the
+         * flags of a segment carrying data, rather than any of the 64
+         * combinations of them -- half of which no stack would ever send. The
+         * places are those [flag_choices] names, which [raised] reads back. *)
         let flags =
-            of_field "flags" gen_values Kinds.flags
-                     (Widget.to_choices flag_choices) js in
+            of_field "flags" gen_values ~auto:(fun () -> [ 1 (* Ack *) ])
+                     Kinds.flags (Widget.to_choices flag_choices) js in
         let raised i = List.mem i flags in
         let seq32 (n : SeqNum.t) = uint32 (n :> int32) in
         (* Given the previous segment: the sequence number that follows it, and
@@ -230,8 +234,13 @@ struct
           win_size = int "window size" Kinds.win_size ;
           flags = { urg = raised 0 ; ack = raised 1 ; psh = raised 2 ;
                     rst = raised 3 ; syn = raised 4 ; fin = raised 5 } ;
-          urg_ptr = int "urgent pointer" Kinds.urg_ptr ;
-          options = bs_of_field "options" gen_values Kinds.options js ;
+          (* Where the urgent data ends, which is nowhere unless Urg says
+             so; and no options rather than 40 random bytes of them, which
+             nothing can read past. *)
+          urg_ptr = int "urgent pointer" ~auto:(fun () -> 0) Kinds.urg_ptr ;
+          options = bs_of_field "options" gen_values
+                                ~auto:(fun () -> empty_bitstring)
+                                Kinds.options js ;
           payload =
               Payload.o (payload_of_field ?upper gen_values Kinds.payload js) }
 

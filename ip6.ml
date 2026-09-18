@@ -145,12 +145,16 @@ module Pdu = struct
         and addr fname =
             of_field fname gen_values Kinds.addr
                      (Ip.Addr.of_dotted_string % Widget.to_string) js in
-        { diff_serv = int "differentiated services" Kinds.diff_serv identity ;
-          ecn = int "explicit congestion notification" Kinds.ecn identity ;
+        (* As for IPv4: an automatic value is what a packet would plausibly
+         * carry. *)
+        { diff_serv = int "differentiated services" ~auto:(fun () -> 0)
+                          Kinds.diff_serv identity ;
+          ecn = int "explicit congestion notification" ~auto:(fun () -> 0)
+                    Kinds.ecn identity ;
           flow_label = int "flow label" Kinds.flow_label identity ;
           proto = int "next header" ?auto:(from_upper upper Ip.Proto.of_layer)
                       Kinds.proto Ip.Proto.o ;
-          ttl = int "hop limit" Kinds.ttl identity ;
+          ttl = int "hop limit" ~auto:(fun () -> 64) Kinds.ttl identity ;
           src = addr "source" ;
           dst = addr "destination" ;
           payload =

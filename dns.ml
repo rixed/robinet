@@ -278,7 +278,9 @@ struct
             Widget.one_of ~range:(0, 0xf)
                 [| 0, "query" ; 1, "inverse query" ; 2, "status request" |]
         let status = IRange (0, 0xf)
-        let name = Widget.hint "www.example.com" String
+        (* With the root label the name ends on, which [pack_question] refuses
+           a name without. *)
+        let name = Widget.hint "www.example.com." String
         let qtype = Widget.one_of ~range:(0, 0xffff) QType.choices
         let qclass = Widget.one_of ~range:(0, 0xffff) [| 1, "IN" |]
         let ttl = IRange (0, 0xffff_ffff)
@@ -349,7 +351,17 @@ struct
             int_of_field fname gen_values ?auto kind f js
         and bool fname =
             of_field fname gen_values SimTypes.Bool Widget.to_bool js in
-        let name js = of_field "name" gen_values Kinds.name Widget.to_string js
+        (* A name of the shape names have: a random string of up to fifty
+         * thousand characters is no label anything can pack (a label is 63
+         * bytes at the outside), and [pack_question] drops the question it
+         * cannot write -- leaving a message whose header counts a question it
+         * does not carry. The trailing dot is one of the things it refuses a
+         * name without: what it writes is the root label too. *)
+        let name js =
+            of_field "name" gen_values
+                     ~auto:(fun () ->
+                         Printf.sprintf "h%d.example.com." (Random.int 1000))
+                     Kinds.name Widget.to_string js
         and qtype js = int "type" Kinds.qtype QType.o js
         and qclass js = int "class" Kinds.qclass identity js in
         let question js = name js, qtype js, qclass js

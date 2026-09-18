@@ -102,7 +102,8 @@ module Pdu = struct
         ignore prev ;
         let open Generator in
         { prio = int_of_field "priority" gen_values Kinds.prio identity js ;
-          cfi = of_field "canonical format" gen_values Kinds.cfi Widget.to_bool js ;
+          cfi = of_field "canonical format" gen_values ~auto:(fun () -> false)
+                         Kinds.cfi Widget.to_bool js ;
           id = int_of_field "vlan" gen_values Kinds.id identity js ;
           proto = int_of_field "protocol" gen_values
                       ?auto:(from_upper upper Arp.HwProto.of_layer)

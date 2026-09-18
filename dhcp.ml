@@ -638,18 +638,32 @@ struct
     let of_synth js ?upper ?prev gen_values =
         ignore upper ; ignore prev ;
         let open Generator in
-        let field fname kind f = of_field fname gen_values kind f js in
-        let int fname kind f = field fname kind (f % Widget.to_int)
-        and opt fname kind f = field fname kind (Widget.to_option f) in
+        let field ?auto fname kind f =
+            of_field fname gen_values ?auto kind f js in
+        let int ?auto fname kind f = field ?auto fname kind (f % Widget.to_int)
+        and opt ?auto fname kind f =
+            field ?auto fname kind (Widget.to_option f) in
+        (* An option carries its length in a byte, so a random string of up to
+         * fifty thousand characters is one no client could read back. What a
+         * message that does not carry the option says is nothing at all,
+         * which is also what most messages say. *)
+        let no_string () = None in
         let address = Ip.Addr.of_dotted_string % Widget.to_string
         and opaque = string_of_bitstring % Widget.to_bitstring in
         { op = int "operation" Kinds.op (function
                    | 1 -> BootRequest
                    | 2 -> BootReply
                    | n -> Widget.bad_value "no operation is %d" n) ;
-          htype = int "hardware type" Kinds.htype Arp.HwType.o ;
-          hlen = int "hardware address length" Kinds.byte identity ;
-          hops = int "hops" Kinds.byte identity ;
+          (* Ethernet, and the six bytes of address it calls for: a message
+             whose hardware type, address length and address disagree is one
+             no client would make anything of. *)
+          htype = int "hardware type" ~auto:(fun () -> Arp.HwType.eth)
+                      Kinds.htype Arp.HwType.o ;
+          hlen = int "hardware address length" ~auto:(fun () -> 6) Kinds.byte
+                     identity ;
+          (* Straight from the client, which is what a message that has not
+             been relayed says. *)
+          hops = int "hops" ~auto:(fun () -> 0) Kinds.byte identity ;
           xid = int "transaction id" Kinds.xid Int32.of_int ;
           secs = int "seconds" Kinds.secs identity ;
           broadcast = field "broadcast" SimTypes.Bool Widget.to_bool ;
@@ -657,28 +671,40 @@ struct
           yiaddr = field "your address" Kinds.address address ;
           siaddr = field "server address" Kinds.address address ;
           giaddr = field "relay address" Kinds.address address ;
-          chaddr = field "client hardware address" Kinds.chaddr
+          chaddr = field "client hardware address"
+                         ~auto:(fun () -> randbs 6) Kinds.chaddr
                          Widget.to_bitstring ;
-          sname = field "server name" SimTypes.String Widget.to_string ;
-          file = field "boot file" SimTypes.String Widget.to_string ;
-          msg_type = opt "message type" Kinds.msg_type
-                         (MsgType.o % Widget.to_int) ;
+          (* Fixed fields of 64 and 128 bytes, which a longer string is cut
+             down to as it is packed: empty is what a message that names no
+             server and no file carries. *)
+          sname = field ~auto:(fun () -> "") "server name" SimTypes.String
+                        Widget.to_string ;
+          file = field ~auto:(fun () -> "") "boot file" SimTypes.String
+                       Widget.to_string ;
+          (* What makes a BOOTP message a DHCP one: one of the eight, rather
+             than nothing at all. *)
+          msg_type = opt "message type"
+                         ~auto:(fun () -> Some (MsgType.o (1 + Random.int 8)))
+                         Kinds.msg_type (MsgType.o % Widget.to_int) ;
           subnet_mask = opt "subnet mask" Kinds.opt_address address ;
           router = opt "router" Kinds.opt_address address ;
           ntp_server = opt "NTP server" Kinds.opt_address address ;
           smtp_server = opt "SMTP server" Kinds.opt_address address ;
           pop3_server = opt "POP3 server" Kinds.opt_address address ;
           domain_name_server = opt "name server" Kinds.opt_address address ;
-          host_name = opt "host name" Kinds.opt_string Widget.to_string ;
-          search_sfx = opt "domain name" Kinds.opt_string Widget.to_string ;
+          host_name = opt "host name" ~auto:no_string Kinds.opt_string
+                          Widget.to_string ;
+          search_sfx = opt "domain name" ~auto:no_string Kinds.opt_string
+                           Widget.to_string ;
           lease_time = opt "lease time" Kinds.lease_time
                            (Int32.of_int % Widget.to_int) ;
           server_id = opt "server identifier" Kinds.opt_address address ;
           requested_ip = opt "requested address" Kinds.opt_address address ;
-          message = opt "message" Kinds.message Widget.to_string ;
+          message = opt "message" ~auto:no_string Kinds.message
+                        Widget.to_string ;
           max_dhcp_msg_size = opt "max message size" Kinds.max_size
                                   Widget.to_int ;
-          vendor_class_id = opt "vendor class" Kinds.opt_string
+          vendor_class_id = opt "vendor class" ~auto:no_string Kinds.opt_string
                                 Widget.to_string ;
           client_id = opt "client identifier" Kinds.opaque opaque ;
           request_list = opt "request list" Kinds.opaque opaque ;
