@@ -145,7 +145,9 @@ VENDORED_ASSETS = www/pico.min.css www/alpine.min.js \
 COASTLINE = www/coast.js
 
 # The page and its own script and style, then the coast and those libraries.
-UI_ASSETS = www/index.html www/app.js www/style.css $(COASTLINE) \
+# The page is assembled first: what is spliced into it (www/cell-input.html) is
+# not an asset of its own.
+UI_ASSETS = build/index.html www/app.js www/style.css $(COASTLINE) \
             $(VENDORED_ASSETS)
 
 # Tests that do not fit qtest's inline style: concurrency and the admin API.
@@ -219,6 +221,14 @@ coastline:
 	@$(RM) ne_110m_coastline.zip
 	@ls -l $(COASTLINE)
 
+# The inputs a value is edited through are written once and spliced in wherever
+# a value is edited, cppo doing the splicing. [-n] keeps its line directives out
+# of the page, which is not OCaml and would show them.
+build/index.html: www/index.html www/cell-input.html
+	@echo 'Assembling $@'
+	@mkdir -p $(@D)
+	@cppo -n -I www $< -o $@
+
 myadmin_assets.ml: $(UI_ASSETS)
 	@echo 'Embedding $(UI_ASSETS) into $@'
 	@{ echo '(* Generated from www/ by the Makefile. Do not edit. *)' ;\
@@ -260,3 +270,4 @@ clean-spec:
 	$(RM) examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
 	$(RM) tests/*.cm[ioxa] tests/*.o tests/*.annot $(EXTRA_TESTS)
 	$(RM) myadmin_assets.ml robinet
+	$(RM) -r build

@@ -18,6 +18,7 @@ remove: [make "uninstall"]
 depends: [
   "batteries"
   "bitstring"
+  "cppo" {build}
   "ocamlfind" {build}
   "ppx_bitstring"
   "ppx_deriving" {build}

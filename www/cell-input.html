@@ -1,0 +1,143 @@
+<!-- The inputs one value is edited through, whatever is being edited with
+     them: a cell of a table in the property panel, a parameter of a device
+     being built, a field of a packet a synthesizer is being given.
+
+     Written once and spliced in wherever a value is edited (cppo does it, see
+     the Makefile), since three copies of a chain this long is three places to
+     fix an input and two of them to forget.
+
+     What it reads from where it is spliced in:
+       [c]      the cell being edited (see [cellOf] in app.js),
+       [owner]  what holds it -- a property, a field of the build dialog, a
+                frame -- which says whether it may be edited at all
+                ([canEdit]) and is told when it has been ([touch]),
+       [dlid]   the id of the <datalist> a cell with suggestions hangs its
+                own off, unique where it is drawn.
+     Each of the three is named by the element this is spliced into, so that
+     nothing here has to know which of the three places it is in. -->
+<!-- Same box as anywhere else a value
+     may be left out, in front of the
+     input for it. -->
+<template x-if="canEdit(owner) && c.kind.type === 'optional'">
+    <input type="checkbox" class="enabler"
+           :disabled="!online" x-model="c.enabled"
+           @change="touch(owner)"
+           :title="c.enabled ? 'leave this out'
+                             : 'give it a value'"/>
+</template>
+
+<template x-if="canEdit(owner) && cellInput(c) === 'bool'">
+    <input type="checkbox" :disabled="!online"
+           :class="{ unset: !set(c) }"
+           :checked="c.draft === 'true'"
+           @change="c.draft = $event.target.checked ? 'true' : 'false' ;
+                    enable(c) ; touch(owner)"/>
+</template>
+
+<template x-if="canEdit(owner) && cellInput(c) === 'enum'">
+    <select :disabled="!online" :class="{ unset: !set(c) }"
+            x-model="c.draft" @change="enable(c) ; touch(owner)">
+        <template x-for="ch in base(c).choices" :key="ch.value">
+            <option :value="ch.value" x-text="ch.label"></option>
+        </template>
+    </select>
+</template>
+
+<!-- A number with some known names: typed
+     into, with those offered beside it,
+     since the names are not all there is
+     (a frame may carry any protocol). -->
+<template x-if="canEdit(owner) && cellInput(c) === 'choice'">
+    <span class="cell">
+        <input type="number" :disabled="!online"
+               :class="{ unset: !set(c) }"
+               :min="base(c).min" :max="base(c).max"
+               :list="dlid"
+               x-model="c.draft" @change="enable(c) ; touch(owner)"/>
+        <datalist :id="dlid">
+            <template x-for="ch in base(c).choices" :key="ch.value">
+                <option :value="ch.value" x-text="ch.label"></option>
+            </template>
+        </datalist>
+    </span>
+</template>
+
+<template x-if="canEdit(owner) && cellInput(c) === 'set'">
+    <span class="choices">
+        <template x-for="ch in base(c).choices" :key="ch.value">
+            <label>
+                <input type="checkbox" :disabled="!online"
+                       :checked="ticked(c, ch.value)"
+                       @change="toggleChoice(c, ch.value) ; touch(owner)"/>
+                <span x-text="ch.label"></span>
+            </label>
+        </template>
+    </span>
+</template>
+
+<!-- No slider in a cell: a column of
+     tracks is unreadable, and there is
+     no room for one beside the number
+     anyway. The bounds still hold. -->
+<template x-if="canEdit(owner) && cellInput(c) === 'number'">
+    <input type="number" :disabled="!online"
+           :class="{ unset: !set(c) }"
+           :min="base(c).type === 'range' ? base(c).min : null"
+           :max="base(c).type === 'range' ? base(c).max : null"
+           :step="base(c).type === 'int' ||
+                  (base(c).type === 'range' && base(c).int)
+                  ? 1 : 'any'"
+           :placeholder="hint(c)"
+           x-model="c.draft"
+           @input="enable(c) ; touch(owner)"/>
+</template>
+
+<template x-if="canEdit(owner) && cellInput(c) === 'text'">
+    <input type="text" :disabled="!online"
+           :class="{ unset: !set(c) }"
+           :placeholder="hint(c)"
+           x-model="c.draft"
+           @input="enable(c) ; touch(owner)"/>
+</template>
+
+<!-- One of several shapes: which one,
+     and then what that one carries --
+     the fields of a row, or a single
+     value. Picking another shape
+     empties the inputs beside it (see
+     [pickCase]): what one case holds
+     says nothing about another. -->
+<template x-if="canEdit(owner) && cellInput(c) === 'variant'">
+    <span class="variant">
+        <select :disabled="!online"
+                @change="pickCase(p, c, $event.target.value)">
+            <template x-for="cs in cases(c)" :key="cs.name">
+                <option :value="cs.name"
+                        :selected="cs.name === c.case"
+                        x-text="cs.name"></option>
+            </template>
+        </select>
+        <template x-for="(s, j) in c.sub" :key="j">
+            <label>
+                <span x-show="s.name" x-text="s.name"></span>
+                <template x-if="subInput(s) === 'bool'">
+                    <input type="checkbox" :disabled="!online"
+                           :checked="s.draft === 'true'"
+                           @change="s.draft = $event.target.checked ? 'true' : 'false' ;
+                                    touch(owner)"/>
+                </template>
+                <template x-if="subInput(s) !== 'bool'">
+                    <input :type="subInput(s) === 'number' ? 'number' : 'text'"
+                           :disabled="!online"
+                           :min="base(s).type === 'range' ? base(s).min : null"
+                           :max="base(s).type === 'range' ? base(s).max : null"
+                           :step="base(s).type === 'int' ||
+                                  (base(s).type === 'range' && base(s).int)
+                                  ? 1 : 'any'"
+                           :placeholder="hint(s)"
+                           x-model="s.draft" @input="touch(owner)"/>
+                </template>
+            </label>
+        </template>
+    </span>
+</template>

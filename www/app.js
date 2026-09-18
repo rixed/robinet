@@ -2241,6 +2241,17 @@ document.addEventListener('alpine:init', () => {
             return baseKind(p.kind)
         },
 
+        /* Whether what holds a cell allows it to be edited at all: a property
+         * that is read-only does not, a field of the build dialog always does
+         * (nothing has been built yet), and a frame does when it was opened to
+         * be written rather than read (see [openFrame]). What the shared
+         * inputs ask before drawing anything (see www/cell-input.html). */
+        canEdit(owner) {
+            if (!owner) return false
+            if (owner.editable !== undefined) return !!owner.editable
+            return !owner.read_only
+        },
+
         /* Has this property (or one cell of it) a value to edit at all?
          * Anything that cannot be absent always has one. */
         set(p) {

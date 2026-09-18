@@ -583,106 +583,10 @@
                                                                 <template x-for="row in f.rows" :key="row.key">
                                                                     <tr :class="{ dragged: dragRow === row.key }">
                                                                         <template x-for="(c, i) in row.cells" :key="i">
-                                                                            <td><span class="cell">
-                                                                                <template x-if="c.kind.type === 'optional'">
-                                                                                    <input type="checkbox" class="enabler"
-                                                                                           :disabled="!online" x-model="c.enabled"
-                                                                                           :title="c.enabled ? 'leave this out'
-                                                                                                             : 'give it a value'"/>
-                                                                                </template>
-
-                                                                                <template x-if="cellInput(c) === 'bool'">
-                                                                                    <input type="checkbox" :disabled="!online"
-                                                                                           :class="{ unset: !set(c) }"
-                                                                                           :checked="c.draft === 'true'"
-                                                                                           @change="c.draft = $event.target.checked ? 'true' : 'false' ;
-                                                                                                    enable(c)"/>
-                                                                                </template>
-
-                                                                                <template x-if="cellInput(c) === 'enum'">
-                                                                                    <select :disabled="!online" :class="{ unset: !set(c) }"
-                                                                                            x-model="c.draft" @change="enable(c)">
-                                                                                        <template x-for="ch in base(c).choices" :key="ch.value">
-                                                                                            <option :value="ch.value" x-text="ch.label"></option>
-                                                                                        </template>
-                                                                                    </select>
-                                                                                </template>
-
-                                                                                <!-- A number with some known names: typed
-                                                                                     into, with those offered beside it,
-                                                                                     since the names are not all there is
-                                                                                     (a frame may carry any protocol). -->
-                                                                                <template x-if="cellInput(c) === 'choice'">
-                                                                                    <span class="cell">
-                                                                                        <input type="number" :disabled="!online"
-                                                                                               :class="{ unset: !set(c) }"
-                                                                                               :min="base(c).min" :max="base(c).max"
-                                                                                               :list="dl('f', f.name, row.key, i)"
-                                                                                               x-model="c.draft" @change="enable(c)"/>
-                                                                                        <datalist :id="dl('f', f.name, row.key, i)">
-                                                                                            <template x-for="ch in base(c).choices" :key="ch.value">
-                                                                                                <option :value="ch.value" x-text="ch.label"></option>
-                                                                                            </template>
-                                                                                        </datalist>
-                                                                                    </span>
-                                                                                </template>
-
-                                                                                <template x-if="cellInput(c) === 'set'">
-                                                                                    <span class="choices">
-                                                                                        <template x-for="ch in base(c).choices" :key="ch.value">
-                                                                                            <label>
-                                                                                                <input type="checkbox" :disabled="!online"
-                                                                                                       :checked="ticked(c, ch.value)"
-                                                                                                       @change="toggleChoice(c, ch.value)"/>
-                                                                                                <span x-text="ch.label"></span>
-                                                                                            </label>
-                                                                                        </template>
-                                                                                    </span>
-                                                                                </template>
-
-                                                                                <template x-if="cellInput(c) === 'number'">
-                                                                                    <input type="number" :disabled="!online"
-                                                                                           :class="{ unset: !set(c) }"
-                                                                                           :min="base(c).type === 'range' ? base(c).min : null"
-                                                                                           :max="base(c).type === 'range' ? base(c).max : null"
-                                                                                           :step="base(c).type === 'int' ||
-                                                                                                  (base(c).type === 'range' && base(c).int)
-                                                                                                  ? 1 : 'any'"
-                                                                                           :placeholder="hint(c)"
-                                                                                           x-model="c.draft" @input="enable(c)"/>
-                                                                                </template>
-
-                                                                                <template x-if="cellInput(c) === 'text'">
-                                                                                    <input type="text" :disabled="!online"
-                                                                                           :class="{ unset: !set(c) }"
-                                                                                           :placeholder="hint(c)"
-                                                                                           x-model="c.draft" @input="enable(c)"/>
-                                                                                </template>
-
-                                                                                <!-- The same choice of shapes as in
-                                                                                     the panel, nothing being built
-                                                                                     yet: see there. -->
-                                                                                <template x-if="cellInput(c) === 'variant'">
-                                                                                    <span class="variant">
-                                                                                        <select :disabled="!online"
-                                                                                                @change="pickCase(f, c, $event.target.value)">
-                                                                                            <template x-for="cs in cases(c)" :key="cs.name">
-                                                                                                <option :value="cs.name"
-                                                                                                        :selected="cs.name === c.case"
-                                                                                                        x-text="cs.name"></option>
-                                                                                            </template>
-                                                                                        </select>
-                                                                                        <template x-for="(s, j) in c.sub" :key="j">
-                                                                                            <label>
-                                                                                                <span x-show="s.name" x-text="s.name"></span>
-                                                                                                <input :type="subInput(s) === 'number' ? 'number' : 'text'"
-                                                                                                       :disabled="!online"
-                                                                                                       :placeholder="hint(s)"
-                                                                                                       x-model="s.draft"/>
-                                                                                            </label>
-                                                                                        </template>
-                                                                                    </span>
-                                                                                </template>
+                                                                            <td><span class="cell"
+                                                                                  x-data="{ owner: f,
+                                                                                            get dlid() { return dl('f', f.name, row.key, i) } }">
+#include "cell-input.html"
                                                                             </span></td>
                                                                         </template>
                                                                         <!-- Buttons of a form say what they
@@ -1201,7 +1105,9 @@
                                                                                  keeps its place at the left of it,
                                                                                  and the input takes what room is
                                                                                  left. -->
-                                                                            <td><span class="cell">
+                                                                            <td><span class="cell"
+                                                                                  x-data="{ owner: p,
+                                                                                            get dlid() { return dl('prop', p.name, row.key, i) } }">
                                                                                 <!-- Read, whatever the property
                                                                                      around it allows: octets have no
                                                                                      input of their own (see
@@ -1244,131 +1150,7 @@
                                                                                             x-text="revealLabel(c)"></button>
                                                                                 </template>
 
-                                                                                <!-- Same box as anywhere else a value
-                                                                                     may be left out, in front of the
-                                                                                     input for it. -->
-                                                                                <template x-if="!p.read_only && c.kind.type === 'optional'">
-                                                                                    <input type="checkbox" class="enabler"
-                                                                                           :disabled="!online" x-model="c.enabled"
-                                                                                           @change="touch(p)"
-                                                                                           :title="c.enabled ? 'leave this out'
-                                                                                                             : 'give it a value'"/>
-                                                                                </template>
-
-                                                                                <template x-if="!p.read_only && cellInput(c) === 'bool'">
-                                                                                    <input type="checkbox" :disabled="!online"
-                                                                                           :class="{ unset: !set(c) }"
-                                                                                           :checked="c.draft === 'true'"
-                                                                                           @change="c.draft = $event.target.checked ? 'true' : 'false' ;
-                                                                                                    enable(c) ; touch(p)"/>
-                                                                                </template>
-
-                                                                                <template x-if="!p.read_only && cellInput(c) === 'enum'">
-                                                                                    <select :disabled="!online" :class="{ unset: !set(c) }"
-                                                                                            x-model="c.draft" @change="enable(c) ; touch(p)">
-                                                                                        <template x-for="ch in base(c).choices" :key="ch.value">
-                                                                                            <option :value="ch.value" x-text="ch.label"></option>
-                                                                                        </template>
-                                                                                    </select>
-                                                                                </template>
-
-                                                                                <!-- See the same input in the device form:
-                                                                                     a number whose known values are
-                                                                                     offered rather than imposed. -->
-                                                                                <template x-if="!p.read_only && cellInput(c) === 'choice'">
-                                                                                    <span class="cell">
-                                                                                        <input type="number" :disabled="!online"
-                                                                                               :class="{ unset: !set(c) }"
-                                                                                               :min="base(c).min" :max="base(c).max"
-                                                                                               :list="dl('p', p.name, row.key, i)"
-                                                                                               x-model="c.draft" @change="enable(c) ; touch(p)"/>
-                                                                                        <datalist :id="dl('p', p.name, row.key, i)">
-                                                                                            <template x-for="ch in base(c).choices" :key="ch.value">
-                                                                                                <option :value="ch.value" x-text="ch.label"></option>
-                                                                                            </template>
-                                                                                        </datalist>
-                                                                                    </span>
-                                                                                </template>
-
-                                                                                <template x-if="!p.read_only && cellInput(c) === 'set'">
-                                                                                    <span class="choices">
-                                                                                        <template x-for="ch in base(c).choices" :key="ch.value">
-                                                                                            <label>
-                                                                                                <input type="checkbox" :disabled="!online"
-                                                                                                       :checked="ticked(c, ch.value)"
-                                                                                                       @change="toggleChoice(c, ch.value) ; touch(p)"/>
-                                                                                                <span x-text="ch.label"></span>
-                                                                                            </label>
-                                                                                        </template>
-                                                                                    </span>
-                                                                                </template>
-
-                                                                                <!-- No slider in a cell: a column of
-                                                                                     tracks is unreadable, and there is
-                                                                                     no room for one beside the number
-                                                                                     anyway. The bounds still hold. -->
-                                                                                <template x-if="!p.read_only && cellInput(c) === 'number'">
-                                                                                    <input type="number" :disabled="!online"
-                                                                                           :class="{ unset: !set(c) }"
-                                                                                           :min="base(c).type === 'range' ? base(c).min : null"
-                                                                                           :max="base(c).type === 'range' ? base(c).max : null"
-                                                                                           :step="base(c).type === 'int' ||
-                                                                                                  (base(c).type === 'range' && base(c).int)
-                                                                                                  ? 1 : 'any'"
-                                                                                           :placeholder="hint(c)"
-                                                                                           x-model="c.draft"
-                                                                                           @input="enable(c) ; touch(p)"/>
-                                                                                </template>
-
-                                                                                <template x-if="!p.read_only && cellInput(c) === 'text'">
-                                                                                    <input type="text" :disabled="!online"
-                                                                                           :class="{ unset: !set(c) }"
-                                                                                           :placeholder="hint(c)"
-                                                                                           x-model="c.draft"
-                                                                                           @input="enable(c) ; touch(p)"/>
-                                                                                </template>
-
-                                                                                <!-- One of several shapes: which one,
-                                                                                     and then what that one carries --
-                                                                                     the fields of a row, or a single
-                                                                                     value. Picking another shape
-                                                                                     empties the inputs beside it (see
-                                                                                     [pickCase]): what one case holds
-                                                                                     says nothing about another. -->
-                                                                                <template x-if="!p.read_only && cellInput(c) === 'variant'">
-                                                                                    <span class="variant">
-                                                                                        <select :disabled="!online"
-                                                                                                @change="pickCase(p, c, $event.target.value)">
-                                                                                            <template x-for="cs in cases(c)" :key="cs.name">
-                                                                                                <option :value="cs.name"
-                                                                                                        :selected="cs.name === c.case"
-                                                                                                        x-text="cs.name"></option>
-                                                                                            </template>
-                                                                                        </select>
-                                                                                        <template x-for="(s, j) in c.sub" :key="j">
-                                                                                            <label>
-                                                                                                <span x-show="s.name" x-text="s.name"></span>
-                                                                                                <template x-if="subInput(s) === 'bool'">
-                                                                                                    <input type="checkbox" :disabled="!online"
-                                                                                                           :checked="s.draft === 'true'"
-                                                                                                           @change="s.draft = $event.target.checked ? 'true' : 'false' ;
-                                                                                                                    touch(p)"/>
-                                                                                                </template>
-                                                                                                <template x-if="subInput(s) !== 'bool'">
-                                                                                                    <input :type="subInput(s) === 'number' ? 'number' : 'text'"
-                                                                                                           :disabled="!online"
-                                                                                                           :min="base(s).type === 'range' ? base(s).min : null"
-                                                                                                           :max="base(s).type === 'range' ? base(s).max : null"
-                                                                                                           :step="base(s).type === 'int' ||
-                                                                                                                  (base(s).type === 'range' && base(s).int)
-                                                                                                                  ? 1 : 'any'"
-                                                                                                           :placeholder="hint(s)"
-                                                                                                           x-model="s.draft" @input="touch(p)"/>
-                                                                                                </template>
-                                                                                            </label>
-                                                                                        </template>
-                                                                                    </span>
-                                                                                </template>
+#include "cell-input.html"
                                                                             </span></td>
                                                                         </template>
                                                                         <td class="row-tools" x-show="growable(p)">

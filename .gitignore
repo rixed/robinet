@@ -28,3 +28,4 @@ core
 oUnit-*
 myadmin_assets.ml
 robinet
+build/
