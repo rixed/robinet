@@ -71,14 +71,51 @@ struct
     (*$< Pdu *)
     type question = string * QType.t * int
 
-    let question_is_valid name =
-        let len = String.length name in
-        len > 0 && name.[0] <> '.' && name.[len-1] = '.'
+    (* A name as it travels: a run of labels, the last of them the empty root
+     * label, which is what the trailing dot writes. So "www.example.com." is
+     * one and "." is the root itself.
+     *
+     * Everything that builds a message normalises what it is given (see
+     * [fqdn]), since a caller resolving "www.example.com" means the name and
+     * not a malformed one; what is refused is what no normalising would save
+     * -- an empty label in the middle, or one longer than the 63 bytes its
+     * length is written in. *)
+    let label_is_valid l = String.length l > 0 && String.length l <= 63
+
+    let name_is_valid name =
+        (* The root is the one name that is nothing but that last label. *)
+        name = "." ||
+        (match List.rev (String.split_on_char '.' name) with
+        | "" :: labels -> labels <> [] && List.for_all label_is_valid labels
+        | _ -> false)
+
+    (* The name [name] means, with the root label it may have been written
+     * without. Raises [Invalid_argument] for what is no name at all. *)
+    let fqdn name =
+        let name = if name = "" then "." else name in
+        let name =
+            if name.[String.length name - 1] = '.' then name else name ^ "." in
+        if not (name_is_valid name) then
+            invalid_arg ("Dns: no name is "^ name) ;
+        name
 
     let questions_are_valid questions =
-        List.for_all (fun (name, _, _) ->
-            question_is_valid name
-        ) questions
+        List.for_all (fun (name, _, _) -> name_is_valid name) questions
+
+    let fqdn_questions questions =
+        List.map (fun (name, qtype, qclass) -> fqdn name, qtype, qclass)
+                 questions
+
+    (*$T fqdn
+      fqdn "www.example.com" = "www.example.com."
+      fqdn "www.example.com." = "www.example.com."
+      (* The root, however it is written: *) \
+      fqdn "." = "." && fqdn "" = "."
+      try ignore (fqdn ".example.com") ; false with Invalid_argument _ -> true
+      try ignore (fqdn "www..com") ; false with Invalid_argument _ -> true
+      try ignore (fqdn (String.make 64 'a' ^ ".com")) ; false \
+      with Invalid_argument _ -> true
+     *)
 
     type rr = string * QType.t * int (* qclass *) * int32 (* TTL *) * bytes
     type t = { id : int ; is_query : bool ; opcode : int ;
@@ -94,8 +131,7 @@ struct
     let make_query =
         let id = ref 0 in
         (fun name ->
-            if not (question_is_valid name) then
-                invalid_arg "Dns.Pdu.make_query" ;
+            let name = fqdn name in
             incr id ;
             { id = !id ; is_query = true ; opcode = std_query ;
               is_auth = false ; truncated = false ;
@@ -106,8 +142,7 @@ struct
               answer_rrs = [] ; authority_rrs = [] ; additional_rrs = [] })
 
     let make_answer id questions answer_rrs =
-        if not (questions_are_valid questions) then
-            invalid_arg "Dns.Pdu.make_answer" ;
+        let questions = fqdn_questions questions in
         { id ; is_query = false ; opcode = std_query ; is_auth = true ;
           truncated = false ; rec_desired = true ; rec_avlb = false ;
           authentic_data = false ; checking_disabled = true ;
@@ -117,7 +152,7 @@ struct
     (* TODO: make_answer *)
 
     let random () =
-        make_query (rand_hostname () ^ ".")
+        make_query (rand_hostname ())
 
     let unpack_name pkt rest =
         let rec aux prevs o =
@@ -134,6 +169,10 @@ struct
             ) in
         Result.Monad.bind (aux [] rest) (fun (parts, rest) ->
             let name = String.concat "." (List.rev parts) in
+            (* A message asking after the root carries that label and no
+             * other, which concatenates to nothing: "." is how that name is
+             * written here, as every other name ends in it. *)
+            let name = if name = "" then "." else name in
             Ok (name, rest))
 
     let read_n16 pkt o =
@@ -171,6 +210,27 @@ struct
                     | _ -> Error (lazy "Should not happen"))
             ) in
         aux [] rest num_rrs
+
+    (* What is written is what the header counts, whoever built the record:
+       a question nothing could write is one the message does not claim. *)
+    (*$R pack
+      let q name = name, QType.a, qclass_inet in
+      let t = make_query "example.com" in
+      let t = { t with questions = [ q "example.com." ; q "not a name" ] } in
+      match unpack (pack t) with
+      | Ok read ->
+          assert_equal ~printer:string_of_int 1 (List.length read.questions)
+      | Error e ->
+          assert_failure (Lazy.force e)
+     *)
+
+    (* Every name a message carries ends in the root label, however it was
+       written on the way in. *)
+    (*$= make_query & ~printer:identity
+      "www.example.com." (List.hd (make_query "www.example.com").questions |> \
+                          fun (n, _, _) -> n)
+      "." (List.hd (make_query ".").questions |> fun (n, _, _) -> n)
+     *)
 
     let unpack bits = match%bitstring bits with
         | {| id : 16 ;
@@ -231,7 +291,7 @@ struct
         )
 
     let pack_question (name, (qtype : QType.t), qclass) =
-        if not (question_is_valid name) then (
+        if not (name_is_valid name) then (
             Error (lazy (Printf.sprintf "Dns: Bad qname '%s'" name))
         ) else (
             let str = Bytes.create (String.length name + 1 + 4) in
@@ -259,20 +319,33 @@ struct
         Bytes.concat Bytes.empty
 
     let pack t =
+        (* What can be written, which is everything unless this record was
+         * built by hand: everything that makes one names it properly (see
+         * [fqdn]). The header counts what is written rather than what was
+         * meant, so that a message that loses a question is still a message
+         * somebody can read -- and not a header that counts one the body does
+         * not carry. *)
+        let ok_questions =
+            List.filter (fun (name, _, _) -> name_is_valid name) t.questions
+        and ok_rrs =
+            List.filter (fun (name, _, _, _, _) -> name_is_valid name) in
+        let answer_rrs = ok_rrs t.answer_rrs
+        and authority_rrs = ok_rrs t.authority_rrs
+        and additional_rrs = ok_rrs t.additional_rrs in
         let%bitstring header = {|
             t.id : 16 ;
             not t.is_query : 1 ; t.opcode : 4 ; t.is_auth : 1 ; t.truncated : 1 ;
             t.rec_desired : 1 ; t.rec_avlb : 1 ;
             false : 1 ; t.authentic_data : 1 ; t.checking_disabled : 1 ;
             t.status : 4 ;
-            List.length t.questions : 16 ;
-            List.length t.answer_rrs : 16 ;
-            List.length t.authority_rrs : 16 ;
-            List.length t.additional_rrs : 16 |} in
-        let questions  = pack_questions t.questions
-        and answers    = pack_rrs t.answer_rrs
-        and authority  = pack_rrs t.authority_rrs
-        and additional = pack_rrs t.additional_rrs in
+            List.length ok_questions : 16 ;
+            List.length answer_rrs : 16 ;
+            List.length authority_rrs : 16 ;
+            List.length additional_rrs : 16 |} in
+        let questions  = pack_questions ok_questions
+        and answers    = pack_rrs answer_rrs
+        and authority  = pack_rrs authority_rrs
+        and additional = pack_rrs additional_rrs in
         concat [ header ;
                  bitstring_of_bytes questions ;
                  bitstring_of_bytes answers ;
@@ -376,7 +449,7 @@ struct
             of_field "name" gen_values
                      ~auto:(fun () ->
                          Printf.sprintf "h%d.example.com." (Random.int 1000))
-                     Kinds.name Widget.to_string js
+                     Kinds.name (fqdn % Widget.to_string) js
         and qtype js = int "type" Kinds.qtype QType.o js
         and qclass js = int "class" Kinds.qclass identity js in
         let question js = name js, qtype js, qclass js
