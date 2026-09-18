@@ -107,14 +107,24 @@ let derive x salt =
     (h lxor (h lsr 31)) land max_int
 
 let rec coerce kind x =
-    let max_string_len = 50_000 in
+    (* How long a random run of bytes may be. Nothing bounds a [Bytes] or a
+     * [String] the way a [BRange] bounds itself, so this is what stands in for
+     * the bound: long enough for the payload of a frame, which is what the
+     * unbounded runs are. *)
+    let max_string_len = 50_000
+    (* And how long a random string may be, which is another matter: a string
+     * travels as a field of a protocol, and those are short -- a DNS name is
+     * 255 bytes at the outside, a DHCP option carries its length in a byte.
+     * A random string of fifty thousand characters is one nothing could put on
+     * the wire, so an automatic value would be a packet nobody could read. *)
+    and max_text_len = 60 in
     (* Not [abs], which leaves [min_int] negative: *)
     let x = x land max_int in
     match kind with
     | String | Text | FileName ->
         (* What's a random string associated with a random integer [x]?
          * A random string of that length. *)
-        let x = x mod max_string_len in
+        let x = x mod max_text_len in
         `String (randstr x)
     | Int ->
         `Int x
