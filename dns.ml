@@ -70,6 +70,16 @@ module Pdu =
 struct
     (*$< Pdu *)
     type question = string * QType.t * int
+
+    let question_is_valid name =
+        let len = String.length name in
+        len > 0 && name.[0] <> '.' && name.[len-1] = '.'
+
+    let questions_are_valid questions =
+        List.for_all (fun (name, _, _) ->
+            question_is_valid name
+        ) questions
+
     type rr = string * QType.t * int (* qclass *) * int32 (* TTL *) * bytes
     type t = { id : int ; is_query : bool ; opcode : int ;
                is_auth : bool ; truncated : bool ;
@@ -84,6 +94,8 @@ struct
     let make_query =
         let id = ref 0 in
         (fun name ->
+            if not (question_is_valid name) then
+                invalid_arg "Dns.Pdu.make_query" ;
             incr id ;
             { id = !id ; is_query = true ; opcode = std_query ;
               is_auth = false ; truncated = false ;
@@ -94,6 +106,8 @@ struct
               answer_rrs = [] ; authority_rrs = [] ; additional_rrs = [] })
 
     let make_answer id questions answer_rrs =
+        if not (questions_are_valid questions) then
+            invalid_arg "Dns.Pdu.make_answer" ;
         { id ; is_query = false ; opcode = std_query ; is_auth = true ;
           truncated = false ; rec_desired = true ; rec_avlb = false ;
           authentic_data = false ; checking_disabled = true ;
@@ -172,6 +186,8 @@ struct
                 Result.Monad.bind (unpack_rrs pkt rest num_additional_rrs) (fun (additional_rrs, rest) ->
                 if debug && Bytes.length pkt > rest then
                     Error (lazy "Dns: Trailing datas in msg")
+                else if not (questions_are_valid questions) then
+                    Error (lazy "Dns: Invalid questions")
                 else
                     Ok { id = id ; is_query = not qr ; opcode = opcode ;
                          is_auth = aa ; truncated = tc ;
@@ -215,11 +231,10 @@ struct
         )
 
     let pack_question (name, (qtype : QType.t), qclass) =
-        let len = String.length name in
-        if len <> 0 && (name.[0] = '.' || name.[len-1] <> '.') then (
+        if not (question_is_valid name) then (
             Error (lazy (Printf.sprintf "Dns: Bad qname '%s'" name))
         ) else (
-            let str = Bytes.create (len + 1 + 4) in
+            let str = Bytes.create (String.length name + 1 + 4) in
             Result.Monad.bind (pack_name name 0 str 0) (fun o ->
                 pack_n16 (qtype :> int) str o ;
                 pack_n16 qclass str (o + 2) ;
