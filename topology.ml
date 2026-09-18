@@ -373,7 +373,7 @@ let of_simulation (sim : Simulation.t) =
             path <> "" && List.mem_assoc "speeds" props) sw.properties) ;
     assert_bool "and none of its metrics"
         (List.for_all (fun (_, props) ->
-            not (List.mem_assoc "ingress" props)) sw.properties) ;
+            not (List.mem_assoc "volume" props)) sw.properties) ;
     (* And it all survives the trip through JSON: *)
     assert_equal ~printer:dump (to_json t) (to_json (of_string (to_string t)))
  *)

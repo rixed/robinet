@@ -479,9 +479,7 @@ type t =
       mutable states : state array ;
       (* Generation number, used by [emit_next] to stop calling itself back when
        * the synthesizer config has been changed: *)
-      mutable gen : int ;
-      (* FIXME: If we wanted to count packets we should do this in the Iface. *)
-      packets_sent : Metric.Counter.t }
+      mutable gen : int }
 
 type Widget.device += Synthesizer of t
 
@@ -510,8 +508,6 @@ let rec emit_next t gen state =
         (* The frame itself: the bottom layer, whose payload is everything
          * above it (see [Packet.of_synth]). *)
         let bits = Packet.pack_layer layers.(Array.length layers - 1) in
-        let now = Simulation.Widget.now t.widget in
-        Metric.Counter.add t.packets_sent ~now (Array.length state.ifaces) ;
         Array.iter (fun i -> t.ifaces.(i).emit bits) state.ifaces ;
         (* Timed on the first adapter it feeds: the others have ports of their
          * own, and what they make of a frame handed to them is their own
@@ -610,8 +606,7 @@ let make ~parent ?location ?speeds ?(adapters=1) ?(independent=false) name =
           stream = { stop_after = None ; distance = Automatic ;
                      distance_from_end = true } ;
           packet = default_packet () ; independent ;
-          emitting = false ; states = [||] ; gen = 0 ;
-          packets_sent = Metric.Counter.make () } in
+          emitting = false ; states = [||] ; gen = 0 } in
     widget.device <- Some (Synthesizer t) ;
     (* Its adapters are its ports, as a switch's are. *)
     widget.ports <- Widget.{
@@ -657,9 +652,7 @@ let make ~parent ?location ?speeds ?(adapters=1) ?(independent=false) name =
             ~descr:"Whether every adapter draws its own values, rather than \
                     emitting the very same packets (requires restart)."
             ~getter:(fun () -> `Bool t.independent)
-            ~setter:(fun v -> t.independent <- to_bool v) ;
-        metric_property "packets" ~descr:"Packets emitted."
-            (Metric.Counter.T t.packets_sent) ] ;
+            ~setter:(fun v -> t.independent <- to_bool v) ] ;
     (* A machine switched off emits nothing, and one switched back on goes on
      * emitting if that is what it was doing: its events were dropped with the
      * supply (see [Simulation.at]), so the chain has to be started again. *)

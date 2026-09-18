@@ -40,8 +40,7 @@ struct
 mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
                power : Simulation.power ;
               widget : Widget.t ;
-             ingress : Metric.Counter.t ;
-              egress : Metric.Counter.t ;
+              volume : Metric.Counter.t ;
           collisions : Metric.Counter.t }
 
     type Widget.device += T of t
@@ -73,13 +72,14 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
             (* Mark the hub as busy and do transfers that frame *)
             let ttime = Eth.Speed.duration t.speed (bitstring_length pld) in
             t.busy_until <- Clock.Time.add now ttime ;
-            Metric.Counter.add t.ingress ~now ~params (bytelength pld) ;
+            Metric.Counter.add t.volume ~now (bytelength pld)
+                               ~params:(Eth.dir_params ~port:n "ingress") ;
             (* Forward to all ports but the incoming one: *)
             Array.iteri (fun i (emit, _is_conn) ->
                 if i <> n then (
                     Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to port %d/%d" i (Array.length t.ports)))) ;
-                    let params = Metric.(Params.singleton "port" (Param.Int i)) in
-                    Metric.Counter.add t.egress ~now ~params (bytelength pld) ;
+                    Metric.Counter.add t.volume ~now (bytelength pld)
+                        ~params:(Eth.dir_params ~port:i "egress") ;
                     (* Beware: the scheduler will separate simultaneous TX of ε *)
                     Simulation.asap t.power emit pld
                 )) t.ports
@@ -127,8 +127,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
             jamming_time = Eth.Speed.duration speed 32 ;
             power = widget.power ;
             widget ;
-            ingress = Metric.Counter.make () ;
-            egress = Metric.Counter.make () ;
+            volume = Metric.Counter.make () ;
             collisions = Metric.Counter.make () } in
         widget.device <- Some (T t) ;
         widget.ports <- Widget.{
@@ -150,10 +149,9 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
                 ~setter:(fun v ->
                     t.speed <- speeds.(to_choice (choices speed_names) v) ;
                     t.jamming_time <- Eth.Speed.duration t.speed 32) ;
-            metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
-                (Metric.Counter.T t.ingress) ;
-            metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
-                (Metric.Counter.T t.egress) ;
+            metric_property "volume" ~descr:"Volume received and emitted."
+                ~units:"bytes"
+                (Metric.Counter.T t.volume) ;
             metric_property "collisions" ~descr:"Dropped frames due to collisions."
                 (Metric.Counter.T t.collisions) ;
             property "tot ports" ~kind:Int ~descr:"Total number of ports."
@@ -232,22 +230,17 @@ struct
             (* now forward *)
             let do_broadcast () =
                 Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forwarding to all ifaces (but %d)" ins))) ;
-                let now = Simulation.Widget.now t.widget in
                 Array.iteri (fun i (iface : Eth.Iface.t) ->
                     if i <> ins && iface.is_connected then (
                         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to iface %d/%d" i (Array.length t.ifaces)))) ;
-                        Metric.(Counter.add iface.egress ~now (bytelength bits)) ;
                         Simulation.asap t.power iface.emit bits
                     )
                 ) t.ifaces in
             let do_unicast out =
                 let iface = t.ifaces.(out) in
                 Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Known dest %s, will forward to iface %d" (Eth.Addr.to_string (Eth.Addr.o dst)) out))) ;
-                if iface.is_connected then (
-                    let now = Simulation.Widget.now t.widget in
-                    Metric.(Counter.add iface.egress ~now (bytelength bits)) ;
-                    Simulation.asap t.power iface.emit bits
-                ) in
+                if iface.is_connected then
+                    Simulation.asap t.power iface.emit bits in
             if Eth.Addr.is_broadcast (Eth.Addr.o dst) then
                 do_broadcast ()
             else (

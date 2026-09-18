@@ -368,10 +368,21 @@ struct
         List.reduce max speeds
 end
 
+(* What became of a frame, as the parameter that tells one case of a counter
+ * from another: which way it was going, or what it was dropped for (see
+ * [Iface]'s "packets" and "volume", and [Pcap.portal], which counts the same
+ * way). [port] for a widget that counts for several of them. *)
+let dir_params ?port dir =
+    let dir = "dir", Metric.Param.String dir in
+    match port with
+    | None -> Metric.Params.make [ dir ]
+    | Some p -> Metric.Params.make [ dir ; "port", Metric.Param.Int p ]
+
 (** {2 Transceiver: basic state, connection, speed, etc}
  * An Iface is used by both address-less Ethernet switches as well as independent
  * adapters with a MAC address etc.
- * Its read and write functions update the ingress/egress metrics, while the
+ * Its read and write functions count the frames and the bytes going either
+ * way, while the
  * write function (reception of a frame from the outside) account for
  * deserialization delay. Which implies that the timestamp at which a frame
  * is transmitted is the timestamp of the first bit on the wire (ie.
@@ -408,9 +419,10 @@ struct
           mutable inter_frame_gap : int ;
           mutable tx_busy_until : Time.t ;
           mutable rx_busy_until : Time.t ;
-          ingress : Metric.Counter.t ;
-          egress : Metric.Counter.t ;
-          rx_crc_errs : Metric.Counter.t }
+          (* Frames and bytes, either way: what became of one is the "dir"
+           * parameter (see [dir_params]). *)
+          packets : Metric.Counter.t ;
+          volume : Metric.Counter.t }
 
     let string_of_negotiated = function
         | None ->
@@ -428,7 +440,8 @@ struct
             let bitlen = bitstring_length pld in
             Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Rx %d bits" bitlen))) ;
             let now = Simulation.Widget.now t.widget in
-            Metric.(Counter.add t.ingress ~now (bytelength pld)) ;
+            Metric.Counter.add t.volume ~now ~params:(dir_params "ingress")
+                               (bytelength pld) ;
             (* Another frame arriving before rx_busy_until would be a collision.
              * We can't take back the previous frame with which this one collided,
              * but this one is dropped. *)
@@ -440,8 +453,11 @@ struct
             let rx_stop = Time.add now ser_delay in
             t.rx_busy_until <- max t.rx_busy_until rx_stop ;
             if dbl_recept then
-                Metric.Counter.inc t.rx_crc_errs ~now
+                Metric.Counter.inc t.packets ~now
+                                   ~params:(dir_params "rx_crc_error")
             else (
+                Metric.Counter.inc t.packets ~now
+                                   ~params:(dir_params "ingress") ;
                 let recv_ts =
                     match t.can_forward_after with
                     | Some b when b < bitlen ->
@@ -464,7 +480,10 @@ struct
                 Log.(log t.widget.logger Debug (lazy (Printf.sprintf
                     "Tx %d bits" bitlen))) ;
                 let now = Simulation.Widget.now t.widget in
-                Metric.(Counter.add t.egress ~now (bytelength pld)) ;
+                Metric.Counter.add t.volume ~now ~params:(dir_params "egress")
+                                   (bytelength pld) ;
+                Metric.Counter.inc t.packets ~now
+                                   ~params:(dir_params "egress") ;
                 (* Frames must wait for each others when sending: *)
                 let ser_delay = Speed.duration speed bitlen in
                 let busy_until =
@@ -545,9 +564,8 @@ struct
               tx_busy_until = beginning_of_time ;
               rx_busy_until = beginning_of_time ;
               speeds ; full_duplex ; negotiated ; inter_frame_gap ;
-              ingress = Metric.Counter.make () ;
-              egress = Metric.Counter.make () ;
-              rx_crc_errs = Metric.Counter.make () } in
+              packets = Metric.Counter.make () ;
+              volume = Metric.Counter.make () } in
         Widget.add_properties widget Widget.[
             property "connected" ~kind:Bool
                 ~descr:"Is there a cable plugged in?"
@@ -583,13 +601,13 @@ struct
                 ~getter:(fun () -> `Int t.inter_frame_gap)
                 ~setter:(fun v ->
                     t.inter_frame_gap <- to_int_range ~min:ifg_min v) ;
-            metric_property "ingress" ~descr:"Received volume." ~units:"bytes"
-                (Metric.Counter.T t.ingress) ;
-            metric_property "egress" ~descr:"Emitted volume." ~units:"bytes"
-                (Metric.Counter.T t.egress) ;
-            metric_property "rx-crc-errors"
-                ~descr:"Dropped frames due to CRC errors on reception."
-                (Metric.Counter.T t.rx_crc_errs) ] ;
+            metric_property "packets"
+                ~descr:"Frames received and emitted, and those dropped on \
+                        reception."
+                (Metric.Counter.T t.packets) ;
+            metric_property "volume" ~descr:"Volume received and emitted."
+                ~units:"bytes"
+                (Metric.Counter.T t.volume) ] ;
         (* An adapter is the one port of whatever owns it. *)
         widget.ports <- Widget.{
             count = (fun () -> 1) ;
