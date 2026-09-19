@@ -526,11 +526,16 @@
                             <template x-if="adding">
                                 <div>
                                     <header>
-                                        <strong x-text="'New ' + adding.type"></strong>
+                                        <strong x-text="adding.mode === 'action'
+                                                        ? adding.type
+                                                        : 'New ' + adding.type"></strong>
                                         <small x-text="adding.descr"></small>
                                     </header>
 
-                                    <label class="field">
+                                    <!-- Only a device is named: an action is
+                                         run on a widget that is already there
+                                         and already called something. -->
+                                    <label class="field" x-show="adding.mode !== 'action'">
                                         <span class="what">name</span>
                                         <!-- Empty, and the server names it: the
                                              box shows what it would be called,
@@ -703,7 +708,13 @@
                                                                x-model="f.draft" @input="enable(f)"/>
                                                     </template>
 
-                                                    <template x-if="base(f).type === 'int' || base(f).type === 'float'">
+                                                    <!-- A length of time is a number of
+                                                         seconds, typed as any other number
+                                                         is: what tells it from one is the
+                                                         unit beside it, and how it is read
+                                                         back out. -->
+                                                    <template x-if="base(f).type === 'int' || base(f).type === 'float' ||
+                                                                    base(f).type === 'duration'">
                                                         <input type="number" :disabled="!online"
                                                                :class="{ unset: !set(f) }"
                                                                :step="base(f).type === 'int' ? 1 : 'any'"
@@ -755,14 +766,104 @@
                                         <button type="button" class="outline secondary"
                                                 @click="cancelAdd()">Cancel</button>
                                         <button type="submit" :disabled="!online || adding.busy"
-                                                x-text="adding.busy ? 'Building...' : 'Build'"></button>
+                                                x-text="adding.mode === 'action'
+                                                        ? (adding.busy ? 'Running...' : 'Run')
+                                                        : (adding.busy ? 'Building...' : 'Build')"></button>
                                     </footer>
                                 </div>
                             </template>
                         </form>
 
+                        <!-- ================= what it is, what it does =========
+
+                             Two lists of one widget, one at a time, under the
+                             schematic they are about: its properties -- state,
+                             read and set -- and its actions -- calls, made. -->
+                        <nav class="panel-tabs" x-show="!adding" x-cloak>
+                            <button :class="panelTab === 'props' ? '' : 'outline secondary'"
+                                    :aria-pressed="panelTab === 'props'"
+                                    @click="showTab('props')">Properties</button>
+                            <button :class="panelTab === 'actions' ? '' : 'outline secondary'"
+                                    :aria-pressed="panelTab === 'actions'"
+                                    @click="showTab('actions')">Actions</button>
+                        </nav>
+
+                        <!-- ================= actions ================= -->
+                        <article class="actions" x-show="!adding && panelTab === 'actions'"
+                                 x-cloak>
+                            <p x-show="actionsState === 'loading'">
+                                <small>Reading them&hellip;</small></p>
+                            <p class="sim-error" x-show="actionsState === 'failed'">
+                                <small x-text="actionsError"></small>
+                            </p>
+                            <p x-show="actionsState === 'loaded' && !actions.length">
+                                <small>There is nothing this widget can be asked
+                                       to do.</small></p>
+
+                            <table x-show="actions.length">
+                                <thead>
+                                    <tr><th>Can do</th><th></th></tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="a in actions" :key="a.name">
+                                        <tr>
+                                            <td>
+                                                <span x-text="a.name"></span>
+                                                <small class="descr" x-show="a.descr"
+                                                       x-text="a.descr"></small>
+                                            </td>
+                                            <td class="run">
+                                                <!-- An action may be runnable
+                                                     only some of the time:
+                                                     there is nothing to stop
+                                                     when nothing is playing. -->
+                                                <button :disabled="!online || !a.can_run"
+                                                        :title="a.can_run
+                                                                ? 'Fill in what it needs, then run it'
+                                                                : 'Not something it can do just now'"
+                                                        @click="startAction(a)">run</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+
+                            <!-- What has been asked of it, most recent first.
+                                 A run outlives what it ran on, so this holds
+                                 runs of a widget that has since been taken out
+                                 of the simulation, and a run whose end nothing
+                                 ever recorded goes on reading as running. -->
+                            <table class="runs" x-show="runs.length">
+                                <thead>
+                                    <tr><th>Run</th><th>Started</th><th>Took</th>
+                                        <th>Came to</th></tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="r in runs" :key="r.id">
+                                        <tr :class="{ running: r.running }">
+                                            <td>
+                                                <span x-text="r.action"></span>
+                                                <small class="descr" x-text="runParams(r)"></small>
+                                            </td>
+                                            <td>
+                                                <span x-text="clock(r.started)"></span>
+                                                <!-- Where the order came from:
+                                                     said only when it was not
+                                                     this interface, which is
+                                                     the usual case. -->
+                                                <small class="descr" x-show="r.origin !== 'api'"
+                                                       x-text="r.origin"></small>
+                                            </td>
+                                            <td x-text="runLength(r, simNow())"></td>
+                                            <td x-text="runResult(r)"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </article>
+
                         <!-- ================= properties ================= -->
-                        <article class="properties" x-show="!adding">
+                        <article class="properties" x-show="!adding && panelTab === 'props'">
                             <header>
                                 <strong>Properties</strong>
                                 <!-- Whether the values below follow what the

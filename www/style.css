@@ -982,10 +982,57 @@ nav.breadcrumb .kind { color: var(--pico-muted-color); margin-left: .25rem; }
 
 /* ------------------------------------------------------------ properties */
 
+/* The two lists of one widget, and which of them is open. Buttons rather than
+ * links: what they do is switch the panel below, which is what a button is. */
+nav.panel-tabs {
+    display: flex;
+    gap: .4rem;
+    margin-top: 1.2rem;
+}
+nav.panel-tabs button {
+    width: auto;
+    margin: 0;
+    padding: .25rem .9rem;
+    font-size: .8rem;
+}
+
 /* Under the picture rather than beside it. Pico draws it as a card, which is
  * separation enough: a rule of our own on top of that is two lines saying the
  * same thing. */
-article.properties { margin-top: 1.2rem; }
+article.properties, article.actions { margin-top: .6rem; }
+
+/* What it can do, and what has been asked of it: the panel's own proportions,
+ * since the two read as one table under another. */
+article.actions > table {
+    margin: 0 0 1rem 0;
+    font-size: .9rem;
+    table-layout: fixed;
+}
+/* What it can do: the name and its description against the button. */
+article.actions > table:not(.runs) > thead th:nth-child(1) { width: 80%; }
+/* What has been run: four columns, the two in the middle no wider than the
+ * clock and the length they hold, so that what it came to keeps the room. */
+article.actions > table.runs > thead th:nth-child(1) { width: 26%; }
+article.actions > table.runs > thead th:nth-child(2) { width: 20%; }
+article.actions > table.runs > thead th:nth-child(3) { width: 16%; }
+article.actions .descr {
+    display: block;
+    color: var(--pico-muted-color);
+    font-size: .75rem;
+    line-height: 1.3;
+}
+article.actions td { vertical-align: top; }
+article.actions td.run { text-align: right; }
+article.actions td.run button {
+    width: auto;
+    margin: 0;
+    padding: .2rem .6rem;
+    font-size: .75rem;
+}
+/* A run that has not ended yet: the one row of the table that is still
+ * moving. */
+article.actions table.runs tr.running td { font-style: italic; }
+
 article.properties > header {
     display: flex;
     align-items: center;

@@ -359,7 +359,14 @@ const withUnits = (v, units) => {
 }
 
 const dur = (s) => {
-    if (s < 1e-3) return (s * 1e6).toFixed(0) + 'us'
+    /* A simulation counts in picoseconds, and the short delays it deals in are
+     * short indeed: a metre of cable is five nanoseconds, and a round trip
+     * across one is a tenth of a microsecond. Without these two rungs every
+     * one of them reads as "0us". */
+    if (s === 0) return '0s'
+    if (s < 1e-9) return (s * 1e12).toFixed(0) + 'ps'
+    if (s < 1e-6) return (s * 1e9).toFixed(s < 1e-8 ? 1 : 0) + 'ns'
+    if (s < 1e-3) return (s * 1e6).toFixed(s < 1e-5 ? 1 : 0) + 'us'
     if (s < 1) return (s * 1e3).toFixed(s < 1e-2 ? 1 : 0) + 'ms'
     if (s < 60) return s.toFixed(s < 10 ? 2 : 1) + 's'
     if (s < 3600) return Math.floor(s / 60) + 'min ' + (s % 60).toFixed(0) + 's'
@@ -1337,6 +1344,18 @@ document.addEventListener('alpine:init', () => {
         selected: null,
 
         props: [],
+        /* Which of the two lists under the schematic is open: what the widget
+         * is, or what it can be asked to do. */
+        panelTab: 'props',
+        /* What the selected widget can be asked to do, as
+         * /widgets/<id>/actions gives it, and what has been asked of it. Read
+         * when the tab is opened and refreshed by the poll while it is: an
+         * action may be runnable only some of the time, and a run that is
+         * going on ends without anybody asking. */
+        actions: [],
+        actionsState: 'loading',
+        actionsError: null,
+        runs: [],
         /* Whether the poll reads the selected widget's values again every
          * second.
          *
@@ -1502,8 +1521,12 @@ document.addEventListener('alpine:init', () => {
          * simulation and does not change while the program runs. */
         deviceTypes: [],
         typeMenu: false,
-        /* The device being built, or null. It stands where the schematic
-         * stands, there being no widget yet to draw a schematic of. */
+        /* The form open in the pane, or null: a device being built, or an
+         * action being given its parameters before it is run ([mode] tells
+         * them apart). It stands where the schematic stands -- a device being
+         * built has no schematic yet, and an action's parameters are filled in
+         * the same inputs from the same kinds, so the two share every field
+         * below their header. */
         adding: null,
         /* While the ends of a cable are being clicked on the map. A cable is
          * the one device whose parameters are two other devices, and it cannot
@@ -1969,6 +1992,11 @@ document.addEventListener('alpine:init', () => {
              * skipping it would leave the panel reporting itself as loaded,
              * which is the one thing it must not do when it is not. */
             if (this.selected && this.autoProps) await this.loadProps()
+            /* Only while that tab is open: nothing of it is on screen
+             * otherwise, and a run of a widget nobody is looking at is read
+             * when somebody looks. */
+            if (this.selected && this.panelTab === 'actions' && !this.adding)
+                await this.loadActions()
             if (this.needPcaps()) await this.loadPcaps()
             if (this.charts.length) await this.pollCharts()
             if (this.logged.length) await this.pollLogs()
@@ -2074,7 +2102,14 @@ document.addEventListener('alpine:init', () => {
             this.props = []
             this.propsState = 'loading'
             this.propsError = null
+            /* The same for what the previous widget could do and had done:
+             * emptied now, read again if the tab is open. */
+            this.actions = []
+            this.runs = []
+            this.actionsState = 'loading'
+            this.actionsError = null
             await this.loadProps({ full: true })
+            if (this.panelTab === 'actions') await this.loadActions()
         },
 
         /* From the root down to the selected widget's parent. */
@@ -2279,6 +2314,14 @@ document.addEventListener('alpine:init', () => {
             if (!s || t === null || t === undefined) return ''
             const d = s.now - t
             return d <= 0 ? 'just now' : dur(d) + ' ago'
+        },
+
+        /* Where the clock of the simulation being looked at stands, which is
+         * what a run that has not ended yet is measured against. */
+        simNow() {
+            const s = this.selected &&
+                      this.sims.find(s => s.id === this.selected.sim)
+            return s ? s.now : 0
         },
 
         /* Where a simulation's clock stands against the world's: what the
@@ -3663,6 +3706,139 @@ document.addEventListener('alpine:init', () => {
             this.mapError = null
         },
 
+        /*
+         * Actions
+         */
+
+        showTab(tab) {
+            this.panelTab = tab
+            if (tab === 'actions') this.loadActions()
+        },
+
+        /* What the selected widget can do, and what has been asked of it.
+         * Both in one go: the two are shown together, and a run that has just
+         * been started is what tells whether the action that started it can be
+         * started again. */
+        async loadActions() {
+            if (!this.selected) { this.actions = [] ; this.runs = [] ; return }
+            const { sim, id } = this.selected
+            const r = await this.exchange(() =>
+                api(`/simulations/${sim}/widgets/${id}/actions`))
+            if (!r.ok) {
+                /* Keep what we have, said stale beside it: an empty list reads
+                 * as "this widget can do nothing", which is a different
+                 * statement. */
+                this.actionsState = 'failed'
+                this.actionsError = r.error.message
+                if (r.error.status === 404) await this.reload()
+                return
+            }
+            this.actions = r.value
+            const runs = await this.exchange(() =>
+                api(`/simulations/${sim}/actions?widget=${id}`))
+            if (!runs.ok) {
+                this.actionsState = 'failed'
+                this.actionsError = runs.error.message
+                return
+            }
+            this.runs = runs.value
+            this.actionsState = 'loaded'
+            this.actionsError = null
+        },
+
+        /* One field per parameter, exactly as a device's form is built: the
+         * kinds are the same kinds, so the inputs are the same inputs and what
+         * is typed is read back by the same [fieldValue]. What it has that a
+         * device's has not is a widget to run on; what it has not is a name to
+         * be given. */
+        startAction(a) {
+            if (!a.can_run) return
+            this.$nextTick(() => this.loadPcaps())
+            this.adding = {
+                mode: 'action',
+                sim: this.selected.sim, widget: this.selected.id,
+                type: a.name, descr: a.descr,
+                fields: a.params.map(p => ({
+                    name: p.name, descr: p.descr, units: p.units, kind: p.kind,
+                    placeholder: p.placeholder,
+                    picked: null,
+                    enabled: p.kind.type !== 'optional' || p.default !== null,
+                    rows: isStructured(p.kind)
+                            ? rowsOf({ kind: p.kind, value: p.default }) : null,
+                    draft: draftOf(p.kind, p.default)
+                })),
+                error: null, busy: false
+            }
+        },
+
+        async submitRun() {
+            const a = this.adding
+            if (!a || a.busy) return
+            const params = {}
+            for (const f of a.fields) params[f.name] = this.fieldValue(f)
+            a.busy = true
+            const r = await this.exchange(() =>
+                api(`/simulations/${a.sim}/widgets/${a.widget}` +
+                    `/actions/${encodeURIComponent(a.type)}`,
+                    { method: 'POST', body: JSON.stringify(params) }))
+            a.busy = false
+            /* Whatever it refused, said beside the form it was refused for:
+             * the fields are still there to be corrected. */
+            if (!r.ok) { a.error = r.error.message ; return }
+            this.adding = null
+            await this.loadActions()
+        },
+
+        /* A value as its kind reads it: a length of time as a length of time,
+         * an instant on the clock. What a property's table does for a cell,
+         * for a value that is not in a table. */
+        valueText(kind, v) {
+            if (v === null || v === undefined) return 'unset'
+            const t = baseKind(kind).type
+            if (t === 'duration' && typeof v === 'number') return dur(v)
+            if (t === 'time' && typeof v === 'number') return this.clock(v)
+            return asText(v)
+        },
+
+        /* What one run came to, in a line: how it ended, or that it has not.
+         *
+         * Read through the kind its action declares for its result, which is
+         * what says that a number is a hundred microseconds rather than
+         * 1.41066e-7. A run whose action is no longer among the widget's --
+         * which is only a widget that has been rebuilt under the reader --
+         * falls back on the bare values. */
+        runResult(run) {
+            if (run.running) return 'running'
+            if (run.result === null) return 'done'
+            const a = this.actions.find(a => a.name === run.action)
+            const k = a && a.result ? baseKind(a.result) : null
+            if (k && (k.type === 'record' || k.type === 'row') &&
+                typeof run.result === 'object')
+                return k.fields
+                    .filter(f => run.result[f.name] !== null &&
+                                 run.result[f.name] !== undefined)
+                    .map(f => `${f.name}: ${this.valueText(f.kind, run.result[f.name])}`)
+                    .join(', ')
+            if (a && a.result) return this.valueText(a.result, run.result)
+            if (typeof run.result !== 'object') return asText(run.result)
+            return Object.entries(run.result)
+                .filter(([ , v ]) => v !== null)
+                .map(([ k, v ]) => `${k}: ${asText(v)}`).join(', ')
+        },
+
+        /* How long a run lasted, or how long it has been going on. */
+        runLength(run, now) {
+            const end = run.running ? now : run.stopped
+            return end === null || end === undefined ? ''
+                 : dur(Math.max(0, end - run.started))
+        },
+
+        /* Its parameters in a line, as they were read: what was really run. */
+        runParams(run) {
+            return Object.entries(run.params)
+                .map(([ k, v ]) => `${k}: ${asText(v)}`).join(', ')
+        },
+
         /* What one field is worth, in the JSON the API expects. */
         fieldValue(f) {
             if (f.picked !== null) return f.picked
@@ -3674,6 +3850,7 @@ document.addEventListener('alpine:init', () => {
         async submitAdd() {
             const a = this.adding
             if (!a || a.busy) return
+            if (a.mode === 'action') return this.submitRun()
             const params = {}
             for (const f of a.fields) params[f.name] = this.fieldValue(f)
             a.busy = true
