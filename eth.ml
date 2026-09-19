@@ -49,7 +49,7 @@ module Addr = struct
      * {[- : Eth.Addr.t = a4:ba:db:e6:15:fa]}
      *
      * This only affect the printing of Ethernet addresses in the toplevel and
-     * {!Eth.Addr.to_string}. *)
+     * [Eth.Addr.to_string]. *)
     let print_with_vendor = ref true
 
     let string_of_sfx l sfx =
@@ -197,7 +197,7 @@ module Pdu = struct
         make (Proto.random ()) (Addr.random ()) (Addr.random ()) (randbs 30)
 
     (** Pack an {!Eth.Pdu.t} into its [bitstring] raw representation, ready for
-     * injection onto the wire (via {!Pcap.inject_pdu} for instance). *)
+     * injection onto the wire (via {!Pcap.inject} for instance). *)
     let pack t =
         (* TODO: pad into minimal (64bytes) size? *)
         let%bitstring hdr = {|
@@ -308,7 +308,7 @@ struct
      * of as an IP address. *)
     type t = Mac of Addr.t | IPv4 of Ip.Addr.t
 
-    (** Converts a {!Eth.addr} to a string. *)
+    (** Converts a {!Eth.Addr} to a string. *)
     let to_string = function
         | Mac mac -> Addr.to_string mac
         | IPv4 ip -> Ip.Addr.to_string ip
@@ -736,11 +736,11 @@ struct
 
     (** Create the state machine for an Ethernet communication.
      * @param mtu the maximum transmit unit (ie. you won't be able to send longer payloads)
-     * @param mac the source {!Eth.Addr.t}
+     * @param mac the source {!Eth.Addr}
      * @param gateways list of [Gateeway.t]
      * @param promisc an optional function that will receive frames received but not destined to this TRX.
      * @param do_proxy_arp an optional function instructing the driver to perform proxy-arp on a give ARP request
-     * @param proto the {!Proto.t} we want to transmit/receive.
+     * @param proto the {!Proto} we want to transmit/receive.
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
     let make ?speeds ?full_duplex ?inter_frame_gap ?can_forward_after
@@ -846,7 +846,7 @@ end
 (** {2 Transceiver} *)
 
 (** An Ethernet TRX will convert from payload to Ethernet frames (resolving
- * destinations using ARP), for a single {!Proto.t}. *)
+ * destinations using ARP), for a single {!Proto}. *)
 module TRX =
 struct
     let gw_for_ip (st : State.t) ip =
@@ -865,7 +865,7 @@ struct
             loop st.gateways
         )
 
-    (** Low level send function. Takes a {!Proto.t} since it's used both
+    (** Low level send function. Takes a {!Proto} since it's used both
      * for the user payload protocol and ARP protocol. *)
     let really_send (st : State.t) proto dst bits =
         let pdu = Pdu.make proto st.mac dst bits in
@@ -1059,7 +1059,7 @@ struct
                         Metric.Counter.inc ~now st.rx_otherhost_dropped
             )
 
-    (** Creates an {!Eth.TRX.t}. *)
+    (** Creates an {!Tools.trx}. *)
     let make (st : State.t) =
         (* Pass the received frames to the TRX engine: *)
         st.iface.recv <- rx st ;

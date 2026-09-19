@@ -134,7 +134,7 @@ end
  * and forward the payload to a callback; and it can be given some payload to
  * tunnel and it will tag it and pass it presumably to an {!Eth.TRX}.
  *
- * Create it with an {!Arp.HwProto.t}, a prio and vlan id. *)
+ * Create it with an {!Arp.HwProto}, a prio and vlan id. *)
 module TRX =
 struct
     type t =
@@ -165,7 +165,7 @@ struct
     (** Creates a {!Vlan.TRX.t}.
      * @param prio the tunnel priority (0 = default = lowest, 7 = highest).
      * @param id then vlan tag.
-     * @param proto the {!Arp.HwProto.t} we want to transmit/receive.
+     * @param proto the {!Arp.HwProto} we want to transmit/receive.
      *)
     let make power prio id proto logger =
         let t = { logger ; power ; prio ; id ; proto ;

@@ -35,7 +35,7 @@
    is a small price for not writing a serializer per constructor's argument
    list. What falls outside is a network wired by hand, calling the constructors
    and {!Eth.Cable.plug} directly; such a device cannot say what it was built
-   with (see {!Widget.made_with}) and a save leaves it out rather than guessing.
+   with (see [Widget.made_with]) and a save leaves it out rather than guessing.
  *)
 open Batteries
 open SimTypes
@@ -359,7 +359,7 @@ let properties_of (device : Widget.t) =
  *
  * The second half is what was left out: a device the catalogue knows how to
  * build but that was not built through it, and which therefore cannot say with
- * which arguments (see {!Widget.made_with}). Handed back rather than passed
+ * which arguments (see [Widget.made_with]). Handed back rather than passed
  * over in silence, since the difference between the file and the network is
  * the one thing a save must not keep to itself.
  *

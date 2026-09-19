@@ -219,7 +219,7 @@ module Addr = struct
         if width > 32 then invalid_arg "Ip.Addr.mask" ;
         Bitstring.concat [ ones_bitstring width ; zeroes_bitstring (32 - width) ]
 
-    (** Convert an {!Ip.Addr.t} to a [bitstring]. *)
+    (** Convert an {!Ip.Addr} to a [bitstring]. *)
     let to_bitstring (t : t) =
         let str : string = Obj.magic t in
         bitstring_of_string str
@@ -235,7 +235,7 @@ module Addr = struct
     let compare t1 t2 =
         Bytes.compare (to_bytes t1) (to_bytes t2)
 
-    (** Convert a [bitstring] into an {!Ip.Addr.t}. *)
+    (** Convert a [bitstring] into an {!Ip.Addr}. *)
     let of_bitstring bits =
         match bitstring_length bits with
         | 32 | 128 ->
@@ -260,7 +260,7 @@ module Addr = struct
         let str : string = Obj.magic t in
         Tools.hexstring ~sep:"" str
 
-    (** Returns a random {!Ip.Addr.t} (apart from broadcast and zero). *)
+    (** Returns a random {!Ip.Addr} (apart from broadcast and zero). *)
     let rec random ?(v4=true) () =
         let str = randstr (if v4 then 4 else 16) in
         let t : Unix.inet_addr = Obj.magic str in
@@ -591,7 +591,8 @@ module Cidr = struct
     let random_addrs t n =
         enum t |> Random.multi_choice n
 
-    (* Much faster than building the enum if we need just one: *)
+    (** One address of that network, drawn at random. Much faster than
+     * building the enumeration when only one is wanted. *)
     let random_addr (t : t) =
         let net, width = (t :> Addr.t * int) in
         let net = Addr.to_bitstring net in

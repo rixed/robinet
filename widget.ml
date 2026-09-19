@@ -349,7 +349,8 @@ let property ?(descr="") ?(units="") ?metric ?setter ?can_set ?(kind=String)
  * cannot reach it, and every widget that owns a source goes through [make]. *)
 let on_own_power : (t -> bool -> unit) ref = ref (fun _ _ -> ())
 
-(* Add new properties before default ones: *)
+(** Give [t] these properties, ahead of the ones it has by being a widget at
+ * all: what a device is, before what everything is. *)
 let add_properties t properties =
     t.properties <- properties @ t.properties
 
@@ -370,8 +371,8 @@ let action ?(descr="") ?(params=[]) ?result ?can_run ~handler name =
       can_run = can_run |? (fun () -> true) ;
       handler }
 
-(* As with properties, what a widget adds comes before what it got by being a
- * widget at all. *)
+(** Likewise for actions: what this widget can be asked to do comes before
+ * what anything with a power switch can. *)
 let add_actions t actions =
     t.actions <- actions @ t.actions
 
@@ -584,7 +585,7 @@ let to_string = function
 
 (** Whether [v] is a value of [k], raising [Bad_value] naming what is not.
 
- * Not {!Device.coerce}, although the two walk the same language. That one
+ * Not {!coerce}, although the two walk the same language. That one
  * reads what a reader typed and is lenient on purpose -- a number arrives as
  * the string of it, and a field is coerced rather than merely looked at. This
  * one checks what a program wrote against the kind that same program wrote to

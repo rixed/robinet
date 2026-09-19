@@ -68,7 +68,8 @@ let fixedbits len bits =
     if l < len then concat [ bits ; zeroes_bitstring (len-l) ]
     else takebits len bits
 
-(* err_rate is the average number of errors per bits *)
+(** [bits] with each bit flipped with probability [err_rate], which is what a
+ * cable does to what crosses it. *)
 let bitstring_fuzz err_rate bits =
     if err_rate = 0. then bits else
     let noerr_len = 1. /. err_rate in (* average number of bits without errors *)
@@ -359,7 +360,9 @@ let all_bits n =
   [ 1 ; 1 ]         (all_bits 1 /@ bitstring_length |> List.of_enum)
 *)
 
-(* Check if a & mask = b & mask *)
+(** Whether [a] and [b] agree everywhere [mask] has a bit set -- all three
+ * being of the same length. Which is what asking whether two addresses are on
+ * the same network comes down to. *)
 let match_mask mask a b =
     let len = bitstring_length mask in
     bitstring_length a = len &&
@@ -623,12 +626,11 @@ let ignore_bits ?(logger=null_logger) bits =
 let null_dev ~logger =
     { write = ignore_bits ~logger ; set_read = ignore }
 
-(* Sets the reader of a device, "graphically" *)
+(** [dev --> f] makes [f] what [dev] hands what it receives to. *)
 let (-->) dev f =
     dev.set_read f
 
-(* Connects two devices [a] and [b] in such a way that one receives what
- * the other transmit. *)
+(** [a <--> b] joins two devices, each receiving what the other sends. *)
 let (<-->) dev1 dev2 =
     dev1 --> dev2.write ;
     dev2 --> dev1.write

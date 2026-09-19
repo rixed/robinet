@@ -246,7 +246,7 @@ module Pdu = struct
         | _ ->
             should_not_happen ()
 
-    (** Converts a {!Pcap.pdu.t} into a {!Packet.Pdu.t}. *)
+    (** Converts a {!Pcap.Pdu.t} into a {!Packet.Pdu.t}. *)
     let unpack pcap =
         let unpack_raw bits =
             if bitstring_is_empty bits then [] else [ Raw bits ] in

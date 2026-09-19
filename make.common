@@ -102,10 +102,25 @@ dep:
 .depend:
 	$(OCAMLDEP) -package "$(REQUIRES)" $(SOURCES) > $@
 
+# ocamldoc works from the sources it is handed and cannot load a .cmi, so it
+# expands neither a functor application nor an [include] over a module from
+# outside this library -- Map.Make, Set.Make, Hashtbl.Make, Condition -- and
+# says so once per such module. Adding -I does not help; only handing it the
+# stdlib's own sources would. Those six are therefore expected, and every other
+# warning is a cross-reference that has gone stale, which is worth a broken
+# build: keeping the references honest is most of what running this buys.
+DOC_EXPECTED = Stdlib\.Map\.Make|Batteries\.Set\.Make|BatSet\.Make|Batteries\.Hashtbl\.Make|Hashtbl\.HashedType|Condition
+
 doc: $(LIB_SOURCES)
 	@echo "Building doc in $(DOCDIR)..."
 	mkdir -p $(DOCDIR)
-	$(OCAMLDOC) -package "$(REQUIRES)" -d $(DOCDIR) $^
+	@unexpected=`$(OCAMLDOC) -package "$(REQUIRES)" -d $(DOCDIR) $^ 2>&1 | \
+	   grep -Ev '^Warning: Module (or module )?type ?($(DOC_EXPECTED)) not found$$'` ; \
+	 if [ -n "$$unexpected" ] ; then \
+	   echo "$$unexpected" ; \
+	   echo "ocamldoc: the above is not one of the expected warnings" ; \
+	   exit 1 ; \
+	 fi
 	#sed -i -e '/^<head>/a<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">' $(DOCDIR)/*.html
 	#sed -i -e 's|<center><h1></h1></center>|<h1>$(PKG_NAME)</h1>|' $(DOCDIR)/index.html
 
