@@ -982,6 +982,72 @@ nav.breadcrumb .kind { color: var(--pico-muted-color); margin-left: .25rem; }
 
 /* ------------------------------------------------------------ properties */
 
+/* What is to be run when this network is loaded, folded away under the clock
+ * controls: it belongs to the simulation, not to any one widget. */
+.sim .startup {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: .2rem;
+    padding: 0 .6rem .4rem .6rem;
+    font-size: .8rem;
+}
+.sim .startup > button.label {
+    width: auto;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--pico-muted-color);
+    text-align: left;
+}
+.sim .startup .entries { flex-basis: 100%; }
+.sim .startup .entry {
+    display: flex;
+    align-items: baseline;
+    gap: .3rem;
+    padding: .15rem 0;
+}
+.sim .startup .entry .what { flex: 1; min-width: 0; }
+.sim .startup .entry .what small {
+    display: block;
+    color: var(--pico-muted-color);
+    font-size: .7rem;
+    overflow-wrap: anywhere;
+}
+.sim .startup .entry .order { display: flex; gap: .15rem; }
+.sim .startup .entry .order button {
+    width: auto;
+    margin: 0;
+    padding: 0 .3rem;
+    font-size: .7rem;
+}
+
+/* When an action is to be run, in the form that asks for its parameters. */
+/* One to a line, since each carries a line of its own explaining it: side by
+ * side, a description would run under the box beside it. */
+form.creator .when {
+    display: flex;
+    flex-direction: column;
+    gap: .3rem;
+    margin: .7rem 0 0 0;
+}
+form.creator .when label {
+    display: block;
+    margin: 0;
+    font-size: .9rem;
+    line-height: 1.4;
+}
+form.creator .when .descr {
+    display: block;
+    /* Under the words rather than under the box, which is what the eye
+       follows. */
+    margin: .1rem 0 0 1.9rem;
+    color: var(--pico-muted-color);
+    font-size: .75rem;
+    line-height: 1.3;
+}
+
 /* The two lists of one widget, and which of them is open. Buttons rather than
  * links: what they do is switch the panel below, which is what a button is. */
 nav.panel-tabs {

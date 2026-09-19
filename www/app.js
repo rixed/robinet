@@ -155,7 +155,9 @@ const cellValue = (c) => {
          * enum's value, of any number of them at once. */
         case 'set':
             return asSet(c.draft)
-        case 'int': case 'float': case 'range': {
+        /* A length of time is a number of seconds, and travels as one: what
+         * sets it apart is the unit beside it and how it is read back. */
+        case 'int': case 'float': case 'range': case 'duration': {
             const n = Number(c.draft)
             /* Send what was typed rather than guessing, and let the setter say
              * what is wrong with it. */
@@ -1356,6 +1358,12 @@ document.addEventListener('alpine:init', () => {
         actionsState: 'loading',
         actionsError: null,
         runs: [],
+        /* The startup list of each simulation, by simulation id: what is to be
+         * run once its network has been built. Read when its panel is
+         * unfolded, and after anything that changes it. */
+        startup: {},
+        startupFolded: true,
+        startupError: null,
         /* Whether the poll reads the selected widget's values again every
          * second.
          *
@@ -3719,6 +3727,51 @@ document.addEventListener('alpine:init', () => {
             if (tab === 'actions' || tab === 'runs') this.loadActions()
         },
 
+        /*
+         * The startup list
+         */
+
+        startupOf(sim) { return this.startup[sim] || [] },
+
+        async loadStartup(sim) {
+            const r = await this.exchange(() => api(`/simulations/${sim}/startup`))
+            if (!r.ok) { this.startupError = r.error.message ; return }
+            this.startup[sim] = r.value
+            this.startupError = null
+        },
+
+        /* The whole list, which is how it is reordered and shortened. */
+        async putStartup(sim, entries) {
+            const r = await this.exchange(() =>
+                api(`/simulations/${sim}/startup`,
+                    { method: 'PUT', body: JSON.stringify(entries) }))
+            if (!r.ok) { this.startupError = r.error.message ; return }
+            this.startup[sim] = r.value
+            this.startupError = null
+        },
+
+        removeStartup(sim, i) {
+            const l = this.startupOf(sim).slice()
+            l.splice(i, 1)
+            this.putStartup(sim, l)
+        },
+
+        /* One place up or down, which is the whole of the reordering a list
+         * this short needs -- and the one thing dragging would do no better. */
+        moveStartup(sim, i, by) {
+            const l = this.startupOf(sim).slice()
+            const j = i + by
+            if (j < 0 || j >= l.length) return
+            const e = l[i] ; l[i] = l[j] ; l[j] = e
+            this.putStartup(sim, l)
+        },
+
+        /* Its parameters in a line, as the runs table shows a run's. */
+        entryParams(e) {
+            return Object.entries(e.params || {})
+                .map(([ k, v ]) => `${k}: ${asText(v)}`).join(', ')
+        },
+
         /* What the selected widget can do, and what has been asked of it.
          * Both in one go: the two are shown together, and a run that has just
          * been started is what tells whether the action that started it can be
@@ -3762,6 +3815,10 @@ document.addEventListener('alpine:init', () => {
                 mode: 'action',
                 sim: this.selected.sim, widget: this.selected.id,
                 type: a.name, descr: a.descr,
+                /* When to run it. Both are ordinary answers: now and not
+                 * again, at every startup and not now, or both. Neither is
+                 * the way to say "never", which is what Cancel is for. */
+                now: true, atStartup: false,
                 fields: a.params.map(p => ({
                     name: p.name, descr: p.descr, units: p.units, kind: p.kind,
                     placeholder: p.placeholder,
@@ -3778,19 +3835,47 @@ document.addEventListener('alpine:init', () => {
         async submitRun() {
             const a = this.adding
             if (!a || a.busy) return
+            /* Neither box ticked is the way to change one's mind, and the
+             * button says so rather than doing nothing. */
+            if (!a.now && !a.atStartup) { this.cancelAdd() ; return }
             const params = {}
             for (const f of a.fields) params[f.name] = this.fieldValue(f)
             a.busy = true
-            const r = await this.exchange(() =>
-                api(`/simulations/${a.sim}/widgets/${a.widget}` +
-                    `/actions/${encodeURIComponent(a.type)}`,
-                    { method: 'POST', body: JSON.stringify(params) }))
+            /* The startup list first: it is a list being edited, and it must
+             * not be left unwritten because the run itself was refused. */
+            if (a.atStartup) {
+                const path = this.pathWithin(a.sim, a.widget)
+                const r = await this.exchange(() =>
+                    api(`/simulations/${a.sim}/startup`,
+                        { method: 'POST',
+                          body: JSON.stringify({ path, action: a.type,
+                                                 params }) }))
+                if (!r.ok) { a.busy = false ; a.error = r.error.message ; return }
+                await this.loadStartup(a.sim)
+            }
+            if (a.now) {
+                const r = await this.exchange(() =>
+                    api(`/simulations/${a.sim}/widgets/${a.widget}` +
+                        `/actions/${encodeURIComponent(a.type)}`,
+                        { method: 'POST', body: JSON.stringify(params) }))
+                a.busy = false
+                /* Whatever it refused, said beside the form it was refused
+                 * for: the fields are still there to be corrected. */
+                if (!r.ok) { a.error = r.error.message ; return }
+            }
             a.busy = false
-            /* Whatever it refused, said beside the form it was refused for:
-             * the fields are still there to be corrected. */
-            if (!r.ok) { a.error = r.error.message ; return }
             this.adding = null
             await this.loadActions()
+        },
+
+        /* Where a widget sits below its simulation's root, which is how the
+         * startup list names it: the root itself is the empty path. */
+        pathWithin(sim, id) {
+            const byId = this.widgetsOf(sim)
+            const names = []
+            for (let w = byId[id] ; w && w.parent !== null ; w = byId[w.parent])
+                names.unshift(w.name)
+            return names.join('/')
         },
 
         /* A value as its kind reads it: a length of time as a length of time,

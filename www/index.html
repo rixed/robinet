@@ -362,6 +362,56 @@
                             x-text="simConfirm === s.id ? 'Sure?' : 'Delete'"></button>
                 </div>
 
+                <!-- What is to be run once this network has been built,
+                     folded away: it is read when one wonders what a document
+                     will do, which is not most of the time. Under the clock
+                     controls because it belongs to the simulation and not to
+                     any one widget. -->
+                <div class="startup" x-show="s.id !== servingId">
+                    <button class="twisty" @click="startupFolded = !startupFolded ;
+                                                   if (!startupFolded) loadStartup(s.id)"
+                            x-text="startupFolded ? '\u25b8' : '\u25be'"></button>
+                    <button class="label" @click="startupFolded = !startupFolded ;
+                                                  if (!startupFolded) loadStartup(s.id)">
+                        at startup
+                        <span class="badge" x-show="startupOf(s.id).length"
+                              x-text="startupOf(s.id).length"></span>
+                    </button>
+
+                    <div class="entries" x-show="!startupFolded" x-cloak>
+                        <p x-show="!startupOf(s.id).length">
+                            <small>Nothing is to be run when this network is
+                                   loaded.</small></p>
+                        <p class="sim-error" x-show="startupError" x-cloak>
+                            <small x-text="startupError"></small></p>
+                        <template x-for="(e, i) in startupOf(s.id)" :key="i">
+                            <div class="entry">
+                                <span class="what">
+                                    <!-- The widget as the list names it, which
+                                         is where it sits and not what it is
+                                         called now: an entry may name one that
+                                         is not there yet, or no longer. -->
+                                    <span x-text="e.action"></span>
+                                    <small x-text="(e.path || '/') +
+                                                   (entryParams(e) ? ' \u2014 ' + entryParams(e) : '')"></small>
+                                </span>
+                                <span class="order">
+                                    <button class="outline secondary" :disabled="!online || i === 0"
+                                            title="Run it earlier"
+                                            @click="moveStartup(s.id, i, -1)">&#9650;</button>
+                                    <button class="outline secondary"
+                                            :disabled="!online || i === startupOf(s.id).length - 1"
+                                            title="Run it later"
+                                            @click="moveStartup(s.id, i, 1)">&#9660;</button>
+                                    <button class="outline secondary" :disabled="!online"
+                                            title="Take it off the list"
+                                            @click="removeStartup(s.id, i)">&times;</button>
+                                </span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
                 <nav class="tree">
                     <template x-for="row in tree(s.id)" :key="row.w.id">
                         <div class="row" :style="'padding-left:' + (row.depth * 0.9) + 'rem'"
@@ -760,15 +810,36 @@
                                         </label>
                                     </template>
 
+                                    <!-- When to run it: now and not again, at
+                                         every startup and not now, or both.
+                                         Neither is how one changes one's mind,
+                                         and the button below says so. -->
+                                    <div class="when" x-show="adding.mode === 'action'">
+                                        <label>
+                                            <input type="checkbox" x-model="adding.now"/>
+                                            now
+                                        </label>
+                                        <label>
+                                            <input type="checkbox" x-model="adding.atStartup"/>
+                                            at startup
+                                            <small class="descr">Every time this
+                                                network is loaded, once it is
+                                                built.</small>
+                                        </label>
+                                    </div>
+
                                     <footer>
                                         <small class="error" x-show="adding.error"
                                                x-text="adding.error"></small>
                                         <button type="button" class="outline secondary"
                                                 @click="cancelAdd()">Cancel</button>
                                         <button type="submit" :disabled="!online || adding.busy"
-                                                x-text="adding.mode === 'action'
-                                                        ? (adding.busy ? 'Running...' : 'Run')
-                                                        : (adding.busy ? 'Building...' : 'Build')"></button>
+                                                x-text="adding.mode !== 'action'
+                                                        ? (adding.busy ? 'Building...' : 'Build')
+                                                        : adding.busy ? 'Running...'
+                                                        : !adding.now && !adding.atStartup ? 'Cancel'
+                                                        : adding.now && adding.atStartup ? 'Run and keep'
+                                                        : adding.now ? 'Run' : 'Keep'"></button>
                                     </footer>
                                 </div>
                             </template>
