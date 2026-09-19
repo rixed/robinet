@@ -1028,6 +1028,19 @@ let next_event (t : t) =
                      * another thread may still feed us, so wait to be signalled
                      * instead of spinning: *)
                     wait_on_cond t ;
+                    (* Having nothing to do is not falling behind, and the wall
+                       clock moved while this one could not: simulated time
+                       only advances by dispatching, so an empty queue leaves
+                       the two drifting apart for as long as it stays empty.
+                       Measured from the anchor as it stands, everything a
+                       thread feeds us next is already overdue by the whole of
+                       that wait, and would be dispatched back to back until
+                       the simulation had made the time up -- an hour idle, and
+                       the next hour of events at once.
+
+                       So the pace starts again from here, exactly as it does
+                       when a pause ends. *)
+                    reanchor t ;
                     false
                 ) else match t.speed_ratio with
                 | None ->
