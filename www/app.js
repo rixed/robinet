@@ -1995,7 +1995,8 @@ document.addEventListener('alpine:init', () => {
             /* Only while that tab is open: nothing of it is on screen
              * otherwise, and a run of a widget nobody is looking at is read
              * when somebody looks. */
-            if (this.selected && this.panelTab === 'actions' && !this.adding)
+            if (this.selected && !this.adding &&
+                (this.panelTab === 'actions' || this.panelTab === 'runs'))
                 await this.loadActions()
             if (this.needPcaps()) await this.loadPcaps()
             if (this.charts.length) await this.pollCharts()
@@ -2109,7 +2110,8 @@ document.addEventListener('alpine:init', () => {
             this.actionsState = 'loading'
             this.actionsError = null
             await this.loadProps({ full: true })
-            if (this.panelTab === 'actions') await this.loadActions()
+            if (this.panelTab === 'actions' || this.panelTab === 'runs')
+                await this.loadActions()
         },
 
         /* From the root down to the selected widget's parent. */
@@ -3712,7 +3714,9 @@ document.addEventListener('alpine:init', () => {
 
         showTab(tab) {
             this.panelTab = tab
-            if (tab === 'actions') this.loadActions()
+            /* Both tabs are read in one go: what has been run is what says
+             * whether an action can be run again. */
+            if (tab === 'actions' || tab === 'runs') this.loadActions()
         },
 
         /* What the selected widget can do, and what has been asked of it.
@@ -3809,6 +3813,11 @@ document.addEventListener('alpine:init', () => {
          * falls back on the bare values. */
         runResult(run) {
             if (run.running) return 'running'
+            /* How it ended comes before what it came to: a run the simulator
+             * took away, or one that failed, has no value to show and its
+             * reason is the whole of what there is to say. */
+            if (run.how === 'withdrawn' || run.how === 'failed')
+                return run.reason || run.how
             if (run.result === null) return 'done'
             const a = this.actions.find(a => a.name === run.action)
             const k = a && a.result ? baseKind(a.result) : null

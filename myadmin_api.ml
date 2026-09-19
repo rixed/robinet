@@ -1335,13 +1335,34 @@ let json_of_action_state (s : Widget.action_state) =
                                | Startup -> "startup"
                                | Api -> "api") ;
              "started", Widget.json_of_time s.started ;
-             (* Null while it is still going on -- or for ever, for a run
-                nothing ever closed: see {!Action}. *)
-             "stopped", (match s.stopped with
+             (* Null while it is still going on -- or for ever, for a run whose
+                handler simply forgot to end it: see {!Action}. *)
+             "stopped", (match s.ended with
                         | None -> `Null
-                        | Some t -> Widget.json_of_time t) ;
+                        | Some (t, _) -> Widget.json_of_time t) ;
              "running", `Bool (Action.is_running s) ;
-             "result", (match s.result with None -> `Null | Some v -> v) ]
+             (* How it ended, which is not what it came to: whether it was the
+                handler that ended it, with a value or with what went wrong, or
+                the simulator that took away what it was doing. *)
+             "how", (match s.ended with
+                    | None -> `Null
+                    | Some (_, Value _) -> `String "value"
+                    | Some (_, Failed _) -> `String "failed"
+                    | Some (_, Withdrawn _) -> `String "withdrawn") ;
+             (* What there is to say about that, for the two endings that are
+                not a value: the handler's own words, or which way the run was
+                taken away. *)
+             "reason", (match s.ended with
+                       | Some (_, Failed m) -> `String m
+                       | Some (_, Withdrawn PowerDown) -> `String "its power went"
+                       | Some (_, Withdrawn Deleted) -> `String "it was deleted"
+                       | _ -> `Null) ;
+             (* Shaped by its action's "result" kind. Null for a run that is
+                still going on, one that hands nothing back, and one that
+                ended any other way than with a value. *)
+             "result", (match s.ended with
+                       | Some (_, Value (Some v)) -> v
+                       | _ -> `Null) ]
 
 let get_actions _mth matches _vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in

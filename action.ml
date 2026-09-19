@@ -31,8 +31,12 @@
    each of them arms on the way. "No event left" is a question about the
    network, not about the action.
 
-   The cost of that is a handler that forgets, and a run withdrawn by a power
-   source going down, which nothing tells: both go on reading as running.
+   Three ways a run could then never end, of which the simulator sees two: a
+   handler that raises rather than returning, which {!start} ends as a
+   [Failed]; the source paying for what it scheduled going off, or its widget
+   being taken away, which {!Simulation.power_down} and
+   {!Simulation.remove_widget} end as a [Withdrawn]. The third is a handler
+   that simply forgets, and nothing can see that one.
  *)
 open Batteries
 open SimTypes
@@ -40,6 +44,10 @@ open SimTypes
 type t = action
 type state = action_state
 type origin = action_origin = Startup | Api
+type result = action_result =
+    | Value of value option
+    | Failed of string
+    | Withdrawn of withdrawal_reason
 
 (* Runs are numbered across the process, as widgets are, although the interface
  * only ever names one within a simulation. *)
@@ -63,7 +71,7 @@ let describe (s : state) =
         ) s.params |> String.concat ", ")
 
 (** Whether that run is still going on. *)
-let is_running (s : state) = s.stopped = None
+let is_running (s : state) = s.ended = None
 
 (** Run [a] on [w] with [given] as its parameters: those the action declares,
  * the ones left out taking their default.
@@ -87,32 +95,32 @@ let start ?(origin=Api) (w : widget) (a : t) given =
               params ;
               origin ;
               started = Simulation.now sim ;
-              stopped = None ;
-              result = None } in
+              ended = None } in
         sim.started_actions <- s :: sim.started_actions ;
         Log.(log w.logger Info (lazy (Printf.sprintf "Running %s" (describe s)))) ;
-        a.handler s ;
+        (* A handler that raises has ended this run, whatever it meant to do,
+           and the run must say so rather than wait for ever on work that was
+           never scheduled. The exception goes on out to whoever asked -- the
+           API answers it with a 400 -- and what is recorded here is what the
+           reader will find afterwards. *)
+        (match a.handler s with
+        | () -> ()
+        | exception e ->
+            Simulation.stop_action s (Failed (match e with
+                | Widget.Bad_value m -> m
+                | e -> Printexc.to_string e)) ;
+            raise e) ;
         s) ()
 
 (** Record that this run is over, and what it came to. Called from whatever the
  * handler scheduled, since nothing else knows when the work is done. *)
 let stop ?result (s : state) =
-    let sim = Widget.sim s.widget in
-    Simulation.with_lock sim (fun () ->
-        match s.stopped with
-        | Some _ ->
-            (* The handler disagreeing with itself: say so rather than move the
-               end of a run that already ended. *)
-            Log.(log s.widget.logger Warning (lazy (Printf.sprintf
-                "%s was already over" (describe s))))
-        | None ->
-            s.stopped <- Some (Simulation.now sim) ;
-            s.result <- result ;
-            Log.(log s.widget.logger Info (lazy (Printf.sprintf "Done %s%s"
-                (describe s)
-                (match result with
-                | None -> ""
-                | Some v -> ": "^ Yojson.Basic.to_string v))))) ()
+    Simulation.stop_action s (Value result)
+
+(** The same, for a run that got nowhere: what went wrong, in the action's own
+ * words. A timeout that is a failure is one of these -- see {!SimTypes}. *)
+let fail (s : state) fmt =
+    Printf.ksprintf (fun m -> Simulation.stop_action s (Failed m)) fmt
 
 (** What has been run in [sim], most recent first; [widget] narrows it to the
  * runs of one widget. *)

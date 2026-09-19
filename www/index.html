@@ -786,6 +786,13 @@
                             <button :class="panelTab === 'actions' ? '' : 'outline secondary'"
                                     :aria-pressed="panelTab === 'actions'"
                                     @click="showTab('actions')">Actions</button>
+                            <!-- What has been asked of this widget, which is a
+                                 different list from what it can be asked: one
+                                 is what the widget is able to do and the other
+                                 is what happened. -->
+                            <button :class="panelTab === 'runs' ? '' : 'outline secondary'"
+                                    :aria-pressed="panelTab === 'runs'"
+                                    @click="showTab('runs')">Past actions</button>
                         </nav>
 
                         <!-- ================= actions ================= -->
@@ -828,11 +835,25 @@
                                 </tbody>
                             </table>
 
-                            <!-- What has been asked of it, most recent first.
-                                 A run outlives what it ran on, so this holds
-                                 runs of a widget that has since been taken out
-                                 of the simulation, and a run whose end nothing
-                                 ever recorded goes on reading as running. -->
+                        </article>
+
+                        <!-- ================= past actions ================= -->
+                        <article class="actions" x-show="!adding && panelTab === 'runs'"
+                                 x-cloak>
+                            <p x-show="actionsState === 'loading'">
+                                <small>Reading them&hellip;</small></p>
+                            <p class="sim-error" x-show="actionsState === 'failed'">
+                                <small x-text="actionsError"></small>
+                            </p>
+                            <p x-show="actionsState === 'loaded' && !runs.length">
+                                <small>Nothing has been asked of this widget
+                                       yet.</small></p>
+
+                            <!-- Most recent first. A run outlives what it ran
+                                 on, so a widget rebuilt under the same name
+                                 does not inherit these, and a run whose
+                                 handler never ended it goes on reading as
+                                 running. -->
                             <table class="runs" x-show="runs.length">
                                 <thead>
                                     <tr><th>Run</th><th>Started</th><th>Took</th>

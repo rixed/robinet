@@ -201,6 +201,50 @@ let now (t : t) = !(t.now)
 
 let is_running (t : t) = t.continue
 
+(* {2 Ending a run of an action}
+ *
+ * Here and not in action.ml, which is compiled after this: the list of runs is
+ * a field of the simulation, and the simulator itself has to be able to end
+ * one -- switching a source off or taking a widget away withdraws what a run
+ * had scheduled, and nothing else would ever close it. [Action.stop] is the
+ * door a handler uses onto this. *)
+
+let result_text = function
+    | Value None -> "done"
+    | Value (Some v) -> Yojson.Basic.to_string v
+    | Failed m -> "failed: "^ m
+    | Withdrawn PowerDown -> "cut short: its power went"
+    | Withdrawn Deleted -> "cut short: it was deleted"
+
+(** Record that this run is over, and how. A run that has already ended is
+ * left as it was: the first ending is the true one, and a handler calling this
+ * twice is a handler disagreeing with itself. *)
+let stop_action (s : action_state) result =
+    let t = Widget.sim s.widget in
+    with_lock t (fun () ->
+        match s.ended with
+        | Some _ ->
+            Log.(log s.widget.logger Warning (lazy (Printf.sprintf
+                "%s was already over" s.action_name)))
+        | None ->
+            s.ended <- Some (now t, result) ;
+            Log.(log s.widget.logger Info (lazy (Printf.sprintf "%s: %s"
+                s.action_name (result_text result))))) ()
+
+(* Every run of [ws] that is still going on, ended as [reason] says.
+ *
+ * What it ends are the runs of those widgets, and not every run that had
+ * anything scheduled on their behalf: a run is recorded against the widget it
+ * was asked of, and following what it really touched is the book-keeping this
+ * design deliberately does without (see the plan). Nothing today starts a run
+ * on one widget and schedules it on another's source. *)
+let withdraw_runs (t : t) ws reason =
+    if t.started_actions <> [] then (
+        let doomed (s : action_state) =
+            s.ended = None && List.memq s.widget ws in
+        List.filter doomed t.started_actions |>
+        List.iter (fun s -> stop_action s (Withdrawn reason)))
+
 let stop (t : t) () =
     with_lock t (fun () ->
         t.continue <- false ;
@@ -263,6 +307,7 @@ let remove_widget (w : widget) =
                 t.events <-
                     Events.filter (fun _ (p, _) -> p != d.power) t.events
         ) (cables @ doomed) ;
+        withdraw_runs t (cables @ doomed) Deleted ;
         (* After the cables have been unplugged, so that a port is told it is
            free before the widget that owns it stops being reachable. *)
         List.iter Widget.delete cables ;
@@ -399,7 +444,11 @@ let power_down (p : power) =
             if dropped > 0 then
                 Log.(log t.root.logger Debug (lazy (Printf.sprintf
                     "Dropped %d event(s) powered by %s" dropped p.name))) ;
-            users p |> List.of_enum |> List.rev |>
+            let ws = users p |> List.of_enum in
+            (* Before the widgets are told, so that a [power_down] which looks
+               at what it was running sees it already ended. *)
+            withdraw_runs t ws PowerDown ;
+            List.rev ws |>
             List.iter (fun (w : widget) -> tell w "down" w.power_down)) () ;
         signal_me t ()
     )

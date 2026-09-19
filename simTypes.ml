@@ -476,12 +476,41 @@ and action_state =
       params : (string * value) list ;
       origin : action_origin ;
       started : Time.t ;
-      (* [None] while it is still running -- or for ever, for a run whose
-       * handler never called [Action.stop]: powering a source down withdraws
-       * its events without telling the actions that scheduled them, so a run
-       * killed that way goes on reading as running. *)
-      mutable stopped : Time.t option ;
-      mutable result : value option }
+      (* When it ended and how, or [None] while it is still running -- or for
+       * ever, for a run whose handler simply forgot to end it.
+       *
+       * One field and not a time beside a result: the two are written
+       * together, so "is it running" has a single answer, and a run that
+       * stopped with nothing recorded of how is not something a handler can
+       * produce by mistake. *)
+      mutable ended : (Time.t * action_result) option }
+
+(* How a run ended, which is not the same question as what it came to: it says
+ * *who* ended it.
+ *
+ * A timeout is none of these. For a ping it is not a failure at all -- the run
+ * ended on its own terms, and "sent 3, received 0" is what the reader wants --
+ * and where a timeout really is a failure it is an [Error] saying so in the
+ * action's own words. *)
+and action_result =
+    (* The handler, with what the run came to: shaped by the action's [result]
+     * kind, and [None] for an action with nothing to hand back. *)
+    | Value of value option
+    (* The handler, with what went wrong instead. Also what [Action.start] ends
+     * a run with when the handler raises rather than returning.
+     *
+     * Not called [Error]: this module is opened wherever widgets are built,
+     * and [Error] there is the stdlib's, which every [unpack] in the protocol
+     * modules answers with. *)
+    | Failed of string
+    (* The simulator, having taken away what the run was doing. *)
+    | Withdrawn of withdrawal_reason
+
+and withdrawal_reason =
+    (* The source paying for what the run scheduled was switched off. *)
+    | PowerDown
+    (* The widget it ran on was taken out of the simulation. *)
+    | Deleted
 
 (* Where the order came from: the startup list of the network that was loaded,
  * or somebody asking for it through the API. *)

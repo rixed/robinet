@@ -119,12 +119,11 @@ and t = { mutable trx : host_trx ;
           dns_queries : (string, ((Ip.Addr.t list option -> unit) * Metric.Timed.stop_func option)) Hashtbl.t ;
           dns_cache   : (string, Ip.Addr.t list) Hashtbl.t ;
           resolutions : Metric.Timed.t ;
-          (* Who is waiting for an echo reply, by the ICMP id its requests
-             carry: what a ping run registers while it is going on, so that the
-             replies, which are dropped by default, reach the one that asked
-             for them. Keyed by id alone -- the sequence number is what the
-             waiter is told -- since an id is what identifies one run. *)
-          echo_waiters : (int, int -> unit) Hashtbl.t ;
+          (* Who is waiting for an ICMP echo reply.
+           * Indexed by ICMP id (which is also the action_state's id).
+           * One waiter may wait for several echo requests (with various seq
+           * number) *)
+          echo_waiters : (int (* ICMP id *), int -> unit) Hashtbl.t ;
           (* ICMP errors want to embed the first 8 bytes of the IP packet so we save
            * it here: *)
           mutable last_ip_packet : Ip.Pdu.t option }
@@ -227,8 +226,7 @@ let icmp_rx t ip_trx bits =
                 Icmp.Pdu.make_echo_reply id seq ~pld |>
                 Icmp.Pdu.pack |>
                 tx ip_trx
-        (* A reply nobody is waiting for is still dropped: a host pings from an
-           action, and it is that action that is listening. *)
+        (* A reply nobody is waiting for is dropped. *)
         | Ok Icmp.Pdu.{ msg_type ; payload = Ids (id, seq, _) ; _ }
             when Icmp.MsgType.is_echo_reply msg_type ->
                 Option.may (fun waiter -> waiter seq)
@@ -607,7 +605,8 @@ let reset t =
     Hashtbl.clear t.tcp_servers ;
     Hashtbl.clear t.udp_servers ;
     Hashtbl.clear t.dns_queries ;
-    Hashtbl.clear t.dns_cache
+    Hashtbl.clear t.dns_cache ;
+    Hashtbl.clear t.echo_waiters
 
 let power_off t =
     Log.(log t.trx.widget.logger Debug (lazy "Halting.")) ;
@@ -875,9 +874,8 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
  *
  * The run's own number is what its replies are recognised by -- an ICMP echo
  * carries an id chosen by whoever sent it, and two pings from one host at the
- * same time must not read each other's replies. It is registered in
- * [echo_waiters] for as long as the run lasts, since a reply nobody is waiting
- * for is dropped.
+ * same time must not read each other's replies. The handler is registered in
+ * [echo_waiters] for as long as the run lasts.
  *
  * The requests are spaced by [interval] and the last one is given [timeout] to
  * be answered; the run ends when every request has been answered or that delay
@@ -961,13 +959,26 @@ let ping_action t =
             let rec send seq () =
                 incr sent ;
                 Hashtbl.replace sent_at seq (Simulation.now sim) ;
-                t.trx.ping ~id ~seq dst ;
-                if seq < count then
-                    Simulation.delay power (Clock.Interval.sec interval)
-                        (send (seq + 1)) ()
-                else
-                    Simulation.delay power (Clock.Interval.sec timeout)
-                        finish () in
+                (* Every request after the first goes out from a scheduled
+                   callback, where an exception would be caught by the
+                   dispatcher, printed, and lost: the run would then wait out
+                   its timeout and report what it had, saying nothing of why it
+                   stopped sending. *)
+                match t.trx.ping ~id ~seq dst with
+                | exception e ->
+                    over := true ;
+                    Hashtbl.remove t.echo_waiters id ;
+                    Action.fail state "cannot ping %s: %s" target
+                        (match e with
+                        | Widget.Bad_value m -> m
+                        | e -> Printexc.to_string e)
+                | () ->
+                    if seq < count then
+                        Simulation.delay power (Clock.Interval.sec interval)
+                            (send (seq + 1)) ()
+                    else
+                        Simulation.delay power (Clock.Interval.sec timeout)
+                            finish () in
             send 1 ())
 
 let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask

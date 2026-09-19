@@ -1861,7 +1861,7 @@ components:
         One run of one action: what was asked for, of what, when, and what came
         of it.
       required: [id, widget, widget_name, action, params, origin, started,
-                 stopped, running, result]
+                 stopped, running, how, reason, result]
       properties:
         id: { type: integer, minimum: 0 }
         widget:
@@ -1891,14 +1891,36 @@ components:
             - $ref: "#/components/schemas/SimTime"
           nullable: true
           description: |
-            Null while it is still going on -- or for ever, for a run nothing
-            ever closed: a handler that forgets, and a run withdrawn by a power
-            source going down, both go on reading as running.
+            Null while it is still going on -- or for ever, for a run whose
+            handler simply forgot to end it. A handler that raises, a source
+            switched off and a widget taken away all end a run; a handler that
+            neither returns nor schedules anything does not.
         running: { type: boolean }
+        how:
+          type: string
+          nullable: true
+          enum: [value, failed, withdrawn, null]
+          description: |
+            How it ended, which is not the same question as what it came to: it
+            says who ended it. `value` and `failed` are the handler, with what
+            the run came to or with what went wrong; `withdrawn` is the
+            simulator, having taken away what the run was doing -- its power
+            went, or its widget was deleted. Null while it is still running.
+
+            A timeout is none of these: an action decides its own timeout, and
+            what it has to say about one is its result or a `failed`.
+        reason:
+          type: string
+          nullable: true
+          description: |
+            What there is to say about the ending, for the two that are not a
+            value: the handler's own words, or which way the run was taken
+            away.
         result:
           description: |
-            What it came to, shaped as its action's `result` says, or null while
-            it is running or when it hands back nothing.
+            What it came to, shaped as its action's `result` says. Null while it
+            is running, when the action hands back nothing, and when it ended
+            any other way than with a value.
 
     Topology:
       type: object
