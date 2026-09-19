@@ -477,26 +477,6 @@ let set_properties (device : Widget.t) properties =
             ) values
     ) properties
 
-(** Switch on every power source owned within [root]'s subtree, in the order
- * the widgets were built in.
- *
- * This is the second phase of a load, and what the first one was careful not
- * to do: a host switched on looks for a DHCP server, a portal switched on
- * opens an interface of the machine, and neither has any business happening
- * while the network is still being built. It is a phase of its own rather than
- * an ordering, because what has to be there first is not always in the network
- * at all -- robinet makes the interfaces its portals name, between the two.
- *
- * The order is the order the widgets were built in, which is a fair guess at
- * the order they want -- a server before what asks it -- and nothing more than
- * a guess: dependencies between devices are not recorded, and are not going to
- * be. *)
-let power_up (root : Widget.t) =
-    Widget.enum root |> List.of_enum |>
-    List.sort (fun (a : Widget.t) b -> compare a.id b.id) |>
-    List.iter (fun (w : Widget.t) ->
-        if w.owns_power then Simulation.power_up w.power)
-
 (** Build [t]'s network in [sim], in place of whatever it was running, and
  * answer with the properties that would not take.
  *
@@ -509,10 +489,17 @@ let power_up (root : Widget.t) =
  * built -- what it replaced is gone from the moment it starts, which is what
  * "in place of" means, and the file it came from is still on disk.
  *
- * Nothing is switched on until all of it stands: every device is built with
- * its supply switched off, and {!power_up} switches them all on at the end --
- * which [power] holds back for a caller with something of its own to do in
- * between, robinet having the interfaces its portals name to make.
+ * Nothing is switched on until all of it stands: every box is born dark, and
+ * what switches it on is its power-on in the startup list, which is run at the
+ * end -- or later still, by whoever runs the simulation, for a caller with
+ * something of its own to do in between, robinet having the interfaces its
+ * portals name to make.
+ *
+ * That list is the document's when the document has one. When it has not --
+ * one written before there was such a thing -- it is the one the devices
+ * registered as they were built, which is a power-on for each of them, in the
+ * order they were built in. Which is what such a document meant, and what the
+ * phase this replaces did.
  *
  * Devices are built in the order the document lists them, which is the order
  * they were built in the first place, and each is configured as soon as it is
@@ -526,7 +513,7 @@ let power_up (root : Widget.t) =
  *
  * Changes a simulation's state, so it belongs inside {!Simulation.borrow} like
  * everything else that does. *)
-let to_simulation ?(power=true) (sim : Simulation.t) t =
+let to_simulation (sim : Simulation.t) t =
     let root = sim.root in
     (* What can be told before anything is destroyed, is: a document naming a
      * device this robinet does not have, or naming one twice, was never going
@@ -560,22 +547,35 @@ let to_simulation ?(power=true) (sim : Simulation.t) t =
                     d.path parent_path in
         let params = params_to_ids ~root entry d.params in
         let w =
-            match Device.make_from_params d.type_ ~parent name params with
+            (* Built and not started: what every device of this document has to
+               be asked is asked below, once they all stand. *)
+            match Device.make_from_params ~start:false d.type_ ~parent name
+                                          params with
             | w -> w
             | exception Widget.Bad_value m ->
                 Widget.bad_value "Cannot make %s, the %s of this network: %s"
                     d.path d.type_ m in
         Widget.place w d.location ;
         refused := !refused @ set_properties w d.properties in
+    (* What was to be run before this load, which a load does not disturb: a
+       document is the whole of a network, but a simulation may be running
+       something this one knows nothing about. *)
+    let before = sim.startup in
     (try List.iter make entries
     with e -> Simulation.clear sim ; raise e) ;
-    if power then power_up root ;
-    (* The network is whole and switched on before anything is asked of it: an
-       action runs against a device that is there and answering, which is the
-       whole reason this is a second pass and not something each device does as
-       it is built. *)
-    Action.set_startup sim t.startup ;
-    Action.run_startup sim ;
+    (* The document's list if it has one; otherwise the one its devices
+       registered while being built, which is a power-on for each of them in
+       the order they were built -- what a document written before there was a
+       startup list meant, and what the phase this replaces did. *)
+    let registered = List.drop (List.length before) sim.startup in
+    let theirs = if t.startup <> [] then t.startup else registered in
+    Action.set_startup sim (before @ theirs) ;
+    (* The network is whole before anything is asked of it: an action runs
+       against a device that is there and answering, which is the whole reason
+       this is a second pass and not something each device does as it is built.
+       A simulation that has not started running yet is left to do it when it
+       does, since that is when the rest of its list runs. *)
+    if sim.startup_done then Action.run_entries sim theirs ;
     !refused
 
 (** A simulation of its own for a network: made, loaded from [topology] if
@@ -598,7 +598,7 @@ let to_simulation ?(power=true) (sim : Simulation.t) t =
  *
  * A document that will not load leaves nothing behind, not even the simulation
  * it was going to be: what was asked for was the network. *)
-let new_simulation ?topology ?(paused=false) ?(power=true) name =
+let new_simulation ?topology ?(paused=false) name =
     let sim = Simulation.make ~realtime:false (Simulation.unique_name name) in
     Simulation.set_speed_ratio sim (Some 1.) ;
     let refused =
@@ -606,7 +606,7 @@ let new_simulation ?topology ?(paused=false) ?(power=true) name =
         | None -> []
         | Some t ->
             (match Simulation.borrow sim (fun () ->
-                       to_simulation ~power sim t) with
+                       to_simulation sim t) with
             | exception e -> Simulation.delete sim ; raise e
             | refused -> refused) in
     if paused then Simulation.pause sim () ;

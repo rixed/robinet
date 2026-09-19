@@ -739,7 +739,6 @@ let make ~parent ?location ?speeds ?(adapters=1) ?(independent=false) name =
      * emitting if that is what it was doing: its events were dropped with the
      * supply (see [Simulation.at]), so the chain has to be started again. *)
     widget.power_up <- (fun () -> if t.emitting then start t) ;
-    Simulation.power_up widget.power ;
     t
 
 (* Born with a packet it can make, one adapter for every port, and stopped. *)

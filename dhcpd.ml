@@ -425,6 +425,10 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                   ~static_ip:(Ip.Addr.of_string "10.99.99.99") "client" in
     srv.trx.dev.set_read clt.trx.dev.write ;
     clt.trx.dev.set_read srv.trx.dev.write ;
+    (* Every box is born dark, and what switches it on is its power-on in the
+       startup list: a network that is not going through [run] yet has to run
+       that list for itself. The server has to be up before the client asks. *)
+    Simulation.run_startup sim ;
     assert_bool "the client starts on its static address"
         (Eth.State.find_ip4 clt.eth_state |> Ip.Addr.to_dotted_string
          = "10.99.99.99") ;

@@ -56,8 +56,7 @@ let open_document (path, (clock : Cli.clock)) =
         if String.trim topology.Topology.name <> "" then
             String.trim topology.Topology.name
         else Filename.(remove_extension (basename path)) in
-    match Topology.new_simulation ~topology ~paused:clock.paused ~power:false
-                                  name with
+    match Topology.new_simulation ~topology ~paused:clock.paused name with
     | exception Widget.Bad_value m ->
         Printf.eprintf "%s: %s\n%!" path m ;
         exit 1
@@ -92,11 +91,17 @@ let set_speed (sim, (clock : Cli.clock)) =
     | Some Cli.Real -> Simulation.make_realtime sim
 
 (* Phase two of every load, now that all of it stands and the interfaces are
- * there: every supply the network owns, switched on. *)
-let power_up (sim, (clock : Cli.clock)) =
-    if clock.Cli.power then
-        Simulation.borrow sim (fun () ->
-            Topology.power_up sim.root)
+ * there: what the network is to be asked, which is what switches on every box
+ * it is made of.
+ *
+ * Here rather than left to [Simulation.run], which would do it too, because
+ * the interfaces the portals name had to be made first and that is this
+ * program's doing. Asked to leave it off, it is had done with rather than left
+ * pending, or running the network would switch it on after all. *)
+let run_startup (sim, (clock : Cli.clock)) =
+    Simulation.borrow sim (fun () ->
+        if clock.Cli.power then Simulation.run_startup sim
+        else Simulation.forgo_startup sim)
 
 let main =
     Printexc.record_backtrace true ;
@@ -123,7 +128,7 @@ let main =
             List.iter Netns.setup ifnames ;
             ifnames in
     finally (fun () -> List.iter Netns.teardown ifnames) (fun () ->
-        List.iter power_up sims ;
+        List.iter run_startup sims ;
         List.iter set_speed sims ;
         Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ] (fun () ->
             match opts.Cli.admin with

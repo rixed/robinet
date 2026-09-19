@@ -61,6 +61,10 @@ let main =
                   ~static_ip:(Ip.Addr.of_string !src_ip)
                   "requester" in
     host.trx.dev.set_read emit ;
+    (* Every box is born dark: switch the network on before asking anything of
+       it, which is what [Simulation.run] does at the start and which is too
+       late for what is scheduled below. *)
+    Simulation.run_startup sim ;
     List.iter (Simulation.asap sim.root.power (fun name ->
         host.trx.gethostbyname name (function
         | None -> ()

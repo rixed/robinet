@@ -156,7 +156,6 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
                 (Metric.Counter.T t.collisions) ;
             property "tot ports" ~kind:Int ~descr:"Total number of ports."
                 ~getter:(fun () -> `Int (Array.length t.ports)) ] ;
-        Simulation.power_up t.power ;
         t
 end
 
@@ -329,7 +328,6 @@ struct
             metric_property "cache misses"
                 ~descr:"Number of MAC cache misses."
                 (Metric.Atomic.T t.mac_misses) ] ;
-        Simulation.power_up t.power ;
         t
 end
 

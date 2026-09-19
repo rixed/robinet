@@ -560,6 +560,12 @@ let run_startup (t : t) =
     t.startup_done <- true ;
     run_entries t t.startup
 
+(** Have done with the startup list without running it, for a caller that
+ * wants the network built and left dark: [run] then leaves it alone, as it
+ * does for one that has already been run. *)
+let forgo_startup (t : t) =
+    t.startup_done <- true
+
 (* The switch of a source, as a pair of actions: what a scenario and a startup
  * list are lists of, and the only way to ask for a box to be switched that can
  * be written down.
@@ -589,8 +595,22 @@ let power_actions (w : widget) =
                 stop_action s (Value None) ;
                 power_down w.power) ]
 
+(* A box is born dark and is switched on by its power-on, at the moment every
+ * box's is: when the simulation starts running, and the network is whole.
+ * Which is why building one registers rather than switches -- see [make]. *)
+let register_power_on (w : widget) =
+    let t = Widget.sim w in
+    match Widget.path_within t.root w with
+    (* It is below the root of its own simulation, so there is always a
+       path. *)
+    | None -> ()
+    | Some path ->
+        t.startup <- t.startup @ [ { path ; action = "power on" ; params = [] } ]
+
 let () =
-    Widget.on_own_power := (fun w -> Widget.add_actions w (power_actions w))
+    Widget.on_own_power := (fun w on ->
+        Widget.add_actions w (power_actions w) ;
+        if on then register_power_on w)
 
 (* How long this simulation has stood paused, the pause it is in right now
  * included: [paused_total] only gets that one when [resume] ends it, yet the

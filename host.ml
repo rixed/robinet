@@ -602,8 +602,10 @@ let reset t =
     Hashtbl.clear t.tcp_socks ;
     Hashtbl.clear t.udp_socks ;
     Hashtbl.clear t.icmp_socks ;
-    Hashtbl.clear t.tcp_servers ;
-    Hashtbl.clear t.udp_servers ;
+    (* What it was serving stays: a machine switched off and on again comes
+       back running what it runs, and the conversations it was having are what
+       it loses. Clearing these left a gateway that had been switched off
+       answering neither DHCP nor DNS, with nothing to register them again. *)
     Hashtbl.clear t.dns_queries ;
     Hashtbl.clear t.dns_cache ;
     Hashtbl.clear t.echo_waiters
@@ -831,8 +833,14 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
           udp_send      = (fun dst ?src_port dst_port bits -> if_on t "udp_send" (udp_send t dst ?src_port dst_port) bits) ;
           ping          = (fun ?id ?seq dst -> if_on t "ping" (ping t ?id ?seq) dst) ;
           gethostbyname = (fun name cont -> if_on t "gethostbyname" (gethostbyname t name) cont) ;
-          tcp_server    = (fun src_port server_f -> if_on t "tcp_server" (tcp_server t src_port) server_f) ;
-          udp_server    = (fun src_port server_f -> if_on t "udp_server" (udp_server t src_port) server_f) ;
+          (* Not [if_on]: what a machine runs is what it is configured with and
+             not something it does, and a box is configured while it is dark --
+             born that way, and switched on by its power-on when the network
+             around it stands. A server on a box that is off still cannot
+             answer: what it would send is scheduled on the box's supply, and
+             there is none. *)
+          tcp_server    = (fun port server_f -> tcp_server t port server_f) ;
+          udp_server    = (fun port server_f -> udp_server t port server_f) ;
           signal_err    = (fun str -> signal_err t str) ;
           (* This call is needed by dhcpd servers running on this host: *)
           arp_set       = (fun ip haddr_opt -> if_on t "arp_set" (Eth.State.set_arp t.eth_state (Ip.Addr.to_bitstring ip)) haddr_opt) ;
@@ -997,7 +1005,7 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
     (* A host can take its power source from some larger equipment, and
        mints one of its own when it is a machine in its own right. *)
     let widget =
-        Widget.make ~parent ?location ~device_type:"host" ~own_power name in
+        Widget.make ~parent ?location ~device_type:"host" ~own_power ~on name in
     let power = widget.power in
     let eth_state =
         (* FIXME: Don't use the GW for same net IP! *)
@@ -1031,11 +1039,11 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
             ~setter:(fun v ->
                 t.nameserver <- to_option (Ip.Addr.of_json "nameserver") v) ] ;
     Widget.add_actions widget [ ping_action t ] ;
-    (* And now it may run: its supply is its own and was minted switched off,
-       so that nothing it does at boot happens before the machine is whole.
-       A host built as a part of something larger leaves that to the box,
-       whose supply it shares and cannot switch. *)
-    if own_power && on then Simulation.power_up power ;
+    (* It does not run yet: its supply is its own and was minted switched off,
+       and what switches it on is the power-on that building it put in the
+       startup list -- run when the simulation starts running, by which time
+       the network is whole. A host built as a part of something larger has
+       neither, and leaves both to the box whose supply it shares. *)
     t
 
 (* A host boots into the configuration it has at that moment, and not the one
@@ -1048,6 +1056,10 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
     let h =
         make ~parent:sim.root ~netmask
              ~static_ip:(Ip.Addr.of_string "192.168.1.10") "h" in
+    (* Born dark, as every box is: what switches it on is its power-on in the
+       startup list, which a test that is not going through [run] runs for
+       itself. *)
+    Simulation.run_startup sim ;
     let prop name =
         List.find (fun (p : Widget.property) -> p.name = name)
                   h.trx.widget.properties in

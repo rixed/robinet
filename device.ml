@@ -857,7 +857,17 @@ let model_of_params type_ given =
  * What the widget is left carrying is the model as it was really built, so
  * that a save writes down the choices the constructor made rather than the
  * blanks it was handed. *)
-let make ~parent name model =
+(** Build a device below [parent] and, unless [start] says otherwise, run what
+ * building it put in the startup list -- its power-on, and whatever else the
+ * parts it is made of registered.
+ *
+ * Which is what a device built into a network that is already running needs:
+ * there is no startup left to wait for, and one that arrived dark with nothing
+ * obvious to wake it would be a trap. A whole network being read back from a
+ * document passes [~start:false]: there, the devices are built first and asked
+ * afterwards, in the order the document says, which is the entire reason that
+ * is a second pass (see {!Topology.to_simulation}). *)
+let make ?(start=true) ~parent name model =
     if String.contains name '/' then
         Widget.bad_value "a name must not contain '/': %S" name ;
     let name =
@@ -869,14 +879,21 @@ let make ~parent name model =
                 Widget.bad_value "there is already something called %S here"
                     name ;
             name in
+    let sim = Widget.sim parent in
+    (* What was in the list before this device was built, so that what it
+       registered while being built is the tail beyond it. *)
+    let before = List.length sim.startup in
     let w, built = build ~parent name model in
     w.made_with <- Some (to_params built) ;
+    if start then
+        Simulation.run_entries sim
+            (List.drop before sim.startup) ;
     w
 
 (** Both at once, for a caller that has parameters rather than a model: the
  * interface, and a topology being read back. *)
-let make_from_params type_ ~parent name given =
-    make ~parent name (model_of_params type_ given)
+let make_from_params ?start type_ ~parent name given =
+    make ?start ~parent name (model_of_params type_ given)
 
 (*$T args_of
   args_of switch [] |> List.assoc "ports" = `Int 8

@@ -65,8 +65,9 @@ type clock =
        * whereas one that was asked for is refused out loud. *)
       speed : speed option ;
       paused : bool ;
-      (* Whether to switch on what the network is made of, once it stands (see
-       * [Topology.power_up]). *)
+      (* Whether to run the network's startup list once it stands, which is
+       * what switches on what it is made of: every box registers its power-on
+       * there as it is built (see [Simulation.run_startup]). *)
       power : bool }
 
 (** How to make the interfaces the portals of a network name, when they are not

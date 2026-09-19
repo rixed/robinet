@@ -128,6 +128,8 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
     let clt : Host.t = Host.make ~parent:sim.root ~nameserver ~netmask ~static_ip:(Ip.Addr.random ()) "client" in
     srv.trx.dev.set_read clt.trx.dev.write ;
     clt.trx.dev.set_read srv.trx.dev.write ;
+    (* Both boxes are born dark, and the client cannot ask before it is on. *)
+    Simulation.run_startup sim ;
     let got_ip = ref false in
     clt.trx.gethostbyname "popo" (fun _ -> got_ip := true) ;
     Simulation.run sim false ;

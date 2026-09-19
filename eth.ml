@@ -1244,9 +1244,6 @@ struct
                 metric_property "bit shifts" ~descr:"Number of flipped bits"
                     (Metric.Counter.T t.bit_shifts) ] ;
 
-            (* Minted switched off, as every source is, and switched on here:
-               a cable carries nothing until it is plugged in anyway. *)
-            Simulation.power_up widget.power ;
             t
     end
 

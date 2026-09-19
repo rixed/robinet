@@ -343,10 +343,11 @@ let property ?(descr="") ?(units="") ?metric ?setter ?can_set ?(kind=String)
       only_when_set }
 
 (* What is done to a widget that mints a power source of its own: it gains the
- * pair of actions that switch it. Set by {!Simulation}, which is where
- * switching lives and which is compiled after this -- [make] cannot reach it,
- * and every widget that owns a source goes through [make]. *)
-let on_own_power : (t -> unit) ref = ref ignore
+ * pair of actions that switch it, and, unless it is to stay dark, an entry in
+ * its simulation's startup list that switches it on. Set by {!Simulation},
+ * which is where switching lives and which is compiled after this -- [make]
+ * cannot reach it, and every widget that owns a source goes through [make]. *)
+let on_own_power : (t -> bool -> unit) ref = ref (fun _ _ -> ())
 
 (* Add new properties before default ones: *)
 let add_properties t properties =
@@ -1101,7 +1102,7 @@ let add_common_properties (t : t) =
  * widget of a simulation, and hence keeps it a complete inventory -- and the
  * root is the one widget this does not build, since it cannot be built before
  * the simulation it belongs to (see [Simulation.make]). *)
-let make ~parent ?power ?(own_power=false) ?size ?location
+let make ~parent ?power ?(own_power=false) ?(on=true) ?size ?location
          ?(properties=[]) ?device_type name =
     if String.contains name '/' then
         invalid_arg ("Widget.make: name must not contain '/': "^ name) ;
@@ -1136,10 +1137,15 @@ let make ~parent ?power ?(own_power=false) ?size ?location
         ports = no_ports ;
         properties ;
         actions = [] } in
-    (* power starts off by default: *)
+    (* Every box is born dark. What switches it on is its power-on in the
+       startup list, which is run when the simulation starts running: a box
+       switched on as it was built would be switched on before the cable to the
+       next one exists, and two adapters settle what they can do between them
+       as they are plugged together. [on] is false for one that is to stay dark
+       even then. *)
     if own_power then (
         t.power <- { on = false ; name = full_name t ; sim = sim t } ;
-        !on_own_power t) ;
+        !on_own_power t on) ;
     (* Linking it to its parent is all the registration there is: a simulation's
      * inventory of widgets is that tree, reachable from its root.
      * Appended rather than prepended so that children stay in creation order,

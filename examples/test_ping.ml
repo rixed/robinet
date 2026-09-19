@@ -28,6 +28,11 @@ let run (sim : Simulation.t) () =
     (* Connect everything *)
     my_recv <-= ip ==> eth =-> host.trx.dev.write ;
     host.trx.dev.set_read (rx eth) ;
+    (* And switch it on. Every box is born dark and is switched on by its
+       power-on in the startup list, which [Simulation.run] would run for us --
+       but the request below goes out before that, and a host that is off
+       cannot answer it. *)
+    Simulation.run_startup sim ;
     (* Send an echo request *)
     let req = Icmp.Pdu.make_echo_request 42 1 in
     tx ip (Icmp.Pdu.pack req) ;
