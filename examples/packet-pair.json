@@ -1,0 +1,2147 @@
+{
+  "version": 1,
+  "name": "packet-pair",
+  "devices": [
+    {
+      "type": "router",
+      "path": "paris",
+      "at": {
+        "lat": 48.8566,
+        "lon": 2.3522
+      },
+      "params": {
+        "ports": 6,
+        "MAC range": "02:52:01",
+        "MACs": ""
+      },
+      "properties": {
+        "": {
+          "routes": [
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": null,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.3/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.4/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.5/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.6/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.7/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 3,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.8/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.9/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 3,
+              "via": "203.0.113.7"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.10/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": "203.0.113.5"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "router",
+      "path": "london",
+      "at": {
+        "lat": 51.5074,
+        "lon": -0.1278
+      },
+      "params": {
+        "ports": 6,
+        "MAC range": "02:52:02",
+        "MACs": ""
+      },
+      "properties": {
+        "": {
+          "routes": [
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": null,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.3/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.4/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.3"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.5/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.6/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.7/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.8/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.9/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.10/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": "203.0.113.6"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "router",
+      "path": "amsterdam",
+      "at": {
+        "lat": 52.3676,
+        "lon": 4.9041
+      },
+      "params": {
+        "ports": 6,
+        "MAC range": "02:52:03",
+        "MACs": ""
+      },
+      "properties": {
+        "": {
+          "routes": [
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.3/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": null,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.4/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.5/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.6/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.7/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.8/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.9/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.10/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "router",
+      "path": "frankfurt",
+      "at": {
+        "lat": 50.1109,
+        "lon": 8.6821
+      },
+      "params": {
+        "ports": 6,
+        "MAC range": "02:52:04",
+        "MACs": ""
+      },
+      "properties": {
+        "": {
+          "routes": [
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.4/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": null,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.3"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.3/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.5/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.6/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.3"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.7/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.3"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.8/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.3"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.9/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.3"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.10/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.3"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "router",
+      "path": "madrid",
+      "at": {
+        "lat": 40.4168,
+        "lon": -3.7038
+      },
+      "params": {
+        "ports": 6,
+        "MAC range": "02:52:05",
+        "MACs": ""
+      },
+      "properties": {
+        "": {
+          "routes": [
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.5/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": null,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.3/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.4/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.6/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.7/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.8/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.9/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.10/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "router",
+      "path": "new-york",
+      "at": {
+        "lat": 40.7128,
+        "lon": -74.006
+      },
+      "params": {
+        "ports": 6,
+        "MAC range": "02:52:06",
+        "MACs": ""
+      },
+      "properties": {
+        "": {
+          "routes": [
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.6/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": null,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.3/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.4/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.5/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.7/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.8/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.9/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.7"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.10/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": "203.0.113.8"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.2"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": "203.0.113.8"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "router",
+      "path": "ashburn",
+      "at": {
+        "lat": 39.0438,
+        "lon": -77.4874
+      },
+      "params": {
+        "ports": 6,
+        "MAC range": "02:52:07",
+        "MACs": ""
+      },
+      "properties": {
+        "": {
+          "routes": [
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.7/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": null,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.3/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.4/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.5/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.6/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.8/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.9/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.10/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": "203.0.113.9"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.1"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": "203.0.113.9"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "router",
+      "path": "chicago",
+      "at": {
+        "lat": 41.8781,
+        "lon": -87.6298
+      },
+      "params": {
+        "ports": 6,
+        "MAC range": "02:52:08",
+        "MACs": ""
+      },
+      "properties": {
+        "": {
+          "routes": [
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.8/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": null,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.3/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.4/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.5/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.6/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.7/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.9/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.10/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.6"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": "203.0.113.10"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "router",
+      "path": "dallas",
+      "at": {
+        "lat": 32.7767,
+        "lon": -96.797
+      },
+      "params": {
+        "ports": 6,
+        "MAC range": "02:52:09",
+        "MACs": ""
+      },
+      "properties": {
+        "": {
+          "routes": [
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.9/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": null,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.7"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.7"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.3/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.7"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.4/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.7"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.5/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.7"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.6/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.7"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.7/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.8/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.10/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.7"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": "203.0.113.10"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "router",
+      "path": "los-angeles",
+      "at": {
+        "lat": 34.0522,
+        "lon": -118.2437
+      },
+      "params": {
+        "ports": 6,
+        "MAC range": "02:52:0a",
+        "MACs": ""
+      },
+      "properties": {
+        "": {
+          "routes": [
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.10/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": null,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.8"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.8"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.3/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.8"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.4/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.8"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.5/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.8"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.6/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.8"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.7/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": "203.0.113.9"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.8/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "203.0.113.9/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 1,
+              "via": null
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.1/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 0,
+              "via": "203.0.113.8"
+            },
+            {
+              "input port": null,
+              "src mask": null,
+              "dst mask": "198.51.100.2/32",
+              "ip proto": null,
+              "src port": null,
+              "dst port": null,
+              "output port": 2,
+              "via": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "gateway",
+      "path": "gw-eu",
+      "at": {
+        "lat": 38.7223,
+        "lon": -9.1393
+      },
+      "params": {
+        "public address": "198.51.100.1",
+        "public netmask": "255.255.255.255",
+        "public gateway": "203.0.113.5",
+        "LAN": "192.168.10.0/24",
+        "max connections": 500,
+        "MAC": "02:52:0b:00:00:01"
+      },
+      "properties": {
+        "nat": {
+          "port forwards": [
+            {
+              "protocol": 17,
+              "external port": 5000,
+              "internal IP": "192.168.10.3",
+              "internal port": 5000
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "gateway",
+      "path": "gw-us",
+      "at": {
+        "lat": 32.7157,
+        "lon": -117.1611
+      },
+      "params": {
+        "public address": "198.51.100.2",
+        "public netmask": "255.255.255.255",
+        "public gateway": "203.0.113.10",
+        "LAN": "192.168.20.0/24",
+        "max connections": 500,
+        "MAC": null
+      },
+      "properties": {
+        "nat": {
+          "port forwards": [
+            {
+              "protocol": 17,
+              "external port": 5000,
+              "internal IP": "192.168.20.3",
+              "internal port": 5000
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "hub",
+      "path": "hub-eu",
+      "at": {
+        "lat": 38.5723,
+        "lon": -9.2893
+      },
+      "params": {
+        "ports": 4,
+        "speed": 1
+      },
+      "properties": {}
+    },
+    {
+      "type": "host",
+      "path": "host-eu",
+      "at": {
+        "lat": 38.4723,
+        "lon": -9.3893
+      },
+      "params": {
+        "static-ip": "192.168.10.3",
+        "netmask": "255.255.255.0",
+        "gateway": "192.168.10.1",
+        "nameserver": "192.168.10.1",
+        "search suffix": null,
+        "MAC": "02:52:0c:00:00:01"
+      },
+      "properties": {}
+    },
+    {
+      "type": "synthesizer",
+      "path": "gen-eu",
+      "at": {
+        "lat": 38.6723,
+        "lon": -9.4393
+      },
+      "params": {
+        "adapters": 1,
+        "speeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "independent": false
+      },
+      "properties": {
+        "": {
+          "generators": [
+            {
+              "name": "payload size",
+              "generator": {
+                "uniform": {
+                  "from": 960,
+                  "up to (excluded)": 1000
+                }
+              }
+            }
+          ],
+          "stream": {
+            "stop after": 2,
+            "distance": null,
+            "distance from end": true
+          },
+          "packet": [
+            {
+              "name": "Eth",
+              "fields": {
+                "source": {
+                  "const": "02:52:0c:00:00:01"
+                },
+                "destination": {
+                  "const": "02:52:0b:00:00:01"
+                },
+                "protocol": null,
+                "payload": null
+              }
+            },
+            {
+              "name": "Ip",
+              "fields": {
+                "type of service": null,
+                "total length": null,
+                "id": null,
+                "don't fragment": {
+                  "const": false
+                },
+                "more fragments": null,
+                "fragment offset": null,
+                "time to live": null,
+                "protocol": null,
+                "source": {
+                  "const": "192.168.10.3"
+                },
+                "destination": {
+                  "const": "198.51.100.2"
+                },
+                "options": null,
+                "payload": null
+              }
+            },
+            {
+              "name": "Udp",
+              "fields": {
+                "source port": {
+                  "const": 40000
+                },
+                "destination port": {
+                  "const": 5000
+                },
+                "length": null,
+                "checksum": null,
+                "payload": null
+              }
+            },
+            {
+              "name": "Data",
+              "fields": {
+                "gen": "payload size"
+              }
+            }
+          ],
+          "independent": false,
+          "emitting": true
+        }
+      }
+    },
+    {
+      "type": "hub",
+      "path": "hub-us",
+      "at": {
+        "lat": 32.5657,
+        "lon": -117.3111
+      },
+      "params": {
+        "ports": 4,
+        "speed": 1
+      },
+      "properties": {}
+    },
+    {
+      "type": "host",
+      "path": "host-us",
+      "at": {
+        "lat": 32.4657,
+        "lon": -117.4111
+      },
+      "params": {
+        "static-ip": "192.168.20.3",
+        "netmask": "255.255.255.0",
+        "gateway": "192.168.20.1",
+        "nameserver": "192.168.20.1",
+        "search suffix": null,
+        "MAC": null
+      },
+      "properties": {}
+    },
+    {
+      "type": "recorder",
+      "path": "rec-us",
+      "at": {
+        "lat": 32.6657,
+        "lon": -117.4611
+      },
+      "params": {
+        "file name": "packet-pair.pcap",
+        "caplen": null,
+        "DLT": 1
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "paris-london",
+      "at": null,
+      "params": {
+        "from": "paris",
+        "to": "london",
+        "from port": 0,
+        "to port": 0,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "paris-frankfurt",
+      "at": null,
+      "params": {
+        "from": "paris",
+        "to": "frankfurt",
+        "from port": 1,
+        "to port": 0,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "paris-madrid",
+      "at": null,
+      "params": {
+        "from": "paris",
+        "to": "madrid",
+        "from port": 2,
+        "to port": 0,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "london-amsterdam",
+      "at": null,
+      "params": {
+        "from": "london",
+        "to": "amsterdam",
+        "from port": 1,
+        "to port": 0,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "amsterdam-frankfurt",
+      "at": null,
+      "params": {
+        "from": "amsterdam",
+        "to": "frankfurt",
+        "from port": 1,
+        "to port": 1,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "london-new-york",
+      "at": null,
+      "params": {
+        "from": "london",
+        "to": "new-york",
+        "from port": 2,
+        "to port": 0,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "paris-ashburn",
+      "at": null,
+      "params": {
+        "from": "paris",
+        "to": "ashburn",
+        "from port": 3,
+        "to port": 0,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "new-york-ashburn",
+      "at": null,
+      "params": {
+        "from": "new-york",
+        "to": "ashburn",
+        "from port": 1,
+        "to port": 1,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "new-york-chicago",
+      "at": null,
+      "params": {
+        "from": "new-york",
+        "to": "chicago",
+        "from port": 2,
+        "to port": 0,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "ashburn-dallas",
+      "at": null,
+      "params": {
+        "from": "ashburn",
+        "to": "dallas",
+        "from port": 2,
+        "to port": 0,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "chicago-dallas",
+      "at": null,
+      "params": {
+        "from": "chicago",
+        "to": "dallas",
+        "from port": 1,
+        "to port": 1,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "chicago-los-angeles",
+      "at": null,
+      "params": {
+        "from": "chicago",
+        "to": "los-angeles",
+        "from port": 2,
+        "to port": 0,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "dallas-los-angeles",
+      "at": null,
+      "params": {
+        "from": "dallas",
+        "to": "los-angeles",
+        "from port": 2,
+        "to port": 1,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "gw-eu-madrid",
+      "at": null,
+      "params": {
+        "from": "gw-eu",
+        "to": "madrid",
+        "from port": 0,
+        "to port": 1,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "gw-us-los-angeles",
+      "at": null,
+      "params": {
+        "from": "gw-us",
+        "to": "los-angeles",
+        "from port": 0,
+        "to port": 2,
+        "length": null,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "gw-eu-hub-eu",
+      "at": null,
+      "params": {
+        "from": "gw-eu",
+        "to": "hub-eu",
+        "from port": 1,
+        "to port": 0,
+        "length": 10.0,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "hub-eu-host-eu",
+      "at": null,
+      "params": {
+        "from": "hub-eu",
+        "to": "host-eu",
+        "from port": 1,
+        "to port": 0,
+        "length": 10.0,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "hub-eu-gen-eu",
+      "at": null,
+      "params": {
+        "from": "hub-eu",
+        "to": "gen-eu",
+        "from port": 2,
+        "to port": 0,
+        "length": 10.0,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "gw-us-hub-us",
+      "at": null,
+      "params": {
+        "from": "gw-us",
+        "to": "hub-us",
+        "from port": 1,
+        "to port": 0,
+        "length": 10.0,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "hub-us-host-us",
+      "at": null,
+      "params": {
+        "from": "hub-us",
+        "to": "host-us",
+        "from port": 1,
+        "to port": 0,
+        "length": 10.0,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "cable",
+      "path": "hub-us-rec-us",
+      "at": null,
+      "params": {
+        "from": "hub-us",
+        "to": "rec-us",
+        "from port": 2,
+        "to port": 0,
+        "length": 10.0,
+        "error rate": 0.0
+      },
+      "properties": {}
+    },
+    {
+      "type": "note",
+      "path": "note-1",
+      "at": {
+        "lat": 60.0,
+        "lon": -40.0
+      },
+      "params": {
+        "text": "Core: 10 routers, one address each (203.0.113.1 to .10, in the order listed). Cables have no length of their own, so each takes the distance between the two cities it joins."
+      },
+      "properties": {}
+    },
+    {
+      "type": "note",
+      "path": "note-2",
+      "at": {
+        "lat": 24.0,
+        "lon": -22.0
+      },
+      "params": {
+        "text": "EU side: gw-eu is 198.51.100.1 behind madrid, LAN 192.168.10.0/24. host-eu holds 192.168.10.3 and gen-eu shares its hub. gen-eu sends two random frames of about 1KiB, back to back, under host-eu's address and hardware address: a gateway translates what comes from its own LAN and nothing else, so that is what gets them out. Its NAT forwards UDP port 5000 to host-eu, as gw-us does to host-us, so either host is reachable from the other at its gateway's public address."
+      },
+      "properties": {}
+    },
+    {
+      "type": "note",
+      "path": "note-3",
+      "at": {
+        "lat": 24.0,
+        "lon": -108.0
+      },
+      "params": {
+        "text": "US side: gw-us is 198.51.100.2 behind los-angeles, LAN 192.168.20.0/24. Its NAT forwards UDP port 5000 to host-us, which is what the frames from gen-eu are addressed to; without that they would go no further than the gateway. hub-us sits between host-us and gw-us so that rec-us sees everything either of them says, and writes it into /tmp/packet-pair.pcap."
+      },
+      "properties": {}
+    }
+  ],
+  "startup": [
+    {
+      "path": "paris",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "london",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "amsterdam",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "frankfurt",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "madrid",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "new-york",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "ashburn",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "chicago",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "dallas",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "los-angeles",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "gw-eu",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "gw-us",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "hub-eu",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "host-eu",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "gen-eu",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "hub-us",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "host-us",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "paris-london",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "paris-frankfurt",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "paris-madrid",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "london-amsterdam",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "amsterdam-frankfurt",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "london-new-york",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "paris-ashburn",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "new-york-ashburn",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "new-york-chicago",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "ashburn-dallas",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "chicago-dallas",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "chicago-los-angeles",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "dallas-los-angeles",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "gw-eu-madrid",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "gw-us-los-angeles",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "gw-eu-hub-eu",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "hub-eu-host-eu",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "hub-eu-gen-eu",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "gw-us-hub-us",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "hub-us-host-us",
+      "action": "power on",
+      "params": {}
+    },
+    {
+      "path": "hub-us-rec-us",
+      "action": "power on",
+      "params": {}
+    }
+  ]
+}
