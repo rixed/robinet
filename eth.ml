@@ -906,6 +906,10 @@ struct
             Postponed
         | exception Invalid_argument _ ->
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "HW addr for '%s' is still resolving" (hexstring_of_bitstring target_ip)))) ;
+            (* Every frame waiting on that address, and not merely the one that
+             * asked for it: they all leave together when the reply comes (see
+             * the loop that drains [postponed]). *)
+            BitHash.add st.postponed target_ip bits ;
             Postponed
 
     let dst_for (st : State.t) bits =
