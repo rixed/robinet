@@ -178,7 +178,7 @@ struct
                                     Ip.Proto.o (to_int_range ~min:0 ~max:255 v)) row
                             and ext_port = port "external port"
                             and internal_ip =
-                                to_field "internal ip" (fun v ->
+                                to_field "internal IP" (fun v ->
                                     Ip.Addr.of_string (to_string v)) row
                             and internal_port = port "internal port" in
                             { proto ; ext_port ; internal_ip ; internal_port }
