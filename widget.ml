@@ -342,6 +342,12 @@ let property ?(descr="") ?(units="") ?metric ?setter ?can_set ?(kind=String)
     { name ; descr ; units ; getter ; setter ; can_set ; kind ; metric ;
       only_when_set }
 
+(* What is done to a widget that mints a power source of its own: it gains the
+ * pair of actions that switch it. Set by {!Simulation}, which is where
+ * switching lives and which is compiled after this -- [make] cannot reach it,
+ * and every widget that owns a source goes through [make]. *)
+let on_own_power : (t -> unit) ref = ref ignore
+
 (* Add new properties before default ones: *)
 let add_properties t properties =
     t.properties <- properties @ t.properties
@@ -1131,7 +1137,9 @@ let make ~parent ?power ?(own_power=false) ?size ?location
         properties ;
         actions = [] } in
     (* power starts off by default: *)
-    if own_power then t.power <- { on = false ; name = full_name t ; sim = sim t } ;
+    if own_power then (
+        t.power <- { on = false ; name = full_name t ; sim = sim t } ;
+        !on_own_power t) ;
     (* Linking it to its parent is all the registration there is: a simulation's
      * inventory of widgets is that tree, reachable from its root.
      * Appended rather than prepended so that children stay in creation order,

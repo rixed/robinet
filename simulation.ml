@@ -454,6 +454,38 @@ let power_down (p : power) =
         signal_me t ()
     )
 
+(* The switch of a source, as a pair of actions: what a scenario and a startup
+ * list are lists of, and the only way to ask for a box to be switched that can
+ * be written down.
+ *
+ * Only a widget that minted its own source gets them, which is what [make]
+ * calls this for: everything inside a box draws on the box's source, and two
+ * switches for one source is the confusion this arrangement ended. The root
+ * widget of a simulation has none either, since it is built without going
+ * through [make]: switching the mains off is stopping the simulation, which is
+ * not something to be asked of a widget. *)
+let power_actions (w : widget) =
+    Widget.[
+        action "power on"
+            ~descr:"Switch this box on, and everything inside it."
+            ~can_run:(fun () -> not w.power.on)
+            ~handler:(fun s ->
+                stop_action s (Value None) ;
+                power_up w.power) ;
+        action "power off"
+            ~descr:"Switch it off: what it had scheduled goes with the power."
+            ~can_run:(fun () -> w.power.on)
+            ~handler:(fun s ->
+                (* Ended before the switch is thrown, not after: switching a
+                   source off ends the runs of the widgets drawing on it, and
+                   this run is one of those. Ended already, it is left alone,
+                   and says it was done rather than that it was cut short. *)
+                stop_action s (Value None) ;
+                power_down w.power) ]
+
+let () =
+    Widget.on_own_power := (fun w -> Widget.add_actions w (power_actions w))
+
 (* How long this simulation has stood paused, the pause it is in right now
  * included: [paused_total] only gets that one when [resume] ends it, yet the
  * gap between the two clocks is already that much wider -- the simulation's
