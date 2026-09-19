@@ -60,6 +60,14 @@
                                             is {"lat": ..., "lon": ...}, or
                                             null to take it off the map
     GET    /api/simulations/<s>/widgets/<w>/properties
+    GET    /api/simulations/<s>/widgets/<w>/actions  what it can be asked to do
+    POST   /api/simulations/<s>/widgets/<w>/actions/<name>
+                                            do it; the body is the parameters,
+                                            as an object, and what comes back
+                                            is the run that was started
+    GET    /api/simulations/<s>/actions     every run of that simulation, most
+                                            recent first; ?widget=<id> for the
+                                            runs of one widget
     PUT    /api/simulations/<s>/widgets/<w>/power    body is true or false
     GET    /api/simulations/<s>/widgets/<w>/properties/<name>
     PUT    /api/simulations/<s>/widgets/<w>/properties/<name>  body is the value
@@ -368,6 +376,22 @@ let json_of_property (p : Widget.property) =
              "only_when_set", `Bool p.only_when_set ;
              "kind", json_of_kind p.kind ;
              "value", value ]
+
+(* One thing a call has to be told: what a device is built with, and what an
+ * action is run with, are the same record and travel the same way, so that the
+ * interface builds either dialog with the one piece of code (see
+ * {!Widget.param}). *)
+let json_of_param (p : Widget.param) =
+    `Assoc [ "name", `String p.name ;
+             "descr", `String p.descr ;
+             "units", `String p.units ;
+             "kind", json_of_kind p.kind ;
+             (* What an empty input is to show: an example of the value, or
+                what leaving it out will do. *)
+             "placeholder", `String p.placeholder ;
+             (* What the dialog offers before anything is typed. Null for a
+                parameter that has no value of its own until one is given. *)
+             "default", p.default ]
 
 (* Where the widget is in the world, or null: most widgets are nowhere, and the
  * map places those itself. It travels with the widget as well as through the
@@ -740,18 +764,7 @@ let get_device_types _mth _matches _vars _qry_body resp =
     respond resp (`List (List.map (fun (t : Device.t) ->
         `Assoc [ "type", `String t.name ;
                  "descr", `String t.descr ;
-                 "params", `List (List.map (fun (p : Device.param) ->
-                     `Assoc [ "name", `String p.name ;
-                              "descr", `String p.descr ;
-                              "units", `String p.units ;
-                              "kind", json_of_kind p.kind ;
-                              (* What an empty input is to show: an example of
-                                 the value, or what leaving it out will do. *)
-                              "placeholder", `String p.placeholder ;
-                              (* What the dialog offers before anything is
-                                 typed. Null for a parameter that has no value
-                                 of its own until one is given. *)
-                              "default", p.default ]) t.params) ]
+                 "params", `List (List.map json_of_param t.params) ]
     ) Device.all))
 
 (* What a frame amounts to, laid out layer by layer: its bytes in, and a kind
@@ -1291,6 +1304,117 @@ let set_property _mth matches vars qry_body resp =
                     (Yojson.Basic.to_string value)))) ;
             respond resp (json_of_property p)))
 
+(* What a widget can be asked to do. The counterpart of a property, and shaped
+ * like one: what it is called, what it is for, and -- since an action may be
+ * available only some of the time -- whether it can be run just now, asked
+ * afresh on every read as [read_only] is. *)
+let json_of_action (a : Widget.action) =
+    `Assoc [ "name", `String a.name ;
+             "descr", `String a.descr ;
+             "params", `List (List.map json_of_param a.params) ;
+             (* The shape of what it hands back when it is over, or null for an
+                action that hands back nothing. *)
+             "result", (match a.result with
+                       | None -> `Null
+                       | Some k -> json_of_kind k) ;
+             "can_run", `Bool (a.can_run ()) ]
+
+(* One run of one action: what was asked for, of what, when, and what came of
+ * it. The widget travels as an id and as a name, as everything that names a
+ * widget here does -- and it may be a widget that is no longer in the tree,
+ * since a run outlives the thing that ran it. *)
+let json_of_action_state (s : Widget.action_state) =
+    `Assoc [ "id", `Int s.id ;
+             "widget", `Int s.widget.id ;
+             "widget_name", `String (Widget.full_name s.widget) ;
+             "action", `String s.action_name ;
+             (* As they were read, the ones left out filled in with their
+                defaults: what was really run, rather than what was typed. *)
+             "params", `Assoc s.params ;
+             "origin", `String (match s.origin with
+                               | Startup -> "startup"
+                               | Api -> "api") ;
+             "started", Widget.json_of_time s.started ;
+             (* Null while it is still going on -- or for ever, for a run
+                nothing ever closed: see {!Action}. *)
+             "stopped", (match s.stopped with
+                        | None -> `Null
+                        | Some t -> Widget.json_of_time t) ;
+             "running", `Bool (Action.is_running s) ;
+             "result", (match s.result with None -> `Null | Some v -> v) ]
+
+let get_actions _mth matches _vars _qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        let w = widget_of_matches sim matches 2 in
+        respond resp (`List (List.map json_of_action w.actions)))
+
+(* The body is the parameters, as an object -- {"target": "192.168.0.1"} --
+ * and an action that takes none needs no body at all. The ones left out take
+ * their default; anything the action does not declare is refused rather than
+ * ignored, exactly as it is when a device is built.
+ *
+ * What comes back is the run that was started, which is what the interface
+ * then watches: an action that is over by the time the handler returns already
+ * has its result in it, and one that is not says it is running. *)
+let run_action _mth matches _vars qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        let w = widget_of_matches sim matches 2 in
+        let name = Url.decode (matched matches 3) in
+        let a =
+            match Action.find w name with
+            | None ->
+                not_found "%s cannot %S" (Widget.full_name w) name
+            | Some a -> a in
+        let given =
+            match String.trim qry_body with
+            | "" -> []
+            | body ->
+                (match Yojson.Basic.from_string body with
+                | exception _ ->
+                    bad_request "Not a set of parameters: %S" body
+                | `Assoc l -> l
+                | `Null -> []
+                | j ->
+                    bad_request "Parameters must be an object, not %s"
+                        (Yojson.Basic.to_string j)) in
+        match Action.start w a given with
+        | exception Widget.Bad_value m ->
+            bad_request "Cannot %s: %s" name m
+        | exception e ->
+            (* The handler itself failed. The run is recorded all the same --
+               it did start -- so this says what went wrong and the reader can
+               see the run that went nowhere. *)
+            bad_request "Cannot %s: %s" name (Printexc.to_string e)
+        | s -> respond resp (json_of_action_state s))
+
+(* Every run of this simulation, most recent first; ?widget=<id> for the runs
+ * of one widget.
+ *
+ * The whole list every time, with no cursor: a run that is already known can
+ * still end, and a cursor that only ever brought back the new ones would leave
+ * it reading as running for ever. It stays short because an action is a whole
+ * campaign and not each of its steps -- one host sending a request a second
+ * for an hour is one of these. *)
+let get_action_runs _mth matches vars _qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        let widget =
+            match Hashtbl.find_option vars "widget" with
+            | None -> None
+            | Some s ->
+                (match int_of_string s with
+                | exception _ -> bad_request "Not a widget id: %S" s
+                | id ->
+                    (match Widget.find sim.root id with
+                    | None ->
+                        not_found "Simulation %s has no widget %d"
+                            (Simulation.name sim) id
+                    | Some w -> Some w)) in
+        respond resp (`List (List.map json_of_action_state
+                                      (Action.runs ?widget sim))))
+
 (*
  * Routing
  *)
@@ -1318,6 +1442,11 @@ let resources serving : (Str.regexp * Opache.resource) list =
     List.map (fun (re, f) -> re, json_errors f) [
     Str.regexp "/api/simulations/\\([0-9]+\\)/\\(pause\\|resume\\|speed\\|step\\)$",
         control_simulation serving ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)/actions$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "GET" -> get_action_runs mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/topology$",
         (fun mth matches vars qry_body resp ->
             match mth with
@@ -1352,6 +1481,13 @@ let resources serving : (Str.regexp * Opache.resource) list =
             | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/properties$",
         get_properties ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/actions/\\(.+\\)$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "PUT" | "POST" -> run_action mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/actions$",
+        get_actions ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/logs$",
         get_logs ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/widgets/\\([0-9]+\\)/power$",

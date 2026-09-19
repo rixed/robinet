@@ -108,6 +108,8 @@ tags:
     description: What a simulation is made of, and where it is on the map.
   - name: properties
     description: Reading and editing what a widget is configured with.
+  - name: actions
+    description: What a widget can be asked to do, and what has been asked of it.
   - name: logs
     description: What a widget had to say.
   - name: catalogue
@@ -890,6 +892,106 @@ paths:
   # Logs
   #
 
+  /api/simulations/{sim}/widgets/{widget}/actions:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+      - $ref: "#/components/parameters/widget"
+    get:
+      tags: [actions]
+      summary: What this widget can be asked to do.
+      operationId: getActions
+      description: |
+        The counterpart of its properties: a property is state, read and set,
+        an action is a call, made. `can_run` is asked afresh on every read,
+        since an action may be available only some of the time.
+      responses:
+        "200":
+          description: What it can do, as of this request.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Action" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/simulations/{sim}/widgets/{widget}/actions/{name}:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+      - $ref: "#/components/parameters/widget"
+      - $ref: "#/components/parameters/actionName"
+    post:
+      tags: [actions]
+      summary: Run it.
+      operationId: runAction
+      description: |
+        The body is the parameters the action declares, as an object; the ones
+        left out take their default, and anything it does not declare is
+        refused rather than ignored. An action that takes none needs no body.
+
+        What comes back is the run that was started -- not what it came to: an
+        action that is over by the time it answers already carries its result,
+        and one that is not says it is running. Watch it through
+        `/api/simulations/{sim}/actions`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: One entry per parameter, by name.
+            example: { "target": "192.168.0.1", "count": 3 }
+      responses:
+        "200":
+          description: The run that was started.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActionRun" }
+        "400":
+          description: |
+            A parameter that is not one, a parameter the action does not
+            declare, an action that cannot run just now, or a handler that
+            refused. The run is recorded all the same when it was the handler
+            that failed: it did start.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/simulations/{sim}/actions:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+    get:
+      tags: [actions]
+      summary: Every run of this simulation, most recent first.
+      operationId: getActionRuns
+      description: |
+        The whole list every time, with no cursor: a run that is already known
+        can still end, and a cursor that only brought back the new ones would
+        leave it reading as running for ever. It stays short because an action
+        is a whole campaign and not each of its steps -- a host sending a
+        request a second for an hour is one of these.
+      parameters:
+        - name: widget
+          in: query
+          required: false
+          description: Only the runs of that widget.
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: What has been run.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ActionRun" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/simulations/{sim}/widgets/{widget}/logs:
     parameters:
       - $ref: "#/components/parameters/sim"
@@ -1218,6 +1320,16 @@ components:
         spaces and all.
       schema: { type: string }
       example: "error rate"
+
+    actionName:
+      name: name
+      in: path
+      required: true
+      description: |
+        The action's name, url-encoded. Unique within a widget, and used as it
+        is -- spaces and all -- exactly as a property's name is.
+      schema: { type: string }
+      example: "ping"
 
     since:
       name: since
@@ -1688,25 +1800,105 @@ components:
             What this kind has to be told, once, when it is built. Only what has
             to be settled before there is anything to configure: everything else
             is a property, edited afterwards.
-          items:
-            type: object
-            required: [name, descr, units, kind, placeholder, default]
-            properties:
-              name: { type: string }
-              descr: { type: string }
-              units: { type: string }
-              kind: { $ref: "#/components/schemas/Kind" }
-              placeholder:
-                type: string
-                description: |
-                  What an empty input shows: an address of the shape expected, or
-                  what leaving the parameter out will do. Only ever seen by a
-                  parameter with no default, since a default fills the input in.
-              default:
-                description: |
-                  What the dialog offers before anything is typed, and what is
-                  used when the parameter is left out. Null for a parameter with
-                  no value of its own.
+          items: { $ref: "#/components/schemas/Param" }
+
+    Param:
+      type: object
+      description: |
+        One thing a call has to be told. What a device is built with and what an
+        action is run with are the same record, so that one dialog fills in
+        either.
+      required: [name, descr, units, kind, placeholder, default]
+      properties:
+        name: { type: string }
+        descr: { type: string }
+        units: { type: string }
+        kind: { $ref: "#/components/schemas/Kind" }
+        placeholder:
+          type: string
+          description: |
+            What an empty input shows: an address of the shape expected, or
+            what leaving the parameter out will do. Only ever seen by a
+            parameter with no default, since a default fills the input in.
+        default:
+          description: |
+            What the dialog offers before anything is typed, and what is
+            used when the parameter is left out. Null for a parameter with
+            no value of its own.
+
+    Action:
+      type: object
+      description: |
+        One thing a widget can be asked to do. A property is state, read and
+        set; an action is a call, made -- which is what a startup list or a
+        scenario is a list of.
+      required: [name, descr, params, result, can_run]
+      properties:
+        name: { type: string, examples: [ping, "power on"] }
+        descr: { type: string }
+        params:
+          type: array
+          description: What it has to be told. Most actions take nothing.
+          items: { $ref: "#/components/schemas/Param" }
+        result:
+          allOf:
+            - $ref: "#/components/schemas/Kind"
+          nullable: true
+          description: |
+            The shape of what it hands back when it is over -- how many replies
+            a ping had, and how long they took -- or null for an action that
+            hands back nothing.
+        can_run:
+          type: boolean
+          description: |
+            Whether it can be run just now: there is nothing to stop when
+            nothing is playing. Read afresh on every request, as a property's
+            `read_only` is.
+
+    ActionRun:
+      type: object
+      description: |
+        One run of one action: what was asked for, of what, when, and what came
+        of it.
+      required: [id, widget, widget_name, action, params, origin, started,
+                 stopped, running, result]
+      properties:
+        id: { type: integer, minimum: 0 }
+        widget:
+          type: integer
+          minimum: 0
+          description: |
+            What ran it. May be a widget that is no longer in the tree: a run
+            outlives the thing that ran it.
+        widget_name: { type: string }
+        action: { type: string }
+        params:
+          type: object
+          additionalProperties: true
+          description: |
+            What it was told, as it was read: the ones left out filled in with
+            their defaults, so this is what was really run rather than what was
+            typed.
+        origin:
+          type: string
+          enum: [startup, api]
+          description: |
+            Where the order came from: the startup list of the network that was
+            loaded, or somebody asking for it through this API.
+        started: { $ref: "#/components/schemas/SimTime" }
+        stopped:
+          allOf:
+            - $ref: "#/components/schemas/SimTime"
+          nullable: true
+          description: |
+            Null while it is still going on -- or for ever, for a run nothing
+            ever closed: a handler that forgets, and a run withdrawn by a power
+            source going down, both go on reading as running.
+        running: { type: boolean }
+        result:
+          description: |
+            What it came to, shaped as its action's `result` says, or null while
+            it is running or when it hands back nothing.
 
     Topology:
       type: object
