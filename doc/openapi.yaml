@@ -892,6 +892,79 @@ paths:
   # Logs
   #
 
+  /api/simulations/{sim}/startup:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+    get:
+      tags: [actions]
+      summary: What is to be run once this network has been built, in order.
+      operationId: getStartup
+      description: |
+        A document says what a network is made of; the startup list says what
+        is to be *done* to it once it is built. A device registers its own
+        entries as it is built, and the reader may add, reorder and remove
+        them.
+      responses:
+        "200":
+          description: The list, in the order it is to be run.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StartupEntry" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [actions]
+      summary: Replace the whole list.
+      operationId: setStartup
+      description: |
+        The list in the order it is to be run: reordering and removing are both
+        this. Nothing checks that the paths lead anywhere -- a list may be
+        edited before the device it names is built, and an entry that leads
+        nowhere says so in the logs when the network is loaded.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: "#/components/schemas/StartupEntry" }
+      responses:
+        "200":
+          description: The list as it now stands.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StartupEntry" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [actions]
+      summary: Add one entry, at the end.
+      operationId: addStartup
+      description: |
+        Which is what asking for an action to be run at startup does. The end,
+        because the order is the order things are to be done in.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StartupEntry" }
+      responses:
+        "200":
+          description: The entry that was added.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StartupEntry" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/simulations/{sim}/widgets/{widget}/actions:
     parameters:
       - $ref: "#/components/parameters/sim"
@@ -1854,6 +1927,32 @@ components:
             Whether it can be run just now: there is nothing to stop when
             nothing is playing. Read afresh on every request, as a property's
             `read_only` is.
+
+    StartupEntry:
+      type: object
+      description: |
+        One thing to be done once the network has been built.
+      required: [path, action]
+      properties:
+        path:
+          type: string
+          description: |
+            Which widget it is asked of, relative to the simulation's root, the
+            empty path being the root itself. A path and not an id: the list
+            outlives the process that wrote it, and is read back into a
+            simulation whose widgets were built afresh.
+          examples: ["alice", "paris/gw"]
+        action:
+          type: string
+          description: The name of one of that widget's actions.
+        params:
+          type: object
+          additionalProperties: true
+          description: |
+            What to run it with, by name, as they are to be given rather than
+            as they will be read: an action whose parameters gain a default is
+            then still run the way the list says. Absent for an action that
+            takes none.
 
     ActionRun:
       type: object

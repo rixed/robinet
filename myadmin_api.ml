@@ -68,6 +68,13 @@
     GET    /api/simulations/<s>/actions     every run of that simulation, most
                                             recent first; ?widget=<id> for the
                                             runs of one widget
+    GET    /api/simulations/<s>/startup     what is to be run once this
+                                            network has been built, in order
+    PUT    /api/simulations/<s>/startup     that whole list, reordered or
+                                            shortened; the body is the list
+    POST   /api/simulations/<s>/startup     one more entry, at the end; the
+                                            body is {"path":..., "action":...,
+                                            "params": {...}}
     PUT    /api/simulations/<s>/widgets/<w>/power    body is true or false
     GET    /api/simulations/<s>/widgets/<w>/properties/<name>
     PUT    /api/simulations/<s>/widgets/<w>/properties/<name>  body is the value
@@ -1364,6 +1371,67 @@ let json_of_action_state (s : Widget.action_state) =
                        | Some (_, Value (Some v)) -> v
                        | _ -> `Null) ]
 
+(* One entry of the startup list: which widget, by path, is to be asked what,
+ * with what. A path and not an id, as the document has it -- the list is meant
+ * to survive the network being built again. *)
+let json_of_startup (e : Widget.startup_entry) =
+    `Assoc [ "path", `String e.path ;
+             "action", `String e.action ;
+             "params", `Assoc e.params ]
+
+let startup_of_json what j : Widget.startup_entry =
+    let str name =
+        match Yojson.Basic.Util.member name j with
+        | `String s -> s
+        | `Null -> bad_request "%s: %S is missing" what name
+        | v -> bad_request "%s: %S must be a string, not %s" what name
+                   (Yojson.Basic.to_string v) in
+    { path = str "path" ;
+      action = str "action" ;
+      params =
+        (match Yojson.Basic.Util.member "params" j with
+        | `Null -> []
+        | `Assoc l -> l
+        | v -> bad_request "%s: %S must be an object, not %s" what "params"
+                   (Yojson.Basic.to_string v)) }
+
+let get_startup _mth matches _vars _qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        respond resp (`List (List.map json_of_startup (Action.startup sim))))
+
+(* The whole list, in the order it is to be run: the interface edits it by
+ * reordering and removing, both of which are this. A POST of one entry adds it
+ * at the end, which is what asking for an action to be run at startup does.
+ *
+ * Neither checks that the paths lead anywhere: a list may be edited before the
+ * device it names is built, and what an entry that leads nowhere does is say so
+ * in the logs when the network is loaded. *)
+let set_startup _mth matches _vars qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        let entries =
+            match Yojson.Basic.from_string qry_body with
+            | exception _ ->
+                bad_request "Not a startup list: %S" qry_body
+            | `List l ->
+                List.map (startup_of_json "a startup entry") l
+            | v ->
+                bad_request "A startup list is a list, not %s"
+                    (Yojson.Basic.to_string v) in
+        Action.set_startup sim entries ;
+        respond resp (`List (List.map json_of_startup (Action.startup sim))))
+
+let add_startup _mth matches _vars qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        let e =
+            match Yojson.Basic.from_string qry_body with
+            | exception _ -> bad_request "Not a startup entry: %S" qry_body
+            | j -> startup_of_json "a startup entry" j in
+        Action.add_startup sim e ;
+        respond resp (json_of_startup e))
+
 let get_actions _mth matches _vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
     Simulation.borrow sim (fun () ->
@@ -1463,6 +1531,13 @@ let resources serving : (Str.regexp * Opache.resource) list =
     List.map (fun (re, f) -> re, json_errors f) [
     Str.regexp "/api/simulations/\\([0-9]+\\)/\\(pause\\|resume\\|speed\\|step\\)$",
         control_simulation serving ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)/startup$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "GET" -> get_startup mth matches vars qry_body resp
+            | "PUT" -> set_startup mth matches vars qry_body resp
+            | "POST" -> add_startup mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/actions$",
         (fun mth matches vars qry_body resp ->
             match mth with
