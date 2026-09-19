@@ -407,6 +407,18 @@ and kind =
      * like. Build one with [hint]. *)
     | Hint of string * kind
 
+(* {2 Parameters}
+ *
+ * What a call the interface makes has to be told: the characteristics a device
+ * is built from, and the arguments an action is run with. Built with
+ * {!Widget.param}, which documents the fields. *)
+and param = { name : string ;
+              descr : string ;
+              units : string ;
+              kind : kind ;
+              placeholder : string ;
+              default : value }
+
 (* {2 Widgets}
  *
  * Anything with a visible presence in the simulation and with which the user

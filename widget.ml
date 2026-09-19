@@ -701,6 +701,193 @@ let rec check_value ?(name="value") k v =
    with Bad_value _ -> true)
  *)
 
+(** {2 What a thing has to be told}
+ *
+ * The arguments of a call the interface makes: the characteristics a device is
+ * built from (see {!Device}) and the parameters an action is run with (see
+ * {!Action}). One notion for both, so that there is one way to declare them,
+ * one place where a value that is not one is refused, and one dialog in the
+ * interface that fills either in. *)
+
+(** One of them, asked for once, when the call is made. *)
+type param = SimTypes.param =
+    { name : string ;
+      descr : string ;
+      units : string ;
+      kind : kind ;
+      (* What an empty input shows: an address of the shape expected, or what
+       * leaving the parameter out will do. It is the description's examples,
+       * moved to where they are read -- so keep it out of [descr]. Only ever
+       * seen by a parameter with no [default], since a default fills the input
+       * in. *)
+      placeholder : string ;
+      (* What the dialog offers before anything is typed, and what is used when
+       * the parameter is left out. [`Null] for a parameter with no value of its
+       * own, which an [Optional] kind is then obliged to accept. *)
+      default : value }
+
+let param ?(descr="") ?(units="") ?(placeholder="") ?(default=`Null) ~kind
+          name =
+    { name ; descr ; units ; kind ; placeholder ; default }
+
+(* Coerce a value to what the parameter says it is, and check whatever the kind
+ * knows how to check. Every refusal a parameter can meet before the call is
+ * made happens here, once, rather than in each callee. *)
+let rec coerce name (kind : kind) v =
+    match kind with
+    | String | Text | FileName -> `String (to_string v)
+    | Int -> `Int (to_int v)
+    | Float -> `Float (to_float v)
+    (* A number of seconds, and only its rendering sets it apart. *)
+    | Duration -> `Float (to_float v)
+    | Bool -> `Bool (to_bool v)
+    | Widget_id -> `Int (to_int v)
+    | IRange (min, max) -> `Int (to_int_range ~min ~max v)
+    | FRange (min, max) -> `Float (to_float_range ~min ~max v)
+    | Ipv4 | Ipv6 | Mac ->
+        check_value ~name kind v ;
+        v
+    | Time | Packet | Bytes | BRange _ | Synth ->
+        (* As for a metric below: these are what a widget has seen, and nothing
+         * is handed what it is meant to produce. Bytes joins them for a reason
+         * of its own -- they are read and never written, whoever is looking at
+         * them. *)
+        bad_value "%s cannot be given as a parameter" name
+    | Enum (choices, range) ->
+        (try `Int (to_choice ?range choices v)
+        with Bad_value m -> bad_value "%s: %s" name m)
+    (* In order and without repetition, however it was sent: the callee is
+       handed the set itself, and has nothing left to check about it. *)
+    | Set choices ->
+        (try `List (to_choices choices v |>
+                    List.map (fun i -> `Int i))
+        with Bad_value m -> bad_value "%s: %s" name m)
+    | Optional k ->
+        (match v with `Null -> `Null | v -> coerce name k v)
+    (* How a value is written is the interface's business; what arrives here is
+       the value. *)
+    | Hint (_, k) -> coerce name k v
+    | List k ->
+        `List (to_list (coerce name k) v)
+    (* The same on the wire, whichever way the interface draws them. *)
+    | Row fields | Record fields ->
+        (* Every field declared, in that order, and nothing else: a name it
+           does not know is a misspelling, and quietly dropping it would call
+           for something other than what was asked for -- the same reason
+           [args_of] refuses an unknown parameter. *)
+        (match v with
+        | `Assoc given ->
+            List.iter (fun (n, _) ->
+                if not (Array.exists (fun (n', _) -> n' = n) fields) then
+                    bad_value "%s has no field %S" name n
+            ) given ;
+            `Assoc (
+                Array.to_list fields |>
+                List.map (fun (fname, k) ->
+                    match List.assoc_opt fname given with
+                    | None -> bad_value "%s has no %S" name fname
+                    | Some v -> fname, coerce (name ^"."^ fname) k v))
+        | v ->
+            bad_value "%s must be a set of named fields, not %s" name
+                (Yojson.Basic.to_string v))
+    (* Which shape it is, and then that shape: a value of a variant is an
+       object of a single field whose name says the case (see [Variant]). A
+       name that is none of the cases is a misspelling, as an unknown field of
+       a record is. *)
+    | Variant cases ->
+        to_case (fun case v ->
+            match Array.find_opt (fun (c, _) -> c = case) cases with
+            | None ->
+                bad_value "%s: %S is none of its %d shapes" name case
+                    (Array.length cases)
+            | Some (_, k) ->
+                `Assoc [ case, coerce (name ^"."^ case) k v ]
+        ) v
+    | Metric ->
+        (* Nothing has one, and nothing should: a metric is what a widget has
+         * counted, which is never an argument. *)
+        bad_value "%s cannot be given as a parameter" name
+
+(*$= coerce & ~printer:Yojson.Basic.to_string
+  (`Int 3) (coerce "n" Int (`String "3"))
+  (`Int 3) (coerce "n" (IRange (0, 5)) (`Int 3))
+  `Null (coerce "n" (optional Int) `Null)
+  (`Int 3) (coerce "n" (optional Int) (`Int 3))
+ *)
+(*$T coerce
+  (try ignore (coerce "n" (IRange (0, 5)) (`Int 9)) ; false \
+   with Bad_value _ -> true)
+  (try ignore (coerce "n" (one_of (choices [| "a" |])) (`Int 9)) ; \
+   false \
+   with Bad_value _ -> true)
+  (try ignore (coerce "n" Metric (`Int 0)) ; false \
+   with Bad_value _ -> true)
+ *)
+
+(* A choice is its own number and not its place among the others, which is what
+   a protocol number needs: what travels for IP is 0x0800. *)
+(*$= coerce & ~printer:Yojson.Basic.to_string
+  (`Int 0x0800) \
+    (coerce "p" (one_of [| 0x0800, "IP" ; 0x0806, "ARP" |]) (`Int 0x0800))
+ *)
+(*$T coerce
+  (try ignore (coerce "p" (one_of [| 0x0800, "IP" |]) (`Int 0)) ; \
+   false \
+   with Bad_value _ -> true)
+ *)
+
+(* One shape of several, which is an object of a single field named after the
+   case: what it carries is then read as that case's own kind says. *)
+(*$= coerce & ~printer:Yojson.Basic.to_string
+  (`Assoc [ "ids", `Assoc [ "id", `Int 1 ] ]) \
+    (coerce "v" (variant [| "ids", row [| "id", Int |] ; \
+                            "mtu", Int |]) \
+                (`Assoc [ "ids", `Assoc [ "id", `String "1" ] ]))
+ *)
+(*$T coerce
+  (try ignore (coerce "v" (variant [| "a", Int |]) \
+                          (`Assoc [ "z", `Int 1 ])) ; \
+   false with Bad_value _ -> true)
+  (try ignore (coerce "v" (variant [| "a", Int |]) \
+                          (`Assoc [ "a", `Int 1 ; "b", `Int 2 ])) ; \
+   false with Bad_value _ -> true)
+  (try ignore (coerce "v" (variant [| "a", IRange (0, 5) |]) \
+                          (`Assoc [ "a", `Int 9 ])) ; \
+   false with Bad_value _ -> true)
+ *)
+
+(** The arguments of a call, read from what was asked for: every parameter
+ * [params] declares, coerced, with the ones left out taking their default.
+ * Anything else is refused rather than ignored, since a misspelt parameter
+ * that is quietly dropped calls for something other than what was asked for.
+ *
+ * [what] names the callee in that refusal -- "a switch", "ping". *)
+let args_of what params given =
+    List.iter (fun (name, _) ->
+        if not (List.exists (fun (p : param) -> p.name = name) params) then
+            bad_value "%s takes no %S" what name
+    ) given ;
+    List.map (fun (p : param) ->
+        let v = match List.assoc_opt p.name given with
+                | None -> p.default
+                | Some v -> v in
+        p.name, coerce p.name p.kind v
+    ) params
+
+(* The arguments handed to a callee are the parameters it declares, already
+ * coerced, so these need no error of their own: a name that is not there is
+ * the callee disagreeing with itself. *)
+let arg args name =
+    try List.assoc name args
+    with Not_found -> invalid_arg ("Widget.arg: no parameter "^ name)
+
+let arg_bool args name = to_bool (arg args name)
+let arg_int args name = to_int (arg args name)
+let arg_float args name = to_float (arg args name)
+let arg_string args name = to_string (arg args name)
+let arg_opt args name f = to_option f (arg args name)
+let arg_list args name f = to_list f (arg args name)
+
 (* Some common encoder to JSON: *)
 
 let json_of_optional sub = function

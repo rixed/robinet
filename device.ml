@@ -41,26 +41,12 @@ open Tools
 
 (** {2 What a device has to be told} *)
 
-(** One characteristic, asked for once, when the device is built. *)
-type param =
-    { name : string ;
-      descr : string ;
-      units : string ;
-      kind : Widget.kind ;
-      (* What an empty input shows: an address of the shape expected, or what
-       * leaving the parameter out will do. It is the description's examples,
-       * moved to where they are read -- so keep it out of [descr]. Only ever
-       * seen by a parameter with no [default], since a default fills the input
-       * in. *)
-      placeholder : string ;
-      (* What the dialog offers before anything is typed, and what is used when
-       * the parameter is left out. [`Null] for a parameter with no value of its
-       * own, which an [Optional] kind is then obliged to accept. *)
-      default : Widget.value }
+(** One characteristic, asked for once, when the device is built: a
+ * {!Widget.param}, which is also what an action is run with. Named here as
+ * well, where a caller of this module looks for it. *)
+type param = Widget.param
 
-let param ?(descr="") ?(units="") ?(placeholder="") ?(default=`Null) ~kind
-          name =
-    { name ; descr ; units ; kind ; placeholder ; default }
+let param = Widget.param
 
 (** {2 What a device is built from} *)
 
@@ -161,113 +147,22 @@ let free_port (widget : Widget.t) port =
 
 (** {2 Reading the arguments} *)
 
-(* Coerce a value to what the parameter says it is, and check whatever the kind
- * knows how to check. Every refusal a parameter can meet before the device is
- * built happens here, once, rather than in each [make]. *)
-let rec coerce name (kind : Widget.kind) v =
-    match kind with
-    | String | Text | FileName -> `String (Widget.to_string v)
-    | Int -> `Int (Widget.to_int v)
-    | Float -> `Float (Widget.to_float v)
-    (* A number of seconds, and only its rendering sets it apart. *)
-    | Duration -> `Float (Widget.to_float v)
-    | Bool -> `Bool (Widget.to_bool v)
-    | Widget_id -> `Int (Widget.to_int v)
-    | IRange (min, max) -> `Int (Widget.to_int_range ~min ~max v)
-    | FRange (min, max) -> `Float (Widget.to_float_range ~min ~max v)
-    | Ipv4 | Ipv6 | Mac ->
-        Widget.check_value ~name kind v ;
-        v
-    | Time | Packet | Bytes | BRange _ | Synth ->
-        (* As for a metric below: these are what a device has seen, and a
-         * device that has not been built yet has seen nothing. Bytes joins
-         * them for a reason of its own -- they are read and never written,
-         * whoever is looking at them. *)
-        Widget.bad_value "%s cannot be given when building a device" name
-    | Enum (choices, range) ->
-        (try `Int (Widget.to_choice ?range choices v)
-        with Widget.Bad_value m -> Widget.bad_value "%s: %s" name m)
-    (* In order and without repetition, however it was sent: [make] is handed
-       the set itself, and has nothing left to check about it. *)
-    | Set choices ->
-        (try `List (Widget.to_choices choices v |>
-                    List.map (fun i -> `Int i))
-        with Widget.Bad_value m -> Widget.bad_value "%s: %s" name m)
-    | Optional k ->
-        (match v with `Null -> `Null | v -> coerce name k v)
-    (* How a value is written is the interface's business; what arrives here is
-       the value. *)
-    | Hint (_, k) -> coerce name k v
-    | List k ->
-        `List (Widget.to_list (coerce name k) v)
-    (* The same on the wire, whichever way the interface draws them. *)
-    | Row fields | Record fields ->
-        (* Every field declared, in that order, and nothing else: a name it
-           does not know is a misspelling, and quietly dropping it would build
-           something other than what was asked for -- the same reason
-           [args_of] refuses an unknown parameter. *)
-        (match v with
-        | `Assoc given ->
-            List.iter (fun (n, _) ->
-                if not (Array.exists (fun (n', _) -> n' = n) fields) then
-                    Widget.bad_value "%s has no field %S" name n
-            ) given ;
-            `Assoc (
-                Array.to_list fields |>
-                List.map (fun (fname, k) ->
-                    match List.assoc_opt fname given with
-                    | None -> Widget.bad_value "%s has no %S" name fname
-                    | Some v -> fname, coerce (name ^"."^ fname) k v))
-        | v ->
-            Widget.bad_value "%s must be a set of named fields, not %s" name
-                (Yojson.Basic.to_string v))
-    (* Which shape it is, and then that shape: a value of a variant is an
-       object of a single field whose name says the case (see [Variant]). A
-       name that is none of the cases is a misspelling, as an unknown field of
-       a record is. *)
-    | Variant cases ->
-        Widget.to_case (fun case v ->
-            match Array.find_opt (fun (c, _) -> c = case) cases with
-            | None ->
-                Widget.bad_value "%s: %S is none of its %d shapes" name case
-                    (Array.length cases)
-            | Some (_, k) ->
-                `Assoc [ case, coerce (name ^"."^ case) k v ]
-        ) v
-    | Metric ->
-        (* Nothing has one, and nothing should: a metric is what a device has
-         * counted, which at birth is nothing. *)
-        Widget.bad_value "%s cannot be given when building a device" name
-
 (** The arguments of [t], read from what was asked for: every parameter it
- * declares, coerced, with the ones left out taking their default. Anything else
- * is refused rather than ignored, since a misspelt parameter that is quietly
- * dropped builds a device that is not the one that was asked for. *)
+ * declares, coerced, with the ones left out taking their default (see
+ * {!Widget.args_of}). *)
 let args_of t given =
-    List.iter (fun (name, _) ->
-        if not (List.exists (fun (p : param) -> p.name = name) t.params) then
-            Widget.bad_value "a %s takes no %S" t.name name
-    ) given ;
-    List.map (fun (p : param) ->
-        let v = match List.assoc_opt p.name given with
-                | None -> p.default
-                | Some v -> v in
-        p.name, coerce p.name p.kind v
-    ) t.params
+    Widget.args_of ("a "^ t.name) t.params given
 
-(* The arguments handed to [make] are the parameters of the device that is being
- * built, already coerced, so these need no error of their own: a name that is
- * not there is this file disagreeing with itself. *)
-let arg args name =
-    try List.assoc name args
-    with Not_found -> invalid_arg ("Device.arg: no parameter "^ name)
-
-let bool args name = Widget.to_bool (arg args name)
-let int args name = Widget.to_int (arg args name)
-let float args name = Widget.to_float (arg args name)
-let string args name = Widget.to_string (arg args name)
-let opt args name f = Widget.to_option f (arg args name)
-let list args name f = Widget.to_list f (arg args name)
+(* The arguments handed to [make] are the parameters of the device that is
+ * being built, already coerced: what {!Widget.arg} and its like read, under
+ * the shorter names the constructors below read them by. *)
+let arg = Widget.arg
+let bool = Widget.arg_bool
+let int = Widget.arg_int
+let float = Widget.arg_float
+let string = Widget.arg_string
+let opt = Widget.arg_opt
+let list = Widget.arg_list
 
 (** Record on [widget] what it was really built with, for a [make] that had a
  * choice to make: [changed] replaces those of [args] it names, and the rest
@@ -982,54 +877,6 @@ let make ~parent name model =
  * interface, and a topology being read back. *)
 let make_from_params type_ ~parent name given =
     make ~parent name (model_of_params type_ given)
-
-(*$= coerce & ~printer:Yojson.Basic.to_string
-  (`Int 3) (coerce "n" Int (`String "3"))
-  (`Int 3) (coerce "n" (IRange (0, 5)) (`Int 3))
-  `Null (coerce "n" (Widget.optional Int) `Null)
-  (`Int 3) (coerce "n" (Widget.optional Int) (`Int 3))
- *)
-(*$T coerce
-  (try ignore (coerce "n" (IRange (0, 5)) (`Int 9)) ; false \
-   with Widget.Bad_value _ -> true)
-  (try ignore (coerce "n" (Widget.one_of (Widget.choices [| "a" |])) (`Int 9)) ; \
-   false \
-   with Widget.Bad_value _ -> true)
-  (try ignore (coerce "n" Metric (`Int 0)) ; false \
-   with Widget.Bad_value _ -> true)
- *)
-
-(* A choice is its own number and not its place among the others, which is what
-   a protocol number needs: what travels for IP is 0x0800. *)
-(*$= coerce & ~printer:Yojson.Basic.to_string
-  (`Int 0x0800) \
-    (coerce "p" (Widget.one_of [| 0x0800, "IP" ; 0x0806, "ARP" |]) (`Int 0x0800))
- *)
-(*$T coerce
-  (try ignore (coerce "p" (Widget.one_of [| 0x0800, "IP" |]) (`Int 0)) ; \
-   false \
-   with Widget.Bad_value _ -> true)
- *)
-
-(* One shape of several, which is an object of a single field named after the
-   case: what it carries is then read as that case's own kind says. *)
-(*$= coerce & ~printer:Yojson.Basic.to_string
-  (`Assoc [ "ids", `Assoc [ "id", `Int 1 ] ]) \
-    (coerce "v" (Widget.variant [| "ids", Widget.row [| "id", Int |] ; \
-                                   "mtu", Int |]) \
-                (`Assoc [ "ids", `Assoc [ "id", `String "1" ] ]))
- *)
-(*$T coerce
-  (try ignore (coerce "v" (Widget.variant [| "a", Int |]) \
-                          (`Assoc [ "z", `Int 1 ])) ; \
-   false with Widget.Bad_value _ -> true)
-  (try ignore (coerce "v" (Widget.variant [| "a", Int |]) \
-                          (`Assoc [ "a", `Int 1 ; "b", `Int 2 ])) ; \
-   false with Widget.Bad_value _ -> true)
-  (try ignore (coerce "v" (Widget.variant [| "a", IRange (0, 5) |]) \
-                          (`Assoc [ "a", `Int 9 ])) ; \
-   false with Widget.Bad_value _ -> true)
- *)
 
 (*$T args_of
   args_of switch [] |> List.assoc "ports" = `Int 8
