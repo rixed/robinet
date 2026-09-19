@@ -454,6 +454,112 @@ let power_down (p : power) =
         signal_me t ()
     )
 
+(* {2 Starting a run of an action}
+ *
+ * Here for the same reason [stop_action] is: the simulator itself has to be
+ * able to run one. A startup list is run when a simulation starts running,
+ * which is this module's business, and what it takes to start one -- a widget,
+ * one of its actions, and parameters to read -- is all declared before this
+ * point. {!Action} is the door a caller uses onto this. *)
+
+(* Runs are numbered across the process, as widgets are, although the interface
+ * only ever names one within a simulation. *)
+let next_action_id =
+    let seq = ref 0 in
+    fun () ->
+        let id = !seq in
+        incr seq ;
+        id
+
+(** The action of [w] by that name, if it has one. *)
+let find_action (w : widget) name =
+    List.find_opt (fun (a : action) -> a.name = name) w.actions
+
+(* A run in a few words, for the logs: what was asked for, with what. *)
+let describe_run (s : action_state) =
+    if s.params = [] then s.action_name else
+    Printf.sprintf "%s (%s)" s.action_name
+        (List.map (fun (n, v) ->
+            n ^"="^ Yojson.Basic.to_string v
+        ) s.params |> String.concat ", ")
+
+(** Run [a] on [w] with [given] as its parameters: those the action declares,
+ * the ones left out taking their default.
+ *
+ * Refuses with {!Widget.Bad_value} -- which the API answers with a 400, as it
+ * does for a setter -- what cannot be read as the parameters the action
+ * declares, and what the action itself says it cannot do just now.
+ *
+ * What the handler raises comes back out as it is, and the run stays recorded:
+ * it did start, and a run that failed on its first step is worth seeing. *)
+let start_action ?(origin=Api) (w : widget) (a : action) given =
+    let t = Widget.sim w in
+    with_lock t (fun () ->
+        if not (a.can_run ()) then
+            Widget.bad_value "%s cannot %s just now" (Widget.full_name w) a.name ;
+        let params = Widget.args_of a.name a.params given in
+        let s =
+            { id = next_action_id () ;
+              widget = w ;
+              action_name = a.name ;
+              params ;
+              origin ;
+              started = now t ;
+              ended = None } in
+        t.started_actions <- s :: t.started_actions ;
+        Log.(log w.logger Info (lazy (Printf.sprintf "Running %s"
+                                          (describe_run s)))) ;
+        (* A handler that raises has ended this run, whatever it meant to do,
+           and the run must say so rather than wait for ever on work that was
+           never scheduled. The exception goes on out to whoever asked -- the
+           API answers it with a 400 -- and what is recorded here is what the
+           reader will find afterwards. *)
+        (match a.handler s with
+        | () -> ()
+        | exception e ->
+            stop_action s (Failed (match e with
+                | Widget.Bad_value m -> m
+                | e -> Printexc.to_string e)) ;
+            raise e) ;
+        s) ()
+
+(** Run those entries of a startup list, in order, each on the widget its path
+ * names.
+ *
+ * One that cannot be run does not stop the ones after it: a network is read
+ * back from a document that may have been edited by hand, and one line of it
+ * naming a widget that is not there is no reason to leave the rest of the
+ * network idle. What went wrong is logged against the simulation's root, which
+ * is where what belongs to no widget goes. *)
+let run_entries (t : t) entries =
+    let fail fmt =
+        Printf.ksprintf (fun m ->
+            Log.(log t.root.logger Error (lazy m))) fmt in
+    List.iter (fun (e : startup_entry) ->
+        match Widget.find_within t.root e.path with
+        | None ->
+            fail "Cannot run %S at startup: no widget at %S" e.action e.path
+        | Some w ->
+            (match find_action w e.action with
+            | None ->
+                fail "Cannot run %S at startup: %s cannot do that" e.action
+                    (Widget.full_name w)
+            | Some a ->
+                (match start_action ~origin:Startup w a e.params with
+                | exception ex ->
+                    fail "Cannot run %S at startup on %s: %s" e.action
+                        (Widget.full_name w)
+                        (match ex with
+                        | Widget.Bad_value m -> m
+                        | ex -> Printexc.to_string ex)
+                | _ -> ()))
+    ) entries
+
+(** The whole list, which is what starting a simulation does once. *)
+let run_startup (t : t) =
+    t.startup_done <- true ;
+    run_entries t t.startup
+
 (* The switch of a source, as a pair of actions: what a scenario and a startup
  * list are lists of, and the only way to ask for a box to be switched that can
  * be written down.
@@ -940,6 +1046,7 @@ let make =
               unsaved = false ;
               started_actions = [] ;
               startup = [] ;
+              startup_done = false ;
               speed_ratio = None ;
               pace_anchor = None ;
               late = Interval.zero ;
@@ -1138,6 +1245,10 @@ let next_event (t : t) =
  * probably run forever whenever you communicate with the outside. *)
 let run (t : t) wait =
     if debug then Printf.printf "clock: running the clock!\n%!" ;
+    (* What the network is to be asked, before it is asked anything else. Once:
+       a simulation may be run again -- [run false] returns when the queue
+       empties -- and a startup list is not a thing that happens twice. *)
+    if not t.startup_done then run_startup t ;
     while t.continue && (wait || not (Events.is_empty t.events)) do
         next_event t ;
         Thread.yield ()

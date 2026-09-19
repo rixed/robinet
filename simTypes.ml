@@ -170,8 +170,12 @@ and simulation =
        * That is the granularity to pick when adding one. *)
       mutable started_actions : action_state list ;
       (* What to run once this simulation's network has been built, in order.
-       * Saved with the network and run by {!Action.run_startup}. *)
+       * Saved with the network (see {!Topology}). *)
       mutable startup : startup_entry list ;
+      (* Whether that list has been run, which happens once, when this
+       * simulation starts running. What is added to a network after that is
+       * run as it is added, since there is no second startup to wait for. *)
+      mutable startup_done : bool ;
       (* Non-realtime only: how fast simulated time is to advance compared to
        * the wall clock -- 1. for real time, .5 for half of it, 2. for twice as
        * fast. [None] is as fast as it can, which is what a closed simulation

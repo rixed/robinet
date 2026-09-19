@@ -25,6 +25,12 @@
    the handler; {!stop} closes that run with whatever it came to. In between,
    what the action does is whatever its handler scheduled.
 
+   This is the vocabulary a widget's author uses; several of these words are
+   {!Simulation}'s, named here where they are looked for. They are there
+   because the simulator itself has to be able to run one and to end one: a
+   startup list is run when a simulation starts running, and switching a source
+   off ends the runs of the widgets drawing on it.
+
    Which is why a run ends when its handler says so, and not when the scheduler
    has nothing left of it: every frame is delivered by an event, so the work one
    ping causes reaches the switch, the host at the other end, and whatever timer
@@ -49,68 +55,19 @@ type result = action_result =
     | Failed of string
     | Withdrawn of withdrawal_reason
 
-(* Runs are numbered across the process, as widgets are, although the interface
- * only ever names one within a simulation. *)
-let next_id =
-    let seq = ref 0 in
-    fun () ->
-        let id = !seq in
-        incr seq ;
-        id
-
 (** The action of [w] by that name, if it has one. *)
-let find (w : widget) name =
-    List.find_opt (fun (a : t) -> a.name = name) w.actions
+let find = Simulation.find_action
 
-(* A run in a few words, for the logs: what was asked for, with what. *)
-let describe (s : state) =
-    if s.params = [] then s.action_name else
-    Printf.sprintf "%s (%s)" s.action_name
-        (List.map (fun (n, v) ->
-            n ^"="^ Yojson.Basic.to_string v
-        ) s.params |> String.concat ", ")
+(** A run in a few words: what was asked for, with what. *)
+let describe = Simulation.describe_run
 
 (** Whether that run is still going on. *)
 let is_running (s : state) = s.ended = None
 
 (** Run [a] on [w] with [given] as its parameters: those the action declares,
- * the ones left out taking their default.
- *
- * Refuses with {!Widget.Bad_value} -- which the API answers with a 400, as it
- * does for a setter -- what cannot be read as the parameters the action
- * declares, and what the action itself says it cannot do just now.
- *
- * What the handler raises comes back out as it is, and the run stays recorded:
- * it did start, and a run that failed on its first step is worth seeing. *)
-let start ?(origin=Api) (w : widget) (a : t) given =
-    let sim = Widget.sim w in
-    Simulation.with_lock sim (fun () ->
-        if not (a.can_run ()) then
-            Widget.bad_value "%s cannot %s just now" (Widget.full_name w) a.name ;
-        let params = Widget.args_of a.name a.params given in
-        let s =
-            { id = next_id () ;
-              widget = w ;
-              action_name = a.name ;
-              params ;
-              origin ;
-              started = Simulation.now sim ;
-              ended = None } in
-        sim.started_actions <- s :: sim.started_actions ;
-        Log.(log w.logger Info (lazy (Printf.sprintf "Running %s" (describe s)))) ;
-        (* A handler that raises has ended this run, whatever it meant to do,
-           and the run must say so rather than wait for ever on work that was
-           never scheduled. The exception goes on out to whoever asked -- the
-           API answers it with a 400 -- and what is recorded here is what the
-           reader will find afterwards. *)
-        (match a.handler s with
-        | () -> ()
-        | exception e ->
-            Simulation.stop_action s (Failed (match e with
-                | Widget.Bad_value m -> m
-                | e -> Printexc.to_string e)) ;
-            raise e) ;
-        s) ()
+ * the ones left out taking their default (see {!Simulation.start_action},
+ * where this lives, since the simulator has to be able to run one itself). *)
+let start = Simulation.start_action
 
 (** Record that this run is over, and what it came to. Called from whatever the
  * handler scheduled, since nothing else knows when the work is done. *)
@@ -160,36 +117,10 @@ let set_startup (sim : simulation) entries =
         sim.startup <- entries ;
         Simulation.changed sim) ()
 
-(** Run the list, in order, each entry on the widget its path names.
- *
- * An entry that cannot be run does not stop the ones after it: a network is
- * read back from a document that may have been edited by hand, and one line of
- * it naming a widget that is not there is no reason to leave the rest of the
- * network idle. What went wrong is logged against the simulation's root, which
- * is where something that belongs to no widget goes. *)
-let run_startup (sim : simulation) =
-    let fail fmt =
-        Printf.ksprintf (fun m ->
-            Log.(log sim.root.logger Error (lazy m))) fmt in
-    List.iter (fun (e : entry) ->
-        match Widget.find_within sim.root e.path with
-        | None ->
-            fail "Cannot run %S at startup: no widget at %S" e.action e.path
-        | Some w ->
-            (match find w e.action with
-            | None ->
-                fail "Cannot run %S at startup: %s cannot do that" e.action
-                    (Widget.full_name w)
-            | Some a ->
-                (match start ~origin:Startup w a e.params with
-                | exception ex ->
-                    fail "Cannot run %S at startup on %s: %s" e.action
-                        (Widget.full_name w)
-                        (match ex with
-                        | Widget.Bad_value m -> m
-                        | ex -> Printexc.to_string ex)
-                | _ -> ()))
-    ) (startup sim)
+(** Run those entries, and the whole list: {!Simulation}'s, for the same
+ * reason -- a list is run when a simulation starts running. *)
+let run_entries = Simulation.run_entries
+let run_startup = Simulation.run_startup
 
 (** Stop a run because somebody asked for it to stop.
  *
