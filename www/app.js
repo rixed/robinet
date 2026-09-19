@@ -3867,6 +3867,11 @@ document.addEventListener('alpine:init', () => {
             }
             a.busy = false
             this.adding = null
+            /* Onto what it came to, which is what one runs an action to see.
+             * Only when something ran: an action merely kept for startup has
+             * nothing to show there, and what it did change -- the list -- is
+             * in the left column. */
+            if (a.now) this.panelTab = 'runs'
             await this.loadActions()
         },
 
