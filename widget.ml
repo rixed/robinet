@@ -37,6 +37,9 @@ type power = SimTypes.power
 type property = SimTypes.property
 type value = SimTypes.value
 type kind = SimTypes.kind
+type action = SimTypes.action
+type action_state = SimTypes.action_state
+type action_origin = SimTypes.action_origin = Startup | Api
 type peer = SimTypes.peer
 type ports = SimTypes.ports
 
@@ -346,6 +349,21 @@ let metric_property ?descr ?units ?(resettable=true) name metric =
     property name ?descr ?units ~kind:Metric ~metric
         ~getter:(fun () -> Metric.to_json metric)
         ?setter:(if resettable then Some (fun _ -> Metric.reset metric) else None)
+
+(** One thing this widget can be asked to do (see {!SimTypes.action}).
+ *
+ * [handler] is handed the record of the run and returns at once; what the
+ * action really does is whatever it schedules from there, and it is that
+ * scheduled work that eventually calls {!Action.stop}. *)
+let action ?(descr="") ?(params=[]) ?result ?can_run ~handler name =
+    { name ; descr ; params ; result ;
+      can_run = can_run |? (fun () -> true) ;
+      handler }
+
+(* As with properties, what a widget adds comes before what it got by being a
+ * widget at all. *)
+let add_actions t actions =
+    t.actions <- actions @ t.actions
 
 (** What a setter raises when handed something it cannot use. The API turns it
  * into a 400 with this message, like any other exception a setter throws. *)
@@ -1107,7 +1125,8 @@ let make ~parent ?power ?(own_power=false) ?size ?location
         location ;
         logger ;
         ports = no_ports ;
-        properties } in
+        properties ;
+        actions = [] } in
     (* power starts off by default: *)
     if own_power then t.power <- { on = false ; name = full_name t ; sim = sim t } ;
     (* Linking it to its parent is all the registration there is: a simulation's

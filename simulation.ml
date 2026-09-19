@@ -856,6 +856,7 @@ let make =
               paused_total = Interval.zero ;
               steps = 0 ;
               unsaved = false ;
+              started_actions = [] ;
               speed_ratio = None ;
               pace_anchor = None ;
               late = Interval.zero ;
@@ -883,7 +884,8 @@ let make =
               power_up = ignore ;
               power_down = ignore ;
               error = None ;
-              properties = [] }
+              properties = [] ;
+              actions = [] }
         (* What powers everything in this simulation that nothing more
            particular powers, and the one source that is never switched off:
            switching it off is stopping the simulation (see [stop]). *)

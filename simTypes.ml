@@ -139,6 +139,15 @@ and simulation =
        * Only what comes through that interface moves it: a program building a
        * network is not asked whether it wants to keep it. *)
       mutable unsaved : bool ;
+      (* Every action that has been run in this simulation, the ones still
+       * running included, most recent first -- which is the order the
+       * interface reads them in.
+       *
+       * It grows with what is asked of the network and is not trimmed: an
+       * action is the whole campaign and not each of its steps, so a host
+       * sending a request a second for an hour is one of these and not 3600.
+       * That is the granularity to pick when adding one. *)
+      mutable started_actions : action_state list ;
       (* Non-realtime only: how fast simulated time is to advance compared to
        * the wall clock -- 1. for real time, .5 for half of it, 2. for twice as
        * fast. [None] is as fast as it can, which is what a closed simulation
@@ -419,6 +428,65 @@ and param = { name : string ;
               placeholder : string ;
               default : value }
 
+(* {2 Actions}
+ *
+ * What a widget can be asked to *do*, as against what it can be asked to be:
+ * a property is state that is read and set, an action is a call that is made.
+ * Powering a box up is an action and not a property with a setter, because the
+ * startup list is a list of calls -- see the plan -- and because what a
+ * scenario does to a network is a sequence of things done to it.
+ *
+ * Built with {!Widget.action}. *)
+and action =
+    { name : string ;
+      descr : string ;
+      (* What it has to be told, in the same vocabulary a device is built with.
+       * Most actions take none. *)
+      params : param list ;
+      (* What it hands back when it is over, if it hands anything back: how
+       * many replies a ping had, and how long they took. Says only the shape;
+       * the value itself lands in the state below. *)
+      result : kind option ;
+      (* Whether it can be run right now: there is nothing to stop when nothing
+       * is playing. Most actions can always run -- a host may perfectly well
+       * serve a second httpd, on another port -- and say so by leaving this
+       * alone. *)
+      can_run : unit -> bool ;
+      (* What running it does. Handed the record of this particular run, which
+       * is what it reads its parameters from and what it must hand to
+       * [Action.stop] when it is over -- typically from the callbacks it
+       * schedules rather than before it returns. *)
+      handler : action_state -> unit }
+
+(* One run of one action: what was asked for, when, and what came of it. Kept
+ * in the simulation's list of what has been run, which is what the interface
+ * shows under a widget.
+ *
+ * It holds the widget itself and not its id: a widget taken out of the
+ * simulation is out of the tree but not out of memory, and a run that outlives
+ * the thing that ran it is still worth reading. *)
+and action_state =
+    { id : int ;
+      widget : widget ;
+      (* Which of the widget's actions this ran. Not the action itself, so that
+       * what is recorded stays what was asked for even if the widget's
+       * actions are added to. *)
+      action_name : string ;
+      (* What it was told, coerced against the action's parameters. *)
+      params : (string * value) list ;
+      origin : action_origin ;
+      started : Time.t ;
+      (* [None] while it is still running -- or for ever, for a run whose
+       * handler never called [Action.stop]: powering a source down withdraws
+       * its events without telling the actions that scheduled them, so a run
+       * killed that way goes on reading as running. *)
+      mutable stopped : Time.t option ;
+      mutable result : value option }
+
+(* Where the order came from: the startup list of the network that was loaded,
+ * or somebody asking for it through the API. *)
+and action_origin = Startup | Api
+
 (* {2 Widgets}
  *
  * Anything with a visible presence in the simulation and with which the user
@@ -523,7 +591,10 @@ and widget =
        * as they like. Cleared by a switching that goes through. *)
       mutable error : string option ;
       (* Setter and getter of configurable properties: *)
-      mutable properties : property list }
+      mutable properties : property list ;
+      (* What this widget can be asked to do, as against what it can be asked
+       * to be. Added with [Widget.add_actions]. *)
+      mutable actions : action list }
 
 and peer = { widget : widget ;
              via : widget option }
