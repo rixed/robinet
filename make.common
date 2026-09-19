@@ -6,7 +6,7 @@ OCAMLDEP   = OCAMLFIND_IGNORE_DUPS_IN="$(DUPS_IN)" ocamlfind ocamldep
 OCAMLDOC   = OCAMLFIND_IGNORE_DUPS_IN="$(DUPS_IN)" ocamlfind ocamldoc -html -colorize-code -thread -sort -stars
 OCAMLMKTOP = OCAMLFIND_IGNORE_DUPS_IN="$(DUPS_IN)" ocamlfind ocamlmktop -thread -g
 QTEST      = qtest
-DOCDIR    ?= doc/
+DOCDIR    ?= docs/
 WARNS      = -w -40-31+27
 override OCAMLOPTFLAGS += $(INCS) $(WARNS) -annot
 override OCAMLFLAGS    += $(INCS) $(WARNS) -annot
@@ -22,7 +22,7 @@ CFLAGS     += -O2 -std=c99 -W -Wall -D_GNU_SOURCE
 
 all:
 
-.PHONY: all dep clean clean-spec install uninstall reinstall doc check clear
+.PHONY: all dep clean clean-spec install uninstall reinstall docs check clear
 
 ifdef PKG_NAME
 LIB_SOURCES_CMO = $(LIB_SOURCES:.ml=.cmo)

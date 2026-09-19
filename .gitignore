@@ -18,8 +18,7 @@ gmon.out
 *.top
 tags
 _build
-doc/*.html
-doc/doc.txt
+docs/*.html
 persist
 TODO
 *.log

@@ -110,7 +110,7 @@
   Property names are used as-is in the URL (url-encoded): they are already
   unique within a widget and readable enough to serve as identifiers.
 
-  WARNING: remember to update doc/openapi.yaml when modifying the API!
+  WARNING: remember to update docs/openapi.yaml when modifying the API!
 *)
 open Batteries
 open SimTypes
