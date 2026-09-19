@@ -119,6 +119,12 @@ and t = { mutable trx : host_trx ;
           dns_queries : (string, ((Ip.Addr.t list option -> unit) * Metric.Timed.stop_func option)) Hashtbl.t ;
           dns_cache   : (string, Ip.Addr.t list) Hashtbl.t ;
           resolutions : Metric.Timed.t ;
+          (* Who is waiting for an echo reply, by the ICMP id its requests
+             carry: what a ping run registers while it is going on, so that the
+             replies, which are dropped by default, reach the one that asked
+             for them. Keyed by id alone -- the sequence number is what the
+             waiter is told -- since an id is what identifies one run. *)
+          echo_waiters : (int, int -> unit) Hashtbl.t ;
           (* ICMP errors want to embed the first 8 bytes of the IP packet so we save
            * it here: *)
           mutable last_ip_packet : Ip.Pdu.t option }
@@ -221,6 +227,12 @@ let icmp_rx t ip_trx bits =
                 Icmp.Pdu.make_echo_reply id seq ~pld |>
                 Icmp.Pdu.pack |>
                 tx ip_trx
+        (* A reply nobody is waiting for is still dropped: a host pings from an
+           action, and it is that action that is listening. *)
+        | Ok Icmp.Pdu.{ msg_type ; payload = Ids (id, seq, _) ; _ }
+            when Icmp.MsgType.is_echo_reply msg_type ->
+                Option.may (fun waiter -> waiter seq)
+                           (Hashtbl.find_option t.echo_waiters id)
         | _ -> ()
 
 let rec find_alive_tcp tcps key =
@@ -795,6 +807,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
           dns_queries   = Hashtbl.create 3 ;
           dns_cache     = Hashtbl.create 3 ;
           resolutions   = Metric.Timed.make () ;
+          echo_waiters  = Hashtbl.create 3 ;
           trx           = host_trx ;
           last_ip_packet = None }
     (* Read afresh at every boot, and not chosen once here: which of the three
@@ -858,6 +871,105 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
     if t.trx.power.on then init () t ;
     t
 
+(* What a host can be asked to do. For now: ping.
+ *
+ * The run's own number is what its replies are recognised by -- an ICMP echo
+ * carries an id chosen by whoever sent it, and two pings from one host at the
+ * same time must not read each other's replies. It is registered in
+ * [echo_waiters] for as long as the run lasts, since a reply nobody is waiting
+ * for is dropped.
+ *
+ * The requests are spaced by [interval] and the last one is given [timeout] to
+ * be answered; the run ends when every request has been answered or that delay
+ * has passed, whichever comes first. If the host is switched off in between,
+ * neither happens: the delay was an event of the host's own supply and went
+ * with it, and the run goes on reading as running. That is the hole {!Action}
+ * describes, and this is the first thing to fall into it. *)
+let ping_action t =
+    let widget = t.trx.widget in
+    Widget.action "ping"
+        ~descr:"Send echo requests to that address and count what comes back."
+        ~params:Widget.[
+            param "target" ~kind:(hint "192.168.0.1" String)
+                ~descr:"What to ping: an address, or a name to be resolved." ;
+            param "count" ~kind:(IRange (1, 10_000)) ~default:(`Int 3)
+                ~descr:"How many requests to send." ;
+            (* Durations rather than ranges: what the interface draws for a
+               range is a slider, which is not how a delay is typed in. What a
+               range would have refused is refused below instead. *)
+            param "interval" ~kind:Duration ~units:"secs" ~default:(`Float 1.)
+                ~descr:"How long to wait between two requests." ;
+            param "timeout" ~kind:Duration ~units:"secs" ~default:(`Float 4.)
+                ~descr:"How long to wait for the last reply before giving up." ]
+        ~result:Widget.(record [| "sent", Int ;
+                                  "received", Int ;
+                                  (* Null when nothing came back: there is no
+                                     round trip to report the length of. *)
+                                  "min", optional Duration ;
+                                  "avg", optional Duration ;
+                                  "max", optional Duration |])
+        ~handler:(fun state ->
+            let target = Widget.arg_string state.params "target"
+            and count = Widget.arg_int state.params "count"
+            and interval = Widget.arg_float state.params "interval"
+            and timeout = Widget.arg_float state.params "timeout" in
+            if interval <= 0. then
+                Widget.bad_value "interval must be above zero, not %g" interval ;
+            if timeout <= 0. then
+                Widget.bad_value "timeout must be above zero, not %g" timeout ;
+            let dst = addr_of_string target in
+            let id = state.id land 0xffff in
+            let sim = Widget.sim widget
+            and power = t.trx.power in
+            (* When each request went out, by sequence number, and emptied as
+               the replies come in: what is left in it is what is still
+               awaited. *)
+            let sent_at = Hashtbl.create count in
+            let sent = ref 0 and received = ref 0
+            and rtt_min = ref infinity and rtt_max = ref 0.
+            and rtt_total = ref 0. and over = ref false in
+            let finish () =
+                if not !over then (
+                    over := true ;
+                    Hashtbl.remove t.echo_waiters id ;
+                    let rtt f = if !received = 0 then `Null else `Float f in
+                    Action.stop state ~result:(`Assoc [
+                        "sent", `Int !sent ;
+                        "received", `Int !received ;
+                        "min", rtt !rtt_min ;
+                        "avg", rtt (!rtt_total /. float_of_int !received) ;
+                        "max", rtt !rtt_max ])) in
+            Hashtbl.add t.echo_waiters id (fun seq ->
+                match Hashtbl.find_option sent_at seq with
+                (* A reply to a request this run did not send, or the second
+                   copy of one it did: neither is a round trip. *)
+                | None -> ()
+                | Some at ->
+                    Hashtbl.remove sent_at seq ;
+                    incr received ;
+                    let rtt =
+                        Clock.Interval.to_secs (Clock.Time.diff (Simulation.now sim) at) in
+                    rtt_total := !rtt_total +. rtt ;
+                    if rtt < !rtt_min then rtt_min := rtt ;
+                    if rtt > !rtt_max then rtt_max := rtt ;
+                    Log.(log widget.logger Info (lazy (Printf.sprintf
+                        "Echo reply from %s: seq=%d, %gs" target seq rtt))) ;
+                    (* Everything sent, and nothing left awaited: no point
+                       waiting out the timeout. *)
+                    if !sent >= count && Hashtbl.is_empty sent_at then
+                        finish ()) ;
+            let rec send seq () =
+                incr sent ;
+                Hashtbl.replace sent_at seq (Simulation.now sim) ;
+                t.trx.ping ~id ~seq dst ;
+                if seq < count then
+                    Simulation.delay power (Clock.Interval.sec interval)
+                        (send (seq + 1)) ()
+                else
+                    Simulation.delay power (Clock.Interval.sec timeout)
+                        finish () in
+            send 1 ())
+
 let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
          ~parent ?(own_power=true) ?location name =
     (* A host can take its power source from some larger equipment, and
@@ -896,6 +1008,7 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
                 json_of_optional Ip.Addr.to_json (cur_nameserver t))
             ~setter:(fun v ->
                 t.nameserver <- to_option (Ip.Addr.of_json "nameserver") v) ] ;
+    Widget.add_actions widget [ ping_action t ] ;
     (* And now it may run: its supply is its own and was minted switched off,
        so that nothing it does at boot happens before the machine is whole.
        A host built as a part of something larger leaves that to the box,
