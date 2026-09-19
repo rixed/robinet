@@ -992,10 +992,22 @@ let set_power _mth matches _vars qry_body resp =
                 (match Widget.to_bool j with
                 | exception Widget.Bad_value m -> bad_request "%s" m
                 | b -> b) in
-        (if on then Simulation.power_up else Simulation.power_down)
-            w.power ;
-        Log.(log w.logger Info (lazy (Printf.sprintf
-            "Switched %s" (if on then "on" else "off")))) ;
+        (* Through the action and not through the switch itself, so that the
+           one way of switching a box is the one that can be written down: a
+           flick of this shows up among the runs, beside the same thing asked
+           for by a startup list. *)
+        let name = if on then "power on" else "power off" in
+        (match Action.find w name with
+        | None ->
+            bad_request "%s cannot %s" (Widget.full_name w) name
+        | Some a ->
+            (match Action.start w a [] with
+            | exception Widget.Bad_value m ->
+                (* Already the way it was asked to be: [can_run] says so, and
+                   what the caller wanted is true, so there is nothing to
+                   report but the widget. *)
+                if w.power.on <> on then bad_request "%s" m
+            | _ -> ())) ;
         respond resp (json_of_widget w))
 
 let get_properties _mth matches _vars _qry_body resp =

@@ -685,7 +685,13 @@ paths:
         with says which it is (`power.owner`).
 
         Switching off forgets every event that supply had paid for, so what was
-        in flight is gone rather than waiting to fire on the way back up.
+        in flight is gone rather than waiting to fire on the way back up, and
+        ends the runs of the widgets drawing on it as `withdrawn`.
+
+        A shorthand for running the widget's own "power on" / "power off"
+        action, which is what it does: a flick of this shows up among the runs
+        beside the same thing asked for by a startup list. Asking for the state
+        it is already in does nothing and is not an error.
       operationId: setPower
       requestBody:
         required: true

@@ -1062,12 +1062,10 @@ let replayer ~parent ?location ?fname ?(loop=false) name =
        between opening its file and being finished must let go of it. *)
     widget.device <- Some (Replayer replayer) ;
     widget.on_delete <- (fun () -> replayer_eject replayer) ;
-    (* Named at birth is named by the reader: it plays at once, as a recorder
-       named at birth records at once. *)
-    Option.may (fun fname ->
-        replayer_open replayer fname ;
-        replayer.replaying <- true ;
-        replay_next replayer) fname ;
+    (* Loaded and stopped, whoever named the file: playing it is a thing this
+       widget is asked to do, and a network that is to play one on being
+       loaded says so in its startup list. *)
+    Option.may (replayer_open replayer) fname ;
     widget.ports <- Widget.{
         count = (fun () -> List.length replayer.readers + 1) ;
         is_connected = (fun n ->
@@ -1096,28 +1094,41 @@ let replayer ~parent ?location ?fname ?(loop=false) name =
             | { contents = Some _ } as r -> r := None) ;
         get_capabilities = (fun _ -> Capabilities.Any) ;
         set_capabilities = (fun _ _ -> ()) } ;
+    (* Start and stop the reading. Not a setter on the property below: playing
+       and stopping are things this widget is asked to do, and a list of them
+       is what a startup list and a scenario are. What the property does is
+       say which it is doing, which is what the panel draws. *)
+    let set_replaying v =
+        if v <> replayer.replaying then (
+            (* Whatever was already on its way belongs to the reading that is
+               being interrupted here (see [gen]). *)
+            replayer.gen <- replayer.gen + 1 ;
+            replayer.replaying <- v ;
+            if v then replay_next replayer ;
+            Log.(log replayer.widget.logger Info (lazy (Printf.sprintf
+                "%s replaying into %d readers"
+                (if v then "Started" else "Stopped")
+                List.(length (filter (function
+                    | { contents = Some _ } -> true
+                    | _ -> false
+                ) replayer.readers)))))) in
+    Widget.add_actions widget Widget.[
+        action "start replay"
+            ~descr:"Play the file into whatever is plugged into this."
+            (* Nothing to play, nothing to start: the file comes first. *)
+            ~can_run:(fun () ->
+                replayer.file <> None && not replayer.replaying)
+            ~handler:(fun s -> set_replaying true ; Action.stop s) ;
+        action "stop replay"
+            ~descr:"Stop where it is; starting again goes on from there."
+            ~can_run:(fun () -> replayer.replaying)
+            ~handler:(fun s -> set_replaying false ; Action.stop s) ] ;
     Widget.add_properties widget Widget.[
+        (* Read and not set: the two actions above are how it is changed. *)
         property "replaying" ~kind:Bool
             ~descr:"Tells if the packets are currently being replayed from \
                     the file (or if the replay is on pause)"
-            ~getter:(fun () -> `Bool replayer.replaying)
-            (* Nothing to play, nothing to start: the file comes first. *)
-            ~can_set:(fun () -> replayer.file <> None)
-            ~setter:(fun v ->
-                let v = to_bool v in
-                if v <> replayer.replaying then (
-                    (* Whatever was already on its way belongs to the reading
-                       that is being interrupted here (see [gen]). *)
-                    replayer.gen <- replayer.gen + 1 ;
-                    replayer.replaying <- v ;
-                    if v then replay_next replayer ;
-                    Log.(log replayer.widget.logger Info (lazy (Printf.sprintf
-                        "%s replaying into %d readers"
-                        (if v then "Started" else "Stopped")
-                        List.(length (filter (function
-                            | { contents = Some _ } -> true
-                            | _ -> false
-                        ) replayer.readers))))))) ;
+            ~getter:(fun () -> `Bool replayer.replaying) ;
         (* Named while there is no file, read while there is one, exactly as a
            recorder's is (see [recorder]): the file being played cannot be
            swapped under the replayer, and the way to be done with one is to
@@ -1137,21 +1148,13 @@ let replayer ~parent ?location ?fname ?(loop=false) name =
                     if replayer.file <> None then
                         bad_value "Already replaying %s: eject it first"
                             replayer.fname ;
-                    replayer_open replayer fname ;
-                    replayer.replaying <- true ;
-                    replay_next replayer) ;
+                    (* Loaded, and stopped: playing it is a thing to be asked
+                       for, and naming a file is not asking. *)
+                    replayer_open replayer fname) ;
         property "loop" ~kind:Bool
             ~descr:"Restart from the beginning when done."
             ~getter:(fun () -> `Bool replayer.loop)
-            ~setter:(fun v ->
-                let v = to_bool v in
-                replayer.loop <- v ;
-                (* A file that had been played to its end is wound back but not
-                   playing: asking for it to loop is asking for it to go on. *)
-                if v && not replayer.replaying && replayer.file <> None then (
-                    replayer.gen <- replayer.gen + 1 ;
-                    replayer.replaying <- true ;
-                    replay_next replayer)) ;
+            ~setter:(fun v -> replayer.loop <- to_bool v) ;
         metric_property "packets" ~descr:"Packets replayed from the files"
             (Metric.Counter.T replayer.packets_sent) ] ;
     replayer
