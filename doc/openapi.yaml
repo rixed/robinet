@@ -2092,7 +2092,11 @@ components:
           description: In the order they must be built, which is the order they were built in.
           items:
             type: object
-            required: [type, path, at, params, properties]
+            # Only what a device cannot be without. A save writes the other
+            # three whatever they hold, but a document written by hand leaves
+            # out what it has nothing to say about, and an absent one reads as
+            # the nothing it means.
+            required: [type, path]
             properties:
               type:
                 type: string

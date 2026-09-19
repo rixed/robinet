@@ -48,7 +48,7 @@ network still loads, because it is still the network that was asked for.
   "path": "h1",
   "at": { "lat": 48.8566, "lon": 2.3522 },
   "params": { "static-ip": "192.168.0.1" },
-  "properties": {} }
+  "properties": { "eth": { "loss": 0.01 } } }
 ```
 
 | key | meaning |
@@ -59,8 +59,10 @@ network still loads, because it is still the network that was asked for.
 | `params` | What it is built with (below). Anything left out takes its default. |
 | `properties` | What it is configured with, once built (below). |
 
-All five keys must be present, `at` excepted, which may be left out as well as
-set to `null`. An empty `{}` is how `params` and `properties` say nothing.
+Only `type` and `path` are required. `at`, `params` and `properties` may be
+left out entirely when there is nothing to say — written `null` means the same
+— which is what the examples below do. A save from the interface writes all
+five all the same: what it writes is what it read.
 
 **Order matters.** Devices are built in the order they are listed, and each is
 configured as it is built, so a cable must come after both of the things it
@@ -236,39 +238,52 @@ being the device itself:
 "properties": {
   "": { "routes": [ ... ] },
   "nat": { "port forwards": [ ... ] },
-  "#0": { "MTU": 1400 }
+  "#0": { "loss": 0.01 }
 }
 ```
 
 The parts too, because that is where much of the configuration lives: a
 router's interfaces are `#0`, `#1`…, a host's adapter is `eth`, a
-synthesizer's are `eth0`, `eth1`…, and a gateway is a whole box of parts —
-`router`, `router/#0`, `router/#1`, `nat`, `srv`, `srv/dhcpd`, `srv/named`,
-`hub`.
+synthesizer's are `eth0`, `eth1`…, and a gateway is a whole box of parts.
 
-Only what can be set is worth writing: the rest are metrics and read-only
-answers, which a save leaves out. What each carries, in short:
+Only what can be set is worth writing: metrics, and answers that are worked out
+rather than chosen, a save leaves out. What each holds, by the path it is
+under:
 
-| widget | properties |
-| --- | --- |
-| host | `static-ip`, `static-netmask`, `netmask`, `nameserver`, `hostname`, `search suffix` |
-| switch | `cut-through` |
-| hub | `speed` |
-| router | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin` |
-| gateway | `nat-max-cnxs`, and its parts |
-| nat | `min port`, `port forwards`, `NAT pings`, `send errors`, `answer pings` |
-| dhcpd | `authoritative`, `lease time`, `netmask`, `broadcast`, `gateway`, `DNS`, `NTP`, `domain name`, `MTU` |
-| cable | `length`, `error rate` |
-| recorder | `recording`, `file name`, `caplen` |
-| replayer | `replaying`, `file name`, `loop` |
-| synthesizer | `emitting`, `generators`, `stream`, `packet`, `independent` |
-| note | `text` |
-| an Ethernet adapter | `MAC`, `MTU`, `ARP cache size`, `gateways`, `delay`, `loss`, `speeds`, `full-duplex`, `inter-frame-gap` |
+| device | path | properties |
+| --- | --- | --- |
+| host | `""` | `static-ip`, `static-netmask`, `nameserver`, `hostname`, `search suffix` |
+| | `eth` | *its adapter* |
+| switch | `""` | `cut-through` |
+| | `#0`… | *its ports* |
+| hub | `""` | `speed` |
+| router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin` |
+| | `#0`… | *its interfaces* |
+| | `#0/admin@0`… | `hostname`, `search suffix` — the stack answering for the address that interface holds |
+| gateway | `router`, `router/#0`, `router/#1` | *a router and its two interfaces* |
+| | `nat` | `min port`, `port forwards`, `NAT pings`, `send errors`, `answer pings` |
+| | `srv`, `srv/eth` | *the host it serves DHCP and DNS from* |
+| | `srv/dhcpd` | `authoritative`, `lease time`, `netmask`, `broadcast`, `gateway`, `DNS`, `NTP`, `domain name`, `MTU` |
+| | `srv/named` | `default TTL` |
+| | `hub` | `speed` — what joins the three inside |
+| recorder | `""` | `file name`, `recording` |
+| replayer | `""` | `file name`, `loop` |
+| synthesizer | `""` | `emitting`, `generators`, `stream`, `packet`, `independent` |
+| | `eth0`… | *its adapters* |
+| cable | `""` | `length`, `error rate` |
+| note | `""` | `text` |
+
+*An Ethernet adapter* is `speeds`, `full-duplex` and `inter-frame-gap`, and on
+one with an IP stack above it also `gateways`, `delay` and `loss` — a loss of
+0.01 drops one frame in a hundred, which is how a machine is made to misbehave
+without touching the cable. Its MAC is a parameter of the device it belongs to,
+not a property: an address is not something a running machine is reconfigured
+with.
 
 The current list for anything is one request away — `GET
 /api/simulations/<s>/widgets/<w>/properties` gives each one's name, kind,
-description and whether it can be set — and saving a network from the interface
-writes out exactly what can be read back.
+description and whether it can be set just now — and saving a network from the
+interface writes out exactly what can be read back, which is the table above.
 
 Properties are restored in the order they are written, which matters where one
 is read against another: a synthesizer's `generators` must come before the
@@ -364,16 +379,16 @@ be *done* to it, once all of it stands and is answering.
 
 ```json
 "startup": [
-  { "path": "h1", "action": "power on", "params": {} },
+  { "path": "h1", "action": "power on" },
   { "path": "h1", "action": "ping",
     "params": { "target": "192.168.0.2", "count": 3 } }
 ]
 ```
 
-All three keys are required (`"params": {}` when there are none). `path` is
-relative to the simulation's root — a path and not an id, since the list
-outlives the process that wrote it. The entries run in order, at one instant of
-the clock.
+`path` and `action` are required, `params` only when the action takes some.
+The path is relative to the simulation's root — a path and not an id, since the
+list outlives the process that wrote it. The entries run in order, at one
+instant of the clock.
 
 **Every box is born dark**, and what switches it on is its `power on` here. So:
 
@@ -421,17 +436,17 @@ Each of these runs as it stands. Start with `robinet --ui <file>` to watch, or
   "version": 1,
   "name": "two-hosts",
   "devices": [
-    { "type": "host", "path": "h1", "at": null,
-      "params": { "static-ip": "192.168.0.1" }, "properties": {} },
-    { "type": "host", "path": "h2", "at": null,
-      "params": { "static-ip": "192.168.0.2" }, "properties": {} },
-    { "type": "cable", "path": "h1-h2", "at": null,
-      "params": { "from": "h1", "to": "h2" }, "properties": {} }
+    { "type": "host", "path": "h1",
+      "params": { "static-ip": "192.168.0.1" } },
+    { "type": "host", "path": "h2",
+      "params": { "static-ip": "192.168.0.2" } },
+    { "type": "cable", "path": "h1-h2",
+      "params": { "from": "h1", "to": "h2" } }
   ],
   "startup": [
-    { "path": "h1", "action": "power on", "params": {} },
-    { "path": "h2", "action": "power on", "params": {} },
-    { "path": "h1-h2", "action": "power on", "params": {} },
+    { "path": "h1", "action": "power on" },
+    { "path": "h2", "action": "power on" },
+    { "path": "h1-h2", "action": "power on" },
     { "path": "h1", "action": "ping",
       "params": { "target": "192.168.0.2", "count": 3 } }
   ]
@@ -450,29 +465,29 @@ The cables say neither port, so each takes the first one free.
   "version": 1,
   "name": "one-switch",
   "devices": [
-    { "type": "switch", "path": "sw", "at": null,
-      "params": { "ports": 4 }, "properties": {} },
-    { "type": "host", "path": "h1", "at": null,
-      "params": { "static-ip": "192.168.0.1" }, "properties": {} },
-    { "type": "host", "path": "h2", "at": null,
-      "params": { "static-ip": "192.168.0.2" }, "properties": {} },
-    { "type": "host", "path": "h3", "at": null,
-      "params": { "static-ip": "192.168.0.3" }, "properties": {} },
-    { "type": "cable", "path": "sw-h1", "at": null,
-      "params": { "from": "sw", "to": "h1" }, "properties": {} },
-    { "type": "cable", "path": "sw-h2", "at": null,
-      "params": { "from": "sw", "to": "h2" }, "properties": {} },
-    { "type": "cable", "path": "sw-h3", "at": null,
-      "params": { "from": "sw", "to": "h3" }, "properties": {} }
+    { "type": "switch", "path": "sw",
+      "params": { "ports": 4 } },
+    { "type": "host", "path": "h1",
+      "params": { "static-ip": "192.168.0.1" } },
+    { "type": "host", "path": "h2",
+      "params": { "static-ip": "192.168.0.2" } },
+    { "type": "host", "path": "h3",
+      "params": { "static-ip": "192.168.0.3" } },
+    { "type": "cable", "path": "sw-h1",
+      "params": { "from": "sw", "to": "h1" } },
+    { "type": "cable", "path": "sw-h2",
+      "params": { "from": "sw", "to": "h2" } },
+    { "type": "cable", "path": "sw-h3",
+      "params": { "from": "sw", "to": "h3" } }
   ],
   "startup": [
-    { "path": "sw", "action": "power on", "params": {} },
-    { "path": "h1", "action": "power on", "params": {} },
-    { "path": "h2", "action": "power on", "params": {} },
-    { "path": "h3", "action": "power on", "params": {} },
-    { "path": "sw-h1", "action": "power on", "params": {} },
-    { "path": "sw-h2", "action": "power on", "params": {} },
-    { "path": "sw-h3", "action": "power on", "params": {} },
+    { "path": "sw", "action": "power on" },
+    { "path": "h1", "action": "power on" },
+    { "path": "h2", "action": "power on" },
+    { "path": "h3", "action": "power on" },
+    { "path": "sw-h1", "action": "power on" },
+    { "path": "sw-h2", "action": "power on" },
+    { "path": "sw-h3", "action": "power on" },
     { "path": "h1", "action": "ping",
       "params": { "target": "192.168.0.3", "count": 2 } }
   ]
@@ -491,19 +506,16 @@ out before the lease: expect `{"sent": 8, "received": 4}`.
   "version": 1,
   "name": "a-gateway",
   "devices": [
-    { "type": "gateway", "path": "gw", "at": null,
-      "params": { "public address": "192.0.2.1", "LAN": "192.168.0.0/24" },
-      "properties": {} },
-    { "type": "host", "path": "h", "at": null,
-      "params": {}, "properties": {} },
-    { "type": "cable", "path": "gw-h", "at": null,
-      "params": { "from": "gw", "to": "h", "from port": 1 },
-      "properties": {} }
+    { "type": "gateway", "path": "gw",
+      "params": { "public address": "192.0.2.1", "LAN": "192.168.0.0/24" } },
+    { "type": "host", "path": "h" },
+    { "type": "cable", "path": "gw-h",
+      "params": { "from": "gw", "to": "h", "from port": 1 } }
   ],
   "startup": [
-    { "path": "gw", "action": "power on", "params": {} },
-    { "path": "h", "action": "power on", "params": {} },
-    { "path": "gw-h", "action": "power on", "params": {} },
+    { "path": "gw", "action": "power on" },
+    { "path": "h", "action": "power on" },
+    { "path": "gw-h", "action": "power on" },
     { "path": "h", "action": "ping",
       "params": { "target": "192.168.0.2", "count": 8 } }
   ]
@@ -520,28 +532,28 @@ whole segment. This writes `/tmp/a-tap.pcap`: two ARP frames and four ICMP.
   "version": 1,
   "name": "a-tap",
   "devices": [
-    { "type": "hub", "path": "hub", "at": null,
-      "params": { "ports": 3 }, "properties": {} },
-    { "type": "host", "path": "h1", "at": null,
-      "params": { "static-ip": "192.168.0.1" }, "properties": {} },
-    { "type": "host", "path": "h2", "at": null,
-      "params": { "static-ip": "192.168.0.2" }, "properties": {} },
-    { "type": "recorder", "path": "tap", "at": null,
-      "params": { "file name": "a-tap.pcap" }, "properties": {} },
-    { "type": "cable", "path": "hub-h1", "at": null,
-      "params": { "from": "hub", "to": "h1" }, "properties": {} },
-    { "type": "cable", "path": "hub-h2", "at": null,
-      "params": { "from": "hub", "to": "h2" }, "properties": {} },
-    { "type": "cable", "path": "hub-tap", "at": null,
-      "params": { "from": "hub", "to": "tap" }, "properties": {} }
+    { "type": "hub", "path": "hub",
+      "params": { "ports": 3 } },
+    { "type": "host", "path": "h1",
+      "params": { "static-ip": "192.168.0.1" } },
+    { "type": "host", "path": "h2",
+      "params": { "static-ip": "192.168.0.2" } },
+    { "type": "recorder", "path": "tap",
+      "params": { "file name": "a-tap.pcap" } },
+    { "type": "cable", "path": "hub-h1",
+      "params": { "from": "hub", "to": "h1" } },
+    { "type": "cable", "path": "hub-h2",
+      "params": { "from": "hub", "to": "h2" } },
+    { "type": "cable", "path": "hub-tap",
+      "params": { "from": "hub", "to": "tap" } }
   ],
   "startup": [
-    { "path": "hub", "action": "power on", "params": {} },
-    { "path": "h1", "action": "power on", "params": {} },
-    { "path": "h2", "action": "power on", "params": {} },
-    { "path": "hub-h1", "action": "power on", "params": {} },
-    { "path": "hub-h2", "action": "power on", "params": {} },
-    { "path": "hub-tap", "action": "power on", "params": {} },
+    { "path": "hub", "action": "power on" },
+    { "path": "h1", "action": "power on" },
+    { "path": "h2", "action": "power on" },
+    { "path": "hub-h1", "action": "power on" },
+    { "path": "hub-h2", "action": "power on" },
+    { "path": "hub-tap", "action": "power on" },
     { "path": "h1", "action": "ping",
       "params": { "target": "192.168.0.2", "count": 2 } }
   ]
@@ -560,7 +572,7 @@ directly; the `/24`s are what let each reach its own host.
   "version": 1,
   "name": "two-routers",
   "devices": [
-    { "type": "router", "path": "r1", "at": null,
+    { "type": "router", "path": "r1",
       "params": { "ports": 2 },
       "properties": { "": { "routes": [
         { "input port": 0, "src mask": null, "dst mask": "10.0.1.1/24",
@@ -575,7 +587,7 @@ directly; the `/24`s are what let each reach its own host.
         { "input port": null, "src mask": null, "dst mask": "10.0.2.0/24",
           "ip proto": null, "src port": null, "dst port": null,
           "output port": 1, "via": "10.0.0.2" } ] } } },
-    { "type": "router", "path": "r2", "at": null,
+    { "type": "router", "path": "r2",
       "params": { "ports": 2 },
       "properties": { "": { "routes": [
         { "input port": 0, "src mask": null, "dst mask": "10.0.0.2/30",
@@ -590,30 +602,27 @@ directly; the `/24`s are what let each reach its own host.
         { "input port": null, "src mask": null, "dst mask": "10.0.1.0/24",
           "ip proto": null, "src port": null, "dst port": null,
           "output port": 0, "via": "10.0.0.1" } ] } } },
-    { "type": "host", "path": "h1", "at": null,
+    { "type": "host", "path": "h1",
       "params": { "static-ip": "10.0.1.2", "netmask": "255.255.255.0",
-                  "gateway": "10.0.1.1" }, "properties": {} },
-    { "type": "host", "path": "h2", "at": null,
+                  "gateway": "10.0.1.1" } },
+    { "type": "host", "path": "h2",
       "params": { "static-ip": "10.0.2.2", "netmask": "255.255.255.0",
-                  "gateway": "10.0.2.1" }, "properties": {} },
-    { "type": "cable", "path": "r1-h1", "at": null,
-      "params": { "from": "r1", "to": "h1", "from port": 0 },
-      "properties": {} },
-    { "type": "cable", "path": "r1-r2", "at": null,
-      "params": { "from": "r1", "to": "r2", "from port": 1, "to port": 0 },
-      "properties": {} },
-    { "type": "cable", "path": "r2-h2", "at": null,
-      "params": { "from": "r2", "to": "h2", "from port": 1 },
-      "properties": {} }
+                  "gateway": "10.0.2.1" } },
+    { "type": "cable", "path": "r1-h1",
+      "params": { "from": "r1", "to": "h1", "from port": 0 } },
+    { "type": "cable", "path": "r1-r2",
+      "params": { "from": "r1", "to": "r2", "from port": 1, "to port": 0 } },
+    { "type": "cable", "path": "r2-h2",
+      "params": { "from": "r2", "to": "h2", "from port": 1 } }
   ],
   "startup": [
-    { "path": "r1", "action": "power on", "params": {} },
-    { "path": "r2", "action": "power on", "params": {} },
-    { "path": "h1", "action": "power on", "params": {} },
-    { "path": "h2", "action": "power on", "params": {} },
-    { "path": "r1-h1", "action": "power on", "params": {} },
-    { "path": "r1-r2", "action": "power on", "params": {} },
-    { "path": "r2-h2", "action": "power on", "params": {} },
+    { "path": "r1", "action": "power on" },
+    { "path": "r2", "action": "power on" },
+    { "path": "h1", "action": "power on" },
+    { "path": "h2", "action": "power on" },
+    { "path": "r1-h1", "action": "power on" },
+    { "path": "r1-r2", "action": "power on" },
+    { "path": "r2-h2", "action": "power on" },
     { "path": "h1", "action": "ping",
       "params": { "target": "10.0.2.2", "count": 3 } }
   ]
@@ -631,12 +640,12 @@ document, so it starts when the box is switched on.
   "version": 1,
   "name": "a-generator",
   "devices": [
-    { "type": "hub", "path": "hub", "at": null,
-      "params": { "ports": 3 }, "properties": {} },
-    { "type": "host", "path": "h", "at": null,
+    { "type": "hub", "path": "hub",
+      "params": { "ports": 3 } },
+    { "type": "host", "path": "h",
       "params": { "static-ip": "10.0.0.2", "netmask": "255.255.255.0",
-                  "MAC": "00:11:22:33:44:02" }, "properties": {} },
-    { "type": "synthesizer", "path": "gen", "at": null,
+                  "MAC": "00:11:22:33:44:02" } },
+    { "type": "synthesizer", "path": "gen",
       "params": { "adapters": 1 },
       "properties": { "": {
         "generators": [
@@ -665,22 +674,22 @@ document, so it starts when the box is switched on.
           { "name": "Data", "fields": { "gen": "payload size" } } ],
         "independent": false,
         "emitting": true } } },
-    { "type": "recorder", "path": "tap", "at": null,
-      "params": { "file name": "a-generator.pcap" }, "properties": {} },
-    { "type": "cable", "path": "hub-h", "at": null,
-      "params": { "from": "hub", "to": "h" }, "properties": {} },
-    { "type": "cable", "path": "hub-gen", "at": null,
-      "params": { "from": "hub", "to": "gen" }, "properties": {} },
-    { "type": "cable", "path": "hub-tap", "at": null,
-      "params": { "from": "hub", "to": "tap" }, "properties": {} }
+    { "type": "recorder", "path": "tap",
+      "params": { "file name": "a-generator.pcap" } },
+    { "type": "cable", "path": "hub-h",
+      "params": { "from": "hub", "to": "h" } },
+    { "type": "cable", "path": "hub-gen",
+      "params": { "from": "hub", "to": "gen" } },
+    { "type": "cable", "path": "hub-tap",
+      "params": { "from": "hub", "to": "tap" } }
   ],
   "startup": [
-    { "path": "hub", "action": "power on", "params": {} },
-    { "path": "h", "action": "power on", "params": {} },
-    { "path": "gen", "action": "power on", "params": {} },
-    { "path": "hub-h", "action": "power on", "params": {} },
-    { "path": "hub-gen", "action": "power on", "params": {} },
-    { "path": "hub-tap", "action": "power on", "params": {} }
+    { "path": "hub", "action": "power on" },
+    { "path": "h", "action": "power on" },
+    { "path": "gen", "action": "power on" },
+    { "path": "hub-h", "action": "power on" },
+    { "path": "hub-gen", "action": "power on" },
+    { "path": "hub-tap", "action": "power on" }
   ]
 }
 ```
@@ -695,23 +704,22 @@ no power switch: `start replay` is what sets it going.
   "version": 1,
   "name": "a-replay",
   "devices": [
-    { "type": "hub", "path": "hub", "at": null,
-      "params": { "ports": 3 }, "properties": {} },
-    { "type": "replayer", "path": "play", "at": null,
-      "params": { "file name": "a-generator.pcap", "loop": false },
-      "properties": {} },
-    { "type": "recorder", "path": "tap", "at": null,
-      "params": { "file name": "a-replay.pcap" }, "properties": {} },
-    { "type": "cable", "path": "hub-play", "at": null,
-      "params": { "from": "hub", "to": "play" }, "properties": {} },
-    { "type": "cable", "path": "hub-tap", "at": null,
-      "params": { "from": "hub", "to": "tap" }, "properties": {} }
+    { "type": "hub", "path": "hub",
+      "params": { "ports": 3 } },
+    { "type": "replayer", "path": "play",
+      "params": { "file name": "a-generator.pcap", "loop": false } },
+    { "type": "recorder", "path": "tap",
+      "params": { "file name": "a-replay.pcap" } },
+    { "type": "cable", "path": "hub-play",
+      "params": { "from": "hub", "to": "play" } },
+    { "type": "cable", "path": "hub-tap",
+      "params": { "from": "hub", "to": "tap" } }
   ],
   "startup": [
-    { "path": "hub", "action": "power on", "params": {} },
-    { "path": "hub-play", "action": "power on", "params": {} },
-    { "path": "hub-tap", "action": "power on", "params": {} },
-    { "path": "play", "action": "start replay", "params": {} }
+    { "path": "hub", "action": "power on" },
+    { "path": "hub-play", "action": "power on" },
+    { "path": "hub-tap", "action": "power on" },
+    { "path": "play", "action": "start replay" }
   ]
 }
 ```

@@ -135,10 +135,23 @@ let member what name = function
         Widget.bad_value "%s must be an object, not %s" what
             (Yojson.Basic.to_string j)
 
+(* A field that need not be there. Left out and written [null] are the same
+ * nothing: what a device has nothing to say about is not worth writing down,
+ * and a document meant to be typed by hand is the shorter for it. Only reached
+ * once [member] has had the object it wants. *)
+let member_opt name = function
+    | `Assoc l -> List.assoc_opt name l |? `Null
+    | _ -> `Null
+
 let to_assoc what = function
     | `Assoc l -> l
     | j -> Widget.bad_value "%s must be an object, not %s" what
                (Yojson.Basic.to_string j)
+
+(* An object, or nothing at all, which is the empty one. *)
+let to_assoc_opt what = function
+    | `Null -> []
+    | j -> to_assoc what j
 
 let to_string_ what = function
     | `String s -> s
@@ -168,10 +181,10 @@ let device_of_json j =
     let what = "device "^ path in
     { type_ = to_string_ (what ^": \"type\"") (member what "type" j) ;
       path ;
-      location = location_of_json (what ^": \"at\"") (member what "at" j) ;
-      params = to_assoc (what ^": \"params\"") (member what "params" j) ;
+      location = location_of_json (what ^": \"at\"") (member_opt "at" j) ;
+      params = to_assoc_opt (what ^": \"params\"") (member_opt "params" j) ;
       properties =
-        to_assoc (what ^": \"properties\"") (member what "properties" j) |>
+        to_assoc_opt (what ^": \"properties\"") (member_opt "properties" j) |>
         List.map (fun (p, props) ->
             p, to_assoc (what ^": properties of "^ p) props) }
 
@@ -180,7 +193,7 @@ let startup_of_json j : Widget.startup_entry =
     let path = to_string_ (what ^": \"path\"") (member what "path" j) in
     { path ;
       action = to_string_ (what ^": \"action\"") (member what "action" j) ;
-      params = to_assoc (what ^": \"params\"") (member what "params" j) }
+      params = to_assoc_opt (what ^": \"params\"") (member_opt "params" j) }
 
 let of_json j =
     let what = "a topology" in
@@ -243,6 +256,25 @@ let of_string s =
   (let t = of_string \
       "{\"version\":1,\"name\":\"n\",\"devices\":[]}" in \
    t.startup = [])
+  (* What a device has nothing to say about need not be written down: *) \
+  (let t = of_string \
+      "{\"version\":1,\"name\":\"n\",\"devices\":[\
+         {\"type\":\"host\",\"path\":\"h\"}]}" in \
+   match t.devices with \
+   | [ { location = None ; params = [] ; properties = [] ; _ } ] -> true \
+   | _ -> false)
+  (* Nor what an action takes none of: *) \
+  (let t = of_string \
+      "{\"version\":1,\"name\":\"n\",\"devices\":[],\"startup\":[\
+         {\"path\":\"h\",\"action\":\"power on\"}]}" in \
+   match t.startup with \
+   | [ { params = [] ; _ } ] -> true \
+   | _ -> false)
+  (* But a field that is there is still read for what it is: *) \
+  (try ignore (of_string \
+      "{\"version\":1,\"name\":\"n\",\"devices\":[\
+         {\"type\":\"host\",\"path\":\"h\",\"params\":3}]}") ; false \
+   with Widget.Bad_value _ -> true)
   (* And what cannot be read says so rather than coming back half built: *) \
   (try ignore (of_string "not json") ; false with Widget.Bad_value _ -> true)
   (try ignore (of_string "{\"version\":1,\"name\":\"n\"}") ; false \

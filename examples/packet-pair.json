@@ -11,8 +11,7 @@
       },
       "params": {
         "ports": 6,
-        "MAC range": "02:52:01",
-        "MACs": ""
+        "MAC range": "02:52:01"
       },
       "properties": {
         "": {
@@ -150,8 +149,7 @@
       },
       "params": {
         "ports": 6,
-        "MAC range": "02:52:02",
-        "MACs": ""
+        "MAC range": "02:52:02"
       },
       "properties": {
         "": {
@@ -289,8 +287,7 @@
       },
       "params": {
         "ports": 6,
-        "MAC range": "02:52:03",
-        "MACs": ""
+        "MAC range": "02:52:03"
       },
       "properties": {
         "": {
@@ -428,8 +425,7 @@
       },
       "params": {
         "ports": 6,
-        "MAC range": "02:52:04",
-        "MACs": ""
+        "MAC range": "02:52:04"
       },
       "properties": {
         "": {
@@ -567,8 +563,7 @@
       },
       "params": {
         "ports": 6,
-        "MAC range": "02:52:05",
-        "MACs": ""
+        "MAC range": "02:52:05"
       },
       "properties": {
         "": {
@@ -706,8 +701,7 @@
       },
       "params": {
         "ports": 6,
-        "MAC range": "02:52:06",
-        "MACs": ""
+        "MAC range": "02:52:06"
       },
       "properties": {
         "": {
@@ -845,8 +839,7 @@
       },
       "params": {
         "ports": 6,
-        "MAC range": "02:52:07",
-        "MACs": ""
+        "MAC range": "02:52:07"
       },
       "properties": {
         "": {
@@ -984,8 +977,7 @@
       },
       "params": {
         "ports": 6,
-        "MAC range": "02:52:08",
-        "MACs": ""
+        "MAC range": "02:52:08"
       },
       "properties": {
         "": {
@@ -1123,8 +1115,7 @@
       },
       "params": {
         "ports": 6,
-        "MAC range": "02:52:09",
-        "MACs": ""
+        "MAC range": "02:52:09"
       },
       "properties": {
         "": {
@@ -1262,8 +1253,7 @@
       },
       "params": {
         "ports": 6,
-        "MAC range": "02:52:0a",
-        "MACs": ""
+        "MAC range": "02:52:0a"
       },
       "properties": {
         "": {
@@ -1432,8 +1422,7 @@
         "public netmask": "255.255.255.255",
         "public gateway": "203.0.113.10",
         "LAN": "192.168.20.0/24",
-        "max connections": 500,
-        "MAC": null
+        "max connections": 500
       },
       "properties": {
         "nat": {
@@ -1458,8 +1447,7 @@
       "params": {
         "ports": 4,
         "speed": 1
-      },
-      "properties": {}
+      }
     },
     {
       "type": "host",
@@ -1473,10 +1461,8 @@
         "netmask": "255.255.255.0",
         "gateway": "192.168.10.1",
         "nameserver": "192.168.10.1",
-        "search suffix": null,
         "MAC": "02:52:0c:00:00:01"
-      },
-      "properties": {}
+      }
     },
     {
       "type": "synthesizer",
@@ -1587,8 +1573,7 @@
       "params": {
         "ports": 4,
         "speed": 1
-      },
-      "properties": {}
+      }
     },
     {
       "type": "host",
@@ -1601,11 +1586,8 @@
         "static-ip": "192.168.20.3",
         "netmask": "255.255.255.0",
         "gateway": "192.168.20.1",
-        "nameserver": "192.168.20.1",
-        "search suffix": null,
-        "MAC": null
-      },
-      "properties": {}
+        "nameserver": "192.168.20.1"
+      }
     },
     {
       "type": "recorder",
@@ -1616,225 +1598,177 @@
       },
       "params": {
         "file name": "packet-pair.pcap",
-        "caplen": null,
         "DLT": 1
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "paris-london",
-      "at": null,
       "params": {
         "from": "paris",
         "to": "london",
         "from port": 0,
         "to port": 0,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "paris-frankfurt",
-      "at": null,
       "params": {
         "from": "paris",
         "to": "frankfurt",
         "from port": 1,
         "to port": 0,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "paris-madrid",
-      "at": null,
       "params": {
         "from": "paris",
         "to": "madrid",
         "from port": 2,
         "to port": 0,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "london-amsterdam",
-      "at": null,
       "params": {
         "from": "london",
         "to": "amsterdam",
         "from port": 1,
         "to port": 0,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "amsterdam-frankfurt",
-      "at": null,
       "params": {
         "from": "amsterdam",
         "to": "frankfurt",
         "from port": 1,
         "to port": 1,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "london-new-york",
-      "at": null,
       "params": {
         "from": "london",
         "to": "new-york",
         "from port": 2,
         "to port": 0,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "paris-ashburn",
-      "at": null,
       "params": {
         "from": "paris",
         "to": "ashburn",
         "from port": 3,
         "to port": 0,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "new-york-ashburn",
-      "at": null,
       "params": {
         "from": "new-york",
         "to": "ashburn",
         "from port": 1,
         "to port": 1,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "new-york-chicago",
-      "at": null,
       "params": {
         "from": "new-york",
         "to": "chicago",
         "from port": 2,
         "to port": 0,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "ashburn-dallas",
-      "at": null,
       "params": {
         "from": "ashburn",
         "to": "dallas",
         "from port": 2,
         "to port": 0,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "chicago-dallas",
-      "at": null,
       "params": {
         "from": "chicago",
         "to": "dallas",
         "from port": 1,
         "to port": 1,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "chicago-los-angeles",
-      "at": null,
       "params": {
         "from": "chicago",
         "to": "los-angeles",
         "from port": 2,
         "to port": 0,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "dallas-los-angeles",
-      "at": null,
       "params": {
         "from": "dallas",
         "to": "los-angeles",
         "from port": 2,
         "to port": 1,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "gw-eu-madrid",
-      "at": null,
       "params": {
         "from": "gw-eu",
         "to": "madrid",
         "from port": 0,
         "to port": 1,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "gw-us-los-angeles",
-      "at": null,
       "params": {
         "from": "gw-us",
         "to": "los-angeles",
         "from port": 0,
         "to port": 2,
-        "length": null,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "gw-eu-hub-eu",
-      "at": null,
       "params": {
         "from": "gw-eu",
         "to": "hub-eu",
@@ -1842,13 +1776,11 @@
         "to port": 0,
         "length": 10.0,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "hub-eu-host-eu",
-      "at": null,
       "params": {
         "from": "hub-eu",
         "to": "host-eu",
@@ -1856,13 +1788,11 @@
         "to port": 0,
         "length": 10.0,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "hub-eu-gen-eu",
-      "at": null,
       "params": {
         "from": "hub-eu",
         "to": "gen-eu",
@@ -1870,13 +1800,11 @@
         "to port": 0,
         "length": 10.0,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "gw-us-hub-us",
-      "at": null,
       "params": {
         "from": "gw-us",
         "to": "hub-us",
@@ -1884,13 +1812,11 @@
         "to port": 0,
         "length": 10.0,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "hub-us-host-us",
-      "at": null,
       "params": {
         "from": "hub-us",
         "to": "host-us",
@@ -1898,13 +1824,11 @@
         "to port": 0,
         "length": 10.0,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "cable",
       "path": "hub-us-rec-us",
-      "at": null,
       "params": {
         "from": "hub-us",
         "to": "rec-us",
@@ -1912,8 +1836,7 @@
         "to port": 0,
         "length": 10.0,
         "error rate": 0.0
-      },
-      "properties": {}
+      }
     },
     {
       "type": "note",
@@ -1924,8 +1847,7 @@
       },
       "params": {
         "text": "Core: 10 routers, one address each (203.0.113.1 to .10, in the order listed). Cables have no length of their own, so each takes the distance between the two cities it joins."
-      },
-      "properties": {}
+      }
     },
     {
       "type": "note",
@@ -1936,8 +1858,7 @@
       },
       "params": {
         "text": "EU side: gw-eu is 198.51.100.1 behind madrid, LAN 192.168.10.0/24. host-eu holds 192.168.10.3 and gen-eu shares its hub. gen-eu sends two random frames of about 1KiB, back to back, under host-eu's address and hardware address: a gateway translates what comes from its own LAN and nothing else, so that is what gets them out. Its NAT forwards UDP port 5000 to host-eu, as gw-us does to host-us, so either host is reachable from the other at its gateway's public address."
-      },
-      "properties": {}
+      }
     },
     {
       "type": "note",
@@ -1948,200 +1869,161 @@
       },
       "params": {
         "text": "US side: gw-us is 198.51.100.2 behind los-angeles, LAN 192.168.20.0/24. Its NAT forwards UDP port 5000 to host-us, which is what the frames from gen-eu are addressed to; without that they would go no further than the gateway. hub-us sits between host-us and gw-us so that rec-us sees everything either of them says, and writes it into /tmp/packet-pair.pcap."
-      },
-      "properties": {}
+      }
     }
   ],
   "startup": [
     {
       "path": "paris",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "london",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "amsterdam",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "frankfurt",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "madrid",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "new-york",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "ashburn",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "chicago",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "dallas",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "los-angeles",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "gw-eu",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "gw-us",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "hub-eu",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "host-eu",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "gen-eu",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "hub-us",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "host-us",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "paris-london",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "paris-frankfurt",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "paris-madrid",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "london-amsterdam",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "amsterdam-frankfurt",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "london-new-york",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "paris-ashburn",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "new-york-ashburn",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "new-york-chicago",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "ashburn-dallas",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "chicago-dallas",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "chicago-los-angeles",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "dallas-los-angeles",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "gw-eu-madrid",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "gw-us-los-angeles",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "gw-eu-hub-eu",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "hub-eu-host-eu",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "hub-eu-gen-eu",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "gw-us-hub-us",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "hub-us-host-us",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     },
     {
       "path": "hub-us-rec-us",
-      "action": "power on",
-      "params": {}
+      "action": "power on"
     }
   ]
 }
