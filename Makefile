@@ -15,6 +15,7 @@ LIB_SOURCES  = \
 	widget.ml \
 	generator.ml \
 	simulation.ml \
+	action.ml \
 	ordArray.ml \
 	payload.ml \
 	peg.ml \
