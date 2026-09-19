@@ -855,20 +855,31 @@
                              Two lists of one widget, one at a time, under the
                              schematic they are about: its properties -- state,
                              read and set -- and its actions -- calls, made. -->
+                        <!-- Links and not buttons: what these do is take the
+                             reader somewhere, and three buttons in a row say
+                             nothing about the one below them being what they
+                             choose between. The chosen one is underlined and
+                             the rest are not, which is the whole of the
+                             convention. -->
                         <nav class="panel-tabs" x-show="!adding" x-cloak>
-                            <button :class="panelTab === 'props' ? '' : 'outline secondary'"
-                                    :aria-pressed="panelTab === 'props'"
-                                    @click="showTab('props')">Properties</button>
-                            <button :class="panelTab === 'actions' ? '' : 'outline secondary'"
-                                    :aria-pressed="panelTab === 'actions'"
-                                    @click="showTab('actions')">Actions</button>
-                            <!-- What has been asked of this widget, which is a
-                                 different list from what it can be asked: one
-                                 is what the widget is able to do and the other
-                                 is what happened. -->
-                            <button :class="panelTab === 'runs' ? '' : 'outline secondary'"
-                                    :aria-pressed="panelTab === 'runs'"
-                                    @click="showTab('runs')">Past actions</button>
+                            <ul>
+                                <li><a href="#"
+                                       :class="{ current: panelTab === 'props' }"
+                                       :aria-current="panelTab === 'props' ? 'page' : false"
+                                       @click.prevent="showTab('props')">Properties</a></li>
+                                <li><a href="#"
+                                       :class="{ current: panelTab === 'actions' }"
+                                       :aria-current="panelTab === 'actions' ? 'page' : false"
+                                       @click.prevent="showTab('actions')">Actions</a></li>
+                                <!-- What has been asked of this widget, which
+                                     is a different list from what it can be
+                                     asked: one is what the widget is able to
+                                     do and the other is what happened. -->
+                                <li><a href="#"
+                                       :class="{ current: panelTab === 'runs' }"
+                                       :aria-current="panelTab === 'runs' ? 'page' : false"
+                                       @click.prevent="showTab('runs')">Past actions</a></li>
+                            </ul>
                         </nav>
 
                         <!-- ================= actions ================= -->
