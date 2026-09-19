@@ -37,6 +37,9 @@ type power = SimTypes.power
 type property = SimTypes.property
 type value = SimTypes.value
 type kind = SimTypes.kind
+(* A plain alias, with the fields left where they are: re-exporting them here
+ * would shadow the [params] an action and a run already have. *)
+type startup_entry = SimTypes.startup_entry
 type action = SimTypes.action
 type action_state = SimTypes.action_state
 type action_origin = SimTypes.action_origin = Startup | Api
@@ -1158,6 +1161,23 @@ let find root id =
     with Not_found ->
         None
 
+(** Where [w] sits relative to [root], with the root itself at the empty path.
+ * [None] when [w] is not below [root] at all.
+ *
+ * A path is a location and not an identity, so this is what is written down --
+ * in a saved network, and in a startup list -- where an id would name
+ * something else the next time the network is built. *)
+let path_within root (w : t) =
+    let rec loop (w : t) =
+        if w == root then Some "" else
+        match w.parent with
+        | None -> None
+        | Some p ->
+            Option.map (fun prefix ->
+                if prefix = "" then w.name else prefix ^"/"^ w.name
+            ) (loop p) in
+    loop w
+
 (** Lookup a widget by its [full_name] within a tree. Siblings differ in name
  * (see [unique_among]), so this returns at most one widget -- a list all the
  * same, since a path that names nothing has to come back as something. The
@@ -1177,6 +1197,18 @@ let find_by_path root path =
     match names with
     | [] -> []
     | first :: rest -> loop (matching first [ root ]) rest
+
+(** The widget [path] names below [root], the empty path being the root: the
+ * counterpart of [path_within]. Siblings differ in name, so a path reaches at
+ * most one widget. *)
+let find_within (root : t) path =
+    let path = String.trim path in
+    if path = "" then Some root else
+    (* [find_by_path] wants the root's own name at the head, which a path
+       within a simulation deliberately leaves out. *)
+    match find_by_path root (root.name ^"/"^ path) with
+    | [ w ] -> Some w
+    | _ -> None
 
 (* Is [a] [t] itself or one of its ancestors? *)
 let rec is_ancestor a t =

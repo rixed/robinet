@@ -33,6 +33,27 @@ type location = { lat : float ; lon : float }
  * Devices are what can be created with the API or the UI, and what is saved. *)
 type device = ..
 
+(** {2 The startup list}
+ *
+ * The ordered list of actions to run once a network has been built: what a
+ * document says is to be done to it, as against what it is made of. A device
+ * registers its own entries as it is built, and the reader may add, reorder
+ * and remove them.
+ *
+ * Declared before the types below, and in terms of [Yojson.Basic.t] rather
+ * than the [value] that is one of them, so that its field names do not shadow
+ * the ones an action and a run already have. *)
+type startup_entry =
+    { (* Which widget it is asked of, as a path relative to the simulation's
+       * root (see {!Widget.path_within}). A path and not an id: the list
+       * outlives the process that wrote it, and is read back into a simulation
+       * whose widgets were built afresh. *)
+      path : string ;
+      action : string ;
+      (* As they are to be given, not as they will be read: an action whose
+       * parameters gain a default is then still run the way the list says. *)
+      params : (string * Yojson.Basic.t) list }
+
 (** {2 Events}
  * They are callbacks depending on a power source.
  * They are scheduled at a particular time (relative to the simulation they
@@ -148,6 +169,9 @@ and simulation =
        * sending a request a second for an hour is one of these and not 3600.
        * That is the granularity to pick when adding one. *)
       mutable started_actions : action_state list ;
+      (* What to run once this simulation's network has been built, in order.
+       * Saved with the network and run by {!Action.run_startup}. *)
+      mutable startup : startup_entry list ;
       (* Non-realtime only: how fast simulated time is to advance compared to
        * the wall clock -- 1. for real time, .5 for half of it, 2. for twice as
        * fast. [None] is as fast as it can, which is what a closed simulation

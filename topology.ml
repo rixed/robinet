@@ -80,7 +80,12 @@ type t =
       name : string ;
       (* In the order they must be built, which is the order they were built in
        * the first place. *)
-      devices : device list }
+      devices : device list ;
+      (* What is to be *done* to that network once it is built, in order, as
+       * against what it is made of: see {!SimTypes.startup_entry}. A document
+       * written before there was such a thing has none, and reads as an empty
+       * one. *)
+      startup : Widget.startup_entry list }
 
 let current_version = 1
 
@@ -101,10 +106,16 @@ let json_of_device d =
                             path, `Assoc props
                         ) d.properties) ]
 
+let json_of_startup (e : Widget.startup_entry) =
+    `Assoc [ "path", `String e.path ;
+             "action", `String e.action ;
+             "params", `Assoc e.params ]
+
 let to_json t =
     `Assoc [ "version", `Int t.version ;
              "name", `String t.name ;
-             "devices", `List (List.map json_of_device t.devices) ]
+             "devices", `List (List.map json_of_device t.devices) ;
+             "startup", `List (List.map json_of_startup t.startup) ]
 
 (** A document as it is written to a file: indented, since it is meant to be
  * read and edited by hand as much as by the interface. *)
@@ -164,6 +175,13 @@ let device_of_json j =
         List.map (fun (p, props) ->
             p, to_assoc (what ^": properties of "^ p) props) }
 
+let startup_of_json j : Widget.startup_entry =
+    let what = "a startup entry" in
+    let path = to_string_ (what ^": \"path\"") (member what "path" j) in
+    { path ;
+      action = to_string_ (what ^": \"action\"") (member what "action" j) ;
+      params = to_assoc (what ^": \"params\"") (member what "params" j) }
+
 let of_json j =
     let what = "a topology" in
     let version =
@@ -180,10 +198,18 @@ let of_json j =
     { version ;
       name = to_string_ (what ^": \"name\"") (member what "name" j) ;
       devices =
-        match member what "devices" j with
+        (match member what "devices" j with
         | `List l -> List.map device_of_json l
         | v -> Widget.bad_value "%s: %S must be a list, not %s" what "devices"
-                   (Yojson.Basic.to_string v) }
+                   (Yojson.Basic.to_string v)) ;
+      (* Absent in a document written before there was a startup list, and in
+         one describing a network nothing is to be done to. *)
+      startup =
+        (match Yojson.Basic.Util.member "startup" j with
+        | `Null -> []
+        | `List l -> List.map startup_of_json l
+        | v -> Widget.bad_value "%s: %S must be a list, not %s" what "startup"
+                   (Yojson.Basic.to_string v)) }
 
 let of_string s =
     match Yojson.Basic.from_string s with
@@ -208,8 +234,15 @@ let of_string s =
                            location = Some Widget.{ lat = 45.75 ; lon = 4.85 } ; \
                            params = [ "ports", `Int 4 ] ; \
                            properties = [ "", [ "cut-through", `Bool true ] ; \
-                                          "iface#0", [ "MTU", `Int 1500 ] ] } ] } in \
+                                          "iface#0", [ "MTU", `Int 1500 ] ] } ] ; \
+             startup = [ SimTypes.{ path = "a/sw" ; action = "power on" ; \
+                                    params = [ "now", `Bool true ] } ] } in \
    to_json (of_string (to_string t)) = to_json t)
+  (* A document from before there was a startup list has none, rather than \
+     failing to read: *) \
+  (let t = of_string \
+      "{\"version\":1,\"name\":\"n\",\"devices\":[]}" in \
+   t.startup = [])
   (* And what cannot be read says so rather than coming back half built: *) \
   (try ignore (of_string "not json") ; false with Widget.Bad_value _ -> true)
   (try ignore (of_string "{\"version\":1,\"name\":\"n\"}") ; false \
@@ -225,30 +258,11 @@ let of_string s =
 
 (** {2 Paths} *)
 
-(** Where [w] sits relative to [root], with the root itself at the empty path.
- * [None] when [w] is not below [root] at all. *)
-let path_within root (w : Widget.t) =
-    let rec loop (w : Widget.t) =
-        if w == root then Some "" else
-        match w.parent with
-        | None -> None
-        | Some p ->
-            Option.map (fun prefix ->
-                if prefix = "" then w.name else prefix ^"/"^ w.name
-            ) (loop p) in
-    loop w
-
-(** The widget [path] names below [root], the empty path being the root.
- *
- * Siblings differ in name, so a path reaches at most one widget. *)
-let find_within (root : Widget.t) path =
-    let path = String.trim path in
-    if path = "" then Some root else
-    (* [Widget.find_by_path] wants the root's own name at the head, which a
-     * path within a simulation deliberately leaves out. *)
-    match Widget.find_by_path root (root.name ^"/"^ path) with
-    | [ w ] -> Some w
-    | _ -> None
+(* Where a widget sits relative to a root, and the way back: {!Widget}'s, since
+ * a startup list names its widgets the same way a document does. Named here as
+ * well, where this file's readers look for them. *)
+let path_within = Widget.path_within
+let find_within = Widget.find_within
 
 (** {2 Reading a simulation} *)
 
@@ -341,7 +355,12 @@ let of_simulation (sim : Simulation.t) =
                 skipped := Widget.full_name w :: !skipped)) ;
     { version = current_version ;
       name = sim.name ;
-      devices = List.rev !saved },
+      devices = List.rev !saved ;
+      (* As it stands, entries naming widgets that were skipped included: what
+         is skipped is a device this interface cannot build back, and dropping
+         what was to be done to it would quietly change the network rather than
+         say what was left out. *)
+      startup = sim.startup },
     List.rev !skipped
 
 (*$R of_simulation
@@ -551,6 +570,12 @@ let to_simulation ?(power=true) (sim : Simulation.t) t =
     (try List.iter make entries
     with e -> Simulation.clear sim ; raise e) ;
     if power then power_up root ;
+    (* The network is whole and switched on before anything is asked of it: an
+       action runs against a device that is there and answering, which is the
+       whole reason this is a second pass and not something each device does as
+       it is built. *)
+    Action.set_startup sim t.startup ;
+    Action.run_startup sim ;
     !refused
 
 (** A simulation of its own for a network: made, loaded from [topology] if

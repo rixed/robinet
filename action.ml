@@ -122,6 +122,75 @@ let stop ?result (s : state) =
 let fail (s : state) fmt =
     Printf.ksprintf (fun m -> Simulation.stop_action s (Failed m)) fmt
 
+(*
+ * The startup list
+ *
+ * What is to be run once a network has been built, in order: it is saved with
+ * the network (see {!Topology}) and is how a document says what is to be
+ * *done* to what it describes, as against what it is made of.
+ *)
+
+type entry = startup_entry
+
+(** What [w] being asked to do [a] with [params] is, as an entry: the widget by
+ * its path, since the list outlives this process. Refuses a widget that is not
+ * in its own simulation's tree, which cannot happen for one that is still in
+ * it. *)
+let entry_of (w : widget) name params =
+    match Widget.path_within (Widget.sim w).root w with
+    | None ->
+        Widget.bad_value "%s is no longer in the simulation"
+            (Widget.full_name w)
+    | Some path -> { path ; action = name ; params }
+
+let startup (sim : simulation) = sim.startup
+
+(** Add one at the end, which is where a device registering its own belongs:
+ * the order is the order things are to be done in, and what is built later is
+ * started later. *)
+let add_startup (sim : simulation) (e : entry) =
+    Simulation.with_lock sim (fun () ->
+        sim.startup <- sim.startup @ [ e ] ;
+        Simulation.changed sim) ()
+
+(** The whole list at once, which is how the interface edits it: reordering and
+ * removing are both this. *)
+let set_startup (sim : simulation) entries =
+    Simulation.with_lock sim (fun () ->
+        sim.startup <- entries ;
+        Simulation.changed sim) ()
+
+(** Run the list, in order, each entry on the widget its path names.
+ *
+ * An entry that cannot be run does not stop the ones after it: a network is
+ * read back from a document that may have been edited by hand, and one line of
+ * it naming a widget that is not there is no reason to leave the rest of the
+ * network idle. What went wrong is logged against the simulation's root, which
+ * is where something that belongs to no widget goes. *)
+let run_startup (sim : simulation) =
+    let fail fmt =
+        Printf.ksprintf (fun m ->
+            Log.(log sim.root.logger Error (lazy m))) fmt in
+    List.iter (fun (e : entry) ->
+        match Widget.find_within sim.root e.path with
+        | None ->
+            fail "Cannot run %S at startup: no widget at %S" e.action e.path
+        | Some w ->
+            (match find w e.action with
+            | None ->
+                fail "Cannot run %S at startup: %s cannot do that" e.action
+                    (Widget.full_name w)
+            | Some a ->
+                (match start ~origin:Startup w a e.params with
+                | exception ex ->
+                    fail "Cannot run %S at startup on %s: %s" e.action
+                        (Widget.full_name w)
+                        (match ex with
+                        | Widget.Bad_value m -> m
+                        | ex -> Printexc.to_string ex)
+                | _ -> ()))
+    ) (startup sim)
+
 (** What has been run in [sim], most recent first; [widget] narrows it to the
  * runs of one widget. *)
 let runs ?widget (sim : simulation) =

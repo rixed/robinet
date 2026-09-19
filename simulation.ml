@@ -906,6 +906,7 @@ let make =
               steps = 0 ;
               unsaved = false ;
               started_actions = [] ;
+              startup = [] ;
               speed_ratio = None ;
               pace_anchor = None ;
               late = Interval.zero ;
