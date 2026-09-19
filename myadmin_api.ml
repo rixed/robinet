@@ -68,6 +68,11 @@
     GET    /api/simulations/<s>/actions     every run of that simulation, most
                                             recent first; ?widget=<id> for the
                                             runs of one widget
+    POST   /api/simulations/<s>/actions/<r>/cancel
+                                            stop that run: what it ends is the
+                                            record of it, and the action gives
+                                            up what it was holding when it
+                                            notices
     GET    /api/simulations/<s>/startup     what is to be run once this
                                             network has been built, in order
     PUT    /api/simulations/<s>/startup     that whole list, reordered or
@@ -1363,6 +1368,7 @@ let json_of_action_state (s : Widget.action_state) =
                        | Some (_, Failed m) -> `String m
                        | Some (_, Withdrawn PowerDown) -> `String "its power went"
                        | Some (_, Withdrawn Deleted) -> `String "it was deleted"
+                       | Some (_, Withdrawn Cancelled) -> `String "it was cancelled"
                        | _ -> `Null) ;
              (* Shaped by its action's "result" kind. Null for a run that is
                 still going on, one that hands nothing back, and one that
@@ -1478,6 +1484,31 @@ let run_action _mth matches _vars qry_body resp =
             bad_request "Cannot %s: %s" name (Printexc.to_string e)
         | s -> respond resp (json_of_action_state s))
 
+(* Stop a run that is still going on.
+ *
+ * What this ends is the record of the run: what its handler scheduled is the
+ * handler's, and an action worth cancelling gives up what it was holding when
+ * it notices (see {!Action.cancel}). A run that is already over is refused
+ * rather than quietly reopened. *)
+let cancel_action _mth matches _vars _qry_body resp =
+    let sim = simulation_of_matches matches 1 in
+    Simulation.borrow sim (fun () ->
+        let s = matched matches 2 in
+        let id =
+            match int_of_string s with
+            | exception _ -> bad_request "Not a run: %S" s
+            | id -> id in
+        match Action.find_run sim id with
+        | None ->
+            not_found "Simulation %s has no run %d" (Simulation.name sim) id
+        | Some run ->
+            if not (Action.is_running run) then
+                raise (Opache.ResourceError (
+                    405, Printf.sprintf "Run %d of %S is already over" id
+                             run.action_name)) ;
+            Action.cancel run ;
+            respond resp (json_of_action_state run))
+
 (* Every run of this simulation, most recent first; ?widget=<id> for the runs
  * of one widget.
  *
@@ -1537,6 +1568,11 @@ let resources serving : (Str.regexp * Opache.resource) list =
             | "GET" -> get_startup mth matches vars qry_body resp
             | "PUT" -> set_startup mth matches vars qry_body resp
             | "POST" -> add_startup mth matches vars qry_body resp
+            | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
+    Str.regexp "/api/simulations/\\([0-9]+\\)/actions/\\([0-9]+\\)/cancel$",
+        (fun mth matches vars qry_body resp ->
+            match mth with
+            | "PUT" | "POST" -> cancel_action mth matches vars qry_body resp
             | _ -> raise (Opache.ResourceError (405, "Method not allowed"))) ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/actions$",
         (fun mth matches vars qry_body resp ->

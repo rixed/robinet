@@ -1078,9 +1078,17 @@ article.actions > table {
 article.actions > table:not(.runs) > thead th:nth-child(1) { width: 80%; }
 /* What has been run: four columns, the two in the middle no wider than the
  * clock and the length they hold, so that what it came to keeps the room. */
-article.actions > table.runs > thead th:nth-child(1) { width: 26%; }
-article.actions > table.runs > thead th:nth-child(2) { width: 20%; }
-article.actions > table.runs > thead th:nth-child(3) { width: 16%; }
+article.actions > table.runs > thead th:nth-child(1) { width: 24%; }
+article.actions > table.runs > thead th:nth-child(2) { width: 17%; }
+article.actions > table.runs > thead th:nth-child(3) { width: 12%; }
+article.actions > table.runs > thead th:nth-child(5) { width: 15%; }
+article.actions > table.runs td.act { text-align: right; }
+article.actions > table.runs td.act button {
+    width: auto;
+    margin: 0;
+    padding: .2rem .5rem;
+    font-size: .7rem;
+}
 article.actions .descr {
     display: block;
     color: var(--pico-muted-color);

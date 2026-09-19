@@ -926,10 +926,16 @@ let ping_action t =
             let sent = ref 0 and received = ref 0
             and rtt_min = ref infinity and rtt_max = ref 0.
             and rtt_total = ref 0. and over = ref false in
+            (* Nothing more is to be sent, and nothing more is awaited: what
+               this run was holding, given up. Called when it ends of its own
+               accord and when it is found to have ended without us -- which is
+               what a cancel is (see {!Action.cancel}). *)
+            let release () =
+                over := true ;
+                Hashtbl.remove t.echo_waiters id in
             let finish () =
                 if not !over then (
-                    over := true ;
-                    Hashtbl.remove t.echo_waiters id ;
+                    release () ;
                     let rtt f = if !received = 0 then `Null else `Float f in
                     Action.stop state ~result:(`Assoc [
                         "sent", `Int !sent ;
@@ -938,6 +944,7 @@ let ping_action t =
                         "avg", rtt (!rtt_total /. float_of_int !received) ;
                         "max", rtt !rtt_max ])) in
             Hashtbl.add t.echo_waiters id (fun seq ->
+                if not (Action.is_running state) then release () else
                 match Hashtbl.find_option sent_at seq with
                 (* A reply to a request this run did not send, or the second
                    copy of one it did: neither is a round trip. *)
@@ -957,6 +964,10 @@ let ping_action t =
                     if !sent >= count && Hashtbl.is_empty sent_at then
                         finish ()) ;
             let rec send seq () =
+                (* Somebody stopped this run between two requests: the events
+                   it had scheduled are still ours to drop, since nothing else
+                   can tell them from the rest of the host's. *)
+                if not (Action.is_running state) then release () else (
                 incr sent ;
                 Hashtbl.replace sent_at seq (Simulation.now sim) ;
                 (* Every request after the first goes out from a scheduled
@@ -978,7 +989,7 @@ let ping_action t =
                             (send (seq + 1)) ()
                     else
                         Simulation.delay power (Clock.Interval.sec timeout)
-                            finish () in
+                            finish ()) in
             send 1 ())
 
 let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask

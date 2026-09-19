@@ -191,6 +191,20 @@ let run_startup (sim : simulation) =
                 | _ -> ()))
     ) (startup sim)
 
+(** Stop a run because somebody asked for it to stop.
+ *
+ * This ends the *record* of the run, and nothing else: what the handler
+ * scheduled is the handler's, and nothing here can tell which of a box's
+ * pending events belong to which run. An action worth cancelling therefore
+ * checks [is_running] in the callbacks it schedules, and gives up whatever it
+ * was holding when the answer is no -- which is what {!Host}'s ping does. *)
+let cancel (s : state) =
+    Simulation.stop_action s (Withdrawn Cancelled)
+
+(** The run of [sim] with that id, if there is one. *)
+let find_run (sim : simulation) id =
+    List.find_opt (fun (s : state) -> s.id = id) sim.started_actions
+
 (** What has been run in [sim], most recent first; [widget] narrows it to the
  * runs of one widget. *)
 let runs ?widget (sim : simulation) =

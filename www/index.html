@@ -933,7 +933,7 @@
                             <table class="runs" x-show="runs.length">
                                 <thead>
                                     <tr><th>Run</th><th>Started</th><th>Took</th>
-                                        <th>Came to</th></tr>
+                                        <th>Result</th><th></th></tr>
                                 </thead>
                                 <tbody>
                                     <template x-for="r in runs" :key="r.id">
@@ -953,6 +953,20 @@
                                             </td>
                                             <td x-text="runLength(r, simNow())"></td>
                                             <td x-text="runResult(r)"></td>
+                                            <!-- The one thing left to do to a
+                                                 run: stop it while it is going
+                                                 on, and otherwise ask for it
+                                                 again, with what it was really
+                                                 given. -->
+                                            <td class="act">
+                                                <button class="outline secondary"
+                                                        :disabled="!online"
+                                                        :title="r.running
+                                                                ? 'Stop this run'
+                                                                : 'Run it again, as it was run'"
+                                                        @click="r.running ? cancelRun(r) : rerun(r)"
+                                                        x-text="r.running ? 'cancel' : 're-run'"></button>
+                                            </td>
                                         </tr>
                                     </template>
                                 </tbody>

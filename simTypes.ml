@@ -535,6 +535,15 @@ and withdrawal_reason =
     | PowerDown
     (* The widget it ran on was taken out of the simulation. *)
     | Deleted
+    (* Somebody asked for it to stop.
+     *
+     * Ending the run is all this does by itself: what the handler scheduled
+     * belongs to the handler, and the simulator cannot tell which of a box's
+     * events were for which run (see {!Action}). So an action that is worth
+     * cancelling checks, in the callbacks it schedules, that its run is still
+     * going on -- [Action.is_running] -- and gives up what it was holding when
+     * it is not. *)
+    | Cancelled
 
 (* Where the order came from: the startup list of the network that was loaded,
  * or somebody asking for it through the API. *)

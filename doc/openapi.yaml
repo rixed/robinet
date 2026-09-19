@@ -892,6 +892,43 @@ paths:
   # Logs
   #
 
+  /api/simulations/{sim}/actions/{run}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+      - name: run
+        in: path
+        required: true
+        description: The run's id, as the listing of runs gives it.
+        schema: { type: integer, minimum: 0 }
+    post:
+      tags: [actions]
+      summary: Stop a run that is still going on.
+      operationId: cancelActionRun
+      description: |
+        It ends as `withdrawn`, with "it was cancelled" as its reason.
+
+        What this ends is the *record* of the run. What its handler scheduled
+        belongs to the handler, and nothing in the simulator can tell which of
+        a box's pending events were for which run, so an action worth
+        cancelling checks whether its run is still going on in the callbacks it
+        schedules and gives up what it was holding when it is not -- which is
+        what a host's ping does, between two requests and on a reply.
+      responses:
+        "200":
+          description: The run, as the cancel left it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActionRun" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          description: That run is already over.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/simulations/{sim}/startup:
     parameters:
       - $ref: "#/components/parameters/sim"
@@ -2004,7 +2041,8 @@ components:
             says who ended it. `value` and `failed` are the handler, with what
             the run came to or with what went wrong; `withdrawn` is the
             simulator, having taken away what the run was doing -- its power
-            went, or its widget was deleted. Null while it is still running.
+            went, its widget was deleted, or somebody cancelled it. Null while
+            it is still running.
 
             A timeout is none of these: an action decides its own timeout, and
             what it has to say about one is its result or a `failed`.

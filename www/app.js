@@ -3896,21 +3896,29 @@ document.addEventListener('alpine:init', () => {
             return asText(v)
         },
 
-        /* What one run came to, in a line: how it ended, or that it has not.
+        /* What one run came to, in a line, said so that it cannot be taken
+         * for a run still going on: "sent: 3, received: 0" is a finished ping
+         * that got no answer, and reads exactly like a tally still climbing.
+         * So every ending says which it was, first.
          *
-         * Read through the kind its action declares for its result, which is
-         * what says that a number is a hundred microseconds rather than
-         * 1.41066e-7. A run whose action is no longer among the widget's --
-         * which is only a widget that has been rebuilt under the reader --
-         * falls back on the bare values. */
+         * The value itself is read through the kind its action declares for
+         * its result, which is what says that a number is a hundred
+         * nanoseconds rather than 1.41066e-7. A run whose action is no longer
+         * among the widget's -- which is only a widget rebuilt under the
+         * reader -- falls back on the bare values. */
         runResult(run) {
             if (run.running) return 'running'
             /* How it ended comes before what it came to: a run the simulator
              * took away, or one that failed, has no value to show and its
              * reason is the whole of what there is to say. */
-            if (run.how === 'withdrawn' || run.how === 'failed')
-                return run.reason || run.how
-            if (run.result === null) return 'done'
+            if (run.how === 'failed') return 'Failed: ' + (run.reason || '')
+            if (run.how === 'withdrawn')
+                return 'Cut short: ' + (run.reason || '')
+            if (run.result === null) return 'Finished'
+            return 'Finished: ' + this.runValue(run)
+        },
+
+        runValue(run) {
             const a = this.actions.find(a => a.name === run.action)
             const k = a && a.result ? baseKind(a.result) : null
             if (k && (k.type === 'record' || k.type === 'row') &&
@@ -3925,6 +3933,27 @@ document.addEventListener('alpine:init', () => {
             return Object.entries(run.result)
                 .filter(([ , v ]) => v !== null)
                 .map(([ k, v ]) => `${k}: ${asText(v)}`).join(', ')
+        },
+
+        /* Stop a run that is still going on. What it ends is the record of
+         * it; the action gives up what it was holding when it notices. */
+        async cancelRun(run) {
+            const r = await this.exchange(() =>
+                api(`/simulations/${this.selected.sim}/actions/${run.id}/cancel`,
+                    { method: 'POST' }))
+            if (!r.ok) { this.actionsError = r.error.message ; return }
+            await this.loadActions()
+        },
+
+        /* The same action again, with what that run was really given -- the
+         * defaults it took included, since that is what it ran with. */
+        async rerun(run) {
+            const r = await this.exchange(() =>
+                api(`/simulations/${this.selected.sim}/widgets/${run.widget}` +
+                    `/actions/${encodeURIComponent(run.action)}`,
+                    { method: 'POST', body: JSON.stringify(run.params || {}) }))
+            if (!r.ok) { this.actionsError = r.error.message ; return }
+            await this.loadActions()
         },
 
         /* How long a run lasted, or how long it has been going on. */

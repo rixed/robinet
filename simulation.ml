@@ -215,6 +215,7 @@ let result_text = function
     | Failed m -> "failed: "^ m
     | Withdrawn PowerDown -> "cut short: its power went"
     | Withdrawn Deleted -> "cut short: it was deleted"
+    | Withdrawn Cancelled -> "cut short: it was cancelled"
 
 (** Record that this run is over, and how. A run that has already ended is
  * left as it was: the first ending is the true one, and a handler calling this
