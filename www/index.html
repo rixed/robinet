@@ -833,13 +833,18 @@
                                                x-text="adding.error"></small>
                                         <button type="button" class="outline secondary"
                                                 @click="cancelAdd()">Cancel</button>
-                                        <button type="submit" :disabled="!online || adding.busy"
+                                        <!-- Neither box ticked asks for nothing,
+                                             so there is nothing to press: the
+                                             way out is Cancel, beside it. -->
+                                        <button type="submit"
+                                                :disabled="!online || adding.busy ||
+                                                           (adding.mode === 'action' &&
+                                                            !adding.now && !adding.atStartup)"
                                                 x-text="adding.mode !== 'action'
                                                         ? (adding.busy ? 'Building...' : 'Build')
                                                         : adding.busy ? 'Running...'
-                                                        : !adding.now && !adding.atStartup ? 'Cancel'
                                                         : adding.now && adding.atStartup ? 'Run and keep'
-                                                        : adding.now ? 'Run' : 'Keep'"></button>
+                                                        : adding.atStartup ? 'Keep' : 'Run'"></button>
                                     </footer>
                                 </div>
                             </template>

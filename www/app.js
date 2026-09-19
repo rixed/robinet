@@ -3835,9 +3835,11 @@ document.addEventListener('alpine:init', () => {
         async submitRun() {
             const a = this.adding
             if (!a || a.busy) return
-            /* Neither box ticked is the way to change one's mind, and the
-             * button says so rather than doing nothing. */
-            if (!a.now && !a.atStartup) { this.cancelAdd() ; return }
+            /* Asked for nothing: the button that submits this is disabled,
+             * and Enter with it disabled does not reach here either. Guarded
+             * all the same, since neither of those is this function's to
+             * rely on. */
+            if (!a.now && !a.atStartup) return
             const params = {}
             for (const f of a.fields) params[f.name] = this.fieldValue(f)
             a.busy = true
