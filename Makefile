@@ -267,6 +267,8 @@ robinet: robinet.opt
 	   echo "sudo setcap cap_net_raw,cap_net_admin=eip $@" ;\
 	 fi
 
+doc-spec: docs/simulation.html
+
 clean-spec:
 	$(RM) examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
 	$(RM) tests/*.cm[ioxa] tests/*.o tests/*.annot $(EXTRA_TESTS)

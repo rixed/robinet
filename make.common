@@ -22,7 +22,7 @@ CFLAGS     += -O2 -std=c99 -W -Wall -D_GNU_SOURCE
 
 all:
 
-.PHONY: all dep clean clean-spec install uninstall reinstall docs check clear
+.PHONY: all dep clean clean-spec install uninstall reinstall doc doc-spec check clear
 
 ifdef PKG_NAME
 LIB_SOURCES_CMO = $(LIB_SOURCES:.ml=.cmo)
@@ -50,7 +50,7 @@ reinstall: uninstall install
 endif
 
 # Common rules
-.SUFFIXES: .ml .mli .cmo .cmi .cmx .opt .byte .ml_test .cmo_test .cmx_test .byte_test .opt_test
+.SUFFIXES: .ml .mli .cmo .cmi .cmx .opt .byte .md .html
 
 %.byte: $(ARCHIVE) %.cmo
 	$(OCAMLC) -o $@ -package "$(REQUIRES)" $(OCAMLFLAGS) $^
@@ -102,6 +102,9 @@ dep:
 .depend:
 	$(OCAMLDEP) -package "$(REQUIRES)" $(SOURCES) > $@
 
+%.html: %.md
+	md2html --github '$<' > '$@.tmp' && mv -f '$@.tmp' '$@'
+
 # ocamldoc works from the sources it is handed and cannot load a .cmi, so it
 # expands neither a functor application nor an [include] over a module from
 # outside this library -- Map.Make, Set.Make, Hashtbl.Make, Condition -- and
@@ -111,7 +114,7 @@ dep:
 # build: keeping the references honest is most of what running this buys.
 DOC_EXPECTED = Stdlib\.Map\.Make|Batteries\.Set\.Make|BatSet\.Make|Batteries\.Hashtbl\.Make|Hashtbl\.HashedType|Condition
 
-doc: $(LIB_SOURCES)
+doc: $(LIB_SOURCES) doc-spec
 	@echo "Building doc in $(DOCDIR)..."
 	mkdir -p $(DOCDIR)
 	@unexpected=`$(OCAMLDOC) -package "$(REQUIRES)" -d $(DOCDIR) $^ 2>&1 | \
