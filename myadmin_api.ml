@@ -49,15 +49,15 @@
                                              takes, and how many it has room
                                              for)
     POST   /api/simulations/<s>/widgets    add a device to it; the body is
-                                            {"type": ..., "name": ...,
-                                             "params": {...}}
+                                            \{"type": ..., "name": ...,
+                                             "params": \{...\}\}
     GET    /api/simulations/<s>/widgets/<w>
     DELETE /api/simulations/<s>/widgets/<w> take it out of the simulation for
                                             good: it, everything it is made
                                             of, and the cables that reached it
     PUT    /api/simulations/<s>/widgets/<w>/location
                                             where it is in the world; the body
-                                            is {"lat": ..., "lon": ...}, or
+                                            is \{"lat": ..., "lon": ...\}, or
                                             null to take it off the map
     GET    /api/simulations/<s>/widgets/<w>/properties
     GET    /api/simulations/<s>/widgets/<w>/actions  what it can be asked to do
@@ -78,8 +78,8 @@
     PUT    /api/simulations/<s>/startup     that whole list, reordered or
                                             shortened; the body is the list
     POST   /api/simulations/<s>/startup     one more entry, at the end; the
-                                            body is {"path":..., "action":...,
-                                            "params": {...}}
+                                            body is \{"path":..., "action":...,
+                                            "params": \{...\}\}
     PUT    /api/simulations/<s>/widgets/<w>/power    body is true or false
     GET    /api/simulations/<s>/widgets/<w>/properties/<name>
     PUT    /api/simulations/<s>/widgets/<w>/properties/<name>  body is the value
