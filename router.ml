@@ -222,11 +222,12 @@ struct
         | First (* Forward a packet to its first matching route *)
         | Flow (* Forward a packet to one matching route based on the socket pair *)
         | Random (* Pick a matching route at random *)
+        | RoundRobin (* Take the matching routes in turn, one packet each *)
         [@@deriving enum]
 
     (* TODO: to_string_array with ppx_deriving.show if it happens again: *)
     let all_load_balancing =
-        [| "first matching" ; "track flow" ; "random" |]
+        [| "first matching" ; "track flow" ; "random" ; "round robin" |]
 
     (* Probability to send ICMP expiry messages after TTL expiration, and after
      * which delay (TODO: should also depend on how busy the router is): *)
@@ -249,6 +250,10 @@ struct
                        power : Simulation.power ;
                       widget : Widget.t ;
       mutable load_balancing : load_balancing ;
+              (** Where [RoundRobin] left off. One cursor for the whole box and
+               * not one per destination: what is being shared out is the
+               * router's own outgoing links. *)
+          mutable lb_cursor : int ;
               (** RAM used by all queued frames: *)
                     buffered : Metric.Gauge.t ;
                       volume : Metric.Counter.t }
@@ -391,6 +396,13 @@ struct
                     forward targets.(h mod rs_len)
                 | Random ->
                     let n = Random.int rs_len in
+                    forward targets.(n)
+                | RoundRobin ->
+                    (* The cursor counts packets and is reduced only here, so
+                     * that it keeps its place whatever the length of the
+                     * choice this packet was offered. *)
+                    let n = t.lb_cursor mod rs_len in
+                    t.lb_cursor <- t.lb_cursor + 1 ;
                     forward targets.(n)
 
     (* The address the routing table gives interface [n]: the one an [Admin]
@@ -547,8 +559,8 @@ struct
         let buffered = Metric.Gauge.make () in
         let volume = Metric.Counter.make () in
         let t = { ifaces ; routes ; widget ; notify_errs ; admin_reroute ;
-                  can_forward_after ; power ; load_balancing ; buffered ;
-                  volume } in
+                  can_forward_after ; power ; load_balancing ; lb_cursor = 0 ;
+                  buffered ; volume } in
         (* One supply for the whole box, and this is what the router itself
            does when it is cut: what its admin hosts do about it is their own,
            and the supply asks each of them in turn. Every interface is reset,

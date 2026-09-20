@@ -90,6 +90,10 @@ simulation whose widgets were built afresh.
 Ethernet speeds are numbered `0`–`8`: 10Mbps, 100Mbps, 1Gbps, 2.5Gbps, 5Gbps,
 10Gbps, 25Gbps, 40Gbps, 100Gbps. A hub accepts the first two only.
 
+A router's `load balancing` is numbered `0`–`3`: first matching, track flow,
+random, round robin. It says which of the routes that matched a packet actually
+carries it — see *Routing tables* below.
+
 ## The catalogue
 
 What a device is *built* with is a short list — the few things one is asked for
@@ -308,6 +312,12 @@ of the tests may be `null`, which is no test at all:
 | `src port`, `dst port` | `"80"`, `"1024-65535"`, `"1024-"`, `"-1023"`. |
 | `output port` | Where it goes… |
 | `via` | …and through which gateway, as an IP or a MAC. `null` for directly. |
+
+Several rows may match one packet, and `load balancing` says which of them
+takes it: the first (the default), the one the source and destination hash to
+(so that a flow keeps its path), one at random, or each in turn. Write the same
+destination several times, once per outgoing link, and that is how a router is
+given more than one way there.
 
 **`"output port": null` is not a route to nowhere: it is a route to the router
 itself** — and it is where a router gets its address. The first such row that
