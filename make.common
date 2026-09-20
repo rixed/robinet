@@ -22,7 +22,7 @@ CFLAGS     += -O2 -std=c99 -W -Wall -D_GNU_SOURCE
 
 all:
 
-.PHONY: all dep clean clean-spec install uninstall reinstall doc doc-spec check clear
+.PHONY: all dep clean clean-spec install uninstall reinstall doc doc-lib doc-spec check clear
 
 ifdef PKG_NAME
 LIB_SOURCES_CMO = $(LIB_SOURCES:.ml=.cmo)
@@ -114,7 +114,7 @@ dep:
 # build: keeping the references honest is most of what running this buys.
 DOC_EXPECTED = Stdlib\.Map\.Make|Batteries\.Set\.Make|BatSet\.Make|Batteries\.Hashtbl\.Make|Hashtbl\.HashedType|Condition
 
-doc: $(LIB_SOURCES) doc-spec
+doc-lib: $(LIB_SOURCES)
 	@echo "Building doc in $(DOCDIR)..."
 	mkdir -p $(DOCDIR)
 	@unexpected=`$(OCAMLDOC) -package "$(REQUIRES)" -d $(DOCDIR) $^ 2>&1 | \
@@ -126,5 +126,7 @@ doc: $(LIB_SOURCES) doc-spec
 	 fi
 	#sed -i -e '/^<head>/a<link href="http://fonts.googleapis.com/css?family=Rosarivo:400,400italic|Happy+Monkey|Electrolize" rel="stylesheet" type="text/css">' $(DOCDIR)/*.html
 	#sed -i -e 's|<center><h1></h1></center>|<h1>$(PKG_NAME)</h1>|' $(DOCDIR)/index.html
+
+doc: doc-lib doc-spec
 
 -include .depend
