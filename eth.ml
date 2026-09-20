@@ -1180,7 +1180,7 @@ struct
             | Some (T t) -> Some t
             | _ -> None
 
-        let delay length = Interval.sec (length /. 3e9)
+        let delay length = Interval.sec (length /. 3e8)
         let success_rate error_rate = int_of_float (1. /. error_rate)
 
         (* A cable has no natural parent; hang it off the root of the
