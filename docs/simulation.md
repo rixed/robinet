@@ -727,9 +727,11 @@ no power switch: `start replay` is what sets it going.
 ### A whole one
 
 `examples/packet-pair.json` puts most of this together: ten routers across an
-ocean, two NATed LANs, a hub and a recorder on one of them, and a generator on
-the other sending two frames under its neighbour's address, through both NATs,
-to the machine at the far end.
+ocean, two NATed LANs, a hub and a recorder on each, and a generator on one of
+them sending two frames under its neighbour's address, through both NATs, to
+the machine at the far end. The two captures are the same two frames seen from
+either side, which is what makes the translation visible: they leave as
+192.168.10.3 and arrive as 198.51.100.1.
 
 ## See also
 

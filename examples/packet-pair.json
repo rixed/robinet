@@ -1394,7 +1394,6 @@
         "public netmask": "255.255.255.255",
         "public gateway": "203.0.113.5",
         "LAN": "192.168.10.0/24",
-        "max connections": 500,
         "MAC": "02:52:0b:00:00:01"
       },
       "properties": {
@@ -1421,8 +1420,7 @@
         "public address": "198.51.100.2",
         "public netmask": "255.255.255.255",
         "public gateway": "203.0.113.10",
-        "LAN": "192.168.20.0/24",
-        "max connections": 500
+        "LAN": "192.168.20.0/24"
       },
       "properties": {
         "nat": {
@@ -1445,8 +1443,7 @@
         "lon": -9.2893
       },
       "params": {
-        "ports": 4,
-        "speed": 1
+        "ports": 4
       }
     },
     {
@@ -1458,7 +1455,6 @@
       },
       "params": {
         "static-ip": "192.168.10.3",
-        "netmask": "255.255.255.0",
         "gateway": "192.168.10.1",
         "nameserver": "192.168.10.1",
         "MAC": "02:52:0c:00:00:01"
@@ -1470,17 +1466,6 @@
       "at": {
         "lat": 38.6723,
         "lon": -9.4393
-      },
-      "params": {
-        "adapters": 1,
-        "speeds": [
-          0,
-          1,
-          2,
-          3,
-          4
-        ],
-        "independent": false
       },
       "properties": {
         "": {
@@ -1564,6 +1549,17 @@
       }
     },
     {
+      "type": "recorder",
+      "path": "rec-eu",
+      "at": {
+        "lat": 38.7723,
+        "lon": -9.5393
+      },
+      "params": {
+        "file name": "packet-pair-source.pcap"
+      }
+    },
+    {
       "type": "hub",
       "path": "hub-us",
       "at": {
@@ -1571,8 +1567,7 @@
         "lon": -117.3111
       },
       "params": {
-        "ports": 4,
-        "speed": 1
+        "ports": 4
       }
     },
     {
@@ -1584,7 +1579,6 @@
       },
       "params": {
         "static-ip": "192.168.20.3",
-        "netmask": "255.255.255.0",
         "gateway": "192.168.20.1",
         "nameserver": "192.168.20.1"
       }
@@ -1597,8 +1591,7 @@
         "lon": -117.4611
       },
       "params": {
-        "file name": "packet-pair.pcap",
-        "DLT": 1
+        "file name": "packet-pair-dest.pcap"
       }
     },
     {
@@ -1608,8 +1601,7 @@
         "from": "paris",
         "to": "london",
         "from port": 0,
-        "to port": 0,
-        "error rate": 0.0
+        "to port": 0
       }
     },
     {
@@ -1619,8 +1611,7 @@
         "from": "paris",
         "to": "frankfurt",
         "from port": 1,
-        "to port": 0,
-        "error rate": 0.0
+        "to port": 0
       }
     },
     {
@@ -1630,8 +1621,7 @@
         "from": "paris",
         "to": "madrid",
         "from port": 2,
-        "to port": 0,
-        "error rate": 0.0
+        "to port": 0
       }
     },
     {
@@ -1641,8 +1631,7 @@
         "from": "london",
         "to": "amsterdam",
         "from port": 1,
-        "to port": 0,
-        "error rate": 0.0
+        "to port": 0
       }
     },
     {
@@ -1652,8 +1641,7 @@
         "from": "amsterdam",
         "to": "frankfurt",
         "from port": 1,
-        "to port": 1,
-        "error rate": 0.0
+        "to port": 1
       }
     },
     {
@@ -1663,8 +1651,7 @@
         "from": "london",
         "to": "new-york",
         "from port": 2,
-        "to port": 0,
-        "error rate": 0.0
+        "to port": 0
       }
     },
     {
@@ -1674,8 +1661,7 @@
         "from": "paris",
         "to": "ashburn",
         "from port": 3,
-        "to port": 0,
-        "error rate": 0.0
+        "to port": 0
       }
     },
     {
@@ -1685,8 +1671,7 @@
         "from": "new-york",
         "to": "ashburn",
         "from port": 1,
-        "to port": 1,
-        "error rate": 0.0
+        "to port": 1
       }
     },
     {
@@ -1696,8 +1681,7 @@
         "from": "new-york",
         "to": "chicago",
         "from port": 2,
-        "to port": 0,
-        "error rate": 0.0
+        "to port": 0
       }
     },
     {
@@ -1707,8 +1691,7 @@
         "from": "ashburn",
         "to": "dallas",
         "from port": 2,
-        "to port": 0,
-        "error rate": 0.0
+        "to port": 0
       }
     },
     {
@@ -1718,8 +1701,7 @@
         "from": "chicago",
         "to": "dallas",
         "from port": 1,
-        "to port": 1,
-        "error rate": 0.0
+        "to port": 1
       }
     },
     {
@@ -1729,8 +1711,7 @@
         "from": "chicago",
         "to": "los-angeles",
         "from port": 2,
-        "to port": 0,
-        "error rate": 0.0
+        "to port": 0
       }
     },
     {
@@ -1740,8 +1721,7 @@
         "from": "dallas",
         "to": "los-angeles",
         "from port": 2,
-        "to port": 1,
-        "error rate": 0.0
+        "to port": 1
       }
     },
     {
@@ -1751,8 +1731,7 @@
         "from": "gw-eu",
         "to": "madrid",
         "from port": 0,
-        "to port": 1,
-        "error rate": 0.0
+        "to port": 1
       }
     },
     {
@@ -1762,8 +1741,7 @@
         "from": "gw-us",
         "to": "los-angeles",
         "from port": 0,
-        "to port": 2,
-        "error rate": 0.0
+        "to port": 2
       }
     },
     {
@@ -1774,8 +1752,7 @@
         "to": "hub-eu",
         "from port": 1,
         "to port": 0,
-        "length": 10.0,
-        "error rate": 0.0
+        "length": 10.0
       }
     },
     {
@@ -1786,8 +1763,7 @@
         "to": "host-eu",
         "from port": 1,
         "to port": 0,
-        "length": 10.0,
-        "error rate": 0.0
+        "length": 10.0
       }
     },
     {
@@ -1798,8 +1774,18 @@
         "to": "gen-eu",
         "from port": 2,
         "to port": 0,
-        "length": 10.0,
-        "error rate": 0.0
+        "length": 10.0
+      }
+    },
+    {
+      "type": "cable",
+      "path": "hub-eu-rec-eu",
+      "params": {
+        "from": "hub-eu",
+        "to": "rec-eu",
+        "from port": 3,
+        "to port": 0,
+        "length": 10.0
       }
     },
     {
@@ -1810,8 +1796,7 @@
         "to": "hub-us",
         "from port": 1,
         "to port": 0,
-        "length": 10.0,
-        "error rate": 0.0
+        "length": 10.0
       }
     },
     {
@@ -1822,8 +1807,7 @@
         "to": "host-us",
         "from port": 1,
         "to port": 0,
-        "length": 10.0,
-        "error rate": 0.0
+        "length": 10.0
       }
     },
     {
@@ -1834,8 +1818,7 @@
         "to": "rec-us",
         "from port": 2,
         "to port": 0,
-        "length": 10.0,
-        "error rate": 0.0
+        "length": 10.0
       }
     },
     {
@@ -1857,7 +1840,7 @@
         "lon": -22.0
       },
       "params": {
-        "text": "EU side: gw-eu is 198.51.100.1 behind madrid, LAN 192.168.10.0/24. host-eu holds 192.168.10.3 and gen-eu shares its hub. gen-eu sends two random frames of about 1KiB, back to back, under host-eu's address and hardware address: a gateway translates what comes from its own LAN and nothing else, so that is what gets them out. Its NAT forwards UDP port 5000 to host-eu, as gw-us does to host-us, so either host is reachable from the other at its gateway's public address."
+        "text": "EU side: gw-eu is 198.51.100.1 behind madrid, LAN 192.168.10.0/24. host-eu holds 192.168.10.3 and gen-eu shares its hub. gen-eu sends two random frames of about 1KiB, back to back, under host-eu's address and hardware address: a gateway translates what comes from its own LAN and nothing else, so that is what gets them out. Its NAT forwards UDP port 5000 to host-eu, as gw-us does to host-us, so either host is reachable from the other at its gateway's public address. rec-eu watches this hub as rec-us watches the other, so the same two frames are written down at both ends, into /tmp/packet-pair-source.pcap on the way out and /tmp/packet-pair-dest.pcap on the way in."
       }
     },
     {
@@ -1868,7 +1851,7 @@
         "lon": -108.0
       },
       "params": {
-        "text": "US side: gw-us is 198.51.100.2 behind los-angeles, LAN 192.168.20.0/24. Its NAT forwards UDP port 5000 to host-us, which is what the frames from gen-eu are addressed to; without that they would go no further than the gateway. hub-us sits between host-us and gw-us so that rec-us sees everything either of them says, and writes it into /tmp/packet-pair.pcap."
+        "text": "US side: gw-us is 198.51.100.2 behind los-angeles, LAN 192.168.20.0/24. Its NAT forwards UDP port 5000 to host-us, which is what the frames from gen-eu are addressed to; without that they would go no further than the gateway. hub-us sits between host-us and gw-us so that rec-us sees everything either of them says, and writes it into /tmp/packet-pair-dest.pcap."
       }
     }
   ],
@@ -2011,6 +1994,10 @@
     },
     {
       "path": "hub-eu-gen-eu",
+      "action": "power on"
+    },
+    {
+      "path": "hub-eu-rec-eu",
       "action": "power on"
     },
     {
