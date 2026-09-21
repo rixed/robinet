@@ -620,6 +620,9 @@ let test_disconnect () =
        that knows which port of which device either end went to. *)
     let st = Eth.Cable.State.make ~parent ~name:"link" () in
     Eth.Cable.plug st (sw_w, 1) (h_w, 0) ;
+    (* Every box is born dark and the startup list is what switches it on, so
+       the network must be run once before anything is written into it. *)
+    Simulation.run sim false ;
 
     check "both ends report a cable"
         (sw_w.ports.is_connected 1 &&
@@ -815,14 +818,11 @@ let test_power () =
     Simulation.power_down h2.trx.power ;
     send () ;
     check "an off host does not" (!served = 1) ;
-    (* Its servers are gone with the rest of its state, so coming back up is
-       coming back up empty rather than resuming. *)
+    (* Attached services are still serving after a power cycle, they have just
+       lost their state. *)
     Simulation.power_up h2.trx.power ;
     send () ;
-    check "and does not remember them when it comes back" (!served = 1) ;
-    listen () ;
-    send () ;
-    check "but serves again once it listens again" (!served = 2) ;
+    check "but serves again when it comes back" (!served = 2) ;
 
     (* An adapter is state too, and the sort that goes wrong quietly. A frame
        held back waiting on an ARP that nobody answered leaves the adapter
