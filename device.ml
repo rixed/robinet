@@ -84,7 +84,8 @@ type model =
        themselves. A model that has been built carries the addresses and an
        empty range: once they are written down the range has nothing left to
        say. *)
-    | TRouter of { ports : int ; mac_range : string ; macs : Eth.Addr.t list }
+    | TRouter of { ports : int ; speeds : Eth.Speed.t list ;
+                   mac_range : string ; macs : Eth.Addr.t list }
     | TGateway of { public : Ip.Addr.t ;
                     public_netmask : Ip.Addr.t option ;
                     public_gw : Eth.Gateway.t option ;
@@ -406,10 +407,19 @@ let router =
       params =
           param "ports" ~kind:(IRange (1, 1024)) ~default:(`Int 4)
               ~descr:"How many interfaces it has, each taking one cable." ::
+          param "speeds" ~kind:(Set (Widget.choices Eth.Speed.names))
+              ~default:(`List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
+                                        Eth.Iface.default_speeds))
+              ~descr:"Speeds of the adapters (can be updated later on a port \
+                      per port basis)." ::
           mac_params ;
       of_params = fun args ->
           TRouter {
               ports = int args "ports" ;
+              speeds =
+                  list args "speeds" (fun v ->
+                      Eth.Speed.all.(Widget.to_choice
+                                         (Widget.choices Eth.Speed.names) v)) ;
               mac_range = String.trim (string args "MAC range") ;
               macs = macs_of_string "MACs" (string args "MACs") } }
 
@@ -621,8 +631,10 @@ let to_params =
           "length", float_opt length ;
           "propagation speed", float_opt speed_ratio ;
           "error rate", `Float error_rate ]
-    | TRouter { ports ; mac_range ; macs } ->
+    | TRouter { ports ; speeds ; mac_range ; macs } ->
         [ "ports", `Int ports ;
+          "speeds", `List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
+                                    speeds) ;
           "MAC range", `String mac_range ;
           "MACs", `String (string_of_macs macs) ]
     | TGateway { public ; public_netmask ; public_gw ; lan ; max_cnxs ; mac } ->
@@ -729,15 +741,16 @@ let build ~parent name = function
                  length = Some st.length ;
                  speed_ratio = Some (st.speed /. Eth.Cable.State.light_speed) ;
                  error_rate }
-    | TRouter { ports ; mac_range ; macs } ->
+    | TRouter { ports ; speeds ; mac_range ; macs } ->
         let macs = macs_of ~range:mac_range ~macs ports in
         let r =
-            Router.Router.make ~parent ~macs:(Array.of_list macs) ports [] name in
+            Router.Router.make ~speeds ~parent ~macs:(Array.of_list macs) ports
+                [] name in
         (* The addresses themselves, whether they were named or drawn from the
            range: a range that picks is a choice like any other, and once the
            addresses are written down it has nothing left to say. *)
         r.Router.Router.widget,
-        TRouter { ports ; mac_range = "" ; macs }
+        TRouter { ports ; speeds ; mac_range = "" ; macs }
     | TGateway ({ public ; public_netmask ; public_gw ; lan ; max_cnxs ;
                   mac } as g) ->
         (* Drawn here rather than left to the gateway to draw, so that what it

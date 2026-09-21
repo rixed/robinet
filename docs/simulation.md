@@ -155,12 +155,12 @@ not something the machine is built with. See *Routing tables* below.
 | param | kind | default | |
 | --- | --- | --- | --- |
 | `ports` | 1…1024 | `4` | Interfaces, one cable each. |
+| `speeds` | list of speeds | `[0,1,2,3,4]` | What every interface advertises. |
 | `MAC range` | string | `""` | Leading octets every interface's address shares (`"00:11:22"`), the rest drawn at random. |
 | `MACs` | string | `""` | The addresses themselves instead, comma separated, one per port. |
 
-Its interfaces are not built with a speed either. They advertise `[0,1,2,3,4]`,
-5Gbps at best; a faster link is asked for interface by interface, under `"#0"`…
-in `properties`.
+`speeds` is what every interface starts with; one that is to differ is set on
+its own afterwards, under `"#0"`… in `properties`.
 
 ### gateway
 

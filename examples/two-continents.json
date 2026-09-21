@@ -8,6 +8,7 @@
       "at": { "lat": 34.0522, "lon": -118.2437 },
       "params": {
         "ports": 6,
+        "speeds": [5],
         "MACs": "02:52:01:00:00:00,02:52:01:00:00:01,02:52:01:00:00:02,02:52:01:00:00:03,02:52:01:00:00:04,02:52:01:00:00:05"
       },
       "properties": {
@@ -26,11 +27,6 @@
           ],
           "load balancing": 2
         },
-        "#0": { "speeds": [5] },
-        "#1": { "speeds": [5] },
-        "#2": { "speeds": [5] },
-        "#3": { "speeds": [5] },
-        "#4": { "speeds": [5] },
         "#5": { "speeds": [0, 1] }
       }
     },
@@ -40,6 +36,7 @@
       "at": { "lat": 47.6062, "lon": -122.3321 },
       "params": {
         "ports": 5,
+        "speeds": [5],
         "MAC range": "02:52:03"
       },
       "properties": {
@@ -56,12 +53,7 @@
             { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": "10.1.0.6" }
           ],
           "load balancing": 2
-        },
-        "#0": { "speeds": [5] },
-        "#1": { "speeds": [5] },
-        "#2": { "speeds": [5] },
-        "#3": { "speeds": [5] },
-        "#4": { "speeds": [5] }
+        }
       }
     },
     {
@@ -70,6 +62,7 @@
       "at": { "lat": 39.7392, "lon": -104.9903 },
       "params": {
         "ports": 5,
+        "speeds": [5],
         "MAC range": "02:52:04"
       },
       "properties": {
@@ -86,12 +79,7 @@
             { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": "10.1.0.6" }
           ],
           "load balancing": 2
-        },
-        "#0": { "speeds": [5] },
-        "#1": { "speeds": [5] },
-        "#2": { "speeds": [5] },
-        "#3": { "speeds": [5] },
-        "#4": { "speeds": [5] }
+        }
       }
     },
     {
@@ -100,6 +88,7 @@
       "at": { "lat": 41.8781, "lon": -87.6298 },
       "params": {
         "ports": 5,
+        "speeds": [5, 7],
         "MAC range": "02:52:05"
       },
       "properties": {
@@ -116,12 +105,7 @@
             { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": "10.1.0.6" }
           ],
           "load balancing": 2
-        },
-        "#0": { "speeds": [5, 7] },
-        "#1": { "speeds": [5, 7] },
-        "#2": { "speeds": [5, 7] },
-        "#3": { "speeds": [5, 7] },
-        "#4": { "speeds": [5, 7] }
+        }
       }
     },
     {
@@ -130,6 +114,7 @@
       "at": { "lat": 40.7128, "lon": -74.006 },
       "params": {
         "ports": 7,
+        "speeds": [5, 7],
         "MAC range": "02:52:06"
       },
       "properties": {
@@ -146,14 +131,7 @@
             { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 6, "via": "10.2.0.1" }
           ],
           "load balancing": 3
-        },
-        "#0": { "speeds": [5, 7] },
-        "#1": { "speeds": [5, 7] },
-        "#2": { "speeds": [5, 7] },
-        "#3": { "speeds": [5, 7] },
-        "#4": { "speeds": [5, 7] },
-        "#5": { "speeds": [5, 7] },
-        "#6": { "speeds": [5, 7] }
+        }
       }
     },
     {
@@ -162,6 +140,7 @@
       "at": { "lat": 39.0438, "lon": -77.4874 },
       "params": {
         "ports": 7,
+        "speeds": [5, 7],
         "MAC range": "02:52:07"
       },
       "properties": {
@@ -178,14 +157,7 @@
             { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 6, "via": "10.2.0.1" }
           ],
           "load balancing": 3
-        },
-        "#0": { "speeds": [5, 7] },
-        "#1": { "speeds": [5, 7] },
-        "#2": { "speeds": [5, 7] },
-        "#3": { "speeds": [5, 7] },
-        "#4": { "speeds": [5, 7] },
-        "#5": { "speeds": [5, 7] },
-        "#6": { "speeds": [5, 7] }
+        }
       }
     },
     {
@@ -194,6 +166,7 @@
       "at": { "lat": 38.7223, "lon": -9.1393 },
       "params": {
         "ports": 7,
+        "speeds": [5, 7],
         "MAC range": "02:52:08"
       },
       "properties": {
@@ -210,14 +183,7 @@
             { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 6, "via": "10.1.0.6" }
           ],
           "load balancing": 3
-        },
-        "#0": { "speeds": [5, 7] },
-        "#1": { "speeds": [5, 7] },
-        "#2": { "speeds": [5, 7] },
-        "#3": { "speeds": [5, 7] },
-        "#4": { "speeds": [5, 7] },
-        "#5": { "speeds": [5, 7] },
-        "#6": { "speeds": [5, 7] }
+        }
       }
     },
     {
@@ -226,6 +192,7 @@
       "at": { "lat": 51.5074, "lon": -0.1278 },
       "params": {
         "ports": 7,
+        "speeds": [5, 7],
         "MAC range": "02:52:09"
       },
       "properties": {
@@ -242,14 +209,7 @@
             { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 6, "via": "10.1.0.6" }
           ],
           "load balancing": 3
-        },
-        "#0": { "speeds": [5, 7] },
-        "#1": { "speeds": [5, 7] },
-        "#2": { "speeds": [5, 7] },
-        "#3": { "speeds": [5, 7] },
-        "#4": { "speeds": [5, 7] },
-        "#5": { "speeds": [5, 7] },
-        "#6": { "speeds": [5, 7] }
+        }
       }
     },
     {
@@ -258,6 +218,7 @@
       "at": { "lat": 48.8566, "lon": 2.3522 },
       "params": {
         "ports": 5,
+        "speeds": [5],
         "MAC range": "02:52:0a"
       },
       "properties": {
@@ -274,12 +235,7 @@
             { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": "10.2.0.2" }
           ],
           "load balancing": 2
-        },
-        "#0": { "speeds": [5] },
-        "#1": { "speeds": [5] },
-        "#2": { "speeds": [5] },
-        "#3": { "speeds": [5] },
-        "#4": { "speeds": [5] }
+        }
       }
     },
     {
@@ -288,6 +244,7 @@
       "at": { "lat": 50.1109, "lon": 8.6821 },
       "params": {
         "ports": 5,
+        "speeds": [5, 7],
         "MAC range": "02:52:0b"
       },
       "properties": {
@@ -304,12 +261,7 @@
             { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": "10.2.0.2" }
           ],
           "load balancing": 2
-        },
-        "#0": { "speeds": [5, 7] },
-        "#1": { "speeds": [5, 7] },
-        "#2": { "speeds": [5, 7] },
-        "#3": { "speeds": [5, 7] },
-        "#4": { "speeds": [5, 7] }
+        }
       }
     },
     {
@@ -318,6 +270,7 @@
       "at": { "lat": 52.2297, "lon": 21.0122 },
       "params": {
         "ports": 5,
+        "speeds": [5],
         "MAC range": "02:52:0c"
       },
       "properties": {
@@ -334,12 +287,7 @@
             { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": "10.2.0.2" }
           ],
           "load balancing": 2
-        },
-        "#0": { "speeds": [5] },
-        "#1": { "speeds": [5] },
-        "#2": { "speeds": [5] },
-        "#3": { "speeds": [5] },
-        "#4": { "speeds": [5] }
+        }
       }
     },
     {
@@ -348,6 +296,7 @@
       "at": { "lat": 44.4268, "lon": 26.1025 },
       "params": {
         "ports": 6,
+        "speeds": [5],
         "MAC range": "02:52:0d"
       },
       "properties": {
@@ -366,11 +315,6 @@
           ],
           "load balancing": 2
         },
-        "#0": { "speeds": [5] },
-        "#1": { "speeds": [5] },
-        "#2": { "speeds": [5] },
-        "#3": { "speeds": [5] },
-        "#4": { "speeds": [5] },
         "#5": { "speeds": [0, 1] }
       }
     },

@@ -509,13 +509,13 @@ struct
             else
                 fun _ -> false
 
-    let make_iface ?proto ?mtu ?delay ?loss ?inter_frame_gap ?can_forward_after
-                   ?mac ?my_addresses ~parent ~power n =
+    let make_iface ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
+                   ?can_forward_after ?mac ?my_addresses ~parent ~power n =
         let name = "#"^ string_of_int n in
         (* For our ifaces we force the GW on a packet by packet basis according
          * to the dynamic (and likely still unset) routing table. *)
         let eth =
-            Eth.State.make ?proto ?mtu ?delay ?loss ?inter_frame_gap
+            Eth.State.make ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
                            ?can_forward_after ?mac ?my_addresses ~name
                            ~parent ~power () in
         let trx = Eth.TRX.make eth in
@@ -526,7 +526,7 @@ struct
 
     let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
              ?(admin_reroute=true) ?(load_balancing=First)
-             ?can_forward_after ?delay ?loss ?mtu ?(macs=[||])
+             ?can_forward_after ?delay ?loss ?speeds ?mtu ?(macs=[||])
              num_ifaces routes name =
         let widget = Widget.make ~parent ~own_power name in
         let power = widget.power in
@@ -553,7 +553,7 @@ struct
                 let mac =
                     (* Caller can set the MAC addresses: *)
                     if n >= Array.length macs then None else Some macs.(n) in
-                make_iface ?delay ?loss ?can_forward_after ?mtu ?mac
+                make_iface ?speeds ?delay ?loss ?can_forward_after ?mtu ?mac
                            ~parent:widget ~power n
             ) in
         let buffered = Metric.Gauge.make () in
