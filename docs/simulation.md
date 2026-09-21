@@ -76,7 +76,10 @@ them. **Two ends with no speed in common make no link at all** — not a slow
 one. Nothing says so but a `Failed negotiation` warning in the interface's log,
 and the interface then drops everything, sent or received. So the two ends of
 every link must be given overlapping `speeds`. A port that advertises nothing
-in particular -- a recorder's, a tap's -- takes whatever the other end offers.
+in particular, a recorder's, takes whatever the other end offers. A tap
+advertises nothing of its own either, but it does not answer for itself: it
+passes the question across to the far side of the link it is cut into, so the
+two ends settle with each other.
 
 ## How values are written
 
@@ -189,18 +192,19 @@ plugged into one of them is never heard on the link.
 Nothing to build it with, and nothing to configure: no params, no properties,
 no power switch. It has no speed of its own either, which is the reason to
 reach for one. A link that is to be watched can be cut with a hub, but a hub is
-a 10 or 100Mbps device and drags every interface on its segment down with it; a
-tap advertises nothing, so each end settles on whatever it can do -- two 5Gbps
-adapters stay at 5Gbps with a tap between them.
+a 10 or 100Mbps device and drags every interface on its segment down with it.
+
+A tap is instead **transparent to negotiation**: asked what it can do, it
+points at whatever is on the far side of the link, so the two ends settle with
+each other exactly as they would on a bare cable. Two 5Gbps adapters stay at
+5Gbps; two ends with no speed in common still make no link, rather than being
+quietly bridged. Until the second cable is there the first has nothing to
+settle against and its end stays down — plugging the second one settles both,
+so the order the two cables are written in does not matter.
 
 A recorder takes as many cables as it is given, so both directions usually go
 to the same one: a cable from port 2 and another from port 3, both to the
 recorder. With only one of the two, only that direction is written down.
-
-What a tap does not do is negotiate on behalf of the two ends. Each of them
-settles with the tap rather than with the other, so a tap put between two
-interfaces with no speed in common bridges them where a cable would have left
-them dark.
 
 ### router
 

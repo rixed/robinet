@@ -547,7 +547,7 @@ let recorder ~parent ?location ?caplen ?(dlt=default_dlt) ?fname name =
         dev = (function _ -> { write = recorder.write ; set_read = ignore }) ;
         owner = (fun _ -> widget) ;
         disconnect = ignore ;
-        get_capabilities = (fun _ -> Capabilities.Any) ;
+        get_capabilities = (fun ?peer:_ _ -> Capabilities.Any) ;
         set_capabilities = (fun _ _ -> ()) } ;
     Widget.add_properties widget Widget.[
         property "recording" ~kind:Bool
@@ -1094,7 +1094,7 @@ let replayer ~parent ?location ?fname ?(loop=false) name =
             | exception _ -> Widget.bad_value "No such port #%d" n
             | { contents = None } -> Widget.bad_value "Port #%d is not connected" n
             | { contents = Some _ } as r -> r := None) ;
-        get_capabilities = (fun _ -> Capabilities.Any) ;
+        get_capabilities = (fun ?peer:_ _ -> Capabilities.Any) ;
         set_capabilities = (fun _ _ -> ()) } ;
     (* Start and stop the reading. Not a setter on the property below: playing
        and stopping are things this widget is asked to do, and a list of them
@@ -1442,7 +1442,7 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
         dev = (fun _ -> dev portal) ;
         owner = (fun _ -> widget) ;
         disconnect = (fun _ -> disconnect portal) ;
-        get_capabilities = (fun _ -> Capabilities.Any) ;
+        get_capabilities = (fun ?peer:_ _ -> Capabilities.Any) ;
         set_capabilities = (fun _ _ -> ()) } ;
     Widget.add_properties widget Widget.[
         property "name" ~kind:String

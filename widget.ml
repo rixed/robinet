@@ -974,7 +974,7 @@ let no_ports = {
     dev = (fun _ -> assert false) ;
     owner = (fun _ -> assert false) ;
     disconnect = (fun _ -> assert false) ;
-    get_capabilities = (fun _ -> Capabilities.Any) ;
+    get_capabilities = (fun ?peer:_ _ -> Capabilities.Any) ;
     set_capabilities = (fun _ _ -> ()) }
 
 (* Beware that the widget graph is cyclic (parent/children and peers point back
@@ -1346,7 +1346,7 @@ let ports_of w =
       dev = (fun n -> w.ports.dev n) ;
       owner = (fun n -> w.ports.owner n) ;
       disconnect = (fun n -> w.ports.disconnect n) ;
-      get_capabilities = (fun n -> w.ports.get_capabilities n) ;
+      get_capabilities = (fun ?peer n -> w.ports.get_capabilities ?peer n) ;
       set_capabilities = (fun n c -> w.ports.set_capabilities n c) }
 
 (* Siblings differ, cousins need not, and a move into a parent that has the

@@ -138,7 +138,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
              * another, so a cable is recorded as reaching the repeater. *)
             owner = (fun _ -> widget) ;
             disconnect = disconnect t ;
-            get_capabilities = (fun _ ->
+            get_capabilities = (fun ?peer:_ _ ->
                 Capabilities.Eth { speeds = [ t.speed ] ; full_duplex = false }) ;
             set_capabilities = (fun _ _ -> ()) } ;
         Widget.add_properties widget Widget.[
@@ -308,8 +308,8 @@ struct
             dev = (fun i -> t.ifaces.(i).widget.ports.dev 0) ;
             owner = (fun i -> t.ifaces.(i).widget.ports.owner 0) ;
             disconnect = (fun i -> t.ifaces.(i).widget.ports.disconnect 0) ;
-            get_capabilities = (fun i ->
-                t.ifaces.(i).widget.ports.get_capabilities 0) ;
+            get_capabilities = (fun ?peer i ->
+                t.ifaces.(i).widget.ports.get_capabilities ?peer 0) ;
             set_capabilities = (fun i c ->
                 t.ifaces.(i).widget.ports.set_capabilities 0 c) } ;
         Widget.add_properties widget Widget.[
@@ -367,6 +367,10 @@ struct
         widget : Widget.t ;
         (* Per port, whether a cable is on it and what to emit into it. *)
         forward : (bool * (bitstring -> unit)) array ; (* 4 ports *)
+        (* Per link port, the port the cable on it reaches, so that either end
+         * of the link can be told to negotiate with the other. Learnt when a
+         * cable is plugged, which is the only time it is asked for. *)
+        peers : (Widget.t * int) option array ; (* 2 link ports *)
     }
 
     type Widget.device += T of t
@@ -384,7 +388,8 @@ struct
     let make ~parent ?location name =
         let widget = Widget.make ~parent ?location ~device_type:"tap" name in
         let t = { widget ;
-                  forward = Array.make num_ports (false, ignore) } in
+                  forward = Array.make num_ports (false, ignore) ;
+                  peers = Array.make 2 None } in
         widget.ports <- Widget.{
             count = (fun () -> num_ports) ;
             is_connected = (fun n -> fst t.forward.(n)) ;
@@ -402,17 +407,71 @@ struct
                       set_read = fun f -> t.forward.(n) <- true, f }) ;
             owner = (fun _ -> t.widget) ;
             disconnect = (fun n ->
-                if fst t.forward.(n) then
-                    t.forward.(n) <- false, ignore
-                else
+                if fst t.forward.(n) then (
+                    t.forward.(n) <- false, ignore ;
+                    (* Or the far end would go on negotiating against a port
+                     * nothing reaches any more. *)
+                    if is_link_port n then t.peers.(n) <- None
+                ) else
                     Log.(log t.widget.logger Debug (lazy (Printf.sprintf
                         "Ignoring request to disconnect Tap %s free port#%d"
                         t.widget.name n)))) ;
-            get_capabilities = (fun _ -> Capabilities.Any) ;
+            (* A tap is not an end of the link it is cut into: it sends the
+             * question across to whatever is on the other side, so that the
+             * two ends settle with each other and keep the speed they would
+             * have had on a bare cable. With nothing there yet there is no
+             * link to settle; the second cable settles both ends, the question
+             * it passes across reaching the first one. Which is also the only
+             * time a port is asked who it faces, so this is where that is
+             * learnt. *)
+            get_capabilities = (fun ?peer n ->
+                if not (is_link_port n) then Any else (
+                    Option.may (fun p -> t.peers.(n) <- Some p) peer ;
+                    match t.peers.(n lxor 1) with
+                    | None -> NoCapabilities
+                    | Some p -> ForwardTo p)) ;
+            (* Never called for a link port, [get_capabilities] having sent
+               whoever asked somewhere else; a mirror has nothing to settle. *)
             set_capabilities = (fun _ _ -> ())
         } ;
         Widget.add_properties widget Widget.[
             property "tot ports" ~kind:Int ~descr:"Total number of ports."
                 ~getter:(fun () -> `Int num_ports) ] ;
         t
+
+    (* A tap is transparent to negotiation: the two ends settle with each
+     * other and not with the glass between them, whichever of the two cables
+     * is plugged first. Two ends with nothing in common therefore make no
+     * link, exactly as they would on a bare cable. *)
+    (*$< Tap *)
+    (*$R make
+        let link speeds_a speeds_b order =
+            let sim = Simulation.make ~realtime:false "tapped" in
+            let iface name speeds =
+                Eth.Iface.make ~parent:sim.root ~power:sim.root.power
+                               ~speeds name in
+            let a = iface "a" speeds_a
+            and b = iface "b" speeds_b
+            and tap = make ~parent:sim.root "tap" in
+            let plug n (i : Eth.Iface.t) =
+                let c = Eth.Cable.State.make ~parent:sim.root
+                                             ~name:("c" ^ string_of_int n) () in
+                Eth.Cable.plug c (tap.widget, n) (i.widget, 0) in
+            List.iter (fun (n, i) -> plug n i) (if order then [ 0, a ; 1, b ]
+                                                          else [ 1, b ; 0, a ]) ;
+            Eth.Iface.(string_of_negotiated a.negotiated,
+                       string_of_negotiated b.negotiated) in
+        let printer (x, y) = x ^" / "^ y in
+        List.iter (fun order ->
+            let msg = if order then "(near end first)" else "(far end first)" in
+            assert_equal ~printer ~msg:("the fastest both have "^ msg)
+                ("1Gbps full-duplex", "1Gbps full-duplex")
+                (link Eth.Speed.[ Eth10Mbps ; Eth1Gbps ; Eth5Gbps ]
+                      Eth.Speed.[ Eth100Mbps ; Eth1Gbps ] order) ;
+            assert_equal ~printer ~msg:("nothing in common is no link "^ msg)
+                ("down", "down")
+                (link Eth.Speed.[ Eth10Mbps ] Eth.Speed.[ Eth1Gbps ] order)
+        ) [ true ; false ]
+     *)
+    (*$>*)
 end

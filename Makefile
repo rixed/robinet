@@ -10,8 +10,8 @@ LIB_SOURCES  = \
 	metric.ml \
 	log.ml \
 	tools.ml \
-	capabilities.ml \
 	simTypes.ml \
+	capabilities.ml \
 	widget.ml \
 	generator.ml \
 	simulation.ml \

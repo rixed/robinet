@@ -576,8 +576,8 @@ struct
             dev = (fun n -> (ports t.ifaces.(n)).dev 0) ;
             owner = (fun n -> (ports t.ifaces.(n)).owner 0) ;
             disconnect = (fun n -> (ports t.ifaces.(n)).disconnect 0) ;
-            get_capabilities = (fun n ->
-                (ports t.ifaces.(n)).get_capabilities 0) ;
+            get_capabilities = (fun ?peer n ->
+                (ports t.ifaces.(n)).get_capabilities ?peer 0) ;
             set_capabilities = (fun n c ->
                 (ports t.ifaces.(n)).set_capabilities 0 c) } ;
         Widget.add_properties widget Widget.[
@@ -1167,9 +1167,9 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
         disconnect = (function
             | 0 -> (Router.ports router.ifaces.(1)).disconnect 0
             | _ -> Hub.Repeater.disconnect hub 0) ;
-        get_capabilities = (function
-            | 0 -> (Router.ports router.ifaces.(1)).get_capabilities 0
-            | _ -> hub.widget.ports.get_capabilities 0) ;
+        get_capabilities = (fun ?peer -> function
+            | 0 -> (Router.ports router.ifaces.(1)).get_capabilities ?peer 0
+            | _ -> hub.widget.ports.get_capabilities ?peer 0) ;
         set_capabilities = (fun n c ->
             match n with
             | 0 -> (Router.ports router.ifaces.(1)).set_capabilities 0 c

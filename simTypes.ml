@@ -28,6 +28,32 @@ open Clock
  * Also used to compute default cable lengths. *)
 type location = { lat : float ; lon : float }
 
+(** {2 Ethernet speeds}
+ *
+ * Here rather than in [Eth] because a port's capabilities are part of what a
+ * widget is, and those are settled before there is an adapter to settle them
+ * for. [Eth.Speed] includes this and adds what a speed is good for. *)
+module EthSpeed =
+struct
+    type t =
+        | Eth10Mbps
+        | Eth100Mbps
+        | Eth1Gbps
+        | Eth2_5Gbps
+        | Eth5Gbps
+        | Eth10Gbps
+        | Eth25Gbps
+        | Eth40Gbps
+        | Eth100Gbps
+        [@@deriving enum]
+
+    let t_max = max
+    let t_min = min
+
+    let max s1 s2 =
+        if s1 >= s2 then s1 else s2
+end
+
 (** {2 Devices}
  *
  * Devices are what can be created with the API or the UI, and what is saved. *)
@@ -697,6 +723,28 @@ and ports =
       (* When connecting two devices, they oftentimes had a brief communication
        * to negotiate some shared characteristics depending on each end's
        * capabilities. This is performed instantly when connecting them thanks
-       * to those two functions: *)
-      get_capabilities : int -> Capabilities.t ;
-      set_capabilities : int -> Capabilities.t -> unit }
+       * to those two functions:
+       *
+       * [peer] is the port the cable being plugged reaches, and is given only
+       * for the two ports that cable joins -- not for the ones walked through
+       * on the way to them (see [capabilities]'s [ForwardTo]). A device that
+       * answers for someone else needs it to know who that someone is; every
+       * other one ignores it. *)
+      get_capabilities : ?peer:(widget * int) -> int -> capabilities ;
+      (* Handed what the two ends settled on. A port that forwarded the
+       * question is not an end of the link and is not told the answer. *)
+      set_capabilities : int -> capabilities -> unit }
+
+(* What a port is prepared to do, which is what plugging a cable in settles
+ * against what is at the other end. *)
+and capabilities =
+    (* Negotiation failed, or has to fail: the port drops everything. *)
+    | NoCapabilities
+    (* Takes whatever it is offered, having nothing of its own to say: a
+     * recorder's port, a tap's mirror. *)
+    | Any
+    | Eth of { speeds : EthSpeed.t list ; full_duplex : bool }
+    (* Not an end of the link: ask that port instead. A tap answers this for
+     * either side of the link it is cut into, so that the two ends negotiate
+     * with each other and not with the glass between them. *)
+    | ForwardTo of (widget * int)

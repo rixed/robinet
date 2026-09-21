@@ -697,8 +697,8 @@ let make ~parent ?location ?speeds ?(adapters=1) ?(independent=false) name =
         dev = (fun i -> t.ifaces.(i).widget.ports.dev 0) ;
         owner = (fun i -> t.ifaces.(i).widget.ports.owner 0) ;
         disconnect = (fun i -> t.ifaces.(i).widget.ports.disconnect 0) ;
-        get_capabilities = (fun i ->
-            t.ifaces.(i).widget.ports.get_capabilities 0) ;
+        get_capabilities = (fun ?peer i ->
+            t.ifaces.(i).widget.ports.get_capabilities ?peer 0) ;
         set_capabilities = (fun i c ->
             t.ifaces.(i).widget.ports.set_capabilities 0 c) } ;
     Widget.add_properties widget Widget.[

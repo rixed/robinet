@@ -18,39 +18,30 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 (**
-  Capabilities that are automatically negotiated when connecting two ports
+  Capabilities that are automatically negotiated when connecting two ports.
+
+  The types live in [SimTypes], a port's capabilities being part of what a
+  widget is, and are named again here so that [Capabilities.Eth] and the rest
+  read as they always did.
  *)
 open Batteries
 
-module EthSpeed =
-struct
-    type t =
-        | Eth10Mbps
-        | Eth100Mbps
-        | Eth1Gbps
-        | Eth2_5Gbps
-        | Eth5Gbps
-        | Eth10Gbps
-        | Eth25Gbps
-        | Eth40Gbps
-        | Eth100Gbps
-        [@@deriving enum]
+module EthSpeed = SimTypes.EthSpeed
 
-    let t_max = max
-    let t_min = min
-
-    let max s1 s2 =
-        if s1 >= s2 then s1 else s2
-end
-
-type t =
-    | NoCapabilities (* For when negotiation failed (or has to fail) *)
-    | Any (* For ports accepting anything equally well, such as recorder *)
+type t = SimTypes.capabilities =
+    | NoCapabilities
+    | Any
     | Eth of { speeds : EthSpeed.t list ; full_duplex : bool }
+    | ForwardTo of (SimTypes.widget * int)
 
+(* [ForwardTo] is not a capability but a redirection, and one that reaches here
+ * is a chain that led nowhere: [Eth.Cable.plug] follows them before it asks.
+ * Which is why they are followed there and not here -- a port is a widget away,
+ * and this stays something two answers can be compared with. *)
 let negotiate a b =
     match a, b with
-    | NoCapabilities, _ | _, NoCapabilities ->
+    | NoCapabilities, _ | _, NoCapabilities
+    | ForwardTo _, _ | _, ForwardTo _ ->
         NoCapabilities
     | Any, c | c, Any ->
         c
@@ -63,6 +54,7 @@ let negotiate a b =
 (*$inject
   open EthSpeed
   let eth ?(full_duplex=true) speeds = Eth { speeds ; full_duplex }
+  let a_port = (Simulation.make ~realtime:false "forward-to").root, 0
  *)
 
 (* The fastest speed both ends have, and full duplex only if both are up for
@@ -84,6 +76,10 @@ let negotiate a b =
   (* ...but a failure is a failure, whatever it is met with. *) \
     NoCapabilities (negotiate Any NoCapabilities)
   NoCapabilities (negotiate (eth [ Eth10Mbps ]) NoCapabilities)
+  (* And so is a redirection: [Eth.Cable.plug] follows those before it asks,
+     so one that arrives here is a chain that led nowhere. *) \
+    NoCapabilities (negotiate (ForwardTo a_port) (eth [ Eth10Mbps ]))
+  NoCapabilities (negotiate (eth [ Eth10Mbps ]) (ForwardTo a_port))
  *)
 
 (* Which end asks makes no difference. *)

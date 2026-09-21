@@ -618,7 +618,7 @@ struct
             dev = (fun _ -> dev t) ;
             owner = (fun _ -> t.widget) ;
             disconnect = (fun _ -> disconnect t) ;
-            get_capabilities = (fun _ ->
+            get_capabilities = (fun ?peer:_ _ ->
                 Capabilities.Eth { speeds = t.speeds ;
                                    full_duplex = t.full_duplex }) ;
             set_capabilities = (fun _ -> function
@@ -1357,6 +1357,31 @@ struct
             unplug_b () ;
             st.ends <- None
 
+    (* How many ports a question may be passed along before the chain is
+     * called broken. Taps in series are the only thing that passes it along,
+     * and a ring of them would otherwise spin forever. *)
+    let max_hops = 8
+
+    (* The port the link from port [p] of [w] really ends at, and what it
+     * advertises: [w, p] itself for anything that answers for itself, and
+     * whatever a tap points at for one that does not. [peer] is given to the
+     * first port only -- it is who *that* one faces, and is none of the
+     * business of the ports the question is passed along to. *)
+    let link_end ~peer (w : Widget.t) p =
+        let rec loop left (w : Widget.t) p c =
+            match c with
+            | Capabilities.ForwardTo (w', p') when left > 0 ->
+                loop (left - 1) w' p' (w'.ports.get_capabilities p')
+            | ForwardTo _ ->
+                Log.(log w.logger Error (lazy (Printf.sprintf
+                    "Giving up looking for what %s port#%d leads to after %d \
+                     ports: a tap pointing at itself?"
+                    (Widget.full_name w) p max_hops))) ;
+                (w, p), Capabilities.NoCapabilities
+            | c ->
+                (w, p), c in
+        loop max_hops w p (w.ports.get_capabilities ~peer p)
+
     (** Plug a cable between port [pa] of [wa] and port [pb] of [wb]: wire the
      * two together, remember how to let go of them, and record in the graph
      * that this cable joins the widgets those two ports belong to.
@@ -1372,10 +1397,12 @@ struct
             invalid_arg ("Eth.Cable.plug: "^ Widget.full_name st.widget ^
                          " is already plugged in") ;
         let trx = make st in
-        let c = Capabilities.negotiate (wa.ports.get_capabilities pa)
-                                       (wb.ports.get_capabilities pb) in
-        wa.ports.set_capabilities pa c ;
-        wb.ports.set_capabilities pb c ;
+        let end_a = link_end ~peer:(wb, pb) wa pa
+        and end_b = link_end ~peer:(wa, pa) wb pb in
+        let c = Capabilities.negotiate (snd end_a) (snd end_b) in
+        let settle ((w : Widget.t), p) = w.ports.set_capabilities p c in
+        settle (fst end_a) ;
+        settle (fst end_b) ;
         wa.ports.dev pa -=> trx <=-> wb.ports.dev pb ;
         st.ends <- Some ((fun () -> wa.ports.disconnect pa),
                          (fun () -> wb.ports.disconnect pb)) ;
