@@ -331,21 +331,88 @@ struct
         t
 end
 
-(** A Tap is a 2 ifaces repeater which mirror each packet to a user function.
+(** A VirtTap is a 2 ifaces repeater which mirror each packet to a user function.
   It can be used as a transparent TRX. *)
+module VirtTap =
+struct
+    type t = trx
+
+    (* If specified, [rev_mirror] will be called with traffic from out to in
+     * and [mirror] only with traffic from in to out.
+     * If [rev_mirror] is unspecified, [mirror] receives it all. *)
+    let make ?rev_mirror mirror =
+        let emit_ins = ref ignore
+        and emit_out = ref ignore in
+        let rev_mirror = rev_mirror |? mirror in
+        { ins = { write = (fun bits -> mirror bits ; !emit_out bits) ;
+                  set_read = fun f -> emit_ins := f } ;
+          out = { write = (fun bits -> rev_mirror bits ; !emit_ins bits) ;
+                  set_read = fun f -> emit_out := f } }
+end
+
+(* A Tap is a passive 4 ports device: what crosses the link between ports 0 and
+ * 1 is copied to port 2 on its way from 0 to 1, and to port 3 on its way back.
+ * It is glass and copper only -- no eth iface, no power, no delay of its own,
+ * and its ports advertise no capability, so each end of the monitored link
+ * settles its speed with the tap rather than with the other end. Which is the
+ * point: unlike a hub, a tap does not drag a whole segment down to its own
+ * speed.
+ *
+ * Ports 2 and 3 are outputs. Nothing plugged into one of them ever reaches the
+ * link, which is what makes the device safe to insert into traffic one only
+ * wants to look at. *)
 module Tap =
 struct
-    type t = { trx : trx ;
-            widget : Widget.t }
+    type t = {
+        widget : Widget.t ;
+        (* Per port, whether a cable is on it and what to emit into it. *)
+        forward : (bool * (bitstring -> unit)) array ; (* 4 ports *)
+    }
 
-    let make ~parent ?location mirror =
-        let widget = Widget.make ~parent ?location "tap" in
-        let emit_ins = ref (ignore_bits ~logger:widget.logger)
-        and emit_out = ref (ignore_bits ~logger:widget.logger) in
-        let trx =
-            { ins = { write = (fun bits -> mirror bits ; !emit_out bits) ;
-                      set_read = fun f -> emit_ins := f } ;
-              out = { write = (fun bits -> mirror bits ; !emit_ins bits) ;
-                      set_read = fun f -> emit_out := f } } in
-        { trx ; widget }
+    type Widget.device += T of t
+
+    let of_widget (w : Widget.t) =
+        match w.device with
+        | Some (T t) -> Some t
+        | _ -> None
+
+    let num_ports = 4
+
+    (* Ports 0 and 1 are the link, and the mirror of port [n] is [n + 2]. *)
+    let is_link_port n = n < 2
+
+    let make ~parent ?location name =
+        let widget = Widget.make ~parent ?location ~device_type:"tap" name in
+        let t = { widget ;
+                  forward = Array.make num_ports (false, ignore) } in
+        widget.ports <- Widget.{
+            count = (fun () -> num_ports) ;
+            is_connected = (fun n -> fst t.forward.(n)) ;
+            dev = (fun n ->
+                if is_link_port n then
+                    { write = (fun bits ->
+                         (snd t.forward.(n + 2)) bits ; (* mirror *)
+                         (snd t.forward.(n lxor 1)) bits) ; (* forward *)
+                      set_read = fun f -> t.forward.(n) <- true, f }
+                else
+                    { write = (fun _ ->
+                         Log.(log t.widget.logger Debug (lazy (Printf.sprintf
+                             "Dropping what was emitted into mirror port#%d, \
+                              which is an output" n)))) ;
+                      set_read = fun f -> t.forward.(n) <- true, f }) ;
+            owner = (fun _ -> t.widget) ;
+            disconnect = (fun n ->
+                if fst t.forward.(n) then
+                    t.forward.(n) <- false, ignore
+                else
+                    Log.(log t.widget.logger Debug (lazy (Printf.sprintf
+                        "Ignoring request to disconnect Tap %s free port#%d"
+                        t.widget.name n)))) ;
+            get_capabilities = (fun _ -> Capabilities.Any) ;
+            set_capabilities = (fun _ _ -> ())
+        } ;
+        Widget.add_properties widget Widget.[
+            property "tot ports" ~kind:Int ~descr:"Total number of ports."
+                ~getter:(fun () -> `Int num_ports) ] ;
+        t
 end

@@ -65,7 +65,7 @@ let params_of_query q =
     let client = Host.make "client" ~mac:(Eth.Addr.random ()) ~static_ip:(Ip.Addr.of_string "192.168.1.2");;
     let browser = Browser.make client;;
     (* Link with a tap in between *)
-    let tap = Hub.Tap.make (Pcap.save "http.pcap");;
+    let tap = Hub.VirtTap.make (Pcap.save "http.pcap");;
     client.Host.dev <--> tap.ins ; tap.out <--> server.Host.dev;;
     (* Send a request *)
     Browser.request browser ~headers:["Connection", "close"]

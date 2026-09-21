@@ -76,7 +76,7 @@ them. **Two ends with no speed in common make no link at all** — not a slow
 one. Nothing says so but a `Failed negotiation` warning in the interface's log,
 and the interface then drops everything, sent or received. So the two ends of
 every link must be given overlapping `speeds`. A port that advertises nothing
-in particular, a recorder's, takes whatever the other end offers.
+in particular -- a recorder's, a tap's -- takes whatever the other end offers.
 
 ## How values are written
 
@@ -178,6 +178,29 @@ A repeater: whatever reaches one port leaves by every other.
 A hub advertises that one speed and half duplex, and nothing besides, so every
 interface plugged into one must keep `0` or `1` among its own `speeds` or the
 link will not come up.
+
+### tap
+
+A passive device that copies a link without taking part in it. What crosses
+between ports 0 and 1 is forwarded unchanged, and copied to **port 2 on its way
+from 0 to 1, port 3 on its way back**. Those last two are outputs: whatever is
+plugged into one of them is never heard on the link.
+
+Nothing to build it with, and nothing to configure: no params, no properties,
+no power switch. It has no speed of its own either, which is the reason to
+reach for one. A link that is to be watched can be cut with a hub, but a hub is
+a 10 or 100Mbps device and drags every interface on its segment down with it; a
+tap advertises nothing, so each end settles on whatever it can do -- two 5Gbps
+adapters stay at 5Gbps with a tap between them.
+
+A recorder takes as many cables as it is given, so both directions usually go
+to the same one: a cable from port 2 and another from port 3, both to the
+recorder. With only one of the two, only that direction is written down.
+
+What a tap does not do is negotiate on behalf of the two ends. Each of them
+settles with the tap rather than with the other, so a tap put between two
+interfaces with no speed in common bridges them where a cable would have left
+them dark.
 
 ### router
 
@@ -316,6 +339,7 @@ under:
 | switch | `""` | `cut-through` |
 | | `#0`… | *its ports* |
 | hub | `""` | `speed` |
+| tap | | *none* |
 | router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin` |
 | | `#0`… | *its interfaces* |
 | | `#0/admin@0`… | `hostname`, `search suffix` — the stack answering for the address that interface holds |
@@ -583,41 +607,49 @@ out before the lease: expect `{"sent": 8, "received": 4}`.
 
 ### A tap
 
-A hub repeats everything to every port, so a recorder on one of them sees the
-whole segment. This writes `/tmp/a-tap.pcap`: two ARP frames and four ICMP.
+A tap cut into the cable between two hosts, with a recorder on both of its
+mirror ports so that either direction is written down. This writes
+`/tmp/a-tap.pcap`: two ARP frames and four ICMP. Neither host is any the wiser
+-- and neither is slowed down, which is what a hub in the same place would have
+done.
 
 ```json
 {
   "version": 1,
   "name": "a-tap",
   "devices": [
-    { "type": "hub", "path": "hub",
-      "params": { "ports": 3 } },
+    { "type": "tap", "path": "tap" },
     { "type": "host", "path": "h1",
       "params": { "static-ip": "192.168.0.1" } },
     { "type": "host", "path": "h2",
       "params": { "static-ip": "192.168.0.2" } },
-    { "type": "recorder", "path": "tap",
+    { "type": "recorder", "path": "rec",
       "params": { "file name": "a-tap.pcap" } },
-    { "type": "cable", "path": "hub-h1",
-      "params": { "from": "hub", "to": "h1" } },
-    { "type": "cable", "path": "hub-h2",
-      "params": { "from": "hub", "to": "h2" } },
-    { "type": "cable", "path": "hub-tap",
-      "params": { "from": "hub", "to": "tap" } }
+    { "type": "cable", "path": "h1-tap",
+      "params": { "from": "h1", "to": "tap", "to port": 0 } },
+    { "type": "cable", "path": "tap-h2",
+      "params": { "from": "tap", "to": "h2", "from port": 1 } },
+    { "type": "cable", "path": "tap-rec-out",
+      "params": { "from": "tap", "to": "rec", "from port": 2 } },
+    { "type": "cable", "path": "tap-rec-in",
+      "params": { "from": "tap", "to": "rec", "from port": 3 } }
   ],
   "startup": [
-    { "path": "hub", "action": "power on" },
     { "path": "h1", "action": "power on" },
     { "path": "h2", "action": "power on" },
-    { "path": "hub-h1", "action": "power on" },
-    { "path": "hub-h2", "action": "power on" },
-    { "path": "hub-tap", "action": "power on" },
+    { "path": "h1-tap", "action": "power on" },
+    { "path": "tap-h2", "action": "power on" },
+    { "path": "tap-rec-out", "action": "power on" },
+    { "path": "tap-rec-in", "action": "power on" },
     { "path": "h1", "action": "ping",
       "params": { "target": "192.168.0.2", "count": 2 } }
   ]
 }
 ```
+
+The ports are spelled out because which is which is the whole of the device:
+`0` and `1` are the link, `2` and `3` the copies. The tap itself is not in the
+startup list, having nothing to switch on.
 
 ### Two routers
 

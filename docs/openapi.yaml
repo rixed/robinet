@@ -1918,7 +1918,7 @@ components:
           description: |
             What to send as `type` when creating a widget, and what a widget's
             `device` reads as.
-          examples: [host, switch, hub, router, gateway, portal, recorder, replayer, cable, note]
+          examples: [host, switch, hub, tap, router, gateway, portal, recorder, replayer, cable, note]
         descr: { type: string }
         params:
           type: array

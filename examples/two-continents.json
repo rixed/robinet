@@ -315,7 +315,7 @@
           ],
           "load balancing": 2
         },
-        "#5": { "speeds": [0, 1] }
+        "#5": { "speeds": [0, 1, 2, 3, 4] }
       }
     },
     {
@@ -401,10 +401,10 @@
       "properties": null
     },
     {
-      "type": "hub",
-      "path": "hub-eu",
+      "type": "tap",
+      "path": "tap-eu",
       "at": { "lat": 44.5268, "lon": 26.2025 },
-      "params": { "ports": 3 },
+      "params": null,
       "properties": null
     },
     {
@@ -689,23 +689,30 @@
     },
     {
       "type": "cable",
-      "path": "bucharest-hub-eu",
+      "path": "bucharest-tap-eu",
       "at": null,
-      "params": { "from": "bucharest", "to": "hub-eu", "from port": 5, "to port": 0, "length": 10.0 },
+      "params": { "from": "bucharest", "to": "tap-eu", "from port": 5, "to port": 0, "length": 10.0 },
       "properties": null
     },
     {
       "type": "cable",
-      "path": "hub-eu-host-eu",
+      "path": "tap-eu-host-eu",
       "at": null,
-      "params": { "from": "hub-eu", "to": "host-eu", "from port": 1, "to port": 0, "length": 10.0 },
+      "params": { "from": "tap-eu", "to": "host-eu", "from port": 1, "to port": 0, "length": 10.0 },
       "properties": null
     },
     {
       "type": "cable",
-      "path": "hub-eu-rec-eu",
+      "path": "tap-eu-rec-eu-in",
       "at": null,
-      "params": { "from": "hub-eu", "to": "rec-eu", "from port": 2, "to port": 0, "length": 10.0 },
+      "params": { "from": "tap-eu", "to": "rec-eu", "from port": 2, "to port": 0, "length": 10.0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "tap-eu-rec-eu-out",
+      "at": null,
+      "params": { "from": "tap-eu", "to": "rec-eu", "from port": 3, "to port": 0, "length": 10.0 },
       "properties": null
     },
     {
@@ -733,7 +740,7 @@
       "type": "note",
       "path": "note-4",
       "at": null,
-      "params": { "text": "gen-us sends two 1KiB frames back to back under host-us' address, from 10.1.1.3 in the western US to host-eu at 10.2.1.3 in the east of Europe. hub-us repeats them to rec-us, which writes us-eu.pcap as they leave; hub-eu repeats what arrives to rec-eu, which writes eu-us.pcap." },
+      "params": { "text": "gen-us sends two 1KiB frames back to back under host-us' address, from 10.1.1.3 in the western US to host-eu at 10.2.1.3 in the east of Europe. hub-us repeats them to rec-us, which writes us-eu.pcap as they leave. At the other end tap-eu is cut into bucharest's LAN cable and copies both directions to rec-eu, which writes eu-us.pcap; being passive it leaves host-eu free to run at its own speed, which a hub in the same place would not." },
       "properties": null
     }
   ],
@@ -753,7 +760,6 @@
     { "path": "hub-us", "action": "power on" },
     { "path": "host-us", "action": "power on" },
     { "path": "gen-us", "action": "power on" },
-    { "path": "hub-eu", "action": "power on" },
     { "path": "host-eu", "action": "power on" },
     { "path": "los-angeles-seattle", "action": "power on" },
     { "path": "los-angeles-denver", "action": "power on" },
@@ -793,8 +799,9 @@
     { "path": "hub-us-host-us", "action": "power on" },
     { "path": "hub-us-gen-us", "action": "power on" },
     { "path": "hub-us-rec-us", "action": "power on" },
-    { "path": "bucharest-hub-eu", "action": "power on" },
-    { "path": "hub-eu-host-eu", "action": "power on" },
-    { "path": "hub-eu-rec-eu", "action": "power on" }
+    { "path": "bucharest-tap-eu", "action": "power on" },
+    { "path": "tap-eu-host-eu", "action": "power on" },
+    { "path": "tap-eu-rec-eu-in", "action": "power on" },
+    { "path": "tap-eu-rec-eu-out", "action": "power on" }
   ]
 }

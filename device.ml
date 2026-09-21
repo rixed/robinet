@@ -67,6 +67,7 @@ let param = Widget.param
  * host model and the [Host] module are named after the same thing and read
  * side by side here. *)
 type model =
+    | TTap
     | THub of { ports : int ; speed : Eth.Speed.t }
     | TSwitch of { ports : int ; speeds : Eth.Speed.t list ;
                    full_duplex : bool ; macs : int }
@@ -235,6 +236,13 @@ let random_mac range =
     Eth.Addr.of_string (String.concat ":" (given @ rest))
 
 (** {2 The catalogue} *)
+
+let tap =
+    { name = "tap" ;
+      descr = "A passive device that copies the link between its ports 0 \
+               and 1 to its ports 2 and 3, one port per direction." ;
+      params = [] ;
+      of_params = fun _ -> TTap }
 
 let hub =
     { name = "hub" ;
@@ -575,6 +583,7 @@ let note =
 
 (** What kind of device a model describes, named as the catalogue names it. *)
 let type_of = function
+    | TTap -> "tap"
     | THub _ -> "hub"
     | TSwitch _ -> "switch"
     | THost _ -> "host"
@@ -606,6 +615,8 @@ let to_params =
         | None -> `Null
         | Some m -> `String (Eth.Addr.to_hexstring m) in
     function
+    | TTap ->
+        []
     | THub { ports ; speed } ->
         [ "ports", `Int ports ;
           "speed", `Int (Array.findi ((=) speed) Hub.Repeater.speeds) ]
@@ -674,6 +685,9 @@ let to_params =
  * one handed in, with whatever it left open filled in with what was chosen.
  * See [model] for why that matters. *)
 let build ~parent name = function
+    | TTap ->
+        let t = Hub.Tap.make ~parent name in
+        t.Hub.Tap.widget, TTap
     | THub { ports ; speed } as m ->
         let t = Hub.Repeater.make ~parent ~speed ports name in
         t.Hub.Repeater.widget, m
@@ -786,8 +800,8 @@ let build ~parent name = function
  * offers them: what a network is mostly made of first, and what is not a
  * device at all last. *)
 let all =
-    [ host ; switch ; hub ; router ; gateway ; portal ; recorder ; replayer ;
-      synthesizer ; cable ; note ]
+    [ host ; switch ; hub ; tap ; router ; gateway ; portal ; recorder ;
+      replayer ; synthesizer ; cable ; note ]
 
 let find name =
     List.find_opt (fun t -> t.name = name) all

@@ -447,14 +447,16 @@ let save sim ?caplen ?(dlt=default_dlt) fname =
         write_pdu pdu in
     write_bits, close
 
-(** Recorder: a widget to record pcap files and download them.
-
-   A recorder records one file after another, and they are told apart by what
-   they are called: the reader names the file, ejects it when it holds what
-   they wanted, and names the next one. The name of the recorder says where in
-   the network it is listening and has nothing to do with the names of the
-   files it writes -- the point of keeping a recorder is to record several
-   files from the same place. *)
+(** {2 Recorder}
+ *
+ * Widget to record pcap files.
+ * The recorder creates a new file [pcap_dir/fname] and records packets in it
+ * when it's started. It is "ejected" (aka the file is closed) when the
+ * filename is cleared.
+ * It can be connected as many times as one wishes, and will copy packets from
+ * all connections. It never emits anything.
+ * A recorder introduces no delay of its own: it is a "perfect" device, not the
+ * simulation of a real one. *)
 
 type recorder =
     { (* What is being recorded, as a file of [pcap_dir], or "" when nothing
