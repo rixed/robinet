@@ -63,6 +63,7 @@ let main =
                                      to_ = w.id ;
                                      from_port = None ; to_port = None ;
                                      length = None ;
+                                     speed_ratio = None ;
                                      error_rate = 0.0001 })) ;
             (* Something to run the pings on. A host built as a host has one,
              * and this is the whole reason the demo can be written this way. *)

@@ -77,7 +77,9 @@ type model =
        them with, and what a topology turns into paths on the way out. *)
     | TCable of { from_ : int ; to_ : int ;
                   from_port : int option ; to_port : int option ;
-                  length : float option ; error_rate : float }
+                  length : float option ;
+                  speed_ratio : float option ;
+                  error_rate : float }
     (* [mac_range] is what to draw the addresses from and [macs] the addresses
        themselves. A model that has been built carries the addresses and an
        empty range: once they are written down the range has nothing left to
@@ -330,6 +332,9 @@ let cable =
               ~units:"meters" ~placeholder:"distance on the map"
               ~descr:"How long it is, and hence how long a frame takes to \
                       cross it." ;
+          param "propagation speed" ~kind:(Widget.optional (FRange (0.1, 1.)))
+              ~units:"× speed of light" ~placeholder:"0.7"
+              ~descr:"How fast a signal travels along it." ;
           param "error rate" ~kind:(FRange (0., 1.)) ~default:(`Float 0.)
               ~descr:"Faulty bits per bit transmitted." ] ;
       of_params = fun args ->
@@ -339,6 +344,7 @@ let cable =
               from_port = opt args "from port" Widget.to_int ;
               to_port = opt args "to port" Widget.to_int ;
               length = opt args "length" Widget.to_float ;
+              speed_ratio = opt args "propagation speed" Widget.to_float ;
               error_rate = float args "error rate" } }
 
 (*$T random_mac
@@ -606,12 +612,14 @@ let to_params =
           "nameserver", ip_opt nameserver ;
           "search suffix", str_opt search_sfx ;
           "MAC", mac_opt mac ]
-    | TCable { from_ ; to_ ; from_port ; to_port ; length ; error_rate } ->
+    | TCable { from_ ; to_ ; from_port ; to_port ; length ; speed_ratio ;
+               error_rate } ->
         [ "from", `Int from_ ;
           "to", `Int to_ ;
           "from port", int_opt from_port ;
           "to port", int_opt to_port ;
           "length", float_opt length ;
+          "propagation speed", float_opt speed_ratio ;
           "error rate", `Float error_rate ]
     | TRouter { ports ; mac_range ; macs } ->
         [ "ports", `Int ports ;
@@ -675,7 +683,8 @@ let build ~parent name = function
            back. *)
         t.Host.trx.Host.widget,
         THost { h with mac = Some t.Host.eth_state.Eth.State.mac }
-    | TCable { from_ ; to_ ; from_port ; to_port ; length ; error_rate } ->
+    | TCable { from_ ; to_ ; from_port ; to_port ; length ; speed_ratio ;
+               error_rate } ->
         let sim = Simulation.of_widget parent in
         let end_ which id =
             match Widget.find sim.root id with
@@ -697,6 +706,8 @@ let build ~parent name = function
                 (match a.location, b.location with
                 | Some la, Some lb -> Some (Float.round (Widget.distance la lb))
                 | _ -> None) in
+        let speed =
+            Option.map (( *. ) Eth.Cable.State.light_speed) speed_ratio in
         (* Both ports before the cable, so that a refusal at the second end
          * does not leave a cable hanging off the first. *)
         let pa = free_port a from_port
@@ -708,14 +719,16 @@ let build ~parent name = function
         if a.ports.owner pa == b.ports.owner pb then
             Widget.bad_value "both ends of this cable are %s"
                 (Widget.full_name (a.ports.owner pa)) ;
-        let st =
-            Eth.Cable.State.make ~parent ?length ~error_rate ~name () in
+        let st : Eth.Cable.State.t =
+            Eth.Cable.State.make ~parent ?length ?speed ~error_rate ~name () in
         Eth.Cable.plug st (a, pa) (b, pb) ;
-        (* The ports it took and the length it ended up with, all three of
-           which it may have been left to work out for itself. *)
-        st.Eth.Cable.State.widget,
+        (* The ports it took, the length and the speed it ended up with, all
+           four of which it may have been left to work out for itself. *)
+        st.widget,
         TCable { from_ ; to_ ; from_port = Some pa ; to_port = Some pb ;
-                 length = Some st.Eth.Cable.State.length ; error_rate }
+                 length = Some st.length ;
+                 speed_ratio = Some (st.speed /. Eth.Cable.State.light_speed) ;
+                 error_rate }
     | TRouter { ports ; mac_range ; macs } ->
         let macs = macs_of ~range:mac_range ~macs ports in
         let r =

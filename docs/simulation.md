@@ -238,11 +238,12 @@ one end loose is not a cable that needs finishing, it is nothing at all.
 | `from`, `to` | path | — | The two devices. |
 | `from port`, `to port` | optional int | `null` | Which port of each; left out, the first free one. |
 | `length` | optional meters | `null` | Left out, the distance between the two points on the map — and nothing at all when either end is not placed. |
+| `propagation speed` | optional 0.1…1 | `0.7` | How fast a signal travels along it, as a fraction of the speed of light in vacuum. |
 | `error rate` | 0…1 | `0.0` | Faulty bits per bit transmitted. |
 
-`length` is what gives a cable its latency: what crosses it is delayed by
-`length / 3e8` seconds, the speed of light in vacuum and not the slower one of
-real fibre. The distance read off the map is the great-circle distance between
+Those two are what give a cable its latency: what crosses it is delayed by
+`length / propagation speed` seconds, the default 0.7 being roughly what real
+fibre does. The distance read off the map is the great-circle distance between
 the two `at` points.
 
 ### note
@@ -295,7 +296,7 @@ under:
 | replayer | `""` | `file name`, `loop` |
 | synthesizer | `""` | `emitting`, `generators`, `stream`, `packet`, `independent` |
 | | `eth0`… | *its adapters* |
-| cable | `""` | `length`, `error rate` |
+| cable | `""` | `length`, `propagation speed`, `error rate` |
 | note | `""` | `text` |
 
 *An Ethernet adapter* is `speeds`, `full-duplex` and `inter-frame-gap`, and on

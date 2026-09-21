@@ -1151,7 +1151,8 @@ struct
     struct
         type t = {
             mutable length : float ;  (** In meters. *)
-             mutable delay : Interval.t ; (** Computed from the length *)
+             mutable speed : float ;   (** In meters per second. *)
+             mutable delay : Interval.t ; (** From the length and the speed *)
         mutable error_rate : float ;  (** In faulty bits per transmitted bits *)
       mutable success_rate : int ;    (** The inverse of the above *)
           mutable tot_bits : Metric.Counter.t ; (** Per direction. *)
@@ -1180,7 +1181,9 @@ struct
             | Some (T t) -> Some t
             | _ -> None
 
-        let delay length = Interval.sec (length /. 3e8)
+        let light_speed = 3e8
+
+        let delay length speed = Interval.sec (length /. speed)
         let success_rate error_rate = int_of_float (1. /. error_rate)
 
         (* A cable has no natural parent; hang it off the root of the
@@ -1194,13 +1197,13 @@ struct
          * still on its way. Sharing the mains -- which is what it did, having
          * the root for a parent -- meant neither could be done without
          * stopping the whole network. *)
-        let make ~parent ?(length=10.) ?(error_rate=0.) ?(history=10)
-                 ?(name="cable") () =
+        let make ~parent ?(length=10.) ?(speed=0.7 *. light_speed)
+                 ?(error_rate=0.) ?(history=10) ?(name="cable") () =
             let widget = Widget.make ~parent ~own_power:true name in
             widget.device_type <- Some "cable" ;
             let t = {
                 power = widget.power ;
-                length ; delay = delay length ;
+                length ; speed ; delay = delay length speed ;
                 error_rate ; success_rate = success_rate error_rate ;
                 tot_bits = Metric.Counter.make () ;
                 bit_shifts = Metric.Counter.make () ;
@@ -1214,8 +1217,17 @@ struct
                     ~setter:(fun v ->
                         let l = to_float v in
                         t.length <- l ;
-                        t.delay <- delay l)
+                        t.delay <- delay l t.speed)
                     ~getter:(fun () -> `Float t.length) ;
+                property "propagation speed" ~kind:(FRange (0.1, 1.))
+                    ~units:"× speed of light"
+                    ~descr:"How fast a signal travels along it."
+                    ~setter:(fun v ->
+                        let s =
+                            to_float_range ~min:0.1 ~max:1. v *. light_speed in
+                        t.speed <- s ;
+                        t.delay <- delay t.length s)
+                    ~getter:(fun () -> `Float (t.speed /. light_speed)) ;
                 property "error rate" ~kind:(FRange (0., 1.))
                     ~descr:"Faulty bits per transmitted bits."
                     ~setter:(fun v ->
