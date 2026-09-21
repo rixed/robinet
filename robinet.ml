@@ -47,7 +47,7 @@ let open_document (path, (clock : Cli.clock)) =
             Printf.eprintf "%s\n%!" m ;
             exit 1
         | s ->
-            (match Topology.of_string s with
+            (match Topology.of_string ~env:true s with
             | exception Widget.Bad_value m ->
                 Printf.eprintf "%s: %s\n%!" path m ;
                 exit 1

@@ -414,6 +414,10 @@ paths:
         refuses: loading into it would take the interface with it, leaving
         nothing to say so.
 
+        A document sent here is taken as it is written: the environment
+        variables a value may name are expanded only for a document `robinet`
+        reads from a file, which it does on behalf of whoever started it.
+
         `POST` does the same thing.
       operationId: putTopology
       requestBody:

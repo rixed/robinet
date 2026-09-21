@@ -110,6 +110,31 @@ A router's `load balancing` is numbered `0`–`3`: first matching, track flow,
 random, round robin. It says which of the routes that matched a packet actually
 carries it — see *Routing tables* below.
 
+## Environment variables
+
+A value written as a string is also what lets a document be parameterised: a
+file `robinet` reads names environment variables in its values, and what they
+stand for is text.
+
+```json
+{ "type": "switch", "path": "sw", "params": { "ports": "$NB_PORTS" } }
+```
+
+`$NAME` and `${NAME}` are that variable, and `${NAME:-8}` is one that need not
+be set. **A variable that is not set and has no default is refused**, naming
+itself, rather than read as nothing: a misspelt name that quietly became `""`
+would go wrong a long way from the line that wrote it.
+
+`$$` is a dollar, and so is a `$` that begins no name — `"costs $5"` is five
+dollars. What a variable stands for is not looked at again, so a value holding
+a `$` is a value. Values only: a key is the name of a parameter or of a
+property.
+
+They are expanded once, as the file is read, so saving the network writes what
+it was built with and not the names it was written with. And only there: a
+document arriving over the API is taken as it is written, since a file is read
+on behalf of whoever started `robinet` and a request is not.
+
 ## The catalogue
 
 What a device is *built* with is a short list — the few things one is asked for

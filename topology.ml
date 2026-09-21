@@ -227,11 +227,134 @@ let of_json j =
         | v -> Widget.bad_value "%s: %S must be a list, not %s" what "startup"
                    (Yojson.Basic.to_string v)) }
 
-let of_string s =
+(* {2 Environment variables}
+ *
+ * A document read from a file may name environment variables in its values:
+ * ["$NB_PORTS"], ["${NB_PORTS}"], or ["${NB_PORTS:-8}"] for one that need not
+ * be set. Which is only useful because any single value may be written as a
+ * string: what a variable stands in for is text, and the kind it is read as is
+ * the document's to say.
+ *
+ * Values only: a key is the name of a parameter or of a property, which the
+ * reader is entitled to know by heart. A ['$'] that begins no name is one, so
+ * "costs $5" is five dollars, and ["$$"] is a dollar whatever follows it. What
+ * a variable expands to is not looked at again, so a value holding a ['$'] is
+ * a value. *)
+
+let name_first c =
+    (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c = '_'
+
+let name_rest c = name_first c || (c >= '0' && c <= '9')
+
+let is_name s =
+    let n = String.length s in
+    let rec ok i = i >= n || (name_rest s.[i] && ok (i + 1)) in
+    n > 0 && name_first s.[0] && ok 1
+
+let env_subst_string ?(getenv=Sys.getenv_opt) s =
+    if not (String.contains s '$') then s else
+    let n = String.length s in
+    let buf = Buffer.create n in
+    (* What a variable stands for, [dflt] when it is not set, and a refusal
+     * when it is not set and has none: a name that expanded to nothing would
+     * go wrong a long way from the line that misspelt it. *)
+    let value name dflt =
+        match getenv name with
+        | Some v -> v
+        | None ->
+            (match dflt with
+            | Some d -> d
+            | None ->
+                Widget.bad_value "$%s is not set (write \"${%s:-...}\" to give \
+                                  it a default)" name name) in
+    let rec loop i =
+        if i < n then
+            if s.[i] <> '$' then (
+                Buffer.add_char buf s.[i] ;
+                loop (i + 1)
+            ) else if i + 1 < n && s.[i + 1] = '$' then (
+                Buffer.add_char buf '$' ;
+                loop (i + 2)
+            ) else if i + 1 < n && s.[i + 1] = '{' then
+                braced (i + 2)
+            else if i + 1 < n && name_first s.[i + 1] then
+                bare (i + 1)
+            else (
+                Buffer.add_char buf '$' ;
+                loop (i + 1)
+            )
+    (* [$NAME], which ends where a name ends. *)
+    and bare i =
+        let j = ref i in
+        while !j < n && name_rest s.[!j] do incr j done ;
+        Buffer.add_string buf (value (String.sub s i (!j - i)) None) ;
+        loop !j
+    (* [${NAME}] or [${NAME:-what it is worth without one}]. *)
+    and braced i =
+        match String.index_from s i '}' with
+        | exception Not_found ->
+            Widget.bad_value "%S has a \"${\" that is never closed" s
+        | j ->
+            let body = String.sub s i (j - i) in
+            let name, dflt =
+                match String.find body ":-" with
+                | exception Not_found -> body, None
+                | k ->
+                    String.sub body 0 k,
+                    Some (String.sub body (k + 2) (String.length body - k - 2)) in
+            if not (is_name name) then
+                Widget.bad_value "%S names no variable" ("${"^ body ^"}") ;
+            Buffer.add_string buf (value name dflt) ;
+            loop (j + 1) in
+    loop 0 ;
+    Buffer.contents buf
+
+(* The environment is read through [getenv] and not around it, so that these
+ * can say what is set without setting it: a test that puts a variable in this
+ * process leaves it there for every test after it. *)
+(*$inject
+  let subst =
+      env_subst_string ~getenv:(function "VAR" -> Some "42" | _ -> None)
+ *)
+(*$= subst & ~printer:(fun s -> s)
+  "42" (subst "$VAR")
+  "42" (subst "${VAR}")
+  "42" (subst "${VAR:-8}")
+  "8" (subst "${UNSET:-8}")
+  "" (subst "${UNSET:-}")
+  "" (subst "")
+  "port 42!" (subst "port $VAR!")
+  "42-42" (subst "$VAR-${VAR}")
+  "costs $5" (subst "costs $5")
+  "trailing $" (subst "trailing $")
+  "$VAR" (subst "$$VAR")
+  "02:52:01:00:00:01" (subst "02:52:01:00:00:01")
+ *)
+(*$T subst
+  (try ignore (subst "$UNSET") ; false with Widget.Bad_value _ -> true)
+  (try ignore (subst "${UNSET}") ; false with Widget.Bad_value _ -> true)
+  (try ignore (subst "${VAR") ; false with Widget.Bad_value _ -> true)
+  (try ignore (subst "${}") ; false with Widget.Bad_value _ -> true)
+  (try ignore (subst "${2VAR}") ; false with Widget.Bad_value _ -> true)
+ *)
+
+(* Every string of a document, and nothing else: the names of the parameters
+ * and of the properties are this reader's own. *)
+let rec env_subst : Yojson.Basic.t -> Yojson.Basic.t = function
+    | `String s -> `String (env_subst_string s)
+    | `List l -> `List (List.map env_subst l)
+    | `Assoc l -> `Assoc (List.map (fun (k, v) -> k, env_subst v) l)
+    | j -> j
+
+(** Read a document. [env] expands the environment variables its values name,
+ * which a document read from a file does and one arriving over the API does
+ * not: a file is read on behalf of whoever started this process, and a request
+ * is not. *)
+let of_string ?(env=false) s =
     match Yojson.Basic.from_string s with
     | exception _ ->
         Widget.bad_value "This is not a topology: it is not even JSON"
-    | j -> of_json j
+    | j -> of_json (if env then env_subst j else j)
 
 (*$= of_string & ~printer:dump
   [ "sw", [ "" , [ "cut-through", `Bool true ] ] ] \
