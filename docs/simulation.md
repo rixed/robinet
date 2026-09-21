@@ -452,17 +452,11 @@ What can be asked:
 `GET /api/simulations/<s>/widgets/<w>/actions` lists what one widget will
 answer to, and what each takes.
 
-Two things to know before putting much in a list:
-
-- **Routers and gateways switch themselves on when built**, so their `power on`
-  runs against a box that is already on and says `cannot power on just now`.
-  Harmless, and the entry is worth keeping: it is what will switch them on the
-  day they stop doing it themselves.
-- **The list runs at time zero**, so anything that has to wait cannot be asked
-  here. A DHCP client waits a few seconds before its first request, so a `ping`
-  in the list goes out before the host has an address. Give it a `count` large
-  enough to outlive the wait, or ask from the interface once the network has
-  settled.
+One thing to know before putting much in a list: **it runs at time zero**, so
+anything that has to wait cannot be asked here. A DHCP client waits a few
+seconds before its first request, so a `ping` in the list goes out before the
+host has an address. Give it a `count` large enough to outlive the wait, or ask
+from the interface once the network has settled.
 
 ## Examples
 

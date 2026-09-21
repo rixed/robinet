@@ -271,11 +271,11 @@ struct
         Eth.Iface.dev t.ifaces.(n)
 
     (* [num_macs] is the maximum number of remembered MACs. *)
-    let make ~parent ?location ?speeds ?full_duplex ?(cut_through=true)
-             num_ifaces num_macs name =
+    let make ~parent ?(own_power=true) ?location ?speeds ?full_duplex
+             ?(cut_through=true) num_ifaces num_macs name =
         let widget =
             Widget.make ~device_type:"switch" ~parent ?location
-                        ~own_power:true name in
+                        ~own_power name in
         let power = widget.power in
         let t = {
             ifaces = [||] (* See below *) ;

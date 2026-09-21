@@ -724,10 +724,6 @@ struct
             (* When packets are received from the outside, go to routing: *)
             iface.trx.ins.set_read (route (Some n) t)
         ) t.ifaces ;
-        (* And now it may run. A router built as a part of something larger --
-           a gateway's -- draws on the box's supply and leaves the switching
-           to it. *)
-        if widget.owns_power then Simulation.power_up t.power ;
         t
 
     (* Returns both the router and the eth trxs (ins is inside router) created for you *)
@@ -913,16 +909,20 @@ struct
         let eth = r.ifaces.(0).eth in
         "an interface with no address has no admin host" @?
             (r.ifaces.(0).admin_host = None) ;
-        Eth.State.set_arp eth
-            (Ip.Addr.to_bitstring (Ip.Addr.of_dotted_string "1.2.3.4"))
-            (Some (Eth.Addr.random ())) ;
-        "and its adapter still learns" @?
-            (Tools.BitHash.length eth.Eth.State.arp_cache = 1) ;
         "a router of its own mints the supply it draws on" @?
             r.widget.owns_power ;
         let flip on =
             (if on then Simulation.power_up else Simulation.power_down)
                 r.widget.power in
+        (* Born dark, as every box is, and a supply that is already off is not
+           switched off again: there is something to forget only once the box
+           has been switched on. *)
+        flip true ;
+        Eth.State.set_arp eth
+            (Ip.Addr.to_bitstring (Ip.Addr.of_dotted_string "1.2.3.4"))
+            (Some (Eth.Addr.random ())) ;
+        "and its adapter still learns" @?
+            (Tools.BitHash.length eth.Eth.State.arp_cache = 1) ;
         flip false ;
         "which the box forgets when it is switched off" @?
             (Tools.BitHash.length eth.Eth.State.arp_cache = 0) ;
@@ -1175,12 +1175,6 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
             | 0 -> (Router.ports router.ifaces.(1)).set_capabilities 0 c
             | _ -> hub.widget.ports.set_capabilities 0 c) } ;
     widget.device <- Some (T gw) ;
-    (* And now the whole box may run: its supply is the one its router and its
-       server draw on, and switching it on is what starts them -- the server
-       then starts the services above, from [on_ip], once it has its address.
-       Everything that was to be hung on them is hung on them by now, which is
-       why a source is minted switched off. *)
-    if own_power then Simulation.power_up gw.widget.power ;
     gw
 
 (* A gateway serves DHCP from a host built inside it, which goes down and comes
