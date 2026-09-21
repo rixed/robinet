@@ -1,0 +1,856 @@
+{
+  "version": 1,
+  "name": "two-continents",
+  "devices": [
+    {
+      "type": "router",
+      "path": "los-angeles",
+      "at": { "lat": 34.0522, "lon": -118.2437 },
+      "params": {
+        "ports": 6,
+        "MACs": "02:52:01:00:00:00,02:52:01:00:00:01,02:52:01:00:00:02,02:52:01:00:00:03,02:52:01:00:00:04,02:52:01:00:00:05"
+      },
+      "properties": {
+        "": {
+          "routes": [
+            { "input port": 5, "src mask": null, "dst mask": "10.1.1.1/24", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.1/32", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.2/32", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.3/32", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.4/32", "ip proto": null, "src port": null, "dst port": null, "output port": 2, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.5/32", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.6/32", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.1.0/24", "ip proto": null, "src port": null, "dst port": null, "output port": 5, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": "10.1.0.5" },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": "10.1.0.6" }
+          ],
+          "load balancing": 2
+        },
+        "#0": { "speeds": [5] },
+        "#1": { "speeds": [5] },
+        "#2": { "speeds": [5] },
+        "#3": { "speeds": [5] },
+        "#4": { "speeds": [5] },
+        "#5": { "speeds": [0, 1] }
+      }
+    },
+    {
+      "type": "router",
+      "path": "seattle",
+      "at": { "lat": 47.6062, "lon": -122.3321 },
+      "params": {
+        "ports": 5,
+        "MAC range": "02:52:03"
+      },
+      "properties": {
+        "": {
+          "routes": [
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.2/32", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.1/32", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.3/32", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.4/32", "ip proto": null, "src port": null, "dst port": null, "output port": 2, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.5/32", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.6/32", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.1.0/24", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": "10.1.0.1" },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": "10.1.0.5" },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": "10.1.0.6" }
+          ],
+          "load balancing": 2
+        },
+        "#0": { "speeds": [5] },
+        "#1": { "speeds": [5] },
+        "#2": { "speeds": [5] },
+        "#3": { "speeds": [5] },
+        "#4": { "speeds": [5] }
+      }
+    },
+    {
+      "type": "router",
+      "path": "denver",
+      "at": { "lat": 39.7392, "lon": -104.9903 },
+      "params": {
+        "ports": 5,
+        "MAC range": "02:52:04"
+      },
+      "properties": {
+        "": {
+          "routes": [
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.3/32", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.1/32", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.2/32", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.4/32", "ip proto": null, "src port": null, "dst port": null, "output port": 2, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.5/32", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.6/32", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.1.0/24", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": "10.1.0.1" },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": "10.1.0.5" },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": "10.1.0.6" }
+          ],
+          "load balancing": 2
+        },
+        "#0": { "speeds": [5] },
+        "#1": { "speeds": [5] },
+        "#2": { "speeds": [5] },
+        "#3": { "speeds": [5] },
+        "#4": { "speeds": [5] }
+      }
+    },
+    {
+      "type": "router",
+      "path": "chicago",
+      "at": { "lat": 41.8781, "lon": -87.6298 },
+      "params": {
+        "ports": 5,
+        "MAC range": "02:52:05"
+      },
+      "properties": {
+        "": {
+          "routes": [
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.4/32", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.1/32", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.2/32", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.3/32", "ip proto": null, "src port": null, "dst port": null, "output port": 2, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.5/32", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.6/32", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.1.0/24", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": "10.1.0.1" },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": "10.1.0.5" },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": "10.1.0.6" }
+          ],
+          "load balancing": 2
+        },
+        "#0": { "speeds": [5, 7] },
+        "#1": { "speeds": [5, 7] },
+        "#2": { "speeds": [5, 7] },
+        "#3": { "speeds": [5, 7] },
+        "#4": { "speeds": [5, 7] }
+      }
+    },
+    {
+      "type": "router",
+      "path": "new-york",
+      "at": { "lat": 40.7128, "lon": -74.006 },
+      "params": {
+        "ports": 7,
+        "MAC range": "02:52:06"
+      },
+      "properties": {
+        "": {
+          "routes": [
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.5/32", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.1/32", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.2/32", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.3/32", "ip proto": null, "src port": null, "dst port": null, "output port": 2, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.4/32", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.6/32", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.1.0/24", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": "10.1.0.1" },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 5, "via": "10.2.0.2" },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 6, "via": "10.2.0.1" }
+          ],
+          "load balancing": 3
+        },
+        "#0": { "speeds": [5, 7] },
+        "#1": { "speeds": [5, 7] },
+        "#2": { "speeds": [5, 7] },
+        "#3": { "speeds": [5, 7] },
+        "#4": { "speeds": [5, 7] },
+        "#5": { "speeds": [5, 7] },
+        "#6": { "speeds": [5, 7] }
+      }
+    },
+    {
+      "type": "router",
+      "path": "ashburn",
+      "at": { "lat": 39.0438, "lon": -77.4874 },
+      "params": {
+        "ports": 7,
+        "MAC range": "02:52:07"
+      },
+      "properties": {
+        "": {
+          "routes": [
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.6/32", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.1/32", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.2/32", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.3/32", "ip proto": null, "src port": null, "dst port": null, "output port": 2, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.4/32", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.5/32", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.1.0/24", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": "10.1.0.1" },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 5, "via": "10.2.0.2" },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 6, "via": "10.2.0.1" }
+          ],
+          "load balancing": 3
+        },
+        "#0": { "speeds": [5, 7] },
+        "#1": { "speeds": [5, 7] },
+        "#2": { "speeds": [5, 7] },
+        "#3": { "speeds": [5, 7] },
+        "#4": { "speeds": [5, 7] },
+        "#5": { "speeds": [5, 7] },
+        "#6": { "speeds": [5, 7] }
+      }
+    },
+    {
+      "type": "router",
+      "path": "lisbon",
+      "at": { "lat": 38.7223, "lon": -9.1393 },
+      "params": {
+        "ports": 7,
+        "MAC range": "02:52:08"
+      },
+      "properties": {
+        "": {
+          "routes": [
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.1/32", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.2/32", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.3/32", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.4/32", "ip proto": null, "src port": null, "dst port": null, "output port": 2, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.5/32", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.6/32", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.1.0/24", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": "10.2.0.6" },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 5, "via": "10.1.0.5" },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 6, "via": "10.1.0.6" }
+          ],
+          "load balancing": 3
+        },
+        "#0": { "speeds": [5, 7] },
+        "#1": { "speeds": [5, 7] },
+        "#2": { "speeds": [5, 7] },
+        "#3": { "speeds": [5, 7] },
+        "#4": { "speeds": [5, 7] },
+        "#5": { "speeds": [5, 7] },
+        "#6": { "speeds": [5, 7] }
+      }
+    },
+    {
+      "type": "router",
+      "path": "london",
+      "at": { "lat": 51.5074, "lon": -0.1278 },
+      "params": {
+        "ports": 7,
+        "MAC range": "02:52:09"
+      },
+      "properties": {
+        "": {
+          "routes": [
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.2/32", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.1/32", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.3/32", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.4/32", "ip proto": null, "src port": null, "dst port": null, "output port": 2, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.5/32", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.6/32", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.1.0/24", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": "10.2.0.6" },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 5, "via": "10.1.0.5" },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 6, "via": "10.1.0.6" }
+          ],
+          "load balancing": 3
+        },
+        "#0": { "speeds": [5, 7] },
+        "#1": { "speeds": [5, 7] },
+        "#2": { "speeds": [5, 7] },
+        "#3": { "speeds": [5, 7] },
+        "#4": { "speeds": [5, 7] },
+        "#5": { "speeds": [5, 7] },
+        "#6": { "speeds": [5, 7] }
+      }
+    },
+    {
+      "type": "router",
+      "path": "paris",
+      "at": { "lat": 48.8566, "lon": 2.3522 },
+      "params": {
+        "ports": 5,
+        "MAC range": "02:52:0a"
+      },
+      "properties": {
+        "": {
+          "routes": [
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.3/32", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.1/32", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.2/32", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.4/32", "ip proto": null, "src port": null, "dst port": null, "output port": 2, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.5/32", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.6/32", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.1.0/24", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": "10.2.0.6" },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": "10.2.0.1" },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": "10.2.0.2" }
+          ],
+          "load balancing": 2
+        },
+        "#0": { "speeds": [5] },
+        "#1": { "speeds": [5] },
+        "#2": { "speeds": [5] },
+        "#3": { "speeds": [5] },
+        "#4": { "speeds": [5] }
+      }
+    },
+    {
+      "type": "router",
+      "path": "frankfurt",
+      "at": { "lat": 50.1109, "lon": 8.6821 },
+      "params": {
+        "ports": 5,
+        "MAC range": "02:52:0b"
+      },
+      "properties": {
+        "": {
+          "routes": [
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.4/32", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.1/32", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.2/32", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.3/32", "ip proto": null, "src port": null, "dst port": null, "output port": 2, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.5/32", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.6/32", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.1.0/24", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": "10.2.0.6" },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": "10.2.0.1" },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": "10.2.0.2" }
+          ],
+          "load balancing": 2
+        },
+        "#0": { "speeds": [5, 7] },
+        "#1": { "speeds": [5, 7] },
+        "#2": { "speeds": [5, 7] },
+        "#3": { "speeds": [5, 7] },
+        "#4": { "speeds": [5, 7] }
+      }
+    },
+    {
+      "type": "router",
+      "path": "warsaw",
+      "at": { "lat": 52.2297, "lon": 21.0122 },
+      "params": {
+        "ports": 5,
+        "MAC range": "02:52:0c"
+      },
+      "properties": {
+        "": {
+          "routes": [
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.5/32", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.1/32", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.2/32", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.3/32", "ip proto": null, "src port": null, "dst port": null, "output port": 2, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.4/32", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.6/32", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.1.0/24", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": "10.2.0.6" },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": "10.2.0.1" },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": "10.2.0.2" }
+          ],
+          "load balancing": 2
+        },
+        "#0": { "speeds": [5] },
+        "#1": { "speeds": [5] },
+        "#2": { "speeds": [5] },
+        "#3": { "speeds": [5] },
+        "#4": { "speeds": [5] }
+      }
+    },
+    {
+      "type": "router",
+      "path": "bucharest",
+      "at": { "lat": 44.4268, "lon": 26.1025 },
+      "params": {
+        "ports": 6,
+        "MAC range": "02:52:0d"
+      },
+      "properties": {
+        "": {
+          "routes": [
+            { "input port": 5, "src mask": null, "dst mask": "10.2.1.1/24", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.6/32", "ip proto": null, "src port": null, "dst port": null, "output port": null, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.1/32", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.2/32", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.3/32", "ip proto": null, "src port": null, "dst port": null, "output port": 2, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.4/32", "ip proto": null, "src port": null, "dst port": null, "output port": 3, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.0.5/32", "ip proto": null, "src port": null, "dst port": null, "output port": 4, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.2.1.0/24", "ip proto": null, "src port": null, "dst port": null, "output port": 5, "via": null },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 0, "via": "10.2.0.1" },
+            { "input port": null, "src mask": null, "dst mask": "10.1.0.0/16", "ip proto": null, "src port": null, "dst port": null, "output port": 1, "via": "10.2.0.2" }
+          ],
+          "load balancing": 2
+        },
+        "#0": { "speeds": [5] },
+        "#1": { "speeds": [5] },
+        "#2": { "speeds": [5] },
+        "#3": { "speeds": [5] },
+        "#4": { "speeds": [5] },
+        "#5": { "speeds": [0, 1] }
+      }
+    },
+    {
+      "type": "hub",
+      "path": "hub-us",
+      "at": { "lat": 33.9522, "lon": -118.1437 },
+      "params": { "ports": 4 },
+      "properties": null
+    },
+    {
+      "type": "host",
+      "path": "host-us",
+      "at": { "lat": 33.9022, "lon": -118.0937 },
+      "params": { "static-ip": "10.1.1.3", "netmask": "255.255.255.0", "gateway": "10.1.1.1", "MAC": "02:52:0d:00:00:01" },
+      "properties": null
+    },
+    {
+      "type": "synthesizer",
+      "path": "gen-us",
+      "at": { "lat": 33.8522, "lon": -118.1937 },
+      "params": { "adapters": 1 },
+      "properties": {
+        "": {
+          "generators": [
+            {
+              "name": "frame payload",
+              "generator": { "constant": 982 }
+            }
+          ],
+          "stream": { "stop after": 2, "distance": null, "distance from end": true },
+          "packet": [
+            {
+              "name": "Eth",
+              "fields": {
+                "source": { "const": "02:52:0d:00:00:01" },
+                "destination": { "const": "02:52:01:00:00:05" },
+                "protocol": null,
+                "payload": null
+              }
+            },
+            {
+              "name": "Ip",
+              "fields": {
+                "type of service": null,
+                "total length": null,
+                "id": null,
+                "don't fragment": { "const": false },
+                "more fragments": null,
+                "fragment offset": null,
+                "time to live": null,
+                "protocol": null,
+                "source": { "const": "10.1.1.3" },
+                "destination": { "const": "10.2.1.3" },
+                "options": null,
+                "payload": null
+              }
+            },
+            {
+              "name": "Udp",
+              "fields": {
+                "source port": { "const": 40000 },
+                "destination port": { "const": 5000 },
+                "length": null,
+                "checksum": null,
+                "payload": null
+              }
+            },
+            {
+              "name": "Data",
+              "fields": { "gen": "frame payload" }
+            }
+          ],
+          "independent": false,
+          "emitting": true
+        }
+      }
+    },
+    {
+      "type": "recorder",
+      "path": "rec-us",
+      "at": { "lat": 34.0022, "lon": -118.0437 },
+      "params": { "file name": "us-eu.pcap" },
+      "properties": null
+    },
+    {
+      "type": "hub",
+      "path": "hub-eu",
+      "at": { "lat": 44.5268, "lon": 26.2025 },
+      "params": { "ports": 3 },
+      "properties": null
+    },
+    {
+      "type": "host",
+      "path": "host-eu",
+      "at": { "lat": 44.5768, "lon": 26.2525 },
+      "params": { "static-ip": "10.2.1.3", "netmask": "255.255.255.0", "gateway": "10.2.1.1", "MAC": "02:52:0e:00:00:01" },
+      "properties": null
+    },
+    {
+      "type": "recorder",
+      "path": "rec-eu",
+      "at": { "lat": 44.4768, "lon": 26.3025 },
+      "params": { "file name": "eu-us.pcap" },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "los-angeles-seattle",
+      "at": null,
+      "params": { "from": "los-angeles", "to": "seattle", "from port": 0, "to port": 0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "los-angeles-denver",
+      "at": null,
+      "params": { "from": "los-angeles", "to": "denver", "from port": 1, "to port": 0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "los-angeles-chicago",
+      "at": null,
+      "params": { "from": "los-angeles", "to": "chicago", "from port": 2, "to port": 0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "los-angeles-new-york",
+      "at": null,
+      "params": { "from": "los-angeles", "to": "new-york", "from port": 3, "to port": 0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "los-angeles-ashburn",
+      "at": null,
+      "params": { "from": "los-angeles", "to": "ashburn", "from port": 4, "to port": 0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "seattle-denver",
+      "at": null,
+      "params": { "from": "seattle", "to": "denver", "from port": 1, "to port": 1 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "seattle-chicago",
+      "at": null,
+      "params": { "from": "seattle", "to": "chicago", "from port": 2, "to port": 1 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "seattle-new-york",
+      "at": null,
+      "params": { "from": "seattle", "to": "new-york", "from port": 3, "to port": 1 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "seattle-ashburn",
+      "at": null,
+      "params": { "from": "seattle", "to": "ashburn", "from port": 4, "to port": 1 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "denver-chicago",
+      "at": null,
+      "params": { "from": "denver", "to": "chicago", "from port": 2, "to port": 2 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "denver-new-york",
+      "at": null,
+      "params": { "from": "denver", "to": "new-york", "from port": 3, "to port": 2 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "denver-ashburn",
+      "at": null,
+      "params": { "from": "denver", "to": "ashburn", "from port": 4, "to port": 2 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "chicago-new-york",
+      "at": null,
+      "params": { "from": "chicago", "to": "new-york", "from port": 3, "to port": 3 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "chicago-ashburn",
+      "at": null,
+      "params": { "from": "chicago", "to": "ashburn", "from port": 4, "to port": 3 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "new-york-ashburn",
+      "at": null,
+      "params": { "from": "new-york", "to": "ashburn", "from port": 4, "to port": 4 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "lisbon-london",
+      "at": null,
+      "params": { "from": "lisbon", "to": "london", "from port": 0, "to port": 0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "lisbon-paris",
+      "at": null,
+      "params": { "from": "lisbon", "to": "paris", "from port": 1, "to port": 0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "lisbon-frankfurt",
+      "at": null,
+      "params": { "from": "lisbon", "to": "frankfurt", "from port": 2, "to port": 0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "lisbon-warsaw",
+      "at": null,
+      "params": { "from": "lisbon", "to": "warsaw", "from port": 3, "to port": 0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "lisbon-bucharest",
+      "at": null,
+      "params": { "from": "lisbon", "to": "bucharest", "from port": 4, "to port": 0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "london-paris",
+      "at": null,
+      "params": { "from": "london", "to": "paris", "from port": 1, "to port": 1 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "london-frankfurt",
+      "at": null,
+      "params": { "from": "london", "to": "frankfurt", "from port": 2, "to port": 1 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "london-warsaw",
+      "at": null,
+      "params": { "from": "london", "to": "warsaw", "from port": 3, "to port": 1 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "london-bucharest",
+      "at": null,
+      "params": { "from": "london", "to": "bucharest", "from port": 4, "to port": 1 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "paris-frankfurt",
+      "at": null,
+      "params": { "from": "paris", "to": "frankfurt", "from port": 2, "to port": 2 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "paris-warsaw",
+      "at": null,
+      "params": { "from": "paris", "to": "warsaw", "from port": 3, "to port": 2 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "paris-bucharest",
+      "at": null,
+      "params": { "from": "paris", "to": "bucharest", "from port": 4, "to port": 2 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "frankfurt-warsaw",
+      "at": null,
+      "params": { "from": "frankfurt", "to": "warsaw", "from port": 3, "to port": 3 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "frankfurt-bucharest",
+      "at": null,
+      "params": { "from": "frankfurt", "to": "bucharest", "from port": 4, "to port": 3 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "warsaw-bucharest",
+      "at": null,
+      "params": { "from": "warsaw", "to": "bucharest", "from port": 4, "to port": 4 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "new-york-london",
+      "at": null,
+      "params": { "from": "new-york", "to": "london", "from port": 5, "to port": 5 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "new-york-lisbon",
+      "at": null,
+      "params": { "from": "new-york", "to": "lisbon", "from port": 6, "to port": 5 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "ashburn-london",
+      "at": null,
+      "params": { "from": "ashburn", "to": "london", "from port": 5, "to port": 6 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "ashburn-lisbon",
+      "at": null,
+      "params": { "from": "ashburn", "to": "lisbon", "from port": 6, "to port": 6 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "los-angeles-hub-us",
+      "at": null,
+      "params": { "from": "los-angeles", "to": "hub-us", "from port": 5, "to port": 0, "length": 10.0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "hub-us-host-us",
+      "at": null,
+      "params": { "from": "hub-us", "to": "host-us", "from port": 1, "to port": 0, "length": 10.0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "hub-us-gen-us",
+      "at": null,
+      "params": { "from": "hub-us", "to": "gen-us", "from port": 2, "to port": 0, "length": 10.0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "hub-us-rec-us",
+      "at": null,
+      "params": { "from": "hub-us", "to": "rec-us", "from port": 3, "to port": 0, "length": 10.0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "bucharest-hub-eu",
+      "at": null,
+      "params": { "from": "bucharest", "to": "hub-eu", "from port": 5, "to port": 0, "length": 10.0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "hub-eu-host-eu",
+      "at": null,
+      "params": { "from": "hub-eu", "to": "host-eu", "from port": 1, "to port": 0, "length": 10.0 },
+      "properties": null
+    },
+    {
+      "type": "cable",
+      "path": "hub-eu-rec-eu",
+      "at": null,
+      "params": { "from": "hub-eu", "to": "rec-eu", "from port": 2, "to port": 0, "length": 10.0 },
+      "properties": null
+    },
+    {
+      "type": "note",
+      "path": "note-1",
+      "at": null,
+      "params": { "text": "Two full meshes of six routers, one address each: 10.1.0.1 to .6 across the US (los-angeles, seattle, denver, chicago, new-york, ashburn) and 10.2.0.1 to .6 across Europe (lisbon, london, paris, frankfurt, warsaw, bucharest). Ports 0 to 4 of every router are its five neighbours, in that order. Cables have no length of their own, so each takes the distance between the two cities and the latency that goes with it." },
+      "properties": null
+    },
+    {
+      "type": "note",
+      "path": "note-2",
+      "at": null,
+      "params": { "text": "chicago, new-york, ashburn, lisbon, london and frankfurt are 40Gbps and advertise 10Gbps as well; los-angeles, seattle, denver, paris, warsaw and bucharest are 10Gbps. A link runs at the fastest speed both ends offer, so the four ocean crossings run at 40Gbps and a link to a 10Gbps router at 10Gbps." },
+      "properties": null
+    },
+    {
+      "type": "note",
+      "path": "note-3",
+      "at": null,
+      "params": { "text": "new-york and ashburn are each cabled to both london and lisbon: four crossings, and two ways to the far continent for every router. Those four balance round robin, taking their two crossings in turn; everyone else balances at random between them. Each continent is one /16, so one pair of rows carries the whole of the other one." },
+      "properties": null
+    },
+    {
+      "type": "note",
+      "path": "note-4",
+      "at": null,
+      "params": { "text": "gen-us sends two 1KiB frames back to back under host-us' address, from 10.1.1.3 in the western US to host-eu at 10.2.1.3 in the east of Europe. hub-us repeats them to rec-us, which writes us-eu.pcap as they leave; hub-eu repeats what arrives to rec-eu, which writes eu-us.pcap." },
+      "properties": null
+    }
+  ],
+  "startup": [
+    { "path": "los-angeles", "action": "power on" },
+    { "path": "seattle", "action": "power on" },
+    { "path": "denver", "action": "power on" },
+    { "path": "chicago", "action": "power on" },
+    { "path": "new-york", "action": "power on" },
+    { "path": "ashburn", "action": "power on" },
+    { "path": "lisbon", "action": "power on" },
+    { "path": "london", "action": "power on" },
+    { "path": "paris", "action": "power on" },
+    { "path": "frankfurt", "action": "power on" },
+    { "path": "warsaw", "action": "power on" },
+    { "path": "bucharest", "action": "power on" },
+    { "path": "hub-us", "action": "power on" },
+    { "path": "host-us", "action": "power on" },
+    { "path": "gen-us", "action": "power on" },
+    { "path": "hub-eu", "action": "power on" },
+    { "path": "host-eu", "action": "power on" },
+    { "path": "los-angeles-seattle", "action": "power on" },
+    { "path": "los-angeles-denver", "action": "power on" },
+    { "path": "los-angeles-chicago", "action": "power on" },
+    { "path": "los-angeles-new-york", "action": "power on" },
+    { "path": "los-angeles-ashburn", "action": "power on" },
+    { "path": "seattle-denver", "action": "power on" },
+    { "path": "seattle-chicago", "action": "power on" },
+    { "path": "seattle-new-york", "action": "power on" },
+    { "path": "seattle-ashburn", "action": "power on" },
+    { "path": "denver-chicago", "action": "power on" },
+    { "path": "denver-new-york", "action": "power on" },
+    { "path": "denver-ashburn", "action": "power on" },
+    { "path": "chicago-new-york", "action": "power on" },
+    { "path": "chicago-ashburn", "action": "power on" },
+    { "path": "new-york-ashburn", "action": "power on" },
+    { "path": "lisbon-london", "action": "power on" },
+    { "path": "lisbon-paris", "action": "power on" },
+    { "path": "lisbon-frankfurt", "action": "power on" },
+    { "path": "lisbon-warsaw", "action": "power on" },
+    { "path": "lisbon-bucharest", "action": "power on" },
+    { "path": "london-paris", "action": "power on" },
+    { "path": "london-frankfurt", "action": "power on" },
+    { "path": "london-warsaw", "action": "power on" },
+    { "path": "london-bucharest", "action": "power on" },
+    { "path": "paris-frankfurt", "action": "power on" },
+    { "path": "paris-warsaw", "action": "power on" },
+    { "path": "paris-bucharest", "action": "power on" },
+    { "path": "frankfurt-warsaw", "action": "power on" },
+    { "path": "frankfurt-bucharest", "action": "power on" },
+    { "path": "warsaw-bucharest", "action": "power on" },
+    { "path": "new-york-london", "action": "power on" },
+    { "path": "new-york-lisbon", "action": "power on" },
+    { "path": "ashburn-london", "action": "power on" },
+    { "path": "ashburn-lisbon", "action": "power on" },
+    { "path": "los-angeles-hub-us", "action": "power on" },
+    { "path": "hub-us-host-us", "action": "power on" },
+    { "path": "hub-us-gen-us", "action": "power on" },
+    { "path": "hub-us-rec-us", "action": "power on" },
+    { "path": "bucharest-hub-eu", "action": "power on" },
+    { "path": "hub-eu-host-eu", "action": "power on" },
+    { "path": "hub-eu-rec-eu", "action": "power on" }
+  ]
+}

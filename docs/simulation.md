@@ -70,6 +70,14 @@ joins. That order is also what makes a cable negotiate against what its two
 interfaces advertise: negotiation happens when a cable is plugged, and a cable
 is always younger than both its ends.
 
+A negotiation settles on the fastest speed both ends advertise, and on full
+duplex only if both are up for it: a link runs at one speed, not at a list of
+them. **Two ends with no speed in common make no link at all** — not a slow
+one. Nothing says so but a `Failed negotiation` warning in the interface's log,
+and the interface then drops everything, sent or received. So the two ends of
+every link must be given overlapping `speeds`. A port that advertises nothing
+in particular, a recorder's, takes whatever the other end offers.
+
 ## How values are written
 
 | kind | written as | example |
@@ -134,6 +142,10 @@ A repeater: whatever reaches one port leaves by every other.
 | `ports` | 2…1024 | `8` | |
 | `speed` | `0` (10Mbps) or `1` (100Mbps) | `1` | One fixed speed, as a real repeater has. |
 
+A hub advertises that one speed and half duplex, and nothing besides, so every
+interface plugged into one must keep `0` or `1` among its own `speeds` or the
+link will not come up.
+
 ### router
 
 Forwards packets between its interfaces. It arrives with an **empty routing
@@ -145,6 +157,10 @@ not something the machine is built with. See *Routing tables* below.
 | `ports` | 1…1024 | `4` | Interfaces, one cable each. |
 | `MAC range` | string | `""` | Leading octets every interface's address shares (`"00:11:22"`), the rest drawn at random. |
 | `MACs` | string | `""` | The addresses themselves instead, comma separated, one per port. |
+
+Its interfaces are not built with a speed either. They advertise `[0,1,2,3,4]`,
+5Gbps at best; a faster link is asked for interface by interface, under `"#0"`…
+in `properties`.
 
 ### gateway
 
@@ -223,6 +239,11 @@ one end loose is not a cable that needs finishing, it is nothing at all.
 | `from port`, `to port` | optional int | `null` | Which port of each; left out, the first free one. |
 | `length` | optional meters | `null` | Left out, the distance between the two points on the map — and nothing at all when either end is not placed. |
 | `error rate` | 0…1 | `0.0` | Faulty bits per bit transmitted. |
+
+`length` is what gives a cable its latency: what crosses it is delayed by
+`length / 3e8` seconds, the speed of light in vacuum and not the slower one of
+real fibre. The distance read off the map is the great-circle distance between
+the two `at` points.
 
 ### note
 
@@ -742,6 +763,23 @@ them sending two frames under its neighbour's address, through both NATs, to
 the machine at the far end. The two captures are the same two frames seen from
 either side, which is what makes the translation visible: they leave as
 192.168.10.3 and arrive as 198.51.100.1.
+
+### Load balancing over an ocean
+
+`examples/two-continents.json` is what the load balancing is for: two full
+meshes of six routers, one address each and ports 0 to 4 for the five
+neighbours, joined by four crossings between the two eastern-US routers and the
+two western-European ones. Each continent is one /16, so a router reaches the
+whole of the other one through a single pair of rows — the two crossings for a
+router that has them, the two routers that have them for everyone else. The
+four that straddle the ocean balance round robin and the rest at random, and
+the interfaces advertise 40Gbps or 10Gbps so that each link settles on what
+both of its ends offer.
+
+Two 1KiB frames leave the western US back to back and are recorded twice, as
+they leave and as they arrive. They do not travel together: the first goes
+through new-york and the second through ashburn, which is the random balancing
+at los-angeles sharing out its two ways east.
 
 ## See also
 
