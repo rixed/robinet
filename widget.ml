@@ -773,15 +773,11 @@ let rec coerce name (kind : kind) v =
     | Widget_id -> `Int (to_int v)
     | IRange (min, max) -> `Int (to_int_range ~min ~max v)
     | FRange (min, max) -> `Float (to_float_range ~min ~max v)
-    | Ipv4 | Ipv6 | Mac ->
+    | Ipv4 | Ipv6 | Mac | Packet | Bytes | BRange _ | Synth ->
         check_value ~name kind v ;
         v
-    | Time | Packet | Bytes | BRange _ | Synth ->
-        (* As for a metric below: these are what a widget has seen, and nothing
-         * is handed what it is meant to produce. Bytes joins them for a reason
-         * of its own -- they are read and never written, whoever is looking at
-         * them. *)
-        bad_value "%s cannot be given as a parameter" name
+    (* An instant is a number of seconds, as a duration is. *)
+    | Time -> `Float (to_float v)
     | Enum (choices, range) ->
         (try `Int (to_choice ?range choices v)
         with Bad_value m -> bad_value "%s: %s" name m)

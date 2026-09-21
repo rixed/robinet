@@ -241,8 +241,9 @@ let random_int () = Random.full_int max_int
 let value_of_synth gen_values kind : Yojson.Basic.t -> Yojson.Basic.t option =
     function
     | `Assoc [ "const", v ] ->
-        Widget.check_value kind v ;
-        Some v
+        (* Coerced and not merely checked, so that a constant may be written as
+         * a string whatever the field holds. *)
+        Some (Widget.coerce "value" kind v)
     | `Assoc [ "gen", `Int g ] ->
         if g < 0 || g >= Array.length gen_values then
             Widget.bad_value "generator #%d does not exist" g ;

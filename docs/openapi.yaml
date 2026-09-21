@@ -1806,6 +1806,12 @@ components:
               an inside of its own indented under the line that names it.
             * `variant` -- one of the shapes in `cases`; the value is an object
               of a single field, named by the case it holds.
+
+            A single value may always be written as a string, whatever kind it
+            is of: `"5"` is read as the number and `"true"` as the boolean. One
+            that does not read as the kind asks for is refused as any other
+            wrong value is. Lists and objects are not written that way; what may
+            be a string is each value inside them.
         choices:
           type: array
           description: For `enum` and `set`, in the order that gives each one its place.

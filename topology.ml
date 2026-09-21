@@ -162,11 +162,12 @@ let location_of_json what = function
     | `Null -> None
     | j ->
         let coord name =
-            match member what name j with
-            | `Float f -> f
-            | `Int i -> float_of_int i
-            | v -> Widget.bad_value "%s: %S must be a number, not %s" what name
-                       (Yojson.Basic.to_string v) in
+            let v = member what name j in
+            match Widget.to_float v with
+            | exception Widget.Bad_value _ ->
+                Widget.bad_value "%s: %S must be a number, not %s" what name
+                    (Yojson.Basic.to_string v)
+            | f -> f in
         let l = Widget.{ lat = coord "lat" ; lon = coord "lon" } in
         (* The same refusal a location meets anywhere else: a coordinate out of
          * range is not a placement that happens to be odd, it is one that has
@@ -198,10 +199,12 @@ let startup_of_json j : Widget.startup_entry =
 let of_json j =
     let what = "a topology" in
     let version =
-        match member what "version" j with
-        | `Int v -> v
-        | v -> Widget.bad_value "%s: %S must be a number, not %s" what "version"
-                   (Yojson.Basic.to_string v) in
+        let v = member what "version" j in
+        match Widget.to_int v with
+        | exception Widget.Bad_value _ ->
+            Widget.bad_value "%s: %S must be a number, not %s" what "version"
+                (Yojson.Basic.to_string v)
+        | n -> n in
     (* A version from the future is refused rather than read hopefully: this
      * reader knows what it does not know. *)
     if version > current_version then

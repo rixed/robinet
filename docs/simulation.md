@@ -95,6 +95,14 @@ A cable's ends are widget ids over the API and paths in a document: the file
 describes a network and not one instance of one, and must load into a
 simulation whose widgets were built afresh.
 
+**Any single value may be written as a string**, whatever the table above says
+it is: `"ports": "5"` is the `"ports": 5` beside it, and so are `"loss":
+"0.01"`, `"full duplex": "true"` and `"speeds": ["5", "7"]`. What it is to be
+read as is the document's to say and never the spelling's, so a string that
+does not read as one is refused as loudly as a wrong value is. Only single
+values, though: a list is a list and an object an object, however their
+contents are written.
+
 Ethernet speeds are numbered `0`–`8`: 10Mbps, 100Mbps, 1Gbps, 2.5Gbps, 5Gbps,
 10Gbps, 25Gbps, 40Gbps, 100Gbps. A hub accepts the first two only.
 
