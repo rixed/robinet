@@ -30,7 +30,7 @@ let main =
     let sim = Simulation.make "dns_query" in
     let ifname = "eth0" in
     let widget = Widget.make ~parent:sim.root ifname in
-    let iface = Pcap.openif ~widget ifname in
+    let iface = Pcap.open_iface ~widget ifname in
     let src_ip  = ref "192.168.1.66"
     and netmask = ref "255.255.255.0"
     and src_eth = ref "12:34:56:78:9a:bc"
@@ -48,7 +48,7 @@ let main =
               "Perform a DNS A query with faked addresses" ;
     let emit bits =
         hexstring_of_bitstring bits |> Printf.printf "Injecting '%s'\n" ;
-        Pcap.inject iface bits in
+        Pcap.inject iface.handler bits in
     let gateways =
         (if !gw = "" then None else Some (Eth.Gateway.of_string !gw)) |>
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) in

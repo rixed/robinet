@@ -134,12 +134,12 @@ let check_fname fname =
 (** {2 Libpcap low level wrappers} *)
 
 (** Libpcap network interface handler. *)
-type iface_handler
+type pcap_handler
 
-(** [inject_ iface_handler packet] inject this packet into this interface *)
-external inject_ : iface_handler -> string -> unit = "wrap_pcap_inject"
+(** [inject_ pcap_handler packet] inject this packet into this interface *)
+external inject_ : pcap_handler -> string -> unit = "wrap_pcap_inject"
 
-(** [sniff_ iface_handler] will return the next available packet as a string,
+(** [sniff_ pcap_handler] will return the next available packet as a string,
  * as well as its capture timestamp.
  * If timeout is set then the function will raise Not_found after that number of
  * seconds if no packets have been captured. It will raise End_of_file if the
@@ -148,17 +148,16 @@ type sniff_ret_ =
     { sniffed_timestamp : Clock.Wall.t ; sniffed_caplen : int ;
       sniffed_wirelen : int ; sniffed_bytes : string }
 
-external sniff_ : ?timeout:float -> iface_handler -> sniff_ret_ = "wrap_pcap_read"
+external sniff_ : ?timeout:float -> pcap_handler -> sniff_ret_ = "wrap_pcap_read"
 
 (** [openif_ "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is set to 0 then a "default" value
  * of 65535 will be chosen, which is probably not what you want. You should set
  * [caplen] = your {e MTU} size. *)
-external openif_ : string -> bool -> string -> int -> iface_handler = "wrap_pcap_make"
+external openif_ : string -> bool -> string -> int -> pcap_handler = "wrap_pcap_make"
 
-external closeif_ : iface_handler -> unit = "wrap_pcap_close"
-
+external closeif_ : pcap_handler -> unit = "wrap_pcap_close"
 
 (** {2 Pcap files} *)
 
@@ -446,6 +445,50 @@ let save sim ?caplen ?(dlt=default_dlt) fname =
         let pdu = Pdu.make fname ?caplen ~dlt ts bits in
         write_pdu pdu in
     write_bits, close
+
+(** {2 Packet sniffing/injection} *)
+
+let default_caplen ifname =
+    if ifname = "any" then 65535
+    else mtu_of_iface ifname
+
+type iface_handler = {
+    pcap : pcap_handler ;
+    name : string ;
+    caplen : int }
+
+(** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
+ * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
+ * of each packets. Notice that if [caplen] is not set then {e MTU} for the
+ * device will be chosen. *)
+let openif ?(promisc=true) ?(filter="") ?caplen name =
+    let caplen =
+        Option.default_delayed (fun () -> default_caplen name) caplen in
+    { pcap = openif_ name promisc filter caplen ;
+      name ; caplen }
+
+let closeif handler =
+    closeif_ handler.pcap
+
+(** [sniff handler] will return the next available packet as a Pcap.Pdu.t.
+ *
+ * Dated on the simulation's clock, not on the one libpcap read: a simulation
+ * that was tied to the wall clock after having run at its own speed is some
+ * distance from it, and a packet still carrying the real world's timestamp
+ * would be scheduled that far into its past or its future. See
+ * [Simulation.of_wall_clock]. *)
+let sniff ?dlt ?timeout handler =
+    let sniffed = sniff_ ?timeout handler.pcap in
+    Pdu.make handler.name ?dlt
+        ~caplen:sniffed.sniffed_caplen
+        ~wirelen:sniffed.sniffed_wirelen
+        sniffed.sniffed_timestamp
+        (bitstring_of_string sniffed.sniffed_bytes)
+
+(** [inject iface bits] inject the packet [bits] into interface [iface]. *)
+let inject handler bits =
+    let str = string_of_bitstring bits in
+    inject_ handler.pcap str
 
 (** {2 Recorder}
  *
@@ -1166,82 +1209,27 @@ let replayer ~parent ?location ?fname ?(loop=false) name =
 
 (** A network device opened for sniffing or injection *)
 type iface = { handler : iface_handler ;
-                  name : string ;
-                caplen : int ;
                (* Interfaces can be opened and closed, but that's still the same
                 * interface. There is nothing to reset and events need not be
                 * removed from the scheduler. So here the power is going to be
                 * the Simulation.mains. *)
-                 power : Simulation.power ;
                 widget : Widget.t }
 
-let default_caplen ifname =
-    if ifname = "any" then 65535
-    else mtu_of_iface ifname
-
-(** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
- * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
- * of each packets. Notice that if [caplen] is not set then {e MTU} for the
- * device will be chosen.
- *
- * Pass it a widget to log and pay for events. *)
-let openif ~(widget : Widget.t) ?(promisc=true) ?(filter="") ?caplen ifname =
-    let caplen =
-        Option.default_delayed (fun () -> default_caplen ifname) caplen in
+(* An iface if a pcap handler that's part of a simulation.
+ * It needs a widget to log and pay for events. *)
+let open_iface ~(widget : Widget.t) ?promisc ?filter ?caplen ifname =
     let iface = {
-        handler = openif_ ifname promisc filter caplen ;
-        name = ifname ;
-        caplen ;
-        power = widget.power ;
-        widget } in
+        handler = openif ?promisc ?filter ?caplen ifname ;
+        widget
+    } in
     (* A real interface only makes sense in a realtime simulation: *)
     Simulation.make_realtime (Simulation.of_widget widget) ;
     iface
 
 (** Never use the handler after that! *)
-let closeif iface =
-    Log.(log iface.widget.logger Info (lazy (Printf.sprintf "Closing interface %s" iface.name))) ;
-    closeif_ iface.handler
-
-(** [sniff iface] will return the next available packet as a Pcap.Pdu.t.
- *
- * Dated on the simulation's clock, not on the one libpcap read: a simulation
- * that was tied to the wall clock after having run at its own speed is some
- * distance from it, and a packet still carrying the real world's timestamp
- * would be scheduled that far into its past or its future. See
- * [Simulation.of_wall_clock]. *)
-let sniff ?dlt ?timeout iface =
-    let sniffed = sniff_ ?timeout iface.handler in
-    Log.(log iface.widget.logger Debug (lazy (Printf.sprintf "Captured %d/%d bytes" sniffed.sniffed_caplen sniffed.sniffed_wirelen))) ;
-    Pdu.make iface.name ?dlt
-        ~caplen:sniffed.sniffed_caplen
-        ~wirelen:sniffed.sniffed_wirelen
-        sniffed.sniffed_timestamp
-        (bitstring_of_string sniffed.sniffed_bytes)
-
-(** {2 Packet injection} *)
-
-(* Waiting to be attached to the widget that owns them, which will supply the
- * clock they must be dated with:
-
-(** A counter for how many packets we failed to inject. *)
-let packets_injected_err = Metric.Atomic.make "Pcap/Packets/Injected/Err"
-
-(** A counter for how many bytes were injected successfully. *)
-let bytes_out            = Metric.Counter.make "Pcap/Bytes/Out" "bytes"
-*)
-
-(** [inject iface bits] inject the packet [bits] into interface [iface]. *)
-let inject (iface : iface) bits =
-    (* let params = Metric.(Params.singleton "iface" Param.(String iface.name)) in *)
-    try
-        let str = string_of_bitstring bits in
-        Log.(log iface.widget.logger Debug (lazy (Printf.sprintf "Injecting %d bytes" (String.length str)))) ;
-        inject_ iface.handler str
-        (* Metric.Counter.add ~params bytes_out (bytelength bits) *)
-    with e ->
-        Log.(log iface.widget.logger Error (lazy (Printf.sprintf "Cannot inject: %s" (Printexc.to_string e))))
-        (* Metric.Atomic.fire ~params packets_injected_err *)
+let close_iface iface =
+    Log.(log iface.widget.logger Info (lazy (Printf.sprintf "Closing interface %s" iface.handler.name))) ;
+    closeif iface.handler
 
 (** {2 Packet sniffing} *)
 
@@ -1258,20 +1246,21 @@ let bytes_in           = Metric.Counter.make "Pcap/Bytes/In" "bytes"
  * and pass them to the [rx] function (via the Clock). *)
 let sniffer iface ?(while_=(fun () -> true)) rx =
     let rec loop () =
-        if while_ () && iface.power.on then
+        if while_ () && iface.widget.power.on then
             (* Although we should not close the interface while this is running,
              * sniff should just fail with End_of_file in those cases. *)
-            match sniff ~timeout:0.5 iface with
+            match sniff ~timeout:0.5 iface.handler with
             | exception End_of_file ->
-                Log.(log iface.widget.logger Warning (lazy (Printf.sprintf "Interface %s has been closed while in use!" iface.name)))
+                Log.(log iface.widget.logger Warning (lazy (Printf.sprintf "Interface %s has been closed while in use!" iface.handler.name)))
             | exception Not_found ->
                 (* Loop to check the ending condition again *)
                 if debug then
-                    Log.(log iface.widget.logger Debug (lazy (Printf.sprintf "No packet to capture yet on interface %s" iface.name))) ;
+                    Log.(log iface.widget.logger Debug (lazy (Printf.sprintf "No packet to capture yet on interface %s" iface.handler.name))) ;
                 loop ()
             | exception e ->
-                Log.(log iface.widget.logger Error (lazy (Printf.sprintf "Cannot capture packet on %s: %s" iface.name (Printexc.to_string e))))
+                Log.(log iface.widget.logger Error (lazy (Printf.sprintf "Cannot capture packet on %s: %s" iface.handler.name (Printexc.to_string e))))
             | pdu ->
+                Log.(log iface.widget.logger Debug (lazy (Printf.sprintf "Captured %d/%d bytes" pdu.caplen pdu.wirelen))) ;
                 Simulation.synch (Simulation.of_widget iface.widget) ;
                 (* Metric.Atomic.fire packets_sniffed_ok ;
                    Metric.Counter.add bytes_in (Payload.length pdu.Pdu.payload) ; *)
@@ -1281,7 +1270,7 @@ let sniffer iface ?(while_=(fun () -> true)) rx =
                 let ts =
                     Simulation.of_wall_clock
                         (Simulation.of_widget iface.widget) pdu.Pdu.ts in
-                Simulation.at iface.power ts rx
+                Simulation.at iface.widget.power ts rx
                               (pdu.Pdu.payload :> bitstring) ;
                 loop () in
     Thread.create loop ()
@@ -1347,8 +1336,17 @@ let dev (portal : portal) =
          * closed before we are done writing *)
         let dir =
             match portal.iface with
-            | Some iface -> inject iface bits ; "egress"
-            | None -> "dropped-tx" in
+            | Some iface ->
+                Log.(log iface.widget.logger Debug (lazy (Printf.sprintf
+                    "Injecting %d bytes" (bytelength bits)))) ;
+                (try
+                    inject iface.handler bits ; "egress"
+                with e ->
+                    Log.(log iface.widget.logger Error (lazy (Printf.sprintf
+                        "Cannot inject: %s" (Printexc.to_string e)))) ;
+                    "error-tx")
+            | None ->
+                "dropped-tx" in
         let now = Simulation.Widget.now portal.widget in
         let params =
             Metric.(Params.singleton "dir" Param.(String dir)) in
@@ -1368,7 +1366,7 @@ let disconnect portal =
 let close_portal portal =
     match portal.iface with
     | Some iface ->
-        Log.(log iface.widget.logger Info (lazy ("Closing portal to "^ iface.name))) ;
+        Log.(log iface.widget.logger Info (lazy ("Closing portal to "^ iface.handler.name))) ;
         (* Stop the reader thread *first*, then close the iface while nobody uses
          * the handle. But do not wait with the lock: do the cleaning from another
          * thread, releasing the simulation lock right now: *)
@@ -1379,7 +1377,7 @@ let close_portal portal =
                 (* Even if open_portal have been called already on the same portal,
                  * the new iface will be a new pcap handle so we can still close
                  * this one safely: *)
-                closeif iface
+                close_iface iface
             ) reader_thread |> ignore
         ) portal.reader ;
         (* Also clear [portal.reader] while we have the lock: *)
@@ -1392,8 +1390,8 @@ let open_portal portal =
     Log.(log portal.widget.logger Info (lazy ("Opening portal to "^ portal.ifname))) ;
     if portal.iface <> None then close_portal portal ;
     let iface =
-        openif ~widget:portal.widget ~promisc:portal.promisc
-               ~filter:portal.filter ?caplen:portal.caplen portal.ifname in
+        open_iface ~widget:portal.widget ~promisc:portal.promisc
+                   ~filter:portal.filter ?caplen:portal.caplen portal.ifname in
     portal.iface <- Some iface ;
     portal.reader <- Some (
         sniffer iface

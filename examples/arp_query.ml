@@ -22,18 +22,18 @@ open Bitstring
 (* TODO: make this a parameter.
          make eth0 a command line arg *)
 
-let arp_query iface (src_eth : Eth.Addr.t) src_ip target_ip =
+let arp_query (iface : Pcap.iface) (src_eth : Eth.Addr.t) src_ip target_ip =
     let arp = Arp.Pdu.make_request Arp.HwType.eth Arp.HwProto.ip4
                                    (src_eth :> bitstring)
                                    ( Ip.Addr.to_bitstring src_ip)
                                    ( Ip.Addr.to_bitstring target_ip) in
     let eth = Eth.Pdu.make Arp.HwProto.arp src_eth Eth.Addr.broadcast (Arp.Pdu.pack arp) in
-    Pcap.inject iface (Eth.Pdu.pack eth)
+    Pcap.inject iface.handler (Eth.Pdu.pack eth)
 
-let wait_answer iface target_ip_bits =
+let wait_answer (iface : Pcap.iface) target_ip_bits =
     (* TODO: times out *)
     let rec aux () =
-        let pdu = Pcap.sniff iface in
+        let pdu = Pcap.sniff iface.handler in
         (match Eth.Pdu.unpack (pdu.Pcap.Pdu.payload :> bitstring) with
         | Error s ->
             failwith ("Cannot unpack Eth: "^ Lazy.force s)
@@ -56,7 +56,7 @@ let main =
     let sim = Simulation.make "arp_query" in
     let ifname = "eth0" in
     let widget = Widget.make ~parent:sim.root ifname in
-    let iface = Pcap.openif ~widget ifname in
+    let iface = Pcap.open_iface ~widget ifname in
     let src_ip_str = ref "192.168.66.147" and src_eth_str = ref "01:23:45:67:89:ab" in
     let resolve_one target_ip_str =
         let target_ip      = Ip.Addr.of_string target_ip_str in

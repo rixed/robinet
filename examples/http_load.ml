@@ -47,8 +47,9 @@ let run (sim : Simulation.t) ifname src_range num_srcs ?gateways ?search_sfx ?na
         Hub.Repeater.set_read hub i (gigabit h.trx.dev.write)
     ) hosts ;
     (* Link all these to the real world *)
-    let iface = Pcap.openif ~widget:(Widget.make ~parent:sim.root ifname) ifname in
-    Hub.Repeater.set_read hub num_srcs (Pcap.inject iface) ;
+    let iface =
+        Pcap.open_iface ~widget:(Widget.make ~parent:sim.root ifname) ifname in
+    Hub.Repeater.set_read hub num_srcs (Pcap.inject iface.handler) ;
     (* Every box is born dark: switch the network on before asking anything
        of it, which is what [Simulation.run] does at the start and which is
        too late for what follows. *)

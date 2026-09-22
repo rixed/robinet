@@ -24,10 +24,10 @@ open Batteries
 open SimTypes
 open Tools
 
-let run sim iface =
+let run sim (iface : Pcap.iface) =
     (* No configuration at all: the whole point is what the lease brings. *)
     let host = Host.make ~parent:sim.root ~mac:(Eth.Addr.of_string "00:23:8b:5f:09:c1") "tester" in
-    host.trx.dev.set_read (Pcap.inject iface) ;
+    host.trx.dev.set_read (Pcap.inject iface.handler) ;
     Pcap.sniffer iface host.trx.dev.write
 
 let main =
@@ -36,6 +36,6 @@ let main =
     Random.self_init () ;
     let ifname = "eth0" in
     let widget = Widget.make ~parent:sim.root ifname in
-    let iface = Pcap.openif ~widget ifname in
+    let iface = Pcap.open_iface ~widget ifname in
     ignore (run sim iface) ;
     Simulation.run sim true

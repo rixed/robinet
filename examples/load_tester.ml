@@ -63,8 +63,8 @@ let input_of (sim : Simulation.t) = function
         Pcap.enum_of_file name
     | Iface name ->
         let widget = Widget.make ~parent:sim.root name in
-        let iface = Pcap.openif ~widget name in
-        Enum.from (fun () -> Pcap.sniff iface)
+        let iface = Pcap.open_iface ~widget name in
+        Enum.from (fun () -> Pcap.sniff iface.handler)
     | Tcps _n ->
         assert false
         (*random_tcp_streams n 100*)
@@ -77,8 +77,9 @@ let sink_to (sim : Simulation.t) = function
         Enum.iter write
     | Iface name ->
         let widget = Widget.make ~parent:sim.root name in
-        let iface = Pcap.openif ~widget ~promisc:false name in
-        let inject_f pdu = Pcap.inject iface (pdu.Pcap.Pdu.payload :> bitstring) in
+        let iface = Pcap.open_iface ~widget ~promisc:false name in
+        let inject_f pdu =
+            Pcap.inject iface.handler (pdu.Pcap.Pdu.payload :> bitstring) in
         Enum.iter inject_f
     | Tcps _n ->
         assert false

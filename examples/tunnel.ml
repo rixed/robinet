@@ -26,12 +26,12 @@ open Tools
 
 let tunnel (sim : Simulation.t) ifname tun_ip netmask mac gw search_sfx nameserver dst dst_port src_port =
     let widget = Widget.make ~parent:sim.root ifname in
-    let iface = Pcap.openif ~widget ifname in
+    let iface = Pcap.open_iface ~widget ifname in
     let gateways =
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) gw in
     let host = Host.make ~parent:sim.root ?gateways ?search_sfx ?nameserver ~mac ~netmask ~static_ip:tun_ip "tun"
     and http = Http.TRX.make [ "Content-Type", "tun/eth" ] in
-    host.trx.dev.set_read (Pcap.inject iface) ;
+    host.trx.dev.set_read (Pcap.inject iface.handler) ;
     let connect_tunnel tcp =
         Printf.printf "Tunnel: We are now connected!\n%!" ;
         http =-> tx tcp.Tcp.TRX.trx ;
@@ -59,7 +59,7 @@ let tunnel (sim : Simulation.t) ifname tun_ip netmask mac gw search_sfx nameserv
     let recv_http bits =
         Printf.printf "Tunnel: Received an eth frame from the HTTP tunnel, injecting\n%!" ;
         (* to use our GW: Eth.TRX.tx host.Host.eth x *)
-        Pcap.inject iface bits
+        Pcap.inject iface.handler bits
     in
     ignore (recv_http <-= http) ;
     ignore (Pcap.sniffer iface host.trx.dev.write) ;

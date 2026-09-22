@@ -532,11 +532,11 @@ let to_file fname e = Enum.map Pdu.pack e |> Pcap.file_of_enum fname
 
 let capture sim ?promisc ?filter ifname =
     let widget = Widget.make ~parent:sim.root ifname in
-    let iface = Pcap.openif ~widget ?promisc ?filter ifname in
+    let iface = Pcap.open_iface ~widget ?promisc ?filter ifname in
     let pkts = ref [] in
     let rec aux () =
         if not (Simulation.is_running sim) then List.rev !pkts else
-        let pkt = Pcap.sniff iface in
+        let pkt = Pcap.sniff iface.handler in
         pkts := pkt :: !pkts ;
         Printf.printf ".%!" ;
         aux () in
