@@ -535,7 +535,7 @@ struct
 
     let ifg_min = 32
 
-    let make ~parent ~power ?speeds ?(full_duplex=true) ?(inter_frame_gap=96)
+    let make ~parent ?power ?speeds ?(full_duplex=true) ?(inter_frame_gap=96)
              ?can_forward_after ?recv name =
         (* Before negotiation, the interface is actually functional,
          * using conservative settings that go through most equipments.
@@ -554,7 +554,7 @@ struct
         if inter_frame_gap < ifg_min then
             Printf.sprintf "inter_frame_gap can't be below %d" ifg_min |>
             invalid_arg ;
-        let widget = Widget.make ~parent ~power name in
+        let widget = Widget.make ~parent ?power name in
         let t =
             { widget ;
               emit = ignore_disconnected ~logger:widget.logger ;
@@ -744,14 +744,14 @@ struct
              ?(mac=Addr.random ()) ?(gateways=[])
              ?promisc ?(do_proxy_arp=(fun _ -> false))
              ?(my_addresses=[]) ?(proto=Proto.ip4) ?(name="eth")
-             ~parent ~power () =
+             ~parent ?power () =
         (* An adapter is called "eth" unless its owner names it, which a
          * device with several of them has to do: which one this is is the
          * owner's to know, and a router names them after its ports. Two left
          * with the default name under one parent end up "eth" and "eth-2",
          * courtesy of [Widget.unique_among]. *)
         let iface =
-            Iface.make ~parent ~power ?speeds ?full_duplex ?inter_frame_gap
+            Iface.make ~parent ?power ?speeds ?full_duplex ?inter_frame_gap
                        ?can_forward_after name in
         let t = {
             iface ; mac ; gateways ; proto ; mtu ; promisc ; do_proxy_arp ;
@@ -1035,9 +1035,7 @@ struct
                             (* TODO: timeout some? *)
                             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...Do I have a msg waiting for '%s'?" (hexstring_of_bitstring arp.sender_proto)))) ;
                             (* In the order they were postponed, which
-                               [find_all] gives the reverse of: a resolution
-                               that let several frames go must not shuffle
-                               them. *)
+                             * [find_all] gives the reverse of. *)
                             let waiting =
                                 List.rev
                                     (BitHash.find_all st.postponed

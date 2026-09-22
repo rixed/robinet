@@ -38,7 +38,6 @@ struct
    * of 32bits added on top. *)
   mutable busy_until : Clock.Time.t ;
 mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
-               power : Simulation.power ;
               widget : Widget.t ;
               volume : Metric.Counter.t ;
           collisions : Metric.Counter.t }
@@ -81,7 +80,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
                     Metric.Counter.add t.volume ~now (bytelength pld)
                         ~params:(Eth.dir_params ~port:i "egress") ;
                     (* Beware: the scheduler will separate simultaneous TX of ε *)
-                    Simulation.asap t.power emit pld
+                    Simulation.asap t.widget.power emit pld
                 )) t.ports
         )
 
@@ -125,7 +124,6 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
             speed ;
             busy_until = Clock.beginning_of_time ;
             jamming_time = Eth.Speed.duration speed 32 ;
-            power = widget.power ;
             widget ;
             volume = Metric.Counter.make () ;
             collisions = Metric.Counter.make () } in
@@ -171,7 +169,6 @@ end
 module Backplane =
 struct
     type t = { ports : ((bitstring -> unit) * bool) array ;
-               power : Simulation.power ;
               widget : Widget.t ;
               volume : Metric.Counter.t }
 
@@ -204,7 +201,7 @@ struct
                 (* Through the scheduler rather than straight down the stack:
                    a part that answers at once would otherwise do so from
                    within the call that is still delivering to the others. *)
-                Simulation.asap t.power emit pld
+                Simulation.asap t.widget.power emit pld
             )) t.ports
 
     let set_read (t : t) n f =
@@ -228,7 +225,6 @@ struct
         let widget = Widget.make ~parent ~own_power name in
         let t = {
             ports = Array.make n (ignore_bits ~logger:widget.logger, false) ;
-            power = widget.power ;
             widget ;
             volume = Metric.Counter.make () } in
         widget.device <- Some (T t) ;
@@ -260,7 +256,6 @@ struct
           (* Mapping from mac to position in the OrdArray [macs] *)
           macs_h : int BitHash.t ;
           widget : Widget.t ;
-          power : Simulation.power ;
           mac_size : Metric.Gauge.t ;
           mac_hits : Metric.Atomic.t ;
           mac_misses : Metric.Atomic.t }
@@ -314,14 +309,14 @@ struct
                 Array.iteri (fun i (iface : Eth.Iface.t) ->
                     if i <> ins && iface.is_connected then (
                         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to iface %d/%d" i (Array.length t.ifaces)))) ;
-                        Simulation.asap t.power iface.emit bits
+                        Simulation.asap t.widget.power iface.emit bits
                     )
                 ) t.ifaces in
             let do_unicast out =
                 let iface = t.ifaces.(out) in
                 Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Known dest %s, will forward to iface %d" (Eth.Addr.to_string (Eth.Addr.o dst)) out))) ;
                 if iface.is_connected then
-                    Simulation.asap t.power iface.emit bits in
+                    Simulation.asap t.widget.power iface.emit bits in
             if Eth.Addr.is_broadcast (Eth.Addr.o dst) then
                 do_broadcast ()
             else (
@@ -358,13 +353,12 @@ struct
         let widget =
             Widget.make ~device_type:"switch" ~parent ?location
                         ~own_power name in
-        let power = widget.power in
         let t = {
             ifaces = [||] (* See below *) ;
             cut_through ;
             macs = OrdArray.init num_macs (fun _ -> { addr = None ; iface = 0 }) ;
             macs_h = BitHash.create (num_macs/10) ;
-            widget ; power ;
+            widget ;
             mac_size = Metric.Gauge.make () ;
             mac_hits = Metric.Atomic.make () ;
             mac_misses = Metric.Atomic.make () } in
@@ -374,8 +368,7 @@ struct
             Array.init num_ifaces (fun i ->
                 let name = "#"^ string_of_int i in
                 let recv = forward_from t i in
-                Eth.Iface.make ~parent:widget ~power ?speeds ?full_duplex
-                               ~recv name) ;
+                Eth.Iface.make ~parent:widget ?speeds ?full_duplex ~recv name) ;
         let reset_cut_through () =
             let can_forward_after =
                 if t.cut_through then Some (6 * 8) else None in
@@ -530,8 +523,7 @@ struct
         let link speeds_a speeds_b order =
             let sim = Simulation.make ~realtime:false "tapped" in
             let iface name speeds =
-                Eth.Iface.make ~parent:sim.root ~power:sim.root.power
-                               ~speeds name in
+                Eth.Iface.make ~parent:sim.root ~speeds name in
             let a = iface "a" speeds_a
             and b = iface "b" speeds_b
             and tap = make ~parent:sim.root "tap" in

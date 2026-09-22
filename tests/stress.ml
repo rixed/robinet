@@ -713,7 +713,7 @@ let test_delete () =
     (* Something it was going to do, to tell a device that has stopped from one
        that has merely been taken out of the drawing. *)
     let fired = ref 0 in
-    Simulation.delay h2.Host.trx.Host.power (Clock.Interval.sec 1.)
+    Simulation.delay h2.trx.widget.power (Clock.Interval.sec 1.)
                      (fun () -> incr fired) () ;
     Simulation.remove_widget h2_w ;
     Simulation.run sim false ;
@@ -749,7 +749,7 @@ let test_delete () =
        which says nothing about anything -- it is out of the tree with the
        widget that owned it, and nothing can schedule on it again. *)
     check "and their future with them"
-        (Events.for_all (fun _ (p, _) -> p != sw.Hub.Switch.power) sim.events)
+        (Events.for_all (fun _ (p, _) -> p != sw.widget.power) sim.events)
 
 (* Powering a host off is not a request that it stop: whatever it had planned
    to do ceases to exist. Everything it schedules -- its adapter, its sockets,
@@ -782,11 +782,11 @@ let test_power () =
     let plan () =
         for i = 1 to 5 do
             let d = Clock.Interval.sec (float_of_int i) in
-            Simulation.delay h2.Host.trx.Host.power d (fun () -> incr mine) () ;
+            Simulation.delay h2.trx.widget.power d (fun () -> incr mine) () ;
             Simulation.delay sim.root.power d (fun () -> incr theirs) ()
         done in
     plan () ;
-    Simulation.power_down h2.trx.power ;
+    Simulation.power_down h2.trx.widget.power ;
     Simulation.run sim false ;
     check "powering a host off drops what it had scheduled" (!mine = 0) ;
     check "and leaves everybody else's events alone" (!theirs = 5) ;
@@ -798,7 +798,7 @@ let test_power () =
     check "an off host schedules nothing more" (!mine = 0) ;
     check "while the rest of the simulation carries on" (!theirs = 10) ;
 
-    Simulation.power_up h2.trx.power ;
+    Simulation.power_up h2.trx.widget.power ;
     plan () ;
     Simulation.run sim false ;
     check "and it schedules again once powered back on" (!mine = 5) ;
@@ -815,12 +815,12 @@ let test_power () =
     listen () ;
     send () ;
     check "a live host answers for the ports it listens on" (!served = 1) ;
-    Simulation.power_down h2.trx.power ;
+    Simulation.power_down h2.trx.widget.power ;
     send () ;
     check "an off host does not" (!served = 1) ;
     (* Attached services are still serving after a power cycle, they have just
        lost their state. *)
-    Simulation.power_up h2.trx.power ;
+    Simulation.power_up h2.trx.widget.power ;
     send () ;
     check "but serves again when it comes back" (!served = 2) ;
 
@@ -839,7 +839,7 @@ let test_power () =
     to_nowhere () ;
     check "a frame for nobody leaves the adapter waiting on an ARP"
         (waiting () > 0) ;
-    Simulation.power_down h2.trx.power ;
+    Simulation.power_down h2.trx.widget.power ;
     check "which a power cut clears" (waiting () = 0) ;
     (* And having forgotten, it asks again rather than queueing in silence. *)
     let carried () =
@@ -850,7 +850,7 @@ let test_power () =
             Yojson.Basic.Util.(
                 p.getter () |> member "values" |> to_list |>
                 List.fold_left (fun n v -> n + (member "value" v |> to_int)) 0) in
-    Simulation.power_up h2.trx.power ;
+    Simulation.power_up h2.trx.widget.power ;
     let before = carried () in
     to_nowhere () ;
     check "so the adapter asks again once it is back" (carried () > before)

@@ -244,10 +244,6 @@ struct
                 * to return via the same interface: *)
        mutable admin_reroute : bool ;
    mutable can_forward_after : int option ;
-              (* What the router's own delayed forwarding draws from, shared
-               * with every interface and with the admin host, since they are
-               * all the same box. *)
-                       power : Simulation.power ;
                       widget : Widget.t ;
       mutable load_balancing : load_balancing ;
               (** Where [RoundRobin] left off. One cursor for the whole box and
@@ -297,7 +293,7 @@ struct
                 let ip_pld = Icmp.Pdu.pack icmp in
                 let ip_pkt = Ip.Pdu.make Ip.Proto.icmp my_ip ip.Ip.Pdu.src ip_pld in
                 let bits = Ip.Pdu.pack ip_pkt in
-                Simulation.delay t.power
+                Simulation.delay t.widget.power
                              (Clock.Interval.sec delay) (route None t) bits
 
     (* The [route] function receives the IP packets from the Eth trx.
@@ -510,14 +506,14 @@ struct
                 fun _ -> false
 
     let make_iface ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
-                   ?can_forward_after ?mac ?my_addresses ~parent ~power n =
+                   ?can_forward_after ?mac ?my_addresses ~parent n =
         let name = "#"^ string_of_int n in
         (* For our ifaces we force the GW on a packet by packet basis according
          * to the dynamic (and likely still unset) routing table. *)
         let eth =
             Eth.State.make ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
                            ?can_forward_after ?mac ?my_addresses ~name
-                           ~parent ~power () in
+                           ~parent () in
         let trx = Eth.TRX.make eth in
         { trx ; eth ; admin_host = None }
 
@@ -529,7 +525,6 @@ struct
              ?can_forward_after ?delay ?loss ?speeds ?mtu ?(macs=[||])
              num_ifaces routes name =
         let widget = Widget.make ~parent ~own_power name in
-        let power = widget.power in
         (* Display the routing table (debug) *)
         Log.(log widget.logger Debug (lazy
             (Printf.sprintf2 "Creating a router with routing table:%a"
@@ -554,12 +549,12 @@ struct
                     (* Caller can set the MAC addresses: *)
                     if n >= Array.length macs then None else Some macs.(n) in
                 make_iface ?speeds ?delay ?loss ?can_forward_after ?mtu ?mac
-                           ~parent:widget ~power n
+                           ~parent:widget n
             ) in
         let buffered = Metric.Gauge.make () in
         let volume = Metric.Counter.make () in
         let t = { ifaces ; routes ; widget ; notify_errs ; admin_reroute ;
-                  can_forward_after ; power ; load_balancing ; lb_cursor = 0 ;
+                  can_forward_after ; load_balancing ; lb_cursor = 0 ;
                   buffered ; volume } in
         (* One supply for the whole box, and this is what the router itself
            does when it is cut: what its admin hosts do about it is their own,
@@ -930,10 +925,10 @@ struct
         (* Deleting it takes its future with it, which is what stops a deleted
            thing for good. Not its destructor's doing: what a widget holds of
            its own is one thing, and what it has scheduled is another. *)
-        Simulation.delay r.power (Clock.Interval.sec 1.) ignore () ;
+        Simulation.delay r.widget.power (Clock.Interval.sec 1.) ignore () ;
         Simulation.remove_widget r.widget ;
         "a deleted router has nothing left scheduled" @?
-            (Events.for_all (fun _ (p, _) -> p != r.power) sim.events) ;
+            (Events.for_all (fun _ (p, _) -> p != r.widget.power) sim.events) ;
         "and out of the tree" @?
             (Widget.find sim.root r.widget.id = None)
      *)

@@ -385,7 +385,7 @@ let spider t max_depth start =
                             (Hashtbl.mem fetched %> not) |>
                             List.of_enum |>
                             List.iter (fun url ->
-                                Simulation.asap t.host.Host.power
+                                Simulation.asap t.host.widget.power
                             (aux (max_depth-1)) url)
                     | None ->
                         if debug then Printf.printf "Browser: Cannot parse HTML from %s\n" (Url.to_string url)
@@ -413,7 +413,7 @@ let user t ?pause max_depth start =
                         tap (fun l -> if debug then Printf.printf "Browser: will iter on %d urls\n" (List.length l)) |>
                         List.iter (fun url' ->
                             if debug then Printf.printf "Browser: user: fetching %s for %s\n" (Url.to_string url') (Url.to_string url) ;
-                            Simulation.asap t.host.Host.power
+                            Simulation.asap t.host.widget.power
                                 (aux (max_depth-1)) url') ;
                     (* fetch sequentially, depth first, a links *)
                     (* TODO: get only one URL amongst the possible links but keep all
@@ -429,7 +429,7 @@ let user t ?pause max_depth start =
                             let d = match pause with
                                 | None -> 0.
                                 | Some t -> Random.float (2.*.t) in
-                            Simulation.delay t.host.Host.power
+                            Simulation.delay t.host.widget.power
                          (Clock.Interval.sec d) (fun () ->
                                 if debug then Printf.printf "Browser: user: fetching %s after %s\n" (Url.to_string url') (Url.to_string url) ;
                                 aux (max_depth-1) url' ;

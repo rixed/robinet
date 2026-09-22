@@ -681,8 +681,7 @@ let make ~parent ?location ?speeds ?(adapters=1) ?(independent=false) name =
                     ~own_power:true name in
     let ifaces =
         Array.init adapters (fun i ->
-            Eth.Iface.make ~parent:widget ~power:widget.power ?speeds
-                           ("eth"^ string_of_int i)) in
+            Eth.Iface.make ~parent:widget ?speeds ("eth"^ string_of_int i)) in
     let t =
         { widget ; ifaces ; generators = [||] ;
           stream = { stop_after = None ; distance = Automatic ;
@@ -809,7 +808,7 @@ let make ~parent ?location ?speeds ?(adapters=1) ?(independent=false) name =
   let got = Array.make 2 [] in
   Array.iteri (fun i (iface : Eth.Iface.t) ->
     let sink =
-      Eth.Iface.make ~parent:sim.root ~power:sim.root.power
+      Eth.Iface.make ~parent:sim.root
                      ~recv:(fun bits -> got.(i) <- bits :: got.(i))
                      (Printf.sprintf "sink%d" i) in
     let cable =

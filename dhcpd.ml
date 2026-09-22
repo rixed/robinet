@@ -436,8 +436,8 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
         List.find (fun (p : Widget.property) -> p.name = "static-ip")
                   clt.Host.trx.Host.widget.properties in
     (Option.get static_ip.setter) `Null ;
-    Simulation.power_down clt.trx.power ;
-    Simulation.power_up clt.trx.power ;
+    Simulation.power_down clt.trx.widget.power ;
+    Simulation.power_up clt.trx.widget.power ;
     Simulation.run sim false ;
     assert_bool "and is leased one after a reboot" (Host.ip_is_set clt) ;
     assert_bool "from the server's range"
@@ -521,7 +521,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
         | _ -> -1) ;
     (* None of it outlives the power: a host coming back up is a host that has
        been granted nothing yet. *)
-    Simulation.power_down clt.trx.power ;
+    Simulation.power_down clt.trx.widget.power ;
     assert_bool "the netmask goes with the power" (Host.cur_netmask clt = None) ;
     assert_bool "and so does the name server"
         (Host.cur_nameserver clt = None) ;

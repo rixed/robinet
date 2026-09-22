@@ -62,13 +62,7 @@ type host_trx = {
     dev           : dev ; (* as seen from the outside *)
     arp_set       : Ip.Addr.t -> Eth.Addr.t option -> unit ;
     (* List of things to do once this host gets its IP address *)
-    mutable on_ip : (t -> unit) list ;
-    (* This host's power supply, which everything it schedules draws from: its
-     * adapter, its sockets, its timers, and whatever process runs on it.
-     * Switching it off is all there is to powering the host down -- what it
-     * had planned to do ceases to exist, rather than being asked politely to
-     * stop. *)
-    power         : Simulation.power }
+    mutable on_ip : (t -> unit) list }
 
 and tcp_socks = { ip_4_tcp : trx ;
                    (* Available sockets per IP dest.
@@ -175,7 +169,7 @@ let tcp_sock_rx t socks bits =
                                             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have no server listening on port %s" (Tcp.Port.to_string tcp.Tcp.Pdu.dst_port)))) ;
                                             raise No_socket
                                         ) in
-                            let tcp = Tcp.TRX.make t.trx.power tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port t.trx.widget.logger in
+                            let tcp = Tcp.TRX.make t.trx.widget.power tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port t.trx.widget.logger in
                             tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx =-> tx socks.ip_4_tcp ;
                             server tcp.Tcp.TRX.tcp_trx ; (* supposed to set the recver of this tcp trx *)
                             tcp.Tcp.TRX.tcp_trx
@@ -199,7 +193,7 @@ let udp_sock_rx t socks icmp_trx bits =
                     hash_find_or_insert socks.udps key (fun () ->
                         let server = try Hashtbl.find t.udp_servers udp.Udp.Pdu.dst_port
                                      with Not_found -> raise No_socket in
-                        let trx = Udp.TRX.make t.trx.power udp.Udp.Pdu.dst_port udp.Udp.Pdu.src_port t.trx.widget.logger in
+                        let trx = Udp.TRX.make t.trx.widget.power udp.Udp.Pdu.dst_port udp.Udp.Pdu.src_port t.trx.widget.logger in
                         trx.Udp.TRX.trx =-> tx socks.ip_4_udp ;
                         server trx ; (* supposed to set the recver of this udp trx *)
                         trx) in
@@ -366,7 +360,7 @@ and do_gethostbyname t name cont =
                 Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Add a query for resolution of '%s' (%s)" name (if pending then "one was already pending" else "first one")))) ;
                 if not pending then (
                     (* add a timeout event that will awake all waiters for this name after some time *)
-                    Simulation.delay t.trx.power
+                    Simulation.delay t.trx.widget.power
                                      dns_timeout_delay dns_timeout () ;
                     (* Then actually sends the query *)
                     let now = Simulation.Widget.now t.trx.widget in
@@ -381,12 +375,12 @@ and do_gethostbyname t name cont =
 
 and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
     (* Fail if we do not have an IP yet *)
-    if not (t.trx.power.on && ip_is_set t) then cont None else
+    if not (t.trx.widget.power.on && ip_is_set t) then cont None else
     let my_ip = Eth.State.find_ip4 t.eth_state in
     let connect dst_ip =
         Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Connecting to %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
         let socks = hash_find_or_insert t.tcp_socks dst_ip (fun () ->
-            let trx = Ip.TRX.make t.trx.power my_ip dst_ip Ip.Proto.tcp t.trx.widget.logger in
+            let trx = Ip.TRX.make t.trx.widget.power my_ip dst_ip Ip.Proto.tcp t.trx.widget.logger in
             let socks = make_tcp_socks trx in
             (tcp_sock_rx t socks) <-= trx =-> tx t.eth_trx ;
             socks) in
@@ -417,7 +411,7 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
             | None ->
                 cont None
             | Some src_port ->
-                let tcp = Tcp.TRX.make t.trx.power src_port dst_port t.trx.widget.logger in
+                let tcp = Tcp.TRX.make t.trx.widget.power src_port dst_port t.trx.widget.logger in
                 tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx.out.set_read socks.ip_4_tcp.ins.write ;
                 Hashtbl.add socks.tcps (src_port, dst_port) tcp.Tcp.TRX.tcp_trx ;
                 Tcp.TRX.connect tcp (function
@@ -447,13 +441,13 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
 
 and udp_connect t dst ?src_port dst_port client_f cont =
     (* Fail if we do not have an IP yet *)
-    if not (t.trx.power.on && ip_is_set t) then cont None else
+    if not (t.trx.widget.power.on && ip_is_set t) then cont None else
     let my_ip = Eth.State.find_ip4 t.eth_state in
     let connect dst_ip =
         let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
-            let icmp_trx = Ip.TRX.make t.trx.power my_ip dst_ip Ip.Proto.icmp t.trx.widget.logger in
+            let icmp_trx = Ip.TRX.make t.trx.widget.power my_ip dst_ip Ip.Proto.icmp t.trx.widget.logger in
             icmp_trx =-> tx t.eth_trx ;
-            let ip_trx = Ip.TRX.make t.trx.power my_ip dst_ip Ip.Proto.udp t.trx.widget.logger in
+            let ip_trx = Ip.TRX.make t.trx.widget.power my_ip dst_ip Ip.Proto.udp t.trx.widget.logger in
             let socks = make_udp_socks ip_trx in
             (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> tx t.eth_trx ;
             socks) in
@@ -464,7 +458,7 @@ and udp_connect t dst ?src_port dst_port client_f cont =
             Log.(log t.trx.widget.logger Error (lazy "Already connected")) ;
             cont None
         ) else (
-            let trx = Udp.TRX.make t.trx.power src_port dst_port t.trx.widget.logger in
+            let trx = Udp.TRX.make t.trx.widget.power src_port dst_port t.trx.widget.logger in
             (* connect this udp to the underlaying ip *)
             (client_f trx) <-= trx.Udp.TRX.trx =-> tx socks.ip_4_udp ;
             Hashtbl.add socks.udps key trx ;
@@ -482,7 +476,7 @@ and udp_connect t dst ?src_port dst_port client_f cont =
                 connect (List.hd dst_ips))
 
 let with_my_ip t f =
-    if t.trx.power.on then
+    if t.trx.widget.power.on then
         match Eth.State.find_ip4 t.eth_state with
         | exception Not_found -> ()
         | my_ip -> f my_ip
@@ -539,23 +533,23 @@ let ip_recv t bits =
             t.last_ip_packet <- Some ip ;
             if ip.Ip.Pdu.proto = Ip.Proto.tcp then (
                 let sock = hash_find_or_insert t.tcp_socks ip.Ip.Pdu.src (fun () ->
-                    let ip_trx = Ip.TRX.make t.trx.power my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
+                    let ip_trx = Ip.TRX.make t.trx.widget.power my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
                     let socks = make_tcp_socks ip_trx in
                     (tcp_sock_rx t socks) <-= ip_trx =-> tx t.eth_trx ;
                     socks) in
                 rx sock.ip_4_tcp bits (* will handle fragmentation then pass payload to its emit function *)
             ) else if ip.Ip.Pdu.proto = Ip.Proto.udp then (
                 let sock = hash_find_or_insert t.udp_socks ip.Ip.Pdu.src (fun () ->
-                    let icmp_trx = Ip.TRX.make t.trx.power my_ip ip.Ip.Pdu.src Ip.Proto.icmp t.trx.widget.logger in
+                    let icmp_trx = Ip.TRX.make t.trx.widget.power my_ip ip.Ip.Pdu.src Ip.Proto.icmp t.trx.widget.logger in
                     icmp_trx =-> tx t.eth_trx ;
-                    let ip_trx = Ip.TRX.make t.trx.power my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
+                    let ip_trx = Ip.TRX.make t.trx.widget.power my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
                     let socks = make_udp_socks ip_trx in
                     (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> tx t.eth_trx ;
                     socks) in
                 rx sock.ip_4_udp bits
             ) else if ip.Ip.Pdu.proto = Ip.Proto.icmp then (
                 let ip_trx = hash_find_or_insert t.icmp_socks ip.Ip.Pdu.src (fun () ->
-                    let ip_trx = Ip.TRX.make t.trx.power my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
+                    let ip_trx = Ip.TRX.make t.trx.widget.power my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
                     (icmp_rx t ip_trx) <-= ip_trx =-> tx t.eth_trx ;
                     ip_trx) in
                 rx ip_trx bits
@@ -612,7 +606,7 @@ let reset t =
 
 let power_off t =
     Log.(log t.trx.widget.logger Debug (lazy "Halting.")) ;
-    Simulation.power_down t.trx.power ;
+    Simulation.power_down t.trx.widget.power ;
     reset t
 
 let set_ip t my_ip netmask =
@@ -641,7 +635,7 @@ let init_static t =
         set_ip t static_ip (t.netmask |? Ip.Addr.all_ones) ;
         (* TODO: Send a gratuitous ARP request? *)
         (* Note: even if on_ip is unset, it might be set before [asap]! *)
-        Simulation.asap t.trx.power (fun () ->
+        Simulation.asap t.trx.widget.power (fun () ->
             List.iter (fun f -> f t) t.trx.on_ip
         ) ()
     | None ->
@@ -729,8 +723,7 @@ let init_dhcp t =
                             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Got DHCP ACK from %s" (Ip.Addr.to_string ip.src)))) ;
                             apply_lease t dhcp ;
                             (* TODO: Send a gratuitous ARP request? *)
-                            Simulation.asap t.trx.power
-                                            (fun () ->
+                            Simulation.asap t.trx.widget.power (fun () ->
                                 List.iter (fun f -> f t) t.trx.on_ip
                             ) ()
                         | Ok (Dhcp.Pdu.{ op = BootReply ; msg_type = Some op ; message ; _ })
@@ -754,7 +747,7 @@ let init_dhcp t =
                 Ip.Pdu.make Ip.Proto.udp Ip.Addr.zero Ip.Addr.broadcast |>
                 Ip.Pdu.pack |>
                 tx t.eth_trx ;
-            Simulation.delay t.trx.power
+            Simulation.delay t.trx.widget.power
                              (Clock.Interval.sec (5.+.(Random.float 3.)))
                              send_discover ()
         ) in
@@ -765,21 +758,16 @@ let init_dhcp t =
     Log.(log t.trx.widget.logger Debug (lazy
         (Printf.sprintf "Waiting %s before using DHCP..."
             (Clock.Interval.to_string delay)))) ;
-    Simulation.delay t.trx.power delay send_discover ()
+    Simulation.delay t.trx.widget.power delay send_discover ()
 
+(* Build the host from its ethernet adapter.
+ * you probably want [eth_state] to share its power source with [widget]. *)
 let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
                   ?(own_ip_config=true) ~widget
                   (eth_state : Eth.State.t) eth_trx name =
     (* For the API a cable reaches a host but in reality it reaches its
        adapter. *)
     widget.ports <- Widget.ports_of eth_state.iface.widget ;
-    (* The adapter's supply is the host's: they are the same machine, and an
-       adapter that went on emitting after its host went down would be a host
-       that is only half off. Taken from the adapter rather than made here
-       because the adapter is built first, and something has to give it one --
-       and a host built on somebody else's adapter, as a router's admin host
-       is, shares that owner's switch, being the same box as well. *)
-    let power = eth_state.iface.widget.power in
     (* Whether this host runs is whether its supply is on, and nothing else:
      * one flag, in the source, however many widgets draw on it. *)
     let if_on t what f x =
@@ -844,8 +832,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
           signal_err    = (fun str -> signal_err t str) ;
           (* This call is needed by dhcpd servers running on this host: *)
           arp_set       = (fun ip haddr_opt -> if_on t "arp_set" (Eth.State.set_arp t.eth_state (Ip.Addr.to_bitstring ip)) haddr_opt) ;
-          on_ip         = [] ;
-          power }
+          on_ip         = [] }
     in
     (* No "on" property here: the switch belongs to whoever minted the supply,
        which for a host built on somebody else's adapter is somebody else. See
@@ -875,7 +862,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
        interface configured after the fact -- boots now, since the supply will
        not be switched again to tell it to. One built with a supply of its own
        is still dark, and boots when [make] switches that on. *)
-    if t.trx.power.on then init () t ;
+    if t.trx.widget.power.on then init () t ;
     t
 
 (* What a host can be asked to do. For now: ping.
@@ -926,7 +913,7 @@ let ping_action t =
             let dst = addr_of_string target in
             let id = state.id land 0xffff in
             let sim = Widget.sim widget
-            and power = t.trx.power in
+            and power = t.trx.widget.power in
             (* When each request went out, by sequence number, and emptied as
                the replies come in: what is left in it is what is still
                awaited. *)
@@ -1006,14 +993,12 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
        mints one of its own when it is a machine in its own right. *)
     let widget =
         Widget.make ~parent ?location ~device_type:"host" ~own_power ~on name in
-    let power = widget.power in
     let eth_state =
         (* FIXME: Don't use the GW for same net IP! *)
-        Eth.State.make ?mac ?gateways ~parent:widget ~power () in
+        Eth.State.make ?mac ?gateways ~parent:widget () in
     let eth_trx = Eth.TRX.make eth_state in
     let t = make_from_eth ?search_sfx ?nameserver ~widget ?static_ip
                           ?netmask eth_state eth_trx name in
-
     (* This host minted the supply above, so the switch for it goes here, and
        so does stopping it for good. And it is a whole machine, unlike a host
        built on somebody else's adapter. *)
