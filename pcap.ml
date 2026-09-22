@@ -317,9 +317,10 @@ struct
 
     (** [save "file.pcap"] returns a function that will save passed pdus in ["file.pcap"]
      * and another one that will close this file.
+     * @param flush pushes every packet out as it is written.
      * @param caplen can be used to cap saved packet to a given number of bytes
      * @param dlt can be used to change the file's DLT (you probably do not want to do that) *)
-    let save ?(flush=true) ?caplen ?dlt fname =
+    let save ?(flush=false) ?caplen ?dlt fname =
         let out_chan = open_out_bin fname in
         let write_pdu = write ?caplen ?dlt out_chan in
         (* The file's header is written as it is opened, but a buffered channel
@@ -327,7 +328,7 @@ struct
            what is on disk from the start is a pcap that can be read -- an empty
            one -- rather than nothing at all, which is what whoever looks at a
            recording that has yet to catch a packet would otherwise find. *)
-        if flush then Batteries.flush out_chan ;
+        Batteries.flush out_chan ;
         let write_pdu =
             if flush then
                 fun pdu -> write_pdu pdu ; Batteries.flush out_chan
@@ -436,8 +437,8 @@ let default_dlt = Dlt.en10mb
  * packets in ["file.pcap"], and another function that will close that file.
  * @param caplen can be used to cap saved packet to a given number of bytes
  * @param dlt can be used to change the file's DLT (required if you do not write Ethernet packets) *)
-let save sim ?caplen ?(dlt=default_dlt) fname =
-    let write_pdu, close = Pdu.save ?caplen ~dlt fname in
+let save sim ?flush ?caplen ?(dlt=default_dlt) fname =
+    let write_pdu, close = Pdu.save ?flush ?caplen ~dlt fname in
     let write_bits bits =
         (* What goes into the file is dated as the world outside would have
            dated it, since that is what everything reading it will assume. *)
@@ -518,6 +519,7 @@ type recorder =
        * [None] when there is none -- which is exactly when [fname] is "". *)
       mutable file : ((bitstring -> unit) * (unit -> unit)) option ;
       mutable recording : bool ;
+      mutable flush : bool ;
       packets_recvd : Metric.Counter.t }
 
 type Widget.device += Recorder of recorder
@@ -544,7 +546,8 @@ let recorder_open recorder fname =
         (* The name was the reader's, so the refusal is theirs to read: a
            directory that is not there, or not theirs to write in, is something
            they can do something about once they are told which. *)
-        try save sim ?caplen:recorder.caplen ~dlt:recorder.dlt path
+        try save sim ~flush:recorder.flush ?caplen:recorder.caplen
+                 ~dlt:recorder.dlt path
         with Sys_error msg -> Widget.bad_value "Cannot record into %s" msg in
     recorder.file <- Some (write, close) ;
     recorder.fname <- fname ;
@@ -565,11 +568,13 @@ let recorder_eject recorder =
     recorder.fname <- "" ;
     recorder.recording <- false
 
-let recorder ~parent ?location ?caplen ?(dlt=default_dlt) ?fname name =
+let recorder ~parent ?location ?(flush=false) ?caplen ?(dlt=default_dlt) ?fname
+             name =
     let widget = Widget.make ~parent ?location ~device_type:"recorder" name in
-    let recorder =
-        { fname = "" ; caplen ; dlt ; widget ; write = ignore ; file = None ;
-          recording = false ; packets_recvd = Metric.Counter.make () } in
+    let recorder = {
+        fname = "" ; caplen ; dlt ; widget ; write = ignore ; file = None ;
+        recording = false ; flush ; packets_recvd = Metric.Counter.make () ;
+    } in
     recorder.write <- (fun bits ->
         match recorder.file with
         | Some (write, _close) when recorder.recording ->
@@ -626,6 +631,11 @@ let recorder ~parent ?location ?caplen ?(dlt=default_dlt) ?fname name =
                             "Already recording into %s: eject it first"
                             recorder.fname ;
                     recorder_open recorder fname) ;
+        property "flush" ~kind:Bool
+            ~descr:"Push every packet out as it is written."
+            ~getter:(fun () -> `Bool recorder.flush)
+            ~can_set:(fun () -> recorder.file = None)
+            ~setter:(fun v -> recorder.flush <- to_bool v) ;
         property "caplen" ~kind:(Optional (IRange (1, 65535))) ~units:"bytes"
             ~descr:"Capture length (or interface MTU)."
             ~getter:(fun () ->

@@ -93,8 +93,8 @@ type model =
                     lan : Ip.Cidr.t ;
                     max_cnxs : int ; mac : Eth.Addr.t option }
     | TPortal of { promisc : bool ; filter : string ; caplen : int option }
-    | TRecorder of { fname : string option ; caplen : int option ;
-                     dlt : Pcap.Dlt.t option }
+    | TRecorder of { fname : string option ; flush : bool ;
+                     caplen : int option ; dlt : Pcap.Dlt.t option }
     | TReplayer of { fname : string option ; loop : bool }
     | TSynth of { adapters : int ; speeds : Eth.Speed.t list ;
                   independent : bool }
@@ -504,6 +504,8 @@ let recorder =
           param "file name"
               ~kind:(Optional (Hint ("capture.pcap", FileName))) ~default:`Null
               ~descr:"Name of the first file to record, in the pcap library." ;
+          param "flush" ~kind:Bool ~default:(`Bool false)
+              ~descr:"Push every packet out as it is written." ;
           param "caplen" ~kind:(Optional (IRange (1, 65535))) ~default:`Null
               ~descr:"Capture length (default to the interface MTU)." ;
           param "DLT" ~kind:(Optional Int)
@@ -512,10 +514,10 @@ let recorder =
       of_params = fun args ->
           TRecorder {
               fname = opt args "file name" Widget.to_string ;
+              flush = bool args "flush" ;
               caplen = opt args "caplen" Widget.to_int ;
               dlt =
-                  opt args "DLT"
-                      (Pcap.Dlt.o % Int32.of_int % Widget.to_int) } }
+                opt args "DLT" (Pcap.Dlt.o % Int32.of_int % Widget.to_int) } }
 
 let replayer =
     { name = "replayer" ;
@@ -664,8 +666,9 @@ let to_params =
         [ "promisc", `Bool promisc ;
           "filter", `String filter ;
           "caplen", int_opt caplen ]
-    | TRecorder { fname ; caplen ; dlt } ->
+    | TRecorder { fname ; flush ; caplen ; dlt } ->
         [ "file name", str_opt fname ;
+          "flush", `Bool flush ;
           "caplen", int_opt caplen ;
           "DLT", (match dlt with
                  | None -> `Null
@@ -779,8 +782,8 @@ let build ~parent name = function
     | TPortal { promisc ; filter ; caplen } as m ->
         let portal = Pcap.portal ~parent ~promisc ~filter ?caplen name in
         portal.Pcap.widget, m
-    | TRecorder { fname ; caplen ; dlt } as m ->
-        let recorder = Pcap.recorder ~parent ?fname ?caplen ?dlt name in
+    | TRecorder { fname ; flush ; caplen ; dlt } as m ->
+        let recorder = Pcap.recorder ~parent ~flush ?fname ?caplen ?dlt name in
         recorder.Pcap.widget, m
     | TReplayer { fname ; loop } as m ->
         let replayer = Pcap.replayer ~parent ?fname ~loop name in

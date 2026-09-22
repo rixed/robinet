@@ -271,9 +271,14 @@ Writes every packet that reaches it into a pcap file. One port. It has no power
 switch: naming a file opens it and starts the recording, and emptying the name
 ejects it.
 
+What is written waits in a buffer and reaches the disk when the file is ejected
+or when robinet quits, which a `SIGKILL` does not let it do. Set `flush` to
+read a recording while it fills, at the price of a write per packet.
+
 | param | kind | default | |
 | --- | --- | --- | --- |
 | `file name` | optional string | `null` | A file in the pcap library, `/tmp` by default. Nothing is recorded until there is one. |
+| `flush` | bool | `false` | Push every packet out as it is written. |
 | `caplen` | optional 1…65535 | `null` | |
 | `DLT` | optional int | `1` | 1 is EN10MB. |
 
@@ -363,7 +368,7 @@ under:
 | | `srv`, `srv/eth` | *the host it serves DHCP and DNS from* |
 | | `srv/dhcpd` | `authoritative`, `lease time`, `netmask`, `broadcast`, `gateway`, `DNS`, `NTP`, `domain name`, `MTU` |
 | | `srv/named` | `default TTL` |
-| recorder | `""` | `file name`, `recording` |
+| recorder | `""` | `file name`, `recording`, `flush` |
 | replayer | `""` | `file name`, `loop` |
 | synthesizer | `""` | `emitting`, `generators`, `stream`, `packet`, `independent` |
 | | `eth0`… | *its adapters* |
