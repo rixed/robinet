@@ -72,6 +72,11 @@ type clock =
        * there as it is built (see [Simulation.run_startup]). *)
       power : bool }
 
+(** What the random generator starts from. *)
+type seed =
+    | Seed of int
+    | Fresh
+
 (** How to make the interfaces the portals of a network name, when they are not
  * there already. One way so far; tuntap and docker are the ones asked for
  * next. *)
@@ -83,6 +88,7 @@ type t =
       (* Whether to open a browser on it. *)
       ui : bool ;
       portals : portals option ;
+      seed : seed ;
       (* The documents to run, in the order they were given, each with the
        * options that were in force where it sat. *)
       documents : (string * clock) list ;
@@ -99,6 +105,10 @@ let () =
 let error fmt = Printf.ksprintf (fun m -> raise (Error m)) fmt
 
 let default_port = 8080
+
+(* Runs repeat one another unless asked otherwise, which is what an experiment
+ * wants; [--seed] alone is how to ask for something else. *)
+let default_seed = Seed 0
 
 (* A network paced against the wall clock, running, and switched on: the
  * answers that surprise nobody. A network's delays and rates are written in
@@ -117,6 +127,9 @@ let usage =
      \  --admin[=PORT]  serve the administration interface (default port:\n\
      \                  8080)\n\
      \  --ui            open a browser on it; implies --admin\n\
+     \  --seed[=N]      draw from N, printed at startup for a run to be\n\
+     \                  repeated with; --seed alone draws a seed from the\n\
+     \                  machine instead of the usual one\n\
      \  --portals=veth  for every portal of every network, make a network\n\
      \                  namespace of that name and a veth pair into it\n\
      \                  (wants root: run under sudo)\n\
@@ -155,6 +168,7 @@ let parse args =
     and ui = ref false
     and portals = ref None
     and help = ref false
+    and seed = ref default_seed
     and clock = ref default_clock
     and documents = ref [] in
     let value ~flag = function
@@ -189,6 +203,11 @@ let parse args =
                           | m -> error "%s: there is no way to make a portal's \
                                         interface called %S (there is: veth)"
                                      flag m)
+            | "--seed" ->
+                seed :=
+                    (match v with
+                    | None -> Fresh
+                    | Some v -> Seed (int_of flag v))
             | "--help" | "-h" -> no_value ~flag v ; help := true
             | "--speed" ->
                 (match value ~flag v with
@@ -215,6 +234,7 @@ let parse args =
         (if !ui && !admin = None then Some default_port else !admin) ;
       ui = !ui ;
       portals = !portals ;
+      seed = !seed ;
       documents = List.rev !documents ;
       help = !help }
 
@@ -265,6 +285,17 @@ let parse args =
   (try ignore (parse [ "--duration" ]) ; false with Error _ -> true)
   (try ignore (parse [ "--duration=soon" ]) ; false with Error _ -> true)
   (try ignore (parse [ "--duration=-1" ]) ; false with Error _ -> true)
+ *)
+
+(* A seed is the same run again, and no seed is the run everybody gets. *)
+(*$= parse & ~printer:dump
+  default_seed (parse [ "a" ]).seed
+  (Seed 42) (parse [ "--seed=42" ; "a" ]).seed
+  Fresh (parse [ "--seed" ; "a" ]).seed
+ *)
+
+(*$T parse
+  (try ignore (parse [ "--seed=random" ]) ; false with Error _ -> true)
  *)
 
 (* A browser has nothing but the interface to open on. *)

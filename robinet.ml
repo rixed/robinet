@@ -20,6 +20,11 @@
  *                             # three networks, the last one stopped: an
  *                             # option applies to the documents that follow it
  *
+ *   % robinet --seed demo.json
+ *                             # that network with numbers of its own, drawn
+ *                             # from a seed that is printed: --seed=<it> runs
+ *                             # the same again
+ *
  *   % robinet --speed=max --duration=10 demo.json
  *                             # ten seconds of that network, as fast as the
  *                             # machine will run them, and then quit
@@ -34,6 +39,24 @@
  *)
 open Batteries
 open SimTypes
+
+(* Where the run's random numbers begin, said out loud so that it can be had
+ * again: everything drawn in it follows from this one number, and a run worth
+ * looking at twice is one that was given, or printed, its seed.
+ *
+ * Before any document is read, because building a network draws already: an
+ * adapter with no address in the document is given one at random. *)
+let set_seed seed =
+    let seed =
+        match seed with
+        | Cli.Seed n -> n
+        | Cli.Fresh ->
+            (* From the machine, and then treated as any other: what is printed
+             * is what [--seed=] takes to run this again. *)
+            Random.self_init () ;
+            Random.bits () in
+    Random.init seed ;
+    Printf.printf "Random seed: %d\n%!" seed
 
 (* A document, as the simulation it describes, running.
  *
@@ -137,6 +160,7 @@ let main =
          * saying so beats a program that starts and does nothing. *)
         print_string "Nothing to run: name a document, or ask for --admin.\n" ;
         exit 0) ;
+    set_seed opts.Cli.seed ;
     let sims = List.map open_document opts.Cli.documents in
     let ifnames =
         match opts.Cli.portals with

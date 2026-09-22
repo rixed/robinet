@@ -540,6 +540,12 @@ Each of these runs as it stands. Start with `robinet --ui <file>` to watch, or
 quit, which is what a script wants: nothing to interrupt, and the recordings
 are complete when the program is done.
 
+Whatever a run draws at random — the addresses left out of a document, the path
+a router balancing at random picks, the moment a DHCP client first asks —
+follows from one seed, printed at startup. Runs repeat one another unless
+`--seed` is given, which draws a seed from the machine, and `--seed=<n>` runs
+again the one that printed that number.
+
 ### Two hosts on a cable
 
 ```json
