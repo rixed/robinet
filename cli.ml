@@ -65,6 +65,8 @@ type clock =
        * whereas one that was asked for is refused out loud. *)
       speed : speed option ;
       paused : bool ;
+      (* How long, in simulated seconds, to let it run before stopping it. *)
+      duration : float option ;
       (* Whether to run the network's startup list once it stands, which is
        * what switches on what it is made of: every box registers its power-on
        * there as it is built (see [Simulation.run_startup]). *)
@@ -102,7 +104,8 @@ let default_port = 8080
  * answers that surprise nobody. A network's delays and rates are written in
  * seconds and bits per second, and at a ratio of 1 they are the seconds and
  * the bits per second of whoever is watching. *)
-let default_clock = { speed = None ; paused = false ; power = true }
+let default_clock =
+    { speed = None ; paused = false ; duration = None ; power = true }
 
 let usage =
     "robinet [option|document]...\n\
@@ -123,6 +126,9 @@ let usage =
      \  --speed=R       run it at R times the speed of the wall clock, 1 by\n\
      \                  default; also \"max\", as fast as it will go, and\n\
      \                  \"real\", reading the time off the wall clock\n\
+     \  --duration=S    stop it after S simulated seconds, and quit once\n\
+     \                  every network has stopped; by default it runs until\n\
+     \                  it is interrupted\n\
      \  --pause         load it stopped, which --speed=0 also says; --resume,\n\
      \                  the default, does not\n\
      \  --off           leave what it is made of switched off; --on, the\n\
@@ -136,7 +142,7 @@ let float_of what s =
     match float_of_string s with
     | exception _ -> error "%s: %S is not a number" what s
     | f when Float.is_finite f && f >= 0. -> f
-    | _ -> error "%s: %S is not a speed" what s
+    | _ -> error "%s: %S is not a positive number" what s
 
 let int_of what s =
     match int_of_string s with
@@ -194,6 +200,9 @@ let parse args =
                      * one thing a ratio of zero can mean. *)
                     | 0. -> clock := { !clock with paused = true }
                     | r -> clock := { !clock with speed = Some (Ratio r) }))
+            | "--duration" ->
+                let d = float_of flag (value ~flag v) in
+                clock := { !clock with duration = Some d }
             | "--pause" -> no_value ~flag v ; clock := { !clock with paused = true }
             | "--resume" -> no_value ~flag v ; clock := { !clock with paused = false }
             | "--on" -> no_value ~flag v ; clock := { !clock with power = true }
@@ -243,6 +252,19 @@ let parse args =
     (clocks [ "--pause" ; "--speed=2" ; "a" ])
   [ { default_clock with speed = Some (Ratio 2.) ; paused = true } ] \
     (clocks [ "--speed=2" ; "--speed=0" ; "a" ])
+ *)
+
+(* How long to run is a number of seconds, and only a document that follows
+ * it is given it. *)
+(*$= clocks & ~printer:dump
+  [ default_clock ; { default_clock with duration = Some 1.5 } ] \
+    (clocks [ "a" ; "--duration=1.5" ; "b" ])
+ *)
+
+(*$T parse
+  (try ignore (parse [ "--duration" ]) ; false with Error _ -> true)
+  (try ignore (parse [ "--duration=soon" ]) ; false with Error _ -> true)
+  (try ignore (parse [ "--duration=-1" ]) ; false with Error _ -> true)
  *)
 
 (* A browser has nothing but the interface to open on. *)

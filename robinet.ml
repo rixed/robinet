@@ -20,6 +20,10 @@
  *                             # three networks, the last one stopped: an
  *                             # option applies to the documents that follow it
  *
+ *   % robinet --speed=max --duration=10 demo.json
+ *                             # ten seconds of that network, as fast as the
+ *                             # machine will run them, and then quit
+ *
  *   % sudo robinet --portals=veth demo.json
  *                             # and for every portal of it, a namespace of
  *                             # that name with a veth pair into it, so that
@@ -90,6 +94,20 @@ let set_speed (sim, (clock : Cli.clock)) =
     | Some (Cli.Ratio r) -> Simulation.set_speed_ratio sim (Some r)
     | Some Cli.Real -> Simulation.make_realtime sim
 
+(* When a document was given a duration, the event that ends its network.
+ *
+ * Simulated seconds, counted by the network's own clock: at [--speed=max] they
+ * cost whatever the machine takes to get through them, and a network that is
+ * paused has yet to spend any. Once stopped there is nothing left to wait for,
+ * so a program with nothing else to do -- no interface to serve -- reaches the
+ * end of its main thread and quits, flushing what the recorders have buffered.
+ *)
+let set_duration (sim, (clock : Cli.clock)) =
+    Option.may (fun d ->
+        Simulation.delay sim.root.power (Clock.Interval.sec d)
+                         (Simulation.stop sim) ()
+    ) clock.Cli.duration
+
 (* Phase two of every load, now that all of it stands and the interfaces are
  * there: what the network is to be asked, which is what switches on every box
  * it is made of.
@@ -130,6 +148,7 @@ let main =
     finally (fun () -> List.iter Netns.teardown ifnames) (fun () ->
         List.iter run_startup sims ;
         List.iter set_speed sims ;
+        List.iter set_duration sims ;
         Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ] (fun () ->
             match opts.Cli.admin with
             | None ->

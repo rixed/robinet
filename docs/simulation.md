@@ -530,7 +530,10 @@ from the interface once the network has settled.
 ## Examples
 
 Each of these runs as it stands. Start with `robinet --ui <file>` to watch, or
-`robinet --speed=max <file>` to let it go as fast as it will.
+`robinet --speed=max <file>` to let it go as fast as it will. Add
+`--duration=<secs>` to stop the network after that many simulated seconds and
+quit, which is what a script wants: nothing to interrupt, and the recordings
+are complete when the program is done.
 
 ### Two hosts on a cable
 
