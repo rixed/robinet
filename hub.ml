@@ -159,6 +159,88 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
         t
 end
 
+(** A Backplane is what joins the parts a device is made of, as against a
+  length of shared wire joining devices: everything reaches every other part
+  at once, with no speed of its own, no collisions and no jamming.
+
+  Parts are wired to one another rather than taking turns on a segment, so a
+  box's insides neither slow down what passes through it nor drop a reply that
+  comes back while it is still busy. Nothing is plugged into one from outside
+  and it has no ports of its own: whoever builds one wires it by hand, as it
+  does the rest of its parts. *)
+module Backplane =
+struct
+    type t = { ports : ((bitstring -> unit) * bool) array ;
+               power : Simulation.power ;
+              widget : Widget.t ;
+              volume : Metric.Counter.t }
+
+    type Widget.device += T of t
+
+    (* The backplane a widget stands for, when it stands for one. *)
+    let of_widget (w : Widget.t) =
+        match w.device with
+        | Some (T t) -> Some t
+        | _ -> None
+
+    let print oc t =
+        Printf.fprintf oc "backplane %s with %d ports" t.widget.name
+                       (Array.length t.ports)
+
+    (* Whether anything is wired to port [n]. Set by [set_read], as a
+     * repeater's is: the parts are wired at build time, and the one port a
+     * device exposes as a socket of its own is marked when a cable lands. *)
+    let is_connected (t : t) n =
+        snd t.ports.(n)
+
+    let write (t : t) n pld =
+        let now = Simulation.Widget.now t.widget in
+        Metric.Counter.add t.volume ~now (bytelength pld)
+                           ~params:(Eth.dir_params ~port:n "ingress") ;
+        Array.iteri (fun i (emit, _is_conn) ->
+            if i <> n then (
+                Metric.Counter.add t.volume ~now (bytelength pld)
+                    ~params:(Eth.dir_params ~port:i "egress") ;
+                (* Through the scheduler rather than straight down the stack:
+                   a part that answers at once would otherwise do so from
+                   within the call that is still delivering to the others. *)
+                Simulation.asap t.power emit pld
+            )) t.ports
+
+    let set_read (t : t) n f =
+        t.ports.(n) <- (f, true)
+
+    (** Turns a port into a device *)
+    let dev t n =
+        { write = write t n ; set_read = set_read t n }
+
+    (* And undoes it, for the port a device offers as a socket. *)
+    let disconnect (t : t) n =
+        if is_connected t n then
+            t.ports.(n) <-
+                (Eth.Iface.ignore_disconnected ~logger:t.widget.logger, false)
+        else
+            Log.(log t.widget.logger Debug (lazy (Printf.sprintf
+                "Ignoring request to disconnect port %d, which is not \
+                 connected" n)))
+
+    let make ~parent ?(own_power=false) n name =
+        let widget = Widget.make ~parent ~own_power name in
+        let t = {
+            ports = Array.make n (ignore_bits ~logger:widget.logger, false) ;
+            power = widget.power ;
+            widget ;
+            volume = Metric.Counter.make () } in
+        widget.device <- Some (T t) ;
+        Widget.add_properties widget Widget.[
+            metric_property "volume" ~descr:"Volume received and emitted."
+                ~units:"bytes"
+                (Metric.Counter.T t.volume) ;
+            property "tot ports" ~kind:Int ~descr:"Total number of ports."
+                ~getter:(fun () -> `Int (Array.length t.ports)) ] ;
+        t
+end
+
 (** A Switch is a device that will forward Ethernet frames based on the observed
   location of the destination.
   Contrary to a simple Hub, it does have proper eth adapters that negotiate a

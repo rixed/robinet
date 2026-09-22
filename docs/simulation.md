@@ -240,6 +240,16 @@ Only the server (`.2`) answers pings: the gateway's own LAN address lives on a
 router interface, and a router interface answers for an address only when its
 routing table says so.
 
+What joins the router, the server and the LAN socket inside the box is a
+backplane and not a length of wire: it has no speed of its own and nothing
+collides on it, so a gateway neither slows down what crosses it nor drops a
+reply that comes back while it is still sending. The LAN cable negotiates with
+the router's first interface, which is the adapter really behind that socket,
+and what they settle on is what the server's adapter runs at too — the three
+are one segment, and a part of it left slower than the rest would drop what the
+others send. So the LAN runs as fast as its two ends agree on; put a hub on it
+and it is the hub, as ever, that decides.
+
 ### portal
 
 Opens a real interface of the machine and exchanges packets with the real world.
@@ -352,7 +362,6 @@ under:
 | | `srv`, `srv/eth` | *the host it serves DHCP and DNS from* |
 | | `srv/dhcpd` | `authoritative`, `lease time`, `netmask`, `broadcast`, `gateway`, `DNS`, `NTP`, `domain name`, `MTU` |
 | | `srv/named` | `default TTL` |
-| | `hub` | `speed` — what joins the three inside |
 | recorder | `""` | `file name`, `recording` |
 | replayer | `""` | `file name`, `loop` |
 | synthesizer | `""` | `emitting`, `generators`, `stream`, `packet`, `independent` |

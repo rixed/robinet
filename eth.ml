@@ -297,6 +297,7 @@ module Pdu = struct
         try Widget.check_value kind (to_json t) ; true \
         with _ -> false)
      *)
+
     (*$>*)
 end
 
@@ -1038,12 +1039,19 @@ struct
                             (* Now that we may have gained knowledge, try to send the msg in waiting queue *)
                             (* TODO: timeout some? *)
                             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...Do I have a msg waiting for '%s'?" (hexstring_of_bitstring arp.sender_proto)))) ;
-                            while BitHash.mem st.postponed arp.sender_proto do
-                                Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...Yes!! Let's send it!"))) ;
-                                let msg = BitHash.find st.postponed arp.sender_proto in
-                                send st st.proto sender_hw msg ;
-                                BitHash.remove st.postponed arp.sender_proto
-                            done
+                            (* In the order they were postponed, which
+                               [find_all] gives the reverse of: a resolution
+                               that let several frames go must not shuffle
+                               them. *)
+                            let waiting =
+                                List.rev
+                                    (BitHash.find_all st.postponed
+                                                      arp.sender_proto) in
+                            BitHash.remove_all st.postponed arp.sender_proto ;
+                            List.iter (fun msg ->
+                                Log.(log st.iface.widget.logger Debug (lazy "...Yes!! Let's send it!")) ;
+                                send st st.proto sender_hw msg
+                            ) waiting
                         )
                     )
             ) else ( (* not for me, send to promisc function *)
@@ -1332,6 +1340,34 @@ struct
                 ~msg:("after "^ string_of_int n ^" frame(s)")
                 (min n 3) (rows ())
         ) [ 1 ; 2 ; 3 ; 4 ; 5 ]
+     *)
+    (* Frames held back while an address is being resolved leave in the order
+     * they were held: what a fast link lets pile up behind one ARP must come
+     * out the way it went in, or a pair sent back to back arrives reversed. *)
+    (*$R plug
+        let sim = Simulation.make ~realtime:false "arp-order" in
+        let ip n = Ip.Addr.of_string ("192.168.0." ^ string_of_int n) in
+        let host n =
+            Host.make ~parent:sim.root ~static_ip:(ip n)
+                      ~netmask:(Ip.Addr.of_string "255.255.255.0")
+                      ("h" ^ string_of_int n) in
+        let a = host 1 and b = host 2 in
+        let st = State.make ~parent:sim.root ~name:"c" () in
+        plug st (a.Host.trx.Host.widget, 0) (b.Host.trx.Host.widget, 0) ;
+        Simulation.run_startup sim ;
+        let got = ref [] in
+        b.Host.trx.Host.udp_server (Udp.Port.o 5000) (fun udp ->
+            udp.Udp.TRX.trx.ins.set_read (fun bits ->
+                got := Bitstring.string_of_bitstring bits :: !got)) ;
+        (* Both go out before the first can be answered, so both wait on the
+           same resolution. *)
+        List.iter (fun n ->
+            a.Host.trx.Host.udp_send (Host.IPv4 (ip 2)) (Udp.Port.o 5000)
+                                     (Bitstring.bitstring_of_string n)
+        ) [ "one" ; "two" ] ;
+        Simulation.run sim false ;
+        assert_equal ~printer:(String.concat ",") [ "one" ; "two" ]
+                     (List.rev !got)
      *)
     (*$>*)
 

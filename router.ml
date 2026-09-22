@@ -1014,11 +1014,15 @@ end
  *
  *          GW: 192.168.0.1
  *           /-----------\
- *    LAN -- :0  (hub)   2:--<:0-router-1:>-- NAT --- Internet
+ *    LAN -- :0  (bus)   2:--<:0-router-1:>-- NAT --- Internet
  *           \____ 1 ____/
  *                 |
  *                 |
  *            dhcpd/named (192.168.0.2)
+ *
+ * The bus is the inside of the box and not a length of wire: the LAN cable
+ * negotiates with the router's LAN adapter, which is the adapter really behind
+ * that socket, and the server hears the segment without being an end of it.
  *)
 
 type gw_trx =
@@ -1091,18 +1095,19 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
          * on it a few lines further down. *)
         Host.make ?nameserver ~gateways ~netmask ~static_ip:srv_ip
                   ~parent:widget ~own_power:false "srv" in
-    (* Now we need the repeater and the services: *)
-    (* FIXME: instead of a Hub that forces us into having 2 IPs make a simple TRX directly, that inspects the protostack and if
-     * the dest IP is gw_ip == src_iv then forward it to the host and if not forward it to the NAT. *)
-    let hub = Hub.Repeater.make ~parent:widget ~own_power:false 3 "hub" in
-    Hub.Repeater.set_read hub 1 h.trx.dev.write ;
-    h.trx.dev.set_read (Hub.Repeater.write hub 1) ;
+    (* Now we need the bus joining those parts, and the services.
+     * FIXME: a TRX that reads the protostack and hands what is addressed to
+     * the gateway itself to the server and the rest to the NAT would do away
+     * with the second address the server needs to be told apart. *)
+    let bus = Hub.Backplane.make ~parent:widget 3 "bus" in
+    Hub.Backplane.set_read bus 1 h.trx.dev.write ;
+    h.trx.dev.set_read (Hub.Backplane.write bus 1) ;
     (* Connect the first iface of our router *)
-    Hub.Repeater.set_read hub 2 router.ifaces.(0).trx.out.write ;
-    router.ifaces.(0).trx.out.set_read (Hub.Repeater.write hub 2) ;
-    (* The entrance of the hub (iface 0) is also the entrance of the whole TRX: *)
-    let in_trx = { write = (fun bits -> Hub.Repeater.write hub 0 bits) ;
-                   set_read = fun f -> Hub.Repeater.set_read hub 0 f } in
+    Hub.Backplane.set_read bus 2 router.ifaces.(0).trx.out.write ;
+    router.ifaces.(0).trx.out.set_read (Hub.Backplane.write bus 2) ;
+    (* The entrance of the bus (port 0) is also the entrance of the whole TRX: *)
+    let in_trx = { write = (fun bits -> Hub.Backplane.write bus 0 bits) ;
+                   set_read = fun f -> Hub.Backplane.set_read bus 0 f } in
     let trx =
         { ins = in_trx ;
           out = out_trx.out } in
@@ -1157,23 +1162,34 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
         count = (fun () -> 2) ;
         is_connected = (function
             | 0 -> router.ifaces.(1).eth.iface.is_connected
-            | _ -> Hub.Repeater.is_connected hub 0) ;
+            | _ -> Hub.Backplane.is_connected bus 0) ;
+        (* A frame from the LAN is for the router or for the server, and which
+           is not known here, so the socket is the bus and both of them hear
+           it. *)
         dev = (function 0 -> out_trx.out | _ -> in_trx) ;
-        (* The outward socket is the router's second adapter; the LAN one is the
-           repeater everything inside hangs off. *)
+        (* Either socket belongs to the router adapter behind it: the outward
+           one to its second, the LAN one to its first. *)
         owner = (function
             | 0 -> (Router.ports router.ifaces.(1)).owner 0
-            | _ -> hub.widget) ;
+            | _ -> (Router.ports router.ifaces.(0)).owner 0) ;
         disconnect = (function
             | 0 -> (Router.ports router.ifaces.(1)).disconnect 0
-            | _ -> Hub.Repeater.disconnect hub 0) ;
+            | _ -> Hub.Backplane.disconnect bus 0) ;
+        (* The LAN cable settles with the router's first adapter, which is
+           the one really behind that socket. *)
         get_capabilities = (fun ?peer -> function
             | 0 -> (Router.ports router.ifaces.(1)).get_capabilities ?peer 0
-            | _ -> hub.widget.ports.get_capabilities ?peer 0) ;
+            | _ -> (Router.ports router.ifaces.(0)).get_capabilities ?peer 0) ;
         set_capabilities = (fun n c ->
             match n with
             | 0 -> (Router.ports router.ifaces.(1)).set_capabilities 0 c
-            | _ -> hub.widget.ports.set_capabilities 0 c) } ;
+            | _ ->
+                (* Both adapters on the bus, and not merely the one that
+                   answered: they and the LAN are one segment, and an adapter
+                   left slower than the rest of it is still busy with the
+                   frame before when the next arrives, and drops it. *)
+                (Router.ports router.ifaces.(0)).set_capabilities 0 c ;
+                h.trx.widget.ports.set_capabilities 0 c) } ;
     widget.device <- Some (T gw) ;
     gw
 
@@ -1218,8 +1234,36 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
                 (address () <> "none")
  *)
 
+(* What joins a gateway's parts is a backplane and not a segment of wire, so
+   the LAN settles with the router's adapter and is not held to a repeater's
+   10 or 100Mbps. The server's adapter is settled along with it: the three are
+   one segment, and one of them left slower would drop what the others send. *)
+(*$R make_gw
+    let sim = Simulation.make ~realtime:false "gw-lan-speed" in
+    let gw =
+        make_gw ~parent:sim.root
+                (Ip.Addr.of_dotted_string "80.82.17.127")
+                (Ip.Cidr.of_string "192.168.0.0/24") in
+    let h =
+        Host.make ~parent:sim.root ~netmask:(Ip.Addr.of_string "255.255.255.0")
+                  ~static_ip:(Ip.Addr.of_string "192.168.0.10") "h" in
+    let cable = Eth.Cable.State.make ~parent:sim.root ~name:"lan" () in
+    Eth.Cable.plug cable (gw.widget, 1) (h.Host.trx.Host.widget, 0) ;
+    let link path =
+        let w = Option.get (Widget.find_within gw.widget path) in
+        match (List.find (fun (p : Widget.property) -> p.name = "link")
+                         w.properties).getter () with
+        | `String s -> s
+        | _ -> "?" in
+    let printer = identity in
+    assert_equal ~printer ~msg:"the LAN adapter takes what the cable settled on"
+        "5Gbps full-duplex" (link "router/#0") ;
+    assert_equal ~printer ~msg:"and so does the server behind it"
+        "5Gbps full-duplex" (link "srv/eth")
+ *)
+
 (* A gateway offers what a gateway has sockets for, and not one port per end
-   that happens to exist within it: the router's two interfaces, the hub's three
+   that happens to exist within it: the router's two interfaces, the bus's three
    and the server's adapter are all spoken for inside. *)
 (*$T make_gw
   let sim = Simulation.make ~realtime:false "gw-ports" in \
@@ -1229,10 +1273,10 @@ let make_gw ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
   gw.widget.ports.count () = 2 && \
   gw.widget.ports.dev 0 == gw.trx.out && \
   gw.widget.ports.dev 1 == gw.trx.ins && \
-  (* The outside socket is the router's second adapter, the LAN one the
-     repeater everything inside it hangs off. *) \
+  (* Either socket belongs to the router adapter behind it, the bus joining
+     the parts inside being no end of a link. *) \
   (gw.widget.ports.owner 0).name = "#1" && \
-  (gw.widget.ports.owner 1).name = "hub" && \
+  (gw.widget.ports.owner 1).name = "#0" && \
   gw.widget.ports.owner 0 != gw.widget.ports.owner 1 && \
   List.for_all (fun (c : Widget.t) -> c.ports.count() <= 3) \
                gw.widget.children
