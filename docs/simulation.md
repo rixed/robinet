@@ -846,15 +846,42 @@ meshes of six routers, one address each and ports 0 to 4 for the five
 neighbours, joined by four crossings between the two eastern-US routers and the
 two western-European ones. Each continent is one /16, so a router reaches the
 whole of the other one through a single pair of rows — the two crossings for a
-router that has them, the two routers that have them for everyone else. The
-four that straddle the ocean balance round robin and the rest at random, and
-the interfaces advertise 40Gbps or 10Gbps so that each link settles on what
-both of its ends offer.
+router that has them, the two routers that have them for everyone else.
 
-Two 1KiB frames leave the western US back to back and are recorded twice, as
-they leave and as they arrive. They do not travel together: the first goes
-through new-york and the second through ashburn, which is the random balancing
-at los-angeles sharing out its two ways east.
+How fast the links are and how the routers share out their two ways is left to
+the environment:
+
+| variable | default | |
+| --- | --- | --- |
+| `ATLANTIC_SPEED` | `7` (40Gbps) | The one speed the four crossings advertise. |
+| `ATLANTIC_LOAD_BALANCING` | `3` (round robin) | Of new-york, ashburn, lisbon and london. |
+| `LAND_SPEED` | `5` (10Gbps) | The one speed every other router port advertises. |
+| `LAND_LOAD_BALANCING` | `2` (random) | Of the eight other routers. |
+
+```
+% ATLANTIC_SPEED=2 ATLANTIC_LOAD_BALANCING=1 robinet examples/two-continents.json
+```
+
+Each end is a LAN of one machine at 100Gbps, whatever those say, with a tap
+cut into its cable, so that the slowest link between the two is on land or at
+sea and never at either end. gen-us sends 26 frames of 1KiB to host-eu, under
+192.0.2.1: nothing routes to that address, so the port unreachable host-eu
+answers each with goes no further than bucharest, rather than crossing back
+and moving the round robins on its way — a router's round robin counts every
+packet it forwards, whichever way it goes. The
+first 24 are spread out, from 2.4s down to 0.1s apart, so that every router on
+the ways east has learnt its next hop's address before the last two leave back
+to back: a packet pair, which would otherwise wait out an ARP exchange together
+and arrive as close as they left. rec-us and rec-eu record them as they leave
+and as they arrive, in `/tmp/us-eu_<tag>.pcap` and `/tmp/eu-us_<tag>.pcap`,
+where `<tag>` is `atlantic-7-3_land-5-2` for the four variables as they are by
+default.
+
+`examples/two-continents-sweep.sh` runs the network once for every combination
+of the four, and prints how far apart the pair arrived next to what the slowest
+link would space them by. Taking the same way, they arrive one frame of that
+link apart; taken apart by a router's balancing, the difference between their
+two ways is what separates them.
 
 ## See also
 
