@@ -371,9 +371,14 @@ under:
 | note | `""` | `text` |
 
 *An Ethernet adapter* is `speeds`, `full-duplex` and `inter-frame-gap`, and on
-one with an IP stack above it also `gateways`, `delay` and `loss` — a loss of
-0.01 drops one frame in a hundred, which is how a machine is made to misbehave
-without touching the cable. Its MAC is a parameter of the device it belongs to,
+one with an IP stack above it also `gateways`, `delay`, `loss` and `accept
+gratuitous ARP` — a loss of 0.01 drops one frame in a hundred, which is how a
+machine is made to misbehave without touching the cable. An adapter learns a
+neighbour's hardware address when it asks for it, or when the neighbour asks
+for its own; with `accept gratuitous ARP` it also learns one that merely
+announces itself (see `emit gratuitous ARP` below), which is what spares the
+first frame to a neighbour the wait of an ARP exchange. It is off unless set,
+as on most real machines. Its MAC is a parameter of the device it belongs to,
 not a property: an address is not something a running machine is reconfigured
 with.
 
@@ -509,6 +514,7 @@ What can be asked:
 | action | of | params |
 | --- | --- | --- |
 | `power on`, `power off` | anything with a power switch of its own: hosts, switches, hubs, routers, gateways, portals, synthesizers and **cables** (but not recorders, replayers or notes) | — |
+| `emit gratuitous ARP` | a router, on every port that has an address; or one adapter with an address: a host's `eth`, a router's `#0`… | — |
 | `ping` | a host | `target` (address or name), `count` (3), `interval` secs (1), `timeout` secs (4) |
 | `start replay`, `stop replay` | a replayer | — |
 
@@ -864,18 +870,17 @@ the environment:
 
 Each end is a LAN of one machine at 100Gbps, whatever those say, with a tap
 cut into its cable, so that the slowest link between the two is on land or at
-sea and never at either end. gen-us sends 26 frames of 1KiB to host-eu, under
-192.0.2.1: nothing routes to that address, so the port unreachable host-eu
-answers each with goes no further than bucharest, rather than crossing back
-and moving the round robins on its way — a router's round robin counts every
-packet it forwards, whichever way it goes. The
-first 24 are spread out, from 2.4s down to 0.1s apart, so that every router on
-the ways east has learnt its next hop's address before the last two leave back
-to back: a packet pair, which would otherwise wait out an ARP exchange together
-and arrive as close as they left. rec-us and rec-eu record them as they leave
-and as they arrive, in `/tmp/us-eu_<tag>.pcap` and `/tmp/eu-us_<tag>.pcap`,
-where `<tag>` is `atlantic-7-3_land-5-2` for the four variables as they are by
-default.
+sea and never at either end. rec-us and rec-eu record what crosses those two
+cables, in `/tmp/us-eu_<tag>.pcap` and `/tmp/eu-us_<tag>.pcap`, where `<tag>`
+is `atlantic-7-3_land-5-2` for the four variables as they are by default.
+
+gen-us sends three frames of 1KiB to host-eu: one, then 0.1s later two back to
+back — a packet pair. A pair that met a router still asking for its next hop's
+address would wait out that ARP exchange together and arrive as close as it
+left, so the startup list ends with every router and host-eu emitting a
+gratuitous ARP, and the ports on the ways east accept them. The first frame is
+there only to hold the pair back until those announcements have crossed the
+ocean, since everything in the startup list happens at the same instant.
 
 `examples/two-continents-sweep.sh` runs the network once for every combination
 of the four, and prints how far apart the pair arrived next to what the slowest

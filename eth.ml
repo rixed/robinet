@@ -687,6 +687,11 @@ struct
           mutable promisc : (bitstring -> unit) option ;
           rx_otherhost_dropped : Metric.Counter.t ;
           mutable do_proxy_arp : Arp.Pdu.t -> bool ;
+          (* Whether an ARP announcing its own sender adds that sender to the
+           * cache. Otherwise, as RFC 826 has it, only an ARP about this
+           * adapter's own address adds its sender, and any other merely
+           * updates an entry already there. *)
+          mutable accept_gratuitous_arp : bool ;
           (* TODO: these two should be timeouted, requiring a clock *)
           arp_cache : Addr.t option BitHash.t ;     (* proto_addr -> hw_addr option (None when resolving) *)
           (* Hash of messages waiting for an ARP resolution.
@@ -730,6 +735,19 @@ struct
         t.via <- None ;
         Iface.reset t.iface
 
+    (** Broadcast one ARP request per address of this adapter, each asking
+     * for that very address: what neighbours that accept gratuitous ARP
+     * learn this adapter from, without having to ask. *)
+    let emit_gratuitous_arp t =
+        List.iter (fun my_addr ->
+            Arp.Pdu.make_request Arp.HwType.eth t.proto (t.mac :> bitstring)
+                                 my_addr.addr my_addr.addr |>
+            Arp.Pdu.pack |>
+            Pdu.make Proto.arp t.mac Addr.broadcast |>
+            Pdu.pack |>
+            Simulation.asap t.iface.widget.power t.iface.emit
+        ) t.my_addresses
+
     (** Create the state machine for an Ethernet communication.
      * @param mtu the maximum transmit unit (ie. you won't be able to send longer payloads)
      * @param mac the source {!Eth.Addr}
@@ -755,6 +773,7 @@ struct
                        ?can_forward_after name in
         let t = {
             iface ; mac ; gateways ; proto ; mtu ; promisc ; do_proxy_arp ;
+            accept_gratuitous_arp = false ;
             rx_otherhost_dropped = Metric.Counter.make () ;
             recv = ignore_bits ~logger:iface.widget.logger ;
             my_addresses ; delay ; loss ; via = None ;
@@ -833,9 +852,20 @@ struct
                 ~descr:"Packet loss ratio."
                 ~getter:(fun () -> `Float t.loss)
                 ~setter:(fun v -> t.loss <- to_float_range ~min:0. ~max:1. v) ;
+            property "accept gratuitous ARP" ~kind:Bool
+                ~descr:"Learn the neighbours that announce themselves, and not \
+                        only the ones that were asked for."
+                ~getter:(fun () -> `Bool t.accept_gratuitous_arp)
+                ~setter:(fun v -> t.accept_gratuitous_arp <- to_bool v) ;
             metric_property "rx-otherhost-dropped" ~units:"frames"
                 ~descr:"Number of frames dropped by the MAC recipient filter."
                 (Metric.Counter.T t.rx_otherhost_dropped) ] ;
+        Widget.add_actions iface.widget Widget.[
+            action "emit gratuitous ARP"
+                ~descr:"Announce this adapter's addresses to its neighbours."
+                ~can_run:(fun () ->
+                    iface.widget.power.on && t.my_addresses <> [])
+                ~handler:(fun s -> emit_gratuitous_arp t ; Action.stop s) ] ;
         t
 end
 
@@ -1005,6 +1035,12 @@ struct
                             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...transporting same proto than me!"))) ;
                             if BitHash.mem st.arp_cache arp.sender_proto then (
                                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...updating entry %s->%s in ARP cache" (hexstring_of_bitstring arp.sender_proto) (Addr.to_string sender_hw)))) ;
+                                merge_flag := true ;
+                                BitHash.replace st.arp_cache arp.sender_proto (Some sender_hw)
+                            ) else if st.accept_gratuitous_arp &&
+                                      Bitstring.equals arp.sender_proto
+                                                       arp.target_proto then (
+                                Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...learning %s->%s from a gratuitous ARP" (hexstring_of_bitstring arp.sender_proto) (Addr.to_string sender_hw)))) ;
                                 merge_flag := true ;
                                 BitHash.replace st.arp_cache arp.sender_proto (Some sender_hw)
                             ) ;

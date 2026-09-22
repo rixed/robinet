@@ -714,6 +714,17 @@ struct
                 (Metric.Gauge.T t.buffered) ;
             property "tot ports" ~kind:Int ~descr:"Total number of ports."
                 ~getter:(fun () -> `Int num_ifaces) ] ;
+        let addressed () =
+            Array.exists (fun iface -> iface.eth.my_addresses <> []) t.ifaces in
+        Widget.add_actions widget Widget.[
+            action "emit gratuitous ARP"
+                ~descr:"Announce the router's addresses on every port that \
+                        has one."
+                ~can_run:(fun () -> widget.power.on && addressed ())
+                ~handler:(fun s ->
+                    Array.iter (fun iface ->
+                        Eth.State.emit_gratuitous_arp iface.eth) t.ifaces ;
+                    Action.stop s) ] ;
         Array.iteri (fun n iface ->
             configure_iface t n ;
             (* When packets are received from the outside, go to routing: *)
@@ -976,6 +987,48 @@ struct
         "and a table that stops naming one takes it away" @?
             (r.ifaces.(0).eth.Eth.State.my_addresses = [] &&
              r.ifaces.(0).admin_host = None)
+     *)
+
+    (* A router announces itself on its ports, and a neighbour learns it from
+       that only if it accepts gratuitous ARP. *)
+    (*$R make
+        let sim = Simulation.make ~realtime:false "gratuitous-arp" in
+        let router name addr =
+            let r = make ~parent:sim.root 1 [] name in
+            (match List.find_opt (fun (p : Widget.property) ->
+                       p.name = "routes") r.widget.properties with
+            | None -> "the router has a routing table" @? false
+            | Some p ->
+                (Option.get p.setter) (`List [
+                    `Assoc [ "input port", `Null ; "src mask", `Null ;
+                             "dst mask", `String (addr ^"/24") ;
+                             "ip proto", `Null ; "src port", `Null ;
+                             "dst port", `Null ; "output port", `Null ;
+                             "via", `Null ] ])) ;
+            r in
+        let r1 = router "r1" "10.0.0.1" and r2 = router "r2" "10.0.0.2" in
+        let a = r1.widget.ports.dev 0 and b = r2.widget.ports.dev 0 in
+        a.Tools.set_read b.Tools.write ;
+        b.Tools.set_read a.Tools.write ;
+        let eth2 = r2.ifaces.(0).eth in
+        let knows_r1 () =
+            match Tools.BitHash.find_option eth2.Eth.State.arp_cache
+                    (Ip.Addr.to_bitstring (Ip.Addr.of_dotted_string "10.0.0.1")) with
+            | Some (Some mac) -> Eth.Addr.eq mac r1.ifaces.(0).eth.Eth.State.mac
+            | _ -> false in
+        (* Which switches both on. *)
+        Simulation.run sim false ;
+        "not before it has been told" @? not (knows_r1 ()) ;
+        Eth.State.emit_gratuitous_arp r1.ifaces.(0).eth ;
+        Simulation.run sim false ;
+        "a neighbour that does not accept them learns nothing" @?
+            not (knows_r1 ()) ;
+        eth2.Eth.State.accept_gratuitous_arp <- true ;
+        let announce = Option.get (Action.find r1.widget "emit gratuitous ARP") in
+        ignore (Action.start r1.widget announce []) ;
+        Simulation.run sim false ;
+        "one that does learns the router's address on that port" @?
+            knows_r1 ()
      *)
 
     (* A router's port n is its interface n, whatever order its parts were built

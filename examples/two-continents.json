@@ -27,6 +27,8 @@
           ],
           "load balancing": "${LAND_LOAD_BALANCING:-2}"
         },
+        "#3": { "accept gratuitous ARP": true },
+        "#4": { "accept gratuitous ARP": true },
         "#5": { "speeds": [8] }
       }
     },
@@ -132,8 +134,8 @@
           ],
           "load balancing": "${ATLANTIC_LOAD_BALANCING:-3}"
         },
-        "#5": { "speeds": ["${ATLANTIC_SPEED:-7}"] },
-        "#6": { "speeds": ["${ATLANTIC_SPEED:-7}"] }
+        "#5": { "speeds": ["${ATLANTIC_SPEED:-7}"], "accept gratuitous ARP": true },
+        "#6": { "speeds": ["${ATLANTIC_SPEED:-7}"], "accept gratuitous ARP": true }
       }
     },
     {
@@ -160,8 +162,8 @@
           ],
           "load balancing": "${ATLANTIC_LOAD_BALANCING:-3}"
         },
-        "#5": { "speeds": ["${ATLANTIC_SPEED:-7}"] },
-        "#6": { "speeds": ["${ATLANTIC_SPEED:-7}"] }
+        "#5": { "speeds": ["${ATLANTIC_SPEED:-7}"], "accept gratuitous ARP": true },
+        "#6": { "speeds": ["${ATLANTIC_SPEED:-7}"], "accept gratuitous ARP": true }
       }
     },
     {
@@ -188,6 +190,7 @@
           ],
           "load balancing": "${ATLANTIC_LOAD_BALANCING:-3}"
         },
+        "#4": { "accept gratuitous ARP": true },
         "#5": { "speeds": ["${ATLANTIC_SPEED:-7}"] },
         "#6": { "speeds": ["${ATLANTIC_SPEED:-7}"] }
       }
@@ -216,6 +219,7 @@
           ],
           "load balancing": "${ATLANTIC_LOAD_BALANCING:-3}"
         },
+        "#4": { "accept gratuitous ARP": true },
         "#5": { "speeds": ["${ATLANTIC_SPEED:-7}"] },
         "#6": { "speeds": ["${ATLANTIC_SPEED:-7}"] }
       }
@@ -323,7 +327,7 @@
           ],
           "load balancing": "${LAND_LOAD_BALANCING:-2}"
         },
-        "#5": { "speeds": [8] }
+        "#5": { "speeds": [8], "accept gratuitous ARP": true }
       }
     },
     {
@@ -347,10 +351,10 @@
             },
             {
               "name": "distance",
-              "generator": { "increment": { "start": 240000000000, "step": -10000000000 } }
+              "generator": { "increment": { "start": 10000000000, "step": -10000000000 } }
             }
           ],
-          "stream": { "stop after": 26, "distance": { "gen": "distance" }, "distance from end": true },
+          "stream": { "stop after": 3, "distance": { "gen": "distance" }, "distance from end": true },
           "packet": [
             {
               "name": "Eth",
@@ -372,7 +376,7 @@
                 "fragment offset": null,
                 "time to live": null,
                 "protocol": null,
-                "source": { "const": "192.0.2.1" },
+                "source": { "const": "10.1.1.3" },
                 "destination": { "const": "10.2.1.3" },
                 "options": null,
                 "payload": null
@@ -748,7 +752,7 @@
       "type": "note",
       "path": "note-4",
       "at": null,
-      "params": { "text": "gen-us sends 26 frames of 1KiB from the western US to host-eu at 10.2.1.3 in the east of Europe, under 192.0.2.1, an address no router here has a route to: host-eu answers each with a port unreachable, which goes no further than bucharest rather than crossing back and moving every round robin on its way. The first 24 are spread out, from 2.4s down to 0.1s apart, so that every router on the ways east has learnt its next hop's address by the time the last two leave: those go back to back, a packet pair, and how far apart they arrive is what the path did to them. tap-us and tap-eu are cut into the two LAN cables and copy both directions to rec-us and rec-eu, which write us-eu_*.pcap as the frames leave and eu-us_*.pcap as they arrive, both named after the four variables. Being passive, the taps leave both ends to run at 100Gbps, which a hub would not." },
+      "params": { "text": "gen-us sends three frames of 1KiB from 10.1.1.3 in the western US to host-eu at 10.2.1.3 in the east of Europe: one, then 0.1s later two back to back, a packet pair, and how far apart those two arrive is what the path did to them. So that they do not wait on ARP on the way, every router and host-eu emit a gratuitous ARP once everything is switched on, and the ports on the ways east accept them; the first frame is only there to hold the pair back until those have crossed the ocean. tap-us and tap-eu are cut into the two LAN cables and copy both directions to rec-us and rec-eu, which write us-eu_*.pcap as the frames leave and eu-us_*.pcap as they arrive, both named after the four variables. Being passive, the taps leave both ends to run at 100Gbps, which a hub would not." },
       "properties": null
     }
   ],
@@ -808,6 +812,19 @@
     { "path": "bucharest-tap-eu", "action": "power on" },
     { "path": "tap-eu-host-eu", "action": "power on" },
     { "path": "tap-eu-rec-eu-in", "action": "power on" },
-    { "path": "tap-eu-rec-eu-out", "action": "power on" }
+    { "path": "tap-eu-rec-eu-out", "action": "power on" },
+    { "path": "los-angeles", "action": "emit gratuitous ARP" },
+    { "path": "seattle", "action": "emit gratuitous ARP" },
+    { "path": "denver", "action": "emit gratuitous ARP" },
+    { "path": "chicago", "action": "emit gratuitous ARP" },
+    { "path": "new-york", "action": "emit gratuitous ARP" },
+    { "path": "ashburn", "action": "emit gratuitous ARP" },
+    { "path": "lisbon", "action": "emit gratuitous ARP" },
+    { "path": "london", "action": "emit gratuitous ARP" },
+    { "path": "paris", "action": "emit gratuitous ARP" },
+    { "path": "frankfurt", "action": "emit gratuitous ARP" },
+    { "path": "warsaw", "action": "emit gratuitous ARP" },
+    { "path": "bucharest", "action": "emit gratuitous ARP" },
+    { "path": "host-eu/eth", "action": "emit gratuitous ARP" }
   ]
 }
