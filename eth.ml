@@ -393,11 +393,6 @@ struct
     (* Each interface is its own widget for easier configuration: *)
     type t =
         { widget : Widget.t ;
-          (* What pays for the frames this adapter sends and receives: the
-           * device it is part of. A host that is switched off has an adapter
-           * that neither emits nor delivers, since both go through the
-           * clock. *)
-          power : Simulation.power ;
           (* The function called with payload to emit, depends on what's
            * plugged in: *)
           mutable emit : bitstring -> unit ;
@@ -434,7 +429,7 @@ struct
 
     (* Reception *)
     let write t pld =
-        match t.power.on, t.negotiated with
+        match t.widget.power.on, t.negotiated with
         | true, Some (speed, full_duplex) ->
             (* On reception, accept no inter-frame-gap. IFG is a discipline for
              * the sender. *)
@@ -468,7 +463,7 @@ struct
                         Time.add now (Speed.duration speed b)
                     | _ ->
                         rx_stop in
-                Simulation.at t.power recv_ts t.recv pld
+                Simulation.at t.widget.power recv_ts t.recv pld
             )
         | _ ->
             Log.(log t.widget.logger Warning (lazy
@@ -501,7 +496,7 @@ struct
                                    (Speed.duration speed t.inter_frame_gap) in
                 let tx_start = max now quiet_until in
                 t.tx_busy_until <- Time.add tx_start ser_delay ;
-                Simulation.at t.power tx_start f pld
+                Simulation.at t.widget.power tx_start f pld
             | None ->
                 Log.(log t.widget.logger Warning (lazy
                     "Ignoring a TX frame (I'm off)"))) ;
@@ -559,9 +554,9 @@ struct
         if inter_frame_gap < ifg_min then
             Printf.sprintf "inter_frame_gap can't be below %d" ifg_min |>
             invalid_arg ;
-        let widget = Widget.make ~parent name in
+        let widget = Widget.make ~parent ~power name in
         let t =
-            { widget ; power ;
+            { widget ;
               emit = ignore_disconnected ~logger:widget.logger ;
               recv = recv |? ignore_bits ~logger:widget.logger ;
               is_connected = false ; can_forward_after ;
@@ -877,7 +872,7 @@ struct
                 Interval.sec
                     (max 0. (jitter 0.1 (Interval.to_secs st.delay)))
             else Interval.zero in
-        Simulation.delay st.iface.power delay
+        Simulation.delay st.iface.widget.power delay
                          st.iface.emit (Pdu.pack pdu)
 
     let send (st : State.t) proto dst bits =
@@ -993,7 +988,7 @@ struct
                     Result.iter (fun ip_src ->
                         let src_proto_addr = Ip.Addr.to_bitstring ip_src in
                         BitHash.replace st.arp_cache src_proto_addr (Some frame.src)) ;
-                    Simulation.asap st.iface.power
+                    Simulation.asap st.iface.widget.power
                                     st.recv (frame.Pdu.payload :> bitstring)
                 )
             ) else if frame.Pdu.proto = Proto.arp then (
@@ -1175,10 +1170,6 @@ struct
              * The only thing in a simulation that has to be undone by hand:
              * everything else within a device is torn down with it. *)
               mutable ends : ((unit -> unit) * (unit -> unit)) option ;
-            (* A cable is not something one switches off, so this is the mains
-             * of its simulation; it is here only because the propagation delay
-             * is a scheduled event like any other. *)
-                     power : Simulation.power ;
                     widget : Widget.t }
 
         type Widget.device += T of t
@@ -1207,10 +1198,11 @@ struct
          * stopping the whole network. *)
         let make ~parent ?(length=10.) ?(speed=0.7 *. light_speed)
                  ?(error_rate=0.) ?(history=10) ?(name="cable") () =
+            (* A cable is its own power source so we can clear its scheduled
+             * events when deleting it. *)
             let widget = Widget.make ~parent ~own_power:true name in
             widget.device_type <- Some "cable" ;
             let t = {
-                power = widget.power ;
                 length ; speed ; delay = delay length speed ;
                 error_rate ; success_rate = success_rate error_rate ;
                 tot_bits = Metric.Counter.make () ;
@@ -1304,11 +1296,11 @@ struct
         and b_reader = ref (ignore_bits ~logger:st.widget.logger) in
         let ins_write bits =
             let bits = pass st true bits in
-            Simulation.delay st.power st.delay !b_reader bits
+            Simulation.delay st.widget.power st.delay !b_reader bits
         and ins_set_read f = a_reader := f
         and out_write bits =
             let bits = pass st false bits in
-            Simulation.delay st.power st.delay !a_reader bits
+            Simulation.delay st.widget.power st.delay !a_reader bits
         and out_set_read f = b_reader := f
         in
         { ins = { write = ins_write ; set_read = ins_set_read } ;

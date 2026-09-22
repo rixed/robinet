@@ -779,11 +779,11 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
        because the adapter is built first, and something has to give it one --
        and a host built on somebody else's adapter, as a router's admin host
        is, shares that owner's switch, being the same box as well. *)
-    let power = eth_state.iface.power in
+    let power = eth_state.iface.widget.power in
     (* Whether this host runs is whether its supply is on, and nothing else:
      * one flag, in the source, however many widgets draw on it. *)
     let if_on t what f x =
-        if t.trx.power.on then f x
+        if t.trx.widget.power.on then f x
         else Log.(log widget.logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
     let rec t =
         { eth_state ;

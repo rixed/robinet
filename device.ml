@@ -966,7 +966,7 @@ let make_from_params ?start type_ ~parent name given =
     "a cable draws on a source of its own" @? c.owns_power ;
     let travelling () =
         Events.exists (fun _ (p, _) ->
-            p == st.Eth.Cable.State.power) sim.events in
+            p == st.Eth.Cable.State.widget.power) sim.events in
     (Eth.Cable.make st).ins.write (Bitstring.create_bitstring 64) ;
     "a frame crossing a cable is an event of the cable's" @? travelling () ;
     Simulation.remove_widget c ;
