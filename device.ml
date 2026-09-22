@@ -773,9 +773,9 @@ let build ~parent name = function
            else is not the one that was saved. *)
         let mac = Option.default_delayed Eth.Addr.random mac in
         let gw =
-            Router.make_gw ~parent ~name ~mac ~num_max_cnxs:max_cnxs
-                           ?public_netmask ?public_gw public lan in
-        gw.Router.widget, TGateway { g with mac = Some mac }
+            Router.Gateway.make ~parent ~name ~mac ~num_max_cnxs:max_cnxs
+                                ?public_netmask ?public_gw public lan in
+        gw.widget, TGateway { g with mac = Some mac }
     | TPortal { promisc ; filter ; caplen } as m ->
         let portal = Pcap.portal ~parent ~promisc ~filter ?caplen name in
         portal.Pcap.widget, m

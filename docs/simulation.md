@@ -232,23 +232,24 @@ outside, port 1 the network it serves.**
 | `public address` | string | `"192.0.2.1"` | What it is known by outside, and what it translates its LAN to. |
 | `public netmask` | optional string | `null` | Left out, everything outside is directly reachable — right for a gateway plugged into a LAN of real machines, wrong for one hanging off a router. |
 | `public gateway` | optional string | `null` | Where to send what that netmask does not cover, as an IP or a MAC. |
-| `LAN` | string | `"192.168.0.0/24"` | The network behind it. Its **first** address is the gateway itself, the **second** the server that hands out the rest, and the pool starts at the third. |
+| `LAN` | string | `"192.168.0.0/24"` | The network behind it. Its **first** address is the gateway, and the pool it hands out starts at the second. |
 | `max connections` | 1…1000000 | `500` | Translations its NAT holds at once. |
 | `MAC` | optional string | `null` | Its address on the LAN side, which is the one the machines behind it send to. |
 
-Only the server (`.2`) answers pings: the gateway's own LAN address lives on a
-router interface, and a router interface answers for an address only when its
-routing table says so.
+On the LAN a gateway is **one machine at one address**: `.1` is where its
+clients send what is to be forwarded, and also the DHCP server that leased them
+their own address, the resolver they were told to use, and what answers their
+pings. Inside there are two things wearing that address — a router for what is
+passing through and a server for what is addressed to the gateway itself — and
+which of them gets a frame is settled by reading it, not by giving them an
+address each.
 
-What joins the router, the server and the LAN socket inside the box is a
-backplane and not a length of wire: it has no speed of its own and nothing
-collides on it, so a gateway neither slows down what crosses it nor drops a
-reply that comes back while it is still sending. The LAN cable negotiates with
-the router's first interface, which is the adapter really behind that socket,
-and what they settle on is what the server's adapter runs at too — the three
-are one segment, and a part of it left slower than the rest would drop what the
-others send. So the LAN runs as fast as its two ends agree on; put a hub on it
-and it is the hub, as ever, that decides.
+That inside is not a length of wire: nothing collides on it and it has no speed
+of its own, so a gateway neither slows down what crosses it nor drops a reply
+that comes back while it is still sending. The LAN cable negotiates with the
+router's first interface, which is the adapter really behind that socket, and
+the server's adapter is set to match. So the LAN runs as fast as its two ends
+agree on; put a hub on it and it is the hub, as ever, that decides.
 
 ### portal
 
@@ -592,10 +593,11 @@ The cables say neither port, so each takes the first one free.
 
 ### A host behind a gateway, by DHCP
 
-No `static-ip`, so the host asks. It is leased 192.168.0.3, the third address of
-the LAN, and told its gateway and its resolver. The ping is aimed at the server
-inside the gateway (`.2`, not `.1`) and asks for eight, because the first few go
-out before the lease: expect `{"sent": 8, "received": 4}`.
+No `static-ip`, so the host asks. It is leased 192.168.0.2, the first address
+of the pool, and told the gateway itself for both its route out and its
+resolver. The ping is aimed at the gateway and asks for eight, because the
+first few go out before the lease and are lost: expect four or five answered,
+the client waiting a random moment before it asks.
 
 ```json
 {
@@ -613,7 +615,7 @@ out before the lease: expect `{"sent": 8, "received": 4}`.
     { "path": "h", "action": "power on" },
     { "path": "gw-h", "action": "power on" },
     { "path": "h", "action": "ping",
-      "params": { "target": "192.168.0.2", "count": 8 } }
+      "params": { "target": "192.168.0.1", "count": 8 } }
   ]
 }
 ```
