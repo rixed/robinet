@@ -1277,10 +1277,14 @@ let run (t : t) wait =
 (** Run [f] with those signals stopping every simulation, then put the previous
  * handlers back.
  *
+ * A signal is acted upon, and [with_trapped] returns once [f] has, within
+ * [sleep] seconds: a thread wakes that often while [f] runs (see below), so
+ * shorter is snappier and costs more wakeups.
+ *
  * Signals are delivered to the process, not to a simulation: there is no such
  * thing as interrupting one of them and leaving the others running, so the
  * handler stops the lot -- including any simulation started while [f] runs. *)
-let with_trapped signals f =
+let with_trapped ?(sleep=0.3) signals f =
     let prev_sigs =
         List.map (fun s ->
             let open Sys in
@@ -1306,10 +1310,11 @@ let with_trapped signals f =
      * the thread waiting on that simulation -- polls nowhere at all, and the
      * signal stays pending until something happens to wake one of them, which
      * can be as far off as the quietest moment of the network. This thread
-     * wakes every second and does nothing else, so that there is always one
-     * place to run it after at most 1s. *)
+     * wakes every [sleep] and does nothing else, so that there is always one
+     * place to run it that soon; and since it is joined on the way out, that
+     * is also how long quitting waits for it. *)
     let ticking = ref true in
-    let ticker = Thread.create (fun () -> while !ticking do Thread.delay 1. done) () in
+    let ticker = Thread.create (fun () -> while !ticking do Thread.delay sleep done) () in
     finally (fun () ->
         ticking := false ;
         Thread.join ticker ;
