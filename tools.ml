@@ -570,7 +570,25 @@ let randstr ?charset len =
     String.init len (match charset with None -> rc | Some s -> sc s)
 
 let randbs len (* in bytes! *) =
-    randstr len |> bitstring_of_string
+    (* Eight bytes a draw, and one draw more for what is left: *)
+    let b = Bytes.create len in
+    let full = len land lnot 7 in
+    let rec words i =
+        if i < full then (
+            Bytes.set_int64_le b i (Random.bits64 ()) ;
+            words (i + 8)) in
+    words 0 ;
+    if full < len then (
+        let r = Random.bits64 () in
+        for i = full to len - 1 do
+            Bytes.set b i (Char.unsafe_chr (Int64.to_int
+                (Int64.shift_right_logical r (8 * (i - full))) land 0xff))
+        done) ;
+    bitstring_of_bytes b
+
+(*$Q randbs
+  Q.nat_small (fun n -> bitstring_length (randbs n) = 8 * n)
+*)
 
 let randbits len (* in bits *) =
     let len' = (len + 7) / 8 in
@@ -586,17 +604,46 @@ let rand_hostname () =
         randstr ~charset:"abcdefghijklmnopqrstuvwxyz-" (3 + randi 4)) in
     String.join "." parts
 
-let do_sum bits =
+(* The sum of the 16 bits words of [bits], padded with zeroes to whole bytes,
+ * read bit by bit: *)
+let sum_bits bits =
     let rec aux s bits = match%bitstring bits with
         | {| w : 16 ; rest : -1 : bitstring |} -> aux (s + w) rest
         | {| b : 8 |} -> s + (b lsl 8)
         | {| _ |} -> s in
-    let s = aux 0 (concat [ bits ; zeroes_bitstring 7 ]) in
+    aux 0 (concat [ bits ; zeroes_bitstring 7 ])
+
+let do_sum bits =
+    let s =
+        match bits with
+        | b, off, len when off land 7 = 0 && len land 7 = 0 ->
+            (* Whole bytes, as a packet always is: read where they lie. *)
+            let o = off lsr 3 and n = len lsr 3 in
+            let rec words s i =
+                if i + 1 < n then
+                    words (s + Stdlib.Bytes.get_uint16_be b (o + i)) (i + 2)
+                else if i < n then
+                    s + (Stdlib.Bytes.get_uint8 b (o + i) lsl 8)
+                else s in
+            words 0 0
+        | _ ->
+            sum_bits bits in
     let rec wrap s =
         if s < 0x10000 then s else wrap ((s land 0xffff) + (s lsr 16)) in
     (lnot (wrap s)) land 0xffff
 (*$= do_sum & ~printer:(fun d -> Printf.sprintf "%x" d)
   (do_sum (bitstring_of_string "\x45\x00\x00\xaa\x03\xa6\x00\x00\x40\x06\x00\x00\xc0\xa8\x01\x45\xd1\x55\xe3\x67")) 0xfffd
+*)
+(*$Q do_sum
+  Q.(triple string small_nat small_nat) (fun (s, skip, cut) -> \
+    let bits = bitstring_of_string s in \
+    let len = bitstring_length bits in \
+    let off = min len skip and cut = min (len - min len skip) cut in \
+    let sub = Bitstring.subbitstring bits off (len - off - cut) in \
+    let slow = (lnot (let rec wrap s = if s < 0x10000 then s else \
+                        wrap ((s land 0xffff) + (s lsr 16)) in \
+                      wrap (sum_bits sub))) land 0xffff in \
+    do_sum sub = slow)
 *)
 
 (* As computing checksum was found to consume 30% of CPU (yes, the above function)

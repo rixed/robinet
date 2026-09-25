@@ -105,10 +105,37 @@ module Addr = struct
      * So [Eth.Addr.of_string (Eth.Addr.to_string "a4:ba:db:e6:15:fa")]
      * will {e not} work if {!Eth.Addr.print_with_vendor} is true! *)
     let of_string str =
-        let pack_addr a b c d e f =
-            let%bitstring addr = {| a : 8 ; b : 8 ; c : 8 ; d : 8 ; e : 8 ; f : 8 |} in
-            o addr in
-        Scanf.sscanf str "%x:%x:%x:%x:%x:%x" pack_addr
+        (* Six numbers of one or two hex digits, colon separated, and nothing
+         * else: whoever tells a MAC from an IP address does it by asking. *)
+        let len = String.length str in
+        let bad () = invalid_arg ("Eth.Addr.of_string: "^ str) in
+        let digit i =
+            if i >= len then -1 else
+            match str.[i] with
+            | '0'..'9' as c -> Char.code c - Char.code '0'
+            | 'a'..'f' as c -> Char.code c - Char.code 'a' + 10
+            | 'A'..'F' as c -> Char.code c - Char.code 'A' + 10
+            | _ -> -1 in
+        let addr = Bytes.create 6 in
+        let rec octet n i =
+            let hi = digit i in
+            if hi < 0 then bad () ;
+            let lo = digit (i + 1) in
+            let v, i = if lo < 0 then hi, i + 1 else hi * 16 + lo, i + 2 in
+            Bytes.set addr n (Char.chr v) ;
+            if n = 5 then (if i <> len then bad ())
+            else if i < len && str.[i] = ':' then octet (n + 1) (i + 1)
+            else bad () in
+        octet 0 0 ;
+        o (bitstring_of_bytes addr)
+    (*$T of_string
+      eq (of_string "0:1:a:B:cd:EF") (of_string "00:01:0a:0b:cd:ef")
+      List.for_all (fun s -> try ignore (of_string s) ; false \
+                             with Invalid_argument _ -> true) \
+        [ "" ; "10.1.0.254" ; "2001:db8::1" ; "00:11:22:33:44" ; \
+          "00:11:22:33:44:55:66" ; "00:11:22:33:44:55x" ; \
+          "000:11:22:33:44:55" ; ":00:11:22:33:44:55" ]
+    *)
 
     (** The plain hexadecimal notation, which is what [of_string] reads back:
      * [to_string] may name the vendor instead ("Dell:e6:15:fa"), which is for
