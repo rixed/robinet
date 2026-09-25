@@ -310,9 +310,10 @@ let messages ?since ?(max_level=max_level) t =
 let wants t level =
     let lvl = int_of_level level in
     lvl <= default_keep || lvl <= int_of_level !console_lvl ||
-    lvl <= t.keep ||
-    Unix.gettimeofday () < t.lease_until ||
-    (t.keep <- default_keep ; false)
+    lvl <= t.keep && (
+        Unix.gettimeofday () < t.lease_until ||
+        (t.keep <- default_keep ; false)
+    )
 
 (** Keep what is logged down to [max_level] for [secs] more seconds of wall
  * clock, on behalf of a reader who will be back for it by then. Of several

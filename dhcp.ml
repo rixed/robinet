@@ -594,7 +594,7 @@ struct
         and opaque = Widget.json_of_optional bytes
         and count = Widget.json_of_optional (fun i -> `Int i) in
         `Assoc [ "operation",
-                 `Int (match t.op with BootRequest -> 1 | BootReply -> 2) ;
+                     `Int (match t.op with BootRequest -> 1 | BootReply -> 2) ;
                  "hardware type", `Int (t.htype :> int) ;
                  "hardware address length", `Int t.hlen ;
                  "hops", `Int t.hops ;
@@ -609,8 +609,8 @@ struct
                  "server name", `String (trim_padding t.sname) ;
                  "boot file", `String (trim_padding t.file) ;
                  "message type",
-                 Widget.json_of_optional (fun m -> `Int (m : MsgType.t :> int))
-                                         t.msg_type ;
+                     Widget.json_of_optional
+                        (fun m -> `Int (m : MsgType.t :> int)) t.msg_type ;
                  "subnet mask", address t.subnet_mask ;
                  "router", address t.router ;
                  "NTP server", address t.ntp_server ;
@@ -620,8 +620,8 @@ struct
                  "host name", str t.host_name ;
                  "domain name", str t.search_sfx ;
                  "lease time",
-                 Widget.json_of_optional (fun l -> `Int (uint32 l))
-                                         t.lease_time ;
+                    Widget.json_of_optional
+                        (fun l -> `Int (uint32 l)) t.lease_time ;
                  "server identifier", address t.server_id ;
                  "requested address", address t.requested_ip ;
                  "message", str t.message ;
@@ -630,10 +630,10 @@ struct
                  "client identifier", opaque t.client_id ;
                  "request list", opaque t.request_list ;
                  "other options",
-                 `List (List.map (fun (code, v) ->
-                            `Assoc [ "code", `Int code ;
-                                     "value", Widget.json_of_bytes v ]
-                        ) t.other_options) ]
+                     `List (List.map (fun (code, v) ->
+                                `Assoc [ "code", `Int code ;
+                                         "value", Widget.json_of_bytes v ]
+                            ) t.other_options) ]
 
     let of_synth js ?upper ?prev gen_values =
         ignore upper ; ignore prev ;
