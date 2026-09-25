@@ -55,8 +55,10 @@ struct
     (* TODO: add usage count *)
     type t = { (* Tests *)
                in_iface : int option ;              (** Test on incoming iface *)
-               src_mask : Ip.Cidr.t option ;        (** Test on source IP *)
-               dst_mask : Ip.Cidr.t option ;        (** Test on dest IP *)
+               src_mask : (Ip.Cidr.t * (Ip.Addr.t -> bool)) option ;
+                                                    (** Test on source IP *)
+               dst_mask : (Ip.Cidr.t * (Ip.Addr.t -> bool)) option ;
+                                                    (** Test on dest IP *)
                ip_proto : Ip.Proto.t option ;       (** Test on IP protocol *)
                src_port : port_range option ;       (** Test on source IP port *)
                dst_port : port_range option ;       (** Test on dest IP port *)
@@ -64,8 +66,10 @@ struct
 
     let make ?in_iface ?src_mask ?dst_mask ?ip_proto ?src_port ?dst_port
              target =
-        { in_iface ; src_mask ; dst_mask ; ip_proto ; src_port ; dst_port ;
-          target }
+        let to_mask_test = Option.map (fun cidr -> cidr, Ip.Cidr.mem cidr) in
+        { src_mask = to_mask_test src_mask ;
+          dst_mask = to_mask_test dst_mask ;
+          in_iface ; ip_proto ; src_port ; dst_port ; target }
 
     let forward ?in_iface ?src_mask ?dst_mask ?ip_proto ?src_port ?dst_port
                 ?via out_iface =
@@ -82,7 +86,7 @@ struct
             | None -> "" in
         let string_of_in_iface n = "received at iface#"^ string_of_int n ^", "
         and string_of_proto p = "of "^ Ip.Proto.to_string p ^" protocol, "
-        and string_of_ip_mask what cidr = what ^ Ip.Cidr.to_string cidr ^" "
+        and string_of_ip_mask what (cidr, _) = what ^ Ip.Cidr.to_string cidr ^" "
         and string_of_port r = "port "^ string_of_port_range r ^" "
         and string_of_target = function
             | Forward { out_iface ; via } ->
@@ -105,29 +109,19 @@ struct
         String.print oc
 
     (** Test an incoming packet against a route. *)
-    let test t logger ifn src_opt dst_opt proto_opt src_port_opt dst_port_opt =
-        let tests = ref [] in
+    let test t ifn src_opt dst_opt proto_opt src_port_opt dst_port_opt =
         (* If the route test is set, then the value is required. *)
-        let test_opt what opt1 test opt2 =
-            tests := what :: !tests ;
+        let test_opt opt1 test opt2 =
             match opt2 with
             | Some opt -> Option.map_default (test opt) true opt1
             | None     -> Option.is_none opt1 in
-        let cidr_mem_rev ip cidr = Ip.Cidr.mem cidr ip in
-        let ok =
-            test_opt "in_face" t.in_iface (=) ifn &&
-            test_opt "src_ip" t.src_mask cidr_mem_rev src_opt &&
-            test_opt "dst_ip" t.dst_mask cidr_mem_rev dst_opt &&
-            test_opt "ip_proto" t.ip_proto (=) proto_opt &&
-            test_opt "src_port" t.src_port port_in_range src_port_opt &&
-            test_opt "dst_port" t.dst_port port_in_range dst_port_opt in
-        Log.(log logger Debug (lazy (
-            let last = if ok then " ✓" else " ¡☠!" in
-            Printf.sprintf2 "Routing: route=%a: %a"
-                print t
-                (List.print ~first:"" ~sep:", " ~last String.print)
-                    (List.rev !tests)))) ;
-        ok
+        let cidr_mem_rev ip (_, f) = f ip in
+        test_opt t.in_iface (=) ifn &&
+        test_opt t.src_mask cidr_mem_rev src_opt &&
+        test_opt t.dst_mask cidr_mem_rev dst_opt &&
+        test_opt t.ip_proto (=) proto_opt &&
+        test_opt t.src_port port_in_range src_port_opt &&
+        test_opt t.dst_port port_in_range dst_port_opt
 
     (* Widget.kind for a route: the tests a packet must pass, then where it
      * goes. Every test may be left out, and one left out is one not made.
@@ -274,8 +268,7 @@ struct
 
     let target_routes ?in_iface ?src_ip ?dst_ip ?proto ?src_port ?dst_port t =
         List.filter_map (fun r ->
-            if Route.test r t.widget.logger in_iface src_ip dst_ip proto
-                          src_port dst_port then
+            if Route.test r in_iface src_ip dst_ip proto src_port dst_port then
                 Some r.target
             else
                 None
@@ -410,7 +403,7 @@ struct
     let my_addresses_of routes n =
         List.find_map_opt (fun (r : Route.t) ->
             match r.dst_mask with
-            | Some addr ->
+            | Some (addr, _test) ->
                 if r.target = Admin &&
                    (r.in_iface = None || r.in_iface = Some n) then
                     let addr = Ip.Cidr.subnet addr |>
@@ -594,8 +587,8 @@ struct
                                 `String (Printf.sprintf "%d-%d" mi ma) in
                             `Assoc [
                                 "input port", json_of_optional (fun i -> `Int i) r.in_iface ;
-                                "src mask", json_of_optional (fun c -> `String (Ip.Cidr.to_string c)) r.src_mask ;
-                                "dst mask", json_of_optional (fun c -> `String (Ip.Cidr.to_string c)) r.dst_mask ;
+                                "src mask", json_of_optional (fun (c, _) -> `String (Ip.Cidr.to_string c)) r.src_mask ;
+                                "dst mask", json_of_optional (fun (c, _) -> `String (Ip.Cidr.to_string c)) r.dst_mask ;
                                 "ip proto", json_of_optional (fun (p : Ip.Proto.t) -> `Int (p :> int)) r.ip_proto ;
                                 "src port", json_of_optional of_port_range r.src_port ;
                                 "dst port", json_of_optional of_port_range r.dst_port ;
@@ -642,7 +635,7 @@ struct
                                 | exception _ ->
                                     bad_value "%S is not a network \
                                                (address/width)" s
-                                | cidr -> cidr in
+                                | cidr -> cidr, Ip.Cidr.mem cidr in
                             (* A MAC when it reads as one, an IP otherwise: the
                                two things a gateway can be named by. *)
                             let gateway s =
@@ -749,11 +742,12 @@ struct
                 let open Route in
                 let target = Forward { out_iface = i ;
                                        via = addr } in
+                let cidr_test cidr = Some (cidr, Ip.Cidr.mem cidr) in
                 let route =
                     { in_iface = None ;
                       src_mask = None ;
                       (* [of_netmask] will clear non masked bits: *)
-                      dst_mask = Some (Ip.Cidr.of_netmask dest_ip mask) ;
+                      dst_mask = cidr_test (Ip.Cidr.of_netmask dest_ip mask) ;
                       ip_proto = None ;
                       src_port = None ;
                       dst_port = None ;
@@ -763,7 +757,7 @@ struct
                     (* Second route: to the admin interface: *)
                     if is_my_address dest_ip mask addr then (
                         { route with
-                            dst_mask = Some Ip.Cidr.(single dest_ip) ;
+                            dst_mask = cidr_test Ip.Cidr.(single dest_ip) ;
                             target = Admin } :: tbl
                     ) else tbl
                     in
