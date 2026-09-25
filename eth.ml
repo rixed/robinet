@@ -628,6 +628,10 @@ struct
     type my_address =
         { addr : bitstring ; netmask : bitstring }
 
+    let my_address_equal a1 a2 =
+        Bitstring.equals a1.addr a2.addr &&
+        Bitstring.equals a2.netmask a2.netmask
+
     let make_my_address ?(netmask=Ip.Addr.(to_bitstring zero)) addr =
         { addr ; netmask }
 

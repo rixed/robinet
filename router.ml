@@ -521,7 +521,10 @@ struct
     let configure_iface t n =
         let iface = t.ifaces.(n) in
         let my_addresses = my_addresses_of t.routes n |? [] in
-        if my_addresses <> iface.eth.my_addresses then (
+        let same_addresses =
+            List.equal Eth.State.my_address_equal
+                my_addresses iface.eth.my_addresses in
+        if not same_addresses then (
             iface.eth.my_addresses <- my_addresses ;
             (* The one it had was for the address it no longer has. *)
             Option.may (fun (h : Host.t) ->
@@ -816,8 +819,6 @@ struct
         ) t.ifaces ;
         t
 
-    (* Returns both the router and the eth trxs (ins is inside router) created for you *)
-
     (* Assuming the network addresses are reachable from different ifaces of a
      * switch, output a trivial routing table that selects the output according
      * to the destination IP only.
@@ -848,6 +849,7 @@ struct
                     (* Second route: to the admin interface: *)
                     if is_my_address dest_ip mask addr then (
                         { route with
+                            in_iface = Some i ;
                             dst_mask = cidr_test Ip.Cidr.(single dest_ip) ;
                             target = Admin } :: tbl
                     ) else tbl
