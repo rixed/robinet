@@ -1128,6 +1128,13 @@ paths:
         lines would claim a continuity it does not have. It is a flag and not a
         count because what a reader can do about it is the same either way --
         slow the simulation down.
+
+        A widget stores messages down to `info` whoever is reading. Anything
+        deeper -- `debug` -- costs too much to keep for nobody, so it is stored
+        only while a reader holds a lease on it: asking for a level is also
+        asking that widget to keep that level for `lease_time` more seconds,
+        by which time the reader is expected to ask again. What was logged
+        before the first such request is not there to be read.
       operationId: getLogs
       parameters:
         - $ref: "#/components/parameters/since"
@@ -1137,6 +1144,14 @@ paths:
           description: How deep to go. Everything at this level and above it.
           schema:
             $ref: "#/components/schemas/LogLevel"
+        - name: lease_time
+          in: query
+          required: false
+          description: |
+            Seconds of wall clock for which the widget is to keep storing
+            messages down to `level`: a little more than the reader takes
+            between two polls. Only matters for a level deeper than `info`.
+          schema: { type: number, minimum: 0, default: 1 }
       responses:
         "200":
           description: The messages logged strictly after `since`.
@@ -1144,7 +1159,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Logs" }
         "400":
-          description: No such level.
+          description: No such level, or a lease time that is not one.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

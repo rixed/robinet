@@ -1248,6 +1248,17 @@ let get_logs _mth matches vars _qry_body resp =
                      String.join ", ")
             | lvl -> lvl) in
     let since = log_cursor_of_vars vars "since" in
+    (* How long the reader will take to come back: until then, the widget keeps
+       what it logs down to that level (see [Log.lease]). *)
+    let lease_time =
+        match Hashtbl.find_option vars "lease_time" with
+        | None -> 1.
+        | Some s ->
+            (match float_of_string (String.trim s) with
+            | exception _ -> bad_request "Not a lease time: %S" s
+            | d when not (Float.is_finite d) || d < 0. ->
+                bad_request "%g is not a lease time, in seconds" d
+            | d -> d) in
     (* Held only while the messages are collected: a logger is written to by
        the dispatcher, and reading one halfway through a dispatch would give
        half of what that dispatch had to say. Forcing them into JSON afterwards
@@ -1255,6 +1266,7 @@ let get_logs _mth matches vars _qry_body resp =
     let w, lost, msgs =
         Simulation.borrow sim (fun () ->
             let w = widget_of_matches sim matches 2 in
+            Log.lease w.logger level lease_time ;
             let lost, msgs = Log.messages ?since ~max_level:level w.logger in
             w, lost, msgs) in
     let json_of_msg (_seq, ts, lvl, text) =

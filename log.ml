@@ -65,7 +65,11 @@ type t =
        * that runs several. A logger belonging to no simulation counts on its
        * own. *)
       seq : unit -> int ;
-      queues : queue array }
+      queues : queue array ;
+      (* The deepest level stored: what is deeper is dropped as it is logged. *)
+      mutable keep : int ;
+      (* After that time, [keep] goes back to [default_keep]. *)
+      mutable lease_until : float }
 
 (* log level <-> queue index *)
 
@@ -102,6 +106,10 @@ let string_of_int_level = string_of_level % level_of_int
 (* output to console happen based on a constant current loglevel *)
 
 let console_lvl = ref Error
+
+(* What a logger stores with no reader asking for more. *)
+let default_keep = int_of_level Info
+
 let console_log (_seq, t, lstr) =
     Printf.printf "%a: %s\n%!" Clock.Time.printf t (Lazy.force lstr)
 
@@ -297,12 +305,31 @@ let messages ?since ?(max_level=max_level) t =
 
 (* log *)
 
-let log t level lstr =
+(** Whether a message of that level would be kept.
+ * Ask first before a very frequent log, to save the closure. *)
+let wants t level =
     let lvl = int_of_level level in
-    let now = t.now () in
-    let msg = t.seq (), now, lstr in
-    enqueue t.queues.(lvl) msg ;
-    if lvl <= int_of_level !console_lvl then console_log msg ;
+    lvl <= default_keep || lvl <= int_of_level !console_lvl ||
+    lvl <= t.keep ||
+    Unix.gettimeofday () < t.lease_until ||
+    (t.keep <- default_keep ; false)
+
+(** Keep what is logged down to [max_level] for [secs] more seconds of wall
+ * clock, on behalf of a reader who will be back for it by then. Of several
+ * readers, the deepest level and the latest end are kept. *)
+let lease t max_level secs =
+    let now = Unix.gettimeofday () in
+    if now >= t.lease_until then t.keep <- default_keep ;
+    t.keep <- max t.keep max_level ;
+    t.lease_until <- max t.lease_until (now +. secs)
+
+let log t level lstr =
+    if wants t level then (
+        let lvl = int_of_level level in
+        let now = t.now () in
+        let msg = t.seq (), now, lstr in
+        enqueue t.queues.(lvl) msg ;
+        if lvl <= int_of_level !console_lvl then console_log msg) ;
     assert (level <> Fatal)
 
 let log_exceptions t ?(level=Warning) what f x =
@@ -322,7 +349,20 @@ let make ?(size=50) ?(now=Clock.Time.since_start) ?seq () =
             (* A logger belonging to no simulation, counting for itself. *)
             let n = ref 0 in
             fun () -> incr n ; !n in
-    { now ; seq ; queues = Array.init num_levels (fun _ -> make_queue size) }
+    { now ; seq ; queues = Array.init num_levels (fun _ -> make_queue size) ;
+      keep = default_keep ; lease_until = 0. }
+
+(*$T lease
+  let t = make () in \
+  log t Debug (lazy "dropped") ; \
+  lease t (int_of_level Debug) 60. ; \
+  log t Debug (lazy "kept") ; \
+  List.map (fun (_, _, _, s) -> s) (snd (messages t)) = [ "kept" ]
+  let t = make () in \
+  lease t (int_of_level Debug) 0. ; \
+  log t Debug (lazy "too late") ; log t Info (lazy "kept") ; \
+  List.map (fun (_, _, _, s) -> s) (snd (messages t)) = [ "kept" ]
+*)
 
 (* The logger that will adopt any others: *)
 

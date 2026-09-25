@@ -3173,9 +3173,13 @@ document.addEventListener('alpine:init', () => {
             for (const w of this.logged) {
                 const l = logs.get(widgetKey(w))
                 const since = l && l.cursor !== null ? `&since=${l.cursor}` : ''
+                /* The widget keeps debug messages only until then: longer
+                 * than till the next poll, which comes a period after this one
+                 * is over. */
+                const lease = 2 * this.period + 1
                 const r = await this.exchange(() => api(
                     `/simulations/${w.sim}/widgets/${w.widget}` +
-                    `/logs?level=${w.level}${since}`))
+                    `/logs?level=${w.level}${since}&lease_time=${lease}`))
                 if (!r.ok) {
                     if (r.error.status === 404) this.unwatch(w)
                     continue
