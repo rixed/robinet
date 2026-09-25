@@ -432,13 +432,38 @@ struct
                  "authority", section json_of_rr t.authority_rrs ;
                  "additional", section json_of_rr t.additional_rrs ]
 
-    let of_synth js ?upper ?prev gen_values =
+    (* Where each field is in [kind], which [of_synth] reads them by: *)
+    module Field =
+    struct
+        let i = Widget.field_index kind
+        let id = i "id"
+        let query = i "query"
+        let opcode = i "opcode"
+        let authoritative = i "authoritative"
+        let truncated = i "truncated"
+        let rec_desired = i "recursion desired"
+        let rec_avlb = i "recursion available"
+        let authentic_data = i "authentic data"
+        let checking_disabled = i "checking disabled"
+        let status = i "status"
+        let questions = i "questions"
+        let answers = i "answers"
+        let authority = i "authority"
+        let additional = i "additional"
+    end
+
+    (* [r] are the fields of a synth of [kind] (see [Generator.fields]): *)
+    let of_synth r ?upper ?prev gen_values =
         ignore upper ;
         let open Generator in
+        (* The fields of the header, by index; those of the questions and
+         * records, which come in lists of any length, by name: *)
         let int fname ?auto kind f js =
             int_of_field fname gen_values ?auto kind f js
-        and bool fname =
-            of_field fname gen_values SimTypes.Bool Widget.to_bool js in
+        and hdr_int i ?auto kind f =
+            int_of_nth r i gen_values ?auto kind f
+        and bool i =
+            of_nth r i gen_values SimTypes.Bool Widget.to_bool in
         (* A name of the shape names have: a random string of up to fifty
          * thousand characters is no label anything can pack (a label is 63
          * bytes at the outside), and [pack_question] drops the question it
@@ -458,32 +483,34 @@ struct
             Int32.of_int (int "TTL" Kinds.ttl identity js),
             Bytes.of_string (string_of_bitstring
                                  (bs_of_field "data" gen_values Kinds.data js)) in
-        let section fname kind f =
-            sub_of_field fname gen_values kind (Widget.to_list f) js in
-        { id = int "id" ?auto:(Option.map (fun p () ->
-                                  (p.id + 1) land 0xffff) prev)
-                   Kinds.id identity js ;
-          is_query = bool "query" ;
-          opcode = int "opcode" Kinds.opcode identity js ;
-          is_auth = bool "authoritative" ;
-          truncated = bool "truncated" ;
-          rec_desired = bool "recursion desired" ;
-          rec_avlb = bool "recursion available" ;
-          authentic_data = bool "authentic data" ;
-          checking_disabled = bool "checking disabled" ;
-          status = int "status" Kinds.status identity js ;
-          questions = section "questions" Kinds.questions question ;
-          answer_rrs = section "answers" Kinds.rrs rr ;
-          authority_rrs = section "authority" Kinds.rrs rr ;
-          additional_rrs = section "additional" Kinds.rrs rr }
+        let section i kind f =
+            sub_of_nth r i gen_values kind (Widget.to_list f) in
+        { id = hdr_int Field.id ?auto:(Option.map (fun p () ->
+                                         (p.id + 1) land 0xffff) prev)
+                       Kinds.id identity ;
+          is_query = bool Field.query ;
+          opcode = hdr_int Field.opcode Kinds.opcode identity ;
+          is_auth = bool Field.authoritative ;
+          truncated = bool Field.truncated ;
+          rec_desired = bool Field.rec_desired ;
+          rec_avlb = bool Field.rec_avlb ;
+          authentic_data = bool Field.authentic_data ;
+          checking_disabled = bool Field.checking_disabled ;
+          status = hdr_int Field.status Kinds.status identity ;
+          questions = section Field.questions Kinds.questions question ;
+          answer_rrs = section Field.answers Kinds.rrs rr ;
+          authority_rrs = section Field.authority Kinds.rrs rr ;
+          additional_rrs = section Field.additional Kinds.rrs rr }
 
     (*$Q of_synth
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_consts (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_consts (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_autos (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_autos (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
      *)
 
     (*$Q kind

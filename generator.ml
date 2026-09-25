@@ -298,37 +298,71 @@ let bits_of_synth gen_values kind js =
         `Assoc [ "const", `String "01 02 03 04" ] ])
 *)
 
-(* Read the field [fname] of the synthesized record [js] with [f], which is
- * given a value of [kind]. A null field is automatic: [auto ()] if given, a
- * random value of [kind] otherwise. Whatever goes wrong is a [Bad_value] that
- * names the field. *)
-let of_field fname gen_values ?auto kind f js =
+(* Read the synth [js] of a field with [f], which is given a value of [kind].
+ * A null synth is automatic: [auto ()] if given, a random value of [kind]
+ * otherwise. *)
+let of_value gen_values ?auto kind f js =
     let decode v =
         try f v with
         | Widget.Bad_value _ as e -> raise e
         | e -> Widget.bad_value "invalid value %s: %s"
                    (Yojson.Basic.to_string v) (Printexc.to_string e) in
-    Widget.to_field fname (fun js ->
-        match value_of_synth gen_values kind js with
-        | Some v ->
-            decode v
-        | None ->
-            (match auto with
-            | Some auto -> auto ()
-            | None -> decode (coerce kind (random_int ())))
-    ) js
+    match value_of_synth gen_values kind js with
+    | Some v ->
+        decode v
+    | None ->
+        (match auto with
+        | Some auto -> auto ()
+        | None -> decode (coerce kind (random_int ())))
+
+(* Same as for any value, but without a validation function since when we
+ * expect a bitstring, any bitstring will do. *)
+let bs_of_value gen_values ?auto kind = function
+    | `Null when auto <> None -> (Option.get auto) ()
+    | js -> bits_of_synth gen_values kind js
+
+(* Read the field [fname] of the synthesized record [js] with [of_value].
+ * Whatever goes wrong is a [Bad_value] that names the field. *)
+let of_field fname gen_values ?auto kind f js =
+    Widget.to_field fname (of_value gen_values ?auto kind f) js
 
 let int_of_field fname gen_values ?auto kind f js =
     of_field fname gen_values ?auto kind (f % Widget.to_int) js
 
-(* Same as for int, but without a validation function since when we expect a
- * bitstring, any bitstring will do. *)
 let bs_of_field fname gen_values ?auto kind js =
-    Widget.to_field fname (fun js ->
-        match auto, js with
-        | Some auto, `Null -> auto ()
-        | _ -> bits_of_synth gen_values kind js
-    ) js
+    Widget.to_field fname (bs_of_value gen_values ?auto kind) js
+
+(* A synthesized record, its fields read once and for all into an array in the
+ * order of its kind, to be read by their index there rather than looked for
+ * by name on every packet. *)
+type fields = { names : string array ; values : Yojson.Basic.t array }
+
+let fields_of_synth kind js =
+    let names = Widget.field_names kind in
+    { names ; values = Widget.fields_of_json names js }
+
+(* Field [i] of [r], read as [of_field] reads it by name: *)
+let nth r i f =
+    try f r.values.(i)
+    with Widget.Bad_value msg -> Widget.bad_value "%s: %s" r.names.(i) msg
+
+let of_nth r i gen_values ?auto kind f =
+    nth r i (of_value gen_values ?auto kind f)
+
+let int_of_nth r i gen_values ?auto kind f =
+    of_nth r i gen_values ?auto kind (f % Widget.to_int)
+
+let bs_of_nth r i gen_values ?auto kind =
+    nth r i (bs_of_value gen_values ?auto kind)
+
+(*$T int_of_nth
+  let r = fields_of_synth (Widget.record [| "a", Int ; "b", Int |]) \
+            (`Assoc [ "a", `Assoc [ "const", `Int 1 ] ; \
+                      "b", `Assoc [ "const", `String "x" ] ]) in \
+  int_of_nth r 0 [||] Int identity = 1 && \
+  (try ignore (int_of_nth r 1 [||] Int identity) ; false \
+   with Widget.Bad_value msg -> String.starts_with msg "b: ")
+*)
 
 (*$T int_of_field
   int_of_field "f" [| 5 |] (IRange (0, 9)) identity \
@@ -410,10 +444,10 @@ let expand gen_values kind js =
   expand [||] (Widget.list Int) (`List []) = `List []
 *)
 
-(* Read the field [fname] of [kind] -- a record, a list or a variant -- with
+(* Read field [i] of [r], of [kind] -- a record, a list or a variant -- with
  * [f], which is given a synth of that kind structured as the kind is. *)
-let sub_of_field fname gen_values kind f js =
-    Widget.to_field fname (fun js -> f (expand gen_values kind js)) js
+let sub_of_nth r i gen_values kind f =
+    nth r i (fun js -> f (expand gen_values kind js))
 
 (* A layer's payload: the layer above, packed, when there is one, and what the
  * synth says otherwise. *)
@@ -421,6 +455,11 @@ let payload_of_field ?upper gen_values kind js =
     match upper with
     | Some (_, bits) -> bits
     | None -> bs_of_field "payload" gen_values kind js
+
+let payload_of_nth ?upper r i gen_values kind =
+    match upper with
+    | Some (_, bits) -> bits
+    | None -> bs_of_nth r i gen_values kind
 
 (* The automatic value the name of the layer above says, when [f] knows what
  * to make of that name. *)

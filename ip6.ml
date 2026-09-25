@@ -137,36 +137,52 @@ module Pdu = struct
                  "destination", Ip.Addr.to_json t.dst ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
 
-    let of_synth js ?upper ?prev gen_values =
+    (* Where each field is in [kind], which [of_synth] reads them by: *)
+    module Field =
+    struct
+        let i = Widget.field_index kind
+        let diff_serv = i "differentiated services"
+        let ecn = i "explicit congestion notification"
+        let flow_label = i "flow label"
+        let proto = i "next header"
+        let ttl = i "hop limit"
+        let src = i "source"
+        let dst = i "destination"
+        let payload = i "payload"
+    end
+
+    (* [r] are the fields of a synth of [kind] (see [Generator.fields]): *)
+    let of_synth r ?upper ?prev gen_values =
         ignore prev ;
         let open Generator in
-        let int fname ?auto kind f =
-            int_of_field fname gen_values ?auto kind f js
-        and addr fname =
-            of_field fname gen_values Kinds.addr
-                     (Ip.Addr.of_dotted_string % Widget.to_string) js in
+        let int i ?auto kind f =
+            int_of_nth r i gen_values ?auto kind f
+        and addr i =
+            of_nth r i gen_values Kinds.addr
+                   (Ip.Addr.of_dotted_string % Widget.to_string) in
         (* As for IPv4: an automatic value is what a packet would plausibly
          * carry. *)
-        { diff_serv = int "differentiated services" ~auto:(fun () -> 0)
+        { diff_serv = int Field.diff_serv ~auto:(fun () -> 0)
                           Kinds.diff_serv identity ;
-          ecn = int "explicit congestion notification" ~auto:(fun () -> 0)
-                    Kinds.ecn identity ;
-          flow_label = int "flow label" Kinds.flow_label identity ;
-          proto = int "next header" ?auto:(from_upper upper Ip.Proto.of_layer)
+          ecn = int Field.ecn ~auto:(fun () -> 0) Kinds.ecn identity ;
+          flow_label = int Field.flow_label Kinds.flow_label identity ;
+          proto = int Field.proto ?auto:(from_upper upper Ip.Proto.of_layer)
                       Kinds.proto Ip.Proto.o ;
-          ttl = int "hop limit" ~auto:(fun () -> 64) Kinds.ttl identity ;
-          src = addr "source" ;
-          dst = addr "destination" ;
-          payload =
-              Payload.o (payload_of_field ?upper gen_values Kinds.payload js) }
+          ttl = int Field.ttl ~auto:(fun () -> 64) Kinds.ttl identity ;
+          src = addr Field.src ;
+          dst = addr Field.dst ;
+          payload = Payload.o (payload_of_nth ?upper r Field.payload
+                                              gen_values Kinds.payload) }
 
     (*$Q of_synth
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_consts (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_consts (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_autos (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_autos (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
      *)
 
     (*$Q kind

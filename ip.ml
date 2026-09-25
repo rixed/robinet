@@ -902,53 +902,75 @@ module Pdu = struct
                  "options", Widget.json_of_bytes t.options ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
 
-    let of_synth js ?upper ?prev gen_values =
+    (* Where each field is in [kind], which [of_synth] reads them by: *)
+    module Field =
+    struct
+        let i = Widget.field_index kind
+        let tos = i "type of service"
+        let tot_len = i "total length"
+        let id = i "id"
+        let dont_frag = i "don't fragment"
+        let more_frags = i "more fragments"
+        let frag_offset = i "fragment offset"
+        let ttl = i "time to live"
+        let proto = i "protocol"
+        let src = i "source"
+        let dst = i "destination"
+        let options = i "options"
+        let payload = i "payload"
+    end
+
+    (* [r] are the fields of a synth of [kind] (see [Generator.fields]): *)
+    let of_synth r ?upper ?prev gen_values =
         let open Generator in
-        let int fname ?auto kind f =
-            int_of_field fname gen_values ?auto kind f js
-        and bool ?auto fname =
-            of_field fname gen_values ?auto SimTypes.Bool Widget.to_bool js
-        and addr fname =
-            of_field fname gen_values Kinds.addr
-                     (Addr.of_dotted_string % Widget.to_string) js in
+        let int i ?auto kind f =
+            int_of_nth r i gen_values ?auto kind f
+        and bool ?auto i =
+            of_nth r i gen_values ?auto SimTypes.Bool Widget.to_bool
+        and addr i =
+            of_nth r i gen_values Kinds.addr
+                   (Addr.of_dotted_string % Widget.to_string) in
         (* An automatic value is what a packet would plausibly carry and not
          * any value the field could hold: a random fragment offset makes a
          * fragment of every packet, and random option bytes a header nothing
          * can read past -- either way what is above is no longer a segment
          * anybody recognises. *)
         let options =
-            bs_of_field "options" gen_values ~auto:(fun () -> empty_bitstring)
-                        Kinds.options js
-        and payload = payload_of_field ?upper gen_values Kinds.payload js in
-        { tos = int "type of service" ~auto:(fun () -> ToS.o 0) Kinds.tos ToS.o ;
-          tot_len = int "total length"
+            bs_of_nth r Field.options gen_values
+                      ~auto:(fun () -> empty_bitstring) Kinds.options
+        and payload = payload_of_nth ?upper r Field.payload gen_values
+                                     Kinds.payload in
+        { tos = int Field.tos ~auto:(fun () -> ToS.o 0) Kinds.tos ToS.o ;
+          tot_len = int Field.tot_len
                         ~auto:(fun () ->
                             20 + bytelength options + bytelength payload)
                         Kinds.tot_len identity ;
-          id = int "id" ?auto:(Option.map (fun p () ->
-                                  (p.id + 1) land 0xffff) prev)
+          id = int Field.id ?auto:(Option.map (fun p () ->
+                                      (p.id + 1) land 0xffff) prev)
                    Kinds.id identity ;
-          dont_frag = bool "don't fragment" ;
-          more_frags = bool ~auto:(fun () -> false) "more fragments" ;
-          frag_offset = int "fragment offset" ~auto:(fun () -> 0)
+          dont_frag = bool Field.dont_frag ;
+          more_frags = bool ~auto:(fun () -> false) Field.more_frags ;
+          frag_offset = int Field.frag_offset ~auto:(fun () -> 0)
                             Kinds.frag_offset identity ;
           (* Enough hops to cross any simulated network, and not the 0 that a
            * random one is 1 time in 256, which no router would forward. *)
-          ttl = int "time to live" ~auto:(fun () -> 64) Kinds.ttl identity ;
-          proto = int "protocol" ?auto:(from_upper upper Proto.of_layer)
+          ttl = int Field.ttl ~auto:(fun () -> 64) Kinds.ttl identity ;
+          proto = int Field.proto ?auto:(from_upper upper Proto.of_layer)
                       Kinds.proto Proto.o ;
-          src = addr "source" ;
-          dst = addr "destination" ;
+          src = addr Field.src ;
+          dst = addr Field.dst ;
           options ;
           payload = Payload.o payload }
 
     (*$Q of_synth
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_consts (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_consts (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_autos (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_autos (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
      *)
 
     (*$Q kind

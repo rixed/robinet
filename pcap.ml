@@ -375,32 +375,46 @@ struct
                  "dlt", `Int (uint32 (t.dlt :> int32)) ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
 
-    let of_synth js ?upper ?prev gen_values =
+    (* Where each field is in [kind], which [of_synth] reads them by: *)
+    module Field =
+    struct
+        let i = Widget.field_index kind
+        let source = i "source"
+        let captured_at = i "captured at"
+        let caplen = i "caplen"
+        let wirelen = i "wirelen"
+        let dlt = i "dlt"
+        let payload = i "payload"
+    end
+
+    (* [r] are the fields of a synth of [kind] (see [Generator.fields]): *)
+    let of_synth r ?upper ?prev gen_values =
         ignore prev ;
         let open Generator in
-        let payload = payload_of_field ?upper gen_values Kinds.payload js in
-        let len fname =
-            int_of_field fname gen_values ~auto:(fun () -> bytelength payload)
-                         Kinds.len identity js in
+        let payload = payload_of_nth ?upper r Field.payload gen_values
+                                     Kinds.payload in
+        let len i =
+            int_of_nth r i gen_values ~auto:(fun () -> bytelength payload)
+                       Kinds.len identity in
         { source_name =
-              of_field "source" gen_values Kinds.source Widget.to_string js ;
+              of_nth r Field.source gen_values Kinds.source Widget.to_string ;
           (* Automatic and nothing else: what [to_json] writes of an instant
            * cannot be read back, and a synthesized packet is captured when it
            * is made. *)
-          ts = Widget.to_field "captured at" (function
+          ts = nth r Field.captured_at (function
                    | `Null -> Clock.Wall.now ()
                    | v -> Widget.bad_value "can only be automatic, not %s"
-                              (Yojson.Basic.to_string v)) js ;
-          caplen = len "caplen" ;
-          wirelen = len "wirelen" ;
+                              (Yojson.Basic.to_string v)) ;
+          caplen = len Field.caplen ;
+          wirelen = len Field.wirelen ;
           (* The link type the layer above says when it does, Ethernet
            * otherwise: *)
-          dlt = int_of_field "dlt" gen_values
+          dlt = int_of_nth r Field.dlt gen_values
                     ~auto:(fun () ->
                         match upper with
                         | Some ("Sll", _) -> Dlt.linux_cooked
                         | _ -> Dlt.en10mb)
-                    Kinds.dlt (Dlt.o % Int32.of_int) js ;
+                    Kinds.dlt (Dlt.o % Int32.of_int) ;
           payload = Payload.o payload }
 
     (*$Q of_synth
@@ -414,11 +428,13 @@ struct
                   | f -> f) l) \
           | js -> js in \
         let synth = Generator.wrap kind Generator.const (to_json t) in \
-        auto_ts (to_json (of_synth (auto_ts synth) [||])) = auto_ts (to_json t))
+        auto_ts (to_json (of_synth (Generator.fields_of_synth kind (auto_ts synth)) \
+                                   [||])) = auto_ts (to_json t))
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) (fun _ -> \
           make "f" ~dlt:(Dlt.random ()) (Clock.Wall.o (Random.float 1e9)) \
                (randbs (Random.int 40)))) \
-        (Generator.reads_autos (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_autos (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
      *)
 
     (*$Q kind

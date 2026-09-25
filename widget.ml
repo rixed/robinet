@@ -571,6 +571,46 @@ let to_field name f js =
     let v = json_of_field name js in
     try f v with Bad_value msg -> bad_value "%s: %s" name msg
 
+(** The names of the fields of a [Record] or [Row] kind, in their order. *)
+let rec field_names = function
+    | Record fields | Row fields -> Array.map fst fields
+    | Hint (_, k) -> field_names k
+    | k -> invalid_arg ("Widget.field_names: not a record: "^ kind_name k)
+
+(** Where field [name] is in [field_names kind]. *)
+let field_index kind name =
+    match Array.findi (String.equal name) (field_names kind) with
+    | exception Not_found -> invalid_arg ("Widget.field_index: "^ name)
+    | i -> i
+
+(** The values of the fields of record [js], in the order of [names]. A record
+ * written in that order, as its [to_json] writes it, costs one comparison a
+ * field; any other is searched for each of them, and refused as [to_field]
+ * refuses it. *)
+let fields_of_json names js =
+    let n = Array.length names in
+    let values = Array.make n `Null in
+    let rec in_order i = function
+        | (name, v) :: rest when i < n && String.equal name names.(i) ->
+            values.(i) <- v ;
+            in_order (i + 1) rest
+        | _ -> i in
+    (match js with
+    | `Assoc l when in_order 0 l = n -> ()
+    | js -> Array.iteri (fun i name -> values.(i) <- json_of_field name js) names) ;
+    values
+
+(*$T fields_of_json
+  fields_of_json [| "a" ; "b" |] (`Assoc [ "a", `Int 1 ; "b", `Int 2 ]) = \
+    [| `Int 1 ; `Int 2 |]
+  fields_of_json [| "a" ; "b" |] (`Assoc [ "b", `Int 2 ; "c", `Null ; "a", `Int 1 ]) = \
+    [| `Int 1 ; `Int 2 |]
+  try ignore (fields_of_json [| "a" ; "b" |] (`Assoc [ "a", `Int 1 ])) ; false \
+  with Bad_value msg -> String.exists msg "\"b\""
+  try ignore (fields_of_json [| "a" |] (`Int 1)) ; false \
+  with Bad_value _ -> true
+ *)
+
 let to_bool = function
     | `Bool b -> b
     | `String ("true" | "1") -> true

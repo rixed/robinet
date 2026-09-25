@@ -96,9 +96,22 @@ struct
                  "checksum", `Int t.checksum ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
 
-    let of_synth js ?upper ?prev gen_values =
+    (* Where each field is in [kind], which [of_synth] reads them by: *)
+    module Field =
+    struct
+        let i = Widget.field_index kind
+        let src_port = i "source port"
+        let dst_port = i "destination port"
+        let length = i "length"
+        let checksum = i "checksum"
+        let payload = i "payload"
+    end
+
+    (* [r] are the fields of a synth of [kind] (see [Generator.fields]): *)
+    let of_synth r ?upper ?prev gen_values =
         let open Generator in
-        let payload = payload_of_field ?upper gen_values Kinds.payload js in
+        let payload = payload_of_nth ?upper r Field.payload gen_values
+                                     Kinds.payload in
         (* The ports DNS and DHCP are known by, under those; otherwise those of
          * the previous datagram, mostly. *)
         let known_src, known_dst =
@@ -106,31 +119,33 @@ struct
             | Some ("Dns", _) -> None, Some 53
             | Some ("Dhcp", _) -> Some 68, Some 67
             | _ -> None, None in
-        let port fname known prev_port =
+        let port i known prev_port =
             let auto =
                 match known with
                 | Some p -> Some (fun () -> Port.o p)
                 | None -> mostly_same prev_port Port.random in
-            int_of_field fname gen_values ?auto Kinds.port Port.o js in
-        { src_port = port "source port" known_src
+            int_of_nth r i gen_values ?auto Kinds.port Port.o in
+        { src_port = port Field.src_port known_src
                           (Option.map (fun p -> p.src_port) prev) ;
-          dst_port = port "destination port" known_dst
+          dst_port = port Field.dst_port known_dst
                           (Option.map (fun p -> p.dst_port) prev) ;
-          length = int_of_field "length" gen_values
+          length = int_of_nth r Field.length gen_values
                        ~auto:(fun () -> 8 + bytelength payload)
-                       Kinds.length identity js ;
+                       Kinds.length identity ;
           (* 0, which is the only checksum [Ip.Pdu.pack] computes: *)
-          checksum = int_of_field "checksum" gen_values ~auto:(fun () -> 0)
-                         Kinds.checksum identity js ;
+          checksum = int_of_nth r Field.checksum gen_values
+                         ~auto:(fun () -> 0) Kinds.checksum identity ;
           payload = Payload.o payload }
 
     (*$Q of_synth
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_consts (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_consts (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_autos (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_autos (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
      *)
 
     (*$Q kind

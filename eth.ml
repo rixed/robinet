@@ -297,26 +297,39 @@ module Pdu = struct
                  "protocol", `Int (t.proto :> int) ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
 
-    let of_synth js ?upper ?prev gen_values =
+    (* Where each field is in [kind], which [of_synth] reads them by: *)
+    module Field =
+    struct
+        let i = Widget.field_index kind
+        let src = i "source"
+        let dst = i "destination"
+        let proto = i "protocol"
+        let payload = i "payload"
+    end
+
+    (* [r] are the fields of a synth of [kind] (see [Generator.fields]): *)
+    let of_synth r ?upper ?prev gen_values =
         ignore prev ;
         let open Generator in
-        let addr fname kind =
-            of_field fname gen_values kind (Addr.of_string % Widget.to_string) js in
-        { src = addr "source" Kinds.src ;
-          dst = addr "destination" Kinds.dst ;
-          proto = int_of_field "protocol" gen_values
+        let addr i kind =
+            of_nth r i gen_values kind (Addr.of_string % Widget.to_string) in
+        { src = addr Field.src Kinds.src ;
+          dst = addr Field.dst Kinds.dst ;
+          proto = int_of_nth r Field.proto gen_values
                       ?auto:(from_upper upper Proto.of_layer)
-                      Kinds.proto Proto.o js ;
-          payload =
-              Payload.o (payload_of_field ?upper gen_values Kinds.payload js) }
+                      Kinds.proto Proto.o ;
+          payload = Payload.o (payload_of_nth ?upper r Field.payload
+                                              gen_values Kinds.payload) }
 
     (*$Q of_synth
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_consts (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_consts (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_autos (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_autos (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
      *)
 
     (*$Q kind

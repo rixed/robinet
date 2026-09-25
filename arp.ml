@@ -262,7 +262,21 @@ module Pdu = struct
         with _ -> false)
      *)
 
-    let of_synth js ?upper ?prev gen_values =
+    (* Where each field is in [kind], which [of_synth] reads them by: *)
+    module Field =
+    struct
+        let i = Widget.field_index kind
+        let hw_type = i "hardware type"
+        let proto_type = i "protocol type"
+        let operation = i "operation"
+        let sender_hw = i "sender hardware address"
+        let sender_proto = i "sender protocol address"
+        let target_hw = i "target hardware address"
+        let target_proto = i "target protocol address"
+    end
+
+    (* [r] are the fields of a synth of [kind] (see [Generator.fields]): *)
+    let of_synth r ?upper ?prev gen_values =
         (* Nothing above or before an ARP says anything about it: *)
         ignore upper ; ignore prev ;
         let open Generator in
@@ -270,31 +284,33 @@ module Pdu = struct
          * two call for: the header says how long its addresses are, so a
          * random type with a random length is a message nothing can read --
          * and every ARP anybody has seen is this pair anyway. *)
-        let hw fname = bs_of_field fname gen_values ~auto:(fun () -> randbs 6)
-                                   Kinds.sender_hw js
-        and proto fname = bs_of_field fname gen_values ~auto:(fun () -> randbs 4)
-                                      Kinds.sender_proto js in
+        let hw i = bs_of_nth r i gen_values ~auto:(fun () -> randbs 6)
+                             Kinds.sender_hw
+        and proto i = bs_of_nth r i gen_values ~auto:(fun () -> randbs 4)
+                                Kinds.sender_proto in
         {
-            hw_type = int_of_field "hardware type" ~auto:(fun () -> HwType.eth)
-                                   gen_values Kinds.hw_type HwType.o js ;
-            proto_type = int_of_field "protocol type"
-                                      ~auto:(fun () -> HwProto.ip4)
-                                      gen_values Kinds.proto_type HwProto.o js ;
-            operation = int_of_field "operation" ~auto:Op.random gen_values
-                                     Kinds.operation Op.o js ;
-            sender_hw = hw "sender hardware address" ;
-            sender_proto = proto "sender protocol address" ;
-            target_hw = hw "target hardware address" ;
-            target_proto = proto "target protocol address" ;
+            hw_type = int_of_nth r Field.hw_type ~auto:(fun () -> HwType.eth)
+                                 gen_values Kinds.hw_type HwType.o ;
+            proto_type = int_of_nth r Field.proto_type
+                                    ~auto:(fun () -> HwProto.ip4)
+                                    gen_values Kinds.proto_type HwProto.o ;
+            operation = int_of_nth r Field.operation ~auto:Op.random gen_values
+                                   Kinds.operation Op.o ;
+            sender_hw = hw Field.sender_hw ;
+            sender_proto = proto Field.sender_proto ;
+            target_hw = hw Field.target_hw ;
+            target_proto = proto Field.target_proto ;
         }
 
     (*$Q of_synth
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_consts (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_consts (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_autos (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_autos (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
      *)
 
     (*$>*)

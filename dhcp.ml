@@ -635,14 +635,53 @@ struct
                                          "value", Widget.json_of_bytes v ]
                             ) t.other_options) ]
 
-    let of_synth js ?upper ?prev gen_values =
+    (* Where each field is in [kind], which [of_synth] reads them by: *)
+    module Field =
+    struct
+        let i = Widget.field_index kind
+        let op = i "operation"
+        let htype = i "hardware type"
+        let hlen = i "hardware address length"
+        let hops = i "hops"
+        let xid = i "transaction id"
+        let secs = i "seconds"
+        let broadcast = i "broadcast"
+        let ciaddr = i "client address"
+        let yiaddr = i "your address"
+        let siaddr = i "server address"
+        let giaddr = i "relay address"
+        let chaddr = i "client hardware address"
+        let sname = i "server name"
+        let file = i "boot file"
+        let msg_type = i "message type"
+        let subnet_mask = i "subnet mask"
+        let router = i "router"
+        let ntp_server = i "NTP server"
+        let smtp_server = i "SMTP server"
+        let pop3_server = i "POP3 server"
+        let name_server = i "name server"
+        let host_name = i "host name"
+        let domain_name = i "domain name"
+        let lease_time = i "lease time"
+        let server_id = i "server identifier"
+        let requested_ip = i "requested address"
+        let message = i "message"
+        let max_size = i "max message size"
+        let vendor_class = i "vendor class"
+        let client_id = i "client identifier"
+        let request_list = i "request list"
+        let other_options = i "other options"
+    end
+
+    (* [r] are the fields of a synth of [kind] (see [Generator.fields]): *)
+    let of_synth r ?upper ?prev gen_values =
         ignore upper ; ignore prev ;
         let open Generator in
-        let field ?auto fname kind f =
-            of_field fname gen_values ?auto kind f js in
-        let int ?auto fname kind f = field ?auto fname kind (f % Widget.to_int)
-        and opt ?auto fname kind f =
-            field ?auto fname kind (Widget.to_option f) in
+        let field ?auto i kind f =
+            of_nth r i gen_values ?auto kind f in
+        let int ?auto i kind f = field ?auto i kind (f % Widget.to_int)
+        and opt ?auto i kind f =
+            field ?auto i kind (Widget.to_option f) in
         (* An option carries its length in a byte, so a random string of up to
          * fifty thousand characters is one no client could read back. What a
          * message that does not carry the option says is nothing at all,
@@ -650,79 +689,80 @@ struct
         let no_string () = None in
         let address = Ip.Addr.of_dotted_string % Widget.to_string
         and opaque = string_of_bitstring % Widget.to_bitstring in
-        { op = int "operation" Kinds.op (function
+        { op = int Field.op Kinds.op (function
                    | 1 -> BootRequest
                    | 2 -> BootReply
                    | n -> Widget.bad_value "no operation is %d" n) ;
           (* Ethernet, and the six bytes of address it calls for: a message
              whose hardware type, address length and address disagree is one
              no client would make anything of. *)
-          htype = int "hardware type" ~auto:(fun () -> Arp.HwType.eth)
+          htype = int Field.htype ~auto:(fun () -> Arp.HwType.eth)
                       Kinds.htype Arp.HwType.o ;
-          hlen = int "hardware address length" ~auto:(fun () -> 6) Kinds.byte
+          hlen = int Field.hlen ~auto:(fun () -> 6) Kinds.byte
                      identity ;
           (* Straight from the client, which is what a message that has not
              been relayed says. *)
-          hops = int "hops" ~auto:(fun () -> 0) Kinds.byte identity ;
-          xid = int "transaction id" Kinds.xid Int32.of_int ;
-          secs = int "seconds" Kinds.secs identity ;
-          broadcast = field "broadcast" SimTypes.Bool Widget.to_bool ;
-          ciaddr = field "client address" Kinds.address address ;
-          yiaddr = field "your address" Kinds.address address ;
-          siaddr = field "server address" Kinds.address address ;
-          giaddr = field "relay address" Kinds.address address ;
-          chaddr = field "client hardware address"
+          hops = int Field.hops ~auto:(fun () -> 0) Kinds.byte identity ;
+          xid = int Field.xid Kinds.xid Int32.of_int ;
+          secs = int Field.secs Kinds.secs identity ;
+          broadcast = field Field.broadcast SimTypes.Bool Widget.to_bool ;
+          ciaddr = field Field.ciaddr Kinds.address address ;
+          yiaddr = field Field.yiaddr Kinds.address address ;
+          siaddr = field Field.siaddr Kinds.address address ;
+          giaddr = field Field.giaddr Kinds.address address ;
+          chaddr = field Field.chaddr
                          ~auto:(fun () -> randbs 6) Kinds.chaddr
                          Widget.to_bitstring ;
           (* Fixed fields of 64 and 128 bytes, which a longer string is cut
              down to as it is packed: empty is what a message that names no
              server and no file carries. *)
-          sname = field ~auto:(fun () -> "") "server name" SimTypes.String
+          sname = field ~auto:(fun () -> "") Field.sname SimTypes.String
                         Widget.to_string ;
-          file = field ~auto:(fun () -> "") "boot file" SimTypes.String
+          file = field ~auto:(fun () -> "") Field.file SimTypes.String
                        Widget.to_string ;
           (* What makes a BOOTP message a DHCP one: one of the eight, rather
              than nothing at all. *)
-          msg_type = opt "message type"
+          msg_type = opt Field.msg_type
                          ~auto:(fun () -> Some (MsgType.o (1 + Random.int 8)))
                          Kinds.msg_type (MsgType.o % Widget.to_int) ;
-          subnet_mask = opt "subnet mask" Kinds.opt_address address ;
-          router = opt "router" Kinds.opt_address address ;
-          ntp_server = opt "NTP server" Kinds.opt_address address ;
-          smtp_server = opt "SMTP server" Kinds.opt_address address ;
-          pop3_server = opt "POP3 server" Kinds.opt_address address ;
-          domain_name_server = opt "name server" Kinds.opt_address address ;
-          host_name = opt "host name" ~auto:no_string Kinds.opt_string
+          subnet_mask = opt Field.subnet_mask Kinds.opt_address address ;
+          router = opt Field.router Kinds.opt_address address ;
+          ntp_server = opt Field.ntp_server Kinds.opt_address address ;
+          smtp_server = opt Field.smtp_server Kinds.opt_address address ;
+          pop3_server = opt Field.pop3_server Kinds.opt_address address ;
+          domain_name_server = opt Field.name_server Kinds.opt_address address ;
+          host_name = opt Field.host_name ~auto:no_string Kinds.opt_string
                           Widget.to_string ;
-          search_sfx = opt "domain name" ~auto:no_string Kinds.opt_string
+          search_sfx = opt Field.domain_name ~auto:no_string Kinds.opt_string
                            Widget.to_string ;
-          lease_time = opt "lease time" Kinds.lease_time
+          lease_time = opt Field.lease_time Kinds.lease_time
                            (Int32.of_int % Widget.to_int) ;
-          server_id = opt "server identifier" Kinds.opt_address address ;
-          requested_ip = opt "requested address" Kinds.opt_address address ;
-          message = opt "message" ~auto:no_string Kinds.message
+          server_id = opt Field.server_id Kinds.opt_address address ;
+          requested_ip = opt Field.requested_ip Kinds.opt_address address ;
+          message = opt Field.message ~auto:no_string Kinds.message
                         Widget.to_string ;
-          max_dhcp_msg_size = opt "max message size" Kinds.max_size
+          max_dhcp_msg_size = opt Field.max_size Kinds.max_size
                                   Widget.to_int ;
-          vendor_class_id = opt "vendor class" ~auto:no_string Kinds.opt_string
+          vendor_class_id = opt Field.vendor_class ~auto:no_string Kinds.opt_string
                                 Widget.to_string ;
-          client_id = opt "client identifier" Kinds.opaque opaque ;
-          request_list = opt "request list" Kinds.opaque opaque ;
+          client_id = opt Field.client_id Kinds.opaque opaque ;
+          request_list = opt Field.request_list Kinds.opaque opaque ;
           other_options =
-              sub_of_field "other options" gen_values Kinds.other_options
+              sub_of_nth r Field.other_options gen_values Kinds.other_options
                   (Widget.to_list (fun js ->
                       of_field "code" gen_values Kinds.option_code
                                Widget.to_int js,
-                      bs_of_field "value" gen_values Kinds.option_value js))
-                  js }
+                      bs_of_field "value" gen_values Kinds.option_value js)) }
 
     (*$Q of_synth
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_consts (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_consts (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_autos (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_autos (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
      *)
 
     (*$Q kind

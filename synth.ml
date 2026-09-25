@@ -196,54 +196,56 @@ struct
         | Pdu.Icmp t -> Icmp.Pdu.pack t
         | Pdu.Pcap t -> Pcap.Pdu.pack t
 
-    (* The layer named [layer_name], synthesized from [js] above [upper] (the name
-     * and the packed bits of the layer above) and after [prev], this layer
-     * in the previous packet. *)
-    let layer_of_synth js ?upper prev gen_values layer_name : Pdu.layer =
+    (* The layer named [layer_name], synthesized from [js] -- or [fields], the
+     * same read into an array (see [to_array_top_to_bottom]) -- above [upper]
+     * (the name and the packed bits of the layer above) and after [prev], this
+     * layer in the previous packet. *)
+    let layer_of_synth (layer_name, js, fields) ?upper prev gen_values
+                       : Pdu.layer =
         match layer_name with
         | "Data" ->
             Pdu.Raw (Generator.bits_of_synth gen_values Bytes js)
         | "Dhcp" ->
-            Pdu.Dhcp (Dhcp.Pdu.of_synth js ?upper gen_values
+            Pdu.Dhcp (Dhcp.Pdu.of_synth (Lazy.force fields) ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Dhcp p) -> Some p | _ -> None))
         | "Eth" ->
-            Pdu.Eth (Eth.Pdu.of_synth js ?upper gen_values
+            Pdu.Eth (Eth.Pdu.of_synth (Lazy.force fields) ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Eth p) -> Some p | _ -> None))
         | "Arp" ->
-            Pdu.Arp (Arp.Pdu.of_synth js ?upper gen_values
+            Pdu.Arp (Arp.Pdu.of_synth (Lazy.force fields) ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Arp p) -> Some p | _ -> None))
         | "Ip" ->
-            Pdu.Ip (Ip.Pdu.of_synth js ?upper gen_values
+            Pdu.Ip (Ip.Pdu.of_synth (Lazy.force fields) ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Ip p) -> Some p | _ -> None))
         | "Ip6" ->
-            Pdu.Ip6 (Ip6.Pdu.of_synth js ?upper gen_values
+            Pdu.Ip6 (Ip6.Pdu.of_synth (Lazy.force fields) ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Ip6 p) -> Some p | _ -> None))
         | "Udp" ->
-            Pdu.Udp (Udp.Pdu.of_synth js ?upper gen_values
+            Pdu.Udp (Udp.Pdu.of_synth (Lazy.force fields) ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Udp p) -> Some p | _ -> None))
         | "Tcp" ->
-            Pdu.Tcp (Tcp.Pdu.of_synth js ?upper gen_values
+            Pdu.Tcp (Tcp.Pdu.of_synth (Lazy.force fields) ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Tcp p) -> Some p | _ -> None))
         | "Dns" ->
-            Pdu.Dns (Dns.Pdu.of_synth js ?upper gen_values
+            Pdu.Dns (Dns.Pdu.of_synth (Lazy.force fields) ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Dns p) -> Some p | _ -> None))
         | "Sll" ->
-            Pdu.Sll (Sll.Pdu.of_synth js ?upper gen_values
+            Pdu.Sll (Sll.Pdu.of_synth (Lazy.force fields) ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Sll p) -> Some p | _ -> None))
         | "Vlan" ->
-            Pdu.Vlan (Vlan.Pdu.of_synth js ?upper gen_values
+            Pdu.Vlan (Vlan.Pdu.of_synth (Lazy.force fields) ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Vlan p) -> Some p | _ -> None))
         | "Icmp" ->
             Pdu.Icmp (Icmp.Pdu.of_synth js ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Icmp p) -> Some p | _ -> None))
         | "Pcap" ->
-            Pdu.Pcap (Pcap.Pdu.of_synth js ?upper gen_values
+            Pdu.Pcap (Pcap.Pdu.of_synth (Lazy.force fields) ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Pcap p) -> Some p | _ -> None))
         | p ->
             Widget.bad_value "no protocol is named %S" p
 
-    (** From an array of proto names and synthesized layers as JSON, top to
-     * bottom, describing the packet to generate, create an array of actual
+    (** From an array of proto names and synthesized layers as JSON (as
+     * [to_array_top_to_bottom] makes them), top to bottom, describing the packet to generate, create an array of actual
      * layers as Pdu.layer, from which a [Packet.Pdu.t] is easily formed
      * (array to list, in reverse order, see [pdu_of_array_top_to_bottom]).
      * Note that the proto names are proper names as given by
@@ -253,13 +255,13 @@ struct
     let of_synth layers ?prev gen_values =
         let upper = ref None in
         Array.init (Array.length layers) (fun i ->
-            let layer_name, js = layers.(i) in
+            let layer_name, _, _ as layer = layers.(i) in
             let prev_layer =
                 (* Just in case the packet generator was edited while running,
                  * which should never happen. *)
                 Option.bind prev (fun prev -> try Some prev.(i) with _ -> None) in
             let layer =
-                try layer_of_synth js ?upper:!upper prev_layer gen_values layer_name
+                try layer_of_synth layer ?upper:!upper prev_layer gen_values
                 with Widget.Bad_value msg ->
                     Widget.bad_value "%s: %s" layer_name msg in
             upper := Some (layer_name, pack_layer layer) ;
@@ -276,8 +278,15 @@ struct
     let to_array_top_to_bottom = function
         | `List layers ->
             List.rev_map (fun layer ->
-                Widget.to_field "name" Widget.to_string layer,
-                Widget.json_of_field "fields" layer
+                let name = Widget.to_field "name" Widget.to_string layer
+                and js = Widget.json_of_field "fields" layer in
+                (* Read once for every packet the layers are made into, by
+                 * whichever protocol reads its fields by index: *)
+                let fields = lazy (
+                    match Pdu.kind_of_protocol name with
+                    | Some kind -> Generator.fields_of_synth kind js
+                    | None -> Widget.bad_value "no protocol %S" name) in
+                name, js, fields
             ) layers |>
             Array.of_list
         | js ->
@@ -344,11 +353,14 @@ struct
             `Assoc (List.map (fun (n, v) -> n, if n = "id" then `Null else v) fields)
         | js -> js in
       let synth =
-        [| "Dns", layer_synth Generator.const (Pdu.Dns (Dns.Pdu.random ())) |>
-                     auto_id ;
-           "Udp", autos (Pdu.Udp (Udp.Pdu.random ())) ;
-           "Ip", autos (Pdu.Ip (Ip.Pdu.random ())) ;
-           "Eth", autos (Pdu.Eth (Eth.Pdu.random ())) |] in
+        [ "Dns", layer_synth Generator.const (Pdu.Dns (Dns.Pdu.random ())) |>
+                   auto_id ;
+          "Udp", autos (Pdu.Udp (Udp.Pdu.random ())) ;
+          "Ip", autos (Pdu.Ip (Ip.Pdu.random ())) ;
+          "Eth", autos (Pdu.Eth (Eth.Pdu.random ())) ] |>
+        List.rev_map (fun (name, fields) ->
+          `Assoc [ "name", `String name ; "fields", fields ]) |>
+        (fun l -> to_array_top_to_bottom (`List l)) in
       let p1 = of_synth synth [||] in
       let p2 = of_synth synth ~prev:p1 [||] in
       let printer = string_of_int in
@@ -547,6 +559,11 @@ type t =
        * Widget.kind of the Pdu that we have already can be used to make this
        * generation partially automatic. *)
       mutable packet : Yojson.Basic.t ;
+      (* [packet] as [Packet.of_synth] reads it, along with the [packet] it was
+       * made of: remade whenever that is not [packet] any more (see
+       * [layers]). *)
+      mutable prepared : Yojson.Basic.t *
+                         (string * Yojson.Basic.t * Generator.fields Lazy.t) array ;
       (* If true, the adapters of this synthesizer have their own distinct
        * values from the generators. If false, every adapter will emit exactly
        * the same packets at the same time. *)
@@ -573,13 +590,20 @@ let of_widget (w : Widget.t) =
  * The values of the step are drawn once and used for the packet and for the
  * distance to the next one, so that a stream whose distance is a generator
  * reads the same value the packet did. *)
+let layers t =
+    let packet, layers = t.prepared in
+    if packet == t.packet then layers else (
+        let layers = Packet.to_array_top_to_bottom t.packet in
+        t.prepared <- t.packet, layers ;
+        layers)
+
 let rec emit_next t gen state =
     if gen = t.gen && t.emitting &&
        not (Stream.is_over t.stream state.count) then (
         let gen_values =
             Array.map (fun g -> Generator.get g state.count) t.generators in
         let layers =
-            Packet.of_synth (Packet.to_array_top_to_bottom t.packet)
+            Packet.of_synth (layers t)
                             ?prev:state.prev gen_values in
         state.prev <- Some layers ;
         state.count <- state.count + 1 ;
@@ -682,8 +706,9 @@ let make ~parent ?location ?speeds ?(adapters=1) ?(independent=false) name =
         { widget ; ifaces ; generators = [||] ;
           stream = { stop_after = None ; distance = Automatic ;
                      distance_from_end = true } ;
-          packet = default_packet () ; independent ;
+          packet = `Null ; prepared = `Null, [||] ; independent ;
           emitting = false ; states = [||] ; gen = 0 } in
+    t.packet <- default_packet () ;
     widget.device <- Some (Synthesizer t) ;
     (* Its adapters are its ports, as a switch's are. *)
     widget.ports <- Widget.{

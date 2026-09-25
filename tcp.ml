@@ -198,59 +198,76 @@ struct
                  "options", Widget.json_of_bytes t.options ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
 
-    let of_synth js ?upper ?prev gen_values =
+    (* Where each field is in [kind], which [of_synth] reads them by: *)
+    module Field =
+    struct
+        let i = Widget.field_index kind
+        let src_port = i "source port"
+        let dst_port = i "destination port"
+        let seq_num = i "sequence number"
+        let ack_num = i "acknowledgment number"
+        let flags = i "flags"
+        let win_size = i "window size"
+        let urg_ptr = i "urgent pointer"
+        let options = i "options"
+        let payload = i "payload"
+    end
+
+    (* [r] are the fields of a synth of [kind] (see [Generator.fields]): *)
+    let of_synth r ?upper ?prev gen_values =
         let open Generator in
-        let int fname ?auto kind =
-            int_of_field fname gen_values ?auto kind identity js in
-        let port fname prev_port =
-            int_of_field fname gen_values ?auto:(mostly_same prev_port Port.random)
-                         Kinds.port Port.o js in
+        let int i ?auto kind =
+            int_of_nth r i gen_values ?auto kind identity in
+        let port i prev_port =
+            int_of_nth r i gen_values ?auto:(mostly_same prev_port Port.random)
+                       Kinds.port Port.o in
         (* An automatic value is what a segment would plausibly carry: the
          * flags of a segment carrying data, rather than any of the 64
          * combinations of them -- half of which no stack would ever send. The
          * places are those [flag_choices] names, which [raised] reads back. *)
         let flags =
-            of_field "flags" gen_values ~auto:(fun () -> [ 1 (* Ack *) ])
-                     Kinds.flags (Widget.to_choices flag_choices) js in
+            of_nth r Field.flags gen_values ~auto:(fun () -> [ 1 (* Ack *) ])
+                   Kinds.flags (Widget.to_choices flag_choices) in
         let raised i = List.mem i flags in
         let seq32 (n : SeqNum.t) = uint32 (n :> int32) in
         (* Given the previous segment: the sequence number that follows it, and
          * an acknowledgment number that moves on now and then, what goes the
          * other way being unknown. *)
         let seq_num =
-            int "sequence number" Kinds.seq_num ?auto:(Option.map (fun p () ->
+            int Field.seq_num Kinds.seq_num ?auto:(Option.map (fun p () ->
                 let one b = if b then 1 else 0 in
                 (seq32 p.seq_num + Payload.length p.payload +
                  one p.flags.syn + one p.flags.fin) land 0xffff_ffff) prev)
         and ack_num =
-            int "acknowledgment number" Kinds.seq_num ?auto:(Option.map (fun p () ->
+            int Field.ack_num Kinds.seq_num ?auto:(Option.map (fun p () ->
                 let ack = seq32 p.ack_num in
                 if Random.bool () then ack
                 else (ack + 1000 + Random.int 2000) land 0xffff_ffff) prev) in
-        { src_port = port "source port" (Option.map (fun p -> p.src_port) prev) ;
-          dst_port = port "destination port" (Option.map (fun p -> p.dst_port) prev) ;
+        { src_port = port Field.src_port (Option.map (fun p -> p.src_port) prev) ;
+          dst_port = port Field.dst_port (Option.map (fun p -> p.dst_port) prev) ;
           seq_num = SeqNum.o (Int32.of_int seq_num) ;
           ack_num = SeqNum.o (Int32.of_int ack_num) ;
-          win_size = int "window size" Kinds.win_size ;
+          win_size = int Field.win_size Kinds.win_size ;
           flags = { urg = raised 0 ; ack = raised 1 ; psh = raised 2 ;
                     rst = raised 3 ; syn = raised 4 ; fin = raised 5 } ;
           (* Where the urgent data ends, which is nowhere unless Urg says
              so; and no options rather than 40 random bytes of them, which
              nothing can read past. *)
-          urg_ptr = int "urgent pointer" ~auto:(fun () -> 0) Kinds.urg_ptr ;
-          options = bs_of_field "options" gen_values
-                                ~auto:(fun () -> empty_bitstring)
-                                Kinds.options js ;
-          payload =
-              Payload.o (payload_of_field ?upper gen_values Kinds.payload js) }
+          urg_ptr = int Field.urg_ptr ~auto:(fun () -> 0) Kinds.urg_ptr ;
+          options = bs_of_nth r Field.options gen_values
+                              ~auto:(fun () -> empty_bitstring) Kinds.options ;
+          payload = Payload.o (payload_of_nth ?upper r Field.payload
+                                              gen_values Kinds.payload) }
 
     (*$Q of_synth
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_consts (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_consts (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
       (Q.make ~print:(fun t -> Yojson.Basic.to_string (to_json t)) \
               (fun _ -> random ())) \
-        (Generator.reads_autos (fun js g -> of_synth js g) kind to_json)
+        (Generator.reads_autos (fun js g -> \
+            of_synth (Generator.fields_of_synth kind js) g) kind to_json)
      *)
 
     (*$Q kind

@@ -635,7 +635,7 @@ let do_sum bits =
   (do_sum (bitstring_of_string "\x45\x00\x00\xaa\x03\xa6\x00\x00\x40\x06\x00\x00\xc0\xa8\x01\x45\xd1\x55\xe3\x67")) 0xfffd
 *)
 (*$Q do_sum
-  Q.(triple string small_nat small_nat) (fun (s, skip, cut) -> \
+  Q.(triple string nat_small nat_small) (fun (s, skip, cut) -> \
     let bits = bitstring_of_string s in \
     let len = bitstring_length bits in \
     let off = min len skip and cut = min (len - min len skip) cut in \
