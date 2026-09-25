@@ -108,20 +108,52 @@ struct
             (string_of_target t.target) |>
         String.print oc
 
-    (** Test an incoming packet against a route. *)
-    let test t ifn src_opt dst_opt proto_opt src_port_opt dst_port_opt =
-        (* If the route test is set, then the value is required. *)
-        let test_opt opt1 test opt2 =
-            match opt2 with
-            | Some opt -> Option.map_default (test opt) true opt1
-            | None     -> Option.is_none opt1 in
-        let cidr_mem_rev ip (_, f) = f ip in
+    (* If the route test is set, then the value is required. *)
+    let test_opt opt1 test opt2 =
+        match opt2 with
+        | Some opt -> Option.map_default (test opt) true opt1
+        | None     -> Option.is_none opt1
+
+    let cidr_mem_rev ip (_, f) = f ip
+
+    (** Test an incoming packet against a route, but for its destination. *)
+    let test_but_dst t ifn src_opt proto_opt src_port_opt dst_port_opt =
         test_opt t.in_iface (=) ifn &&
         test_opt t.src_mask cidr_mem_rev src_opt &&
-        test_opt t.dst_mask cidr_mem_rev dst_opt &&
         test_opt t.ip_proto (=) proto_opt &&
         test_opt t.src_port port_in_range src_port_opt &&
         test_opt t.dst_port port_in_range dst_port_opt
+
+    (** Test an incoming packet against a route. *)
+    let test t ifn src_opt dst_opt proto_opt src_port_opt dst_port_opt =
+        test_opt t.dst_mask cidr_mem_rev dst_opt &&
+        test_but_dst t ifn src_opt proto_opt src_port_opt dst_port_opt
+
+    (*$Q test
+      (Q.make (fun st -> \
+        let rnd = Random.State.int st in \
+        let opt f = if rnd 3 = 0 then None else Some (f ()) in \
+        let addr () = \
+          if rnd 6 = 0 then Ip.Addr.of_dotted_string "2001:db8::1" \
+          else Ip.Addr.o32 (Int32.of_int (0x0a000000 + rnd 4 * 256 + rnd 4)) in \
+        let cidr () = \
+          Ip.Cidr.o (addr (), [| 0 ; 8 ; 16 ; 23 ; 24 ; 31 ; 32 |].(rnd 7)) in \
+        let proto () = if rnd 2 = 0 then Ip.Proto.tcp else Ip.Proto.udp in \
+        let routes = List.init (rnd 20) (fun _ -> \
+          forward ?in_iface:(opt (fun () -> rnd 3)) ?dst_mask:(opt cidr) \
+                  ?ip_proto:(opt proto) (rnd 3)) \
+        and pkts = List.init 20 (fun _ -> \
+          opt (fun () -> rnd 3), opt addr, opt proto) in \
+        routes, pkts)) \
+      (fun (routes, pkts) -> \
+        let t = Table.make routes in \
+        List.for_all (fun (ifn, dst, proto) -> \
+          let linear = List.filter (fun r -> \
+            test r ifn None dst proto None None) routes \
+          and indexed = Table.matching t ifn None dst proto None None in \
+          List.length linear = List.length indexed && \
+          List.for_all2 (==) linear indexed) pkts)
+     *)
 
     (* Widget.kind for a route: the tests a packet must pass, then where it
      * goes. Every test may be left out, and one left out is one not made.
@@ -195,6 +227,74 @@ struct
     (*$>*)
 end
 
+(** A routing table indexed by destination: for every address length and
+ * prefix width some dst mask has, the rows by the network they name. The
+ * rows whose dst mask holds an address are then found with one lookup per
+ * width. *)
+module Table =
+struct
+    type t = { routes : Route.t list ; (** What it was made of *)
+               rows : Route.t array ;
+               any_dst : int list ; (** Rows with no dst mask *)
+               by_width : ((int * int) * (string, int list) Hashtbl.t) list }
+
+    (* The first [width] bits of [addr], the rest of their byte zeroed: *)
+    let prefix addr width =
+        let n = (width + 7) / 8 in
+        let s = Bytes.sub addr 0 n in
+        if width land 7 <> 0 then
+            Bytes.set s (n - 1) (Char.chr (
+                Char.code (Bytes.get s (n - 1)) land
+                ((0xff lsl (8 - width land 7)) land 0xff))) ;
+        Bytes.unsafe_to_string s
+
+    let make routes =
+        let rows = Array.of_list routes in
+        let any_dst = ref [] and by_width = ref [] in
+        Array.iteri (fun i (r : Route.t) ->
+            match r.dst_mask with
+            | None ->
+                any_dst := i :: !any_dst
+            | Some (cidr, _) ->
+                let net, width = (cidr :> Ip.Addr.t * int) in
+                let net = Ip.Addr.to_bytes net in
+                let len = Bytes.length net in
+                let width = max 0 (min width (8 * len)) in
+                let h =
+                    try List.assoc (len, width) !by_width
+                    with Not_found ->
+                        let h = Hashtbl.create 16 in
+                        by_width := ((len, width), h) :: !by_width ;
+                        h in
+                Hashtbl.modify_def [] (prefix net width) (List.cons i) h
+        ) rows ;
+        { routes ; rows ; any_dst = !any_dst ; by_width = !by_width }
+
+    (** The rows that may match a packet to [dst_opt], in table order. *)
+    let candidates t dst_opt =
+        match dst_opt with
+        | None ->
+            List.rev t.any_dst
+        | Some dst ->
+            let addr = Ip.Addr.to_bytes dst in
+            List.fold_left (fun acc ((len, width), h) ->
+                if len <> Bytes.length addr then acc else
+                List.rev_append
+                    (Hashtbl.find_default h (prefix addr width) []) acc
+            ) t.any_dst t.by_width |>
+            List.sort Int.compare
+
+    (** The rows matching that packet, in table order. *)
+    let matching t ifn src_opt dst_opt proto_opt src_port_opt dst_port_opt =
+        candidates t dst_opt |>
+        List.filter_map (fun i ->
+            let r = t.rows.(i) in
+            if Route.test_but_dst r ifn src_opt proto_opt src_port_opt
+                                  dst_port_opt
+            then Some r else None)
+end
+
+
 (** A router is a device with N IP/Eth devices and a routing
  * table with rules on interface number, Ip addresses, proto, ports.
  * IP packets TTL is decremented and expired with optional support for ICMP
@@ -232,6 +332,9 @@ struct
     (** A router is mainly an array of ifaces and a route table *)
     type t = {        ifaces : iface array ;
               mutable routes : Route.t list ;
+               (** [routes] indexed, remade whenever it is found to be made of
+                * another list: *)
+               mutable table : Table.t ;
                  (** How diligently to report errors with ICMP *)
                  notify_errs : icmp_probability ;
                (** Answers from admin should go through routing, as opposed
@@ -267,12 +370,11 @@ struct
     let lb_prefix_length = ref 5
 
     let target_routes ?in_iface ?src_ip ?dst_ip ?proto ?src_port ?dst_port t =
-        List.filter_map (fun r ->
-            if Route.test r in_iface src_ip dst_ip proto src_port dst_port then
-                Some r.target
-            else
-                None
-        ) t.routes
+        if t.table.routes != t.routes then
+            t.table <- Table.make t.routes ;
+        Table.matching t.table in_iface src_ip dst_ip proto src_port
+                             dst_port |>
+        List.map (fun (r : Route.t) -> r.target)
 
     (* Sending will perform routing again *)
     let rec maybe_send_icmp t n ip icmp_maker =
@@ -546,7 +648,8 @@ struct
             ) in
         let buffered = Metric.Gauge.make () in
         let volume = Metric.Counter.make () in
-        let t = { ifaces ; routes ; widget ; notify_errs ; admin_reroute ;
+        let t = { ifaces ; routes ; table = Table.make routes ;
+                  widget ; notify_errs ; admin_reroute ;
                   can_forward_after ; load_balancing ; lb_cursor = 0 ;
                   buffered ; volume } in
         (* One supply for the whole box, and this is what the router itself
