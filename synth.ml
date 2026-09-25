@@ -202,11 +202,7 @@ struct
     let layer_of_synth js ?upper prev gen_values layer_name : Pdu.layer =
         match layer_name with
         | "Data" ->
-            let kind = Bytes in
-            Pdu.Raw (Widget.to_bitstring (
-                match Generator.value_of_synth gen_values kind js with
-                | Some v -> v
-                | None -> Generator.coerce kind (Generator.random_int ())))
+            Pdu.Raw (Generator.bits_of_synth gen_values Bytes js)
         | "Dhcp" ->
             Pdu.Dhcp (Dhcp.Pdu.of_synth js ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Dhcp p) -> Some p | _ -> None))

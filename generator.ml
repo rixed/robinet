@@ -106,18 +106,32 @@ let derive x salt =
     let h = (h lxor (h lsr 27)) * 0x14D049BB133111EB in
     (h lxor (h lsr 31)) land max_int
 
+(* How long a random run of bytes may be. Nothing bounds a [Bytes] or a
+ * [String] the way a [BRange] bounds itself, so this is what stands in for
+ * the bound: long enough for the payload of a frame, which is what the
+ * unbounded runs are. *)
+let max_string_len = 50_000
+
+(* The random bytes that [x] stands for, of [Bytes] or a [BRange]: *)
+let random_bytes kind x =
+    let x = x land max_int in
+    match kind with
+    | Bytes ->
+        randbs (x mod max_string_len)
+    | BRange (mi, ma) ->
+        let ma = min ma (mi + max_string_len) in
+        randbs (if ma < mi then mi else mi + x mod (ma - mi + 1))
+    | _ ->
+        invalid_arg "Generator.random_bytes"
+
 let rec coerce kind x =
-    (* How long a random run of bytes may be. Nothing bounds a [Bytes] or a
-     * [String] the way a [BRange] bounds itself, so this is what stands in for
-     * the bound: long enough for the payload of a frame, which is what the
-     * unbounded runs are. *)
-    let max_string_len = 50_000
-    (* And how long a random string may be, which is another matter: a string
-     * travels as a field of a protocol, and those are short -- a DNS name is
-     * 255 bytes at the outside, a DHCP option carries its length in a byte.
-     * A random string of fifty thousand characters is one nothing could put on
-     * the wire, so an automatic value would be a packet nobody could read. *)
-    and max_text_len = 60 in
+    (* How long a random string may be, which is another matter than a run of
+     * bytes: a string travels as a field of a protocol, and those are short --
+     * a DNS name is 255 bytes at the outside, a DHCP option carries its length
+     * in a byte. A random string of fifty thousand characters is one nothing
+     * could put on the wire, so an automatic value would be a packet nobody
+     * could read. *)
+    let max_text_len = 60 in
     (* Not [abs], which leaves [min_int] negative: *)
     let x = x land max_int in
     match kind with
@@ -156,9 +170,8 @@ let rec coerce kind x =
         `Int (if rng <= 0 then mi + x else mi + x mod rng)
     | Duration ->
         `Float (float_of_int x)
-    | Bytes ->
-        let x = x mod max_string_len in
-        `String (hexstring_of_bitstring (randbs x))
+    | Bytes | BRange _ ->
+        `String (hexstring_of_bitstring (random_bytes kind x))
     | Optional kind ->
         if x land 1 = 0 then `Null else coerce kind (x lsr 1)
     | Variant variants ->
@@ -167,10 +180,6 @@ let rec coerce kind x =
         `Assoc [ case, coerce kind (x / n) ]
     | Hint (_, kind) ->
         coerce kind x
-    | BRange (mi, ma) ->
-        let ma = min ma (mi + max_string_len) in
-        let len = if ma < mi then mi else mi + x mod (ma - mi + 1) in
-        `String (hexstring_of_bitstring (randbs len))
     | Ipv4 ->
         `String (Printf.sprintf "%d.%d.%d.%d"
                     ((x lsr 24) land 0xff) ((x lsr 16) land 0xff)
@@ -254,6 +263,41 @@ let value_of_synth gen_values kind : Yojson.Basic.t -> Yojson.Basic.t option =
         Widget.bad_value "expected a constant, a generator or null, not %s"
             (Yojson.Basic.to_string v)
 
+(* [value_of_synth] read as a bitstring, for [Bytes] or a [BRange]. Random
+ * bytes are drawn as such rather than written out in hex to be read back,
+ * which for a payload costs more than all the headers above it. *)
+let bits_of_synth gen_values kind js =
+    match kind, js with
+    | (Bytes | BRange _), `Assoc [ "gen", `Int g ]
+      when g >= 0 && g < Array.length gen_values ->
+        random_bytes kind gen_values.(g)
+    | (Bytes | BRange _), `Null ->
+        random_bytes kind (random_int ())
+    | _ ->
+        Widget.to_bitstring (
+            match value_of_synth gen_values kind js with
+            | Some v -> v
+            | None -> coerce kind (random_int ()))
+
+(*$Q bits_of_synth
+  Q.(pair int (int_bound 3)) (fun (x, n) -> \
+    let kind = [| Bytes ; BRange (0, 1500) ; BRange (4, 4) ; \
+                  BRange (10, 2) |].(n) in \
+    let attempt f = try Some (f ()) with Widget.Bad_value _ -> None in \
+    List.for_all (fun js -> \
+      let seed = x land 0xffff in \
+      Random.init seed ; \
+      let bits = attempt (fun () -> bits_of_synth [| x |] kind js) in \
+      Random.init seed ; \
+      let hex = attempt (fun () -> Widget.to_bitstring ( \
+        match value_of_synth [| x |] kind js with \
+        | Some v -> v \
+        | None -> coerce kind (random_int ()))) in \
+      Option.eq ~eq:Bitstring.equals bits hex \
+    ) [ `Assoc [ "gen", `Int 0 ] ; `Null ; \
+        `Assoc [ "const", `String "01 02 03 04" ] ])
+*)
+
 (* Read the field [fname] of the synthesized record [js] with [f], which is
  * given a value of [kind]. A null field is automatic: [auto ()] if given, a
  * random value of [kind] otherwise. Whatever goes wrong is a [Bad_value] that
@@ -280,7 +324,11 @@ let int_of_field fname gen_values ?auto kind f js =
 (* Same as for int, but without a validation function since when we expect a
  * bitstring, any bitstring will do. *)
 let bs_of_field fname gen_values ?auto kind js =
-    of_field fname gen_values ?auto kind Widget.to_bitstring js
+    Widget.to_field fname (fun js ->
+        match auto, js with
+        | Some auto, `Null -> auto ()
+        | _ -> bits_of_synth gen_values kind js
+    ) js
 
 (*$T int_of_field
   int_of_field "f" [| 5 |] (IRange (0, 9)) identity \
