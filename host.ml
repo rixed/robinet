@@ -527,8 +527,8 @@ let ip_recv t bits =
         match Ip.Pdu.unpack bits with
         | Error s ->
             Log.(log t.trx.widget.logger Warning s)
-        (* Shouldn't we check first that the dest IP is my_ip? or broadcast? *)
-        | Ok ip ->
+        | Ok ip when Ip.Addr.compare my_ip ip.dst = 0 ||
+                     Ip.Addr.is_broadcast ip.dst ->
             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Received an IP packet."))) ;
             t.last_ip_packet <- Some ip ;
             if ip.Ip.Pdu.proto = Ip.Proto.tcp then (
@@ -553,7 +553,11 @@ let ip_recv t bits =
                     (icmp_rx t ip_trx) <-= ip_trx =-> tx t.eth_trx ;
                     ip_trx) in
                 rx ip_trx bits
-            ))
+            )
+        | Ok ip ->
+            Log.(log t.trx.widget.logger Info (lazy (Printf.sprintf
+                "Received an IP packet for %s (I'm %s)"
+                (Ip.Addr.to_string ip.dst) (Ip.Addr.to_string my_ip)))))
 
 (* The default route a lease installed on the adapter, taken off it again.
  * There is at most one at a time, so this is for whoever grants another as
