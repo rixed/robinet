@@ -188,8 +188,8 @@ type metric = ..
 (* Atomic events are for errors, per results stats, etc *)
 module Atomic =
 struct
-    type t = { counts : (Params.t, int) Hashtbl.t
-                   [@to_yojson table_to_yojson (fun c -> `Int c)] ;
+    type t = { counts : (Params.t, int ref) Hashtbl.t
+                   [@to_yojson table_to_yojson (fun c -> `Int !c)] ;
                first_last : FirstLast.t } [@@deriving to_yojson]
 
     type metric += T of t
@@ -203,12 +203,14 @@ struct
         FirstLast.reset t.first_last
 
     let fire ~now ?(params=Params.empty) t =
-        Hashtbl.modify_def 0 params succ t.counts ;
+        (match Hashtbl.find t.counts params with
+        | exception Not_found -> Hashtbl.add t.counts params (ref 1)
+        | count -> incr count) ;
         FirstLast.update now t.first_last
 
     let print oc t =
         Printf.fprintf oc "counts: %a"
-            (Params.print_hash Int.print)
+            (Params.print_hash (fun oc c -> Int.print oc !c))
                 t.counts ;
         FirstLast.printf oc t.first_last
 end
@@ -226,8 +228,12 @@ struct
      * wants instead -- the others only ever widen, and a band drawn from them
      * would swallow the plot within a minute. Sampling closes the window and
      * opens a new one at the value standing then; see [sample]. *)
-    and value = { min : int ; current : int ; max : int ;
-                  sample_min : int ; sample_max : int }
+    and value = {
+        mutable min : int ;
+        mutable current : int ;
+        mutable max : int ;
+        mutable sample_min : int ;
+        mutable sample_max : int }
     [@@deriving to_yojson]
 
     type metric += T of t
@@ -241,15 +247,17 @@ struct
         FirstLast.reset t.first_last
 
     let set ~now ?(params=Params.empty) t v =
-        Hashtbl.modify_opt params (function
-        | None ->
-            Some { min = v ; current = v ; max = v ;
-                   sample_min = v ; sample_max = v }
-        | Some value ->
-            Some { min = min value.min v ; current = v ; max = max value.max v ;
-                   sample_min = min value.sample_min v ;
-                   sample_max = max value.sample_max v }
-        ) t.values ;
+        (match Hashtbl.find t.values params with
+        | exception Not_found ->
+            let new_v = { min = v ; current = v ; max = v ;
+                          sample_min = v ; sample_max = v } in
+            Hashtbl.add t.values params new_v
+        | value ->
+            value.current <- v ;
+            if v < value.min then value.min <- v ;
+            if v > value.max then value.max <- v ;
+            if v < value.sample_min then value.sample_min <- v ;
+            if v > value.sample_max then value.sample_max <- v) ;
         FirstLast.update now t.first_last
 
     (* Read every row and start a new window at the value each of them stands
@@ -292,8 +300,8 @@ end
 (* Counters are for counting bytes, etc *)
 module Counter =
 struct
-    type t = { values : (Params.t, int) Hashtbl.t
-                   [@to_yojson table_to_yojson (fun c -> `Int c)] ;
+    type t = { values : (Params.t, int ref) Hashtbl.t
+                   [@to_yojson table_to_yojson (fun { contents } -> `Int contents)] ;
                fired : Atomic.t } [@@deriving to_yojson]
 
     type metric += T of t
@@ -307,25 +315,23 @@ struct
         Atomic.reset t.fired
 
     let add t ~now ?(params=Params.empty) c =
-        Hashtbl.modify_opt params (function
-            | None ->
-                Some c
-            | Some sum ->
-                Some (sum + c)
-        ) t.values ;
+        (match Hashtbl.find t.values params with
+        | exception Not_found ->
+            Hashtbl.add t.values params (ref c)
+        | v -> v.contents <- v.contents + c) ;
         Atomic.fire ~now ~params t.fired
 
     let inc ?params t =
         add t ?params 1
 
     let get ?(params=Params.empty) t =
-        try Hashtbl.find t.values params
+        try !(Hashtbl.find t.values params)
         with Not_found -> 0
 
     let print oc t =
         Printf.fprintf oc "counts: %a"
             (Params.print_hash
-                (fun oc v -> Printf.fprintf oc "%d\n" v))
+                (fun oc v -> Printf.fprintf oc "%d\n" !v))
                 t.values
 end
 
@@ -479,8 +485,8 @@ let sample m =
     let of_table wrap l = List.map (fun (params, v) -> params, wrap v) l in
     let all h = Hashtbl.fold (fun params v l -> (params, v) :: l) h [] in
     match m with
-    | Atomic.T t -> of_table (fun c -> Count c) (all t.Atomic.counts)
-    | Counter.T t -> of_table (fun c -> Count c) (all t.Counter.values)
+    | Atomic.T t -> of_table (fun c -> Count !c) (all t.Atomic.counts)
+    | Counter.T t -> of_table (fun c -> Count !c) (all t.Counter.values)
     | Gauge.T t -> of_table (fun v -> Value v) (Gauge.take_windows t)
     | Timed.T t -> of_table (fun d -> Durations d) (Timed.take_windows t)
     | _ -> invalid_arg "Metric.sample: unknown kind of metric"

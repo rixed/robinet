@@ -348,8 +348,7 @@ struct
                * router's own outgoing links. *)
           mutable lb_cursor : int ;
               (** RAM used by all queued frames: *)
-                    buffered : Metric.Gauge.t ;
-                      volume : Metric.Counter.t }
+                    buffered : Metric.Gauge.t }
 
     type Widget.device += T of t
 
@@ -398,11 +397,6 @@ struct
         Log.(log t.widget.logger Debug (lazy (match in_iface_opt with
             | Some n -> Printf.sprintf "rx from iface %d" n
             | None -> "generated traffic"))) ;
-        Option.may (fun in_iface ->
-            let now = Simulation.Widget.now t.widget in
-            Metric.(Counter.add t.volume ~now (bytelength bits)
-                    ~params:(dir_params ~port:in_iface "ingress"))
-        ) in_iface_opt ;
         let ip_opt, src_opt, dst_opt, ttl_opt, proto_opt =
             match Ip.Pdu.unpack bits with
             | Error _ ->
@@ -433,8 +427,6 @@ struct
                         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forwarding packet to iface %d" out_iface))) ;
                         let now = Simulation.Widget.now t.widget in
                         let len = bytelength bits in
-                        Metric.(Counter.add t.volume ~now len
-                                ~params:(dir_params ~port:out_iface "egress")) ;
                         Metric.Gauge.add t.buffered ~now len ;
                         let iface = t.ifaces.(out_iface) in
                         (* So we want to set the gateway for this packet but cannot
@@ -647,11 +639,10 @@ struct
                            ~parent:widget n
             ) in
         let buffered = Metric.Gauge.make () in
-        let volume = Metric.Counter.make () in
         let t = { ifaces ; routes ; table = Table.make routes ;
                   widget ; notify_errs ; admin_reroute ;
                   can_forward_after ; load_balancing ; lb_cursor = 0 ;
-                  buffered ; volume } in
+                  buffered } in
         (* One supply for the whole box, and this is what the router itself
            does when it is cut: what its admin hosts do about it is their own,
            and the supply asks each of them in turn. Every interface is reset,
@@ -802,9 +793,6 @@ struct
                         instead of returning via the same interface it came from."
                 ~getter:(fun () -> `Bool t.admin_reroute)
                 ~setter:(fun v -> t.admin_reroute <- to_bool v) ;
-            metric_property "volume" ~descr:"Volume received and emitted."
-                ~units:"bytes"
-                (Metric.Counter.T t.volume) ;
             metric_property "buffered" ~units:"bytes"
                 ~descr:"Volume of buffered packets, in bytes."
                 (Metric.Gauge.T t.buffered) ;
