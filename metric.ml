@@ -188,7 +188,6 @@ type metric = ..
 (* Atomic events are for errors, per results stats, etc *)
 module Atomic =
 struct
-
     type t = { counts : (Params.t, int) Hashtbl.t
                    [@to_yojson table_to_yojson (fun c -> `Int c)] ;
                first_last : FirstLast.t } [@@deriving to_yojson]
@@ -577,3 +576,21 @@ let params = function
 
 let has_data metric =
     not (Enum.is_empty (params metric))
+
+(* What became of a frame, as the parameter that tells one case of a counter
+ * from another: which way it was going, or what it was dropped for (see
+ * [Iface]'s "packets" and "volume", and [Pcap.portal], which counts the same
+ * way). [port] for a widget that counts for several of them. *)
+let dir_params ?port dir =
+    let dir = "dir", Param.String dir in
+    match port with
+    | None -> [ dir ]
+    | Some p -> Params.make [ dir ; "port", Param.Int p ]
+
+(* Some commont params: *)
+let ingress = dir_params "ingress"
+let egress = dir_params "egress"
+let rx_crc_error = dir_params "rx_crc_error"
+let tx_error = dir_params "tx_error"
+let tx_dropped = dir_params "tx_dropped"
+let rx_dropped = dir_params "rx_dropped"

@@ -400,8 +400,8 @@ struct
             | None -> "generated traffic"))) ;
         Option.may (fun in_iface ->
             let now = Simulation.Widget.now t.widget in
-            Metric.Counter.add t.volume ~now (bytelength bits)
-                ~params:(Eth.dir_params ~port:in_iface "ingress")
+            Metric.(Counter.add t.volume ~now (bytelength bits)
+                    ~params:(dir_params ~port:in_iface "ingress"))
         ) in_iface_opt ;
         let ip_opt, src_opt, dst_opt, ttl_opt, proto_opt =
             match Ip.Pdu.unpack bits with
@@ -433,8 +433,8 @@ struct
                         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forwarding packet to iface %d" out_iface))) ;
                         let now = Simulation.Widget.now t.widget in
                         let len = bytelength bits in
-                        Metric.Counter.add t.volume ~now len
-                            ~params:(Eth.dir_params ~port:out_iface "egress") ;
+                        Metric.(Counter.add t.volume ~now len
+                                ~params:(dir_params ~port:out_iface "egress")) ;
                         Metric.Gauge.add t.buffered ~now len ;
                         let iface = t.ifaces.(out_iface) in
                         (* So we want to set the gateway for this packet but cannot

@@ -71,14 +71,14 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
             (* Mark the hub as busy and do transfers that frame *)
             let ttime = Eth.Speed.duration t.speed (bitstring_length pld) in
             t.busy_until <- Clock.Time.add now ttime ;
-            Metric.Counter.add t.volume ~now (bytelength pld)
-                               ~params:(Eth.dir_params ~port:n "ingress") ;
+            Metric.(Counter.add t.volume ~now (bytelength pld)
+                                ~params:(dir_params ~port:n "ingress")) ;
             (* Forward to all ports but the incoming one: *)
             Array.iteri (fun i (emit, _is_conn) ->
                 if i <> n then (
                     Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forward to port %d/%d" i (Array.length t.ports)))) ;
-                    Metric.Counter.add t.volume ~now (bytelength pld)
-                        ~params:(Eth.dir_params ~port:i "egress") ;
+                    Metric.(Counter.add t.volume ~now (bytelength pld)
+                                        ~params:(dir_params ~port:i "egress")) ;
                     (* Beware: the scheduler will separate simultaneous TX of ε *)
                     Simulation.asap t.widget.power emit pld
                 )) t.ports
@@ -192,12 +192,12 @@ struct
 
     let write (t : t) n pld =
         let now = Simulation.Widget.now t.widget in
-        Metric.Counter.add t.volume ~now (bytelength pld)
-                           ~params:(Eth.dir_params ~port:n "ingress") ;
+        Metric.(Counter.add t.volume ~now (bytelength pld)
+                            ~params:(dir_params ~port:n "ingress")) ;
         Array.iteri (fun i (emit, _is_conn) ->
             if i <> n then (
-                Metric.Counter.add t.volume ~now (bytelength pld)
-                    ~params:(Eth.dir_params ~port:i "egress") ;
+                Metric.(Counter.add t.volume ~now (bytelength pld)
+                       ~params:(dir_params ~port:i "egress")) ;
                 (* Through the scheduler rather than straight down the stack:
                    a part that answers at once would otherwise do so from
                    within the call that is still delivering to the others. *)

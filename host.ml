@@ -288,7 +288,7 @@ let rec with_resolver_trx t cont =
                     List.iter (fun (cont, timer_stop_opt) ->
                         Option.may (fun f ->
                             let now = Simulation.Widget.now t.trx.widget in
-                            f ~now (Metric.Params.singleton "status" (Metric.Param.String "ok"))
+                            f ~now Metric.(Params.singleton "status" (Param.String "ok"))
                         ) timer_stop_opt ;
                         cont (Some ips)) conts ;
                     Hashtbl.remove_all t.dns_queries name ;

@@ -369,16 +369,6 @@ struct
         List.reduce max speeds
 end
 
-(* What became of a frame, as the parameter that tells one case of a counter
- * from another: which way it was going, or what it was dropped for (see
- * [Iface]'s "packets" and "volume", and [Pcap.portal], which counts the same
- * way). [port] for a widget that counts for several of them. *)
-let dir_params ?port dir =
-    let dir = "dir", Metric.Param.String dir in
-    match port with
-    | None -> Metric.Params.make [ dir ]
-    | Some p -> Metric.Params.make [ dir ; "port", Metric.Param.Int p ]
-
 (** {2 Transceiver: basic state, connection, speed, etc}
  * An Iface is used by both address-less Ethernet switches as well as independent
  * adapters with a MAC address etc.
@@ -439,8 +429,8 @@ struct
             (* Every byte that arrived, whether or not the frame survives the
              * collision below, as SNMP's ifInOctets counts them -- "packets"
              * counts what was delivered instead. *)
-            Metric.Counter.add t.volume ~now ~params:(dir_params "ingress")
-                               (bytelength pld) ;
+            Metric.(Counter.add t.volume ~now ~params:ingress
+                                (bytelength pld)) ;
             (* Another frame arriving before rx_busy_until would be a collision.
              * We can't take back the previous frame with which this one collided,
              * but this one is dropped. *)
@@ -452,11 +442,9 @@ struct
             let rx_stop = Time.add now ser_delay in
             t.rx_busy_until <- max t.rx_busy_until rx_stop ;
             if dbl_recept then
-                Metric.Counter.inc t.packets ~now
-                                   ~params:(dir_params "rx_crc_error")
+                Metric.(Counter.inc t.packets ~now ~params:rx_crc_error)
             else (
-                Metric.Counter.inc t.packets ~now
-                                   ~params:(dir_params "ingress") ;
+                Metric.(Counter.inc t.packets ~now ~params:ingress) ;
                 let recv_ts =
                     match t.can_forward_after with
                     | Some b when b < bitlen ->
@@ -479,10 +467,9 @@ struct
                 Log.(log t.widget.logger Debug (lazy (Printf.sprintf
                     "Tx %d bits" bitlen))) ;
                 let now = Simulation.Widget.now t.widget in
-                Metric.Counter.add t.volume ~now ~params:(dir_params "egress")
-                                   (bytelength pld) ;
-                Metric.Counter.inc t.packets ~now
-                                   ~params:(dir_params "egress") ;
+                Metric.(Counter.add t.volume ~now ~params:egress
+                                    (bytelength pld)) ;
+                Metric.(Counter.inc t.packets ~now ~params:egress) ;
                 (* Frames must wait for each others when sending: *)
                 let ser_delay = Speed.duration speed bitlen in
                 let busy_until =

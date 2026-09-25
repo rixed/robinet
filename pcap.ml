@@ -1344,22 +1344,20 @@ let dev (portal : portal) =
         let len = bytelength bits in
         (* Any writer will hold the simulation lock so iface is not going to be
          * closed before we are done writing *)
-        let dir =
+        let params =
             match portal.iface with
             | Some iface ->
                 Log.(log iface.widget.logger Debug (lazy (Printf.sprintf
                     "Injecting %d bytes" (bytelength bits)))) ;
                 (try
-                    inject iface.handler bits ; "egress"
+                    inject iface.handler bits ; Metric.egress
                 with e ->
                     Log.(log iface.widget.logger Error (lazy (Printf.sprintf
                         "Cannot inject: %s" (Printexc.to_string e)))) ;
-                    "error-tx")
+                    Metric.tx_error)
             | None ->
-                "dropped-tx" in
+                Metric.tx_dropped in
         let now = Simulation.Widget.now portal.widget in
-        let params =
-            Metric.(Params.singleton "dir" Param.(String dir)) in
         Metric.Counter.add portal.volume ~now ~params len) ;
       set_read = set_read portal }
 
@@ -1411,10 +1409,9 @@ let open_portal portal =
             (fun bits ->
                 let len = bytelength bits in
                 let now = Simulation.Widget.now portal.widget in
-                let dir =
-                    if portal.emit = None then "dropped-rx" else "ingress" in
                 let params =
-                    Metric.(Params.singleton "dir" Param.(String dir)) in
+                    if portal.emit = None then Metric.rx_dropped
+                                          else Metric.ingress in
                 Metric.Counter.add portal.volume ~now ~params len ;
                 (* Use the current emit function not the one at open_portal: *)
                 Option.may (fun emit -> emit bits) portal.emit))
