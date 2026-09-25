@@ -570,20 +570,29 @@ let randstr ?charset len =
     String.init len (match charset with None -> rc | Some s -> sc s)
 
 let randbs len (* in bytes! *) =
-    (* Eight bytes a draw, and one draw more for what is left: *)
+    (* One draw, and a counter through a mixer for as many bytes as asked
+     * for, which costs a fraction of drawing them: seven bytes a word, the
+     * top bits of an int being the least mixed. *)
+    let seed = Random.bits () lor (Random.bits () lsl 30) in
+    let word k =
+        let h = seed + k * 0x2545F4914F6CDD1D in
+        let h = (h lxor (h lsr 31)) * 0x3F58476D1CE4E5B9 in
+        let h = (h lxor (h lsr 27)) * 0x14D049BB133111EB in
+        h lxor (h lsr 31) in
     let b = Bytes.create len in
-    let full = len land lnot 7 in
-    let rec words i =
-        if i < full then (
-            Bytes.set_int64_le b i (Random.bits64 ()) ;
-            words (i + 8)) in
-    words 0 ;
-    if full < len then (
-        let r = Random.bits64 () in
-        for i = full to len - 1 do
-            Bytes.set b i (Char.unsafe_chr (Int64.to_int
-                (Int64.shift_right_logical r (8 * (i - full))) land 0xff))
-        done) ;
+    (* Eight bytes written at once, the last of them overwritten by the next
+     * word, while there is room for eight: *)
+    let rec fill i k =
+        if i + 8 <= len then (
+            Bytes.set_int64_le b i (Int64.of_int (word k)) ;
+            fill (i + 7) (k + 1)
+        ) else (
+            let w = word k in
+            for j = 0 to len - i - 1 do
+                Bytes.unsafe_set b (i + j)
+                    (Char.unsafe_chr ((w lsr (8 * j)) land 0xff))
+            done) in
+    fill 0 0 ;
     bitstring_of_bytes b
 
 (*$Q randbs
