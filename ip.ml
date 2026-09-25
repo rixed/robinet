@@ -468,8 +468,10 @@ module Cidr = struct
 
     let mem (t : t) =
         let net, width = (t :> Addr.t * int) in
+        let len = Addr.length net in
         let net_hi = takebits width (Addr.to_bitstring net) in
         fun (ip : Addr.t) ->
+            Addr.length ip = len &&
             let ip_hi = takebits width (Addr.to_bitstring ip) in
             Bitstring.equals net_hi ip_hi
     (*$= mem & ~printer:string_of_bool
@@ -480,6 +482,8 @@ module Cidr = struct
       false (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.16"))
       false (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.17"))
       false (mem (of_string "192.168.10.7/28") (Addr.of_string "192.168.10.17"))
+      false (mem (of_string "0.0.0.0/0") (Addr.of_string "2001:db8::1"))
+      false (mem (of_string "::/0") (Addr.of_string "10.0.0.1"))
      *)
 
     let width (t : t) =
