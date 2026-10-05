@@ -284,6 +284,7 @@ module Wall : sig
     val sub : t -> Interval.t -> t
     val diff : t -> t -> Interval.t
     val compare : t -> t -> int
+    val trunc : t -> Interval.t -> t
     val to_ints : t -> int * int
 end = struct
     (** When displaying a time, print also the corresponding date.
@@ -323,6 +324,34 @@ end = struct
     let diff (a : t) (b : t) = Interval.of_secs ((a :> float) -. (b :> float))
 
     let compare a b = Float.compare (a : t :> float) (b : t :> float)
+
+    (** The last multiple of [i] before [t]. [i] must be a whole number of
+     * seconds: those are exact floats, so the division cannot round [t] into
+     * a neighbouring slice, which other lengths can. *)
+    let trunc (t : t) (i : Interval.t) =
+        if (i :> int) <= 0 || (i :> int) mod 1_000_000_000_000 <> 0 then
+            invalid_arg "Wall.trunc: slices must be a whole number of seconds" ;
+        let i = Interval.to_secs i in
+        o (floor ((t :> float) /. i) *. i)
+
+    (*$= & ~printer:(Printf.sprintf "%.17g")
+      3. Clock.Wall.(trunc (of_secs 3.7) (Clock.Interval.sec 1.) |> to_secs)
+      3. Clock.Wall.(trunc (of_secs 3.) (Clock.Interval.sec 1.) |> to_secs)
+      (-4.) Clock.Wall.(trunc (of_secs (-3.7)) (Clock.Interval.sec 1.) |> to_secs)
+      (-128.) Clock.Wall.(trunc (of_secs (-128.)) (Clock.Interval.sec 1.) |> to_secs)
+      1785221520. \
+        Clock.Wall.(trunc (of_secs 1785221556.318881) (Clock.Interval.min 1.) |> to_secs)
+      1785196800. \
+        Clock.Wall.(trunc (of_secs 1785196800.) (Clock.Interval.day 1.) |> to_secs)
+    *)
+    (*$T
+      try ignore (Clock.Wall.(trunc (of_secs 3.) (Clock.Interval.msec 100.))) ; \
+        false with Invalid_argument _ -> true
+      try ignore (Clock.Wall.(trunc (of_secs 3.) (Clock.Interval.msec 1500.))) ; \
+        false with Invalid_argument _ -> true
+      try ignore (Clock.Wall.(trunc (of_secs 3.) (Clock.Interval.sec 0.))) ; \
+        false with Invalid_argument _ -> true
+    *)
 
     (** Convert a timestamp to a pair of ints with seconds, microseconds *)
     let to_ints (t : t) =
