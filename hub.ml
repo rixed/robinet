@@ -122,7 +122,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
         let t = {
             ports = Array.make n (ignore_bits ~logger:widget.logger, false) ;
             speed ;
-            busy_until = Clock.beginning_of_time ;
+            busy_until = Clock.Time.beginning_of_time ;
             jamming_time = Eth.Speed.duration speed 32 ;
             widget ;
             volume = Metric.Counter.make () ;

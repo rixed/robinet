@@ -197,6 +197,8 @@ and Time : sig
     (* How long this program has been running, used as default clock by the
      * logger. *)
     val since_start : unit -> t
+    val beginning_of_time : t
+    val end_of_time : t
     (* Seconds since the simulation began. Named for ppx_deriving_yojson, which
      * looks for [to_yojson] beside any type it is asked to serialize. *)
     val to_yojson : t -> Yojson.Safe.t
@@ -234,6 +236,12 @@ end = struct
     let compare a b = Int.compare (a : t :> int) (b : t :> int)
 
     let is_after a b = compare a b >= 0
+
+    (* Sentinels, for a value that has to be an instant while meaning "not yet" or
+     * "never": compare them, [max] them, but do not compute with them -- there is
+     * nothing on the other side of either. *)
+    let beginning_of_time = o min_int
+    let end_of_time = o max_int
 
     (** The last multiple of [i] before [t]: what dates a sample that stands
      * for everything that happened in that slice of time. *)
@@ -286,6 +294,8 @@ module Wall : sig
     val compare : t -> t -> int
     val trunc : t -> Interval.t -> t
     val to_ints : t -> int * int
+    val beginning_of_time : t
+    val end_of_time : t
 end = struct
     (** When displaying a time, print also the corresponding date.
      * Only useful if your simulation spans several days, which is uncommon. *)
@@ -359,14 +369,10 @@ end = struct
         let sec  = Int.of_float t in
         let usec = Int.of_float ((t -. (floor t)) *. 1_000_000.) in
         sec, usec
+
+    (* Sentinels, for a value that has to be an instant while meaning "not yet" or
+     * "never": compare them, [max] them, but do not compute with them -- there is
+     * nothing on the other side of either. *)
+    let beginning_of_time = o neg_infinity
+    let end_of_time = o infinity
 end
-
-(* Sentinels, for a value that has to be an instant while meaning "not yet" or
- * "never": compare them, [max] them, but do not compute with them -- there is
- * nothing on the other side of either. *)
-
-let end_of_time =
-    Time.o max_int
-
-let beginning_of_time =
-    Time.o min_int

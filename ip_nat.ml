@@ -125,7 +125,7 @@ struct
         orig_num = 0 ;
         nat_num = 0 ;
         keys = None ;
-        last_used = Clock.beginning_of_time ;
+        last_used = Clock.Time.beginning_of_time ;
     }
 
     (** Forget every tracked connection. *)

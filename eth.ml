@@ -542,8 +542,8 @@ struct
                 (bitstring_length bits))))
 
     let reset t =
-        t.tx_busy_until <- beginning_of_time ;
-        t.rx_busy_until <- beginning_of_time
+        t.tx_busy_until <- Time.beginning_of_time ;
+        t.rx_busy_until <- Time.beginning_of_time
 
     let disconnect t =
         if t.is_connected then (
@@ -587,8 +587,8 @@ struct
               emit = ignore_disconnected ~logger:widget.logger ;
               recv = recv |? ignore_bits ~logger:widget.logger ;
               is_connected = false ; can_forward_after ;
-              tx_busy_until = beginning_of_time ;
-              rx_busy_until = beginning_of_time ;
+              tx_busy_until = Time.beginning_of_time ;
+              rx_busy_until = Time.beginning_of_time ;
               speeds ; full_duplex ; negotiated ; inter_frame_gap ;
               packets = Metric.Counter.make () ;
               volume = Metric.Counter.make () } in
