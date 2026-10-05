@@ -120,6 +120,23 @@ struct
       (try ignore (checked_min_port (-1)) ; false with Widget.Bad_value _ -> true)
      *)
 
+    let no_cnx = {
+        orig_addr = Ip.Addr.zero ;
+        orig_num = 0 ;
+        nat_num = 0 ;
+        keys = None ;
+        last_used = Clock.beginning_of_time ;
+    }
+
+    (** Forget every tracked connection. *)
+    let reset t =
+        Log.(log t.widget.logger Info (lazy "Resetting the NAT table")) ;
+        OrdArray.fill t.cnxs no_cnx ;
+        Hashtbl.clear t.inc_cnxs_h ;
+        Hashtbl.clear t.out_cnxs_h ;
+        Hashtbl.clear t.inc_icmp_h ;
+        Hashtbl.clear t.out_icmp_h
+
     (** Initialize the state for a NAT TRX. *)
     let make ?(min_port=1024) ?(num_max_cnxs=200) ?(nat_pings=true)
              ?(send_errs=true) ?(answer_pings=true)
@@ -131,12 +148,7 @@ struct
         let t = {
             widget ; addr ; min_port ; nat_pings ; send_errs ; answer_pings ;
             port_forwards ;
-            cnxs = OrdArray.make num_max_cnxs {
-                       orig_addr = Ip.Addr.zero ;
-                       orig_num = 0 ;
-                       nat_num = 0 ;
-                       keys = None ;
-                       last_used = Simulation.now (Simulation.of_widget widget) } ;
+            cnxs = OrdArray.make num_max_cnxs no_cnx ;
             inc_cnxs_h = Hashtbl.create num_max_cnxs ;
             out_cnxs_h = Hashtbl.create num_max_cnxs ;
             inc_icmp_h = Hashtbl.create num_max_cnxs ;
@@ -199,6 +211,11 @@ struct
                 ~kind:Bool
                 ~getter:(fun () -> `Bool t.answer_pings)
                 ~setter:(fun v -> t.answer_pings <- to_bool v) ] ;
+        Widget.add_actions widget Widget.[
+            action "flush"
+                ~descr:"Forget every tracked connection: established ones \
+                        break, as their replies no longer match anything."
+                ~handler:(fun s -> reset t ; Action.stop s) ] ;
         t
 
     (* Remove an overwritten tracked connection from the hashes: *)

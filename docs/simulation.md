@@ -522,6 +522,7 @@ What can be asked:
 | `emit gratuitous ARP` | a router, on every port that has an address; or one adapter with an address: a host's `eth`, a router's `#0`… | — |
 | `ping` | a host | `target` (address or name), `count` (3), `interval` secs (1), `timeout` secs (4) |
 | `start replay`, `stop replay` | a replayer | — |
+| `flush` | a gateway's `nat`: forgets every connection it tracks, so established ones break | — |
 
 `GET /api/simulations/<s>/widgets/<w>/actions` lists what one widget will
 answer to, and what each takes.

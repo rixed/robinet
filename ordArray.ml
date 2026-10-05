@@ -65,6 +65,9 @@ let fold_left f init t =
         else loop (f acc t.data.(n)) t.last_used.(n).next in
     loop init t.first
 
+(** Overwrite every item with [x]; the order is unchanged. *)
+let fill t x = Array.fill t.data 0 (Array.length t.data) x
+
 (** The data, most recently used first. *)
 let to_list t = List.rev (fold_left (fun l x -> x :: l) [] t)
 
