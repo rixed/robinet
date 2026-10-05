@@ -760,13 +760,12 @@ let build ~parent name = function
                  error_rate }
     | TRouter { ports ; speeds ; mac_range ; macs } ->
         let macs = macs_of ~range:mac_range ~macs ports in
-        let r =
-            Router.Router.make ~speeds ~parent ~macs:(Array.of_list macs) ports
-                [] name in
+        let r = Router.make ~speeds ~parent ~macs:(Array.of_list macs) ports []
+                            name in
         (* The addresses themselves, whether they were named or drawn from the
            range: a range that picks is a choice like any other, and once the
            addresses are written down it has nothing left to say. *)
-        r.Router.Router.widget,
+        r.Router.widget,
         TRouter { ports ; speeds ; mac_range = "" ; macs }
     | TGateway ({ public ; public_netmask ; public_gw ; lan ; max_cnxs ;
                   mac } as g) ->
@@ -775,9 +774,8 @@ let build ~parent name = function
            address, and a network whose machines come back sending to somewhere
            else is not the one that was saved. *)
         let mac = Option.default_delayed Eth.Addr.random mac in
-        let gw =
-            Router.Gateway.make ~parent ~name ~mac ~num_max_cnxs:max_cnxs
-                                ?public_netmask ?public_gw public lan in
+        let gw = Gateway.make ~parent ~name ~mac ~num_max_cnxs:max_cnxs
+                              ?public_netmask ?public_gw public lan in
         gw.widget, TGateway { g with mac = Some mac }
     | TPortal { promisc ; filter ; caplen } as m ->
         let portal = Pcap.portal ~parent ~promisc ~filter ?caplen name in

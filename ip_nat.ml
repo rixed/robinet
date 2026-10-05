@@ -87,9 +87,9 @@ struct
         { proto ; ext_port ; internal_ip ; internal_port }
 
     (* TODO: add an optional sink inside IP *)
-    type t = {      addr : Ip.Addr.t ;                  (** our IP addr *)
+    type t = {    widget : Widget.t ;
+                    addr : Ip.Addr.t ;                  (** our IP addr *)
         mutable min_port : int ;                        (** smallest port to use for outgoing source ports *)
-                  widget : Widget.t ;
        mutable nat_pings : bool ;                       (** whether to NAT outgoing PINGs or to drop them *)
        mutable send_errs : bool ;                       (** whether to send ICMP/TCP errors on bad incoming packets *)
     mutable answer_pings : bool ;                       (** whether to answer incoming pings in absence of port forwarding *)
@@ -129,7 +129,7 @@ struct
         let widget = Widget.make ~parent "nat" in
         Log.(log widget.logger Debug (lazy (Printf.sprintf "Creating a NATer for IP %s, with %d cnxs max" (Ip.Addr.to_string addr) num_max_cnxs))) ;
         let t = {
-            addr ; min_port ; widget ; nat_pings ; send_errs ; answer_pings ;
+            widget ; addr ; min_port ; nat_pings ; send_errs ; answer_pings ;
             port_forwards ;
             cnxs = OrdArray.make num_max_cnxs {
                        orig_addr = Ip.Addr.zero ;

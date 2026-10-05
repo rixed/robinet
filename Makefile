@@ -47,6 +47,7 @@ LIB_SOURCES  = \
 	dhcpd.ml \
 	ip_nat.ml \
 	router.ml \
+	gateway.ml \
 	device.ml \
 	topology.ml \
 	netns.ml \

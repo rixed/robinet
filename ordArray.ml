@@ -39,7 +39,7 @@ let make_from_data data =
           next = if i = s-1 then -1 else i+1 }) ;
       first = 0 ;
       last = s-1 ;
-      data  }
+      data }
 
 let make s x = make_from_data (Array.create s x)
 let init s f = make_from_data (Array.init s f)

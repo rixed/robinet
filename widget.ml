@@ -342,13 +342,6 @@ let property ?(descr="") ?(units="") ?metric ?setter ?can_set ?(kind=String)
     { name ; descr ; units ; getter ; setter ; can_set ; kind ; metric ;
       only_when_set }
 
-(* What is done to a widget that mints a power source of its own: it gains the
- * pair of actions that switch it, and, unless it is to stay dark, an entry in
- * its simulation's startup list that switches it on. Set by {!Simulation},
- * which is where switching lives and which is compiled after this -- [make]
- * cannot reach it, and every widget that owns a source goes through [make]. *)
-let on_own_power : (t -> bool -> unit) ref = ref (fun _ _ -> ())
-
 (** Give [t] these properties, ahead of the ones it has by being a widget at
  * all: what a device is, before what everything is. *)
 let add_properties t properties =
@@ -375,6 +368,13 @@ let action ?(descr="") ?(params=[]) ?result ?can_run ~handler name =
  * what anything with a power switch can. *)
 let add_actions t actions =
     t.actions <- actions @ t.actions
+
+(* What is done to a widget that mints a power source of its own: it gains the
+ * pair of actions that switch it, and, unless it is to stay dark, an entry in
+ * its simulation's startup list that switches it on. Set by {!Simulation},
+ * which is where switching lives and which is compiled after this -- [make]
+ * cannot reach it, and every widget that owns a source goes through [make]. *)
+let on_own_power : (t -> bool -> unit) ref = ref (fun _ _ -> ())
 
 (** What a setter raises when handed something it cannot use. The API turns it
  * into a 400 with this message, like any other exception a setter throws. *)

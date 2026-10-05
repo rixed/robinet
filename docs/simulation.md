@@ -906,5 +906,5 @@ two ways is what separates them.
 
 - [openapi.yaml](openapi.yaml) — the administration API, and the schema of
   everything above.
-- `device.ml` — the catalogue: the one place a device type is declared.
+- [device.ml](device.ml) — the catalogue: the one place a device type is declared.
 - `examples/` — documents to start from.
