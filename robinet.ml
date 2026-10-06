@@ -161,6 +161,7 @@ let main =
          * saying so beats a program that starts and does nothing. *)
         print_string "Nothing to run: name a document, or ask for --admin.\n" ;
         exit 0) ;
+    Option.may (fun l -> Log.console_lvl := l) opts.Cli.console_lvl ;
     set_seed opts.Cli.seed ;
     let sims = List.map open_document opts.Cli.documents in
     let ifnames =

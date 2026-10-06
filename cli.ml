@@ -89,6 +89,9 @@ type t =
       ui : bool ;
       portals : portals option ;
       seed : seed ;
+      (* What to print on the console, [None] leaving [Log.console_lvl] as
+       * it is. *)
+      console_lvl : Log.level option ;
       (* The documents to run, in the order they were given, each with the
        * options that were in force where it sat. *)
       documents : (string * clock) list ;
@@ -133,6 +136,9 @@ let usage =
      \  --portals=veth  for every portal of every network, make a network\n\
      \                  namespace of that name and a veth pair into it\n\
      \                  (wants root: run under sudo)\n\
+     \  --warn, --info, --debug\n\
+     \                  print log messages down to that level on the\n\
+     \                  console, which otherwise only shows errors\n\
      \  --help          this\n\
      \n\
      Options applying to every document that follows them:\n\
@@ -169,6 +175,7 @@ let parse args =
     and portals = ref None
     and help = ref false
     and seed = ref default_seed
+    and console_lvl = ref None
     and clock = ref default_clock
     and documents = ref [] in
     let value ~flag = function
@@ -208,6 +215,9 @@ let parse args =
                     (match v with
                     | None -> Fresh
                     | Some v -> Seed (int_of flag v))
+            | "--warn" -> no_value ~flag v ; console_lvl := Some Log.Warning
+            | "--info" -> no_value ~flag v ; console_lvl := Some Log.Info
+            | "--debug" -> no_value ~flag v ; console_lvl := Some Log.Debug
             | "--help" | "-h" -> no_value ~flag v ; help := true
             | "--speed" ->
                 (match value ~flag v with
@@ -235,6 +245,7 @@ let parse args =
       ui = !ui ;
       portals = !portals ;
       seed = !seed ;
+      console_lvl = !console_lvl ;
       documents = List.rev !documents ;
       help = !help }
 
@@ -296,6 +307,13 @@ let parse args =
 
 (*$T parse
   (try ignore (parse [ "--seed=random" ]) ; false with Error _ -> true)
+ *)
+
+(* The last of them wins, wherever it sits. *)
+(*$= parse & ~printer:dump
+  None (parse [ "a" ]).console_lvl
+  (Some Log.Debug) (parse [ "a" ; "--debug" ]).console_lvl
+  (Some Log.Warning) (parse [ "--info" ; "--warn" ; "a" ]).console_lvl
  *)
 
 (* A browser has nothing but the interface to open on. *)
