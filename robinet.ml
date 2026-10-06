@@ -14,6 +14,7 @@
  *
  *   % robinet --admin         # the interface alone, on port 8080, to build a
  *                             # network in
+ *
  *   % robinet --ui demo.json  # that network, and a browser on the interface
  *
  *   % robinet demo1.json demo2.json --pause demo3.json

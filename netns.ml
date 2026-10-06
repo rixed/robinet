@@ -54,9 +54,7 @@ let () =
         | Command_failed (cmd, how) ->
             Some (Printf.sprintf "%S %s.\n\
                                   Making a namespace or an interface is for \
-                                  root, and this is the one thing robinet \
-                                  asks to be root for: if that is what it \
-                                  lacked, try again under sudo." cmd how)
+                                  root; Have you tried under sudo?" cmd how)
         | _ -> None)
 
 (* Shells do not need to be told about a name or a keyword, and a line of them

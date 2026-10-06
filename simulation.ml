@@ -414,7 +414,7 @@ let tell (w : widget) what f =
         let m = Printexc.to_string e in
         w.error <- Some m ;
         Log.(log w.logger Error (lazy (Printf.sprintf
-            "Cannot power %s: %s" what m)))
+            "Cannot power %s %s: %s" what w.name m)))
 
 let power_up (p : power) =
     if not p.on then (
