@@ -59,7 +59,7 @@ let set_seed seed =
     Random.init seed ;
     Printf.printf "Random seed: %d\n%!" seed
 
-(* A document, as the simulation it describes, running.
+(* A document, as the simulation it describes, not yet running.
  *
  * Nothing is switched on yet, whatever the options say: the interfaces the
  * portals name may not exist until every document has been read and
@@ -84,7 +84,8 @@ let open_document (path, (clock : Cli.clock)) =
         if String.trim topology.Topology.name <> "" then
             String.trim topology.Topology.name
         else Filename.(remove_extension (basename path)) in
-    match Topology.new_simulation ~topology ~paused:clock.paused name with
+    match Topology.new_simulation ~topology ~paused:clock.paused ~start:false
+                                  name with
     | exception Widget.Bad_value m ->
         Printf.eprintf "%s: %s\n%!" path m ;
         exit 1
@@ -175,6 +176,7 @@ let main =
         List.iter run_startup sims ;
         List.iter set_speed sims ;
         List.iter set_duration sims ;
+        List.iter (fun (sim, _) -> ignore (Simulation.start sim)) sims ;
         Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ] (fun () ->
             match opts.Cli.admin with
             | None ->

@@ -737,7 +737,7 @@ let to_simulation (sim : Simulation.t) t =
     !refused
 
 (** A simulation of its own for a network: made, loaded from [topology] if
- * there is one, and started.
+ * there is one, and started unless [start] is false.
  *
  * Every simulation a reader asks for comes through here -- the interface's New
  * and Open, the binary's command line -- so that what a new simulation is is
@@ -754,9 +754,13 @@ let to_simulation (sim : Simulation.t) t =
  * it creates because what was asked for is somewhere to build, and the binary
  * was asked to run a network.
  *
+ * Starting it runs its startup list, which switches on what it is made of. A
+ * caller with something to do before that -- making the interfaces its portals
+ * name -- passes [~start:false] and calls [Simulation.start] itself.
+ *
  * A document that will not load leaves nothing behind, not even the simulation
  * it was going to be: what was asked for was the network. *)
-let new_simulation ?topology ?(paused=false) name =
+let new_simulation ?topology ?(paused=false) ?(start=true) name =
     let sim = Simulation.make ~realtime:false (Simulation.unique_name name) in
     Simulation.set_speed_ratio sim (Some 1.) ;
     let refused =
@@ -768,7 +772,7 @@ let new_simulation ?topology ?(paused=false) name =
             | exception e -> Simulation.delete sim ; raise e
             | refused -> refused) in
     if paused then Simulation.pause sim () ;
-    ignore (Simulation.start sim) ;
+    if start then ignore (Simulation.start sim) ;
     sim, refused
 
 (* [a_network] below builds one whose cables are not on the ports a plain
