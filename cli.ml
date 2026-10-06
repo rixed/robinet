@@ -128,7 +128,7 @@ let usage =
      \n\
      Options, wherever they appear:\n\
      \  --admin[=PORT]  serve the administration interface (default port:\n\
-     \                  8080)\n\
+     \                  "^ string_of_int default_port ^")\n\
      \  --ui            open a browser on it; implies --admin\n\
      \  --seed[=N]      draw from N, printed at startup for a run to be\n\
      \                  repeated with; --seed alone draws a seed from the\n\
