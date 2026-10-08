@@ -684,6 +684,9 @@ end
 module Pdu = struct
     (*$< Pdu *)
 
+    (* Size of an IP header without options: *)
+    let no_opt_hdr_len = 20
+
     let id_seq = ref 0
     let next_id () = id_seq := (!id_seq + 1) land 0xffff ; !id_seq
 
@@ -697,7 +700,7 @@ module Pdu = struct
              ?(frag_offset=0) ?(ttl=64)
              ?(options=empty_bitstring)
              proto src dst bits =
-        let hdr_len = 20 + bytelength options
+        let hdr_len = no_opt_hdr_len + bytelength options
         and id = may_default id next_id in
         let tot_len = match tot_len with Some v -> v | None ->
             bytelength bits + hdr_len in
@@ -708,7 +711,7 @@ module Pdu = struct
         make ~tos:(ToS.random ()) ~id:(randi 16) ~dont_frag:(randb ())
              ~more_frags:(randb ()) ~frag_offset:(randi 13)
              ~ttl:(randi 8) ~options:(randbs (4*(randi 3)))
-             (Proto.random ()) (Addr.random ()) (Addr.random ()) (randbs (Random.int 10 + 20))
+             (Proto.random ()) (Addr.random ()) (Addr.random ()) (randbs (Random.int 10 + no_opt_hdr_len))
 
     let pseudo_header t () =
         let%bitstring r = {|
@@ -733,7 +736,7 @@ module Pdu = struct
             pld
 
     let pack_header t =
-        let hdr_len = 20 + bytelength t.options in
+        let hdr_len = no_opt_hdr_len + bytelength t.options in
         assert (hdr_len < 64) ;
         assert (t.tot_len < 65536) ;
         assert (t.id < 65536) ;
@@ -871,7 +874,7 @@ module Pdu = struct
         let proto = Widget.one_of ~range:(0, 0xff) Proto.choices
         let addr = Widget.hint "192.168.0.1" Ipv4
         let options = BRange (0, 40)
-        let payload = BRange (0, 0xffff - 20)
+        let payload = BRange (0, 0xffff - no_opt_hdr_len)
     end
 
     let kind =
@@ -947,7 +950,7 @@ module Pdu = struct
         { tos = int Field.tos ~auto:(fun () -> ToS.o 0) Kinds.tos ToS.o ;
           tot_len = int Field.tot_len
                         ~auto:(fun () ->
-                            20 + bytelength options + bytelength payload)
+                            no_opt_hdr_len + bytelength options + bytelength payload)
                         Kinds.tot_len identity ;
           id = int Field.id ?auto:(Option.map (fun p () ->
                                       (p.id + 1) land 0xffff) prev)
@@ -994,7 +997,7 @@ module TRX = struct
         power : Simulation.power ;
         src : Addr.t ; dst : Addr.t ;
         proto : Proto.t ;
-        (* Fragment if the payload is larger than that (set to max_int to disable fragmentation: *)
+        (* Fragment if the packet is larger than that (set to max_int to disable fragmentation: *)
         mtu : int ;
         (* Set the DF bit of emitted packets (and fragments!) to this value: *)
         dont_frag : bool ;
@@ -1010,16 +1013,18 @@ module TRX = struct
      * error, wtv) so let's use the IPs in additon to the ID to identify reassembled packets: *)
     and reassemble_key = Addr.t * Addr.t * Proto.t * int (* src, dst, proto, id *)
 
+    (* Emitted packets have no options, thus a 20 bytes header: *)
+    let hdr_len = Pdu.no_opt_hdr_len
+
     let tx t bits =
         let id = Pdu.next_id () in
+        let max_pld = (t.mtu - hdr_len) land (lnot 7) in (* in bytes *)
         let rec aux bit_offset =
             if bit_offset < bitstring_length bits then (
                 let pld = dropbits bit_offset bits in
                 let pld, more_frags =
-                    if bitstring_length pld <= t.mtu*8 then pld, false
-                    else takebits (t.mtu*8) pld, true in
-                (* The frag_offset is given in unit of 8 bytes.
-                   So the MTU is required to be a multiple of 8 bytes as well. *)
+                    if bytelength pld <= max_pld then pld, false
+                    else takebits (max_pld * 8) pld, true in
                 let pdu = Pdu.make ~id ~dont_frag:t.dont_frag ~more_frags ~frag_offset:(bit_offset lsr 6) t.proto t.src t.dst pld in
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (bytelength pld) (hexstring_of_bitstring bits)))) ;
                 Simulation.asap t.power t.emit (Pdu.pack pdu) ;
@@ -1104,8 +1109,8 @@ module TRX = struct
      *       IP cannot do this since the application layer won't tell him the destination hostname. Or
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)
-    let make power ?(mtu=1400) ?(dont_frag=false) ?(reassemble=true) src dst proto logger =
-        ensure ((mtu mod 8) = 0) "Ip: MTU is required to be a multiple of 8 bytes" ;
+    let make power ?(mtu=1420) ?(dont_frag=false) ?(reassemble=true) src dst proto logger =
+        ensure (mtu >= hdr_len + 8) "Ip: MTU must leave room for at least 8 bytes of payload" ;
         let t = { logger ; power ; src ; dst ; proto ; mtu ; dont_frag ; reassemble ;
                   emit = ignore_bits ~logger ;
                   recv = ignore_bits ~logger ;
@@ -1124,7 +1129,7 @@ module TRX = struct
       let a = Addr.of_string "10.0.0.1" and b = Addr.of_string "10.0.0.2"
       let msg = "0123456789abcdefghijklmnopqrstuvwxyzABCD"
 
-      let frags_of ?(mtu=16) s =
+      let frags_of ?(mtu=36) s =
         let trx = make sim.root.power ~mtu a b Proto.udp sim.root.logger in
         let out = ref [] in
         trx.out.set_read (fun bits -> out := bits :: !out) ;
@@ -1151,8 +1156,10 @@ module TRX = struct
       [ "hello" ] (receive (frags_of "hello"))
       [ msg ] (receive (frags_of msg))
       [ msg ] (receive (List.rev (frags_of msg)))
-      [ msg ] (receive (frags_of ~mtu:8 msg))
-      [ msg ] (receive (frags_of ~mtu:40 msg))
+      [ msg ] (receive (frags_of ~mtu:28 msg))
+      [ msg ] (receive (frags_of ~mtu:60 msg))
+      [ String.sub msg 0 16 ; String.sub msg 16 16 ; String.sub msg 32 8 ] \
+        (receive ~reassemble:false (frags_of ~mtu:43 msg))
       [ String.sub msg 0 16 ; String.sub msg 16 16 ; String.sub msg 32 8 ] \
         (receive ~reassemble:false (frags_of msg))
       [ msg ] (receive [ frag 16 16 true ; frag 32 8 false ; frag 0 16 true ])
