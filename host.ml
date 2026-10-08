@@ -528,7 +528,7 @@ let ip_recv t bits =
         | Error s ->
             Log.(log t.trx.widget.logger Warning s)
         | Ok ip when Ip.Addr.compare my_ip ip.dst = 0 ||
-                     Ip.Addr.is_broadcast ip.dst ->
+                     Ip.Addr.(is_broadcast ip.dst || is_multicast ip.dst) ->
             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Received an IP packet."))) ;
             t.last_ip_packet <- Some ip ;
             if ip.Ip.Pdu.proto = Ip.Proto.tcp then (

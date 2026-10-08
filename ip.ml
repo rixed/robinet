@@ -324,8 +324,12 @@ module Addr = struct
 
     let is_broadcast t =
         match%bitstring (to_bitstring t) with
-        | {| 0xffffffffl : 32 |} -> true (* all 1s *)
-        | {| 0b1110 : 4 ; _ : 28 |} -> true (* multicast *)
+        | {| 0xffffffffl : 32 |} -> true
+        | {| _ |} -> false
+
+    let is_multicast t =
+        match%bitstring (to_bitstring t) with
+        | {| 0b1110 : 4 ; _ : 28 |} -> true
         | {| _ |} -> false
 
     let is_zero t =
