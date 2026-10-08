@@ -309,11 +309,11 @@ struct
         mtu : int ;
         isn : SeqNum.t ; (* initial seq num *)
         mutable rcvd_isn : SeqNum.t option ;
-        mutable closed : bool ; (* set whenever the user want to cloe or we received a FIN *)
+        mutable closed : bool ; (* set whenever the user want to close or we received a FIN *)
         mutable sent_fin : bool ;
         mutable sent_pld : int ;    (* what was already send, with syn and fin counting as 1 *)
         mutable sent_acked : int ;  (* what was acked from what we sent (must be <= sent_pld) *)
-        mutable rcvd_pld : int ;    (* what was already received (sequencialy), with same remark *)
+        mutable rcvd_pld : int ;    (* what was already received (sequentially), with same remark *)
         mutable rcvd_acked : int ;  (* what we have acked so far (must be <= rcvd_pld) *)
         mutable rcvd_pkts : Streambuf.t ; (* what we received but haven't given to application yet *)
         mutable to_send : bitstring list ; (* what we must send next *) (* FIXME: s/list/dequeue/ *)
@@ -332,6 +332,7 @@ struct
             Some (SeqNum.o ((Int32.of_int t.rcvd_pld) +/ ((Option.get t.rcvd_isn) :> int32)))
         else None
 
+    (* TX a single segment *)
     let emit_one t ?(psh=false) ?(rst=false) ?(syn=false) ?(fin=false) bits =
         let src_port = t.src and dst_port = t.dst
         and seq_num = next_seq_num t and ack_num = next_ack_num t in
@@ -347,6 +348,7 @@ struct
             t.sent_pld <- t.sent_pld + bytelength bits + int_of_bool syn + int_of_bool fin
         )
 
+    (* TX some bits, split into segments *)
     let emit_multi t bits =
         let rec aux off bits =
             let rem_size = bytelength bits in

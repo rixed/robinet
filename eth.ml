@@ -1052,22 +1052,22 @@ struct
         match Pdu.unpack bits with
         | Error s ->
             Log.(log st.iface.widget.logger Warning s)
-        | Ok frame ->
-            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Got an eth frame of proto %s for %s" (Proto.to_string frame.Pdu.proto) (Addr.to_string frame.Pdu.dst)))) ;
-            if frame.Pdu.proto = st.proto &&
-               (Addr.eq frame.Pdu.dst st.mac || Addr.eq frame.Pdu.dst Addr.broadcast) then (
+        | Ok (frame : Pdu.t) ->
+            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Got an eth frame of proto %s for %s" (Proto.to_string frame.proto) (Addr.to_string frame.dst)))) ;
+            if frame.proto = st.proto &&
+               (Addr.eq frame.dst st.mac || Addr.eq frame.dst Addr.broadcast) then (
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...that's me!"))) ;
-                if Payload.bitlength frame.Pdu.payload > 0 then (
+                if Payload.bitlength frame.payload > 0 then (
                     (* Take note of the MAC/IP pair of the sender (TODO: with a short timeout) : *)
                     Pdu.extract_src_proto frame.proto (frame.payload :> bitstring) |>
                     Result.iter (fun ip_src ->
                         let src_proto_addr = Ip.Addr.to_bitstring ip_src in
                         BitHash.replace st.arp_cache src_proto_addr (Some frame.src)) ;
                     Simulation.asap st.iface.widget.power
-                                    st.recv (frame.Pdu.payload :> bitstring)
+                                    st.recv (frame.payload :> bitstring)
                 )
-            ) else if frame.Pdu.proto = Proto.arp then (
-                match Arp.Pdu.unpack (frame.Pdu.payload :> bitstring) with
+            ) else if frame.proto = Proto.arp then (
+                match Arp.Pdu.unpack (frame.payload :> bitstring) with
                 | Error s ->
                     Log.(log st.iface.widget.logger Warning s)
                 | Ok (arp : Arp.Pdu.t) ->
@@ -1130,7 +1130,7 @@ struct
                     )
             ) else ( (* not for me, send to promisc function *)
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...not for me (for %s but I'm %s)!"
-                    (Addr.to_string frame.Pdu.dst) (Addr.to_string st.mac)))) ;
+                    (Addr.to_string frame.dst) (Addr.to_string st.mac)))) ;
                 if Payload.bitlength frame.payload > 0 then
                     match st.promisc with
                     | Some f ->
