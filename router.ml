@@ -306,7 +306,9 @@ type iface = { mutable trx : trx ; (** Can come handy to splice another trx ther
      * totally independent IP stacks. If all the admin_hosts of a router
      * were to be made to edit the router's global configuration then
      * they would have to share that storage area of course. *)
-        mutable admin_host : Host.t option }
+        mutable admin_host : Host.t option ;
+    (** Fragment IPv4 packets larger than the MTU, unless they have DF set. *)
+mutable link_fragmentation : bool }
 
 type load_balancing =
     | First (* Forward a packet to its first matching route *)
@@ -371,6 +373,20 @@ let target_routes ?in_iface ?src_ip ?dst_ip ?proto ?src_port ?dst_port t =
                          dst_port |>
     List.map (fun (r : Route.t) -> r.target)
 
+(* Either [Ok] the packets to emit on [iface] in place of [bits], or [Error ip]
+ * if [ip] does not fit the MTU and cannot be fragmented. What is not an IPv4
+ * packet is left whole for Eth to deal with. *)
+let maybe_fragment iface bits =
+    if bytelength bits <= iface.eth.mtu ||
+       iface.eth.proto <> Eth.Proto.ip4 then Ok [ bits ]
+    else match Ip.Pdu.unpack bits with
+        | Error _ -> Ok [ bits ]
+        | Ok ip ->
+            if ip.dont_frag || not iface.link_fragmentation then Error ip
+            else match Ip.Pdu.fragment iface.eth.mtu ip with
+                | exception Invalid_argument _ -> Error ip
+                | frags -> Ok frags
+
 (* Sending will perform routing again *)
 let rec maybe_send_icmp t n ip icmp_maker =
     match Eth.State.find_ip4 t.ifaces.(n).eth with
@@ -425,11 +441,22 @@ and route in_iface_opt t bits =
                     let len = bytelength bits in
                     Metric.Gauge.add t.buffered ~now len ;
                     let iface = t.ifaces.(out_iface) in
-                    (* So we want to set the gateway for this packet but cannot
-                     * call Etc.TRX.tx directly because some additional processing
-                     * might be hidden in the TRX (NAT...) *)
-                    iface.eth.via <- via ;
-                    tx iface.trx bits ;
+                    (match maybe_fragment iface bits with
+                    | Ok frags ->
+                        List.iter (fun bits ->
+                            (* So we want to set the gateway for this packet but cannot
+                             * call Etc.TRX.tx directly because some additional processing
+                             * might be hidden in the TRX (NAT...) *)
+                            iface.eth.via <- via ;
+                            tx iface.trx bits
+                        ) frags
+                    | Error ip ->
+                        Log.(log t.widget.logger Debug (lazy "Dropping a packet larger than the MTU")) ;
+                        Option.may (fun n ->
+                            maybe_send_icmp t n ip
+                                Icmp.(Pdu.make_destination_unreachable
+                                    ~next_hop_mtu:iface.eth.mtu Unreachable.fragmentation_needed)
+                        ) in_iface_opt) ;
                     Log.(log t.widget.logger Debug (lazy "Done")) in
                 (match in_iface_opt, ttl_opt with
                 | None, _ ->
@@ -592,7 +619,8 @@ let set_proxy_arp t n v =
             fun _ -> false
 
 let make_iface ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
-               ?can_forward_after ?mac ?my_addresses ~parent n =
+               ?can_forward_after ?mac ?my_addresses ?(link_fragmentation=true)
+               ~parent n =
     let name = "#"^ string_of_int n in
     (* For our ifaces we force the GW on a packet by packet basis according
      * to the dynamic (and likely still unset) routing table. *)
@@ -601,7 +629,15 @@ let make_iface ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
                        ?can_forward_after ?mac ?my_addresses ~name
                        ~parent () in
     let trx = Eth.TRX.make eth in
-    { trx ; eth ; admin_host = None }
+    let iface = { trx ; eth ; admin_host = None ; link_fragmentation } in
+    Widget.add_properties eth.iface.widget Widget.[
+        property "link fragmentation" ~kind:Bool
+            ~descr:"Fragment IPv4 packets larger than the MTU, unless they \
+                    say not to. Those not fragmented are dropped and reported \
+                    with ICMP."
+            ~getter:(fun () -> `Bool iface.link_fragmentation)
+            ~setter:(fun v -> iface.link_fragmentation <- to_bool v) ] ;
+    iface
 
 let notify_never = { probability = 0. ; delay = 0. }
 let notify_always ?(delay=0.) () = { probability = 1. ; delay }

@@ -182,6 +182,16 @@ struct
     (*$>*)
 end
 
+(** Codes of the Destination Unreachable messages (type 3): *)
+module Unreachable = struct
+    let network = 0
+    let host = 1
+    let protocol = 2
+    let port = 3
+    let fragmentation_needed = 4
+    let source_route_failed = 5
+end
+
 (** {2 ICMP Messages} *)
 
 (** This module handle ICMP messages (un)packing. *)
@@ -245,8 +255,8 @@ module Pdu = struct
         { msg_type = MsgType.o (3, code) ;
           payload = DestUnreachable (next_hop_mtu, Payload.o ip_start) }
 
-    let make_port_unreachable = make_destination_unreachable 3
-    let make_host_unreachable = make_destination_unreachable 1
+    let make_port_unreachable = make_destination_unreachable Unreachable.port
+    let make_host_unreachable = make_destination_unreachable Unreachable.host
 
     let pack t =
         let pack_payload = function

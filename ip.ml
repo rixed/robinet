@@ -731,7 +731,7 @@ module Pdu = struct
                 Payload.o pld
             ) else pld
         | {| _ |} ->
-            Printf.fprintf stderr "Ip: Cannot patch checksum at offset %d, payload: %s\n"
+            Printf.eprintf "Ip: Cannot patch checksum at offset %d, payload: %s\n"
                 offset (hexstring_of_bitstring_abbrev ~bits:(offset + 16) (pld :> bitstring)) ;
             pld
 
@@ -753,9 +753,13 @@ module Pdu = struct
         let%bitstring s = {| sum header : 16 |} in
         concat [ takebits 80 header ; s ; dropbits 96 header ]
 
+    let is_fragment t = t.more_frags || t.frag_offset > 0
+
     let pack_payload t =
-        (* Patch TCP/UDP checksums since they use some fields of the IP header *)
-        if t.proto = Proto.tcp then patch_checksum 128 (pseudo_header t) t.payload
+        (* Patch TCP/UDP checksums since they use some fields of the IP header.
+         * The checksum covers the whole L4 PDU, so a fragment is left alone: *)
+        if is_fragment t then t.payload
+        else if t.proto = Proto.tcp then patch_checksum 128 (pseudo_header t) t.payload
         else if t.proto = Proto.udp then patch_checksum 48 (pseudo_header t) t.payload
         else t.payload
 
@@ -763,6 +767,51 @@ module Pdu = struct
         let header = pack_header t
         and payload = pack_payload t in
         concat [ header ; (payload :> bitstring) ]
+
+    (* The options that go into every fragment (copied flag set), padded to
+     * a multiple of 4 bytes: *)
+    let copied_options opts =
+        let rec loop acc opts =
+            match%bitstring opts with
+            | {| 0 : 8 ; _ : -1 : bitstring |} -> acc (* end of options *)
+            | {| 1 : 8 ; rest : -1 : bitstring |} -> loop acc rest (* no-op *)
+            | {| copied : 1 ; _ : 7 ; len : 8 ;
+                 _ : (len - 2) * 8 : bitstring ; rest : -1 : bitstring |} ->
+                loop (if copied then takebits (len * 8) opts :: acc else acc) rest
+            | {| _ |} -> acc in
+        let opts = concat (List.rev (loop [] opts)) in
+        let pad = (4 - bytelength opts mod 4) mod 4 in
+        concat [ opts ; zeroes_bitstring (pad * 8) ]
+    (*$= copied_options & ~printer:identity
+      "\x82\x03\x00\x00" \
+        (Bitstring.string_of_bitstring (copied_options \
+          (Bitstring.bitstring_of_string "\x07\x03\x00\x01\x82\x03\x00\x00")))
+      "" (Bitstring.string_of_bitstring (copied_options Bitstring.empty_bitstring))
+    *)
+
+    (** Split [t] into packets of at most [mtu] bytes. [t] can itself be a
+     * fragment, so offsets and MF flag are relative to its own. The DF flag is
+     * not checked.
+     * Raises Invalid_argument if [mtu] leaves no room for 8 bytes of payload. *)
+    let fragment mtu t =
+        let len = Payload.length t.payload in
+        let hdr_len opts = no_opt_hdr_len + bytelength opts in
+        if hdr_len t.options + len <= mtu then [ pack t ] else
+        let t = { t with payload = pack_payload t } in (* before splitting *)
+        let rec loop options pos acc =
+            let max_pld = (mtu - hdr_len options) land (lnot 7) in
+            if max_pld < 8 then invalid_arg "Ip.Pdu.fragment: MTU too small" ;
+            let last = len - pos <= max_pld in
+            let n = if last then len - pos else max_pld in
+            let frag =
+                { t with tot_len = hdr_len options + n ; options ;
+                         more_frags = t.more_frags || not last ;
+                         frag_offset = t.frag_offset + pos lsr 3 ;
+                         payload = Payload.sub pos n t.payload } in
+            let bits = pack frag in
+            if last then List.rev (bits :: acc)
+            else loop (copied_options t.options) (pos + n) (bits:: acc) in
+        loop t.options 0 []
 
     let unpack bits = match%bitstring bits with
         | {| 4 : 4 ; hdr_len : 4 ; tos : 8 ; tot_len : 16 ;
@@ -1017,20 +1066,13 @@ module TRX = struct
     let hdr_len = Pdu.no_opt_hdr_len
 
     let tx t bits =
-        let id = Pdu.next_id () in
-        let max_pld = (t.mtu - hdr_len) land (lnot 7) in (* in bytes *)
-        let rec aux bit_offset =
-            if bit_offset < bitstring_length bits then (
-                let pld = dropbits bit_offset bits in
-                let pld, more_frags =
-                    if bytelength pld <= max_pld then pld, false
-                    else takebits (max_pld * 8) pld, true in
-                let pdu = Pdu.make ~id ~dont_frag:t.dont_frag ~more_frags ~frag_offset:(bit_offset lsr 6) t.proto t.src t.dst pld in
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (bytelength pld) (hexstring_of_bitstring bits)))) ;
-                Simulation.asap t.power t.emit (Pdu.pack pdu) ;
-                aux (bit_offset + bitstring_length pld)
-            ) in
-        aux 0
+        if bitstring_length bits > 0 then (
+            let pdu = Pdu.make ~dont_frag:t.dont_frag t.proto t.src t.dst bits in
+            Pdu.fragment t.mtu pdu |>
+            List.iter (fun bits ->
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (Payload.length pdu.payload) (hexstring_of_bitstring bits)))) ;
+                Simulation.asap t.power t.emit bits)
+        )
 
     let reassemble t (ip : Pdu.t) =
         let key = ip.src, ip.dst, ip.proto, ip.id in
@@ -1150,6 +1192,18 @@ module TRX = struct
         Simulation.run sim false ;
         List.rev !got
 
+      let refrag mtu pkts =
+        List.concat_map (fun bits ->
+          Pdu.fragment mtu (Result.get_ok (Pdu.unpack bits))
+        ) pkts
+
+      let with_opts =
+        Bitstring.bitstring_of_string msg |>
+        Pdu.make ~options:(Bitstring.bitstring_of_string "\x07\x03\x00\x01\x82\x03\x00\x00")
+                 Proto.udp a b
+
+      let udp_wants_chk = "\x00\x01\x00\x02\x00\x30\x00\x00" ^ msg
+
       let printer = IO.to_string (List.print String.print)
     *)
     (*$= receive & ~printer
@@ -1176,6 +1230,27 @@ module TRX = struct
                          frag 16 16 true ; frag 32 8 false ])
       [ msg ; msg ] (receive [ frag 0 16 true ; frag ~id:43 0 16 true ; \
                                frag 16 24 false ; frag ~id:43 16 24 false ])
+      [ msg ] (receive (refrag 36 (frags_of ~mtu:60 msg)))
+      [ msg ] (receive (refrag 28 (frags_of msg)))
+      [ msg ] (receive (List.rev (refrag 28 (frags_of msg))))
+      [ msg ] (receive (Pdu.fragment 36 with_opts))
+      [ msg ] (receive (Pdu.fragment 40 with_opts))
+      (receive (frags_of ~mtu:1500 udp_wants_chk)) (receive (frags_of udp_wants_chk))
+    *)
+    (*$= frags_of & ~printer:string_of_int
+      1 (List.length (frags_of ~mtu:60 msg))
+    *)
+    (*$= refrag & ~printer:string_of_int
+      3 (List.length (refrag 36 (frags_of ~mtu:60 msg)))
+      5 (List.length (refrag 28 (frags_of msg)))
+      3 (List.length (refrag 60 (frags_of msg)))
+    *)
+    (*$= with_opts & ~printer:string_of_int
+      4 (match Pdu.fragment 36 with_opts with \
+         | _ :: f :: _ -> \
+             let f = Pdu.unpack f |> Result.get_ok in \
+             Bitstring.bitstring_length f.options / 8 \
+         | _ -> -1)
     *)
     (*$>*)
 end

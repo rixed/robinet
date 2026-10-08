@@ -361,7 +361,7 @@ under:
 | hub | `""` | `speed` |
 | tap | | *none* |
 | router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin` |
-| | `#0`… | *its interfaces* |
+| | `#0`… | *its interfaces*, and `link fragmentation` |
 | | `#0/admin@0`… | `hostname`, `search suffix` — the stack answering for the address that interface holds |
 | gateway | `router`, `router/#0`, `router/#1` | *a router and its two interfaces* |
 | | `nat` | `min port`, `port forwards`, `NAT pings`, `send errors`, `answer pings` |
@@ -386,6 +386,12 @@ first frame to a neighbour the wait of an ARP exchange. It is off unless set,
 as on most real machines. Its MAC is a parameter of the device it belongs to,
 not a property: an address is not something a running machine is reconfigured
 with.
+
+A router's interface also has `link fragmentation`, on unless set otherwise: an
+IPv4 packet longer than the interface's MTU leaves in fragments, unless it says
+not to fragment it. One that is not fragmented, either way, is dropped and
+reported with an ICMP *fragmentation needed* giving that MTU — as the router's
+`errors probability` allows, which at 0 makes it a silent black hole.
 
 The current list for anything is one request away — `GET
 /api/simulations/<s>/widgets/<w>/properties` gives each one's name, kind,

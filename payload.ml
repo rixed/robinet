@@ -35,11 +35,22 @@ include Private.Make (struct
 end)
 
 let empty = o empty_bitstring
+
 let bitlength (t : t) = bitstring_length (t :> bitstring)
+
 let length (t : t) = bytelength (t :> bitstring)
+
 let random len = o (randbs len)
+
 (* Since a bitstring is a slice, if we want a hash of the content we have
  * to extract the content first: *)
 let hash (t : t) =
     string_of_bitstring (t :> bitstring) |> Hashtbl.hash
+
 let is_empty (t : t) = bitstring_is_empty (t :> bitstring)
+
+(* Extract a subpart of a payload, from [ofs] bytes with length [len] bytes: *)
+let sub ofs len (t : t) =
+    dropbytes ofs (t :> bitstring) |>
+    takebytes len |>
+    o
