@@ -1505,5 +1505,4 @@ struct
         st.widget.on_delete <- (fun () -> disconnect st) ;
         Widget.make_peers ~via:st.widget
             (wa.ports.owner pa) (wb.ports.owner pb)
-
 end

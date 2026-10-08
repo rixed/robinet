@@ -326,25 +326,25 @@ type icmp_probability = {
           mutable delay : float }
 
 (** A router is mainly an array of ifaces and a route table *)
-type t = {        ifaces : iface array ;
-          mutable routes : Route.t list ;
+type t = {         ifaces : iface array ;
+           mutable routes : Route.t list ;
            (** [routes] indexed, remade whenever it is found to be made of
             * another list: *)
-           mutable table : Table.t ;
+            mutable table : Table.t ;
              (** How diligently to report errors with ICMP *)
-             notify_errs : icmp_probability ;
+              notify_errs : icmp_probability ;
            (** Answers from admin should go through routing, as opposed
             * to return via the same interface: *)
-   mutable admin_reroute : bool ;
+    mutable admin_reroute : bool ;
 mutable can_forward_after : int option ;
-                  widget : Widget.t ;
-  mutable load_balancing : load_balancing ;
+                   widget : Widget.t ;
+   mutable load_balancing : load_balancing ;
           (** Where [RoundRobin] left off. One cursor for the whole box and
            * not one per destination: what is being shared out is the
            * router's own outgoing links. *)
-      mutable lb_cursor : int ;
+        mutable lb_cursor : int ;
           (** RAM used by all queued frames: *)
-                buffered : Metric.Gauge.t }
+                 buffered : Metric.Gauge.t }
 
 type Widget.device += T of t
 
