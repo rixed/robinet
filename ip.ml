@@ -989,47 +989,182 @@ module TRX = struct
         logger : Log.t ;
         power : Simulation.power ;
         src : Addr.t ; dst : Addr.t ;
-        proto : Proto.t ; mtu : int ;
+        proto : Proto.t ;
+        (* Fragment if the payload is larger than that (set to max_int to disable fragmentation: *)
+        mtu : int ;
+        (* Set the DF bit of emitted packets (and fragments!) to this value: *)
+        dont_frag : bool ;
+        (* Perform reassembly before handing over received frames: *)
+        reassemble : bool ;
         mutable emit : bitstring -> unit ;
-        mutable recv : bitstring -> unit }
+        mutable recv : bitstring -> unit ;
+        (* TODO: timeout reassembly lines *)
+        reassembled : (reassemble_key, Pdu.t list (* sorted by frag_offset *)) Hashtbl.t
+    }
+
+    (* We might want to reassemble packets that are not destined to [t.src] (broadcast, ICMP
+     * error, wtv) so let's use the IPs in additon to the ID to identify reassembled packets: *)
+    and reassemble_key = Addr.t * Addr.t * Proto.t * int (* src, dst, proto, id *)
 
     let tx t bits =
         let id = Pdu.next_id () in
         let rec aux bit_offset =
             if bit_offset < bitstring_length bits then (
                 let pld = dropbits bit_offset bits in
-                let pld, more_frags = if bitstring_length pld <= t.mtu*8 then pld, false
-                                      else takebits (t.mtu*8) pld, true in
+                let pld, more_frags =
+                    if bitstring_length pld <= t.mtu*8 then pld, false
+                    else takebits (t.mtu*8) pld, true in
                 (* The frag_offset is given in unit of 8 bytes.
                    So the MTU is required to be a multiple of 8 bytes as well. *)
-                let pdu = Pdu.make ~id ~more_frags ~frag_offset:((bit_offset+7) lsr 6) t.proto t.src t.dst pld in
+                let pdu = Pdu.make ~id ~dont_frag:t.dont_frag ~more_frags ~frag_offset:(bit_offset lsr 6) t.proto t.src t.dst pld in
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (bytelength pld) (hexstring_of_bitstring bits)))) ;
                 Simulation.asap t.power t.emit (Pdu.pack pdu) ;
                 aux (bit_offset + bitstring_length pld)
             ) in
         aux 0
 
+    let reassemble t (ip : Pdu.t) =
+        let key = ip.src, ip.dst, ip.proto, ip.id in
+        match Hashtbl.find t.reassembled key with
+        | exception Not_found ->
+            Hashtbl.add t.reassembled key [ ip ] ;
+            None
+        | frags ->
+            (* Insert the fragment: *)
+            let rec loop prevs = function
+                | [] ->
+                    List.rev (ip :: prevs)
+                | ((f : Pdu.t) :: rest) ->
+                    (* if [ip] starts before [f] then insert [ip] here.
+                     * if they start at the same place, keep the longest.
+                     * if [ip] starts after [f] then keep going. *)
+                    if ip.frag_offset < f.frag_offset then
+                        List.rev_append (ip :: prevs) (f :: rest)
+                    else if ip.frag_offset = f.frag_offset then
+                        if Payload.bitlength ip.payload > Payload.bitlength f.payload then
+                            List.rev_append (ip :: prevs) rest
+                        else
+                            frags (* the original list *)
+                    else
+                        loop (f :: prevs) rest in
+            let frags = loop [] frags in
+            (* Offsets and lengths in bits: *)
+            let start (f : Pdu.t) = f.frag_offset lsl 6
+            and stop (f : Pdu.t) = (f.frag_offset lsl 6) + Payload.bitlength f.payload in
+            (* Complete when the fragments cover from 0 without a gap, up to
+             * the end of one without more_frags: *)
+            let rec is_complete covered more_frags = function
+                | [] ->
+                    not more_frags
+                | f :: rest ->
+                    if start f > covered then false
+                    else if stop f <= covered then is_complete covered more_frags rest
+                    else is_complete (stop f) f.Pdu.more_frags rest in
+            if is_complete 0 true frags then (
+                Hashtbl.remove t.reassembled key ;
+                (* Rebuild the payload, skipping whatever is already covered: *)
+                let rec loop covered plds = function
+                    | [] ->
+                        Bitstring.concat (List.rev plds)
+                    | (f : Pdu.t) :: rest ->
+                        if stop f <= covered then
+                            loop covered plds rest
+                        else
+                            let pld = dropbits (covered - start f) (f.payload :> bitstring) in
+                            loop (stop f) (pld :: plds) rest in
+                Some (loop 0 [] frags)
+            ) else (
+                Hashtbl.replace t.reassembled key frags ;
+                None
+            )
+
     (* TODO: check checksum? *)
-    (* TODO: handle fragmentation *)
     let rx (t : t) bits =
         match Pdu.unpack bits with
         | Error s ->
             Log.(log t.logger Warning s)
-        | Ok ip ->
-            if Payload.bitlength ip.Pdu.payload > 0 then
-                Simulation.asap t.power t.recv (ip.Pdu.payload :> bitstring)
+        | Ok (ip : Pdu.t) ->
+            if Payload.bitlength ip.payload = 0 then
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Ip: Ignoring an empty packet from %s to %s"
+                    (Addr.to_dotted_string ip.src) (Addr.to_dotted_string ip.dst))))
+            else (
+                (* Perform reassembly if needed: *)
+                if (ip.more_frags || ip.frag_offset > 0) && t.reassemble then (
+                    reassemble t ip |>
+                    Option.may (Simulation.asap t.power t.recv)
+                ) else
+                    Simulation.asap t.power t.recv (ip.payload :> bitstring)
+            )
 
     (* Note: In Eth we do not require dst addr since the trx know (using ARP) how to get dest addr itself.
      *       IP cannot do this since the application layer won't tell him the destination hostname. Or
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)
-    let make power ?(mtu=1400) src dst proto logger =
+    let make power ?(mtu=1400) ?(dont_frag=false) ?(reassemble=true) src dst proto logger =
         ensure ((mtu mod 8) = 0) "Ip: MTU is required to be a multiple of 8 bytes" ;
-        let t = { logger ; power ; src ; dst ; proto ; mtu ;
+        let t = { logger ; power ; src ; dst ; proto ; mtu ; dont_frag ; reassemble ;
                   emit = ignore_bits ~logger ;
-                  recv = ignore_bits ~logger } in
+                  recv = ignore_bits ~logger ;
+                  reassembled = Hashtbl.create 10 } in
         { ins = { write = tx t ;
                   set_read = fun f -> t.recv <- f } ;
           out = { write = rx t ;
                   set_read = fun f -> t.emit <- f } }
+
+    (*$< TRX *)
+    (* [frags_of s] is what a TRX from [a] to [b] emits for [s]; [frag off len mf]
+     * is a hand made fragment of [msg] (offsets and lengths in bytes); and
+     * [receive pkts] is what [b] hands over after receiving [pkts] in order. *)
+    (*$inject
+      let sim = Simulation.make ~realtime:false "ip-frags"
+      let a = Addr.of_string "10.0.0.1" and b = Addr.of_string "10.0.0.2"
+      let msg = "0123456789abcdefghijklmnopqrstuvwxyzABCD"
+
+      let frags_of ?(mtu=16) s =
+        let trx = make sim.root.power ~mtu a b Proto.udp sim.root.logger in
+        let out = ref [] in
+        trx.out.set_read (fun bits -> out := bits :: !out) ;
+        trx.ins.write (Bitstring.bitstring_of_string s) ;
+        Simulation.run sim false ;
+        List.rev !out
+
+      let frag ?(id=42) off len more_frags =
+        Bitstring.bitstring_of_string (String.sub msg off len) |>
+        Pdu.make ~id ~frag_offset:(off / 8) ~more_frags Proto.udp a b |>
+        Pdu.pack
+
+      let receive ?reassemble pkts =
+        let trx = make sim.root.power ?reassemble b a Proto.udp sim.root.logger in
+        let got = ref [] in
+        trx.ins.set_read (fun bits -> got := Bitstring.string_of_bitstring bits :: !got) ;
+        List.iter trx.out.write pkts ;
+        Simulation.run sim false ;
+        List.rev !got
+
+      let printer = IO.to_string (List.print String.print)
+    *)
+    (*$= receive & ~printer
+      [ "hello" ] (receive (frags_of "hello"))
+      [ msg ] (receive (frags_of msg))
+      [ msg ] (receive (List.rev (frags_of msg)))
+      [ msg ] (receive (frags_of ~mtu:8 msg))
+      [ msg ] (receive (frags_of ~mtu:40 msg))
+      [ String.sub msg 0 16 ; String.sub msg 16 16 ; String.sub msg 32 8 ] \
+        (receive ~reassemble:false (frags_of msg))
+      [ msg ] (receive [ frag 16 16 true ; frag 32 8 false ; frag 0 16 true ])
+      [] (receive [ frag 0 16 true ; frag 32 8 false ])
+      [] (receive [ frag 16 16 true ; frag 32 8 false ])
+      [] (receive [ frag 0 16 true ; frag 16 16 true ])
+      [ msg ] (receive [ frag 0 16 true ; frag 0 16 true ; frag 16 16 true ; \
+                         frag 16 16 true ; frag 32 8 false ])
+      [ msg ] (receive [ frag 0 8 true ; frag 0 24 true ; frag 24 16 false ])
+      [ msg ] (receive [ frag 0 24 true ; frag 8 8 true ; frag 24 16 false ])
+      [ msg ] (receive [ frag 8 8 true ; frag 0 24 true ; frag 16 24 false ])
+      [ msg ] (receive [ frag 0 16 true ; frag 8 24 true ; frag 32 8 false ])
+      [ msg ] (receive [ frag 0 16 true ; frag 16 16 true ; frag 32 8 false ; \
+                         frag 16 16 true ; frag 32 8 false ])
+      [ msg ; msg ] (receive [ frag 0 16 true ; frag ~id:43 0 16 true ; \
+                               frag 16 24 false ; frag ~id:43 16 24 false ])
+    *)
+    (*$>*)
 end
