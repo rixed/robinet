@@ -223,6 +223,9 @@ module Pdu = struct
     let random () =
         make (Proto.random ()) (Addr.random ()) (Addr.random ()) (randbs 30)
 
+    (** Bytes [pack] puts in front of the payload. *)
+    let header_length = 14
+
     (** Pack an {!Eth.Pdu.t} into its [bitstring] raw representation, ready for
      * injection onto the wire (via {!Pcap.inject} for instance). *)
     let pack t =
@@ -531,6 +534,17 @@ struct
             t.is_connected <- true ;
             Log.(log t.widget.logger Info (lazy (Printf.sprintf "Connected!")))
         )
+
+    (** Bytes accepted for emission that have not left yet: emitted frames
+     * wait for [tx_busy_until], so the queue is that much wire time. *)
+    let backlog t =
+        match t.negotiated with
+        | None -> 0
+        | Some (speed, _) ->
+            let now = Simulation.Widget.now t.widget in
+            if Time.compare t.tx_busy_until now <= 0 then 0 else
+            let secs = Interval.to_secs (Time.diff t.tx_busy_until now) in
+            int_of_float (secs *. Speed.to_bps speed /. 8.)
 
     (** Turns an iface into a device *)
     let dev (t : t) =

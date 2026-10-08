@@ -360,7 +360,7 @@ under:
 | | `#0`… | *its ports* |
 | hub | `""` | `speed` |
 | tap | | *none* |
-| router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin` |
+| router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin`, `buffer capacity` |
 | | `#0`… | *its interfaces*, and `link fragmentation` |
 | | `#0/admin@0`… | `hostname`, `search suffix` — the stack answering for the address that interface holds |
 | gateway | `router`, `router/#0`, `router/#1` | *a router and its two interfaces* |
@@ -392,6 +392,16 @@ IPv4 packet longer than the interface's MTU leaves in fragments, unless it says
 not to fragment it. One that is not fragmented, either way, is dropped and
 reported with an ICMP *fragmentation needed* giving that MTU — as the router's
 `errors probability` allows, which at 0 makes it a silent black hole.
+
+A router's `buffer capacity` is the RAM, in bytes, it holds the frames waiting
+for an interface to be free in. A third of it is reserved to the interfaces in
+equal parts; the rest is shared, and taken by whichever interface fills its own
+share first. A frame that fits in neither is dropped, and counted under
+`tail-dropped` for the port it was to leave by. Left out, it is 200ms of
+traffic at the best of the router's `speeds` on every port at once — 250MB for
+a router of two ports at 5Gbps, which nothing short of a flood fills. Its
+`buffered` reads the RAM in use: the reserves, whatever queues, plus what the
+queues take from the shared part.
 
 The current list for anything is one request away — `GET
 /api/simulations/<s>/widgets/<w>/properties` gives each one's name, kind,

@@ -301,13 +301,13 @@ end
 
 type iface = { mutable trx : trx ; (** Can come handy to splice another trx there. *)
                        eth : Eth.State.t ;
-    (** Any traffic arriving in this interface and directed to Admin is
-     * forwarded to this host. There is one per interface so they have
-     * totally independent IP stacks. If all the admin_hosts of a router
-     * were to be made to edit the router's global configuration then
-     * they would have to share that storage area of course. *)
+        (** Any traffic arriving in this interface and directed to Admin is
+         * forwarded to this host. There is one per interface so they have
+         * totally independent IP stacks. If all the admin_hosts of a router
+         * were to be made to edit the router's global configuration then
+         * they would have to share that storage area of course. *)
         mutable admin_host : Host.t option ;
-    (** Fragment IPv4 packets larger than the MTU, unless they have DF set. *)
+(** Fragment IPv4 packets larger than the MTU, unless they have DF set. *)
 mutable link_fragmentation : bool }
 
 type load_balancing =
@@ -341,12 +341,20 @@ type t = {         ifaces : iface array ;
 mutable can_forward_after : int option ;
                    widget : Widget.t ;
    mutable load_balancing : load_balancing ;
-          (** Where [RoundRobin] left off. One cursor for the whole box and
-           * not one per destination: what is being shared out is the
-           * router's own outgoing links. *)
+        (** Where [RoundRobin] left off. One cursor for the whole box and
+         * not one per destination: what is being shared out is the
+         * router's own outgoing links. *)
         mutable lb_cursor : int ;
-          (** RAM used by all queued frames: *)
-                 buffered : Metric.Gauge.t }
+          (** Max total RAM available to buffer frames, a third of which is
+           * reserved to the ports, in equal parts: *)
+  mutable buffer_capacity : int ;
+                 (** RAM used by all queued frames or reserved per port
+                  * space, as of its last refresh: *)
+                 buffered : Metric.Gauge.t ;
+  (** Whether a refresh of [buffered] is scheduled: *)
+  mutable refresh_pending : bool ;
+             (** Count the frames dropped for out of RAM *)
+             tail_dropped : Metric.Counter.t }
 
 type Widget.device += T of t
 
@@ -363,15 +371,61 @@ let add_route (t : t) r =
     Log.(log t.widget.logger Debug (lazy (Printf.sprintf2 "Adding route: %a" Route.print r))) ;
     t.routes <- r :: t.routes
 
-(** How many bytes to consider when hashing the packet prefix for load-balancing *)
-let lb_prefix_length = ref 5
-
 let target_routes ?in_iface ?src_ip ?dst_ip ?proto ?src_port ?dst_port t =
     if t.table.routes != t.routes then
         t.table <- Table.make t.routes ;
     Table.matching t.table in_iface src_ip dst_ip proto src_port
                          dst_port |>
     List.map (fun (r : Route.t) -> r.target)
+
+(* RAM reserved to each port alone: *)
+let buffer_reserved t =
+    t.buffer_capacity / 3 / Array.length t.ifaces
+
+(* What a port takes from the shared pool when [backlog] bytes are queued on
+ * it: *)
+let shared_use t backlog =
+    max 0 (backlog - buffer_reserved t)
+
+(* RAM used by the queued frames and the reserves. The queues being those of
+ * the Eth interfaces, this is never out of step with what they hold. *)
+let buffer_used t =
+    Array.fold_left (fun sum iface ->
+        let backlog = Eth.Iface.backlog iface.eth.iface in
+        sum + buffer_reserved t + shared_use t backlog
+    ) 0 t.ifaces
+
+(* Set [buffered] from the queues, then again when the last frame queued so
+ * far has left, until all are empty. *)
+let rec refresh_buffered t () =
+    let now = Simulation.Widget.now t.widget in
+    Metric.Gauge.set t.buffered ~now (buffer_used t) ;
+    let drained_at =
+        Array.fold_left (fun m iface ->
+            max m iface.eth.iface.tx_busy_until
+        ) now t.ifaces in
+    t.refresh_pending <- Clock.Time.compare drained_at now > 0 ;
+    if t.refresh_pending then
+        Simulation.at t.widget.power drained_at (refresh_buffered t) ()
+
+(* Whether port [n] has room to queue a frame of [len] bytes: up to its
+ * reserve, then from what the shared pool has left. *)
+let buffer_alloc t n len =
+    let backlog = Eth.Iface.backlog t.ifaces.(n).eth.iface in
+    let extra = shared_use t (backlog + len) - shared_use t backlog in
+    if extra > t.buffer_capacity - buffer_used t then (
+        let now = Simulation.Widget.now t.widget in
+        let params = Metric.dir_params ~port:n "tail-dropped" in
+        Metric.Counter.inc t.tail_dropped ~now ~params ;
+        false
+    ) else (
+        (* The frame reaches the Eth queue later than now: *)
+        if not t.refresh_pending then (
+            t.refresh_pending <- true ;
+            Simulation.asap t.widget.power (refresh_buffered t) ()
+        ) ;
+        true
+    )
 
 (* Either [Ok] the packets to emit on [iface] in place of [bits], or [Error ip]
  * if [ip] does not fit the MTU and cannot be fragmented. What is not an IPv4
@@ -437,27 +491,28 @@ and route in_iface_opt t bits =
             | Route.Forward { out_iface ; via } ->
                 let do_forward bits =
                     Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Forwarding packet to iface %d" out_iface))) ;
-                    let now = Simulation.Widget.now t.widget in
-                    let len = bytelength bits in
-                    Metric.Gauge.add t.buffered ~now len ;
                     let iface = t.ifaces.(out_iface) in
-                    (match maybe_fragment iface bits with
+                    match maybe_fragment iface bits with
                     | Ok frags ->
                         List.iter (fun bits ->
-                            (* So we want to set the gateway for this packet but cannot
-                             * call Etc.TRX.tx directly because some additional processing
-                             * might be hidden in the TRX (NAT...) *)
-                            iface.eth.via <- via ;
-                            tx iface.trx bits
+                            (* So we want to set the gateway for this packet but
+                             * cannot call Etc.TRX.tx directly because some
+                             * additional processing might be hidden in the TRX
+                             * (NAT...) *)
+                            let len = Eth.Pdu.header_length + bytelength bits in
+                            if buffer_alloc t out_iface len then (
+                                iface.eth.via <- via ;
+                                tx iface.trx bits
+                            )
                         ) frags
                     | Error ip ->
                         Log.(log t.widget.logger Debug (lazy "Dropping a packet larger than the MTU")) ;
                         Option.may (fun n ->
                             maybe_send_icmp t n ip
                                 Icmp.(Pdu.make_destination_unreachable
-                                    ~next_hop_mtu:iface.eth.mtu Unreachable.fragmentation_needed)
-                        ) in_iface_opt) ;
-                    Log.(log t.widget.logger Debug (lazy "Done")) in
+                                    ~next_hop_mtu:iface.eth.mtu
+                                    Unreachable.fragmentation_needed)
+                        ) in_iface_opt in
                 (match in_iface_opt, ttl_opt with
                 | None, _ ->
                     do_forward bits
@@ -582,17 +637,6 @@ let configure_iface t n =
         )
     )
 
-(** Change the emitter of iface N. *)
-let set_read (t : t) n f =
-    Log.(log t.widget.logger Debug (lazy (Printf.sprintf "setting emitter for iface %d" n))) ;
-    (* Also decrease memory usage on the router *)
-    let f bits =
-        let len = bytelength bits in
-        let now = Simulation.Widget.now t.widget in
-        Metric.Gauge.sub ~now t.buffered len ;
-        f bits in
-    t.ifaces.(n).trx =-> f
-
 let is_connected iface =
     iface.eth.iface.is_connected
 
@@ -618,7 +662,7 @@ let set_proxy_arp t n v =
         else
             fun _ -> false
 
-let make_iface ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
+let iface_make ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
                ?can_forward_after ?mac ?my_addresses ?(link_fragmentation=true)
                ~parent n =
     let name = "#"^ string_of_int n in
@@ -629,7 +673,8 @@ let make_iface ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
                        ?can_forward_after ?mac ?my_addresses ~name
                        ~parent () in
     let trx = Eth.TRX.make eth in
-    let iface = { trx ; eth ; admin_host = None ; link_fragmentation } in
+    let iface =
+        { trx ; eth ; admin_host = None ; link_fragmentation } in
     Widget.add_properties eth.iface.widget Widget.[
         property "link fragmentation" ~kind:Bool
             ~descr:"Fragment IPv4 packets larger than the MTU, unless they \
@@ -643,7 +688,7 @@ let notify_never = { probability = 0. ; delay = 0. }
 let notify_always ?(delay=0.) () = { probability = 1. ; delay }
 
 let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
-         ?(admin_reroute=true) ?(load_balancing=First)
+         ?(admin_reroute=true) ?(load_balancing=First) ?buffer_capacity
          ?can_forward_after ?delay ?loss ?speeds ?mtu ?(macs=[||])
          num_ifaces routes name =
     let widget = Widget.make ~parent ~own_power name in
@@ -665,26 +710,41 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
     if max_used_iface >= num_ifaces then
         Printf.sprintf "Router.make: routing table uses up to iface#%d but router has only %d ifaces" max_used_iface num_ifaces |>
         invalid_arg ;
+    let buffer_capacity =
+        match buffer_capacity with Some v -> v | None ->
+        (* 200ms of traffic by default: *)
+        let speed = Eth.(Speed.best (speeds |? Iface.default_speeds)) in
+        let throughput = (Eth.Speed.to_bps speed) /. 8. in
+        int_of_float (throughput *. 0.2 *. float_of_int num_ifaces) in
+    let buffered = Metric.Gauge.make () in
+    let tail_dropped = Metric.Counter.make () in
     let ifaces =
         Array.init num_ifaces (fun n ->
             let mac =
                 (* Caller can set the MAC addresses: *)
                 if n >= Array.length macs then None else Some macs.(n) in
-            make_iface ?speeds ?delay ?loss ?can_forward_after ?mtu ?mac
+            iface_make ?speeds ?delay ?loss ?can_forward_after ?mtu ?mac
                        ~parent:widget n
         ) in
-    let buffered = Metric.Gauge.make () in
     let t = { ifaces ; routes ; table = Table.make routes ;
               widget ; notify_errs ; admin_reroute ;
               can_forward_after ; load_balancing ; lb_cursor = 0 ;
-              buffered } in
+              buffer_capacity ; buffered ; refresh_pending = false ;
+              tail_dropped } in
+    (* The reserves are taken from the start: *)
+    Metric.Gauge.set buffered ~now:(Simulation.Widget.now widget)
+                     (buffer_used t) ;
     (* One supply for the whole box, and this is what the router itself
        does when it is cut: what its admin hosts do about it is their own,
        and the supply asks each of them in turn. Every interface is reset,
        including the ones no admin host was built on, which nothing else
        would reach. *)
     widget.power_down <- (fun () ->
-        Array.iter (fun iface -> Eth.State.reset iface.eth) t.ifaces) ;
+        Array.iter (fun iface -> Eth.State.reset iface.eth) t.ifaces ;
+        (* Powering down cancelled any pending refresh: *)
+        t.refresh_pending <- false ;
+        let now = Simulation.Widget.now widget in
+        Metric.Gauge.set buffered ~now (buffer_used t)) ;
     widget.device_type <- Some "router" ;
     widget.device <- Some (T t) ;
     widget.ports <- Widget.{
@@ -828,9 +888,23 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                     instead of returning via the same interface it came from."
             ~getter:(fun () -> `Bool t.admin_reroute)
             ~setter:(fun v -> t.admin_reroute <- to_bool v) ;
+        property "buffer capacity" ~kind:Int ~units:"bytes"
+            ~descr:"RAM to queue frames waiting to be emitted, a third of \
+                    which is reserved to the ports in equal parts while the \
+                    rest is shared."
+            ~getter:(fun () -> `Int t.buffer_capacity)
+            ~setter:(fun v ->
+                t.buffer_capacity <- to_int_range ~min:0 v ;
+                (* Extremes seen with other reserves would mislead: *)
+                Metric.Gauge.reset t.buffered ;
+                let now = Simulation.Widget.now widget in
+                Metric.Gauge.set t.buffered ~now (buffer_used t)) ;
         metric_property "buffered" ~units:"bytes"
-            ~descr:"Volume of buffered packets, in bytes."
+            ~descr:"RAM taken by the queued frames and the ports' reserves."
             (Metric.Gauge.T t.buffered) ;
+        metric_property "tail-dropped"
+            ~descr:"Number of frames dropped due to memory constraints."
+            (Metric.Counter.T t.tail_dropped) ;
         property "tot ports" ~kind:Int ~descr:"Total number of ports."
             ~getter:(fun () -> `Int num_ifaces) ] ;
     let addressed () =
@@ -920,8 +994,7 @@ let make_from_addrs
     (* Now we will count incoming packets from each iface (ARP requests, actually) : *)
     let counts = Array.create 3 0 in
     for i = 0 to Array.length counts - 1 do
-        set_read router i (fun _ ->
-            counts.(i) <- succ counts.(i))
+        router.ifaces.(i).trx =-> (fun _ -> counts.(i) <- succ counts.(i))
     done ;
     let reset_count () = Array.iteri (fun i _ -> counts.(i) <- 0) counts in
 
@@ -1061,6 +1134,63 @@ let make_from_addrs
         (Events.for_all (fun _ (p, _) -> p != r.widget.power) sim.events) ;
     "and out of the tree" @?
         (Widget.find sim.root r.widget.id = None)
+ *)
+
+(* Two ports receiving at line rate and forwarding to a third of the same
+   speed fill its queue twice as fast as it drains: the router queues what it
+   has room for, drops the rest, and has its RAM back once the queue is
+   empty. *)
+(*$R buffer_alloc
+    ignore buffer_alloc ;
+    let sim = Simulation.make ~realtime:false "router-congestion" in
+    let via = Some (Eth.Gateway.Mac (Eth.Addr.random ())) in
+    let routes = [ Route.make (Forward { out_iface = 2 ; via }) ] in
+    let r = make ~parent:sim.root ~speeds:[ Eth.Speed.Eth10Mbps ]
+                 ~buffer_capacity:30_000 3 routes "r" in
+    Simulation.power_up r.widget.power ;
+    Array.iter (fun iface ->
+        (ports iface).set_capabilities 0 Capabilities.Any) r.ifaces ;
+    let emitted = ref 0 in
+    r.ifaces.(2).trx =-> (fun _ -> incr emitted) ;
+    let num_sent = 100 in
+    let frame n =
+        Ip.Pdu.make Ip.Proto.udp (Ip.Addr.of_string "10.0.0.1")
+                    (Ip.Addr.of_string "10.0.1.1")
+                    (Bitstring.create_bitstring (1000 * 8)) |>
+        Ip.Pdu.pack |>
+        Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ())
+                     r.ifaces.(n).eth.Eth.State.mac |>
+        Eth.Pdu.pack in
+    for i = 1 to num_sent do
+        List.iter (fun n ->
+            Simulation.delay sim.root.power
+                (Clock.Interval.msec (float_of_int i))
+                r.ifaces.(n).trx.out.write (frame n)
+        ) [ 0 ; 1 ]
+    done ;
+    Simulation.run sim false ;
+    let dropped =
+        Metric.Counter.get r.tail_dropped
+            ~params:(Metric.dir_params ~port:2 "tail-dropped") in
+    "some frames are dropped" @? (dropped > 0) ;
+    assert_equal ~msg:"the others are emitted" ~printer:string_of_int
+                 (2 * num_sent) (!emitted + dropped) ;
+    let all_reserved = 3 * ((30_000 / 3) / 3) in
+    let buffered = Metric.Gauge.get r.buffered in
+    "the shared pool was used" @? (buffered.max > all_reserved) ;
+    "but no more than there is" @? (buffered.max <= 30_000) ;
+    assert_equal ~msg:"and given back once drained" ~printer:string_of_int
+                 all_reserved buffered.current ;
+    (* The capacity is a property, and the reserves follow it: *)
+    let p = List.find (fun (p : Widget.property) ->
+                p.name = "buffer capacity") r.widget.properties in
+    (Option.get p.setter) (`String "60000") ;
+    assert_equal ~msg:"the reserves follow the capacity"
+                 ~printer:string_of_int
+                 (3 * ((60_000 / 3) / 3)) (Metric.Gauge.get r.buffered).current ;
+    "and a negative capacity is refused" @?
+        (try (Option.get p.setter) (`Int (-1)) ; false
+         with _ -> true)
  *)
 
 (* Which address is a router's own is part of its routing table, so a

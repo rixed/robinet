@@ -260,6 +260,11 @@ struct
             if v > value.sample_max then value.sample_max <- v) ;
         FirstLast.update now t.first_last
 
+    (* Return the current value of this gauge for the given [params].
+     * @raise Not_found if there is no value for this parameters set. *)
+    let get ?(params=Params.empty) t =
+        Hashtbl.find t.values params
+
     (* Read every row and start a new window at the value each of them stands
      * at: the extremes of what comes next are those of what happens next. *)
     let take_windows t =
@@ -596,7 +601,7 @@ let dir_params ?port dir =
 (* Some commont params: *)
 let ingress = dir_params "ingress"
 let egress = dir_params "egress"
-let rx_crc_error = dir_params "rx_crc_error"
-let tx_error = dir_params "tx_error"
-let tx_dropped = dir_params "tx_dropped"
-let rx_dropped = dir_params "rx_dropped"
+let rx_crc_error = dir_params "rx-crc-error"
+let tx_error = dir_params "tx-error"
+let tx_dropped = dir_params "tx-dropped"
+let rx_dropped = dir_params "rx-dropped"

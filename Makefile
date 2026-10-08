@@ -272,6 +272,6 @@ doc-spec: docs/simulation.html
 
 clean-spec:
 	$(RM) examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
-	$(RM) tests/*.cm[ioxa] tests/*.o tests/*.annot $(EXTRA_TESTS)
+	$(RM) tests/*.cm[ioxa] tests/*.o tests/*.annot oUnit-anon.cache $(EXTRA_TESTS)
 	$(RM) myadmin_assets.ml robinet
 	$(RM) -r build
