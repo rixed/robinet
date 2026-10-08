@@ -987,9 +987,6 @@ module TRX = struct
 
     type t = {
         logger : Log.t ;
-        (* What pays for the events this TRX schedules, and names the clock
-         * they run on: the host it belongs to, so that they go down with
-         * it. *)
         power : Simulation.power ;
         src : Addr.t ; dst : Addr.t ;
         proto : Proto.t ; mtu : int ;

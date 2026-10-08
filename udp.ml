@@ -164,9 +164,6 @@ struct
                      get_ports : unit -> Port.t * Port.t }
     type t = {
         logger : Log.t ;
-        (* What pays for the events this TRX schedules, and names the clock
-         * they run on: the host it belongs to, so that they go down with
-         * it. *)
         power : Simulation.power ;
         mutable src : Port.t ; mutable dst : Port.t ;
         mutable emit : bitstring -> unit ;

@@ -300,8 +300,6 @@ struct
         is_closed : unit -> bool }
     type t = {
         logger : Log.t ;
-        (* What pays for this connection's timers, and says which clock they
-         * run on. When the host goes down they go with it. *)
         power : Simulation.power ;
         mutable tcp_trx : tcp_trx ;
         mutable src : Port.t ;
