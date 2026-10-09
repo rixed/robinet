@@ -306,19 +306,22 @@ struct
         mutable dst : Port.t ;
         mutable emit : bitstring -> unit ;
         mutable recv : bitstring -> unit ;
-        mtu : int ;
+        mss : int ;  (* max segment size: used to segment payloads *)
         isn : SeqNum.t ; (* initial seq num *)
         mutable rcvd_isn : SeqNum.t option ;
-        mutable closed : bool ; (* set whenever the user want to close or we received a FIN *)
+        mutable closed : bool ;  (* set whenever the user want to close or we received a FIN *)
         mutable sent_fin : bool ;
-        mutable sent_pld : int ;    (* what was already send, with syn and fin counting as 1 *)
+        mutable sent_pld : int ;  (* what was already send, with syn and fin counting as 1 *)
         mutable sent_acked : int ;  (* what was acked from what we sent (must be <= sent_pld) *)
-        mutable rcvd_pld : int ;    (* what was already received (sequentially), with same remark *)
+        mutable rcvd_pld : int ;  (* what was already received (sequentially), with same remark *)
         mutable rcvd_acked : int ;  (* what we have acked so far (must be <= rcvd_pld) *)
         mutable rcvd_pkts : Streambuf.t ; (* what we received but haven't given to application yet *)
         mutable to_send : bitstring list ; (* what we must send next *) (* FIXME: s/list/dequeue/ *)
         mutable unacked_tx : Streambuf.t ; (* previous packet we sent but that were not acked yet *)
-        mutable rcvd_fin : bool ;   (* if we already passed the fin to the application *)
+        mutable rcvd_fin : bool ; (* if we already passed the fin to the application *)
+        mutable cwnd : int ;  (* congestion window: bytes allowed in flight (sent_pld - sent_acked) *)
+        mutable ssthresh : int ; (* slow start threshold (TODO: cached per dest in a host to avoid initial overshoot) *)
+        mutable ca_acked : int ; (* bytes acked toward the next cwnd increase *)
         mutable cnx_established_cont : (tcp_trx option -> unit) option (* what to do when the cnx is established *) }
 
     (* FIXME: ideally, wait 2 minutes after the complete close *)
@@ -348,16 +351,20 @@ struct
             t.sent_pld <- t.sent_pld + bytelength bits + int_of_bool syn + int_of_bool fin
         )
 
-    (* TX some bits, split into segments *)
-    let emit_multi t bits =
-        let rec aux off bits =
-            let rem_size = bytelength bits in
-            let last = rem_size <= t.mtu in
-            let pkt_len = min rem_size t.mtu in
-            emit_one t ~psh:last (takebits (pkt_len * 8) bits) ;
-            if not last then aux (off + pkt_len) (dropbits (pkt_len * 8) bits)
-        in
-        aux 0 bits
+    let in_flight t = t.sent_pld - t.sent_acked
+
+    (* Byte counting (RFC 3465), with L = 2 MSS in slow start *)
+    let grow_cwnd t newly_acked =
+        if t.cwnd < t.ssthresh then
+            t.cwnd <- t.cwnd + min newly_acked (2 * t.mss)
+        else (
+            t.ca_acked <- t.ca_acked + newly_acked ;
+            if t.ca_acked >= t.cwnd then (
+                t.ca_acked <- t.ca_acked - t.cwnd ;
+                t.cwnd <- t.cwnd + t.mss
+            )
+        ) ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: cwnd is now %d" t.cwnd)))
 
     let delayed_ack (t : t) =
         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: I acked %d / %d received bytes" t.rcvd_acked t.rcvd_pld))) ;
@@ -435,6 +442,7 @@ struct
                     (* FIXME: raise an error? *)
                 ) else (
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Acked %d/%d" acked t.sent_pld))) ;
+                    grow_cwnd t (acked - t.sent_acked) ;
                     t.sent_acked <- acked ;
                     drop_unacked_tx t ;
                 )
@@ -478,11 +486,19 @@ struct
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: ignoring recvd packet while cnx is not established")))
             ) else inqueue_pkt t tcp)
 
+    (* Data is sent one segment at a time, only while the whole segment fits in cwnd.
+     * Each ack calls back here to send what cwnd now allows. *)
     and try_really_tx t = match t.to_send with
         | bits :: to_send' ->
-            t.to_send <- to_send' ;
-            emit_multi t bits ;
-            try_really_tx t
+            let len, is_last =
+                let len = bytelength bits in
+                if len <= t.mss then len, true else t.mss, false in
+            if in_flight t + len <= t.cwnd then (
+                emit_one t ~psh:is_last (takebytes len bits) ;
+                t.to_send <- if is_last then to_send' else dropbytes len bits :: to_send' ;
+                try_really_tx t
+            ) else
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: cwnd full (%d in flight, cwnd %d)" (in_flight t) t.cwnd)))
         | [] ->
             if t.closed && not t.sent_fin then (
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: sending FIN"))) ;
@@ -509,13 +525,13 @@ struct
             try_really_tx t
         )
 
-    let make power ?isn ?(mtu=1300) src dst logger =
+    let make power ?isn ?(mss=536) ?(ssthresh=max_int) src dst logger =
         let t = { logger ; power ;
                   src = src ;
                   dst = dst ;
                   emit = ignore_bits ~logger ;
                   recv = ignore_bits ~logger ;
-                  mtu = mtu ;
+                  mss ; cwnd = mss ; ssthresh ; ca_acked = 0 ;
                   isn = may_default isn (fun () -> SeqNum.o 0l (*Random.int32 0x7FFFFFFFl*)) ;
                   rcvd_isn = None ;
                   closed = false ; sent_fin = false ;
