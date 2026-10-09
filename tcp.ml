@@ -536,18 +536,23 @@ struct
             ) else inqueue_pkt t tcp)
 
     (* Data is sent one segment at a time, only while the whole segment fits in cwnd.
-     * Each ack calls back here to send what cwnd now allows. *)
+     * Each ack calls back here to send what cwnd now allows.
+     * Limited Transmit (RFC 3042): each of the first two dup acks allows one more
+     * segment, so that small windows still get the 3 dup acks of a fast retransmit. *)
     and try_really_tx t = match t.to_send with
         | bits :: to_send' ->
             let len, is_last =
                 let len = bytelength bits in
                 if len <= t.mss then len, true else t.mss, false in
-            if in_flight t + len <= t.cwnd then (
+            let wnd =
+                if t.recover = None then t.cwnd + min t.dup_acks 2 * t.mss
+                else t.cwnd in
+            if in_flight t + len <= wnd then (
                 emit_one t ~psh:is_last (takebytes len bits) ;
                 t.to_send <- if is_last then to_send' else dropbytes len bits :: to_send' ;
                 try_really_tx t
             ) else
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: cwnd full (%d in flight, cwnd %d)" (in_flight t) t.cwnd)))
+                Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: window full (%d in flight, window %d)" (in_flight t) wnd)))
         | [] ->
             if t.closed && not t.sent_fin then (
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: sending FIN"))) ;
