@@ -537,11 +537,25 @@ What can be asked:
 | `power on`, `power off` | anything with a power switch of its own: hosts, switches, hubs, routers, gateways, portals, synthesizers and **cables** (but not recorders, replayers or notes) | — |
 | `emit gratuitous ARP` | a router, on every port that has an address; or one adapter with an address: a host's `eth`, a router's `#0`… | — |
 | `ping` | a host | `target` (address or name), `count` (3), `interval` secs (1), `timeout` secs (4) |
+| `start TCP server`, `start UDP server` | a host | `port`, and how it behaves (below) |
+| `start TCP client`, `start UDP client` | a host | `target` (address or name), `port`, `source port` (random), how it behaves (below), and when to stop: `duration` secs, `volume` bytes sent and received (both unset) |
+| `stop` | a server or a client (below) | — |
 | `start replay`, `stop replay` | a replayer | — |
 | `flush` | a gateway's `nat`: forgets every connection it tracks, so established ones break | — |
 
 `GET /api/simulations/<s>/widgets/<w>/actions` lists what one widget will
 answer to, and what each takes.
+
+A server or a client runs under a part of its host named after its port —
+`h2/server-tcp:5001`, `h1/client-udp:6000` — or, for a client given no source
+port, after what it connects to: `h1/client-tcp:10.0.0.2:5001`. That part
+shows the bytes `sent` and `received` so far, and answers `stop`. Both ends
+take the same `behavior`: `0` discards what comes in, `1` sends it back, and
+`2` sends messages of between `min size` (1) and `max size` (1000) bytes,
+`interval` secs (1) apart on average. A client also stops when the server
+closes the connection, and a server or a client stops with the power of its
+host or when its part is deleted. The run that started it then ends with what
+it exchanged.
 
 One thing to know before putting much in a list: **it runs at time zero**, so
 anything that has to wait cannot be asked here. A DHCP client waits a few

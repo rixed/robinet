@@ -499,8 +499,10 @@ and udp_connect t dst ?src_port dst_port client_f cont =
         | Name name ->
             gethostbyname t name (function
             | None -> cont None
-            | Some dst_ips ->
-                connect (List.hd dst_ips))
+            | Some (dst_ip :: _) -> connect dst_ip
+            | Some [] ->
+                Log.(log t.trx.widget.logger Error (lazy ("Cannot resolve "^name))) ;
+                cont None)
 
 let with_my_ip t f =
     if t.trx.widget.power.on then
@@ -611,7 +613,7 @@ let udp_server_stop t port =
         Simulation.run sim false in
     connect () ;
     assert_bool "connected" (!cnx <> None) ;
-    b.trx.tcp_server_stop port ;
+    tcp_server_stop b port ;
     Simulation.run sim false ;
     assert_bool "the server closed the connection" !closed ;
     connect () ;
@@ -1115,6 +1117,341 @@ let ping_action t =
                             finish ()) in
             send 1 ())
 
+(* {2 Servers and clients}
+ *
+ * What a host can be asked to run to have some traffic flowing. Each runs
+ * under a widget of its own below the host, named after its port --
+ * "server-tcp:5001", "client-udp:6000" -- or, for a client given no source
+ * port, after what it connects to: "client-tcp:10.0.0.2:5001". That widget
+ * shows what was exchanged so far and offers [stop], and goes when the server
+ * or client stops, however that happens: stopped, deleted, its run cancelled
+ * or its host switched off. What was exchanged is then the result of the run
+ * that started it.
+ *
+ * A cancelled run is noticed by the next callback of that server or client
+ * (see {!Action.cancel}), so one with no traffic lingers until stopped. *)
+
+type behavior =
+    | Sink
+    | Echo
+    (* Sizes uniform within those bounds, and intervals exponentially
+       distributed with that mean, in seconds: *)
+    | Random of { min_size : int ; max_size : int ; interval : float }
+
+let behavior_names = [| "sink" ; "echo" ; "random" |]
+
+let behavior_name = function
+    | Sink -> behavior_names.(0)
+    | Echo -> behavior_names.(1)
+    | Random _ -> behavior_names.(2)
+
+let behavior_params = Widget.[
+    param "behavior" ~kind:(one_of (choices behavior_names)) ~default:(`Int 0)
+        ~descr:"What to do with the traffic: discard what comes in, send it \
+                back, or send messages of random sizes at random intervals." ;
+    param "min size" ~kind:Int ~units:"bytes" ~default:(`Int 1)
+        ~descr:"Random behavior only: the smallest message." ;
+    param "max size" ~kind:Int ~units:"bytes" ~default:(`Int 1000)
+        ~descr:"Random behavior only: the largest message." ;
+    param "interval" ~kind:Duration ~units:"secs" ~default:(`Float 1.)
+        ~descr:"Random behavior only: the mean time between two messages." ]
+
+(* [max_size] is the largest message the protocol can carry. *)
+let behavior_of_args ~max_size params =
+    match Widget.arg_int params "behavior" with
+    | 0 -> Sink
+    | 1 -> Echo
+    | _ ->
+        let min_size = Widget.arg_int params "min size"
+        and max_size' = Widget.arg_int params "max size"
+        and interval = Widget.arg_float params "interval" in
+        if min_size < 1 then
+            Widget.bad_value "min size must be at least 1, not %d" min_size ;
+        if max_size' < min_size then
+            Widget.bad_value "max size must not be below min size (%d), not %d"
+                min_size max_size' ;
+        if max_size' > max_size then
+            Widget.bad_value "max size cannot be above %d" max_size ;
+        if interval <= 0. then
+            Widget.bad_value "interval must be above zero, not %g" interval ;
+        Random { min_size ; max_size = max_size' ; interval }
+
+let port_arg params name =
+    let p = Widget.arg_int params name in
+    if p < 1 || p > 0xffff then
+        Widget.bad_value "%s must be between 1 and 65535, not %d" name p ;
+    p
+
+(* What a UDP datagram can carry: *)
+let max_udp_payload = 65507
+
+(* Bytes, both ways, of a whole server or client: *)
+type traffic = { mutable sent : int ; mutable received : int }
+
+(* One conversation, whichever the protocol: *)
+type flow =
+    { send : bitstring -> unit ;
+      (* Whether [send] may be called now: not before a TCP connection is
+         established, nor once it is closed. *)
+      writable : unit -> bool ;
+      (* Whether it is over for good: *)
+      finished : unit -> bool ;
+      close : unit -> unit }
+
+(* [closed] is called when the peer closes the connection. *)
+let tcp_flow (cnx : Tcp.TRX.tcp_trx) ~recv ~closed =
+    cnx.trx.ins.set_read (fun bits ->
+        if bitstring_length bits = 0 then closed () else recv bits) ;
+    let writable () = cnx.is_established () && not (cnx.is_closed ()) in
+    { send = tx cnx.trx ; writable ; finished = cnx.is_closed ;
+      close = (fun () -> if writable () then cnx.close ()) }
+
+let udp_flow (udp : Udp.TRX.udp_trx) =
+    { send = tx udp.trx ; writable = (fun () -> true) ;
+      finished = (fun () -> false) ; close = ignore }
+
+let random_payload n =
+    bitstring_of_string (String.init n (fun _ -> Char.chr (Random.int 256)))
+
+(* Have [flow] behave as told, for as long as it lasts and [alive] says, and
+   return what is to receive from it. [counted] is called after every message, sent or
+   received. *)
+let talk power traffic behavior ~alive ~counted flow =
+    let send bits =
+        traffic.sent <- traffic.sent + bytelength bits ;
+        flow.send bits in
+    (match behavior with
+    | Random { min_size ; max_size ; interval } ->
+        let wait () =
+            Clock.Interval.sec (-. interval *. log (1. -. Random.float 1.)) in
+        let going () = alive () && not (flow.finished ()) in
+        let rec loop () =
+            if going () then (
+                if flow.writable () then (
+                    send (random_payload
+                        (min_size + Random.int (max_size - min_size + 1))) ;
+                    counted ()) ;
+                if going () then Simulation.delay power (wait ()) loop ()) in
+        Simulation.delay power (wait ()) loop ()
+    | Sink | Echo -> ()) ;
+    fun bits ->
+        if alive () then (
+            traffic.received <- traffic.received + bytelength bits ;
+            (match behavior with
+            | Echo when flow.writable () -> send bits
+            | _ -> ()) ;
+            counted ())
+
+let traffic_properties traffic = Widget.[
+    property "sent" ~kind:Int ~units:"bytes" ~descr:"Bytes sent so far."
+        ~getter:(fun () -> `Int traffic.sent) ;
+    property "received" ~kind:Int ~units:"bytes"
+        ~descr:"Bytes received so far."
+        ~getter:(fun () -> `Int traffic.received) ]
+
+(* Whether [state] is still running; and if it was cancelled, have what it
+   holds given up, from outside of whatever callback noticed. *)
+let still_running power over state release =
+    let running = Action.is_running state in
+    if not running && not !over then
+        Simulation.asap power (fun () -> release ~remove:true) () ;
+    running && not !over
+
+(* [peers] names what is counted of the flows it accepts. [listen] and
+   [unlisten] are the host's server start and stop, and [serve] makes a flow of
+   what [listen] hands over. *)
+let server_action t ~proto ~peers ~max_size ~listen ~unlisten ~serve =
+    let host = t.trx.widget in
+    let result_kind =
+        Widget.(record [| peers, Int ; "sent", Int ; "received", Int |]) in
+    Widget.action ("start "^ String.uppercase_ascii proto ^" server")
+        ~descr:"Listen to a port, and answer whoever connects to it as told."
+        ~params:(Widget.param "port" ~kind:Int
+                    ~descr:"The port to listen to." :: behavior_params)
+        ~result:result_kind
+        ~handler:(fun state ->
+            let port = port_arg state.params "port"
+            and behavior = behavior_of_args ~max_size state.params in
+            let power = host.power in
+            let traffic = { sent = 0 ; received = 0 }
+            and flows = ref 0 and over = ref false in
+            let result () =
+                `Assoc [ peers, `Int !flows ;
+                         "sent", `Int traffic.sent ;
+                         "received", `Int traffic.received ] in
+            let widget =
+                Widget.make ~parent:host (Printf.sprintf "server-%s:%d" proto port) in
+            (* Whoever stops it first, once. [remove] is false when the widget
+               is already being removed. *)
+            let release ~remove =
+                if not !over then (
+                    over := true ;
+                    unlisten port ;
+                    if Action.is_running state then
+                        Action.stop state ~result:(result ()) ;
+                    if remove then Simulation.remove_widget widget) in
+            let alive () = still_running power over state release in
+            (match
+                listen port (fun x ->
+                    if alive () then (
+                        incr flows ;
+                        let recv = ref ignore in
+                        let flow = serve x ~recv:(fun bits -> !recv bits) in
+                        recv := talk power traffic behavior ~alive
+                                     ~counted:ignore flow))
+            with
+            | exception e ->
+                Simulation.remove_widget widget ;
+                raise e
+            | () -> ()) ;
+            widget.on_delete <- (fun () -> release ~remove:false) ;
+            widget.power_down <- (fun () -> release ~remove:true) ;
+            Widget.add_properties widget Widget.(
+                property "behavior" ~descr:"What it does with the traffic."
+                    ~getter:(fun () -> `String (behavior_name behavior)) ::
+                property peers ~kind:Int ~descr:"How many it was reached by."
+                    ~getter:(fun () -> `Int !flows) ::
+                traffic_properties traffic) ;
+            Widget.add_actions widget [
+                Widget.action "stop" ~result:result_kind
+                    ~descr:"Stop listening, closing what connections it has."
+                    ~handler:(fun s ->
+                        Action.stop s ~result:(result ()) ;
+                        release ~remove:true) ])
+
+let tcp_server_action t =
+    server_action t ~proto:"tcp" ~peers:"connections" ~max_size:max_int
+        ~listen:(fun p -> tcp_server_start t (Tcp.Port.o p))
+        ~unlisten:(fun p -> tcp_server_stop t (Tcp.Port.o p))
+        ~serve:(fun cnx ~recv ->
+            (* The peer closing is answered by Tcp itself: *)
+            tcp_flow cnx ~recv ~closed:ignore)
+
+let udp_server_action t =
+    server_action t ~proto:"udp" ~peers:"peers" ~max_size:max_udp_payload
+        ~listen:(fun p -> udp_server_start t (Udp.Port.o p))
+        ~unlisten:(fun p -> udp_server_stop t (Udp.Port.o p))
+        ~serve:(fun udp ~recv ->
+            udp.Udp.TRX.trx.ins.set_read recv ;
+            udp_flow udp)
+
+(* [connect dst ~src_port port ~recv ~closed cont] opens a flow and hands it
+   to [cont], or [None] if it cannot. *)
+let client_action t ~proto ~max_size ~connect =
+    let host = t.trx.widget in
+    let result_kind =
+        Widget.(record [| "sent", Int ; "received", Int ;
+                          "duration", Duration |]) in
+    Widget.action ("start "^ String.uppercase_ascii proto ^" client")
+        ~descr:"Connect to a server and talk to it as told, until one of the \
+                limits is reached, the server closes the connection, or it \
+                is stopped."
+        ~params:Widget.([
+            param "target" ~kind:(hint "192.168.0.1" String)
+                ~descr:"What to connect to: an address, or a name to be resolved." ;
+            param "port" ~kind:Int ~descr:"The port to connect to." ;
+            param "source port" ~kind:(optional Int)
+                ~descr:"The port to connect from, which then also names it \
+                        (random if unset)." ] @
+            behavior_params @ Widget.[
+            param "duration" ~kind:(optional Duration) ~units:"secs"
+                ~descr:"Stop after that long." ;
+            param "volume" ~kind:(optional Int) ~units:"bytes"
+                ~descr:"Stop once that many bytes were sent and received." ])
+        ~result:result_kind
+        ~handler:(fun state ->
+            let params = state.params in
+            let target = Widget.arg_string params "target"
+            and port = port_arg params "port"
+            and src_port =
+                Widget.arg_opt params "source port" (fun v ->
+                    port_arg [ "source port", v ] "source port")
+            and behavior = behavior_of_args ~max_size params
+            and duration = Widget.arg_opt params "duration" Widget.to_float
+            and volume = Widget.arg_opt params "volume" Widget.to_int in
+            Option.may (fun d ->
+                if d <= 0. then
+                    Widget.bad_value "duration must be above zero, not %g" d
+            ) duration ;
+            if not host.power.on then
+                Widget.bad_value "%s is off" (Widget.full_name host) ;
+            let power = host.power and sim = Widget.sim host in
+            let started = Simulation.now sim in
+            let traffic = { sent = 0 ; received = 0 }
+            and flow = ref None and over = ref false in
+            let result () =
+                `Assoc [ "sent", `Int traffic.sent ;
+                         "received", `Int traffic.received ;
+                         "duration", `Float (Clock.Interval.to_secs
+                            (Clock.Time.diff (Simulation.now sim) started)) ] in
+            let name =
+                match src_port with
+                | Some p -> Printf.sprintf "client-%s:%d" proto p
+                | None -> Printf.sprintf "client-%s:%s:%d" proto target port in
+            let widget = Widget.make ~parent:host name in
+            (* Whoever stops it first, once. [remove] is false when the widget
+               is already being removed. *)
+            let release ~remove =
+                if not !over then (
+                    over := true ;
+                    Option.may (fun f -> f.close ()) !flow ;
+                    if remove then Simulation.remove_widget widget) in
+            let finish ~remove =
+                if Action.is_running state then
+                    Action.stop state ~result:(result ()) ;
+                release ~remove in
+            let alive () = still_running power over state release in
+            let counted () =
+                match volume with
+                | Some v when traffic.sent + traffic.received >= v ->
+                    finish ~remove:true
+                | _ -> () in
+            widget.on_delete <- (fun () -> finish ~remove:false) ;
+            widget.power_down <- (fun () -> release ~remove:true) ;
+            Widget.add_properties widget Widget.(
+                property "behavior" ~descr:"What it does with the traffic."
+                    ~getter:(fun () -> `String (behavior_name behavior)) ::
+                traffic_properties traffic) ;
+            Widget.add_actions widget [
+                Widget.action "stop" ~result:result_kind
+                    ~descr:"Stop talking, closing the connection."
+                    ~handler:(fun s ->
+                        Action.stop s ~result:(result ()) ;
+                        finish ~remove:true) ] ;
+            Option.may (fun d ->
+                Simulation.delay power (Clock.Interval.sec d)
+                    (fun () -> if not !over then finish ~remove:true) ()
+            ) duration ;
+            let recv = ref ignore in
+            connect (addr_of_string target) ~src_port port
+                    ~recv:(fun bits -> !recv bits)
+                    ~closed:(fun () -> finish ~remove:true) (function
+                | None ->
+                    if not !over then (
+                        Action.fail state "cannot connect to %s:%d" target port ;
+                        release ~remove:true)
+                | Some f ->
+                    if !over then f.close () else (
+                        flow := Some f ;
+                        recv := talk power traffic behavior ~alive ~counted f)))
+
+let tcp_client_action t =
+    client_action t ~proto:"tcp" ~max_size:max_int
+        ~connect:(fun dst ~src_port port ~recv ~closed cont ->
+            let src_port = Option.map Tcp.Port.o src_port in
+            t.trx.tcp_connect dst ?src_port (Tcp.Port.o port) (function
+                | None -> cont None
+                | Some cnx -> cont (Some (tcp_flow cnx ~recv ~closed))))
+
+let udp_client_action t =
+    client_action t ~proto:"udp" ~max_size:max_udp_payload
+        ~connect:(fun dst ~src_port port ~recv ~closed:_ cont ->
+            let src_port = Option.map Udp.Port.o src_port in
+            t.trx.udp_connect dst ?src_port (Udp.Port.o port)
+                (fun _ bits -> recv bits) (function
+                | None -> cont None
+                | Some udp -> cont (Some (udp_flow udp))))
+
 let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
          ~parent ?(own_power=true) ?location name =
     (* A host can take its power source from some larger equipment, and
@@ -1152,7 +1489,10 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
             ~setter:(fun v ->
                 t.nameserver <- to_option (Ip.Addr.of_json "nameserver") v) ] ;
     (* TODO: properties for TCP initial_rto, min_rto_var, max_rto and max_timeouts *)
-    Widget.add_actions widget [ ping_action t ] ;
+    Widget.add_actions widget
+        [ ping_action t ;
+          tcp_server_action t ; udp_server_action t ;
+          tcp_client_action t ; udp_client_action t ] ;
     (* It does not run yet: its supply is its own and was minted switched off,
        and what switches it on is the power-on that building it put in the
        startup list -- run when the simulation starts running, by which time
@@ -1212,6 +1552,104 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
     set "static-netmask" `Null ;
     reboot () ;
     assert_equal ~printer:identity "192.168.1.11" (address ())
+ *)
+
+(* Servers and clients, asked as the API asks: each under a widget of its own
+   while it runs, and its run ending with what it exchanged, however it
+   stops. *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "traffic" in
+    let ip n = Ip.Addr.of_string ("192.168.0." ^ string_of_int n) in
+    let host n =
+        make ~parent:sim.root ~static_ip:(ip n)
+             ~netmask:(Ip.Addr.of_string "255.255.255.0")
+             ("h" ^ string_of_int n) in
+    let a = host 1 and b = host 2 in
+    let st = Eth.Cable.State.make ~parent:sim.root ~name:"c" () in
+    Eth.Cable.plug st (a.trx.widget, 0) (b.trx.widget, 0) ;
+    Simulation.run_startup sim ;
+    let run (w : Widget.t) name params =
+        Action.start w (Option.get (Action.find w name)) params in
+    let child (h : t) name =
+        List.find_opt (fun (w : Widget.t) -> w.name = name)
+                      h.trx.widget.children in
+    let get (s : Action.state) field =
+        match s.ended with
+        | Some (_, Value (Some (`Assoc l))) -> List.assoc field l
+        | _ -> `Null in
+    let int s field = match get s field with `Int i -> i | _ -> -1 in
+    let prop (w : Widget.t) name =
+        (List.find (fun (p : Widget.property) -> p.name = name)
+                   w.properties).getter () in
+    let target = "target", `String "192.168.0.2" in
+
+    (* Random against echo, until a volume is reached: *)
+    let srv = run b.trx.widget "start TCP server"
+                  [ "port", `Int 7 ; "behavior", `Int 1 ] in
+    let srv_w = Option.get (child b "server-tcp:7") in
+    assert_bool "one server per port"
+        (try ignore (run b.trx.widget "start TCP server" [ "port", `Int 7 ]) ;
+             false
+         with Widget.Bad_value _ -> true) ;
+    assert_bool "and the refused one leaves no widget behind"
+        (child b "server-tcp:7-2" = None) ;
+    let cli = run a.trx.widget "start TCP client"
+                  [ target ; "port", `Int 7 ; "behavior", `Int 2 ;
+                    "interval", `Float 0.01 ; "volume", `Int 100_000 ] in
+    assert_bool "a client is named after its target"
+        (child a "client-tcp:192.168.0.2:7" <> None) ;
+    Simulation.run sim false ;
+    assert_bool "the volume ends the client" (not (Action.is_running cli)) ;
+    assert_bool "which is then gone" (child a "client-tcp:192.168.0.2:7" = None) ;
+    let sent = int cli "sent" and received = int cli "received" in
+    assert_bool "up to that volume" (sent + received >= 100_000) ;
+    assert_bool "and echoed" (received > 0) ;
+    assert_equal ~printer:Yojson.Basic.to_string ~msg:"all of it reached the server"
+        (`Int sent) (prop srv_w "received") ;
+    let stop = run srv_w "stop" [] in
+    assert_equal ~printer:string_of_int 1 (int stop "connections") ;
+    assert_bool "stopping the server ends its run" (not (Action.is_running srv)) ;
+    assert_equal ~printer:string_of_int sent (int srv "received") ;
+    assert_bool "and takes its widget" (child b "server-tcp:7" = None) ;
+
+    (* Random against a sink, for a duration, from a given port: *)
+    let srv = run b.trx.widget "start UDP server" [ "port", `Int 9 ] in
+    let cli = run a.trx.widget "start UDP client"
+                  [ target ; "port", `Int 9 ; "source port", `Int 6000 ;
+                    "behavior", `Int 2 ; "interval", `Float 0.1 ;
+                    "duration", `Float 5. ] in
+    assert_bool "a client given a port is named after it"
+        (child a "client-udp:6000" <> None) ;
+    Simulation.run sim false ;
+    assert_bool "the duration ends the client" (not (Action.is_running cli)) ;
+    assert_equal ~printer:Yojson.Basic.to_string (`Float 5.) (get cli "duration") ;
+    assert_equal ~printer:string_of_int 0 (int cli "received") ;
+    assert_bool "having sent" (int cli "sent" > 0) ;
+    (* Deleting a server is stopping it: *)
+    Simulation.remove_widget (Option.get (child b "server-udp:9")) ;
+    assert_equal ~printer:string_of_int (int cli "sent") (int srv "received") ;
+
+    (* A random server pushing to a sink, until the client is cancelled: *)
+    let srv = run b.trx.widget "start TCP server"
+                  [ "port", `Int 7 ; "behavior", `Int 2 ;
+                    "interval", `Float 0.1 ] in
+    let cli = run a.trx.widget "start TCP client"
+                  [ target ; "port", `Int 7 ; "source port", `Int 1234 ] in
+    Simulation.delay sim.root.power (Clock.Interval.sec 3.)
+        (fun () -> Action.cancel cli) () ;
+    Simulation.run sim false ;
+    assert_bool "a cancelled client is gone" (child a "client-tcp:1234" = None) ;
+    assert_bool "the server is still there" (Action.is_running srv) ;
+    assert_bool "having sent something"
+        (prop (Option.get (child b "server-tcp:7")) "sent" <> `Int 0) ;
+
+    (* And everything goes with the power: *)
+    Simulation.power_down b.trx.widget.power ;
+    assert_bool "a server goes with the power" (child b "server-tcp:7" = None) ;
+    assert_bool "and its run" (not (Action.is_running srv)) ;
+    Simulation.power_up b.trx.widget.power ;
+    ignore (run b.trx.widget "start TCP server" [ "port", `Int 7 ]) ;
+    assert_bool "leaving its port free" (child b "server-tcp:7" <> None)
  *)
 
 module Name = struct
