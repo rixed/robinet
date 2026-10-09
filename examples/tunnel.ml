@@ -71,7 +71,7 @@ let tunnel (sim : Simulation.t) ifname tun_ip netmask mac gw search_sfx nameserv
                 connect_tunnel tcp)
         | None ->
             Printf.printf "Tunnel: Waiting for connections on port %s...\n%!" (Tcp.Port.to_string dst_port) ;
-            host.trx.tcp_server dst_port connect_tunnel) ;
+            host.trx.tcp_server_start dst_port connect_tunnel) ;
     Simulation.run sim true
 
 let main =

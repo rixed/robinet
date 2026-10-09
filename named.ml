@@ -55,7 +55,7 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
     let timed = Metric.Timed.make ("hosts/"^ host.Host.widget.name ^"/named/queries") in
     *)
     Log.(log st.widget.logger Debug (lazy "Listening for requests...")) ;
-    host.Host.udp_server port (fun udp ->
+    host.Host.udp_server_start port (fun udp ->
         udp.Udp.TRX.trx.ins.set_read (fun bits ->
             Log.(log st.widget.logger Debug (lazy "Received an UDP packet...")) ;
             match Pdu.unpack bits with

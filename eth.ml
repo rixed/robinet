@@ -1427,7 +1427,7 @@ struct
         plug st (a.Host.trx.Host.widget, 0) (b.Host.trx.Host.widget, 0) ;
         Simulation.run_startup sim ;
         let got = ref [] in
-        b.Host.trx.Host.udp_server (Udp.Port.o 5000) (fun udp ->
+        b.Host.trx.Host.udp_server_start (Udp.Port.o 5000) (fun udp ->
             udp.Udp.TRX.trx.ins.set_read (fun bits ->
                 got := Bitstring.string_of_bitstring bits :: !got)) ;
         (* Both go out before the first can be answered, so both wait on the

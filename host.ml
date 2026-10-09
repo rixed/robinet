@@ -56,8 +56,13 @@ type host_trx = {
     udp_send      : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> bitstring -> unit ;
     ping          : ?id:int -> ?seq:int -> addr -> unit ;
     gethostbyname : string -> (Ip.Addr.t list option -> unit) -> unit ;
-    tcp_server    : Tcp.Port.t -> (Tcp.TRX.tcp_trx -> unit) -> unit ;
-    udp_server    : Udp.Port.t -> (Udp.TRX.udp_trx -> unit) -> unit ;
+    (* Starting a server on a port that already has one, or stopping one on a
+       port that has none, raises [Widget.Bad_value]. *)
+    tcp_server_start : Tcp.Port.t -> (Tcp.TRX.tcp_trx -> unit) -> unit ;
+    (* Also closes the connections that server accepted. *)
+    tcp_server_stop  : Tcp.Port.t -> unit ;
+    udp_server_start : Udp.Port.t -> (Udp.TRX.udp_trx -> unit) -> unit ;
+    udp_server_stop  : Udp.Port.t -> unit ;
     signal_err    : string -> unit ;
     dev           : dev ; (* as seen from the outside *)
     arp_set       : Ip.Addr.t -> Eth.Addr.t option -> unit ;
@@ -77,6 +82,18 @@ and udp_socks = { ip_4_udp : trx ;
                       contrary to TCP where we still want to handle incoming FIN). *)
                    udps : (Udp.Port.t * Udp.Port.t (* local, remote *), Udp.TRX.udp_trx) Hashtbl.t }
 
+(* A listening server: what to do with a new connection, and the connections
+   it was handed, so that stopping it can close them. *)
+and tcp_server = { tcp_accept : Tcp.TRX.tcp_trx -> unit ;
+                   (* With the table and key each is registered under. Closed
+                      ones are pruned on each accept. *)
+                   mutable tcp_cnxs : (tcp_socks * (Tcp.Port.t * Tcp.Port.t) * Tcp.TRX.tcp_trx) list }
+
+(* UDP has nothing to close, but the sockets a server was handed must stop
+   receiving when it stops: *)
+and udp_server = { udp_accept : Udp.TRX.udp_trx -> unit ;
+                   mutable udp_peers : (udp_socks * (Udp.Port.t * Udp.Port.t)) list }
+
 and t = { mutable trx : host_trx ;
           eth_state   : Eth.State.t ;
           eth_trx     : trx ;
@@ -84,8 +101,8 @@ and t = { mutable trx : host_trx ;
           udp_socks   : (Ip.Addr.t, udp_socks) Hashtbl.t ;
           icmp_socks  : (Ip.Addr.t, trx) Hashtbl.t ;
           (* the listening servers *)
-          tcp_servers : (Tcp.Port.t, (Tcp.TRX.tcp_trx -> unit)) Hashtbl.t ;
-          udp_servers : (Udp.Port.t, (Udp.TRX.udp_trx -> unit)) Hashtbl.t ;
+          tcp_servers : (Tcp.Port.t, tcp_server) Hashtbl.t ;
+          udp_servers : (Udp.Port.t, udp_server) Hashtbl.t ;
           (* Whether this host has an IP configuration of its own to apply
              when it boots. It has, unless it speaks through somebody else's
              adapter -- a router's admin host does -- in which case the
@@ -176,7 +193,11 @@ let tcp_sock_rx t socks bits =
                                         ) in
                             let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t) tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port t.trx.widget.logger in
                             tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx =-> tx socks.ip_4_tcp ;
-                            server tcp.Tcp.TRX.tcp_trx ; (* supposed to set the recver of this tcp trx *)
+                            server.tcp_cnxs <-
+                                (socks, key, tcp.Tcp.TRX.tcp_trx) ::
+                                List.filter (fun (_, _, (c : Tcp.TRX.tcp_trx)) ->
+                                    not (c.is_closed ())) server.tcp_cnxs ;
+                            server.tcp_accept tcp.Tcp.TRX.tcp_trx ; (* supposed to set the recver of this tcp trx *)
                             tcp.Tcp.TRX.tcp_trx
                         ) else (
                             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have a server but so socket for ports %s:%s and TCP flags=%s" (Tcp.Port.to_string tcp.Tcp.Pdu.dst_port) (Tcp.Port.to_string tcp.Tcp.Pdu.src_port) (Tcp.Pdu.string_of_flags tcp.Tcp.Pdu.flags)))) ;
@@ -200,7 +221,8 @@ let udp_sock_rx t socks icmp_trx bits =
                                      with Not_found -> raise No_socket in
                         let trx = Udp.TRX.make t.trx.widget.power udp.Udp.Pdu.dst_port udp.Udp.Pdu.src_port t.trx.widget.logger in
                         trx.Udp.TRX.trx =-> tx socks.ip_4_udp ;
-                        server trx ; (* supposed to set the recver of this udp trx *)
+                        server.udp_peers <- (socks, key) :: server.udp_peers ;
+                        server.udp_accept trx ; (* supposed to set the recver of this udp trx *)
                         trx) in
                 rx trx.Udp.TRX.trx bits
             with No_socket ->
@@ -522,9 +544,102 @@ let ping t ?(id=1) ?(seq=1) dst =
                     if dst_ips <> [] then
                         do_ping (List.hd dst_ips)))
 
+let tcp_server_start t port tcp_accept =
+    if Hashtbl.mem t.tcp_servers port then
+        Widget.bad_value "TCP port %s already has a server"
+            (Tcp.Port.to_string port) ;
+    Hashtbl.add t.tcp_servers port { tcp_accept ; tcp_cnxs = [] }
 
-let tcp_server t src_port server_f = Hashtbl.add t.tcp_servers src_port server_f
-let udp_server t src_port server_f = Hashtbl.add t.udp_servers src_port server_f
+(* An established connection is closed. A half-open one cannot be, and is
+   forgotten instead: the peer's next segment then draws a reset. *)
+let tcp_server_stop t port =
+    match Hashtbl.find_option t.tcp_servers port with
+    | None ->
+        Widget.bad_value "No TCP server on port %s" (Tcp.Port.to_string port)
+    | Some server ->
+        Hashtbl.remove t.tcp_servers port ;
+        List.iter (fun (socks, key, (cnx : Tcp.TRX.tcp_trx)) ->
+            if not (cnx.is_closed ()) then
+                if cnx.is_established () then cnx.close ()
+                else Hashtbl.remove socks.tcps key
+        ) server.tcp_cnxs
+
+let udp_server_start t port udp_accept =
+    if Hashtbl.mem t.udp_servers port then
+        Widget.bad_value "UDP port %s already has a server"
+            (Udp.Port.to_string port) ;
+    Hashtbl.add t.udp_servers port { udp_accept ; udp_peers = [] }
+
+let udp_server_stop t port =
+    match Hashtbl.find_option t.udp_servers port with
+    | None ->
+        Widget.bad_value "No UDP server on port %s" (Udp.Port.to_string port)
+    | Some server ->
+        Hashtbl.remove t.udp_servers port ;
+        List.iter (fun (socks, key) -> Hashtbl.remove socks.udps key)
+                  server.udp_peers
+
+(* A port takes one server at a time, and a stopped server stops answering,
+   including the peers it was already talking to. *)
+(*$R tcp_server_stop
+    let sim = Simulation.make ~realtime:false "server-stop" in
+    let ip n = Ip.Addr.of_string ("192.168.0." ^ string_of_int n) in
+    let host n =
+        make ~parent:sim.root ~static_ip:(ip n)
+             ~netmask:(Ip.Addr.of_string "255.255.255.0")
+             ("h" ^ string_of_int n) in
+    let a = host 1 and b = host 2 in
+    let st = Eth.Cable.State.make ~parent:sim.root ~name:"c" () in
+    Eth.Cable.plug st (a.trx.widget, 0) (b.trx.widget, 0) ;
+    Simulation.run_startup sim ;
+    let refused f = try f () ; false with Widget.Bad_value _ -> true in
+    let port = Tcp.Port.o 7 in
+    b.trx.tcp_server_start port ignore ;
+    assert_bool "a busy port is refused"
+        (refused (fun () -> b.trx.tcp_server_start port ignore)) ;
+    assert_bool "stopping nothing is refused"
+        (refused (fun () -> b.trx.tcp_server_stop (Tcp.Port.o 8))) ;
+    let cnx = ref None and closed = ref false in
+    let connect () =
+        cnx := None ;
+        a.trx.tcp_connect (IPv4 (ip 2)) port (fun c ->
+            cnx := c ;
+            Option.may (fun (c : Tcp.TRX.tcp_trx) ->
+                c.trx.ins.set_read (fun bits ->
+                    if Bitstring.bitstring_length bits = 0 then closed := true)
+            ) c) ;
+        Simulation.run sim false in
+    connect () ;
+    assert_bool "connected" (!cnx <> None) ;
+    b.trx.tcp_server_stop port ;
+    Simulation.run sim false ;
+    assert_bool "the server closed the connection" !closed ;
+    connect () ;
+    assert_bool "and accepts no more" (!cnx = None) ;
+    (* The port is free again: *)
+    b.trx.tcp_server_start port ignore ;
+    connect () ;
+    assert_bool "until restarted" (!cnx <> None) ;
+
+    let uport = Udp.Port.o 5000 and served = ref 0 in
+    let serve () =
+        b.trx.udp_server_start uport (fun udp ->
+            udp.Udp.TRX.trx.ins.set_read (fun _ -> incr served)) in
+    let send () =
+        a.trx.udp_send (IPv4 (ip 2)) ~src_port:(Udp.Port.o 6000) uport
+                       (Bitstring.zeroes_bitstring 64) ;
+        Simulation.run sim false in
+    serve () ;
+    assert_bool "a busy UDP port is refused" (refused serve) ;
+    send () ; send () ;
+    assert_equal ~printer:string_of_int 2 !served ;
+    b.trx.udp_server_stop uport ;
+    send () ;
+    assert_equal ~printer:string_of_int ~msg:"a known peer is not served" 2 !served ;
+    serve () ;
+    send () ;
+    assert_equal ~printer:string_of_int ~msg:"until restarted" 3 !served
+ *)
 
 (* The recv of the eth is responsible for handling the payload to the correct Ip.TRX *)
 let ip_recv t bits =
@@ -609,6 +724,8 @@ let reset t =
        back running what it runs, and the conversations it was having are what
        it loses. Clearing these left a gateway that had been switched off
        answering neither DHCP nor DNS, with nothing to register them again. *)
+    Hashtbl.iter (fun _ s -> s.tcp_cnxs <- []) t.tcp_servers ;
+    Hashtbl.iter (fun _ s -> s.udp_peers <- []) t.udp_servers ;
     Hashtbl.clear t.dns_queries ;
     Hashtbl.clear t.dns_cache ;
     Hashtbl.clear t.echo_waiters
@@ -836,8 +953,10 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
              around it stands. A server on a box that is off still cannot
              answer: what it would send is scheduled on the box's supply, and
              there is none. *)
-          tcp_server    = (fun port server_f -> tcp_server t port server_f) ;
-          udp_server    = (fun port server_f -> udp_server t port server_f) ;
+          tcp_server_start = (fun port server_f -> tcp_server_start t port server_f) ;
+          tcp_server_stop  = (fun port -> tcp_server_stop t port) ;
+          udp_server_start = (fun port server_f -> udp_server_start t port server_f) ;
+          udp_server_stop  = (fun port -> udp_server_stop t port) ;
           signal_err    = (fun str -> signal_err t str) ;
           (* This call is needed by dhcpd servers running on this host: *)
           arp_set       = (fun ip haddr_opt -> if_on t "arp_set" (Eth.State.set_arp t.eth_state (Ip.Addr.to_bitstring ip)) haddr_opt) ;

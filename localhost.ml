@@ -124,7 +124,9 @@ let tcp_trx_of_socket ctx sock =
                   set_read = should_not_happen } } in
     { Tcp.TRX.trx       = trx ;
       Tcp.TRX.close     = close t ;
-      Tcp.TRX.is_closed = (fun () -> t.is_closed) }
+      Tcp.TRX.is_closed = (fun () -> t.is_closed) ;
+      (* A socket is handed out only once connected: *)
+      Tcp.TRX.is_established = (fun () -> true) }
 
 (* TODO: make use of another thread for an asynchronous gethostbyname *)
 let gethostbyname ctx name cont =
@@ -185,6 +187,7 @@ let tcp_connect ctx ?(wait_for_server=true) ?ttl ?tos
                 h_entry.Unix.h_addr_list in
             connect_ dst_ips.(0)
 
+(* A port already in use is refused by [bind]. *)
 let tcp_server ctx src_port server_f =
     Log.(log (logger ctx) Debug (lazy (Printf.sprintf "Establishing a server on port %s" (Tcp.Port.to_string src_port)))) ;
     let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
@@ -224,14 +227,19 @@ let host ?location sim =
     and ping ?id ?seq _ =
         ignore id ; ignore seq ;
         todo "Ping from localhost"
-    and udp_server _ _ =
+    and tcp_server_stop _ =
+        todo "TCP server stop for localhost"
+    and udp_server_start _ _ =
+        todo "UDP server for localhost"
+    and udp_server_stop _ =
         todo "UDP server for localhost"
     and arp_set _ _ =
         todo "set ARP table of localhost" in
     { Host.widget = ctx.widget ;
       tcp_connect ; udp_connect ; udp_send ; ping ;
       gethostbyname = gethostbyname ctx ;
-      tcp_server = tcp_server ctx ; udp_server ; signal_err ;
+      tcp_server_start = tcp_server ctx ; tcp_server_stop ;
+      udp_server_start ; udp_server_stop ; signal_err ;
       dev = { write = ignore ; set_read = ignore } ;
       (* Nothing here waits for an address: this host has the one the machine
          running the simulation has, and had it before the simulation began. *)

@@ -303,7 +303,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
         Metric.Atomic.fire ~now ~params st.queries in
     (* Offered IPs (and options), indexed by client-ids: *)
     Log.(log st.widget.logger Debug (lazy "Listening for requests...")) ;
-    host.Host.udp_server port (fun udp ->
+    host.Host.udp_server_start port (fun udp ->
         udp.Udp.TRX.trx.ins.set_read (fun bits ->
             Log.(log st.widget.logger Debug (lazy "Received an UDP packet...")) ;
             let src_port, dst_port = udp.Udp.TRX.get_ports () in

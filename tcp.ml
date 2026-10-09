@@ -306,8 +306,9 @@ struct
 
     type tcp_trx = {
         trx : trx ;
-        close : unit -> unit ; (* close the trx *)
-        is_closed : unit -> bool }
+        close : unit -> unit ; (* close the trx (only once established) *)
+        is_closed : unit -> bool ;
+        is_established : unit -> bool }
     type t = {
         logger : Log.t ;
         power : Simulation.power ;
@@ -697,13 +698,15 @@ struct
                   cnx_established_cont = None ;
                   tcp_trx = { trx = null_trx ~logger ;
                               close = ignore ;
-                              is_closed = fun _ -> true } } in
+                              is_closed = (fun _ -> true) ;
+                              is_established = (fun _ -> false) } } in
         t.tcp_trx <- { trx =  { ins = { write = tx t ;
                                         set_read = fun f -> t.recv <- f } ;
                                 out = { write = rx t ;
                                         set_read = fun f -> t.emit <- f } } ;
                        close = close t ;
-                       is_closed = is_closed t } ;
+                       is_closed = is_closed t ;
+                       is_established = (fun () -> is_established t) } ;
         t
 
     let may_timeout t =

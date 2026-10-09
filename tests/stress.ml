@@ -807,7 +807,7 @@ let test_power () =
        were merely a bag of timers: a server on h2, reached from h1. *)
     let served = ref 0 in
     let listen () =
-        h2.Host.trx.Host.udp_server (Udp.Port.o 1234) (fun _ -> incr served) in
+        h2.Host.trx.Host.udp_server_start (Udp.Port.o 1234) (fun _ -> incr served) in
     let send () =
         h1.Host.trx.Host.udp_send (Host.IPv4 (Ip.Addr.of_dotted_string "10.2.0.2"))
                                   (Udp.Port.o 1234) (Bitstring.zeroes_bitstring 64) ;

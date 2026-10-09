@@ -52,7 +52,7 @@ let run (sim : Simulation.t) () =
     at_exit close ;
     Hub.Repeater.set_read hub 2 write ;
     (* Start a server on h1 *)
-    h1.trx.tcp_server (Tcp.Port.o 7) (fun tcp -> tcp.Tcp.TRX.trx.ins.set_read (server_f h1 tcp)) ;
+    h1.trx.tcp_server_start (Tcp.Port.o 7) (fun tcp -> tcp.Tcp.TRX.trx.ins.set_read (server_f h1 tcp)) ;
     (* Client connects and write a msg *)
     let client_f tcp bits =
         Printf.printf "Client received '%s'\n" (string_of_bitstring bits) ;
