@@ -55,6 +55,10 @@ end)
 module Pdu =
 struct
     (*$< Pdu *)
+
+    (* Size of a TCP header without options: *)
+    let no_opt_hdr_len = 20
+
     type flags = {
         urg      : bool ;
         ack      : bool ;
@@ -113,7 +117,7 @@ struct
              ~ack:true ~rst:true empty_bitstring
 
     let pack t =
-        let hdr_len = 20 + bytelength t.options in
+        let hdr_len = no_opt_hdr_len + bytelength t.options in
         let%bitstring hdr = {|
             (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
             (t.seq_num :> int32)  : 32 ; (t.ack_num :> int32)  : 32 ;
@@ -130,7 +134,7 @@ struct
              hdr_len  : 4  ; 0 : 6 ;
              urg : 1 ; ack : 1 ; psh : 1 ; rst : 1 ; syn : 1 ; fin : 1 ;
              win_size : 16 ; _checksum : 16 ; urg_ptr  : 16 ;
-             options : ((hdr_len lsl 2) - 20) * 8 : bitstring ;
+             options : ((hdr_len lsl 2) - no_opt_hdr_len) * 8 : bitstring ;
              payload  : -1 : bitstring |} ->
         Ok { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
                seq_num  = SeqNum.o seq_num  ; ack_num  = SeqNum.o ack_num ;

@@ -1151,7 +1151,7 @@ module TRX = struct
      *       IP cannot do this since the application layer won't tell him the destination hostname. Or
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)
-    let make power ?(mtu=1420) ?(dont_frag=false) ?(reassemble=true) src dst proto logger =
+    let make power ?(mtu=1500) ?(dont_frag=false) ?(reassemble=true) src dst proto logger =
         ensure (mtu >= hdr_len + 8) "Ip: MTU must leave room for at least 8 bytes of payload" ;
         let t = { logger ; power ; src ; dst ; proto ; mtu ; dont_frag ; reassemble ;
                   emit = ignore_bits ~logger ;
