@@ -298,6 +298,12 @@ struct
             let compare (o1, _) (o2, _) = Int.compare o1 o2
         end)
 
+    (* Loss recovery, and the sent_pld at which it ends: *)
+    type recovery =
+        | Open
+        | Fast of int (* after 3 dup acks *)
+        | Timeout of int (* after the retransmission timer expired *)
+
     type tcp_trx = {
         trx : trx ;
         close : unit -> unit ; (* close the trx *)
@@ -327,7 +333,16 @@ struct
         mutable ssthresh : int ; (* slow start threshold (TODO: cached per dest in a host to avoid initial overshoot) *)
         mutable ca_acked : int ; (* bytes acked toward the next cwnd increase *)
         mutable dup_acks : int ; (* consecutive duplicate acks received *)
-        mutable recover : int option ; (* during fast recovery, sent_pld when the loss was detected *)
+        mutable recovery : recovery ;
+        mutable rtt : (Clock.Interval.t * Clock.Interval.t) option ; (* smoothed RTT and its variation, once measured *)
+        mutable rtt_probe : (int * Clock.Time.t) option ; (* sent_pld after the timed segment, and when it was sent *)
+        mutable rto : Clock.Interval.t ; (* retransmission timeout *)
+        min_rto_var : Clock.Interval.t ; (* lower bound of the variation term of rto *)
+        max_rto : Clock.Interval.t ;
+        max_timeouts : int ; (* consecutive timeouts before giving up on the cnx *)
+        mutable rto_gen : int ; (* only the last armed timer is live *)
+        mutable rto_armed : bool ;
+        mutable timeouts : int ; (* consecutive expirations of the retransmission timer *)
         mutable cnx_established_cont : (tcp_trx option -> unit) option (* what to do when the cnx is established *) }
 
     (* FIXME: ideally, wait 2 minutes after the complete close *)
@@ -341,6 +356,78 @@ struct
             Some (SeqNum.o ((Int32.of_int t.rcvd_pld) +/ ((Option.get t.rcvd_isn) :> int32)))
         else None
 
+    let in_flight t = t.sent_pld - t.sent_acked
+
+    (* Re-emit the oldest unacked segment, with an up to date ack *)
+    let retransmit_first t =
+        match Streambuf.min_elt_opt t.unacked_tx with
+        | None -> ()
+        | Some (offset, tcp) ->
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Retransmitting from %d" offset))) ;
+            t.rtt_probe <- None ; (* Karn's algorithm: the ack would be ambiguous *)
+            let tcp = match next_ack_num t with
+                | Some ack_num ->
+                    t.rcvd_acked <- t.rcvd_pld ;
+                    { tcp with ack_num ; flags = { tcp.flags with ack = true } }
+                | None ->
+                    tcp in
+            Simulation.asap t.power t.emit (Pdu.pack tcp)
+
+    (* Retransmission timer (RFC 6298), with a lower bound on the variation term
+     * (as Linux does) so that delayed acks do not cause spurious timeouts: *)
+    let update_rtt t sample =
+        let open Clock in
+        let srtt, rttvar =
+            match t.rtt with
+            | None ->
+                sample, Interval.div sample 2.
+            | Some (srtt, rttvar) ->
+                Interval.(add (mul srtt 0.875) (mul sample 0.125)),
+                Interval.(add (mul rttvar 0.75) (mul (abs (sub srtt sample)) 0.25)) in
+        t.rtt <- Some (srtt, rttvar) ;
+        t.rto <- min t.max_rto (Interval.add srtt (max t.min_rto_var (Interval.mul rttvar 4.))) ;
+        Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: RTT sample %s, srtt %s, rto %s"
+            (Interval.to_string sample) (Interval.to_string srtt) (Interval.to_string t.rto))))
+
+    let stop_rto t =
+        t.rto_gen <- t.rto_gen + 1 ;
+        t.rto_armed <- false
+
+    (* Give up on the cnx, as if it was reset *)
+    let abort t =
+        Log.(log t.logger Debug (lazy "Tcp: Aborting the cnx")) ;
+        stop_rto t ;
+        t.closed <- true ;
+        t.sent_fin <- true ;
+        t.rcvd_fin <- true ;
+        t.to_send <- [] ;
+        t.unacked_tx <- Streambuf.empty
+
+    let rec arm_rto t =
+        stop_rto t ;
+        t.rto_armed <- true ;
+        Simulation.delay t.power t.rto (on_rto t) t.rto_gen
+
+    and on_rto t gen =
+        if gen = t.rto_gen then (
+            t.timeouts <- t.timeouts + 1 ;
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Retransmission timeout #%d" t.timeouts))) ;
+            if t.timeouts > t.max_timeouts then (
+                abort t ;
+                Simulation.asap t.power t.recv empty_bitstring (* signal the close *)
+            ) else (
+                (* Only the first timeout tells about the window that was in flight: *)
+                if t.timeouts = 1 then t.ssthresh <- max (in_flight t / 2) (2 * t.mss) ;
+                t.cwnd <- t.mss ;
+                t.ca_acked <- 0 ;
+                t.dup_acks <- 0 ;
+                t.recovery <- Timeout t.sent_pld ;
+                t.rto <- min t.max_rto (Clock.Interval.mul t.rto 2.) ;
+                retransmit_first t ;
+                arm_rto t
+            )
+        )
+
     (* TX a single segment *)
     let emit_one t ?(psh=false) ?(rst=false) ?(syn=false) ?(fin=false) bits =
         let src_port = t.src and dst_port = t.dst
@@ -352,12 +439,15 @@ struct
             Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Emitting a packet from %s to %s, seq %s, length %d, content '%s'" (Port.to_string src_port) (Port.to_string dst_port) (SeqNum.to_string seq_num) (bytelength bits) (string_of_bitstring bits)))) ;
             Simulation.asap t.power t.emit (Pdu.pack tcp) ;
             if ack then t.rcvd_acked <- t.rcvd_pld ;
-            if bitstring_length bits > 0 then
+            let seq_len = bytelength bits + int_of_bool syn + int_of_bool fin in
+            if seq_len > 0 then (
                 t.unacked_tx <- Streambuf.add (t.sent_pld, tcp) t.unacked_tx ;
-            t.sent_pld <- t.sent_pld + bytelength bits + int_of_bool syn + int_of_bool fin
+                if t.rtt_probe = None then
+                    t.rtt_probe <- Some (t.sent_pld + seq_len, Simulation.now t.power.sim) ;
+                if not t.rto_armed then arm_rto t
+            ) ;
+            t.sent_pld <- t.sent_pld + seq_len
         )
-
-    let in_flight t = t.sent_pld - t.sent_acked
 
     (* Byte counting (RFC 3465), with L = 2 MSS in slow start *)
     let grow_cwnd t newly_acked =
@@ -372,26 +462,12 @@ struct
         ) ;
         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: cwnd is now %d" t.cwnd)))
 
-    (* Re-emit the oldest unacked segment, with an up to date ack *)
-    let retransmit_first t =
-        match Streambuf.min_elt_opt t.unacked_tx with
-        | None -> ()
-        | Some (offset, tcp) ->
-            Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Retransmitting from %d" offset))) ;
-            let tcp = match next_ack_num t with
-                | Some ack_num ->
-                    t.rcvd_acked <- t.rcvd_pld ;
-                    { tcp with ack_num ; flags = { tcp.flags with ack = true } }
-                | None ->
-                    tcp in
-            Simulation.asap t.power t.emit (Pdu.pack tcp)
-
     (* Fast retransmit and fast recovery (RFC 5681 and 6582) *)
     let fast_retransmit t =
         t.ssthresh <- max (in_flight t / 2) (2 * t.mss) ;
         t.cwnd <- t.ssthresh + 3 * t.mss ; (* the 3 dup acks are segments that left the network *)
         t.ca_acked <- 0 ;
-        t.recover <- Some t.sent_pld ;
+        t.recovery <- Fast t.sent_pld ;
         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Loss detected, ssthresh is now %d" t.ssthresh))) ;
         retransmit_first t
 
@@ -476,27 +552,40 @@ struct
                     t.sent_acked <- acked ;
                     t.dup_acks <- 0 ;
                     drop_unacked_tx t ;
-                    match t.recover with
-                    | None ->
+                    (match t.rtt_probe with
+                    | Some (seq, sent) when acked >= seq ->
+                        t.rtt_probe <- None ;
+                        update_rtt t (Clock.Time.diff (Simulation.now t.power.sim) sent)
+                    | _ -> ()) ;
+                    t.timeouts <- 0 ;
+                    if in_flight t = 0 then stop_rto t else arm_rto t ;
+                    (* Partial acks: the next hole is lost too *)
+                    match t.recovery with
+                    | Open ->
                         grow_cwnd t newly_acked
-                    | Some recover when acked < recover ->
-                        (* Partial ack: the next hole is lost too *)
+                    | Fast recover when acked < recover ->
                         t.cwnd <- max t.mss (t.cwnd - newly_acked + t.mss) ;
                         retransmit_first t
-                    | Some _ ->
+                    | Timeout recover when acked < recover ->
+                        grow_cwnd t newly_acked ;
+                        retransmit_first t
+                    | Fast _ ->
                         Log.(log t.logger Debug (lazy "Tcp: Recovered")) ;
-                        t.recover <- None ;
+                        t.recovery <- Open ;
                         t.cwnd <- min t.ssthresh (in_flight t + t.mss)
+                    | Timeout _ ->
+                        Log.(log t.logger Debug (lazy "Tcp: Recovered")) ;
+                        t.recovery <- Open
                 )
             ) else if acked = t.sent_acked && len = 0 &&
                       not (tcp.Pdu.flags.Pdu.syn || tcp.Pdu.flags.Pdu.fin) &&
                       not (Streambuf.is_empty t.unacked_tx) then (
                 t.dup_acks <- t.dup_acks + 1 ;
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Duplicate ack #%d for %d" t.dup_acks acked))) ;
-                if t.recover <> None then
-                    t.cwnd <- t.cwnd + t.mss (* another segment left the network *)
-                else if t.dup_acks = 3 then
-                    fast_retransmit t
+                match t.recovery with
+                | Open -> if t.dup_acks = 3 then fast_retransmit t
+                | Fast _ -> t.cwnd <- t.cwnd + t.mss (* another segment left the network *)
+                | Timeout _ -> ()
             )
         ) ;
         (* Out of order, filling a gap, or already received: *)
@@ -504,10 +593,14 @@ struct
         t.rcvd_pkts <- Streambuf.add (offset, tcp) t.rcvd_pkts ;
         try_really_rx t ;
         try_really_tx t ; (* because the advertized window may have changed, we might want to send a FIN, etc *)
-        (* Data is acked at once when unexpected (so the sender sees duplicate acks)
-         * or when more than one MSS is unacked (ie. every second full segment),
-         * otherwise after at most 200ms. *)
-        if len > 0 && (unexpected || t.rcvd_pld - t.rcvd_acked > t.mss) then
+        (* Data (or SYN/FIN) is acked at once when unexpected (so the sender sees
+         * duplicate acks, or a lost ack is replaced), when more than one MSS is
+         * unacked (ie. every second full segment) or on FIN, otherwise after at
+         * most 200ms. *)
+        let consumes_seq = len > 0 || tcp.Pdu.flags.Pdu.syn || tcp.Pdu.flags.Pdu.fin in
+        if consumes_seq && (unexpected ||
+                            t.rcvd_acked < t.rcvd_pld && tcp.Pdu.flags.Pdu.fin ||
+                            t.rcvd_pld - t.rcvd_acked > t.mss) then
             emit_one t empty_bitstring
         else if t.rcvd_acked < t.rcvd_pld then
             Simulation.delay t.power (Clock.Interval.msec 200.) delayed_ack t
@@ -545,7 +638,7 @@ struct
                 let len = bytelength bits in
                 if len <= t.mss then len, true else t.mss, false in
             let wnd =
-                if t.recover = None then t.cwnd + min t.dup_acks 2 * t.mss
+                if t.recovery = Open then t.cwnd + min t.dup_acks 2 * t.mss
                 else t.cwnd in
             if in_flight t + len <= wnd then (
                 emit_one t ~psh:is_last (takebytes len bits) ;
@@ -579,13 +672,20 @@ struct
             try_really_tx t
         )
 
-    let make power ?isn ?(mss=536) ?(ssthresh=max_int) src dst logger =
+    (* Retransmission defaults are those of Linux: *)
+    let make power ?isn ?(mss=536) ?(ssthresh=max_int)
+             ?(initial_rto=Clock.Interval.sec 1.) ?(min_rto_var=Clock.Interval.msec 200.)
+             ?(max_rto=Clock.Interval.sec 120.) ?(max_timeouts=15)
+             src dst logger =
         let t = { logger ; power ;
                   src = src ;
                   dst = dst ;
                   emit = ignore_bits ~logger ;
                   recv = ignore_bits ~logger ;
-                  mss ; cwnd = mss ; ssthresh ; ca_acked = 0 ; dup_acks = 0 ; recover = None ;
+                  mss ; cwnd = mss ; ssthresh ; ca_acked = 0 ; dup_acks = 0 ; recovery = Open ;
+                  rtt = None ; rtt_probe = None ; rto = initial_rto ; rto_gen = 0 ;
+                  min_rto_var ; max_rto ; max_timeouts ;
+                  rto_armed = false ; timeouts = 0 ;
                   isn = may_default isn (fun () -> SeqNum.o 0l (*Random.int32 0x7FFFFFFFl*)) ;
                   rcvd_isn = None ;
                   closed = false ; sent_fin = false ;
@@ -606,7 +706,12 @@ struct
                        is_closed = is_closed t } ;
         t
 
-    let may_timeout t = if not (is_established t) then establish_cnx t false
+    let may_timeout t =
+        if not (is_established t) then (
+            establish_cnx t false ;
+            t.cnx_established_cont <- None ;
+            abort t
+        )
     let default_connect_timeout = Clock.Interval.sec 15.
     let connect ?(timeout=default_connect_timeout) t cont =
         t.cnx_established_cont <- Some cont ;

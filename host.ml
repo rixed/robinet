@@ -1032,6 +1032,7 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
                 json_of_optional Ip.Addr.to_json (cur_nameserver t))
             ~setter:(fun v ->
                 t.nameserver <- to_option (Ip.Addr.of_json "nameserver") v) ] ;
+    (* TODO: properties for TCP initial_rto, min_rto_var, max_rto and max_timeouts *)
     Widget.add_actions widget [ ping_action t ] ;
     (* It does not run yet: its supply is its own and was minted switched off,
        and what switches it on is the power-on that building it put in the
