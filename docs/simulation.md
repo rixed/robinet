@@ -526,8 +526,8 @@ be *done* to it, once all of it stands and is answering.
 
 `path` and `action` are required, `params` only when the action takes some.
 The path is relative to the simulation's root — a path and not an id, since the
-list outlives the process that wrote it. The entries run in order, at one
-instant of the clock.
+list outlives the process that wrote it. The entries start in order, at one
+instant of the clock, unless told to wait (below).
 
 An entry may also say when, and how many times:
 
@@ -591,11 +591,10 @@ closes the connection, and a server or a client stops with the power of its
 host or when its part is deleted. The run that started it then ends with what
 it exchanged.
 
-One thing to know before putting much in a list: **it runs at time zero**, so
-anything that has to wait cannot be asked here. A DHCP client waits a few
-seconds before its first request, so a `ping` in the list goes out before the
-host has an address. Give it a `count` large enough to outlive the wait, or ask
-from the interface once the network has settled.
+One thing to know before putting much in a list: **an entry without a `delay`
+runs at time zero**, before anything has settled. A DHCP client waits a few
+seconds before its first request, so an undelayed `ping` goes out before the
+host has an address. Give it a `delay` that outlives the wait.
 
 ## Examples
 
@@ -959,7 +958,7 @@ address would wait out that ARP exchange together and arrive as close as it
 left, so the startup list ends with every router and host-eu emitting a
 gratuitous ARP, and the ports on the ways east accept them. The first frame is
 there only to hold the pair back until those announcements have crossed the
-ocean, since everything in the startup list happens at the same instant.
+ocean, since nothing in that startup list is delayed.
 
 `examples/two-continents-sweep.sh` runs the network once for every combination
 of the four, and prints how far apart the pair arrived next to what the slowest

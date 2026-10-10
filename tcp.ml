@@ -287,7 +287,6 @@ end
 
 (* This TRX encode a TCP socket. Create it with the local and remote ports (so
  * after you received the initial SYN if you want to simulate a listening host). *)
-(* TODO: faire un truc equivalent pour UDP *)
 
 module TRX =
 struct
