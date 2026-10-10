@@ -393,7 +393,8 @@
                                          is not there yet, or no longer. -->
                                     <span x-text="e.action"></span>
                                     <small x-text="(e.path || '/') +
-                                                   (entryParams(e) ? ' \u2014 ' + entryParams(e) : '')"></small>
+                                                   (entryParams(e) ? ' \u2014 ' + entryParams(e) : '') +
+                                                   (scheduleText(e) ? ' \u2014 ' + scheduleText(e) : '')"></small>
                                 </span>
                                 <span class="order">
                                     <button class="outline secondary" :disabled="!online || i === 0"
@@ -826,6 +827,31 @@
                                                 network is loaded, once it is
                                                 built.</small>
                                         </label>
+                                        <!-- Either way, when and how many
+                                             times: left blank, once and
+                                             straight away. -->
+                                        <div class="schedule">
+                                            <label>
+                                                after
+                                                <input type="number" min="0" step="any"
+                                                       placeholder="0" x-model="adding.delay"/>
+                                                <small class="units">s</small>
+                                            </label>
+                                            <label>
+                                                then again
+                                                <input type="number" min="0" step="any"
+                                                       placeholder="never" x-model="adding.repeatAfter"/>
+                                                <small class="units">s after each run ends</small>
+                                            </label>
+                                            <label>
+                                                times
+                                                <input type="number" min="1" step="1" class="times"
+                                                       :placeholder="adding.repeatAfter === '' || adding.repeatAfter === null
+                                                                     ? '1' : 'until cancelled'"
+                                                       x-model="adding.times"/>
+                                                <small class="units">in all</small>
+                                            </label>
+                                        </div>
                                     </div>
 
                                     <footer>
@@ -952,6 +978,10 @@
                                             <td>
                                                 <span x-text="r.action"></span>
                                                 <small class="descr" x-text="runParams(r)"></small>
+                                                <!-- Which round of which loop,
+                                                     for a run that is one. -->
+                                                <small class="descr" x-show="scheduleText(r.schedule)"
+                                                       x-text="roundText(r)"></small>
                                             </td>
                                             <td>
                                                 <span x-text="clock(r.started)"></span>
@@ -973,7 +1003,9 @@
                                                 <button class="outline secondary"
                                                         :disabled="!online"
                                                         :title="r.running
-                                                                ? 'Stop this run'
+                                                                ? (scheduleText(r.schedule)
+                                                                   ? 'Stop this run, and its loop'
+                                                                   : 'Stop this run')
                                                                 : 'Run it again, as it was run'"
                                                         @click="r.running ? cancelRun(r) : rerun(r)"
                                                         x-text="r.running ? 'cancel' : 're-run'"></button>

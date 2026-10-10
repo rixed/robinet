@@ -276,7 +276,8 @@ let json_of_device d =
 let json_of_startup (e : Widget.startup_entry) =
     `Assoc ([ "path", `String e.path ;
               "action", `String e.action ] @
-            optional_fields [ "params", `Assoc e.params ])
+            optional_fields [ "params", `Assoc e.params ] @
+            Action.schedule_fields e.schedule)
 
 let to_json t =
     env_escape @@
@@ -364,7 +365,87 @@ let startup_of_json j : Widget.startup_entry =
     let path = to_string_ (what ^": \"path\"") (member what "path" j) in
     { path ;
       action = to_string_ (what ^": \"action\"") (member what "action" j) ;
-      params = to_assoc_opt (what ^": \"params\"") (member_opt "params" j) }
+      params = to_assoc_opt (what ^": \"params\"") (member_opt "params" j) ;
+      schedule =
+        (try Action.schedule_of_fields (fun name -> member_opt name j)
+        with Widget.Bad_value m -> Widget.bad_value "%s: %s" what m) }
+
+(*$R startup_of_json
+    let sim = Simulation.make ~realtime:false "loops" in
+    let root = sim.root in
+    let w = Widget.make ~parent:root "w" in
+    (* An action that takes one second: *)
+    Widget.add_actions w [
+        Widget.action "tick" ~handler:(fun s ->
+            Simulation.delay w.power (Clock.Interval.sec 1.)
+                (fun () -> Action.stop s) ()) ] ;
+    let tick = Option.get (Action.find w "tick") in
+    let schedule l =
+        Action.schedule_of_fields (fun n -> List.assoc_opt n l |? `Null) in
+    let secs (s : Action.state) = Clock.Time.to_secs s.started in
+    let rounds (s : Action.state) =
+        List.filter (fun (s' : Action.state) -> s'.loop = s.loop)
+                    (Action.runs sim) |> List.rev in
+
+    (* Waits, then starts each round a gap after the end of the one before: *)
+    let first =
+        Action.start ~schedule:(schedule [ "delay", `Int 2 ;
+                                           "repeat_after", `Int 3 ;
+                                           "times", `Int 3 ]) w tick [] in
+    assert_bool "waits" first.waiting ;
+    Simulation.run sim false ;
+    assert_equal ~printer:dump [ 2. ; 6. ; 10. ] (List.map secs (rounds first)) ;
+    assert_equal ~printer:dump [ 1 ; 2 ; 3 ]
+                 (List.map (fun (s : Action.state) -> s.round) (rounds first)) ;
+    assert_bool "all of them done"
+        (List.for_all (fun (s : Action.state) ->
+            match s.ended with Some (_, Value None) -> true | _ -> false
+        ) (rounds first)) ;
+
+    (* Cancelling any round, even one that is over, ends the loop: *)
+    let first =
+        Action.start ~schedule:(schedule [ "repeat_after", `Int 1 ]) w tick [] in
+    Simulation.delay root.power (Clock.Interval.sec 4.5)
+        (fun () -> Action.cancel first) () ;
+    Simulation.run sim false ;
+    assert_equal ~printer:dump None (Action.live_round first) ;
+    assert_equal ~printer:string_of_int 3 (List.length (rounds first)) ;
+
+    (* A round that fails ends the loop: *)
+    let rounds_left = ref 2 in
+    Widget.add_actions w [
+        Widget.action "flaky" ~handler:(fun s ->
+            decr rounds_left ;
+            if !rounds_left > 0 then Action.stop s
+            else Action.fail s "no more") ] ;
+    let first =
+        Action.start ~schedule:(schedule [ "repeat_after", `Int 1 ]) w
+                     (Option.get (Action.find w "flaky")) [] in
+    Simulation.run sim false ;
+    assert_equal ~printer:string_of_int 2 (List.length (rounds first)) ;
+    assert_equal ~printer:dump None (Action.live_round first) ;
+
+    (* A loop with neither a gap nor an end is refused: *)
+    assert_raises (Widget.Bad_value "repeating until stopped needs a \"repeat_after\" above zero")
+        (fun () -> schedule [ "repeat_after", `Int 0 ]) ;
+
+    (* A round waiting to switch its box back on outlives the box's power: *)
+    let box = Widget.make ~parent:root ~own_power:true "box" in
+    let on = Option.get (Action.find box "power on") in
+    let s = Action.start ~schedule:(schedule [ "delay", `Int 1 ]) box on [] in
+    Simulation.power_down box.power ;
+    Simulation.run sim false ;
+    assert_bool "box is on" box.power.on ;
+    assert_bool "having run" (match s.ended with Some (_, Value _) -> true
+                                                | _ -> false) ;
+
+    (* And a startup entry keeps its schedule through JSON: *)
+    let e = Action.entry_of ~schedule:(schedule [ "delay", `Float 1.5 ;
+                                                  "times", `Int 2 ])
+                            w "tick" [] in
+    assert_equal ~printer:(Yojson.Basic.to_string % json_of_startup)
+                 e (startup_of_json (json_of_startup e))
+ *)
 
 let of_expanded_json j =
     let what = "a topology" in
@@ -427,7 +508,11 @@ let of_string ?getenv s =
                            properties = [ "", [ "cut-through", `Bool true ] ; \
                                           "iface#0", [ "MTU", `Int 1500 ] ] } ] ; \
              startup = [ SimTypes.{ path = "a/sw" ; action = "power on" ; \
-                                    params = [ "now", `Bool true ] } ] } in \
+                                    params = [ "now", `Bool true ] ; \
+                                    schedule = \
+                                      { delay = Clock.Interval.sec 2. ; \
+                                        repeat_after = Some (Clock.Interval.sec 5.) ; \
+                                        times = Some 3 } } ] } in \
    to_json (of_string (to_string t)) = to_json t)
   (* Nothing is written that a reader would take for nothing anyway, and it \
      still reads back as what was written: *) \
@@ -435,7 +520,7 @@ let of_string ?getenv s =
              devices = [ { type_ = "host" ; path = "h" ; location = None ; \
                            params = [] ; properties = [ "", [] ] } ] ; \
              startup = [ SimTypes.{ path = "h" ; action = "power on" ; \
-                                    params = [] } ] } in \
+                                    params = [] ; schedule = once } ] } in \
    to_json t = Yojson.Basic.from_string \
      "{\"version\":1,\"name\":\"n\",\
        \"devices\":[{\"type\":\"host\",\"path\":\"h\",\

@@ -80,6 +80,54 @@ let fail (s : state) fmt =
     Printf.ksprintf (fun m -> Simulation.stop_action s (Failed m)) fmt
 
 (*
+ * Schedules
+ *)
+
+(** A schedule from what a document or the API gives for it, [field] answering
+ * [`Null] for what was left out: "delay" before the first run, "repeat_after"
+ * between the end of a run and the start of the next, both in seconds, and
+ * "times" for how many runs in all.
+ *
+ * "repeat_after" alone repeats until stopped, and "times" alone repeats with
+ * no gap. Refuses with {!Widget.Bad_value} a loop with neither a gap nor an
+ * end: a run that is over as soon as it starts would hold the clock for
+ * ever. *)
+let schedule_of_fields field =
+    let secs name =
+        match field name with
+        | `Null -> None
+        | v ->
+            (try Some (Widget.to_float_range ~min:0. v |> Clock.Interval.of_secs)
+            with Widget.Bad_value m -> Widget.bad_value "%S: %s" name m) in
+    let times =
+        match field "times" with
+        | `Null -> None
+        | v ->
+            (try Some (Widget.to_int_range ~min:1 v)
+            with Widget.Bad_value m -> Widget.bad_value "%S: %s" "times" m) in
+    let repeat_after =
+        match secs "repeat_after", times with
+        | None, Some _ -> Some Clock.Interval.zero
+        | r, _ -> r in
+    (match repeat_after, times with
+    | Some gap, None when Clock.Interval.compare gap Clock.Interval.zero <= 0 ->
+        Widget.bad_value "repeating until stopped needs a \"repeat_after\" \
+                          above zero"
+    | _ -> ()) ;
+    { delay = secs "delay" |? Clock.Interval.zero ; repeat_after ; times }
+
+(** The fields of a schedule, as [schedule_of_fields] reads them; none for a
+ * run once, now. *)
+let schedule_fields (s : schedule) =
+    (if Clock.Interval.compare s.delay Clock.Interval.zero > 0 then
+        [ "delay", Widget.json_of_duration s.delay ] else []) @
+    (match s.repeat_after with
+    | None -> []
+    | Some gap ->
+        [ "repeat_after", Widget.json_of_duration gap ] @
+        (match s.times with None -> [] | Some n -> [ "times", `Int n ]))
+
+(*
  * The startup list
  *
  * What is to be run once a network has been built, in order: it is saved with
@@ -93,12 +141,12 @@ type entry = startup_entry
  * its path, since the list outlives this process. Refuses a widget that is not
  * in its own simulation's tree, which cannot happen for one that is still in
  * it. *)
-let entry_of (w : widget) name params =
+let entry_of ?(schedule=once) (w : widget) name params =
     match Widget.path_within (Widget.sim w).root w with
     | None ->
         Widget.bad_value "%s is no longer in the simulation"
             (Widget.full_name w)
-    | Some path -> { path ; action = name ; params }
+    | Some path -> { path ; action = name ; params ; schedule }
 
 let startup (sim : simulation) = sim.startup
 
@@ -122,7 +170,15 @@ let set_startup (sim : simulation) entries =
 let run_entries = Simulation.run_entries
 let run_startup = Simulation.run_startup
 
-(** Stop a run because somebody asked for it to stop.
+(** The run of [s]'s loop that is still going on or waiting, if any: at most
+ * one is, since a round only starts once the one before it is over. *)
+let live_round (s : state) =
+    if s.ended = None then Some s else
+    List.find_opt (fun (s' : state) -> s'.loop = s.loop && s'.ended = None)
+        (Widget.sim s.widget).started_actions
+
+(** Stop a run because somebody asked for it to stop, and with it the loop it
+ * is a round of: the live round of that loop is the one ended.
  *
  * This ends the *record* of the run, and nothing else: what the handler
  * scheduled is the handler's, and nothing here can tell which of a box's
@@ -130,7 +186,8 @@ let run_startup = Simulation.run_startup
  * checks [is_running] in the callbacks it schedules, and gives up whatever it
  * was holding when the answer is no -- which is what {!Host}'s ping does. *)
 let cancel (s : state) =
-    Simulation.stop_action s (Withdrawn Cancelled)
+    Option.may (fun s -> Simulation.stop_action s (Withdrawn Cancelled))
+               (live_round s)
 
 (** The run of [sim] with that id, if there is one. *)
 let find_run (sim : simulation) id =

@@ -914,10 +914,14 @@ paths:
         schema: { type: integer, minimum: 0 }
     post:
       tags: [actions]
-      summary: Stop a run that is still going on.
+      summary: Stop a run that is still going on, and the loop it is part of.
       operationId: cancelActionRun
       description: |
         It ends as `withdrawn`, with "it was cancelled" as its reason.
+
+        Any run of a loop, even one that is over, names the whole loop: what is
+        ended is the round of that loop that is still going on or waiting, and
+        no round follows it.
 
         What this ends is the *record* of the run. What its handler scheduled
         belongs to the handler, and nothing in the simulator can tell which of
@@ -927,7 +931,7 @@ paths:
         what a host's ping does, between two requests and on a reply.
       responses:
         "200":
-          description: The run, as the cancel left it.
+          description: The round that was ended, as the cancel left it.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ActionRun" }
@@ -936,7 +940,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "405":
-          description: That run is already over.
+          description: That run, and its loop if it has one, is already over.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -1055,6 +1059,26 @@ paths:
         action that is over by the time it answers already carries its result,
         and one that is not says it is running. Watch it through
         `/api/simulations/{sim}/actions`.
+
+        When, and how many times, is said in the query string rather than in
+        the body, where it could be taken for parameters: the same `delay`,
+        `repeat_after` and `times` a startup entry has (see `Schedule`). A run
+        that is to wait comes back `waiting`; whether the action can run just
+        now is then asked when it is due, and a no ends that run, and its loop,
+        as `failed`.
+      parameters:
+        - name: delay
+          in: query
+          required: false
+          schema: { type: number, minimum: 0 }
+        - name: repeat_after
+          in: query
+          required: false
+          schema: { type: number, minimum: 0 }
+        - name: times
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
       requestBody:
         required: false
         content:
@@ -1073,8 +1097,8 @@ paths:
         "400":
           description: |
             A parameter that is not one, a parameter the action does not
-            declare, an action that cannot run just now, or a handler that
-            refused. The run is recorded all the same when it was the handler
+            declare, a schedule that is not one, an action that cannot run just
+            now, or a handler that refused. The run is recorded all the same when it was the handler
             that failed: it did start.
           content:
             application/json:
@@ -1094,7 +1118,8 @@ paths:
         can still end, and a cursor that only brought back the new ones would
         leave it reading as running for ever. It stays short because an action
         is a whole campaign and not each of its steps -- a host sending a
-        request a second for an hour is one of these.
+        request a second for an hour is one of these -- and a loop keeps only
+        its last ten finished rounds.
       parameters:
         - name: widget
           in: query
@@ -2034,14 +2059,44 @@ components:
             as they will be read: an action whose parameters gain a default is
             then still run the way the list says. Absent for an action that
             takes none.
+      allOf:
+        - $ref: "#/components/schemas/Schedule"
+
+    Schedule:
+      type: object
+      description: |
+        When an action is to run, and how many times; every field left out for
+        one run, straight away.
+
+        Repeating is a loop, not a timetable: a run never starts before the one
+        before it is over. A run that fails or is withdrawn ends the loop.
+      properties:
+        delay:
+          type: number
+          minimum: 0
+          description: Seconds to wait before the first run.
+        repeat_after:
+          type: number
+          minimum: 0
+          description: |
+            Seconds from the end of one run to the start of the next. Must be
+            above zero when `times` is left out.
+        times:
+          type: integer
+          minimum: 1
+          description: |
+            How many runs in all: until cancelled when left out with
+            `repeat_after` set. Given alone, the runs follow one another with
+            no gap.
 
     ActionRun:
       type: object
       description: |
         One run of one action: what was asked for, of what, when, and what came
         of it.
-      required: [id, widget, widget_name, action, params, origin, started,
-                 stopped, running, how, reason, result]
+      required: [id, widget, widget_name, action, params, origin, schedule,
+                 loop, round, started, waiting, stopped, running, how, reason,
+                 result]
       properties:
         id: { type: integer, minimum: 0 }
         widget:
@@ -2065,7 +2120,27 @@ components:
           description: |
             Where the order came from: the startup list of the network that was
             loaded, or somebody asking for it through this API.
-        started: { $ref: "#/components/schemas/SimTime" }
+        schedule:
+          $ref: "#/components/schemas/Schedule"
+        loop:
+          type: integer
+          minimum: 0
+          description: |
+            The id of the first run of the loop this one is a round of: its own
+            id for a run that is not repeated.
+        round:
+          type: integer
+          minimum: 1
+          description: Which round of that loop this is.
+        started:
+          allOf:
+            - $ref: "#/components/schemas/SimTime"
+          description: When it started, or for a run still waiting, when it is due to.
+        waiting:
+          type: boolean
+          description: |
+            Not started yet: its delay, or the gap after the round before it,
+            is not over. A waiting run is also `running`, and can be cancelled.
         stopped:
           allOf:
             - $ref: "#/components/schemas/SimTime"

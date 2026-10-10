@@ -69,6 +69,23 @@ type device = ..
  * Declared before the types below, and in terms of [Yojson.Basic.t] rather
  * than the [value] that is one of them, so that its field names do not shadow
  * the ones an action and a run already have. *)
+
+(* When an action is to run, and how many times: the same for a startup entry
+ * as for a run asked for through the API.
+ *
+ * Repeating is a loop and not a timetable: the next run starts once the one
+ * before it is over, so that a run lasting longer than the gap never piles
+ * runs up. A run that does not end with a value ends the loop. *)
+type schedule =
+    { (* Before the first run. *)
+      delay : Interval.t ;
+      (* Between the end of one run and the start of the next, or [None] for
+       * an action run only once. *)
+      repeat_after : Interval.t option ;
+      (* How many runs in all, or [None] for as many as it takes to be
+       * stopped. Only read when [repeat_after] is set. *)
+      times : int option }
+
 type startup_entry =
     { (* Which widget it is asked of, as a path relative to the simulation's
        * root (see {!Widget.path_within}). A path and not an id: the list
@@ -78,7 +95,11 @@ type startup_entry =
       action : string ;
       (* As they are to be given, not as they will be read: an action whose
        * parameters gain a default is then still run the way the list says. *)
-      params : (string * Yojson.Basic.t) list }
+      params : (string * Yojson.Basic.t) list ;
+      schedule : schedule }
+
+(* Run once, now: what a startup entry or a run asks for by default. *)
+let once = { delay = Interval.zero ; repeat_after = None ; times = None }
 
 (** {2 Events}
  * They are callbacks depending on a power source.
@@ -535,7 +556,18 @@ and action_state =
       (* What it was told, coerced against the action's parameters. *)
       params : (string * value) list ;
       origin : action_origin ;
+      schedule : schedule ;
+      (* The id of the first run of the loop this one belongs to, its own for
+       * a run that is the first or the only one. *)
+      loop : int ;
+      (* Which run of that loop this is, from 1. *)
+      round : int ;
+      (* When it started, or for a run still [waiting], when it is due to. *)
       started : Time.t ;
+      (* Not started yet: its delay, or the gap after the run before it, is
+       * not over. Its handler has not been called, and it draws on nothing but
+       * the mains until it is. *)
+      mutable waiting : bool ;
       (* When it ended and how, or [None] while it is still running -- or for
        * ever, for a run whose handler simply forgot to end it.
        *
@@ -571,7 +603,7 @@ and withdrawal_reason =
     | PowerDown
     (* The widget it ran on was taken out of the simulation. *)
     | Deleted
-    (* Somebody asked for it to stop.
+    (* Somebody asked for it to stop, and for the loop it is a round of.
      *
      * Ending the run is all this does by itself: what the handler scheduled
      * belongs to the handler, and the simulator cannot tell which of a box's

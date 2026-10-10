@@ -1004,10 +1004,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
  *
  * The requests are spaced by [interval] and the last one is given [timeout] to
  * be answered; the run ends when every request has been answered or that delay
- * has passed, whichever comes first. If the host is switched off in between,
- * neither happens: the delay was an event of the host's own supply and went
- * with it, and the run goes on reading as running. That is the hole {!Action}
- * describes, and this is the first thing to fall into it. *)
+ * has passed, whichever comes first. *)
 let ping_action t =
     let widget = t.trx.widget in
     Widget.action "ping"
@@ -1031,6 +1028,8 @@ let ping_action t =
                                   "min", optional Duration ;
                                   "avg", optional Duration ;
                                   "max", optional Duration |])
+        (* Off, it would schedule nothing, and so never end. *)
+        ~can_run:(fun () -> widget.power.on)
         ~handler:(fun state ->
             let target = Widget.arg_string state.params "target"
             and count = Widget.arg_int state.params "count"
@@ -1274,6 +1273,7 @@ let server_action t ~proto ~peers ~max_size ~listen ~unlisten ~serve =
         ~params:Widget.[ param "port" ~kind:Int ~descr:"The port to listen to." ;
                          behavior_param ~max_size ]
         ~result:result_kind
+        ~can_run:(fun () -> host.power.on)
         ~handler:(fun state ->
             let port = port_arg state.params "port"
             and behavior = behavior_of_json (Widget.arg state.params "behavior") in
@@ -1365,6 +1365,7 @@ let client_action t ~proto ~max_size ~connect =
             param "volume" ~kind:(optional Int) ~units:"bytes"
                 ~descr:"Stop once that many bytes were sent and received." ]
         ~result:result_kind
+        ~can_run:(fun () -> host.power.on)
         ~handler:(fun state ->
             let params = state.params in
             let target = Widget.arg_string params "target"
@@ -1678,6 +1679,9 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
     Simulation.power_down b.trx.widget.power ;
     assert_bool "a server goes with the power" (child b "server-tcp:7" = None) ;
     assert_bool "and its run" (not (Action.is_running srv)) ;
+    assert_bool "nothing starts on a host that is off"
+        (refused b.trx.widget "start TCP server" [ "port", `Int 7 ] &&
+         refused b.trx.widget "ping" [ "target", `String "192.168.0.1" ]) ;
     Simulation.power_up b.trx.widget.power ;
     ignore (run b.trx.widget "start TCP server" [ "port", `Int 7 ]) ;
     assert_bool "leaving its port free" (child b "server-tcp:7" <> None)

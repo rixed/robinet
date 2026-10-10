@@ -524,6 +524,28 @@ The path is relative to the simulation's root — a path and not an id, since th
 list outlives the process that wrote it. The entries run in order, at one
 instant of the clock.
 
+An entry may also say when, and how many times:
+
+```json
+{ "path": "h1", "action": "ping", "params": { "target": "192.168.0.2" },
+  "delay": 10, "repeat_after": 5, "times": 3 }
+```
+
+| field | means | left out |
+| --- | --- | --- |
+| `delay` | seconds to wait before the first run | `0`: straight away |
+| `repeat_after` | seconds from the end of one run to the start of the next | no repeat |
+| `times` | how many runs in all, at least 1 | until cancelled, if `repeat_after` is set; once otherwise |
+
+`times` without `repeat_after` repeats with no gap. Repeating until cancelled
+needs a `repeat_after` above zero.
+
+Repeating is a loop, not a timetable: a run never starts before the one before
+it is over, however long that one takes. A run that fails, or is withdrawn —
+cancelled, its widget deleted, or its box switched off while it ran — ends the
+loop, and cancelling any run of a loop ends the whole of it. The wait between two runs does not draw on the box's
+own power, so a loop can switch a box off and on again.
+
 **Every box is born dark**, and what switches it on is its `power on` here. So:
 
 - **An empty or absent `startup` means the power-ons the devices registered as

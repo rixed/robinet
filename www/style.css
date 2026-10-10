@@ -1038,6 +1038,28 @@ form.creator .when label {
     font-size: .9rem;
     line-height: 1.4;
 }
+form.creator .when .schedule {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .3rem 1rem;
+    margin: .3rem 0 0 0;
+}
+form.creator .when .schedule label {
+    display: inline-flex;
+    align-items: baseline;
+    white-space: nowrap;
+}
+form.creator .when .schedule small.units {
+    margin: 0;
+}
+form.creator .when .schedule input {
+    display: inline-block;
+    width: 6rem;
+    margin: 0 .3rem;
+    padding: .1rem .4rem;
+    height: auto;
+}
+form.creator .when .schedule input.times { width: 10.5rem; }
 form.creator .when .descr {
     display: block;
     /* Under the words rather than under the box, which is what the eye

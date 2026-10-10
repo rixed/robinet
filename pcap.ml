@@ -1188,7 +1188,8 @@ let replayer ~parent ?location ?fname ?(loop=false) name =
             ~descr:"Play the file into whatever is plugged into this."
             (* Nothing to play, nothing to start: the file comes first. *)
             ~can_run:(fun () ->
-                replayer.file <> None && not replayer.replaying)
+                widget.power.on && replayer.file <> None &&
+                not replayer.replaying)
             ~handler:(fun s -> set_replaying true ; Action.stop s) ;
         action "stop replay"
             ~descr:"Stop where it is; starting again goes on from there."

@@ -369,6 +369,15 @@ const withUnits = (v, units) => {
                                       : num(v) + (units ? ' ' + units : '')
 }
 
+/* A schedule as the query string of a request to run an action. */
+const scheduleQuery = (s) => {
+    const q = new URLSearchParams()
+    for (const k of [ 'delay', 'repeat_after', 'times' ])
+        if (s && s[k] !== undefined && s[k] !== null) q.set(k, s[k])
+    const t = q.toString()
+    return t ? '?' + t : ''
+}
+
 const dur = (s) => {
     /* A simulation counts in picoseconds, and the short delays it deals in are
      * short indeed: a metre of cable is five nanoseconds, and a round trip
@@ -3812,6 +3821,27 @@ document.addEventListener('alpine:init', () => {
             this.putStartup(sim, l)
         },
 
+        /* When, and how many times, in a line: nothing for once, now. Takes
+         * a startup entry or a run's "schedule", which have the same fields. */
+        scheduleText(s) {
+            if (!s) return ''
+            const l = []
+            if (s.delay) l.push('after ' + dur(s.delay))
+            if (s.repeat_after !== undefined && s.repeat_after !== null) {
+                l.push(s.times ? s.times + ' times' : 'until cancelled')
+                if (s.repeat_after) l.push(dur(s.repeat_after) + ' apart')
+            }
+            return l.join(', ')
+        },
+
+        /* Which round of its loop a run is. */
+        roundText(run) {
+            const s = run.schedule
+            if (s.repeat_after === undefined) return this.scheduleText(s)
+            return 'round ' + run.round + (s.times ? ' of ' + s.times : '') +
+                   ' \u2014 ' + this.scheduleText(s)
+        },
+
         /* Its parameters in a line, as the runs table shows a run's. */
         entryParams(e) {
             return Object.entries(e.params || {})
@@ -3865,6 +3895,9 @@ document.addEventListener('alpine:init', () => {
                  * again, at every startup and not now, or both. Neither is
                  * the way to say "never", which is what Cancel is for. */
                 now: true, atStartup: false,
+                /* In seconds, as typed: blank is the default -- straight
+                 * away, not again. */
+                delay: '', repeatAfter: '', times: '',
                 fields: a.params.map(p => ({
                     name: p.name, descr: p.descr, units: p.units, kind: p.kind,
                     placeholder: p.placeholder,
@@ -3888,6 +3921,11 @@ document.addEventListener('alpine:init', () => {
             if (!a.now && !a.atStartup) return
             const params = {}
             for (const f of a.fields) params[f.name] = this.fieldValue(f)
+            const schedule = {}
+            const set = v => v !== '' && v !== null && v !== undefined
+            if (set(a.delay)) schedule.delay = Number(a.delay)
+            if (set(a.repeatAfter)) schedule.repeat_after = Number(a.repeatAfter)
+            if (set(a.times)) schedule.times = Number(a.times)
             a.busy = true
             /* The startup list first: it is a list being edited, and it must
              * not be left unwritten because the run itself was refused. */
@@ -3897,14 +3935,15 @@ document.addEventListener('alpine:init', () => {
                     api(`/simulations/${a.sim}/startup`,
                         { method: 'POST',
                           body: JSON.stringify({ path, action: a.type,
-                                                 params }) }))
+                                                 params, ...schedule }) }))
                 if (!r.ok) { a.busy = false ; a.error = r.error.message ; return }
                 await this.loadStartup(a.sim)
             }
             if (a.now) {
                 const r = await this.exchange(() =>
                     api(`/simulations/${a.sim}/widgets/${a.widget}` +
-                        `/actions/${encodeURIComponent(a.type)}`,
+                        `/actions/${encodeURIComponent(a.type)}` +
+                        scheduleQuery(schedule),
                         { method: 'POST', body: JSON.stringify(params) }))
                 a.busy = false
                 /* Whatever it refused, said beside the form it was refused
@@ -3960,6 +3999,7 @@ document.addEventListener('alpine:init', () => {
          * among the widget's -- which is only a widget rebuilt under the
          * reader -- falls back on the bare values. */
         runResult(run) {
+            if (run.waiting) return 'Waiting until ' + this.clock(run.started)
             if (run.running) return 'running'
             /* How it ended comes before what it came to: a run the simulator
              * took away, or one that failed, has no value to show and its
@@ -4003,7 +4043,8 @@ document.addEventListener('alpine:init', () => {
         async rerun(run) {
             const r = await this.exchange(() =>
                 api(`/simulations/${this.selected.sim}/widgets/${run.widget}` +
-                    `/actions/${encodeURIComponent(run.action)}`,
+                    `/actions/${encodeURIComponent(run.action)}` +
+                    scheduleQuery(run.schedule),
                     { method: 'POST', body: JSON.stringify(run.params || {}) }))
             if (!r.ok) { this.actionsError = r.error.message ; return }
             await this.loadActions()
@@ -4011,6 +4052,7 @@ document.addEventListener('alpine:init', () => {
 
         /* How long a run lasted, or how long it has been going on. */
         runLength(run, now) {
+            if (run.waiting) return ''
             const end = run.running ? now : run.stopped
             return end === null || end === undefined ? ''
                  : dur(Math.max(0, end - run.started))
@@ -4036,6 +4078,11 @@ document.addEventListener('alpine:init', () => {
             if (a.mode === 'action') return this.submitRun()
             const params = {}
             for (const f of a.fields) params[f.name] = this.fieldValue(f)
+            const schedule = {}
+            const set = v => v !== '' && v !== null && v !== undefined
+            if (set(a.delay)) schedule.delay = Number(a.delay)
+            if (set(a.repeatAfter)) schedule.repeat_after = Number(a.repeatAfter)
+            if (set(a.times)) schedule.times = Number(a.times)
             a.busy = true
             const r = await this.exchange(() =>
                 api(`/simulations/${a.sim}/widgets`,

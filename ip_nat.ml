@@ -215,6 +215,7 @@ struct
             action "flush"
                 ~descr:"Forget every tracked connection: established ones \
                         break, as their replies no longer match anything."
+                ~can_run:(fun () -> widget.power.on)
                 ~handler:(fun s -> reset t ; Action.stop s) ] ;
         t
 

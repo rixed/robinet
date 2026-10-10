@@ -1382,7 +1382,15 @@ let json_of_action_state (s : Widget.action_state) =
              "origin", `String (match s.origin with
                                | Startup -> "startup"
                                | Api -> "api") ;
+             (* When it was asked to run, and how many times: the same fields
+                a startup entry has, left out for a run once, now. *)
+             "schedule", `Assoc (Action.schedule_fields s.schedule) ;
+             (* The first run of its loop, and which round of it this is. *)
+             "loop", `Int s.loop ;
+             "round", `Int s.round ;
+             (* For a run still waiting, when it is due to. *)
              "started", Widget.json_of_time s.started ;
+             "waiting", `Bool s.waiting ;
              (* Null while it is still going on -- or for ever, for a run whose
                 handler simply forgot to end it: see {!Action}. *)
              "stopped", (match s.ended with
@@ -1468,10 +1476,14 @@ let get_actions _mth matches _vars _qry_body resp =
  * their default; anything the action does not declare is refused rather than
  * ignored, exactly as it is when a device is built.
  *
+ * When and how many times is the query string's: ?delay=, ?repeat_after= and
+ * ?times=, as a startup entry has them (see {!Action.schedule_of_fields}).
+ * Not in the body, where they could be taken for parameters.
+ *
  * What comes back is the run that was started, which is what the interface
  * then watches: an action that is over by the time the handler returns already
  * has its result in it, and one that is not says it is running. *)
-let run_action _mth matches _vars qry_body resp =
+let run_action _mth matches vars qry_body resp =
     let sim = simulation_of_matches matches 1 in
     Simulation.borrow sim (fun () ->
         let w = widget_of_matches sim matches 2 in
@@ -1493,7 +1505,13 @@ let run_action _mth matches _vars qry_body resp =
                 | j ->
                     bad_request "Parameters must be an object, not %s"
                         (Yojson.Basic.to_string j)) in
-        match Action.start w a given with
+        let schedule =
+            try Action.schedule_of_fields (fun name ->
+                    match Hashtbl.find_option vars name with
+                    | None | Some "" -> `Null
+                    | Some v -> `String v)
+            with Widget.Bad_value m -> bad_request "Cannot %s: %s" name m in
+        match Action.start ~schedule w a given with
         | exception Widget.Bad_value m ->
             bad_request "Cannot %s: %s" name m
         | exception e ->
@@ -1503,12 +1521,14 @@ let run_action _mth matches _vars qry_body resp =
             bad_request "Cannot %s: %s" name (Printexc.to_string e)
         | s -> respond resp (json_of_action_state s))
 
-(* Stop a run that is still going on.
+(* Stop a run that is still going on or waiting, and with it the loop it is a
+ * round of: any round of a loop names the whole of it, and what comes back is
+ * the round that was ended.
  *
  * What this ends is the record of the run: what its handler scheduled is the
  * handler's, and an action worth cancelling gives up what it was holding when
- * it notices (see {!Action.cancel}). A run that is already over is refused
- * rather than quietly reopened. *)
+ * it notices (see {!Action.cancel}). A run whose loop is already over is
+ * refused rather than quietly reopened. *)
 let cancel_action _mth matches _vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
     Simulation.borrow sim (fun () ->
@@ -1521,12 +1541,14 @@ let cancel_action _mth matches _vars _qry_body resp =
         | None ->
             not_found "Simulation %s has no run %d" (Simulation.name sim) id
         | Some run ->
-            if not (Action.is_running run) then
+            match Action.live_round run with
+            | None ->
                 raise (Opache.ResourceError (
                     405, Printf.sprintf "Run %d of %S is already over" id
-                             run.action_name)) ;
-            Action.cancel run ;
-            respond resp (json_of_action_state run))
+                             run.action_name))
+            | Some live ->
+                Action.cancel live ;
+                respond resp (json_of_action_state live))
 
 (* Every run of this simulation, most recent first; ?widget=<id> for the runs
  * of one widget.
@@ -1535,7 +1557,7 @@ let cancel_action _mth matches _vars _qry_body resp =
  * still end, and a cursor that only ever brought back the new ones would leave
  * it reading as running for ever. It stays short because an action is a whole
  * campaign and not each of its steps -- one host sending a request a second
- * for an hour is one of these. *)
+ * for an hour is one of these -- and a loop keeps only its last few rounds. *)
 let get_action_runs _mth matches vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
     Simulation.borrow sim (fun () ->

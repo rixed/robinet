@@ -201,6 +201,42 @@ let now (t : t) = !(t.now)
 
 let is_running (t : t) = t.continue
 
+(** [at p ts f x] will execute [f x] when the clock of [p]'s simulation reaches
+ * time [ts] -- or never, if [p] is switched off by then.
+ *
+ * Nothing is scheduled at all while [p] is off, and [power_down] withdraws
+ * what it had already scheduled, which is why the dispatcher never has to look
+ * at a power source: everything left in the queue is powered. *)
+let at (p : power) (ts : Time.t) f x =
+    let t = p.sim in
+    if not p.on then (
+        if debug then Printf.printf "Clock: dropping an event for time %s: %s is off\n%!" (Time.to_string ts) p.name ;
+        Log.(log t.root.logger Debug (lazy (Printf.sprintf
+            "Not scheduling anything at %s: %s is off"
+            (Time.to_string ts) p.name)))
+    ) else (
+        let epsilon = Interval.o 1 in
+        let rec loop ts =
+            (* If ts was already bound in t.events, its previous binding disappears.
+               Also, we do not like the idea of several sequential events having the same TS. *)
+            if Events.mem ts t.events then (
+                loop (Time.add ts epsilon)
+            ) else (
+                if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.diff ts (now t))) ;
+                t.events <- Events.add ts (p, (fun () -> f x)) t.events
+            ) in
+        with_lock t loop ts ;
+        signal_me t ()
+    )
+
+(** [delay d f x] will delay the execution of [f x] by the interval [d]. *)
+let delay (p : power) d f x =
+    at p (Time.add (now p.sim) d) f x
+
+let asap (p : power) f x =
+    (* FIXME: would be more precise and fast to have a dedicated list for asap events *)
+    delay p Interval.zero f x
+
 (* {2 Ending a run of an action}
  *
  * Here and not in action.ml, which is compiled after this: the list of runs is
@@ -217,10 +253,47 @@ let result_text = function
     | Withdrawn Deleted -> "cut short: it was deleted"
     | Withdrawn Cancelled -> "cut short: it was cancelled"
 
+(* Runs are numbered across the process, as widgets are, although the interface
+ * only ever names one within a simulation. *)
+let next_action_id =
+    let seq = ref 0 in
+    fun () ->
+        let id = !seq in
+        incr seq ;
+        id
+
+(** The action of [w] by that name, if it has one. *)
+let find_action (w : widget) name =
+    List.find_opt (fun (a : action) -> a.name = name) w.actions
+
+(* A run in a few words, for the logs: what was asked for, with what. *)
+let describe_run (s : action_state) =
+    if s.params = [] then s.action_name else
+    Printf.sprintf "%s (%s)" s.action_name
+        (List.map (fun (n, v) ->
+            n ^"="^ Yojson.Basic.to_string v
+        ) s.params |> String.concat ", ")
+
+(* How many finished runs of one loop are kept in the list of runs: a loop has
+ * no end of its own, and the list is handed out whole. *)
+let kept_rounds = 10
+
+(* Record [s] as a run of [t], forgetting the rounds of its loop more than
+ * [kept_rounds] before it. *)
+let record_run (t : t) (s : action_state) =
+    t.started_actions <-
+        s :: List.filter (fun (s' : action_state) ->
+            s'.loop <> s.loop || s.round - s'.round <= kept_rounds
+        ) t.started_actions
+
 (** Record that this run is over, and how. A run that has already ended is
  * left as it was: the first ending is the true one, and a handler calling this
- * twice is a handler disagreeing with itself. *)
-let stop_action (s : action_state) result =
+ * twice is a handler disagreeing with itself.
+ *
+ * A run of a loop that ends with a value has the next round of the loop wait
+ * for its turn; one that fails or is withdrawn ends the loop, so that a loop
+ * cannot go on failing for ever. *)
+let rec stop_action (s : action_state) result =
     let t = Widget.sim s.widget in
     with_lock t (fun () ->
         match s.ended with
@@ -230,7 +303,57 @@ let stop_action (s : action_state) result =
         | None ->
             s.ended <- Some (now t, result) ;
             Log.(log s.widget.logger Info (lazy (Printf.sprintf "%s: %s"
-                s.action_name (result_text result))))) ()
+                s.action_name (result_text result)))) ;
+            (match result, s.schedule.repeat_after with
+            | (Failed _ | Withdrawn _), _ | _, None -> ()
+            | Value _, Some gap ->
+                if Option.map_default (fun n -> s.round < n) true
+                                      s.schedule.times then
+                    wait_for_round t
+                        { s with id = next_action_id () ;
+                                 round = s.round + 1 ;
+                                 started = Time.add (now t) gap ;
+                                 waiting = true ;
+                                 ended = None })) ()
+
+(* Record [s], which is waiting, and have it start when it is due.
+ *
+ * The wait is paid for by the mains and not by the widget's own source: what
+ * is to be done may well be switching that source back on. *)
+and wait_for_round (t : t) (s : action_state) =
+    record_run t s ;
+    at t.root.power s.started (fun () ->
+        (* Ended while it waited: cancelled, or its widget taken away. *)
+        if s.ended = None then
+            try fire s
+            with e ->
+                Log.(log s.widget.logger Error (lazy (Printf.sprintf
+                    "Cannot %s: %s" s.action_name (Printexc.to_string e))))
+    ) ()
+
+(* Start [s], which is due: what is refused or raised ends it as [Failed], and
+ * goes on out to the caller. *)
+and fire (s : action_state) =
+    s.waiting <- false ;
+    let fail e =
+        stop_action s (Failed (match e with
+            | Widget.Bad_value m -> m
+            | e -> Printexc.to_string e)) ;
+        raise e in
+    match find_action s.widget s.action_name with
+    | None ->
+        fail (Widget.Bad_value (Printf.sprintf "%s can no longer %s"
+                (Widget.full_name s.widget) s.action_name))
+    | Some a ->
+        if not (a.can_run ()) then
+            fail (Widget.Bad_value (Printf.sprintf "%s cannot %s just now"
+                    (Widget.full_name s.widget) s.action_name)) ;
+        Log.(log s.widget.logger Info (lazy (Printf.sprintf "Running %s"
+                                              (describe_run s)))) ;
+        (* A handler that raises has ended this run, whatever it meant to do,
+           and the run must say so rather than wait for ever on work that was
+           never scheduled. *)
+        (try a.handler s with e -> fail e)
 
 (* Every run of [ws] that is still going on, ended as [reason] says.
  *
@@ -238,11 +361,15 @@ let stop_action (s : action_state) result =
  * anything scheduled on their behalf: a run is recorded against the widget it
  * was asked of, and following what it really touched is the book-keeping this
  * design deliberately does without (see the plan). Nothing today starts a run
- * on one widget and schedules it on another's source. *)
+ * on one widget and schedules it on another's source.
+ *
+ * A run still waiting has nothing of its own to lose with the power, and is
+ * left to start when it is due. *)
 let withdraw_runs (t : t) ws reason =
     if t.started_actions <> [] then (
         let doomed (s : action_state) =
-            s.ended = None && List.memq s.widget ws in
+            s.ended = None && List.memq s.widget ws &&
+            not (s.waiting && reason = PowerDown) in
         List.filter doomed t.started_actions |>
         List.iter (fun s -> stop_action s (Withdrawn reason)))
 
@@ -359,42 +486,6 @@ let saved (t : t) = t.unsaved <- false
 (** Whether anything has been done to it since. *)
 let unsaved (t : t) = t.unsaved
 
-(** [at p ts f x] will execute [f x] when the clock of [p]'s simulation reaches
- * time [ts] -- or never, if [p] is switched off by then.
- *
- * Nothing is scheduled at all while [p] is off, and [power_down] withdraws
- * what it had already scheduled, which is why the dispatcher never has to look
- * at a power source: everything left in the queue is powered. *)
-let at (p : power) (ts : Time.t) f x =
-    let t = p.sim in
-    if not p.on then (
-        if debug then Printf.printf "Clock: dropping an event for time %s: %s is off\n%!" (Time.to_string ts) p.name ;
-        Log.(log t.root.logger Debug (lazy (Printf.sprintf
-            "Not scheduling anything at %s: %s is off"
-            (Time.to_string ts) p.name)))
-    ) else (
-        let epsilon = Interval.o 1 in
-        let rec loop ts =
-            (* If ts was already bound in t.events, its previous binding disappears.
-               Also, we do not like the idea of several sequential events having the same TS. *)
-            if Events.mem ts t.events then (
-                loop (Time.add ts epsilon)
-            ) else (
-                if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.diff ts (now t))) ;
-                t.events <- Events.add ts (p, (fun () -> f x)) t.events
-            ) in
-        with_lock t loop ts ;
-        signal_me t ()
-    )
-
-(** [delay d f x] will delay the execution of [f x] by the interval [d]. *)
-let delay (p : power) d f x =
-    at p (Time.add (now p.sim) d) f x
-
-let asap (p : power) f x =
-    (* FIXME: would be more precise and fast to have a dedicated list for asap events *)
-    delay p Interval.zero f x
-
 (* The widgets drawing on [p], in tree order: found by walking rather than by
  * registration, so that a widget destroyed or moved needs no unregistering and
  * cannot be called after it is gone. Walked on switching only, which is a
@@ -462,65 +553,54 @@ let power_down (p : power) =
  * one of its actions, and parameters to read -- is all declared before this
  * point. {!Action} is the door a caller uses onto this. *)
 
-(* Runs are numbered across the process, as widgets are, although the interface
- * only ever names one within a simulation. *)
-let next_action_id =
-    let seq = ref 0 in
-    fun () ->
-        let id = !seq in
-        incr seq ;
-        id
-
-(** The action of [w] by that name, if it has one. *)
-let find_action (w : widget) name =
-    List.find_opt (fun (a : action) -> a.name = name) w.actions
-
-(* A run in a few words, for the logs: what was asked for, with what. *)
-let describe_run (s : action_state) =
-    if s.params = [] then s.action_name else
-    Printf.sprintf "%s (%s)" s.action_name
-        (List.map (fun (n, v) ->
-            n ^"="^ Yojson.Basic.to_string v
-        ) s.params |> String.concat ", ")
-
 (** Run [a] on [w] with [given] as its parameters: those the action declares,
- * the ones left out taking their default.
+ * the ones left out taking their default. When, and how many times, is what
+ * [schedule] says: by default once, now.
  *
  * Refuses with {!Widget.Bad_value} -- which the API answers with a 400, as it
  * does for a setter -- what cannot be read as the parameters the action
- * declares, and what the action itself says it cannot do just now.
+ * declares, and, for a run that is to start now, what the action itself says
+ * it cannot do just now. A run that is to wait is asked that when it is due,
+ * and is recorded as failed if the answer is no.
  *
- * What the handler raises comes back out as it is, and the run stays recorded:
- * it did start, and a run that failed on its first step is worth seeing. *)
-let start_action ?(origin=Api) (w : widget) (a : action) given =
+ * What the handler of a run started now raises comes back out as it is, and
+ * the run stays recorded: it did start, and a run that failed on its first
+ * step is worth seeing. *)
+let start_action ?(origin=Api) ?(schedule=once) (w : widget) (a : action)
+                 given =
     let t = Widget.sim w in
     with_lock t (fun () ->
-        if not (a.can_run ()) then
+        let immediate = Interval.compare schedule.delay Interval.zero <= 0 in
+        if immediate && not (a.can_run ()) then
             Widget.bad_value "%s cannot %s just now" (Widget.full_name w) a.name ;
         let params = Widget.args_of a.name a.params given in
+        let id = next_action_id () in
         let s =
-            { id = next_action_id () ;
+            { id ;
               widget = w ;
               action_name = a.name ;
               params ;
               origin ;
-              started = now t ;
+              schedule ;
+              loop = id ;
+              round = 1 ;
+              started = Time.add (now t) schedule.delay ;
+              waiting = true ;
               ended = None } in
-        t.started_actions <- s :: t.started_actions ;
-        Log.(log w.logger Info (lazy (Printf.sprintf "Running %s"
-                                          (describe_run s)))) ;
-        (* A handler that raises has ended this run, whatever it meant to do,
-           and the run must say so rather than wait for ever on work that was
-           never scheduled. The exception goes on out to whoever asked -- the
-           API answers it with a 400 -- and what is recorded here is what the
-           reader will find afterwards. *)
-        (match a.handler s with
-        | () -> ()
-        | exception e ->
-            stop_action s (Failed (match e with
-                | Widget.Bad_value m -> m
-                | e -> Printexc.to_string e)) ;
-            raise e) ;
+        if immediate then (
+            record_run t s ;
+            try fire s
+            with e ->
+                (* Answered with an error, so no loop goes on behind it. *)
+                List.iter (fun (s' : action_state) ->
+                    if s'.loop = s.loop && s'.ended = None then
+                        stop_action s' (Withdrawn Cancelled)
+                ) t.started_actions ;
+                raise e
+        ) else (
+            Log.(log w.logger Info (lazy (Printf.sprintf "Will run %s in %s"
+                    (describe_run s) (Interval.to_string schedule.delay)))) ;
+            wait_for_round t s) ;
         s) ()
 
 (** Run those entries of a startup list, in order, each on the widget its path
@@ -545,7 +625,8 @@ let run_entries (t : t) entries =
                 fail "Cannot run %S at startup: %s cannot do that" e.action
                     (Widget.full_name w)
             | Some a ->
-                (match start_action ~origin:Startup w a e.params with
+                (match start_action ~origin:Startup ~schedule:e.schedule
+                                    w a e.params with
                 | exception ex ->
                     fail "Cannot run %S at startup on %s: %s" e.action
                         (Widget.full_name w)
@@ -605,7 +686,8 @@ let register_power_on (w : widget) =
        path. *)
     | None -> ()
     | Some path ->
-        t.startup <- t.startup @ [ { path ; action = "power on" ; params = [] } ]
+        t.startup <- t.startup @ [ { path ; action = "power on" ; params = [] ;
+                                      schedule = once } ]
 
 let () =
     Widget.on_own_power := (fun w on ->
