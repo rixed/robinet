@@ -270,8 +270,10 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
          * configuration has become; the one it replaces goes with it, or a
          * gateway switched off and on again would grow another pair of parts
          * every time. *)
-        Option.may (fun (st : Dhcpd.State.t) -> Simulation.remove_widget st.Dhcpd.State.widget)
-                   gw.dhcp_state ;
+        Option.may (fun (st : Dhcpd.State.t) ->
+            Simulation.remove_widget st.Dhcpd.State.widget ;
+            h.trx.udp_server_stop (Udp.Port.o 67)
+        ) gw.dhcp_state ;
         (* Get from the host what could be edited there (TODO: dhcp_mtu,
          * lease_time_sec etc could also be part of the config) *)
         let netmask = h.netmask in
@@ -283,8 +285,10 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
         (* TODO: register a callback when leasing/releasing that updates the dns lookup function *)
         Dhcpd.serve st h.trx in
     let start_dns gw =
-        Option.may (fun (st : Named.State.t) -> Simulation.remove_widget st.Named.State.widget)
-                   gw.dns_state ;
+        Option.may (fun (st : Named.State.t) ->
+            Simulation.remove_widget st.Named.State.widget ;
+            h.trx.udp_server_stop (Udp.Port.o 53)
+        ) gw.dns_state ;
         let st =
             Named.State.make ~parent:h.trx.widget (fun _ -> None) in (* Delegate everything to nameserver *)
         gw.dns_state <- Some st ;
