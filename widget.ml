@@ -303,7 +303,7 @@ let record fields =
  *)
 
 (** A value that is one of those named shapes, each carrying what its own kind
- * says.
+ * says, or nothing for a case with no kind.
  *
  * Names are what a case is known by on the wire, so there must be no two alike
  * and none empty -- the same rule as a record's fields, and for the same
@@ -312,7 +312,7 @@ let variant cases =
     check_fields "variant" cases ;
     Array.iter (fun (name, k) ->
         match k with
-        | Metric ->
+        | Some (Metric as k) ->
             invalid_arg ("Widget.variant: case "^ name ^" cannot be "^
                          kind_name k)
         | _ -> ()
@@ -320,13 +320,14 @@ let variant cases =
     Variant cases
 
 (*$T variant
-  variant [| "a", Int ; "b", record [| "c", Int |] |] = \
-      Variant [| "a", Int ; "b", Record [| "c", Int |] |]
+  variant [| "a", Some Int ; "b", Some (record [| "c", Int |]) |] = \
+      Variant [| "a", Some Int ; "b", Some (Record [| "c", Int |]) |]
+  variant [| "a", None |] = Variant [| "a", None |]
   (try ignore (variant [||]) ; false with Invalid_argument _ -> true)
-  (try ignore (variant [| "a", Int ; "a", Float |]) ; \
+  (try ignore (variant [| "a", Some Int ; "a", None |]) ; \
    false with Invalid_argument _ -> true)
-  (try ignore (variant [| "", Int |]) ; false with Invalid_argument _ -> true)
-  (try ignore (variant [| "a", Metric |]) ; \
+  (try ignore (variant [| "", Some Int |]) ; false with Invalid_argument _ -> true)
+  (try ignore (variant [| "a", Some Metric |]) ; \
    false with Invalid_argument _ -> true)
  *)
 
@@ -711,7 +712,11 @@ let rec check_value ?(name="value") k v =
             | None ->
                 bad_value "%s: %S is none of its %d shapes" name case
                     (Array.length cases)
-            | Some (_, k) -> check_value ~name:(name ^"."^ case) k v
+            | Some (_, Some k) -> check_value ~name:(name ^"."^ case) k v
+            | Some (_, None) ->
+                if v <> `Null then
+                    bad_value "%s.%s carries nothing, not %s" name case
+                        (Yojson.Basic.to_string v)
         ) v
     | (Ipv4 | Ipv6), `String s ->
         let family = if k = Ipv4 then Unix.PF_INET else Unix.PF_INET6 in
@@ -755,7 +760,8 @@ let rec check_value ?(name="value") k v =
   check_value Bytes (`String "de ad") = ()
   check_value (record [| "a", Int |]) (`Assoc [ "a", `Int 1 ]) = ()
   check_value (list (row [| "a", Int |])) (`List [ `Assoc [ "a", `Int 1 ] ]) = ()
-  check_value (variant [| "a", Int |]) (`Assoc [ "a", `Int 1 ]) = ()
+  check_value (variant [| "a", Some Int |]) (`Assoc [ "a", `Int 1 ]) = ()
+  check_value (variant [| "a", None |]) (`Assoc [ "a", `Null ]) = ()
   check_value (one_of ~range:(0, 9) [| 3, "c" |]) (`Int 7) = ()
   (try check_value Int (`String "1") ; false with Bad_value _ -> true)
   (try check_value (IRange (0, 9)) (`Int 10) ; false with Bad_value _ -> true)
@@ -766,7 +772,9 @@ let rec check_value ?(name="value") k v =
   (try check_value (record [| "a", Int |]) \
          (`Assoc [ "a", `Int 1 ; "b", `Int 2 ]) ; false \
    with Bad_value _ -> true)
-  (try check_value (variant [| "a", Int |]) (`Assoc [ "b", `Int 1 ]) ; false \
+  (try check_value (variant [| "a", Some Int |]) (`Assoc [ "b", `Int 1 ]) ; false \
+   with Bad_value _ -> true)
+  (try check_value (variant [| "a", None |]) (`Assoc [ "a", `Int 1 ]) ; false \
    with Bad_value _ -> true)
  *)
 
@@ -865,8 +873,13 @@ let rec coerce name (kind : kind) v =
             | None ->
                 bad_value "%s: %S is none of its %d shapes" name case
                     (Array.length cases)
-            | Some (_, k) ->
+            | Some (_, Some k) ->
                 `Assoc [ case, coerce (name ^"."^ case) k v ]
+            | Some (_, None) ->
+                if v <> `Null then
+                    bad_value "%s.%s carries nothing, not %s" name case
+                        (Yojson.Basic.to_string v) ;
+                `Assoc [ case, `Null ]
         ) v
     | Metric ->
         (* Nothing has one, and nothing should: a metric is what a widget has
@@ -905,18 +918,23 @@ let rec coerce name (kind : kind) v =
    case: what it carries is then read as that case's own kind says. *)
 (*$= coerce & ~printer:Yojson.Basic.to_string
   (`Assoc [ "ids", `Assoc [ "id", `Int 1 ] ]) \
-    (coerce "v" (variant [| "ids", row [| "id", Int |] ; \
-                            "mtu", Int |]) \
+    (coerce "v" (variant [| "ids", Some (row [| "id", Int |]) ; \
+                            "mtu", Some Int |]) \
                 (`Assoc [ "ids", `Assoc [ "id", `String "1" ] ]))
+  (`Assoc [ "none", `Null ]) \
+    (coerce "v" (variant [| "none", None |]) (`Assoc [ "none", `Null ]))
  *)
 (*$T coerce
-  (try ignore (coerce "v" (variant [| "a", Int |]) \
+  (try ignore (coerce "v" (variant [| "a", Some Int |]) \
                           (`Assoc [ "z", `Int 1 ])) ; \
    false with Bad_value _ -> true)
-  (try ignore (coerce "v" (variant [| "a", Int |]) \
+  (try ignore (coerce "v" (variant [| "a", Some Int |]) \
                           (`Assoc [ "a", `Int 1 ; "b", `Int 2 ])) ; \
    false with Bad_value _ -> true)
-  (try ignore (coerce "v" (variant [| "a", IRange (0, 5) |]) \
+  (try ignore (coerce "v" (variant [| "a", Some (IRange (0, 5)) |]) \
+                          (`Assoc [ "a", `Int 9 ])) ; \
+   false with Bad_value _ -> true)
+  (try ignore (coerce "v" (variant [| "a", None |]) \
                           (`Assoc [ "a", `Int 9 ])) ; \
    false with Bad_value _ -> true)
  *)
@@ -1139,6 +1157,11 @@ let add_common_properties (t : t) =
  * widget of a simulation, and hence keeps it a complete inventory -- and the
  * root is the one widget this does not build, since it cannot be built before
  * the simulation it belongs to (see [Simulation.make]). *)
+(* See [tree_version]. *)
+let reshaped t =
+    let s = sim t in
+    s.tree_version <- s.tree_version + 1
+
 let make ~parent ?power ?(own_power=false) ?(on=true) ?size ?location
          ?(properties=[]) ?device_type name =
     if String.contains name '/' then
@@ -1188,8 +1211,9 @@ let make ~parent ?power ?(own_power=false) ?(on=true) ?size ?location
      * Appended rather than prepended so that children stay in creation order,
      * which is the order they are then enumerated, listed by the API and shown
      * in the UI. Quadratic in the number of siblings, which is irrelevant:
-     * widgets are created once, at set-up. *)
+     * a widget has few. *)
     parent.children <- parent.children @ [ t ] ;
+    reshaped t ;
     add_common_properties t ;
     t
 
@@ -1298,6 +1322,7 @@ let rec delete t =
     ) t.peers ;
     t.peers <- [] ;
     unlink_from_parent t ;
+    reshaped t ;
     t.parent <- None
 
 (** Every cable reaching into [doomed] from outside it, which is where a cable
@@ -1340,7 +1365,8 @@ let reparent t new_parent =
      * is not renamed after itself. *)
     t.name <- unique_among new_parent t.name ;
     t.parent <- Some new_parent ;
-    new_parent.children <- t :: new_parent.children
+    new_parent.children <- t :: new_parent.children ;
+    reshaped t
 
 (** Put a widget somewhere in the world, or nowhere with [None].
  *
@@ -1454,6 +1480,7 @@ let make_peers ?via t1 t2 =
                      intermediary") ;
     t1.peers <- { widget = t2 ; via } :: t1.peers ;
     t2.peers <- { widget = t1 ; via } :: t2.peers ;
+    reshaped t1 ;
     Option.may (fun via ->
         via.peers <- { widget = t1 ; via = None } ::
                      { widget = t2 ; via = None } :: via.peers

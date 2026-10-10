@@ -186,6 +186,10 @@ and simulation =
        * Only what comes through that interface moves it: a program building a
        * network is not asked whether it wants to keep it. *)
       mutable unsaved : bool ;
+      (* Moves whenever its widget tree changes shape -- a widget made, deleted
+       * or moved, two made peers -- however that came about, so that whoever
+       * holds a copy of the tree can tell it is stale. *)
+      mutable tree_version : int ;
       (* Every action that has been run in this simulation, the ones still
        * running included, most recent first -- which is the order the
        * interface reads them in.
@@ -461,8 +465,10 @@ and kind =
      * editor offer an echo request carrying a redirect, while a variant over
      * the kinds of message cannot. Choosing the case is then the edit.
      *
-     * Every case carries a kind. Build one with [variant]. *)
-    | Variant of (string * kind) array
+     * A case carries a value of its kind, or nothing at all when its name is
+     * all there is to say, which is [`Null] on the wire. Build one with
+     * [variant]. *)
+    | Variant of (string * kind option) array
     (* A value written a particular way, with an example of it: what the
      * interface shows in the input while it is empty. Not a kind of its own --
      * it is one more thing said about the value inside it -- and where a

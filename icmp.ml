@@ -342,24 +342,24 @@ module Pdu = struct
         let message =
             Widget.variant
                 [| "identifiers",
-                   Widget.record
+                   Some (Widget.record
                        [| "type", ids_type ; "code", code ; "id", id ;
-                          "sequence", seq ; "payload", payload |] ;
+                          "sequence", seq ; "payload", payload |]) ;
                    "redirect",
-                   Widget.record
+                   Some (Widget.record
                        [| "code", redirect_code ; "gateway", gateway ;
-                          "payload", payload |] ;
+                          "payload", payload |]) ;
                    "unreachable",
-                   Widget.record
+                   Some (Widget.record
                        [| "code", unreachable_code ; "next hop MTU", mtu ;
-                          "payload", payload |] ;
+                          "payload", payload |]) ;
                    (* Everything else, which quotes the datagram that caused it
                       and points into it. *)
                    "quoted header",
-                   Widget.record
+                   Some (Widget.record
                        [| "type", header_type ; "code", code ;
                           "pointer", pointer ; "MTU", mtu ;
-                          "payload", payload |] |]
+                          "payload", payload |]) |]
     end
 
     let kind = Kinds.message

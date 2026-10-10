@@ -91,6 +91,9 @@
            x-model="c.draft"
            @input="enable(c) ; touch(owner)"/>
 </template>
+<template x-if="canEdit(owner) && cellUnits(c)">
+    <small class="units" x-text="cellUnits(c)"></small>
+</template>
 
 <template x-if="canEdit(owner) && cellInput(c) === 'text'">
     <input type="text" :disabled="!online"
@@ -110,7 +113,7 @@
 <template x-if="canEdit(owner) && cellInput(c) === 'variant'">
     <span class="variant">
         <select :disabled="!online"
-                @change="pickCase(p, c, $event.target.value)">
+                @change="pickCase(owner, c, $event.target.value)">
             <template x-for="cs in cases(c)" :key="cs.name">
                 <option :value="cs.name"
                         :selected="cs.name === c.case"
@@ -137,6 +140,8 @@
                            :placeholder="hint(s)"
                            x-model="s.draft" @input="touch(owner)"/>
                 </template>
+                <small class="units" x-show="cellUnits(s)"
+                       x-text="cellUnits(s)"></small>
             </label>
         </template>
     </span>

@@ -179,6 +179,15 @@ let rec json_of_fields fields =
            List.map (fun (name, k) ->
                `Assoc [ "name", `String name ; "kind", json_of_kind k ]))
 
+(* As [json_of_fields], a case that carries nothing having no kind. *)
+and json_of_cases cases =
+    `List (Array.to_list cases |>
+           List.map (function
+               | name, Some k ->
+                   `Assoc [ "name", `String name ; "kind", json_of_kind k ]
+               | name, None ->
+                   `Assoc [ "name", `String name ]))
+
 and json_of_kind = function
     | String -> `Assoc [ "type", `String "string" ]
     (* The same string, in a box rather than on a line. *)
@@ -282,7 +291,7 @@ and json_of_kind = function
        the interface offers the names, and what it draws below is the kind of
        the one that is picked. *)
     | Variant cases ->
-        `Assoc [ "type", `String "variant" ; "cases", json_of_fields cases ]
+        `Assoc [ "type", `String "variant" ; "cases", json_of_cases cases ]
     | Hint (h, k) ->
         (match json_of_kind k with
         | `Assoc l -> `Assoc (l @ [ "placeholder", `String h ])
@@ -523,7 +532,10 @@ let json_of_simulation (s : Simulation.t) =
                 save. Only what came through this interface is counted: a
                 program building a network is not asked whether it wants to
                 keep it. *)
-             "unsaved", `Bool (Simulation.unsaved s) ]
+             "unsaved", `Bool (Simulation.unsaved s) ;
+             (* What a reader compares with the one it last read the tree at,
+                to know whether to read it again. *)
+             "tree_version", `Int s.tree_version ]
 
 (* Reading a simulation's state means borrowing it from its own thread. *)
 let simulation_of_matches matches n =

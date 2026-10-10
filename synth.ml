@@ -89,8 +89,8 @@ struct
     (* A distance is a synth of its own: a number of bits, a generator by name,
      * or nothing at all for back to back (see [bits_to_next]). *)
     let distance_kind =
-        Widget.optional (Widget.variant [| "const", IRange (0, max_int) ;
-                                           "gen", String |])
+        Widget.optional (Widget.variant [| "const", Some (IRange (0, max_int)) ;
+                                           "gen", Some String |])
 
     let kind =
         Widget.record [|

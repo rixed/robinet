@@ -1584,6 +1584,7 @@ components:
         - paused_total
         - pending_events
         - unsaved
+        - tree_version
       properties:
         id: { type: integer }
         name: { type: string }
@@ -1637,6 +1638,14 @@ components:
             read in, which is what says if there is anything to save. Only what
             came through this API is counted: a program building a network is not
             asked whether it wants to keep it.
+        tree_version:
+          type: integer
+          description: |
+            Moves whenever its widget tree changes shape -- a widget made, deleted
+            or moved, two made peers -- whatever did it: a request, or the
+            simulation itself, as when a client started by an action finishes
+            and its widget goes. A reader holding the tree reads it again when
+            this is not the number it read it at.
 
     Location:
       type: object
@@ -1824,7 +1833,8 @@ components:
             * `record` -- the same named values, one under the next, a field with
               an inside of its own indented under the line that names it.
             * `variant` -- one of the shapes in `cases`; the value is an object
-              of a single field, named by the case it holds.
+              of a single field, named by the case it holds, whose value is
+              null for a case that carries nothing.
 
             A single value may always be written as a string, whatever kind it
             is of: `"5"` is read as the number and `"true"` as the boolean. One
@@ -1869,10 +1879,11 @@ components:
           type: array
           description: |
             For `variant`: the shapes it may hold, each carrying what its own
-            kind says. The name is what the value's single field is called.
+            kind says, or nothing when it has no kind. The name is what the
+            value's single field is called.
           items:
             type: object
-            required: [name, kind]
+            required: [name]
             properties:
               name: { type: string }
               kind: { $ref: "#/components/schemas/Kind" }

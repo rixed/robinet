@@ -74,14 +74,13 @@ const hintOf = (kind) => baseKind(kind).placeholder || kind.placeholder || ''
 const draftFor = (p, text) =>
     p.kind.type === 'optional' && p.value === null ? p.draft : text
 
-/* Whether a kind takes more than one input to edit: a list and a row are
- * drawn as a table of cells, everything else as a single field.
- *
- * A record is neither, being a form of its own and drawn down rather than
- * across; nothing declares one yet (see [Record] in simTypes.ml). */
+/* Whether a kind takes more than one input to edit: a list, a row and a
+ * record are drawn as a table of cells, and a variant as a table of the one
+ * cell that picks its case and holds what that carries. Everything else is a
+ * single field. */
 const isStructured = (kind) => {
     const t = baseKind(kind).type
-    return t === 'list' || t === 'row' || t === 'record'
+    return t === 'list' || t === 'row' || t === 'record' || t === 'variant'
 }
 
 /* The fields one value is made of, or none for a value that is a single input:
@@ -103,9 +102,16 @@ const caseOf = (kind, value) => {
                                             : (cases.length ? cases[0].name : null)
 }
 
+/* Null for a case that carries nothing, as for one that is not there. */
 const caseKind = (kind, name) => {
     const c = (baseKind(kind).cases || []).find(c => c.name === name)
-    return c ? c.kind : null
+    return c && c.kind ? c.kind : null
+}
+
+/* The cells of what a case carries: none when it carries nothing. */
+const caseCellsOf = (kind, name, value) => {
+    const ck = caseKind(kind, name)
+    return ck ? cellsOf(ck, value) : []
 }
 
 /* Beyond how many characters a string is no longer a line to be read at a
@@ -135,12 +141,16 @@ const cellValue = (c) => {
     if (c.kind.type === 'optional' && !c.enabled) return null
     switch (baseKind(c.kind).type) {
         /* The case it holds, named, carrying what its own kind says: the
-         * fields of a row, or the single value of anything else. */
-        case 'variant':
+         * fields of a row, the single value of anything else, or null when it
+         * carries nothing. */
+        case 'variant': {
+            const ck = caseKind(c.kind, c.case)
             return { [c.case]:
-                fieldsOf(caseKind(c.kind, c.case))
+                !ck ? null
+                    : fieldsOf(ck)
                     ? Object.fromEntries(c.sub.map(s => [ s.name, cellValue(s) ]))
                     : cellValue(c.sub[0]) }
+        }
         case 'bool':
             return c.draft === true || c.draft === 'true'
         /* Which choice, by its own number rather than by its place among
@@ -180,8 +190,7 @@ const cellOf = (name, kind, value) => {
      * choice and then whatever the chosen case carries, so a cell of one is a
      * select and the cells of that case (see [pickCase]). */
     c.case = caseOf(kind, value)
-    c.sub = cellsOf(caseKind(kind, c.case),
-                    value == null ? null : value[c.case])
+    c.sub = caseCellsOf(kind, c.case, value == null ? null : value[c.case])
     return c
 }
 
@@ -298,7 +307,7 @@ const edited = (p) => {
     const k = baseKind(p.kind)
     if (k.type === 'list')
         return p.rows.filter(r => !rowIsBlank(r)).map(r => rowValue(k.of, r))
-    if (k.type === 'row' || k.type === 'record')
+    if (k.type === 'row' || k.type === 'record' || k.type === 'variant')
         return rowValue(k, p.rows[0])
     return cellValue(p)
 }
@@ -1191,7 +1200,8 @@ const materialiseSynth = (kind, value) => {
             const which = Object.keys(held)[0]
             const c = (k.cases || []).find(c => c.name === which)
             if (!c) return null
-            return { [which]: materialiseSynth(c.kind, of_(held[which])) }
+            return { [which]: c.kind ? materialiseSynth(c.kind, of_(held[which]))
+                                     : null }
         }
         case 'list':
             return Array.isArray(held)
@@ -1272,7 +1282,7 @@ const kindLines = (kind, value, editable, synth) => {
                 const which = Object.keys(value)[0]
                 const c = (k.cases || []).find(c => c.name === which)
                 line({ note: which })
-                if (!c) break
+                if (!c || !c.kind) break
                 /* The fields of the case, under the line that already named
                    it: a head of its own would say the case's name a second
                    time, one line under the first. */
@@ -1341,6 +1351,8 @@ document.addEventListener('alpine:init', () => {
         widgets: {},
         /* simulation id -> root widget id */
         roots: {},
+        /* simulation id -> the [tree_version] its widgets were read at */
+        treeVersions: {},
         /* "simId/widgetId" of the folded subtrees */
         folded: new Set(),
         selected: null,
@@ -1995,7 +2007,10 @@ document.addEventListener('alpine:init', () => {
         /* The cheap poll: clocks, and the selected widget's values. */
         async poll() {
             const r = await this.exchange(() => api('/simulations'))
-            if (r.ok) this.sims = r.value
+            if (r.ok) {
+                this.sims = r.value
+                await this.reloadIfReshaped(r.value)
+            }
             /* Ask for the properties even when the first call just failed:
              * skipping it would leave the panel reporting itself as loaded,
              * which is the one thing it must not do when it is not. */
@@ -2009,6 +2024,16 @@ document.addEventListener('alpine:init', () => {
             if (this.needPcaps()) await this.loadPcaps()
             if (this.charts.length) await this.pollCharts()
             if (this.logged.length) await this.pollLogs()
+        },
+
+        /* The widget trees again, if one has changed shape since they were
+         * read or a simulation has come or gone: whatever changed them, this
+         * interface or the simulation itself. */
+        async reloadIfReshaped(sims) {
+            const known = this.treeVersions
+            if (sims.length !== Object.keys(known).length ||
+                sims.some(s => known[s.id] !== s.tree_version))
+                await this.reload()
         },
 
         /* Everything: the simulations and their widget trees. Needed whenever
@@ -2034,6 +2059,8 @@ document.addEventListener('alpine:init', () => {
             this.sims = sims
             this.widgets = widgets
             this.roots = roots
+            this.treeVersions =
+                Object.fromEntries(sims.map(s => [ s.id, s.tree_version ]))
             this.servingId = serving
             this.foldNewSims(sims)
             /* These describe attempts that are now history. */
@@ -2483,6 +2510,13 @@ document.addEventListener('alpine:init', () => {
             return 'text'
         },
 
+        /* What a number typed into a cell counts, where its kind says: a
+         * cell has no units of its own, only a property or a parameter has.
+         * Read cells say it in how they are written (see [cellText]). */
+        cellUnits(c) {
+            return baseKind(c.kind).type === 'duration' ? 'secs' : ''
+        },
+
         /* The shapes a variant cell offers, and the one it holds. */
         cases(c) {
             return baseKind(c.kind).cases || []
@@ -2492,7 +2526,7 @@ document.addEventListener('alpine:init', () => {
          * one case holds says nothing about what another would. */
         pickCase(p, c, name) {
             c.case = name
-            c.sub = cellsOf(caseKind(c.kind, name), null)
+            c.sub = caseCellsOf(c.kind, name, null)
             this.touch(p)
         },
 
@@ -2668,6 +2702,14 @@ document.addEventListener('alpine:init', () => {
             const n = Number(c.draft)
             if (f && numericKind(c.kind) && c.draft !== '' &&
                 Number.isFinite(n)) return f(n)
+            /* Which shape, then what it carries as its own cells read:
+               "echo", "random: min size 1, max size 1000, interval 1s". */
+            if (baseKind(c.kind).type === 'variant')
+                return c.sub.length
+                    ? c.case + ': ' + c.sub.map(s =>
+                          (s.name ? s.name + ' ' : '') + this.cellText(s)
+                      ).join(', ')
+                    : c.case
             /* An instant of the simulation, read as the clock in the log
                window reads one: seconds since the simulation began are what
                travels, and a time of day is what anybody wants to see. */
@@ -3868,6 +3910,13 @@ document.addEventListener('alpine:init', () => {
                 /* Whatever it refused, said beside the form it was refused
                  * for: the fields are still there to be corrected. */
                 if (!r.ok) { a.error = r.error.message ; return }
+                /* What it made or took away, now rather than at the next
+                 * poll: a server's widget is there by the time it answers. */
+                const sims = await this.exchange(() => api('/simulations'))
+                if (sims.ok) {
+                    this.sims = sims.value
+                    await this.reloadIfReshaped(sims.value)
+                }
             }
             a.busy = false
             this.adding = null

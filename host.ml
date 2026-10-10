@@ -1138,43 +1138,48 @@ type behavior =
        distributed with that mean, in seconds: *)
     | Random of { min_size : int ; max_size : int ; interval : float }
 
-let behavior_names = [| "sink" ; "echo" ; "random" |]
+(* Of messages up to [max_size] bytes, the largest the protocol can carry: *)
+let behavior_kind ~max_size =
+    let size = IRange (1, max_size) in
+    Widget.(variant [|
+        "sink", None ;
+        "echo", None ;
+        "random", Some (record [| "min size", size ; "max size", size ;
+                                  "interval", Duration |]) |])
 
-let behavior_name = function
-    | Sink -> behavior_names.(0)
-    | Echo -> behavior_names.(1)
-    | Random _ -> behavior_names.(2)
+let behavior_param ~max_size =
+    Widget.param "behavior" ~kind:(behavior_kind ~max_size)
+        ~default:(`Assoc [ "sink", `Null ])
+        ~descr:"What to do with the traffic: discard what comes in (sink), \
+                send it back (echo), or send messages of sizes between min \
+                size and max size bytes, at intervals of that mean in seconds \
+                (random)."
 
-let behavior_params = Widget.[
-    param "behavior" ~kind:(one_of (choices behavior_names)) ~default:(`Int 0)
-        ~descr:"What to do with the traffic: discard what comes in, send it \
-                back, or send messages of random sizes at random intervals." ;
-    param "min size" ~kind:Int ~units:"bytes" ~default:(`Int 1)
-        ~descr:"Random behavior only: the smallest message." ;
-    param "max size" ~kind:Int ~units:"bytes" ~default:(`Int 1000)
-        ~descr:"Random behavior only: the largest message." ;
-    param "interval" ~kind:Duration ~units:"secs" ~default:(`Float 1.)
-        ~descr:"Random behavior only: the mean time between two messages." ]
+let json_of_behavior = function
+    | Sink -> `Assoc [ "sink", `Null ]
+    | Echo -> `Assoc [ "echo", `Null ]
+    | Random { min_size ; max_size ; interval } ->
+        `Assoc [ "random", `Assoc [ "min size", `Int min_size ;
+                                    "max size", `Int max_size ;
+                                    "interval", `Float interval ] ]
 
-(* [max_size] is the largest message the protocol can carry. *)
-let behavior_of_args ~max_size params =
-    match Widget.arg_int params "behavior" with
-    | 0 -> Sink
-    | 1 -> Echo
-    | _ ->
-        let min_size = Widget.arg_int params "min size"
-        and max_size' = Widget.arg_int params "max size"
-        and interval = Widget.arg_float params "interval" in
-        if min_size < 1 then
-            Widget.bad_value "min size must be at least 1, not %d" min_size ;
-        if max_size' < min_size then
-            Widget.bad_value "max size must not be below min size (%d), not %d"
-                min_size max_size' ;
-        if max_size' > max_size then
-            Widget.bad_value "max size cannot be above %d" max_size ;
-        if interval <= 0. then
-            Widget.bad_value "interval must be above zero, not %g" interval ;
-        Random { min_size ; max_size = max_size' ; interval }
+(* Of a value already coerced to [behavior_kind], so of a known case and of
+ * sizes within bounds. *)
+let behavior_of_json =
+    Widget.to_case (fun case v ->
+        match case with
+        | "sink" -> Sink
+        | "echo" -> Echo
+        | _ ->
+            let min_size = Widget.to_field "min size" Widget.to_int v
+            and max_size = Widget.to_field "max size" Widget.to_int v
+            and interval = Widget.to_field "interval" Widget.to_float v in
+            if max_size < min_size then
+                Widget.bad_value "max size must not be below min size (%d), \
+                                  not %d" min_size max_size ;
+            if interval <= 0. then
+                Widget.bad_value "interval must be above zero, not %g" interval ;
+            Random { min_size ; max_size ; interval })
 
 let port_arg params name =
     let p = Widget.arg_int params name in
@@ -1266,12 +1271,12 @@ let server_action t ~proto ~peers ~max_size ~listen ~unlisten ~serve =
         Widget.(record [| peers, Int ; "sent", Int ; "received", Int |]) in
     Widget.action ("start "^ String.uppercase_ascii proto ^" server")
         ~descr:"Listen to a port, and answer whoever connects to it as told."
-        ~params:(Widget.param "port" ~kind:Int
-                    ~descr:"The port to listen to." :: behavior_params)
+        ~params:Widget.[ param "port" ~kind:Int ~descr:"The port to listen to." ;
+                         behavior_param ~max_size ]
         ~result:result_kind
         ~handler:(fun state ->
             let port = port_arg state.params "port"
-            and behavior = behavior_of_args ~max_size state.params in
+            and behavior = behavior_of_json (Widget.arg state.params "behavior") in
             let power = host.power in
             let traffic = { sent = 0 ; received = 0 }
             and flows = ref 0 and over = ref false in
@@ -1308,7 +1313,8 @@ let server_action t ~proto ~peers ~max_size ~listen ~unlisten ~serve =
             widget.power_down <- (fun () -> release ~remove:true) ;
             Widget.add_properties widget Widget.(
                 property "behavior" ~descr:"What it does with the traffic."
-                    ~getter:(fun () -> `String (behavior_name behavior)) ::
+                    ~kind:(behavior_kind ~max_size)
+                    ~getter:(fun () -> json_of_behavior behavior) ::
                 property peers ~kind:Int ~descr:"How many it was reached by."
                     ~getter:(fun () -> `Int !flows) ::
                 traffic_properties traffic) ;
@@ -1346,18 +1352,18 @@ let client_action t ~proto ~max_size ~connect =
         ~descr:"Connect to a server and talk to it as told, until one of the \
                 limits is reached, the server closes the connection, or it \
                 is stopped."
-        ~params:Widget.([
+        ~params:Widget.[
             param "target" ~kind:(hint "192.168.0.1" String)
                 ~descr:"What to connect to: an address, or a name to be resolved." ;
             param "port" ~kind:Int ~descr:"The port to connect to." ;
             param "source port" ~kind:(optional Int)
                 ~descr:"The port to connect from, which then also names it \
-                        (random if unset)." ] @
-            behavior_params @ Widget.[
+                        (random if unset)." ;
+            behavior_param ~max_size ;
             param "duration" ~kind:(optional Duration) ~units:"secs"
                 ~descr:"Stop after that long." ;
             param "volume" ~kind:(optional Int) ~units:"bytes"
-                ~descr:"Stop once that many bytes were sent and received." ])
+                ~descr:"Stop once that many bytes were sent and received." ]
         ~result:result_kind
         ~handler:(fun state ->
             let params = state.params in
@@ -1366,7 +1372,7 @@ let client_action t ~proto ~max_size ~connect =
             and src_port =
                 Widget.arg_opt params "source port" (fun v ->
                     port_arg [ "source port", v ] "source port")
-            and behavior = behavior_of_args ~max_size params
+            and behavior = behavior_of_json (Widget.arg params "behavior")
             and duration = Widget.arg_opt params "duration" Widget.to_float
             and volume = Widget.arg_opt params "volume" Widget.to_int in
             Option.may (fun d ->
@@ -1410,7 +1416,8 @@ let client_action t ~proto ~max_size ~connect =
             widget.power_down <- (fun () -> release ~remove:true) ;
             Widget.add_properties widget Widget.(
                 property "behavior" ~descr:"What it does with the traffic."
-                    ~getter:(fun () -> `String (behavior_name behavior)) ::
+                    ~kind:(behavior_kind ~max_size)
+                    ~getter:(fun () -> json_of_behavior behavior) ::
                 traffic_properties traffic) ;
             Widget.add_actions widget [
                 Widget.action "stop" ~result:result_kind
@@ -1582,24 +1589,50 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
         (List.find (fun (p : Widget.property) -> p.name = name)
                    w.properties).getter () in
     let target = "target", `String "192.168.0.2" in
+    let random ?(max_size=1000) interval =
+        "behavior", `Assoc [ "random", `Assoc [ "min size", `Int 1 ;
+                                                "max size", `Int max_size ;
+                                                "interval", `Float interval ] ] in
+    let refused w action params =
+        try ignore (run w action params) ; false
+        with Widget.Bad_value _ -> true in
 
     (* Random against echo, until a volume is reached: *)
+    let version = sim.tree_version in
     let srv = run b.trx.widget "start TCP server"
-                  [ "port", `Int 7 ; "behavior", `Int 1 ] in
+                  [ "port", `Int 7 ; "behavior", `Assoc [ "echo", `Null ] ] in
     let srv_w = Option.get (child b "server-tcp:7") in
+    assert_bool "a new server reshapes the tree" (sim.tree_version > version) ;
+    assert_equal ~printer:Yojson.Basic.to_string ~msg:"says what it does"
+        (`Assoc [ "echo", `Null ]) (prop srv_w "behavior") ;
     assert_bool "one server per port"
-        (try ignore (run b.trx.widget "start TCP server" [ "port", `Int 7 ]) ;
-             false
-         with Widget.Bad_value _ -> true) ;
+        (refused b.trx.widget "start TCP server" [ "port", `Int 7 ]) ;
     assert_bool "and the refused one leaves no widget behind"
         (child b "server-tcp:7-2" = None) ;
+    let bad behavior =
+        refused b.trx.widget "start UDP server"
+                [ "port", `Int 8 ; "behavior", behavior ] in
+    assert_bool "a sink carries nothing"
+        (bad (`Assoc [ "sink", `Int 1 ])) ;
+    assert_bool "random needs its sizes and interval"
+        (bad (`Assoc [ "random", `Null ])) ;
+    assert_bool "no larger than a datagram" (bad (snd (random ~max_size:70_000 1.))) ;
+    assert_bool "nor reversed"
+        (bad (`Assoc [ "random", `Assoc [ "min size", `Int 9 ;
+                                          "max size", `Int 8 ;
+                                          "interval", `Float 1. ] ])) ;
+    assert_bool "nor without delay" (bad (snd (random 0.))) ;
+    assert_bool "and none of those leaves a widget behind"
+        (child b "server-udp:8" = None) ;
     let cli = run a.trx.widget "start TCP client"
-                  [ target ; "port", `Int 7 ; "behavior", `Int 2 ;
-                    "interval", `Float 0.01 ; "volume", `Int 100_000 ] in
+                  [ target ; "port", `Int 7 ; random 0.01 ;
+                    "volume", `Int 100_000 ] in
     assert_bool "a client is named after its target"
         (child a "client-tcp:192.168.0.2:7" <> None) ;
+    let version = sim.tree_version in
     Simulation.run sim false ;
     assert_bool "the volume ends the client" (not (Action.is_running cli)) ;
+    assert_bool "and so does a client going" (sim.tree_version > version) ;
     assert_bool "which is then gone" (child a "client-tcp:192.168.0.2:7" = None) ;
     let sent = int cli "sent" and received = int cli "received" in
     assert_bool "up to that volume" (sent + received >= 100_000) ;
@@ -1616,8 +1649,7 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
     let srv = run b.trx.widget "start UDP server" [ "port", `Int 9 ] in
     let cli = run a.trx.widget "start UDP client"
                   [ target ; "port", `Int 9 ; "source port", `Int 6000 ;
-                    "behavior", `Int 2 ; "interval", `Float 0.1 ;
-                    "duration", `Float 5. ] in
+                    random 0.1 ; "duration", `Float 5. ] in
     assert_bool "a client given a port is named after it"
         (child a "client-udp:6000" <> None) ;
     Simulation.run sim false ;
@@ -1631,8 +1663,7 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
 
     (* A random server pushing to a sink, until the client is cancelled: *)
     let srv = run b.trx.widget "start TCP server"
-                  [ "port", `Int 7 ; "behavior", `Int 2 ;
-                    "interval", `Float 0.1 ] in
+                  [ "port", `Int 7 ; random 0.1 ] in
     let cli = run a.trx.widget "start TCP client"
                   [ target ; "port", `Int 7 ; "source port", `Int 1234 ] in
     Simulation.delay sim.root.power (Clock.Interval.sec 3.)

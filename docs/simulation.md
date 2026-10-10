@@ -550,9 +550,11 @@ A server or a client runs under a part of its host named after its port —
 `h2/server-tcp:5001`, `h1/client-udp:6000` — or, for a client given no source
 port, after what it connects to: `h1/client-tcp:10.0.0.2:5001`. That part
 shows the bytes `sent` and `received` so far, and answers `stop`. Both ends
-take the same `behavior`: `0` discards what comes in, `1` sends it back, and
-`2` sends messages of between `min size` (1) and `max size` (1000) bytes,
-`interval` secs (1) apart on average. A client also stops when the server
+take the same `behavior`, one of three shapes: `{"sink": null}` (the default)
+discards what comes in, `{"echo": null}` sends it back, and
+`{"random": {"min size": 1, "max size": 1000, "interval": 0.5}}` sends messages
+of between `min size` and `max size` bytes, `interval` secs apart on average. A
+client also stops when the server
 closes the connection, and a server or a client stops with the power of its
 host or when its part is deleted. The run that started it then ends with what
 it exchanged.

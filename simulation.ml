@@ -1064,6 +1064,7 @@ let make =
               paused_total = Interval.zero ;
               steps = 0 ;
               unsaved = false ;
+              tree_version = 0 ;
               started_actions = [] ;
               startup = [] ;
               startup_done = false ;

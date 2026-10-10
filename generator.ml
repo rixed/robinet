@@ -176,8 +176,9 @@ let rec coerce kind x =
         if x land 1 = 0 then `Null else coerce kind (x lsr 1)
     | Variant variants ->
         let n = Array.length variants in
-        let case, kind = variants.(x mod n) in
-        `Assoc [ case, coerce kind (x / n) ]
+        (match variants.(x mod n) with
+        | case, Some kind -> `Assoc [ case, coerce kind (x / n) ]
+        | case, None -> `Assoc [ case, `Null ])
     | Hint (_, kind) ->
         coerce kind x
     | Ipv4 ->
@@ -229,7 +230,8 @@ let rec coerce kind x =
       Widget.list (Widget.row [| "a", Mac ; "b", Widget.optional Bytes |]) ; \
       Widget.record [| "a", Widget.list Int ; \
                        "b", Widget.record [| "c", Bool |] |] ; \
-      Widget.variant [| "a", Int ; "b", Widget.record [| "c", Ipv6 |] |] ])
+      Widget.variant [| "a", Some Int ; "b", Some (Widget.record [| "c", Ipv6 |]) ; \
+                       "c", None |] ])
 *)
 (*$Q coerce
   Q.int (fun x -> match coerce (IRange (3, 7)) x with \
@@ -389,7 +391,7 @@ let bs_of_nth r i gen_values ?auto kind =
 (* Turn the value [js] of [kind] into a synth, by applying [f] to each value a
  * single synth stands for: down through the fields of records and rows, the
  * elements of lists and what a variant's case carries, to what is none of
- * those. *)
+ * those. A case that carries nothing has nothing to synthesize. *)
 let rec wrap kind f (js : Yojson.Basic.t) : Yojson.Basic.t =
     let kind_of_part parts name =
         Array.find_opt (fun (n, _) -> n = name) parts |> Option.map snd in
@@ -406,7 +408,8 @@ let rec wrap kind f (js : Yojson.Basic.t) : Yojson.Basic.t =
         `List (List.map (wrap k f) l)
     | Variant cases, `Assoc [ case, v ] ->
         (match kind_of_part cases case with
-        | Some k -> `Assoc [ case, wrap k f v ]
+        | Some (Some k) -> `Assoc [ case, wrap k f v ]
+        | Some None -> js
         | None -> f js)
     | _ ->
         f js
@@ -420,6 +423,8 @@ let const v : Yojson.Basic.t = `Assoc [ "const", v ]
     (`Assoc [ "a", `Int 1 ; "b", `List [ `Int 2 ] ]) = \
     `Assoc [ "a", `Assoc [ "const", `Int 1 ] ; \
              "b", `List [ `Assoc [ "const", `Int 2 ] ] ]
+  wrap (Widget.variant [| "a", None |]) const (`Assoc [ "a", `Null ]) = \
+    `Assoc [ "a", `Null ]
 *)
 
 (* A synth of [kind] structured as the kind is: a constant, a generated value
@@ -439,7 +444,7 @@ let expand gen_values kind js =
 (*$T expand
   expand [||] (Widget.list Int) (`Assoc [ "const", `List [ `Int 2 ] ]) = \
     `List [ `Assoc [ "const", `Int 2 ] ]
-  expand [| 3 |] (Widget.variant [| "a", Int |]) (`Assoc [ "gen", `Int 0 ]) = \
+  expand [| 3 |] (Widget.variant [| "a", Some Int |]) (`Assoc [ "gen", `Int 0 ]) = \
     `Assoc [ "a", `Assoc [ "const", `Int 3 ] ]
   expand [||] (Widget.list Int) (`List []) = `List []
 *)
@@ -491,11 +496,11 @@ let reads_autos of_synth kind to_json t =
  * names are those of the fields above, spelled as they are read. *)
 let kind =
     Widget.variant [|
-        "constant", Int ;
-        "increment", Widget.row [| "start", Int ; "step", Int |] ;
-        "uniform", Widget.row [| "from", Int ; "up to (excluded)", Int |] ;
-        "normal", Widget.row [| "mean", Float ;
-                                "standard deviation", Float |] |]
+        "constant", Some Int ;
+        "increment", Some (Widget.row [| "start", Int ; "step", Int |]) ;
+        "uniform", Some (Widget.row [| "from", Int ; "up to (excluded)", Int |]) ;
+        "normal", Some (Widget.row [| "mean", Float ;
+                                      "standard deviation", Float |]) |]
 
 (* A generator and the name it is known by, which is how it is referenced
  * (see {!Synth}). *)

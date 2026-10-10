@@ -1377,6 +1377,9 @@ button.metric-reset {
     white-space: nowrap;
 }
 .variant label input { margin: 0; width: 6rem; }
+/* Level with the input, which Pico's margins for a small that follows one
+   would not leave it. */
+.variant small.units, .cell small.units { margin: 0; font-size: inherit; }
 
 /* Inline, so that the unit that follows stays on the same line. */
 .range { display: inline-flex; align-items: center; gap: .5rem;
