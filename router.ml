@@ -299,6 +299,15 @@ end
  * IP packets TTL is decremented and expired with optional support for ICMP
  * expiration error messages. *)
 
+(* Probability to send ICMP expiry messages after TTL expiration, and after
+ * which delay (TODO: should also depend on how busy the router is): *)
+type icmp_probability = {
+    mutable probability : float ;
+          mutable delay : float }
+
+let notify_never = { probability = 0. ; delay = 0. }
+let notify_always ?(delay=0.) () = { probability = 1. ; delay }
+
 type iface = { mutable trx : trx ; (** Can come handy to splice another trx there. *)
                        eth : Eth.State.t ;
         (** Any traffic arriving in this interface and directed to Admin is
@@ -308,7 +317,11 @@ type iface = { mutable trx : trx ; (** Can come handy to splice another trx ther
          * they would have to share that storage area of course. *)
         mutable admin_host : Host.t option ;
 (** Fragment IPv4 packets larger than the MTU, unless they have DF set. *)
-mutable link_fragmentation : bool }
+mutable link_fragmentation : bool ;
+               (** Errors about packets received here are reported with the product
+                * of this and the router's probability, after the sum of both
+                * delays: *)
+               notify_errs : icmp_probability }
 
 type load_balancing =
     | First (* Forward a packet to its first matching route *)
@@ -320,12 +333,6 @@ type load_balancing =
 (* TODO: to_string_array with ppx_deriving.show if it happens again: *)
 let all_load_balancing =
     [| "first matching" ; "track flow" ; "random" ; "round robin" |]
-
-(* Probability to send ICMP expiry messages after TTL expiration, and after
- * which delay (TODO: should also depend on how busy the router is): *)
-type icmp_probability = {
-    mutable probability : float ;
-          mutable delay : float }
 
 (** A router is mainly an array of ifaces and a route table *)
 type t = {         ifaces : iface array ;
@@ -447,8 +454,11 @@ let rec maybe_send_icmp t n ip icmp_maker =
     | exception Not_found ->
         Log.(log t.widget.logger Debug (lazy "Cannot send an ICMP error: I have no IP!"))
     | my_ip ->
-        if Random.float 1. < t.notify_errs.probability then
-            let delay = jitter 0.1 t.notify_errs.delay in
+        let iface_errs = t.ifaces.(n).notify_errs in
+        if Random.float 1. <
+           t.notify_errs.probability *. iface_errs.probability then
+            let delay =
+                jitter 0.1 (t.notify_errs.delay +. iface_errs.delay) in
             let icmp = icmp_maker ip in
             let ip_pld = Icmp.Pdu.pack icmp in
             let ip_pkt = Ip.Pdu.make Ip.Proto.icmp my_ip ip.Ip.Pdu.src ip_pld in
@@ -664,7 +674,7 @@ let set_proxy_arp t n v =
 
 let iface_make ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
                ?can_forward_after ?mac ?my_addresses ?(link_fragmentation=true)
-               ~parent n =
+               ?(notify_errs=notify_always ()) ~parent n =
     let name = "#"^ string_of_int n in
     (* For our ifaces we force the GW on a packet by packet basis according
      * to the dynamic (and likely still unset) routing table. *)
@@ -674,18 +684,28 @@ let iface_make ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
                        ~parent () in
     let trx = Eth.TRX.make eth in
     let iface =
-        { trx ; eth ; admin_host = None ; link_fragmentation } in
+        { trx ; eth ; admin_host = None ; link_fragmentation ;
+          notify_errs } in
     Widget.add_properties eth.iface.widget Widget.[
         property "link fragmentation" ~kind:Bool
             ~descr:"Fragment IPv4 packets larger than the MTU, unless they \
                     say not to. Those not fragmented are dropped and reported \
                     with ICMP."
             ~getter:(fun () -> `Bool iface.link_fragmentation)
-            ~setter:(fun v -> iface.link_fragmentation <- to_bool v) ] ;
+            ~setter:(fun v -> iface.link_fragmentation <- to_bool v) ;
+        property "errors probability" ~kind:(FRange (0., 1.))
+            ~descr:"Probability to report errors about packets received \
+                    here with ICMP, times the router's."
+            ~getter:(fun () -> `Float iface.notify_errs.probability)
+            ~setter:(fun v ->
+                iface.notify_errs.probability <-
+                    to_float_range ~min:0. ~max:1. v) ;
+        property "errors delay" ~kind:Float ~units:"secs"
+            ~descr:"Report ICMP errors about packets received here after \
+                    that delay, on top of the router's."
+            ~getter:(fun () -> `Float iface.notify_errs.delay)
+            ~setter:(fun v -> iface.notify_errs.delay <- to_float v) ] ;
     iface
-
-let notify_never = { probability = 0. ; delay = 0. }
-let notify_always ?(delay=0.) () = { probability = 1. ; delay }
 
 let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
          ?(admin_reroute=true) ?(load_balancing=First) ?buffer_capacity
@@ -1097,6 +1117,35 @@ let make_from_addrs
     easy_send 0 "192.168.3.42" ;
     Simulation.run sim false ;
     "and routes again once switched back on" @? (counts = [| 0;0;1 |]) ;
+
+    (* An expiring packet is reported back the way it came, which here
+     * starts with an ARP request for its sender; a new sender each time,
+     * so that each report asks again. *)
+    let expire src =
+        Ip.Pdu.{ (random ()) with src = Ip.Addr.of_string src ;
+                                  dst = Ip.Addr.of_string "192.168.3.42" ;
+                                  ttl = 1 } |>
+        Ip.Pdu.pack |>
+        Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (snd addrs.(0)) |>
+        Eth.Pdu.pack |>
+        send 0 in
+    reset_count () ;
+    expire "192.168.1.43" ;
+    Simulation.run sim false ;
+    "expiry is reported" @? (counts = [| 1;0;0 |]) ;
+
+    router.ifaces.(2).notify_errs.probability <- 0. ;
+    reset_count () ;
+    expire "192.168.1.44" ;
+    Simulation.run sim false ;
+    "as the receiving port allows, not the leaving one" @?
+        (counts = [| 1;0;0 |]) ;
+
+    router.ifaces.(0).notify_errs.probability <- 0. ;
+    reset_count () ;
+    expire "192.168.1.45" ;
+    Simulation.run sim false ;
+    "a port can be silenced alone" @? (counts = [| 0;0;0 |]) ;
 *)
 
 (* An interface with no address of its own gets no admin host, so nothing

@@ -366,7 +366,7 @@ under:
 | hub | `""` | `speed` |
 | tap | | *none* |
 | router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin`, `buffer capacity` |
-| | `#0`… | *its interfaces*, and `link fragmentation` |
+| | `#0`… | *its interfaces*, and `link fragmentation`, `errors probability`, `errors delay` |
 | | `#0/admin@0`… | `hostname`, `search suffix` — the stack answering for the address that interface holds |
 | gateway | `router`, `router/#0`, `router/#1` | *a router and its two interfaces* |
 | | `nat` | `min port`, `port forwards`, `NAT pings`, `send errors`, `answer pings` |
@@ -397,6 +397,11 @@ IPv4 packet longer than the interface's MTU leaves in fragments, unless it says
 not to fragment it. One that is not fragmented, either way, is dropped and
 reported with an ICMP *fragmentation needed* giving that MTU — as the router's
 `errors probability` allows, which at 0 makes it a silent black hole.
+
+A router's interface also has its own `errors probability` and `errors delay`,
+1 and 0 unless set otherwise. An error about a packet that came in through
+that interface is reported with the product of the router's probability and
+the interface's, after the sum of both delays.
 
 A router's `buffer capacity` is the RAM, in bytes, it holds the frames waiting
 for an interface to be free in. A third of it is reserved to the interfaces in
