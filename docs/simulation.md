@@ -60,9 +60,9 @@ network still loads, because it is still the network that was asked for.
 | `properties` | What it is configured with, once built (below). |
 
 Only `type` and `path` are required. `at`, `params` and `properties` may be
-left out entirely when there is nothing to say — written `null` means the same
-— which is what the examples below do. A save from the interface writes all
-five all the same: what it writes is what it read.
+left out entirely when there is nothing to say — written `null` or empty means
+the same — which is what the examples below do, and what a save from the
+interface does too.
 
 **Order matters.** Devices are built in the order they are listed, and each is
 configured as it is built, so a cable must come after both of the things it

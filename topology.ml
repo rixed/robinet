@@ -255,27 +255,36 @@ let json_of_location = function
     | Some (l : Widget.location) ->
         `Assoc [ "lat", `Float l.lat ; "lon", `Float l.lon ]
 
-let json_of_device d =
-    `Assoc [ "type", `String d.type_ ;
-             "path", `String d.path ;
-             "at", json_of_location d.location ;
-             "params", `Assoc d.params ;
-             "properties",
-                `Assoc (List.map (fun (path, props) ->
-                            path, `Assoc props
-                        ) d.properties) ]
+(* For the fields read with [member_opt] only: what is empty is not written,
+ * since it reads back as the same nothing. Not to be applied to values, an
+ * empty one of which can be what a property is set to. *)
+let optional_fields l =
+    List.filter (fun (_, v) -> v <> `Null && v <> `Assoc [] && v <> `List []) l
 
+let json_of_device d =
+    `Assoc ([ "type", `String d.type_ ;
+              "path", `String d.path ] @
+            optional_fields
+              [ "at", json_of_location d.location ;
+                "params", `Assoc d.params ;
+                "properties",
+                   `Assoc (List.map (fun (path, props) ->
+                               path, `Assoc props
+                           ) d.properties) ])
+
+(** One entry of a startup list, also as the API hands it out. *)
 let json_of_startup (e : Widget.startup_entry) =
-    `Assoc [ "path", `String e.path ;
-             "action", `String e.action ;
-             "params", `Assoc e.params ]
+    `Assoc ([ "path", `String e.path ;
+              "action", `String e.action ] @
+            optional_fields [ "params", `Assoc e.params ])
 
 let to_json t =
     env_escape @@
-    `Assoc [ "version", `Int t.version ;
-             "name", `String t.name ;
-             "devices", `List (List.map json_of_device t.devices) ;
-             "startup", `List (List.map json_of_startup t.startup) ]
+    `Assoc ([ "version", `Int t.version ;
+              "name", `String t.name ;
+              "devices", `List (List.map json_of_device t.devices) ] @
+            optional_fields
+              [ "startup", `List (List.map json_of_startup t.startup) ])
 
 (** A document as it is written to a file: indented, since it is meant to be
  * read and edited by hand as much as by the interface. *)
@@ -349,6 +358,7 @@ let device_of_json j =
         List.map (fun (p, props) ->
             p, to_assoc (what ^": properties of "^ p) props) }
 
+(** One entry of a startup list, also as the API is given it. *)
 let startup_of_json j : Widget.startup_entry =
     let what = "a startup entry" in
     let path = to_string_ (what ^": \"path\"") (member what "path" j) in
@@ -419,6 +429,24 @@ let of_string ?getenv s =
              startup = [ SimTypes.{ path = "a/sw" ; action = "power on" ; \
                                     params = [ "now", `Bool true ] } ] } in \
    to_json (of_string (to_string t)) = to_json t)
+  (* Nothing is written that a reader would take for nothing anyway, and it \
+     still reads back as what was written: *) \
+  (let t = { version = current_version ; name = "n" ; \
+             devices = [ { type_ = "host" ; path = "h" ; location = None ; \
+                           params = [] ; properties = [ "", [] ] } ] ; \
+             startup = [ SimTypes.{ path = "h" ; action = "power on" ; \
+                                    params = [] } ] } in \
+   to_json t = Yojson.Basic.from_string \
+     "{\"version\":1,\"name\":\"n\",\
+       \"devices\":[{\"type\":\"host\",\"path\":\"h\",\
+                     \"properties\":{\"\":{}}}],\
+       \"startup\":[{\"path\":\"h\",\"action\":\"power on\"}]}" && \
+   of_string (to_string t) = t)
+  (let t = { version = current_version ; name = "n" ; devices = [] ; \
+             startup = [] } in \
+   to_json t = Yojson.Basic.from_string \
+     "{\"version\":1,\"name\":\"n\",\"devices\":[]}" && \
+   of_string (to_string t) = t)
   (* A document from before there was a startup list has none, rather than \
      failing to read: *) \
   (let t = of_string \

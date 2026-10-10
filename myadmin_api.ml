@@ -1413,34 +1413,17 @@ let json_of_action_state (s : Widget.action_state) =
                        | Some (_, Value (Some v)) -> v
                        | _ -> `Null) ]
 
-(* One entry of the startup list: which widget, by path, is to be asked what,
- * with what. A path and not an id, as the document has it -- the list is meant
- * to survive the network being built again. *)
-let json_of_startup (e : Widget.startup_entry) =
-    `Assoc [ "path", `String e.path ;
-             "action", `String e.action ;
-             "params", `Assoc e.params ]
+(* A startup entry is written as the document has it. *)
+let json_of_startup_list sim =
+    `List (List.map Topology.json_of_startup (Action.startup sim))
 
-let startup_of_json what j : Widget.startup_entry =
-    let str name =
-        match Yojson.Basic.Util.member name j with
-        | `String s -> s
-        | `Null -> bad_request "%s: %S is missing" what name
-        | v -> bad_request "%s: %S must be a string, not %s" what name
-                   (Yojson.Basic.to_string v) in
-    { path = str "path" ;
-      action = str "action" ;
-      params =
-        (match Yojson.Basic.Util.member "params" j with
-        | `Null -> []
-        | `Assoc l -> l
-        | v -> bad_request "%s: %S must be an object, not %s" what "params"
-                   (Yojson.Basic.to_string v)) }
+let startup_of_json j =
+    try Topology.startup_of_json j
+    with Widget.Bad_value m -> bad_request "%s" m
 
 let get_startup _mth matches _vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
-    Simulation.borrow sim (fun () ->
-        respond resp (`List (List.map json_of_startup (Action.startup sim))))
+    Simulation.borrow sim (fun () -> respond resp (json_of_startup_list sim))
 
 (* The whole list, in the order it is to be run: the interface edits it by
  * reordering and removing, both of which are this. A POST of one entry adds it
@@ -1457,12 +1440,12 @@ let set_startup _mth matches _vars qry_body resp =
             | exception _ ->
                 bad_request "Not a startup list: %S" qry_body
             | `List l ->
-                List.map (startup_of_json "a startup entry") l
+                List.map startup_of_json l
             | v ->
                 bad_request "A startup list is a list, not %s"
                     (Yojson.Basic.to_string v) in
         Action.set_startup sim entries ;
-        respond resp (`List (List.map json_of_startup (Action.startup sim))))
+        respond resp (json_of_startup_list sim))
 
 let add_startup _mth matches _vars qry_body resp =
     let sim = simulation_of_matches matches 1 in
@@ -1470,9 +1453,9 @@ let add_startup _mth matches _vars qry_body resp =
         let e =
             match Yojson.Basic.from_string qry_body with
             | exception _ -> bad_request "Not a startup entry: %S" qry_body
-            | j -> startup_of_json "a startup entry" j in
+            | j -> startup_of_json j in
         Action.add_startup sim e ;
-        respond resp (json_of_startup e))
+        respond resp (Topology.json_of_startup e))
 
 let get_actions _mth matches _vars _qry_body resp =
     let sim = simulation_of_matches matches 1 in
