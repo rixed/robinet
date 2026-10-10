@@ -384,6 +384,31 @@ exception Bad_value of string
 let bad_value fmt =
     Printf.ksprintf (fun s -> raise (Bad_value s)) fmt
 
+(* Set one property, answering with a refusal or with nothing.
+ *
+ * [where] is what a refusal calls the widget. The path the document used,
+ * where there is one: a refusal is read next to the file it came from. *)
+let set_property ~where (p : property) v =
+    let refused fmt =
+        Printf.ksprintf (fun m ->
+            Some (Printf.sprintf "%s: %S %s" where p.name m)) fmt in
+    if p.setter = None then refused "cannot be set" else
+    match p.getter () with
+    (* Already what it is to be. Not merely quicker: a property may be
+     * settable only some of the time, and one that a parameter has already
+     * brought about would then be reported as refused for having nothing left
+     * to do -- a recorder opens its file as it is built, and will not be told
+     * to open it again. *)
+    | current when current = v -> None
+    | exception _ | _ ->
+        if not (p.can_set ()) then
+            refused "cannot be set as things stand"
+        else
+        match (Option.get p.setter) v with
+        | () -> None
+        | exception Bad_value m -> refused "%s" m
+        | exception e -> refused "%s" (Printexc.to_string e)
+
 (* Coercions for setters to read their argument with.
  *
  * JSON has a single number type while Yojson has two, so a UI sending a round

@@ -447,6 +447,55 @@ let startup_of_json j : Widget.startup_entry =
                  e (startup_of_json (json_of_startup e))
  *)
 
+(* Every widget answers to "set-property", which none of them lists: *)
+(*$R startup_of_json
+    let sim = Simulation.make ~realtime:false "set-property" in
+    let w = Widget.make ~parent:sim.root "w" in
+    let x = ref 0 in
+    Widget.add_properties w Widget.[
+        property "x" ~kind:Int ~getter:(fun () -> `Int !x)
+            ~setter:(fun v -> x := to_int v) ;
+        property "ro" ~kind:Int ~getter:(fun () -> `Int 0) ] ;
+    assert_bool "not listed"
+        (not (List.exists (fun (a : Widget.action) ->
+                  a.name = "set-property") w.actions)) ;
+    let set = Option.get (Action.find w "set-property") in
+    let schedule l =
+        Action.schedule_of_fields (fun n -> List.assoc_opt n l |? `Null) in
+    let s = Action.start ~schedule:(schedule [ "delay", `Int 2 ]) w set
+                         [ "name", `String "x" ; "value", `String "42" ] in
+    Simulation.delay sim.root.power (Clock.Interval.sec 1.)
+        (fun () -> assert_equal ~msg:"not before its time" 0 !x) () ;
+    Simulation.run sim false ;
+    assert_equal ~msg:"the setter coerces" ~printer:string_of_int 42 !x ;
+    assert_equal ~msg:"the value it replaced" ~printer:dump
+                 (Some (Value (Some (`Int 0)))) (Option.map snd s.ended) ;
+    (* What cannot be set is refused when asked, even for later: *)
+    let refused params =
+        try ignore (Action.start ~schedule:(schedule [ "delay", `Int 1 ]) w
+                                 set params) ; false
+        with Widget.Bad_value _ -> true in
+    "a misspelt name" @? refused [ "name", `String "y" ; "value", `Int 1 ] ;
+    "a read-only one" @? refused [ "name", `String "ro" ; "value", `Int 1 ] ;
+    "no value" @? refused [ "name", `String "x" ] ;
+    "anything else" @? refused [ "name", `String "x" ; "value", `Int 1 ;
+                                 "values", `Int 2 ] ;
+    (* A value the setter refuses fails the run: *)
+    "a bad value" @?
+        (try ignore (Action.start w set [ "name", `String "x" ;
+                                          "value", `String "lots" ]) ; false
+         with Widget.Bad_value _ -> true) ;
+    assert_equal ~printer:string_of_int 42 !x ;
+    (* From a startup list, as a document has it: *)
+    Action.run_entries sim
+        [ startup_of_json (`Assoc [
+            "path", `String "w" ; "action", `String "set-property" ;
+            "params", `Assoc [ "name", `String "x" ; "value", `Int 7 ] ;
+            "delay", `Int 1 ]) ] ;
+    Simulation.run sim false ;
+    assert_equal ~printer:string_of_int 7 !x
+ *)
+
 let of_expanded_json j =
     let what = "a topology" in
     let version =
@@ -746,31 +795,6 @@ let parent_and_name path =
         String.sub path 0 i,
         String.sub path (i + 1) (String.length path - i - 1)
 
-(* Set one property, answering with a refusal or with nothing.
- *
- * [where] is what a refusal calls the widget. The path the document used,
- * where there is one: a refusal is read next to the file it came from. *)
-let set_property ~where (p : Widget.property) v =
-    let refused fmt =
-        Printf.ksprintf (fun m ->
-            Some (Printf.sprintf "%s: %S %s" where p.name m)) fmt in
-    if p.setter = None then refused "cannot be set" else
-    match p.getter () with
-    (* Already what it is to be. Not merely quicker: a property may be
-     * settable only some of the time, and one that a parameter has already
-     * brought about would then be reported as refused for having nothing left
-     * to do -- a recorder opens its file as it is built, and will not be told
-     * to open it again. *)
-    | current when current = v -> None
-    | exception _ | _ ->
-        if not (p.can_set ()) then
-            refused "cannot be set as things stand"
-        else
-        match (Option.get p.setter) v with
-        | () -> None
-        | exception Widget.Bad_value m -> refused "%s" m
-        | exception e -> refused "%s" (Printexc.to_string e)
-
 let set_properties (device : Widget.t) properties =
     List.concat_map (fun (path, values) ->
         let where =
@@ -786,7 +810,7 @@ let set_properties (device : Widget.t) properties =
                 | None ->
                     Some (Printf.sprintf "%s: %S is not one of its properties"
                               where name)
-                | Some p -> set_property ~where p v
+                | Some p -> Widget.set_property ~where p v
             ) values
     ) properties
 

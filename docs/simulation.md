@@ -583,9 +583,19 @@ What can be asked:
 | `stop` | a server or a client (below) | — |
 | `start replay`, `stop replay` | a replayer | — |
 | `flush` | a gateway's `nat`: forgets every connection it tracks, so established ones break | — |
+| `set-property` | anything | `name` of one of its properties, and the `value` to give it |
 
 `GET /api/simulations/<s>/widgets/<w>/actions` lists what one widget will
-answer to, and what each takes.
+answer to, and what each takes — all but `set-property`, which every widget
+answers to and none lists.
+
+`set-property` is what a document's `properties` do, put off or repeated as
+the entry says: the value is written as it would be there, and the run comes
+to the value it replaced. So a router that swaps between two routing tables
+every five minutes is two entries, each setting its `routes` to one of them,
+both repeated after ten minutes and the second delayed by five. A property that is not there or cannot be set is
+refused as the list starts, delay or not; a value the property will not
+take fails its run when it is due, and that ends its loop.
 
 A server or a client runs under a part of its host named after its port —
 `h2/server-tcp:5001`, `h1/client-udp:6000` — or, for a client given no source

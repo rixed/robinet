@@ -1066,6 +1066,13 @@ paths:
         that is to wait comes back `waiting`; whether the action can run just
         now is then asked when it is due, and a no ends that run, and its loop,
         as `failed`.
+
+        Every widget also answers to `set-property`, which it does not list:
+        its body is `{"name": <a property>, "value": <its new value>}`, the
+        value as the property's own `PUT` takes it, and the run comes to the
+        value it replaced. A property that is not there or cannot be set is
+        refused at once, even for a run that is to wait. It is what puts off a
+        change of configuration, or repeats one, the way a startup entry does.
       parameters:
         - name: delay
           in: query

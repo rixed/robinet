@@ -262,9 +262,43 @@ let next_action_id =
         incr seq ;
         id
 
-(** The action of [w] by that name, if it has one. *)
-let find_action (w : widget) name =
-    List.find_opt (fun (a : action) -> a.name = name) w.actions
+(** Something about this simulation's network has been changed from outside. *)
+let changed (t : t) = t.unsaved <- true
+
+(* What a startup list writes to set one of [w]'s properties, [name], to
+ * [value], when its schedule says. Not one of [w]'s actions, and so neither
+ * listed nor offered by the interface, but every widget answers to it (see
+ * [find_action]).
+ *
+ * Its value is handed to the setter as written, as a document's properties
+ * are, since a property coerces what it is given itself. So [check_args] does
+ * for it what {!Widget.args_of} does for other actions. *)
+module SetProperty =
+struct
+    let name = "set-property"
+
+    let settable (w : widget) prop =
+        match List.find_opt (fun (p : Widget.property) -> p.name = prop)
+                            w.properties with
+        | None ->
+            Widget.bad_value "%s has no property %S" (Widget.full_name w) prop
+        | Some p when p.setter = None ->
+            Widget.bad_value "%s: %S cannot be set" (Widget.full_name w) prop
+        | Some p -> p
+
+    let check_args (w : widget) given =
+        List.iter (fun (n, _) ->
+            if n <> "name" && n <> "value" then
+                Widget.bad_value "%s takes no %S" name n
+        ) given ;
+        let arg n =
+            match List.assoc_opt n given with
+            | Some v -> v
+            | None -> Widget.bad_value "%s needs a %S" name n in
+        let prop = Widget.to_string (arg "name") in
+        ignore (settable w prop) ;
+        [ "name", `String prop ; "value", arg "value" ]
+end
 
 (* A run in a few words, for the logs: what was asked for, with what. *)
 let describe_run (s : action_state) =
@@ -354,6 +388,33 @@ and fire (s : action_state) =
            and the run must say so rather than wait for ever on work that was
            never scheduled. *)
         (try a.handler s with e -> fail e)
+
+(** The action of [w] by that name, if it has one. *)
+and find_action (w : widget) name =
+    if name = SetProperty.name then Some (set_property_action w) else
+    List.find_opt (fun (a : action) -> a.name = name) w.actions
+
+(* The run of a [SetProperty] hands back the value it replaced. *)
+and set_property_action (w : widget) =
+    Widget.action SetProperty.name
+        ~descr:"Set one property to a value."
+        (* Only for whoever reads them: [SetProperty.check_args] is what
+           reads its arguments. *)
+        ~params:Widget.[ param "name" ~kind:String ;
+                         param "value" ~kind:Text ]
+        ~handler:(fun s ->
+            let p = SetProperty.settable w (Widget.arg_string s.params "name")
+            and value = Widget.arg s.params "value" in
+            let before = try Some (p.getter ()) with _ -> None in
+            match Widget.set_property ~where:(Widget.full_name w) p value
+            with
+            | Some refusal -> Widget.bad_value "%s" refusal
+            | None ->
+                changed (Widget.sim w) ;
+                Log.(log w.logger Info (lazy (Printf.sprintf
+                    "Property %S set to %s" p.name
+                    (Yojson.Basic.to_string value)))) ;
+                stop_action s (Value before))
 
 (* Every run of [ws] that is still going on, ended as [reason] says.
  *
@@ -476,9 +537,6 @@ let clear (t : t) =
             | w :: _ -> remove_widget w ; loop () in
         loop ()) ()
 
-(** Something about this simulation's network has been changed from outside. *)
-let changed (t : t) = t.unsaved <- true
-
 (** Its network has just been written out, or read in: what it holds is safe
  * somewhere else. *)
 let saved (t : t) = t.unsaved <- false
@@ -573,7 +631,9 @@ let start_action ?(origin=Api) ?(schedule=once) (w : widget) (a : action)
         let immediate = Interval.compare schedule.delay Interval.zero <= 0 in
         if immediate && not (a.can_run ()) then
             Widget.bad_value "%s cannot %s just now" (Widget.full_name w) a.name ;
-        let params = Widget.args_of a.name a.params given in
+        let params =
+            if a.name = SetProperty.name then SetProperty.check_args w given
+            else Widget.args_of a.name a.params given in
         let id = next_action_id () in
         let s =
             { id ;
