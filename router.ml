@@ -318,6 +318,9 @@ type iface = { mutable trx : trx ; (** Can come handy to splice another trx ther
         mutable admin_host : Host.t option ;
 (** Fragment IPv4 packets larger than the MTU, unless they have DF set. *)
 mutable link_fragmentation : bool ;
+               (** Longest a frame may wait in this interface's queue, which
+                * caps its backlog at that much of its negotiated speed: *)
+               mutable max_queue_delay : float ;
                (** Errors about packets received here are reported with the product
                 * of this and the router's probability, after the sum of both
                 * delays: *)
@@ -353,8 +356,9 @@ mutable can_forward_after : int option ;
          * router's own outgoing links. *)
         mutable lb_cursor : int ;
           (** Max total RAM available to buffer frames, a third of which is
-           * reserved to the ports, in equal parts: *)
-  mutable buffer_capacity : int ;
+           * reserved to the ports, in equal parts. [None] for just enough
+           * for every port to fill its [max_queue_delay] at once: *)
+  mutable buffer_capacity : int option ;
                  (** RAM used by all queued frames or reserved per port
                   * space, as of its last refresh: *)
                  buffered : Metric.Gauge.t ;
@@ -385,21 +389,37 @@ let target_routes ?in_iface ?src_ip ?dst_ip ?proto ?src_port ?dst_port t =
                          dst_port |>
     List.map (fun (r : Route.t) -> r.target)
 
+(* Most bytes [iface] may have queued, or [None] while it has no link (and
+ * drops everything anyway): *)
+let max_backlog iface =
+    Option.map (fun (speed, _) ->
+        int_of_float (iface.max_queue_delay *. Eth.Speed.to_bps speed /. 8.)
+    ) iface.eth.iface.negotiated
+
+let actual_buffer_capacity t =
+    match t.buffer_capacity with
+    | Some c -> c
+    | None ->
+        Array.fold_left (fun sum iface ->
+            sum + (max_backlog iface |? 0)
+        ) 0 t.ifaces
+
 (* RAM reserved to each port alone: *)
 let buffer_reserved t =
-    t.buffer_capacity / 3 / Array.length t.ifaces
+    actual_buffer_capacity t / 3 / Array.length t.ifaces
 
 (* What a port takes from the shared pool when [backlog] bytes are queued on
  * it: *)
-let shared_use t backlog =
-    max 0 (backlog - buffer_reserved t)
+let shared_use ~reserved backlog =
+    max 0 (backlog - reserved)
 
 (* RAM used by the queued frames and the reserves. The queues being those of
  * the Eth interfaces, this is never out of step with what they hold. *)
 let buffer_used t =
+    let reserved = buffer_reserved t in
     Array.fold_left (fun sum iface ->
         let backlog = Eth.Iface.backlog iface.eth.iface in
-        sum + buffer_reserved t + shared_use t backlog
+        sum + reserved + shared_use ~reserved backlog
     ) 0 t.ifaces
 
 (* Set [buffered] from the queues, then again when the last frame queued so
@@ -416,11 +436,20 @@ let rec refresh_buffered t () =
         Simulation.at t.widget.power drained_at (refresh_buffered t) ()
 
 (* Whether port [n] has room to queue a frame of [len] bytes: up to its
- * reserve, then from what the shared pool has left. *)
+ * reserve, then from what the shared pool has left, and never beyond its own
+ * [max_backlog] -- unless its queue is empty, so that a frame is never
+ * dropped for being larger than that. *)
 let buffer_alloc t n len =
-    let backlog = Eth.Iface.backlog t.ifaces.(n).eth.iface in
-    let extra = shared_use t (backlog + len) - shared_use t backlog in
-    if extra > t.buffer_capacity - buffer_used t then (
+    let iface = t.ifaces.(n) in
+    let backlog = Eth.Iface.backlog iface.eth.iface in
+    let reserved = buffer_reserved t in
+    let extra =
+        shared_use ~reserved (backlog + len) - shared_use ~reserved backlog in
+    let over_max =
+        match max_backlog iface with
+        | Some m -> backlog > 0 && backlog + len > m
+        | None -> false in
+    if over_max || extra > actual_buffer_capacity t - buffer_used t then (
         let now = Simulation.Widget.now t.widget in
         let params = Metric.dir_params ~port:n "tail-dropped" in
         Metric.Counter.inc t.tail_dropped ~now ~params ;
@@ -674,6 +703,7 @@ let set_proxy_arp t n v =
 
 let iface_make ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
                ?can_forward_after ?mac ?my_addresses ?(link_fragmentation=true)
+               ?(max_queue_delay=0.2)
                ?(notify_errs=notify_always ()) ~parent n =
     let name = "#"^ string_of_int n in
     (* For our ifaces we force the GW on a packet by packet basis according
@@ -685,7 +715,7 @@ let iface_make ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
     let trx = Eth.TRX.make eth in
     let iface =
         { trx ; eth ; admin_host = None ; link_fragmentation ;
-          notify_errs } in
+          max_queue_delay ; notify_errs } in
     Widget.add_properties eth.iface.widget Widget.[
         property "link fragmentation" ~kind:Bool
             ~descr:"Fragment IPv4 packets larger than the MTU, unless they \
@@ -693,6 +723,12 @@ let iface_make ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
                     with ICMP."
             ~getter:(fun () -> `Bool iface.link_fragmentation)
             ~setter:(fun v -> iface.link_fragmentation <- to_bool v) ;
+        property "max queue delay" ~kind:Duration ~units:"secs"
+            ~descr:"Longest a frame may wait to leave by this interface, at \
+                    its negotiated speed. Frames that would wait longer are \
+                    dropped."
+            ~getter:(fun () -> `Float iface.max_queue_delay)
+            ~setter:(fun v -> iface.max_queue_delay <- to_float_range ~min:0. v) ;
         property "errors probability" ~kind:(FRange (0., 1.))
             ~descr:"Probability to report errors about packets received \
                     here with ICMP, times the router's."
@@ -730,12 +766,6 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
     if max_used_iface >= num_ifaces then
         Printf.sprintf "Router.make: routing table uses up to iface#%d but router has only %d ifaces" max_used_iface num_ifaces |>
         invalid_arg ;
-    let buffer_capacity =
-        match buffer_capacity with Some v -> v | None ->
-        (* 200ms of traffic by default: *)
-        let speed = Eth.(Speed.best (speeds |? Iface.default_speeds)) in
-        let throughput = (Eth.Speed.to_bps speed) /. 8. in
-        int_of_float (throughput *. 0.2 *. float_of_int num_ifaces) in
     let buffered = Metric.Gauge.make () in
     let tail_dropped = Metric.Counter.make () in
     let ifaces =
@@ -908,17 +938,23 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
                     instead of returning via the same interface it came from."
             ~getter:(fun () -> `Bool t.admin_reroute)
             ~setter:(fun v -> t.admin_reroute <- to_bool v) ;
-        property "buffer capacity" ~kind:Int ~units:"bytes"
+        property "buffer capacity" ~kind:(optional Int) ~units:"bytes"
             ~descr:"RAM to queue frames waiting to be emitted, a third of \
                     which is reserved to the ports in equal parts while the \
-                    rest is shared."
-            ~getter:(fun () -> `Int t.buffer_capacity)
+                    rest is shared. Unset, just enough for every port to \
+                    fill its max queue delay at once."
+            ~getter:(fun () ->
+                match t.buffer_capacity with None -> `Null | Some c -> `Int c)
             ~setter:(fun v ->
-                t.buffer_capacity <- to_int_range ~min:0 v ;
+                t.buffer_capacity <- to_option (to_int_range ~min:0) v ;
                 (* Extremes seen with other reserves would mislead: *)
                 Metric.Gauge.reset t.buffered ;
                 let now = Simulation.Widget.now widget in
                 Metric.Gauge.set t.buffered ~now (buffer_used t)) ;
+        property "actual buffer capacity" ~kind:Int ~units:"bytes"
+            ~descr:"The buffer capacity, or what it is worked out to be \
+                    from the links when unset."
+            ~getter:(fun () -> `Int (actual_buffer_capacity t)) ;
         metric_property "buffered" ~units:"bytes"
             ~descr:"RAM taken by the queued frames and the ports' reserves."
             (Metric.Gauge.T t.buffered) ;
@@ -1240,6 +1276,56 @@ let make_from_addrs
     "and a negative capacity is refused" @?
         (try (Option.get p.setter) (`Int (-1)) ; false
          with _ -> true)
+ *)
+
+(* Unset, the capacity is what every port needs to queue its max queue delay
+   at its negotiated speed, and no port queues more than that, however much
+   RAM is left. *)
+(*$R max_backlog
+    ignore max_backlog ;
+    let sim = Simulation.make ~realtime:false "router-queue-delay" in
+    let via = Some (Eth.Gateway.Mac (Eth.Addr.random ())) in
+    let routes = [ Route.make (Forward { out_iface = 2 ; via }) ] in
+    let r = make ~parent:sim.root
+                 ~speeds:Eth.Speed.[ Eth10Mbps ; Eth100Mbps ] 3 routes "r" in
+    Simulation.power_up r.widget.power ;
+    assert_equal ~msg:"no link, no buffer" ~printer:string_of_int
+                 0 (actual_buffer_capacity r) ;
+    let slow = Capabilities.(Eth { speeds = [ EthSpeed.Eth10Mbps ] ;
+                                   full_duplex = true }) in
+    (ports r.ifaces.(0)).set_capabilities 0 Capabilities.Any ;
+    (ports r.ifaces.(1)).set_capabilities 0 Capabilities.Any ;
+    (ports r.ifaces.(2)).set_capabilities 0 slow ;
+    assert_equal ~msg:"200ms of each negotiated speed" ~printer:string_of_int
+                 (2_500_000 + 2_500_000 + 250_000) (actual_buffer_capacity r) ;
+    let emitted = ref 0 in
+    r.ifaces.(2).trx =-> (fun _ -> incr emitted) ;
+    let send_all () =
+        let num_sent = 100 in
+        let frame n =
+            Ip.Pdu.make Ip.Proto.udp (Ip.Addr.of_string "10.0.0.1")
+                        (Ip.Addr.of_string "10.0.1.1")
+                        (Bitstring.create_bitstring (1000 * 8)) |>
+            Ip.Pdu.pack |>
+            Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ())
+                         r.ifaces.(n).eth.Eth.State.mac |>
+            Eth.Pdu.pack in
+        for i = 1 to num_sent do
+            List.iter (fun n ->
+                Simulation.delay sim.root.power
+                    (Clock.Interval.msec (float_of_int i))
+                    r.ifaces.(n).trx.out.write (frame n)
+            ) [ 0 ; 1 ]
+        done ;
+        Simulation.run sim false ;
+        Metric.Counter.get r.tail_dropped
+            ~params:(Metric.dir_params ~port:2 "tail-dropped") in
+    (* Twice 8Mbps into 10Mbps for 100ms queues less than 100KB, which is
+       less than 200ms: *)
+    assert_equal ~msg:"within 200ms, all is queued" ~printer:string_of_int
+                 0 (send_all ()) ;
+    r.ifaces.(2).max_queue_delay <- 0.01 ;
+    "beyond 10ms, some is dropped" @? (send_all () > 0)
  *)
 
 (* Which address is a router's own is part of its routing table, so a

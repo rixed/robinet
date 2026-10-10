@@ -366,7 +366,7 @@ under:
 | hub | `""` | `speed` |
 | tap | | *none* |
 | router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin`, `buffer capacity` |
-| | `#0`… | *its interfaces*, and `link fragmentation`, `errors probability`, `errors delay` |
+| | `#0`… | *its interfaces*, and `link fragmentation`, `max queue delay`, `errors probability`, `errors delay` |
 | | `#0/admin@0`… | `hostname`, `search suffix` — the stack answering for the address that interface holds |
 | gateway | `router`, `router/#0`, `router/#1` | *a router and its two interfaces* |
 | | `nat` | `min port`, `port forwards`, `NAT pings`, `send errors`, `answer pings` |
@@ -407,11 +407,20 @@ A router's `buffer capacity` is the RAM, in bytes, it holds the frames waiting
 for an interface to be free in. A third of it is reserved to the interfaces in
 equal parts; the rest is shared, and taken by whichever interface fills its own
 share first. A frame that fits in neither is dropped, and counted under
-`tail-dropped` for the port it was to leave by. Left out, it is 200ms of
-traffic at the best of the router's `speeds` on every port at once — 250MB for
-a router of two ports at 5Gbps, which nothing short of a flood fills. Its
-`buffered` reads the RAM in use: the reserves, whatever queues, plus what the
-queues take from the shared part.
+`tail-dropped` for the port it was to leave by.
+
+Whatever RAM is left, an interface never queues more than its `max queue
+delay` (0.2 secs unless set otherwise) at the speed it negotiated: a frame
+that would wait longer is dropped and counted the same way, unless the queue
+is empty. So a port that came up at 100Mbps on a 10Gbps router holds 200ms of
+100Mbps, not of 10Gbps.
+
+Left out, or `null`, the capacity is just what every port needs to fill its
+own `max queue delay` at once, worked out from the speeds the links
+negotiated as they come and go: 250MB for two ports at 5Gbps, nothing for a
+router with no link. `actual buffer capacity` reads what it currently is, and
+`buffered` the RAM in use: the reserves, whatever queues, plus what the queues
+take from the shared part.
 
 The current list for anything is one request away — `GET
 /api/simulations/<s>/widgets/<w>/properties` gives each one's name, kind,
