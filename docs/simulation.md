@@ -116,8 +116,8 @@ carries it — see *Routing tables* below.
 ## Environment variables
 
 A value written as a string is also what lets a document be parameterised: a
-file `robinet` reads names environment variables in its values, and what they
-stand for is text.
+document names environment variables in its values, and what they stand for
+is text.
 
 ```json
 { "type": "switch", "path": "sw", "params": { "ports": "$NB_PORTS" } }
@@ -133,10 +133,15 @@ dollars. What a variable stands for is not looked at again, so a value holding
 a `$` is a value. Values only: a key is the name of a parameter or of a
 property.
 
-They are expanded once, as the file is read, so saving the network writes what
-it was built with and not the names it was written with. And only there: a
-document arriving over the API is taken as it is written, since a file is read
-on behalf of whoever started `robinet` and a request is not.
+They are expanded once, as the document is read, so saving the network writes
+what it was built with and not the names it was written with. Saving also
+doubles every `$` that would otherwise begin a variable or a `$$`, so that a
+saved network reads back as it was saved.
+
+A document arriving over the API is read the same way, but in an empty
+environment, since a file is read on behalf of whoever started `robinet` and a
+request is not: there, `${NAME:-8}` is its default, `$$` is still a dollar, and
+a bare `$NAME` is refused.
 
 ## The catalogue
 

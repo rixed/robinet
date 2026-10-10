@@ -414,9 +414,11 @@ paths:
         refuses: loading into it would take the interface with it, leaving
         nothing to say so.
 
-        A document sent here is taken as it is written: the environment
-        variables a value may name are expanded only for a document `robinet`
-        reads from a file, which it does on behalf of whoever started it.
+        A document sent here is read as a file is, but in an empty
+        environment, since `robinet` reads a file on behalf of whoever
+        started it and a request is not: `${NAME:-8}` is its default, `$$` is
+        a dollar, and a bare `$NAME` is refused. What `GET` answers is
+        written so that it reads back as it is.
 
         `POST` does the same thing.
       operationId: putTopology
