@@ -1355,10 +1355,15 @@ struct
             t
     end
 
+    let params_of_dir =
+        let p d = Metric.(Params.singleton "dir" Param.(Bool d)) in
+        let fwd = p true and bwd = p false in
+        fun dir -> if dir then fwd else bwd
+
     (* Transfer some bits along the cable *)
     let pass (st : State.t) dir bits =
         let len = bitstring_length bits in
-        let params = Metric.(Params.singleton "dir" Param.(Bool dir)) in
+        let params = params_of_dir dir in
         let prev_tot_bits = Metric.Counter.get ~params st.tot_bits in
         let now = Simulation.Widget.now st.widget in
         Metric.Counter.add st.tot_bits ~now ~params len ;

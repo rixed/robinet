@@ -1100,7 +1100,7 @@ let metric_history ?since t widget_id property_name =
     ) rows [] |>
     (* By parameters, so that a caller polling every second is handed the rows
      * in the same order every time: a hash table has none. *)
-    List.sort (fun (a, _) (b, _) -> Metric.Params.compare Stdlib.compare a b)
+    List.sort (fun (a, _) (b, _) -> Metric.Params.compare a b)
 
 (* Take one if the clock has reached the time it was due at, and say when the
  * next one is. Due times are multiples of the rate, so that the snapshots of a

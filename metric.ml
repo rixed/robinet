@@ -76,6 +76,20 @@ struct
         | Bool b -> `Bool b
         | Int d -> `Int d
         | String s -> `String s
+
+    let rank = function Bool _ -> 0 | Int _ -> 1 | String _ -> 2
+
+    let compare a b =
+        match a, b with
+        | Bool a, Bool b -> Stdlib.Bool.compare a b
+        | Int a, Int b -> Stdlib.Int.compare a b
+        | String a, String b -> Stdlib.String.compare a b
+        | _ -> Stdlib.Int.compare (rank a) (rank b)
+
+    let hash = function
+        | Bool b -> Bool.to_int b
+        | Int d -> d
+        | String s -> Hashtbl.hash s
 end
 
 module Params =
@@ -87,7 +101,18 @@ struct
 
     let singleton n v = [ n, v ]
 
-    let compare = List.compare
+    let compare =
+        List.compare (fun (n1, v1) (n2, v2) ->
+            match Stdlib.String.compare n1 n2 with
+            | 0 -> Param.compare v1 v2
+            | c -> c)
+
+    let equal t1 t2 = compare t1 t2 = 0
+
+    let hash t =
+        List.fold_left (fun h (n, v) ->
+            h * 31 + Hashtbl.hash n + Param.hash v
+        ) 0 t land max_int
 
     let cmp_param (n1, _) (n2, _) = String.compare n1 n2
 
@@ -123,22 +148,24 @@ struct
             (fun oc (n, v) -> Printf.fprintf oc "%S:%s" n (Param.to_string v))
             oc t
 
-    let print_hash p oc h =
-        Hashtbl.print ~first:"" ~last:"" ~sep:"" ~kvsep:""
-            (fun oc params -> Printf.fprintf oc "\t\t%a: " print params)
-            (fun oc v -> Printf.fprintf oc "%a\n" p v)
-            oc h
-
     let to_yojson t =
         `Assoc (List.map (fun (n, v) -> n, Param.to_yojson v) t)
 end
+
+(* A table keyed by params, hashed and compared as such: *)
+module Tbl = Hashtbl.Make (Params)
+
+let print_tbl p oc h =
+    Tbl.iter (fun params v ->
+        Printf.fprintf oc "\t\t%a: %a\n" Params.print params p v
+    ) h
 
 (* Every metric is a family, keyed by the parameters of the event: a JSON
  * object cannot hold that, its keys being strings, so the tables become a list
  * of the pairs they hold. *)
 let table_to_yojson value_to_yojson h =
     `List (
-        Hashtbl.fold (fun params v lst ->
+        Tbl.fold (fun params v lst ->
             `Assoc [ "params", Params.to_yojson params ;
                      "value", value_to_yojson v ] :: lst
         ) h [])
@@ -188,29 +215,29 @@ type metric = ..
 (* Atomic events are for errors, per results stats, etc *)
 module Atomic =
 struct
-    type t = { counts : (Params.t, int ref) Hashtbl.t
+    type t = { counts : int ref Tbl.t
                    [@to_yojson table_to_yojson (fun c -> `Int !c)] ;
                first_last : FirstLast.t } [@@deriving to_yojson]
 
     type metric += T of t
 
     let make () =
-        { counts = Hashtbl.create 5 ;
+        { counts = Tbl.create 5 ;
           first_last = FirstLast.make () }
 
     let reset t =
-        Hashtbl.clear t.counts ;
+        Tbl.clear t.counts ;
         FirstLast.reset t.first_last
 
     let fire ~now ?(params=Params.empty) t =
-        (match Hashtbl.find t.counts params with
-        | exception Not_found -> Hashtbl.add t.counts params (ref 1)
+        (match Tbl.find t.counts params with
+        | exception Not_found -> Tbl.add t.counts params (ref 1)
         | count -> incr count) ;
         FirstLast.update now t.first_last
 
     let print oc t =
         Printf.fprintf oc "counts: %a"
-            (Params.print_hash (fun oc c -> Int.print oc !c))
+            (print_tbl (fun oc c -> Int.print oc !c))
                 t.counts ;
         FirstLast.printf oc t.first_last
 end
@@ -218,7 +245,7 @@ end
 (* Measure some current capacity. Can increase or decrease. *)
 module Gauge =
 struct
-    type t = { values : (Params.t, value) Hashtbl.t
+    type t = { values : value Tbl.t
                    [@to_yojson table_to_yojson value_to_yojson] ;
                first_last : FirstLast.t }
     (* [min] and [max] are the extremes since the metric was last reset, which
@@ -239,19 +266,19 @@ struct
     type metric += T of t
 
     let make () =
-        { values = Hashtbl.create 5 ;
+        { values = Tbl.create 5 ;
           first_last = FirstLast.make () }
 
     let reset t =
-        Hashtbl.clear t.values ;
+        Tbl.clear t.values ;
         FirstLast.reset t.first_last
 
     let set ~now ?(params=Params.empty) t v =
-        (match Hashtbl.find t.values params with
+        (match Tbl.find t.values params with
         | exception Not_found ->
             let new_v = { min = v ; current = v ; max = v ;
                           sample_min = v ; sample_max = v } in
-            Hashtbl.add t.values params new_v
+            Tbl.add t.values params new_v
         | value ->
             value.current <- v ;
             if v < value.min then value.min <- v ;
@@ -263,21 +290,21 @@ struct
     (* Return the current value of this gauge for the given [params].
      * @raise Not_found if there is no value for this parameters set. *)
     let get ?(params=Params.empty) t =
-        Hashtbl.find t.values params
+        Tbl.find t.values params
 
     (* Read every row and start a new window at the value each of them stands
      * at: the extremes of what comes next are those of what happens next. *)
     let take_windows t =
-        let rows = Hashtbl.fold (fun params v l -> (params, v) :: l) t.values [] in
+        let rows = Tbl.fold (fun params v l -> (params, v) :: l) t.values [] in
         List.iter (fun (params, v) ->
-            Hashtbl.replace t.values params
+            Tbl.replace t.values params
                 { v with sample_min = v.current ; sample_max = v.current }
         ) rows ;
         rows
 
     let add ~now ?(params=Params.empty) t d =
         let v =
-            try (Hashtbl.find t.values params).current
+            try (Tbl.find t.values params).current
             with Not_found -> 0 in
         set ~now ~params t (v + d)
 
@@ -294,7 +321,7 @@ struct
         Printf.fprintf oc "\
             \tvalues:\n\
             %a"
-            (Params.print_hash
+            (print_tbl
                 (fun oc value ->
                     Printf.fprintf oc "min:%d, current:%d, max:%d"
                         value.min value.current value.max)
@@ -305,24 +332,24 @@ end
 (* Counters are for counting bytes, etc *)
 module Counter =
 struct
-    type t = { values : (Params.t, int ref) Hashtbl.t
+    type t = { values : int ref Tbl.t
                    [@to_yojson table_to_yojson (fun { contents } -> `Int contents)] ;
                fired : Atomic.t } [@@deriving to_yojson]
 
     type metric += T of t
 
     let make () =
-        { values = Hashtbl.create 10 ;
+        { values = Tbl.create 10 ;
           fired = Atomic.make () }
 
     let reset t =
-        Hashtbl.clear t.values ;
+        Tbl.clear t.values ;
         Atomic.reset t.fired
 
     let add t ~now ?(params=Params.empty) c =
-        (match Hashtbl.find t.values params with
+        (match Tbl.find t.values params with
         | exception Not_found ->
-            Hashtbl.add t.values params (ref c)
+            Tbl.add t.values params (ref c)
         | v -> v.contents <- v.contents + c) ;
         Atomic.fire ~now ~params t.fired
 
@@ -330,12 +357,12 @@ struct
         add t ?params 1
 
     let get ?(params=Params.empty) t =
-        try !(Hashtbl.find t.values params)
+        try !(Tbl.find t.values params)
         with Not_found -> 0
 
     let print oc t =
         Printf.fprintf oc "counts: %a"
-            (Params.print_hash
+            (print_tbl
                 (fun oc v -> Printf.fprintf oc "%d\n" !v))
                 t.values
 end
@@ -343,7 +370,7 @@ end
 (* Timeds are for download times, connection times, etc *)
 module Timed =
 struct
-    type t = { durations : (Params.t, duration) Hashtbl.t
+    type t = { durations : duration Tbl.t
                    [@to_yojson table_to_yojson duration_to_yojson] ;
                starts : Atomic.t ;
                stops : Atomic.t ;
@@ -369,13 +396,13 @@ struct
     let make () =
         { starts = Atomic.make () ;
           stops = Atomic.make () ;
-          durations = Hashtbl.create 10 ;
+          durations = Tbl.create 10 ;
           simult = Gauge.make () }
 
     let reset t =
         Atomic.reset t.starts ;
         Atomic.reset t.stops ;
-        Hashtbl.clear t.durations ;
+        Tbl.clear t.durations ;
         Gauge.reset t.simult
 
     (* The event is over at the time the caller says it is: only the caller
@@ -383,7 +410,7 @@ struct
     type stop_func = now:Clock.Time.t -> Params.t -> unit
 
     let record t params duration =
-        Hashtbl.modify_opt params (function
+        Tbl.modify_opt params (function
             | None ->
                 Some {
                     min = duration ;
@@ -409,9 +436,9 @@ struct
      * something else is measured. *)
     let take_windows t =
         let rows =
-            Hashtbl.fold (fun params d l -> (params, d) :: l) t.durations [] in
+            Tbl.fold (fun params d l -> (params, d) :: l) t.durations [] in
         List.iter (fun (params, d) ->
-            Hashtbl.replace t.durations params
+            Tbl.replace t.durations params
                 { d with sample_min = None ; sample_max = None }
         ) rows ;
         rows
@@ -450,7 +477,7 @@ struct
 
     let print oc t =
         Printf.fprintf oc "durations: %a"
-            (Params.print_hash
+            (print_tbl
                 (fun oc d ->
                     let open Clock.Interval in
                     Printf.fprintf oc "min:%s, avg:%s, max:%s, count:%d"
@@ -488,7 +515,7 @@ type value =
  * whatever happened since some other caller last looked. *)
 let sample m =
     let of_table wrap l = List.map (fun (params, v) -> params, wrap v) l in
-    let all h = Hashtbl.fold (fun params v l -> (params, v) :: l) h [] in
+    let all h = Tbl.fold (fun params v l -> (params, v) :: l) h [] in
     match m with
     | Atomic.T t -> of_table (fun c -> Count !c) (all t.Atomic.counts)
     | Counter.T t -> of_table (fun c -> Count !c) (all t.Counter.values)
@@ -579,10 +606,10 @@ let reset = function
     | _ -> invalid_arg "Metric.reset: unknown kind of metric"
 
 let params = function
-    | Atomic.T t -> Hashtbl.keys t.counts
-    | Gauge.T t -> Hashtbl.keys t.values
-    | Counter.T t -> Hashtbl.keys t.values
-    | Timed.T t -> Hashtbl.keys t.durations
+    | Atomic.T t -> Tbl.keys t.counts
+    | Gauge.T t -> Tbl.keys t.values
+    | Counter.T t -> Tbl.keys t.values
+    | Timed.T t -> Tbl.keys t.durations
     | _ -> invalid_arg "Metric.params: unknown kind of metric"
 
 let has_data metric =
