@@ -114,9 +114,9 @@ Some
     Tcp.Pdu.flags = Syn; Tcp.Pdu.checksum = Some 38264;
     Tcp.Pdu.urg_ptr = 0;
     Tcp.Pdu.options =
-     02 04 05 64 01 01 08 0a - 8c 61 60 83 00 00 00 00  ...d.....a......
-     01 03 03 07                                        ....
-     ;
+     [Tcp.Pdu.Opt.Mss 1380; Tcp.Pdu.Opt.Nop; Tcp.Pdu.Opt.Nop;
+      Tcp.Pdu.Opt.Timestamps (-1939775357l, 0l); Tcp.Pdu.Opt.Nop;
+      Tcp.Pdu.Opt.Wscale 7];
     Tcp.Pdu.payload = empty}]
 ]}
 

@@ -509,13 +509,22 @@ cannot start a frame before it has finished the one before it.
   { "name": "Data", "fields": { "gen": "payload size" } } ]
 ```
 
+A field made of parts — a record, a list, a variant — takes a synth for each
+part, or a single one for the whole. TCP `options` is a list, each option an
+object naming it with a synth for what it carries: `{"MSS": {"const": 1460}}`,
+`{"window scale": null}`, `{"NOP": null}`, `{"SACK permitted": null}`,
+`{"SACK": [{"left edge": …, "right edge": …}]}`,
+`{"timestamps": {"value": …, "echo reply": …}}`, `{"EOL": …}` (the bytes after
+it) or `{"other": …}` (raw bytes, kind and length included).
+At most 40 bytes of them, zero padded to a multiple of 4.
+
 An automatic value is a *plausible* one and not any the field could hold: a
 protocol number says what is above it, a length counts what is below, a TTL is
-64, an IP id is the previous packet's plus one. `Data` is the raw bottom layer
-and its whole `fields` is one value: from a generator, it is that many random
-bytes. Layer names are `Eth`, `Arp`, `Ip`, `Ip6`, `Udp`, `Tcp`, `Icmp`, `Dns`,
-`Dhcp`, `Vlan`, `Sll`, `Pcap`, `Data`; a field left out of `fields` is refused,
-so write them all, `null` for the ones to leave alone.
+64, an IP id is the previous packet's plus one, TCP options are none. `Data`
+is the raw bottom layer and its whole `fields` is one value: from a generator,
+it is that many random bytes. Layer names are `Eth`, `Arp`, `Ip`, `Ip6`, `Udp`,
+`Tcp`, `Icmp`, `Dns`, `Dhcp`, `Vlan`, `Sll`, `Pcap`, `Data`; a field left out
+of `fields` is refused, so write them all, `null` for the ones to leave alone.
 
 A synthesizer emits nothing until `emitting` is set. Set in a document, it
 starts when the box is switched on.

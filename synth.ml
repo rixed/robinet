@@ -451,7 +451,8 @@ let default_packet () : Yojson.Basic.t =
                          (Packet.Pdu.json_of_layer l) ] in
     `List [ layer "Eth" (Packet.Pdu.Eth (Eth.Pdu.random ())) ;
             layer "Ip" (Packet.Pdu.Ip (Ip.Pdu.random ())) ;
-            layer "Tcp" (Packet.Pdu.Tcp (Tcp.Pdu.random ())) ]
+            (* A list keeps its length through [wrap], so none: *)
+            layer "Tcp" (Packet.Pdu.Tcp { (Tcp.Pdu.random ()) with options = [] }) ]
 
 (* Check that the stream and packet definitions match the available generators.
  * Called whenever one is updated. *)
@@ -486,7 +487,7 @@ let check ~generators ~stream ~packet =
           bitstring_is_empty ip.Ip.Pdu.options ;
         "hops enough to get anywhere" @? (ip.Ip.Pdu.ttl > 0) ;
         "a segment with no options either" @?
-          bitstring_is_empty tcp.Tcp.Pdu.options ;
+          (tcp.Tcp.Pdu.options = []) ;
         "flags of a segment somebody would send" @?
           (tcp.Tcp.Pdu.flags.Tcp.Pdu.ack &&
            not tcp.Tcp.Pdu.flags.Tcp.Pdu.rst &&

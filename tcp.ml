@@ -76,6 +76,200 @@ struct
             (if f.fin then "Fin" else "")
     let print_flags fmt f = Format.fprintf fmt "@{<flags>%s@}" (string_of_flags f)
 
+    (** TCP options. Decoding never fails, and packing what was decoded gives
+     * back the same bytes: what is not understood is an [Other], and what
+     * follows an EOL, padding included, is the value of the [Eol]. *)
+    module Opt =
+    struct
+        (*$< Opt *)
+
+        type t =
+            | Eol of bitstring (* the padding *)
+            | Nop
+            | Mss of int
+            | Wscale of int (* the shift *)
+            | Sack_permitted
+            | Sack of (int32 * int32) list (* left and right edges of each block *)
+            | Timestamps of int32 * int32 (* value and echo reply *)
+            | Other of bitstring (* an unknown or malformed option, kind and length included *)
+
+        (* For the header length to fit in its 4 bits: *)
+        let max_len = 40
+
+        let pack_one = function
+            | Eol rest ->
+                concat [ [%bitstring {| 0 : 8 |}] ; rest ]
+            | Nop ->
+                [%bitstring {| 1 : 8 |}]
+            | Mss mss ->
+                [%bitstring {| 2 : 8 ; 4 : 8 ; mss : 16 |}]
+            | Wscale shift ->
+                [%bitstring {| 3 : 8 ; 3 : 8 ; shift : 8 |}]
+            | Sack_permitted ->
+                [%bitstring {| 4 : 8 ; 2 : 8 |}]
+            | Sack blocks ->
+                concat ([%bitstring {| 5 : 8 ; 2 + 8 * List.length blocks : 8 |}] ::
+                        List.map (fun (l, r) -> [%bitstring {| l : 32 ; r : 32 |}]) blocks)
+            | Timestamps (v, e) ->
+                [%bitstring {| 8 : 8 ; 10 : 8 ; v : 32 ; e : 32 |}]
+            | Other bits ->
+                bits
+
+        (* Zero padded to a whole number of 32 bits words: *)
+        let pack opts =
+            let bits = concat (List.map pack_one opts) in
+            match bytelength bits land 3 with
+            | 0 -> bits
+            | r -> concat [ bits ; zeroes_bitstring (8 * (4 - r)) ]
+
+        let rec sack_blocks bits =
+            match%bitstring bits with
+            | {| l : 32 ; r : 32 ; rest : -1 : bitstring |} -> (l, r) :: sack_blocks rest
+            | {| _ |} -> []
+
+        (* [tlv] is a whole option, of the length it says: *)
+        let decode tlv =
+            match%bitstring tlv with
+            | {| 2 : 8 ; 4 : 8 ; mss : 16 |} -> Mss mss
+            | {| 3 : 8 ; 3 : 8 ; shift : 8 |} -> Wscale shift
+            | {| 4 : 8 ; 2 : 8 |} -> Sack_permitted
+            | {| 5 : 8 ; len : 8 ; blocks : -1 : bitstring |}
+              when len > 2 && (len - 2) land 7 = 0 -> Sack (sack_blocks blocks)
+            | {| 8 : 8 ; 10 : 8 ; v : 32 ; e : 32 |} -> Timestamps (v, e)
+            | {| _ |} -> Other tlv
+
+        (* Past an option whose length cannot be right, there is no telling
+         * where the next one starts: *)
+        let rec unpack bits =
+            match%bitstring bits with
+            | {| 0 : 8 ; rest : -1 : bitstring |} ->
+                [ Eol rest ]
+            | {| 1 : 8 ; rest : -1 : bitstring |} ->
+                Nop :: unpack rest
+            | {| _ : 8 ; len : 8 |} when len >= 2 && 8 * len <= bitstring_length bits ->
+                decode (takebytes len bits) :: unpack (dropbytes len bits)
+            | {| _ |} ->
+                if bitstring_length bits = 0 then [] else [ Other bits ]
+
+        (*$= unpack & ~printer:Yojson.Basic.to_string
+          (`List (List.map to_json \
+            [ Mss 1380 ; Nop ; Nop ; Timestamps (0x8c616083l, 0l) ; Nop ; Wscale 7 ])) \
+            (`List (List.map to_json (unpack (bitstring_of_string \
+              "\x02\x04\x05\x64\x01\x01\x08\x0a\x8c\x61\x60\x83\x00\x00\x00\x00\x01\x03\x03\x07"))))
+          (`List (List.map to_json [ Mss 1460 ; Eol (bitstring_of_string "\x00\x00\x00") ])) \
+            (`List (List.map to_json (unpack (bitstring_of_string "\x02\x04\x05\xb4\x00\x00\x00\x00"))))
+          (`List (List.map to_json [ Nop ; Eol (bitstring_of_string "\x00\x07") ])) \
+            (`List (List.map to_json (unpack (bitstring_of_string "\x01\x00\x00\x07"))))
+          (`List (List.map to_json [ Sack [ 1l, 2l ] ; Nop ; Nop ])) \
+            (`List (List.map to_json (unpack (bitstring_of_string \
+              "\x05\x0a\x00\x00\x00\x01\x00\x00\x00\x02\x01\x01"))))
+          (`List (List.map to_json [ Other (bitstring_of_string "\x02\x05\x00\x00\x00") ; Nop ; Nop ; Nop ])) \
+            (`List (List.map to_json (unpack (bitstring_of_string "\x02\x05\x00\x00\x00\x01\x01\x01"))))
+          (`List (List.map to_json [ Nop ; Other (bitstring_of_string "\x02\x08\x00") ])) \
+            (`List (List.map to_json (unpack (bitstring_of_string "\x01\x02\x08\x00"))))
+         *)
+        (*$Q unpack
+          Q.(int_bound 10) (fun n -> \
+            let b = randbs (4 * n) in Bitstring.equals b (pack (unpack b)))
+         *)
+
+        let random () =
+            let one () =
+                match Random.int 7 with
+                | 0 -> Nop
+                | 1 -> Mss (Random.int 0x10000)
+                | 2 -> Wscale (Random.int 15)
+                | 3 -> Sack_permitted
+                | 4 -> Sack (List.init (1 + Random.int 2) (fun _ -> rand32 (), rand32 ()))
+                | 5 -> Timestamps (rand32 (), rand32 ())
+                | _ ->
+                    let kind = 253 + Random.int 2 and len = 2 + Random.int 5 in
+                    Other (concat [ [%bitstring {| kind : 8 ; len : 8 |}] ; randbs (len - 2) ]) in
+            let opts = List.init (Random.int 4) (fun _ -> one ()) in
+            let opts =
+                if Random.bool () then opts
+                else opts @ [ Eol (randbs (Random.int 4)) ] in
+            let rec fit opts =
+                if bytelength (pack opts) <= max_len then opts
+                else fit (List.take (List.length opts - 1) opts) in
+            fit opts
+
+        module Kinds =
+        struct
+            open SimTypes
+            let after_eol = BRange (0, max_len - 1)
+            let mss = IRange (0, 0xffff)
+            let shift = IRange (0, 0xff)
+            let edge = IRange (0, 0xffff_ffff)
+            let sack_block = Widget.row [| "left edge", edge ; "right edge", edge |]
+            let sack = Widget.list sack_block
+            let timestamps = Widget.record [| "value", edge ; "echo reply", edge |]
+            let other = BRange (1, max_len)
+            let opt =
+                Widget.variant [|
+                    "EOL", Some after_eol ;
+                    "NOP", None ;
+                    "MSS", Some mss ;
+                    "window scale", Some shift ;
+                    "SACK permitted", None ;
+                    "SACK", Some sack ;
+                    "timestamps", Some timestamps ;
+                    "other", Some other |]
+        end
+
+        let to_json opt : Yojson.Basic.t =
+            let u32 n = `Int (uint32 n) in
+            match opt with
+            | Eol rest -> `Assoc [ "EOL", Widget.json_of_bytes rest ]
+            | Nop -> `Assoc [ "NOP", `Null ]
+            | Mss mss -> `Assoc [ "MSS", `Int mss ]
+            | Wscale shift -> `Assoc [ "window scale", `Int shift ]
+            | Sack_permitted -> `Assoc [ "SACK permitted", `Null ]
+            | Sack blocks ->
+                `Assoc [ "SACK", `List (List.map (fun (l, r) ->
+                    `Assoc [ "left edge", u32 l ; "right edge", u32 r ]) blocks) ]
+            | Timestamps (v, e) ->
+                `Assoc [ "timestamps", `Assoc [ "value", u32 v ; "echo reply", u32 e ] ]
+            | Other bits -> `Assoc [ "other", Widget.json_of_bytes bits ]
+
+        (* [js] is the synth of an option of [Kinds.opt], as [Generator.expand]
+         * leaves it. Automatic values are small, so that a few options fit: *)
+        let of_synth gen_values js =
+            let open Generator in
+            let int ~auto kind v = of_value gen_values ~auto kind Widget.to_int v
+            and edge name js =
+                Int32.of_int (int_of_field name gen_values Kinds.edge identity js) in
+            match js with
+            | `Assoc [ "EOL", v ] ->
+                Eol (bs_of_value gen_values ~auto:(fun () -> empty_bitstring)
+                                 Kinds.after_eol v)
+            | `Assoc [ "NOP", _ ] ->
+                Nop
+            | `Assoc [ "MSS", v ] ->
+                Mss (int ~auto:(fun () -> 1460) Kinds.mss v)
+            | `Assoc [ "window scale", v ] ->
+                Wscale (int ~auto:(fun () -> 7) Kinds.shift v)
+            | `Assoc [ "SACK permitted", _ ] ->
+                Sack_permitted
+            | `Assoc [ "SACK", v ] ->
+                let v = if v = `Null then `List [ `Null ] else v in
+                Sack (expand gen_values Kinds.sack v |>
+                      Widget.to_list (fun b ->
+                          let b = expand gen_values Kinds.sack_block b in
+                          edge "left edge" b, edge "right edge" b))
+            | `Assoc [ "timestamps", v ] ->
+                let v = expand gen_values Kinds.timestamps v in
+                Timestamps (edge "value" v, edge "echo reply" v)
+            | `Assoc [ "other", v ] ->
+                (* An option of an experimental kind (RFC 4727), carrying nothing: *)
+                Other (bs_of_value gen_values ~auto:(fun () -> bitstring_of_string "\xfd\x02")
+                                   Kinds.other v)
+            | js ->
+                Widget.bad_value "not a TCP option: %s" (Yojson.Basic.to_string js)
+
+        (*$>*)
+    end
+
     (** An unpacked TCP segment. Notice the absence of the checksum, which
      * will be set to 0 by {!Tcp.Pdu.pack}, and filled in by {!Ip.Pdu.pack},
      * since it's computed over some IP fields. *)
@@ -87,14 +281,14 @@ struct
         win_size : int ;
         flags    : flags ;
         urg_ptr  : int ;
-        options  : bitstring ;
+        options  : Opt.t list ;
         payload  : Payload.t }
 
     let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80)
              ?(seq_num = SeqNum.o 0l) ?(ack_num = SeqNum.o 0l)
              ?(urg=false) ?(ack=false) ?(psh=false) ?(rst=false) ?(syn=false) ?(fin=false)
              ?(win_size=1024) ?(urg_ptr=0)
-             ?(options=empty_bitstring)
+             ?(options=[])
              bits =
         { src_port ; dst_port ;
           seq_num  ; ack_num ;
@@ -108,7 +302,7 @@ struct
              ~seq_num:(SeqNum.o (rand32 ())) ~ack_num:(SeqNum.o (rand32 ()))
              ~urg:(randb ()) ~ack:(randb ()) ~psh:(randb ()) ~rst:(randb ()) ~syn:(randb ()) ~fin:(randb ())
              ~win_size:(randi 16) ~urg_ptr:(if randb () then randi 16 else 0)
-             ~options:(randbs 16)
+             ~options:(Opt.random ())
              (randbs 64)
 
     let make_reset_of pdu =
@@ -117,7 +311,10 @@ struct
              ~ack:true ~rst:true empty_bitstring
 
     let pack t =
-        let hdr_len = no_opt_hdr_len + bytelength t.options in
+        let options = Opt.pack t.options in
+        if bytelength options > Opt.max_len then
+            invalid_arg "Tcp.Pdu.pack: more than 40 bytes of options" ;
+        let hdr_len = no_opt_hdr_len + bytelength options in
         let%bitstring hdr = {|
             (t.src_port :> int) : 16 ; (t.dst_port :> int) : 16 ;
             (t.seq_num :> int32)  : 32 ; (t.ack_num :> int32)  : 32 ;
@@ -125,7 +322,7 @@ struct
             t.flags.urg : 1 ; t.flags.ack : 1 ; t.flags.psh : 1 ;
             t.flags.rst : 1 ; t.flags.syn : 1 ; t.flags.fin : 1 ;
             t.win_size : 16 ; 0 : 16 ;
-            t.urg_ptr  : 16 ; t.options : -1 : bitstring |} in
+            t.urg_ptr  : 16 ; options : -1 : bitstring |} in
         concat [ hdr ; (t.payload :> bitstring) ]
 
     let unpack bits = match%bitstring bits with
@@ -139,7 +336,8 @@ struct
         Ok { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
                seq_num  = SeqNum.o seq_num  ; ack_num  = SeqNum.o ack_num ;
                flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
-               win_size ; urg_ptr  ; options ; payload = Payload.o payload }
+               win_size ; urg_ptr  ; options = Opt.unpack options ;
+               payload = Payload.o payload }
         | {| _ |} -> Error (lazy "Not TCP")
 
     (*$Q pack
@@ -160,9 +358,7 @@ struct
      *
      * No checksum: it is not in [t] either, being computed over fields of the
      * IP header below (see [Ip.Pdu.pack]), so there is nothing here to show.
-     * The options are bytes until somebody writes the kind that describes
-     * them, which is the day the NOP option makes a variant case that carries
-     * nothing. *)
+     * The options are those of [Opt.Kinds.opt]. *)
     module Kinds =
     struct
         open SimTypes
@@ -171,7 +367,7 @@ struct
         let flags = Set flag_choices
         let win_size = IRange (0, 0xffff)
         let urg_ptr = IRange (0, 0xffff)
-        let options = BRange (0, 40)
+        let options = Widget.list Opt.Kinds.opt
         let payload = BRange (0, 0xffff)
     end
 
@@ -199,7 +395,7 @@ struct
                  "flags", `List raised ;
                  "window size", `Int t.win_size ;
                  "urgent pointer", `Int t.urg_ptr ;
-                 "options", Widget.json_of_bytes t.options ;
+                 "options", `List (List.map Opt.to_json t.options) ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
 
     (* Where each field is in [kind], which [of_synth] reads them by: *)
@@ -247,6 +443,15 @@ struct
                 let ack = seq32 p.ack_num in
                 if Random.bool () then ack
                 else (ack + 1000 + Random.int 2000) land 0xffff_ffff) prev) in
+        (* No options when automatic, rather than random ones: *)
+        let options =
+            nth r Field.options (function
+                | `Null -> []
+                | js -> expand gen_values Kinds.options js |>
+                        Widget.to_list (Opt.of_synth gen_values)) in
+        let len = bytelength (Opt.pack options) in
+        if len > Opt.max_len then
+            Widget.bad_value "options: %d bytes, more than %d" len Opt.max_len ;
         { src_port = port Field.src_port (Option.map (fun p -> p.src_port) prev) ;
           dst_port = port Field.dst_port (Option.map (fun p -> p.dst_port) prev) ;
           seq_num = SeqNum.o (Int32.of_int seq_num) ;
@@ -254,12 +459,9 @@ struct
           win_size = int Field.win_size Kinds.win_size ;
           flags = { urg = raised 0 ; ack = raised 1 ; psh = raised 2 ;
                     rst = raised 3 ; syn = raised 4 ; fin = raised 5 } ;
-          (* Where the urgent data ends, which is nowhere unless Urg says
-             so; and no options rather than 40 random bytes of them, which
-             nothing can read past. *)
+          (* Where the urgent data ends, which is nowhere unless Urg says so: *)
           urg_ptr = int Field.urg_ptr ~auto:(fun () -> 0) Kinds.urg_ptr ;
-          options = bs_of_nth r Field.options gen_values
-                              ~auto:(fun () -> empty_bitstring) Kinds.options ;
+          options ;
           payload = Payload.o (payload_of_nth ?upper r Field.payload
                                               gen_values Kinds.payload) }
 
@@ -273,6 +475,32 @@ struct
         (Generator.reads_autos (fun js g -> \
             of_synth (Generator.fields_of_synth kind js) g) kind to_json)
      *)
+
+    (*$R of_synth
+      (* The ways docs/simulation.md says options are written: *)
+      let synth options =
+          match Generator.wrap kind (fun _ -> `Null) (to_json (make empty_bitstring)) with
+          | `Assoc fields ->
+              `Assoc (List.map (fun (n, v) -> n, if n = "options" then options else v) fields)
+          | _ -> assert false in
+      let read options =
+          let t = of_synth (Generator.fields_of_synth kind (synth options)) [||] in
+          `List (List.map Opt.to_json t.options) in
+      let expect opts = `List (List.map Opt.to_json opts) in
+      assert_equal ~printer:Yojson.Basic.to_string
+          (expect Opt.[ Mss 1460 ; Nop ; Wscale 7 ; Eol empty_bitstring ])
+          (read (`List [ `Assoc [ "MSS", `Assoc [ "const", `Int 1460 ] ] ;
+                         `Assoc [ "NOP", `Null ] ;
+                         `Assoc [ "window scale", `Null ] ;
+                         `Assoc [ "EOL", `Null ] ])) ;
+      assert_equal ~printer:Yojson.Basic.to_string
+          (expect Opt.[ Mss 1400 ])
+          (read (`Assoc [ "const", `List [ `Assoc [ "MSS", `Int 1400 ] ] ])) ;
+      assert_equal ~printer:Yojson.Basic.to_string (expect []) (read `Null) ;
+      assert_bool "more than 40 bytes refused"
+          (try ignore (read (`List (List.init 11 (fun _ -> `Assoc [ "MSS", `Null ])))) ; false
+           with Widget.Bad_value _ -> true)
+    *)
 
     (*$Q kind
       (Q.make (fun _ -> random ())) (fun t -> \
