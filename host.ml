@@ -180,30 +180,30 @@ let tcp_sock_rx t socks bits =
     match Tcp.Pdu.unpack bits with
         | Error s ->
             Log.(log t.trx.widget.logger Warning s)
-        | Ok tcp ->
-            let key = tcp.Tcp.Pdu.dst_port, tcp.Tcp.Pdu.src_port in
+        | Ok (tcp : Tcp.Pdu.t) ->
+            let key = tcp.dst_port, tcp.src_port in
             try
                 let trx =
                     hash_find_or_insert socks.tcps key (fun () ->
-                        if tcp.Tcp.Pdu.flags.Tcp.Pdu.syn then (
-                            let server = try Hashtbl.find t.tcp_servers tcp.Tcp.Pdu.dst_port
+                        if tcp.flags.Tcp.Pdu.syn then (
+                            let server = try Hashtbl.find t.tcp_servers tcp.dst_port
                                          with Not_found -> (
-                                            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have no server listening on port %s" (Tcp.Port.to_string tcp.Tcp.Pdu.dst_port)))) ;
+                                            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have no server listening on port %s" (Tcp.Port.to_string tcp.dst_port)))) ;
                                             raise No_socket
                                         ) in
-                            let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t) tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port t.trx.widget.logger in
-                            tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx =-> socks.ip_4_tcp.ins ;
+                            let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t) tcp.dst_port tcp.src_port t.trx.widget.logger in
+                            tcp.tcp_trx.trx =-> socks.ip_4_tcp.ins ;
                             server.tcp_cnxs <-
-                                (socks, key, tcp.Tcp.TRX.tcp_trx) ::
+                                (socks, key, tcp.tcp_trx) ::
                                 List.filter (fun (_, _, (c : Tcp.TRX.tcp_trx)) ->
                                     not (c.is_closed ())) server.tcp_cnxs ;
-                            server.tcp_accept tcp.Tcp.TRX.tcp_trx ; (* supposed to set the recver of this tcp trx *)
-                            tcp.Tcp.TRX.tcp_trx
+                            server.tcp_accept tcp.tcp_trx ; (* supposed to set the recver of this tcp trx *)
+                            tcp.tcp_trx
                         ) else (
-                            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have a server but so socket for ports %s:%s and TCP flags=%s" (Tcp.Port.to_string tcp.Tcp.Pdu.dst_port) (Tcp.Port.to_string tcp.Tcp.Pdu.src_port) (Tcp.Pdu.string_of_flags tcp.Tcp.Pdu.flags)))) ;
+                            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have a server but so socket for ports %s:%s and TCP flags=%s" (Tcp.Port.to_string tcp.dst_port) (Tcp.Port.to_string tcp.src_port) (Tcp.Pdu.string_of_flags tcp.flags)))) ;
                             raise No_socket
                         )) in
-                rx trx.Tcp.TRX.trx bits (* will reorder fragments and transmit the messages up to its emit function *)
+                rx trx.trx bits (* will reorder fragments and transmit the messages up to its emit function *)
             with No_socket ->
                 Log.(log t.trx.widget.logger Debug (lazy "Sending a TCP-RST")) ;
                 Tcp.Pdu.make_reset_of tcp |> Tcp.Pdu.pack |> tx socks.ip_4_tcp
