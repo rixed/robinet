@@ -146,6 +146,13 @@ let run_startup (sim, (clock : Cli.clock)) =
         if clock.Cli.power then Simulation.run_startup sim
         else Simulation.forgo_startup sim)
 
+(* How far behind the wall clock a realtime network fell, at worst; nothing if
+ * it always kept up. *)
+let report_max_late ((sim : Simulation.t), _) =
+    if sim.realtime && Clock.Interval.(compare sim.max_late zero) > 0 then
+        Printf.printf "%s: max lag %s\n%!"
+            sim.name (Clock.Interval.to_string sim.max_late)
+
 let main =
     Printexc.record_backtrace true ;
     let opts =
@@ -205,4 +212,5 @@ let main =
                         (* The interface is up either way, and its address has
                          * been printed. *)
                         Printf.eprintf "Cannot open a browser with %S\n%!" cmd) ;
-                Simulation.run_here admin)) ()
+                Simulation.run_here admin)) () ;
+    List.iter report_max_late sims

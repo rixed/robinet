@@ -943,6 +943,16 @@ let make_realtime (t : t) =
   t.epoch = epoch && t.realtime
  *)
 
+(* Must be called with the lock held. *)
+let set_late (t : t) late =
+    t.late <- late ;
+    if Interval.compare late t.max_late > 0 then t.max_late <- late
+
+(** Forget how late the simulation has been so far: [max_late] starts again
+ * from how late it is now. *)
+let reset_max_late (t : t) () =
+    with_lock t (fun () -> t.max_late <- t.late) ()
+
 (* When, by the wall clock, the event at [ts] is due at that speed. *)
 let due_at (t : t) ratio ts =
     match t.pace_anchor with
@@ -1208,6 +1218,8 @@ let make =
               speed_ratio = None ;
               pace_anchor = None ;
               late = Interval.zero ;
+              max_late = Interval.zero ;
+              awake_since = Time.zero ;
               metrics_sample_rate = default_metrics_sample_rate ;
               metric_samples = Array.make default_metrics_max_samples None ;
               metric_samples_next = 0 ;
@@ -1310,11 +1322,23 @@ let next_event (t : t) =
                      * next event, which may be a different one. *)
                     (* Because of the loop condition above: *)
                     synch_locked t ;
+                    t.awake_since <- now t ;
                     if t.continue then wait_loop ()
                 ) in
                 (* Else there is no need to wait we can go straight to processing
                    that event: *)
             wait_loop () ;
+            (* How far the wall clock is past the event about to run. Not
+               while paused: a step runs an event that is due by no clock. *)
+            if not t.paused then (
+                match Events.next_ts t.events with
+                | exception Not_found -> ()
+                | ts ->
+                    let ts = if Time.compare ts t.awake_since > 0 then ts
+                             else t.awake_since in
+                    let late = Time.diff (unpaused_wall_clock t) ts in
+                    set_late t (if Interval.compare late Interval.zero > 0
+                                then late else Interval.zero)) ;
             t.continue && may_dispatch t) ()
         ) else ( (* not realtime *)
             with_lock t (fun () ->
@@ -1356,7 +1380,7 @@ let next_event (t : t) =
                     and wall = Wall.now () in
                     if Wall.compare wall due >= 0 then (
                         (* Due already: run it, and say how far behind we are. *)
-                        t.late <- Wall.diff wall due ;
+                        set_late t (Wall.diff wall due) ;
                         true
                     ) else (
                         t.late <- Interval.zero ;

@@ -37,6 +37,8 @@
     POST   /api/simulations/<id>/pause      freeze its clock
     POST   /api/simulations/<id>/resume     and let it run again
     POST   /api/simulations/<id>/step       run one event (?n= for more)
+    POST   /api/simulations/<id>/reset-max-late
+                                            forget its worst lag so far
     GET    /api/protocols                   what a layer of each protocol is
                                             made of, as a kind: what draws the
                                             fields of a packet, one a
@@ -523,6 +525,7 @@ let json_of_simulation (s : Simulation.t) =
                             | None -> `Null
                             | Some r -> `Float r) ;
              "late", `Float (Clock.Interval.to_secs s.late) ;
+             "max_late", `Float (Clock.Interval.to_secs s.max_late) ;
              "running", `Bool s.continue ;
              "paused", `Bool s.paused ;
              "paused_total", `Float (Clock.Interval.to_secs s.paused_total) ;
@@ -694,8 +697,10 @@ let control_simulation serving _mth matches vars _qry_body resp =
                 | exception _ -> bad_request "Not a number of steps: %S" n
                 | n -> n) in
         Simulation.step ~n s ()
+    | "reset-max-late" -> Simulation.reset_max_late s ()
     | _ ->
-        bad_request "Unknown action %S (pause, resume, speed or step)" action) ;
+        bad_request "Unknown action %S (pause, resume, speed, step or \
+                     reset-max-late)" action) ;
     respond resp (Simulation.borrow s (fun () -> json_of_simulation s))
 
 (* The network a simulation is running, as a document one saves and opens
@@ -1601,7 +1606,7 @@ let json_errors f mth matches vars qry_body resp =
  * be paused, and the only one it can be asked to control that it must refuse. *)
 let resources serving : (Str.regexp * Opache.resource) list =
     List.map (fun (re, f) -> re, json_errors f) [
-    Str.regexp "/api/simulations/\\([0-9]+\\)/\\(pause\\|resume\\|speed\\|step\\)$",
+    Str.regexp "/api/simulations/\\([0-9]+\\)/\\(pause\\|resume\\|speed\\|step\\|reset-max-late\\)$",
         control_simulation serving ;
     Str.regexp "/api/simulations/\\([0-9]+\\)/startup$",
         (fun mth matches vars qry_body resp ->

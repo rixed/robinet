@@ -446,9 +446,19 @@ and simulation =
        * Set afresh whenever the speed changes or the simulation resumes --
        * neither of which is the simulation being late. *)
       mutable pace_anchor : (Wall.t * Time.t) option ;
-      (* How far behind that pace the simulation is: zero while it keeps up,
-       * growing while it cannot go as fast as it was asked to. *)
+      (* How far behind its pace the simulation is: zero while it keeps up,
+       * growing while it cannot go as fast as it was asked to. The pace is the
+       * wall clock for a realtime simulation, the speed ratio otherwise. *)
       mutable late : Interval.t ;
+      (* The most [late] has been since the simulation was made, or since
+       * [Simulation.reset_max_late]. Unlike [late], pausing and changing the
+       * pace leave it alone. *)
+      mutable max_late : Interval.t ;
+      (* Realtime only: the simulated time the dispatcher last woke up at. An
+       * event dated before it was scheduled while the dispatcher slept, by a
+       * thread reading a [now] that sleeping leaves behind, and is late only
+       * from that instant. *)
+      mutable awake_since : Time.t ;
       (* How often, in *simulated* time, every metric of this simulation is
        * written down. A plot of a simulation is drawn against that
        * simulation's own clock, so the samples must be spaced along it too: a

@@ -336,6 +336,23 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/simulations/{sim}/reset-max-late:
+    parameters:
+      - $ref: "#/components/parameters/sim"
+    post:
+      tags: [simulations]
+      summary: Forget its worst lag so far.
+      description: |
+        `max_late` starts again from the current `late`.
+      operationId: resetSimulationMaxLate
+      responses:
+        "200":
+          $ref: "#/components/responses/SimulationState"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/simulations/{sim}/speed:
     parameters:
       - $ref: "#/components/parameters/sim"
@@ -1613,6 +1630,7 @@ components:
         - realtime
         - speed_ratio
         - late
+        - max_late
         - running
         - paused
         - paused_total
@@ -1651,7 +1669,15 @@ components:
             speed is not ours to choose.
         late:
           allOf: [ { $ref: "#/components/schemas/Interval" } ]
-          description: How far behind the pace it is asked to keep.
+          description: |
+            How far behind its pace it is: the wall clock for a realtime
+            simulation, the speed ratio otherwise. Zero while paused.
+        max_late:
+          allOf: [ { $ref: "#/components/schemas/Interval" } ]
+          description: |
+            The most `late` has been since the simulation was made, or since it
+            was last reset (see `reset-max-late`). Pausing or changing the speed
+            leaves it alone.
         running:
           type: boolean
           description: Whether its thread is going round.
