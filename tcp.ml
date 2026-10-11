@@ -561,7 +561,9 @@ struct
         snd_buf : int ; (* to_send makes writers wait once it has that many bytes *)
         mutable unacked_tx : Streambuf.t ; (* previous packet we sent but that were not acked yet *)
         mutable rcvd_fin : bool ; (* if we already passed the fin to the application *)
-        rcv_buf : int ; (* the window we advertise and enforce (at most 0xffff for lack of window scaling) *)
+        rcv_buf : int ; (* the window we advertise and enforce (at most 0xffff without window scaling) *)
+        rcv_wscale : int ; (* the shift we offer: the smallest that makes rcv_buf fit in 16 bits *)
+        mutable snd_wscale : int option ; (* the peer's shift, once its SYN offered one (RFC 7323) *)
         mutable snd_wnd : int ; (* the window the peer advertises: bytes allowed in flight *)
         mutable snd_wl1 : int ; (* rcvd offset of the segment that set snd_wnd... *)
         mutable snd_wl2 : int ; (* ...and its ack (RFC 793) *)
@@ -601,7 +603,32 @@ struct
 
     let acked_of t tcp = Int32.to_int ((tcp.Pdu.ack_num :> int32) -/ (t.isn :> int32))
 
-    let adv_wnd t = min t.rcv_buf 0xffff
+    (* Window scaling is on once the peer's SYN offered it, as we offer it in
+     * every SYN but a SYN-ACK to a peer that did not. The window of a SYN is
+     * never scaled. *)
+
+    (* What the window field of our segments says: *)
+    let adv_wnd ?(syn=false) t =
+        match t.snd_wscale with
+        | Some _ when not syn -> min 0xffff (t.rcv_buf lsr t.rcv_wscale)
+        | _ -> min 0xffff t.rcv_buf
+
+    (* The window we enforce, ie. what that field means to the peer: *)
+    let rcv_wnd t =
+        match t.snd_wscale with
+        | Some _ -> adv_wnd t lsl t.rcv_wscale
+        | None -> adv_wnd t
+
+    (* The window the peer advertises in [tcp]: *)
+    let peer_wnd t tcp =
+        match t.snd_wscale with
+        | Some shift when not tcp.Pdu.flags.Pdu.syn -> tcp.Pdu.win_size lsl shift
+        | _ -> tcp.Pdu.win_size
+
+    let syn_options t =
+        if t.rcvd_isn = None || t.snd_wscale <> None then
+            Pdu.Opt.[ Nop ; Wscale t.rcv_wscale ]
+        else []
 
     (* Re-emit the oldest unacked segment, with an up to date ack *)
     let retransmit_first t =
@@ -613,7 +640,7 @@ struct
             let tcp = match next_ack_num t with
                 | Some ack_num ->
                     t.rcvd_acked <- t.rcvd_pld ;
-                    { tcp with ack_num ; win_size = adv_wnd t ;
+                    { tcp with ack_num ; win_size = adv_wnd ~syn:tcp.flags.syn t ;
                                flags = { tcp.flags with ack = true } }
                 | None ->
                     tcp in
@@ -682,7 +709,8 @@ struct
         let ack = ack_num <> None in
         if ack || psh || rst || syn || fin || bitstring_length bits > 0 then (
             let tcp = Pdu.make ~src_port ~dst_port ~seq_num ?ack_num
-                               ~win_size:(adv_wnd t) ~ack ~psh ~rst ~syn ~fin bits in
+                               ~win_size:(adv_wnd ~syn t) ~ack ~psh ~rst ~syn ~fin
+                               ~options:(if syn then syn_options t else []) bits in
             Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Emitting a packet from %s to %s, seq %s, length %d, content '%s'" (Port.to_string src_port) (Port.to_string dst_port) (SeqNum.to_string seq_num) (bytelength bits) (string_of_bitstring bits)))) ;
             Simulation.asap t.power t.emit (Pdu.pack tcp) ;
             if ack then t.rcvd_acked <- t.rcvd_pld ;
@@ -717,6 +745,10 @@ struct
         t.recovery <- Fast t.sent_pld ;
         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Loss detected, ssthresh is now %d" t.ssthresh))) ;
         retransmit_first t
+
+    (* How long a lone segment's ack may wait: Linux's TCP_DELACK_MIN, well
+     * within the 200ms the RTO leaves above the RTT. *)
+    let tcp_delack_min = Clock.Interval.msec 40.
 
     let delayed_ack (t : t) =
         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: I acked %d / %d received bytes" t.rcvd_acked t.rcvd_pld))) ;
@@ -834,7 +866,7 @@ struct
                         Log.(log t.logger Debug (lazy "Tcp: Recovered")) ;
                         t.recovery <- Open
                 )
-            ) else if acked = t.sent_acked && len = 0 && tcp.Pdu.win_size = t.snd_wnd &&
+            ) else if acked = t.sent_acked && len = 0 && peer_wnd t tcp = t.snd_wnd &&
                       offset >= t.rcvd_pld && (* not a window probe *)
                       not (tcp.Pdu.flags.Pdu.syn || tcp.Pdu.flags.Pdu.fin) &&
                       not (Streambuf.is_empty t.unacked_tx) then (
@@ -851,15 +883,15 @@ struct
             t.unanswered_probes <- 0 ;
             let acked = acked_of t tcp in
             if acked >= t.sent_acked && acked <= t.sent_pld then
-                update_snd_wnd t offset acked tcp.Pdu.win_size
+                update_snd_wnd t offset acked (peer_wnd t tcp)
         ) else if tcp.Pdu.flags.Pdu.syn then
-            update_snd_wnd t offset 0 tcp.Pdu.win_size ;
+            update_snd_wnd t offset 0 (peer_wnd t tcp) ;
         (* Out of order, filling a gap, or already received: *)
         let unexpected = offset <> t.rcvd_pld || not (Streambuf.is_empty t.rcvd_pkts) in
         let is_probe = len = 0 && offset < t.rcvd_pld in
         (* With an application that reads at once, our window is all of rcv_buf,
          * out of order data included: *)
-        let beyond_wnd = len > 0 && offset >= t.rcvd_pld + adv_wnd t in
+        let beyond_wnd = len > 0 && offset >= t.rcvd_pld + rcv_wnd t in
         if beyond_wnd then
             Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Dropping data at %d, beyond our window" offset)))
         else
@@ -869,7 +901,7 @@ struct
         (* Data (or SYN/FIN) is acked at once when unexpected (so the sender sees
          * duplicate acks, or a lost ack is replaced), when more than one MSS is
          * unacked (ie. every second full segment) or on FIN, otherwise after at
-         * most 200ms. A segment below what was received (a window probe) or
+         * most tcp_delack_min. A segment below what was received (a window probe) or
          * beyond our window is acked at once, for its sender to learn our window. *)
         let consumes_seq = len > 0 || tcp.Pdu.flags.Pdu.syn || tcp.Pdu.flags.Pdu.fin in
         if is_probe || beyond_wnd ||
@@ -878,7 +910,7 @@ struct
                             t.rcvd_pld - t.rcvd_acked > t.mss) then
             emit_one t empty_bitstring
         else if t.rcvd_acked < t.rcvd_pld then
-            Simulation.delay t.power (Clock.Interval.msec 200.) delayed_ack t
+            Simulation.delay t.power tcp_delack_min delayed_ack t
 
     and is_established t = t.sent_pld > 0 && t.rcvd_pld > 0
 
@@ -897,6 +929,13 @@ struct
                     )
                 ) else (
                     t.rcvd_isn <- Some tcp.Pdu.seq_num ;
+                    t.snd_wscale <-
+                        List.fold_left (fun found -> function
+                            | Pdu.Opt.Wscale shift -> Some (min shift 14) (* RFC 7323 *)
+                            | _ -> found) None tcp.Pdu.options ;
+                    Log.(log t.logger Debug (lazy (match t.snd_wscale with
+                        | Some shift -> Printf.sprintf "Tcp: Window scaling, peer's shift %d, ours %d" shift t.rcv_wscale
+                        | None -> "Tcp: No window scaling"))) ;
                     inqueue_pkt t tcp
                 )
             ) else if not (is_established t) then (
@@ -1016,8 +1055,9 @@ struct
             else match t.rtt with Some (srtt, _) -> srtt | None -> t.rto in
         max own (t.emit_busy_for ())
 
-    (* Retransmission defaults are those of Linux: *)
-    let make power ?isn ?(mss=536) ?(ssthresh=max_int) ?(snd_buf=65536) ?(rcv_buf=65535)
+    (* Retransmission defaults are those of Linux, as is rcv_buf (the maximum
+     * of tcp_rmem): *)
+    let make power ?isn ?(mss=536) ?(ssthresh=max_int) ?(snd_buf=65536) ?(rcv_buf=6 * 1024 * 1024)
              ?(initial_rto=Clock.Interval.sec 1.) ?(min_rto_var=Clock.Interval.msec 200.)
              ?(max_rto=Clock.Interval.sec 120.) ?(max_timeouts=15)
              src dst logger =
@@ -1040,7 +1080,12 @@ struct
                   to_send = [] ; to_send_len = 0 ; snd_buf ;
                   unacked_tx = Streambuf.empty ;
                   rcvd_fin = false ;
-                  rcv_buf ; snd_wnd = 0 ; snd_wl1 = -1 ; snd_wl2 = 0 ; max_snd_wnd = 0 ;
+                  rcv_buf ; snd_wscale = None ;
+                  rcv_wscale = (let rec shift s =
+                                    if s >= 14 || rcv_buf lsr s <= 0xffff then s
+                                    else shift (s + 1) in
+                                shift 0) ;
+                  snd_wnd = 0 ; snd_wl1 = -1 ; snd_wl2 = 0 ; max_snd_wnd = 0 ;
                   persist_gen = 0 ; persist_armed = false ; probes = 0 ; unanswered_probes = 0 ;
                   cnx_established_cont = None ;
                   tcp_trx = { trx = null_trx ~logger ;
@@ -1079,35 +1124,51 @@ end
 (*$< TRX *)
 (*$R make
     (* [a] sends [size] bytes to [b], which advertises [rcv_buf] in segments
-     * that [b_to_a] may then rewrite or drop. Returns [a], the most that was
+     * that [b_to_a] may then rewrite or drop, as [a_to_b] may those going the
+     * other way, over 10ms of latency each way (without which the RTO would
+     * be no longer than a delayed ack). Returns [a], the most that was
      * in flight, the bytes received, the window probes sent and how far beyond
      * what it received [b] ever held data. *)
-    let transfer ?rcv_buf ?(mss=100) ?max_timeouts ?(b_to_a=fun _ p -> Some p) size =
+    let transfer ?rcv_buf ?(mss=100) ?max_timeouts ?(a_to_b=fun p -> Some p)
+                 ?(b_to_a=fun _ p -> Some p) size =
         let sim = Simulation.make ~realtime:false "peer-window" in
         let power = sim.root.power and logger = Log.make () in
         let a = make power ~mss ?max_timeouts (Port.o 1) (Port.o 2) logger
         and b = make power ~mss ?rcv_buf (Port.o 2) (Port.o 1) logger in
         let max_in_flight = ref 0 and rcvd = ref 0 and probes = ref 0 and ahead = ref 0 in
+        let later f = Simulation.delay power (Clock.Interval.msec 10.) f () in
         a.tcp_trx.trx.out --> sink (fun bits ->
             max_in_flight := max !max_in_flight (in_flight a) ;
             let p = Result.get_ok (Pdu.unpack bits) in
             if Payload.length p.Pdu.payload = 0 && not p.Pdu.flags.Pdu.syn &&
                (p.Pdu.seq_num :> int32) = Int32.pred (next_seq_num a :> int32) then
                 incr probes ;
-            b.tcp_trx.trx.out.write bits ;
-            Streambuf.iter (fun (o, p) ->
-                ahead := max !ahead (o + Payload.length p.Pdu.payload - b.rcvd_pld)
-            ) b.rcvd_pkts) ;
+            later (fun () ->
+                Option.may (fun p -> b.tcp_trx.trx.out.write (Pdu.pack p)) (a_to_b p) ;
+                Streambuf.iter (fun (o, p) ->
+                    ahead := max !ahead (o + Payload.length p.Pdu.payload - b.rcvd_pld)
+                ) b.rcvd_pkts)) ;
         b.tcp_trx.trx.out --> sink (fun bits ->
-            Option.may (fun p -> a.tcp_trx.trx.out.write (Pdu.pack p))
-                (b_to_a (Simulation.now sim) (Result.get_ok (Pdu.unpack bits)))) ;
+            let p = b_to_a (Simulation.now sim) (Result.get_ok (Pdu.unpack bits)) in
+            later (fun () -> Option.may (fun p -> a.tcp_trx.trx.out.write (Pdu.pack p)) p)) ;
         b.tcp_trx.trx.ins --> sink (fun bits -> rcvd := !rcvd + bytelength bits) ;
         connect a (fun _ -> a.tcp_trx.trx.ins.write (zeroes_bitstring (8 * size))) ;
         Simulation.run sim false ;
         a, !max_in_flight, !rcvd, !probes, !ahead in
     let a, _, rcvd, _, _ = transfer 1000 in
     assert_equal ~printer:string_of_int ~msg:"all received" 1000 rcvd ;
-    assert_equal ~printer:string_of_int ~msg:"default window" 0xffff a.snd_wnd ;
+    assert_equal ~printer:string_of_int ~msg:"default window, scaled" (6 * 1024 * 1024) a.snd_wnd ;
+    assert_equal ~msg:"peer's shift" (Some 7) a.snd_wscale ;
+    let _, m, rcvd, _, _ = transfer ~mss:1000 500_000 in
+    assert_equal ~printer:string_of_int ~msg:"all received" 500_000 rcvd ;
+    assert_bool "more than 64KiB in flight" (m > 0xffff) ;
+    (* A peer that knows nothing of window scaling: *)
+    let a_to_b p = Some { p with Pdu.options = [] } in
+    let a, m, rcvd, _, _ = transfer ~mss:1000 ~a_to_b 500_000 in
+    assert_equal ~printer:string_of_int ~msg:"all received" 500_000 rcvd ;
+    assert_equal ~msg:"no shift" None a.snd_wscale ;
+    assert_equal ~printer:string_of_int ~msg:"unscaled window" 0xffff a.snd_wnd ;
+    assert_bool "at most 64KiB in flight" (m <= 0xffff) ;
     let _, m, rcvd, _, _ = transfer ~rcv_buf:250 2000 in
     assert_equal ~printer:string_of_int ~msg:"all received" 2000 rcvd ;
     assert_bool "whole segments within the window" (m = 200) ;
@@ -1124,7 +1185,7 @@ end
     (* A window too small for SWS avoidance to ever use: *)
     let b_to_a _ p =
         Some { p with Pdu.win_size = if p.Pdu.flags.Pdu.syn then 1000 else 100 } in
-    let _, _, rcvd, _, _ = transfer ~mss:200 ~b_to_a 2000 in
+    let _, _, rcvd, _, _ = transfer ~mss:200 ~rcv_buf:0xffff ~b_to_a 2000 in
     assert_equal ~printer:string_of_int ~msg:"all received in small segments" 2000 rcvd ;
     (* A closed window, and a peer that answers no probe: *)
     let b_to_a _ p =
