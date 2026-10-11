@@ -546,7 +546,8 @@ struct
         mutable emit_busy_for : unit -> Clock.Interval.t ;
         mutable recv : bitstring -> unit ;
         mutable recv_busy_for : unit -> Clock.Interval.t ;
-        mss : int ;  (* max segment size: used to segment payloads *)
+        rcv_mss : int ; (* the max segment size we advertise, ie. we can receive *)
+        mutable snd_mss : int ; (* the max segment size we send: ours, capped by the peer's *)
         isn : SeqNum.t ; (* initial seq num *)
         mutable rcvd_isn : SeqNum.t option ;
         mutable closed : bool ;  (* set whenever the user want to close or we received a FIN *)
@@ -626,9 +627,15 @@ struct
         | _ -> tcp.Pdu.win_size
 
     let syn_options t =
+        Pdu.Opt.Mss t.rcv_mss ::
         if t.rcvd_isn = None || t.snd_wscale <> None then
             Pdu.Opt.[ Nop ; Wscale t.rcv_wscale ]
         else []
+
+    (* The MSS assumed of a peer that advertises none (RFC 9293, for IPv4), and
+     * the smallest we accept (as Linux), lest no segment carries anything: *)
+    let default_snd_mss = 536
+    let min_snd_mss = 88
 
     (* Re-emit the oldest unacked segment, with an up to date ack *)
     let retransmit_first t =
@@ -691,8 +698,8 @@ struct
                 Simulation.asap t.power t.recv empty_bitstring (* signal the close *)
             ) else (
                 (* Only the first timeout tells about the window that was in flight: *)
-                if t.timeouts = 1 then t.ssthresh <- max (in_flight t / 2) (2 * t.mss) ;
-                t.cwnd <- t.mss ;
+                if t.timeouts = 1 then t.ssthresh <- max (in_flight t / 2) (2 * t.snd_mss) ;
+                t.cwnd <- t.snd_mss ;
                 t.ca_acked <- 0 ;
                 t.dup_acks <- 0 ;
                 t.recovery <- Timeout t.sent_pld ;
@@ -727,20 +734,20 @@ struct
     (* Byte counting (RFC 3465), with L = 2 MSS in slow start *)
     let grow_cwnd t newly_acked =
         if t.cwnd < t.ssthresh then
-            t.cwnd <- t.cwnd + min newly_acked (2 * t.mss)
+            t.cwnd <- t.cwnd + min newly_acked (2 * t.snd_mss)
         else (
             t.ca_acked <- t.ca_acked + newly_acked ;
             if t.ca_acked >= t.cwnd then (
                 t.ca_acked <- t.ca_acked - t.cwnd ;
-                t.cwnd <- t.cwnd + t.mss
+                t.cwnd <- t.cwnd + t.snd_mss
             )
         ) ;
         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: cwnd is now %d" t.cwnd)))
 
     (* Fast retransmit and fast recovery (RFC 5681 and 6582) *)
     let fast_retransmit t =
-        t.ssthresh <- max (in_flight t / 2) (2 * t.mss) ;
-        t.cwnd <- t.ssthresh + 3 * t.mss ; (* the 3 dup acks are segments that left the network *)
+        t.ssthresh <- max (in_flight t / 2) (2 * t.snd_mss) ;
+        t.cwnd <- t.ssthresh + 3 * t.snd_mss ; (* the 3 dup acks are segments that left the network *)
         t.ca_acked <- 0 ;
         t.recovery <- Fast t.sent_pld ;
         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Loss detected, ssthresh is now %d" t.ssthresh))) ;
@@ -853,7 +860,7 @@ struct
                     | Open ->
                         grow_cwnd t newly_acked
                     | Fast recover when acked < recover ->
-                        t.cwnd <- max t.mss (t.cwnd - newly_acked + t.mss) ;
+                        t.cwnd <- max t.snd_mss (t.cwnd - newly_acked + t.snd_mss) ;
                         retransmit_first t
                     | Timeout recover when acked < recover ->
                         grow_cwnd t newly_acked ;
@@ -861,7 +868,7 @@ struct
                     | Fast _ ->
                         Log.(log t.logger Debug (lazy "Tcp: Recovered")) ;
                         t.recovery <- Open ;
-                        t.cwnd <- min t.ssthresh (in_flight t + t.mss)
+                        t.cwnd <- min t.ssthresh (in_flight t + t.snd_mss)
                     | Timeout _ ->
                         Log.(log t.logger Debug (lazy "Tcp: Recovered")) ;
                         t.recovery <- Open
@@ -874,7 +881,7 @@ struct
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Duplicate ack #%d for %d" t.dup_acks acked))) ;
                 match t.recovery with
                 | Open -> if t.dup_acks = 3 then fast_retransmit t
-                | Fast _ -> t.cwnd <- t.cwnd + t.mss (* another segment left the network *)
+                | Fast _ -> t.cwnd <- t.cwnd + t.snd_mss (* another segment left the network *)
                 | Timeout _ -> ()
             )
         ) ;
@@ -907,7 +914,7 @@ struct
         if is_probe || beyond_wnd ||
            consumes_seq && (unexpected ||
                             t.rcvd_acked < t.rcvd_pld && tcp.Pdu.flags.Pdu.fin ||
-                            t.rcvd_pld - t.rcvd_acked > t.mss) then
+                            t.rcvd_pld - t.rcvd_acked > t.rcv_mss) then
             emit_one t empty_bitstring
         else if t.rcvd_acked < t.rcvd_pld then
             Simulation.delay t.power tcp_delack_min delayed_ack t
@@ -936,6 +943,13 @@ struct
                     Log.(log t.logger Debug (lazy (match t.snd_wscale with
                         | Some shift -> Printf.sprintf "Tcp: Window scaling, peer's shift %d, ours %d" shift t.rcv_wscale
                         | None -> "Tcp: No window scaling"))) ;
+                    let peer_mss =
+                        List.fold_left (fun found -> function
+                            | Pdu.Opt.Mss mss -> mss
+                            | _ -> found) default_snd_mss tcp.Pdu.options in
+                    t.snd_mss <- min t.rcv_mss (max min_snd_mss peer_mss) ;
+                    t.cwnd <- t.snd_mss ; (* no data was sent yet *)
+                    Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: peer's MSS %d, sending segments up to %d" peer_mss t.snd_mss))) ;
                     inqueue_pkt t tcp
                 )
             ) else if not (is_established t) then (
@@ -1002,12 +1016,12 @@ struct
             let bits_len = bytelength bits in
             let rwnd_room = t.snd_wnd - in_flight t in
             let len =
-                let len = min bits_len t.mss in
+                let len = min bits_len t.snd_mss in
                 if len <= rwnd_room then len
                 else if rwnd_room > 0 && (force || 2 * rwnd_room >= t.max_snd_wnd) then rwnd_room
                 else 0 in
             let wnd =
-                if t.recovery = Open then t.cwnd + min t.dup_acks 2 * t.mss
+                if t.recovery = Open then t.cwnd + min t.dup_acks 2 * t.snd_mss
                 else t.cwnd in
             if len > 0 && in_flight t + len <= wnd then (
                 let is_last = len = bits_len in
@@ -1068,7 +1082,7 @@ struct
                   emit_busy_for = never_busy ;
                   recv = ignore_bits ~logger ;
                   recv_busy_for = never_busy ;
-                  mss ; cwnd = mss ; ssthresh ; ca_acked = 0 ; dup_acks = 0 ; recovery = Open ;
+                  rcv_mss = mss ; snd_mss = mss ; cwnd = mss ; ssthresh ; ca_acked = 0 ; dup_acks = 0 ; recovery = Open ;
                   rtt = None ; rtt_probe = None ; rto = initial_rto ; rto_gen = 0 ;
                   min_rto_var ; max_rto ; max_timeouts ;
                   rto_armed = false ; timeouts = 0 ;
@@ -1129,12 +1143,12 @@ end
      * be no longer than a delayed ack). Returns [a], the most that was
      * in flight, the bytes received, the window probes sent and how far beyond
      * what it received [b] ever held data. *)
-    let transfer ?rcv_buf ?(mss=100) ?max_timeouts ?(a_to_b=fun p -> Some p)
+    let transfer ?rcv_buf ?(mss=100) ?b_mss ?max_timeouts ?(a_to_b=fun p -> Some p)
                  ?(b_to_a=fun _ p -> Some p) size =
         let sim = Simulation.make ~realtime:false "peer-window" in
         let power = sim.root.power and logger = Log.make () in
         let a = make power ~mss ?max_timeouts (Port.o 1) (Port.o 2) logger
-        and b = make power ~mss ?rcv_buf (Port.o 2) (Port.o 1) logger in
+        and b = make power ~mss:(b_mss |? mss) ?rcv_buf (Port.o 2) (Port.o 1) logger in
         let max_in_flight = ref 0 and rcvd = ref 0 and probes = ref 0 and ahead = ref 0 in
         let later f = Simulation.delay power (Clock.Interval.msec 10.) f () in
         a.tcp_trx.trx.out --> sink (fun bits ->
@@ -1169,6 +1183,21 @@ end
     assert_equal ~msg:"no shift" None a.snd_wscale ;
     assert_equal ~printer:string_of_int ~msg:"unscaled window" 0xffff a.snd_wnd ;
     assert_bool "at most 64KiB in flight" (m <= 0xffff) ;
+    (* Segments are sized for the smaller MSS, or 536 if the peer gives none: *)
+    let largest = ref 0 in
+    let a_to_b p = largest := max !largest (Payload.length p.Pdu.payload) ; Some p in
+    let _, _, rcvd, _, _ = transfer ~mss:1000 ~b_mss:300 ~a_to_b 5000 in
+    assert_equal ~printer:string_of_int ~msg:"all received" 5000 rcvd ;
+    assert_equal ~printer:string_of_int ~msg:"peer's MSS" 300 !largest ;
+    largest := 0 ;
+    let _, _, rcvd, _, _ = transfer ~mss:300 ~b_mss:1000 ~a_to_b 5000 in
+    assert_equal ~printer:string_of_int ~msg:"all received" 5000 rcvd ;
+    assert_equal ~printer:string_of_int ~msg:"our MSS" 300 !largest ;
+    largest := 0 ;
+    let b_to_a _ p = Some { p with Pdu.options = [] } in
+    let _, _, rcvd, _, _ = transfer ~mss:1000 ~a_to_b ~b_to_a 5000 in
+    assert_equal ~printer:string_of_int ~msg:"all received" 5000 rcvd ;
+    assert_equal ~printer:string_of_int ~msg:"default MSS" 536 !largest ;
     let _, m, rcvd, _, _ = transfer ~rcv_buf:250 2000 in
     assert_equal ~printer:string_of_int ~msg:"all received" 2000 rcvd ;
     assert_bool "whole segments within the window" (m = 200) ;
