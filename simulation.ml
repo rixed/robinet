@@ -1266,6 +1266,8 @@ let make =
         register t ;
         t
 
+let one_ps = Interval.o 1
+
 (** Will process the next event *)
 let next_event (t : t) =
     let min_ts_for_sleep = Interval.msec 10. in
@@ -1377,11 +1379,10 @@ let next_event (t : t) =
                      * [power] here *)
                     (* An instant to each event, so that everything that
                      * happens can be ordered by time: *)
-                    let ts = Events.current_ts t.events
-                    and next_ps = Time.add (now t) (Interval.o 1) in
+                    let ts = Events.current_ts t.events in
                     let ts =
-                        if (ts : Time.t :> int) > (next_ps :> int) then ts
-                        else next_ps in
+                        if (ts : Time.t :> int) > (now t :> int) then ts
+                        else Time.add (now t) one_ps in
                     if debug then Printf.printf "Clock: next_event: executing since it's %s\n%!" (Time.to_string ts) ;
                     t.now := ts ;
                     (* Before the handler runs, so that a snapshot holds
