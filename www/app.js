@@ -4688,6 +4688,11 @@ document.addEventListener('alpine:init', () => {
                    's behind the speed asked for'
         },
 
+        /* Behind its pace (the wall clock, or the speed asked for) by that
+         * much, now and at worst. */
+        lagText(s) { return '(-' + dur(s.late) + ')' },
+        maxLateText(s) { return dur(s.max_late) },
+
         async setSpeed(sim, ratio) {
             await this.control(sim, 'speed?ratio=' +
                                     (ratio === null ? 'full' : ratio))

@@ -239,7 +239,12 @@
                 <div class="body" x-show="!simFolded.includes(s.id)">
 
                 <dl class="clock">
-                    <dt>now</dt>       <dd x-text="s.now_str"></dd>
+                    <dt>now</dt>
+                    <dd><span x-text="s.now_str"></span>
+                        <!-- How far behind its pace it is running. -->
+                        <small x-show="s.late > 0" x-text="lagText(s)"></small></dd>
+                    <dt x-show="s.max_late > 0">max late</dt>
+                    <dd x-show="s.max_late > 0" x-text="maxLateText(s)"></dd>
                     <!-- What is waiting to happen, not what has happened:
                          the size of the clock's queue. -->
                     <dt>pending</dt>
