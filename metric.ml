@@ -119,7 +119,7 @@ struct
     let make assoc_lst =
         List.fast_sort cmp_param assoc_lst
 
-    let ref find n = function
+    let rec find n = function
         | [] ->
             raise Not_found
         | (n', v) :: rest ->
