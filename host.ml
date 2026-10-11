@@ -51,14 +51,16 @@ type host_trx = {
     (* The widget of the host this speaks for: will have the properties of a
      * [Host.t] for a simulated host, whereas the localhost's has no properties. *)
     widget        : Widget.t ;
-    tcp_connect   : addr -> ?src_port:Tcp.Port.t -> Tcp.Port.t -> (Tcp.TRX.tcp_trx option -> unit) -> unit ;
+    (* The buffer sizes are those of [Tcp.TRX.make], and the localhost leaves
+       them to the kernel. *)
+    tcp_connect   : addr -> ?src_port:Tcp.Port.t -> ?snd_buf:int -> ?rcv_buf:int -> Tcp.Port.t -> (Tcp.TRX.tcp_trx option -> unit) -> unit ;
     udp_connect   : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> (Udp.TRX.udp_trx -> bitstring -> unit) -> (Udp.TRX.udp_trx option -> unit) -> unit ;
     udp_send      : addr -> ?src_port:Udp.Port.t -> Udp.Port.t -> bitstring -> unit ;
     ping          : ?id:int -> ?seq:int -> addr -> unit ;
     gethostbyname : string -> (Ip.Addr.t list option -> unit) -> unit ;
     (* Starting a server on a port that already has one, or stopping one on a
        port that has none, raises [Widget.Bad_value]. *)
-    tcp_server_start : Tcp.Port.t -> (Tcp.TRX.tcp_trx -> unit) -> unit ;
+    tcp_server_start : ?snd_buf:int -> ?rcv_buf:int -> Tcp.Port.t -> (Tcp.TRX.tcp_trx -> unit) -> unit ;
     (* Also closes the connections that server accepted. *)
     tcp_server_stop  : Tcp.Port.t -> unit ;
     udp_server_start : Udp.Port.t -> (Udp.TRX.udp_trx -> unit) -> unit ;
@@ -85,6 +87,9 @@ and udp_socks = { ip_4_udp : trx ;
 (* A listening server: what to do with a new connection, and the connections
    it was handed, so that stopping it can close them. *)
 and tcp_server = { tcp_accept : Tcp.TRX.tcp_trx -> unit ;
+                   (* for the connections it accepts: *)
+                   tcp_snd_buf : int option ;
+                   tcp_rcv_buf : int option ;
                    (* With the table and key each is registered under. Closed
                       ones are pruned on each accept. *)
                    mutable tcp_cnxs : (tcp_socks * (Tcp.Port.t * Tcp.Port.t) * Tcp.TRX.tcp_trx) list }
@@ -192,7 +197,7 @@ let tcp_sock_rx t socks bits =
                                             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have no server listening on port %s" (Tcp.Port.to_string tcp.dst_port)))) ;
                                             raise No_socket
                                         ) in
-                            let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t) tcp.dst_port tcp.src_port t.trx.widget.logger in
+                            let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t) ?snd_buf:server.tcp_snd_buf ?rcv_buf:server.tcp_rcv_buf tcp.dst_port tcp.src_port t.trx.widget.logger in
                             tcp.tcp_trx.trx =-> socks.ip_4_tcp.ins ;
                             server.tcp_cnxs <-
                                 (socks, key, tcp.tcp_trx) ::
@@ -401,7 +406,7 @@ and do_gethostbyname t name cont =
                 )
             )
 
-and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
+and tcp_connect t dst ?src_port ?snd_buf ?rcv_buf (dst_port : Tcp.Port.t) cont =
     (* Fail if we do not have an IP yet *)
     if not (t.trx.widget.power.on && ip_is_set t) then cont None else
     let my_ip = Eth.State.find_ip4 t.eth_state in
@@ -439,7 +444,7 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
             | None ->
                 cont None
             | Some src_port ->
-                let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t) src_port dst_port t.trx.widget.logger in
+                let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t) ?snd_buf ?rcv_buf src_port dst_port t.trx.widget.logger in
                 tcp.tcp_trx.trx.out --> socks.ip_4_tcp.ins ;
                 Hashtbl.add socks.tcps (src_port, dst_port) tcp.tcp_trx ;
                 Tcp.TRX.connect tcp (function
@@ -547,11 +552,13 @@ let ping t ?(id=1) ?(seq=1) dst =
                     if dst_ips <> [] then
                         do_ping (List.hd dst_ips)))
 
-let tcp_server_start t port tcp_accept =
+let tcp_server_start t ?snd_buf ?rcv_buf port tcp_accept =
     if Hashtbl.mem t.tcp_servers port then
         Widget.bad_value "TCP port %s already has a server"
             (Tcp.Port.to_string port) ;
-    Hashtbl.add t.tcp_servers port { tcp_accept ; tcp_cnxs = [] }
+    Hashtbl.add t.tcp_servers port
+        { tcp_accept ; tcp_snd_buf = snd_buf ; tcp_rcv_buf = rcv_buf ;
+          tcp_cnxs = [] }
 
 (* An established connection is closed. A half-open one cannot be, and is
    forgotten instead: the peer's next segment then draws a reset. *)
@@ -948,7 +955,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
                             busy_for = never_busy ;
                             set_read = (fun f busy_for ->
                                 t.eth_trx.out.set_read f busy_for) } ;
-          tcp_connect   = (fun addr ?src_port dst cont -> if_on t "tcp_connect" (tcp_connect t addr ?src_port dst) cont) ;
+          tcp_connect   = (fun addr ?src_port ?snd_buf ?rcv_buf dst cont -> if_on t "tcp_connect" (tcp_connect t addr ?src_port ?snd_buf ?rcv_buf dst) cont) ;
           udp_connect   = (fun dst ?src_port dst_port client_f cont -> if_on t "udp_connect" (udp_connect t dst ?src_port dst_port client_f) cont) ;
           udp_send      = (fun dst ?src_port dst_port bits -> if_on t "udp_send" (udp_send t dst ?src_port dst_port) bits) ;
           ping          = (fun ?id ?seq dst -> if_on t "ping" (ping t ?id ?seq) dst) ;
@@ -959,7 +966,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
              around it stands. A server on a box that is off still cannot
              answer: what it would send is scheduled on the box's supply, and
              there is none. *)
-          tcp_server_start = (fun port server_f -> tcp_server_start t port server_f) ;
+          tcp_server_start = (fun ?snd_buf ?rcv_buf port server_f -> tcp_server_start t ?snd_buf ?rcv_buf port server_f) ;
           tcp_server_stop  = (fun port -> tcp_server_stop t port) ;
           udp_server_start = (fun port server_f -> udp_server_start t port server_f) ;
           udp_server_stop  = (fun port -> udp_server_stop t port) ;
@@ -1193,6 +1200,34 @@ let port_arg params name =
 (* What a UDP datagram can carry: *)
 let max_udp_payload = 65507
 
+let tcp_buffer_params = Widget.[
+    param "send buffer" ~kind:Int ~units:"bytes"
+        ~default:(`Int Tcp.TRX.default_snd_buf)
+        ~descr:"How much can be waiting to be sent before the sender is made \
+                to wait." ;
+    param "receive buffer" ~kind:Int ~units:"bytes"
+        ~default:(`Int Tcp.TRX.default_rcv_buf)
+        ~descr:(Printf.sprintf "The window advertised to the peer, at most \
+                                %d (the largest window scaling can \
+                                advertise)." Tcp.TRX.max_rcv_buf) ]
+
+let tcp_buffer_args params =
+    let snd_buf = Widget.arg_int params "send buffer"
+    and rcv_buf = Widget.arg_int params "receive buffer" in
+    if snd_buf < 1 then
+        Widget.bad_value "send buffer must be above zero, not %d" snd_buf ;
+    if rcv_buf < 1 || rcv_buf > Tcp.TRX.max_rcv_buf then
+        Widget.bad_value "receive buffer must be between 1 and %d, not %d"
+                         Tcp.TRX.max_rcv_buf rcv_buf ;
+    snd_buf, rcv_buf
+
+(* The arguments of [params] as read-only properties: *)
+let param_properties (params : Widget.param list) args =
+    List.map (fun (p : Widget.param) ->
+        Widget.property p.name ~descr:p.descr ~units:p.units ~kind:p.kind
+            ~getter:(fun () -> Widget.arg args p.name)
+    ) params
+
 (* Bytes, both ways, of a whole server or client: *)
 type traffic = { mutable sent : int ; mutable received : int }
 
@@ -1276,20 +1311,23 @@ let still_running power over state release =
 
 (* [peers] names what is counted of the flows it accepts. [listen] and
    [unlisten] are the host's server start and stop, and [serve] makes a flow of
-   what [listen] hands over. *)
-let server_action t ~proto ~peers ~max_size ~listen ~unlisten ~serve =
+   what [listen] hands over. [opts] are the protocol's own parameters, and
+   what reads their arguments into what [listen] is given first. *)
+let server_action t ~proto ~peers ~max_size ~opts:(opt_params, opts_of)
+                  ~listen ~unlisten ~serve =
     let host = t.trx.widget in
     let result_kind =
         Widget.(record [| peers, Int ; "sent", Int ; "received", Int |]) in
     Widget.action ("start "^ String.uppercase_ascii proto ^" server")
         ~descr:"Listen to a port, and answer whoever connects to it as told."
-        ~params:Widget.[ param "port" ~kind:Int ~descr:"The port to listen to." ;
-                         behavior_param ~max_size ]
+        ~params:Widget.(param "port" ~kind:Int ~descr:"The port to listen to." ::
+                        behavior_param ~max_size :: opt_params)
         ~result:result_kind
         ~can_run:(fun () -> host.power.on)
         ~handler:(fun state ->
             let port = port_arg state.params "port"
-            and behavior = behavior_of_json (Widget.arg state.params "behavior") in
+            and behavior = behavior_of_json (Widget.arg state.params "behavior")
+            and opts = opts_of state.params in
             let power = host.power in
             let traffic = { sent = 0 ; received = 0 }
             and flows = ref 0 and over = ref false in
@@ -1310,7 +1348,7 @@ let server_action t ~proto ~peers ~max_size ~listen ~unlisten ~serve =
                     if remove then Simulation.remove_widget widget) in
             let alive () = still_running power over state release in
             (match
-                listen port (fun x ->
+                listen opts port (fun x ->
                     if alive () then (
                         incr flows ;
                         let recv = ref ignore in
@@ -1330,6 +1368,7 @@ let server_action t ~proto ~peers ~max_size ~listen ~unlisten ~serve =
                     ~getter:(fun () -> json_of_behavior behavior) ::
                 property peers ~kind:Int ~descr:"How many it was reached by."
                     ~getter:(fun () -> `Int !flows) ::
+                param_properties opt_params state.params @
                 traffic_properties traffic) ;
             Widget.add_actions widget [
                 Widget.action "stop" ~result:result_kind
@@ -1340,7 +1379,9 @@ let server_action t ~proto ~peers ~max_size ~listen ~unlisten ~serve =
 
 let tcp_server_action t =
     server_action t ~proto:"tcp" ~peers:"connections" ~max_size:max_int
-        ~listen:(fun p -> tcp_server_start t (Tcp.Port.o p))
+        ~opts:(tcp_buffer_params, tcp_buffer_args)
+        ~listen:(fun (snd_buf, rcv_buf) p ->
+            tcp_server_start t ~snd_buf ~rcv_buf (Tcp.Port.o p))
         ~unlisten:(fun p -> tcp_server_stop t (Tcp.Port.o p))
         ~serve:(fun cnx ~recv ->
             (* The peer closing is answered by Tcp itself: *)
@@ -1348,15 +1389,16 @@ let tcp_server_action t =
 
 let udp_server_action t =
     server_action t ~proto:"udp" ~peers:"peers" ~max_size:max_udp_payload
-        ~listen:(fun p -> udp_server_start t (Udp.Port.o p))
+        ~opts:([], ignore)
+        ~listen:(fun () p -> udp_server_start t (Udp.Port.o p))
         ~unlisten:(fun p -> udp_server_stop t (Udp.Port.o p))
         ~serve:(fun udp ~recv ->
             udp.trx.ins --> sink recv ;
             udp_flow udp)
 
-(* [connect dst ~src_port port ~recv ~closed cont] opens a flow and hands it
-   to [cont], or [None] if it cannot. *)
-let client_action t ~proto ~max_size ~connect =
+(* [connect opts dst ~src_port port ~recv ~closed cont] opens a flow and hands
+   it to [cont], or [None] if it cannot. [opts] are as for [server_action]. *)
+let client_action t ~proto ~max_size ~opts:(opt_params, opts_of) ~connect =
     let host = t.trx.widget in
     let result_kind =
         Widget.(record [| "sent", Int ; "received", Int ;
@@ -1365,7 +1407,7 @@ let client_action t ~proto ~max_size ~connect =
         ~descr:"Connect to a server and talk to it as told, until one of the \
                 limits is reached, the server closes the connection, or it \
                 is stopped."
-        ~params:Widget.[
+        ~params:(Widget.[
             param "target" ~kind:(hint "192.168.0.1" String)
                 ~descr:"What to connect to: an address, or a name to be resolved." ;
             param "port" ~kind:Int ~descr:"The port to connect to." ;
@@ -1376,7 +1418,8 @@ let client_action t ~proto ~max_size ~connect =
             param "duration" ~kind:(optional Duration) ~units:"secs"
                 ~descr:"Stop after that long." ;
             param "volume" ~kind:(optional Int) ~units:"bytes"
-                ~descr:"Stop once that many bytes were sent and received." ]
+                ~descr:"Stop once that many bytes were sent and received." ] @
+            opt_params)
         ~result:result_kind
         ~can_run:(fun () -> host.power.on)
         ~handler:(fun state ->
@@ -1388,7 +1431,8 @@ let client_action t ~proto ~max_size ~connect =
                     port_arg [ "source port", v ] "source port")
             and behavior = behavior_of_json (Widget.arg params "behavior")
             and duration = Widget.arg_opt params "duration" Widget.to_float
-            and volume = Widget.arg_opt params "volume" Widget.to_int in
+            and volume = Widget.arg_opt params "volume" Widget.to_int
+            and opts = opts_of params in
             Option.may (fun d ->
                 if d <= 0. then
                     Widget.bad_value "duration must be above zero, not %g" d
@@ -1432,6 +1476,7 @@ let client_action t ~proto ~max_size ~connect =
                 property "behavior" ~descr:"What it does with the traffic."
                     ~kind:(behavior_kind ~max_size)
                     ~getter:(fun () -> json_of_behavior behavior) ::
+                param_properties opt_params params @
                 traffic_properties traffic) ;
             Widget.add_actions widget [
                 Widget.action "stop" ~result:result_kind
@@ -1444,7 +1489,7 @@ let client_action t ~proto ~max_size ~connect =
                     (fun () -> if not !over then finish ~remove:true) ()
             ) duration ;
             let recv = ref ignore in
-            connect (addr_of_string target) ~src_port port
+            connect opts (addr_of_string target) ~src_port port
                     ~recv:(fun bits -> !recv bits)
                     ~closed:(fun () -> finish ~remove:true) (function
                 | None ->
@@ -1458,15 +1503,17 @@ let client_action t ~proto ~max_size ~connect =
 
 let tcp_client_action t =
     client_action t ~proto:"tcp" ~max_size:max_int
-        ~connect:(fun dst ~src_port port ~recv ~closed cont ->
+        ~opts:(tcp_buffer_params, tcp_buffer_args)
+        ~connect:(fun (snd_buf, rcv_buf) dst ~src_port port ~recv ~closed cont ->
             let src_port = Option.map Tcp.Port.o src_port in
-            t.trx.tcp_connect dst ?src_port (Tcp.Port.o port) (function
+            t.trx.tcp_connect dst ?src_port ~snd_buf ~rcv_buf (Tcp.Port.o port) (function
                 | None -> cont None
                 | Some cnx -> cont (Some (tcp_flow cnx ~recv ~closed))))
 
 let udp_client_action t =
     client_action t ~proto:"udp" ~max_size:max_udp_payload
-        ~connect:(fun dst ~src_port port ~recv ~closed:_ cont ->
+        ~opts:([], ignore)
+        ~connect:(fun () dst ~src_port port ~recv ~closed:_ cont ->
             let src_port = Option.map Udp.Port.o src_port in
             t.trx.udp_connect dst ?src_port (Udp.Port.o port)
                 (fun _ bits -> recv bits) (function
@@ -1698,6 +1745,70 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
     Simulation.power_up b.trx.widget.power ;
     ignore (run b.trx.widget "start TCP server" [ "port", `Int 7 ]) ;
     assert_bool "leaving its port free" (child b "server-tcp:7" <> None)
+ *)
+
+(* Each end of a connection advertises the receive buffer it was given. *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "buffers" in
+    let ip n = Ip.Addr.of_string ("192.168.0." ^ string_of_int n) in
+    let host n =
+        make ~parent:sim.root ~static_ip:(ip n)
+             ~netmask:(Ip.Addr.of_string "255.255.255.0")
+             ("h" ^ string_of_int n) in
+    let a = host 1 and b = host 2 in
+    let tap = Hub.Tap.make ~parent:sim.root "tap" in
+    List.iter (fun (n, (h : t)) ->
+        let c = Eth.Cable.State.make ~parent:sim.root
+                                     ~name:("c" ^ string_of_int n) () in
+        Eth.Cable.plug c (tap.widget, n) (h.trx.widget, 0)
+    ) [ 0, a ; 1, b ] ;
+    (* The window of the SYNs seen going each way: *)
+    let syn_wins = Array.make 2 [] in
+    List.iter (fun n ->
+        (tap.widget.ports.dev (n + 2)).set_read (fun bits ->
+            match Eth.Pdu.unpack bits with
+            | Error _ -> ()
+            | Ok eth ->
+                match Ip.Pdu.unpack (eth.payload :> Bitstring.bitstring) with
+                | Ok ip when ip.proto = Ip.Proto.tcp ->
+                    (match Tcp.Pdu.unpack (ip.payload :> Bitstring.bitstring) with
+                    | Ok tcp when tcp.flags.syn ->
+                        syn_wins.(n) <- tcp.win_size :: syn_wins.(n)
+                    | _ -> ())
+                | _ -> ()) never_busy
+    ) [ 0 ; 1 ] ;
+    Simulation.run_startup sim ;
+    let run (w : Widget.t) name params =
+        Action.start w (Option.get (Action.find w name)) params in
+    let refused w action params =
+        try ignore (run w action params) ; false
+        with Widget.Bad_value _ -> true in
+    assert_bool "an empty buffer is refused"
+        (refused b.trx.widget "start TCP server"
+                 [ "port", `Int 7 ; "receive buffer", `Int 0 ]) ;
+    assert_bool "and so is one too large to advertise"
+        (refused a.trx.widget "start TCP client"
+                 [ "target", `String "192.168.0.2" ; "port", `Int 7 ;
+                   "receive buffer", `Int (Tcp.TRX.max_rcv_buf + 1) ]) ;
+    ignore (run b.trx.widget "start TCP server"
+                [ "port", `Int 7 ; "receive buffer", `Int 1000 ;
+                  "send buffer", `Int 3000 ]) ;
+    ignore (run a.trx.widget "start TCP client"
+                [ "target", `String "192.168.0.2" ; "port", `Int 7 ;
+                  "source port", `Int 1234 ; "receive buffer", `Int 2000 ]) ;
+    Simulation.run sim false ;
+    let printer = IO.to_string (List.print Int.print) in
+    assert_equal ~printer ~msg:"the client's" [ 2000 ] syn_wins.(0) ;
+    assert_equal ~printer ~msg:"the server's" [ 1000 ] syn_wins.(1) ;
+    let prop (h : t) name prop =
+        let w = List.find (fun (w : Widget.t) -> w.name = name)
+                          h.trx.widget.children in
+        (List.find (fun (p : Widget.property) -> p.name = prop)
+                   w.properties).getter () in
+    assert_equal ~printer:Yojson.Basic.to_string ~msg:"shown by the server"
+        (`Int 3000) (prop b "server-tcp:7" "send buffer") ;
+    assert_equal ~printer:Yojson.Basic.to_string ~msg:"defaults shown too"
+        (`Int Tcp.TRX.default_snd_buf) (prop a "client-tcp:1234" "send buffer")
  *)
 
 module Name = struct

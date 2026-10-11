@@ -587,8 +587,8 @@ What can be asked:
 | `power on`, `power off` | anything with a power switch of its own: hosts, switches, hubs, routers, gateways, portals, synthesizers and **cables** (but not recorders, replayers or notes) | — |
 | `emit gratuitous ARP` | a router, on every port that has an address; or one adapter with an address: a host's `eth`, a router's `#0`… | — |
 | `ping` | a host | `target` (address or name), `count` (3), `interval` secs (1), `timeout` secs (4) |
-| `start TCP server`, `start UDP server` | a host | `port`, and how it behaves (below) |
-| `start TCP client`, `start UDP client` | a host | `target` (address or name), `port`, `source port` (random), how it behaves (below), and when to stop: `duration` secs, `volume` bytes sent and received (both unset) |
+| `start TCP server`, `start UDP server` | a host | `port`, how it behaves (below), and for TCP its buffers (below) |
+| `start TCP client`, `start UDP client` | a host | `target` (address or name), `port`, `source port` (random), how it behaves (below), when to stop: `duration` secs, `volume` bytes sent and received (both unset), and for TCP its buffers (below) |
 | `stop` | a server or a client (below) | — |
 | `start replay`, `stop replay` | a replayer | — |
 | `flush` | a gateway's `nat`: forgets every connection it tracks, so established ones break | — |
@@ -613,7 +613,11 @@ shows the bytes `sent` and `received` so far, and answers `stop`. Both ends
 take the same `behavior`, one of three shapes: `{"sink": null}` (the default)
 discards what comes in, `{"echo": null}` sends it back, and
 `{"random": {"min size": 1, "max size": 1000, "interval": 0.5}}` sends messages
-of between `min size` and `max size` bytes, `interval` secs apart on average. A
+of between `min size` and `max size` bytes, `interval` secs apart on average.
+Over TCP, both ends also take a `send buffer` (65536 bytes), how much can wait
+to be sent before the sender is made to wait, and a `receive buffer` (6291456
+bytes), the window advertised to the peer, at most 1073725440; a server gives
+them to every connection it accepts, and its part shows them. A
 client also stops when the server
 closes the connection, and a server or a client stops with the power of its
 host or when its part is deleted. The run that started it then ends with what

@@ -1069,9 +1069,14 @@ struct
             else match t.rtt with Some (srtt, _) -> srtt | None -> t.rto in
         max own (t.emit_busy_for ())
 
-    (* Retransmission defaults are those of Linux, as is rcv_buf (the maximum
-     * of tcp_rmem): *)
-    let make power ?isn ?(mss=536) ?(ssthresh=max_int) ?(snd_buf=65536) ?(rcv_buf=6 * 1024 * 1024)
+    let default_snd_buf = 65536
+    (* The maximum of Linux's tcp_rmem: *)
+    let default_rcv_buf = 6 * 1024 * 1024
+    (* What the largest window scaling allows to advertise: *)
+    let max_rcv_buf = 0xffff lsl 14
+
+    (* Retransmission defaults are those of Linux: *)
+    let make power ?isn ?(mss=536) ?(ssthresh=max_int) ?(snd_buf=default_snd_buf) ?(rcv_buf=default_rcv_buf)
              ?(initial_rto=Clock.Interval.sec 1.) ?(min_rto_var=Clock.Interval.msec 200.)
              ?(max_rto=Clock.Interval.sec 120.) ?(max_timeouts=15)
              src dst logger =

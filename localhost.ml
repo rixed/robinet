@@ -219,7 +219,13 @@ let make_ctx ?location sim =
 
 let host ?location sim =
     let ctx = make_ctx ?location sim in
-    let tcp_connect = tcp_connect ctx ~wait_for_server:true ?ttl:None ?tos:None
+    (* Real sockets, whose buffers are the kernel's business: *)
+    let tcp_connect dst ?src_port ?snd_buf ?rcv_buf port cont =
+        ignore snd_buf ; ignore rcv_buf ;
+        tcp_connect ctx ~wait_for_server:true dst ?src_port port cont
+    and tcp_server_start ?snd_buf ?rcv_buf port server_f =
+        ignore snd_buf ; ignore rcv_buf ;
+        tcp_server ctx port server_f
     and udp_connect _ ?src_port _ _ =
         ignore src_port ;
         todo "UDP connect for localhost"
@@ -240,7 +246,7 @@ let host ?location sim =
     { Host.widget = ctx.widget ;
       tcp_connect ; udp_connect ; udp_send ; ping ;
       gethostbyname = gethostbyname ctx ;
-      tcp_server_start = tcp_server ctx ; tcp_server_stop ;
+      tcp_server_start ; tcp_server_stop ;
       udp_server_start ; udp_server_stop ; signal_err ;
       dev = sink ignore ;
       (* Nothing here waits for an address: this host has the one the machine
