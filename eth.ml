@@ -500,8 +500,30 @@ struct
             Log.(log t.widget.logger Warning (lazy
                 "Ignoring an RX frame (I'm off)"))
 
-    (* Emission *)
-    let set_read t f =
+    (* When a frame emitted [now] would start: frames must wait for each others
+     * when sending. *)
+    let tx_start t speed full_duplex now =
+        let busy_until =
+            if full_duplex then t.tx_busy_until
+            else max t.rx_busy_until t.tx_busy_until in
+        (* The IFG is a silence after the carrier stops (not a longer
+         * carrier, or the link would appear busy when receiving in
+         * half duplex). *)
+        let quiet_until =
+            Time.add busy_until (Speed.duration speed t.inter_frame_gap) in
+        max now quiet_until
+
+    (** How long a frame emitted now would wait before it starts. *)
+    let tx_busy_for t () =
+        match t.negotiated with
+        | None -> Interval.zero
+        | Some (speed, full_duplex) ->
+            let now = Simulation.Widget.now t.widget in
+            Time.diff (tx_start t speed full_duplex now) now
+
+    (* Emission. The wire cannot make the frames wait, so its [busy_for] is not
+     * asked. *)
+    let set_read t f _busy_for =
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting emitter"))) ;
         t.emit <- (fun pld ->
             match t.negotiated with
@@ -513,18 +535,8 @@ struct
                 Metric.(Counter.add t.volume ~now ~params:egress
                                     (bytelength pld)) ;
                 Metric.(Counter.inc t.packets ~now ~params:egress) ;
-                (* Frames must wait for each others when sending: *)
                 let ser_delay = Speed.duration speed bitlen in
-                let busy_until =
-                    if full_duplex then t.tx_busy_until
-                    else max t.rx_busy_until t.tx_busy_until in
-                (* The IFG is a silence after the carrier stops (not a longer
-                 * carrier, or the link would appear busy when receiving in
-                 * half duplex). *)
-                let quiet_until =
-                    Time.add busy_until
-                                   (Speed.duration speed t.inter_frame_gap) in
-                let tx_start = max now quiet_until in
+                let tx_start = tx_start t speed full_duplex now in
                 t.tx_busy_until <- Time.add tx_start ser_delay ;
                 Simulation.at t.widget.power tx_start f pld
             | None ->
@@ -548,7 +560,7 @@ struct
 
     (** Turns an iface into a device *)
     let dev (t : t) =
-        { write = write t ; set_read = set_read t }
+        { write = write t ; busy_for = never_busy ; set_read = set_read t }
 
     let ignore_disconnected ~logger bits =
         Log.(log logger Debug (lazy
@@ -1150,7 +1162,8 @@ struct
             (List.print State.print_my_address) st.my_addresses
             (List.print State.print_gw) st.gateways))) ;
         { ins = { write = tx st ;
-                  set_read = fun f -> st.recv <- f } ;
+                  busy_for = Iface.tx_busy_for st.iface ;
+                  set_read = fun f _busy_for -> st.recv <- f } ;
           out = Iface.dev st.iface }
 end
 
@@ -1371,19 +1384,23 @@ struct
 
     (** Return a TRX representing an imperfect network link. *)
     let make (st : State.t) =
-        let a_reader = ref (ignore_bits ~logger:st.widget.logger)
-        and b_reader = ref (ignore_bits ~logger:st.widget.logger) in
+        let a_reader = ref (null_dev ~logger:st.widget.logger)
+        and b_reader = ref (null_dev ~logger:st.widget.logger) in
         let ins_write bits =
             let bits = pass st true bits in
-            Simulation.delay st.widget.power st.delay !b_reader bits
-        and ins_set_read f = a_reader := f
+            Simulation.delay st.widget.power st.delay !b_reader.write bits
+        and ins_set_read write busy_for = a_reader := { (sink write) with busy_for }
         and out_write bits =
             let bits = pass st false bits in
-            Simulation.delay st.widget.power st.delay !a_reader bits
-        and out_set_read f = b_reader := f
+            Simulation.delay st.widget.power st.delay !a_reader.write bits
+        and out_set_read write busy_for = b_reader := { (sink write) with busy_for }
         in
-        { ins = { write = ins_write ; set_read = ins_set_read } ;
-          out = { write = out_write ; set_read = out_set_read } }
+        { ins = { write = ins_write ;
+                  busy_for = (fun () -> !b_reader.busy_for ()) ;
+                  set_read = ins_set_read } ;
+          out = { write = out_write ;
+                  busy_for = (fun () -> !a_reader.busy_for ()) ;
+                  set_read = out_set_read } }
 
     (* What the reader is shown of a cable: the frames that have gone by, most
      * recent first, one row per frame and not one per slot it remembers. A
@@ -1428,7 +1445,7 @@ struct
         Simulation.run_startup sim ;
         let got = ref [] in
         b.Host.trx.Host.udp_server_start (Udp.Port.o 5000) (fun udp ->
-            udp.Udp.TRX.trx.ins.set_read (fun bits ->
+            udp.Udp.TRX.trx.ins --> sink (fun bits ->
                 got := Bitstring.string_of_bitstring bits :: !got)) ;
         (* Both go out before the first can be answered, so both wait on the
            same resolution. *)

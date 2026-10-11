@@ -102,7 +102,9 @@ struct
               (* FIXME: Ideally, those functions are serializable references to
                * the TRX they are connected to: *)
             mutable emit : bitstring -> unit ;          (** the emit function (ie. carry packets to the outside *)
-            mutable recv : bitstring -> unit }          (** the receive functon (ie. forward incoming packets from the outside *)
+            mutable emit_busy_for : unit -> Clock.Interval.t ;
+            mutable recv : bitstring -> unit ;          (** the receive functon (ie. forward incoming packets from the outside *)
+            mutable recv_busy_for : unit -> Clock.Interval.t }
 
     (* [min_port] is used as [Random.int (65536 - min_port)]: out of range, it takes
      * down every packet the NAT handles, one event handler at a time. *)
@@ -153,8 +155,8 @@ struct
             out_cnxs_h = Hashtbl.create num_max_cnxs ;
             inc_icmp_h = Hashtbl.create num_max_cnxs ;
             out_icmp_h = Hashtbl.create num_max_cnxs ;
-            emit = ignore_bits ~logger:widget.logger ;
-            recv = ignore_bits ~logger:widget.logger } in
+            emit = ignore_bits ~logger:widget.logger ; emit_busy_for = never_busy ;
+            recv = ignore_bits ~logger:widget.logger ; recv_busy_for = never_busy } in
         Widget.add_properties widget Widget.[
             property "addr" ~descr:"IP address" ~kind:String
                 ~getter:(fun () -> `String (Ip.Addr.to_string t.addr)) ;
@@ -697,7 +699,11 @@ v}
     (** [make ip n] returns a {!Tools.trx} corresponding to a NAT device (tx is for transmitting from the LAN to the outside) that can track [n] sockets. *)
     let make (st : State.t) =
         { ins = { write = tx st ;
-                  set_read = fun f -> st.recv <- f } ;
+                  busy_for = (fun () -> st.emit_busy_for ()) ;
+                  set_read = fun f busy_for ->
+                      st.recv <- f ; st.recv_busy_for <- busy_for } ;
           out = { write = rx st ;
-                  set_read = fun f -> st.emit <- f } }
+                  busy_for = (fun () -> st.recv_busy_for ()) ;
+                  set_read = fun f busy_for ->
+                      st.emit <- f ; st.emit_busy_for <- busy_for } }
 end

@@ -60,7 +60,7 @@ let main =
                   ~netmask:(Ip.Addr.of_string !netmask)
                   ~static_ip:(Ip.Addr.of_string !src_ip)
                   "requester" in
-    host.trx.dev.set_read emit ;
+    host.trx.dev --> sink emit ;
     (* Every box is born dark: switch the network on before asking anything of
        it, which is what [Simulation.run] does at the start and which is too
        late for what is scheduled below. *)

@@ -56,7 +56,7 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
     *)
     Log.(log st.widget.logger Debug (lazy "Listening for requests...")) ;
     host.Host.udp_server_start port (fun udp ->
-        udp.Udp.TRX.trx.ins.set_read (fun bits ->
+        udp.Udp.TRX.trx.ins --> sink (fun bits ->
             Log.(log st.widget.logger Debug (lazy "Received an UDP packet...")) ;
             match Pdu.unpack bits with
             | Error s ->
@@ -126,8 +126,8 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
     serve st srv.trx ;
     let nameserver = Ip.Addr.of_dotted_string "1.1.1.1" in
     let clt : Host.t = Host.make ~parent:sim.root ~nameserver ~netmask ~static_ip:(Ip.Addr.random ()) "client" in
-    srv.trx.dev.set_read clt.trx.dev.write ;
-    clt.trx.dev.set_read srv.trx.dev.write ;
+    srv.trx.dev --> clt.trx.dev ;
+    clt.trx.dev --> srv.trx.dev ;
     (* Both boxes are born dark, and the client cannot ask before it is on. *)
     Simulation.run_startup sim ;
     let got_ip = ref false in

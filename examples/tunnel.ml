@@ -31,15 +31,15 @@ let tunnel (sim : Simulation.t) ifname tun_ip netmask mac gw search_sfx nameserv
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) gw in
     let host = Host.make ~parent:sim.root ?gateways ?search_sfx ?nameserver ~mac ~netmask ~static_ip:tun_ip "tun"
     and http = Http.TRX.make [ "Content-Type", "tun/eth" ] in
-    host.trx.dev.set_read (Pcap.inject iface.handler) ;
+    host.trx.dev --> sink (Pcap.inject iface.handler) ;
     let connect_tunnel tcp =
         Printf.printf "Tunnel: We are now connected!\n%!" ;
-        http =-> tx tcp.Tcp.TRX.trx ;
-        tcp.Tcp.TRX.trx.ins.set_read (fun bits ->
+        http =-> tcp.Tcp.TRX.trx.ins ;
+        tcp.Tcp.TRX.trx.ins --> sink (fun bits ->
             if bitstring_is_empty bits then (
                 (* close the socket *)
                 Printf.printf "Tunnel: The HTTP connection was closed\n%!" ;
-                http =-> ignore ;
+                http =-> sink ignore ;
                 rx http bits ;    (* signal the end of the socket to http parser *)
                 tcp.Tcp.TRX.close ()
                 (* TODO: if client, quit or reconnect *)
@@ -61,7 +61,7 @@ let tunnel (sim : Simulation.t) ifname tun_ip netmask mac gw search_sfx nameserv
         (* to use our GW: Eth.TRX.tx host.Host.eth x *)
         Pcap.inject iface.handler bits
     in
-    ignore (recv_http <-= http) ;
+    ignore (sink recv_http <-= http) ;
     ignore (Pcap.sniffer iface host.trx.dev.write) ;
     (match dst with
         | Some addr ->

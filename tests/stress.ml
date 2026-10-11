@@ -1409,7 +1409,7 @@ let test_http net cable duration nthreads
                                "params":{"static-ip":"10.9.0.6"}}|}) in
         check "a port with nothing on it is free"
             (not (lone.ports.is_connected 0)) ;
-        (lone.ports.dev 0).Tools.set_read ignore ;
+        Tools.(lone.ports.dev 0 --> sink ignore) ;
         check "and a cable plugged in by a program counts as one"
             (lone.ports.is_connected 0) ;
         (* The length of a cable is how long a frame takes to cross it, so where

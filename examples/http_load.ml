@@ -43,13 +43,13 @@ let run (sim : Simulation.t) ifname src_range num_srcs ?gateways ?search_sfx ?na
     and gigabit = Eth.limited sim.root.power (Clock.Interval.msec 10.) 1_000_000_000. in
     List.iteri (fun i (h : Host.t) ->
         (* notice that the cable is not full duplex *)
-        h.trx.dev.set_read (gigabit (Hub.Repeater.write hub i)) ;
-        Hub.Repeater.set_read hub i (gigabit h.trx.dev.write)
+        h.trx.dev --> sink (gigabit (Hub.Repeater.write hub i)) ;
+        Hub.Repeater.set_read hub i (gigabit h.trx.dev.write) never_busy
     ) hosts ;
     (* Link all these to the real world *)
     let iface =
         Pcap.open_iface ~widget:(Widget.make ~parent:sim.root ifname) ifname in
-    Hub.Repeater.set_read hub num_srcs (Pcap.inject iface.handler) ;
+    Hub.Repeater.set_read hub num_srcs (Pcap.inject iface.handler) never_busy ;
     (* Every box is born dark: switch the network on before asking anything
        of it, which is what [Simulation.run] does at the start and which is
        too late for what follows. *)

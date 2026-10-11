@@ -315,7 +315,9 @@ struct
         mutable src : Port.t ;
         mutable dst : Port.t ;
         mutable emit : bitstring -> unit ;
+        mutable emit_busy_for : unit -> Clock.Interval.t ;
         mutable recv : bitstring -> unit ;
+        mutable recv_busy_for : unit -> Clock.Interval.t ;
         mss : int ;  (* max segment size: used to segment payloads *)
         isn : SeqNum.t ; (* initial seq num *)
         mutable rcvd_isn : SeqNum.t option ;
@@ -327,6 +329,8 @@ struct
         mutable rcvd_acked : int ;  (* what we have acked so far (must be <= rcvd_pld) *)
         mutable rcvd_pkts : Streambuf.t ; (* what we received but haven't given to application yet *)
         mutable to_send : bitstring list ; (* what we must send next *) (* FIXME: s/list/dequeue/ *)
+        mutable to_send_len : int ; (* bytes in to_send *)
+        snd_buf : int ; (* to_send makes writers wait once it has that many bytes *)
         mutable unacked_tx : Streambuf.t ; (* previous packet we sent but that were not acked yet *)
         mutable rcvd_fin : bool ; (* if we already passed the fin to the application *)
         mutable cwnd : int ;  (* congestion window: bytes allowed in flight (sent_pld - sent_acked) *)
@@ -401,6 +405,7 @@ struct
         t.sent_fin <- true ;
         t.rcvd_fin <- true ;
         t.to_send <- [] ;
+        t.to_send_len <- 0 ;
         t.unacked_tx <- Streambuf.empty
 
     let rec arm_rto t =
@@ -643,6 +648,7 @@ struct
             if in_flight t + len <= wnd then (
                 emit_one t ~psh:is_last (takebytes len bits) ;
                 t.to_send <- if is_last then to_send' else dropbytes len bits :: to_send' ;
+                t.to_send_len <- t.to_send_len - len ;
                 try_really_tx t
             ) else
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: window full (%d in flight, window %d)" (in_flight t) wnd)))
@@ -669,11 +675,20 @@ struct
             Printf.fprintf stderr "Tcp: writing to a non-established TRX!"
         ) else (
             t.to_send <- t.to_send @ [ bits ] ;
+            t.to_send_len <- t.to_send_len + bytelength bits ;
             try_really_tx t
         )
 
+    (* A full send buffer drains as acks come back, so in about an RTT; and
+     * what does leave it then waits for what is below. *)
+    let busy_for t () =
+        let own =
+            if t.to_send_len < t.snd_buf then Clock.Interval.zero
+            else match t.rtt with Some (srtt, _) -> srtt | None -> t.rto in
+        max own (t.emit_busy_for ())
+
     (* Retransmission defaults are those of Linux: *)
-    let make power ?isn ?(mss=536) ?(ssthresh=max_int)
+    let make power ?isn ?(mss=536) ?(ssthresh=max_int) ?(snd_buf=65536)
              ?(initial_rto=Clock.Interval.sec 1.) ?(min_rto_var=Clock.Interval.msec 200.)
              ?(max_rto=Clock.Interval.sec 120.) ?(max_timeouts=15)
              src dst logger =
@@ -681,7 +696,9 @@ struct
                   src = src ;
                   dst = dst ;
                   emit = ignore_bits ~logger ;
+                  emit_busy_for = never_busy ;
                   recv = ignore_bits ~logger ;
+                  recv_busy_for = never_busy ;
                   mss ; cwnd = mss ; ssthresh ; ca_acked = 0 ; dup_acks = 0 ; recovery = Open ;
                   rtt = None ; rtt_probe = None ; rto = initial_rto ; rto_gen = 0 ;
                   min_rto_var ; max_rto ; max_timeouts ;
@@ -691,7 +708,7 @@ struct
                   closed = false ; sent_fin = false ;
                   sent_pld = 0 ; sent_acked = 0 ; rcvd_pld = 0 ; rcvd_acked = 0 ;
                   rcvd_pkts = Streambuf.empty ;
-                  to_send = [] ;
+                  to_send = [] ; to_send_len = 0 ; snd_buf ;
                   unacked_tx = Streambuf.empty ;
                   rcvd_fin = false ;
                   cnx_established_cont = None ;
@@ -700,9 +717,15 @@ struct
                               is_closed = (fun _ -> true) ;
                               is_established = (fun _ -> false) } } in
         t.tcp_trx <- { trx =  { ins = { write = tx t ;
-                                        set_read = fun f -> t.recv <- f } ;
+                                        busy_for = busy_for t ;
+                                        set_read = fun f busy_for ->
+                                            t.recv <- f ;
+                                            t.recv_busy_for <- busy_for } ;
                                 out = { write = rx t ;
-                                        set_read = fun f -> t.emit <- f } } ;
+                                        busy_for = (fun () -> t.recv_busy_for ()) ;
+                                        set_read = fun f busy_for ->
+                                            t.emit <- f ;
+                                            t.emit_busy_for <- busy_for } } ;
                        close = close t ;
                        is_closed = is_closed t ;
                        is_established = (fun () -> is_established t) } ;

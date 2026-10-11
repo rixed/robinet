@@ -43,16 +43,16 @@ let run (sim : Simulation.t) () =
     and hub = Hub.Repeater.make ~parent:sim.root 3 "hub"
     in
     let gigabit = Eth.limited sim.root.power (Clock.Interval.msec 1.) 1_000_000_000. in
-    h1.trx.dev.set_read (gigabit (Hub.Repeater.write hub 0)) ;
-    Hub.Repeater.set_read hub 0 (gigabit h1.trx.dev.write) ;
-    h2.trx.dev.set_read (gigabit (Hub.Repeater.write hub 1)) ;
-    Hub.Repeater.set_read hub 1 (gigabit h2.trx.dev.write) ;
+    h1.trx.dev --> sink (gigabit (Hub.Repeater.write hub 0)) ;
+    Hub.Repeater.set_read hub 0 (gigabit h1.trx.dev.write) never_busy ;
+    h2.trx.dev --> sink (gigabit (Hub.Repeater.write hub 1)) ;
+    Hub.Repeater.set_read hub 1 (gigabit h2.trx.dev.write) never_busy ;
     (* Save everything into sock_test.pcap *)
     let write, close = Pcap.save sim "sock_test.pcap" in
     at_exit close ;
-    Hub.Repeater.set_read hub 2 write ;
+    Hub.Repeater.set_read hub 2 write never_busy ;
     (* Start a server on h1 *)
-    h1.trx.tcp_server_start (Tcp.Port.o 7) (fun tcp -> tcp.Tcp.TRX.trx.ins.set_read (server_f h1 tcp)) ;
+    h1.trx.tcp_server_start (Tcp.Port.o 7) (fun tcp -> tcp.Tcp.TRX.trx.ins --> sink (server_f h1 tcp)) ;
     (* Client connects and write a msg *)
     let client_f tcp bits =
         Printf.printf "Client received '%s'\n" (string_of_bitstring bits) ;
@@ -66,7 +66,7 @@ let run (sim : Simulation.t) () =
     h2.trx.tcp_connect (Host.IPv4 (Ip.Addr.of_string "192.168.0.1")) (Tcp.Port.o 7) (function
     | None -> ()
     | Some tcp ->
-        tcp.Tcp.TRX.trx.ins.set_read (client_f tcp) ;
+        tcp.Tcp.TRX.trx.ins --> sink (client_f tcp) ;
         tx tcp.Tcp.TRX.trx (bitstring_of_string "Hello world!"))
 
 let main =

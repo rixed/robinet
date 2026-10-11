@@ -26,8 +26,8 @@ let run (sim : Simulation.t) () =
                     assert (id = 42 && seq = 1)
                 | _ -> error "Bad msg payload") in
     (* Connect everything *)
-    my_recv <-= ip ==> eth =-> host.trx.dev.write ;
-    host.trx.dev.set_read (rx eth) ;
+    sink my_recv <-= ip ==> eth =-> host.trx.dev ;
+    host.trx.dev --> sink (rx eth) ;
     (* And switch it on. Every box is born dark and is switched on by its
        power-on in the startup list, which [Simulation.run] would run for us --
        but the request below goes out before that, and a host that is off

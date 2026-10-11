@@ -279,8 +279,8 @@ let rec request t ?(command="GET") ?(headers=[]) ?body url cont =
                 t.host.Host.tcp_connect addr port (function
                 | None -> cont None
                 | Some tcp ->
-                    ignore ((TRXtop.rx http) <-= tcp.Tcp.TRX.trx) ;
-                    TRXtop.set_emit http (tx tcp.Tcp.TRX.trx) ;
+                    ignore (sink (TRXtop.rx http) <-= tcp.Tcp.TRX.trx) ;
+                    TRXtop.set_emit http tcp.Tcp.TRX.trx.ins ;
                     with_http_cnx http tcp)
             | Some v ->
                 with_http_cnx v.http v.tcp in

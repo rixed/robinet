@@ -157,7 +157,9 @@ struct
           prio : int ; id : int ;
           proto : Arp.HwProto.t ;
           mutable emit : bitstring -> unit ;
-          mutable recv : bitstring -> unit }
+          mutable emit_busy_for : unit -> Clock.Interval.t ;
+          mutable recv : bitstring -> unit ;
+          mutable recv_busy_for : unit -> Clock.Interval.t }
 
     (** Transmit function. [tx t payload] will tunnel the payload through this TRX. *)
     let tx t bits =
@@ -180,10 +182,14 @@ struct
      *)
     let make power prio id proto logger =
         let t = { logger ; power ; prio ; id ; proto ;
-                  emit = ignore_bits ~logger ;
-                  recv = ignore_bits ~logger } in
+                  emit = ignore_bits ~logger ; emit_busy_for = never_busy ;
+                  recv = ignore_bits ~logger ; recv_busy_for = never_busy } in
         { ins = { write = tx t ;
-                  set_read = fun f -> t.recv <- f } ;
+                  busy_for = (fun () -> t.emit_busy_for ()) ;
+                  set_read = fun f busy_for ->
+                      t.recv <- f ; t.recv_busy_for <- busy_for } ;
           out = { write = rx t ;
-                  set_read = fun f -> t.emit <- f } }
+                  busy_for = (fun () -> t.recv_busy_for ()) ;
+                  set_read = fun f busy_for ->
+                      t.emit <- f ; t.emit_busy_for <- busy_for } }
 end

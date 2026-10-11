@@ -167,7 +167,9 @@ struct
         power : Simulation.power ;
         mutable src : Port.t ; mutable dst : Port.t ;
         mutable emit : bitstring -> unit ;
-        mutable recv : bitstring -> unit }
+        mutable emit_busy_for : unit -> Clock.Interval.t ;
+        mutable recv : bitstring -> unit ;
+        mutable recv_busy_for : unit -> Clock.Interval.t }
 
     let tx t bits =
         let udp = Pdu.make ~src_port:t.src ~dst_port:t.dst bits in
@@ -185,15 +187,19 @@ struct
 
     let trx_of t =
         { trx = { ins = { write = tx t ;
-                          set_read = fun f -> t.recv <- f } ;
+                          busy_for = (fun () -> t.emit_busy_for ()) ;
+                          set_read = fun f busy_for ->
+                              t.recv <- f ; t.recv_busy_for <- busy_for } ;
                   out = { write = rx t;
-                          set_read = fun f -> t.emit <- f } } ;
+                          busy_for = (fun () -> t.recv_busy_for ()) ;
+                          set_read = fun f busy_for ->
+                              t.emit <- f ; t.emit_busy_for <- busy_for } } ;
           get_ports = (fun () -> t.src, t.dst) }
 
     let make power src dst logger =
         let t = { power ; src = src ; dst = dst ;
-                  emit = ignore_bits ~logger ;
-                  recv = ignore_bits ~logger ;
+                  emit = ignore_bits ~logger ; emit_busy_for = never_busy ;
+                  recv = ignore_bits ~logger ; recv_busy_for = never_busy ;
                   logger } in
         trx_of t
 end

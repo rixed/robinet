@@ -37,7 +37,7 @@ let forward_traffic (widget : Widget.t) ifname input_dev =
     let pcap_to_string b =
         let len = Bitstring.bitstring_length b / 8 in
         Printf.sprintf "packet of %d byte(s)" len in
-    input_dev.set_read
+    input_dev --> sink
         (log_paquet "spitting" pcap_to_string (fun b ->
             Pcap.inject iface.handler b)) ;
     Pcap.sniffer iface
@@ -233,7 +233,7 @@ let build_network (widget : Widget.t) router_specs fst_router_name delays err_de
             ) dests in
         (* make that [emit] function the emitter for iface [i] of [emitter]: *)
         let src_dev = Hashtbl.find devices src_name in
-        src_dev.set_read emit) ;
+        src_dev --> sink emit) ;
     (* Return the input device for the first iface of the first router: *)
     let fst_router = Hashtbl.find routers fst_router_name in
     fst_router.Router.ifaces.(0).trx.out

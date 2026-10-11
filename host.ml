@@ -192,7 +192,7 @@ let tcp_sock_rx t socks bits =
                                             raise No_socket
                                         ) in
                             let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t) tcp.Tcp.Pdu.dst_port tcp.Tcp.Pdu.src_port t.trx.widget.logger in
-                            tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx =-> tx socks.ip_4_tcp ;
+                            tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx =-> socks.ip_4_tcp.ins ;
                             server.tcp_cnxs <-
                                 (socks, key, tcp.Tcp.TRX.tcp_trx) ::
                                 List.filter (fun (_, _, (c : Tcp.TRX.tcp_trx)) ->
@@ -220,7 +220,7 @@ let udp_sock_rx t socks icmp_trx bits =
                         let server = try Hashtbl.find t.udp_servers udp.Udp.Pdu.dst_port
                                      with Not_found -> raise No_socket in
                         let trx = Udp.TRX.make t.trx.widget.power udp.Udp.Pdu.dst_port udp.Udp.Pdu.src_port t.trx.widget.logger in
-                        trx.Udp.TRX.trx =-> tx socks.ip_4_udp ;
+                        trx.Udp.TRX.trx =-> socks.ip_4_udp.ins ;
                         server.udp_peers <- (socks, key) :: server.udp_peers ;
                         server.udp_accept trx ; (* supposed to set the recver of this udp trx *)
                         trx) in
@@ -409,7 +409,7 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
         let socks = hash_find_or_insert t.tcp_socks dst_ip (fun () ->
             let trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip dst_ip Ip.Proto.tcp t.trx.widget.logger in
             let socks = make_tcp_socks trx in
-            (tcp_sock_rx t socks) <-= trx =-> tx t.eth_trx ;
+            sink (tcp_sock_rx t socks) <-= trx =-> t.eth_trx.ins ;
             socks) in
         (* Try to find a unused port if none was given, or ensure the given one is free *)
         let src_port = match src_port with
@@ -439,7 +439,7 @@ and tcp_connect t dst ?src_port (dst_port : Tcp.Port.t) cont =
                 cont None
             | Some src_port ->
                 let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t) src_port dst_port t.trx.widget.logger in
-                tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx.out.set_read socks.ip_4_tcp.ins.write ;
+                tcp.Tcp.TRX.tcp_trx.Tcp.TRX.trx.out --> socks.ip_4_tcp.ins ;
                 Hashtbl.add socks.tcps (src_port, dst_port) tcp.Tcp.TRX.tcp_trx ;
                 Tcp.TRX.connect tcp (function
                 | Some trx ->
@@ -473,10 +473,10 @@ and udp_connect t dst ?src_port dst_port client_f cont =
     let connect dst_ip =
         let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
             let icmp_trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip dst_ip Ip.Proto.icmp t.trx.widget.logger in
-            icmp_trx =-> tx t.eth_trx ;
+            icmp_trx =-> t.eth_trx.ins ;
             let ip_trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip dst_ip Ip.Proto.udp t.trx.widget.logger in
             let socks = make_udp_socks ip_trx in
-            (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> tx t.eth_trx ;
+            sink (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> t.eth_trx.ins ;
             socks) in
         let src_port = may_default src_port (fun () -> Udp.Port.o (Random.int 0x10000)) in
         let key = src_port, dst_port in
@@ -487,7 +487,7 @@ and udp_connect t dst ?src_port dst_port client_f cont =
         ) else (
             let trx = Udp.TRX.make t.trx.widget.power src_port dst_port t.trx.widget.logger in
             (* connect this udp to the underlaying ip *)
-            (client_f trx) <-= trx.Udp.TRX.trx =-> tx socks.ip_4_udp ;
+            sink (client_f trx) <-= trx.Udp.TRX.trx =-> socks.ip_4_udp.ins ;
             Hashtbl.add socks.udps key trx ;
             (* Metric.Atomic.fire udp_cnxs_ok ; *)
             cont (Some trx)
@@ -607,7 +607,7 @@ let udp_server_stop t port =
         a.trx.tcp_connect (IPv4 (ip 2)) port (fun c ->
             cnx := c ;
             Option.may (fun (c : Tcp.TRX.tcp_trx) ->
-                c.trx.ins.set_read (fun bits ->
+                c.trx.ins --> sink (fun bits ->
                     if Bitstring.bitstring_length bits = 0 then closed := true)
             ) c) ;
         Simulation.run sim false in
@@ -626,7 +626,7 @@ let udp_server_stop t port =
     let uport = Udp.Port.o 5000 and served = ref 0 in
     let serve () =
         b.trx.udp_server_start uport (fun udp ->
-            udp.Udp.TRX.trx.ins.set_read (fun _ -> incr served)) in
+            udp.Udp.TRX.trx.ins --> sink (fun _ -> incr served)) in
     let send () =
         a.trx.udp_send (IPv4 (ip 2)) ~src_port:(Udp.Port.o 6000) uport
                        (Bitstring.zeroes_bitstring 64) ;
@@ -657,22 +657,22 @@ let ip_recv t bits =
                 let sock = hash_find_or_insert t.tcp_socks ip.Ip.Pdu.src (fun () ->
                     let ip_trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
                     let socks = make_tcp_socks ip_trx in
-                    (tcp_sock_rx t socks) <-= ip_trx =-> tx t.eth_trx ;
+                    sink (tcp_sock_rx t socks) <-= ip_trx =-> t.eth_trx.ins ;
                     socks) in
                 rx sock.ip_4_tcp bits (* will handle fragmentation then pass payload to its emit function *)
             ) else if ip.Ip.Pdu.proto = Ip.Proto.udp then (
                 let sock = hash_find_or_insert t.udp_socks ip.Ip.Pdu.src (fun () ->
                     let icmp_trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip ip.Ip.Pdu.src Ip.Proto.icmp t.trx.widget.logger in
-                    icmp_trx =-> tx t.eth_trx ;
+                    icmp_trx =-> t.eth_trx.ins ;
                     let ip_trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
                     let socks = make_udp_socks ip_trx in
-                    (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> tx t.eth_trx ;
+                    sink (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> t.eth_trx.ins ;
                     socks) in
                 rx sock.ip_4_udp bits
             ) else if ip.Ip.Pdu.proto = Ip.Proto.icmp then (
                 let ip_trx = hash_find_or_insert t.icmp_socks ip.Ip.Pdu.src (fun () ->
                     let ip_trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip ip.Ip.Pdu.src ip.Ip.Pdu.proto t.trx.widget.logger in
-                    (icmp_rx t ip_trx) <-= ip_trx =-> tx t.eth_trx ;
+                    sink (icmp_rx t ip_trx) <-= ip_trx =-> t.eth_trx.ins ;
                     ip_trx) in
                 rx ip_trx bits
             )
@@ -709,7 +709,7 @@ let reset t =
        the router routing. See [own_ip_config]. *)
     if t.own_ip_config then (
         t.eth_state.my_addresses <- [] ;
-        ignore <-= t.eth_trx |> ignore
+        sink ignore <-= t.eth_trx |> ignore
     ) ;
     (* And so does everything else the lease brought, the default route it
        installed included: a lease is granted to a running host, and this one
@@ -740,7 +740,7 @@ let power_off t =
 let set_ip t my_ip netmask =
     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Setting my IP to %s" (Ip.Addr.to_string my_ip)))) ;
     t.eth_state.my_addresses <- [ Eth.State.make_my_ip_address ~netmask my_ip ] ;
-    ip_recv t <-= t.eth_trx |> ignore
+    sink (ip_recv t) <-= t.eth_trx |> ignore
 
 (* What a host is built from belongs within it, which is what the interface
    being built under the host's own widget buys. *)
@@ -879,7 +879,7 @@ let init_dhcp t =
                              (Clock.Interval.sec (5.+.(Random.float 3.)))
                              send_discover ()
         ) in
-    ignore (dhcp_client <-= t.eth_trx) ;
+    ignore (sink dhcp_client <-= t.eth_trx) ;
     (* The client should wait a random time between one and ten seconds to desynchronize
        the use of DHCP at startup - RFC 2131 *)
     let delay = Clock.Interval.sec (1.+.(Random.float 9.)) in
@@ -943,7 +943,9 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
           dev           = { write = (fun bits ->
                                Log.(log widget.logger Debug (lazy (Printf.sprintf "got written to %d bits" (bitstring_length bits)))) ;
                                rx t.eth_trx bits) ;
-                            set_read = (fun f -> t.eth_trx =-> f) } ;
+                            busy_for = never_busy ;
+                            set_read = (fun f busy_for ->
+                                t.eth_trx.out.set_read f busy_for) } ;
           tcp_connect   = (fun addr ?src_port dst cont -> if_on t "tcp_connect" (tcp_connect t addr ?src_port dst) cont) ;
           udp_connect   = (fun dst ?src_port dst_port client_f cont -> if_on t "udp_connect" (udp_connect t dst ?src_port dst_port client_f) cont) ;
           udp_send      = (fun dst ?src_port dst_port bits -> if_on t "udp_send" (udp_send t dst ?src_port dst_port) bits) ;
@@ -1198,20 +1200,24 @@ type flow =
       (* Whether [send] may be called now: not before a TCP connection is
          established, nor once it is closed. *)
       writable : unit -> bool ;
+      (* How long what [send] is given now would wait before it leaves: *)
+      busy_for : unit -> Clock.Interval.t ;
       (* Whether it is over for good: *)
       finished : unit -> bool ;
       close : unit -> unit }
 
 (* [closed] is called when the peer closes the connection. *)
 let tcp_flow (cnx : Tcp.TRX.tcp_trx) ~recv ~closed =
-    cnx.trx.ins.set_read (fun bits ->
+    cnx.trx.ins --> sink (fun bits ->
         if bitstring_length bits = 0 then closed () else recv bits) ;
     let writable () = cnx.is_established () && not (cnx.is_closed ()) in
-    { send = tx cnx.trx ; writable ; finished = cnx.is_closed ;
+    { send = tx cnx.trx ; writable ; busy_for = cnx.trx.ins.busy_for ;
+      finished = cnx.is_closed ;
       close = (fun () -> if writable () then cnx.close ()) }
 
 let udp_flow (udp : Udp.TRX.udp_trx) =
     { send = tx udp.trx ; writable = (fun () -> true) ;
+      busy_for = udp.trx.ins.busy_for ;
       finished = (fun () -> false) ; close = ignore }
 
 let random_payload n =
@@ -1231,11 +1237,16 @@ let talk power traffic behavior ~alive ~counted flow =
         let going () = alive () && not (flow.finished ()) in
         let rec loop () =
             if going () then (
-                if flow.writable () then (
-                    send (random_payload
-                        (min_size + Random.int (max_size - min_size + 1))) ;
-                    counted ()) ;
-                if going () then Simulation.delay power (wait ()) loop ()) in
+                let busy = flow.busy_for () in
+                (* Not before what was sent before has left: *)
+                if Clock.Interval.compare busy Clock.Interval.zero > 0 then
+                    Simulation.delay power busy loop ()
+                else (
+                    if flow.writable () then (
+                        send (random_payload
+                            (min_size + Random.int (max_size - min_size + 1))) ;
+                        counted ()) ;
+                    if going () then Simulation.delay power (wait ()) loop ())) in
         Simulation.delay power (wait ()) loop ()
     | Sink | Echo -> ()) ;
     fun bits ->
@@ -1338,7 +1349,7 @@ let udp_server_action t =
         ~listen:(fun p -> udp_server_start t (Udp.Port.o p))
         ~unlisten:(fun p -> udp_server_stop t (Udp.Port.o p))
         ~serve:(fun udp ~recv ->
-            udp.Udp.TRX.trx.ins.set_read recv ;
+            udp.Udp.TRX.trx.ins --> sink recv ;
             udp_flow udp)
 
 (* [connect dst ~src_port port ~recv ~closed cont] opens a flow and hands it

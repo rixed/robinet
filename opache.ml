@@ -86,7 +86,7 @@ let serve (host : Host.host_trx) ?(port=Tcp.Port.o 80) f =
         (* once we obtain the transport layer, build an http on top of it *)
         Log.(log widget.logger Debug (lazy "Building a new HTTP.TRXtop")) ;
         let http = TRXtop.make () in
-        TRXtop.set_emit http (tx tcp.trx) ;
+        TRXtop.set_emit http tcp.trx.ins ;
         TRXtop.set_recv http (function
             | TRXtop.HttpError x ->
                 Log.(log widget.logger Debug (lazy (Printf.sprintf "Got error %s" x))) ;
@@ -112,7 +112,7 @@ let serve (host : Host.host_trx) ?(port=Tcp.Port.o 80) f =
         let verbose_rx bits =
             Log.(log widget.logger Debug (lazy "Got some bits for HTTP!")) ;
             TRXtop.rx http bits in
-        ignore (verbose_rx <-= tcp.trx))
+        ignore (sink verbose_rx <-= tcp.trx))
 
 (** {2 HTTP servicing functions}
   These functions build a function taking an {Http.TRXtop.t}, an incomming {Http.Pdu.t} and

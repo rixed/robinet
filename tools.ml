@@ -666,9 +666,17 @@ let sum bits =
 (** A device is something to which you can send packet and register a
  * receiving function.
  * In a way this is just a trick to defer initialization of a peer when
- * creating another. *)
+ * creating another.
+ * [busy_for ()] is how long what is written now would wait before it starts
+ * to leave, for writers to pace themselves on.
+ * [set_read] takes the receiving function along with its own
+ * [busy_for]. *)
 type dev =
-    { write : bitstring -> unit ; set_read : (bitstring -> unit) -> unit }
+    { write : bitstring -> unit ;
+      busy_for : unit -> Clock.Interval.t ;
+      set_read : (bitstring -> unit) -> (unit -> Clock.Interval.t) -> unit }
+
+let never_busy () = Clock.Interval.zero
 
 let null_logger =
     Log.make ()
@@ -678,18 +686,23 @@ let ignore_bits ?(logger=null_logger) bits =
     Log.(log logger Debug (lazy
         (Printf.sprintf "wolfed %d bits down" (bitstring_length bits))))
 
+(** A device that reads nothing, and hands what is written to it to [f]. *)
+let sink f =
+    { write = f ; busy_for = never_busy ; set_read = (fun _ _ -> ()) }
+
 (** For those cases when you want to build a [trx] from a single [dev] *)
 let null_dev ~logger =
-    { write = ignore_bits ~logger ; set_read = ignore }
+    sink (ignore_bits ~logger)
 
-(** [dev --> f] makes [f] what [dev] hands what it receives to. *)
-let (-->) dev f =
-    dev.set_read f
+(** [dev1 --> dev2] makes [dev2] the reader of [dev1] (and [dev1] will forward
+ * [busy_for] calls to [dev2]. *)
+let (-->) dev1 dev2 =
+    dev1.set_read dev2.write dev2.busy_for
 
 (** [a <--> b] joins two devices, each receiving what the other sends. *)
 let (<-->) dev1 dev2 =
-    dev1 --> dev2.write ;
-    dev2 --> dev1.write
+    dev1 --> dev2 ;
+    dev2 --> dev1
 
 (** A transmitter is a kind of pipe with an inside and an outside device, and is
  * thus oriented (from inside to outside, inside being left operand for following
@@ -703,8 +716,8 @@ let (<-->) dev1 dev2 =
  *        ins.write -->  out.set_read =->
  * <-= ins.set_read <--  out.write
  *
- * Where the operator <-= sets the receiving function for (the inside side of)
- * the trx, and =-> sets the function that will receive data emitted from the
+ * Where the operator <-= sets the device receiving from (the inside side of)
+ * the trx, and =-> sets the device that will receive data emitted from the
  * (outside side of) the trx.
  *
  * Two usual ways to connect two TRXs together, with the <==> and the ==>
@@ -728,34 +741,34 @@ let rx trx = trx.out.write
 
 let null_trx ~logger = { ins = null_dev ~logger ; out = null_dev ~logger }
 
-(** [f <-= trx] sets f as the receive function of this [trx].
- * Previous receive function, if any, is lost.
+(** [dev <-= trx] sets [dev] as the receiver of this [trx].
+ * Previous receiver, if any, is lost.
  * {b Note:} [trx] is returned so that you can write such things as:
- * [f <-= a <==> b] or [f1 <-= a =-> f2] *)
-let (<-=) f trx =
-    trx.ins.set_read f ;
+ * [d <-= a <==> b] or [d1 <-= a =-> d2] *)
+let (<-=) dev trx =
+    trx.ins --> dev ;
     trx
 
-(** [trx =-> f] sets [f] as the emitting function of this [trx].
- * Previous emitting function, if any, is lost. *)
-let (=->) trx f =
-    trx.out.set_read f
+(** [trx =-> dev] sets [dev] as what this [trx] emits into.
+ * Previous one, if any, is lost. *)
+let (=->) trx dev =
+    trx.out --> dev
 
 (* Connect the device to the inside of the trx: *)
 let (-=>) dev trx =
-    dev.set_read trx.ins.write ;
-    dev.write <-= trx
+    dev --> trx.ins ;
+    dev <-= trx
 
 (* Or the other way around, connect it to the output side of the trx: *)
 let (<=-) trx dev =
-    dev.set_read trx.out.write ;
-    trx =-> dev.write
+    dev --> trx.out ;
+    trx =-> dev
 
 (** [a ==> b] connects [a] to [b] such that [b] transmits what [a] emits.
  * Previous connection from [a], if any, is overridden. *)
 let (==>) trx1 trx2 =
-    trx1 =-> trx2.ins.write ;
-    trx1.out.write <-= trx2
+    trx1 =-> trx2.ins ;
+    trx1.out <-= trx2
 
 (** [a <==> b] connects [a] to [b] such that [b] receives from the outside
  * what [a] emits to the outside, and [a] receives from the outside what
@@ -763,14 +776,13 @@ let (==>) trx1 trx2 =
 (* BEWARE that for a change, [b]'s is not oriented inside->outside but the
  * other way around. *)
 let (<==>) trx1 trx2 =
-    trx1 =-> trx2.out.write ;
-    trx2 =-> trx1.out.write
+    trx1 =-> trx2.out ;
+    trx2 =-> trx1.out
 
 (** [pipe trx1 trx2] is like [trx1 ==> trx2] but instead of returning trx2 it
  * returns a trx with trx1 as the inside and trx2 as the outside. *)
 let pipe trx1 trx2 =
-    trx1.out.set_read trx2.ins.write ;
-    trx2.ins.set_read trx1.out.write ;
+    trx1 ==> trx2 |> ignore ;
     { ins = trx1.ins ; out = trx2.out }
 
 (* Sometime we connect trx to mere devices: *)

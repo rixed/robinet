@@ -84,13 +84,13 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
                 )) t.ports
         )
 
-    let set_read (t : t) n f =
+    let set_read (t : t) n f _busy_for =
         Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Setting reader for port %d" n))) ;
         t.ports.(n) <- (f, true)
 
     (** Turns a port into a device *)
     let dev t n =
-        { write = write t n ; set_read = set_read t n }
+        { write = write t n ; busy_for = never_busy ; set_read = set_read t n }
 
     let t_printer _paren oc t =
         Printf.fprintf oc "%d" (Array.length t.ports)
@@ -204,12 +204,12 @@ struct
                 Simulation.asap t.widget.power emit pld
             )) t.ports
 
-    let set_read (t : t) n f =
+    let set_read (t : t) n f _busy_for =
         t.ports.(n) <- (f, true)
 
     (** Turns a port into a device *)
     let dev t n =
-        { write = write t n ; set_read = set_read t n }
+        { write = write t n ; busy_for = never_busy ; set_read = set_read t n }
 
     (* And undoes it, for the port a device offers as a socket. *)
     let disconnect (t : t) n =
@@ -416,13 +416,17 @@ struct
      * and [mirror] only with traffic from in to out.
      * If [rev_mirror] is unspecified, [mirror] receives it all. *)
     let make ?rev_mirror mirror =
-        let emit_ins = ref ignore
-        and emit_out = ref ignore in
+        let emit_ins = ref (sink ignore)
+        and emit_out = ref (sink ignore) in
         let rev_mirror = rev_mirror |? mirror in
-        { ins = { write = (fun bits -> mirror bits ; !emit_out bits) ;
-                  set_read = fun f -> emit_ins := f } ;
-          out = { write = (fun bits -> rev_mirror bits ; !emit_ins bits) ;
-                  set_read = fun f -> emit_out := f } }
+        { ins = { write = (fun bits -> mirror bits ; !emit_out.write bits) ;
+                  busy_for = (fun () -> !emit_out.busy_for ()) ;
+                  set_read = fun write busy_for ->
+                      emit_ins := { (sink write) with busy_for } } ;
+          out = { write = (fun bits -> rev_mirror bits ; !emit_ins.write bits) ;
+                  busy_for = (fun () -> !emit_ins.busy_for ()) ;
+                  set_read = fun write busy_for ->
+                      emit_out := { (sink write) with busy_for } } }
 end
 
 (* A Tap is a passive 4 ports device: what crosses the link between ports 0 and
@@ -473,13 +477,15 @@ struct
                     { write = (fun bits ->
                          (snd t.forward.(n + 2)) bits ; (* mirror *)
                          (snd t.forward.(n lxor 1)) bits) ; (* forward *)
-                      set_read = fun f -> t.forward.(n) <- true, f }
+                      busy_for = never_busy ;
+                      set_read = fun f _ -> t.forward.(n) <- true, f }
                 else
                     { write = (fun _ ->
                          Log.(log t.widget.logger Debug (lazy (Printf.sprintf
                              "Dropping what was emitted into mirror port#%d, \
                               which is an output" n)))) ;
-                      set_read = fun f -> t.forward.(n) <- true, f }) ;
+                      busy_for = never_busy ;
+                      set_read = fun f _ -> t.forward.(n) <- true, f }) ;
             owner = (fun _ -> t.widget) ;
             disconnect = (fun n ->
                 if fst t.forward.(n) then (

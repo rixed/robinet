@@ -608,7 +608,7 @@ let recorder ~parent ?location ?(flush=false) ?caplen ?(dlt=default_dlt) ?fname
     widget.ports <- Widget.{
         count = (fun () -> 1) ;
         is_connected = (fun _ -> false) ;
-        dev = (function _ -> { write = recorder.write ; set_read = ignore }) ;
+        dev = (function _ -> sink recorder.write) ;
         owner = (fun _ -> widget) ;
         disconnect = ignore ;
         get_capabilities = (fun ?peer:_ _ -> Capabilities.Any) ;
@@ -1145,14 +1145,14 @@ let replayer ~parent ?location ?fname ?(loop=false) name =
             | exception _ -> Widget.bad_value "No such port #%d" n
             | reader -> !reader <> None) ;
         dev = (fun n ->
-            { write = ignore ;
+            { write = ignore ; busy_for = never_busy ;
               (* Into port [n] and no other: a freed slot when that is what was
                  handed out, and a new one at the end otherwise. The port a
                  cable was given is the one it asks to be disconnected from, so
                  a reader that went in anywhere else would leave that cable
                  unable to let go -- and the port it really took reading as
                  free to the next cable. *)
-              set_read = (fun f ->
+              set_read = (fun f _ ->
                 match List.nth replayer.readers n with
                 | exception _ ->
                     replayer.readers <- replayer.readers @ [ ref (Some f) ]
@@ -1348,7 +1348,7 @@ let portal_of_widget (w : Widget.t) =
     | Some (Portal t) -> Some t
     | _ -> None
 
-let set_read (portal : portal) f =
+let set_read (portal : portal) f _busy_for =
     Log.(log portal.widget.logger Debug (lazy (Printf.sprintf
         "Setting emitter for portal %s" portal.ifname))) ;
     portal.emit <- Some f
@@ -1376,6 +1376,7 @@ let dev (portal : portal) =
                 Metric.tx_dropped in
         let now = Simulation.Widget.now portal.widget in
         Metric.Counter.add portal.volume ~now ~params len) ;
+      busy_for = never_busy ;
       set_read = set_read portal }
 
 let disconnect portal =

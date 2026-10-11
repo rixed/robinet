@@ -115,12 +115,14 @@ let tcp_trx_of_socket ctx sock =
         reader = None } in
     let trx =
         { ins = { write = tx t ;
-                  set_read = (fun f ->
+                  busy_for = never_busy ;
+                  set_read = (fun f _ ->
                     (* trick: only start reading the socket when the receiver is set, so that buffering is handled by the kernel *)
                     Log.(log (logger ctx) Debug (lazy (Printf.sprintf "Set recv function"))) ;
                     t.recv <- f ;
                     if t.reader = None then t.reader <- Some (Thread.create reader t)) } ;
           out = { write = should_not_happen ;
+                  busy_for = should_not_happen ;
                   set_read = should_not_happen } } in
     { Tcp.TRX.trx       = trx ;
       Tcp.TRX.close     = close t ;
@@ -240,7 +242,7 @@ let host ?location sim =
       gethostbyname = gethostbyname ctx ;
       tcp_server_start = tcp_server ctx ; tcp_server_stop ;
       udp_server_start ; udp_server_stop ; signal_err ;
-      dev = { write = ignore ; set_read = ignore } ;
+      dev = sink ignore ;
       (* Nothing here waits for an address: this host has the one the machine
          running the simulation has, and had it before the simulation began. *)
       arp_set ; on_ip = [] }

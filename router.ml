@@ -656,8 +656,8 @@ let configure_iface t n =
              * another route (usually safer): *)
             let trx =
                 if t.admin_reroute then
-                    { ins = { write = route None t ; set_read = ignore } ;
-                      out = { write = ignore_bits ; set_read = ignore } }
+                    { ins = sink (route None t) ;
+                      out = sink ignore_bits }
                 else
                     iface.trx in
             (* On the other way around it's a bit more convoluted: the host
@@ -977,7 +977,7 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
     Array.iteri (fun n iface ->
         configure_iface t n ;
         (* When packets are received from the outside, go to routing: *)
-        iface.trx.ins.set_read (route (Some n) t)
+        iface.trx.ins --> sink (route (Some n) t)
     ) t.ifaces ;
     t
 
@@ -1050,7 +1050,7 @@ let make_from_addrs
     (* Now we will count incoming packets from each iface (ARP requests, actually) : *)
     let counts = Array.create 3 0 in
     for i = 0 to Array.length counts - 1 do
-        router.ifaces.(i).trx =-> (fun _ -> counts.(i) <- succ counts.(i))
+        router.ifaces.(i).trx =-> sink (fun _ -> counts.(i) <- succ counts.(i))
     done ;
     let reset_count () = Array.iteri (fun i _ -> counts.(i) <- 0) counts in
 
@@ -1236,7 +1236,7 @@ let make_from_addrs
     Array.iter (fun iface ->
         (ports iface).set_capabilities 0 Capabilities.Any) r.ifaces ;
     let emitted = ref 0 in
-    r.ifaces.(2).trx =-> (fun _ -> incr emitted) ;
+    r.ifaces.(2).trx =-> sink (fun _ -> incr emitted) ;
     let num_sent = 100 in
     let frame n =
         Ip.Pdu.make Ip.Proto.udp (Ip.Addr.of_string "10.0.0.1")
@@ -1299,7 +1299,7 @@ let make_from_addrs
     assert_equal ~msg:"200ms of each negotiated speed" ~printer:string_of_int
                  (2_500_000 + 2_500_000 + 250_000) (actual_buffer_capacity r) ;
     let emitted = ref 0 in
-    r.ifaces.(2).trx =-> (fun _ -> incr emitted) ;
+    r.ifaces.(2).trx =-> sink (fun _ -> incr emitted) ;
     let send_all () =
         let num_sent = 100 in
         let frame n =
@@ -1392,8 +1392,7 @@ let make_from_addrs
         r in
     let r1 = router "r1" "10.0.0.1" and r2 = router "r2" "10.0.0.2" in
     let a = r1.widget.ports.dev 0 and b = r2.widget.ports.dev 0 in
-    a.Tools.set_read b.Tools.write ;
-    b.Tools.set_read a.Tools.write ;
+    Tools.(a <--> b) ;
     let eth2 = r2.ifaces.(0).eth in
     let knows_r1 () =
         match Tools.BitHash.find_option eth2.Eth.State.arp_cache
@@ -1422,7 +1421,7 @@ let make_from_addrs
   let r = make ~parent:sim.root 4 [] "r" in \
   r.widget.ports.count () = 4 && \
   not (r.widget.ports.is_connected 2) && \
-  ((r.widget.ports.dev 2).Tools.set_read ignore ; \
+  (Tools.(r.widget.ports.dev 2 --> sink ignore) ; \
    r.widget.ports.is_connected 2 && \
    (ports r.ifaces.(2)).is_connected 0) && \
   (* A cable to port n reaches interface n's adapter, and that is what a

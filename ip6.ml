@@ -203,7 +203,9 @@ module TRX = struct
                src : Ip.Addr.t ; dst : Ip.Addr.t ;
                proto : Ip.Proto.t ;
                mutable emit : bitstring -> unit ;
-               mutable recv : bitstring -> unit }
+               mutable emit_busy_for : unit -> Clock.Interval.t ;
+               mutable recv : bitstring -> unit ;
+               mutable recv_busy_for : unit -> Clock.Interval.t }
 
     let tx t bits =
         let pdu = Pdu.make t.proto t.src t.dst bits in
@@ -222,9 +224,13 @@ module TRX = struct
      *       this layer. *)
     let make power src dst proto logger =
         let t = { logger ; power ; src ; dst ; proto ;
-                  emit = ignore ; recv = ignore } in
+                  emit = ignore ; emit_busy_for = never_busy ; recv = ignore ; recv_busy_for = never_busy } in
         { ins = { write = tx t ;
-                  set_read = fun f -> t.recv <- f } ;
+                  busy_for = (fun () -> t.emit_busy_for ()) ;
+                  set_read = fun f busy_for ->
+                      t.recv <- f ; t.recv_busy_for <- busy_for } ;
           out = { write = rx t ;
-                  set_read = fun f -> t.emit <- f } }
+                  busy_for = (fun () -> t.recv_busy_for ()) ;
+                  set_read = fun f busy_for ->
+                      t.emit <- f ; t.emit_busy_for <- busy_for } }
 end

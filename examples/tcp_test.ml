@@ -32,7 +32,7 @@ let perform_get (sim : Simulation.t) my_ip my_netmask mac peer_ip ?nameserver ?g
     let gateways =
         Option.map (fun gw -> [ Eth.State.gw_selector (), Some gw ]) gw in
     let host = Host.make ~parent:sim.root ?nameserver ?gateways ~mac ~netmask:my_netmask ~static_ip:my_ip "tester" in
-    host.trx.dev.set_read (Pcap.inject iface.handler) ;
+    host.trx.dev --> sink (Pcap.inject iface.handler) ;
     ignore (Pcap.sniffer iface host.trx.dev.write) ;
     (* Every box is born dark: switch the network on before asking anything
        of it, which is what [Simulation.run] does at the start and which is
@@ -41,7 +41,7 @@ let perform_get (sim : Simulation.t) my_ip my_netmask mac peer_ip ?nameserver ?g
     host.trx.tcp_connect (Host.IPv4 peer_ip) (Tcp.Port.o 80) (function
     | None -> ()
     | Some tcp ->
-        tcp.Tcp.TRX.trx.ins.set_read (fun bits ->
+        tcp.Tcp.TRX.trx.ins --> sink (fun bits ->
             if bitstring_is_empty bits then tcp.Tcp.TRX.close ()) ;
         (* Send the get *)
         tx tcp.Tcp.TRX.trx (bitstring_of_string get) ;

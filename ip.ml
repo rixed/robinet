@@ -1053,7 +1053,9 @@ module TRX = struct
         (* Perform reassembly before handing over received frames: *)
         reassemble : bool ;
         mutable emit : bitstring -> unit ;
+        mutable emit_busy_for : unit -> Clock.Interval.t ;
         mutable recv : bitstring -> unit ;
+        mutable recv_busy_for : unit -> Clock.Interval.t ;
         (* TODO: timeout reassembly lines *)
         reassembled : (reassemble_key, Pdu.t list (* sorted by frag_offset *)) Hashtbl.t
     }
@@ -1154,13 +1156,17 @@ module TRX = struct
     let make power ?(mtu=1500) ?(dont_frag=false) ?(reassemble=true) src dst proto logger =
         ensure (mtu >= hdr_len + 8) "Ip: MTU must leave room for at least 8 bytes of payload" ;
         let t = { logger ; power ; src ; dst ; proto ; mtu ; dont_frag ; reassemble ;
-                  emit = ignore_bits ~logger ;
-                  recv = ignore_bits ~logger ;
+                  emit = ignore_bits ~logger ; emit_busy_for = never_busy ;
+                  recv = ignore_bits ~logger ; recv_busy_for = never_busy ;
                   reassembled = Hashtbl.create 10 } in
         { ins = { write = tx t ;
-                  set_read = fun f -> t.recv <- f } ;
+                  busy_for = (fun () -> t.emit_busy_for ()) ;
+                  set_read = fun f busy_for ->
+                      t.recv <- f ; t.recv_busy_for <- busy_for } ;
           out = { write = rx t ;
-                  set_read = fun f -> t.emit <- f } }
+                  busy_for = (fun () -> t.recv_busy_for ()) ;
+                  set_read = fun f busy_for ->
+                      t.emit <- f ; t.emit_busy_for <- busy_for } }
 
     (*$< TRX *)
     (* [frags_of s] is what a TRX from [a] to [b] emits for [s]; [frag off len mf]
@@ -1174,7 +1180,7 @@ module TRX = struct
       let frags_of ?(mtu=36) s =
         let trx = make sim.root.power ~mtu a b Proto.udp sim.root.logger in
         let out = ref [] in
-        trx.out.set_read (fun bits -> out := bits :: !out) ;
+        trx.out --> sink (fun bits -> out := bits :: !out) ;
         trx.ins.write (Bitstring.bitstring_of_string s) ;
         Simulation.run sim false ;
         List.rev !out
@@ -1187,7 +1193,7 @@ module TRX = struct
       let receive ?reassemble pkts =
         let trx = make sim.root.power ?reassemble b a Proto.udp sim.root.logger in
         let got = ref [] in
-        trx.ins.set_read (fun bits -> got := Bitstring.string_of_bitstring bits :: !got) ;
+        trx.ins --> sink (fun bits -> got := Bitstring.string_of_bitstring bits :: !got) ;
         List.iter trx.out.write pkts ;
         Simulation.run sim false ;
         List.rev !got

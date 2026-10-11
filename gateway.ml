@@ -154,7 +154,8 @@ struct
     (* The LAN socket, as something a cable plugs into. *)
     let lan_dev t =
         { write = from_lan t ;
-          set_read = (fun f -> t.to_lan <- f ; t.lan_connected <- true) }
+          busy_for = never_busy ;
+          set_read = (fun f _ -> t.to_lan <- f ; t.lan_connected <- true) }
 
     let disconnect t =
         if t.lan_connected then (
@@ -221,7 +222,7 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     router.ifaces.(1).trx <- pipe nat_trx router.ifaces.(1).trx ;
     (* FIXME: if we had directly a "mutable read" function rather than a
      * set_reader, the pipe operator (and others) could do the right thing here: *)
-    router.ifaces.(1).trx.ins.set_read (Router.route (Some 1) router) ;
+    router.ifaces.(1).trx.ins --> sink (Router.route (Some 1) router) ;
     (* This iface will become the outside side of out global TRX: *)
     let out_trx = router.ifaces.(1).trx in
     (* Create the "host" that answers for the gateway. It wears the gateway's
@@ -242,10 +243,10 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
         Demux.make ~mac:gw_mac ~ip:gw_ip ~lan:local_cidr ~bcast:broadcast
                       ~logger:widget.logger in
     demux.Demux.to_srv <- h.trx.dev.write ;
-    h.trx.dev.set_read (Demux.from_srv demux) ;
+    h.trx.dev --> sink (Demux.from_srv demux) ;
     (* Connect the first iface of our router *)
     demux.Demux.to_router <- router.ifaces.(0).trx.out.write ;
-    router.ifaces.(0).trx.out.set_read (Demux.from_router demux) ;
+    router.ifaces.(0).trx.out --> sink (Demux.from_router demux) ;
     (* Its LAN side is the entrance of the whole TRX: *)
     let in_trx = Demux.lan_dev demux in
     let trx =
@@ -348,8 +349,8 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
              (Ip.Cidr.of_string "192.168.0.0/24") in
     (* No address of its own, so it asks for one. *)
     let client : Host.t = Host.make ~parent:sim.root "client" in
-    client.Host.trx.Host.dev.set_read gw.trx.ins.write ;
-    ignore (client.Host.trx.Host.dev.write <-= gw.trx) ;
+    client.Host.trx.Host.dev --> gw.trx.ins ;
+    ignore (client.Host.trx.Host.dev <-= gw.trx) ;
     let address () =
         match Eth.State.find_ip4 client.Host.eth_state with
         | exception Not_found -> "none"
@@ -388,12 +389,12 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let far : Host.t =
         Host.make ~parent:sim.root ~netmask:Ip.Addr.zero
                   ~static_ip:(Ip.Addr.of_string "80.82.17.1") "far" in
-    far.Host.trx.Host.dev.set_read gw.trx.out.write ;
-    gw.trx.out.set_read far.Host.trx.Host.dev.write ;
+    far.Host.trx.Host.dev --> gw.trx.out ;
+    gw.trx.out --> far.Host.trx.Host.dev ;
     (* No address of its own, so it asks the gateway for one. *)
     let client : Host.t = Host.make ~parent:sim.root "client" in
-    client.Host.trx.Host.dev.set_read gw.trx.ins.write ;
-    ignore (client.Host.trx.Host.dev.write <-= gw.trx) ;
+    client.Host.trx.Host.dev --> gw.trx.ins ;
+    ignore (client.Host.trx.Host.dev <-= gw.trx) ;
     Simulation.run sim false ;
     (* The address it was handed is the one right after the gateway's own: no
        second address is taken for a server any more. *)
@@ -436,11 +437,11 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
             | "popo" -> Some (Ip.Addr.of_string "1.2.3.4")
             | _ -> None))
         far.Host.trx ;
-    far.Host.trx.Host.dev.set_read gw.trx.out.write ;
-    gw.trx.out.set_read far.Host.trx.Host.dev.write ;
+    far.Host.trx.Host.dev --> gw.trx.out ;
+    gw.trx.out --> far.Host.trx.Host.dev ;
     let client : Host.t = Host.make ~parent:sim.root "client" in
-    client.Host.trx.Host.dev.set_read gw.trx.ins.write ;
-    ignore (client.Host.trx.Host.dev.write <-= gw.trx) ;
+    client.Host.trx.Host.dev --> gw.trx.ins ;
+    ignore (client.Host.trx.Host.dev <-= gw.trx) ;
     Simulation.run sim false ;
     (* Asking the gateway, which is the nameserver its own lease named. *)
     let answer = ref "nothing came back" in
@@ -510,15 +511,15 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let gateways = Eth.[ State.gw_selector (), Some (Gateway.of_string "192.168.0.1") ] in
     let netmask = Ip.Addr.of_string "255.255.255.0" in
     let desktop : Host.t = Host.make ~parent:sim.root ~netmask ~gateways "desktop" in
-    desktop.trx.dev.set_read gw_trx.trx.ins.write ;
-    ignore (desktop.trx.dev.write <-= gw_trx.trx) ;
+    desktop.trx.dev --> gw_trx.trx.ins ;
+    ignore (desktop.trx.dev <-= gw_trx.trx) ;
     let server_ip = Ip.Addr.of_string "42.43.44.45" in
     let server_eth = Eth.(TRX.make State.(make ~parent:sim.root ~power:sim.root.power ~my_addresses:[ make_my_ip_address server_ip ] ())) in
     let src = ref None in
     let server_recv bits = (* check source IP is the public one (NATed) *)
         let ip = Ip.Pdu.unpack bits |> Result.get_ok in
         src := Some ip.Ip.Pdu.src in
-    ignore (server_recv <-= server_eth) ;
+    ignore (sink server_recv <-= server_eth) ;
     gw_trx.trx <==> server_eth ;
     Simulation.delay sim.root.power (Clock.Interval.sec 10.) (fun () ->
         Log.(log desktop.trx.widget.logger Debug (lazy "Sending UDP packet to server")) ;

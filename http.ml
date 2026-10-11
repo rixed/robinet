@@ -287,14 +287,20 @@ struct
         | HttpMsg of Pdu.t * bool (* tells whether the underlying transport is still open *)
     type t = { parzer  : (Pdu.t, char) parzer ; (* The parser we use for reconstructing the PDU *)
                mutable emit : bitstring -> unit ;
+               mutable emit_busy_for : unit -> Clock.Interval.t ;
                mutable recv : result -> unit }
 
-    let set_emit t emit = t.emit <- emit
+    (* Emit into [dev]: *)
+    let set_emit t dev =
+        t.emit <- dev.write ;
+        t.emit_busy_for <- dev.busy_for
+
+    let busy_for t () = t.emit_busy_for ()
     let set_recv t recv = t.recv <- recv
 
     let make () =
         { parzer = Pdu.parzer () ;
-          emit = ignore ; recv = ignore }
+          emit = ignore ; emit_busy_for = never_busy ; recv = ignore }
 
     let tx t pdu =
         let pdu = Pdu.pack pdu in
@@ -331,6 +337,7 @@ struct
     type t = { cmd : cmd ;
                headers : header list ;
                mutable recv : bitstring -> unit ;
+               mutable recv_busy_for : unit -> Clock.Interval.t ;
                top : TRXtop.t }
 
     let tx t bits =
@@ -345,7 +352,7 @@ struct
     let make ?(cmd=(Status 200)) headers =
         let top = TRXtop.make () in
         let t = { cmd = cmd ; headers = headers ;
-                  recv = ignore ; top = top } in
+                  recv = ignore ; recv_busy_for = never_busy ; top = top } in
         TRXtop.set_recv top (function
             | TRXtop.HttpMsg (msg, opened) ->
                 t.recv (bitstring_of_string msg.Pdu.body) ;
@@ -353,9 +360,14 @@ struct
             | TRXtop.HttpError x ->
                     if debug then Printf.printf "Http: Error: %s\n" x) ;
         { ins = { write = tx t ;
-                  set_read = fun f -> t.recv <- f } ;
+                  busy_for = TRXtop.busy_for t.top ;
+                  set_read = fun f busy_for ->
+                      t.recv <- f ; t.recv_busy_for <- busy_for } ;
           out = { write = rx t ;
-                  set_read = fun f -> TRXtop.set_emit t.top f } }
+                  busy_for = (fun () -> t.recv_busy_for ()) ;
+                  set_read = fun write busy_for ->
+                      TRXtop.set_emit t.top { write ; busy_for ;
+                                              set_read = fun _ _ -> () } } }
 
 end
 

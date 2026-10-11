@@ -304,7 +304,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
     (* Offered IPs (and options), indexed by client-ids: *)
     Log.(log st.widget.logger Debug (lazy "Listening for requests...")) ;
     host.Host.udp_server_start port (fun udp ->
-        udp.Udp.TRX.trx.ins.set_read (fun bits ->
+        udp.Udp.TRX.trx.ins --> sink (fun bits ->
             Log.(log st.widget.logger Debug (lazy "Received an UDP packet...")) ;
             let src_port, dst_port = udp.Udp.TRX.get_ports () in
             match Pdu.unpack bits with
@@ -400,8 +400,8 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
     let st = State.make ~parent:sim.root (Ip.Range.of_cidr my_net) in
     serve st srv.trx ;
     let clt : Host.t = Host.make ~parent:sim.root ~netmask "client" in
-    srv.trx.dev.set_read clt.trx.dev.write ;
-    clt.trx.dev.set_read srv.trx.dev.write ;
+    srv.trx.dev --> clt.trx.dev ;
+    clt.trx.dev --> srv.trx.dev ;
     Simulation.run sim false ;
     assert_bool "Client got an IP" (Host.ip_is_set clt) ;
     assert_bool "IP is within net" (Eth.State.find_ip4 clt.eth_state |> Ip.Cidr.mem my_net)
@@ -423,8 +423,8 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
     let clt : Host.t =
         Host.make ~parent:sim.root ~netmask
                   ~static_ip:(Ip.Addr.of_string "10.99.99.99") "client" in
-    srv.trx.dev.set_read clt.trx.dev.write ;
-    clt.trx.dev.set_read srv.trx.dev.write ;
+    srv.trx.dev --> clt.trx.dev ;
+    clt.trx.dev --> srv.trx.dev ;
     (* Every box is born dark, and what switches it on is its power-on in the
        startup list: a network that is not going through [run] yet has to run
        that list for itself. The server has to be up before the client asks. *)
@@ -463,8 +463,8 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
     serve st srv.trx ;
     (* No configuration of its own: all it runs with comes from the lease. *)
     let clt : Host.t = Host.make ~parent:sim.root "client" in
-    srv.trx.dev.set_read clt.trx.dev.write ;
-    clt.trx.dev.set_read srv.trx.dev.write ;
+    srv.trx.dev --> clt.trx.dev ;
+    clt.trx.dev --> srv.trx.dev ;
     Simulation.run sim false ;
     assert_bool "the client is leased an address" (Host.ip_is_set clt) ;
     assert_equal ~printer:identity "255.255.255.0"
