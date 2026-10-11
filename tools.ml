@@ -54,6 +54,37 @@ let jitter r v =
 
 let bytelength bs = (bitstring_length bs + 7) lsr 3
 
+(* [Bitstring.concat], but pieces of whole bytes, as those of packets are, are
+ * copied once, straight into a result of the right size. Either way the result
+ * is a fresh buffer of its own, at offset 0. *)
+(* TODO: add to bitstring itself *)
+let concat bss =
+    let rec aligned_len n = function
+        | [] -> n
+        | (_, off, len) :: rest ->
+            if off land 7 = 0 && len land 7 = 0 then aligned_len (n + len) rest
+            else -1 in
+    let len = aligned_len 0 bss in
+    if len < 0 then Bitstring.concat bss else (
+        let b = Stdlib.Bytes.create (len lsr 3) in
+        ignore (List.fold_left (fun o (d, off, len) ->
+            let n = len lsr 3 in
+            Stdlib.Bytes.blit d (off lsr 3) b o n ;
+            o + n) 0 bss) ;
+        b, 0, len)
+(*$Q concat
+  Q.(list_small (triple string_small nat_small nat_small)) (fun l -> \
+    let bss = List.map (fun (s, skip, cut) -> \
+      let bits = bitstring_of_string s in \
+      let len = bitstring_length bits in \
+      let off = min len skip in \
+      Bitstring.subbitstring bits off (len - off - min (len - off) cut)) l in \
+    Bitstring.equals (concat bss) (Bitstring.concat bss))
+  Q.(list_small string_small) (fun l -> \
+    let bss = List.map bitstring_of_string l in \
+    Bitstring.equals (concat bss) (Bitstring.concat bss))
+*)
+
 let takebytes n bs = takebits (n lsl 3) bs
 
 let extendbytes n bs =
@@ -622,24 +653,26 @@ let sum_bits bits =
         | {| _ |} -> s in
     aux 0 (concat [ bits ; zeroes_bitstring 7 ])
 
+(* The sum of the 16 bits words of [bits], of whole bytes, read where they
+ * lie: *)
+let words_sum (b, off, len) =
+    let o = off lsr 3 and n = len lsr 3 in
+    let rec words s i =
+        if i + 1 < n then
+            words (s + Stdlib.Bytes.get_uint16_be b (o + i)) (i + 2)
+        else if i < n then
+            s + (Stdlib.Bytes.get_uint8 b (o + i) lsl 8)
+        else s in
+    words 0 0
+
+let rec fold_carries s =
+    if s < 0x10000 then s else fold_carries ((s land 0xffff) + (s lsr 16))
+
+let is_whole_bytes (_, off, len) = off land 7 = 0 && len land 7 = 0
+
 let do_sum bits =
-    let s =
-        match bits with
-        | b, off, len when off land 7 = 0 && len land 7 = 0 ->
-            (* Whole bytes, as a packet always is: read where they lie. *)
-            let o = off lsr 3 and n = len lsr 3 in
-            let rec words s i =
-                if i + 1 < n then
-                    words (s + Stdlib.Bytes.get_uint16_be b (o + i)) (i + 2)
-                else if i < n then
-                    s + (Stdlib.Bytes.get_uint8 b (o + i) lsl 8)
-                else s in
-            words 0 0
-        | _ ->
-            sum_bits bits in
-    let rec wrap s =
-        if s < 0x10000 then s else wrap ((s land 0xffff) + (s lsr 16)) in
-    (lnot (wrap s)) land 0xffff
+    let s = if is_whole_bytes bits then words_sum bits else sum_bits bits in
+    (lnot (fold_carries s)) land 0xffff
 (*$= do_sum & ~printer:(fun d -> Printf.sprintf "%x" d)
   (do_sum (bitstring_of_string "\x45\x00\x00\xaa\x03\xa6\x00\x00\x40\x06\x00\x00\xc0\xa8\x01\x45\xd1\x55\xe3\x67")) 0xfffd
 *)
@@ -662,6 +695,31 @@ let sum bits =
     if !do_compute_checksum then
         do_sum bits
     else Random.int 65536
+
+(* [sum (concat bss)], without the concatenation. A piece that starts at an odd
+ * byte of the whole adds its own sum with the two bytes swapped (RFC 1071). *)
+let sum_list bss =
+    if not !do_compute_checksum then Random.int 65536 else
+    if not (List.for_all is_whole_bytes bss) then sum (concat bss) else
+    let s, _ =
+        List.fold_left (fun (s, odd) ((_, _, len) as bits) ->
+            let p = fold_carries (words_sum bits) in
+            let p = if odd then ((p land 0xff) lsl 8) lor (p lsr 8) else p in
+            s + p, odd <> (len land 8 <> 0)
+        ) (0, false) bss in
+    (lnot (fold_carries s)) land 0xffff
+(*$Q sum_list
+  Q.(list_small (triple string_small nat_small nat_small)) (fun l -> \
+    let bss = List.map (fun (s, skip, cut) -> \
+      let bits = bitstring_of_string s in \
+      let len = bitstring_length bits in \
+      let off = min len skip in \
+      Bitstring.subbitstring bits off (len - off - min (len - off) cut)) l in \
+    sum_list bss = sum (concat bss))
+  Q.(list_small string_small) (fun l -> \
+    let bss = List.map bitstring_of_string l in \
+    sum_list bss = sum (Bitstring.concat bss))
+*)
 
 (** A device is something to which you can send packet and register a
  * receiving function.

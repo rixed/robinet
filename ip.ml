@@ -719,21 +719,30 @@ module Pdu = struct
             0 : 8 ; (t.proto :> int) : 8 ; Payload.length (t.payload) : 16 |} in
         r
 
-    let patch_checksum ?(fixit=identity) offset pseudo_header (pld : Payload.t) =
+    (* The checksum to write [offset] bits into [pld] for it to cover
+     * [pseudo_header] too, unless it has one already: *)
+    let missing_checksum ?(fixit=identity) offset pseudo_header (pld : Payload.t) =
         match%bitstring (pld :> bitstring) with
         | {| head : offset : bitstring ;
              chk  : 16 ;
              tail : -1 : bitstring |} (* FIXME: for TCP, force urgent pointer at 0 if the urgent flag is unset *) ->
-            if chk = 0 then (
-                let chk = sum (concat [ pseudo_header () ; head ; zeroes_bitstring 16 ; tail ]) |>
-                          fixit in
-                let%bitstring pld = {| head : offset : bitstring ; chk : 16 ; tail : -1 : bitstring |} in
-                Payload.o pld
-            ) else pld
+            if chk = 0 then
+                Some (sum_list [ pseudo_header () ; head ; zeroes_bitstring 16 ; tail ] |>
+                      fixit)
+            else None
         | {| _ |} ->
             Printf.eprintf "Ip: Cannot patch checksum at offset %d, payload: %s\n"
                 offset (hexstring_of_bitstring_abbrev ~bits:(offset + 16) (pld :> bitstring)) ;
-            pld
+            None
+
+    (* [offset] is whole bytes, as the checksum of every protocol lies: *)
+    let patch_checksum ?fixit offset pseudo_header (pld : Payload.t) =
+        match missing_checksum ?fixit offset pseudo_header pld with
+        | None -> pld
+        | Some chk ->
+            let (b, _, _) as bits = concat [ (pld :> bitstring) ] in
+            Bytes.set_uint16_be b (offset lsr 3) chk ;
+            Payload.o bits
 
     let pack_header t =
         let hdr_len = no_opt_hdr_len + bytelength t.options in
@@ -755,18 +764,37 @@ module Pdu = struct
 
     let is_fragment t = t.more_frags || t.frag_offset > 0
 
+    (* Where the TCP/UDP checksum lies in the payload, in bits, since it uses
+     * some fields of the IP header. It covers the whole L4 PDU, so a fragment
+     * has none of its own: *)
+    let checksum_offset t =
+        if is_fragment t then None
+        else if t.proto = Proto.tcp then Some 128
+        else if t.proto = Proto.udp then Some 48
+        else None
+
     let pack_payload t =
-        (* Patch TCP/UDP checksums since they use some fields of the IP header.
-         * The checksum covers the whole L4 PDU, so a fragment is left alone: *)
-        if is_fragment t then t.payload
-        else if t.proto = Proto.tcp then patch_checksum 128 (pseudo_header t) t.payload
-        else if t.proto = Proto.udp then patch_checksum 48 (pseudo_header t) t.payload
-        else t.payload
+        match checksum_offset t with
+        | Some offset -> patch_checksum offset (pseudo_header t) t.payload
+        | None -> t.payload
 
     let pack t =
-        let header = pack_header t
-        and payload = pack_payload t in
-        concat [ header ; (payload :> bitstring) ]
+        let header = pack_header t in
+        let missing =
+            Option.bind (checksum_offset t) (fun offset ->
+                Option.map (fun chk -> offset, chk)
+                    (missing_checksum offset (pseudo_header t) t.payload)) in
+        match missing with
+        | Some (offset, chk) when is_whole_bytes header ->
+            (* Written straight into the packet rather than into a copy of the
+             * payload: *)
+            let (b, _, _) as bits = concat [ header ; (t.payload :> bitstring) ] in
+            Bytes.set_uint16_be b (bytelength header + offset lsr 3) chk ;
+            bits
+        | Some _ ->
+            concat [ header ; (pack_payload t :> bitstring) ]
+        | None ->
+            concat [ header ; (t.payload :> bitstring) ]
 
     (** [bits], a packet [unpack] accepted with a TTL above 0, with that TTL
      * one less and its header checksum adjusted to match (RFC 1624), cut to
