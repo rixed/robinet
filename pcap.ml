@@ -456,9 +456,8 @@ let default_dlt = Dlt.en10mb
 let save sim ?flush ?caplen ?(dlt=default_dlt) fname =
     let write_pdu, close = Pdu.save ?flush ?caplen ~dlt fname in
     let write_bits bits =
-        (* What goes into the file is dated as the world outside would have
-           dated it, since that is what everything reading it will assume. *)
-        let ts = Simulation.to_wall_clock sim (Simulation.now sim) in
+        (* Dated by the simulation's clock, as everything it records is. *)
+        let ts = Simulation.date_of sim (Simulation.now sim) in
         let pdu = Pdu.make fname ?caplen ~dlt ts bits in
         write_pdu pdu in
     write_bits, close

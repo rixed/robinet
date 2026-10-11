@@ -517,7 +517,7 @@ let json_of_simulation (s : Simulation.t) =
                 this by hand rather than drawing it. *)
              "now_str",
                 `String (Clock.Wall.to_string
-                            (Simulation.to_wall_clock s (Simulation.now s))) ;
+                            (Simulation.date_of s (Simulation.now s))) ;
              "realtime", `Bool s.realtime ;
              (* Null is "as fast as it can", and is what a realtime simulation
               * reports too: its speed is not ours to choose. *)

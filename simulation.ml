@@ -779,6 +779,15 @@ let of_wall_clock (t : t) (ts : Wall.t) =
 let to_wall_clock (t : t) (ts : Time.t) =
     Wall.add t.epoch (Interval.add (Time.to_interval ts) (paused_so_far t))
 
+(** The date [t] gives its instant [ts]: its epoch plus [ts], pauses or not.
+ *
+ * What everything the simulation itself dates -- the packets it records, the
+ * instants the administration interface displays -- must be written with, so
+ * that they all agree with one another. Not when the wall clock will reach
+ * [ts]: that is [to_wall_clock]. *)
+let date_of (t : t) (ts : Time.t) =
+    Wall.add t.epoch (Time.to_interval ts)
+
 (* The wall clock, on this simulation's timeline: shifted by whatever it is
  * from the world outside, and less however long it has stood paused. *)
 let unpaused_wall_clock (t : t) =
