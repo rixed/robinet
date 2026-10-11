@@ -768,6 +768,31 @@ module Pdu = struct
         and payload = pack_payload t in
         concat [ header ; (payload :> bitstring) ]
 
+    (** [bits], a packet [unpack] accepted with a TTL above 0, with that TTL
+     * one less and its header checksum adjusted to match (RFC 1624), cut to
+     * the total length it announces. Nothing else changes, the checksum of
+     * the payload included. *)
+    let decr_ttl bits =
+        let tot_len = match%bitstring bits with
+            | {| _ : 16 ; tot_len : 16 ; _ |} -> tot_len
+            | {| _ |} -> invalid_arg "Ip.Pdu.decr_ttl" in
+        let len = min (bitstring_length bits) (tot_len * 8) in
+        let b = Bytes.unsafe_of_string (string_of_bitstring (takebits len bits)) in
+        let old_w = Bytes.get_uint16_be b 8 in
+        let new_w = old_w - 0x100 in
+        Bytes.set_uint16_be b 8 new_w ;
+        let s = (lnot (Bytes.get_uint16_be b 10) land 0xffff) +
+                (lnot old_w land 0xffff) + new_w in
+        let rec wrap s =
+            if s < 0x10000 then s else wrap ((s land 0xffff) + (s lsr 16)) in
+        Bytes.set_uint16_be b 10 (lnot (wrap s) land 0xffff) ;
+        b, 0, len
+    (*$Q decr_ttl
+      (Q.make (fun _ -> random ())) (fun t -> \
+        t.ttl = 0 || \
+        Bitstring.equals (decr_ttl (pack t)) (pack { t with ttl = t.ttl - 1 }))
+     *)
+
     (* The options that go into every fragment (copied flag set), padded to
      * a multiple of 4 bytes: *)
     let copied_options opts =

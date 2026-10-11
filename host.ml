@@ -1257,8 +1257,23 @@ let udp_flow (udp : Udp.TRX.udp_trx) =
       busy_for = udp.trx.ins.busy_for ;
       finished = (fun () -> false) ; close = ignore }
 
+(* Random bytes, drawn once from a state of their own so as not to move the
+   simulation's, that messages are cut from: *)
+let random_pool =
+    let st = Random.State.make [| 0x5eed |] in
+    Bytes.init 65536 (fun _ -> Char.chr (Random.State.int st 256))
+
+(* [n] bytes of [random_pool] from a random offset, wrapping around: *)
 let random_payload n =
-    bitstring_of_string (String.init n (fun _ -> Char.chr (Random.int 256)))
+    let pool_len = Bytes.length random_pool in
+    let b = Bytes.create n in
+    let rec fill o i =
+        if i < n then (
+            let k = min (n - i) (pool_len - o) in
+            Bytes.blit random_pool o b i k ;
+            fill 0 (i + k)) in
+    fill (Random.int pool_len) 0 ;
+    b, 0, n * 8
 
 (* Have [flow] behave as told, for as long as it lasts and [alive] says, and
    return what is to receive from it. [counted] is called after every message, sent or

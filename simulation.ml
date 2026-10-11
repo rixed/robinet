@@ -163,11 +163,12 @@ let me () = Thread.(id (self ()))
 
 let with_lock (t : t) f x =
     let me = me () in
-    if t.lock_owner = Some me then
+    match t.lock_owner with
+    | Some owner when owner = me ->
         (* Already ours, and by construction consistent: we are the one who made
          * it so. Taking the mutex again would deadlock. *)
         f x
-    else
+    | _ ->
         BatMutex.synchronize ~lock:t.lock (fun x ->
             t.lock_owner <- Some me ;
             finally (fun () -> t.lock_owner <- None) f x

@@ -559,11 +559,8 @@ and route in_iface_opt t bits =
                     Log.(log t.widget.logger Debug (lazy (Printf.sprintf "Expiring packet from %d" n))) ;
                     let ip = Option.get ip_opt in
                     maybe_send_icmp t n ip Icmp.Pdu.make_ttl_expired_in_transit
-                | Some _, Some ttl ->
-                    let ip = Option.get ip_opt in
-                    let ip = Ip.Pdu.{ ip with ttl = ttl - 1 } in
-                    let bits = Ip.Pdu.pack ip in
-                    do_forward bits
+                | Some _, Some _ ->
+                    do_forward (Ip.Pdu.decr_ttl bits)
                 | Some _, None ->
                     do_forward bits)
             | Admin ->
@@ -578,12 +575,15 @@ and route in_iface_opt t bits =
                         Log.(log t.widget.logger Debug (lazy "Delivering to the admin host")) ;
                         Host.ip_recv host bits)) in
         let targets =
-            List.enum targets // (function
+            List.filter (function
                 (* Actually, that's OK if out=in but then the router should
                  * generate also an ICMP redirect (see Stevens section 9.5) *)
-                | Forward { out_iface ; _ } -> in_iface_opt <> Some out_iface
+                | Route.Forward { out_iface ; _ } ->
+                    (match in_iface_opt with
+                    | Some n -> n <> out_iface
+                    | None -> true)
                 | Admin -> true
-             ) |> Array.of_enum in
+             ) targets |> Array.of_list in
         let rs_len = Array.length targets in
         if rs_len = 0 then
             Log.(log t.widget.logger Debug (lazy ("Dropping packet with no targets")))
