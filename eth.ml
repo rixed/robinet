@@ -248,26 +248,43 @@ module Pdu = struct
         | {| _ |} ->
            Error (lazy "Not Eth")
 
-    let extract_proto do_extract proto pld =
+    (* The 32 bits at byte [off] of the header of the IPv4 packet in [pld],
+     * the payload of a frame of [proto], as a view on [pld] rather than a
+     * copy: *)
+    let ip4_addr_at off proto pld =
+        let at ip =
+            match%bitstring ip with
+            | {| 4 : 4 ; hdr_len : 4 ; _ : -1 : bitstring |}
+              when hdr_len >= 5 && bitstring_length ip >= hdr_len * 32 ->
+                Ok (subbitstring ip (off * 8) 32)
+            | {| _ |} ->
+                Error (lazy "Not IPv4") in
         if proto = Proto.ip4 then
-            do_extract pld
+            at pld
         else if proto = Proto.ieee8021q then
-            Result.Monad.bind (Vlan.Pdu.unpack pld) (fun vlan ->
-                if vlan.Vlan.Pdu.proto = Proto.ip4 then
-                    do_extract (vlan.Vlan.Pdu.payload :> bitstring)
-                else Error (lazy ("Vlan proto not IPv4")))
-        else Error (lazy ("Eth proto neither IPv4 not ieee8021q"))
+            match%bitstring pld with
+            | {| _ : 16 ; vlan_proto : 16 ; ip : -1 : bitstring |}
+              when vlan_proto = (Proto.ip4 :> int) ->
+                at ip
+            | {| _ |} ->
+                Error (lazy "Vlan proto not IPv4")
+        else Error (lazy "Eth proto neither IPv4 not ieee8021q")
 
-    (* Actually only extract IP addresses *)
-    let extract_src_proto =
-        extract_proto (fun pdu ->
-            Result.Monad.bind (Ip.Pdu.unpack pdu) (fun ip ->
-                Ok ip.Ip.Pdu.src))
+    let extract_src_proto = ip4_addr_at 12
 
-    let extract_dst_proto =
-        extract_proto (fun pdu ->
-            Result.Monad.bind (Ip.Pdu.unpack pdu) (fun ip ->
-                Ok ip.Ip.Pdu.dst))
+    let extract_dst_proto = ip4_addr_at 16
+    (*$Q extract_src_proto
+      (Q.make (fun _ -> Ip.Pdu.random ())) (fun ip -> \
+        let bits = Ip.Pdu.pack ip in \
+        let vlan = Vlan.Pdu.(pack (make 42 Proto.ip4 bits)) in \
+        let is a = function \
+          | Ok b -> Bitstring.equals b (Ip.Addr.to_bitstring a) \
+          | Error _ -> false in \
+        is ip.Ip.Pdu.src (extract_src_proto Proto.ip4 bits) && \
+        is ip.Ip.Pdu.dst (extract_dst_proto Proto.ip4 bits) && \
+        is ip.Ip.Pdu.src (extract_src_proto Proto.ieee8021q vlan) && \
+        is ip.Ip.Pdu.dst (extract_dst_proto Proto.ieee8021q vlan))
+     *)
 
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
@@ -689,6 +706,19 @@ end
 
 (** {2 Stateful Eth adapters} *)
 
+(* Which senders of the IP packets it receives an adapter adds to its ARP
+ * cache, beside the neighbours ARP itself tells it about: *)
+module Learn =
+struct
+    type t =
+        | Never (* none, as RFC 826 and real stacks have it *)
+        | Subnet (* those on one of its subnets *)
+        | Always (* any, as reachable through whoever handed the frame over *)
+        [@@deriving enum]
+
+    let names = [| "never" ; "subnet" ; "always" |]
+end
+
 module State =
 struct
     type my_address =
@@ -749,6 +779,7 @@ struct
            * adapter's own address adds its sender, and any other merely
            * updates an entry already there. *)
           mutable accept_gratuitous_arp : bool ;
+          mutable learn_neighbors_from_incoming : Learn.t ;
           (* TODO: these two should be timeouted, requiring a clock *)
           arp_cache : Addr.t option BitHash.t ;     (* proto_addr -> hw_addr option (None when resolving) *)
           (* Hash of messages waiting for an ARP resolution.
@@ -770,6 +801,11 @@ struct
     (* Add this IPv4 in the list of my addresses: *)
     let add_ip4 t ?netmask ip =
         t.my_addresses <- make_my_ip_address ?netmask ip :: t.my_addresses
+
+    let on_my_subnet t addr =
+        List.exists (fun my_addr ->
+            match_mask my_addr.netmask my_addr.addr addr
+        ) t.my_addresses
 
     let set_arp (t : t) iaddr = function
         | None      ->
@@ -818,6 +854,7 @@ struct
              ?(mtu=1500) ?(delay=Interval.zero) ?(loss=0.)
              ?(mac=Addr.random ()) ?(gateways=[])
              ?promisc ?(do_proxy_arp=(fun _ -> false))
+             ?(learn_neighbors_from_incoming=Learn.Never)
              ?(my_addresses=[]) ?(proto=Proto.ip4) ?(name="eth")
              ~parent ?power () =
         (* An adapter is called "eth" unless its owner names it, which a
@@ -830,7 +867,7 @@ struct
                        ?can_forward_after name in
         let t = {
             iface ; mac ; gateways ; proto ; mtu ; promisc ; do_proxy_arp ;
-            accept_gratuitous_arp = false ;
+            accept_gratuitous_arp = false ; learn_neighbors_from_incoming ;
             rx_otherhost_dropped = Metric.Counter.make () ;
             recv = ignore_bits ~logger:iface.widget.logger ;
             my_addresses ; delay ; loss ; via = None ;
@@ -914,6 +951,21 @@ struct
                         only the ones that were asked for."
                 ~getter:(fun () -> `Bool t.accept_gratuitous_arp)
                 ~setter:(fun v -> t.accept_gratuitous_arp <- to_bool v) ;
+            property "learn neighbors from incoming"
+                ~kind:(one_of (choices Learn.names))
+                ~descr:"Which senders of the IP packets received to learn the \
+                        hardware address of, beside the neighbours ARP tells \
+                        about: none, those on one of this adapter's subnets, \
+                        or any, as reachable through whoever handed the frame \
+                        over."
+                ~getter:(fun () ->
+                    `Int (Learn.to_enum t.learn_neighbors_from_incoming))
+                ~setter:(fun v ->
+                    match Learn.of_enum (to_int v) with
+                    | None -> bad_value "Invalid enum for learn neighbors \
+                                         from incoming: %s"
+                                (Yojson.Basic.to_string v)
+                    | Some l -> t.learn_neighbors_from_incoming <- l) ;
             metric_property "rx-otherhost-dropped" ~units:"frames"
                 ~descr:"Number of frames dropped by the MAC recipient filter."
                 (Metric.Counter.T t.rx_otherhost_dropped) ] ;
@@ -977,6 +1029,7 @@ struct
 
     type dst = Postponed | Dst of Addr.t
 
+    (* [target_ip] may be a view on [bits]: what is kept of it is a copy. *)
     let arp_resolve_ipv4 (st : State.t) bits sender_ip target_ip =
         match Option.get (BitHash.find st.arp_cache target_ip) with
         | dst ->
@@ -984,6 +1037,7 @@ struct
             Dst dst
         | exception Not_found ->
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Cannot find HW addr for '%s' in ARP cache" (hexstring_of_bitstring target_ip)))) ;
+            let target_ip = concat [ target_ip ] in
             BitHash.add st.arp_cache target_ip None ;
             resolve_proto_addr st bits sender_ip target_ip ;
             Postponed
@@ -992,50 +1046,31 @@ struct
             (* Every frame waiting on that address, and not merely the one that
              * asked for it: they all leave together when the reply comes (see
              * the loop that drains [postponed]). *)
-            BitHash.add st.postponed target_ip bits ;
+            BitHash.add st.postponed (concat [ target_ip ]) bits ;
             Postponed
 
+    let broadcast_bits = Ip.Addr.(to_bitstring broadcast)
+
     let dst_for (st : State.t) bits =
-        let arp_resolve_ipv4_pld sender_ip pld =
-            Result.Monad.bind (Ip.Pdu.unpack pld) (fun ip ->
-                (* Note: we might be a router forwarding a packet. In that case,
-                 * ip.mac is that of the original packet, yet the ARP sender addr
-                 * is that of the emitting device, aka the router: *)
-                let target_ip = Ip.Addr.to_bitstring ip.Ip.Pdu.dst in
-                Ok (arp_resolve_ipv4 st bits sender_ip target_ip)) in
-        let arp_resolve_ieee8021q_pld sender_ip pld =
-            Result.Monad.bind (Vlan.Pdu.unpack pld) (fun vlan ->
-                if vlan.Vlan.Pdu.proto = Proto.ip4 then
-                    arp_resolve_ipv4_pld sender_ip (vlan.Vlan.Pdu.payload :> bitstring)
-                else Error (lazy "Vlan proto not IPv4")) in
-        let arp_resolve_pld pld =
-            let my_addr =
-                match st.my_addresses with
-                | [] -> failwith "No address to use as sender proto addr for ARP"
-                | a :: _ -> a.addr in
-            if st.proto = Proto.ip4 then (
-                arp_resolve_ipv4_pld my_addr pld
-            ) else if st.proto = Proto.ieee8021q then (
-                arp_resolve_ieee8021q_pld my_addr pld
-            ) else (
-                Error (lazy "Don't know how to resolve address for this protocol")
-            ) in
-        let same_net my_addresses bits =
-            List.exists (fun (my_addr : State.my_address) ->
-                match_mask my_addr.netmask my_addr.addr bits
-            ) my_addresses in
+        (* Note: we might be a router forwarding a packet. In that case, the
+         * source of the packet is not us, yet the ARP sender addr is that of
+         * the emitting device, aka the router: *)
+        let arp_resolve target_ip =
+            match st.my_addresses with
+            | [] -> failwith "No address to use as sender proto addr for ARP"
+            | a :: _ -> Ok (arp_resolve_ipv4 st bits a.addr target_ip) in
         match Pdu.extract_dst_proto st.proto bits with
-        | Ok dst_ip when dst_ip = Ip.Addr.broadcast ->
+        | Ok dst when Bitstring.equals dst broadcast_bits ->
             Ok (Dst Addr.broadcast)
-        | Ok dst_ip when same_net st.my_addresses (Ip.Addr.to_bitstring dst_ip) ->
+        | Ok dst when State.on_my_subnet st dst ->
             Log.(log st.iface.widget.logger Debug (lazy "Same network as me, sending directly")) ;
-            arp_resolve_pld bits (* FIXME: should also tell us which source address to use *)
-        | Ok dst_ip ->
+            arp_resolve dst (* FIXME: should also tell us which source address to use *)
+        | Ok dst ->
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf2 "Not on my LAN (my addresses = %a)" (List.print State.print_my_address) st.my_addresses))) ;
-            (match gw_for_ip st dst_ip with
+            (match gw_for_ip st (Ip.Addr.of_bitstring dst) with
             | None ->
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "No GW, resolving with ARP"))) ;
-                arp_resolve_pld bits
+                arp_resolve dst
             | Some (Mac addr) ->
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Using GW MAC %s" (Addr.to_string addr)))) ;
                 Ok (Dst addr)
@@ -1071,10 +1106,19 @@ struct
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...that's me!"))) ;
                 if Payload.bitlength frame.payload > 0 then (
                     (* Take note of the MAC/IP pair of the sender (TODO: with a short timeout) : *)
-                    Pdu.extract_src_proto frame.proto (frame.payload :> bitstring) |>
-                    Result.iter (fun ip_src ->
-                        let src_proto_addr = Ip.Addr.to_bitstring ip_src in
-                        BitHash.replace st.arp_cache src_proto_addr (Some frame.src)) ;
+                    let learn src =
+                        (* A copy, not to keep the whole frame alive: *)
+                        BitHash.replace st.arp_cache (concat [ src ])
+                                        (Some frame.src) in
+                    let src () =
+                        Pdu.extract_src_proto frame.proto (frame.payload :> bitstring) in
+                    (match st.learn_neighbors_from_incoming with
+                    | Learn.Never -> ()
+                    | Learn.Subnet ->
+                        Result.iter (fun src ->
+                            if State.on_my_subnet st src then learn src) (src ())
+                    | Learn.Always ->
+                        Result.iter learn (src ())) ;
                     Simulation.asap st.iface.widget.power
                                     st.recv (frame.payload :> bitstring)
                 )

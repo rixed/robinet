@@ -256,6 +256,11 @@ router's first interface, which is the adapter really behind that socket, and
 the server's adapter is set to match. So the LAN runs as fast as its two ends
 agree on; put a hub on it and it is the hub, as ever, that decides.
 
+Sharing `.1` has one consequence for the router: an ARP for the server's
+address is one for its own, which nobody answers. So its LAN interface learns
+the neighbours on its subnet from what they send (`learn neighbors from
+incoming` at subnet), and that is how it finds the server.
+
 ### portal
 
 Opens a real interface of the machine and exchanges packets with the real world.
@@ -381,14 +386,18 @@ under:
 | note | `""` | `text` |
 
 *An Ethernet adapter* is `speeds`, `full-duplex` and `inter-frame-gap`, and on
-one with an IP stack above it also `gateways`, `delay`, `loss` and `accept
-gratuitous ARP` — a loss of 0.01 drops one frame in a hundred, which is how a
-machine is made to misbehave without touching the cable. An adapter learns a
-neighbour's hardware address when it asks for it, or when the neighbour asks
-for its own; with `accept gratuitous ARP` it also learns one that merely
-announces itself (see `emit gratuitous ARP` below), which is what spares the
-first frame to a neighbour the wait of an ARP exchange. It is off unless set,
-as on most real machines. Its MAC is a parameter of the device it belongs to,
+one with an IP stack above it also `gateways`, `delay`, `loss`, `accept
+gratuitous ARP` and `learn neighbors from incoming` — a loss of 0.01 drops one
+frame in a hundred, which is how a machine is made to misbehave without
+touching the cable. An adapter learns a neighbour's hardware address when it
+asks for it, or when the neighbour asks for its own; with `accept gratuitous
+ARP` it also learns one that merely announces itself (see `emit gratuitous ARP`
+below), which is what spares the first frame to a neighbour the wait of an ARP
+exchange. It is off unless set, as on most real machines. `learn neighbors from
+incoming` (`0`–`2`: never, subnet, always) has it also learn the sender of
+every IP packet it receives, from the frame that brought it: never, unless set,
+as real machines do; only senders on one of its subnets; or any, a distant one
+then being reached through whoever handed its packet over. Its MAC is a parameter of the device it belongs to,
 not a property: an address is not something a running machine is reconfigured
 with.
 
