@@ -104,11 +104,209 @@ let once = { delay = Interval.zero ; repeat_after = None ; times = None }
 (** {2 Events}
  * They are callbacks depending on a power source.
  * They are scheduled at a particular time (relative to the simulation they
- * belong to). *)
-module Events = Map.Make (struct
-    type t = Time.t
-    let compare (a : t) (b : t) = Time.compare a b
-end)
+ * belong to).
+ *
+ * The queue is a binary heap of buckets, each holding what is due at one
+ * instant in the order it was scheduled (two buckets may share an instant, and
+ * then come out in no particular order). What is due now, which is what most
+ * scheduling asks for, skips the heap and goes after what is being run. *)
+module Events =
+struct
+    type 'a bucket =
+        { ts : Time.t ; first : 'a ; mutable more : 'a list (* latest first *) }
+
+    type 'a t =
+        { (* No bucket is due after its children, [heap.(2i+1)] and
+           * [heap.(2i+2)]. Slots from [len] on are garbage. *)
+          mutable heap : 'a bucket array ;
+          mutable len : int ;
+          (* What is left to run of the bucket being run, in order: *)
+          mutable batch : 'a list ;
+          (* What was scheduled for now since, latest first: *)
+          mutable now_events : 'a list ;
+          (* When the bucket being run was due: *)
+          mutable current_ts : Time.t }
+
+    let make () =
+        { heap = [||] ; len = 0 ; batch = [] ; now_events = [] ;
+          current_ts = Time.zero }
+
+    let clear q =
+        q.heap <- [||] ; q.len <- 0 ; q.batch <- [] ; q.now_events <- []
+
+    let is_empty q =
+        match q.batch, q.now_events with
+        | [], [] -> q.len = 0
+        | _ -> false
+
+    let earlier b1 b2 = (b1.ts : Time.t :> int) < (b2.ts : Time.t :> int)
+
+    (* Fill the hole at [i] with [b] or one of its ancestors: *)
+    let rec sift_up h i b =
+        if i = 0 then h.(0) <- b else
+        let p = (i - 1) / 2 in
+        if earlier b h.(p) then (
+            h.(i) <- h.(p) ;
+            sift_up h p b
+        ) else h.(i) <- b
+
+    (* Fill the hole at [i] with [b] or one of its descendants: *)
+    let rec sift_down h len i b =
+        let l = 2 * i + 1 in
+        if l >= len then h.(i) <- b else
+        let c = if l + 1 < len && earlier h.(l + 1) h.(l) then l + 1 else l in
+        if earlier h.(c) b then (
+            h.(i) <- h.(c) ;
+            sift_down h len c b
+        ) else h.(i) <- b
+
+    (* Schedule [x] at [ts], which is after now: *)
+    let push q ts x =
+        let b = { ts ; first = x ; more = [] } in
+        if q.len = Array.length q.heap then (
+            let heap = Array.make (max 64 (2 * q.len)) b in
+            Array.blit q.heap 0 heap 0 q.len ;
+            q.heap <- heap) ;
+        sift_up q.heap q.len b ;
+        q.len <- q.len + 1
+
+    (* Schedule [x] now, after everything already due: *)
+    let push_now q x =
+        q.now_events <- x :: q.now_events
+
+    let pop_bucket q =
+        let h = q.heap in
+        let top = h.(0) in
+        q.len <- q.len - 1 ;
+        if q.len > 0 then sift_down h q.len 0 h.(q.len) ;
+        top
+
+    (** The next event to run, which [current_ts] then says when it was due.
+     * Raises [Not_found] if there is none. *)
+    let next q =
+        match q.batch with
+        | x :: rest ->
+            q.batch <- rest ;
+            x
+        | [] ->
+            match q.now_events with
+            | [ x ] ->
+                q.now_events <- [] ;
+                x
+            | _ :: _ as l ->
+                q.now_events <- [] ;
+                (match List.rev l with
+                | x :: rest -> q.batch <- rest ; x
+                | [] -> assert false)
+            | [] ->
+                if q.len = 0 then raise Not_found ;
+                let b = pop_bucket q in
+                q.current_ts <- b.ts ;
+                (match b.more with
+                | [] -> ()
+                | more -> q.batch <- List.rev more) ;
+                b.first
+
+    let current_ts q = q.current_ts
+
+    (** When the next event is due. Raises [Not_found] if there is none. *)
+    let next_ts q =
+        match q.batch, q.now_events with
+        | [], [] -> if q.len = 0 then raise Not_found else q.heap.(0).ts
+        | _ -> q.current_ts
+
+    let fold f q acc =
+        let acc = List.fold_left (fun acc x -> f x acc) acc q.batch in
+        let acc = List.fold_left (fun acc x -> f x acc) acc q.now_events in
+        let acc = ref acc in
+        for i = 0 to q.len - 1 do
+            let b = q.heap.(i) in
+            acc := List.fold_left (fun acc x -> f x acc) (f b.first !acc) b.more
+        done ;
+        !acc
+
+    let cardinal q = fold (fun _ n -> n + 1) q 0
+
+    let exists p q = fold (fun x b -> b || p x) q false
+
+    let for_all p q = fold (fun x b -> b && p x) q true
+
+    (* Keep only the events satisfying [keep], in the same order. *)
+    let filter keep q =
+        q.batch <- List.filter keep q.batch ;
+        q.now_events <- List.filter keep q.now_events ;
+        let h = q.heap and n = ref 0 in
+        for i = 0 to q.len - 1 do
+            let b = h.(i) in
+            let more = List.filter keep b.more in
+            let kept =
+                if keep b.first then (
+                    b.more <- more ;
+                    Some b
+                ) else
+                    match List.rev more with
+                    | [] -> None
+                    | first :: rest ->
+                        Some { ts = b.ts ; first ; more = List.rev rest } in
+            match kept with
+            | Some b -> h.(!n) <- b ; incr n
+            | None -> ()
+        done ;
+        q.len <- !n ;
+        for i = q.len / 2 - 1 downto 0 do
+            sift_down h q.len i h.(i)
+        done
+    (*$inject
+      let drain q =
+        let rec loop acc =
+          match Events.next q with
+          | exception Not_found -> List.rev acc
+          | x -> loop ((Events.current_ts q, x) :: acc) in
+        loop []
+      let push_all q l =
+        List.iteri (fun i ts -> Events.push q (Clock.Time.o (1 + ts)) i) l
+      let sorted l =
+        let rec loop = function
+          | (a, _) :: ((b, _) :: _ as rest) ->
+              Clock.Time.compare a b <= 0 && loop rest
+          | _ -> true in
+        loop l
+    *)
+    (*$< Events *)
+    (*$Q push
+      Q.(list_small nat_small) (fun l -> \
+        let q = Events.make () in \
+        push_all q l ; \
+        let out = drain q in \
+        sorted out && \
+        List.sort Stdlib.compare (List.map snd out) = List.init (List.length l) identity && \
+        Events.is_empty q)
+    *)
+    (*$Q filter
+      Q.(list_small nat_small) (fun l -> \
+        let q = Events.make () in \
+        push_all q l ; \
+        Events.push_now q (-1) ; Events.push_now q (-2) ; \
+        Events.filter (fun i -> i mod 3 <> 0) q ; \
+        Events.cardinal q = List.length (List.filter (fun i -> i mod 3 <> 0) \
+                                    (-1 :: -2 :: List.init (List.length l) identity)) && \
+        let out = drain q in \
+        List.for_all (fun (_, i) -> i mod 3 <> 0) out && \
+        sorted (List.filter (fun (_, i) -> i >= 0) out))
+    *)
+    (*$T next
+      (let q = Events.make () in \
+       let ts = Clock.Time.o 5 in \
+       Events.push q ts 1 ; Events.push q (Clock.Time.o 9) 9 ; \
+       let a = Events.next q in \
+       Events.push_now q 2 ; Events.push_now q 3 ; \
+       let b = Events.next q in Events.push_now q 4 ; \
+       let c = Events.next q in let d = Events.next q in let e = Events.next q in \
+       [ a ; b ; c ; d ; e ] = [ 1 ; 2 ; 3 ; 4 ; 9 ] && \
+       Clock.Time.compare (Events.current_ts q) (Clock.Time.o 9) = 0)
+    *)
+    (*$>*)
+end
 
 (* An event is what to do and the source that pays for it. Switching that
  * source off withdraws it, which is what powering a box down means and what
@@ -144,7 +342,7 @@ and simulation =
       log_seq : int ref ;
       (* Every event waiting to happen, soonest first, each with the power
        * source that pays for it. *)
-      mutable events : event Events.t ;
+      events : event Events.t ;
       mutable thread : Thread.t option ;
       (* Protects everything this simulation owns. It is held for the whole of
        * an event dispatch, which is what gives a thread borrowing this

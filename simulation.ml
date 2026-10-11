@@ -216,17 +216,13 @@ let at (p : power) (ts : Time.t) f x =
             "Not scheduling anything at %s: %s is off"
             (Time.to_string ts) p.name)))
     ) else (
-        let epsilon = Interval.o 1 in
-        let rec loop ts =
-            (* If ts was already bound in t.events, its previous binding disappears.
-               Also, we do not like the idea of several sequential events having the same TS. *)
-            if Events.mem ts t.events then (
-                loop (Time.add ts epsilon)
-            ) else (
-                if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.diff ts (now t))) ;
-                t.events <- Events.add ts (p, (fun () -> f x)) t.events
-            ) in
-        with_lock t loop ts ;
+        with_lock t (fun () ->
+            if debug then Printf.printf "Clock: add an event for time %s (%s)\n%!" (Time.to_string ts) (Interval.to_string (Time.diff ts (now t))) ;
+            let ev = p, (fun () -> f x) in
+            if (ts : Time.t :> int) <= (now t :> int) then
+                Events.push_now t.events ev
+            else
+                Events.push t.events ts ev) () ;
         signal_me t ()
     )
 
@@ -235,7 +231,6 @@ let delay (p : power) d f x =
     at p (Time.add (now p.sim) d) f x
 
 let asap (p : power) f x =
-    (* FIXME: would be more precise and fast to have a dedicated list for asap events *)
     delay p Interval.zero f x
 
 (* {2 Ending a run of an action}
@@ -441,7 +436,7 @@ let stop (t : t) () =
         (* The mains, which is the root widget's: a simulation that has been
            stopped pays for nothing more. *)
         t.root.power.on <- false ;
-        t.events <- Events.empty) () ;
+        Events.clear t.events) () ;
     Condition.signal t.cond
 
 (** Stop every simulation. *)
@@ -494,8 +489,7 @@ let remove_widget (w : widget) =
         List.iter (fun (d : widget) -> d.on_delete ()) doomed ;
         List.iter (fun (d : widget) ->
             if d.owns_power then
-                t.events <-
-                    Events.filter (fun _ (p, _) -> p != d.power) t.events
+                Events.filter (fun (p, _) -> p != d.power) t.events
         ) (cables @ doomed) ;
         withdraw_runs t (cables @ doomed) Deleted ;
         (* After the cables have been unplugged, so that a port is told it is
@@ -531,7 +525,7 @@ let delete (t : t) =
  * scheduled, so everything in it is going anyway. *)
 let clear (t : t) =
     with_lock t (fun () ->
-        t.events <- Events.empty ;
+        Events.clear t.events ;
         let rec loop () =
             match t.root.children with
             | [] -> ()
@@ -590,7 +584,7 @@ let power_down (p : power) =
                up in, what is inside a box before the box. *)
             p.on <- false ;
             let before = Events.cardinal t.events in
-            t.events <- Events.filter (fun _ (p', _) -> p' != p) t.events ;
+            Events.filter (fun (p', _) -> p' != p) t.events ;
             let dropped = before - Events.cardinal t.events in
             if dropped > 0 then
                 Log.(log t.root.logger Debug (lazy (Printf.sprintf
@@ -1190,7 +1184,7 @@ let make =
               thread = None ;
               now ;
               log_seq ;
-              events = Events.empty ;
+              events = Events.make () ;
               lock = Mutex.create () ;
               cond = Condition.create () ;
               lock_owner = None ;
@@ -1298,9 +1292,9 @@ let next_event (t : t) =
                         (* Paused: nothing to run, wake up only when signalled *)
                         Time.add (now t) max_sleep_time
                     else
-                        match Events.min_binding t.events with
+                        match Events.next_ts t.events with
                         | exception Not_found -> Time.add (now t) max_sleep_time
-                        | ts, _ -> ts in
+                        | ts -> ts in
                 let wait_time = Time.diff until (now t) in
                 if not (may_dispatch t) ||
                    Interval.compare wait_time min_ts_for_sleep > 0 then (
@@ -1355,7 +1349,7 @@ let next_event (t : t) =
                     (* A step is asked for now: pacing it would defeat it. *)
                     true
                 | Some ratio ->
-                    let ts, _ = Events.min_binding t.events in
+                    let ts = Events.next_ts t.events in
                     let due = due_at t ratio ts
                     and wall = Wall.now () in
                     if Wall.compare wall due >= 0 then (
@@ -1375,14 +1369,20 @@ let next_event (t : t) =
         (* We have some work to do *)
         let f =
             with_lock t (fun () ->
-                match Events.min_binding t.events with
+                match Events.next t.events with
                 | exception Not_found -> None
-                | ts, (_power, f) ->
+                | _power, f ->
                     (* powering down a power source clears its events (or a
                      * rapid power cycle would leave them), so no need to check
                      * [power] here *)
+                    (* An instant to each event, so that everything that
+                     * happens can be ordered by time: *)
+                    let ts = Events.current_ts t.events
+                    and next_ps = Time.add (now t) (Interval.o 1) in
+                    let ts =
+                        if (ts : Time.t :> int) > (next_ps :> int) then ts
+                        else next_ps in
                     if debug then Printf.printf "Clock: next_event: executing since it's %s\n%!" (Time.to_string ts) ;
-                    t.events <- Events.remove ts t.events ;
                     t.now := ts ;
                     (* Before the handler runs, so that a snapshot holds
                      * everything that happened strictly before [ts] and

@@ -1216,7 +1216,7 @@ let make_from_addrs
     Simulation.delay r.widget.power (Clock.Interval.sec 1.) ignore () ;
     Simulation.remove_widget r.widget ;
     "a deleted router has nothing left scheduled" @?
-        (Events.for_all (fun _ (p, _) -> p != r.widget.power) sim.events) ;
+        (Events.for_all (fun (p, _) -> p != r.widget.power) sim.events) ;
     "and out of the tree" @?
         (Widget.find sim.root r.widget.id = None)
  *)

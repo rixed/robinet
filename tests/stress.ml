@@ -749,7 +749,7 @@ let test_delete () =
        which says nothing about anything -- it is out of the tree with the
        widget that owned it, and nothing can schedule on it again. *)
     check "and their future with them"
-        (Events.for_all (fun _ (p, _) -> p != sw.widget.power) sim.events)
+        (Events.for_all (fun (p, _) -> p != sw.widget.power) sim.events)
 
 (* Powering a host off is not a request that it stop: whatever it had planned
    to do ceases to exist. Everything it schedules -- its adapter, its sockets,
