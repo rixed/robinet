@@ -85,6 +85,7 @@ all_tests.ml: $(LIB_SOURCES)
 	$(QTEST) --shuffle --preamble 'open Batteries;; open Bitstring;; open Tools;; open SimTypes' -o $@ extract $^
 
 check: all_tests.opt $(EXTRA_TESTS)
+	$(RM) oUnit-anon.cache
 	@for t in $^; do \
 		echo "Running $$t" ;\
 		./$$t ;\
