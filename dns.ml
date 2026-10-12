@@ -520,3 +520,33 @@ struct
      *)
     (*$>*)
 end
+
+let hostname_is_valid name =
+    let label_is_valid_host l =
+        l <> "" &&
+        String.for_all (fun c ->
+            (c >= 'a' && c <= 'z') ||
+            (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') ||
+            c = '-'
+        ) l &&
+        String.unsafe_get l 0 <> '-' &&
+        String.unsafe_get l (String.length l - 1) <> '-'
+    in
+    let len = String.length name in
+    len > 0 && len <= 253 &&
+    String.split_on_char '.' name |>
+    List.for_all (fun label ->
+        Pdu.label_is_valid label &&
+        label_is_valid_host label)
+
+(*$T hostname_is_valid
+  hostname_is_valid "foo"
+  hostname_is_valid "foo.bar"
+  hostname_is_valid "f-o-o.3bAr.42"
+  not (hostname_is_valid "")
+  not (hostname_is_valid ".")
+  not (hostname_is_valid "foo..bar")
+  not (hostname_is_valid "foo-.bar")
+  not (hostname_is_valid "foo.-bar")
+*)
