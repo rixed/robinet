@@ -386,7 +386,7 @@ under:
 | note | `""` | `text` |
 
 *An Ethernet adapter* is `speeds`, `full-duplex` and `inter-frame-gap`, and on
-one with an IP stack above it also `gateways`, `delay`, `loss`, `accept
+one with an IP stack above it also `MTU` (68…65535), `gateways`, `delay`, `loss`, `accept
 gratuitous ARP` and `learn neighbors from incoming` — a loss of 0.01 drops one
 frame in a hundred, which is how a machine is made to misbehave without
 touching the cable. An adapter learns a neighbour's hardware address when it

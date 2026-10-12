@@ -769,7 +769,7 @@ struct
           (* Which can be overridden for one packet in routers with: *)
           mutable via : Gateway.t option ;
           proto : Proto.t ;
-          mtu : int ;
+          mutable mtu : int ;
           mutable my_addresses : my_address list ;
           mutable promisc : (bitstring -> unit) option ;
           rx_otherhost_dropped : Metric.Counter.t ;
@@ -877,8 +877,10 @@ struct
         Widget.add_properties iface.widget Widget.[
             property "MAC" ~kind:String ~descr:"MAC address."
                 ~getter:(fun () -> `String (Addr.to_string t.mac)) ;
-            property "MTU" ~kind:Int ~descr:"MTU of the interface."
-                ~getter:(fun () -> `Int t.mtu) ;
+            property "MTU" ~kind:(IRange (68, 65535))
+                ~descr:"MTU of the interface."
+                ~getter:(fun () -> `Int t.mtu)
+                ~setter:(fun v -> t.mtu <- to_int_range ~min:68 ~max:65535 v) ;
             property "ARP cache size" ~kind:Int
                 ~descr:"Current size of the ARP cache"
                 ~getter:(fun () -> `Int (BitHash.length t.arp_cache)) ;
