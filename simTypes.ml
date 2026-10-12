@@ -112,6 +112,7 @@ let once = { delay = Interval.zero ; repeat_after = None ; times = None }
  * scheduling asks for, skips the heap and goes after what is being run. *)
 module Events =
 struct
+    (*$< Events *)
     type 'a bucket =
         { ts : Time.t ; first : 'a ; mutable more : 'a list (* latest first *) }
 
@@ -259,12 +260,12 @@ struct
     (*$inject
       let drain q =
         let rec loop acc =
-          match Events.next q with
+          match next q with
           | exception Not_found -> List.rev acc
-          | x -> loop ((Events.current_ts q, x) :: acc) in
+          | x -> loop ((current_ts q, x) :: acc) in
         loop []
       let push_all q l =
-        List.iteri (fun i ts -> Events.push q (Clock.Time.o (1 + ts)) i) l
+        List.iteri (fun i ts -> push q (Clock.Time.o (1 + ts)) i) l
       let sorted l =
         let rec loop = function
           | (a, _) :: ((b, _) :: _ as rest) ->
@@ -272,38 +273,37 @@ struct
           | _ -> true in
         loop l
     *)
-    (*$< Events *)
-    (*$Q push
+    (*$Q push_all
       Q.(list_small nat_small) (fun l -> \
-        let q = Events.make () in \
+        let q = make () in \
         push_all q l ; \
         let out = drain q in \
         sorted out && \
         List.sort Stdlib.compare (List.map snd out) = List.init (List.length l) identity && \
-        Events.is_empty q)
+        is_empty q)
     *)
     (*$Q filter
       Q.(list_small nat_small) (fun l -> \
-        let q = Events.make () in \
+        let q = make () in \
         push_all q l ; \
-        Events.push_now q (-1) ; Events.push_now q (-2) ; \
-        Events.filter (fun i -> i mod 3 <> 0) q ; \
-        Events.cardinal q = List.length (List.filter (fun i -> i mod 3 <> 0) \
-                                    (-1 :: -2 :: List.init (List.length l) identity)) && \
+        push_now q (-1) ; push_now q (-2) ; \
+        filter (fun i -> i mod 3 <> 0) q ; \
+        cardinal q = List.length (List.filter (fun i -> i mod 3 <> 0) \
+                                 (-1 :: -2 :: List.init (List.length l) identity)) && \
         let out = drain q in \
         List.for_all (fun (_, i) -> i mod 3 <> 0) out && \
         sorted (List.filter (fun (_, i) -> i >= 0) out))
     *)
     (*$T next
-      (let q = Events.make () in \
+      (let q = make () in \
        let ts = Clock.Time.o 5 in \
-       Events.push q ts 1 ; Events.push q (Clock.Time.o 9) 9 ; \
-       let a = Events.next q in \
-       Events.push_now q 2 ; Events.push_now q 3 ; \
-       let b = Events.next q in Events.push_now q 4 ; \
-       let c = Events.next q in let d = Events.next q in let e = Events.next q in \
+       push q ts 1 ; push q (Clock.Time.o 9) 9 ; \
+       let a = next q in \
+       push_now q 2 ; push_now q 3 ; \
+       let b = next q in push_now q 4 ; \
+       let c = next q in let d = next q in let e = next q in \
        [ a ; b ; c ; d ; e ] = [ 1 ; 2 ; 3 ; 4 ; 9 ] && \
-       Clock.Time.compare (Events.current_ts q) (Clock.Time.o 9) = 0)
+       Clock.Time.compare (current_ts q) (Clock.Time.o 9) = 0)
     *)
     (*$>*)
 end

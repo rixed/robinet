@@ -202,7 +202,7 @@ let env_subst_string ?(getenv=no_env) s =
  *)
 (*$T subst
   (try ignore (subst "$UNSET") ; false with Widget.Bad_value _ -> true)
-  (try ignore (env_subst_string "$VAR") ; false \
+  (try ignore subst; ignore (env_subst_string "$VAR") ; false \
    with Widget.Bad_value _ -> true)
   (try ignore (subst "${UNSET}") ; false with Widget.Bad_value _ -> true)
   (try ignore (subst "${VAR") ; false with Widget.Bad_value _ -> true)
@@ -232,7 +232,7 @@ let env_escape_string s =
  *)
 (*$Q env_escape_string
   Q.string (fun s -> subst (env_escape_string s) = s)
-  Q.(string_gen (Gen.oneofl [ '$' ; '{' ; '}' ; 'V' ; 'A' ; 'R' ; ':' ; '-' ])) \
+  Q.(string_of (Gen.oneof_list [ '$' ; '{' ; '}' ; 'V' ; 'A' ; 'R' ; ':' ; '-' ])) \
     (fun s -> subst (env_escape_string s) = s)
  *)
 
