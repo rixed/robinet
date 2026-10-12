@@ -159,7 +159,7 @@ EXTRA_TESTS = tests/stress.opt
 
 include make.common
 
-.PHONY: examples run vendor coastline
+.PHONY: examples run vendor coastline upgrade
 
 all: robinet robinet.top examples $(EXTRA_TESTS)
 
@@ -275,3 +275,6 @@ clean-spec:
 	$(RM) tests/*.cm[ioxa] tests/*.o tests/*.annot oUnit-anon.cache $(EXTRA_TESTS)
 	$(RM) myadmin_assets.ml robinet
 	$(RM) -r build
+
+upgrade: robinet
+	@opam reinstall --inplace --no-auto-upgrade --no-self-upgrade .
