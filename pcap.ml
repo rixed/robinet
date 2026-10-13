@@ -1296,6 +1296,7 @@ let sniffer iface ?(while_=(fun () -> true)) rx =
                 let ts =
                     Simulation.of_wall_clock
                         (Simulation.of_widget iface.widget) pdu.Pdu.ts in
+                (* TODO: optionally, fragment and/or checksum that pdu *)
                 Simulation.at iface.widget.power ts rx
                               (pdu.Pdu.payload :> bitstring) ;
                 loop () in
@@ -1466,6 +1467,8 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
         disconnect = (fun _ -> disconnect portal) ;
         get_capabilities = (fun ?peer:_ _ -> Capabilities.Any) ;
         set_capabilities = (fun _ _ -> ()) } ;
+    (* TODO: a property to enable fragmentation and/or checksumming of packets
+     * before to inject them in the simulation. *)
     Widget.add_properties widget Widget.[
         property "name" ~kind:String
             ~descr:"Interface name."

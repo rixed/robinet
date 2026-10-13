@@ -35,6 +35,12 @@
   cap_dac_override on top, which is root by another name. So [ip] is left to
   fail, and to say what it lacked.
 
+  The end in the namespace sends with checksum offload off, and so without
+  segmentation offload either: robinet passes on frames as it captures them, so
+  a checksum left for a veth to never fill in would reach the next kernel wrong
+  and be dropped there, and a TCP segment the size of 64KB would cross a
+  simulated link whole.
+
   Neither end is given an address. What holds one is the business of the
   network on this side: a DHCP server in the document can hand the namespace
   its address, its gateway and its DNS, which is most of the reason for joining
@@ -44,7 +50,7 @@ open Batteries
 
 (* Through [ip] rather than through netlink: there is no netlink binding here,
  * this is a handful of commands, and [ip] is what anybody would check the
- * result with by hand in any case. *)
+ * result with by hand in any case. Likewise [ethtool] for the offloads. *)
 let ip = "ip"
 
 exception Command_failed of string * string
@@ -113,7 +119,8 @@ let setup ifname =
         run [ "link" ; "set" ; peer ; "netns" ; ns ] ;
         run [ "link" ; "set" ; ifname ; "up" ] ;
         run [ "netns" ; "exec" ; ns ; ip ; "link" ; "set" ; "lo" ; "up" ] ;
-        run [ "netns" ; "exec" ; ns ; ip ; "link" ; "set" ; peer ; "up" ]
+        run [ "netns" ; "exec" ; ns ; ip ; "link" ; "set" ; peer ; "up" ] ;
+        run [ "netns" ; "exec" ; ns ; "ethtool" ; "-K" ; peer ; "tx" ; "off" ]
     with e ->
         try_run [ "netns" ; "del" ; ns ] ;
         try_run [ "link" ; "del" ; ifname ] ;

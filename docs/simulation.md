@@ -269,6 +269,12 @@ interface, so the interface must exist by then — `robinet --portals=veth` make
 a namespace and a veth pair for every portal of every document it loads. A
 portal turns its simulation over to the wall clock.
 
+A portal passes on frames as it captures them, checksums and sizes included, so
+what sends into it must not leave those to offloading: with checksum offload
+on, the next kernel drops the packet, and with segmentation offload on, robinet
+is handed TCP segments far larger than the MTU. `--portals=veth` turns both off
+(with `ethtool -K <portal>-ns tx off`) on the end of the pair in the namespace.
+
 | param | kind | default | |
 | --- | --- | --- | --- |
 | `promisc` | bool | `true` | |

@@ -135,7 +135,7 @@ let usage =
      \                  machine instead of the usual one\n\
      \  --portals=veth  for every portal of every network, make a network\n\
      \                  namespace of that name and a veth pair into it\n\
-     \                  (wants root: run under sudo)\n\
+     \                  (wants root, so run under sudo, and ethtool)\n\
      \  --warn, --info, --debug\n\
      \                  print log messages down to that level on the\n\
      \                  console, which otherwise only shows errors\n\
