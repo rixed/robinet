@@ -207,7 +207,7 @@ retry:
     CAMLlocal3(result, ts, pkt);
     pkt = caml_alloc_string(hdr->caplen);
     memcpy((char *)String_val(pkt), bytes, hdr->caplen);
-    Byte(pkt, hdr->caplen+1) = 0;
+    // caml_alloc_string already placed a nul terminator at the end
 
     ts = caml_copy_double(hdr->ts.tv_sec + (double)hdr->ts.tv_usec * 0.000001);
 
