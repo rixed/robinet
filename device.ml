@@ -489,7 +489,7 @@ let portal =
           param "filter" ~kind:String ~default:(`String "")
               ~descr:"Filter to select packets to capture." ;
           param "caplen" ~kind:(Optional (IRange (1, 65535))) ~default:`Null
-              ~descr:"Capture length (default to the interface MTU)." ] ;
+              ~descr:"Capture length (default to a whole frame at the interface MTU)." ] ;
       of_params = fun args ->
           TPortal { promisc = bool args "promisc" ;
                     filter = string args "filter" ;
@@ -507,7 +507,7 @@ let recorder =
           param "flush" ~kind:Bool ~default:(`Bool false)
               ~descr:"Push every packet out as it is written." ;
           param "caplen" ~kind:(Optional (IRange (1, 65535))) ~default:`Null
-              ~descr:"Capture length (default to the interface MTU)." ;
+              ~descr:"Capture length (default to whole packets)." ;
           param "DLT" ~kind:(Optional Int)
               ~default:(`Int (Pcap.Dlt.to_int Pcap.default_dlt))
               ~descr:"DLT to use to create the pcap file." ] ;

@@ -153,8 +153,8 @@ external sniff_ : ?timeout:float -> pcap_handler -> sniff_ret_ = "wrap_pcap_read
 (** [openif_ "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is set to 0 then a "default" value
- * of 65535 will be chosen, which is probably not what you want. You should set
- * [caplen] = your {e MTU} size. *)
+ * of 65535 will be chosen, which is probably not what you want. See
+ * [default_caplen] for what you probably want. *)
 external openif_ : string -> bool -> string -> int -> pcap_handler = "wrap_pcap_make"
 
 external closeif_ : pcap_handler -> unit = "wrap_pcap_close"
@@ -464,9 +464,11 @@ let save sim ?flush ?caplen ?(dlt=default_dlt) fname =
 
 (** {2 Packet sniffing/injection} *)
 
+(* What a whole frame of [ifname] takes: its MTU is what the frame carries,
+ * and the capture also holds the Ethernet header and possibly a VLAN tag. *)
 let default_caplen ifname =
     if ifname = "any" then 65535
-    else mtu_of_iface ifname
+    else mtu_of_iface ifname + 14 + 4
 
 type iface_handler = {
     pcap : pcap_handler ;
@@ -475,8 +477,8 @@ type iface_handler = {
 
 (** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
- * of each packets. Notice that if [caplen] is not set then {e MTU} for the
- * device will be chosen. *)
+ * of each packets. Notice that if [caplen] is not set then whole frames are
+ * captured (see [default_caplen]). *)
 let openif ?(promisc=true) ?(filter="") ?caplen name =
     let caplen =
         Option.default_delayed (fun () -> default_caplen name) caplen in
@@ -652,7 +654,7 @@ let recorder ~parent ?location ?(flush=false) ?caplen ?(dlt=default_dlt) ?fname
             ~can_set:(fun () -> recorder.file = None)
             ~setter:(fun v -> recorder.flush <- to_bool v) ;
         property "caplen" ~kind:(Optional (IRange (1, 65535))) ~units:"bytes"
-            ~descr:"Capture length (or interface MTU)."
+            ~descr:"Capture length (or whole packets)."
             ~getter:(fun () ->
                 match recorder.caplen with None -> `Null
                 | Some i -> `Int i) ;
@@ -1482,7 +1484,7 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
             ~getter:(fun () -> `String portal.filter)
             ~setter:(fun v -> portal.filter <- to_string v) ;
         property "caplen" ~kind:(Optional (IRange (1, 65535))) ~units:"bytes"
-            ~descr:"Capture length (or interface MTU)."
+            ~descr:"Capture length (or a whole frame at the interface MTU)."
             ~getter:(fun () ->
                 match portal.caplen with None -> `Null
                 | Some i -> `Int i)

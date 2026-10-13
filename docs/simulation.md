@@ -279,7 +279,7 @@ is handed TCP segments far larger than the MTU. `--portals=veth` turns both off
 | --- | --- | --- | --- |
 | `promisc` | bool | `true` | |
 | `filter` | string | `""` | pcap filter for what to capture. |
-| `caplen` | optional 1…65535 | `null` | Defaults to the interface MTU. |
+| `caplen` | optional 1…65535 | `null` | Defaults to a whole frame at the interface MTU: the MTU plus 18 bytes, for the Ethernet header and a VLAN tag. |
 
 ### recorder
 
