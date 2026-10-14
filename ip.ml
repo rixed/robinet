@@ -477,7 +477,7 @@ module Cidr = struct
         fun (ip : Addr.t) ->
             Addr.length ip = len &&
             let ip_hi = takebits width (Addr.to_bitstring ip) in
-            Bitstring.equals net_hi ip_hi
+            bits_equal net_hi ip_hi
     (*$= mem & ~printer:string_of_bool
       true  (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.0"))
       true  (mem (of_string "192.168.10.0/28") (Addr.of_string "192.168.10.1"))

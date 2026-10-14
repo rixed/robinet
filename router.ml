@@ -115,7 +115,8 @@ struct
 
     let cidr_mem_rev ip (_, f) = f ip
 
-    (** Test an incoming packet against a route, but for its destination. *)
+    (** Test an incoming packet against a route, considering all fields but for
+     * its destination. *)
     let test_but_dst t ifn src_opt proto_opt src_port_opt dst_port_opt =
         test_opt t.in_iface (=) ifn &&
         test_opt t.src_mask cidr_mem_rev src_opt &&

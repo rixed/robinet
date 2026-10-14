@@ -157,7 +157,7 @@ module Addr = struct
      * using the built-in [=] operator, here is a dedicated comparison
      * operator for addresses. *)
     let eq (a : t) (b : t) =
-        Bitstring.equals (a :> bitstring) (b :> bitstring)
+        bits_equal (a :> bitstring) (b :> bitstring)
 
     let is_broadcast = eq broadcast
 
@@ -725,8 +725,8 @@ struct
         { addr : bitstring ; netmask : bitstring }
 
     let my_address_equal a1 a2 =
-        Bitstring.equals a1.addr a2.addr &&
-        Bitstring.equals a2.netmask a2.netmask
+        bits_equal a1.addr a2.addr &&
+        bits_equal a1.netmask a2.netmask
 
     let make_my_address ?(netmask=Ip.Addr.(to_bitstring zero)) addr =
         { addr ; netmask }
@@ -1062,7 +1062,7 @@ struct
             | [] -> failwith "No address to use as sender proto addr for ARP"
             | a :: _ -> Ok (arp_resolve_ipv4 st bits a.addr target_ip) in
         match Pdu.extract_dst_proto st.proto bits with
-        | Ok dst when Bitstring.equals dst broadcast_bits ->
+        | Ok dst when bits_equal dst broadcast_bits ->
             Ok (Dst Addr.broadcast)
         | Ok dst when State.on_my_subnet st dst ->
             Log.(log st.iface.widget.logger Debug (lazy "Same network as me, sending directly")) ;
@@ -1141,7 +1141,7 @@ struct
                                 merge_flag := true ;
                                 BitHash.replace st.arp_cache arp.sender_proto (Some sender_hw)
                             ) else if st.accept_gratuitous_arp &&
-                                      Bitstring.equals arp.sender_proto
+                                      bits_equal arp.sender_proto
                                                        arp.target_proto then (
                                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...learning %s->%s from a gratuitous ARP" (hexstring_of_bitstring arp.sender_proto) (Addr.to_string sender_hw)))) ;
                                 merge_flag := true ;
@@ -1154,7 +1154,7 @@ struct
                                     arp.sender_hw arp.sender_proto |>
                                 Arp.Pdu.pack |>
                                 send st Proto.arp sender_hw in
-                            if List.exists (fun my_addr -> Bitstring.equals arp.target_proto my_addr.State.addr) st.my_addresses then (
+                            if List.exists (fun my_addr -> bits_equal arp.target_proto my_addr.State.addr) st.my_addresses then (
                                 Log.(log st.iface.widget.logger Debug (lazy "...It's about me!!")) ;
                                 if not !merge_flag then (
                                     BitHash.add st.arp_cache arp.sender_proto (Some sender_hw) ;

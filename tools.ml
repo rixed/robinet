@@ -85,6 +85,38 @@ let concat bss =
     Bitstring.equals (concat bss) (Bitstring.concat bss))
 *)
 
+let is_byte_aligned (_, off, len) = off land 7 = 0 && len land 7 = 0
+
+(* Whether the [n] bytes from [o1] in [d1] and from [o2] in [d2] are equal. *)
+let rec bytes_equal d1 o1 d2 o2 n =
+    if n >= 2 then
+        Stdlib.Bytes.get_uint16_ne d1 o1 = Stdlib.Bytes.get_uint16_ne d2 o2 &&
+        bytes_equal d1 (o1 + 2) d2 (o2 + 2) (n - 2)
+    else
+        n = 0 || Stdlib.Bytes.get_uint8 d1 o1 = Stdlib.Bytes.get_uint8 d2 o2
+
+(** Same as [Bitstring.equals], which compares the underlying buffers with the
+ * polymorphic [=] before comparing the bits. *)
+let bits_equal ((d1, o1, l1) as a) ((d2, o2, l2) as b) =
+    l1 = l2 && (
+        (d1 == d2 && o1 = o2) ||
+        if is_byte_aligned a && is_byte_aligned b then
+            bytes_equal d1 (o1 lsr 3) d2 (o2 lsr 3) (l1 lsr 3)
+        else
+            Bitstring.compare a b = 0)
+(*$Q bits_equal
+  Q.(pair (pair string_small small_nat) (pair string_small small_nat)) \
+    (fun ((s1, k1), (s2, k2)) -> \
+      let sub s k = let b = bitstring_of_string s in \
+                    let len = bitstring_length b in \
+                    Bitstring.subbitstring b (min len k) (len - min len k) in \
+      let a = sub s1 k1 and b = sub s2 k2 in \
+      let shifted = Bitstring.subbitstring \
+        (Bitstring.concat [ zeroes_bitstring k2 ; a ]) k2 (bitstring_length a) in \
+      bits_equal a b = Bitstring.equals a b && \
+      bits_equal a (concat [ a ]) && bits_equal a shifted)
+*)
+
 let takebytes n bs = takebits (n lsl 3) bs
 
 let extendbytes n bs =
@@ -391,6 +423,12 @@ let all_bits n =
   [ 1 ; 1 ]         (all_bits 1 /@ bitstring_length |> List.of_enum)
 *)
 
+let rec bytes_match_mask dm om da oa db ob n =
+    n = 0 || (
+        let m = Stdlib.Bytes.get_uint8 dm om in
+        Stdlib.Bytes.get_uint8 da oa land m = Stdlib.Bytes.get_uint8 db ob land m &&
+        bytes_match_mask dm (om + 1) da (oa + 1) db (ob + 1) (n - 1))
+
 (** Whether [a] and [b] agree everywhere [mask] has a bit set -- all three
  * being of the same length. Which is what asking whether two addresses are on
  * the same network comes down to. *)
@@ -398,6 +436,10 @@ let match_mask mask a b =
     let len = bitstring_length mask in
     bitstring_length a = len &&
     bitstring_length b = len &&
+    if is_byte_aligned mask && is_byte_aligned a && is_byte_aligned b then
+        let (dm, om, _), (da, oa, _), (db, ob, _) = mask, a, b in
+        bytes_match_mask dm (om lsr 3) da (oa lsr 3) db (ob lsr 3) (len lsr 3)
+    else
     let a = string_of_bitstring a
     and b = string_of_bitstring b
     and m = string_of_bitstring mask in
@@ -526,10 +568,29 @@ let str_all_matches str =
          str_all_matches str)
 *)
 
+(* Equal bitstrings must hash the same whatever their alignment, hence the
+ * copy of unaligned ones, which [string_of_bitstring] zero pads. *)
+let hash_bits ((d, o, l) as t) =
+    let rec fold d o n h =
+        if n = 0 then h lxor (h lsr 29) else
+        fold d (o + 1) (n - 1)
+             ((h lxor Stdlib.Bytes.get_uint8 d o) * 0x100000001b3) in
+    if is_byte_aligned t then fold d (o lsr 3) (l lsr 3) l
+    else
+        let s = Stdlib.Bytes.unsafe_of_string (string_of_bitstring t) in
+        fold s 0 (Stdlib.Bytes.length s) l
+(*$Q hash_bits
+  Q.(pair string_small small_nat) (fun (s, k) -> \
+    let a = bitstring_of_string s in \
+    let shifted = Bitstring.subbitstring \
+      (Bitstring.concat [ zeroes_bitstring k ; a ]) k (bitstring_length a) in \
+    hash_bits a = hash_bits shifted)
+*)
+
 module HashedBits : Hashtbl.HashedType with type t = bitstring = struct
     type t = bitstring
-    let equal = Bitstring.equals
-    let hash t = Hashtbl.hash (string_of_bitstring t)
+    let equal = bits_equal
+    let hash = hash_bits
 end
 
 module BitHash = Hashtbl.Make (HashedBits)
