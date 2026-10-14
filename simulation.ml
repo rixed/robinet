@@ -793,12 +793,19 @@ let date_of (t : t) (ts : Time.t) =
 let unpaused_wall_clock (t : t) =
     of_wall_clock t (Wall.now ())
 
-let synch_locked (t : t) =
+(* [upto], if given, caps the clock: see [next_event]. *)
+let synch_locked ?upto (t : t) =
     assert t.realtime (* Synch with real clock in non-realtime mode!? *) ;
     (* While paused, time must stand still: the pause duration has not been
-     * accounted into paused_total yet. *)
+     * accounted into paused_total yet.
+     * Nor may it go backward: an event may have run a little early (see
+     * [next_event]), and what is scheduled now must not come before it. *)
     if not t.paused then (
-        t.now := unpaused_wall_clock t ;
+        let wall = unpaused_wall_clock t in
+        let wall = match upto with
+            | Some upto when Time.compare upto wall < 0 -> upto
+            | _ -> wall in
+        if Time.compare wall (now t) > 0 then t.now := wall ;
         if debug then Printf.printf "Clock: synch: set current time to %s\n%!" (Time.to_string (now t))
     )
 
@@ -1291,7 +1298,11 @@ let one_ps = Interval.o 1
 
 (** Will process the next event *)
 let next_event (t : t) =
-    let min_ts_for_sleep = Interval.msec 10. in
+    (* How early, by the wall clock, an event may run rather than be slept
+     * for. Measured against the wall clock and not the simulated one, which
+     * running an event moves to its date: so measured, a chain of events each
+     * due a little after the previous one would run all at once. *)
+    let min_ts_for_sleep = Interval.usec 50. in
     (* Time to sleep while waiting for an event to be added in the queue.
      * Must be > min_ts_for_sleep *)
     let max_sleep_time = Interval.sec 3. in
@@ -1318,19 +1329,27 @@ let next_event (t : t) =
                         match Events.next_ts t.events with
                         | exception Not_found -> Time.add (now t) max_sleep_time
                         | ts -> ts in
-                let wait_time = Time.diff until (now t) in
+                (* [until] names an instant of this simulation, which is
+                   not where the wall clock is unless the two were never
+                   parted (see [make_realtime]). *)
+                let wall_until = to_wall_clock t until in
+                let wait_time = Wall.diff wall_until (Wall.now ()) in
                 if not (may_dispatch t) ||
                    Interval.compare wait_time min_ts_for_sleep > 0 then (
                     if debug then Printf.printf "Clock: next_event: waiting until %s since we're too early\n%!" (Time.to_string until) ;
-                    (* [until] names an instant of this simulation, which is
-                       not where the wall clock is unless the two were never
-                       parted (see [make_realtime]). *)
-                    wait_on_cond ~until:(to_wall_clock t until) t ;
+                    wait_on_cond ~until:wall_until t ;
                     (* If we timed out we need to wait longer.
                      * If we have been signaled we still need to wait for the
-                     * next event, which may be a different one. *)
-                    (* Because of the loop condition above: *)
-                    synch_locked t ;
+                     * next event, which may be a different one.
+                     * No further than the next event, though: waking up
+                     * late is no reason to date it, and everything that
+                     * follows from it, any later. *)
+                    let upto =
+                        if may_dispatch t then
+                            try Some (Events.next_ts t.events)
+                            with Not_found -> None
+                        else None in
+                    synch_locked ?upto t ;
                     t.awake_since <- now t ;
                     if t.continue then wait_loop ()
                 ) in
@@ -1451,6 +1470,21 @@ let run (t : t) wait =
         next_event t ;
         Thread.yield ()
     done
+
+(* An event due shortly after the previous one waits for it all the same: *)
+(*$R run
+  let t = make "chain" in
+  let left = ref 10 in
+  let rec hop () =
+    decr left ;
+    if !left > 0 then delay t.root.power (Clock.Interval.msec 5.) hop () in
+  let t0 = Unix.gettimeofday () in
+  delay t.root.power (Clock.Interval.msec 5.) hop () ;
+  run t false ;
+  let took = Unix.gettimeofday () -. t0 in
+  assert_bool (Printf.sprintf "ten 5ms hops took %.1fms" (took *. 1e3))
+              (took >= 0.0495)
+ *)
 
 (** Run [f] with those signals stopping every simulation, then put the previous
  * handlers back.
