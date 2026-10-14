@@ -94,51 +94,50 @@ end
 
 module Params =
 struct
-    (* There are smarter representations but let's see if we need them *)
-    type t = (string * Param.t) list
+    (* Sorted by name. Hashed once when made, as it is looked up on every
+     * update of a metric: *)
+    type t = { assoc : (string * Param.t) list ; hash : int }
 
-    let empty = []
+    let of_sorted assoc =
+        { assoc ;
+          hash = List.fold_left (fun h (n, v) ->
+                     h * 31 + Hashtbl.hash n + Param.hash v
+                 ) 0 assoc land max_int }
 
-    let singleton n v = [ n, v ]
+    let empty = of_sorted []
 
-    let compare =
+    let singleton n v = of_sorted [ n, v ]
+
+    (* Compare [t1] and [t2]'s association lists *)
+    let compare t1 t2 =
         List.compare (fun (n1, v1) (n2, v2) ->
             match Stdlib.String.compare n1 n2 with
             | 0 -> Param.compare v1 v2
-            | c -> c)
+            | c -> c) t1.assoc t2.assoc
 
-    let equal t1 t2 = compare t1 t2 = 0
+    let equal t1 t2 =
+        t1 == t2 || t1.hash = t2.hash && compare t1 t2 = 0
 
-    let hash t =
-        List.fold_left (fun h (n, v) ->
-            h * 31 + Hashtbl.hash n + Param.hash v
-        ) 0 t land max_int
+    let hash t = t.hash
 
     let cmp_param (n1, _) (n2, _) = String.compare n1 n2
 
     let make assoc_lst =
-        List.fast_sort cmp_param assoc_lst
+        of_sorted (List.fast_sort cmp_param assoc_lst)
 
-    let rec find n = function
-        | [] ->
-            raise Not_found
-        | (n', v) :: rest ->
-            let c = String.compare n n' in
-            if c < 0 then raise Not_found else
-            if c = 0 then v else
-            find n rest
-
-    let rec (+::) (n, _ as p) = function
-        | [] ->
-            [ p ]
-        | (n', _ as p') :: rest ->
-            let c = String.compare n n' in
-            if c < 0 then p :: rest else
-            if c = 0 then invalid_arg ("Params.cons: "^ n ^" added twice")
-            else p' :: (p +:: rest)
+    let find n t =
+        let rec loop = function
+            | [] ->
+                raise Not_found
+            | (n', v) :: rest ->
+                let c = String.compare n n' in
+                if c < 0 then raise Not_found else
+                if c = 0 then v else
+                loop rest in
+        loop t.assoc
 
     let add t1 t2 =
-        List.merge cmp_param t1 t2
+        of_sorted (List.merge cmp_param t1.assoc t2.assoc)
 
     let has_param n t =
         try ignore (find n t) ; true with Not_found -> false
@@ -146,10 +145,10 @@ struct
     let print oc t =
         List.print ~first:"" ~sep:"|" ~last:""
             (fun oc (n, v) -> Printf.fprintf oc "%S:%s" n (Param.to_string v))
-            oc t
+            oc t.assoc
 
     let to_yojson t =
-        `Assoc (List.map (fun (n, v) -> n, Param.to_yojson v) t)
+        `Assoc (List.map (fun (n, v) -> n, Param.to_yojson v) t.assoc)
 end
 
 (* A table keyed by params, hashed and compared as such: *)
@@ -622,7 +621,7 @@ let has_data metric =
 let dir_params ?port dir =
     let dir = "dir", Param.String dir in
     match port with
-    | None -> [ dir ]
+    | None -> Params.of_sorted [ dir ]
     | Some p -> Params.make [ dir ; "port", Param.Int p ]
 
 (* Some commont params: *)
