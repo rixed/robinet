@@ -192,6 +192,7 @@ and Time : sig
     val sub : t -> Interval.t -> t
     val diff : t -> t -> Interval.t
     val compare : t -> t -> int
+    val max : t -> t -> t
     val is_after : t -> t -> bool
     val trunc : t -> Interval.t -> t
     (* How long this program has been running, used as default clock by the
@@ -234,6 +235,8 @@ end = struct
     let diff (a : t) (b : t) = Interval.o ((a :> int) - (b :> int))
 
     let compare a b = Int.compare (a : t :> int) (b : t :> int)
+
+    let max a b = if compare a b >= 0 then a else b
 
     let is_after a b = compare a b >= 0
 

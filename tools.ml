@@ -595,6 +595,14 @@ end
 
 module BitHash = Hashtbl.Make (HashedBits)
 
+(* The generic [Hashtbl] compares keys with the polymorphic [=], which for
+ * strings costs more than [String.equal]. The hash is the same. *)
+module StrHash = Hashtbl.Make (struct
+    type t = string
+    let equal = Stdlib.String.equal
+    let hash = Hashtbl.hash
+end)
+
 let hash_find_or_insert h k f =
     try Hashtbl.find h k
     with Not_found -> (

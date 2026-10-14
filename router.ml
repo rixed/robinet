@@ -236,7 +236,7 @@ struct
     type t = { routes : Route.t list ; (** What it was made of *)
                rows : Route.t array ;
                any_dst : int list ; (** Rows with no dst mask *)
-               by_width : ((int * int) * (string, int list) Hashtbl.t) list }
+               by_width : ((int * int) * int list StrHash.t) list }
 
     (* The first [width] bits of [addr], the rest of their byte zeroed: *)
     let prefix addr width =
@@ -263,10 +263,10 @@ struct
                 let h =
                     try List.assoc (len, width) !by_width
                     with Not_found ->
-                        let h = Hashtbl.create 16 in
+                        let h = StrHash.create 16 in
                         by_width := ((len, width), h) :: !by_width ;
                         h in
-                Hashtbl.modify_def [] (prefix net width) (List.cons i) h
+                StrHash.modify_def [] (prefix net width) (List.cons i) h
         ) rows ;
         { routes ; rows ; any_dst = !any_dst ; by_width = !by_width }
 
@@ -280,7 +280,7 @@ struct
             List.fold_left (fun acc ((len, width), h) ->
                 if len <> Bytes.length addr then acc else
                 List.rev_append
-                    (Hashtbl.find_default h (prefix addr width) []) acc
+                    (StrHash.find_default h (prefix addr width) []) acc
             ) t.any_dst t.by_width |>
             List.sort Int.compare
 
@@ -417,7 +417,7 @@ let buffer_reserved t =
 (* What a port takes from the shared pool when [backlog] bytes are queued on
  * it: *)
 let shared_use ~reserved backlog =
-    max 0 (backlog - reserved)
+    Stdlib.Int.max 0 (backlog - reserved)
 
 (* RAM used by the queued frames and the reserves, [reserved] to each port.
  * The queues being those of the Eth interfaces, this is never out of step
@@ -438,7 +438,7 @@ let rec refresh_buffered t () =
     Metric.Gauge.set t.buffered ~now (buffer_used t) ;
     let drained_at =
         Array.fold_left (fun m iface ->
-            max m iface.eth.iface.tx_busy_until
+            Clock.Time.max m iface.eth.iface.tx_busy_until
         ) now t.ifaces in
     t.refresh_pending <- Clock.Time.compare drained_at now > 0 ;
     if t.refresh_pending then
