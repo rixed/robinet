@@ -106,81 +106,107 @@ let once = { delay = Interval.zero ; repeat_after = None ; times = None }
  * They are scheduled at a particular time (relative to the simulation they
  * belong to).
  *
- * The queue is a binary heap of buckets, each holding what is due at one
- * instant in the order it was scheduled (two buckets may share an instant, and
- * then come out in no particular order). What is due now, which is what most
- * scheduling asks for, skips the heap and goes after what is being run. *)
+ * The queue is a binary heap of events, kept apart in a pool of their own so
+ * that sifting moves nothing but ints, by which neither the GC nor a pointer
+ * dereference has to be bothered (two events due at the same instant come
+ * out in no particular order). What is due now, which is what most scheduling
+ * asks for, skips the heap and goes after what is being run. *)
 module Events =
 struct
     (*$< Events *)
-    type 'a bucket =
-        { ts : Time.t ; first : 'a ; mutable more : 'a list (* latest first *) }
-
     type 'a t =
-        { (* No bucket is due after its children, [heap.(2i+1)] and
-           * [heap.(2i+2)]. Slots from [len] on are garbage. *)
-          mutable heap : 'a bucket array ;
+        { (* No event is due after its children, at [2i+1] and [2i+2]: the one
+           * at [i] is [pool.(slots.(i))], due at [tss.(i)]. Slots from [len]
+           * on are garbage. *)
+          mutable tss : Time.t array ;
+          mutable slots : int array ;
           mutable len : int ;
-          (* What is left to run of the bucket being run, in order: *)
+          (* Where every event of the heap is, and garbage elsewhere: *)
+          mutable pool : 'a array ;
+          (* The indices of the pool that the heap does not use, the first
+           * [num_free] of them: *)
+          mutable free : int array ;
+          mutable num_free : int ;
+          (* What is left to run of what was due now, in order: *)
           mutable batch : 'a list ;
           (* What was scheduled for now since, latest first: *)
           mutable now_events : 'a list ;
-          (* When the bucket being run was due: *)
+          (* When the event taken from the heap last was due: *)
           mutable current_ts : Time.t }
 
     let make () =
-        { heap = [||] ; len = 0 ; batch = [] ; now_events = [] ;
+        { tss = [||] ; slots = [||] ; len = 0 ; pool = [||] ; free = [||] ;
+          num_free = 0 ; batch = [] ; now_events = [] ;
           current_ts = Time.zero }
 
     let clear q =
-        q.heap <- [||] ; q.len <- 0 ; q.batch <- [] ; q.now_events <- []
+        q.tss <- [||] ; q.slots <- [||] ; q.len <- 0 ; q.pool <- [||] ;
+        q.free <- [||] ; q.num_free <- 0 ; q.batch <- [] ; q.now_events <- []
 
     let is_empty q =
         match q.batch, q.now_events with
         | [], [] -> q.len = 0
         | _ -> false
 
-    let earlier b1 b2 = (b1.ts : Time.t :> int) < (b2.ts : Time.t :> int)
+    let earlier (a : Time.t) (b : Time.t) = (a :> int) < (b :> int)
 
-    (* Fill the hole at [i] with [b] or one of its ancestors: *)
-    let rec sift_up h i b =
-        if i = 0 then h.(0) <- b else
+    (* Fill the hole at [i] with slot [s], due at [ts], or one of its
+     * ancestors: *)
+    let rec sift_up tss slots i ts s =
+        if i = 0 then (
+            tss.(0) <- ts ; slots.(0) <- s
+        ) else
         let p = (i - 1) / 2 in
-        if earlier b h.(p) then (
-            h.(i) <- h.(p) ;
-            sift_up h p b
-        ) else h.(i) <- b
+        if earlier ts tss.(p) then (
+            tss.(i) <- tss.(p) ; slots.(i) <- slots.(p) ;
+            sift_up tss slots p ts s
+        ) else (
+            tss.(i) <- ts ; slots.(i) <- s)
 
-    (* Fill the hole at [i] with [b] or one of its descendants: *)
-    let rec sift_down h len i b =
+    (* Fill the hole at [i] with slot [s], due at [ts], or one of its
+     * descendants: *)
+    let rec sift_down tss slots len i ts s =
         let l = 2 * i + 1 in
-        if l >= len then h.(i) <- b else
-        let c = if l + 1 < len && earlier h.(l + 1) h.(l) then l + 1 else l in
-        if earlier h.(c) b then (
-            h.(i) <- h.(c) ;
-            sift_down h len c b
-        ) else h.(i) <- b
+        if l >= len then (
+            tss.(i) <- ts ; slots.(i) <- s
+        ) else
+        let c =
+            if l + 1 < len && earlier tss.(l + 1) tss.(l) then l + 1 else l in
+        if earlier tss.(c) ts then (
+            tss.(i) <- tss.(c) ; slots.(i) <- slots.(c) ;
+            sift_down tss slots len c ts s
+        ) else (
+            tss.(i) <- ts ; slots.(i) <- s)
+
+    (* Room for twice as many events, [x] being any of them: *)
+    let grow q x =
+        let size = Array.length q.pool in
+        let new_size = max 64 (2 * size) in
+        let resize a init =
+            let a' = Array.make new_size init in
+            Array.blit a 0 a' 0 q.len ;
+            a' in
+        q.tss <- resize q.tss Time.zero ;
+        q.slots <- resize q.slots 0 ;
+        let pool = Array.make new_size x in
+        Array.blit q.pool 0 pool 0 size ;
+        q.pool <- pool ;
+        (* The pool was full: *)
+        q.free <- Array.init new_size (fun i -> new_size - 1 - i) ;
+        q.num_free <- new_size - size
 
     (* Schedule [x] at [ts], which is after now: *)
     let push q ts x =
-        let b = { ts ; first = x ; more = [] } in
-        if q.len = Array.length q.heap then (
-            let heap = Array.make (max 64 (2 * q.len)) b in
-            Array.blit q.heap 0 heap 0 q.len ;
-            q.heap <- heap) ;
-        sift_up q.heap q.len b ;
+        if q.num_free = 0 then grow q x ;
+        q.num_free <- q.num_free - 1 ;
+        let s = q.free.(q.num_free) in
+        q.pool.(s) <- x ;
+        sift_up q.tss q.slots q.len ts s ;
         q.len <- q.len + 1
 
     (* Schedule [x] now, after everything already due: *)
     let push_now q x =
         q.now_events <- x :: q.now_events
-
-    let pop_bucket q =
-        let h = q.heap in
-        let top = h.(0) in
-        q.len <- q.len - 1 ;
-        if q.len > 0 then sift_down h q.len 0 h.(q.len) ;
-        top
 
     (** The next event to run, which [current_ts] then says when it was due.
      * Raises [Not_found] if there is none. *)
@@ -201,19 +227,23 @@ struct
                 | [] -> assert false)
             | [] ->
                 if q.len = 0 then raise Not_found ;
-                let b = pop_bucket q in
-                q.current_ts <- b.ts ;
-                (match b.more with
-                | [] -> ()
-                | more -> q.batch <- List.rev more) ;
-                b.first
+                let tss = q.tss and slots = q.slots in
+                let s = slots.(0) in
+                q.current_ts <- tss.(0) ;
+                q.free.(q.num_free) <- s ;
+                q.num_free <- q.num_free + 1 ;
+                let len = q.len - 1 in
+                q.len <- len ;
+                if len > 0 then
+                    sift_down tss slots len 0 tss.(len) slots.(len) ;
+                q.pool.(s)
 
     let current_ts q = q.current_ts
 
     (** When the next event is due. Raises [Not_found] if there is none. *)
     let next_ts q =
         match q.batch, q.now_events with
-        | [], [] -> if q.len = 0 then raise Not_found else q.heap.(0).ts
+        | [], [] -> if q.len = 0 then raise Not_found else q.tss.(0)
         | _ -> q.current_ts
 
     let fold f q acc =
@@ -221,8 +251,7 @@ struct
         let acc = List.fold_left (fun acc x -> f x acc) acc q.now_events in
         let acc = ref acc in
         for i = 0 to q.len - 1 do
-            let b = q.heap.(i) in
-            acc := List.fold_left (fun acc x -> f x acc) (f b.first !acc) b.more
+            acc := f q.pool.(q.slots.(i)) !acc
         done ;
         !acc
 
@@ -236,26 +265,19 @@ struct
     let filter keep q =
         q.batch <- List.filter keep q.batch ;
         q.now_events <- List.filter keep q.now_events ;
-        let h = q.heap and n = ref 0 in
+        let tss = q.tss and slots = q.slots and n = ref 0 in
         for i = 0 to q.len - 1 do
-            let b = h.(i) in
-            let more = List.filter keep b.more in
-            let kept =
-                if keep b.first then (
-                    b.more <- more ;
-                    Some b
-                ) else
-                    match List.rev more with
-                    | [] -> None
-                    | first :: rest ->
-                        Some { ts = b.ts ; first ; more = List.rev rest } in
-            match kept with
-            | Some b -> h.(!n) <- b ; incr n
-            | None -> ()
+            let s = slots.(i) in
+            if keep q.pool.(s) then (
+                tss.(!n) <- tss.(i) ; slots.(!n) <- s ;
+                incr n
+            ) else (
+                q.free.(q.num_free) <- s ;
+                q.num_free <- q.num_free + 1)
         done ;
         q.len <- !n ;
         for i = q.len / 2 - 1 downto 0 do
-            sift_down h q.len i h.(i)
+            sift_down tss slots q.len i tss.(i) slots.(i)
         done
     (*$inject
       let drain q =

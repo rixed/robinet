@@ -169,10 +169,18 @@ let with_lock (t : t) f x =
          * it so. Taking the mutex again would deadlock. *)
         f x
     | _ ->
-        BatMutex.synchronize ~lock:t.lock (fun x ->
-            t.lock_owner <- Some me ;
-            finally (fun () -> t.lock_owner <- None) f x
-        ) x
+        Mutex.lock t.lock ;
+        t.lock_owner <- Some me ;
+        match f x with
+        | res ->
+            t.lock_owner <- None ;
+            Mutex.unlock t.lock ;
+            res
+        | exception e ->
+            let bt = Printexc.get_raw_backtrace () in
+            t.lock_owner <- None ;
+            Mutex.unlock t.lock ;
+            Printexc.raise_with_backtrace e bt
 
 let signal_me (t : t) () =
     Condition.signal t.cond
@@ -1296,22 +1304,23 @@ let make =
 
 let one_ps = Interval.o 1
 
-(** Will process the next event *)
-let next_event (t : t) =
-    (* How early, by the wall clock, an event may run rather than be slept
-     * for. Measured against the wall clock and not the simulated one, which
-     * running an event moves to its date: so measured, a chain of events each
-     * due a little after the previous one would run all at once. *)
-    let min_ts_for_sleep = Interval.usec 50. in
-    (* Time to sleep while waiting for an event to be added in the queue.
-     * Must be > min_ts_for_sleep *)
-    let max_sleep_time = Interval.sec 3. in
+(* How early, by the wall clock, an event may run rather than be slept
+ * for. Measured against the wall clock and not the simulated one, which
+ * running an event moves to its date: so measured, a chain of events each
+ * due a little after the previous one would run all at once. *)
+let min_ts_for_sleep = Interval.usec 50.
+
+(* Time to sleep while waiting for an event to be added in the queue.
+ * Must be > min_ts_for_sleep *)
+let max_sleep_time = Interval.sec 3.
+
+(* Process the next event, with the lock held. *)
+let next_event_locked (t : t) =
     let run_first_event =
         if t.realtime then (
             (* Note: In realtime, other threads may add new events while we are
              * sleeping, so a condition variable is used (instead of a mere
              * Unix.sleep). *)
-            with_lock t (fun () ->
             (* Wait until there is an event to process now: *)
             let rec wait_loop () =
                 if t.steps > 0 then
@@ -1367,94 +1376,93 @@ let next_event (t : t) =
                     let late = Time.diff (unpaused_wall_clock t) ts in
                     set_late t (if Interval.compare late Interval.zero > 0
                                 then late else Interval.zero)) ;
-            t.continue && may_dispatch t) ()
+            t.continue && may_dispatch t
         ) else ( (* not realtime *)
-            with_lock t (fun () ->
-                if not (may_dispatch t) then (
-                    (* Paused: block until someone resumes or steps us, rather
-                     * than spinning. *)
-                    wait_on_cond t ;
-                    false
-                ) else if Events.is_empty t.events then (
-                    if debug then Printf.printf "Clock: no more events\n%!" ;
-                    (* Nothing more will come from a clock of our own, but
-                     * another thread may still feed us, so wait to be signalled
-                     * instead of spinning: *)
-                    wait_on_cond t ;
-                    (* Having nothing to do is not falling behind, and the wall
-                       clock moved while this one could not: simulated time
-                       only advances by dispatching, so an empty queue leaves
-                       the two drifting apart for as long as it stays empty.
-                       Measured from the anchor as it stands, everything a
-                       thread feeds us next is already overdue by the whole of
-                       that wait, and would be dispatched back to back until
-                       the simulation had made the time up -- an hour idle, and
-                       the next hour of events at once.
+            if not (may_dispatch t) then (
+                (* Paused: block until someone resumes or steps us, rather
+                 * than spinning. *)
+                wait_on_cond t ;
+                false
+            ) else if Events.is_empty t.events then (
+                if debug then Printf.printf "Clock: no more events\n%!" ;
+                (* Nothing more will come from a clock of our own, but
+                 * another thread may still feed us, so wait to be signalled
+                 * instead of spinning: *)
+                wait_on_cond t ;
+                (* Having nothing to do is not falling behind, and the wall
+                   clock moved while this one could not: simulated time
+                   only advances by dispatching, so an empty queue leaves
+                   the two drifting apart for as long as it stays empty.
+                   Measured from the anchor as it stands, everything a
+                   thread feeds us next is already overdue by the whole of
+                   that wait, and would be dispatched back to back until
+                   the simulation had made the time up -- an hour idle, and
+                   the next hour of events at once.
 
-                       So the pace starts again from here, exactly as it does
-                       when a pause ends. *)
-                    reanchor t ;
+                   So the pace starts again from here, exactly as it does
+                   when a pause ends. *)
+                reanchor t ;
+                false
+            ) else match t.speed_ratio with
+            | None ->
+                (* As fast as it can. *)
+                true
+            | Some _ when t.steps > 0 ->
+                (* A step is asked for now: pacing it would defeat it. *)
+                true
+            | Some ratio ->
+                let ts = Events.next_ts t.events in
+                let due = due_at t ratio ts
+                and wall = Wall.now () in
+                if Wall.compare wall due >= 0 then (
+                    (* Due already: run it, and say how far behind we are. *)
+                    set_late t (Wall.diff wall due) ;
+                    true
+                ) else (
+                    t.late <- Interval.zero ;
+                    (* Sleeping on the condition rather than on the clock:
+                     * whoever changes the speed, resumes or adds an event
+                     * meanwhile wakes us to reconsider. *)
+                    wait_on_cond ~until:due t ;
                     false
-                ) else match t.speed_ratio with
-                | None ->
-                    (* As fast as it can. *)
-                    true
-                | Some _ when t.steps > 0 ->
-                    (* A step is asked for now: pacing it would defeat it. *)
-                    true
-                | Some ratio ->
-                    let ts = Events.next_ts t.events in
-                    let due = due_at t ratio ts
-                    and wall = Wall.now () in
-                    if Wall.compare wall due >= 0 then (
-                        (* Due already: run it, and say how far behind we are. *)
-                        set_late t (Wall.diff wall due) ;
-                        true
-                    ) else (
-                        t.late <- Interval.zero ;
-                        (* Sleeping on the condition rather than on the clock:
-                         * whoever changes the speed, resumes or adds an event
-                         * meanwhile wakes us to reconsider. *)
-                        wait_on_cond ~until:due t ;
-                        false
-                    )) ()
+                )
         ) in
     if run_first_event then (
         (* We have some work to do *)
-        let f =
-            with_lock t (fun () ->
-                match Events.next t.events with
-                | exception Not_found -> None
-                | _power, f ->
-                    (* powering down a power source clears its events (or a
-                     * rapid power cycle would leave them), so no need to check
-                     * [power] here *)
-                    (* An instant to each event, so that everything that
-                     * happens can be ordered by time: *)
-                    let ts = Events.current_ts t.events in
-                    let ts =
-                        if (ts : Time.t :> int) > (now t :> int) then ts
-                        else Time.add (now t) one_ps in
-                    if debug then Printf.printf "Clock: next_event: executing since it's %s\n%!" (Time.to_string ts) ;
-                    t.now := ts ;
-                    (* Before the handler runs, so that a snapshot holds
-                     * everything that happened strictly before [ts] and
-                     * nothing that happens at it. *)
-                    sample_metrics_if_due t ;
-                    dispatched t ;
-                    Some f) () in
-        Option.may (fun f ->
-            (* Held for the whole dispatch. The handler will call back into
-             * [now] and [at], which want the lock too and get it for free,
-             * since it is re-entrant and already ours. *)
-            with_lock t (fun () ->
-                try f ()
-                with exn ->
-                    Printf.printf "Clock: event handler triggered an exception : %a\n%s%!"
-                        Printexc.print exn
-                        (Printexc.get_backtrace ())) ()
-        ) f
+        match Events.next t.events with
+        | exception Not_found -> ()
+        | _power, f ->
+            (* powering down a power source clears its events (or a
+             * rapid power cycle would leave them), so no need to check
+             * [power] here *)
+            (* An instant to each event, so that everything that
+             * happens can be ordered by time: *)
+            let ts = Events.current_ts t.events in
+            let ts =
+                if (ts : Time.t :> int) > (now t :> int) then ts
+                else Time.add (now t) one_ps in
+            if debug then Printf.printf "Clock: next_event: executing since it's %s\n%!" (Time.to_string ts) ;
+            t.now := ts ;
+            (* Before the handler runs, so that a snapshot holds
+             * everything that happened strictly before [ts] and
+             * nothing that happens at it. *)
+            sample_metrics_if_due t ;
+            dispatched t ;
+            (* The handler will call back into [now] and [at], which
+             * want the lock too and get it for free, since it is
+             * re-entrant and already ours. *)
+            (try f ()
+            with exn ->
+                Printf.printf "Clock: event handler triggered an exception : %a\n%s%!"
+                    Printexc.print exn
+                    (Printexc.get_backtrace ()))
     )
+
+(** Will process the next event. The lock is held from deciding whether there
+ * is one to run until it has run, so that no other thread changes the
+ * simulation in between. *)
+let next_event (t : t) =
+    with_lock t next_event_locked t
 
 (** [run true] will run forever while [run false] will return once no more
  * events are waiting.  If you choose to not run forever, beware that waiting
