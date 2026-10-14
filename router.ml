@@ -401,26 +401,34 @@ let actual_buffer_capacity t =
     | Some c -> c
     | None ->
         Array.fold_left (fun sum iface ->
-            sum + (max_backlog iface |? 0)
+            match max_backlog iface with
+            | Some m -> sum + m
+            | None -> sum
         ) 0 t.ifaces
 
-(* RAM reserved to each port alone: *)
+(* RAM reserved to each port alone, out of [capacity]: *)
+let reserved_of_capacity t capacity =
+    capacity / 3 / Array.length t.ifaces
+
 let buffer_reserved t =
-    actual_buffer_capacity t / 3 / Array.length t.ifaces
+    reserved_of_capacity t (actual_buffer_capacity t)
 
 (* What a port takes from the shared pool when [backlog] bytes are queued on
  * it: *)
 let shared_use ~reserved backlog =
     max 0 (backlog - reserved)
 
-(* RAM used by the queued frames and the reserves. The queues being those of
- * the Eth interfaces, this is never out of step with what they hold. *)
-let buffer_used t =
-    let reserved = buffer_reserved t in
+(* RAM used by the queued frames and the reserves, [reserved] to each port.
+ * The queues being those of the Eth interfaces, this is never out of step
+ * with what they hold. *)
+let buffer_used_with t reserved =
     Array.fold_left (fun sum iface ->
         let backlog = Eth.Iface.backlog iface.eth.iface in
         sum + reserved + shared_use ~reserved backlog
     ) 0 t.ifaces
+
+let buffer_used t =
+    buffer_used_with t (buffer_reserved t)
 
 (* Set [buffered] from the queues, then again when the last frame queued so
  * far has left, until all are empty. *)
@@ -442,14 +450,16 @@ let rec refresh_buffered t () =
 let buffer_alloc t n len =
     let iface = t.ifaces.(n) in
     let backlog = Eth.Iface.backlog iface.eth.iface in
-    let reserved = buffer_reserved t in
+    let capacity = actual_buffer_capacity t in
+    let reserved = reserved_of_capacity t capacity in
     let extra =
         shared_use ~reserved (backlog + len) - shared_use ~reserved backlog in
     let over_max =
         match max_backlog iface with
         | Some m -> backlog > 0 && backlog + len > m
         | None -> false in
-    if over_max || extra > actual_buffer_capacity t - buffer_used t then (
+    if over_max ||
+       extra > 0 && extra > capacity - buffer_used_with t reserved then (
         let now = Simulation.Widget.now t.widget in
         let params = Metric.dir_params ~port:n "tail-dropped" in
         Metric.Counter.inc t.tail_dropped ~now ~params ;
