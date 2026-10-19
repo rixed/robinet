@@ -774,6 +774,9 @@ struct
           mutable promisc : (bitstring -> unit) option ;
           rx_otherhost_dropped : Metric.Counter.t ;
           mutable do_proxy_arp : Arp.Pdu.t -> bool ;
+          (* Whether ARP requests for [my_addresses] are answered. Not when
+           * the iface is shared with the kernel. *)
+          mutable answer_arp : bool ;
           (* Whether an ARP announcing its own sender adds that sender to the
            * cache. Otherwise, as RFC 826 has it, only an ARP about this
            * adapter's own address adds its sender, and any other merely
@@ -847,13 +850,14 @@ struct
      * @param gateways list of [Gateeway.t]
      * @param promisc an optional function that will receive frames received but not destined to this TRX.
      * @param do_proxy_arp an optional function instructing the driver to perform proxy-arp on a give ARP request
+     * @param answer_arp whether to answer ARP requests for [my_addresses] (default: true)
      * @param proto the {!Proto} we want to transmit/receive.
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
     let make ?speeds ?full_duplex ?inter_frame_gap ?can_forward_after
              ?(mtu=1500) ?(delay=Interval.zero) ?(loss=0.)
              ?(mac=Addr.random ()) ?(gateways=[])
-             ?promisc ?(do_proxy_arp=(fun _ -> false))
+             ?promisc ?(do_proxy_arp=(fun _ -> false)) ?(answer_arp=true)
              ?(learn_neighbors_from_incoming=Learn.Never)
              ?(my_addresses=[]) ?(proto=Proto.ip4) ?(name="eth")
              ~parent ?power () =
@@ -867,7 +871,8 @@ struct
                        ?can_forward_after name in
         let t = {
             iface ; mac ; gateways ; proto ; mtu ; promisc ; do_proxy_arp ;
-            accept_gratuitous_arp = false ; learn_neighbors_from_incoming ;
+            answer_arp ; accept_gratuitous_arp = false ;
+            learn_neighbors_from_incoming ;
             rx_otherhost_dropped = Metric.Counter.make () ;
             recv = ignore_bits ~logger:iface.widget.logger ;
             my_addresses ; delay ; loss ; via = None ;
@@ -953,6 +958,10 @@ struct
                         only the ones that were asked for."
                 ~getter:(fun () -> `Bool t.accept_gratuitous_arp)
                 ~setter:(fun v -> t.accept_gratuitous_arp <- to_bool v) ;
+            property "answer ARP" ~kind:Bool
+                ~descr:"Answer the ARP requests for this adapter's addresses."
+                ~getter:(fun () -> `Bool t.answer_arp)
+                ~setter:(fun v -> t.answer_arp <- to_bool v) ;
             property "learn neighbors from incoming"
                 ~kind:(one_of (choices Learn.names))
                 ~descr:"Which senders of the IP packets received to learn the \
@@ -1160,7 +1169,7 @@ struct
                                     BitHash.add st.arp_cache arp.sender_proto (Some sender_hw) ;
                                     Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...adding %s->%s in ARP cache" (hexstring_of_bitstring arp.sender_proto) (Addr.to_string sender_hw)))) ;
                                 ) ;
-                                if arp.operation = Arp.Op.request then (
+                                if arp.operation = Arp.Op.request && st.answer_arp then (
                                     Log.(log st.iface.widget.logger Debug (lazy "...It's a request, let's reply!")) ;
                                     do_reply ()
                                 )
@@ -1198,6 +1207,50 @@ struct
                         let now = Simulation.Widget.now st.iface.widget in
                         Metric.Counter.inc ~now st.rx_otherhost_dropped
             )
+
+    (*$< TRX *)
+    (* [pair ~answer_arp] wires two adapters built outside of any host, [a]
+     * and [b] (which answers ARP or not), and returns them with what [b]
+     * received; [send st dst] emits an IP packet from [st] to [dst]. *)
+    (*$inject
+      let ip n = Ip.Addr.of_string ("10.0.0."^ string_of_int n)
+      let mask = Ip.Addr.of_string "255.255.255.0"
+      let pair ~answer_arp =
+          let sim = Simulation.make ~realtime:false "eth-outside-host" in
+          let adapter ?answer_arp mac n =
+              State.make ~parent:sim.root ~name:mac ?answer_arp
+                         ~mac:(Addr.of_string mac)
+                         ~my_addresses:[ State.make_my_ip_address ~netmask:mask
+                                                                  (ip n) ] () in
+          let a = adapter "02:00:00:00:00:01" 1
+          and b = adapter ~answer_arp "02:00:00:00:00:02" 2 in
+          let got = ref 0 in
+          let trx_a = make a and trx_b = make b in
+          ignore Tools.(sink (fun _ -> incr got) <-= trx_b) ;
+          Tools.(trx_a <==> trx_b) ;
+          sim, a, b, got
+      let send st dst =
+          Ip.Pdu.make Ip.Proto.udp (State.find_ip4 st) dst
+                      (Bitstring.bitstring_of_string "hello") |>
+          Ip.Pdu.pack |> tx st
+    *)
+    (*$R
+      let sim, a, _b, got = pair ~answer_arp:true in
+      send a (ip 2) ;
+      Simulation.run sim false ;
+      assert_equal ~printer:string_of_int ~msg:"answering ARP" 1 !got ;
+      let sim, a, b, got = pair ~answer_arp:false in
+      send a (ip 2) ;
+      Simulation.run sim false ;
+      assert_equal ~printer:string_of_int ~msg:"not answering ARP" 0 !got ;
+      assert_bool "the requester is learnt all the same"
+          (BitHash.mem b.State.arp_cache (Ip.Addr.to_bitstring (ip 1))) ;
+      send b (ip 1) ;
+      Simulation.run sim false ;
+      assert_bool "and can be reached without asking"
+          (BitHash.find b.State.arp_cache (Ip.Addr.to_bitstring (ip 1)) <> None)
+    *)
+    (*$>*)
 
     (** Creates an {!Tools.trx}. *)
     let make (st : State.t) =

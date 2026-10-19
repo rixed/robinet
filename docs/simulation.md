@@ -416,14 +416,17 @@ under:
 | note | `""` | `text` |
 
 *An Ethernet adapter* is `speeds`, `full-duplex` and `inter-frame-gap`, and on
-one with an IP stack above it also `MTU` (68…65535), `gateways`, `delay`, `loss`, `accept
-gratuitous ARP` and `learn neighbors from incoming` — a loss of 0.01 drops one
+one with an IP stack above it also `MTU` (68…65535), `gateways`, `delay`, `loss`, `answer
+ARP`, `accept gratuitous ARP` and `learn neighbors from incoming` — a loss of 0.01 drops one
 frame in a hundred, which is how a machine is made to misbehave without
 touching the cable. An adapter learns a neighbour's hardware address when it
 asks for it, or when the neighbour asks for its own; with `accept gratuitous
 ARP` it also learns one that merely announces itself (see `emit gratuitous ARP`
 below), which is what spares the first frame to a neighbour the wait of an ARP
-exchange. It is off unless set, as on most real machines. `learn neighbors from
+exchange. It is off unless set, as on most real machines. `answer ARP`, on
+unless unset, has it answer the ARP requests for its own addresses; off, it
+still asks for others' with them, as an adapter whose addresses some other
+stack answers for. `learn neighbors from
 incoming` (`0`–`2`: never, subnet, always) has it also learn the sender of
 every IP packet it receives, from the frame that brought it: never, unless set,
 as real machines do; only senders on one of its subnets; or any, a distant one
