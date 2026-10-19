@@ -474,3 +474,37 @@ let post_encode body =
             Printf.printf "Http: Fail: Cannot unpack http.post\n" ;
             false)
 *)
+(*$R
+    (* The messages a TRXtop receives from [segs], before and after the
+       transport closes: *)
+    let receive segs =
+        let t = TRXtop.make () and got = ref [] in
+        TRXtop.set_recv t (fun r -> got := r :: !got) ;
+        List.iter (fun s -> TRXtop.rx t (bitstring_of_string s)) segs ;
+        let before = List.rev !got in
+        got := [] ;
+        TRXtop.rx t empty_bitstring ;
+        before, List.rev !got in
+    let split n str =
+        let rec aux prev i =
+            if i >= String.length str then List.rev prev
+            else aux (String.sub str i (min n (String.length str - i)) :: prev) (i + n) in
+        aux [] 0 in
+    let body_lengths = List.filter_map (function
+        | TRXtop.HttpMsg (msg, opened) -> Some (String.length msg.Pdu.body, opened)
+        | TRXtop.HttpError _ -> None) in
+    let real = file_content "tests/http.real"
+    and chunked = file_content "tests/http.chunked" in
+    let printer (a, b) =
+        let p l = IO.to_string (List.print (Tuple2.print Int.print Bool.print)) l in
+        p a ^", "^ p b in
+    List.iter (fun n ->
+        let before, after = receive (split n (real ^ chunked)) in
+        assert_equal ~printer ([ 2175, true ; 0x1000+0xCEA+0x97C, true ], [])
+            (body_lengths before, body_lengths after) ;
+        assert_equal ~printer:string_of_int (List.length before) 2
+    ) [ 1 ; 7 ; 100 ; 3000 ; 20000 ] ;
+    (* A response with no length is delimited by the end of the transport: *)
+    let before, after = receive [ "HTTP/1.1 200 OK\r\n\r\nabc" ; "de" ] in
+    assert_equal ~printer ([], [ 5, false ]) (body_lengths before, body_lengths after)
+*)
