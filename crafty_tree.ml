@@ -160,12 +160,6 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
                 | Some (L.Random_in (lo, hi)) ->
                     random := true ;
                     i, pick_random loc parent l i lo hi
-                | Some (L.Random_shared (lo, hi)) ->
-                    (match Option.bind (siblings parent l) (fun s ->
-                               Siblings.fold (fun k _ v ->
-                                   if v = None then List.assoc_opt i k else v) s None) with
-                    | Some v -> i, v
-                    | None -> i, pick_random loc parent l i lo hi)
                 | Some L.Required | None ->
                     error loc "%s needs a %s" l.name l.fields.(i).name)
         ) (L.key_fields l) in
@@ -442,13 +436,12 @@ let to_string n = IO.to_string print n
   let root = make_root eth in
   let ip = child loc root Crafty_layers.ip (ip_to "1.2.3.4") in
   let icmp = child loc ip Crafty_layers.icmp [] in
-  let echo = Option.get (Crafty_layers.find ~below:icmp.layer "EchoRequest") in
-  let first = child loc icmp echo [] in
-  assert_bool "a shared id" (child loc icmp echo [] == first) ;
-  assert_bool "a given id" (child loc icmp echo [ 0, port 7 ] != first) ;
-  let icmp' = child loc (child loc root Crafty_layers.ip (ip_to "1.2.3.5")) Crafty_layers.icmp [] in
-  let given = child loc icmp' echo [ 0, port 7 ] in
-  assert_bool "shares a given id" (child loc icmp' echo [] == given) ;
+  let echo = child loc icmp Crafty_layers.echo [] in
+  assert_bool "a new id for each" (child loc icmp Crafty_layers.echo [] != echo) ;
+  let given = child loc icmp Crafty_layers.echo [ 0, port 7 ] in
+  assert_bool "a given id" (child loc icmp Crafty_layers.echo [ 0, port 7 ] == given) ;
+  let request = Option.get (Crafty_layers.find ~below:Crafty_layers.echo "Request") in
+  assert_bool "one message node" (child loc echo request [] == child loc echo request []) ;
   let l = Crafty_layers.layer "Tiny" ~above:[ "ip" ]
       [ Crafty_layers.field "id" Crafty_ast.Type.Int ~discriminant:true
           ~pick:(Crafty_layers.Random_in (1, 2)) ] in

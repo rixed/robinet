@@ -46,8 +46,6 @@ type pick =
     | Local_address
     (* At random within these bounds, and distinct from the siblings': *)
     | Random_in of int * int
-    (* That of a sibling, or else at random within these bounds: *)
-    | Random_shared of int * int
 
 type field =
     { name : string ;
@@ -336,18 +334,18 @@ let tcp_node _ =
     { pack = unsupported ; send = unsupported ; receive = pass }
 
 let icmp_upper = function
-    | 0 -> Some "EchoReply"
+    | 0 | 8 -> Some "Echo"
     | 3 -> Some "DestUnreachable"
-    | 8 -> Some "EchoRequest"
     | 11 -> Some "TimeExceeded"
     | _ -> None
 
-(* The message on top is what follows the checksum, and is told the code: *)
+(* What is on top is what follows the checksum, and is told the type and
+ * code: *)
 let unpack_icmp _ bits =
     match%bitstring bits with
     | {| typ : 8 ; code : 8 ; _checksum : 16 ; payload : -1 : bitstring |} ->
         unpacked [ "type", V.Int typ ; "code", V.Int code ] ?upper:(icmp_upper typ)
-                 ~up_hints:[ "code", V.Int code ] ~payload bits
+                 ~up_hints:[ "type", V.Int typ ; "code", V.Int code ] ~payload bits
     | {| _ |} -> None
 
 (* The message on top tells the type and code, and its own bits are what
@@ -365,22 +363,42 @@ let icmp_node _ =
         msg (Tools.sum (msg 0)), [ "proto", V.Int (Ip.Proto.icmp :> int) ]) ;
       send = not_driven ; receive = pass }
 
-let unpack_echo _ bits =
+(* The message on top is told by the type: *)
+let unpack_echo hints bits =
     match%bitstring bits with
-    | {| id : 16 ; seq : 16 ; payload : -1 : bitstring |} ->
-        unpacked [ "id", V.Int id ; "seq", V.Int seq ; "payload", bytes_value payload ] bits
+    | {| id : 16 ; payload : -1 : bitstring |} ->
+        let upper =
+            match List.assoc_opt "type" hints with
+            | Some (V.Int 8) -> Some "Request"
+            | Some (V.Int 0) -> Some "Reply"
+            | _ -> None in
+        unpacked [ "id", V.Int id ] ?upper ~payload bits
     | {| _ |} -> None
 
-(* The sequence numbers count from 1, unless given: *)
-let echo_node typ _ =
+(* The id of the stream; the message on top tells its type: *)
+let echo_node _ =
+    { pack = (fun fields hints payload ->
+        let id = int_of fields "Echo" "id" 0 0xffff in
+        let%bitstring hdr = {| id : 16 |} in
+        concat [ hdr ; payload ], hints) ;
+      send = not_driven ; receive = pass }
+
+let unpack_echo_message _ bits =
+    match%bitstring bits with
+    | {| seq : 16 ; payload : -1 : bitstring |} ->
+        unpacked [ "seq", V.Int seq ; "payload", bytes_value payload ] bits
+    | {| _ |} -> None
+
+(* Its node lasts as long as its Echo, so the sequence numbers count from 1
+ * along the stream, unless given: *)
+let echo_message_node typ _ =
     let seq = ref 0 in
     { pack = (fun fields _ _ ->
-        let id = int_of fields "Echo" "id" 0 0xffff
-        and seq =
+        let seq =
             match opt_int fields "seq" 0 0xffff with
             | Some s -> s
             | None -> seq := (!seq + 1) land 0xffff ; !seq in
-        let%bitstring hdr = {| id : 16 ; seq : 16 |} in
+        let%bitstring hdr = {| seq : 16 |} in
         concat [ hdr ; bytes_of fields "payload" ],
         [ "type", V.Int typ ; "code", V.Int 0 ]) ;
       send = not_driven ; receive = pass }
@@ -505,10 +523,14 @@ let icmp =
         field "type" Type.Int ~set_in:[] ;
         field "code" Type.Int ~set_in:[] ]
 
-let echo name typ =
-    layer name ~above:[ "icmp" ] ~terminal:true ~default:"payload"
-          ~node:(echo_node typ) ~unpack:unpack_echo [
-        field "id" Type.Int ~discriminant:true ~pick:(Random_shared (0, 65535)) ;
+(* The stream of the requests and replies of an id: *)
+let echo =
+    layer "Echo" ~above:[ "icmp" ] ~node:echo_node ~unpack:unpack_echo [
+        field "id" Type.Int ~discriminant:true ~pick:(Random_in (0, 65535)) ]
+
+let echo_message name typ =
+    layer name ~above:[ "echo" ] ~terminal:true ~default:"payload"
+          ~node:(echo_message_node typ) ~unpack:unpack_echo_message [
         field "seq" Type.Int ;
         field "payload" Type.bytes ]
 
@@ -540,7 +562,8 @@ let bytes =
         ~default:"data" [ field "data" Type.bytes ]
 
 let all =
-    [ eth ; ip ; tcp ; udp ; icmp ; echo "EchoRequest" 8 ; echo "EchoReply" 0 ;
+    [ eth ; ip ; tcp ; udp ; icmp ; echo ; echo_message "Request" 8 ;
+      echo_message "Reply" 0 ;
       dest_unreachable ; time_exceeded ; bytes ]
 
 let same_name a b = String.lowercase_ascii a = String.lowercase_ascii b
@@ -602,9 +625,9 @@ let record_type (l : layer) mode =
   (find "eth" |> Option.map (fun (l : layer) -> l.name)) = Some "Eth"
   find "IP" = None
   (find ~below:eth "ip" |> Option.map (fun (l : layer) -> l.name)) = Some "IP"
-  (find ~below:icmp "echoREQUEST" |> Option.map (fun (l : layer) -> l.name)) = \
-    Some "EchoRequest"
-  find ~below:udp "EchoRequest" = None
+  (find ~below:echo "reQUEST" |> Option.map (fun (l : layer) -> l.name)) = \
+    Some "Request"
+  find ~below:icmp "Request" = None
   find ~below:tcp "Bytes" <> None
   find ~below:bytes "Bytes" = None
 *)
@@ -616,13 +639,14 @@ let record_type (l : layer) mode =
 (* Defaults are found by name: *)
 (*$T
   bytes.default_field = Some 0
-  (echo "EchoRequest" 8).default_field = Some 2
+  (echo_message "Request" 8).default_field = Some 1
   tcp.default_field = None
 *)
 (*$T key_fields
   key_fields ip = [ 0 ; 1 ]
   key_fields icmp = []
-  key_fields (echo "EchoReply" 0) = [ 0 ]
+  key_fields echo = [ 0 ]
+  key_fields (echo_message "Reply" 0) = []
 *)
 (*$T find_constant
   find_constant "rst" = Some (Crafty_ast.Int 4)

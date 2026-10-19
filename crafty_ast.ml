@@ -172,7 +172,7 @@ type program = block
 let functions =
     [ "rand" ; "randbytes" ; "exp" ; "ln" ; "log" ; "log2" ; "int" ; "float" ;
       "bool" ; "byte" ; "interval" ; "array" ; "length" ; "get" ; "print" ;
-      "print_err" ]
+      "print_err" ; "assert" ]
 
 (** Variables that the language defines, which are case insensitive as are
  * all the names that the user does not choose. Lower case. *)

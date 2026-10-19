@@ -129,6 +129,9 @@ let call loc (b : T.builtin) args ~print ~print_err =
         a.(i)
     | T.Print, [ String s ] -> print s ; Void
     | T.Print_err, [ String s ] -> print_err s ; Void
+    | T.Assert, [ cond ; String msg ] ->
+        if cond = Bool false || cond = Int 0 then error loc "%s" msg ;
+        Void
     | _ -> assert false
 
 (* The [value] of type [from] as a [typ]: *)
@@ -677,6 +680,17 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
       Arp.Pdu.pack |>
       incoming ~proto:Eth.Proto.arp ~dst_mac:Eth.Addr.broadcast
 
+  let same_random_ids s =
+      let first = ref None in
+      String.split_on_char '\n' s |> List.map (fun l ->
+          match String.split l ~by:" id=" with
+          | a, b ->
+              let id, rest = String.split b ~by:" " in
+              if id = "7" then l else (
+                  if !first = None then first := Some id ;
+                  a ^" id="^ (if !first = Some id then "?" else "other") ^" "^ rest)
+          | exception Not_found -> l) |> String.concat "\n"
+
   let reply ?(sport=53) ?(dport=1000) data =
       incoming (Ip.Pdu.pack (udp_packet sport dport data))
 
@@ -763,6 +777,12 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
     (runs "print(\"${int(3.7) + log2(1024)} ${float(3)} ${bool(0)} ${byte(300)} ${interval(1.5)}\")")
   "0s: [1.5, 1.5] 2 1.5 4\n0s: done" \
     (runs "x = array(init=1.5, len=2)\nprint(\"${x} ${length(x)} ${get(a=x, index=1)} ${length(randbytes(4))}\")")
+  "0s: failed: line 3, column 1: Assertion failed: (x * 2) == 5" \
+    (runs "x = 2\nassert(x * 2 == 4)\nassert(x * 2 == 5)\nprint(\"not reached\")")
+  "0s: failed: line 2, column 1: x is 3" \
+    (runs "x = 3\nassert(x == 4, msg=\"x is ${x}\")")
+  "0s: caught\n0s: done" \
+    (runs "catch { assert(0) }\nprint(\"caught\")")
   "0s: failed: line 1, column 5: No item -1 in an array of length 1" \
     (runs "x = get(a=[1], index=-1)")
   "line 2, column 1: Unknown variable y" \
@@ -775,8 +795,8 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
 (*$= runs & ~printer:identity
   "0s: in Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: out Eth\n0s: done Eth" \
     (runs ~trees:true "/IP(dst=1.2.3.4)/UDP(src=1, dst=53) { print(\"in\") }\nprint(\"out\")")
-  "0s: a Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: b Eth{IP(src=10.0.0.1, dst=1.2.3.4)*2}\n0s: c Eth{IP(src=10.0.0.1, dst=1.2.3.4)*3{ICMP*1{EchoRequest(id=7)}, UDP(src=1, dst=53)*1}}\n0s: d Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: e Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1, IP(src=10.0.0.1, dst=1.2.3.5)*1}\n0s: done Eth" \
-    (runs ~trees:true "IP(dst=1.2.3.4)\nprint(\"a\")\n{\n  /IP(dst=1.2.3.4)\n  print(\"b\")\n  UDP(src=1, dst=53)\n  /IP(dst=1.2.3.4)/ICMP/EchoRequest(id=7)\n  print(\"c\")\n}\nprint(\"d\")\n/IP(dst=1.2.3.5)\nprint(\"e\")")
+  "0s: a Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: b Eth{IP(src=10.0.0.1, dst=1.2.3.4)*2}\n0s: c Eth{IP(src=10.0.0.1, dst=1.2.3.4)*3{ICMP*1{Echo(id=7)*1{Request}}, UDP(src=1, dst=53)*1}}\n0s: d Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: e Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1, IP(src=10.0.0.1, dst=1.2.3.5)*1}\n0s: done Eth" \
+    (runs ~trees:true "IP(dst=1.2.3.4)\nprint(\"a\")\n{\n  /IP(dst=1.2.3.4)\n  print(\"b\")\n  UDP(src=1, dst=53)\n  /IP(dst=1.2.3.4)/ICMP/Echo(id=7)/Request\n  print(\"c\")\n}\nprint(\"d\")\n/IP(dst=1.2.3.5)\nprint(\"e\")")
   "0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: failed: line 4, column 7: Division by zero Eth" \
     (runs ~trees:true "retry max=1 {\n  /IP(dst=1.2.3.4)/UDP(src=1, dst=53)\n  print(\"try\")\n  x = 1 / 0 }")
   "0s: done Eth" \
@@ -796,19 +816,13 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
     (runs ~frames:true "/IP(dst=10.0.0.3)/UDP(src=1, dst=2)/Bytes(\"who\")")
 *)
 (* Self-driven IP takes TTL and DF per packet (and a terminal stack leaves
- * its own as the current one); echo ids are shared (the random ones shown
- * as "?"), and their sequence numbers go on: *)
+ * its own as the current one); the requests of an Echo share its id (the
+ * random one shown as "?"), and their sequence numbers go on: *)
 (*$= runs & ~printer:identity
   "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 UDP 1>2 \"a\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=3 df UDP 1>2 \"b\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=3 df UDP 1>2 \"c\"" \
     (runs ~frames:true "/IP(dst=10.0.0.2)/UDP(src=1, dst=2) { Bytes(\"a\")\n  /IP(dst=10.0.0.2, ttl=3, dont_frag=true)/UDP(src=1, dst=2)/Bytes(\"b\")\n  Bytes(\"c\") }")
   "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 8/0 id=? seq=1 \"ping\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 8/0 id=? seq=2 \"ping\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 8/0 id=7 seq=42 \"\"" \
-    (runs ~frames:true "/IP(dst=10.0.0.2)/ICMP { repeat count=2 { EchoRequest(\"ping\") }\n  EchoRequest(id=7, seq=42) }" |> \
-     String.split_on_char '\n' |> List.map (fun l -> \
-        match String.split l ~by:" id=" with \
-        | a, b when not (String.starts_with b "7 ") -> \
-            a ^" id=? "^ snd (String.split b ~by:" ") \
-        | _ -> l \
-        | exception Not_found -> l) |> String.concat "\n")
+    (same_random_ids (runs ~frames:true "/IP(dst=10.0.0.2)/ICMP/Echo { repeat count=2 { Request(\"ping\") }\n  /IP(dst=10.0.0.2)/ICMP/Echo(id=7)/Request(seq=42) }"))
   "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 3/3 mtu=1400 \"\\001\\002\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 11/0 mtu=0 \"\\003\\004\"" \
     (runs ~frames:true "/IP!(dst=10.0.0.2)/ICMP/DestUnreachable(code=PORT_UNREACHABLE, mtu=1400, payload=#0102)\n/IP!(dst=10.0.0.2)/ICMP/TimeExceeded(#0304)")
 *)
@@ -826,7 +840,7 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
   "0s: failed: line 1, column 1: IP needs a proto" \
     (runs ~frames:true "/IP(dst=1.2.3.4)/Bytes(\"x\")")
   "0s: failed: line 1, column 1: The ttl must be between 0 and 255, not 256" \
-    (runs ~frames:true "/IP!(dst=1.2.3.4, ttl=256)/ICMP/EchoRequest()")
+    (runs ~frames:true "/IP!(dst=1.2.3.4, ttl=256)/ICMP/Echo/Request()")
   "0s: failed: line 1, column 1: A self-driven IP sends no empty packet: use IP!" \
     (runs ~frames:true "/IP(dst=1.2.3.4, proto=99)/Bytes()")
   "0s: failed: line 1, column 1: TCP is not supported yet" \
@@ -911,9 +925,10 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
 *)
 (* ICMP, with the code of an error: *)
 (*$= runs & ~printer:identity
-  "500ms: {id: 7, payload: [], seq: 1}\n600ms: unreachable\n600ms: done" \
-    (runs ~inject:[ 0.5, incoming (Ip.Pdu.pack (ip_packet Ip.Proto.icmp (Icmp.Pdu.(pack (make_echo_reply 7 1))))) ; \
+  "500ms: 7 {payload: [], seq: 1}\n600ms: unreachable\n600ms: done" \
+    (runs ~inject:[ 0.4, incoming (Ip.Pdu.pack (ip_packet Ip.Proto.icmp (Icmp.Pdu.(pack (make_echo_reply 8 1))))) ; \
+                    0.5, incoming (Ip.Pdu.pack (ip_packet Ip.Proto.icmp (Icmp.Pdu.(pack (make_echo_reply 7 1))))) ; \
                     0.6, incoming (Ip.Pdu.pack (ip_packet Ip.Proto.icmp (Icmp.Pdu.(pack { msg_type = Icmp.MsgType.o (3, 3) ; \
                               payload = DestUnreachable (0, Payload.o (Bitstring.bitstring_of_string "A")) })))) ] \
-        "/IP(dst=10.0.0.2)/ICMP {\n  EchoRequest(\"hi\")\n  expect EchoReply { print(\"${MATCH[EchoReply]}\") }\n  expect DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
+        "/IP(dst=10.0.0.2)/ICMP {\n  Echo(id=7) { Request(\"hi\")\n    expect Reply { assert(MATCH[Echo].id == 7)\n      print(\"${MATCH[Echo].id} ${MATCH[Reply]}\") } }\n  expect DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
 *)

@@ -41,7 +41,7 @@ type var = { name : string ; id : int ; typ : Type.t }
 type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
     | To_int | To_float | To_bool | To_byte | To_interval
-    | Make_array | Length | Get | Print | Print_err
+    | Make_array | Length | Get | Print | Print_err | Assert
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
 
@@ -235,9 +235,14 @@ let lookup_var env loc name =
 
 (** {2 Expressions} *)
 
+type default =
+    | Literal of A.literal
+    (* The source of the argument for that parameter, after this text: *)
+    | Quote of string * string
+
 type param =
     { pname : string ;
-      default : A.literal option ;
+      default : default option ;
       (* What an argument of that type converts to, if acceptable: *)
       accept : Type.t -> Type.t option ;
       descr : string }
@@ -263,7 +268,7 @@ let builtins =
     let scalar = param "x" "a bool, int, float or byte" (only_exactly scalars) in
     let res t _ = t in
     [ "rand", Rand,
-        [ param "max" "an int, bool or float" ~default:(A.Float 1.)
+        [ param "max" "an int, bool or float" ~default:(Literal (A.Float 1.))
                 (only_exactly Type.[ Int ; Bool ; Float ]) ],
         (fun ts -> List.hd ts) ;
       "randbytes", Randbytes, [ param "len" "an int" (only Type.[ Int ]) ],
@@ -291,6 +296,12 @@ let builtins =
         (function Type.Array t :: _ -> t | _ -> assert false) ;
       "print", Print, [ param "s" "a string" (only Type.[ String ]) ], res Type.Void ;
       "print_err", Print_err, [ param "s" "a string" (only Type.[ String ]) ],
+        res Type.Void ;
+      (* Failing, as any error, where it is called: *)
+      "assert", Assert,
+        [ param "cond" "a bool or an int" (only_exactly Type.[ Bool ; Int ]) ;
+          param "msg" "a string" (only Type.[ String ])
+                ~default:(Quote ("Assertion failed: ", "cond")) ],
         res Type.Void ]
 
 let find_builtin loc name =
@@ -455,6 +466,9 @@ and call env loc f args =
                 | Some p -> p.pname, a
                 | None -> error a.arg_loc "%s has no parameter %s" fname n)
             | None, [ p ] -> p.pname, a
+            (* Else for the only one that must be given, if any: *)
+            | None, _ when List.length (List.filter (fun p -> p.default = None) params) = 1 ->
+                (List.find (fun p -> p.default = None) params).pname, a
             | None, _ -> error a.arg_loc "The arguments of %s must be named" fname
         ) args in
     List.iter (fun p ->
@@ -472,7 +486,11 @@ and call env loc f args =
                         p.pname fname p.descr (a_type e.typ))
             | exception Not_found ->
                 (match p.default with
-                | Some l -> { loc ; typ = type_of_literal l ; desc = Lit l }
+                | Some (Literal l) -> { loc ; typ = type_of_literal l ; desc = Lit l }
+                | Some (Quote (text, quoted)) ->
+                    let (a : A.arg) = List.assoc quoted named in
+                    { loc ; typ = Type.String ;
+                      desc = String [ Text (text ^ IO.to_string A.print_bare_expr a.value) ] }
                 | None -> error loc "%s needs an argument %s" fname p.pname)
         ) params in
     b, args, result (List.map (fun e -> e.typ) args)
@@ -815,7 +833,7 @@ let check (program : A.program) =
   "" \
     (types "/IP!(dst=1.2.3.4, id=3)/TCP!(dst=80, flags=SYN|ACK)/Bytes(\"x\")")
   "" \
-    (types "/IP(dst=1.2.3.4)/ICMP/EchoRequest(\"hello\")")
+    (types "/IP(dst=1.2.3.4)/ICMP/Echo/Request(\"hello\")")
   "x: ip" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"hi\")\n  expect Bytes(\"ho\") { x = MATCH[IP].src } }")
   "x: int" \
@@ -847,6 +865,10 @@ let check (program : A.program) =
     (types "rand(3)")
   "line 1, column 12: Argument a of length must be an array, not an int" \
     (types "x = length(3)")
+  "line 1, column 8: Argument cond of assert must be a bool or an int, not a string" \
+    (types "assert(\"x\")")
+  "line 1, column 1: x would have no value" \
+    (types "x = assert(true)")
   "line 1, column 7: Argument s of print must be a string, not an int" \
     (types "print(1)")
   "line 1, column 1: Break out of 1 repeat or on, but there is none" \
@@ -869,8 +891,8 @@ let check (program : A.program) =
     (types "/IP!(dst=1.2.3.4)/TCP(dst=80)")
   "line 1, column 23: type of ICMP cannot be set" \
     (types "/IP(dst=1.2.3.4)/ICMP(type=8)")
-  "line 1, column 41: Nothing can be on top of EchoRequest" \
-    (types "/IP(dst=1.2.3.4)/ICMP/EchoRequest(id=1)/Bytes(\"x\")")
+  "line 1, column 43: Nothing can be on top of Request" \
+    (types "/IP(dst=1.2.3.4)/ICMP/Echo/Request(seq=1)/Bytes(\"x\")")
   "line 1, column 1: No block can follow Bytes, which sends" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80)/Bytes(\"x\") { print(\"a\") }")
   "line 1, column 2: IP needs a dst" \
