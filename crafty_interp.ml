@@ -430,13 +430,14 @@ and exec t b env (s : T.stmt) k =
         exec t b env { s with stmt = T.Block (push :: body) } k
     | T.Stack { absolute ; layers ; body = None } ->
         guard (fun () ->
-            match push t b env absolute layers with
-            | top :: rest as stack when top.node.layer.terminal ->
-                (* Which sends, and does not stay: *)
-                (try Crafty_tree.send stack
-                 with Failed msg -> error s.stmt_loc "%s" msg) ;
-                rest
-            | stack -> stack) |>
+            try
+                match push t b env absolute layers with
+                | top :: rest as stack when top.node.layer.terminal ->
+                    (* Which sends, and does not stay: *)
+                    Crafty_tree.send stack ;
+                    rest
+                | stack -> stack
+            with Failed msg -> error s.stmt_loc "%s" msg) |>
         Option.may (fun stack -> k { env with stack })
     | T.Expect { timeout ; pattern ; match_ ; body } ->
         guard (fun () -> timeout_of eval "expect" timeout) |>
@@ -664,6 +665,14 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
                       | Icmp.Pdu.Header { mtu ; pld = p ; _ } -> add " mtu=%d %S" mtu (pld p)
                       | _ -> add " ?") ;
                       if Tools.sum l4 <> 0 then add " bad-checksum"
+              ) else if ip.proto = Ip.Proto.tcp then (
+                  match Tcp.Pdu.unpack l4 with
+                  | Error _ -> add " ?"
+                  | Ok t ->
+                      add " TCP %d>%d %s %S" (t.Tcp.Pdu.src_port :> int) (t.dst_port :> int)
+                          (Tcp.Pdu.string_of_flags t.flags) (pld t.payload) ;
+                      if Tools.sum_list [ Ip.Pdu.pseudo_header ip () ; l4 ] <> 0 then
+                          add " bad-checksum"
               ) else add " proto=%d %S" (ip.proto :> int) (str l4)) ;
       Stdlib.Buffer.contents b
 
@@ -860,8 +869,6 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
     (runs ~frames:true "/IP!(dst=1.2.3.4, ttl=256)/ICMP/Echo/Request()")
   "0s: failed: line 1, column 1: A self-driven IP sends no empty packet: use IP!" \
     (runs ~frames:true "/IP(dst=1.2.3.4, proto=99)/Bytes()")
-  "0s: failed: line 1, column 1: TCP is not supported yet" \
-    (runs ~frames:true "/IP(dst=1.2.3.4)/TCP(dst=80)/Bytes(\"x\")")
 *)
 (* Received frames go through the nodes of their streams (the sender's
  * port being the destination port of the node), fragments reassembled,
@@ -950,13 +957,15 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
         "/IP(dst=10.0.0.2)/ICMP {\n  Echo(id=7) { Request(\"hi\")\n    expect Reply { assert(MATCH[Echo].id == 7)\n      print(\"${MATCH[Echo].id} ${MATCH[Reply]}\") } }\n  expect DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
 *)
 
-(* [two ?error_rate ?arp a b] is what programs [a] (at 10.0.0.1) and [b]
- * (at 10.0.0.2, started first) print, each line with the name of the
- * program and the time to the millisecond, then how they end and their
- * trees then (with [counts], the numbers of packets received), when they
- * are at both ends of a cable (that knows each other's MAC address already
- * with [arp]). [with_host] is the same with a simulated host at 10.0.0.2,
- * set up by [setup]. *)
+(* [two ?error_rate ?arp ?frames a b] is what programs [a] (at 10.0.0.1)
+ * and [b] (at 10.0.0.2, started first) print, each line with the name of
+ * the program and the time to the millisecond, then how they end and their
+ * trees then, when they are at both ends of a cable (that knows each
+ * other's MAC address already with [arp]); with [frames], the frames [a]
+ * sends ("a>") and receives ("a<") too, from their IP layer.
+ * [without_counts] removes the numbers of packets received from the trees.
+ * [with_host] is the same with a simulated host at 10.0.0.2, set up by
+ * [setup], which is given a function for the host to print lines. *)
 (*$inject
   let compile text =
       match Crafty_parser.parse text with
@@ -988,9 +997,25 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
               | Stopped -> line "stopped"
               | Running -> ()) (compile text))
 
-  let plug sim ?(error_rate=0.) a b =
+  let frame_line sim out dir bits =
+      let d = describe bits in
+      let d =
+          match String.split d ~by:" IP " with
+          | _, ip -> ip
+          | exception Not_found -> if String.ends_with d " ARP" then "ARP" else d in
+      out := Printf.sprintf "a%s %.3fs: %s" dir (Clock.Time.to_secs (Simulation.now sim)) d :: !out
+
+  let plug sim ?(error_rate=0.) ?log a b =
       let cable = Eth.Cable.State.make ~parent:sim.SimTypes.root ~error_rate () in
       let trx = Eth.Cable.make cable in
+      let trx =
+          match log with
+          | None -> trx
+          | Some log ->
+              Tools.{ trx with ins = {
+                  trx.ins with
+                  write = (fun bits -> log ">" bits ; trx.ins.write bits) ;
+                  set_read = (fun f busy -> trx.ins.set_read (fun bits -> log "<" bits ; f bits) busy) } } in
       ignore Tools.(a -=> trx) ;
       Tools.(trx <=- b)
 
@@ -1002,25 +1027,28 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
               skip := false ; Stdlib.Buffer.add_char b c)) s ;
       Stdlib.Buffer.contents b
 
-  let two ?error_rate ?(arp=false) a b =
+  let two ?error_rate ?(arp=false) ?(frames=false) a b =
       let sim = Simulation.make ~realtime:false "crafty-pair" in
       let out = ref [] in
       let ea = crafty_peer sim 1 and eb = crafty_peer sim 2 in
       if arp then (knows ea 2 ; knows eb 1) ;
-      plug sim ?error_rate (Eth.Iface.dev ea.Eth.State.iface) (Eth.Iface.dev eb.Eth.State.iface) ;
+      let log = if frames then Some (frame_line sim out) else None in
+      plug sim ?error_rate ?log (Eth.Iface.dev ea.Eth.State.iface) (Eth.Iface.dev eb.Eth.State.iface) ;
       start sim out "b" eb b ;
       start sim out "a" ea a ;
       Simulation.run sim false ;
       String.concat "\n" (List.rev !out)
 
-  let with_host ?(setup=ignore) text =
+  let with_host ?(setup=fun _ _ -> ()) ?(frames=false) text =
       let sim = Simulation.make ~realtime:false "crafty-host" in
       let out = ref [] in
       let ea = crafty_peer sim 1 in
       let h = Host.make ~parent:sim.SimTypes.root ~static_ip:(address 2) ~netmask "host" in
-      plug sim (Eth.Iface.dev ea.Eth.State.iface) (h.Host.trx.Host.widget.SimTypes.ports.SimTypes.dev 0) ;
+      let log = if frames then Some (frame_line sim out) else None in
+      plug sim ?log (Eth.Iface.dev ea.Eth.State.iface) (h.Host.trx.Host.widget.SimTypes.ports.SimTypes.dev 0) ;
       Simulation.run_startup sim ;
-      setup h ;
+      setup h (fun s ->
+          out := Printf.sprintf "host %.3fs: %s" (Clock.Time.to_secs (Simulation.now sim)) s :: !out) ;
       start sim out "a" ea text ;
       Simulation.run sim false ;
       String.concat "\n" (List.rev !out)
@@ -1047,9 +1075,55 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
   "a 0.000s: seq 1\na 0.100s: seq 2\na 0.200s: seq 3\na 0.200s: done Eth#4" \
     (with_host "/IP(dst=10.0.0.2)/ICMP/Echo { repeat count=3 every=100ms { Request(\"hi\")\n    expect timeout=1s Reply { assert(MATCH[Reply].payload == \"hi\")\n      print(\"seq ${MATCH[Reply].seq}\") } } }")
   "a 0.000s: echo 0\na 0.000s: echo 1\na 0.000s: done Eth#3" \
-    (with_host ~setup:(fun h -> h.Host.trx.Host.udp_server_start (Udp.Port.o 7) (fun udp -> \
+    (with_host ~setup:(fun h _ -> h.Host.trx.Host.udp_server_start (Udp.Port.o 7) (fun udp -> \
         Tools.(udp.Udp.TRX.trx.ins --> sink (fun bits -> tx udp.Udp.TRX.trx bits)))) \
         "/IP(dst=10.0.0.2)/UDP(dst=7) { repeat count=2 { Bytes(\"echo ${I}\")\n    expect timeout=1s Bytes { print(MATCH[Bytes].data) } } }")
   "a 0.000s: unreachable\na 0.000s: done Eth#2" \
     (with_host "/IP(dst=10.0.0.2)/UDP(dst=9) { Bytes(\"anyone?\")\n  expect timeout=1s ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
+*)
+(* TCP, against a host's echo server that closes when its client does,
+ * and as a server to a host's client, with the handshakes and the closes
+ * (the nodes going away once the close is complete): *)
+(*$inject
+  let tcp_echo h _ =
+      h.Host.trx.Host.tcp_server_start (Tcp.Port.o 7) (fun cnx ->
+          Tools.(cnx.Tcp.TRX.trx.ins --> sink (fun bits ->
+              if Bitstring.bitstring_length bits = 0 then cnx.close ()
+              else tx cnx.trx bits)))
+
+  let tcp_client h log =
+      h.Host.trx.Host.tcp_connect (Host.IPv4 (address 1)) ~src_port:(Tcp.Port.o 5000) (Tcp.Port.o 80) (function
+          | None -> log "cannot connect"
+          | Some cnx ->
+              Tools.(cnx.Tcp.TRX.trx.ins --> sink (fun bits ->
+                  if Bitstring.bitstring_length bits = 0 then (log "closed" ; cnx.close ())
+                  else log ("got "^ Bitstring.string_of_bitstring bits))) ;
+              Tools.tx cnx.trx (Bitstring.bitstring_of_string "hello"))
+*)
+(*$= & ~printer:identity
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hello\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hello\"\na 0.000s: hello\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Bytes#2}}}\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckFin \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckFin \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"" \
+    (with_host ~setup:tcp_echo ~frames:true \
+        "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Bytes(\"hello\")\n  expect timeout=1s Bytes { print(MATCH[Bytes].data) } }")
+  "a< 0.000s: ARP\na> 0.000s: ARP\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 5000>80 Syn \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 80>5000 AckSyn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 5000>80 Ack \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 5000>80 AckPsh \"hello\"\na 0.000s: hello\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 80>5000 AckPsh \"world\"\nhost 0.000s: got world\na< 0.040s: 10.0.0.2>10.0.0.1 ttl=64 TCP 5000>80 Ack \"\"\na 1.000s: done Eth#5{IP(src=10.0.0.1, dst=10.0.0.2)#4{TCP(src=80, dst=5000)#4{Bytes}}}\na> 1.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 80>5000 AckFin \"\"\nhost 1.000s: closed\na< 1.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 5000>80 AckFin \"\"\na> 1.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 80>5000 Ack \"\"" \
+    (with_host ~setup:tcp_client ~frames:true \
+        "on timeout=1s /IP/TCP(dst == 80)/Bytes {\n  print(MATCH[Bytes].data)\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/Bytes(\"world\") }")
+  "a 0.000s: pong\na 0.000s: pong\na 0.000s: pong\na 0.000s: done Eth#5{IP(src=10.0.0.1, dst=10.0.0.2)#4{TCP(src=5000, dst=80)#4{Bytes#6}}}\nb 1.000s: done Eth#8{IP(src=10.0.0.2, dst=10.0.0.1)#7{TCP(src=80, dst=5000)#7{Bytes#4}}}" \
+    (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n  repeat count=3 { Bytes(\"ping ${I}\")\n    expect timeout=1s Bytes { print(MATCH[Bytes].data) } } }" \
+         "on timeout=1s /IP/TCP(dst == 80)/Bytes {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/Bytes(\"pong\") }")
+*)
+(* Manual segments, inserted into a connection or not (a handshake made
+ * by hand), and resets: *)
+(*$= & ~printer:identity
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4001>22 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 22>4001 AckRst \"\"\na 0.000s: reset\na 0.000s: done Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4001, dst=22)#1{Bytes}}}" \
+    (with_host ~frames:true \
+        "/IP(dst=10.0.0.2)/TCP(src=4001, dst=22) {\n  Bytes(#1ee7)\n  expect timeout=1s ../TCP!(flags & RST) { print(\"reset\") } }")
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn \"\"\na 0.000s: connected!\na 0.000s: done Eth#2\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"" \
+    (with_host ~setup:tcp_echo ~frames:true \
+        "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  { /IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=123)/Bytes() }\n  expect timeout=1s ../TCP!(flags == SYN | ACK) {\n    { /IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=ACK, seq_num=124, ack_num=MATCH[TCP].seq_num + 1)/Bytes() }\n    print(\"connected!\") } }")
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hello\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hello\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \" world\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \" world\"\na 0.000s: failed: line 7, column 3: This TCP connection is closed Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=4000, dst=7)#3{Bytes#4}}}\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Rst \"\"" \
+    (with_host ~setup:tcp_echo ~frames:true \
+        "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Bytes(\"hello\")\n  expect timeout=1s Bytes(\"hello\") {}\n  { /IP(dst=10.0.0.2)/TCP!(src=4000, dst=7)/Bytes(\" world\") }\n  expect timeout=1s Bytes(\" world\") {}\n  { /IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=RST)/Bytes() }\n  Bytes(\"too late\") }")
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckRst \"\"\na 0.000s: 101\na 0.000s: done Eth#2" \
+    (with_host ~frames:true \
+        "/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=100)/Bytes()\nexpect timeout=1s /IP/TCP!(src == 7, flags & RST) { print(\"${MATCH[TCP].ack_num}\") }")
 *)

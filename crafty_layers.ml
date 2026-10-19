@@ -102,11 +102,19 @@ type ops =
        * nothing (a frame for another host), that layer, or others (a
        * fragment, seen as it is in manual mode, then the reassembled packet,
        * seen by the self-driven stream): *)
-      receive : unpacked -> (unpacked * mode list) list }
+      receive : unpacked -> (unpacked * mode list) list ;
+      (* A self-driven pattern made the node (TCP accepts a connection): *)
+      listen : unit -> unit ;
+      (* The node is no longer used: once what it has to finish is (TCP
+       * closing), the continuation removes it: *)
+      close : (unit -> unit) -> unit }
 
 (** What a node is made with: *)
 type context =
     { eth : Eth.State.t ;
+      (* Its own key, and that of the node below: *)
+      key : fields ;
+      below_key : fields ;
       (* That of the node below, but for the root: *)
       below : ops option }
 
@@ -153,6 +161,12 @@ let not_driven _ _ _ = invalid_arg "Crafty_layers: not a self-driven layer"
 let both = [ Manual ; Driven ]
 
 let pass u = [ u, both ]
+
+(* The operations of a node with no stream, building a header in manual
+ * mode: *)
+let manual pack =
+    { pack ; send = not_driven ; receive = pass ;
+      listen = ignore ; close = (fun k -> k ()) }
 
 let bytes_value bits = V.bytes_of_string (string_of_bitstring bits)
 
@@ -203,14 +217,14 @@ let eth_node ctx =
         | _, V.Mac dst when Eth.Addr.eq dst st.mac || Eth.Addr.eq dst Eth.Addr.broadcast ->
             pass u
         | _ -> [] in
-    { pack = (fun fields hints payload ->
+    { (manual @@ fun fields hints payload ->
         let proto = int_of ~hints fields "Eth!" "proto" 0 0xffff in
         let src = match fields "src" with Some (V.Mac m) -> m | _ -> st.mac in
         let dst =
             match fields "dst" with
             | Some (V.Mac m) -> m
             | _ -> next_mac st proto payload in
-        Eth.Pdu.(pack (make (Eth.Proto.o proto) src dst payload)), []) ;
+        Eth.Pdu.(pack (make (Eth.Proto.o proto) src dst payload)), []) with
       send = (fun _ hints payload ->
         if List.assoc_opt "proto" hints <> Some (V.Int ip4) then
             V.fail "A self-driven Eth carries only IPv4: use Eth!" ;
@@ -268,7 +282,7 @@ let ip_node ctx =
                   { values = ip_values ip ; upper = Some (ip_upper ip) ;
                     payload ; up_hints = [] ; bits = Ip.Pdu.pack ip }, [ Driven ] ]) in
     let proto fields hints = int_of ~hints fields "IP" "proto" 0 0xff in
-    { pack = (fun fields hints payload ->
+    { (manual @@ fun fields hints payload ->
         let int ~def name hi = int_of ~def fields "IP!" name 0 hi
         and options = bytes_of fields "options" in
         if Tools.bytelength options mod 4 <> 0 || Tools.bytelength options > 40 then
@@ -285,7 +299,7 @@ let ip_node ctx =
             ~ttl:(int ~def:64 "ttl" 0xff) ~options
             (Ip.Proto.o (proto fields hints))
             (ip_of fields "src") (ip_of fields "dst") payload |>
-        Ip.Pdu.pack, [ "proto", V.Int ip4 ]) ;
+        Ip.Pdu.pack, [ "proto", V.Int ip4 ]) with
       send = (fun fields hints payload ->
         if Tools.bytelength payload = 0 then
             V.fail "A self-driven IP sends no empty packet: use IP!" ;
@@ -319,19 +333,186 @@ let unpack_udp _ bits =
 
 (* The checksum is left to IP: *)
 let udp_node _ =
-    { pack = (fun fields _ payload ->
+    manual (fun fields _ payload ->
         let port name = Udp.Port.o (int_of fields "UDP" name 0 0xffff) in
         let length = opt_int fields "length" 0 0xffff in
         if length = None && 8 + Tools.bytelength payload > 0xffff then
             V.fail "Too long for a UDP datagram" ;
         Udp.Pdu.make ~src_port:(port "src") ~dst_port:(port "dst") ?length
                      ?checksum:(opt_int fields "checksum" 0 0xffff) payload |>
-        Udp.Pdu.pack, [ "proto", V.Int (Ip.Proto.udp :> int) ]) ;
-      send = not_driven ; receive = pass }
+        Udp.Pdu.pack, [ "proto", V.Int (Ip.Proto.udp :> int) ])
 
-let tcp_node _ =
-    let unsupported _ _ _ = V.fail "TCP is not supported yet" in
-    { pack = unsupported ; send = unsupported ; receive = pass }
+let tcp_proto = (Ip.Proto.tcp :> int)
+
+(* Sequence numbers as unsigned ints: *)
+let int_of_seq_num (n : Tcp.SeqNum.t) = Int32.to_int (n :> int32) land 0xffff_ffff
+
+let unpack_tcp _ bits =
+    match Tcp.Pdu.unpack bits with
+    | Error _ -> None
+    | Ok t ->
+        let f = t.flags and bit b v = if b then v else 0 in
+        let flags =
+            bit f.fin 1 lor bit f.syn 2 lor bit f.rst 4 lor bit f.psh 8 lor
+            bit f.ack 16 lor bit f.urg 32 in
+        let payload = (t.payload :> bitstring) in
+        unpacked [ "src", V.Int (t.src_port :> int) ; "dst", V.Int (t.dst_port :> int) ;
+                   "seq_num", V.Int (int_of_seq_num t.seq_num) ;
+                   "ack_num", V.Int (int_of_seq_num t.ack_num) ;
+                   "flags", V.Int flags ; "win_size", V.Int t.win_size ;
+                   "urg_ptr", V.Int t.urg_ptr ]
+                 ?upper:(if bitstring_length payload > 0 then Some "Bytes" else None)
+                 ~payload bits
+
+(* A connection: robinet's TRX, what was written before it was established,
+ * whether it is to be closed, and what removes the node once it is: *)
+type tcp_stream =
+    { trx : Tcp.TRX.t ;
+      mutable pending : bitstring list ;
+      mutable closing : bool ;
+      mutable on_closed : (unit -> unit) option }
+
+type tcp_state = Idle | Listening | Stream of tcp_stream
+
+(* A node without a connection is idle, or listening if a self-driven
+ * pattern made it, until a SYN comes; the first packet sent self-driven
+ * connects it, and waits for the connection, as what follows does. A
+ * manual segment takes the sequence and ack numbers of the connection if not
+ * given, and the connection then accounts for it. The connection's data is
+ * seen in self-driven mode, as it comes in order, and each segment in manual
+ * mode. Once the node is unused, the connection is closed after what was
+ * written, and the node removed once both ends are closed (or after 2
+ * minutes): *)
+let tcp_node ctx =
+    let st = ctx.eth and below = Option.get ctx.below in
+    let power = st.iface.widget.power and logger = st.iface.widget.logger in
+    let port name = Tcp.Port.o (int_of ctx.key "TCP" name 0 0xffff) in
+    let state = ref Idle in
+    (* What the connection hands while a segment is received: *)
+    let received = ref [] in
+    (* The sequence number of manual segments without a connection: *)
+    let manual_seq = ref (Random.bits () lsl 2 land 0xffff_ffff) in
+    let over s =
+        let t = s.trx in
+        t.closed && t.rcvd_fin && (t.sent_acked >= t.sent_pld || not t.rto_armed) in
+    let removed s =
+        match s.on_closed with
+        | Some k when over s ->
+            s.on_closed <- None ;
+            Simulation.asap power k ()
+        | _ -> () in
+    let try_close s =
+        if s.closing && Tcp.TRX.is_established s.trx && not s.trx.sent_fin then
+            s.trx.tcp_trx.close () ;
+        removed s in
+    let established s = function
+        | Some _ ->
+            List.iter (Tcp.TRX.tx s.trx) (List.rev s.pending) ;
+            s.pending <- [] ;
+            try_close s
+        | None ->
+            Tcp.TRX.abort s.trx ;
+            s.pending <- [] ;
+            removed s in
+    let new_stream ?(mss=st.mtu - 40) () =
+        (match !state with
+        | Stream s -> Tcp.TRX.abort s.trx ; removed s
+        | _ -> ()) ;
+        let t = Tcp.TRX.make power ~sync_recv:true ~mss (port "src") (port "dst") logger in
+        Tools.(t.tcp_trx.trx.out --> sink (below.send ctx.below_key [ "proto", V.Int tcp_proto ])) ;
+        Tools.(t.tcp_trx.trx.ins --> sink (fun bits ->
+            if bitstring_length bits > 0 then received := bits :: !received)) ;
+        let s = { trx = t ; pending = [] ; closing = false ; on_closed = None } in
+        t.cnx_established_cont <- Some (established s) ;
+        state := Stream s ;
+        s in
+    (* The connection to send to, a new one if there is none or it is being
+     * closed (the node being used again): *)
+    let stream fields =
+        match !state with
+        | Stream s when not s.closing -> s
+        | _ ->
+            let s = new_stream ?mss:(opt_int fields "mss" 1 0xffff) () in
+            Tcp.TRX.connect s.trx (established s) ;
+            s in
+    { pack = (fun fields _ payload ->
+        let trx = match !state with Stream s -> Some s.trx | _ -> None in
+        Option.may (fun t ->
+            if not (Tcp.TRX.is_established t || t.closed) then
+                V.fail "TCP! cannot go into a connection that is not established yet") trx ;
+        let given name = opt_int fields name 0 0xffff_ffff in
+        let seq_given = given "seq_num" in
+        let seq =
+            match seq_given, trx with
+            | Some n, _ -> n
+            | None, Some t -> int_of_seq_num (Tcp.TRX.next_seq_num t)
+            | None, None -> !manual_seq in
+        let ack =
+            match given "ack_num", trx with
+            | Some n, _ -> Some n
+            | None, Some t -> Option.map int_of_seq_num (Tcp.TRX.next_ack_num t)
+            | None, None -> None in
+        let flags =
+            match opt_int fields "flags" 0 0x3f with
+            | Some f -> f
+            | None ->
+                (if ack <> None then 16 else 0) lor
+                (if bitstring_length payload > 0 then 8 else 0) in
+        let bit b = flags land b <> 0 in
+        let win_size =
+            match opt_int fields "win_size" 0 0xffff, trx with
+            | Some w, _ -> w
+            | None, Some t -> Tcp.TRX.adv_wnd t
+            | None, None -> 0xffff in
+        let seq_num n = Tcp.SeqNum.o (Int32.of_int n) in
+        let pdu =
+            Tcp.Pdu.make ~src_port:(port "src") ~dst_port:(port "dst")
+                ~seq_num:(seq_num seq) ~ack_num:(seq_num (ack |? 0))
+                ~fin:(bit 1) ~syn:(bit 2) ~rst:(bit 4) ~psh:(bit 8) ~ack:(bit 16)
+                ~urg:(bit 32) ~win_size
+                ~urg_ptr:(int_of ~def:0 fields "TCP!" "urg_ptr" 0 0xffff) payload in
+        (match seq_given, trx with
+        | None, Some t -> Tcp.TRX.sent_manually t pdu
+        | None, None ->
+            manual_seq :=
+                (seq + Tools.bytelength payload + (if bit 2 then 1 else 0) +
+                 (if bit 1 then 1 else 0)) land 0xffff_ffff
+        | Some _, _ -> ()) ;
+        Tcp.Pdu.pack pdu, [ "proto", V.Int tcp_proto ]) ;
+      send = (fun fields _ payload ->
+        let s = stream fields in
+        if bitstring_length payload > 0 then
+            if s.trx.closed then V.fail "This TCP connection is closed"
+            else if Tcp.TRX.is_established s.trx then Tcp.TRX.tx s.trx payload
+            else s.pending <- payload :: s.pending) ;
+      receive = (fun u ->
+        (match !state, List.assoc "flags" u.values with
+        | Listening, V.Int f when f land 2 <> 0 && f land 16 = 0 ->
+            ignore (new_stream ())
+        | _ -> ()) ;
+        let raw = u, [ Manual ] in
+        match !state with
+        | Stream s ->
+            received := [] ;
+            Tools.rx s.trx.tcp_trx.trx u.bits ;
+            let data = List.rev !received in
+            received := [] ;
+            removed s ;
+            raw :: List.map (fun d ->
+                { u with payload = d ; upper = Some "Bytes" ; bits = d }, [ Driven ]) data
+        | Idle | Listening -> [ raw ]) ;
+      listen = (fun () -> match !state with Idle -> state := Listening | _ -> ()) ;
+      close = (fun k ->
+        match !state with
+        | Idle | Listening -> k ()
+        | Stream s ->
+            s.closing <- true ;
+            s.on_closed <- Some k ;
+            try_close s ;
+            Simulation.delay power (Clock.Interval.min 2.) (fun () ->
+                if Option.is_some s.on_closed then (
+                    Tcp.TRX.abort s.trx ;
+                    Option.may (fun k -> s.on_closed <- None ; k ()) s.on_closed)) ()) }
 
 let icmp_upper = function
     | 0 | 8 -> Some "Echo"
@@ -351,7 +532,7 @@ let unpack_icmp _ bits =
 (* The message on top tells the type and code, and its own bits are what
  * follows them: *)
 let icmp_node _ =
-    { pack = (fun _ hints payload ->
+    manual (fun _ hints payload ->
         let int name =
             match List.assoc_opt name hints with
             | Some v -> int_value name 0 0xff v
@@ -360,8 +541,7 @@ let icmp_node _ =
         let msg chk =
             let%bitstring hdr = {| typ : 8 ; code : 8 ; chk : 16 |} in
             concat [ hdr ; payload ] in
-        msg (Tools.sum (msg 0)), [ "proto", V.Int (Ip.Proto.icmp :> int) ]) ;
-      send = not_driven ; receive = pass }
+        msg (Tools.sum (msg 0)), [ "proto", V.Int (Ip.Proto.icmp :> int) ])
 
 (* The message on top is told by the type: *)
 let unpack_echo hints bits =
@@ -377,11 +557,10 @@ let unpack_echo hints bits =
 
 (* The id of the stream; the message on top tells its type: *)
 let echo_node _ =
-    { pack = (fun fields hints payload ->
+    manual (fun fields hints payload ->
         let id = int_of fields "Echo" "id" 0 0xffff in
         let%bitstring hdr = {| id : 16 |} in
-        concat [ hdr ; payload ], hints) ;
-      send = not_driven ; receive = pass }
+        concat [ hdr ; payload ], hints)
 
 let unpack_echo_message _ bits =
     match%bitstring bits with
@@ -393,15 +572,14 @@ let unpack_echo_message _ bits =
  * along the stream, unless given: *)
 let echo_message_node typ _ =
     let seq = ref 0 in
-    { pack = (fun fields _ _ ->
+    manual (fun fields _ _ ->
         let seq =
             match opt_int fields "seq" 0 0xffff with
             | Some s -> s
             | None -> seq := (!seq + 1) land 0xffff ; !seq in
         let%bitstring hdr = {| seq : 16 |} in
         concat [ hdr ; bytes_of fields "payload" ],
-        [ "type", V.Int typ ; "code", V.Int 0 ]) ;
-      send = not_driven ; receive = pass }
+        [ "type", V.Int typ ; "code", V.Int 0 ])
 
 let unpack_icmp_error ~mtu hints bits =
     match%bitstring bits with
@@ -412,19 +590,17 @@ let unpack_icmp_error ~mtu hints bits =
     | {| _ |} -> None
 
 let icmp_error_node typ ~mtu _ =
-    { pack = (fun fields _ _ ->
+    manual (fun fields _ _ ->
         let code = int_of ~def:0 fields "ICMP" "code" 0 0xff
         and mtu = if mtu then int_of ~def:0 fields "ICMP" "mtu" 0 0xffff else 0 in
         let%bitstring hdr = {| 0 : 16 ; mtu : 16 |} in
         concat [ hdr ; bytes_of fields "payload" ],
-        [ "type", V.Int typ ; "code", V.Int code ]) ;
-      send = not_driven ; receive = pass }
+        [ "type", V.Int typ ; "code", V.Int code ])
 
 let unpack_bytes _ bits = unpacked [ "data", bytes_value bits ] bits
 
 let bytes_node _ =
-    { pack = (fun fields _ _ -> bytes_of fields "data", []) ;
-      send = not_driven ; receive = pass }
+    manual (fun fields _ _ -> bytes_of fields "data", [])
 
 (** {2 Layers} *)
 
@@ -458,7 +634,7 @@ let random_port = Random_in (49152, 65535)
 
 let unsendable name _ =
     let fail _ _ _ = V.fail "%s cannot be sent" name in
-    { pack = fail ; send = fail ; receive = pass }
+    { (manual fail) with send = fail }
 
 let layer ?(above=[]) ?(driven=false) ?(terminal=false) ?default
           ?(constants=[]) ?node ?(unpack=fun _ _ -> None) name fields =
@@ -496,7 +672,7 @@ let ip =
         field "is_fragment" Type.Bool ~set_in:[] ]
 
 let tcp =
-    layer "TCP" ~above:[ "ip" ] ~driven:true ~node:tcp_node
+    layer "TCP" ~above:[ "ip" ] ~driven:true ~node:tcp_node ~unpack:unpack_tcp
         ~constants:[ "FIN", Int 1 ; "SYN", Int 2 ; "RST", Int 4 ; "PSH", Int 8 ;
                      "ACK", Int 16 ; "URG", Int 32 ] [
         field "src" Type.Int ~set_in:both ~read_in:both ~discriminant:true

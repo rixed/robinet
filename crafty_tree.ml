@@ -76,6 +76,8 @@ type node =
       mutable users : int ;
       (* How many received packets went through it: *)
       mutable received : int ;
+      (* Unused, it is finishing what it has to before going away: *)
+      mutable closing : bool ;
       eth : Eth.State.t ;
       ops : L.ops ;
       (* Registered on it, by order of registration: *)
@@ -124,12 +126,18 @@ let pick_random loc parent (l : L.layer) i lo hi =
         if Set.Int.mem v taken then loop (if v = hi then lo else v + 1) else v in
     Int (loop (lo + Random.int n))
 
+(* The fields of key [key] of layer [l], by name: *)
+let key_fields (l : L.layer) key name =
+    Option.bind (L.find_field l name) (fun i -> List.assoc_opt i key)
+
 (* A new child of [parent], with no user: *)
 let make_child parent (l : L.layer) key =
     let c = { layer = l ; key ; parent = Some parent ;
               children = Hashtbl.create 3 ; users = 0 ; received = 0 ;
-              eth = parent.eth ;
-              ops = l.node { eth = parent.eth ; below = Some parent.ops } ;
+              closing = false ; eth = parent.eth ;
+              ops = l.node { eth = parent.eth ; key = key_fields l key ;
+                             below_key = key_fields parent.layer parent.key ;
+                             below = Some parent.ops } ;
               patterns = [] } in
     let s =
         match siblings parent l with
@@ -176,17 +184,24 @@ let children n =
     Hashtbl.fold (fun _ s cs -> Siblings.fold (fun _ c cs -> c :: cs) s cs)
                  n.children []
 
-(* Removes [n] if nothing uses it any more, its terminal children with it,
- * and so on down to the root: *)
+(* Removes [n] if nothing uses it any more, once it has closed, its terminal
+ * children with it, and so on down to the root; unless it is used again
+ * meanwhile: *)
 let rec prune n =
-    if n.users = 0 &&
-       List.for_all (fun c -> c.layer.terminal && c.users = 0) (children n) then
+    let unused () =
+        n.users = 0 &&
+        List.for_all (fun c -> c.layer.terminal && c.users = 0) (children n) in
+    if unused () && not n.closing then
         Option.may (fun p ->
-            Option.may (fun s ->
-                Siblings.remove s n.key ;
-                if Siblings.length s = 0 then Hashtbl.remove p.children n.layer.name
-            ) (siblings p n.layer) ;
-            prune p) n.parent
+            n.closing <- true ;
+            n.ops.close (fun () ->
+                n.closing <- false ;
+                if unused () then (
+                    Option.may (fun s ->
+                        Siblings.remove s n.key ;
+                        if Siblings.length s = 0 then Hashtbl.remove p.children n.layer.name
+                    ) (siblings p n.layer) ;
+                    prune p))) n.parent
 
 let release n =
     assert (n.users > 0) ;
@@ -310,6 +325,9 @@ let rec up w node packet pending =
                 | Some n, _ :: _ ->
                     let c = make_child n ul key in
                     List.iter (fun ((p : pattern), _) -> p.hold c) makers ;
+                    if List.exists (fun (_, pls) ->
+                           match pls with pl :: _ -> pl.pmode = L.Driven | [] -> false) makers
+                    then c.ops.listen () ;
                     enter w c packet uu pending
                 | _ ->
                     let pending = check w above L.both pending in
@@ -355,8 +373,11 @@ let decode frame : packet =
 let make_root (eth : Eth.State.t) =
     let root =
         { layer = L.root ; key = [] ; parent = None ;
-          children = Hashtbl.create 10 ; users = 0 ; received = 0 ; eth ;
-          ops = L.root.node { eth ; below = None } ; patterns = [] } in
+          children = Hashtbl.create 10 ; users = 0 ; received = 0 ;
+          closing = false ; eth ;
+          ops = L.root.node { eth ; key = (fun _ -> None) ;
+                              below_key = (fun _ -> None) ; below = None } ;
+          patterns = [] } in
     eth.iface.recv <- receive root ;
     root
 

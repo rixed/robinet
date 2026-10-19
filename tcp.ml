@@ -593,6 +593,11 @@ struct
     (* FIXME: ideally, wait 2 minutes after the complete close *)
     let is_closed t () = t.closed
 
+    (* Hands [bits] to the reader, an empty bitstring signaling the close: *)
+    let deliver t bits =
+        if t.sync_recv then t.recv bits
+        else Simulation.asap t.power t.recv bits
+
     let int_of_bool x = if x then 1 else 0
     let (+/) = Int32.add and (-/) = Int32.sub
     let next_seq_num t = SeqNum.o ((Int32.of_int t.sent_pld) +/ (t.isn :> int32))
@@ -698,7 +703,7 @@ struct
             Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Retransmission timeout #%d" t.timeouts))) ;
             if t.timeouts > t.max_timeouts then (
                 abort t ;
-                Simulation.asap t.power t.recv empty_bitstring (* signal the close *)
+                deliver t empty_bitstring (* signal the close *)
             ) else (
                 (* Only the first timeout tells about the window that was in flight: *)
                 if t.timeouts = 1 then t.ssthresh <- max (in_flight t / 2) (2 * t.snd_mss) ;
@@ -792,18 +797,18 @@ struct
                     let pld = dropbytes skip (tcp.Pdu.payload :> bitstring) in
                     t.rcvd_pld <- t.rcvd_pld + (bytelength pld) ;
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: I have now read %d bytes" t.rcvd_pld))) ;
-                    if bitstring_length pld > 0 then Simulation.asap t.power t.recv pld ;
+                    if bitstring_length pld > 0 then deliver t pld ;
                     if tcp.Pdu.flags.Pdu.fin && not t.rcvd_fin then (
                         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: received a FIN"))) ;
                         t.rcvd_pld <- t.rcvd_pld + 1 ;
                         t.rcvd_fin <- true ;
                         t.closed <- true ;
-                        Simulation.asap t.power t.recv empty_bitstring (* signal the close *) (* FIXME: which is not very easy to use when the TRX is piped into another one. An Err would suit better *)
+                        deliver t empty_bitstring (* signal the close *) (* FIXME: which is not very easy to use when the TRX is piped into another one. An Err would suit better *)
                     ) else if tcp.Pdu.flags.Pdu.rst && not t.rcvd_fin then (
                         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: received a RST"))) ;
                         (* Nothing is sent after it, not even a FIN: *)
                         abort t ;
-                        Simulation.asap t.power t.recv empty_bitstring (* signal the close *)
+                        deliver t empty_bitstring (* signal the close *)
                     )
                 ) else (
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp:...obsolete packet")))
@@ -989,7 +994,7 @@ struct
                     tx_queued t true
                 ) else if t.unanswered_probes >= t.max_timeouts then (
                     abort t ;
-                    Simulation.asap t.power t.recv empty_bitstring (* signal the close *)
+                    deliver t empty_bitstring (* signal the close *)
                 ) else (
                     send_probe t ;
                     t.probes <- t.probes + 1 ;
@@ -1086,7 +1091,9 @@ struct
     let max_rcv_buf = 0xffff lsl 14
 
     (* Retransmission defaults are those of Linux: *)
-    let make power ?isn ?(mss=536) ?(ssthresh=max_int) ?(snd_buf=default_snd_buf) ?(rcv_buf=default_rcv_buf)
+    (* With [sync_recv], what is received in order is handed to the reader
+     * while the segment that completes it is being received. *)
+    let make power ?(sync_recv=false) ?isn ?(mss=536) ?(ssthresh=max_int) ?(snd_buf=default_snd_buf) ?(rcv_buf=default_rcv_buf)
              ?(initial_rto=Clock.Interval.sec 1.) ?(min_rto_var=Clock.Interval.msec 200.)
              ?(max_rto=Clock.Interval.sec 120.) ?(max_timeouts=15)
              src dst logger =
@@ -1116,7 +1123,7 @@ struct
                                 shift 0) ;
                   snd_wnd = 0 ; snd_wl1 = -1 ; snd_wl2 = 0 ; max_snd_wnd = 0 ;
                   persist_gen = 0 ; persist_armed = false ; probes = 0 ; unanswered_probes = 0 ;
-                  cnx_established_cont = None ;
+                  cnx_established_cont = None ; sync_recv ;
                   tcp_trx = { trx = null_trx ~logger ;
                               close = ignore ;
                               is_closed = (fun _ -> true) ;
