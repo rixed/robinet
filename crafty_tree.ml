@@ -27,7 +27,18 @@
    mode, and goes away when the last of them is gone and it has no children
    left. The nodes of terminal layers, which send a message each, are not
    held by the stack that sends it: they go away with their parent. The root
-   is the Ethernet interface. *)
+   is the Ethernet interface.
+
+   Patterns are registered on nodes: a relative one on the node of the
+   current stack it is on top of, an absolute one on the root. A received
+   packet goes up the nodes of its stream, each updating its state then
+   telling what goes on (a reassembled packet...); along the way, it carries
+   the patterns whose layers matched so far, each layer seen in its mode. A
+   layer of a pattern that matched where there is no node yet makes one (so
+   that, say, the fragments of a packet are reassembled), which the pattern
+   holds as long as it is registered. Once the packet is through, the
+   patterns it completed are told, by order of registration: none of them
+   runs while the tree is being walked. *)
 open Batteries
 open Crafty_value
 module A = Crafty_ast
@@ -50,6 +61,9 @@ end
 
 module Siblings = Hashtbl.Make (Key)
 
+(** A received packet as decoded: its layers, the top first. *)
+type packet = (L.layer * L.unpacked) list
+
 type node =
     { layer : L.layer ;
       key : Key.t ;
@@ -63,7 +77,29 @@ type node =
       (* How many received packets went through it: *)
       mutable received : int ;
       eth : Eth.State.t ;
-      ops : L.ops }
+      ops : L.ops ;
+      (* Registered on it, by order of registration: *)
+      mutable patterns : pattern list }
+
+(* Of patterns, whose layers are matched from that of the node they are
+ * registered on: *)
+and pattern =
+    { seq : int ;
+      layers : pattern_layer list ;
+      (* Holds a node made for it, for as long as it is registered: *)
+      hold : node -> unit ;
+      (* Told a packet that completed it: *)
+      matched : packet -> unit ;
+      (* Told an error of one of its conditions: *)
+      failed : A.location -> string -> unit }
+
+(* Matches a layer of a packet seen in that mode, if its condition, given
+ * the packet up to that layer, holds (raising [Runtime_error] if it
+ * fails): *)
+and pattern_layer =
+    { player : L.layer ;
+      pmode : L.mode ;
+      test : (packet -> bool) option }
 
 (** A layer of a stack: a node used in a mode, with the options given. *)
 type entry = { node : node ; mode : L.mode ; options : (int * value) list }
@@ -87,6 +123,23 @@ let pick_random loc parent (l : L.layer) i lo hi =
     let rec loop v =
         if Set.Int.mem v taken then loop (if v = hi then lo else v + 1) else v in
     Int (loop (lo + Random.int n))
+
+(* A new child of [parent], with no user: *)
+let make_child parent (l : L.layer) key =
+    let c = { layer = l ; key ; parent = Some parent ;
+              children = Hashtbl.create 3 ; users = 0 ; received = 0 ;
+              eth = parent.eth ;
+              ops = l.node { eth = parent.eth ; below = Some parent.ops } ;
+              patterns = [] } in
+    let s =
+        match siblings parent l with
+        | Some s -> s
+        | None ->
+            let s = Siblings.create 3 in
+            Hashtbl.add parent.children l.name s ;
+            s in
+    Siblings.add s key c ;
+    c
 
 (** The child of [parent] for [l] given these [options]: an existing one if
  * they give all of its key, or else a new one, with what is missing picked
@@ -121,20 +174,7 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
         else Option.bind (siblings parent l) (fun s -> Siblings.find_option s key) in
     match existing with
     | Some c -> c
-    | None ->
-        let c = { layer = l ; key ; parent = Some parent ;
-                  children = Hashtbl.create 3 ; users = 0 ; received = 0 ;
-                  eth = parent.eth ;
-                  ops = l.node { eth = parent.eth ; below = Some parent.ops } } in
-        let s =
-            match siblings parent l with
-            | Some s -> s
-            | None ->
-                let s = Siblings.create 3 in
-                Hashtbl.add parent.children l.name s ;
-                s in
-        Siblings.add s key c ;
-        c
+    | None -> make_child parent l key
 
 let acquire n = n.users <- n.users + 1
 
@@ -191,62 +231,138 @@ let send stack =
                     loop hints bits rest)) in
     loop [] Bitstring.empty_bitstring stack
 
-(** {2 Receiving} *)
+(** {2 Patterns} *)
 
-(** A received packet as decoded: its layers, the top first. *)
-type packet = (L.layer * L.unpacked) list
+let next_seq = ref 0
+
+(** Registers a pattern on [node], which it holds until the function
+ * returned unregisters it; [layers] start with that of [node]. *)
+let register node layers ~hold ~matched ~failed =
+    incr next_seq ;
+    let p = { seq = !next_seq ; layers ; hold ; matched ; failed } in
+    acquire node ;
+    node.patterns <- node.patterns @ [ p ] ;
+    let registered = ref true in
+    fun () ->
+        if !registered then (
+            registered := false ;
+            node.patterns <- List.filter ((!=) p) node.patterns ;
+            release node)
+
+(** {2 Receiving} *)
 
 (* The key of the node of [l] that a packet with this layer belongs to: *)
 let incoming_key (l : L.layer) (u : L.unpacked) =
     List.map (fun i -> i, List.assoc l.fields.(i).peer u.values) (L.key_fields l)
 
-(* Decodes the layer on top of [packet], and so on up to the last one, along
- * the nodes from [node] while there are some for those layers; [node] is
- * that of the top of [packet], if any: *)
-let rec up node (packet : packet) =
+type event = Match of packet | Condition_error of A.location * string
+
+(* What a packet did to the patterns it met, the last first; at most one
+ * thing to each: *)
+type walk = { mutable met : (pattern * event) list }
+
+let met w p = List.exists (fun (p', _) -> p' == p) w.met
+
+(* Whether [pl] matches the top of [packet], seen in [modes]: *)
+let passes packet modes pl =
+    pl.player == fst (List.hd packet) && List.mem pl.pmode modes &&
+    match pl.test with None -> true | Some test -> test packet
+
+(* A pattern on its way up, with its layers left to match: *)
+type pending = pattern * pattern_layer list
+
+(* What of [pending] goes on past the top of [packet], seen in [modes]; what
+ * it completes, or makes fail, is met: *)
+let check w packet modes (pending : pending list) =
+    List.filter_map (fun (p, pls) ->
+        match pls with
+        | pl :: rest when not (met w p) ->
+            (match passes packet modes pl, rest with
+            | true, [] -> w.met <- (p, Match packet) :: w.met ; None
+            | true, rest -> Some (p, rest)
+            | false, _ -> None
+            | exception Runtime_error (where, message) ->
+                w.met <- (p, Condition_error (where, message)) :: w.met ; None)
+        | _ -> None) pending
+
+(* Decodes the layer on top of [packet], [node] being that of its top if
+ * any, and goes on along the nodes of that stream, or as long as some
+ * patterns are pending: *)
+let rec up w node packet pending =
     let l, (u : L.unpacked) = List.hd packet in
     match Option.bind u.upper (fun name -> L.find ~below:l name) with
     | None -> ()
     | Some ul ->
-        (match ul.unpack u.up_hints u.payload with
+        let streams = Option.bind node (fun n -> siblings n ul) in
+        if Option.is_some streams || not (List.is_empty pending) then
+        match ul.unpack u.up_hints u.payload with
         | None -> ()
         | Some uu ->
-            (match Option.bind node (fun n ->
-                       Option.bind (siblings n ul) (fun s ->
-                           Siblings.find_option s (incoming_key ul uu))) with
-            | Some c -> enter c packet uu
-            | None -> up None ((ul, uu) :: packet)))
+            let key = incoming_key ul uu in
+            match Option.bind streams (fun s -> Siblings.find_option s key) with
+            | Some c -> enter w c packet uu pending
+            | None ->
+                let above = (ul, uu) :: packet in
+                (* The patterns that would make a node for that layer (but
+                 * for errors, told in [enter]): *)
+                let makers =
+                    if ul.terminal then [] else
+                    List.filter (fun (p, pls) ->
+                        not (met w p) &&
+                        match pls with
+                        | pl :: _ -> (try passes above L.both pl with Runtime_error _ -> false)
+                        | [] -> false) pending in
+                match node, makers with
+                | Some n, _ :: _ ->
+                    let c = make_child n ul key in
+                    List.iter (fun ((p : pattern), _) -> p.hold c) makers ;
+                    enter w c packet uu pending
+                | _ ->
+                    let pending = check w above L.both pending in
+                    if not (List.is_empty pending) then up w None above pending
 
-(* What goes on from that layer of a packet, received by its node: *)
-and enter node packet u =
+(* What goes on from that layer of a packet, received by its node, with
+ * the patterns registered there: *)
+and enter w node packet u pending =
     node.received <- node.received + 1 ;
-    List.iter (fun u -> up (Some node) ((node.layer, u) :: packet))
-              (node.ops.receive u)
+    let pending = pending @ List.map (fun p -> p, p.layers) node.patterns in
+    List.iter (fun (u, modes) ->
+        let packet = (node.layer, u) :: packet in
+        up w (Some node) packet (check w packet modes pending)
+    ) (node.ops.receive u)
 
-(** Takes a frame from the interface. *)
+(** Takes a frame from the interface, then tells the patterns it met. *)
 let receive root frame =
-    Option.may (enter root []) (L.root.unpack [] frame)
+    let w = { met = [] } in
+    Option.may (fun u -> enter w root [] u []) (L.root.unpack [] frame) ;
+    List.sort (fun (a, _) (b, _) -> Int.compare a.seq b.seq) w.met |>
+    List.iter (fun (p, e) ->
+        match e with
+        | Match packet -> p.matched packet
+        | Condition_error (where, message) -> p.failed where message)
+
+(** [packet] with the layers on top of it, as decoded without any node. *)
+let rec complete (packet : packet) =
+    let l, (u : L.unpacked) = List.hd packet in
+    match Option.bind u.upper (fun name -> L.find ~below:l name) with
+    | None -> packet
+    | Some ul ->
+        (match ul.unpack u.up_hints u.payload with
+        | None -> packet
+        | Some uu -> complete ((ul, uu) :: packet))
 
 (** The layers of a frame, as decoded without any node. *)
 let decode frame : packet =
-    let rec loop (p : packet) =
-        let l, (u : L.unpacked) = List.hd p in
-        match Option.bind u.upper (fun name -> L.find ~below:l name) with
-        | None -> p
-        | Some ul ->
-            (match ul.unpack u.up_hints u.payload with
-            | None -> p
-            | Some uu -> loop ((ul, uu) :: p)) in
     match L.root.unpack [] frame with
     | None -> []
-    | Some u -> loop [ L.root, u ]
+    | Some u -> complete [ L.root, u ]
 
 (** The tree of an interface, which then receives through it. *)
 let make_root (eth : Eth.State.t) =
     let root =
         { layer = L.root ; key = [] ; parent = None ;
           children = Hashtbl.create 10 ; users = 0 ; received = 0 ; eth ;
-          ops = L.root.node { eth ; below = None } } in
+          ops = L.root.node { eth ; below = None } ; patterns = [] } in
     eth.iface.recv <- receive root ;
     root
 

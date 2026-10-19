@@ -100,10 +100,11 @@ type ops =
       pack : fields -> hints -> bitstring -> bitstring * hints ;
       (* Self-driven mode: [payload] handed to its TRX: *)
       send : fields -> hints -> bitstring -> unit ;
-      (* What goes on from a received layer: nothing (a frame for another
-       * host, a fragment...), that layer, or another (a reassembled
-       * packet...): *)
-      receive : unpacked -> unpacked list }
+      (* What goes on from a received layer, with the modes that see it:
+       * nothing (a frame for another host), that layer, or others (a
+       * fragment, seen as it is in manual mode, then the reassembled packet,
+       * seen by the self-driven stream): *)
+      receive : unpacked -> (unpacked * mode list) list }
 
 (** What a node is made with: *)
 type context =
@@ -151,7 +152,9 @@ let ip_of (fields : fields) name =
 
 let not_driven _ _ _ = invalid_arg "Crafty_layers: not a self-driven layer"
 
-let pass u = [ u ]
+let both = [ Manual ; Driven ]
+
+let pass u = [ u, both ]
 
 let bytes_value bits = V.bytes_of_string (string_of_bitstring bits)
 
@@ -200,7 +203,7 @@ let eth_node ctx =
             Eth.TRX.rx st u.bits ;
             []
         | _, V.Mac dst when Eth.Addr.eq dst st.mac || Eth.Addr.eq dst Eth.Addr.broadcast ->
-            [ u ]
+            pass u
         | _ -> [] in
     { pack = (fun fields hints payload ->
         let proto = int_of ~hints fields "Eth!" "proto" 0 0xffff in
@@ -239,9 +242,9 @@ let unpack_ip _ bits =
         unpacked (ip_values ip) ~upper:(ip_upper ip)
                  ~payload:(ip.payload :> bitstring) bits
 
-(* Both modes share the ids. A self-driven IP has a TRX per protocol. Both
- * modes reassemble the fragments received, the whole packet going on once
- * complete, beside the last fragment: *)
+(* Both modes share the ids. A self-driven IP has a TRX per protocol. The
+ * fragments received are seen in manual mode, and reassembled for the
+ * self-driven mode, which sees the whole packet once complete: *)
 let ip_node ctx =
     let st = ctx.eth in
     let below = Option.get ctx.below in
@@ -250,20 +253,22 @@ let ip_node ctx =
     let trxs = Hashtbl.create 3 in
     let fragments = Hashtbl.create 3 in
     let receive (u : unpacked) =
-        if List.assoc "is_fragment" u.values <> V.Bool true then [ u ] else
+        if List.assoc "is_fragment" u.values <> V.Bool true then pass u else
+        let fragment = u, [ Manual ] in
         match Ip.Pdu.unpack u.bits with
-        | Error _ -> [ u ]
+        | Error _ -> [ fragment ]
         | Ok ip ->
             (match Ip.TRX.reassemble_into fragments ip with
-            | None -> [ u ]
+            | None -> [ fragment ]
             | Some payload ->
                 let ip =
                     { ip with more_frags = false ; frag_offset = 0 ;
                               tot_len = 20 + Tools.bytelength ip.options +
                                         Tools.bytelength payload ;
                               payload = Payload.o payload } in
-                [ u ; { values = ip_values ip ; upper = Some (ip_upper ip) ;
-                        payload ; up_hints = [] ; bits = Ip.Pdu.pack ip } ]) in
+                [ fragment ;
+                  { values = ip_values ip ; upper = Some (ip_upper ip) ;
+                    payload ; up_hints = [] ; bits = Ip.Pdu.pack ip }, [ Driven ] ]) in
     let proto fields hints = int_of ~hints fields "IP" "proto" 0 0xff in
     { pack = (fun fields hints payload ->
         let int ~def name hi = int_of ~def fields "IP!" name 0 hi
@@ -432,8 +437,6 @@ let field ?(set_in=[ Manual ]) ?(read_in=[ Manual ]) ?(discriminant=false)
     { name ; typ ; set_in ; read_in ; discriminant ; pick ; peer = peer |? name }
 
 let random_port = Random_in (49152, 65535)
-
-let both = [ Manual ; Driven ]
 
 let unsendable name _ =
     let fail _ _ _ = V.fail "%s cannot be sent" name in

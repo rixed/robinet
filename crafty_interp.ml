@@ -33,7 +33,13 @@
    [retry max=N] runs its block again up to N times (3 by default) while it
    fails, the error of the last attempt going to the enclosing block.
    [catch] leaves its block on its first error, which goes no further. An
-   error reaching the program's block ends the program. *)
+   error reaching the program's block ends the program.
+
+   [expect] waits for its pattern, failing after its timeout, then runs its
+   block once. [on] lets its block go on, and runs its own block for every
+   match until its timeout, its [max] or a [break] out of it; a block ends
+   only once its statements are done and its [on]s are over. The packet
+   matched, [MATCH], is decoded to its top, and only if read. *)
 open Batteries
 open Crafty_value
 module A = Crafty_ast
@@ -46,20 +52,27 @@ type error = Crafty_parser.error
 
 (* Variables are cells, so that a block sees the changes made after it was
  * entered; a block entered again (a new iteration, another match) has cells
- * of its own: *)
+ * of its own. A cell is made when first used, so that a value is computed
+ * only if needed: *)
 module Env = Map.Int
 
 type env =
-    { vars : value ref Env.t ;
+    { vars : value ref Lazy.t Env.t ;
       (* The current protocol stack, its top first: *)
-      stack : Crafty_tree.entry list }
+      stack : Crafty_tree.entry list ;
+      (* In a condition, the packet being matched up to its layer, the top
+       * first: *)
+      packet : Crafty_tree.packet }
 
 let lookup (env : env) (v : T.var) =
-    try Env.find v.id env.vars
+    try Lazy.force (Env.find v.id env.vars)
     with Not_found -> invalid_arg ("Crafty_interp: no cell for "^ v.name)
 
 let bind env (v : T.var) value =
-    { env with vars = Env.add v.id (ref value) env.vars }
+    { env with vars = Env.add v.id (Lazy.from_val (ref value)) env.vars }
+
+let bind_lazy env (v : T.var) f =
+    { env with vars = Env.add v.id (lazy (ref (f ()))) env.vars }
 
 let rand loc = function
     | Int max ->
@@ -175,8 +188,10 @@ let rec eval output (env : env) (e : T.expr) =
             | T.Text s -> s
             | T.Interp e -> to_string e.typ (eval e)) parts))
     | T.Var v -> !(lookup env v)
-    | T.Packet_field _ ->
-        error e.loc "Packets are not supported yet"
+    | T.Packet_field { layer ; field } ->
+        let (l : Crafty_layers.layer), (u : Crafty_layers.unpacked) =
+            List.nth env.packet (List.length env.packet - 1 - layer) in
+        List.assoc l.fields.(field).name u.values
     | T.Field (r, i) ->
         (match eval r with Record vs -> vs.(i) | _ -> assert false)
     | T.Index (a, i) ->
@@ -241,7 +256,11 @@ type block =
       (* Where its errors go, once it is cancelled: *)
       fail : error -> unit ;
       (* Leaving that many enclosing loops: *)
-      break_ : int -> unit }
+      break_ : int -> unit ;
+      (* How many of its [on]s are not over: *)
+      mutable busy : int ;
+      (* What ends it, once its statements are done, when it is not busy: *)
+      mutable finish : (unit -> unit) option }
 
 (* Leaves [b], and the blocks within it; the most recent first: *)
 let rec cancel b =
@@ -252,6 +271,11 @@ let rec cancel b =
         b.cleanups <- [] ;
         Option.may (fun p -> p.children <- List.filter ((!=) b) p.children)
                    b.parent)
+
+(* Ends [b] if it is done and not busy: *)
+let settle b =
+    if b.live && b.busy = 0 then
+        Option.may (fun f -> b.finish <- None ; f ()) b.finish
 
 (* [f ()], or else its error goes to [b], which is then left. Only what is
  * run within this block is guarded, never what follows it: *)
@@ -294,18 +318,60 @@ let push t b env absolute (layers : T.layer list) =
         Crafty_tree.{ node ; mode = l.mode ; options } :: stack
     ) base layers
 
+(* The value of the [timeout] parameter of that statement: *)
+let timeout_of eval what = function
+    | Some (e : T.expr) ->
+        (match eval e with
+        | Interval i ->
+            if Interval.compare i Interval.zero < 0 then
+                error e.loc "The timeout of %s cannot be negative" what ;
+            i
+        | _ -> assert false)
+    | None -> Interval.min 1.
+
+(* [MATCH], from the packet that matched, the bottom first: *)
+let match_value packet =
+    Array (Array.of_list (List.rev_map (fun ((l : Crafty_layers.layer), (u : Crafty_layers.unpacked)) ->
+        match T.packet_record l with
+        | A.Type.Record fields ->
+            Variant (l.name, Record (Array.of_list (List.map (fun (name, _) ->
+                List.assoc name u.values) fields)))
+        | _ -> assert false) (Crafty_tree.complete packet)))
+
+(* Registers [pattern] for block [b], its conditions evaluated in [env] at
+ * match time; a relative pattern on the node of the stack it is on top of,
+ * which is seen in the mode of the stack. Returns what unregisters it: *)
+let register t b env (p : T.pattern) ~matched ~failed =
+    let layers =
+        List.map (fun (pl : T.pattern_layer) ->
+            Crafty_tree.{
+                player = pl.pl_layer ; pmode = pl.pl_mode ;
+                test = Option.map (fun c packet ->
+                    match eval t.output { env with packet } c with
+                    | Bool b -> b
+                    | _ -> assert false) pl.cond }) p.pat_layers in
+    let node, layers =
+        if p.depth = 0 then t.tree, layers else
+        let (e : Crafty_tree.entry) =
+            List.nth env.stack (List.length env.stack - p.depth) in
+        e.node,
+        Crafty_tree.{ player = e.node.layer ; pmode = e.mode ; test = None } :: layers in
+    Crafty_tree.register node layers ~matched ~failed ~hold:(fun n ->
+        Crafty_tree.acquire n ;
+        b.cleanups <- (fun () -> Crafty_tree.release n) :: b.cleanups)
+
 (* Runs that block within [parent], then [k], unless it fails or breaks
  * first; returns the block: *)
 let rec run_block t parent env (stmts : T.block) ~fail ~break_ k =
     let rec b =
         { parent = Some parent ; live = true ; children = [] ; cleanups = [] ;
           fail = (fun e -> cancel b ; fail e) ;
-          break_ } in
+          break_ ; busy = 0 ; finish = None } in
     parent.children <- b :: parent.children ;
     let rec loop env = function
         | [] ->
-            cancel b ;
-            k ()
+            b.finish <- Some (fun () -> cancel b ; k ()) ;
+            settle b
         | s :: rest ->
             exec t b env s (fun env -> if b.live then loop env rest) in
     loop env stmts ;
@@ -358,9 +424,80 @@ and exec t b env (s : T.stmt) k =
                 rest
             | stack -> stack) |>
         Option.may (fun stack -> k { env with stack })
-    | T.Expect _ | T.On _ ->
-        ignore (guard (fun () ->
-            error s.stmt_loc "Patterns are not supported yet"))
+    | T.Expect { timeout ; pattern ; match_ ; body } ->
+        guard (fun () -> timeout_of eval "expect" timeout) |>
+        Option.may (fun timeout ->
+            let armed = ref true and unregister = ref ignore in
+            let disarm () = armed := false ; !unregister () in
+            let fire f = if !armed && b.live then (disarm () ; f ()) in
+            unregister :=
+                register t b env pattern
+                    ~matched:(fun packet -> fire (fun () ->
+                        let inner = bind_lazy env match_ (fun () -> match_value packet) in
+                        ignore (run_block t b inner body ~fail:b.fail ~break_:b.break_
+                                    (fun () -> k env))))
+                    ~failed:(fun where message -> fire (fun () ->
+                        b.fail Crafty_parser.{ where ; message })) ;
+            b.cleanups <- disarm :: b.cleanups ;
+            Simulation.delay t.power timeout (fun () -> fire (fun () ->
+                ignore (guard (fun () ->
+                    error s.stmt_loc "Nothing matched within %s"
+                        (Interval.to_string timeout))))) ())
+    | T.On { timeout ; max ; pattern ; match_ ; body } ->
+        guard (fun () ->
+            timeout_of eval "on" timeout,
+            Option.map (fun e -> match eval e with Int n -> n | _ -> assert false) max) |>
+        Option.may (fun (timeout, max) ->
+            (* Like [repeat count=0], [max=0] does nothing: *)
+            if Option.map_default (fun m -> m > 0) true max then
+                on t b env pattern match_ body timeout max ;
+            k env)
+
+and on t b env pattern match_ body timeout max =
+    let armed = ref true and over = ref false and unregister = ref ignore in
+    let matches = ref 0 in
+    (* The instances of its block that are running: *)
+    let running = ref [] in
+    let disarm () = if !armed then (armed := false ; !unregister ()) in
+    let check_over () =
+        if not !armed && List.is_empty !running && not !over && b.live then (
+            over := true ;
+            b.busy <- b.busy - 1 ;
+            settle b) in
+    let stop () =
+        disarm () ;
+        let r = !running in
+        running := [] ;
+        List.iter cancel r ;
+        check_over () in
+    b.busy <- b.busy + 1 ;
+    unregister :=
+        register t b env pattern
+            ~matched:(fun packet ->
+                if !armed && b.live then (
+                    incr matches ;
+                    if Option.map_default (fun m -> !matches >= m) false max then
+                        disarm () ;
+                    let inner = bind_lazy env match_ (fun () -> match_value packet) in
+                    let instance =
+                        run_block t b inner body ~fail:b.fail
+                            ~break_:(fun n -> if n <= 1 then stop () else b.break_ (n - 1))
+                            (fun () ->
+                                running := List.filter (fun i -> i.live) !running ;
+                                check_over ()) in
+                    (* Unless it was left already, with a break: *)
+                    if instance.live then
+                        if !over then cancel instance
+                        else running := instance :: !running ;
+                    check_over ()))
+            ~failed:(fun where message ->
+                if !armed && b.live then (
+                    disarm () ;
+                    b.fail Crafty_parser.{ where ; message })) ;
+    b.cleanups <- disarm :: b.cleanups ;
+    Simulation.delay t.power timeout (fun () ->
+        disarm () ;
+        check_over ()) ()
 
 and repeat t b env var count every for_ body body_loc k =
     let eval = eval t.output env in
@@ -443,8 +580,8 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
     let rec root =
         { parent = None ; live = true ; children = [] ; cleanups = [] ;
           fail = (fun e -> cancel root ; exit (Failed e)) ;
-          break_ = (fun _ -> assert false) } in
-    ignore (run_block t root { vars = Env.empty ; stack = [] } program
+          break_ = (fun _ -> assert false) ; busy = 0 ; finish = None } in
+    ignore (run_block t root { vars = Env.empty ; stack = [] ; packet = [] } program
                 ~fail:root.fail ~break_:root.break_
                 (fun () -> cancel root ; exit Done)) ;
     { stop = (fun () -> cancel root ; exit Stopped) ;
@@ -540,6 +677,9 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
       Arp.Pdu.pack |>
       incoming ~proto:Eth.Proto.arp ~dst_mac:Eth.Addr.broadcast
 
+  let reply ?(sport=53) ?(dport=1000) data =
+      incoming (Ip.Pdu.pack (udp_packet sport dport data))
+
   let runs ?stop_at ?(trees=false) ?(frames=false) ?(inject=[]) text =
       match Crafty_parser.parse text with
       | Error e -> IO.to_string Crafty_parser.print_error e
@@ -630,8 +770,6 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
   "0s: 0\n1s: 1\n1s500ms: stopped" \
     (runs ~stop_at:(Clock.Time.of_secs 1.5) \
           "repeat count=5 every=1s { print(\"${I}\") }")
-  "0s: failed: line 1, column 32: Patterns are not supported yet" \
-    (runs "/IP(dst=1.2.3.4)/UDP(dst=53) { expect Bytes(\"x\") {} }")
 *)
 (* Stacks hold their nodes for the block they are in: *)
 (*$= runs & ~printer:identity
@@ -716,4 +854,66 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
   "0s: done\n> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP\n> 02:00:00:00:00:01>02:00:00:00:00:02 ARP\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.3 ttl=64 UDP 1>2 \"who\"" \
     (runs ~frames:true ~inject:[ 0.1, arp "10.0.0.2" ; 0.2, arp ~reply:true "10.0.0.3" ] \
         "/IP(dst=10.0.0.3)/UDP(src=1, dst=2)/Bytes(\"who\")")
+*)
+(* expect waits for its pattern, on the stream of the stack, conditions
+ * evaluated at match time: *)
+(*$= runs & ~printer:identity
+  "500ms: 10.0.0.2 53 [Eth {dst: 02:00:00:00:00:01, proto: 2048, src: 02:00:00:00:00:02}, IP {dont_frag: false, dst: 10.0.0.1, frag_offset: 0, id: 1, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.2, tos: 0, tot_len: 32, ttl: 64}, UDP {checksum: 2272, dst: 1000, length: 12, src: 53}, Bytes {data: #706f6e67}]\n500ms: after\n500ms: done" \
+    (runs ~inject:[ 0.2, reply ~sport:54 "pong" ; 0.3, reply "nope" ; 0.5, reply "pong" ; 0.6, reply "pong" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Bytes(\"pong\") { print(\"${MATCH[IP].src} ${MATCH[UDP].src} ${MATCH}\") }\n  print(\"after\") }")
+  "1s: failed: line 2, column 3: Nothing matched within 1s" \
+    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect timeout=1s Bytes(\"pong\") { print(\"no\") } }")
+  "2s400ms: 2\n2s400ms: done" \
+    (runs ~inject:[ 0.5, reply "pong" ; 1.4, reply "pong" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  catch { repeat count=3 { Bytes(\"ping\")\n      expect timeout=1s Bytes(\"pong\") { n += 1 } } }\n  print(\"${n}\") }")
+  "500ms: failed: line 2, column 26: 5 bytes are no IP address" \
+    (runs ~inject:[ 0.5, reply "pong!" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Bytes(IP.dst == data) {} }")
+*)
+(* on runs its block for every match, and its block waits for it: *)
+(*$= runs & ~printer:identity
+  "0s: armed\n1s: 3\n1s: done" \
+    (runs ~inject:[ 0.1, reply "pong" ; 0.2, reply "pong" ; 0.3, reply "pong" ; 1.5, reply "pong" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  { on timeout=1s Bytes(\"pong\") { n += 1 }\n    print(\"armed\") }\n  print(\"${n}\") }")
+  "100ms: pong\n200ms: pong\n200ms: done" \
+    (runs ~inject:[ 0.1, reply "pong" ; 0.2, reply "pong" ; 0.3, reply "pong" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on max=2 Bytes(\"pong\") { print(\"pong\") } }")
+  "400ms: stop\n400ms: after\n400ms: done" \
+    (runs ~inject:[ 0.4, reply "stop" ; 0.5, reply "stop" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on timeout=10s Bytes(\"stop\") { print(\"stop\")\n    break } }\nprint(\"after\")")
+  "400ms: 0\n400ms: after\n400ms: done" \
+    (runs ~inject:[ 0.4, reply "pong" ] \
+        "repeat count=3 { /IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on Bytes(\"pong\") { print(\"${I}\")\n    break 2 } } }\nprint(\"after\")")
+  "0s: done" \
+    (runs ~inject:[ 0.4, reply "pong" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on max=0 Bytes(\"pong\") { print(\"no\") } }")
+  "0s: failed: line 1, column 16: The timeout of expect cannot be negative" \
+    (runs "expect timeout=-1s Bytes(\"x\") {}")
+  "400ms: failed: line 2, column 26: Division by zero" \
+    (runs ~inject:[ 0.4, reply "pong" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on Bytes(\"pong\") { x = 1 / 0 } }")
+  "400ms: on\n400ms: expect\n1s: done" \
+    (runs ~inject:[ 0.4, reply "pong" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on timeout=1s Bytes(\"pong\") { print(\"on\") }\n  expect Bytes(\"pong\") { print(\"expect\") } }")
+*)
+(* Patterns from the root, or going down the stack, make nodes for the
+ * layers they matched, which their block holds: *)
+(*$= runs & ~printer:identity
+  "500ms: got Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)*1#2{UDP(src=7, dst=53)*1#1}}\n500ms: after Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)*1#2{UDP(src=7, dst=53)*1#1}}\n500ms: out Eth#2\n500ms: done Eth#2" \
+    (runs ~trees:true ~inject:[ 0.2, reply ~dport:8 "a" ; 0.5, reply ~dport:7 "b" ] \
+        "{ expect /IP(src == 10.0.0.2)/UDP(dst == 7) { print(\"got\") }\n  print(\"after\") }\nprint(\"out\")")
+  "500ms: 54 Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)*2#2{UDP(src=1000, dst=53)*1#1, UDP(src=1000, dst=54)*1#1}}\n1s: done Eth#2" \
+    (runs ~trees:true ~inject:[ 0.2, reply "a" ; 0.5, reply ~sport:54 "b" ] \
+        "x = 53\n/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on timeout=1s ../UDP(src == x, IP.src == 10.0.0.2) { print(\"${MATCH[UDP].src}\") }\n  x := 54 }")
+  "500ms: fragment 0\n500ms1ps: fragment 2\n500ms1ps: in two fragments\n1s1ps: done" \
+    (runs ~inject:(List.map (fun f -> 0.5, incoming f) (Ip.Pdu.fragment 36 (udp_packet ~id:2 53 1000 "in two fragments"))) \
+        "/IP(dst=10.0.0.2) {\n  on timeout=1s ../IP!(is_fragment) { print(\"fragment ${MATCH[IP].frag_offset}\") }\n  on timeout=1s ../IP/UDP { print(MATCH[Bytes].data) } }")
+*)
+(* ICMP, with the code of an error: *)
+(*$= runs & ~printer:identity
+  "500ms: {id: 7, payload: [], seq: 1}\n600ms: unreachable\n600ms: done" \
+    (runs ~inject:[ 0.5, incoming (Ip.Pdu.pack (ip_packet Ip.Proto.icmp (Icmp.Pdu.(pack (make_echo_reply 7 1))))) ; \
+                    0.6, incoming (Ip.Pdu.pack (ip_packet Ip.Proto.icmp (Icmp.Pdu.(pack { msg_type = Icmp.MsgType.o (3, 3) ; \
+                              payload = DestUnreachable (0, Payload.o (Bitstring.bitstring_of_string "A")) })))) ] \
+        "/IP(dst=10.0.0.2)/ICMP {\n  EchoRequest(\"hi\")\n  expect EchoReply { print(\"${MATCH[EchoReply]}\") }\n  expect DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
 *)
