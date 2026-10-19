@@ -25,7 +25,9 @@
 
    Each layer also tells how its nodes in the tree of parsers send: building
    its header in manual mode, filling in what the stack leaves out, or
-   handing the payload to a robinet TRX in self-driven mode. *)
+   handing the payload to a robinet TRX in self-driven mode. And how a
+   received packet is decoded, layer by layer, each telling what is on top
+   of it. *)
 open Batteries
 open Bitstring
 open Crafty_ast
@@ -61,7 +63,11 @@ type field =
       discriminant : bool ;
       (* For a discriminant that is not told by the layer on top (as the
        * protocol of IP is): *)
-      pick : pick option }
+      pick : pick option ;
+      (* The field of a received packet that holds the value of this one in
+       * the packets sent (the source port is the destination port of a
+       * reply): *)
+      peer : string }
 
 (* Instantiated only once so can be compared with == and != *)
 (** {2 Nodes}
@@ -76,12 +82,28 @@ type hints = (string * V.value) list
 (** The fields of a node by name: its key and the options of a stack. *)
 type fields = string -> V.value option
 
+(** A layer of a received packet, decoded: *)
+type unpacked =
+    { (* The fields that can be read, by name: *)
+      values : (string * V.value) list ;
+      (* The name of the layer on top, if any: *)
+      upper : string option ;
+      payload : bitstring ;
+      (* What the layer on top needs to know (the code of an ICMP error): *)
+      up_hints : hints ;
+      (* This layer and what is on top of it: *)
+      bits : bitstring }
+
 type ops =
     { (* Manual mode: this layer around [payload], and the hints for the
        * layer below: *)
       pack : fields -> hints -> bitstring -> bitstring * hints ;
       (* Self-driven mode: [payload] handed to its TRX: *)
-      send : fields -> hints -> bitstring -> unit }
+      send : fields -> hints -> bitstring -> unit ;
+      (* What goes on from a received layer: nothing (a frame for another
+       * host, a fragment...), that layer, or another (a reassembled
+       * packet...): *)
+      receive : unpacked -> unpacked list }
 
 (** What a node is made with: *)
 type context =
@@ -129,6 +151,13 @@ let ip_of (fields : fields) name =
 
 let not_driven _ _ _ = invalid_arg "Crafty_layers: not a self-driven layer"
 
+let pass u = [ u ]
+
+let bytes_value bits = V.bytes_of_string (string_of_bitstring bits)
+
+let unpacked ?upper ?(up_hints=[]) ?(payload=empty_bitstring) values bits =
+    Some { values ; upper ; payload ; up_hints ; bits }
+
 let ip4 = (Eth.Proto.ip4 :> int)
 
 (* Where a frame of [proto] carrying [payload] goes, from what the interface
@@ -150,11 +179,29 @@ let next_mac (st : Eth.State.t) proto payload =
             | Some (Eth.Gateway.IPv4 gw) -> arp (Ip.Addr.to_bitstring gw))
     | _ -> V.fail "Eth! needs a dst"
 
+let unpack_eth _ bits =
+    match Eth.Pdu.unpack bits with
+    | Error _ -> None
+    | Ok e ->
+        let proto = (e.proto :> int) in
+        unpacked [ "src", V.Mac e.src ; "dst", V.Mac e.dst ; "proto", V.Int proto ]
+                 ~upper:(if proto = ip4 then "IP" else "Bytes")
+                 ~payload:(e.payload :> bitstring) bits
+
 (* The root: an Ethernet interface, which a self-driven Eth sends IPv4
- * through, resolving with ARP: *)
+ * through, resolving with ARP. It answers ARP itself, and takes the frames
+ * for its address: *)
 let eth_node ctx =
     let st = ctx.eth in
     let trx = Eth.TRX.make st in
+    let receive (u : unpacked) =
+        match List.assoc "proto" u.values, List.assoc "dst" u.values with
+        | V.Int p, _ when p = (Eth.Proto.arp :> int) ->
+            Eth.TRX.rx st u.bits ;
+            []
+        | _, V.Mac dst when Eth.Addr.eq dst st.mac || Eth.Addr.eq dst Eth.Addr.broadcast ->
+            [ u ]
+        | _ -> [] in
     { pack = (fun fields hints payload ->
         let proto = int_of ~hints fields "Eth!" "proto" 0 0xffff in
         let src = match fields "src" with Some (V.Mac m) -> m | _ -> st.mac in
@@ -166,15 +213,57 @@ let eth_node ctx =
       send = (fun _ hints payload ->
         if List.assoc_opt "proto" hints <> Some (V.Int ip4) then
             V.fail "A self-driven Eth carries only IPv4: use Eth!" ;
-        Tools.tx trx payload) }
+        Tools.tx trx payload) ;
+      receive }
 
-(* Both modes share the ids. A self-driven IP has a TRX per protocol: *)
+let ip_upper (ip : Ip.Pdu.t) =
+    if Ip.Pdu.is_fragment ip then "Bytes"
+    else if ip.proto = Ip.Proto.icmp then "ICMP"
+    else if ip.proto = Ip.Proto.udp then "UDP"
+    else if ip.proto = Ip.Proto.tcp then "TCP"
+    else "Bytes"
+
+let ip_values (ip : Ip.Pdu.t) =
+    [ "src", V.Ip ip.src ; "dst", V.Ip ip.dst ; "proto", V.Int (ip.proto :> int) ;
+      "tos", V.Int (ip.tos :> int) ; "ttl", V.Int ip.ttl ;
+      "dont_frag", V.Bool ip.dont_frag ; "id", V.Int ip.id ;
+      "more_frags", V.Bool ip.more_frags ; "frag_offset", V.Int ip.frag_offset ;
+      "tot_len", V.Int ip.tot_len ; "options", bytes_value ip.options ;
+      "is_fragment", V.Bool (Ip.Pdu.is_fragment ip) ]
+
+(* A fragment goes on as bytes: *)
+let unpack_ip _ bits =
+    match Ip.Pdu.unpack bits with
+    | Error _ -> None
+    | Ok ip ->
+        unpacked (ip_values ip) ~upper:(ip_upper ip)
+                 ~payload:(ip.payload :> bitstring) bits
+
+(* Both modes share the ids. A self-driven IP has a TRX per protocol. Both
+ * modes reassemble the fragments received, the whole packet going on once
+ * complete, beside the last fragment: *)
 let ip_node ctx =
     let st = ctx.eth in
     let below = Option.get ctx.below in
     let id = ref (Random.int 0x10000) in
     let next_id () = id := (!id + 1) land 0xffff ; !id in
     let trxs = Hashtbl.create 3 in
+    let fragments = Hashtbl.create 3 in
+    let receive (u : unpacked) =
+        if List.assoc "is_fragment" u.values <> V.Bool true then [ u ] else
+        match Ip.Pdu.unpack u.bits with
+        | Error _ -> [ u ]
+        | Ok ip ->
+            (match Ip.TRX.reassemble_into fragments ip with
+            | None -> [ u ]
+            | Some payload ->
+                let ip =
+                    { ip with more_frags = false ; frag_offset = 0 ;
+                              tot_len = 20 + Tools.bytelength ip.options +
+                                        Tools.bytelength payload ;
+                              payload = Payload.o payload } in
+                [ u ; { values = ip_values ip ; upper = Some (ip_upper ip) ;
+                        payload ; up_hints = [] ; bits = Ip.Pdu.pack ip } ]) in
     let proto fields hints = int_of ~hints fields "IP" "proto" 0 0xff in
     { pack = (fun fields hints payload ->
         let int ~def name hi = int_of ~def fields "IP!" name 0 hi
@@ -212,7 +301,18 @@ let ip_node ctx =
                 t in
         Ip.TRX.tx ?tos:(Option.map Ip.ToS.o (opt_int fields "tos" 0 0xff))
                   ?ttl:(opt_int fields "ttl" 0 0xff)
-                  ?dont_frag:(opt_bool fields "dont_frag") t payload) }
+                  ?dont_frag:(opt_bool fields "dont_frag") t payload) ;
+      receive }
+
+let unpack_udp _ bits =
+    match Udp.Pdu.unpack bits with
+    | Error _ -> None
+    | Ok u ->
+        let payload = (u.payload :> bitstring) in
+        unpacked [ "src", V.Int (u.src_port :> int) ; "dst", V.Int (u.dst_port :> int) ;
+                   "length", V.Int u.length ; "checksum", V.Int u.checksum ]
+                 ?upper:(if bitstring_length payload > 0 then Some "Bytes" else None)
+                 ~payload bits
 
 (* The checksum is left to IP: *)
 let udp_node _ =
@@ -224,11 +324,26 @@ let udp_node _ =
         Udp.Pdu.make ~src_port:(port "src") ~dst_port:(port "dst") ?length
                      ?checksum:(opt_int fields "checksum" 0 0xffff) payload |>
         Udp.Pdu.pack, [ "proto", V.Int (Ip.Proto.udp :> int) ]) ;
-      send = not_driven }
+      send = not_driven ; receive = pass }
 
 let tcp_node _ =
     let unsupported _ _ _ = V.fail "TCP is not supported yet" in
-    { pack = unsupported ; send = unsupported }
+    { pack = unsupported ; send = unsupported ; receive = pass }
+
+let icmp_upper = function
+    | 0 -> Some "EchoReply"
+    | 3 -> Some "DestUnreachable"
+    | 8 -> Some "EchoRequest"
+    | 11 -> Some "TimeExceeded"
+    | _ -> None
+
+(* The message on top is what follows the checksum, and is told the code: *)
+let unpack_icmp _ bits =
+    match%bitstring bits with
+    | {| typ : 8 ; code : 8 ; _checksum : 16 ; payload : -1 : bitstring |} ->
+        unpacked [ "type", V.Int typ ; "code", V.Int code ] ?upper:(icmp_upper typ)
+                 ~up_hints:[ "code", V.Int code ] ~payload bits
+    | {| _ |} -> None
 
 (* The message on top tells the type and code, and its own bits are what
  * follows them: *)
@@ -243,7 +358,13 @@ let icmp_node _ =
             let%bitstring hdr = {| typ : 8 ; code : 8 ; chk : 16 |} in
             concat [ hdr ; payload ] in
         msg (Tools.sum (msg 0)), [ "proto", V.Int (Ip.Proto.icmp :> int) ]) ;
-      send = not_driven }
+      send = not_driven ; receive = pass }
+
+let unpack_echo _ bits =
+    match%bitstring bits with
+    | {| id : 16 ; seq : 16 ; payload : -1 : bitstring |} ->
+        unpacked [ "id", V.Int id ; "seq", V.Int seq ; "payload", bytes_value payload ] bits
+    | {| _ |} -> None
 
 (* The sequence numbers count from 1, unless given: *)
 let echo_node typ _ =
@@ -257,7 +378,15 @@ let echo_node typ _ =
         let%bitstring hdr = {| id : 16 ; seq : 16 |} in
         concat [ hdr ; bytes_of fields "payload" ],
         [ "type", V.Int typ ; "code", V.Int 0 ]) ;
-      send = not_driven }
+      send = not_driven ; receive = pass }
+
+let unpack_icmp_error ~mtu hints bits =
+    match%bitstring bits with
+    | {| _ : 16 ; mtu_value : 16 ; payload : -1 : bitstring |} ->
+        unpacked ((if mtu then [ "mtu", V.Int mtu_value ] else []) @
+                  [ "code", List.assoc_opt "code" hints |? V.Int 0 ;
+                    "payload", bytes_value payload ]) bits
+    | {| _ |} -> None
 
 let icmp_error_node typ ~mtu _ =
     { pack = (fun fields _ _ ->
@@ -266,11 +395,13 @@ let icmp_error_node typ ~mtu _ =
         let%bitstring hdr = {| 0 : 16 ; mtu : 16 |} in
         concat [ hdr ; bytes_of fields "payload" ],
         [ "type", V.Int typ ; "code", V.Int code ]) ;
-      send = not_driven }
+      send = not_driven ; receive = pass }
+
+let unpack_bytes _ bits = unpacked [ "data", bytes_value bits ] bits
 
 let bytes_node _ =
     { pack = (fun fields _ _ -> bytes_of fields "data", []) ;
-      send = not_driven }
+      send = not_driven ; receive = pass }
 
 (** {2 Layers} *)
 
@@ -291,11 +422,14 @@ type layer =
       (* The constants for its fields ([flags & RST]): *)
       constants : (string * literal) list ;
       (* The operations of a new node of this layer: *)
-      node : context -> ops }
+      node : context -> ops ;
+      (* Decodes this layer of a received packet, given the hints of the
+       * layer below: *)
+      unpack : hints -> bitstring -> unpacked option }
 
 let field ?(set_in=[ Manual ]) ?(read_in=[ Manual ]) ?(discriminant=false)
-          ?pick name typ =
-    { name ; typ ; set_in ; read_in ; discriminant ; pick }
+          ?pick ?peer name typ =
+    { name ; typ ; set_in ; read_in ; discriminant ; pick ; peer = peer |? name }
 
 let random_port = Random_in (49152, 65535)
 
@@ -303,10 +437,10 @@ let both = [ Manual ; Driven ]
 
 let unsendable name _ =
     let fail _ _ _ = V.fail "%s cannot be sent" name in
-    { pack = fail ; send = fail }
+    { pack = fail ; send = fail ; receive = pass }
 
 let layer ?(above=[]) ?(driven=false) ?(terminal=false) ?default
-          ?(constants=[]) ?node name fields =
+          ?(constants=[]) ?node ?(unpack=fun _ _ -> None) name fields =
     let fields = Array.of_list fields in
     let default_field =
         Option.map (fun d ->
@@ -315,20 +449,20 @@ let layer ?(above=[]) ?(driven=false) ?(terminal=false) ?default
                 invalid_arg ("Crafty_layers: no field "^ d ^" in "^ name)
         ) default in
     { name ; above ; driven ; terminal ; fields ; default_field ; constants ;
-      node = node |? unsendable name }
+      node = node |? unsendable name ; unpack }
 
 let eth =
-    layer "Eth" ~driven:true ~node:eth_node [
+    layer "Eth" ~driven:true ~node:eth_node ~unpack:unpack_eth [
         field "src" Type.Mac ~read_in:both ;
         field "dst" Type.Mac ~read_in:both ;
         field "proto" Type.Int ~read_in:both ~discriminant:true ]
 
 let ip =
-    layer "IP" ~above:[ "eth" ] ~driven:true ~node:ip_node [
+    layer "IP" ~above:[ "eth" ] ~driven:true ~node:ip_node ~unpack:unpack_ip [
         field "src" Type.Ip ~set_in:both ~read_in:both ~discriminant:true
-              ~pick:Local_address ;
+              ~pick:Local_address ~peer:"dst" ;
         field "dst" Type.Ip ~set_in:both ~read_in:both ~discriminant:true
-              ~pick:Required ;
+              ~pick:Required ~peer:"src" ;
         field "proto" Type.Int ~set_in:both ~read_in:both ~discriminant:true ;
         field "tos" Type.Int ~set_in:both ~read_in:both ;
         field "ttl" Type.Int ~set_in:both ~read_in:both ;
@@ -345,9 +479,9 @@ let tcp =
         ~constants:[ "FIN", Int 1 ; "SYN", Int 2 ; "RST", Int 4 ; "PSH", Int 8 ;
                      "ACK", Int 16 ; "URG", Int 32 ] [
         field "src" Type.Int ~set_in:both ~read_in:both ~discriminant:true
-              ~pick:random_port ;
+              ~pick:random_port ~peer:"dst" ;
         field "dst" Type.Int ~set_in:both ~read_in:both ~discriminant:true
-              ~pick:Required ;
+              ~pick:Required ~peer:"src" ;
         field "seq_num" Type.Int ;
         field "ack_num" Type.Int ;
         field "flags" Type.Int ;
@@ -356,21 +490,21 @@ let tcp =
         field "mss" Type.Int ~set_in:[ Driven ] ~read_in:[] ]
 
 let udp =
-    layer "UDP" ~above:[ "ip" ] ~node:udp_node [
-        field "src" Type.Int ~discriminant:true ~pick:random_port ;
-        field "dst" Type.Int ~discriminant:true ~pick:Required ;
+    layer "UDP" ~above:[ "ip" ] ~node:udp_node ~unpack:unpack_udp [
+        field "src" Type.Int ~discriminant:true ~pick:random_port ~peer:"dst" ;
+        field "dst" Type.Int ~discriminant:true ~pick:Required ~peer:"src" ;
         field "length" Type.Int ;
         field "checksum" Type.Int ]
 
 (* The kind of message is told by the layer on top of it: *)
 let icmp =
-    layer "ICMP" ~above:[ "ip" ] ~node:icmp_node [
+    layer "ICMP" ~above:[ "ip" ] ~node:icmp_node ~unpack:unpack_icmp [
         field "type" Type.Int ~set_in:[] ;
         field "code" Type.Int ~set_in:[] ]
 
 let echo name typ =
     layer name ~above:[ "icmp" ] ~terminal:true ~default:"payload"
-          ~node:(echo_node typ) [
+          ~node:(echo_node typ) ~unpack:unpack_echo [
         field "id" Type.Int ~discriminant:true ~pick:(Random_shared (0, 65535)) ;
         field "seq" Type.Int ;
         field "payload" Type.bytes ]
@@ -379,7 +513,7 @@ let echo name typ =
  * bytes: *)
 let icmp_error name typ codes ~mtu =
     layer name ~above:[ "icmp" ] ~terminal:true ~default:"payload"
-          ~node:(icmp_error_node typ ~mtu)
+          ~node:(icmp_error_node typ ~mtu) ~unpack:(unpack_icmp_error ~mtu)
         ~constants:(List.map (fun (n, c) -> n, Int c) codes) (
         field "code" Type.Int ::
         (if mtu then [ field "mtu" Type.Int ] else []) @
@@ -399,7 +533,7 @@ let time_exceeded =
 (* What is carried by a layer that is not decoded any further: *)
 let bytes =
     layer "Bytes" ~above:[ "eth" ; "ip" ; "tcp" ; "udp" ] ~terminal:true
-        ~node:bytes_node
+        ~node:bytes_node ~unpack:unpack_bytes
         ~default:"data" [ field "data" Type.bytes ]
 
 let all =

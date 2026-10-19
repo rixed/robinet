@@ -1138,11 +1138,13 @@ module TRX = struct
                 Simulation.asap t.power t.emit bits)
         )
 
-    let reassemble t (ip : Pdu.t) =
+    (** The payload of the packet [ip] is a fragment of, once [reassembled]
+     * (the fragments received so far) has all of them. *)
+    let reassemble_into reassembled (ip : Pdu.t) =
         let key = ip.src, ip.dst, ip.proto, ip.id in
-        match Hashtbl.find t.reassembled key with
+        match Hashtbl.find reassembled key with
         | exception Not_found ->
-            Hashtbl.add t.reassembled key [ ip ] ;
+            Hashtbl.add reassembled key [ ip ] ;
             None
         | frags ->
             (* Insert the fragment: *)
@@ -1176,7 +1178,7 @@ module TRX = struct
                     else if stop f <= covered then is_complete covered more_frags rest
                     else is_complete (stop f) f.Pdu.more_frags rest in
             if is_complete 0 true frags then (
-                Hashtbl.remove t.reassembled key ;
+                Hashtbl.remove reassembled key ;
                 (* Rebuild the payload, skipping whatever is already covered: *)
                 let rec loop covered plds = function
                     | [] ->
@@ -1189,9 +1191,11 @@ module TRX = struct
                             loop (stop f) (pld :: plds) rest in
                 Some (loop 0 [] frags)
             ) else (
-                Hashtbl.replace t.reassembled key frags ;
+                Hashtbl.replace reassembled key frags ;
                 None
             )
+
+    let reassemble t ip = reassemble_into t.reassembled ip
 
     (* TODO: check checksum? *)
     let rx (t : t) bits =

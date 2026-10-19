@@ -269,7 +269,11 @@ type t =
 
 (* The stack of [env] with these layers on top, their nodes held by [b] (but
  * for the root, which stays, and for a terminal layer's, which goes with its
- * parent): *)
+ * parent).
+ * Options belong to the stack and not to the nodes, so they are scoped as
+ * the stack is: a stack statement without a block, terminal or not, makes
+ * its stack with its options the current one until the end of the block.
+ * Another packet with other options writes its whole stack again. *)
 let push t b env absolute (layers : T.layer list) =
     let base = if absolute then [] else env.stack in
     List.fold_left (fun stack (l : T.layer) ->
@@ -446,11 +450,13 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
     { stop = (fun () -> cancel root ; exit Stopped) ;
       status = (fun () -> !status) }
 
-(* [runs ?stop_at ?trees ?frames text] is what the program in that text
+(* [runs ?stop_at ?trees ?frames ?inject text] is what the program in that text
  * prints, each line with the time it is printed at (and with [trees], the
  * tree of parsers then), then how it ends; or why it cannot run. With
  * [frames], the frames it emits are among those lines, as [describe] tells
- * them (without their time, which depends on the scheduler by a few ps). Its interface is 10.0.0.1/24, its gateway 02:00:00:00:00:fe, and it
+ * them (without their time, which depends on the scheduler by a few ps).
+ * [inject] are frames it receives, with the time they arrive at, made with
+ * the help of [incoming] (from 02:00:00:00:00:02). Its interface is 10.0.0.1/24, its gateway 02:00:00:00:00:fe, and it
  * knows the MAC address of 10.0.0.2. *)
 (*$inject
   let gw_mac = Eth.Addr.of_string "02:00:00:00:00:fe"
@@ -510,7 +516,31 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
               ) else add " proto=%d %S" (ip.proto :> int) (str l4)) ;
       Stdlib.Buffer.contents b
 
-  let runs ?stop_at ?(trees=false) ?(frames=false) text =
+  let peer_mac = Eth.Addr.of_string "02:00:00:00:00:02"
+
+  let incoming ?(dst_mac=Eth.Addr.of_string "02:00:00:00:00:01") ?(proto=Eth.Proto.ip4) bits =
+      Eth.Pdu.(pack (make proto peer_mac dst_mac bits))
+
+  let ip_packet ?(id=1) ?(src="10.0.0.2") proto bits =
+      Ip.Pdu.make ~id proto (Ip.Addr.of_string src) (Ip.Addr.of_string "10.0.0.1") bits
+
+  let udp_packet ?id sport dport data =
+      Udp.Pdu.(pack (make ~src_port:(Udp.Port.o sport) ~dst_port:(Udp.Port.o dport)
+                          (Bitstring.bitstring_of_string data))) |>
+      ip_packet ?id Ip.Proto.udp
+
+  let arp ?(reply=false) sender =
+      let sender = Ip.Addr.to_bitstring (Ip.Addr.of_string sender)
+      and us = Ip.Addr.to_bitstring (Ip.Addr.of_string "10.0.0.1") in
+      let hw = (peer_mac :> Bitstring.bitstring) in
+      (if reply then
+          Arp.Pdu.make_reply Arp.HwType.eth Eth.Proto.ip4 hw sender
+              (Eth.Addr.of_string "02:00:00:00:00:01" :> Bitstring.bitstring) us
+      else Arp.Pdu.make_request Arp.HwType.eth Eth.Proto.ip4 hw sender us) |>
+      Arp.Pdu.pack |>
+      incoming ~proto:Eth.Proto.arp ~dst_mac:Eth.Addr.broadcast
+
+  let runs ?stop_at ?(trees=false) ?(frames=false) ?(inject=[]) text =
       match Crafty_parser.parse text with
       | Error e -> IO.to_string Crafty_parser.print_error e
       | Ok p ->
@@ -529,6 +559,9 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
               if frames then
                   Tools.(Eth.Iface.dev eth.Eth.State.iface -->
                       sink (fun bits -> out := ("> "^ describe bits) :: !out)) ;
+              List.iter (fun (t, frame) ->
+                  Simulation.at sim.root.power (Clock.Time.of_secs t)
+                      (fun () -> eth.Eth.State.iface.Eth.Iface.recv frame) ()) inject ;
               let h =
                   run sim.root.power tree ~print:(line "") ~print_err:(line "err ")
                       ~on_exit:(function
@@ -660,4 +693,27 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
     (runs ~frames:true "/IP(dst=1.2.3.4, proto=99)/Bytes()")
   "0s: failed: line 1, column 1: TCP is not supported yet" \
     (runs ~frames:true "/IP(dst=1.2.3.4)/TCP(dst=80)/Bytes(\"x\")")
+*)
+(* Received frames go through the nodes of their streams (the sender's
+ * port being the destination port of the node), fragments reassembled,
+ * those for other hosts dropped: *)
+(*$= runs & ~printer:identity
+  "0s:  Eth{IP(src=10.0.0.1, dst=10.0.0.2)*1{UDP(src=1000, dst=53)*1}}\n1s:  Eth#6{IP(src=10.0.0.1, dst=10.0.0.2)*1#5{UDP(src=1000, dst=53)*1#2}}\n1s: done Eth#6" \
+    (runs ~trees:true \
+        ~inject:(List.map (fun f -> 0.5, f) \
+            ([ incoming (Ip.Pdu.pack (udp_packet 53 1000 "hi")) ; \
+               incoming (Ip.Pdu.pack (udp_packet 54 1000 "other port")) ; \
+               incoming ~dst_mac:(Eth.Addr.of_string "02:00:00:00:00:03") \
+                   (Ip.Pdu.pack (udp_packet 53 1000 "other host")) ; \
+               incoming (Ip.Pdu.pack (ip_packet Ip.Proto.icmp \
+                   (Icmp.Pdu.(pack (make_echo_reply 7 1))))) ] @ \
+             List.map incoming \
+               (Ip.Pdu.fragment 36 (udp_packet ~id:2 53 1000 "in two fragments")))) \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { repeat count=2 every=1s { print(\"\") } }")
+*)
+(* The interface answers ARP, and sends what waited for an answer: *)
+(*$= runs & ~printer:identity
+  "0s: done\n> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP\n> 02:00:00:00:00:01>02:00:00:00:00:02 ARP\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.3 ttl=64 UDP 1>2 \"who\"" \
+    (runs ~frames:true ~inject:[ 0.1, arp "10.0.0.2" ; 0.2, arp ~reply:true "10.0.0.3" ] \
+        "/IP(dst=10.0.0.3)/UDP(src=1, dst=2)/Bytes(\"who\")")
 *)

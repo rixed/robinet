@@ -60,16 +60,14 @@ type node =
       children : (string, node Siblings.t) Hashtbl.t ;
       (* How many stacks and patterns hold it: *)
       mutable users : int ;
+      (* How many received packets went through it: *)
+      mutable received : int ;
       eth : Eth.State.t ;
       ops : L.ops }
 
 (** A layer of a stack: a node used in a mode, with the options given. *)
 type entry = { node : node ; mode : L.mode ; options : (int * value) list }
 
-let make_root eth =
-    { layer = L.root ; key = [] ; parent = None ;
-      children = Hashtbl.create 10 ; users = 0 ; eth ;
-      ops = L.root.node { eth ; below = None } }
 
 (* The children of [n] for layer [l]: *)
 let siblings n (l : L.layer) = Hashtbl.find_option n.children l.name
@@ -125,7 +123,8 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
     | Some c -> c
     | None ->
         let c = { layer = l ; key ; parent = Some parent ;
-                  children = Hashtbl.create 3 ; users = 0 ; eth = parent.eth ;
+                  children = Hashtbl.create 3 ; users = 0 ; received = 0 ;
+                  eth = parent.eth ;
                   ops = l.node { eth = parent.eth ; below = Some parent.ops } } in
         let s =
             match siblings parent l with
@@ -192,7 +191,78 @@ let send stack =
                     loop hints bits rest)) in
     loop [] Bitstring.empty_bitstring stack
 
+(** {2 Receiving} *)
+
+(** A received packet as decoded: its layers, the top first. *)
+type packet = (L.layer * L.unpacked) list
+
+(* The key of the node of [l] that a packet with this layer belongs to: *)
+let incoming_key (l : L.layer) (u : L.unpacked) =
+    List.map (fun i -> i, List.assoc l.fields.(i).peer u.values) (L.key_fields l)
+
+(* Decodes the layer on top of [packet], and so on up to the last one, along
+ * the nodes from [node] while there are some for those layers; [node] is
+ * that of the top of [packet], if any: *)
+let rec up node (packet : packet) =
+    let l, (u : L.unpacked) = List.hd packet in
+    match Option.bind u.upper (fun name -> L.find ~below:l name) with
+    | None -> ()
+    | Some ul ->
+        (match ul.unpack u.up_hints u.payload with
+        | None -> ()
+        | Some uu ->
+            (match Option.bind node (fun n ->
+                       Option.bind (siblings n ul) (fun s ->
+                           Siblings.find_option s (incoming_key ul uu))) with
+            | Some c -> enter c packet uu
+            | None -> up None ((ul, uu) :: packet)))
+
+(* What goes on from that layer of a packet, received by its node: *)
+and enter node packet u =
+    node.received <- node.received + 1 ;
+    List.iter (fun u -> up (Some node) ((node.layer, u) :: packet))
+              (node.ops.receive u)
+
+(** Takes a frame from the interface. *)
+let receive root frame =
+    Option.may (enter root []) (L.root.unpack [] frame)
+
+(** The layers of a frame, as decoded without any node. *)
+let decode frame : packet =
+    let rec loop (p : packet) =
+        let l, (u : L.unpacked) = List.hd p in
+        match Option.bind u.upper (fun name -> L.find ~below:l name) with
+        | None -> p
+        | Some ul ->
+            (match ul.unpack u.up_hints u.payload with
+            | None -> p
+            | Some uu -> loop ((ul, uu) :: p)) in
+    match L.root.unpack [] frame with
+    | None -> []
+    | Some u -> loop [ L.root, u ]
+
+(** The tree of an interface, which then receives through it. *)
+let make_root (eth : Eth.State.t) =
+    let root =
+        { layer = L.root ; key = [] ; parent = None ;
+          children = Hashtbl.create 10 ; users = 0 ; received = 0 ; eth ;
+          ops = L.root.node { eth ; below = None } } in
+    eth.iface.recv <- receive root ;
+    root
+
 (** {2 Printing} *)
+
+(** As [Layer(field=value, ...)/...], the bottom first. *)
+let print_packet oc (p : packet) =
+    List.print ~first:"" ~last:"" ~sep:"/" (fun oc ((l : L.layer), (u : L.unpacked)) ->
+        String.print oc l.name ;
+        List.print ~first:"(" ~last:")" ~sep:", " (fun oc (n, v) ->
+            let typ =
+                match L.find_field l n with
+                | Some i -> l.fields.(i).typ
+                | None -> A.Type.Void in
+            Printf.fprintf oc "%s=%s" n (to_string typ v)) oc u.values
+    ) oc (List.rev p)
 
 let rec size n = List.fold_left (fun s c -> s + size c) 1 (children n)
 
@@ -202,11 +272,12 @@ let key_string n =
         f.name ^"="^ to_string f.typ v) n.key |>
     String.concat ", "
 
-(** As [Layer(key)*users{children}], children by layer then key. *)
+(** As [Layer(key)*users#received{children}], children by layer then key. *)
 let rec print oc n =
     String.print oc n.layer.name ;
     if n.key <> [] then Printf.fprintf oc "(%s)" (key_string n) ;
     if n.users > 0 then Printf.fprintf oc "*%d" n.users ;
+    if n.received > 0 then Printf.fprintf oc "#%d" n.received ;
     match children n with
     | [] -> ()
     | cs ->
@@ -268,4 +339,18 @@ let to_string n = IO.to_string print n
   ignore (child loc ip l []) ; ignore (child loc ip l []) ;
   assert_raises (Crafty_value.Runtime_error (loc, "No id left for another Tiny"))
       (fun () -> child loc ip l [])
+*)
+(*$= decode & ~printer:identity
+  "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048)/IP(src=10.0.0.2, dst=10.0.0.1, proto=17, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=30, options=[], is_fragment=false)/UDP(src=53, dst=1000, length=10, checksum=32593)/Bytes(data=#6869)" \
+    (IO.to_string print_packet (decode (Eth.Pdu.(pack (make Eth.Proto.ip4 \
+        (Eth.Addr.of_string "02:00:00:00:00:02") (Eth.Addr.of_string "02:00:00:00:00:01") \
+        (Ip.Pdu.pack (Ip.Pdu.make ~id:1 Ip.Proto.udp (Ip.Addr.of_string "10.0.0.2") (Ip.Addr.of_string "10.0.0.1") \
+            (Udp.Pdu.(pack (make ~src_port:(Udp.Port.o 53) ~dst_port:(Udp.Port.o 1000) \
+                (Bitstring.bitstring_of_string "hi")))))))))))
+  "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048)/IP(src=10.0.0.2, dst=10.0.0.1, proto=1, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=29, options=[], is_fragment=false)/ICMP(type=3, code=3)/DestUnreachable(mtu=0, code=3, payload=#41)" \
+    (IO.to_string print_packet (decode (Eth.Pdu.(pack (make Eth.Proto.ip4 \
+        (Eth.Addr.of_string "02:00:00:00:00:02") (Eth.Addr.of_string "02:00:00:00:00:01") \
+        (Ip.Pdu.pack (Ip.Pdu.make ~id:1 Ip.Proto.icmp (Ip.Addr.of_string "10.0.0.2") (Ip.Addr.of_string "10.0.0.1") \
+            (Icmp.Pdu.(pack { msg_type = Icmp.MsgType.o (3, 3) ; \
+                              payload = DestUnreachable (0, Payload.o (Bitstring.bitstring_of_string "A")) })))))))))
 *)
