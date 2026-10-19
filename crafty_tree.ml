@@ -25,7 +25,9 @@
    that cannot be set (the protocol of IP) are told by the layer on top. A
    node is shared by the stacks and patterns that use it, whatever their
    mode, and goes away when the last of them is gone and it has no children
-   left. The root is the Ethernet interface. *)
+   left. The nodes of terminal layers, which send a message each, are not
+   held by the stack that sends it: they go away with their parent. The root
+   is the Ethernet interface. *)
 open Batteries
 open Crafty_value
 module A = Crafty_ast
@@ -58,24 +60,16 @@ type node =
       children : (string, node Siblings.t) Hashtbl.t ;
       (* How many stacks and patterns hold it: *)
       mutable users : int ;
-      state : state }
-
-and state =
-    | Root of Eth.State.t
-    | Plain
+      eth : Eth.State.t ;
+      ops : L.ops }
 
 (** A layer of a stack: a node used in a mode, with the options given. *)
 type entry = { node : node ; mode : L.mode ; options : (int * value) list }
 
 let make_root eth =
     { layer = L.root ; key = [] ; parent = None ;
-      children = Hashtbl.create 10 ; users = 0 ; state = Root eth }
-
-let rec eth_of n =
-    match n.state, n.parent with
-    | Root eth, _ -> eth
-    | _, Some p -> eth_of p
-    | _, None -> assert false
+      children = Hashtbl.create 10 ; users = 0 ; eth ;
+      ops = L.root.node { eth ; below = None } }
 
 (* The children of [n] for layer [l]: *)
 let siblings n (l : L.layer) = Hashtbl.find_option n.children l.name
@@ -108,13 +102,19 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
             | None ->
                 (match l.fields.(i).pick with
                 | Some L.Local_address ->
-                    (match Eth.State.find_ip4 (eth_of parent) with
+                    (match Eth.State.find_ip4 parent.eth with
                     | ip -> i, Ip ip
                     | exception Not_found ->
                         error loc "No IPv4 address to send %s from" l.name)
                 | Some (L.Random_in (lo, hi)) ->
                     random := true ;
                     i, pick_random loc parent l i lo hi
+                | Some (L.Random_shared (lo, hi)) ->
+                    (match Option.bind (siblings parent l) (fun s ->
+                               Siblings.fold (fun k _ v ->
+                                   if v = None then List.assoc_opt i k else v) s None) with
+                    | Some v -> i, v
+                    | None -> i, pick_random loc parent l i lo hi)
                 | Some L.Required | None ->
                     error loc "%s needs a %s" l.name l.fields.(i).name)
         ) (L.key_fields l) in
@@ -125,7 +125,8 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
     | Some c -> c
     | None ->
         let c = { layer = l ; key ; parent = Some parent ;
-                  children = Hashtbl.create 3 ; users = 0 ; state = Plain } in
+                  children = Hashtbl.create 3 ; users = 0 ; eth = parent.eth ;
+                  ops = l.node { eth = parent.eth ; below = Some parent.ops } } in
         let s =
             match siblings parent l with
             | Some s -> s
@@ -138,9 +139,15 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
 
 let acquire n = n.users <- n.users + 1
 
-(* Removes [n] if nothing uses it any more, and so on down to the root: *)
+let children n =
+    Hashtbl.fold (fun _ s cs -> Siblings.fold (fun _ c cs -> c :: cs) s cs)
+                 n.children []
+
+(* Removes [n] if nothing uses it any more, its terminal children with it,
+ * and so on down to the root: *)
 let rec prune n =
-    if n.users = 0 && Hashtbl.is_empty n.children then
+    if n.users = 0 &&
+       List.for_all (fun c -> c.layer.terminal && c.users = 0) (children n) then
         Option.may (fun p ->
             Option.may (fun s ->
                 Siblings.remove s n.key ;
@@ -153,9 +160,39 @@ let release n =
     n.users <- n.users - 1 ;
     prune n
 
-let children n =
-    Hashtbl.fold (fun _ s cs -> Siblings.fold (fun _ c cs -> c :: cs) s cs)
-                 n.children []
+(** {2 Sending} *)
+
+(* The fields of the node of [e] by name: its key, then the options: *)
+let fields_of e name =
+    match L.find_field e.node.layer name with
+    | None -> invalid_arg ("Crafty_tree: no field "^ name ^" in "^ e.node.layer.name)
+    | Some i ->
+        (match List.assoc_opt i e.node.key with
+        | Some _ as v -> v
+        | None -> List.assoc_opt i e.options)
+
+(** Sends a packet down that stack, from its top (a terminal layer): each
+ * manual layer packs what is above it, until a self-driven one takes it, or
+ * the root, which emits it as it is. Raises [Failed]. *)
+let send stack =
+    let rec loop hints bits = function
+        | [] ->
+            invalid_arg "Crafty_tree.send: empty stack"
+        | e :: rest ->
+            (match e.mode with
+            | L.Driven ->
+                e.node.ops.send (fields_of e) hints bits
+            | L.Manual ->
+                let bits, hints = e.node.ops.pack (fields_of e) hints bits in
+                (match rest with
+                | [] ->
+                    let st = e.node.eth in
+                    Simulation.asap st.iface.widget.power st.iface.emit bits
+                | rest ->
+                    loop hints bits rest)) in
+    loop [] Bitstring.empty_bitstring stack
+
+(** {2 Printing} *)
 
 let rec size n = List.fold_left (fun s c -> s + size c) 1 (children n)
 
@@ -219,10 +256,12 @@ let to_string n = IO.to_string print n
   let ip = child loc root Crafty_layers.ip (ip_to "1.2.3.4") in
   let icmp = child loc ip Crafty_layers.icmp [] in
   let echo = Option.get (Crafty_layers.find ~below:icmp.layer "EchoRequest") in
-  let ids = List.init 3 (fun _ ->
-      let c = child loc icmp echo [] in
-      List.assoc 0 c.key) in
-  assert_equal 3 (List.length (List.unique ids)) ;
+  let first = child loc icmp echo [] in
+  assert_bool "a shared id" (child loc icmp echo [] == first) ;
+  assert_bool "a given id" (child loc icmp echo [ 0, port 7 ] != first) ;
+  let icmp' = child loc (child loc root Crafty_layers.ip (ip_to "1.2.3.5")) Crafty_layers.icmp [] in
+  let given = child loc icmp' echo [ 0, port 7 ] in
+  assert_bool "shares a given id" (child loc icmp' echo [] == given) ;
   let l = Crafty_layers.layer "Tiny" ~above:[ "ip" ]
       [ Crafty_layers.field "id" Crafty_ast.Type.Int ~discriminant:true
           ~pick:(Crafty_layers.Random_in (1, 2)) ] in

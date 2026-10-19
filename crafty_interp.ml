@@ -40,6 +40,8 @@ module A = Crafty_ast
 module T = Crafty_typing
 module Interval = Clock.Interval
 
+type error = Crafty_parser.error
+
 (** {2 Expressions} *)
 
 (* Variables are cells, so that a block sees the changes made after it was
@@ -265,31 +267,28 @@ type t =
       output : output ;
       tree : Crafty_tree.node }
 
-(* The stack of [env] with these layers on top (but for a terminal one,
- * which sends and does not stay), their nodes held by [b] (but for the root,
- * which stays): *)
+(* The stack of [env] with these layers on top, their nodes held by [b] (but
+ * for the root, which stays, and for a terminal layer's, which goes with its
+ * parent): *)
 let push t b env absolute (layers : T.layer list) =
     let base = if absolute then [] else env.stack in
-    let stack =
-        List.fold_left (fun stack (l : T.layer) ->
-            let options =
-                List.map (fun (i, e) -> i, eval t.output env e) l.options in
-            let node =
-                match stack with
-                | [] ->
-                    assert (l.layer == Crafty_layers.root) ;
-                    t.tree
-                | (below : Crafty_tree.entry) :: _ ->
-                    let node =
-                        Crafty_tree.child l.layer_loc below.node l.layer options in
+    List.fold_left (fun stack (l : T.layer) ->
+        let options =
+            List.map (fun (i, e) -> i, eval t.output env e) l.options in
+        let node =
+            match stack with
+            | [] ->
+                assert (l.layer == Crafty_layers.root) ;
+                t.tree
+            | (below : Crafty_tree.entry) :: _ ->
+                let node =
+                    Crafty_tree.child l.layer_loc below.node l.layer options in
+                if not l.layer.terminal then (
                     Crafty_tree.acquire node ;
-                    b.cleanups <- (fun () -> Crafty_tree.release node) :: b.cleanups ;
-                    node in
-            Crafty_tree.{ node ; mode = l.mode ; options } :: stack
-        ) base layers in
-    match stack with
-    | top :: rest when top.node.layer.terminal -> rest
-    | stack -> stack
+                    b.cleanups <- (fun () -> Crafty_tree.release node) :: b.cleanups) ;
+                node in
+        Crafty_tree.{ node ; mode = l.mode ; options } :: stack
+    ) base layers
 
 (* Runs that block within [parent], then [k], unless it fails or breaks
  * first; returns the block: *)
@@ -346,7 +345,14 @@ and exec t b env (s : T.stmt) k =
         let push = { s with stmt = T.Stack { absolute ; layers ; body = None } } in
         exec t b env { s with stmt = T.Block (push :: body) } k
     | T.Stack { absolute ; layers ; body = None } ->
-        guard (fun () -> push t b env absolute layers) |>
+        guard (fun () ->
+            match push t b env absolute layers with
+            | top :: rest as stack when top.node.layer.terminal ->
+                (* Which sends, and does not stay: *)
+                (try Crafty_tree.send stack
+                 with Failed msg -> error s.stmt_loc "%s" msg) ;
+                rest
+            | stack -> stack) |>
         Option.may (fun stack -> k { env with stack })
     | T.Expect _ | T.On _ ->
         ignore (guard (fun () ->
@@ -440,11 +446,71 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
     { stop = (fun () -> cancel root ; exit Stopped) ;
       status = (fun () -> !status) }
 
-(* [runs ?stop_at ?trees text] is what the program in that text prints, each
- * line with the time it is printed at (and with [trees], the tree of parsers
- * then), then how it ends; or why it cannot run. *)
+(* [runs ?stop_at ?trees ?frames text] is what the program in that text
+ * prints, each line with the time it is printed at (and with [trees], the
+ * tree of parsers then), then how it ends; or why it cannot run. With
+ * [frames], the frames it emits are among those lines, as [describe] tells
+ * them (without their time, which depends on the scheduler by a few ps). Its interface is 10.0.0.1/24, its gateway 02:00:00:00:00:fe, and it
+ * knows the MAC address of 10.0.0.2. *)
 (*$inject
-  let runs ?stop_at ?(trees=false) text =
+  let gw_mac = Eth.Addr.of_string "02:00:00:00:00:fe"
+
+  let crafty_eth sim =
+      let eth =
+          Eth.State.make ~parent:sim.SimTypes.root ~name:"crafty"
+              ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
+              ~gateways:[ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw_mac) ]
+              ~my_addresses:[ Eth.State.make_my_ip_address
+                                  ~netmask:(Ip.Addr.of_string "255.255.255.0")
+                                  (Ip.Addr.of_string "10.0.0.1") ] () in
+      Tools.BitHash.replace eth.Eth.State.arp_cache
+          (Ip.Addr.to_bitstring (Ip.Addr.of_string "10.0.0.2"))
+          (Some (Eth.Addr.of_string "02:00:00:00:00:02")) ;
+      eth
+
+  let describe frame =
+      let b = Stdlib.Buffer.create 80 in
+      let add fmt = Printf.bprintf b fmt in
+      let str bits = Bitstring.string_of_bitstring bits in
+      let pld (p : Payload.t) = str (p :> Bitstring.bitstring) in
+      (match Eth.Pdu.unpack frame with
+      | Error _ -> add "?"
+      | Ok e ->
+          add "%s>%s" (Eth.Addr.to_hexstring e.Eth.Pdu.src) (Eth.Addr.to_hexstring e.dst) ;
+          let bits = (e.payload :> Bitstring.bitstring) in
+          if e.proto = Eth.Proto.arp then add " ARP"
+          else if e.proto <> Eth.Proto.ip4 then add " proto=0x%x %S" (e.proto :> int) (str bits)
+          else match Ip.Pdu.unpack bits with
+          | Error _ -> add " ?"
+          | Ok ip ->
+              add " IP %s>%s ttl=%d" (Ip.Addr.to_dotted_string ip.Ip.Pdu.src)
+                  (Ip.Addr.to_dotted_string ip.dst) ip.ttl ;
+              if ip.dont_frag then add " df" ;
+              if Tools.sum (Bitstring.takebits (8 * (20 + Tools.bytelength ip.options)) bits) <> 0 then
+                  add " bad-checksum" ;
+              let l4 = (ip.payload :> Bitstring.bitstring) in
+              if ip.proto = Ip.Proto.udp then (
+                  match Udp.Pdu.unpack l4 with
+                  | Error _ -> add " ?"
+                  | Ok u ->
+                      add " UDP %d>%d %S" (u.Udp.Pdu.src_port :> int) (u.dst_port :> int) (pld u.payload) ;
+                      if Tools.sum_list [ Ip.Pdu.pseudo_header ip () ; l4 ] <> 0 then
+                          add " bad-checksum"
+              ) else if ip.proto = Ip.Proto.icmp then (
+                  match Icmp.Pdu.unpack l4 with
+                  | Error _ -> add " ?"
+                  | Ok i ->
+                      let typ, code = (i.Icmp.Pdu.msg_type :> int * int) in
+                      add " ICMP %d/%d" typ code ;
+                      (match i.payload with
+                      | Icmp.Pdu.Ids (id, seq, p) -> add " id=%d seq=%d %S" id seq (pld p)
+                      | Icmp.Pdu.Header { mtu ; pld = p ; _ } -> add " mtu=%d %S" mtu (pld p)
+                      | _ -> add " ?") ;
+                      if Tools.sum l4 <> 0 then add " bad-checksum"
+              ) else add " proto=%d %S" (ip.proto :> int) (str l4)) ;
+      Stdlib.Buffer.contents b
+
+  let runs ?stop_at ?(trees=false) ?(frames=false) text =
       match Crafty_parser.parse text with
       | Error e -> IO.to_string Crafty_parser.print_error e
       | Ok p ->
@@ -453,17 +519,16 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
               String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es)
           | Ok p ->
               let sim = Simulation.make ~realtime:false "crafty" in
-              let eth =
-                  Eth.State.make ~parent:sim.root ~name:"crafty"
-                      ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
-                      ~my_addresses:[ Eth.State.make_my_ip_address
-                                          (Ip.Addr.of_string "10.0.0.1") ] () in
+              let eth = crafty_eth sim in
               let tree = Crafty_tree.make_root eth in
               let out = ref [] in
               let line pfx s =
                   out := Printf.sprintf "%s%s: %s%s" pfx
                       (Clock.Time.to_string (Simulation.now sim)) s
                       (if trees then " "^ Crafty_tree.to_string tree else "") :: !out in
+              if frames then
+                  Tools.(Eth.Iface.dev eth.Eth.State.iface -->
+                      sink (fun bits -> out := ("> "^ describe bits) :: !out)) ;
               let h =
                   run sim.root.power tree ~print:(line "") ~print_err:(line "err ")
                       ~on_exit:(function
@@ -539,10 +604,60 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
 (*$= runs & ~printer:identity
   "0s: in Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: out Eth\n0s: done Eth" \
     (runs ~trees:true "/IP(dst=1.2.3.4)/UDP(src=1, dst=53) { print(\"in\") }\nprint(\"out\")")
-  "0s: a Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: b Eth{IP(src=10.0.0.1, dst=1.2.3.4)*2}\n0s: c Eth{IP(src=10.0.0.1, dst=1.2.3.4)*3{ICMP*1{EchoRequest(id=7)*1}, UDP(src=1, dst=53)*1}}\n0s: d Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: e Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1, IP(src=10.0.0.1, dst=1.2.3.5)*1}\n0s: done Eth" \
+  "0s: a Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: b Eth{IP(src=10.0.0.1, dst=1.2.3.4)*2}\n0s: c Eth{IP(src=10.0.0.1, dst=1.2.3.4)*3{ICMP*1{EchoRequest(id=7)}, UDP(src=1, dst=53)*1}}\n0s: d Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: e Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1, IP(src=10.0.0.1, dst=1.2.3.5)*1}\n0s: done Eth" \
     (runs ~trees:true "IP(dst=1.2.3.4)\nprint(\"a\")\n{\n  /IP(dst=1.2.3.4)\n  print(\"b\")\n  UDP(src=1, dst=53)\n  /IP(dst=1.2.3.4)/ICMP/EchoRequest(id=7)\n  print(\"c\")\n}\nprint(\"d\")\n/IP(dst=1.2.3.5)\nprint(\"e\")")
   "0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: failed: line 4, column 7: Division by zero Eth" \
     (runs ~trees:true "retry max=1 {\n  /IP(dst=1.2.3.4)/UDP(src=1, dst=53)\n  print(\"try\")\n  x = 1 / 0 }")
   "0s: done Eth" \
     (runs ~trees:true "repeat count=3 { /IP(dst=1.2.3.4)/UDP(dst=53) }")
+*)
+(* What programs send, through the gateway or to a neighbour, self-driven or
+ * manual, with the automatic fields filled in (checksums included, which
+ * [describe] checks): *)
+(*$= runs & ~printer:identity
+  "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:FE IP 10.0.0.1>1.2.3.4 ttl=64 UDP 1000>53 \"hi\"" \
+    (runs ~frames:true "/IP(dst=1.2.3.4)/UDP(src=1000, dst=53)/Bytes(\"hi\")")
+  "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:FE IP 10.0.0.1>1.2.3.4 ttl=3 df UDP 1>2 \"x\"" \
+    (runs ~frames:true "/IP!(dst=1.2.3.4, ttl=3, dont_frag=true)/UDP(src=1, dst=2)/Bytes(\"x\")")
+  "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:FE IP 10.0.0.1>1.2.3.4 ttl=64 proto=99 \"p\"" \
+    (runs ~frames:true "/IP(dst=1.2.3.4, proto=99)/Bytes(\"p\")")
+  "0s: done\n> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP" \
+    (runs ~frames:true "/IP(dst=10.0.0.3)/UDP(src=1, dst=2)/Bytes(\"who\")")
+*)
+(* Self-driven IP takes TTL and DF per packet (and a terminal stack leaves
+ * its own as the current one); echo ids are shared (the random ones shown
+ * as "?"), and their sequence numbers go on: *)
+(*$= runs & ~printer:identity
+  "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 UDP 1>2 \"a\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=3 df UDP 1>2 \"b\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=3 df UDP 1>2 \"c\"" \
+    (runs ~frames:true "/IP(dst=10.0.0.2)/UDP(src=1, dst=2) { Bytes(\"a\")\n  /IP(dst=10.0.0.2, ttl=3, dont_frag=true)/UDP(src=1, dst=2)/Bytes(\"b\")\n  Bytes(\"c\") }")
+  "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 8/0 id=? seq=1 \"ping\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 8/0 id=? seq=2 \"ping\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 8/0 id=7 seq=42 \"\"" \
+    (runs ~frames:true "/IP(dst=10.0.0.2)/ICMP { repeat count=2 { EchoRequest(\"ping\") }\n  EchoRequest(id=7, seq=42) }" |> \
+     String.split_on_char '\n' |> List.map (fun l -> \
+        match String.split l ~by:" id=" with \
+        | a, b when not (String.starts_with b "7 ") -> \
+            a ^" id=? "^ snd (String.split b ~by:" ") \
+        | _ -> l \
+        | exception Not_found -> l) |> String.concat "\n")
+  "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 3/3 mtu=1400 \"\\001\\002\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 11/0 mtu=0 \"\\003\\004\"" \
+    (runs ~frames:true "/IP!(dst=10.0.0.2)/ICMP/DestUnreachable(code=PORT_UNREACHABLE, mtu=1400, payload=#0102)\n/IP!(dst=10.0.0.2)/ICMP/TimeExceeded(#0304)")
+*)
+(* Manual frames, to a given MAC address or to what the interface knows: *)
+(*$= runs & ~printer:identity
+  "0s: done\n> 02:00:00:00:00:01>AA:BB:CC:DD:EE:FF proto=0x88b5 \"raw\"\n> 02:00:00:00:00:01>02:00:00:00:00:FE IP 10.0.0.1>1.2.3.4 ttl=64 UDP 1>2 \"y\"\n> 02:00:00:00:00:99>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 proto=99 \"z\"" \
+    (runs ~frames:true "/Eth!(dst=aa:bb:cc:dd:ee:ff, proto=0x88b5)/Bytes(\"raw\")\n/Eth!/IP!(dst=1.2.3.4)/UDP(src=1, dst=2)/Bytes(\"y\")\n/Eth!(src=02:00:00:00:00:99)/IP!(dst=10.0.0.2, proto=99)/Bytes(\"z\")")
+*)
+(* What cannot be sent: *)
+(*$= runs & ~printer:identity
+  "0s: failed: line 1, column 1: The MAC address of 10.0.0.3 is not known: Eth! needs a dst" \
+    (runs ~frames:true "/Eth!/IP!(dst=10.0.0.3)/UDP(src=1, dst=2)/Bytes(\"x\")")
+  "0s: failed: line 1, column 1: A self-driven Eth carries only IPv4: use Eth!" \
+    (runs ~frames:true "/Eth/Bytes(\"x\")")
+  "0s: failed: line 1, column 1: IP needs a proto" \
+    (runs ~frames:true "/IP(dst=1.2.3.4)/Bytes(\"x\")")
+  "0s: failed: line 1, column 1: The ttl must be between 0 and 255, not 256" \
+    (runs ~frames:true "/IP!(dst=1.2.3.4, ttl=256)/ICMP/EchoRequest()")
+  "0s: failed: line 1, column 1: A self-driven IP sends no empty packet: use IP!" \
+    (runs ~frames:true "/IP(dst=1.2.3.4, proto=99)/Bytes()")
+  "0s: failed: line 1, column 1: TCP is not supported yet" \
+    (runs ~frames:true "/IP(dst=1.2.3.4)/TCP(dst=80)/Bytes(\"x\")")
 *)

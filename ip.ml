@@ -1101,7 +1101,8 @@ module TRX = struct
         proto : Proto.t ;
         (* Fragment if the packet is larger than that (set to max_int to disable fragmentation: *)
         mtu : int ;
-        (* Set the DF bit of emitted packets (and fragments!) to this value: *)
+        (* Set the DF bit of emitted packets (and fragments!) to this value,
+         * unless [tx] is told otherwise: *)
         dont_frag : bool ;
         (* Perform reassembly before handing over received frames: *)
         reassemble : bool ;
@@ -1124,12 +1125,13 @@ module TRX = struct
     (* Emitted packets have no options, thus a 20 bytes header: *)
     let hdr_len = Pdu.no_opt_hdr_len
 
-    let tx ?tos ?ttl ?id t bits =
+    let tx ?tos ?ttl ?id ?dont_frag t bits =
         if bitstring_length bits > 0 then (
             let tos = tos |? t.tos
             and ttl = ttl |? t.ttl
-            and id = may_default id t.next_id in
-            let pdu = Pdu.make ~tos ~ttl ~id ~dont_frag:t.dont_frag t.proto t.src t.dst bits in
+            and id = may_default id t.next_id
+            and dont_frag = dont_frag |? t.dont_frag in
+            let pdu = Pdu.make ~tos ~ttl ~id ~dont_frag t.proto t.src t.dst bits in
             Pdu.fragment t.mtu pdu |>
             List.iter (fun bits ->
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (Payload.length pdu.payload) (hexstring_of_bitstring bits)))) ;
@@ -1337,6 +1339,16 @@ module TRX = struct
         (emitted ~tos:(ToS.o 0x20) ~ttl:1 \
                  (create sim.root.power ~mtu:36 ~next_id:(counter ()) \
                          a b Proto.udp sim.root.logger) msg)
+    *)
+    (*$R tx
+      let t = create sim.root.power ~dont_frag:true a b (Proto.o 99) sim.root.logger in
+      let dfs = ref [] in
+      (trx_of t).out --> sink (fun bits ->
+          dfs := (Result.get_ok (Pdu.unpack bits)).Pdu.dont_frag :: !dfs) ;
+      tx t (Bitstring.bitstring_of_string "a") ;
+      tx ~dont_frag:false t (Bitstring.bitstring_of_string "b") ;
+      Simulation.run sim false ;
+      assert_equal [ true ; false ] (List.rev !dfs)
     *)
     (*$= frags_of & ~printer:string_of_int
       1 (List.length (frags_of ~mtu:60 msg))

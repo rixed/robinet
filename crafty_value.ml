@@ -96,10 +96,19 @@ let compare_values a b =
     | Interval a, Interval b -> Interval.compare a b
     | a, b -> compare a b
 
-(** {2 Errors} *)
+(* The bits of a byte array: *)
+let bits_of_bytes = function
+    | Array a -> Bitstring.bitstring_of_string (string_of_bytes a)
+    | _ -> invalid_arg "Crafty_value.bits_of_bytes"
 
-type error = Crafty_parser.error
+(** {2 Errors} *)
 
 exception Runtime_error of A.location * string
 
 let error loc fmt = Printf.ksprintf (fun s -> raise (Runtime_error (loc, s))) fmt
+
+(* An error of what has no location to tell, such as a layer building a
+ * packet, which whoever runs it places: *)
+exception Failed of string
+
+let fail fmt = Printf.ksprintf (fun s -> raise (Failed s)) fmt

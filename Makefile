@@ -38,10 +38,10 @@ LIB_SOURCES  = \
 	packet.ml \
 	synth.ml \
 	crafty_ast.ml \
+	crafty_value.ml \
 	crafty_layers.ml \
 	crafty_parser.ml \
 	crafty_typing.ml \
-	crafty_value.ml \
 	crafty_tree.ml \
 	crafty_interp.ml \
 	sockopt.ml \
