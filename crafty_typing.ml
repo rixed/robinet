@@ -107,6 +107,7 @@ and stmt_desc =
     | Catch of block
     (* How many enclosing [repeat] and [on] to leave: *)
     | Break of int
+    | Wait of expr
     (* [match_] is the variable [MATCH] of the block: *)
     | Expect of { timeout : expr option ; pattern : pattern ; match_ : var ;
                   body : block }
@@ -757,6 +758,8 @@ and stmt errors env (s : A.stmt) =
                     | 1 -> "there is only one"
                     | n -> Printf.sprintf "there are only %d" n) ;
             env, Some (mk (Break depth))
+        | A.Wait dur ->
+            env, Some (mk (Wait (expect "The duration of wait" (expr env dur) Type.Interval)))
         | A.Expect { timeout ; pattern = p ; body } ->
             let timeout = opt_expr env "The timeout of expect" Type.Interval timeout in
             let pattern = pattern env p in
@@ -879,6 +882,8 @@ let check (program : A.program) =
     (types "retry max=1s {}")
   "line 1, column 22: The period of repeat must be an interval, not an int" \
     (types "repeat count=3 every=1 {}")
+  "line 1, column 6: The duration of wait must be an interval, not an int" \
+    (types "wait 3")
   "line 1, column 8: The timeout of expect must be an interval, not an int" \
     (types "expect 5 Bytes(\"x\") {}")
   "line 1, column 22: The value of ttl must be an int, not a string" \

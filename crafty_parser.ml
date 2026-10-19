@@ -496,6 +496,11 @@ let stmt = fix (fun stmt ->
         (keyword "catch" -+ body >>: fun body -> Catch body) |||
         (keyword "break" -+ params "break" [ "depth" ] >>:
             fun p -> Break { depth = p "depth" }) |||
+        (keyword "wait" -+ params "wait" [ "dur" ] >>:
+            fun p ->
+                match p "dur" with
+                | Some d -> Wait d
+                | None -> reject "wait needs a duration") |||
         (keyword "expect" -+ params "expect" [ "timeout" ] +- sp ++ pattern ++
          body >>: fun ((p, pattern), body) ->
             Expect { timeout = p "timeout" ; pattern ; body }) |||
@@ -590,6 +595,7 @@ let parse text =
   "x = (y =~ /IP/UDP(dport == 53))\n" (reads "x = y =~ /IP/UDP(dport = 53)")
   "retry max=3 {\n  break\n}\n" (reads "retry 3 {\n  break\n}")
   "catch {\n  x = 1\n}\n" (reads "catch { x = 1 }")
+  "wait dur=10ms\nwait dur=(1s * n)\n" (reads "wait 10ms\nwait dur=1s * n")
   "repeat var=j {\n  break depth=2\n}\n" (reads "repeat var=\"j\" { break 2 }")
   "repeat var=i count=3 every=1ms for=1s {\n  print(\"${i}\")\n}\n" \
     (reads "repeat var=i count=3 every=1ms for=1s { print(\"${i}\") }")
@@ -638,7 +644,8 @@ let parse text =
   "line 1, column 20: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")
   "line 1, column 8: Unknown layer DNS" (reads "/IP/DNS {}")
   "line 1, column 11: Carets on both sides of IP" (reads "x = a[^IP^]")
-  "line 1, column 5: wait is not supported yet" (reads "wait 10ms")
+  "line 1, column 3: if is not supported yet" (reads "if x {}")
+  "line 1, column 5: wait needs a duration" (reads "wait")
   "line 1, column 9: Expected '\\\"' in string" (reads "x = \"abc")
   "line 1, column 9: Unknown escape sequence \\q" (reads "x = \"a\\qb\"")
   "line 1, column 9: Odd number of hexadecimal digits in #123" (reads "x = #123")

@@ -159,6 +159,7 @@ and stmt_desc =
     (* Run [body], leaving it on its first error: *)
     | Catch of block
     | Break of { depth : expr option }
+    | Wait of expr
     | Expect of { timeout : expr option ; pattern : pattern ; body : block }
     | On of { timeout : expr option ; max : expr option ;
               pattern : pattern ; body : block }
@@ -181,11 +182,11 @@ let predefined = [ "match" ; "last" ]
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
     [ "true" ; "false" ; "repeat" ; "retry" ; "catch" ;
-      "break" ; "expect" ; "on" ]
+      "break" ; "expect" ; "on" ; "wait" ]
 
 (** Keywords of what the language will have but not yet. Lower case. *)
 let unsupported =
-    [ "any" ; "if" ; "elsif" ; "else" ; "case" ; "wait" ; "report" ]
+    [ "any" ; "if" ; "elsif" ; "else" ; "case" ; "report" ]
 
 (** {2 Printing}
  *
@@ -318,6 +319,8 @@ let rec print_stmt indent oc s =
         String.print oc "catch " ; print_block indent oc body
     | Break { depth } ->
         String.print oc "break" ; param "depth" depth
+    | Wait dur ->
+        String.print oc "wait" ; param "dur" (Some dur)
     | Expect { timeout ; pattern ; body } ->
         String.print oc "expect" ; param "timeout" timeout ;
         Printf.fprintf oc " %a " print_pattern pattern ;

@@ -32,6 +32,7 @@
    elapsed since it started; it ends right after its last iteration.
    [retry max=N] runs its block again up to N times (3 by default) while it
    fails, the error of the last attempt going to the enclosing block.
+   [wait] goes on with the next statement after that duration.
    [catch] leaves its block on its first error, which goes no further. An
    error reaching the program's block ends the program.
 
@@ -398,6 +399,16 @@ and exec t b env (s : T.stmt) k =
         ignore (run_block t b env body ~fail:b.fail ~break_:b.break_
                     (fun () -> k env))
     | T.Break n -> b.break_ n
+    | T.Wait dur ->
+        guard (fun () ->
+            match eval dur with
+            | Interval i ->
+                if Interval.compare i Interval.zero < 0 then
+                    error dur.loc "Cannot wait %s" (Interval.to_string i) ;
+                i
+            | _ -> assert false) |>
+        Option.may (fun i ->
+            Simulation.delay t.power i (fun () -> if b.live then k env) ())
     | T.Repeat { var ; count ; every ; for_ ; body } ->
         repeat t b env var count every for_ body s.stmt_loc (fun () -> k env)
     | T.Retry { max ; body } ->
@@ -787,6 +798,12 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
     (runs "x = get(a=[1], index=-1)")
   "line 2, column 1: Unknown variable y" \
     (runs "x = #0102\ny := x")
+  "0s: a\n1s500ms: b\n1s500ms: done" \
+    (runs "print(\"a\")\nwait 1500ms\nprint(\"b\")")
+  "1s: 0\n1s500ms: stopped" \
+    (runs ~stop_at:(Clock.Time.of_secs 1.5) "repeat count=3 { wait 1s\n  print(\"${I}\") }")
+  "0s: failed: line 1, column 6: Cannot wait -1s" \
+    (runs "wait -1s")
   "0s: 0\n1s: 1\n1s500ms: stopped" \
     (runs ~stop_at:(Clock.Time.of_secs 1.5) \
           "repeat count=5 every=1s { print(\"${I}\") }")
@@ -931,4 +948,108 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
                     0.6, incoming (Ip.Pdu.pack (ip_packet Ip.Proto.icmp (Icmp.Pdu.(pack { msg_type = Icmp.MsgType.o (3, 3) ; \
                               payload = DestUnreachable (0, Payload.o (Bitstring.bitstring_of_string "A")) })))) ] \
         "/IP(dst=10.0.0.2)/ICMP {\n  Echo(id=7) { Request(\"hi\")\n    expect Reply { assert(MATCH[Echo].id == 7)\n      print(\"${MATCH[Echo].id} ${MATCH[Reply]}\") } }\n  expect DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
+*)
+
+(* [two ?error_rate ?arp a b] is what programs [a] (at 10.0.0.1) and [b]
+ * (at 10.0.0.2, started first) print, each line with the name of the
+ * program and the time to the millisecond, then how they end and their
+ * trees then (with [counts], the numbers of packets received), when they
+ * are at both ends of a cable (that knows each other's MAC address already
+ * with [arp]). [with_host] is the same with a simulated host at 10.0.0.2,
+ * set up by [setup]. *)
+(*$inject
+  let compile text =
+      match Crafty_parser.parse text with
+      | Error e -> failwith (IO.to_string Crafty_parser.print_error e)
+      | Ok p ->
+          match Crafty_typing.check p with
+          | Error es -> failwith (String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es))
+          | Ok p -> p
+
+  let address n = Ip.Addr.of_string (Printf.sprintf "10.0.0.%d" n)
+  let mac n = Eth.Addr.of_string (Printf.sprintf "02:00:00:00:00:%02x" n)
+  let netmask = Ip.Addr.of_string "255.255.255.0"
+
+  let crafty_peer sim n =
+      Eth.State.make ~parent:sim.SimTypes.root ~name:(Printf.sprintf "crafty%d" n) ~mac:(mac n)
+          ~my_addresses:[ Eth.State.make_my_ip_address ~netmask (address n) ] ()
+
+  let knows (eth : Eth.State.t) n =
+      Tools.BitHash.replace eth.arp_cache (Ip.Addr.to_bitstring (address n)) (Some (mac n))
+
+  let start sim out name eth text =
+      let tree = Crafty_tree.make_root eth in
+      let line s =
+          out := Printf.sprintf "%s %.3fs: %s" name (Clock.Time.to_secs (Simulation.now sim)) s :: !out in
+      ignore (run sim.SimTypes.root.power tree ~print:line ~print_err:(fun s -> line ("err "^ s))
+          ~on_exit:(function
+              | Done -> line ("done "^ Crafty_tree.to_string tree)
+              | Failed e -> line ("failed: "^ IO.to_string Crafty_parser.print_error e ^" "^ Crafty_tree.to_string tree)
+              | Stopped -> line "stopped"
+              | Running -> ()) (compile text))
+
+  let plug sim ?(error_rate=0.) a b =
+      let cable = Eth.Cable.State.make ~parent:sim.SimTypes.root ~error_rate () in
+      let trx = Eth.Cable.make cable in
+      ignore Tools.(a -=> trx) ;
+      Tools.(trx <=- b)
+
+  let without_counts s =
+      let b = Stdlib.Buffer.create (String.length s) and skip = ref false in
+      String.iter (fun c ->
+          if c = '#' then (skip := true ; Stdlib.Buffer.add_char b c)
+          else if not (!skip && c >= '0' && c <= '9') then (
+              skip := false ; Stdlib.Buffer.add_char b c)) s ;
+      Stdlib.Buffer.contents b
+
+  let two ?error_rate ?(arp=false) a b =
+      let sim = Simulation.make ~realtime:false "crafty-pair" in
+      let out = ref [] in
+      let ea = crafty_peer sim 1 and eb = crafty_peer sim 2 in
+      if arp then (knows ea 2 ; knows eb 1) ;
+      plug sim ?error_rate (Eth.Iface.dev ea.Eth.State.iface) (Eth.Iface.dev eb.Eth.State.iface) ;
+      start sim out "b" eb b ;
+      start sim out "a" ea a ;
+      Simulation.run sim false ;
+      String.concat "\n" (List.rev !out)
+
+  let with_host ?(setup=ignore) text =
+      let sim = Simulation.make ~realtime:false "crafty-host" in
+      let out = ref [] in
+      let ea = crafty_peer sim 1 in
+      let h = Host.make ~parent:sim.SimTypes.root ~static_ip:(address 2) ~netmask "host" in
+      plug sim (Eth.Iface.dev ea.Eth.State.iface) (h.Host.trx.Host.widget.SimTypes.ports.SimTypes.dev 0) ;
+      Simulation.run_startup sim ;
+      setup h ;
+      start sim out "a" ea text ;
+      Simulation.run sim false ;
+      String.concat "\n" (List.rev !out)
+*)
+(* Two programs: a UDP ping retried until the other end listens (after
+ * 1.5s); a response counter, without and with
+ * losses; ICMP echo requests answered by a program: *)
+(*$= & ~printer:identity
+  "b 1.500s: listening\nb 2.000s: ping from 10.0.0.1:1000\nb 2.000s: done Eth#4\na 2.000s: pong from 10.0.0.2\na 2.000s: done Eth#2" \
+    (two "/IP(dst=10.0.0.2)/UDP(src=1000, dst=7) {\n  retry { Bytes(\"ping\")\n    expect timeout=1s Bytes(\"pong\") { print(\"pong from ${MATCH[IP].src}\") } } }" \
+         "wait 1500ms\nprint(\"listening\")\nexpect /IP/UDP(dst == 7)/Bytes(\"ping\") {\n  print(\"ping from ${MATCH[IP].src}:${MATCH[UDP].src}\")\n  /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Bytes(\"pong\") }")
+  "a 1.000s: 100 pongs\na 1.000s: done Eth#101\nb 2.000s: done Eth#101" \
+    (two "/IP(dst=10.0.0.2)/UDP(src=1000, dst=7) {\n  n = 0\n  { on timeout=1s Bytes(\"pong\") { n += 1 }\n    repeat count=100 every=1ms { Bytes(\"ping\") } }\n  print(\"${n} pongs\") }" \
+         "on timeout=2s /IP/UDP(dst == 7)/Bytes(\"ping\") {\n  /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Bytes(\"pong\") }")
+  "a 1.000s: some lost\na 1.000s: done Eth#\nb 2.000s: done Eth#" \
+    (without_counts @@ two ~arp:true ~error_rate:5e-4 "/IP(dst=10.0.0.2)/UDP(src=1000, dst=7) {\n  n = 0\n  { on timeout=1s Bytes(\"pong\") { n += 1 }\n    repeat count=100 every=1ms { Bytes(\"ping\") } }\n  assert(n > 30 && n < 100, msg=\"${n} pongs\")\n  print(\"some lost\") }" \
+         "on timeout=2s /IP/UDP(dst == 7)/Bytes(\"ping\") {\n  /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Bytes(\"pong\") }")
+  "a 0.000s: seq 1\na 0.100s: seq 2\na 0.200s: seq 3\na 0.200s: done Eth#4\nb 1.000s: done Eth#4" \
+    (two "/IP(dst=10.0.0.2)/ICMP/Echo { repeat count=3 every=100ms { Request(\"hi\")\n    expect timeout=1s Reply { assert(MATCH[Reply].payload == \"hi\")\n      print(\"seq ${MATCH[Reply].seq}\") } } }" \
+         "on timeout=1s /IP/ICMP/Echo/Request {\n  /IP(dst=MATCH[IP].src)/ICMP/Echo(id=MATCH[Echo].id)/Reply(seq=MATCH[Request].seq, payload=MATCH[Request].payload) }")
+*)
+(* A program and a host: ping, a UDP echo server, a closed port: *)
+(*$= & ~printer:identity
+  "a 0.000s: seq 1\na 0.100s: seq 2\na 0.200s: seq 3\na 0.200s: done Eth#4" \
+    (with_host "/IP(dst=10.0.0.2)/ICMP/Echo { repeat count=3 every=100ms { Request(\"hi\")\n    expect timeout=1s Reply { assert(MATCH[Reply].payload == \"hi\")\n      print(\"seq ${MATCH[Reply].seq}\") } } }")
+  "a 0.000s: echo 0\na 0.000s: echo 1\na 0.000s: done Eth#3" \
+    (with_host ~setup:(fun h -> h.Host.trx.Host.udp_server_start (Udp.Port.o 7) (fun udp -> \
+        Tools.(udp.Udp.TRX.trx.ins --> sink (fun bits -> tx udp.Udp.TRX.trx bits)))) \
+        "/IP(dst=10.0.0.2)/UDP(dst=7) { repeat count=2 { Bytes(\"echo ${I}\")\n    expect timeout=1s Bytes { print(MATCH[Bytes].data) } } }")
+  "a 0.000s: unreachable\na 0.000s: done Eth#2" \
+    (with_host "/IP(dst=10.0.0.2)/UDP(dst=9) { Bytes(\"anyone?\")\n  expect timeout=1s ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
 *)
