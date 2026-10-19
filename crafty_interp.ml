@@ -297,11 +297,8 @@ type t =
 
 (* The stack of [env] with these layers on top, their nodes held by [b] (but
  * for the root, which stays, and for a terminal layer's, which goes with its
- * parent).
- * Options belong to the stack and not to the nodes, so they are scoped as
- * the stack is: a stack statement without a block, terminal or not, makes
- * its stack with its options the current one until the end of the block.
- * Another packet with other options writes its whole stack again. *)
+ * parent). The options are those of this stack, not of its nodes. Raises
+ * [Failed]. *)
 let push t b env absolute (layers : T.layer list) =
     let base = if absolute then [] else env.stack in
     List.fold_left (fun stack (l : T.layer) ->
@@ -365,8 +362,10 @@ let register t b env (p : T.pattern) ~matched ~failed =
         b.cleanups <- (fun () -> Crafty_tree.release n) :: b.cleanups)
 
 (* Runs that block within [parent], then [k], unless it fails or breaks
- * first; returns the block: *)
-let rec run_block t parent env (stmts : T.block) ~fail ~break_ k =
+ * first; returns the block. Its environment is what [enter] makes of [env]
+ * once the block exists, unless that fails: *)
+let rec run_block ?(enter=fun _ env -> Some env) t parent env (stmts : T.block)
+                  ~fail ~break_ k =
     let rec b =
         { parent = Some parent ; live = true ; children = [] ; cleanups = [] ;
           fail = (fun e -> cancel b ; fail e) ;
@@ -378,7 +377,7 @@ let rec run_block t parent env (stmts : T.block) ~fail ~break_ k =
             settle b
         | s :: rest ->
             exec t b env s (fun env -> if b.live then loop env rest) in
-    loop env stmts ;
+    Option.may (fun env -> loop env stmts) (enter b env) ;
     b
 
 (* Runs that statement in block [b], then [k] with the environment for the
@@ -425,20 +424,22 @@ and exec t b env (s : T.stmt) k =
         ignore (run_block t b env body ~break_:b.break_ (fun () -> k env)
                     ~fail:(fun _ -> if b.live then k env))
     | T.Stack { absolute ; layers ; body = Some body } ->
-        (* The block after a stack is where that stack is pushed: *)
-        let push = { s with stmt = T.Stack { absolute ; layers ; body = None } } in
-        exec t b env { s with stmt = T.Block (push :: body) } k
+        (* The block holds the nodes of its stack: *)
+        let enter b env =
+            match push t b env absolute layers with
+            | stack -> Some { env with stack }
+            | exception Failed message ->
+                b.fail Crafty_parser.{ where = s.stmt_loc ; message } ; None
+            | exception Runtime_error (where, message) ->
+                b.fail Crafty_parser.{ where ; message } ; None in
+        ignore (run_block ~enter t b env body ~fail:b.fail ~break_:b.break_
+                    (fun () -> k env))
     | T.Stack { absolute ; layers ; body = None } ->
+        (* A packet, leaving the current stack as it was: *)
         guard (fun () ->
-            try
-                match push t b env absolute layers with
-                | top :: rest as stack when top.node.layer.terminal ->
-                    (* Which sends, and does not stay: *)
-                    Crafty_tree.send stack ;
-                    rest
-                | stack -> stack
+            try Crafty_tree.send (push t b env absolute layers)
             with Failed msg -> error s.stmt_loc "%s" msg) |>
-        Option.may (fun stack -> k { env with stack })
+        Option.may (fun () -> k env)
     | T.Expect { timeout ; pattern ; match_ ; body } ->
         guard (fun () -> timeout_of eval "expect" timeout) |>
         Option.may (fun timeout ->
@@ -821,12 +822,12 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
 (*$= runs & ~printer:identity
   "0s: in Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: out Eth\n0s: done Eth" \
     (runs ~trees:true "/IP(dst=1.2.3.4)/UDP(src=1, dst=53) { print(\"in\") }\nprint(\"out\")")
-  "0s: a Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: b Eth{IP(src=10.0.0.1, dst=1.2.3.4)*2}\n0s: c Eth{IP(src=10.0.0.1, dst=1.2.3.4)*3{ICMP*1{Echo(id=7)*1{Request}}, UDP(src=1, dst=53)*1}}\n0s: d Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: e Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1, IP(src=10.0.0.1, dst=1.2.3.5)*1}\n0s: done Eth" \
-    (runs ~trees:true "IP(dst=1.2.3.4)\nprint(\"a\")\n{\n  /IP(dst=1.2.3.4)\n  print(\"b\")\n  UDP(src=1, dst=53)\n  /IP(dst=1.2.3.4)/ICMP/Echo(id=7)/Request\n  print(\"c\")\n}\nprint(\"d\")\n/IP(dst=1.2.3.5)\nprint(\"e\")")
-  "0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: failed: line 4, column 7: Division by zero Eth" \
-    (runs ~trees:true "retry max=1 {\n  /IP(dst=1.2.3.4)/UDP(src=1, dst=53)\n  print(\"try\")\n  x = 1 / 0 }")
+  "0s: a Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: b Eth{IP(src=10.0.0.1, dst=1.2.3.4)*2}\n0s: c Eth{IP(src=10.0.0.1, dst=1.2.3.4)*3{ICMP*1{Echo(id=7)*1{Request}}, UDP(src=1, dst=53)*1}}\n0s: d Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: e Eth{IP(src=10.0.0.1, dst=1.2.3.5)*1}\n0s: done Eth" \
+    (runs ~trees:true "IP(dst=1.2.3.4) {\n  print(\"a\")\n  /IP(dst=1.2.3.4) {\n    print(\"b\")\n    UDP(src=1, dst=53) {\n      /IP(dst=1.2.3.4)/ICMP/Echo(id=7)/Request\n      print(\"c\") } }\n  print(\"d\") }\n/IP(dst=1.2.3.5) { print(\"e\") }")
+  "0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: failed: line 4, column 9: Division by zero Eth" \
+    (runs ~trees:true "retry max=1 {\n  /IP(dst=1.2.3.4)/UDP(src=1, dst=53) {\n    print(\"try\")\n    x = 1 / 0 } }")
   "0s: done Eth" \
-    (runs ~trees:true "repeat count=3 { /IP(dst=1.2.3.4)/UDP(dst=53) }")
+    (runs ~trees:true "repeat count=3 { /IP(dst=1.2.3.4)/UDP(dst=53) {} }")
 *)
 (* What programs send, through the gateway or to a neighbour, self-driven or
  * manual, with the automatic fields filled in (checksums included, which
@@ -841,11 +842,11 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
   "0s: done\n> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP" \
     (runs ~frames:true "/IP(dst=10.0.0.3)/UDP(src=1, dst=2)/Bytes(\"who\")")
 *)
-(* Self-driven IP takes TTL and DF per packet (and a terminal stack leaves
- * its own as the current one); the requests of an Echo share its id (the
+(* Self-driven IP takes TTL and DF per packet (and a packet leaves the
+ * stack of the block as it was); the requests of an Echo share its id (the
  * random one shown as "?"), and their sequence numbers go on: *)
 (*$= runs & ~printer:identity
-  "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 UDP 1>2 \"a\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=3 df UDP 1>2 \"b\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=3 df UDP 1>2 \"c\"" \
+  "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 UDP 1>2 \"a\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=3 df UDP 1>2 \"b\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 UDP 1>2 \"c\"" \
     (runs ~frames:true "/IP(dst=10.0.0.2)/UDP(src=1, dst=2) { Bytes(\"a\")\n  /IP(dst=10.0.0.2, ttl=3, dont_frag=true)/UDP(src=1, dst=2)/Bytes(\"b\")\n  Bytes(\"c\") }")
   "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 8/0 id=? seq=1 \"ping\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 8/0 id=? seq=2 \"ping\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 8/0 id=7 seq=42 \"\"" \
     (same_random_ids (runs ~frames:true "/IP(dst=10.0.0.2)/ICMP/Echo { repeat count=2 { Request(\"ping\") }\n  /IP(dst=10.0.0.2)/ICMP/Echo(id=7)/Request(seq=42) }"))

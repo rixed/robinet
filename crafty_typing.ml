@@ -21,9 +21,9 @@
    program, or tells every statement that makes no sense and why.
 
    Stacks and patterns are resolved against the layer registry, starting
-   from its root ([/IP] being [/Eth/IP]). A terminal layer sends a packet
-   and does not stay on the current stack; other layers do, for the rest of
-   the block or for the block that follows them.
+   from its root ([/IP] being [/Eth/IP]). A stack is either that of the
+   block that follows it, or a packet to send, its top layer being
+   terminal; a packet leaves the current stack as it was.
 
    Within a pattern's condition, a name is a field of that layer if it has
    one, else a variable; [IP.src] is a field of the nearest IP below ([IP^]
@@ -95,7 +95,8 @@ type stmt = { stmt_loc : A.location ; stmt : stmt_desc }
 
 and stmt_desc =
     (* From the root if [absolute], otherwise on top of the current stack;
-     * a root that was left implicit is the first layer: *)
+     * a root that was left implicit is the first layer. The stack of
+     * [body] if any, else a packet to send: *)
     | Stack of { absolute : bool ; layers : layer list ; body : block option }
     | Block of block
     | Declare of var * expr
@@ -682,20 +683,11 @@ and stmt errors env (s : A.stmt) =
         | A.Stack { absolute ; layers ; body } ->
             let base = if absolute then [] else env.stack in
             let stack, tls = stack_layers env base layers in
-            let top, stack_after =
-                match stack with
-                | (top, _) :: rest when top.terminal -> top, rest
-                | (top, _) :: _ -> top, stack
-                | [] -> assert false in
-            (match body with
-            | Some body ->
-                if top.terminal then
-                    error loc "No block can follow %s, which sends" top.name ;
-                let body = block errors { env with stack } body in
-                env, Some (mk (Stack { absolute ; layers = tls ; body = Some body }))
-            | None ->
-                { env with stack = stack_after },
-                Some (mk (Stack { absolute ; layers = tls ; body = None })))
+            (* Which the parser checked: *)
+            let top = fst (List.hd stack) in
+            assert (top.terminal = (body = None)) ;
+            let body = Option.map (block errors { env with stack }) body in
+            env, Some (mk (Stack { absolute ; layers = tls ; body }))
         | A.Block b ->
             env, Some (mk (Block (block errors env b)))
         | A.Declare (name, e) ->
@@ -889,25 +881,23 @@ let check (program : A.program) =
   "line 1, column 22: The value of ttl must be an int, not a string" \
     (types "/IP(dst=1.2.3.4, ttl=\"x\")/UDP(dst=53)/Bytes(\"hi\")")
   "line 1, column 30: UDP has no field flags" \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=53, flags=2)")
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53, flags=2) {}")
   "line 1, column 5: id cannot be set in a self-driven IP" \
-    (types "/IP(id=3)/TCP(dst=80)")
+    (types "/IP(id=3)/TCP(dst=80) {}")
   "line 1, column 19: TCP cannot be self-driven on top of a manual IP" \
-    (types "/IP!(dst=1.2.3.4)/TCP(dst=80)")
+    (types "/IP!(dst=1.2.3.4)/TCP(dst=80) {}")
   "line 1, column 23: type of ICMP cannot be set" \
-    (types "/IP(dst=1.2.3.4)/ICMP(type=8)")
+    (types "/IP(dst=1.2.3.4)/ICMP(type=8) {}")
   "line 1, column 43: Nothing can be on top of Request" \
     (types "/IP(dst=1.2.3.4)/ICMP/Echo/Request(seq=1)/Bytes(\"x\")")
-  "line 1, column 1: No block can follow Bytes, which sends" \
-    (types "/IP(dst=1.2.3.4)/TCP(dst=80)/Bytes(\"x\") { print(\"a\") }")
   "line 1, column 2: IP needs a dst" \
-    (types "/IP/UDP(dst=53)")
+    (types "/IP/UDP(dst=53) {}")
   "line 1, column 18: UDP needs a dst" \
-    (types "/IP(dst=1.2.3.4)/UDP(src=1)")
+    (types "/IP(dst=1.2.3.4)/UDP(src=1) {}")
   "line 1, column 2: UDP cannot be at the bottom of a stack" \
-    (types "/UDP")
+    (types "/UDP {}")
   "line 1, column 18: IP cannot be on top of IP" \
-    (types "/IP(dst=1.2.3.4)/IP")
+    (types "/IP(dst=1.2.3.4)/IP {}")
   "line 1, column 5: MATCH is only defined in the blocks of expect and on" \
     (types "x = MATCH")
   "line 1, column 5: LAST is not supported yet" \

@@ -38,6 +38,11 @@ open Crafty_ast
 
 let layers = Crafty_layers.names
 
+(* Whether the layer of that name sends a packet: *)
+let terminal name =
+    List.exists (fun (l : Crafty_layers.layer) ->
+        l.terminal && Crafty_layers.same_name l.name name) Crafty_layers.all
+
 module P = Parsers.Make (ParsersPositions.LineCol (Parsers.SimpleConfig (Char)))
 open P
 
@@ -475,10 +480,20 @@ let stmt = fix (fun stmt ->
         | String [] -> reject "The %s cannot be empty" what
         | _ -> reject "The %s must be a name" what in
     with_loc (
+        (* A stack sends a packet if its top layer is terminal, and is
+         * otherwise that of the block that follows: *)
         (optional ~def:false (slash >>: fun () -> true) ++
          repeat ~min:1 ~sep:(maybe_next (slash -- nl_sp)) layer ++
          optional ~def:None (body >>: Option.some) >>:
-            fun ((absolute, layers), body) -> Stack { absolute ; layers ; body }) |||
+            fun ((absolute, layers), body) ->
+                let top = (List.last layers).layer_name in
+                (match body, terminal top with
+                | None, false ->
+                    reject "%s needs a block, or a layer on top that sends" top
+                | Some _, true ->
+                    reject "No block can follow %s, which sends" top
+                | _ -> ()) ;
+                Stack { absolute ; layers ; body }) |||
         (block >>: fun b -> Block b) |||
         (variable ++ maybe_next (
             item '=' -- nay (item '=' ||| item '~') -- nl_sp -+ expr) >>:
@@ -616,7 +631,11 @@ let parse text =
 (*$= reads & ~printer:identity
   "line 1, column 17: Expected expression in arguments" \
     (reads "/IP(dst=1.2.3.4/UDP")
-  "line 1, column 17: Expected end of statement" (reads "/IP(dst=1.2.3.4))/UDP")
+  "line 1, column 11: Expected end of statement" (reads "print(\"a\"))")
+  "line 1, column 16: UDP needs a block, or a layer on top that sends" \
+    (reads "/IP/UDP(dst=53)")
+  "line 1, column 19: No block can follow Bytes, which sends" \
+    (reads "/IP/UDP/Bytes() {}")
   "line 1, column 12: Expected end of statement" (reads "print(\"a\") print(\"b\")")
   "line 1, column 7: Expected end of statement" (reads "x = 1 2")
   "line 1, column 5: Expected expression in statement" (reads "x = ")

@@ -142,8 +142,9 @@ type layer =
 type stmt = { stmt_loc : location ; stmt : stmt_desc }
 
 and stmt_desc =
-    (* Add those layers on top of the current stack, or on top of the root
-     * if [absolute]; with a block, only for the duration of that block: *)
+    (* Those layers on top of the current stack, or on top of the root if
+     * [absolute]: the stack of [body] if any, or else a packet to send, its
+     * top layer being terminal: *)
     | Stack of { absolute : bool ; layers : layer list ; body : block option }
     | Block of block
     (* [x = e]: *)
