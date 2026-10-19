@@ -1,0 +1,6 @@
+# From the spec's "Special forms for control flow".
+{
+  on timeout=1s Bytes("Pong\n") { n += 1 }
+  repeat count=100 every=1ms { Bytes("Ping\n") }
+  # wait before leaving that block that the `on` statement times out
+}

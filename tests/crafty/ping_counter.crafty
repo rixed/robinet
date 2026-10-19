@@ -1,0 +1,14 @@
+# From the spec's "Declarations and assignment", with "retry max=1" in place
+# of "catch", which is not supported yet.
+/IP(dst=1.2.3.4)/UDP(src=1,dst=2) {
+  num_resp = 0
+  retry max=1 { # quit this block on the first timeout
+    repeat count=10 {
+      Bytes("Ping\n")
+      expect timeout=1s Bytes("Pong\n") {
+        num_resp += 1
+      }
+    }
+  }
+  print("Got ${num_resp} repsonses")
+}
