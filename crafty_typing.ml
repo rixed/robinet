@@ -577,6 +577,9 @@ let stack_layers env base (layers : A.layer list) =
         List.iter (fun (i, (e : expr)) ->
             if List.length (List.filter (fun (i', _) -> i = i') options) > 1 then
                 error e.loc "%s given twice" l.fields.(i).name) options ;
+        Array.iteri (fun i (f : L.field) ->
+            if f.pick = Some L.Required && not (List.mem_assoc i options) then
+                error al.layer_loc "%s needs a %s" l.name f.name) l.fields ;
         (l, mode) :: base',
         { layer_loc = al.layer_loc ; layer = l ; mode ; options } :: tls
     ) (base, []) layers |>
@@ -806,19 +809,19 @@ let check (program : A.program) =
   "x: int, y: int" \
     (types "x = SYN | ACK\ny = port_unreachable")
   "" \
-    (types "/IP/ICMP { expect DestUnreachable(code == PORT_UNREACHABLE) {} }")
+    (types "/IP(dst=1.2.3.4)/ICMP { expect DestUnreachable(code == PORT_UNREACHABLE) {} }")
   "I: int" \
     (types "repeat { on Bytes(\"x\") { break 2 } }")
   "" \
-    (types "/IP!(id=3)/TCP!(dst=80, flags=SYN|ACK)/Bytes(\"x\")")
+    (types "/IP!(dst=1.2.3.4, id=3)/TCP!(dst=80, flags=SYN|ACK)/Bytes(\"x\")")
   "" \
-    (types "/IP/ICMP/EchoRequest(\"hello\")")
+    (types "/IP(dst=1.2.3.4)/ICMP/EchoRequest(\"hello\")")
   "x: ip" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"hi\")\n  expect Bytes(\"ho\") { x = MATCH[IP].src } }")
   "x: int" \
-    (types "/IP/UDP { expect ../UDP(dst == 53, IP.ttl < 3, ^IP.src = 1.2.3.4, Eth.proto == 0x800) { x = MATCH[UDP].src } }")
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(dst == 53, IP.ttl < 3, ^IP.src = 1.2.3.4, Eth.proto == 0x800) { x = MATCH[UDP].src } }")
   "" \
-    (types "/IP/TCP { expect ../TCP!(flags & RST, seq_num > 3) {}\n  expect ../TCP!/Bytes(data == \"x\") {} }")
+    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { expect ../TCP!(flags & RST, seq_num > 3) {}\n  expect ../TCP!/Bytes(data == \"x\") {} }")
 *)
 
 (* What makes no sense, and where; after an error in a declaration, the uses
@@ -858,22 +861,26 @@ let check (program : A.program) =
     (types "expect 5 Bytes(\"x\") {}")
   "line 1, column 22: The value of ttl must be an int, not a string" \
     (types "/IP(dst=1.2.3.4, ttl=\"x\")/UDP(dst=53)/Bytes(\"hi\")")
-  "line 1, column 17: UDP has no field flags" \
-    (types "/IP/UDP(dst=53, flags=2)")
+  "line 1, column 30: UDP has no field flags" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53, flags=2)")
   "line 1, column 5: id cannot be set in a self-driven IP" \
     (types "/IP(id=3)/TCP(dst=80)")
-  "line 1, column 6: TCP cannot be self-driven on top of a manual IP" \
-    (types "/IP!/TCP(dst=80)")
-  "line 1, column 10: type of ICMP cannot be set" \
-    (types "/IP/ICMP(type=8)")
-  "line 1, column 28: Nothing can be on top of EchoRequest" \
-    (types "/IP/ICMP/EchoRequest(id=1)/Bytes(\"x\")")
+  "line 1, column 19: TCP cannot be self-driven on top of a manual IP" \
+    (types "/IP!(dst=1.2.3.4)/TCP(dst=80)")
+  "line 1, column 23: type of ICMP cannot be set" \
+    (types "/IP(dst=1.2.3.4)/ICMP(type=8)")
+  "line 1, column 41: Nothing can be on top of EchoRequest" \
+    (types "/IP(dst=1.2.3.4)/ICMP/EchoRequest(id=1)/Bytes(\"x\")")
   "line 1, column 1: No block can follow Bytes, which sends" \
-    (types "/IP/TCP/Bytes(\"x\") { print(\"a\") }")
+    (types "/IP(dst=1.2.3.4)/TCP(dst=80)/Bytes(\"x\") { print(\"a\") }")
+  "line 1, column 2: IP needs a dst" \
+    (types "/IP/UDP(dst=53)")
+  "line 1, column 18: UDP needs a dst" \
+    (types "/IP(dst=1.2.3.4)/UDP(src=1)")
   "line 1, column 2: UDP cannot be at the bottom of a stack" \
     (types "/UDP")
-  "line 1, column 5: IP cannot be on top of IP" \
-    (types "/IP/IP")
+  "line 1, column 18: IP cannot be on top of IP" \
+    (types "/IP(dst=1.2.3.4)/IP")
   "line 1, column 5: MATCH is only defined in the blocks of expect and on" \
     (types "x = MATCH")
   "line 1, column 5: LAST is not supported yet" \
@@ -882,16 +889,16 @@ let check (program : A.program) =
     (types "x = IP.src")
   "line 1, column 5: =~ is not supported yet" \
     (types "x = y =~ /IP")
-  "line 1, column 18: ../ goes below the bottom of the stack" \
-    (types "/IP/UDP { expect ../../../../UDP {} }")
-  "line 1, column 25: There is no TCP below UDP" \
-    (types "/IP/UDP { expect ../UDP(TCP.src == 1) {} }")
-  "line 1, column 25: There is only one IP below UDP" \
-    (types "/IP/UDP { expect ../UDP(IP^.ttl == 1) {} }")
-  "line 1, column 25: The condition on TCP must be a bool, not a string" \
-    (types "/IP/TCP { expect ../TCP(\"x\") {} }")
-  "line 1, column 25: flags cannot be read in a self-driven TCP" \
-    (types "/IP/TCP { expect ../TCP(flags & ACK) {} }")
+  "line 1, column 39: ../ goes below the bottom of the stack" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../../../../UDP {} }")
+  "line 1, column 46: There is no TCP below UDP" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(TCP.src == 1) {} }")
+  "line 1, column 46: There is only one IP below UDP" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(IP^.ttl == 1) {} }")
+  "line 1, column 46: The condition on TCP must be a bool, not a string" \
+    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { expect ../TCP(\"x\") {} }")
+  "line 1, column 46: flags cannot be read in a self-driven TCP" \
+    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { expect ../TCP(flags & ACK) {} }")
   "line 1, column 5: Field a given twice" \
     (types "x = {a: 1, A: 2}")
   "line 1, column 5: Cannot order values of type ip" \

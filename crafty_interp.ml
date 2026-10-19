@@ -35,93 +35,10 @@
    [catch] leaves its block on its first error, which goes no further. An
    error reaching the program's block ends the program. *)
 open Batteries
+open Crafty_value
 module A = Crafty_ast
 module T = Crafty_typing
 module Interval = Clock.Interval
-
-(** {2 Values} *)
-
-type value =
-    | Void
-    | Bool of bool
-    | Byte of int
-    | Int of int
-    | Float of float
-    | String of string
-    | Interval of Interval.t
-    | Ip of Ip.Addr.t
-    | Mac of Eth.Addr.t
-    (* In the order of the fields of the record type: *)
-    | Record of value array
-    | Array of value array
-    | Variant of string * value
-
-let of_literal = function
-    | A.Bool b -> Bool b
-    | A.Int i -> Int i
-    | A.Float f -> Float f
-    | A.Byte b -> Byte b
-    | A.Interval i -> Interval i
-    | A.Ip ip -> Ip ip
-    | A.Mac mac -> Mac mac
-
-let bytes_of_string s =
-    Array (Array.init (String.length s) (fun i -> Byte (Char.code s.[i])))
-
-let string_of_bytes a =
-    String.init (Array.length a) (fun i ->
-        match a.(i) with Byte b -> Char.chr b | _ -> assert false)
-
-let mac_bits mac = (mac : Eth.Addr.t :> Bitstring.bitstring)
-
-(* How a value of type [typ] is written into a string: *)
-let rec to_string (typ : A.Type.t) v =
-    match typ, v with
-    | _, Void -> ""
-    | _, Bool b -> if b then "true" else "false"
-    | _, Byte b -> Printf.sprintf "#%02x" b
-    | _, Int i -> string_of_int i
-    | _, Float f -> A.string_of_float f
-    | _, String s -> s
-    | _, Interval i -> Interval.to_string i
-    | _, Ip ip -> Ip.Addr.to_dotted_string ip
-    | _, Mac mac ->
-        Tools.hexstring ~sep:":" (Bitstring.string_of_bitstring (mac_bits mac))
-    | Record fs, Record vs ->
-        "{"^ String.concat ", " (List.mapi (fun i (n, t) ->
-            n ^": "^ to_string t vs.(i)) fs) ^"}"
-    | Array Byte, Array a when Array.length a > 0 ->
-        "#"^ String.concat "" (Array.to_list (Array.map (function
-            | Byte b -> Printf.sprintf "%02x" b | _ -> assert false) a))
-    | Array t, Array a ->
-        "["^ String.concat ", " (Array.to_list (Array.map (to_string t) a)) ^"]"
-    | Variant cs, Variant (n, v) ->
-        let t = try List.assoc n cs with Not_found -> A.Type.Void in
-        if t = A.Type.Void then n else n ^" "^ to_string t v
-    | _ -> invalid_arg "Crafty_interp.to_string"
-
-let rec equal a b =
-    match a, b with
-    | Ip a, Ip b -> Ip.Addr.compare a b = 0
-    | Mac a, Mac b -> Bitstring.equals (mac_bits a) (mac_bits b)
-    | Record a, Record b | Array a, Array b ->
-        Array.length a = Array.length b && Array.for_all2 equal a b
-    | Variant (n, a), Variant (m, b) -> n = m && equal a b
-    | a, b -> a = b
-
-(* Only what the typer lets be ordered: *)
-let compare_values a b =
-    match a, b with
-    | Interval a, Interval b -> Interval.compare a b
-    | a, b -> compare a b
-
-(** {2 Errors} *)
-
-type error = Crafty_parser.error
-
-exception Runtime_error of A.location * string
-
-let error loc fmt = Printf.ksprintf (fun s -> raise (Runtime_error (loc, s))) fmt
 
 (** {2 Expressions} *)
 
@@ -130,13 +47,17 @@ let error loc fmt = Printf.ksprintf (fun s -> raise (Runtime_error (loc, s))) fm
  * of its own: *)
 module Env = Map.Int
 
-type env = value ref Env.t
+type env =
+    { vars : value ref Env.t ;
+      (* The current protocol stack, its top first: *)
+      stack : Crafty_tree.entry list }
 
 let lookup (env : env) (v : T.var) =
-    try Env.find v.id env
+    try Env.find v.id env.vars
     with Not_found -> invalid_arg ("Crafty_interp: no cell for "^ v.name)
 
-let bind env (v : T.var) value = Env.add v.id (ref value) env
+let bind env (v : T.var) value =
+    { env with vars = Env.add v.id (ref value) env.vars }
 
 let rand loc = function
     | Int max ->
@@ -341,7 +262,34 @@ let guard b f =
 
 type t =
     { power : Simulation.power ;
-      output : output }
+      output : output ;
+      tree : Crafty_tree.node }
+
+(* The stack of [env] with these layers on top (but for a terminal one,
+ * which sends and does not stay), their nodes held by [b] (but for the root,
+ * which stays): *)
+let push t b env absolute (layers : T.layer list) =
+    let base = if absolute then [] else env.stack in
+    let stack =
+        List.fold_left (fun stack (l : T.layer) ->
+            let options =
+                List.map (fun (i, e) -> i, eval t.output env e) l.options in
+            let node =
+                match stack with
+                | [] ->
+                    assert (l.layer == Crafty_layers.root) ;
+                    t.tree
+                | (below : Crafty_tree.entry) :: _ ->
+                    let node =
+                        Crafty_tree.child l.layer_loc below.node l.layer options in
+                    Crafty_tree.acquire node ;
+                    b.cleanups <- (fun () -> Crafty_tree.release node) :: b.cleanups ;
+                    node in
+            Crafty_tree.{ node ; mode = l.mode ; options } :: stack
+        ) base layers in
+    match stack with
+    | top :: rest when top.node.layer.terminal -> rest
+    | stack -> stack
 
 (* Runs that block within [parent], then [k], unless it fails or breaks
  * first; returns the block: *)
@@ -393,9 +341,16 @@ and exec t b env (s : T.stmt) k =
     | T.Catch body ->
         ignore (run_block t b env body ~break_:b.break_ (fun () -> k env)
                     ~fail:(fun _ -> if b.live then k env))
-    | T.Stack _ | T.Expect _ | T.On _ ->
+    | T.Stack { absolute ; layers ; body = Some body } ->
+        (* The block after a stack is where that stack is pushed: *)
+        let push = { s with stmt = T.Stack { absolute ; layers ; body = None } } in
+        exec t b env { s with stmt = T.Block (push :: body) } k
+    | T.Stack { absolute ; layers ; body = None } ->
+        guard (fun () -> push t b env absolute layers) |>
+        Option.may (fun stack -> k { env with stack })
+    | T.Expect _ | T.On _ ->
         ignore (guard (fun () ->
-            error s.stmt_loc "Protocol stacks are not supported yet"))
+            error s.stmt_loc "Patterns are not supported yet"))
 
 and repeat t b env var count every for_ body body_loc k =
     let eval = eval t.output env in
@@ -464,12 +419,13 @@ type handle =
     { stop : unit -> unit ;
       status : unit -> status }
 
-(** Runs [program] on [power]'s simulation, starting at once, writing with
+(** Runs [program] on [power]'s simulation, starting at once, sending and
+ * receiving through [tree] (from {!Crafty_tree.make_root}), writing with
  * [print] and [print_err], and calling [on_exit] with its final status
  * (possibly before returning). *)
-let run power ~print ~print_err ?(on_exit=ignore) (program : T.block) =
+let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
     let status = ref Running in
-    let t = { power ; output = { print ; print_err } } in
+    let t = { power ; output = { print ; print_err } ; tree } in
     let exit s =
         if !status = Running then (
             status := s ;
@@ -478,15 +434,17 @@ let run power ~print ~print_err ?(on_exit=ignore) (program : T.block) =
         { parent = None ; live = true ; children = [] ; cleanups = [] ;
           fail = (fun e -> cancel root ; exit (Failed e)) ;
           break_ = (fun _ -> assert false) } in
-    ignore (run_block t root Env.empty program ~fail:root.fail
-                ~break_:root.break_ (fun () -> cancel root ; exit Done)) ;
+    ignore (run_block t root { vars = Env.empty ; stack = [] } program
+                ~fail:root.fail ~break_:root.break_
+                (fun () -> cancel root ; exit Done)) ;
     { stop = (fun () -> cancel root ; exit Stopped) ;
       status = (fun () -> !status) }
 
-(* [runs ?stop_at text] is what the program in that text prints, each line
- * with the time it is printed at, then how it ends; or why it cannot run. *)
+(* [runs ?stop_at ?trees text] is what the program in that text prints, each
+ * line with the time it is printed at (and with [trees], the tree of parsers
+ * then), then how it ends; or why it cannot run. *)
 (*$inject
-  let runs ?stop_at text =
+  let runs ?stop_at ?(trees=false) text =
       match Crafty_parser.parse text with
       | Error e -> IO.to_string Crafty_parser.print_error e
       | Ok p ->
@@ -495,12 +453,19 @@ let run power ~print ~print_err ?(on_exit=ignore) (program : T.block) =
               String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es)
           | Ok p ->
               let sim = Simulation.make ~realtime:false "crafty" in
+              let eth =
+                  Eth.State.make ~parent:sim.root ~name:"crafty"
+                      ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
+                      ~my_addresses:[ Eth.State.make_my_ip_address
+                                          (Ip.Addr.of_string "10.0.0.1") ] () in
+              let tree = Crafty_tree.make_root eth in
               let out = ref [] in
               let line pfx s =
-                  out := Printf.sprintf "%s%s: %s" pfx
-                      (Clock.Time.to_string (Simulation.now sim)) s :: !out in
+                  out := Printf.sprintf "%s%s: %s%s" pfx
+                      (Clock.Time.to_string (Simulation.now sim)) s
+                      (if trees then " "^ Crafty_tree.to_string tree else "") :: !out in
               let h =
-                  run sim.root.power ~print:(line "") ~print_err:(line "err ")
+                  run sim.root.power tree ~print:(line "") ~print_err:(line "err ")
                       ~on_exit:(function
                           | Done -> line "" "done"
                           | Failed e ->
@@ -567,6 +532,17 @@ let run power ~print ~print_err ?(on_exit=ignore) (program : T.block) =
   "0s: 0\n1s: 1\n1s500ms: stopped" \
     (runs ~stop_at:(Clock.Time.of_secs 1.5) \
           "repeat count=5 every=1s { print(\"${I}\") }")
-  "0s: failed: line 1, column 1: Protocol stacks are not supported yet" \
-    (runs "/IP/UDP/Bytes(\"x\")")
+  "0s: failed: line 1, column 32: Patterns are not supported yet" \
+    (runs "/IP(dst=1.2.3.4)/UDP(dst=53) { expect Bytes(\"x\") {} }")
+*)
+(* Stacks hold their nodes for the block they are in: *)
+(*$= runs & ~printer:identity
+  "0s: in Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: out Eth\n0s: done Eth" \
+    (runs ~trees:true "/IP(dst=1.2.3.4)/UDP(src=1, dst=53) { print(\"in\") }\nprint(\"out\")")
+  "0s: a Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: b Eth{IP(src=10.0.0.1, dst=1.2.3.4)*2}\n0s: c Eth{IP(src=10.0.0.1, dst=1.2.3.4)*3{ICMP*1{EchoRequest(id=7)*1}, UDP(src=1, dst=53)*1}}\n0s: d Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1}\n0s: e Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1, IP(src=10.0.0.1, dst=1.2.3.5)*1}\n0s: done Eth" \
+    (runs ~trees:true "IP(dst=1.2.3.4)\nprint(\"a\")\n{\n  /IP(dst=1.2.3.4)\n  print(\"b\")\n  UDP(src=1, dst=53)\n  /IP(dst=1.2.3.4)/ICMP/EchoRequest(id=7)\n  print(\"c\")\n}\nprint(\"d\")\n/IP(dst=1.2.3.5)\nprint(\"e\")")
+  "0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: try Eth{IP(src=10.0.0.1, dst=1.2.3.4)*1{UDP(src=1, dst=53)*1}}\n0s: failed: line 4, column 7: Division by zero Eth" \
+    (runs ~trees:true "retry max=1 {\n  /IP(dst=1.2.3.4)/UDP(src=1, dst=53)\n  print(\"try\")\n  x = 1 / 0 }")
+  "0s: done Eth" \
+    (runs ~trees:true "repeat count=3 { /IP(dst=1.2.3.4)/UDP(dst=53) }")
 *)

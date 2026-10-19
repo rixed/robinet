@@ -31,6 +31,14 @@ type mode = Manual | Driven
 
 let string_of_mode = function Manual -> "manual" | Driven -> "self-driven"
 
+(** How a discriminant that a stack leaves out is chosen: *)
+type pick =
+    | Required
+    (* The IPv4 address of the interface: *)
+    | Local_address
+    (* At random within these bounds, and distinct from the siblings': *)
+    | Random_in of int * int
+
 type field =
     { name : string ;
       typ : Type.t ;
@@ -42,8 +50,12 @@ type field =
       read_in : mode list ;
       (* Whether it tells streams apart, which the tree of parsers keys its
        * nodes on: *)
-      discriminant : bool }
+      discriminant : bool ;
+      (* For a discriminant that is not told by the layer on top (as the
+       * protocol of IP is): *)
+      pick : pick option }
 
+(* Instantiated only once so can be compared with == and != *)
 type layer =
     { name : string ;
       (* The layers it can be on top of, by name; none for the root: *)
@@ -62,8 +74,10 @@ type layer =
       constants : (string * literal) list }
 
 let field ?(set_in=[ Manual ]) ?(read_in=[ Manual ]) ?(discriminant=false)
-          name typ =
-    { name ; typ ; set_in ; read_in ; discriminant }
+          ?pick name typ =
+    { name ; typ ; set_in ; read_in ; discriminant ; pick }
+
+let random_port = Random_in (49152, 65535)
 
 let both = [ Manual ; Driven ]
 
@@ -86,8 +100,10 @@ let eth =
 
 let ip =
     layer "IP" ~above:[ "eth" ] ~driven:true [
-        field "src" Type.Ip ~set_in:both ~read_in:both ~discriminant:true ;
-        field "dst" Type.Ip ~set_in:both ~read_in:both ~discriminant:true ;
+        field "src" Type.Ip ~set_in:both ~read_in:both ~discriminant:true
+              ~pick:Local_address ;
+        field "dst" Type.Ip ~set_in:both ~read_in:both ~discriminant:true
+              ~pick:Required ;
         field "proto" Type.Int ~read_in:both ~discriminant:true ;
         field "tos" Type.Int ~set_in:both ~read_in:both ;
         field "ttl" Type.Int ~set_in:both ~read_in:both ;
@@ -103,8 +119,10 @@ let tcp =
     layer "TCP" ~above:[ "ip" ] ~driven:true
         ~constants:[ "FIN", Int 1 ; "SYN", Int 2 ; "RST", Int 4 ; "PSH", Int 8 ;
                      "ACK", Int 16 ; "URG", Int 32 ] [
-        field "src" Type.Int ~set_in:both ~read_in:both ~discriminant:true ;
-        field "dst" Type.Int ~set_in:both ~read_in:both ~discriminant:true ;
+        field "src" Type.Int ~set_in:both ~read_in:both ~discriminant:true
+              ~pick:random_port ;
+        field "dst" Type.Int ~set_in:both ~read_in:both ~discriminant:true
+              ~pick:Required ;
         field "seq_num" Type.Int ;
         field "ack_num" Type.Int ;
         field "flags" Type.Int ;
@@ -114,8 +132,8 @@ let tcp =
 
 let udp =
     layer "UDP" ~above:[ "ip" ] [
-        field "src" Type.Int ~discriminant:true ;
-        field "dst" Type.Int ~discriminant:true ;
+        field "src" Type.Int ~discriminant:true ~pick:random_port ;
+        field "dst" Type.Int ~discriminant:true ~pick:Required ;
         field "length" Type.Int ;
         field "checksum" Type.Int ]
 
@@ -127,7 +145,7 @@ let icmp =
 
 let echo name =
     layer name ~above:[ "icmp" ] ~terminal:true ~default:"payload" [
-        field "id" Type.Int ~discriminant:true ;
+        field "id" Type.Int ~discriminant:true ~pick:(Random_in (0, 65535)) ;
         field "seq" Type.Int ;
         field "payload" Type.bytes ]
 
@@ -197,6 +215,14 @@ let find_constant name =
     List.find_opt (fun (n, _) -> same_name n name) constants |>
     Option.map snd
 
+(** The indices of the discriminants of [l] that are not told by the layer
+ * on top: what tells apart its nodes under a same parent. *)
+let key_fields (l : layer) =
+    Array.to_list l.fields |>
+    List.mapi (fun i (f : field) -> i, f) |>
+    List.filter_map (fun (i, (f : field)) ->
+        if f.pick <> None then Some i else None)
+
 (** The mode a layer runs in when written with a bang or not. *)
 let mode_of (l : layer) ~bang =
     if bang || not l.driven then Manual else Driven
@@ -228,6 +254,11 @@ let record_type (l : layer) mode =
   (echo "EchoRequest").default_field = Some 2
   tcp.default_field = None
 *)
+(*$T key_fields
+  key_fields ip = [ 0 ; 1 ]
+  key_fields icmp = []
+  key_fields (echo "EchoReply") = [ 0 ]
+*)
 (*$T find_constant
   find_constant "rst" = Some (Crafty_ast.Int 4)
   find_constant "port_unreachable" = Some (Crafty_ast.Int 3)
@@ -248,6 +279,9 @@ let record_type (l : layer) mode =
       l.driven || List.for_all (fun (f : field) -> \
         not (List.mem Driven f.set_in) && not (List.mem Driven f.read_in)) \
         (Array.to_list l.fields)) all
+  List.for_all (fun (l : layer) -> \
+      Array.for_all (fun (f : field) -> \
+        f.pick = None || (f.discriminant && f.set_in <> [])) l.fields) all
   List.for_all (fun (l : layer) -> \
       let names = List.map (fun (f : field) -> String.lowercase_ascii f.name) \
                       (Array.to_list l.fields) in \

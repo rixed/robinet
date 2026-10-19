@@ -41,6 +41,8 @@ LIB_SOURCES  = \
 	crafty_layers.ml \
 	crafty_parser.ml \
 	crafty_typing.ml \
+	crafty_value.ml \
+	crafty_tree.ml \
 	crafty_interp.ml \
 	sockopt.ml \
 	hub.ml \
