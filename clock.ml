@@ -49,11 +49,23 @@ module rec Interval : sig
     val abs  : t -> t
     val of_secs : float -> t
     val to_secs : t -> float
+    val of_string : string -> t
     (* In seconds, for whoever reads the API: picoseconds are for computing
      * with, not for a graph's axis. *)
     val to_yojson : t -> Yojson.Safe.t
 end = struct
     (*$< Interval *)
+    (* Picoseconds in each unit, largest first: *)
+    let units =
+        [ 86_400_000_000_000_000, "d" ;
+           3_600_000_000_000_000, "h" ;
+              60_000_000_000_000, "m" ;
+               1_000_000_000_000, "s" ;
+                   1_000_000_000, "ms" ;
+                       1_000_000, "µs" ;
+                           1_000, "ns" ;
+                               1, "ps" ]
+
     include Private.Make (struct
         type t = int
 
@@ -72,15 +84,7 @@ end = struct
                         loop (s ^ string_of_int (t / unit_) ^ name)
                              (t mod unit_) rest
                     else loop s t rest in
-            loop "" t
-                [ 86_400_000_000_000_000, "d" ;
-                   3_600_000_000_000_000, "h" ;
-                      60_000_000_000_000, "m" ;
-                       1_000_000_000_000, "s" ;
-                           1_000_000_000, "ms" ;
-                               1_000_000, "µs" ;
-                                   1_000, "ns" ;
-                                       1, "ps" ]
+            loop "" t units
         (*$= to_string & ~printer:identity
           "1d10m" (to_string (sec 87000.))
           "10s" (to_string (sec 10.))
@@ -138,6 +142,75 @@ end = struct
 
     (** Empty interval *)
     let zero = o 0
+
+    (** Reads what [to_string] writes: an optional minus sign then one or more
+     * numbers each followed by its unit (d, h, m, s, ms, µs or us, ns, ps),
+     * added together, such as "5s", "1m30s" or "1.5ms". A number alone, with
+     * no unit, is refused.
+     * Fractions are rounded to the nearest picosecond. *)
+    let of_string str =
+        let fail reason =
+            invalid_arg (Printf.sprintf "Interval.of_string: %S: %s" str reason) in
+        let len = String.length str in
+        let neg = len > 0 && str.[0] = '-' in
+        let is_num c = Char.is_digit c || c = '.' in
+        let add a b =
+            if a > max_int - b then fail "too long" else a + b in
+        (* Returns the picoseconds of the terms from position [i]: *)
+        let rec terms i =
+            if i >= len then 0 else
+            let j = ref i in
+            while !j < len && is_num str.[!j] do incr j done ;
+            let k = ref !j in
+            while !k < len && not (is_num str.[!k]) do incr k done ;
+            if !j = i then fail "a number is expected" ;
+            let unit_ =
+                match String.sub str !j (!k - !j) with
+                | "" -> fail "a unit is expected"
+                | "us" -> 1_000_000
+                | u ->
+                    (try fst (List.find (fun (_, n) -> n = u) units)
+                    with Not_found -> fail ("unknown unit "^ u)) in
+            let num = String.sub str i (!j - i) in
+            let int_part, frac_part =
+                try String.split num ~by:"."
+                with Not_found -> num, "" in
+            if int_part = "" && frac_part = "" ||
+               String.contains frac_part '.' then
+                fail ("invalid number "^ num) ;
+            let int_part = if int_part = "" then 0 else int_of_string int_part in
+            if int_part > max_int / unit_ then fail "too long" ;
+            let frac =
+                if frac_part = "" then 0 else
+                int_of_float (Float.round (
+                    float_of_string ("0."^ frac_part) *. float_of_int unit_)) in
+            add (add (int_part * unit_) frac) (terms !k) in
+        if len = (if neg then 1 else 0) then fail "empty" ;
+        let t = terms (if neg then 1 else 0) in
+        o (if neg then ~- t else t)
+
+    (*$= of_string & ~printer:to_string
+      (sec 5.) (of_string "5s")
+      (msec 10.) (of_string "10ms")
+      (min 1.) (of_string "1m")
+      (usec 7.) (of_string "7us")
+      (usec 7.) (of_string "7µs")
+      (msec 1.5) (of_string "1.5ms")
+      (msec 500.) (of_string ".5s")
+      (sec 90.) (of_string "1m30s")
+      (sec (-3.042)) (of_string "-3s42ms")
+      zero (of_string "0s")
+      (add (day 1.) (msec 42.)) (of_string "1d42ms")
+    *)
+    (*$Q of_string
+      Q.int (fun i -> i = min_int || let t = o i in of_string (to_string t) = t)
+    *)
+    (*$T of_string
+      List.for_all (fun s -> \
+          try ignore (of_string s) ; false with Invalid_argument _ -> true) \
+        [ "" ; "-" ; "5" ; "s" ; "5x" ; "1.2.3s" ; ".s" ; "5s3" ; "- 5s" ; \
+          "1000000d" ; "53d53d" ]
+    *)
 
     (** Custom comparison function so that we can change time representation
      * more easily in the future. *)
