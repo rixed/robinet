@@ -60,12 +60,12 @@ struct
     let no_opt_hdr_len = 20
 
     type flags = {
-        urg      : bool ;
-        ack      : bool ;
-        psh      : bool ;
-        rst      : bool ;
-        syn      : bool ;
-        fin      : bool }
+        urg : bool ;
+        ack : bool ;
+        psh : bool ;
+        rst : bool ;
+        syn : bool ;
+        fin : bool }
     let string_of_flags f =
         Printf.sprintf "%s%s%s%s%s%s"
             (if f.urg then "Urg" else "")
@@ -587,7 +587,8 @@ struct
         mutable rto_gen : int ; (* only the last armed timer is live *)
         mutable rto_armed : bool ;
         mutable timeouts : int ; (* consecutive expirations of the retransmission timer *)
-        mutable cnx_established_cont : (tcp_trx option -> unit) option (* what to do when the cnx is established *) }
+        mutable cnx_established_cont : (tcp_trx option -> unit) option ; (* what to do when the cnx is established *)
+        sync_recv : bool (* whether what is received is handed to the reader at once rather than from the scheduler *) }
 
     (* FIXME: ideally, wait 2 minutes after the complete close *)
     let is_closed t () = t.closed
@@ -682,7 +683,9 @@ struct
         t.rcvd_fin <- true ;
         t.to_send <- [] ;
         t.to_send_len <- 0 ;
-        t.unacked_tx <- Streambuf.empty
+        t.unacked_tx <- Streambuf.empty ;
+        (* Nor is anything acked any more: *)
+        t.rcvd_acked <- t.rcvd_pld
 
     let rec arm_rto t =
         stop_rto t ;
@@ -798,8 +801,8 @@ struct
                         Simulation.asap t.power t.recv empty_bitstring (* signal the close *) (* FIXME: which is not very easy to use when the TRX is piped into another one. An Err would suit better *)
                     ) else if tcp.Pdu.flags.Pdu.rst && not t.rcvd_fin then (
                         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: received a RST"))) ;
-                        t.rcvd_fin <- true ;
-                        t.closed <- true ;
+                        (* Nothing is sent after it, not even a FIN: *)
+                        abort t ;
                         Simulation.asap t.power t.recv empty_bitstring (* signal the close *)
                     )
                 ) else (
@@ -952,6 +955,13 @@ struct
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: peer's MSS %d, sending segments up to %d" peer_mss t.snd_mss))) ;
                     inqueue_pkt t tcp
                 )
+            ) else if tcp.Pdu.flags.Pdu.rst && t.rcvd_pld = 0 then (
+                (* A reset of our SYN refuses the connection (RFC 793): *)
+                if tcp.Pdu.flags.Pdu.ack && t.sent_pld > 0 && acked_of t tcp = t.sent_pld then (
+                    Log.(log t.logger Debug (lazy "Tcp: connection refused")) ;
+                    abort t ;
+                    establish_cnx t false ;
+                    t.cnx_established_cont <- None)
             ) else if not (is_established t) then (
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: ignoring recvd packet while cnx is not established")))
             ) else inqueue_pkt t tcp)
@@ -1291,10 +1301,11 @@ end
     assert_bool "FIN received" eof ;
     assert_bool "closed by the FIN" (a.closed && a.sent_fin) ;
     assert_equal ~printer:string_of_int ~msg:"FIN acked" a.sent_pld a.sent_acked ;
-    let a, _, rcvd, eof = exchange [ write "hello" ; manual ~rst:true "" ] in
+    let a, b, rcvd, eof = exchange [ write "hello" ; manual ~rst:true "" ] in
     assert_equal ~printer:identity "hello" rcvd ;
     assert_bool "RST received" eof ;
     assert_bool "aborted by the RST" (a.closed && not a.rto_armed) ;
+    assert_bool "the peer aborted, with no FIN to send" (b.closed && b.sent_fin) ;
     (* Sequence numbers wrap around: *)
     let _, _, rcvd, _ =
         exchange ~isn:(SeqNum.o 0xFFFFFFF8l) [ write "hello " ; manual "manual " ; write "world" ] in
@@ -1304,5 +1315,24 @@ end
     false (let sim = Simulation.make ~realtime:false "isn" in \
            let mk () = make sim.root.power (Port.o 1) (Port.o 2) (Log.make ()) in \
            (mk ()).isn = (mk ()).isn)
+*)
+(* A reset of the SYN refuses the connection, which is then neither retried
+ * nor timed out: *)
+(*$R connect
+    let sim = Simulation.make ~realtime:false "refused" in
+    let a = make sim.root.power (Port.o 1) (Port.o 2) (Log.make ()) in
+    let syns = ref 0 and conts = ref [] in
+    a.tcp_trx.trx.out --> sink (fun bits ->
+        match Pdu.unpack bits with
+        | Ok tcp when tcp.flags.syn ->
+            incr syns ;
+            Simulation.asap sim.root.power a.tcp_trx.trx.out.write
+                (Pdu.pack (Pdu.make_reset_of tcp))
+        | _ -> ()) ;
+    connect a (fun r -> conts := Option.is_some r :: !conts) ;
+    Simulation.run sim false ;
+    assert_equal ~printer:string_of_int ~msg:"SYNs" 1 !syns ;
+    assert_equal ~printer:(IO.to_string (List.print Bool.print)) [ false ] !conts ;
+    assert_bool "closed" a.closed
 *)
 (*$>*)
