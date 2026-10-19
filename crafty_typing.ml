@@ -104,6 +104,7 @@ and stmt_desc =
     | Repeat of { var : var ; count : expr option ; every : expr option ;
                   for_ : expr option ; body : block }
     | Retry of { max : expr option ; body : block }
+    | Catch of block
     (* How many enclosing [repeat] and [on] to leave: *)
     | Break of int
     (* [match_] is the variable [MATCH] of the block: *)
@@ -720,6 +721,8 @@ and stmt errors env (s : A.stmt) =
         | A.Retry { max ; body } ->
             let max = opt_expr env "The maximum of retry" Type.Int max in
             env, Some (mk (Retry { max ; body = block errors env body }))
+        | A.Catch body ->
+            env, Some (mk (Catch (block errors env body)))
         | A.Break { depth } ->
             let depth =
                 match depth with
@@ -757,7 +760,7 @@ let rec declarations (b : block) =
     List.concat_map (fun s ->
         match s.stmt with
         | Declare (v, _) -> [ v ]
-        | Stack { body = Some b ; _ } | Block b | Retry { body = b ; _ }
+        | Stack { body = Some b ; _ } | Block b | Retry { body = b ; _ } | Catch b
         | Expect { body = b ; _ } | On { body = b ; _ } -> declarations b
         | Repeat { var ; body ; _ } -> var :: declarations body
         | _ -> []) b

@@ -154,7 +154,10 @@ and stmt_desc =
     | Do of string * arg list
     | Repeat of { var : string option ; count : expr option ;
                   every : expr option ; for_ : expr option ; body : block }
+    (* Run [body], and again up to [max] times while it fails: *)
     | Retry of { max : expr option ; body : block }
+    (* Run [body], leaving it on its first error: *)
+    | Catch of block
     | Break of { depth : expr option }
     | Expect of { timeout : expr option ; pattern : pattern ; body : block }
     | On of { timeout : expr option ; max : expr option ;
@@ -177,11 +180,12 @@ let predefined = [ "match" ; "last" ]
 
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
-    [ "true" ; "false" ; "repeat" ; "retry" ; "break" ; "expect" ; "on" ]
+    [ "true" ; "false" ; "repeat" ; "retry" ; "catch" ;
+      "break" ; "expect" ; "on" ]
 
 (** Keywords of what the language will have but not yet. Lower case. *)
 let unsupported =
-    [ "any" ; "catch" ; "if" ; "elsif" ; "else" ; "case" ; "wait" ; "report" ]
+    [ "any" ; "if" ; "elsif" ; "else" ; "case" ; "wait" ; "report" ]
 
 (** {2 Printing}
  *
@@ -310,6 +314,8 @@ let rec print_stmt indent oc s =
     | Retry { max ; body } ->
         String.print oc "retry" ; param "max" max ;
         Char.print oc ' ' ; print_block indent oc body
+    | Catch body ->
+        String.print oc "catch " ; print_block indent oc body
     | Break { depth } ->
         String.print oc "break" ; param "depth" depth
     | Expect { timeout ; pattern ; body } ->

@@ -493,6 +493,7 @@ let stmt = fix (fun stmt ->
                      body }) |||
         (keyword "retry" -+ params "retry" [ "max" ] ++ body >>:
             fun (p, body) -> Retry { max = p "max" ; body }) |||
+        (keyword "catch" -+ body >>: fun body -> Catch body) |||
         (keyword "break" -+ params "break" [ "depth" ] >>:
             fun p -> Break { depth = p "depth" }) |||
         (keyword "expect" -+ params "expect" [ "timeout" ] +- sp ++ pattern ++
@@ -588,6 +589,7 @@ let parse text =
     (reads "IP!(ttl=1)\\TCP!(flags=2)/Bytes(\"x\")")
   "x = (y =~ /IP/UDP(dport == 53))\n" (reads "x = y =~ /IP/UDP(dport = 53)")
   "retry max=3 {\n  break\n}\n" (reads "retry 3 {\n  break\n}")
+  "catch {\n  x = 1\n}\n" (reads "catch { x = 1 }")
   "repeat var=j {\n  break depth=2\n}\n" (reads "repeat var=\"j\" { break 2 }")
   "repeat var=i count=3 every=1ms for=1s {\n  print(\"${i}\")\n}\n" \
     (reads "repeat var=i count=3 every=1ms for=1s { print(\"${i}\") }")

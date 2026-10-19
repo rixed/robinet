@@ -1,6 +1,6 @@
 /IP(dst=1.2.3.4)/UDP(src=1, dst=2) {
   num_resp = 0
-  retry max=1 {
+  catch {
     repeat count=10 {
       Bytes("Ping\n")
       expect timeout=1s Bytes("Pong\n") {
