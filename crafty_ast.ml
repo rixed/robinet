@@ -30,6 +30,41 @@ type location = { line : int ; column : int }
 let print_location oc loc =
     Printf.fprintf oc "line %d, column %d" loc.line loc.column
 
+(** Types of values. *)
+module Type =
+struct
+    type t =
+        | Void | Bool | Byte | Int | Float | String | Interval | Ip | Mac
+        | Record of (string * t) list
+        | Array of t
+        | Variant of (string * t) list
+        | Pattern
+
+    let bytes = Array Byte
+
+    let rec print oc = function
+        | Void -> String.print oc "void"
+        | Bool -> String.print oc "bool"
+        | Byte -> String.print oc "byte"
+        | Int -> String.print oc "int"
+        | Float -> String.print oc "float"
+        | String -> String.print oc "string"
+        | Interval -> String.print oc "interval"
+        | Ip -> String.print oc "ip"
+        | Mac -> String.print oc "mac"
+        | Record fs ->
+            List.print ~first:"{" ~last:"}" ~sep:", " (fun oc (n, t) ->
+                Printf.fprintf oc "%s: %a" n print t) oc fs
+        | Array t -> Printf.fprintf oc "%a[]" print t
+        | Variant cs ->
+            List.print ~first:"(" ~last:")" ~sep:" | " (fun oc (n, t) ->
+                if t = Void then String.print oc n
+                else Printf.fprintf oc "%s %a" n print t) oc cs
+        | Pattern -> String.print oc "pattern"
+
+    let to_string t = IO.to_string print t
+end
+
 type unop = Not | Neg
 
 type binop =
@@ -132,11 +167,6 @@ let functions =
     [ "rand" ; "randbytes" ; "exp" ; "ln" ; "log" ; "log2" ; "int" ; "float" ;
       "bool" ; "byte" ; "interval" ; "array" ; "length" ; "get" ; "print" ;
       "print_err" ]
-
-(** The layers, until a registry of them tells. Lower case. *)
-let layers =
-    [ "eth" ; "ip" ; "tcp" ; "udp" ; "icmp" ; "echorequest" ; "echoreply" ;
-      "destunreachable" ; "timeexceeded" ; "bytes" ]
 
 (** Variables that the language defines, which are case insensitive as are
  * all the names that the user does not choose. Lower case. *)

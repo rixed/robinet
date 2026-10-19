@@ -36,6 +36,8 @@
 open Batteries
 open Crafty_ast
 
+let layers = Crafty_layers.names
+
 module P = Parsers.Make (ParsersPositions.LineCol (Parsers.SimpleConfig (Char)))
 open P
 
