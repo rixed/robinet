@@ -20,7 +20,8 @@
 (** The protocol layers crafty knows of: what the parser, the typer, the tree
    of parsers and the packet generator all read from.
 
-   Names of layers, fields and constants are case insensitive. *)
+   Names of layers, fields and constants are case insensitive. Constants are
+   reserved names, valid anywhere, as are the layers. *)
 open Batteries
 open Crafty_ast
 
@@ -57,8 +58,7 @@ type layer =
       (* The index of the field that a lone option, or a lone condition that
        * is not a boolean, is about ([Bytes("x")]): *)
       default_field : int option ;
-      (* Names valid within this layer's options and conditions
-       * ([flags & RST]): *)
+      (* The constants for its fields ([flags & RST]): *)
       constants : (string * literal) list }
 
 let field ?(set_in=[ Manual ]) ?(read_in=[ Manual ]) ?(discriminant=false)
@@ -142,12 +142,14 @@ let icmp_error name codes ~mtu =
 
 let dest_unreachable =
     icmp_error "DestUnreachable" ~mtu:true Icmp.Unreachable.[
-        "NETWORK", network ; "HOST", host ; "PROTOCOL", protocol ;
-        "PORT", port ; "FRAGMENTATION_NEEDED", fragmentation_needed ;
+        "NET_UNREACHABLE", network ; "HOST_UNREACHABLE", host ;
+        "PROTOCOL_UNREACHABLE", protocol ; "PORT_UNREACHABLE", port ;
+        "FRAG_NEEDED", fragmentation_needed ;
         "SOURCE_ROUTE_FAILED", source_route_failed ]
 
 let time_exceeded =
-    icmp_error "TimeExceeded" ~mtu:false [ "TTL", 0 ; "REASSEMBLY", 1 ]
+    icmp_error "TimeExceeded" ~mtu:false
+        [ "TTL_EXCEEDED", 0 ; "REASSEMBLY_TIMEOUT", 1 ]
 
 (* What is carried by a layer that is not decoded any further: *)
 let bytes =
@@ -187,9 +189,12 @@ let find_field (l : layer) name =
     try Some (Array.findi (fun (f : field) -> same_name f.name name) l.fields)
     with Not_found -> None
 
-(** That constant of [l]. *)
-let find_constant (l : layer) name =
-    List.find_opt (fun (n, _) -> same_name n name) l.constants |>
+(** All the constants, of all the layers. *)
+let constants = List.concat_map (fun (l : layer) -> l.constants) all
+
+(** The value of that constant. *)
+let find_constant name =
+    List.find_opt (fun (n, _) -> same_name n name) constants |>
     Option.map snd
 
 (** The mode a layer runs in when written with a bang or not. *)
@@ -224,8 +229,9 @@ let record_type (l : layer) mode =
   tcp.default_field = None
 *)
 (*$T find_constant
-  find_constant tcp "rst" = Some (Crafty_ast.Int 4)
-  find_constant udp "RST" = None
+  find_constant "rst" = Some (Crafty_ast.Int 4)
+  find_constant "port_unreachable" = Some (Crafty_ast.Int 3)
+  find_constant "src" = None
 *)
 (*$= record_type & ~printer:Crafty_ast.Type.to_string
   (Crafty_ast.Type.Record [ "src", Crafty_ast.Type.Int ; "dst", Crafty_ast.Type.Int ]) (record_type tcp Driven)
@@ -244,10 +250,18 @@ let record_type (l : layer) mode =
         (Array.to_list l.fields)) all
   List.for_all (fun (l : layer) -> \
       let names = List.map (fun (f : field) -> String.lowercase_ascii f.name) \
-                      (Array.to_list l.fields) @ \
-                  List.map (fun (n, _) -> String.lowercase_ascii n) l.constants in \
+                      (Array.to_list l.fields) in \
       List.length (List.unique names) = List.length names) all
   List.for_all (fun (l : layer) -> List.for_all (fun (b : layer) -> \
       l == b || not (same_name l.name b.name) || \
       List.for_all (fun a -> not (List.exists (same_name a) b.above)) l.above) all) all
+*)
+(* Constants are names of their own, apart from any other: *)
+(*$T
+  let names = List.map (fun (n, _) -> String.lowercase_ascii n) constants in \
+  List.length (List.unique names) = List.length names && \
+  List.for_all (fun n -> \
+      not (is_layer n) && \
+      not (List.mem n Crafty_ast.(keywords @ unsupported @ functions @ predefined)) && \
+      List.for_all (fun (l : layer) -> find_field l n = None) all) names
 *)

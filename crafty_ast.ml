@@ -21,7 +21,8 @@
 
    Names of layers, fields, functions and special forms are case insensitive
    and kept as written. Variables are case sensitive, and cannot be named
-   after a layer, a function, a keyword or a predefined variable. *)
+   after a layer, a constant, a function, a keyword or a predefined
+   variable. *)
 open Batteries
 
 (** Where something starts in the source, counting from 1. *)
@@ -86,6 +87,8 @@ type expr = { loc : location ; desc : expr_desc }
 
 and expr_desc =
     | Lit of literal
+    (* One of the layers' constants ([RST]), named as written: *)
+    | Constant of string * literal
     | String of string_part list
     (* The predefined variables ([MATCH], [LAST]) are named in upper case,
      * however written: *)
@@ -227,6 +230,7 @@ let print_list print oc l =
 let rec print_expr oc e =
     match e.desc with
     | Lit l -> print_literal oc l
+    | Constant (n, _) -> String.print oc n
     | String parts ->
         Char.print oc '"' ;
         List.iter (function

@@ -126,7 +126,8 @@ let is_in names s = List.mem (String.lowercase_ascii s) names
 let is_keyword s = is_in keywords s || is_in unsupported s
 
 let is_reserved s =
-    is_keyword s || is_in functions s || is_in layers s || is_in predefined s
+    is_keyword s || is_in functions s || is_in layers s || is_in predefined s ||
+    Crafty_layers.find_constant s <> None
 
 (* Names of the user's variables: *)
 let name =
@@ -135,6 +136,12 @@ let name =
 let predefined_var =
     identifier >>= fun s ->
         if is_in predefined s then return (String.uppercase_ascii s) else fail
+
+let constant =
+    identifier >>= fun s ->
+        match Crafty_layers.find_constant s with
+        | Some l -> return (s, l)
+        | None -> fail
 
 let function_name =
     identifier >>= fun s -> if is_in functions s then return s else fail
@@ -320,6 +327,7 @@ let make_expr ~cond ~self ~expr ~pattern =
             fun ((loc, f), args) -> { loc ; desc = Call (f, args) }) |||
         (here ++ (name ||| predefined_var) >>:
             fun (loc, n) -> { loc ; desc = Var n }) |||
+        (here ++ constant >>: fun (loc, (n, l)) -> { loc ; desc = Constant (n, l) }) |||
         (* A layer that is not followed by what makes it a value is not an
          * error of its own; whatever is expected there is: *)
         (quiet (here ++ optional ~def:0 carets ++ known_layer ++
@@ -561,6 +569,7 @@ let parse text =
   "x = (MATCH[IP^].src + MATCH[^^IP].dst)\n" \
     (reads "x = MATCH[IP^].src + MATCH[^^IP].dst")
   "x = a.b.c[0].d\n" (reads "x = a.b.c[0].d")
+  "x = (SYN | ack)\n" (reads "x = SYN | ack")
   "x = (MATCH[ip].src + LAST[TCP].seq)\n" \
     (reads "x = match[ip].src + Last[TCP].seq")
   "x = (length(MATCH) * rand(max=3))\n" (reads "x = length(MATCH) * rand(max=3)")
