@@ -1105,6 +1105,10 @@ module TRX = struct
         dont_frag : bool ;
         (* Perform reassembly before handing over received frames: *)
         reassemble : bool ;
+        (* [tos] and [ttl] for all emitted packets, unless [tx] is told otherwise: *)
+        tos : ToS.t ;
+        ttl : int ;
+        next_id : unit -> int ;
         mutable emit : bitstring -> unit ;
         mutable emit_busy_for : unit -> Clock.Interval.t ;
         mutable recv : bitstring -> unit ;
@@ -1120,9 +1124,12 @@ module TRX = struct
     (* Emitted packets have no options, thus a 20 bytes header: *)
     let hdr_len = Pdu.no_opt_hdr_len
 
-    let tx t bits =
+    let tx ?tos ?ttl ?id t bits =
         if bitstring_length bits > 0 then (
-            let pdu = Pdu.make ~dont_frag:t.dont_frag t.proto t.src t.dst bits in
+            let tos = tos |? t.tos
+            and ttl = ttl |? t.ttl
+            and id = may_default id t.next_id in
+            let pdu = Pdu.make ~tos ~ttl ~id ~dont_frag:t.dont_frag t.proto t.src t.dst bits in
             Pdu.fragment t.mtu pdu |>
             List.iter (fun bits ->
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (Payload.length pdu.payload) (hexstring_of_bitstring bits)))) ;
@@ -1206,12 +1213,16 @@ module TRX = struct
      *       IP cannot do this since the application layer won't tell him the destination hostname. Or
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)
-    let make power ?(mtu=1500) ?(dont_frag=false) ?(reassemble=true) src dst proto logger =
+    let create power ?(mtu=1500) ?(dont_frag=false) ?(reassemble=true)
+               ?(tos=ToS.o 0) ?(ttl=64) ?(next_id=Pdu.next_id) src dst proto logger =
         ensure (mtu >= hdr_len + 8) "Ip: MTU must leave room for at least 8 bytes of payload" ;
-        let t = { logger ; power ; src ; dst ; proto ; mtu ; dont_frag ; reassemble ;
-                  emit = ignore_bits ~logger ; emit_busy_for = never_busy ;
-                  recv = ignore_bits ~logger ; recv_busy_for = never_busy ;
-                  reassembled = Hashtbl.create 10 } in
+        { logger ; power ; src ; dst ; proto ; mtu ; dont_frag ; reassemble ;
+          tos ; ttl ; next_id ;
+          emit = ignore_bits ~logger ; emit_busy_for = never_busy ;
+          recv = ignore_bits ~logger ; recv_busy_for = never_busy ;
+          reassembled = Hashtbl.create 10 }
+
+    let trx_of t =
         { ins = { write = tx t ;
                   busy_for = (fun () -> t.emit_busy_for ()) ;
                   set_read = fun f busy_for ->
@@ -1221,10 +1232,15 @@ module TRX = struct
                   set_read = fun f busy_for ->
                       t.emit <- f ; t.emit_busy_for <- busy_for } }
 
+    let make power ?mtu ?dont_frag ?reassemble ?tos ?ttl ?next_id src dst proto logger =
+        trx_of (create power ?mtu ?dont_frag ?reassemble ?tos ?ttl ?next_id
+                       src dst proto logger)
+
     (*$< TRX *)
     (* [frags_of s] is what a TRX from [a] to [b] emits for [s]; [frag off len mf]
-     * is a hand made fragment of [msg] (offsets and lengths in bytes); and
-     * [receive pkts] is what [b] hands over after receiving [pkts] in order. *)
+     * is a hand made fragment of [msg] (offsets and lengths in bytes);
+     * [receive pkts] is what [b] hands over after receiving [pkts] in order;
+     * and [emitted t s] the ToS, TTL and id of what [t] emits for [s]. *)
     (*$inject
       let sim = Simulation.make ~realtime:false "ip-frags"
       let a = Addr.of_string "10.0.0.1" and b = Addr.of_string "10.0.0.2"
@@ -1264,6 +1280,19 @@ module TRX = struct
       let udp_wants_chk = "\x00\x01\x00\x02\x00\x30\x00\x00" ^ msg
 
       let printer = IO.to_string (List.print String.print)
+
+      let emitted ?tos ?ttl ?id t s =
+        let out = ref [] in
+        (trx_of t).out --> sink (fun bits -> out := Result.get_ok (Pdu.unpack bits) :: !out) ;
+        tx ?tos ?ttl ?id t (Bitstring.bitstring_of_string s) ;
+        Simulation.run sim false ;
+        List.rev_map (fun (p : Pdu.t) -> (p.tos :> int), p.ttl, p.id) !out
+
+      let counter () =
+        let n = ref 6 in
+        fun () -> incr n ; !n
+
+      let hdr_printer = IO.to_string (List.print (Tuple3.print Int.print Int.print Int.print))
     *)
     (*$= receive & ~printer
       [ "hello" ] (receive (frags_of "hello"))
@@ -1295,6 +1324,19 @@ module TRX = struct
       [ msg ] (receive (Pdu.fragment 36 with_opts))
       [ msg ] (receive (Pdu.fragment 40 with_opts))
       (receive (frags_of ~mtu:1500 udp_wants_chk)) (receive (frags_of udp_wants_chk))
+    *)
+    (*$= emitted & ~printer:hdr_printer
+      [ 0x10, 3, 7 ] \
+        (emitted (create sim.root.power ~tos:(ToS.o 0x10) ~ttl:3 ~next_id:(counter ()) \
+                         a b Proto.udp sim.root.logger) "hello")
+      [ 0x20, 1, 99 ] \
+        (emitted ~tos:(ToS.o 0x20) ~ttl:1 ~id:99 \
+                 (create sim.root.power ~tos:(ToS.o 0x10) ~ttl:3 ~next_id:(counter ()) \
+                         a b Proto.udp sim.root.logger) "hello")
+      [ 0x20, 1, 7 ; 0x20, 1, 7 ; 0x20, 1, 7 ] \
+        (emitted ~tos:(ToS.o 0x20) ~ttl:1 \
+                 (create sim.root.power ~mtu:36 ~next_id:(counter ()) \
+                         a b Proto.udp sim.root.logger) msg)
     *)
     (*$= frags_of & ~printer:string_of_int
       1 (List.length (frags_of ~mtu:60 msg))

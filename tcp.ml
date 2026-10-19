@@ -1091,7 +1091,7 @@ struct
                   rtt = None ; rtt_probe = None ; rto = initial_rto ; rto_gen = 0 ;
                   min_rto_var ; max_rto ; max_timeouts ;
                   rto_armed = false ; timeouts = 0 ;
-                  isn = may_default isn (fun () -> SeqNum.o 0l (*Random.int32 0x7FFFFFFFl*)) ;
+                  isn = may_default isn (fun () -> SeqNum.o (rand32 ())) ;
                   rcvd_isn = None ;
                   closed = false ; sent_fin = false ;
                   sent_pld = 0 ; sent_acked = 0 ; rcvd_pld = 0 ; rcvd_acked = 0 ;
@@ -1137,6 +1137,21 @@ struct
         t.cnx_established_cont <- Some cont ;
         Simulation.delay t.power timeout may_timeout t ;
         emit_one t ~syn:true empty_bitstring
+
+    (* Accounts for [tcp], a segment emitted beside [t] at its [next_seq_num],
+     * so that what [t] emits next follows it: its payload, SYN and FIN advance
+     * the sequence numbers, a FIN closes the stream and a RST aborts it. Not
+     * being retransmitted, such a segment that is lost stalls the stream. *)
+    let sent_manually t (tcp : Pdu.t) =
+        if tcp.flags.ack && Some tcp.ack_num = next_ack_num t then
+            t.rcvd_acked <- t.rcvd_pld ;
+        t.sent_pld <- t.sent_pld + Payload.length tcp.payload +
+                      int_of_bool tcp.flags.syn + int_of_bool tcp.flags.fin ;
+        if tcp.flags.rst then abort t
+        else if tcp.flags.fin then (
+            t.closed <- true ;
+            t.sent_fin <- true
+        )
 
 end
 
@@ -1233,5 +1248,61 @@ end
     let _, _, rcvd, _, ahead = transfer ~rcv_buf:300 ~b_to_a 3000 in
     assert_equal ~printer:string_of_int ~msg:"all received" 3000 rcvd ;
     assert_bool "nothing held beyond the window" (ahead <= 300)
+*)
+(*$R sent_manually
+    (* [a] connects to [b], over 10ms each way, then runs [steps] 1ms apart.
+     * Each step is given [a] and a function to emit a segment to [b] beside
+     * [a]. Returns [a], [b], what [b] received and whether it saw the end of
+     * the stream. *)
+    let exchange ?isn steps =
+        let sim = Simulation.make ~realtime:false "manual" in
+        let power = sim.root.power and logger = Log.make () in
+        let a = make power ?isn (Port.o 1) (Port.o 2) logger
+        and b = make power (Port.o 2) (Port.o 1) logger in
+        let later f x = Simulation.delay power (Clock.Interval.msec 10.) f x in
+        let to_b = later b.tcp_trx.trx.out.write
+        and to_a = later a.tcp_trx.trx.out.write in
+        a.tcp_trx.trx.out --> sink to_b ;
+        b.tcp_trx.trx.out --> sink to_a ;
+        let rcvd = ref "" and eof = ref false in
+        b.tcp_trx.trx.ins --> sink (fun bits ->
+            if bitstring_is_empty bits then eof := true
+            else rcvd := !rcvd ^ string_of_bitstring bits) ;
+        connect a (fun _ ->
+            List.iteri (fun i step ->
+                Simulation.delay power (Clock.Interval.msec (float_of_int (i + 1)))
+                    (fun () -> step a (fun tcp -> to_b (Pdu.pack tcp))) ()
+            ) steps) ;
+        Simulation.run sim false ;
+        a, b, !rcvd, !eof in
+    let write str a _ = a.tcp_trx.trx.ins.write (bitstring_of_string str) in
+    let manual ?(rst=false) ?(fin=false) str a emit =
+        let ack_num = next_ack_num a in
+        let tcp = Pdu.make ~src_port:a.src ~dst_port:a.dst ~seq_num:(next_seq_num a) ?ack_num
+                           ~ack:(ack_num <> None) ~psh:(str <> "") ~rst ~fin
+                           (bitstring_of_string str) in
+        emit tcp ;
+        sent_manually a tcp in
+    let _, _, rcvd, eof = exchange [ write "hello " ; manual "manual " ; write "world" ] in
+    assert_equal ~printer:identity "hello manual world" rcvd ;
+    assert_bool "still open" (not eof) ;
+    let a, _, rcvd, eof = exchange [ write "bye" ; manual ~fin:true "" ] in
+    assert_equal ~printer:identity "bye" rcvd ;
+    assert_bool "FIN received" eof ;
+    assert_bool "closed by the FIN" (a.closed && a.sent_fin) ;
+    assert_equal ~printer:string_of_int ~msg:"FIN acked" a.sent_pld a.sent_acked ;
+    let a, _, rcvd, eof = exchange [ write "hello" ; manual ~rst:true "" ] in
+    assert_equal ~printer:identity "hello" rcvd ;
+    assert_bool "RST received" eof ;
+    assert_bool "aborted by the RST" (a.closed && not a.rto_armed) ;
+    (* Sequence numbers wrap around: *)
+    let _, _, rcvd, _ =
+        exchange ~isn:(SeqNum.o 0xFFFFFFF8l) [ write "hello " ; manual "manual " ; write "world" ] in
+    assert_equal ~printer:identity "hello manual world" rcvd
+*)
+(*$= make & ~printer:string_of_bool
+    false (let sim = Simulation.make ~realtime:false "isn" in \
+           let mk () = make sim.root.power (Port.o 1) (Port.o 2) (Log.make ()) in \
+           (mk ()).isn = (mk ()).isn)
 *)
 (*$>*)

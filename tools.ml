@@ -105,7 +105,7 @@ let bits_equal ((d1, o1, l1) as a) ((d2, o2, l2) as b) =
         else
             Bitstring.compare a b = 0)
 (*$Q bits_equal
-  Q.(pair (pair string_small small_nat) (pair string_small small_nat)) \
+  Q.(pair (pair string_small nat_small) (pair string_small nat_small)) \
     (fun ((s1, k1), (s2, k2)) -> \
       let sub s k = let b = bitstring_of_string s in \
                     let len = bitstring_length b in \
@@ -580,7 +580,7 @@ let hash_bits ((d, o, l) as t) =
         let s = Stdlib.Bytes.unsafe_of_string (string_of_bitstring t) in
         fold s 0 (Stdlib.Bytes.length s) l
 (*$Q hash_bits
-  Q.(pair string_small small_nat) (fun (s, k) -> \
+  Q.(pair string_small nat_small) (fun (s, k) -> \
     let a = bitstring_of_string s in \
     let shifted = Bitstring.subbitstring \
       (Bitstring.concat [ zeroes_bitstring k ; a ]) k (bitstring_length a) in \
