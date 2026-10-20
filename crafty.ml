@@ -148,7 +148,7 @@ let () =
     (* The handle, which the program is given no event before [run]
      * returns: *)
     let handle = ref None in
-    let nodes () = Option.map_default (fun h -> h.Crafty_interp.nodes ()) 0 !handle in
+    let idle () = Option.map_default (fun h -> h.Crafty_interp.idle ()) true !handle in
     let dev, h =
         Crafty_interp.run ~parent:sim.root ~mac:iface.mac ~ip ~netmask
             ?gateway:(Option.map (fun gw -> Eth.Gateway.IPv4 gw) iface.gateway)
@@ -158,18 +158,17 @@ let () =
             ~print:print_endline ~print_err:prerr_endline
             ~on_exit:(fun s ->
                 status := s ;
-                (* Streams that are closing go on, for a while: *)
+                (* Streams that are closing, and frames on their way, go on
+                 * for a while; checked from the next tick, once what was
+                 * sent last is out: *)
                 let deadline = secs () +. Clock.Interval.to_secs !linger in
-                let rec finish () =
-                    if s = Crafty_interp.Stopped || nodes () = 0 ||
-                       secs () >= deadline then
-                        (* From a thread of its own, as stopping takes the lock
-                         * this event runs under: *)
-                        ignore (Thread.create (Simulation.stop sim) ())
-                    else
-                        Simulation.delay sim.root.power
-                            (Clock.Interval.msec 100.) finish () in
-                finish ())
+                (* From a thread of its own, as stopping takes the lock this
+                 * event runs under: *)
+                let stop () = ignore (Thread.create (Simulation.stop sim) ()) in
+                let rec check () =
+                    Simulation.delay sim.root.power (Clock.Interval.msec 100.) (fun () ->
+                        if idle () || secs () >= deadline then stop () else check ()) () in
+                if s = Crafty_interp.Stopped then stop () else check ())
             program in
     handle := Some h ;
     let policer =

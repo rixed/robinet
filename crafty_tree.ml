@@ -26,8 +26,9 @@
    node is shared by the stacks and patterns that use it, whatever their
    mode, and goes away when the last of them is gone and it has no children
    left. The nodes of terminal layers, which send a message each, are not
-   held by the stack that sends it: they go away with their parent. The root
-   is the Ethernet interface.
+   held by the stack that sends it: they go away with their parent, or once
+   sent for those of the root, which stays. The root is the Ethernet
+   interface.
 
    Patterns are registered on nodes: a relative one on the node of the
    current stack it is on top of, an absolute one on the root. A received
@@ -251,7 +252,11 @@ let send stack =
                     Simulation.asap st.iface.widget.power st.iface.emit bits
                 | rest ->
                     loop hints bits rest)) in
-    loop [] Bitstring.empty_bitstring stack
+    loop [] Bitstring.empty_bitstring stack ;
+    match stack with
+    | { node = { parent = Some { parent = None ; _ } ; _ } as n ; _ } :: _ ->
+        prune n
+    | _ -> ()
 
 (** {2 Patterns} *)
 
@@ -506,6 +511,17 @@ let to_string n = IO.to_string print n
       (fun () -> udp ()) ;
   let tcp = child loc ip Crafty_layers.tcp [ 1, port 80 ] in
   assert_bool "other layers keep the dynamic ports" (src tcp >= 49152)
+*)
+(* A terminal node of the root goes once sent, the root staying: *)
+(*$R send
+  let root = make_root eth in
+  let bytes = child loc root Crafty_layers.bytes [] in
+  assert_equal ~printer:identity "Eth{Bytes}" (to_string root) ;
+  send [ { node = bytes ; mode = Crafty_layers.Manual ; options = [] } ;
+         { node = root ; mode = Crafty_layers.Manual ;
+           options = [ 1, Crafty_value.Mac Eth.Addr.broadcast ;
+                       2, Crafty_value.Int 0x88b5 ] } ] ;
+  assert_equal ~printer:identity "Eth" (to_string root)
 *)
 (*$= decode & ~printer:identity
   "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048)/IP(src=10.0.0.2, dst=10.0.0.1, proto=17, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=30, options=[], is_fragment=false)/UDP(src=53, dst=1000, length=10, checksum=32593)/Bytes(data=#6869)" \

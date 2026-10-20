@@ -584,9 +584,12 @@ type status = Running | Done | Failed of error | Stopped
 type handle =
     { stop : unit -> unit ;
       status : unit -> status ;
-      (* How many nodes the tree has beside its root, streams still closing
-       * included: *)
-      nodes : unit -> int }
+      (* Whether the tree has no node beside its root, streams still
+       * closing included, and no frame waits for an address resolution: *)
+      idle : unit -> bool }
+
+let idle (tree : Crafty_tree.node) () =
+    Crafty_tree.size tree = 1 && Tools.BitHash.length tree.eth.Eth.State.postponed = 0
 
 (* Runs [program] on [power]'s simulation, starting at once, sending and
  * receiving through [tree] (from {!Crafty_tree.make_root}), writing with
@@ -608,7 +611,7 @@ let run_on_tree power tree ~print ~print_err ?(on_exit=ignore) (program : T.bloc
                 (fun () -> cancel root ; exit Done)) ;
     { stop = (fun () -> cancel root ; exit Stopped) ;
       status = (fun () -> !status) ;
-      nodes = (fun () -> Crafty_tree.size tree - 1) }
+      idle = idle tree }
 
 type program = Crafty_typing.block
 
@@ -663,7 +666,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         match !started with
         | Some h -> h.status ()
         | None -> if !stopped then Stopped else Running) ;
-      nodes = (fun () -> Crafty_tree.size tree - 1) }
+      idle = idle tree }
 
 (* [runs ?stop_at ?trees ?frames ?inject text] is what the program in that text
  * prints, each line with the time it is printed at (and with [trees], the
@@ -1227,5 +1230,5 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         "02:00:00:00:00:01>02:00:00:00:00:FE IP 10.0.0.1>1.2.3.4 ttl=64 UDP 5000>7 \"x\"" ]
       (List.rev !frames) ;
   assert_equal Done (h.status ()) ;
-  assert_equal ~printer:string_of_int 0 (h.nodes ())
+  assert_bool "idle" (h.idle ())
 *)
