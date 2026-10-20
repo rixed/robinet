@@ -933,11 +933,12 @@ let check (program : A.program) =
     (types "/IP(dst=1.2.3.4)/ICMP/Echo/Request(seq=1)/Bytes(\"x\")")
   "line 1, column 2: IP needs a dst" \
     (types "/IP/UDP(dst=53) {}")
-  "line 1, column 18: UDP needs a dst" \
-    (types "/IP(dst=1.2.3.4)/UDP(src=1) {}")
+  "line 1, column 18: TCP needs a dst" \
+    (types "/IP(dst=1.2.3.4)/TCP(src=1) {}")
+  "" (types "/IP(dst=1.2.3.4)/UDP(src=1) { DNS/Query(\"x\") }")
   "" (types "/IP(dst=1.2.3.4)/TCP(dst=80) { ../TCP!(flags=RST)/Bytes() }")
-  "line 1, column 35: UDP needs a dst" \
-    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { ../UDP/Bytes() }")
+  "line 1, column 35: TCP needs a dst" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { ../TCP/Bytes() }")
   "line 1, column 2: UDP cannot be at the bottom of a stack" \
     (types "/UDP {}")
   "line 1, column 18: IP cannot be on top of IP" \

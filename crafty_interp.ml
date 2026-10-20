@@ -462,11 +462,20 @@ and exec t b env (s : T.stmt) k =
         ignore (run_block ~enter t b env body ~fail:b.fail ~break_:b.break_
                     (fun () -> k env))
     | T.Stack { depth ; overlay ; layers ; body = None } ->
-        (* A packet, leaving the current stack as it was: *)
+        (* A packet, leaving the current stack as it was, once it can go on
+         * without waiting (as a blocking write does): *)
         guard (fun () ->
-            try Crafty_tree.send (push t b env depth overlay layers)
+            try
+                let stack = push t b env depth overlay layers in
+                Crafty_tree.send stack ;
+                stack
             with Failed msg -> error s.stmt_loc "%s" msg) |>
-        Option.may (fun () -> k env)
+        Option.may (fun stack ->
+            let rec drain () =
+                let d = Crafty_tree.busy_for stack in
+                if Interval.compare d Interval.zero <= 0 then k env
+                else Simulation.delay t.power d (fun () -> if b.live then drain ()) () in
+            drain ())
     | T.Expect { timeout ; pattern ; match_ ; body } ->
         guard (fun () -> timeout_of eval "expect" timeout) |>
         Option.may (fun timeout ->
@@ -1103,7 +1112,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
  * 1.5s); a response counter; a TCP checksum given, then computed; the
  * counter with losses; ICMP echo requests answered by a program: *)
 (*$= & ~printer:identity
-  "b 1.500s: listening\nb 2.000s: ping from 10.0.0.1:1000\nb 2.000s: done Eth#4\na 2.000s: pong from 10.0.0.2\na 2.000s: done Eth#2" \
+  "b 1.500s: listening\nb 2.000s: ping from 10.0.0.1:1000\na 2.000s: pong from 10.0.0.2\na 2.000s: done Eth#2\nb 2.000s: done Eth#4" \
     (two "/IP(dst=10.0.0.2)/UDP(src=1000, dst=7) {\n  retry { Bytes(\"ping\")\n    expect timeout=1s Bytes(\"pong\") { print(\"pong from ${MATCH[IP].src}\") } } }" \
          "wait 1500ms\nprint(\"listening\")\nexpect /IP/UDP(dst == 7)/Bytes(\"ping\") {\n  print(\"ping from ${MATCH[IP].src}:${MATCH[UDP].src}\")\n  /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Bytes(\"pong\") }")
   "a 1.000s: 100 pongs\na 1.000s: done Eth#101\nb 2.000s: done Eth#101" \
@@ -1130,13 +1139,30 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "a 0.000s: unreachable\na 0.000s: done Eth#2" \
     (with_host "/IP(dst=10.0.0.2)/UDP(dst=9) { Bytes(\"anyone?\")\n  expect timeout=1s ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
 *)
+(* A key told by the layer on top: DNS tells UDP its port, at the first
+ * message of the stream; told nothing, UDP fails, as it does if told the
+ * key of another stream; given, the port wins: *)
+(*$= & ~printer:identity
+  "a 0.000s: popo. has 1 address\na 0.000s: done Eth#2" \
+    (with_host ~setup:(fun h _ -> \
+        Named.serve (Named.State.make ~parent:h.Host.trx.Host.widget (function \
+            | "popo" -> Some (address 2) | _ -> None)) h.Host.trx) \
+        "/IP(dst=10.0.0.2)/UDP {\n  DNS {\n    Query(\"popo\")\n    expect timeout=1s Answer { print(\"${MATCH[Answer].name}. has ${length(MATCH[Answer].answers)} address\") } } }")
+  "a 0.000s: failed: line 1, column 25: UDP needs a dst Eth" \
+    (with_host "/IP(dst=10.0.0.2)/UDP { Bytes(\"x\") }")
+  "a 0.000s: failed: line 2, column 3: There is already a UDP with src=4000, dst=53 Eth" \
+    (with_host "/IP(dst=10.0.0.2)/UDP(src=4000, dst=53) {\n  /IP(dst=10.0.0.2)/UDP(src=4000)/DNS/Query(\"x\") }")
+  "a 0.000s: done Eth\nb 0.000s: port 5353\nb 0.000s: done Eth#1" \
+    (two ~arp:true "/IP(dst=10.0.0.2)/UDP(dst=5353)/DNS/Query(\"popo\")" \
+         "expect timeout=1s /IP/UDP/DNS/Query { print(\"port ${MATCH[UDP].dst}\") }")
+*)
 (* ICMP errors and the packets they quote: a host's, and forged by a
  * program, one quoting a whole datagram, one only the first 8 bytes of a
  * segment: *)
 (*$= & ~printer:identity
   "a 0.000s: port 9 of 10.0.0.2, from 10.0.0.2, length 15\na 0.000s: done Eth#2" \
     (with_host "/IP(dst=10.0.0.2)/UDP(src=4000, dst=9)/Bytes(\"anyone?\")\nexpect timeout=1s /IP/ICMP/DestUnreachable(code == PORT_UNREACHABLE)/IP/UDP(src == 4000) {\n  print(\"port ${MATCH[UDP].dst} of ${MATCH[IP].dst}, from ${MATCH[^IP].src}, length ${MATCH[UDP].length}\") }")
-  "b 0.000s: done Eth#1\na 0.000s: udp to 33434, ttl 1, from 10.0.0.2\na 0.000s: tcp seq 7, win 0\na 1.000s: done Eth#2" \
+  "a 0.000s: udp to 33434, ttl 1, from 10.0.0.2\nb 0.000s: done Eth#1\na 0.000s: tcp seq 7, win 0\na 1.000s: done Eth#2" \
     (two ~arp:true "{ on timeout=1s /IP/ICMP/TimeExceeded/IP/UDP(src == 4000) {\n    print(\"udp to ${MATCH[UDP].dst}, ttl ${MATCH[IP].ttl}, from ${MATCH[^IP].src}\") }\n  on timeout=1s /IP/ICMP/TimeExceeded/IP/TCP(src == 4000) {\n    print(\"tcp seq ${MATCH[TCP].seq_num}, win ${MATCH[TCP].win_size}\") }\n  /IP(dst=10.0.0.2)/UDP(src=4000, dst=33434)/Bytes(\"probe\") }" \
          "expect timeout=1s /IP/UDP(dst == 33434)/Bytes {\n  /IP(dst=MATCH[IP].src)/ICMP/TimeExceeded/IP(src=MATCH[IP].src, dst=MATCH[IP].dst, ttl=1)/UDP(src=MATCH[UDP].src, dst=MATCH[UDP].dst)/Bytes(MATCH[Bytes].data)\n  /IP(dst=MATCH[IP].src)/ICMP/TimeExceeded/IP(src=MATCH[IP].src, dst=MATCH[IP].dst, proto=6, tot_len=60)/Bytes(#0fa0005000000007) }")
 *)
@@ -1182,16 +1208,29 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n  repeat count=3 { Bytes(\"ping ${I}\")\n    expect timeout=1s Bytes { print(MATCH[Bytes].data) } } }" \
          "on timeout=1s /IP/TCP(dst == 80)/Bytes {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/Bytes(\"pong\") }")
 *)
+(* Writing more than the send buffer takes until the rest fits in it: *)
+(*$inject
+  let tcp_discard h _ =
+      h.Host.trx.Host.tcp_server_start (Tcp.Port.o 9) (fun cnx ->
+          Tools.(cnx.Tcp.TRX.trx.ins --> sink (fun bits ->
+              if Bitstring.bitstring_length bits = 0 then cnx.close ())))
+*)
+(*$T
+  not (String.starts_with \
+    (with_host ~setup:tcp_discard \
+        "/IP(dst=10.0.0.2)/TCP(src=4000, dst=9) {\n  Bytes(randbytes(100000))\n  print(\"written\") }") \
+    "a 0.000s: written")
+*)
 (* Manual segments, inserted into a connection or not (a handshake made
  * by hand), and resets: *)
 (*$= & ~printer:identity
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4001>22 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 22>4001 AckRst \"\"\na 0.000s: reset\na 0.000s: done Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4001, dst=22)#1{Bytes}}}" \
     (with_host ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4001, dst=22) {\n  Bytes(#1ee7)\n  expect timeout=1s ../TCP!(flags & RST) { print(\"reset\") } }")
-  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn \"\"\na 0.000s: connected!\na 0.000s: done Eth#2\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"" \
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na 0.000s: connected!\na 0.000s: done Eth#2" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  ../TCP!(flags=SYN, seq_num=123)/Bytes()\n  expect timeout=1s ../TCP!(flags == SYN | ACK) {\n    ../TCP!(flags=ACK, seq_num=124, ack_num=MATCH[TCP].seq_num + 1)/Bytes()\n    print(\"connected!\") } }")
-  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hello\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hello\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \" world\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \" world\"\na 0.000s: failed: line 7, column 3: This TCP connection is closed Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=4000, dst=7)#3{Bytes#4}}}\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Rst \"\"" \
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hello\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hello\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \" world\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \" world\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Rst \"\"\na 0.000s: failed: line 7, column 3: This TCP connection is closed Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=4000, dst=7)#3{Bytes#4}}}" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Bytes(\"hello\")\n  expect timeout=1s Bytes(\"hello\") {}\n  ../TCP!/Bytes(\" world\")\n  expect timeout=1s Bytes(\" world\") {}\n  ../TCP!(flags=RST)/Bytes()\n  Bytes(\"too late\") }")
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckRst \"\"\na 0.000s: 101\na 0.000s: done Eth#2" \

@@ -43,6 +43,9 @@ let string_of_mode = function Manual -> "manual" | Driven -> "self-driven"
 (** How a discriminant that a stack leaves out is chosen: *)
 type pick =
     | Required
+    (* Told by the layer on top, as the first message is sent, and else
+     * required: *)
+    | Told
     (* The IPv4 address of the interface: *)
     | Local_address
     (* At random within these bounds, and distinct from the siblings': *)
@@ -77,7 +80,8 @@ type field =
  * behind closures that keep its state (counters, TRXs). *)
 
 (** What a layer tells the layer below it about itself, by the names of the
- * fields of that one (the protocol of IP, the type of ICMP...): *)
+ * fields of that one (the protocol of IP, the type of ICMP, the port of a
+ * DNS server...): *)
 type hints = (string * V.value) list
 
 (** The fields of a node by name: its key and the options of a stack. *)
@@ -118,7 +122,10 @@ type ops =
       listen : unit -> unit ;
       (* The node is no longer used: once what it has to finish is (TCP
        * closing), the continuation removes it: *)
-      close : (unit -> unit) -> unit }
+      close : (unit -> unit) -> unit ;
+      (* How long what is sent now would wait in this node before it
+       * leaves it, for senders to pace themselves on: *)
+      busy_for : unit -> Clock.Interval.t }
 
 (** What a node is made with: *)
 type context =
@@ -177,7 +184,7 @@ let pass u = [ u, both ]
  * mode: *)
 let manual pack =
     { pack ; send = not_driven ; receive = pass ;
-      listen = ignore ; close = (fun k -> k ()) }
+      listen = ignore ; close = (fun k -> k ()) ; busy_for = Tools.never_busy }
 
 let bytes_value bits = V.bytes_of_string (string_of_bitstring bits)
 
@@ -240,7 +247,8 @@ let eth_node ctx =
         if List.assoc_opt "proto" hints <> Some (V.Int ip4) then
             V.fail "A self-driven Eth carries only IPv4: use Eth!" ;
         Tools.tx trx payload) ;
-      receive }
+      receive ;
+      busy_for = Eth.Iface.tx_busy_for st.iface }
 
 let ip_upper (ip : Ip.Pdu.t) =
     if Ip.Pdu.is_fragment ip then N.Bytes
@@ -528,7 +536,16 @@ let tcp_node ctx =
             Simulation.delay power (Clock.Interval.min 2.) (fun () ->
                 if Option.is_some s.on_closed then (
                     Tcp.TRX.abort s.trx ;
-                    Option.may (fun k -> s.on_closed <- None ; k ()) s.on_closed)) ()) }
+                    Option.may (fun k -> s.on_closed <- None ; k ()) s.on_closed)) ()) ;
+      (* What is written before the connection is established waits for
+       * it, as what fills the send buffer does: *)
+      busy_for = (fun () ->
+        match !state with
+        | Stream s when List.fold_left (fun n b -> n + Tools.bytelength b) 0 s.pending
+                        >= s.trx.snd_buf ->
+            s.trx.rto
+        | Stream s -> Tcp.TRX.busy_for s.trx ()
+        | Idle | Listening -> Clock.Interval.zero) }
 
 let icmp_upper = function
     | 0 | 8 -> Only N.Echo
@@ -704,12 +721,13 @@ let unpack_dns _ bits =
                  ~upper:(Only (if m.is_query then N.Query else N.Answer))
                  ~payload:bits bits
 
-(* The id of the stream, over that of the whole message on top: *)
+(* The id of the stream, over that of the whole message on top; a server is
+ * on port 53: *)
 let dns_node _ =
     manual (fun fields _ payload ->
         let id = int_of fields "DNS" "id" 0 0xffff in
         let%bitstring hdr = {| id : 16 |} in
-        concat [ hdr ; dropbits 16 payload ], [])
+        concat [ hdr ; dropbits 16 payload ], [ "dst", V.Int 53 ])
 
 (* As written, without the root label every name but the root ends with: *)
 let dns_name n = if n = "." then n else String.rchop n
@@ -891,7 +909,7 @@ let tcp =
 let udp =
     layer N.UDP ~above:[ ip ] ~node:udp_node ~unpack:unpack_udp [
         field "src" Type.Int ~discriminant:true ~pick:Local_port ~peer:"dst" ;
-        field "dst" Type.Int ~discriminant:true ~pick:Required ~peer:"src" ;
+        field "dst" Type.Int ~discriminant:true ~pick:Told ~peer:"src" ;
         field "length" Type.Int ;
         field "checksum" Type.Int ]
 

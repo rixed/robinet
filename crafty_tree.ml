@@ -67,7 +67,8 @@ type packet = (L.layer * L.unpacked) list
 
 type node =
     { layer : L.layer ;
-      key : Key.t ;
+      (* Without the keys that are told (see {!tell}) until they are: *)
+      mutable key : Key.t ;
       parent : node option ;
       (* By layer name, then by key, as a received packet is looked up at
        * every layer, among possibly many streams. A layer with no node
@@ -141,15 +142,20 @@ let pick_random loc parent (l : L.layer) i ranges =
 let key_fields (l : L.layer) key name =
     Option.bind (L.find_field l name) (fun i -> List.assoc_opt i key)
 
-(* A new child of [parent], with no user: *)
+(* A new child of [parent], with no user. Its operations read the keys as
+ * they are, which a told one completes: *)
 let make_child parent (l : L.layer) key =
+    let self = ref None in
+    let current () = match !self with Some c -> c.key | None -> key in
     let c = { layer = l ; key ; parent = Some parent ;
               children = Hashtbl.create 3 ; users = 0 ; received = 0 ;
               closing = false ; eth = parent.eth ; ports = parent.ports ;
-              ops = l.node { eth = parent.eth ; key = key_fields l key ;
-                             below_key = key_fields parent.layer parent.key ;
+              ops = l.node { eth = parent.eth ;
+                             key = (fun name -> key_fields l (current ()) name) ;
+                             below_key = (fun name -> key_fields parent.layer parent.key name) ;
                              below = Some parent.ops } ;
               patterns = [] } in
+    self := Some c ;
     let s =
         match siblings parent l with
         | Some s -> s
@@ -162,26 +168,28 @@ let make_child parent (l : L.layer) key =
 
 (** The child of [parent] for [l] given these [options]: an existing one if
  * they give all of its key, or else a new one, with what is missing picked
- * as {!L.pick} says. *)
+ * as {!L.pick} says; but for what is told, which it is left without. *)
 let child loc parent (l : L.layer) (options : (int * value) list) =
     let random = ref false in
     let key =
-        List.map (fun i ->
+        List.filter_map (fun i ->
             match List.assoc_opt i options with
-            | Some v -> i, v
+            | Some v -> Some (i, v)
             | None ->
+                Option.map (fun v -> i, v) @@
                 (match l.fields.(i).pick with
+                | Some L.Told -> None
                 | Some L.Local_address ->
                     (match Eth.State.find_ip4 parent.eth with
-                    | ip -> i, Ip ip
+                    | ip -> Some (Ip ip)
                     | exception Not_found ->
                         error loc "No IPv4 address to send %s from" (L.N.to_string l.name))
                 | Some (L.Random_in (lo, hi)) ->
                     random := true ;
-                    i, pick_random loc parent l i [ lo, hi ]
+                    Some (pick_random loc parent l i [ lo, hi ])
                 | Some L.Local_port ->
                     random := true ;
-                    i, pick_random loc parent l i (parent.ports (L.N.to_string l.name))
+                    Some (pick_random loc parent l i (parent.ports (L.N.to_string l.name)))
                 | Some L.Required | None ->
                     error loc "%s needs a %s" (L.N.to_string l.name) l.fields.(i).name)
         ) (L.key_fields l) in
@@ -224,6 +232,37 @@ let release n =
 
 (** {2 Sending} *)
 
+let key_string n =
+    List.map (fun (i, v) ->
+        let f = n.layer.fields.(i) in
+        f.name ^"="^ to_string f.typ v) n.key |>
+    String.concat ", "
+
+(* Completes the key of [n] with what the layer on top tells of the keys its
+ * stack left out, so that a stream is that of its first message. Raises
+ * [Failed]. *)
+let tell n hints =
+    let keys = L.key_fields n.layer in
+    if List.length n.key < List.length keys then
+        let key =
+            List.map (fun i ->
+                match List.assoc_opt i n.key with
+                | Some v -> i, v
+                | None ->
+                    let name = n.layer.fields.(i).name in
+                    (match List.assoc_opt name hints with
+                    | Some v -> i, v
+                    | None -> fail "%s needs a %s" (L.to_string n.layer) name)
+            ) keys in
+        Option.may (fun p ->
+            Option.may (fun s ->
+                if Siblings.mem s key then
+                    fail "There is already a %s with %s" (L.to_string n.layer)
+                        (key_string { n with key }) ;
+                Siblings.remove s n.key ;
+                Siblings.add s key n) (siblings p n.layer)) n.parent ;
+        n.key <- key
+
 (* The fields of the node of [e] by name: its key, then the options: *)
 let fields_of e name =
     match L.find_field e.node.layer name with
@@ -241,6 +280,7 @@ let send stack =
         | [] ->
             invalid_arg "Crafty_tree.send: empty stack"
         | e :: rest ->
+            tell e.node hints ;
             (match e.mode with
             | L.Driven ->
                 e.node.ops.send (fields_of e) hints bits
@@ -257,6 +297,12 @@ let send stack =
     | { node = { parent = Some { parent = None ; _ } ; _ } as n ; _ } :: _ ->
         prune n
     | _ -> ()
+
+(** How long what is sent down that stack now would wait before it leaves,
+ * in the node that makes it wait the longest: *)
+let busy_for stack =
+    List.fold_left (fun d e -> max d (e.node.ops.busy_for ()))
+        Clock.Interval.zero stack
 
 (** {2 Patterns} *)
 
@@ -452,12 +498,6 @@ let print_packet oc (p : packet) =
     ) oc (List.rev p)
 
 let rec size n = List.fold_left (fun s c -> s + size c) 1 (children n)
-
-let key_string n =
-    List.map (fun (i, v) ->
-        let f = n.layer.fields.(i) in
-        f.name ^"="^ to_string f.typ v) n.key |>
-    String.concat ", "
 
 (** As [Layer(key)*users#received{children}], children by layer then key. *)
 let rec print oc n =

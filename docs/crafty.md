@@ -176,15 +176,19 @@ A stack is a list of layers, each optionally with options in parentheses:
   `Answer`), a stack is a message, which is sent.
   The current stack stays as it was: `Bytes("a")` then `Bytes("b")` both
   send on it.
+  The execution continue when the message has been sent.
 - Options are named (`dst=...`), except that a lone option of a layer that
   has a default field is that field: `Bytes("x")` is `Bytes(data="x")`.
 - Options belong to the stack, not to the stream: those of a block's stack
   apply to everything sent from that block, those of a message to that
   message only.
+- Options are guessed when left out. For instance, ports or protocol fields can
+  be guessed from upper protocols.
 - Each leading `../` goes one layer down the current stack. A layer that
   then lands over the same layer of the current stack overlays it: it takes
   its keys and options, and those it gives override them. `../TCP!` is
   thus the same connection, sent by hand.
+
 
 **Streams.** The layers of a stack are *nodes*, keyed by what tells streams
 apart. These keys are the IP addresses, the TCP and UDP ports, and the echo
@@ -371,7 +375,7 @@ sequence numbers from a random one.
 | Field | Type | Set | Read | |
 |-------|------|-----|------|-|
 | **`src`** | int | M | M | Default: a free local port. |
-| **`dst`** | int | M | M | Required. |
+| **`dst`** | int | M | M | Required, unless told by the layer on top. |
 | `length` | int | M | M | Default: computed. |
 | `checksum` | int | M | M | Default: computed, as it is when given 0. |
 
@@ -534,7 +538,7 @@ condition on the id.
 ### Resolve, then ping
 
 ```
-/IP(dst=192.0.2.53)/UDP(dst=53)/DNS {
+/IP(dst=192.0.2.53)/UDP/DNS {
   Query("www.example.com")
   expect timeout=2s Answer(status == NOERROR) {
     a = MATCH[Answer].answers

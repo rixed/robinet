@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 c7643ecb6dfc1fcc301926589a5cbab1) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 d21836f8ba5c9b332bb79ac3ccca3d7b) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -191,12 +191,17 @@ A stack is a list of layers, each optionally with options in parentheses:
 -   Followed by a block, a stack is the current stack of that block.
 -   Ending with a terminal layer (`Bytes`, `Request`, `Reply`, `Query`,
     `Answer`), a stack is a message, which is sent. The current stack stays as
-    it was: `Bytes("a")` then `Bytes("b")` both send on it.
+    it was: `Bytes("a")` then `Bytes("b")` both send on it. Sending lasts until
+    what is sent next would not wait, as a blocking write does: until the
+    interface is free, and for TCP until the rest of the data fits in the send
+    buffer (64KB).
 -   Options are named (`dst=...`), except that a lone option of a layer that has
     a default field is that field: `Bytes("x")` is `Bytes(data="x")`.
 -   Options belong to the stack, not to the stream: those of a block's stack
     apply to everything sent from that block, those of a message to that message
     only.
+-   Options are guessed when left out. For instance, ports or protocol fields
+    can be guessed from upper protocols.
 -   Each leading `../` goes one layer down the current stack. A layer that then
     lands over the same layer of the current stack overlays it: it takes its
     keys and options, and those it gives override them. `../TCP!` is thus the
@@ -464,17 +469,17 @@ one.
 
 #### `UDP` (on `IP`)
 
-+------------+------+-----+------+-------------------------------------------+
-| Field      | Type | Set | Read |                                           |
-+============+======+=====+======+===========================================+
-| **`src`**  | int  | M   | M    | Default: a free local port.               |
-+------------+------+-----+------+-------------------------------------------+
-| **`dst`**  | int  | M   | M    | Required.                                 |
-+------------+------+-----+------+-------------------------------------------+
-| `length`   | int  | M   | M    | Default: computed.                        |
-+------------+------+-----+------+-------------------------------------------+
-| `checksum` | int  | M   | M    | Default: computed, as it is when given 0. |
-+------------+------+-----+------+-------------------------------------------+
++------------+------+-----+------+--------------------------------------------+
+| Field      | Type | Set | Read |                                            |
++============+======+=====+======+============================================+
+| **`src`**  | int  | M   | M    | Default: a free local port.                |
++------------+------+-----+------+--------------------------------------------+
+| **`dst`**  | int  | M   | M    | Required, unless told by the layer on top. |
++------------+------+-----+------+--------------------------------------------+
+| `length`   | int  | M   | M    | Default: computed.                         |
++------------+------+-----+------+--------------------------------------------+
+| `checksum` | int  | M   | M    | Default: computed, as it is when given 0.  |
++------------+------+-----+------+--------------------------------------------+
 
 #### `ICMP` (on `IP`)
 
@@ -653,7 +658,7 @@ The replies come back to that stream, so `Reply` needs no condition on the id.
 
 ### Resolve, then ping
 
-    /IP(dst=192.0.2.53)/UDP(dst=53)/DNS {
+    /IP(dst=192.0.2.53)/UDP/DNS {
       Query("www.example.com")
       expect timeout=2s Answer(status == NOERROR) {
         a = MATCH[Answer].answers
