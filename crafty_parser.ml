@@ -510,6 +510,14 @@ let stmt = fix (fun stmt ->
         | String [ Text n ] -> check_var n
         | String [] -> reject "The %s cannot be empty" what
         | _ -> reject "The %s must be a name" what in
+    (* What follows [if] or [elsif], the else on the same line as the brace
+     * that ends the block before it or on the next ones: *)
+    let if_ = fix (fun if_ ->
+        sp -+ expr ++ body ++
+        optional ~def:None (nl_sp -+ (
+            (keyword "else" -+ body) |||
+            (keyword "elsif" -+ with_loc if_ >>: fun s -> [ s ])) >>: Option.some) >>:
+        fun ((cond, then_), else_) -> If { cond ; then_ ; else_ }) in
     with_loc (
         (* A stack sends a packet if its top layer is terminal, and is
          * otherwise that of the block that follows: *)
@@ -544,6 +552,7 @@ let stmt = fix (fun stmt ->
         (keyword "retry" -+ params "retry" [ "max" ] ++ body >>:
             fun (p, body) -> Retry { max = p "max" ; body }) |||
         (keyword "catch" -+ body >>: fun body -> Catch body) |||
+        (keyword "if" -+ if_) |||
         (keyword "break" -+ params "break" [ "depth" ] >>:
             fun p -> Break { depth = p "depth" }) |||
         (keyword "wait" -+ params "wait" [ "dur" ] >>:
@@ -652,6 +661,15 @@ let parse text =
   "x = (y =~ /IP/UDP(dport == 53))\n" (reads "x = y =~ /IP/UDP(dport = 53)")
   "retry max=3 {\n  break\n}\n" (reads "retry 3 {\n  break\n}")
   "catch {\n  x = 1\n}\n" (reads "catch { x = 1 }")
+  "if x == 1 {\n  y := 1\n}\n" (reads "if x == 1 { y := 1 }")
+  "if x {\n} else {\n  y := 2\n}\n" (reads "if x {}\nelse { y := 2 }")
+  "if a {\n} elsif b {\n} elsif c && d {\n} else {\n}\n" \
+    (reads "if a {} elsif b {}\n  elsif c && d {} else {}")
+  "if a {\n} elsif b {\n}\n" (reads "if a {} else { if b {} }")
+  "if a {\n} else {\n  if b {\n  }\n  x := 1\n}\n" \
+    (reads "if a {} else { if b {}; x := 1 }")
+  "repeat {\n  if I > 3 {\n    break\n  }\n}\n" \
+    (reads "repeat { if I > 3 { break } }")
   "wait dur=10ms\nwait dur=(1s * n)\n" (reads "wait 10ms\nwait dur=1s * n")
   "repeat var=j {\n  break depth=2\n}\n" (reads "repeat var=\"j\" { break 2 }")
   "repeat var=i count=3 every=1ms for=1s {\n  print(\"${i}\")\n}\n" \
@@ -683,6 +701,8 @@ let parse text =
     (formats "x = \"a ${x + 1} b\"\nassert(a + 1 == 2)")
   "x = y =~ /IP && z\ny = (a == b) =~ /IP\n" (formats "x = (y =~ /IP) && z\ny = (a == b) =~ /IP")
   "wait 1s * n\nrepeat count=n * 2 {\n}\n" (formats "wait dur=1s * n\nrepeat count=n*2 {}")
+  "if x & FLAG {\n} elsif x == 1 || y {\n}\n" \
+    (formats "if (x & FLAG) {} elsif (x == 1) || y {}")
   "expect UDP(IP^.ttl == 3 && (a || b)) {\n}\n" \
     (formats "expect UDP(IP^.ttl = 3, a || b) {}")
 *)
@@ -716,7 +736,8 @@ let parse text =
     "on max=3 timeout=1s ../UDP { n += 1; m := 2 }" ; \
     "expect UDP(IP^.ttl = 3, ^IP.src == 1.2.3.4) {}" ; \
     "expect ../../TCP!(flags & RST) {}" ; "IP!(ttl=1)/TCP!(flags=2)/Bytes(\"x\")" ; \
-    "/IP/UDP/Bytes(\"x\")\n{ y = !(a == b) }" ]
+    "/IP/UDP/Bytes(\"x\")\n{ y = !(a == b) }" ; \
+    "if a & 1 {} elsif (b || c) && d { x := 1 }\nelse { if e {} }" ]
 *)
 
 (* The errors, where they are found: *)
@@ -757,8 +778,10 @@ let parse text =
   "line 1, column 20: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")
   "line 1, column 9: Unknown layer HTTP" (reads "/IP/HTTP {}")
   "line 1, column 11: Carets on both sides of IP" (reads "x = a[^IP^]")
-  "line 1, column 3: if is not supported yet" (reads "if x {}")
+  "line 1, column 4: any is not supported yet" (reads "any x {}")
   "line 1, column 5: wait needs a duration" (reads "wait")
+  "line 1, column 5: Expected '{' in block" (reads "if x\n{}")
+  "line 1, column 1: Expected end of statement" (reads "else {}")
   "line 1, column 9: Expected '\\\"' in string" (reads "x = \"abc")
   "line 1, column 9: Unknown escape sequence \\q" (reads "x = \"a\\qb\"")
   "line 1, column 9: Odd number of hexadecimal digits in #123" (reads "x = #123")

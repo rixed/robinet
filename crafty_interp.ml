@@ -36,7 +36,8 @@
    [retry max=N] runs its block again up to N times (3 by default) while it
    fails, the error of the last attempt going to the enclosing block.
    [wait] goes on with the next statement after that duration.
-   [catch] leaves its block on its first error, which goes no further. An
+   [catch] leaves its block on its first error, which goes no further. [if]
+   runs the block of the first condition that holds, if any. An
    error reaching the program's block ends the program.
 
    [expect] waits for its pattern, failing after its timeout, then runs its
@@ -473,6 +474,12 @@ and exec t b env (s : T.stmt) k =
     | T.Catch body ->
         ignore (run_block t b env body ~break_:b.break_ (fun () -> k env)
                     ~fail:(fun _ -> if b.live then k env))
+    | T.If { cond ; then_ ; else_ } ->
+        guard (fun () -> eval cond) |>
+        Option.may (fun c ->
+            let body = match c with Bool true -> then_ | _ -> else_ in
+            ignore (run_block t b env body ~fail:b.fail ~break_:b.break_
+                        (fun () -> k env)))
     | T.Stack { depth ; overlay ; layers ; body = Some body } ->
         (* The block holds the nodes of its stack: *)
         let enter b env =
@@ -902,6 +909,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "x = 3\nassert(x == 4, msg=\"x is ${x}\")")
   "0s: caught\n0s: done" \
     (runs "catch { assert(0) }\nprint(\"caught\")")
+  "0s: small 0\n0s: odd 1\n0s: big 2\n0s: odd 3\n0s: big 4\n0s: done" \
+    (runs "repeat count=5 { if I & 1 { print(\"odd ${I}\") } elsif I > 1 { print(\"big ${I}\") }\n  else { print(\"small ${I}\") } }")
+  "0s: 0\n0s: 1\n0s: after\n0s: done" \
+    (runs "repeat { if I == 2 { break }\n  print(\"${I}\") }\nprint(\"after\")")
+  "0s: failed: line 1, column 4: Division by zero" \
+    (runs "if 1 / 0 > 0 {}\nprint(\"not reached\")")
   "0s: failed: line 1, column 5: No item -1 in an array of length 1" \
     (runs "x = get(a=[1], index=-1)")
   "line 2, column 1: Unknown variable y" \

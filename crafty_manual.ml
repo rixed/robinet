@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 25982b444db5b497fc9e63336a055ea8) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 501b7b7694ef8f3f7ce34ac73b381623) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -310,6 +310,14 @@ takes it unnamed (`break 2`, `wait 1s`).
 | `catch { ... }`                      | Leaves the block at its first error, |
 |                                      | which goes no further: the program   |
 |                                      | goes on after the block.             |
++--------------------------------------+--------------------------------------+
+| `if c {                              | Runs the block of the first          |
+|  ... } elsif c { ... } else { ... }` | condition that holds, if any. An int |
+|                                      | condition holds unless it is 0       |
+|                                      | (`if flags & SYN`). There can be any |
+|                                      | number of `elsif`, and an `else` may |
+|                                      | start the line after the brace       |
+|                                      | before it.                           |
 +--------------------------------------+--------------------------------------+
 | `break depth=n`                      | Leaves the `n` (default 1, a         |
 |                                      | literal) innermost enclosing         |
@@ -638,10 +646,9 @@ UDP, the data of TCP, a fragment, a quote, or an unknown protocol.
 
 ### Not available yet
 
-The keywords `if`, `elsif`, `else`, `case`, `any` and `report`, the predefined
-`LAST` (the last packet sent), matching embedded packets with `=~`, variant
-literals, the HTTP layer, IPv6, VLANs and tunnels. Using any of them is reported
-as unsupported.
+The keywords `case`, `any` and `report`, the predefined `LAST` (the last packet
+sent), matching embedded packets with `=~`, variant literals, the HTTP layer,
+IPv6, VLANs and tunnels. Using any of them is reported as unsupported.
 |crafty_manual}
 
 let examples = {crafty_manual|All these examples were run against a host with UDP and TCP echo servers on port

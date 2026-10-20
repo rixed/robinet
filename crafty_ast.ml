@@ -195,6 +195,8 @@ and stmt_desc =
     | Retry of { max : expr option ; body : block }
     (* Run [body], leaving it on its first error: *)
     | Catch of block
+    (* [elsif] being an [else] block of a single [If]: *)
+    | If of { cond : expr ; then_ : block ; else_ : block option }
     | Break of { depth : expr option }
     | Wait of expr
     | Expect of { timeout : expr option ; pattern : pattern ; body : block }
@@ -218,12 +220,12 @@ let predefined = [ "match" ; "last" ]
 
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
-    [ "true" ; "false" ; "repeat" ; "retry" ; "catch" ;
-      "break" ; "expect" ; "on" ; "wait" ]
+    [ "true" ; "false" ; "repeat" ; "retry" ; "catch" ; "if" ; "elsif" ;
+      "else" ; "break" ; "expect" ; "on" ; "wait" ]
 
 (** Keywords of what the language will have but not yet. Lower case. *)
 let unsupported =
-    [ "any" ; "if" ; "elsif" ; "else" ; "case" ; "report" ]
+    [ "any" ; "case" ; "report" ]
 
 (** {2 Printing}
  *
@@ -384,6 +386,16 @@ let rec print_stmt ~all indent oc s =
         Char.print oc ' ' ; print_block ~all indent oc body
     | Catch body ->
         String.print oc "catch " ; print_block ~all indent oc body
+    | If { cond ; then_ ; else_ } ->
+        let rec print_if kw cond then_ else_ =
+            Printf.fprintf oc "%s %a " kw (print_expr_at ~bare:true ~all 0) cond ;
+            print_block ~all indent oc then_ ;
+            match else_ with
+            | None -> ()
+            | Some [ { stmt = If { cond ; then_ ; else_ } ; _ } ] ->
+                print_if " elsif" cond then_ else_
+            | Some b -> String.print oc " else " ; print_block ~all indent oc b in
+        print_if "if" cond then_ else_
     | Break { depth } ->
         String.print oc "break" ; param "depth" depth
     | Wait dur ->

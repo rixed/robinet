@@ -271,6 +271,7 @@ also takes it unnamed (`break 2`, `wait 1s`).
 | `repeat var=v count=n every=d for=d { ... }` | Runs the block `count` times, or as long as `for` (default 5m) has not elapsed. An iteration starts `every` after the previous one started, or when that one ends if it ends later. `v` (default `I`) counts from 0. All parameters are optional. `count=0` runs nothing. |
 | `retry max=n { ... }` | Runs the block, and again up to `n` times (default 3) while it fails. If the last try fails too, its error escapes the retry block. |
 | `catch { ... }` | Leaves the block at its first error, which goes no further: the program goes on after the block. |
+| `if c { ... } elsif c { ... } else { ... }` | Runs the block of the first condition that holds, if any. An int condition holds unless it is 0 (`if flags & SYN`). There can be any number of `elsif`, and an `else` may start the line after the brace before it. |
 | `break depth=n` | Leaves the `n` (default 1, a literal) innermost enclosing `repeat` or `on` forms. |
 | `wait dur=d` | Pauses for `d`. A negative duration is an error. |
 | `expect timeout=d PATTERN { ... }` | Waits for one packet that matches (default timeout 1m), then runs the block with `MATCH` bound to it. A timeout is an error. |
@@ -497,7 +498,7 @@ of UDP, the data of TCP, a fragment, a quote, or an unknown protocol.
 
 ### Not available yet
 
-The keywords `if`, `elsif`, `else`, `case`, `any` and `report`, the
+The keywords `case`, `any` and `report`, the
 predefined `LAST` (the last packet sent), matching embedded packets with
 `=~`, variant literals, the HTTP
 layer, IPv6, VLANs and tunnels. Using any of them is reported as

@@ -112,6 +112,8 @@ and stmt_desc =
                   for_ : expr option ; body : block }
     | Retry of { max : expr option ; body : block }
     | Catch of block
+    (* With no [else], an empty [else_]: *)
+    | If of { cond : expr ; then_ : block ; else_ : block }
     (* How many enclosing [repeat] and [on] to leave: *)
     | Break of int
     | Wait of expr
@@ -794,6 +796,11 @@ and stmt errors env (s : A.stmt) =
             env, Some (mk (Retry { max ; body = block errors env body }))
         | A.Catch body ->
             env, Some (mk (Catch (block errors env body)))
+        | A.If { cond ; then_ ; else_ } ->
+            let cond = as_bool "The condition of if" (expr env cond) in
+            let then_ = block errors env then_
+            and else_ = Option.map_default (block errors env) [] else_ in
+            env, Some (mk (If { cond ; then_ ; else_ }))
         | A.Break { depth } ->
             let depth =
                 match depth with
@@ -835,6 +842,7 @@ let rec declarations (b : block) =
         | Declare (v, _) -> [ v ]
         | Stack { body = Some b ; _ } | Block b | Retry { body = b ; _ } | Catch b
         | Expect { body = b ; _ } | On { body = b ; _ } -> declarations b
+        | If { then_ ; else_ ; _ } -> declarations then_ @ declarations else_
         | Repeat { var ; body ; _ } -> var :: declarations body
         | _ -> []) b
 
@@ -882,6 +890,8 @@ let check (program : A.program) =
     (types "/IP(dst=1.2.3.4)/ICMP { expect DestUnreachable(code == PORT_UNREACHABLE) {} }")
   "I: int" \
     (types "repeat { on Bytes(\"x\") { break 2 } }")
+  "n: int, x: int, y: bool, z: float" \
+    (types "n = 3\nif n & 1 { x = 1 } elsif n > 2 { y = true } else { z = 1.0 }")
   "" \
     (types "/IP!(dst=1.2.3.4, id=3)/TCP!(dst=80, flags=SYN|ACK)/Bytes(\"x\")")
   "" \
@@ -929,6 +939,8 @@ let check (program : A.program) =
     (types "break")
   "line 1, column 10: Break out of 2 repeat or on, but there is only one" \
     (types "repeat { break 2 }")
+  "line 1, column 4: The condition of if must be a bool, not a string" \
+    (types "if \"x\" {}")
   "line 1, column 11: The maximum of retry must be an int, not an interval" \
     (types "retry max=1s {}")
   "line 1, column 22: The period of repeat must be an interval, not an int" \
