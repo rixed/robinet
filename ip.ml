@@ -687,8 +687,18 @@ module Pdu = struct
     (* Size of an IP header without options: *)
     let no_opt_hdr_len = 20
 
+    (* IP ids are the top 16 bits of a xorshift32 generator: not sequential,
+     * and of period 2^32-1. Faster than what's doable with Random and
+     * independent of the simulation random generator. *)
     let id_seq = ref 0
-    let next_id () = id_seq := (!id_seq + 1) land 0xffff ; !id_seq
+    let next_id () =
+        let x = !id_seq in
+        let x = if x = 0 then 1 + Random.full_int 0xffff_ffff else x in
+        let x = x lxor ((x lsl 13) land 0xffff_ffff) in
+        let x = x lxor (x lsr 17) in
+        let x = x lxor ((x lsl 5) land 0xffff_ffff) in
+        id_seq := x ;
+        x lsr 16
 
     type t = { tos : ToS.t ; tot_len : int ;
                id : int ; dont_frag : bool ; more_frags : bool ; frag_offset : int ;
