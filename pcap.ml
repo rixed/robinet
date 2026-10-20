@@ -469,11 +469,14 @@ let save sim ?flush ?caplen ?(dlt=default_dlt) fname =
 
 (** {2 Packet sniffing/injection} *)
 
-(* What a whole frame of [ifname] takes: its MTU is what the frame carries,
- * and the capture also holds the Ethernet header and possibly a VLAN tag. *)
+(* What a whole frame takes on an interface of that MTU: the MTU is what the
+ * frame carries, and the capture also holds the Ethernet header and possibly
+ * a VLAN tag. *)
+let caplen_of_mtu mtu = mtu + 14 + 4
+
 let default_caplen ifname =
     if ifname = "any" then 65535
-    else mtu_of_iface ifname + 14 + 4
+    else caplen_of_mtu (mtu_of_iface ifname)
 
 type iface_handler = {
     pcap : pcap_handler ;

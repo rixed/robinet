@@ -127,34 +127,63 @@ let netmask_of_prefix n =
   "0.0.0.0" (Ip.Addr.to_dotted_string (netmask_of_prefix 0))
  *)
 
-(* [ip_addr] is the output of [ip -j addr show dev IF], [ip_route] that of
- * [ip -j -4 route show default dev IF]: *)
-let iface_of_json ifname ~ip_addr ~ip_route =
-    let open Yojson.Basic.Util in
-    let link =
-        match Yojson.Basic.from_string ip_addr with
-        | `List [ link ] -> link
-        | _ -> failwith (Printf.sprintf "No interface %s" ifname) in
-    let ip =
-        link |> member "addr_info" |> to_list |>
-        List.find_map_opt (fun a ->
-            if member "family" a = `String "inet" then
-                Some (Ip.Addr.of_dotted_string (member "local" a |> to_string),
-                      netmask_of_prefix (member "prefixlen" a |> to_int))
-            else None)
+(* [ip_addr] is the output of [ip addr show dev IF], [ip_route] that of
+ * [ip -4 route show default dev IF], in the text format common to iproute2
+ * and busybox: *)
+let iface_of_ip_output ifname ~ip_addr ~ip_route =
+    let lines s =
+        String.split_on_char '\n' s |>
+        List.map (List.filter ((<>) "") % String.split_on_char ' ') in
+    let rec after w = function
+        | w' :: v :: _ when w' = w -> Some v
+        | _ :: rest -> after w rest
+        | [] -> None in
+    let addr = lines ip_addr in
+    let find what f =
+        match List.find_map_opt f addr with
+        | Some v -> v
+        | None -> failwith (Printf.sprintf "No %s for interface %s" what ifname) in
+    let mac =
+        find "MAC address" (function
+            | l :: m :: _ when String.starts_with l "link/" -> Some m
+            | _ -> None)
+    and mtu = find "MTU" (fun l -> Option.map int_of_string (after "mtu" l))
+    and ip =
+        List.find_map_opt (function
+            | "inet" :: a :: _ ->
+                let a, p =
+                    try String.split a ~by:"/"
+                    with Not_found -> a, "32" in
+                Some (Ip.Addr.of_dotted_string a,
+                      netmask_of_prefix (int_of_string p))
+            | _ -> None) addr
     and gateway =
-        Yojson.Basic.from_string ip_route |> to_list |>
-        List.find_map_opt (fun r ->
-            member "gateway" r |> to_string_option |>
-            Option.map Ip.Addr.of_dotted_string) in
-    { ifname ;
-      mac = Eth.Addr.of_string (link |> member "address" |> to_string) ;
-      mtu = link |> member "mtu" |> to_int ;
-      ip ; gateway }
+        lines ip_route |>
+        List.find_map_opt (function
+            | "default" :: r -> Option.map Ip.Addr.of_dotted_string (after "via" r)
+            | _ -> None) in
+    { ifname ; mac = Eth.Addr.of_string mac ; mtu ; ip ; gateway }
 
 (*$inject
-  let sample_addr = {|[{"ifindex":3,"ifname":"wlp59s0","flags":["BROADCAST","MULTICAST","UP","LOWER_UP"],"mtu":1500,"qdisc":"noqueue","operstate":"UP","group":"default","txqlen":1000,"link_type":"ether","address":"04:ea:56:ad:bf:ab","broadcast":"ff:ff:ff:ff:ff:ff","altnames":["wlx04ea56adbfab"],"addr_info":[{"family":"inet6","local":"fe80::2f5d:b660:1af9:29","prefixlen":64,"scope":"link","noprefixroute":true,"valid_life_time":4294967295,"preferred_life_time":4294967295},{"family":"inet","local":"192.168.1.31","prefixlen":24,"broadcast":"192.168.1.255","scope":"global","dynamic":true,"noprefixroute":true,"label":"wlp59s0","valid_life_time":35881,"preferred_life_time":35881}]}]|}
-  let sample_route = {|[{"dst":"default","gateway":"192.168.1.254","dev":"wlp59s0","protocol":"dhcp","prefsrc":"192.168.1.31","metric":600,"flags":[]}]|}
+  let iproute2_addr = {|3: wlp59s0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 04:ea:56:ad:bf:ab brd ff:ff:ff:ff:ff:ff
+    altname wlx04ea56adbfab
+    inet6 2a01:e0a:823:6270:fa1f:2a78:30a:3da2/64 scope global dynamic noprefixroute
+       valid_lft 86021sec preferred_lft 86021sec
+    inet 192.168.1.31/24 brd 192.168.1.255 scope global dynamic noprefixroute wlp59s0
+       valid_lft 32605sec preferred_lft 32605sec
+|}
+  let iproute2_route = {|default via 192.168.1.254 dev wlp59s0 proto dhcp src 192.168.1.31 metric 600
+|}
+  let busybox_addr = {|5: eth0@if6: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1400 qlen 1000
+    link/ether 02:00:00:00:00:01 brd ff:ff:ff:ff:ff:ff
+    inet 10.1.1.2/26 scope global eth0
+       valid_lft forever preferred_lft forever
+    inet6 fe80::ff:fe00:1/64 scope link
+       valid_lft forever preferred_lft forever
+|}
+  let busybox_route = {|default via 10.1.1.1 dev eth0
+|}
   let describe i =
       Printf.sprintf "%s %s mtu=%d ip=%s gw=%s" i.ifname
           (Eth.Addr.to_hexstring i.mac) i.mtu
@@ -163,18 +192,23 @@ let iface_of_json ifname ~ip_addr ~ip_route =
            | Some (a, m) -> Ip.Addr.to_dotted_string a ^"/"^ Ip.Addr.to_dotted_string m)
           (Option.map_default Ip.Addr.to_dotted_string "none" i.gateway)
 *)
-(*$= iface_of_json & ~printer:identity
+(*$= iface_of_ip_output & ~printer:identity
   "wlp59s0 04:EA:56:AD:BF:AB mtu=1500 ip=192.168.1.31/255.255.255.0 gw=192.168.1.254" \
-    (describe (iface_of_json "wlp59s0" ~ip_addr:sample_addr ~ip_route:sample_route))
+    (describe (iface_of_ip_output "wlp59s0" ~ip_addr:iproute2_addr ~ip_route:iproute2_route))
   "wlp59s0 04:EA:56:AD:BF:AB mtu=1500 ip=192.168.1.31/255.255.255.0 gw=none" \
-    (describe (iface_of_json "wlp59s0" ~ip_addr:sample_addr ~ip_route:"[]"))
+    (describe (iface_of_ip_output "wlp59s0" ~ip_addr:iproute2_addr ~ip_route:""))
+  "eth0 02:00:00:00:00:01 mtu=1400 ip=10.1.1.2/255.255.255.192 gw=10.1.1.1" \
+    (describe (iface_of_ip_output "eth0" ~ip_addr:busybox_addr ~ip_route:busybox_route))
+  "No MAC address for interface tun0" \
+    (try describe (iface_of_ip_output "tun0" ~ip_addr:"7: tun0: <UP> mtu 1500\n    link/none\n" ~ip_route:"") \
+     with Failure e -> e)
  *)
 
 (** The configuration of interface [ifname]. *)
 let iface ifname =
-    iface_of_json ifname
-        ~ip_addr:(output "ip" [ "-j" ; "addr" ; "show" ; "dev" ; ifname ])
-        ~ip_route:(output "ip" [ "-j" ; "-4" ; "route" ; "show" ; "default" ;
+    iface_of_ip_output ifname
+        ~ip_addr:(output "ip" [ "addr" ; "show" ; "dev" ; ifname ])
+        ~ip_route:(output "ip" [ "-4" ; "route" ; "show" ; "default" ;
                                  "dev" ; ifname ])
 
 (** {2 Ports} *)

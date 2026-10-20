@@ -149,6 +149,7 @@ let () =
     let pcap =
         Pcap.open_iface ~widget:(Widget.make ~parent:sim.root !ifname)
             ~promisc:false ~direction:Pcap.In
+            ~caplen:(Pcap.caplen_of_mtu iface.mtu)
             ~filter:(Host_config.pcap_filter ?ip:!own_ip !ports) !ifname in
     let secs () = Clock.Time.to_secs (Simulation.now sim) in
     let ports_of proto =
