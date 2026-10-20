@@ -57,6 +57,20 @@ let quote arg =
 (** The command line of [prog] with [args], as a reader would type it. *)
 let command_line prog args = String.concat " " (List.map quote (prog :: args))
 
+(* [prog] as found on the PATH, or else in the sbin directories: a user's PATH
+ * may lack them, although what is there can read the configuration. Commands
+ * are run by that path, as a shell may prefer its own version of them
+ * otherwise (busybox's sysctl, which cannot clear a setting). *)
+let find_prog prog =
+    if String.contains prog '/' then prog else
+    let path = try String.split_on_char ':' (Sys.getenv "PATH") with Not_found -> [] in
+    let executable d =
+        d <> "" &&
+        try Unix.access (Filename.concat d prog) [ Unix.X_OK ] ; true
+        with Unix.Unix_error _ -> false in
+    try Filename.concat (List.find executable (path @ [ "/usr/sbin" ; "/sbin" ])) prog
+    with Not_found -> prog
+
 (** Run the command line [cmd], or say which command would not run.
  *
  * [quiet] silences what the command itself has to say, never the line naming
@@ -81,24 +95,12 @@ let run_line ?(quiet=false) cmd =
         raise (Command_failed (cmd, Printf.sprintf "was signalled (%d)" n))
 
 (** As [run_line], for [prog] with [args]. *)
-let run ?quiet prog args = run_line ?quiet (command_line prog args)
+let run ?quiet prog args = run_line ?quiet (command_line (find_prog prog) args)
 
 (** As [run], for a command that may fail without it mattering: what was asked
  * for and what is there may already agree, and a command that fails on the
  * way out is not a reason to stop taking things down. *)
 let try_run prog args = try run ~quiet:true prog args with _ -> ()
-
-(* [prog] as found on the PATH, or else in the sbin directories: a user's PATH
- * may lack them, although what is there can read the configuration. *)
-let find_prog prog =
-    if String.contains prog '/' then prog else
-    let path = try String.split_on_char ':' (Sys.getenv "PATH") with Not_found -> [] in
-    let executable d =
-        d <> "" &&
-        try Unix.access (Filename.concat d prog) [ Unix.X_OK ] ; true
-        with Unix.Unix_error _ -> false in
-    try Filename.concat (List.find executable (path @ [ "/usr/sbin" ; "/sbin" ])) prog
-    with Not_found -> prog
 
 (** What [prog] with [args] prints, which reading the configuration of the
  * host changes nothing of, so the command is not printed. *)
@@ -394,7 +396,7 @@ let changes name =
 (** Make a change by running [prog] with [args], after having recorded that
  * running [undo] (a program and its arguments) undoes it. *)
 let change t ~undo prog args =
-    let undo = command_line (List.hd undo) (List.tl undo) in
+    let undo = command_line (find_prog (List.hd undo)) (List.tl undo) in
     File.with_file_out ~mode:[ `append ] t.file (fun oc ->
         Printf.fprintf oc "%s\n" undo) ;
     t.undo <- undo :: t.undo ;
