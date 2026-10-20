@@ -88,9 +88,22 @@ let run ?quiet prog args = run_line ?quiet (command_line prog args)
  * way out is not a reason to stop taking things down. *)
 let try_run prog args = try run ~quiet:true prog args with _ -> ()
 
+(* [prog] as found on the PATH, or else in the sbin directories: a user's PATH
+ * may lack them, although what is there can read the configuration. *)
+let find_prog prog =
+    if String.contains prog '/' then prog else
+    let path = try String.split_on_char ':' (Sys.getenv "PATH") with Not_found -> [] in
+    let executable d =
+        d <> "" &&
+        try Unix.access (Filename.concat d prog) [ Unix.X_OK ] ; true
+        with Unix.Unix_error _ -> false in
+    try Filename.concat (List.find executable (path @ [ "/usr/sbin" ; "/sbin" ])) prog
+    with Not_found -> prog
+
 (** What [prog] with [args] prints, which reading the configuration of the
  * host changes nothing of, so the command is not printed. *)
 let output prog args =
+    let prog = find_prog prog in
     (* UnixLabels, whose channels are those of the stdlib, unlike Batteries'
      * Unix: *)
     let ic = UnixLabels.open_process_args_in prog (Array.of_list (prog :: args)) in
