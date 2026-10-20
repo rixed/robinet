@@ -36,12 +36,10 @@
 open Batteries
 open Crafty_ast
 
-let layers = Crafty_layers.names
-
 (* Whether the layer of that name sends a packet: *)
 let terminal name =
     List.exists (fun (l : Crafty_layers.layer) ->
-        l.terminal && Crafty_layers.same_name l.name name) Crafty_layers.all
+        l.terminal && l.name = name) Crafty_layers.all
 
 module P = Parsers.Make (ParsersPositions.LineCol (Parsers.SimpleConfig (Char)))
 open P
@@ -131,7 +129,8 @@ let is_in names s = List.mem (String.lowercase_ascii s) names
 let is_keyword s = is_in keywords s || is_in unsupported s
 
 let is_reserved s =
-    is_keyword s || is_in functions s || is_in layers s || is_in predefined s ||
+    is_keyword s || is_in functions s || Layer_name.of_string s <> None ||
+    is_in predefined s ||
     Crafty_layers.find_constant s <> None
 
 (* Names of the user's variables: *)
@@ -152,13 +151,17 @@ let function_name =
     identifier >>= fun s -> if is_in functions s then return s else fail
 
 let known_layer =
-    identifier >>= fun s -> if is_in layers s then return s else fail
+    identifier >>= fun s ->
+        match Layer_name.of_string s with Some n -> return n | None -> fail
 
 (* Where only a layer can be: *)
 let layer_name =
     (identifier >>= fun s ->
         if is_keyword s || is_in functions s then fail else return s) >>:
-    fun s -> if is_in layers s then s else reject "Unknown layer %s" s
+    fun s ->
+        match Layer_name.of_string s with
+        | Some n -> n
+        | None -> reject "Unknown layer %s" s
 
 (* That keyword, or else no error: a name that starts like it is no
  * misspelling of it. *)
@@ -342,7 +345,8 @@ let make_expr ~cond ~self ~expr ~pattern =
                     match before, after with
                     | 0, n -> Layer { name ; from_start = false ; nth = n }
                     | n, 0 -> Layer { name ; from_start = true ; nth = n - 1 }
-                    | _ -> reject "Carets on both sides of %s" name in
+                    | _ -> reject "Carets on both sides of %s"
+                                    (Layer_name.to_string name) in
                 { loc ; desc }) in
     let postfix =
         atom ++ repeat_greedy ~sep:none (
@@ -422,7 +426,7 @@ let () =
  * block or the pattern that follows): *)
 let params form names =
     let param_name =
-        identifier >>= fun s -> if is_in layers s then fail else return s in
+        identifier >>= fun s -> if Layer_name.of_string s <> None then fail else return s in
     let param =
         here ++
         ((param_name +- sp +- item '=' +- nay (item '=') +- sp >>: Option.some) ++
@@ -491,13 +495,14 @@ let stmt = fix (fun stmt ->
                 if terminal top then
                     (* Refused at the brace, rather than at the block's end: *)
                     optional ~def:() (sp -- item '{' >>: fun _ ->
-                        reject "No block can follow %s, which sends" top) >>:
+                        reject "No block can follow %s, which sends"
+                            (Layer_name.to_string top)) >>:
                     fun () -> Stack { anchor ; layers ; body = None }
                 else
                     optional ~def:None (body >>: Option.some) >>: function
                     | None ->
                         reject "%s needs a block, or a layer on top that sends"
-                            top
+                            (Layer_name.to_string top)
                     | body -> Stack { anchor ; layers ; body }) |||
         (block >>: fun b -> Block b) |||
         (variable ++ maybe_next (
@@ -596,7 +601,7 @@ let parse text =
     (reads "x = MATCH[IP^].src + MATCH[^^IP].dst")
   "x = a.b.c[0].d\n" (reads "x = a.b.c[0].d")
   "x = (SYN | ack)\n" (reads "x = SYN | ack")
-  "x = (MATCH[ip].src + LAST[TCP].seq)\n" \
+  "x = (MATCH[IP].src + LAST[TCP].seq)\n" \
     (reads "x = match[ip].src + Last[TCP].seq")
   "x = (length(MATCH) * rand(max=3))\n" (reads "x = length(MATCH) * rand(max=3)")
   "x = ((((31 + 15) + 5) + 1500.0) + 0.002)\n" \

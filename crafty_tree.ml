@@ -72,7 +72,7 @@ type node =
       (* By layer name, then by key, as a received packet is looked up at
        * every layer, among possibly many streams. A layer with no node
        * left has no entry: *)
-      children : (string, node Siblings.t) Hashtbl.t ;
+      children : (L.N.t, node Siblings.t) Hashtbl.t ;
       (* How many stacks and patterns hold it: *)
       mutable users : int ;
       (* How many received packets went through it: *)
@@ -125,7 +125,7 @@ let pick_random loc parent (l : L.layer) i ranges =
                 | _ -> taken) s Set.Int.empty) Set.Int.empty (siblings parent l) in
     let n = List.fold_left (fun n (lo, hi) -> n + hi - lo + 1) 0 ranges in
     if Set.Int.cardinal taken >= n then
-        error loc "No %s left for another %s" l.fields.(i).name l.name ;
+        error loc "No %s left for another %s" l.fields.(i).name (L.N.to_string l.name) ;
     (* The [j]th value of all the ranges: *)
     let rec nth j = function
         | [] -> assert false
@@ -175,15 +175,15 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
                     (match Eth.State.find_ip4 parent.eth with
                     | ip -> i, Ip ip
                     | exception Not_found ->
-                        error loc "No IPv4 address to send %s from" l.name)
+                        error loc "No IPv4 address to send %s from" (L.N.to_string l.name))
                 | Some (L.Random_in (lo, hi)) ->
                     random := true ;
                     i, pick_random loc parent l i [ lo, hi ]
                 | Some L.Local_port ->
                     random := true ;
-                    i, pick_random loc parent l i (parent.ports l.name)
+                    i, pick_random loc parent l i (parent.ports (L.N.to_string l.name))
                 | Some L.Required | None ->
-                    error loc "%s needs a %s" l.name l.fields.(i).name)
+                    error loc "%s needs a %s" (L.N.to_string l.name) l.fields.(i).name)
         ) (L.key_fields l) in
     let existing =
         if !random then None
@@ -227,7 +227,7 @@ let release n =
 (* The fields of the node of [e] by name: its key, then the options: *)
 let fields_of e name =
     match L.find_field e.node.layer name with
-    | None -> invalid_arg ("Crafty_tree: no field "^ name ^" in "^ e.node.layer.name)
+    | None -> invalid_arg ("Crafty_tree: no field "^ name ^" in "^ L.N.to_string e.node.layer.name)
     | Some i ->
         (match List.assoc_opt i e.node.key with
         | Some _ as v -> v
@@ -390,19 +390,23 @@ let receive root frame =
         | Match packet -> p.matched packet
         | Condition_error (where, message) -> p.failed where message)
 
-(** [packet] with the layers on top of it, as decoded without any node. *)
+(** [packet] with the layers on top of it, as decoded without any node: of
+ * those that could be, the one named, else [Bytes]. *)
 let rec complete (packet : packet) =
     let l, (u : L.unpacked) = List.hd packet in
-    let upper =
+    let names =
         match u.upper with
-        | L.Nothing -> None
-        | L.Only name | L.Any name -> L.find ~below:l name in
-    match upper with
-    | None -> packet
-    | Some ul ->
-        (match ul.unpack u.up_hints u.payload with
-        | None -> packet
-        | Some uu -> complete ((ul, uu) :: packet))
+        | L.Nothing -> []
+        | L.Only name -> [ name ]
+        | L.Any name -> [ name ; L.N.Bytes ] in
+    let rec first = function
+        | [] -> packet
+        | name :: names ->
+            (match Option.bind (L.find ~below:l name) (fun ul ->
+                       Option.map (fun uu -> ul, uu) (ul.unpack u.up_hints u.payload)) with
+            | Some top -> complete (top :: packet)
+            | None -> first names) in
+    first names
 
 (** The layers of a frame, as decoded without any node. *)
 let decode frame : packet =
@@ -438,7 +442,7 @@ let make_root ?(ports=[]) (eth : Eth.State.t) =
 (** As [Layer(field=value, ...)/...], the bottom first. *)
 let print_packet oc (p : packet) =
     List.print ~first:"" ~last:"" ~sep:"/" (fun oc ((l : L.layer), (u : L.unpacked)) ->
-        String.print oc l.name ;
+        String.print oc (L.to_string l) ;
         List.print ~first:"(" ~last:")" ~sep:", " (fun oc (n, v) ->
             let typ =
                 match L.find_field l n with
@@ -457,14 +461,14 @@ let key_string n =
 
 (** As [Layer(key)*users#received{children}], children by layer then key. *)
 let rec print oc n =
-    String.print oc n.layer.name ;
+    String.print oc (L.to_string n.layer) ;
     if n.key <> [] then Printf.fprintf oc "(%s)" (key_string n) ;
     if n.users > 0 then Printf.fprintf oc "*%d" n.users ;
     if n.received > 0 then Printf.fprintf oc "#%d" n.received ;
     match children n with
     | [] -> ()
     | cs ->
-        List.map (fun c -> (c.layer.name, key_string c), c) cs |>
+        List.map (fun c -> (L.to_string c.layer, key_string c), c) cs |>
         List.sort (fun (a, _) (b, _) -> compare a b) |>
         List.map snd |>
         List.print ~first:"{" ~last:"}" ~sep:", " print oc
@@ -513,13 +517,13 @@ let to_string n = IO.to_string print n
   assert_bool "a new id for each" (child loc icmp Crafty_layers.echo [] != echo) ;
   let given = child loc icmp Crafty_layers.echo [ 0, port 7 ] in
   assert_bool "a given id" (child loc icmp Crafty_layers.echo [ 0, port 7 ] == given) ;
-  let request = Option.get (Crafty_layers.find ~below:Crafty_layers.echo "Request") in
+  let request = Option.get (Crafty_layers.find ~below:Crafty_layers.echo Crafty_ast.Layer_name.Request) in
   assert_bool "one message node" (child loc echo request [] == child loc echo request []) ;
-  let l = Crafty_layers.layer "Tiny" ~above:[ "ip" ]
+  let l = Crafty_layers.layer Crafty_ast.Layer_name.Echo ~above:[ Crafty_layers.ip ]
       [ Crafty_layers.field "id" Crafty_ast.Type.Int ~discriminant:true
           ~pick:(Crafty_layers.Random_in (1, 2)) ] in
   ignore (child loc ip l []) ; ignore (child loc ip l []) ;
-  assert_raises (Crafty_value.Runtime_error (loc, "No id left for another Tiny"))
+  assert_raises (Crafty_value.Runtime_error (loc, "No id left for another Echo"))
       (fun () -> child loc ip l [])
 *)
 (* Local ports are picked from the ranges of the tree, across them all: *)
@@ -553,7 +557,7 @@ let to_string n = IO.to_string print n
         (Ip.Pdu.pack (Ip.Pdu.make ~id:1 Ip.Proto.udp (Ip.Addr.of_string "10.0.0.2") (Ip.Addr.of_string "10.0.0.1") \
             (Udp.Pdu.(pack (make ~src_port:(Udp.Port.o 53) ~dst_port:(Udp.Port.o 1000) \
                 (Bitstring.bitstring_of_string "hi")))))))))))
-  "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048)/IP(src=10.0.0.2, dst=10.0.0.1, proto=1, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=29, options=[], is_fragment=false)/ICMP(type=3, code=3)/DestUnreachable(mtu=0, code=3, payload=#41)" \
+  "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048)/IP(src=10.0.0.2, dst=10.0.0.1, proto=1, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=29, options=[], is_fragment=false)/ICMP(type=3, code=3)/DestUnreachable(mtu=0, code=3)/Bytes(data=#41)" \
     (IO.to_string print_packet (decode (Eth.Pdu.(pack (make Eth.Proto.ip4 \
         (Eth.Addr.of_string "02:00:00:00:00:02") (Eth.Addr.of_string "02:00:00:00:00:01") \
         (Ip.Pdu.pack (Ip.Pdu.make ~id:1 Ip.Proto.icmp (Ip.Addr.of_string "10.0.0.2") (Ip.Addr.of_string "10.0.0.1") \

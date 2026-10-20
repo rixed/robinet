@@ -19,10 +19,10 @@
  *)
 (** Abstract syntax of crafty programs, as parsed and before any typing.
 
-   Names of layers, fields, functions and special forms are case insensitive
-   and kept as written. Variables are case sensitive, and cannot be named
-   after a layer, a constant, a function, a keyword or a predefined
-   variable. *)
+   Names of layers, fields, functions and special forms are case insensitive;
+   layers are known by their names, and the others kept as written. Variables
+   are case sensitive, and cannot be named after a layer, a constant, a
+   function, a keyword or a predefined variable. *)
 open Batteries
 
 (** Where something starts in the source, counting from 1. *)
@@ -30,6 +30,41 @@ type location = { line : int ; column : int }
 
 let print_location oc loc =
     Printf.fprintf oc "line %d, column %d" loc.line loc.column
+
+(** The names of the layers. Layers on top of different ones can share a
+ * name ([DNS/Query], [HTTP/Query]). *)
+module Layer_name =
+struct
+    type t =
+        | Eth | IP | TCP | UDP | ICMP | Echo | Request | Reply
+        | DestUnreachable | TimeExceeded | DNS | Query | Answer | Bytes
+
+    let all =
+        [ Eth ; IP ; TCP ; UDP ; ICMP ; Echo ; Request ; Reply ;
+          DestUnreachable ; TimeExceeded ; DNS ; Query ; Answer ; Bytes ]
+
+    let to_string = function
+        | Eth -> "Eth" | IP -> "IP" | TCP -> "TCP" | UDP -> "UDP"
+        | ICMP -> "ICMP" | Echo -> "Echo" | Request -> "Request"
+        | Reply -> "Reply" | DestUnreachable -> "DestUnreachable"
+        | TimeExceeded -> "TimeExceeded" | DNS -> "DNS" | Query -> "Query"
+        | Answer -> "Answer" | Bytes -> "Bytes"
+
+    (* However written: *)
+    let of_string s =
+        let s = String.lowercase_ascii s in
+        List.find_opt (fun n -> String.lowercase_ascii (to_string n) = s) all
+
+    let print oc n = String.print oc (to_string n)
+end
+
+(* Names are found however written: *)
+(*$T
+  Layer_name.of_string "dns" = Some Layer_name.DNS
+  Layer_name.of_string "destUNREACHABLE" = Some Layer_name.DestUnreachable
+  Layer_name.of_string "HTTP" = None
+  List.for_all (fun n -> Layer_name.of_string (Layer_name.to_string n) = Some n) Layer_name.all
+*)
 
 (** Types of values. *)
 module Type =
@@ -97,7 +132,7 @@ and expr_desc =
      * counted from the end ([nth] carets after its name: [IP] is the last,
      * [IP^] the last but one), or from the start ([nth] + 1 carets before
      * it: [^IP] is the first one). *)
-    | Layer of { name : string ; from_start : bool ; nth : int }
+    | Layer of { name : Layer_name.t ; from_start : bool ; nth : int }
     | Field of expr * string
     | Index of expr * expr
     | Call of string * arg list
@@ -126,7 +161,7 @@ and anchor =
 
 and pattern_layer =
     { pl_loc : location ;
-      pl_name : string ;
+      pl_name : Layer_name.t ;
       pl_manual : bool ;
       (* With the conditions separated by commas joined into one with [And],
        * and [=] already read as [Eq]: *)
@@ -135,7 +170,7 @@ and pattern_layer =
 (** A layer of a protocol stack, with its options. *)
 type layer =
     { layer_loc : location ;
-      layer_name : string ;
+      layer_name : Layer_name.t ;
       manual : bool ;
       options : arg list }
 
@@ -245,8 +280,8 @@ let rec print_expr oc e =
     | Var n -> String.print oc n
     | Layer { name ; from_start ; nth } ->
         let carets = String.make (if from_start then nth + 1 else nth) '^' in
-        if from_start then Printf.fprintf oc "%s%s" carets name
-        else Printf.fprintf oc "%s%s" name carets
+        if from_start then Printf.fprintf oc "%s%a" carets Layer_name.print name
+        else Printf.fprintf oc "%a%s" Layer_name.print name carets
     | Field (e, f) -> Printf.fprintf oc "%a.%s" print_expr e f
     | Index (e, i) -> Printf.fprintf oc "%a[%a]" print_expr e print_expr i
     | Call (f, args) -> Printf.fprintf oc "%s(%a)" f print_args args
@@ -286,12 +321,12 @@ and print_anchor oc = function
 and print_pattern oc p =
     print_anchor oc p.anchor ;
     List.print ~first:"" ~last:"" ~sep:"/" (fun oc l ->
-        Printf.fprintf oc "%s%s" l.pl_name (if l.pl_manual then "!" else "") ;
+        Printf.fprintf oc "%a%s" Layer_name.print l.pl_name (if l.pl_manual then "!" else "") ;
         Option.may (Printf.fprintf oc "(%a)" print_bare_expr) l.cond
     ) oc p.pat_layers
 
 let print_layer oc l =
-    Printf.fprintf oc "%s%s" l.layer_name (if l.manual then "!" else "") ;
+    Printf.fprintf oc "%a%s" Layer_name.print l.layer_name (if l.manual then "!" else "") ;
     if l.options <> [] then Printf.fprintf oc "(%a)" print_args l.options
 
 let rec print_stmt indent oc s =

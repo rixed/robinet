@@ -127,6 +127,8 @@ and block = stmt list
 
 let same_name a b = String.lowercase_ascii a = String.lowercase_ascii b
 
+let lname = A.Layer_name.to_string
+
 (* Records are compared field by field, whatever the order they were written
  * in: *)
 let record_type fields =
@@ -140,10 +142,17 @@ let packet_record (l : L.layer) =
     record_type (Array.to_list l.fields |> List.filter_map (fun (f : L.field) ->
         if f.read_in = [] then None else Some (f.name, f.typ)))
 
-(** The type of packets, such as [MATCH]: their layers from the bottom. *)
+(** The type of packets, such as [MATCH]: their layers from the bottom. A
+ * name is one variant, which the layers that share it all read the same
+ * record as: *)
 let packet_type =
     Type.Array (Type.Variant (List.map (fun (l : L.layer) ->
-        l.name, packet_record l) L.all))
+        lname l.name, packet_record l) L.all |> List.unique))
+
+(*$T packet_type
+  List.for_all (fun (a : Crafty_layers.layer) -> List.for_all (fun (b : Crafty_layers.layer) -> \
+      a.name <> b.name || packet_record a = packet_record b) Crafty_layers.all) Crafty_layers.all
+*)
 
 let type_of_literal = function
     | A.Bool _ -> Type.Bool
@@ -344,7 +353,8 @@ let rec expr ?expected env (e : A.expr) =
     | A.Var name -> var env loc name
     | A.Layer { name ; _ } ->
         error loc "A layer is no value: %s needs a field, as in %s.src, or to \
-                   select a layer of a packet, as in MATCH[%s]" name name name
+                   select a layer of a packet, as in MATCH[%s]"
+              (lname name) (lname name) (lname name)
     | A.Field ({ desc = A.Layer { name ; from_start ; nth } ; _ }, f) ->
         layer_field env loc name from_start nth f
     | A.Field (r, f) ->
@@ -360,12 +370,11 @@ let rec expr ?expected env (e : A.expr) =
         let a = expr env a in
         (match a.typ with
         | Type.Array (Type.Variant cs) ->
-            (match List.find_opt (fun (n, _) -> same_name n name) cs with
-            | Some (_, t) ->
-                let layer =
-                    List.find (fun (l : L.layer) -> same_name l.name name) L.all in
+            (match List.assoc_opt (lname name) cs with
+            | Some t ->
+                let layer = List.find (fun (l : L.layer) -> l.name = name) L.all in
                 mk t (Select { packet = a ; layer ; from_start ; nth })
-            | None -> error loc "No %s in %s" name (a_type a.typ))
+            | None -> error loc "No %s in %s" (lname name) (a_type a.typ))
         | t -> error loc "Cannot select a layer of %s" (a_type t))
     | A.Index (a, i) ->
         let a = expr env a and i = expr env i in
@@ -432,7 +441,7 @@ and var env loc name =
             let f = ctx.cur.fields.(i) in
             if not (List.mem ctx.cur_mode f.read_in) then
                 error loc "%s cannot be read in a %s %s" f.name
-                    (L.string_of_mode ctx.cur_mode) ctx.cur.name ;
+                    (L.string_of_mode ctx.cur_mode) (L.to_string ctx.cur) ;
             mk f.typ (Packet_field { layer = Array.length ctx.below ; field = i })
         | None -> as_var ()
 
@@ -440,26 +449,26 @@ and layer_field env loc name from_start nth f =
     let ctx =
         match env.layer_ctx with
         | Some ctx when ctx.in_cond -> ctx
-        | _ -> error loc "Fields of %s can only be read in a condition" name in
+        | _ -> error loc "Fields of %s can only be read in a condition" (lname name) in
     let positions =
         Array.to_list ctx.below |>
         List.mapi (fun i (l, m) -> i, l, m) |>
-        List.filter (fun (_, (l : L.layer), _) -> same_name l.name name) in
+        List.filter (fun (_, (l : L.layer), _) -> l.name = name) in
     let positions = if from_start then positions else List.rev positions in
     match List.nth_opt positions nth with
     | None ->
         (match List.length positions with
-        | 0 -> error loc "There is no %s below %s" name ctx.cur.name
-        | 1 -> error loc "There is only one %s below %s" name ctx.cur.name
-        | n -> error loc "There are only %d %s below %s" n name ctx.cur.name)
+        | 0 -> error loc "There is no %s below %s" (lname name) (L.to_string ctx.cur)
+        | 1 -> error loc "There is only one %s below %s" (lname name) (L.to_string ctx.cur)
+        | n -> error loc "There are only %d %s below %s" n (lname name) (L.to_string ctx.cur))
     | Some (layer, (l : L.layer), mode) ->
         match L.find_field l f with
-        | None -> error loc "%s has no field %s" l.name f
+        | None -> error loc "%s has no field %s" (L.to_string l) f
         | Some i ->
             let fd = l.fields.(i) in
             if not (List.mem mode fd.read_in) then
                 error loc "%s cannot be read in a %s %s" fd.name
-                    (L.string_of_mode mode) l.name ;
+                    (L.string_of_mode mode) (L.to_string l) ;
             { loc ; typ = fd.typ ; desc = Packet_field { layer ; field = i } }
 
 (* The function, its arguments in the order of its parameters, and the type
@@ -553,16 +562,17 @@ let push loc base name =
     | None, None ->
         (match L.find ~below:L.root name with
         | Some l -> [ L.root, L.Driven ], l
-        | None -> error loc "%s cannot be at the bottom of a stack" name)
+        | None -> error loc "%s cannot be at the bottom of a stack" (lname name))
     | None, Some (b : L.layer) ->
-        if b.terminal then error loc "Nothing can be on top of %s" b.name
-        else error loc "%s cannot be on top of %s" name b.name
+        if b.terminal then error loc "Nothing can be on top of %s" (L.to_string b)
+        else error loc "%s cannot be on top of %s" (lname name) (L.to_string b)
 
 let mode_on loc base (l : L.layer) ~bang =
     let mode = L.mode_of l ~bang in
     if mode = L.Driven then
         Option.may (fun ((b : L.layer), _) ->
-            error loc "%s cannot be self-driven on top of a manual %s" l.name b.name
+            error loc "%s cannot be self-driven on top of a manual %s"
+                (L.to_string l) (L.to_string b)
         ) (List.find_opt (fun ((b : L.layer), m) -> b.driven && m = L.Manual) base) ;
     mode
 
@@ -607,18 +617,18 @@ let stack_layers env base over (layers : A.layer list) =
                     | Some n ->
                         (match L.find_field l n with
                         | Some i -> i
-                        | None -> error a.arg_loc "%s has no field %s" l.name n)
+                        | None -> error a.arg_loc "%s has no field %s" (L.to_string l) n)
                     | None ->
                         (match l.default_field with
                         | Some i -> i
-                        | None -> error a.arg_loc "The options of %s must be named" l.name) in
+                        | None -> error a.arg_loc "The options of %s must be named" (L.to_string l)) in
                 let f = l.fields.(i) in
                 if not (List.mem mode f.set_in) then (
                     if f.set_in = [] then
-                        error a.arg_loc "%s of %s cannot be set" f.name l.name
+                        error a.arg_loc "%s of %s cannot be set" f.name (L.to_string l)
                     else
                         error a.arg_loc "%s cannot be set in a %s %s" f.name
-                            (L.string_of_mode mode) l.name) ;
+                            (L.string_of_mode mode) (L.to_string l)) ;
                 let e = expr ~expected:f.typ env a.value in
                 i, expect ("The value of "^ f.name) e f.typ
             ) al.options in
@@ -635,7 +645,7 @@ let stack_layers env base over (layers : A.layer list) =
             if j >= n then
                 Array.iteri (fun i (f : L.field) ->
                     if f.pick = Some L.Required && not (List.mem_assoc i tl.options) then
-                        error tl.layer_loc "%s needs a %s" tl.layer.name f.name
+                        error tl.layer_loc "%s needs a %s" (L.to_string tl.layer) f.name
                 ) tl.layer.fields) tls ;
         base, tls, n
 
@@ -669,7 +679,7 @@ let pattern env (p : A.pattern) =
                         { loc = c.loc ; typ = Type.Bool ; desc = Binop (A.Eq, field, c) }
                     | t, _ ->
                         error c.loc "The condition on %s must be a bool, not %s"
-                            l.name (a_type t)
+                            (L.to_string l) (a_type t)
                 ) pl.cond in
             (l, mode) :: base',
             { pl_loc = pl.pl_loc ; pl_layer = l ; pl_mode = mode ; cond } :: pls

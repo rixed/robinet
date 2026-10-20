@@ -114,9 +114,10 @@ Done after 0.2s, status: OK.
 Literals are read as whole words: `1.2.3.4` is an IP address, `5s` an
 interval.
 
-Strings interpolate any expression with `${...}` and know the escapes `\n`,
-`\r`, `\t`, `\0`, `\\`, `\"`, `\$` and `\xHH`. In an interpolation, bytes
-are written in hexadecimal (`#68656c6c6f`). Bytes passed where a string is
+Strings interpolate any expression with `${...}`, not only variables:
+`"hop ${MATCH[UDP].dst - 33434}, ttl ${MATCH[IP].ttl}"`. They know the
+escapes `\n`, `\r`, `\t`, `\0`, `\\`, `\"`, `\$` and `\xHH`. In an
+interpolation, bytes are written in hexadecimal (`#68656c6c6f`). Bytes passed where a string is
 expected, such as to `print`, are taken as text.
 
 **Conversions** happen where needed: an int to a float, a byte to an int, a
@@ -171,8 +172,8 @@ A stack is a list of layers, each optionally with options in parentheses:
   layer, always at the bottom, which can be left out (`/IP` is `/Eth/IP`).
   Without the `/`, a stack goes on top of the current stack.
 - Followed by a block, a stack is the current stack of that block.
-- Ending with a terminal layer (`Bytes`, `Request`, `Reply`,
-  `DestUnreachable`, `TimeExceeded`), a stack is a message, which is sent.
+- Ending with a terminal layer (`Bytes`, `Request`, `Reply`, `Query`,
+  `Answer`), a stack is a message, which is sent.
   The current stack stays as it was: `Bytes("a")` then `Bytes("b")` both
   send on it.
 - Options are named (`dst=...`), except that a lone option of a layer that
@@ -226,8 +227,9 @@ expression, where `,` and `=` can replace `&&` and `==`. In conditions:
 
 - A bare name is a field of that layer if it has one, else a variable:
   `UDP(src == port)`.
-- Fields of the layers below are read as `IP.src`. In tunnels, `IP^.src`
-  is that of the IP layer below the last one, and `^IP.src` of the first.
+- Fields of the layers below are read as `IP.src`. In tunnels and in the
+  packets that ICMP errors quote, `IP^.src` is that of the IP layer below
+  the last one, and `^IP.src` of the first.
 - A condition that is not a bool, on a layer with a default field, compares
   that field: `Bytes("pong")` is `Bytes(data == "pong")`. An int condition
   is true when it is not zero: `TCP!(flags & RST)`.
@@ -235,11 +237,12 @@ expression, where `,` and `=` can replace `&&` and `==`. In conditions:
   [Layers](#layers)). A self-driven `TCP` shows only its ports, and a
   manual `TCP!` shows each segment's header.
 
-A layer whose header names what it carries (the `proto` of IP, the `type`
-of ICMP) is decoded only as that. What UDP and TCP carry is decoded as each
-layer that a stream or a pattern expects there, so that a datagram can
-match both `UDP/DNS/Query` and `UDP/Bytes`. `MATCH` is decoded past the
-pattern as `Bytes` only.
+A layer whose header names what it carries (the `proto` of IP, the `type` of
+ICMP) is decoded only as that. What UDP, TCP and the ICMP errors carry is
+decoded as each layer that a stream or a pattern expects there, so that a
+datagram can match both `UDP/DNS/Query` and `UDP/Bytes`. `MATCH` is decoded
+past the pattern as `Bytes` only, but for the packet an ICMP error quotes,
+which is decoded as `IP` when it can be.
 
 A packet matches a pattern in one mode at most:
 
@@ -398,18 +401,44 @@ counted per stream.
 | `seq` | int | M | M | Default: the stream's counter, from 1. |
 | `payload` | bytes | M | M | Default field. |
 
-#### `DestUnreachable` and `TimeExceeded` (on `ICMP`, terminal)
+#### `DestUnreachable` and `TimeExceeded` (on `ICMP`)
 
 | Field | Type | Set | Read | |
 |-------|------|-----|------|-|
 | `code` | int | M | M | Default 0. |
 | `mtu` | int | M | M | `DestUnreachable` only; default 0. |
-| `payload` | bytes | M | M | Default field: the start of the packet the error is about. |
 
 Constants for `code`: `NET_UNREACHABLE`, `HOST_UNREACHABLE`,
 `PROTOCOL_UNREACHABLE`, `PORT_UNREACHABLE`, `FRAG_NEEDED`,
 `SOURCE_ROUTE_FAILED` (for `DestUnreachable`); `TTL_EXCEEDED`,
 `REASSEMBLY_TIMEOUT` (for `TimeExceeded`).
+
+On top of them is the start of the packet the error is about: a quoted
+`IP`, or `Bytes`.
+
+#### Quoted `IP`, and `UDP` and `TCP` on top of it (on `DestUnreachable` and `TimeExceeded`)
+
+The packet that an ICMP error quotes has the fields of `IP`, `UDP` and
+`TCP`, all of which can be read and set but for `is_fragment`, and none of
+`TCP`'s `mss`. Its layers are manual only, are no streams and have no
+keys, so that what they hold changes nothing to the streams of the
+program: a quoted TCP segment is no part of a connection. Errors print them
+as `IP?`, `UDP?` and `TCP?`.
+
+```
+on /IP/ICMP/TimeExceeded/IP(dst == target)/UDP(dst == 33434) {
+  print("from ${MATCH[^IP].src}, ttl ${MATCH[IP].ttl}")
+}
+```
+
+`MATCH[IP]` is the quoted packet, and `MATCH[^IP]` the error's.
+
+A quote is often cut short, at 8 bytes after the IP header: its `IP` and
+`UDP` keep the lengths they announce, and the payload is what is left. Of
+`TCP`, only the ports and `seq_num` are sure to be there; the other fields
+read 0 when cut off. Sent, a quoted `IP` needs a `src` and a `dst`, and
+its lengths are computed unless given, as are the checksums of `UDP` and
+`TCP`.
 
 #### `DNS` (on `UDP`)
 
@@ -450,20 +479,20 @@ Constants for `type`: `TYPE_A`, `TYPE_NS`, `TYPE_CNAME`, `TYPE_SOA`,
 `class`: `CLASS_IN`; for `status`: `NOERROR`, `FORMERR`, `SERVFAIL`,
 `NXDOMAIN`, `NOTIMP`, `REFUSED`.
 
-#### `Bytes` (on `Eth`, `IP`, `TCP` or `UDP`, terminal)
+#### `Bytes` (on `Eth`, `IP`, `TCP`, `UDP`, the ICMP errors and the quoted layers, terminal)
 
 | Field | Type | Set | Read | |
 |-------|------|-----|------|-|
 | `data` | bytes | M | M | Default field. |
 
 It is what a layer carries when it is not decoded any further: the payload
-of UDP, the data of TCP, a fragment, or an unknown protocol.
+of UDP, the data of TCP, a fragment, a quote, or an unknown protocol.
 
 ### Not available yet
 
 The keywords `if`, `elsif`, `else`, `case`, `any` and `report`, the
 predefined `LAST` (the last packet sent), matching embedded packets with
-`=~` (as in the payload of an ICMP error), variant literals, the HTTP
+`=~`, variant literals, the HTTP
 layer, IPv6, VLANs and tunnels. Using any of them is reported as
 unsupported.
 
@@ -583,22 +612,25 @@ resetting connections it knows nothing of.
 target = 192.0.2.10
 repeat var=hop count=30 {
   ttl = hop + 1
-  /IP(dst=target, ttl=ttl)/UDP(dst=33434 + hop)/Bytes("probe")
+  port = 33434 + hop
   {
-    on max=1 timeout=1s /IP/ICMP/TimeExceeded(code == TTL_EXCEEDED) {
-      print("${ttl}: ${MATCH[IP].src}")
+    on max=1 timeout=1s /IP/ICMP/TimeExceeded(code == TTL_EXCEEDED)/IP/UDP(dst == port) {
+      print("${ttl}: ${MATCH[^IP].src}")
     }
-    on max=1 timeout=1s /IP(src == target)/ICMP/DestUnreachable(code == PORT_UNREACHABLE) {
+    on max=1 timeout=1s /IP/ICMP/DestUnreachable(code == PORT_UNREACHABLE)/IP/UDP(dst == port) {
       print("${ttl}: ${target}, reached")
       break 2
     }
+    /IP(dst=target, ttl=ttl)/UDP(dst=port)/Bytes("probe")
   }
 }
 ```
 
 Each probe waits for whichever answer comes first: a router's that the TTL
 ran out, or the target's that the port is unreachable. The patterns are
-absolute, as routers have addresses of their own. `break 2` leaves both the
+absolute, as routers have addresses of their own, and tell the answers to
+each probe by the destination port of the packet they quote: `MATCH[IP]`
+is the quoted probe, and `MATCH[^IP]` the error. `break 2` leaves both the
 `on` and the `repeat`.
 
 ### Giving up gracefully

@@ -214,12 +214,12 @@ let rec eval output (env : env) (e : T.expr) =
             let layers =
                 Array.to_list a |>
                 List.filter_map (function
-                    | Variant (n, v) when n = layer.name -> Some v
+                    | Variant (n, v) when n = T.lname layer.name -> Some v
                     | _ -> None) in
             let layers = if from_start then layers else List.rev layers in
             (match List.nth_opt layers nth with
             | Some v -> v
-            | None -> error e.loc "No such %s in this packet" layer.name)
+            | None -> error e.loc "No such %s in this packet" (T.lname layer.name))
         | _ -> assert false)
     | T.Call (b, args) ->
         call e.loc b (List.map eval args)
@@ -352,7 +352,7 @@ let match_value packet =
     Array (Array.of_list (List.rev_map (fun ((l : Crafty_layers.layer), (u : Crafty_layers.unpacked)) ->
         match T.packet_record l with
         | A.Type.Record fields ->
-            Variant (l.name, Record (Array.of_list (List.map (fun (name, _) ->
+            Variant (T.lname l.name, Record (Array.of_list (List.map (fun (name, _) ->
                 List.assoc name u.values) fields)))
         | _ -> assert false) (Crafty_tree.complete packet)))
 
@@ -892,7 +892,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 8/0 id=? seq=1 \"ping\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 8/0 id=? seq=2 \"ping\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 8/0 id=7 seq=42 \"\"" \
     (same_random_ids (runs ~frames:true "/IP(dst=10.0.0.2)/ICMP/Echo { repeat count=2 { Request(\"ping\") }\n  /IP(dst=10.0.0.2)/ICMP/Echo(id=7)/Request(seq=42) }"))
   "0s: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 3/3 mtu=1400 \"\\001\\002\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 11/0 mtu=0 \"\\003\\004\"" \
-    (runs ~frames:true "/IP!(dst=10.0.0.2)/ICMP/DestUnreachable(code=PORT_UNREACHABLE, mtu=1400, payload=#0102)\n/IP!(dst=10.0.0.2)/ICMP/TimeExceeded(#0304)")
+    (runs ~frames:true "/IP!(dst=10.0.0.2)/ICMP/DestUnreachable(code=PORT_UNREACHABLE, mtu=1400)/Bytes(#0102)\n/IP!(dst=10.0.0.2)/ICMP/TimeExceeded/Bytes(#0304)")
 *)
 (* Manual frames, to a given MAC address or to what the interface knows: *)
 (*$= runs & ~printer:identity
@@ -1129,6 +1129,16 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         "/IP(dst=10.0.0.2)/UDP(dst=7) { repeat count=2 { Bytes(\"echo ${I}\")\n    expect timeout=1s Bytes { print(MATCH[Bytes].data) } } }")
   "a 0.000s: unreachable\na 0.000s: done Eth#2" \
     (with_host "/IP(dst=10.0.0.2)/UDP(dst=9) { Bytes(\"anyone?\")\n  expect timeout=1s ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
+*)
+(* ICMP errors and the packets they quote: a host's, and forged by a
+ * program, one quoting a whole datagram, one only the first 8 bytes of a
+ * segment: *)
+(*$= & ~printer:identity
+  "a 0.000s: port 9 of 10.0.0.2, from 10.0.0.2, length 15\na 0.000s: done Eth#2" \
+    (with_host "/IP(dst=10.0.0.2)/UDP(src=4000, dst=9)/Bytes(\"anyone?\")\nexpect timeout=1s /IP/ICMP/DestUnreachable(code == PORT_UNREACHABLE)/IP/UDP(src == 4000) {\n  print(\"port ${MATCH[UDP].dst} of ${MATCH[IP].dst}, from ${MATCH[^IP].src}, length ${MATCH[UDP].length}\") }")
+  "b 0.000s: done Eth#1\na 0.000s: udp to 33434, ttl 1, from 10.0.0.2\na 0.000s: tcp seq 7, win 0\na 1.000s: done Eth#2" \
+    (two ~arp:true "{ on timeout=1s /IP/ICMP/TimeExceeded/IP/UDP(src == 4000) {\n    print(\"udp to ${MATCH[UDP].dst}, ttl ${MATCH[IP].ttl}, from ${MATCH[^IP].src}\") }\n  on timeout=1s /IP/ICMP/TimeExceeded/IP/TCP(src == 4000) {\n    print(\"tcp seq ${MATCH[TCP].seq_num}, win ${MATCH[TCP].win_size}\") }\n  /IP(dst=10.0.0.2)/UDP(src=4000, dst=33434)/Bytes(\"probe\") }" \
+         "expect timeout=1s /IP/UDP(dst == 33434)/Bytes {\n  /IP(dst=MATCH[IP].src)/ICMP/TimeExceeded/IP(src=MATCH[IP].src, dst=MATCH[IP].dst, ttl=1)/UDP(src=MATCH[UDP].src, dst=MATCH[UDP].dst)/Bytes(MATCH[Bytes].data)\n  /IP(dst=MATCH[IP].src)/ICMP/TimeExceeded/IP(src=MATCH[IP].src, dst=MATCH[IP].dst, proto=6, tot_len=60)/Bytes(#0fa0005000000007) }")
 *)
 (* DNS: a name resolved by a host's server then pinged; and between two
  * programs, the server's query also seen as bytes: *)
