@@ -282,6 +282,12 @@ let register node layers ~hold ~matched ~failed =
 let incoming_key (l : L.layer) (u : L.unpacked) =
     List.map (fun i -> i, List.assoc l.fields.(i).peer u.values) (L.key_fields l)
 
+(** Whether a received layer, of that of [n], is of the stream of [n]: of
+ * the root, any is. *)
+let of_stream n (u : L.unpacked) =
+    List.for_all (fun (i, v) ->
+        equal v (List.assoc n.layer.fields.(i).peer u.values)) n.key
+
 type event = Match of packet | Condition_error of A.location * string
 
 (* What a packet did to the patterns it met, the last first; at most one

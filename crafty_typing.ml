@@ -89,15 +89,21 @@ type pattern =
       (* How many layers of the current stack, from its bottom, are below the
        * pattern; with none, the pattern starts from the root: *)
       depth : int ;
+      (* How many of its layers, from the first, are over the same layers of
+       * the current stack, and see only the streams of their nodes: *)
+      overlay : int ;
       pat_layers : pattern_layer list }
 
 type stmt = { stmt_loc : A.location ; stmt : stmt_desc }
 
 and stmt_desc =
-    (* From the root if [absolute], otherwise on top of the current stack;
-     * a root that was left implicit is the first layer. The stack of
-     * [body] if any, else a packet to send: *)
-    | Stack of { absolute : bool ; layers : layer list ; body : block option }
+    (* On top of the [depth] first layers of the current stack, from its
+     * bottom (with none, from the root); a root that was left implicit is
+     * the first layer. The first [overlay] layers are over the same layers
+     * of the current stack, whose keys and options they take unless they
+     * give them. The stack of [body] if any, else a packet to send: *)
+    | Stack of { depth : int ; overlay : int ; layers : layer list ;
+                 body : block option }
     | Block of block
     | Declare of var * expr
     | Assign of var * expr
@@ -562,8 +568,30 @@ let mode_on loc base (l : L.layer) ~bang =
 
 let implicit_root loc = { layer_loc = loc ; layer = L.root ; mode = L.Driven ; options = [] }
 
-(* The layers of a stack statement on top of [base], and the new stack: *)
-let stack_layers env base (layers : A.layer list) =
+(* How many of [layers] (bottom first), from the first, are the same as
+ * those of [over]: *)
+let overlay over (layers : L.layer list) =
+    let rec loop n = function
+        | (o : L.layer) :: over, (l : L.layer) :: layers when o == l ->
+            loop (n + 1) (over, layers)
+        | _ -> n in
+    loop 0 (over, layers)
+
+(* Where the layers of a stack or pattern go: on top of the root, or on top
+ * of the current stack once [n] layers are taken off. Returns that base and
+ * the layers taken off, bottom first: *)
+let anchor_base env loc = function
+    | A.Absolute -> [], []
+    | A.Relative n ->
+        if n > List.length env.stack then
+            error loc "../ goes below the bottom of the stack" ;
+        List.drop n env.stack, List.rev_map fst (List.take n env.stack)
+
+(* The layers of a stack statement on top of [base], over the layers [over]
+ * (bottom first) that were taken off the current stack, and the new stack.
+ * The layers that are over the same ones take their key, which they need
+ * not give: *)
+let stack_layers env base over (layers : A.layer list) =
     List.fold_left (fun (base, tls) (al : A.layer) ->
         let base', l = push al.layer_loc base al.layer_name in
         let tls =
@@ -597,22 +625,22 @@ let stack_layers env base (layers : A.layer list) =
         List.iter (fun (i, (e : expr)) ->
             if List.length (List.filter (fun (i', _) -> i = i') options) > 1 then
                 error e.loc "%s given twice" l.fields.(i).name) options ;
-        Array.iteri (fun i (f : L.field) ->
-            if f.pick = Some L.Required && not (List.mem_assoc i options) then
-                error al.layer_loc "%s needs a %s" l.name f.name) l.fields ;
         (l, mode) :: base',
         { layer_loc = al.layer_loc ; layer = l ; mode ; options } :: tls
     ) (base, []) layers |>
-    fun (base, tls) -> base, List.rev tls
+    fun (base, tls) ->
+        let tls = List.rev tls in
+        let n = overlay over (List.map (fun tl -> tl.layer) tls) in
+        List.iteri (fun j tl ->
+            if j >= n then
+                Array.iteri (fun i (f : L.field) ->
+                    if f.pick = Some L.Required && not (List.mem_assoc i tl.options) then
+                        error tl.layer_loc "%s needs a %s" tl.layer.name f.name
+                ) tl.layer.fields) tls ;
+        base, tls, n
 
 let pattern env (p : A.pattern) =
-    let base =
-        match p.anchor with
-        | A.Absolute -> []
-        | A.Relative n ->
-            if n > List.length env.stack then
-                error p.pat_loc "../ goes below the bottom of the stack" ;
-            List.drop n env.stack in
+    let base, over = anchor_base env p.pat_loc p.anchor in
     let depth = List.length base in
     let _, pls =
         List.fold_left (fun (base, pls) (pl : A.pattern_layer) ->
@@ -646,7 +674,9 @@ let pattern env (p : A.pattern) =
             (l, mode) :: base',
             { pl_loc = pl.pl_loc ; pl_layer = l ; pl_mode = mode ; cond } :: pls
         ) (base, []) p.pat_layers in
-    { pat_loc = p.pat_loc ; depth ; pat_layers = List.rev pls }
+    let pat_layers = List.rev pls in
+    { pat_loc = p.pat_loc ; depth ; pat_layers ;
+      overlay = overlay over (List.map (fun pl -> pl.pl_layer) pat_layers) }
 
 (** {2 Statements} *)
 
@@ -680,14 +710,15 @@ and stmt errors env (s : A.stmt) =
                    declared_here = name :: env.declared_here }, v in
     try
         match s.stmt with
-        | A.Stack { absolute ; layers ; body } ->
-            let base = if absolute then [] else env.stack in
-            let stack, tls = stack_layers env base layers in
+        | A.Stack { anchor ; layers ; body } ->
+            let base, over = anchor_base env s.stmt_loc anchor in
+            let stack, tls, overlay = stack_layers env base over layers in
             (* Which the parser checked: *)
             let top = fst (List.hd stack) in
             assert (top.terminal = (body = None)) ;
             let body = Option.map (block errors { env with stack }) body in
-            env, Some (mk (Stack { absolute ; layers = tls ; body }))
+            env, Some (mk (Stack { depth = List.length base ; overlay ;
+                                   layers = tls ; body }))
         | A.Block b ->
             env, Some (mk (Block (block errors env b)))
         | A.Declare (name, e) ->
@@ -894,6 +925,9 @@ let check (program : A.program) =
     (types "/IP/UDP(dst=53) {}")
   "line 1, column 18: UDP needs a dst" \
     (types "/IP(dst=1.2.3.4)/UDP(src=1) {}")
+  "" (types "/IP(dst=1.2.3.4)/TCP(dst=80) { ../TCP!(flags=RST)/Bytes() }")
+  "line 1, column 35: UDP needs a dst" \
+    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { ../UDP/Bytes() }")
   "line 1, column 2: UDP cannot be at the bottom of a stack" \
     (types "/UDP {}")
   "line 1, column 18: IP cannot be on top of IP" \

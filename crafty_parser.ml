@@ -386,11 +386,13 @@ let make_expr ~cond ~self ~expr ~pattern =
     let conjunction = left_assoc (op "&&" And) comparison in
     left_assoc (op "||" Or) conjunction |? "expression"
 
+(* From the root ([/]), or else down the current stack ([../] each): *)
+let anchor =
+    (slash >>: fun () -> Absolute) |||
+    (repeat_greedy ~sep:none (word ".." -- slash) >>:
+        fun l -> Relative (List.length l))
+
 let make_pattern cond_expr =
-    let anchor =
-        (slash >>: fun () -> Absolute) |||
-        (repeat_greedy ~sep:none (word ".." -- slash) >>:
-            fun l -> Relative (List.length l)) in
     let conditions =
         in_ '(' (list_of cond_expr) ')' >>: function
             | [] -> None
@@ -482,10 +484,10 @@ let stmt = fix (fun stmt ->
     with_loc (
         (* A stack sends a packet if its top layer is terminal, and is
          * otherwise that of the block that follows: *)
-        (optional ~def:false (slash >>: fun () -> true) ++
+        (anchor ++
          repeat ~min:1 ~sep:(maybe_next (slash -- nl_sp)) layer ++
          optional ~def:None (body >>: Option.some) >>:
-            fun ((absolute, layers), body) ->
+            fun ((anchor, layers), body) ->
                 let top = (List.last layers).layer_name in
                 (match body, terminal top with
                 | None, false ->
@@ -493,7 +495,7 @@ let stmt = fix (fun stmt ->
                 | Some _, true ->
                     reject "No block can follow %s, which sends" top
                 | _ -> ()) ;
-                Stack { absolute ; layers ; body }) |||
+                Stack { anchor ; layers ; body }) |||
         (block >>: fun b -> Block b) |||
         (variable ++ maybe_next (
             item '=' -- nay (item '=' ||| item '~') -- nl_sp -+ expr) >>:
@@ -607,6 +609,7 @@ let parse text =
   "x = a\n/IP {\n}\n" (reads "x = a\n/IP {}")
   "IP!(ttl=1)/TCP!(flags=2)/Bytes(\"x\")\n" \
     (reads "IP!(ttl=1)\\TCP!(flags=2)/Bytes(\"x\")")
+  "../../IP!/TCP!(flags=4)/Bytes\n" (reads "../../IP!/TCP!(flags=4)/Bytes()")
   "x = (y =~ /IP/UDP(dport == 53))\n" (reads "x = y =~ /IP/UDP(dport = 53)")
   "retry max=3 {\n  break\n}\n" (reads "retry 3 {\n  break\n}")
   "catch {\n  x = 1\n}\n" (reads "catch { x = 1 }")

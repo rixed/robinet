@@ -142,10 +142,9 @@ type layer =
 type stmt = { stmt_loc : location ; stmt : stmt_desc }
 
 and stmt_desc =
-    (* Those layers on top of the current stack, or on top of the root if
-     * [absolute]: the stack of [body] if any, or else a packet to send, its
-     * top layer being terminal: *)
-    | Stack of { absolute : bool ; layers : layer list ; body : block option }
+    (* Those layers on top of the [anchor]: the stack of [body] if any, or
+     * else a packet to send, its top layer being terminal: *)
+    | Stack of { anchor : anchor ; layers : layer list ; body : block option }
     | Block of block
     (* [x = e]: *)
     | Declare of string * expr
@@ -280,10 +279,12 @@ and print_bare_expr oc e =
     | Matches (e, p) -> Printf.fprintf oc "%a =~ %a" print_expr e print_pattern p
     | _ -> print_expr oc e
 
-and print_pattern oc p =
-    (match p.anchor with
+and print_anchor oc = function
     | Absolute -> Char.print oc '/'
-    | Relative n -> for _ = 1 to n do String.print oc "../" done) ;
+    | Relative n -> for _ = 1 to n do String.print oc "../" done
+
+and print_pattern oc p =
+    print_anchor oc p.anchor ;
     List.print ~first:"" ~last:"" ~sep:"/" (fun oc l ->
         Printf.fprintf oc "%s%s" l.pl_name (if l.pl_manual then "!" else "") ;
         Option.may (Printf.fprintf oc "(%a)" print_bare_expr) l.cond
@@ -297,8 +298,8 @@ let rec print_stmt indent oc s =
     let param name = Option.may (Printf.fprintf oc " %s=%a" name print_expr) in
     String.print oc (String.make indent ' ') ;
     match s.stmt with
-    | Stack { absolute ; layers ; body } ->
-        if absolute then Char.print oc '/' ;
+    | Stack { anchor ; layers ; body } ->
+        print_anchor oc anchor ;
         List.print ~first:"" ~last:"" ~sep:"/" print_layer oc layers ;
         Option.may (fun b -> Char.print oc ' ' ; print_block indent oc b) body
     | Block b -> print_block indent oc b

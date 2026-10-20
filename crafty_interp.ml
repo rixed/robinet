@@ -298,15 +298,29 @@ type t =
       output : output ;
       tree : Crafty_tree.node }
 
-(* The stack of [env] with these layers on top, their nodes held by [b] (but
- * for the root, which stays, and for a terminal layer's, which goes with its
- * parent). The options are those of this stack, not of its nodes. Raises
- * [Failed]. *)
-let push t b env absolute (layers : T.layer list) =
-    let base = if absolute then [] else env.stack in
-    List.fold_left (fun stack (l : T.layer) ->
+(* The stack of [env] with these layers on top of its [depth] first ones,
+ * their nodes held by [b] (but for the root, which stays, and for a terminal
+ * layer's, which goes with its parent). The options are those of this stack,
+ * not of its nodes; the first [overlay] layers also take the key and the
+ * options (that they can set) of the layers of [env] they are over, unless
+ * they give them. Raises [Failed]. *)
+let push t b env depth overlay (layers : T.layer list) =
+    let n = List.length env.stack - depth in
+    let base = List.drop n env.stack
+    and over = List.rev (List.take n env.stack) in
+    List.fold_lefti (fun stack j (l : T.layer) ->
         let options =
             List.map (fun (i, e) -> i, eval t.output env e) l.options in
+        let options =
+            if j >= overlay then options else
+            let (o : Crafty_tree.entry) = List.nth over j in
+            let given (i, _) = List.mem_assoc i options in
+            let settable (i, _) = List.mem l.mode l.layer.fields.(i).set_in in
+            options @
+            List.filter (not % given) o.node.key @
+            List.filter (fun opt ->
+                not (given opt) && not (List.mem_assoc (fst opt) o.node.key) &&
+                settable opt) o.options in
         let node =
             match stack with
             | [] ->
@@ -344,16 +358,26 @@ let match_value packet =
 
 (* Registers [pattern] for block [b], its conditions evaluated in [env] at
  * match time; a relative pattern on the node of the stack it is on top of,
- * which is seen in the mode of the stack. Returns what unregisters it: *)
+ * which is seen in the mode of the stack. Its layers that are over layers
+ * of the stack match only the streams of their nodes. Returns what
+ * unregisters it: *)
 let register t b env (p : T.pattern) ~matched ~failed =
+    let over = List.rev (List.take (List.length env.stack - p.depth) env.stack) in
     let layers =
-        List.map (fun (pl : T.pattern_layer) ->
-            Crafty_tree.{
-                player = pl.pl_layer ; pmode = pl.pl_mode ;
-                test = Option.map (fun c packet ->
+        List.mapi (fun j (pl : T.pattern_layer) ->
+            let cond =
+                Option.map (fun c packet ->
                     match eval t.output { env with packet } c with
                     | Bool b -> b
-                    | _ -> assert false) pl.cond }) p.pat_layers in
+                    | _ -> assert false) pl.cond in
+            let test =
+                if j >= p.overlay then cond else
+                let (o : Crafty_tree.entry) = List.nth over j in
+                Some (fun packet ->
+                    Crafty_tree.of_stream o.node (snd (List.hd packet)) &&
+                    Option.map_default (fun c -> c packet) true cond) in
+            Crafty_tree.{ player = pl.pl_layer ; pmode = pl.pl_mode ; test }
+        ) p.pat_layers in
     let node, layers =
         if p.depth = 0 then t.tree, layers else
         let (e : Crafty_tree.entry) =
@@ -426,10 +450,10 @@ and exec t b env (s : T.stmt) k =
     | T.Catch body ->
         ignore (run_block t b env body ~break_:b.break_ (fun () -> k env)
                     ~fail:(fun _ -> if b.live then k env))
-    | T.Stack { absolute ; layers ; body = Some body } ->
+    | T.Stack { depth ; overlay ; layers ; body = Some body } ->
         (* The block holds the nodes of its stack: *)
         let enter b env =
-            match push t b env absolute layers with
+            match push t b env depth overlay layers with
             | stack -> Some { env with stack }
             | exception Failed message ->
                 b.fail Crafty_parser.{ where = s.stmt_loc ; message } ; None
@@ -437,10 +461,10 @@ and exec t b env (s : T.stmt) k =
                 b.fail Crafty_parser.{ where ; message } ; None in
         ignore (run_block ~enter t b env body ~fail:b.fail ~break_:b.break_
                     (fun () -> k env))
-    | T.Stack { absolute ; layers ; body = None } ->
+    | T.Stack { depth ; overlay ; layers ; body = None } ->
         (* A packet, leaving the current stack as it was: *)
         guard (fun () ->
-            try Crafty_tree.send (push t b env absolute layers)
+            try Crafty_tree.send (push t b env depth overlay layers)
             with Failed msg -> error s.stmt_loc "%s" msg) |>
         Option.may (fun () -> k env)
     | T.Expect { timeout ; pattern ; match_ ; body } ->
@@ -952,15 +976,19 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs ~inject:[ 0.4, reply "pong" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on timeout=1s Bytes(\"pong\") { print(\"on\") }\n  expect Bytes(\"pong\") { print(\"expect\") } }")
 *)
-(* Patterns from the root, or going down the stack, make nodes for the
- * layers they matched, which their block holds: *)
+(* Patterns from the root, or on top of the stack, make nodes for the
+ * layers they matched, which their block holds; those over the layers of
+ * the stack see only their streams: *)
 (*$= runs & ~printer:identity
   "500ms: got Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)*1#2{UDP(src=7, dst=53)*1#1}}\n500ms: after Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)*1#2{UDP(src=7, dst=53)*1#1}}\n500ms: out Eth#2\n500ms: done Eth#2" \
     (runs ~trees:true ~inject:[ 0.2, reply ~dport:8 "a" ; 0.5, reply ~dport:7 "b" ] \
         "{ expect /IP(src == 10.0.0.2)/UDP(dst == 7) { print(\"got\") }\n  print(\"after\") }\nprint(\"out\")")
-  "500ms: 54 Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)*2#2{UDP(src=1000, dst=53)*1#1, UDP(src=1000, dst=54)*1#1}}\n1s: done Eth#2" \
+  "500ms: 54 Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)*2#2{UDP(src=1000, dst=54)*1#1}}\n1s: done Eth#2" \
     (runs ~trees:true ~inject:[ 0.2, reply "a" ; 0.5, reply ~sport:54 "b" ] \
-        "x = 53\n/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on timeout=1s ../UDP(src == x, IP.src == 10.0.0.2) { print(\"${MATCH[UDP].src}\") }\n  x := 54 }")
+        "x = 53\n/IP(dst=10.0.0.2) {\n  on timeout=1s UDP(src == x, IP.src == 10.0.0.2) { print(\"${MATCH[UDP].src}\") }\n  x := 54 }")
+  "500ms: a\n1s: done" \
+    (runs ~inject:[ 0.2, reply ~sport:54 "b" ; 0.5, reply "a" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on timeout=1s ../UDP { print(MATCH[Bytes].data) } }")
   "500ms: fragment 0\n500ms1ps: fragment 2\n500ms1ps: in two fragments\n1s1ps: done" \
     (runs ~inject:(List.map (fun f -> 0.5, incoming f) (Ip.Pdu.fragment 36 (udp_packet ~id:2 53 1000 "in two fragments"))) \
         "/IP(dst=10.0.0.2) {\n  on timeout=1s ../IP!(is_fragment) { print(\"fragment ${MATCH[IP].frag_offset}\") }\n  on timeout=1s ../IP/UDP { print(MATCH[Bytes].data) } }")
@@ -1137,10 +1165,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         "/IP(dst=10.0.0.2)/TCP(src=4001, dst=22) {\n  Bytes(#1ee7)\n  expect timeout=1s ../TCP!(flags & RST) { print(\"reset\") } }")
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn \"\"\na 0.000s: connected!\na 0.000s: done Eth#2\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"" \
     (with_host ~setup:tcp_echo ~frames:true \
-        "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  { /IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=123)/Bytes() }\n  expect timeout=1s ../TCP!(flags == SYN | ACK) {\n    { /IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=ACK, seq_num=124, ack_num=MATCH[TCP].seq_num + 1)/Bytes() }\n    print(\"connected!\") } }")
+        "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  ../TCP!(flags=SYN, seq_num=123)/Bytes()\n  expect timeout=1s ../TCP!(flags == SYN | ACK) {\n    ../TCP!(flags=ACK, seq_num=124, ack_num=MATCH[TCP].seq_num + 1)/Bytes()\n    print(\"connected!\") } }")
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hello\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hello\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \" world\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \" world\"\na 0.000s: failed: line 7, column 3: This TCP connection is closed Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=4000, dst=7)#3{Bytes#4}}}\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Rst \"\"" \
     (with_host ~setup:tcp_echo ~frames:true \
-        "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Bytes(\"hello\")\n  expect timeout=1s Bytes(\"hello\") {}\n  { /IP(dst=10.0.0.2)/TCP!(src=4000, dst=7)/Bytes(\" world\") }\n  expect timeout=1s Bytes(\" world\") {}\n  { /IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=RST)/Bytes() }\n  Bytes(\"too late\") }")
+        "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Bytes(\"hello\")\n  expect timeout=1s Bytes(\"hello\") {}\n  ../TCP!/Bytes(\" world\")\n  expect timeout=1s Bytes(\" world\") {}\n  ../TCP!(flags=RST)/Bytes()\n  Bytes(\"too late\") }")
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckRst \"\"\na 0.000s: 101\na 0.000s: done Eth#2" \
     (with_host ~frames:true \
         "/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=100)/Bytes()\nexpect timeout=1s /IP/TCP!(src == 7, flags & RST) { print(\"${MATCH[TCP].ack_num}\") }")
