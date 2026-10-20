@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 dd46faa9dcecd7835c07079ba4cd258d) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 ec1c9498896e6be1a393d4dda5de5b87) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -406,8 +406,6 @@ nodes it held.
 | `array(init=v, len=n)`               | An array of `n` items, all `v`.      |
 +--------------------------------------+--------------------------------------+
 | `length(a)`                          | The length of an array or a string.  |
-+--------------------------------------+--------------------------------------+
-| `get(a=a, index=i)`                  | The same as `a[i]`.                  |
 +--------------------------------------+--------------------------------------+
 
 An argument can be left unnamed when the function has a single parameter, or

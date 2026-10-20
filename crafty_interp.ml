@@ -136,10 +136,6 @@ let call loc (b : T.builtin) args ~print ~print_err ~now =
         Array (Array.make len init)
     | T.Length, [ Array a ] -> Int (Array.length a)
     | T.Length, [ String s ] -> Int (String.length s)
-    | T.Get, [ Array a ; Int i ] ->
-        if i < 0 || i >= Array.length a then
-            error loc "No item %d in an array of length %d" i (Array.length a) ;
-        a.(i)
     | T.Print, [ String s ] -> print s ; Void
     | T.Print_err, [ String s ] -> print_err s ; Void
     | T.Assert, [ cond ; String msg ] ->
@@ -933,7 +929,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: failed: line 1, column 10: 2026-10-20T00:00:00Z - 1970-01-01T00:00:00Z is too long an interval" \
     (runs "print(\"${2026-10-20T00:00Z - time(0)}\")")
   "0s: [1.5, 1.5] 2 1.5 4\n0s: done" \
-    (runs "x = array(init=1.5, len=2)\nprint(\"${x} ${length(x)} ${get(a=x, index=1)} ${length(randbytes(4))}\")")
+    (runs "x = array(init=1.5, len=2)\nprint(\"${x} ${length(x)} ${x[1]} ${length(randbytes(4))}\")")
   "0s: failed: line 3, column 1: Assertion failed: (x * 2) == 5" \
     (runs "x = 2\nassert(x * 2 == 4)\nassert(x * 2 == 5)\nprint(\"not reached\")")
   "0s: failed: line 2, column 1: x is 3" \
@@ -947,7 +943,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: failed: line 1, column 4: Division by zero" \
     (runs "if 1 / 0 > 0 {}\nprint(\"not reached\")")
   "0s: failed: line 1, column 5: No item -1 in an array of length 1" \
-    (runs "x = get(a=[1], index=-1)")
+    (runs "x = [1][-1]")
   "line 2, column 1: Unknown variable y" \
     (runs "x = #0102\ny := x")
   "0s: a\n1s500ms: b\n1s500ms: done" \

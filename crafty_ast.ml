@@ -216,8 +216,8 @@ type program = block
  * Lower case. *)
 let functions =
     [ "rand" ; "randbytes" ; "exp" ; "ln" ; "log" ; "log2" ; "int" ; "float" ;
-      "bool" ; "byte" ; "interval" ; "time" ; "now" ; "array" ; "length" ; "get" ; "print" ;
-      "print_err" ; "assert" ]
+      "bool" ; "byte" ; "interval" ; "time" ; "now" ; "array" ; "length" ;
+      "print" ; "print_err" ; "assert" ]
 
 (** Variables that the language defines, which are case insensitive as are
  * all the names that the user does not choose. Lower case. *)

@@ -41,7 +41,7 @@ type var = { name : string ; id : int ; typ : Type.t }
 type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
     | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
-    | Make_array | Length | Get | Print | Print_err | Assert
+    | Make_array | Length | Print | Print_err | Assert
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
 
@@ -321,9 +321,6 @@ let builtins =
         [ param "a" "an array" (fun t ->
             if t = Type.String then Some t else any_array t) ],
         res Type.Int ;
-      "get", Get,
-        [ param "a" "an array" any_array ; param "index" "an int" (only Type.[ Int ]) ],
-        (function Type.Array t :: _ -> t | _ -> assert false) ;
       "print", Print, [ param "s" "a string" (only Type.[ String ]) ], res Type.Void ;
       "print_err", Print_err, [ param "s" "a string" (only Type.[ String ]) ],
         res Type.Void ;
@@ -922,7 +919,7 @@ let check (program : A.program) =
   "x: float, y: int, z: bool" \
     (types "x = rand()\ny = rand(10)\nz = rand(max=true)")
   "x: int[], y: int, z: int" \
-    (types "x = array(init=0, len=3)\ny = get(a=x, index=1)\nz = length(x)")
+    (types "x = array(init=0, len=3)\ny = x[1]\nz = length(x)")
   "x: int, y: bool, z: interval, b: bool" \
     (types "x = int(1.5) + log2(8)\ny = 1.2.3.4 == #01020304\nz = -1s\nb = !3 && 1")
   "x: float" \

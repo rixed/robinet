@@ -308,7 +308,6 @@ and the nodes it held.
 | `now()` | The current time: the clock of the host when crafty runs a program. |
 | `array(init=v, len=n)` | An array of `n` items, all `v`. |
 | `length(a)` | The length of an array or a string. |
-| `get(a=a, index=i)` | The same as `a[i]`. |
 
 An argument can be left unnamed when the function has a single parameter,
 or when it is the only parameter without a default (`assert(x == 4)`).
