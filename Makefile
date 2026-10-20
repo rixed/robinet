@@ -39,6 +39,7 @@ LIB_SOURCES  = \
 	synth.ml \
 	sockopt.ml \
 	hub.ml \
+	policer.ml \
 	host.ml \
 	named.ml \
 	localhost.ml \

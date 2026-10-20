@@ -68,6 +68,11 @@ let param = Widget.param
  * side by side here. *)
 type model =
     | TTap
+    (* The duration in seconds: *)
+    | TPolicer of { start : Policer.start ; max_packets : int option ;
+                    max_volume : int option ; max_packet_rate : float option ;
+                    max_throughput : float option ;
+                    max_duration : float option }
     | THub of { ports : int ; speed : Eth.Speed.t }
     | TSwitch of { ports : int ; speeds : Eth.Speed.t list ;
                    full_duplex : bool ; macs : int }
@@ -243,6 +248,34 @@ let tap =
                and 1 to its ports 2 and 3, one port per direction." ;
       params = [] ;
       of_params = fun _ -> TTap }
+
+let policer =
+    { name = "policer" ;
+      descr = "Drops what goes from its port 0 to its port 1 beyond some \
+               limits: totals that, once reached, drop everything until \
+               reset, and rates beyond which it drops." ;
+      params = [
+          param "start" ~kind:(Widget.one_of (Widget.choices Policer.start_names))
+              ~default:(`Int 0)
+              ~descr:"When the duration starts counting." ;
+          param "max packets" ~kind:(Widget.optional (IRange (0, max_int)))
+              ~descr:"How many packets may pass." ;
+          param "max volume" ~kind:(Widget.optional (IRange (0, max_int)))
+              ~descr:"How many bytes of frames may pass." ;
+          param "max duration" ~kind:(Widget.optional Duration)
+              ~descr:"For how long frames may pass." ;
+          param "max packet rate" ~kind:(Widget.optional (FRange (0., infinity)))
+              ~descr:"How many packets may pass per second." ;
+          param "max throughput" ~kind:(Widget.optional (FRange (0., infinity)))
+              ~descr:"How many bytes of frames may pass per second." ] ;
+      of_params = fun args ->
+          TPolicer {
+              start = Policer.start_of_int (int args "start") ;
+              max_packets = opt args "max packets" Widget.to_int ;
+              max_volume = opt args "max volume" Widget.to_int ;
+              max_duration = opt args "max duration" Widget.to_float ;
+              max_packet_rate = opt args "max packet rate" Widget.to_float ;
+              max_throughput = opt args "max throughput" Widget.to_float } }
 
 let hub =
     { name = "hub" ;
@@ -586,6 +619,7 @@ let note =
 (** What kind of device a model describes, named as the catalogue names it. *)
 let type_of = function
     | TTap -> "tap"
+    | TPolicer _ -> "policer"
     | THub _ -> "hub"
     | TSwitch _ -> "switch"
     | THost _ -> "host"
@@ -619,6 +653,14 @@ let to_params =
     function
     | TTap ->
         []
+    | TPolicer { start ; max_packets ; max_volume ; max_packet_rate ;
+                 max_throughput ; max_duration } ->
+        [ "start", `Int (Policer.int_of_start start) ;
+          "max packets", int_opt max_packets ;
+          "max volume", int_opt max_volume ;
+          "max duration", float_opt max_duration ;
+          "max packet rate", float_opt max_packet_rate ;
+          "max throughput", float_opt max_throughput ]
     | THub { ports ; speed } ->
         [ "ports", `Int ports ;
           "speed", `Int (Array.findi ((=) speed) Hub.Repeater.speeds) ]
@@ -691,6 +733,14 @@ let build ~parent name = function
     | TTap ->
         let t = Hub.Tap.make ~parent name in
         t.Hub.Tap.widget, TTap
+    | TPolicer { start ; max_packets ; max_volume ; max_packet_rate ;
+                 max_throughput ; max_duration } as m ->
+        let t =
+            Policer.make ~parent ~start ?max_packets ?max_volume
+                ?max_packet_rate ?max_throughput
+                ?max_duration:(Option.map Clock.Interval.of_secs max_duration)
+                name in
+        t.Policer.widget, m
     | THub { ports ; speed } as m ->
         let t = Hub.Repeater.make ~parent ~speed ports name in
         t.Hub.Repeater.widget, m
@@ -801,8 +851,8 @@ let build ~parent name = function
  * offers them: what a network is mostly made of first, and what is not a
  * device at all last. *)
 let all =
-    [ host ; switch ; hub ; tap ; router ; gateway ; portal ; recorder ;
-      replayer ; synthesizer ; cable ; note ]
+    [ host ; switch ; hub ; tap ; policer ; router ; gateway ; portal ;
+      recorder ; replayer ; synthesizer ; cable ; note ]
 
 let find name =
     List.find_opt (fun t -> t.name = name) all

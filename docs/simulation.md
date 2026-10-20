@@ -211,6 +211,29 @@ A recorder takes as many cables as it is given, so both directions usually go
 to the same one: a cable from port 2 and another from port 3, both to the
 recorder. With only one of the two, only that direction is written down.
 
+### policer
+
+Drops what goes from port 0 to port 1 beyond some limits; what goes from port 1
+to port 0 passes as it is. Like a tap, it is transparent to negotiation. It has
+a power switch, and passes nothing while off.
+
+| param | kind | default | |
+| --- | --- | --- | --- |
+| `start` | `0` (at power on) or `1` (at first packet) | `0` | When the duration starts counting. |
+| `max packets` | optional int | `null` | How many packets may pass. |
+| `max volume` | optional int | `null` | How many bytes of frames may pass. |
+| `max duration` | optional duration | `null` | For how long frames may pass. |
+| `max packet rate` | optional float | `null` | Packets per second. |
+| `max throughput` | optional float | `null` | Bytes of frames per second. |
+
+A limit on a total (packets, volume, duration), once reached, drops everything
+until its flag (`max packets reached`, `max volume reached`, `expired`) is
+reset to false, which starts its count again (the duration from then, or from
+the next packet). A limit on a rate drops what goes beyond it, a second's worth
+being allowed at once. The `dropped` metric counts what was dropped, by the
+limit that dropped it (`max-packets`, `max-volume`, `expired`,
+`max-packet-rate`, `max-throughput`).
+
 ### router
 
 Forwards packets between its interfaces. It arrives with an **empty routing
@@ -376,6 +399,7 @@ under:
 | | `#0`… | *its ports* |
 | hub | `""` | `speed` |
 | tap | | *none* |
+| policer | `""` | `max packets`, `max volume`, `max duration`, `max packet rate`, `max throughput`; the flags `max packets reached`, `max volume reached`, `expired` (which are only reset); and, read only, `start`, `packets`, `volume`, `elapsed` |
 | router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin`, `buffer capacity` |
 | | `#0`… | *its interfaces*, and `link fragmentation`, `max queue delay`, `errors probability`, `errors delay` |
 | | `#0/admin@0`… | `hostname`, `search suffix` — the stack answering for the address that interface holds |
