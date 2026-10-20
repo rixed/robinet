@@ -17,7 +17,10 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
-(** Runs a typed crafty program on a robinet simulation.
+(** Compiles crafty programs, and runs them on an Ethernet interface of a
+   robinet simulation. What a program may send is bounded by what its
+   interface is connected to, such as a {!Policer}, whose [on_limit] can stop
+   the program.
 
    Everything happens in the callbacks of the simulation's scheduler, in
    continuation passing style: a statement is given what to do once it is
@@ -582,11 +585,11 @@ type handle =
     { stop : unit -> unit ;
       status : unit -> status }
 
-(** Runs [program] on [power]'s simulation, starting at once, sending and
+(* Runs [program] on [power]'s simulation, starting at once, sending and
  * receiving through [tree] (from {!Crafty_tree.make_root}), writing with
  * [print] and [print_err], and calling [on_exit] with its final status
  * (possibly before returning). *)
-let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
+let run_on_tree power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
     let status = ref Running in
     let t = { power ; output = { print ; print_err } ; tree } in
     let exit s =
@@ -602,6 +605,57 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
                 (fun () -> cancel root ; exit Done)) ;
     { stop = (fun () -> cancel root ; exit Stopped) ;
       status = (fun () -> !status) }
+
+type program = Crafty_typing.block
+
+let print_error = Crafty_parser.print_error
+
+(** The program, or all the errors found in it, in the order of the source. *)
+let compile text : (program, error list) result =
+    match Crafty_parser.parse text with
+    | Error e -> Error [ e ]
+    | Ok p -> Crafty_typing.check p
+
+let print_status oc = function
+    | Running -> String.print oc "running"
+    | Done -> String.print oc "done"
+    | Failed e -> Printf.fprintf oc "failed: %a" print_error e
+    | Stopped -> String.print oc "stopped"
+
+(** Runs [program] on a new Ethernet interface under [parent], of address
+ * [mac] and [ip] (in [netmask]), sending beyond its subnet to [gateway],
+ * printing with [print] and [print_err], and calling [on_exit] with how it
+ * ends. Returns the device of the interface, and a handle to stop the
+ * program or ask its status. The program starts at the next tick of the
+ * simulation, once that device can be connected. *)
+let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?(print=ignore)
+        ?(print_err=ignore) ?(on_exit=ignore) (program : program) =
+    let gateways =
+        Option.map_default (fun gw ->
+            [ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw) ]) [] gateway in
+    let eth =
+        Eth.State.make ~parent ~name ~mac ~gateways
+            ~my_addresses:[ Eth.State.make_my_ip_address ?netmask ip ] () in
+    let power = eth.iface.widget.power in
+    let tree = Crafty_tree.make_root eth in
+    let started = ref None and stopped = ref false in
+    Simulation.asap power (fun () ->
+        if not !stopped then
+            started :=
+                Some (run_on_tree power tree ~print ~print_err ~on_exit program)
+    ) () ;
+    Eth.Iface.dev eth.iface,
+    { stop = (fun () ->
+        match !started with
+        | Some (h : handle) -> h.stop ()
+        | None ->
+            if not !stopped then (
+                stopped := true ;
+                on_exit Stopped)) ;
+      status = (fun () ->
+        match !started with
+        | Some h -> h.status ()
+        | None -> if !stopped then Stopped else Running) }
 
 (* [runs ?stop_at ?trees ?frames ?inject text] is what the program in that text
  * prints, each line with the time it is printed at (and with [trees], the
@@ -738,7 +792,7 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
                   Simulation.at sim.root.power (Clock.Time.of_secs t)
                       (fun () -> eth.Eth.State.iface.Eth.Iface.recv frame) ()) inject ;
               let h =
-                  run sim.root.power tree ~print:(line "") ~print_err:(line "err ")
+                  run_on_tree sim.root.power tree ~print:(line "") ~print_err:(line "err ")
                       ~on_exit:(function
                           | Done -> line "" "done"
                           | Failed e ->
@@ -991,7 +1045,7 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
       let tree = Crafty_tree.make_root eth in
       let line s =
           out := Printf.sprintf "%s %.3fs: %s" name (Clock.Time.to_secs (Simulation.now sim)) s :: !out in
-      ignore (run sim.SimTypes.root.power tree ~print:line ~print_err:(fun s -> line ("err "^ s))
+      ignore (run_on_tree sim.SimTypes.root.power tree ~print:line ~print_err:(fun s -> line ("err "^ s))
           ~on_exit:(function
               | Done -> line ("done "^ Crafty_tree.to_string tree)
               | Failed e -> line ("failed: "^ IO.to_string Crafty_parser.print_error e ^" "^ Crafty_tree.to_string tree)
@@ -1127,4 +1181,52 @@ let run power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckRst \"\"\na 0.000s: 101\na 0.000s: done Eth#2" \
     (with_host ~frames:true \
         "/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=100)/Bytes()\nexpect timeout=1s /IP/TCP!(src == 7, flags & RST) { print(\"${MATCH[TCP].ack_num}\") }")
+*)
+(* [policed ?limits ?stop_at ?stop text] is what the program in that text prints,
+ * each line with the time to the millisecond, how it ends, then how many
+ * frames went through a policer with these limits, which stops the program
+ * when one is hit; or why it does not compile. It is at 10.0.0.1/24, behind
+ * the gateway 02:00:00:00:00:fe. It is stopped at [stop_at] seconds, or with
+ * [stop] as soon as it is run. *)
+(*$inject
+  let policed ?max_packets ?max_packet_rate ?stop_at ?(stop=false) text =
+      match Crafty_interp.compile text with
+      | Error es -> String.concat "\n" (List.map (IO.to_string print_error) es)
+      | Ok p ->
+          let sim = Simulation.make ~realtime:false "crafty-api" in
+          let out = ref [] and frames = ref 0 in
+          let line s =
+              out := Printf.sprintf "%.3fs: %s" (Clock.Time.to_secs (Simulation.now sim)) s :: !out in
+          let dev, h =
+              run ~parent:sim.SimTypes.root ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
+                  ~ip:(Ip.Addr.of_string "10.0.0.1") ~netmask:(Ip.Addr.of_string "255.255.255.0")
+                  ~gateway:(Eth.Addr.of_string "02:00:00:00:00:fe")
+                  ~print:line ~print_err:line
+                  ~on_exit:(fun s -> line (IO.to_string print_status s)) p in
+          let policer =
+              Policer.make ~parent:sim.root ?max_packets ?max_packet_rate
+                  ~on_limit:(fun l -> line ("hit "^ Policer.string_of_limit l) ; h.stop ()) "policer" in
+          Simulation.power_up policer.widget.power ;
+          Tools.(dev --> policer.widget.ports.dev 0) ;
+          Tools.(policer.widget.ports.dev 1 --> sink (fun _ -> incr frames)) ;
+          if stop then h.stop () ;
+          Option.may (fun t -> Simulation.at sim.root.power (Clock.Time.of_secs t) h.stop ()) stop_at ;
+          Simulation.run sim false ;
+          String.concat "\n" (List.rev !out) ^ Printf.sprintf "\n%d frames" !frames
+
+  let pings = "/IP(dst=1.2.3.4)/UDP(src=1000, dst=7) { repeat count=500 every=1ms { Bytes(\"ping\") } }"
+*)
+(*$= policed & ~printer:identity
+  "line 1, column 5: Cannot apply + to a string and an int\nline 2, column 1: Unknown variable y" \
+    (policed "x = \"a\" + 1\ny := 2")
+  "line 1, column 5: Expected expression in statement" \
+    (policed "x = ")
+  "0.000s: hello\n0.000s: done\n1 frames" \
+    (policed "print(\"hello\")\n/IP(dst=1.2.3.4)/UDP(src=1000, dst=7)/Bytes(\"x\")")
+  "0.003s: hit max-packets\n0.003s: stopped\n3 frames" (policed ~max_packets:3 pings)
+  "0.003s: hit max-packets\n0.003s: stopped\n3 frames" \
+    (policed ~max_packets:3 ("catch { "^ pings ^" }\nprint(\"not caught\")"))
+  "0.110s: hit max-packet-rate\n0.110s: stopped\n110 frames" (policed ~max_packet_rate:100. pings)
+  "0.100s: stopped\n100 frames" (policed ~stop_at:0.1 pings)
+  "0.000s: stopped\n0 frames" (policed ~stop:true pings)
 *)
