@@ -665,11 +665,11 @@ let ip =
         field "tos" Type.Int ~set_in:both ~read_in:both ;
         field "ttl" Type.Int ~set_in:both ~read_in:both ;
         field "dont_frag" Type.Bool ~set_in:both ~read_in:both ;
-        field "id" Type.Int ;
+        field "id" Type.Int ~read_in:both ;
         field "more_frags" Type.Bool ;
         field "frag_offset" Type.Int ;
         field "tot_len" Type.Int ;
-        field "options" Type.bytes ;
+        field "options" Type.bytes ~read_in:both ;
         field "is_fragment" Type.Bool ~set_in:[] ]
 
 let tcp =

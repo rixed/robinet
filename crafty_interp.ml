@@ -989,9 +989,9 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "500ms: a\n1s: done" \
     (runs ~inject:[ 0.2, reply ~sport:54 "b" ; 0.5, reply "a" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on timeout=1s ../UDP { print(MATCH[Bytes].data) } }")
-  "500ms: fragment 0\n500ms1ps: fragment 2\n500ms1ps: in two fragments\n1s1ps: done" \
+  "500ms: fragment 0\n500ms1ps: fragment 2\n500ms1ps: id 2\n500ms1ps: in two fragments\n1s1ps: done" \
     (runs ~inject:(List.map (fun f -> 0.5, incoming f) (Ip.Pdu.fragment 36 (udp_packet ~id:2 53 1000 "in two fragments"))) \
-        "/IP(dst=10.0.0.2) {\n  on timeout=1s ../IP!(is_fragment) { print(\"fragment ${MATCH[IP].frag_offset}\") }\n  on timeout=1s ../IP/UDP { print(MATCH[Bytes].data) } }")
+        "/IP(dst=10.0.0.2) {\n  on timeout=1s ../IP!(is_fragment) { print(\"fragment ${MATCH[IP].frag_offset}\") }\n  on timeout=1s ../IP/UDP { print(\"id ${MATCH[IP].id}\") ; print(MATCH[Bytes].data) } }")
 *)
 (* ICMP, with the code of an error: *)
 (*$= runs & ~printer:identity
