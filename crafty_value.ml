@@ -30,6 +30,7 @@ type value =
     | Float of float
     | String of string
     | Interval of Interval.t
+    | Time of Clock.Wall.t
     | Ip of Ip.Addr.t
     | Mac of Eth.Addr.t
     (* In the order of the fields of the record type: *)
@@ -43,6 +44,7 @@ let of_literal = function
     | A.Float f -> Float f
     | A.Byte b -> Byte b
     | A.Interval i -> Interval i
+    | A.Time t -> Time t
     | A.Ip ip -> Ip ip
     | A.Mac mac -> Mac mac
 
@@ -65,6 +67,7 @@ let rec to_string (typ : A.Type.t) v =
     | _, Float f -> A.string_of_float f
     | _, String s -> s
     | _, Interval i -> Interval.to_string i
+    | _, Time t -> Clock.Wall.to_iso8601 t
     | _, Ip ip -> Ip.Addr.to_dotted_string ip
     | _, Mac mac ->
         Tools.hexstring ~sep:":" (Bitstring.string_of_bitstring (mac_bits mac))
@@ -94,6 +97,7 @@ let rec equal a b =
 let compare_values a b =
     match a, b with
     | Interval a, Interval b -> Interval.compare a b
+    | Time a, Time b -> Clock.Wall.compare a b
     | a, b -> compare a b
 
 (* The bits of a byte array: *)

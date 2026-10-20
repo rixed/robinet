@@ -106,6 +106,7 @@ Done after 0.2s, status: OK.
 | bytes      | `#deadbeef`, or a string where bytes are expected | An array of bytes; an odd number of digits is an error. |
 | `string`   | `"text ${expr}"`                             | See below. |
 | `interval` | `5s`, `10ms`, `1m30s`, `1.5ms`, `-2s`        | Units: `d`, `h`, `m`, `s`, `ms`, `us` (or `µs`), `ns`, `ps`. |
+| `time`     | `2026-10-20T22:02:45Z`, `2026-10-20T22:02+02:00`, `2026-10-20T22:02` | ISO 8601, with the `T` and the hour and minute; seconds (with a fraction, as in `:45.25`) and zone are optional. Without a zone, in the local time of the host. Written in UTC (`2026-10-20T20:02:00Z`). |
 | `ip`       | `192.0.2.1`                                  | IPv4 only. |
 | `mac`      | `aa:bb:cc:dd:ee:ff`                          | |
 | arrays     | `[1, 2, 3]`                                  | Items of one type. |
@@ -124,7 +125,7 @@ expected, such as to `print`, are taken as text.
 string to bytes and back, bytes to an IP address (4 bytes) or a MAC address
 (6 bytes, checked at run time). An int is a bool where one is expected
 (non-zero is true). Other conversions use the functions `int`, `float`,
-`bool`, `byte` and `interval`.
+`bool`, `byte`, `interval` and `time`.
 
 ### Variables
 
@@ -147,11 +148,11 @@ Operators, from the tightest binding to the loosest:
 |-----------|---------|
 | `!x`, `-x` | not, negation |
 | `*`, `/`, `%` | on ints and floats; an interval can be multiplied or divided by a number |
-| `+`, `-` | on ints and floats, and between intervals |
+| `+`, `-` | on ints and floats, and between intervals; a time minus a time is an interval, and a time plus or minus an interval, or a number of seconds, is a time |
 | `&` | bitwise and (ints or bytes) |
 | `^` | bitwise exclusive or |
 | `\|` | bitwise or |
-| `==`, `!=`, `<`, `<=`, `>`, `>=` | comparisons, which do not chain; ordering works on numbers, bytes, intervals and strings |
+| `==`, `!=`, `<`, `<=`, `>`, `>=` | comparisons, which do not chain; ordering works on numbers, bytes, intervals, times and strings |
 | `&&` | and |
 | `\|\|` | or |
 
@@ -292,6 +293,8 @@ and the nodes it held.
 | `log2(n)` | The integer base 2 logarithm of a positive int. |
 | `int(x)`, `float(x)`, `bool(x)`, `byte(x)` | Conversions between bools, ints, floats and bytes (`byte` keeps the low 8 bits). |
 | `interval(secs)` | The interval of that many seconds. |
+| `time(secs)` | The time that many seconds after 1970-01-01T00:00:00Z. |
+| `now()` | The current time: the clock of the host when crafty runs a program. |
 | `array(init=v, len=n)` | An array of `n` items, all `v`. |
 | `length(a)` | The length of an array or a string. |
 | `get(a=a, index=i)` | The same as `a[i]`. |

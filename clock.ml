@@ -370,6 +370,8 @@ module Wall : sig
     val compare : t -> t -> int
     val trunc : t -> Interval.t -> t
     val to_ints : t -> int * int
+    val of_date : ?utc_offset:Interval.t -> int -> int -> int -> int -> int -> float -> t
+    val to_iso8601 : t -> string
     val beginning_of_time : t
     val end_of_time : t
 end = struct
@@ -445,6 +447,79 @@ end = struct
         let sec  = Int.of_float t in
         let usec = Int.of_float ((t -. (floor t)) *. 1_000_000.) in
         sec, usec
+
+    let is_leap y = y mod 4 = 0 && (y mod 100 <> 0 || y mod 400 = 0)
+
+    let days_in_month y m =
+        match m with
+        | 2 -> if is_leap y then 29 else 28
+        | 4 | 6 | 9 | 11 -> 30
+        | _ -> 31
+
+    (* Days from 1970-01-01 to that day of the proleptic Gregorian calendar: *)
+    let days_from_civil y m d =
+        let y = if m <= 2 then y - 1 else y in
+        let era = (if y >= 0 then y else y - 399) / 400 in
+        let yoe = y - era * 400 in
+        let doy = (153 * (if m > 2 then m - 3 else m + 9) + 2) / 5 + d - 1 in
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy in
+        era * 146097 + doe - 719468
+
+    (** The instant of that [year], [month] (from 1), [day], [hour], [minute]
+     * and [second] (with its fraction), which are [utc_offset] ahead of UTC,
+     * or else in the local time of the host. Raises [Invalid_argument] for a
+     * date that does not exist. *)
+    let of_date ?utc_offset year month day hour minute second =
+        if month < 1 || month > 12 then
+            invalid_arg (Printf.sprintf "No month %d" month) ;
+        if day < 1 || day > days_in_month year month then
+            invalid_arg (Printf.sprintf "No day %d in month %d of %d" day month year) ;
+        if hour > 23 || minute > 59 || second < 0. || second >= 61. then
+            invalid_arg (Printf.sprintf "No time %02d:%02d:%g" hour minute second) ;
+        match utc_offset with
+        | Some off ->
+            let secs = (days_from_civil year month day * 24 + hour) * 3600 + minute * 60 in
+            o (float_of_int secs +. second -. Interval.to_secs off)
+        | None ->
+            let tm = Unix.{ tm_year = year - 1900 ; tm_mon = month - 1 ;
+                            tm_mday = day ; tm_hour = hour ; tm_min = minute ;
+                            tm_sec = 0 ; tm_wday = 0 ; tm_yday = 0 ;
+                            tm_isdst = false } in
+            o (fst (Unix.mktime tm) +. second)
+
+    (** As ISO 8601 writes it in UTC, to the microsecond: *)
+    let to_iso8601 (t : t) =
+        let us = int_of_float (Float.round ((t :> float) *. 1e6)) in
+        let sec = if us >= 0 then us / 1_000_000 else (us - 999_999) / 1_000_000 in
+        let us = us - sec * 1_000_000 in
+        let tm = Unix.gmtime (float_of_int sec) in
+        let frac =
+            if us = 0 then "" else
+            let s = Printf.sprintf "%06d" us in
+            let n = ref 6 in
+            while s.[!n - 1] = '0' do decr n done ;
+            "."^ String.sub s 0 !n in
+        Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02d%sZ"
+            (1900 + tm.tm_year) (1 + tm.tm_mon) tm.tm_mday tm.tm_hour tm.tm_min
+            tm.tm_sec frac
+
+    (*$= & ~printer:identity
+      "2026-10-20T22:02:45Z" \
+        Clock.Wall.(to_iso8601 (of_date ~utc_offset:Clock.Interval.zero 2026 10 20 22 2 45.))
+      "2026-10-20T20:02:45.25Z" \
+        Clock.Wall.(to_iso8601 (of_date ~utc_offset:(Clock.Interval.hour 2.) 2026 10 20 22 2 45.25))
+      "2024-02-29T00:00:00Z" \
+        Clock.Wall.(to_iso8601 (of_date ~utc_offset:Clock.Interval.zero 2024 2 29 0 0 0.))
+      "1969-12-31T23:59:59.5Z" Clock.Wall.(to_iso8601 (of_secs (-0.5)))
+      "1970-01-01T00:00:00.000001Z" Clock.Wall.(to_iso8601 (of_secs 1e-6))
+    *)
+    (*$= & ~printer:(Printf.sprintf "%.17g")
+      1792533765. Clock.Wall.(to_secs (of_date ~utc_offset:Clock.Interval.zero 2026 10 20 22 2 45.))
+    *)
+    (*$T
+      try ignore (Clock.Wall.of_date 2026 2 29 0 0 0.) ; false with Invalid_argument _ -> true
+      try ignore (Clock.Wall.of_date 2026 13 1 0 0 0.) ; false with Invalid_argument _ -> true
+    *)
 
     (* Sentinels, for a value that has to be an instant while meaning "not yet" or
      * "never": compare them, [max] them, but do not compute with them -- there is

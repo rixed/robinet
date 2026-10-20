@@ -231,13 +231,38 @@ let interval_lit =
                 try snd (String.rsplit msg ~by:": ") with Not_found -> msg in
             reject "Invalid interval %s: %s" s reason
 
+(* ISO 8601, in the local time of the host unless given a zone: *)
+let time_lit =
+    let num n = chars_of ~min:n ~max:n "digit" is_digit >>: int_of_string in
+    let two = num 2 in
+    let zone =
+        (char_if "time zone" (fun c -> c = 'Z' || c = 'z') >>:
+            fun _ -> Clock.Interval.zero) |||
+        (char_if "sign" (fun c -> c = '+' || c = '-') ++ two +- item ':' ++ two >>:
+            fun ((sign, h), m) ->
+                let off = Clock.Interval.(add (hour (float_of_int h)) (min (float_of_int m))) in
+                if sign = '-' then Clock.Interval.(sub zero off) else off) in
+    let seconds =
+        item ':' -+ chars_of ~min:2 ~max:2 "digit" is_digit ++
+        optional ~def:"" (item '.' -+ digits) >>:
+        fun (s, f) -> float_of_string (s ^"."^ f) in
+    num 4 +- item '-' ++ two +- item '-' ++ two +-
+    char_if "T" (fun c -> c = 'T' || c = 't') ++ two +- item ':' ++ two ++
+    optional ~def:0. seconds ++ optional ~def:None (zone >>: Option.some) +-
+    end_of_word >>:
+    fun ((((((y, mo), d), h), mi), s), utc_offset) ->
+        match Clock.Wall.of_date ?utc_offset y mo d h mi s with
+        | t -> Time t
+        | exception Invalid_argument msg -> reject "Invalid time: %s" msg
+
 let bool_lit =
     (keyword "true" >>: fun () -> Bool true) |||
     (keyword "false" >>: fun () -> Bool false)
 
 (* Of those that fail at the same place, the last one tried tells why: *)
 let literal =
-    interval_lit ||| bool_lit ||| ip_lit ||| mac_lit ||| float_lit ||| int_lit
+    time_lit ||| interval_lit ||| bool_lit ||| ip_lit ||| mac_lit ||| float_lit |||
+    int_lit
 
 (* One byte, or an array of them when more than two digits: *)
 let bytes_lit =
@@ -660,6 +685,21 @@ let parse text =
   "wait 1s * n\nrepeat count=n * 2 {\n}\n" (formats "wait dur=1s * n\nrepeat count=n*2 {}")
   "expect UDP(IP^.ttl == 3 && (a || b)) {\n}\n" \
     (formats "expect UDP(IP^.ttl = 3, a || b) {}")
+*)
+
+(* Times, printed in UTC; without a zone, in the local time of the host: *)
+(*$= reads & ~printer:identity
+  "x = 2026-10-20T22:02:45Z\n" (reads "x = 2026-10-20T22:02:45Z")
+  "x = 2026-10-20T20:02:45.25Z\n" (reads "x = 2026-10-20T22:02:45.25+02:00")
+  "x = (2026-10-20T23:00:00Z - 2026-10-20T22:00:00Z)\n" \
+    (reads "x = 2026-10-20t22:30-00:30 - 2026-10-20T22:00:00z")
+  "x = (2026-10-20T22:02:45Z - 1)\n" (reads "x = 2026-10-20T22:02:45Z-1")
+  "line 1, column 22: Invalid time: No day 30 in month 2 of 2026" \
+    (reads "x = 2026-02-30T00:00Z")
+*)
+(*$T reads
+  reads "x = 2026-10-20T22:02:45" = \
+    "x = "^ Clock.Wall.(to_iso8601 (of_date 2026 10 20 22 2 45.)) ^"\n"
 *)
 
 (* Formatted, a program reads back as itself: *)

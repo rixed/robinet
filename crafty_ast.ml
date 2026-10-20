@@ -70,7 +70,7 @@ end
 module Type =
 struct
     type t =
-        | Void | Bool | Byte | Int | Float | String | Interval | Ip | Mac
+        | Void | Bool | Byte | Int | Float | String | Interval | Time | Ip | Mac
         | Record of (string * t) list
         | Array of t
         | Variant of (string * t) list
@@ -86,6 +86,7 @@ struct
         | Float -> String.print oc "float"
         | String -> String.print oc "string"
         | Interval -> String.print oc "interval"
+        | Time -> String.print oc "time"
         | Ip -> String.print oc "ip"
         | Mac -> String.print oc "mac"
         | Record fs ->
@@ -115,6 +116,7 @@ type literal =
     | Float of float
     | Byte of int
     | Interval of Clock.Interval.t
+    | Time of Clock.Wall.t
     | Ip of Ip.Addr.t
     | Mac of Eth.Addr.t
 
@@ -207,7 +209,7 @@ type program = block
  * Lower case. *)
 let functions =
     [ "rand" ; "randbytes" ; "exp" ; "ln" ; "log" ; "log2" ; "int" ; "float" ;
-      "bool" ; "byte" ; "interval" ; "array" ; "length" ; "get" ; "print" ;
+      "bool" ; "byte" ; "interval" ; "time" ; "now" ; "array" ; "length" ; "get" ; "print" ;
       "print_err" ; "assert" ]
 
 (** Variables that the language defines, which are case insensitive as are
@@ -246,6 +248,7 @@ let print_literal oc = function
     | Float f -> String.print oc (string_of_float f)
     | Byte b -> Printf.fprintf oc "#%02x" b
     | Interval i -> String.print oc (Clock.Interval.to_string i)
+    | Time t -> String.print oc (Clock.Wall.to_iso8601 t)
     | Ip ip -> String.print oc (Ip.Addr.to_dotted_string ip)
     | Mac mac ->
         (* Not [Eth.Addr.to_string], which may name the vendor: *)

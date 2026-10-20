@@ -40,7 +40,7 @@ type var = { name : string ; id : int ; typ : Type.t }
 
 type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
-    | To_int | To_float | To_bool | To_byte | To_interval
+    | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
     | Make_array | Length | Get | Print | Print_err | Assert
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
@@ -160,6 +160,7 @@ let type_of_literal = function
     | A.Float _ -> Type.Float
     | A.Byte _ -> Type.Byte
     | A.Interval _ -> Type.Interval
+    | A.Time _ -> Type.Time
     | A.Ip _ -> Type.Ip
     | A.Mac _ -> Type.Mac
 
@@ -301,6 +302,10 @@ let builtins =
       "interval", To_interval,
         [ param "x" "a number of seconds" (only_exactly Type.[ Int ; Float ]) ],
         res Type.Interval ;
+      "time", To_time,
+        [ param "x" "a number of seconds since 1970" (only_exactly Type.[ Int ; Float ]) ],
+        res Type.Time ;
+      "now", Now, [], res Type.Time ;
       "array", Make_array,
         [ param "init" "a value" any_value ; param "len" "an int" (only Type.[ Int ]) ],
         (fun ts -> Type.Array (List.hd ts)) ;
@@ -530,6 +535,17 @@ and binop env loc op a b =
             mk Type.Interval (Binop (op, a, expect "" b Type.Float))
         | (Type.Int | Type.Float), Type.Interval when op = A.Mul ->
             mk Type.Interval (Binop (op, expect "" a Type.Float, b))
+        (* Numbers offset times by that many seconds: *)
+        | Type.Time, Type.Time when op = A.Sub ->
+            mk Type.Interval (Binop (op, a, b))
+        | Type.Time, Type.Interval when op = A.Add || op = A.Sub ->
+            mk Type.Time (Binop (op, a, b))
+        | Type.Interval, Type.Time when op = A.Add ->
+            mk Type.Time (Binop (op, a, b))
+        | Type.Time, (Type.Int | Type.Float) when op = A.Add || op = A.Sub ->
+            mk Type.Time (Binop (op, a, expect "" b Type.Float))
+        | (Type.Int | Type.Float), Type.Time when op = A.Add ->
+            mk Type.Time (Binop (op, expect "" a Type.Float, b))
         | _ -> cannot ())
     | A.BitAnd | A.BitOr | A.BitXor ->
         (match a.typ, b.typ with
@@ -547,7 +563,7 @@ and binop env loc op a b =
         mk Type.Bool (Binop (op, a, b))
     | A.Lt | A.Le | A.Gt | A.Ge ->
         let a, b = unify "compare" a b in
-        if not (List.mem a.typ Type.[ Int ; Float ; Byte ; Interval ; String ]) then
+        if not (List.mem a.typ Type.[ Int ; Float ; Byte ; Interval ; Time ; String ]) then
             error loc "Cannot order values of type %s" (tname a.typ) ;
         mk Type.Bool (Binop (op, a, b))
 
@@ -876,6 +892,8 @@ let check (program : A.program) =
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(dst == 53, IP.ttl < 3, ^IP.src = 1.2.3.4, Eth.proto == 0x800) { x = MATCH[UDP].src } }")
   "" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80) { expect ../TCP!(flags & RST, seq_num > 3) {}\n  expect ../TCP!/Bytes(data == \"x\") {} }")
+  "t: time, d: interval, u: time, v: time, w: bool" \
+    (types "t = now()\nd = t - time(0)\nu = t + 1\nv = 2.5 + t - 1s\nw = t < u")
 *)
 
 (* What makes no sense, and where; after an error in a declaration, the uses
@@ -969,6 +987,10 @@ let check (program : A.program) =
     (types "x = [1, \"a\"]")
   "line 1, column 5: Cannot apply / to an int and an interval" \
     (types "x = 3 / 2s")
+  "line 1, column 5: Cannot apply + to a time and a time" \
+    (types "x = now() + now()")
+  "line 1, column 5: Cannot apply - to an int and a time" \
+    (types "x = 1 - now()")
   "line 1, column 5: Unknown variable z\nline 3, column 1: Unknown variable w\nline 4, column 7: Argument s of print must be a string, not an int" \
     (types "x = z\ny = x + 1\nw := 1\nprint(2)")
 *)

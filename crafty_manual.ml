@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 c2cb5ac283205df03293e352b9f23dd6) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 25982b444db5b497fc9e63336a055ea8) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -105,6 +105,15 @@ let reference = {crafty_manual|### Lexical conventions
 |            | `1.5ms`, `-2s`                | `ms`, `us` (or `µs`), `ns`,   |
 |            |                               | `ps`.                         |
 +------------+-------------------------------+-------------------------------+
+| `time`     | `2026-10-20T22:02:45Z`,       | ISO 8601, with the `T` and    |
+|            | `2026-10-20T22:02+02:00`,     | the hour and minute; seconds  |
+|            | `2026-10-20T22:02`            | (with a fraction, as in       |
+|            |                               | `:45.25`) and zone are        |
+|            |                               | optional. Without a zone, in  |
+|            |                               | the local time of the host.   |
+|            |                               | Written in UTC                |
+|            |                               | (`2026-10-20T20:02:00Z`).     |
++------------+-------------------------------+-------------------------------+
 | `ip`       | `192.0.2.1`                   | IPv4 only.                    |
 +------------+-------------------------------+-------------------------------+
 | `mac`      | `aa:bb:cc:dd:ee:ff`           |                               |
@@ -126,8 +135,8 @@ expected, such as to `print`, are taken as text.
 **Conversions** happen where needed: an int to a float, a byte to an int, a
 string to bytes and back, bytes to an IP address (4 bytes) or a MAC address (6
 bytes, checked at run time). An int is a bool where one is expected (non-zero is
-true). Other conversions use the functions `int`, `float`, `bool`, `byte` and
-`interval`.
+true). Other conversions use the functions `int`, `float`, `bool`, `byte`,
+`interval` and `time`.
 
 ### Variables
 
@@ -155,7 +164,10 @@ Operators, from the tightest binding to the loosest:
 |                                  | multiplied or divided by a number        |
 +----------------------------------+------------------------------------------+
 | `+`, `-`                         | on ints and floats, and between          |
-|                                  | intervals                                |
+|                                  | intervals; a time minus a time is an     |
+|                                  | interval, and a time plus or minus an    |
+|                                  | interval, or a number of seconds, is a   |
+|                                  | time                                     |
 +----------------------------------+------------------------------------------+
 | `&`                              | bitwise and (ints or bytes)              |
 +----------------------------------+------------------------------------------+
@@ -165,7 +177,7 @@ Operators, from the tightest binding to the loosest:
 +----------------------------------+------------------------------------------+
 | `==`, `!=`, `<`, `<=`, `>`, `>=` | comparisons, which do not chain;         |
 |                                  | ordering works on numbers, bytes,        |
-|                                  | intervals and strings                    |
+|                                  | intervals, times and strings             |
 +----------------------------------+------------------------------------------+
 | `&&`                             | and                                      |
 +----------------------------------+------------------------------------------+
@@ -354,6 +366,12 @@ nodes it held.
 |                                      | low 8 bits).                         |
 +--------------------------------------+--------------------------------------+
 | `interval(secs)`                     | The interval of that many seconds.   |
++--------------------------------------+--------------------------------------+
+| `time(secs)`                         | The time that many seconds after     |
+|                                      | 1970-01-01T00:00:00Z.                |
++--------------------------------------+--------------------------------------+
+| `now()`                              | The current time: the clock of the   |
+|                                      | host when crafty runs a program.     |
 +--------------------------------------+--------------------------------------+
 | `array(init=v, len=n)`               | An array of `n` items, all `v`.      |
 +--------------------------------------+--------------------------------------+

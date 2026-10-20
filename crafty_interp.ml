@@ -100,7 +100,7 @@ let float_of = function
     | Float f -> f
     | _ -> assert false
 
-let call loc (b : T.builtin) args ~print ~print_err =
+let call loc (b : T.builtin) args ~print ~print_err ~now =
     match b, args with
     | T.Rand, [ max ] -> rand loc max
     | T.Randbytes, [ Int len ] ->
@@ -122,6 +122,12 @@ let call loc (b : T.builtin) args ~print ~print_err =
         | i -> Interval i
         | exception Invalid_argument _ ->
             error loc "%s is not a number of seconds" (A.string_of_float (float_of x)))
+    | T.To_time, [ x ] ->
+        let s = float_of x in
+        if not (Float.is_finite s) then
+            error loc "%s is not a number of seconds" (A.string_of_float s) ;
+        Time (Clock.Wall.of_secs s)
+    | T.Now, [] -> Time (now ())
     | T.Make_array, [ init ; Int len ] ->
         if len < 0 then error loc "array needs a length, not %d" len ;
         Array (Array.make len init)
@@ -175,6 +181,20 @@ let arith loc op a b =
         Interval (Interval.mul a b)
     | A.Div, Interval _, Float 0. -> error loc "Division by zero"
     | A.Div, Interval a, Float b -> Interval (Interval.div a b)
+    | A.Sub, Time a, Time b ->
+        let d = Clock.Wall.to_secs a -. Clock.Wall.to_secs b in
+        (* As many picoseconds as an int holds: *)
+        if Float.abs d *. 1e12 >= float_of_int max_int then
+            error loc "%s - %s is too long an interval"
+                (Clock.Wall.to_iso8601 a) (Clock.Wall.to_iso8601 b) ;
+        Interval (Interval.of_secs d)
+    | A.Add, Time t, Interval i | A.Add, Interval i, Time t ->
+        Time (Clock.Wall.add t i)
+    | A.Sub, Time t, Interval i -> Time (Clock.Wall.sub t i)
+    | A.Add, Time t, Float s | A.Add, Float s, Time t ->
+        Time (Clock.Wall.of_secs (Clock.Wall.to_secs t +. s))
+    | A.Sub, Time t, Float s ->
+        Time (Clock.Wall.of_secs (Clock.Wall.to_secs t -. s))
     | A.BitAnd, Int a, Int b -> Int (a land b)
     | A.BitOr, Int a, Int b -> Int (a lor b)
     | A.BitXor, Int a, Int b -> Int (a lxor b)
@@ -183,8 +203,10 @@ let arith loc op a b =
     | A.BitXor, Byte a, Byte b -> Byte (a lxor b)
     | _ -> invalid_arg "Crafty_interp.arith"
 
-(* Where a program writes: *)
-type output = { print : string -> unit ; print_err : string -> unit }
+(* Where a program writes, and the date it reads: *)
+type output =
+    { print : string -> unit ; print_err : string -> unit ;
+      now : unit -> Clock.Wall.t }
 
 let rec eval output (env : env) (e : T.expr) =
     let eval = eval output env in
@@ -223,7 +245,7 @@ let rec eval output (env : env) (e : T.expr) =
         | _ -> assert false)
     | T.Call (b, args) ->
         call e.loc b (List.map eval args)
-             ~print:output.print ~print_err:output.print_err
+             ~print:output.print ~print_err:output.print_err ~now:output.now
     | T.Unop (A.Not, a) ->
         (match eval a with Bool b -> Bool (not b) | _ -> assert false)
     | T.Unop (A.Neg, a) ->
@@ -419,7 +441,8 @@ and exec t b env (s : T.stmt) k =
     | T.Do (f, args) ->
         guard (fun () ->
             ignore (call s.stmt_loc f (List.map eval args)
-                         ~print:t.output.print ~print_err:t.output.print_err)) |>
+                         ~print:t.output.print ~print_err:t.output.print_err
+                         ~now:t.output.now)) |>
         Option.may (fun () -> k env)
     | T.Block body ->
         ignore (run_block t b env body ~fail:b.fail ~break_:b.break_
@@ -641,7 +664,10 @@ let idle (tree : Crafty_tree.node) () =
  * (possibly before returning). *)
 let run_on_tree power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
     let status = ref Running in
-    let t = { power ; output = { print ; print_err } ; tree } in
+    let now () =
+        let sim = power.SimTypes.sim in
+        Simulation.date_of sim (Simulation.now sim) in
+    let t = { power ; output = { print ; print_err ; now } ; tree } in
     let exit s =
         if !status = Running then (
             status := s ;
@@ -862,6 +888,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "print(#414243)\nprint(\"${1.2.3.4 == #01020304} ${1s + 500ms} ${2 * 1s} ${-1s} ${7 % 3} ${7.5 % 2}\")")
   "0s: 13 3.0 false #2c 1s500ms\n0s: done" \
     (runs "print(\"${int(3.7) + log2(1024)} ${float(3)} ${bool(0)} ${byte(300)} ${interval(1.5)}\")")
+  "0s: 2026-10-20T22:02:46.5Z 1s500ms 2026-10-20T22:02:46.5Z true 1970-01-01T00:00:00Z 1970-01-01T00:00:11Z 2026-10-20T22:02:44Z\n0s: done" \
+    (runs "t0 = 2026-10-20T22:02:45Z\nt1 = t0 + 1.5\nprint(\"${t1} ${t1 - t0} ${t0 + 2s - 500ms} ${t1 > t0} ${time(0)} ${10 + time(1)} ${t0 - 1}\")")
+  "1s500ms: 1s500ms\n1s500ms: done" \
+    (runs "t = now()\nwait 1500ms\nprint(\"${now() - t}\")")
+  "0s: failed: line 1, column 10: 2026-10-20T00:00:00Z - 1970-01-01T00:00:00Z is too long an interval" \
+    (runs "print(\"${2026-10-20T00:00Z - time(0)}\")")
   "0s: [1.5, 1.5] 2 1.5 4\n0s: done" \
     (runs "x = array(init=1.5, len=2)\nprint(\"${x} ${length(x)} ${get(a=x, index=1)} ${length(randbytes(4))}\")")
   "0s: failed: line 3, column 1: Assertion failed: (x * 2) == 5" \
