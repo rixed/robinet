@@ -117,11 +117,13 @@ and stmt_desc =
     (* How many enclosing [repeat] and [on] to leave: *)
     | Break of int
     | Wait of expr
-    (* [match_] is the variable [MATCH] of the block: *)
-    | Expect of { timeout : expr option ; pattern : pattern ; match_ : var ;
-                  body : block }
+    (* An [expect] being an [any] of a single case; [form] is which: *)
+    | Any of { form : string ; timeout : expr option ; cases : case list }
     | On of { timeout : expr option ; max : expr option ; pattern : pattern ;
               match_ : var ; body : block }
+
+(* [match_] is the variable [MATCH] of the block: *)
+and case = { pattern : pattern ; match_ : var ; body : block }
 
 and block = stmt list
 
@@ -249,7 +251,7 @@ let lookup_var env loc name =
     | None ->
         if List.mem name env.poisoned then raise Already_told ;
         if name = "MATCH" then
-            error loc "MATCH is only defined in the blocks of expect and on" ;
+            error loc "MATCH is only defined in the blocks of expect, any and on" ;
         if name = "LAST" then error loc "LAST is not supported yet" ;
         error loc "Unknown variable %s" name
 
@@ -730,6 +732,16 @@ let rec block errors env stmts =
 and stmt errors env (s : A.stmt) =
     let loc = s.stmt_loc in
     let mk stmt = { stmt_loc = loc ; stmt } in
+    let any form timeout cases =
+        let timeout =
+            opt_expr env ("The timeout of "^ form) Type.Interval timeout in
+        let cases =
+            List.map (fun (p, body) ->
+                let pattern = pattern env p in
+                let match_ = new_var "MATCH" packet_type in
+                let body = block errors { env with vars = match_ :: env.vars } body in
+                { pattern ; match_ ; body }) cases in
+        env, Some (mk (Any { form ; timeout ; cases })) in
     let declare env name e =
         if List.mem name env.declared_here then
             error loc "%s is already declared in this block (:= changes it)" name ;
@@ -816,12 +828,10 @@ and stmt errors env (s : A.stmt) =
             env, Some (mk (Break depth))
         | A.Wait dur ->
             env, Some (mk (Wait (expect "The duration of wait" (expr env dur) Type.Interval)))
-        | A.Expect { timeout ; pattern = p ; body } ->
-            let timeout = opt_expr env "The timeout of expect" Type.Interval timeout in
-            let pattern = pattern env p in
-            let match_ = new_var "MATCH" packet_type in
-            let body = block errors { env with vars = match_ :: env.vars } body in
-            env, Some (mk (Expect { timeout ; pattern ; match_ ; body }))
+        | A.Expect { timeout ; pattern ; body } ->
+            any "expect" timeout [ pattern, body ]
+        | A.Any { timeout ; cases } ->
+            any "any" timeout cases
         | A.On { timeout ; max ; pattern = p ; body } ->
             let timeout = opt_expr env "The timeout of on" Type.Interval timeout
             and max = opt_expr env "The maximum of on" Type.Int max in
@@ -841,7 +851,8 @@ let rec declarations (b : block) =
         match s.stmt with
         | Declare (v, _) -> [ v ]
         | Stack { body = Some b ; _ } | Block b | Retry { body = b ; _ } | Catch b
-        | Expect { body = b ; _ } | On { body = b ; _ } -> declarations b
+        | On { body = b ; _ } -> declarations b
+        | Any { cases ; _ } -> List.concat_map (fun c -> declarations c.body) cases
         | If { then_ ; else_ ; _ } -> declarations then_ @ declarations else_
         | Repeat { var ; body ; _ } -> var :: declarations body
         | _ -> []) b
@@ -890,6 +901,8 @@ let check (program : A.program) =
     (types "/IP(dst=1.2.3.4)/ICMP { expect DestUnreachable(code == PORT_UNREACHABLE) {} }")
   "I: int" \
     (types "repeat { on Bytes(\"x\") { break 2 } }")
+  "x: int, y: ip" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { any Bytes(\"a\") { x = length(MATCH) } | ../ICMP { y = MATCH[IP].src } }")
   "n: int, x: int, y: bool, z: float" \
     (types "n = 3\nif n & 1 { x = 1 } elsif n > 2 { y = true } else { z = 1.0 }")
   "" \
@@ -941,6 +954,10 @@ let check (program : A.program) =
     (types "repeat { break 2 }")
   "line 1, column 4: The condition of if must be a bool, not a string" \
     (types "if \"x\" {}")
+  "line 1, column 13: The timeout of any must be an interval, not an int" \
+    (types "any timeout=1 Bytes {}")
+  "line 2, column 5: MATCH is only defined in the blocks of expect, any and on" \
+    (types "any Bytes {} | Bytes { x = MATCH }\ny = MATCH")
   "line 1, column 11: The maximum of retry must be an int, not an interval" \
     (types "retry max=1s {}")
   "line 1, column 22: The period of repeat must be an interval, not an int" \
@@ -973,7 +990,7 @@ let check (program : A.program) =
     (types "/UDP {}")
   "line 1, column 18: IP cannot be on top of IP" \
     (types "/IP(dst=1.2.3.4)/IP {}")
-  "line 1, column 5: MATCH is only defined in the blocks of expect and on" \
+  "line 1, column 5: MATCH is only defined in the blocks of expect, any and on" \
     (types "x = MATCH")
   "line 1, column 5: LAST is not supported yet" \
     (types "x = LAST")

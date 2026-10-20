@@ -24,9 +24,10 @@ fragments and reassembles. A bang (`!`) after a layer's name makes it
 values. On reception, `IP!` sees each fragment and `TCP!` each segment,
 including those without data.
 
-**Patterns.** `expect` waits for the first matching packet, and `on`
-handles every matching packet while the rest of the block goes on. Both take
-a *pattern*, which describes a packet layer by layer, with conditions on
+**Patterns.** `expect` waits for the first matching packet, `any` for the
+first packet that matches one of several patterns, and `on` handles every
+matching packet while the rest of the block goes on. They take
+*patterns*, each of which describes a packet layer by layer, with conditions on
 each layer:
 
   `expect /IP/TCP(dst == 7)/Bytes(data == "Ping") { ... }`
@@ -35,7 +36,7 @@ or, as `data` is the default field of `Bytes`:
 
   `expect /IP/TCP(dst == 7)/Bytes("Ping") { ... }`
 
-In the block of an `expect` or `on`, `MATCH` is the packet that matched:
+In the block of an `expect`, `any` or `on`, `MATCH` is the packet that matched:
 
   `expect /IP/ICMP/Echo(id == 42)/Request { print("ping from ${MATCH[IP].src}") }`
 
@@ -138,7 +139,7 @@ string to bytes and back, bytes to an IP address (4 bytes) or a MAC address
   patterns read their values when a packet arrives, not when the pattern
   starts waiting.
 - Predefined variables: `MATCH` (the matched packet, within the block of an
-  `expect` or an `on`) and the counter of a `repeat` (`I` by default).
+  `expect`, an `any` or an `on`) and the counter of a `repeat` (`I` by default).
 
 ### Expressions
 
@@ -275,6 +276,7 @@ also takes it unnamed (`break 2`, `wait 1s`).
 | `break depth=n` | Leaves the `n` (default 1, a literal) innermost enclosing `repeat` or `on` forms. |
 | `wait dur=d` | Pauses for `d`. A negative duration is an error. |
 | `expect timeout=d PATTERN { ... }` | Waits for one packet that matches (default timeout 1m), then runs the block with `MATCH` bound to it. A timeout is an error. |
+| `any timeout=d PATTERN { ... }` `\| PATTERN { ... } ...` | Waits for the first packet that matches any of the patterns (default timeout 1m), then runs the block of that pattern only, with `MATCH` bound to it. A `\|` may end a line or start the next one. A timeout is an error. |
 | `on timeout=d max=n PATTERN { ... }` | Lets the enclosing block go on, and runs a new block for each matching packet, each with its own `MATCH`. It ends at its timeout (default 1m, not an error), after its `max`th match, or at a `break` from one of its blocks. |
 
 A block completes when its statements are done and all its `on` forms have
@@ -498,7 +500,7 @@ of UDP, the data of TCP, a fragment, a quote, or an unknown protocol.
 
 ### Not available yet
 
-The keywords `case`, `any` and `report`, the
+The keywords `case` and `report`, the
 predefined `LAST` (the last packet sent), matching embedded packets with
 `=~`, variant literals, the HTTP
 layer, IPv6, VLANs and tunnels. Using any of them is reported as

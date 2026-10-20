@@ -41,7 +41,7 @@
    error reaching the program's block ends the program.
 
    [expect] waits for its pattern, failing after its timeout, then runs its
-   block once. [on] lets its block go on, and runs its own block for every
+   block once. [any] does the same with the first of its patterns to match. [on] lets its block go on, and runs its own block for every
    match until its timeout, its [max] or a [break] out of it; a block ends
    only once its statements are done and its [on]s are over. The packet
    matched, [MATCH], is decoded to its top, and only if read. *)
@@ -517,20 +517,22 @@ and exec t b env (s : T.stmt) k =
                 let d = Crafty_tree.busy_for stack in
                 if Interval.compare d Interval.zero <= 0 then k env else wait d in
             wait (Interval.psec 1))
-    | T.Expect { timeout ; pattern ; match_ ; body } ->
-        guard (fun () -> timeout_of eval "expect" timeout) |>
+    | T.Any { form ; timeout ; cases } ->
+        guard (fun () -> timeout_of eval form timeout) |>
         Option.may (fun timeout ->
-            let armed = ref true and unregister = ref ignore in
-            let disarm () = armed := false ; !unregister () in
+            let armed = ref true and unregisters = ref [] in
+            let disarm () = armed := false ; List.iter (fun u -> u ()) !unregisters in
             let fire f = if !armed && b.live then (disarm () ; f ()) in
-            unregister :=
-                register t b env pattern
-                    ~matched:(fun packet -> fire (fun () ->
-                        let inner = bind_lazy env match_ (fun () -> match_value packet) in
-                        ignore (run_block t b inner body ~fail:b.fail ~break_:b.break_
-                                    (fun () -> k env))))
-                    ~failed:(fun where message -> fire (fun () ->
-                        b.fail Crafty_parser.{ where ; message })) ;
+            unregisters :=
+                List.map (fun (c : T.case) ->
+                    register t b env c.pattern
+                        ~matched:(fun packet -> fire (fun () ->
+                            let inner =
+                                bind_lazy env c.match_ (fun () -> match_value packet) in
+                            ignore (run_block t b inner c.body ~fail:b.fail
+                                        ~break_:b.break_ (fun () -> k env))))
+                        ~failed:(fun where message -> fire (fun () ->
+                            b.fail Crafty_parser.{ where ; message }))) cases ;
             b.cleanups <- disarm :: b.cleanups ;
             Simulation.delay t.power timeout (fun () -> fire (fun () ->
                 ignore (guard (fun () ->
@@ -1020,6 +1022,17 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs ~inject:[ 0.5, reply "pong!" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Bytes(IP.dst == data) {} }")
 *)
+(* any runs the block of the first pattern to match, and no other: *)
+(*$= runs & ~printer:identity
+  "500ms: b\n500ms: after\n500ms: done" \
+    (runs ~inject:[ 0.3, reply "nope" ; 0.5, reply "b" ; 0.6, reply "a" ; 0.7, reply "b" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  any Bytes(\"a\") { print(\"a\") } | Bytes(\"b\") { print(MATCH[Bytes].data) }\n  print(\"after\") }")
+  "1s: failed: line 2, column 3: Nothing matched within 1s" \
+    (runs ~inject:[ 1.5, reply "a" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  any timeout=1s Bytes(\"a\") {} | Bytes(\"b\") {} }")
+  "0s: failed: line 1, column 13: The timeout of any cannot be negative" \
+    (runs "any timeout=-1s Bytes(\"x\") {} | Bytes(\"y\") {}")
+*)
 (* on runs its block for every match, and its block waits for it: *)
 (*$= runs & ~printer:identity
   "0s: armed\n1s: 3\n1s: done" \
@@ -1201,6 +1214,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (with_host ~setup:(fun h _ -> h.Host.trx.Host.udp_server_start (Udp.Port.o 7) (fun udp -> \
         Tools.(udp.Udp.TRX.trx.ins --> sink (fun bits -> tx udp.Udp.TRX.trx bits)))) \
         "/IP(dst=10.0.0.2)/UDP(dst=7) { repeat count=2 { Bytes(\"echo ${I}\")\n    expect timeout=1s Bytes { print(MATCH[Bytes].data) } } }")
+  "a 0.000s: unreachable\na 0.000s: done Eth#2" \
+    (with_host "/IP(dst=10.0.0.2)/UDP(dst=9) { Bytes(\"anyone?\")\n  any timeout=1s Bytes { print(\"answer\") } | ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
   "a 0.000s: unreachable\na 0.000s: done Eth#2" \
     (with_host "/IP(dst=10.0.0.2)/UDP(dst=9) { Bytes(\"anyone?\")\n  expect timeout=1s ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
 *)

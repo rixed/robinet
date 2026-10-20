@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 501b7b7694ef8f3f7ce34ac73b381623) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 8c3ba65b127a90e352f572337e547b57) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -16,10 +16,10 @@ reassembles. A bang (`!`) after a layer's name makes it *manual*: crafty only
 fills in the header fields not given, with plausible values. On reception, `IP!`
 sees each fragment and `TCP!` each segment, including those without data.
 
-**Patterns.** `expect` waits for the first matching packet, and `on` handles
-every matching packet while the rest of the block goes on. Both take a
-*pattern*, which describes a packet layer by layer, with conditions on each
-layer:
+**Patterns.** `expect` waits for the first matching packet, `any` for the first
+packet that matches one of several patterns, and `on` handles every matching
+packet while the rest of the block goes on. They take *patterns*, each of which
+describes a packet layer by layer, with conditions on each layer:
 
 `expect /IP/TCP(dst == 7)/Bytes(data == "Ping") { ... }`
 
@@ -27,7 +27,7 @@ or, as `data` is the default field of `Bytes`:
 
 `expect /IP/TCP(dst == 7)/Bytes("Ping") { ... }`
 
-In the block of an `expect` or `on`, `MATCH` is the packet that matched:
+In the block of an `expect`, `any` or `on`, `MATCH` is the packet that matched:
 
 `expect /IP/ICMP/Echo(id == 42)/Request { print("ping from ${MATCH[IP].src}") }`
 
@@ -149,7 +149,8 @@ true). Other conversions use the functions `int`, `float`, `bool`, `byte`,
     read their values when a packet arrives, not when the pattern starts
     waiting.
 -   Predefined variables: `MATCH` (the matched packet, within the block of an
-    `expect` or an `on`) and the counter of a `repeat` (`I` by default).
+    `expect`, an `any` or an `on`) and the counter of a `repeat` (`I` by
+    default).
 
 ### Expressions
 
@@ -330,6 +331,14 @@ takes it unnamed (`break 2`, `wait 1s`).
 |                                      | (default timeout 1m), then runs the  |
 |                                      | block with `MATCH` bound to it. A    |
 |                                      | timeout is an error.                 |
++--------------------------------------+--------------------------------------+
+| `any timeout=d PATTERN { ... }`      | Waits for the first packet that      |
+| `| PATTERN { ... } ...`              | matches any of the patterns (default |
+|                                      | timeout 1m), then runs the block of  |
+|                                      | that pattern only, with `MATCH`      |
+|                                      | bound to it. A `|` may end a line or |
+|                                      | start the next one. A timeout is an  |
+|                                      | error.                               |
 +--------------------------------------+--------------------------------------+
 | `on timeout=d max=n PATTERN { ... }` | Lets the enclosing block go on, and  |
 |                                      | runs a new block for each matching   |
@@ -646,9 +655,9 @@ UDP, the data of TCP, a fragment, a quote, or an unknown protocol.
 
 ### Not available yet
 
-The keywords `case`, `any` and `report`, the predefined `LAST` (the last packet
-sent), matching embedded packets with `=~`, variant literals, the HTTP layer,
-IPv6, VLANs and tunnels. Using any of them is reported as unsupported.
+The keywords `case` and `report`, the predefined `LAST` (the last packet sent),
+matching embedded packets with `=~`, variant literals, the HTTP layer, IPv6,
+VLANs and tunnels. Using any of them is reported as unsupported.
 |crafty_manual}
 
 let examples = {crafty_manual|All these examples were run against a host with UDP and TCP echo servers on port

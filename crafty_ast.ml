@@ -200,6 +200,8 @@ and stmt_desc =
     | Break of { depth : expr option }
     | Wait of expr
     | Expect of { timeout : expr option ; pattern : pattern ; body : block }
+    (* The block of the first of those patterns to match, never empty: *)
+    | Any of { timeout : expr option ; cases : (pattern * block) list }
     | On of { timeout : expr option ; max : expr option ;
               pattern : pattern ; body : block }
 
@@ -221,11 +223,11 @@ let predefined = [ "match" ; "last" ]
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
     [ "true" ; "false" ; "repeat" ; "retry" ; "catch" ; "if" ; "elsif" ;
-      "else" ; "break" ; "expect" ; "on" ; "wait" ]
+      "else" ; "break" ; "expect" ; "any" ; "on" ; "wait" ]
 
 (** Keywords of what the language will have but not yet. Lower case. *)
 let unsupported =
-    [ "any" ; "case" ; "report" ]
+    [ "case" ; "report" ]
 
 (** {2 Printing}
  *
@@ -405,6 +407,12 @@ let rec print_stmt ~all indent oc s =
         String.print oc "expect" ; param "timeout" timeout ;
         Printf.fprintf oc " %a " (print_pattern ~all) pattern ;
         print_block ~all indent oc body
+    | Any { timeout ; cases } ->
+        String.print oc "any" ; param "timeout" timeout ;
+        List.iteri (fun i (pattern, body) ->
+            Printf.fprintf oc "%s%a " (if i = 0 then " " else " | ")
+                (print_pattern ~all) pattern ;
+            print_block ~all indent oc body) cases
     | On { timeout ; max ; pattern ; body } ->
         String.print oc "on" ; param "timeout" timeout ; param "max" max ;
         Printf.fprintf oc " %a " (print_pattern ~all) pattern ;

@@ -563,6 +563,10 @@ let stmt = fix (fun stmt ->
         (keyword "expect" -+ params "expect" [ "timeout" ] +- sp ++ pattern ++
          body >>: fun ((p, pattern), body) ->
             Expect { timeout = p "timeout" ; pattern ; body }) |||
+        (* Its cases, separated by bars that may start or end lines: *)
+        (keyword "any" -+ params "any" [ "timeout" ] +- sp ++
+         repeat ~min:1 ~sep:(nl_sp -- item '|' -- nl_sp) (pattern ++ body) >>:
+            fun (p, cases) -> Any { timeout = p "timeout" ; cases }) |||
         (keyword "on" -+ params "on" [ "timeout" ; "max" ] +- sp ++ pattern ++
          body >>: fun ((p, pattern), body) ->
             On { timeout = p "timeout" ; max = p "max" ; pattern ; body }) |||
@@ -685,6 +689,10 @@ let parse text =
   "expect timeout=5s /IP(src == x)/UDP {\n}\n" \
     (reads "expect 5s /IP(src=x)/UDP {}")
   "expect timeout=5s /IP/UDP {\n}\n" (reads "expect timeout=5s /IP/UDP {}")
+  "any timeout=1s Bytes(\"a\") {\n} | Bytes(\"b\") {\n  x := 1\n}\n" \
+    (reads "any 1s Bytes(\"a\") {} | Bytes(\"b\") { x := 1 }")
+  "any Bytes(data == \"a\") {\n} | ../ICMP {\n} | /IP(src == x)/UDP {\n}\nx := 1\n" \
+    (reads "any Bytes(data = \"a\") {}\n| ../ICMP {} |\n/IP(src=x)/UDP {}\nx := 1")
 *)
 
 (*$= formats & ~printer:identity
@@ -737,7 +745,8 @@ let parse text =
     "expect UDP(IP^.ttl = 3, ^IP.src == 1.2.3.4) {}" ; \
     "expect ../../TCP!(flags & RST) {}" ; "IP!(ttl=1)/TCP!(flags=2)/Bytes(\"x\")" ; \
     "/IP/UDP/Bytes(\"x\")\n{ y = !(a == b) }" ; \
-    "if a & 1 {} elsif (b || c) && d { x := 1 }\nelse { if e {} }" ]
+    "if a & 1 {} elsif (b || c) && d { x := 1 }\nelse { if e {} }" ; \
+    "any timeout=2s * n Bytes(\"a\") {} | ../TCP!(flags & (SYN | RST)) {}" ]
 *)
 
 (* The errors, where they are found: *)
@@ -778,7 +787,9 @@ let parse text =
   "line 1, column 20: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")
   "line 1, column 9: Unknown layer HTTP" (reads "/IP/HTTP {}")
   "line 1, column 11: Carets on both sides of IP" (reads "x = a[^IP^]")
-  "line 1, column 4: any is not supported yet" (reads "any x {}")
+  "line 1, column 5: case is not supported yet" (reads "case x {}")
+  "line 1, column 5: Expected name in pattern" (reads "any {}")
+  "line 1, column 21: Expected name in pattern" (reads "any Bytes(\"a\") {} | {}")
   "line 1, column 5: wait needs a duration" (reads "wait")
   "line 1, column 5: Expected '{' in block" (reads "if x\n{}")
   "line 1, column 1: Expected end of statement" (reads "else {}")
