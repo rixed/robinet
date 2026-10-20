@@ -31,10 +31,7 @@
 *)
 open Batteries
 
-let usage = "crafty [options] PROG.cfty\n\
-             Budgets limit what the program sends; once one is reached, the \
-             program is stopped.\n\
-             Options:"
+let usage = "crafty [options] PROG.cfty\n\nOptions:"
 
 let die fmt =
     Printf.ksprintf (fun s -> prerr_endline s ; exit 2) fmt
@@ -57,7 +54,14 @@ let () =
     let port_range proto = Arg.String (fun s ->
         try ports := !ports @ [ Host_config.port_range_of_string proto s ]
         with Invalid_argument e -> die "%s" e) in
-    Arg.parse (Arg.align [
+    (* The options, which [--help] lists: *)
+    let specs = ref [] in
+    let manual text = Arg.Unit (fun () -> print_string text ; exit 0) in
+    let help () =
+        print_string (Arg.usage_string !specs usage) ;
+        print_string ("\n"^ Crafty_manual.introduction) ;
+        exit 0 in
+    specs := Arg.align [
         "-i", Arg.Set_string ifname, "IFACE the interface to use (required)" ;
         "--ip", Arg.String (fun s -> own_ip := Some (Ip.Addr.of_dotted_string s)),
             "ADDR use this address, rather than the interface's" ;
@@ -78,7 +82,14 @@ let () =
         "-p", Arg.Set print_packets, " print every packet sent and received" ;
         "--print-packets", Arg.Set print_packets, " same as -p" ;
         "--cleanup", Arg.Set cleanup,
-            " undo what a killed crafty left on the host, and exit" ])
+            " undo what a killed crafty left on the host, and exit" ;
+        "--reference", manual Crafty_manual.reference,
+            " print the reference of the crafty language, and exit" ;
+        "--examples", manual Crafty_manual.examples,
+            " print examples of crafty programs, and exit" ;
+        "-help", Arg.Unit help, " print this help and an introduction to crafty" ;
+        "--help", Arg.Unit help, " same as -help" ] ;
+    Arg.parse !specs
         (fun s ->
             if !prog_file <> None then die "Only one program, please" ;
             prog_file := Some s)
@@ -90,7 +101,7 @@ let () =
         exit 0) ;
     let prog_file = match !prog_file with
         | Some f -> f
-        | None -> die "No program given.\n%s" (Arg.usage_string [] usage) in
+        | None -> die "No program given.\n%s" (Arg.usage_string !specs usage) in
     if !ifname = "" then die "No interface given (-i)." ;
     if !fw && !ports = [] then die "--fw needs ports (--tcp, --udp)." ;
     if !fw && !own_ip <> None then

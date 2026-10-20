@@ -103,7 +103,8 @@ C_SOURCES = \
 	sockopt_wrap.c \
 	condvar_wrap.c
 
-SOURCES = $(LIB_SOURCES) $(EXAMPLE_SOURCES) $(TEST_SOURCES) robinet.ml crafty.ml
+SOURCES = $(LIB_SOURCES) $(EXAMPLE_SOURCES) $(TEST_SOURCES) robinet.ml \
+          crafty_manual.ml crafty.ml
 
 CLIB_SHORT = robinetext
 CLIB = lib$(CLIB_SHORT).a
@@ -182,7 +183,7 @@ $(EXTRA_TESTS): $(XARCHIVE)
 # .depend is computed by scanning the sources, and this one is generated: were
 # it missing from that scan, nothing would know that myadmin_ui.ml uses it, and
 # a change to www/ would leave the two disagreeing about it.
-.depend: myadmin_assets.ml
+.depend: myadmin_assets.ml crafty_manual.ml
 
 # Fetch the vendored libraries, at the versions pinned above.
 #
@@ -276,6 +277,43 @@ robinet: robinet.opt
 	   echo "You should run:" ;\
 	   echo "sudo setcap cap_net_raw,cap_net_admin=eip $@" ;\
 	 fi
+
+crafty.opt: $(XARCHIVE) crafty_manual.cmx crafty.cmx
+	$(OCAMLOPT) -o $@ -I . -linkpkg -package "$(REQUIRES)" $(OCAMLOPTFLAGS) $^
+
+# The sections of docs/crafty.md, for `crafty --help', `--reference' and
+# `--examples': rendered by pandoc to markdown fit for a terminal (tables
+# wrapped to 80 columns), each into a {crafty_manual|...|crafty_manual} string
+# named after the last word of its title. The result is committed, with the
+# md5 of the manual it was made from: when the manual is unchanged, whatever
+# the dates of the files, nothing is regenerated and pandoc is not needed.
+CRAFTY_MANUAL_PANDOC = pandoc -f gfm --columns=80 \
+  -t markdown-smart-pipe_tables-simple_tables-multiline_tables-raw_html
+
+crafty_manual.ml: docs/crafty.md
+	@sum=$$(md5sum $< | cut -d' ' -f1) ;\
+	 if grep -qs "md5 $$sum" $@ ; then touch $@ ; exit 0 ; fi ;\
+	 if grep -q '|crafty_manual}' $< ; then \
+	   echo "$< contains \"|crafty_manual}\", which ends the strings of $@" >&2 ;\
+	   exit 1 ;\
+	 fi ;\
+	 echo "Generating $@ from $<" ;\
+	 if ! $(CRAFTY_MANUAL_PANDOC) $< > $@.md ; then \
+	   rm -f $@.md ;\
+	   echo "$< changed: regenerating $@ needs pandoc" >&2 ;\
+	   exit 1 ;\
+	 fi ;\
+	 awk -v sum=$$sum ' \
+	   BEGIN { print "(* Generated from docs/crafty.md (md5 " sum ") by the Makefile. Do not edit. *)" } \
+	   /^## / { \
+	     if (name) print "|crafty_manual}\n" ; \
+	     sub(/ *\{#.*\}$$/, "") ; name = tolower($$NF) ; \
+	     printf "let %s = {crafty_manual|", name ; started = 0 ; blanks = 0 ; next } \
+	   !name { next } \
+	   /^$$/ { if (started) blanks++ ; next } \
+	   { for (; blanks > 0 ; blanks--) print "" ; started = 1 ; print } \
+	   END { print "|crafty_manual}" }' $@.md > $@.tmp ;\
+	 rm -f $@.md ; mv $@.tmp $@
 
 crafty: crafty.opt
 	@ln -f $< $@
