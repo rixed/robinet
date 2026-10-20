@@ -27,4 +27,5 @@ core
 oUnit-*
 myadmin_assets.ml
 robinet
+crafty
 build/

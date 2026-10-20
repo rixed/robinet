@@ -5,7 +5,7 @@
 # This file is part of RobiNet, under the GNU Affero General Public License
 # (see the other files for the full notice).
 #
-# Checks examples/crafty.opt on a real interface: a veth pair into a network
+# Checks crafty.opt on a real interface: a veth pair into a network
 # namespace with UDP and TCP echo servers in it. Wants root, and socat,
 # tcpdump, nft and ethtool. Not part of `make check`.
 #
@@ -14,7 +14,7 @@
 
 set -u
 
-CRAFTY="$(cd "$(dirname "$0")/.." && pwd)/examples/crafty.opt"
+CRAFTY="$(cd "$(dirname "$0")/.." && pwd)/crafty.opt"
 NS=crtns
 HOST_IF=crt0
 NS_IF=crt1

@@ -78,7 +78,6 @@ EXAMPLE_SOURCES = \
 	examples/beautify_html.ml \
 	examples/beautify_mac.ml \
 	examples/capecho.ml \
-	examples/crafty.ml \
 	examples/dns_query.ml \
 	examples/http_echo_server.ml \
 	examples/http_load.ml \
@@ -104,7 +103,7 @@ C_SOURCES = \
 	sockopt_wrap.c \
 	condvar_wrap.c
 
-SOURCES = $(LIB_SOURCES) $(EXAMPLE_SOURCES) $(TEST_SOURCES) robinet.ml
+SOURCES = $(LIB_SOURCES) $(EXAMPLE_SOURCES) $(TEST_SOURCES) robinet.ml crafty.ml
 
 CLIB_SHORT = robinetext
 CLIB = lib$(CLIB_SHORT).a
@@ -127,7 +126,6 @@ EXAMPLES_BYTE = \
 	examples/beautify_mac.byte \
 	examples/test_ping.byte \
 	examples/capecho.byte \
-	examples/crafty.byte \
 	examples/load_tester.byte \
 	examples/pcap_reorder.byte \
 	examples/admin_demo.byte
@@ -172,7 +170,7 @@ include make.common
 
 .PHONY: examples run vendor coastline upgrade
 
-all: robinet robinet.top examples $(EXTRA_TESTS)
+all: robinet crafty robinet.top examples $(EXTRA_TESTS)
 
 run: robinet.top
 	rlwrap ./robinet.top -init robinet.init
@@ -279,12 +277,19 @@ robinet: robinet.opt
 	   echo "sudo setcap cap_net_raw,cap_net_admin=eip $@" ;\
 	 fi
 
+crafty: crafty.opt
+	@ln -f $< $@
+	@if which setcap > /dev/null 2>&1 ; then \
+	   echo "You should run:" ;\
+	   echo "sudo setcap cap_net_raw,cap_net_admin=eip $@" ;\
+	 fi
+
 doc-spec: docs/simulation.html
 
 clean-spec:
 	$(RM) examples/*.cm[ioxa] examples/*.o $(EXAMPLES)
 	$(RM) tests/*.cm[ioxa] tests/*.o tests/*.annot oUnit-anon.cache $(EXTRA_TESTS)
-	$(RM) myadmin_assets.ml robinet
+	$(RM) myadmin_assets.ml robinet crafty
 	$(RM) -r build
 
 upgrade: robinet
