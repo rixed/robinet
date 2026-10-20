@@ -270,9 +270,8 @@ struct
         (*$>*)
     end
 
-    (** An unpacked TCP segment. Notice the absence of the checksum, which
-     * will be set to 0 by {!Tcp.Pdu.pack}, and filled in by {!Ip.Pdu.pack},
-     * since it's computed over some IP fields. *)
+    (** An unpacked TCP segment. The checksum will be overwritten by {!Ip.Pdu.pack}
+     * if left to 0 (since it's computed over some IP fields. *)
     type t = {
         src_port : Port.t ;
         dst_port : Port.t ;
@@ -282,19 +281,18 @@ struct
         flags    : flags ;
         urg_ptr  : int ;
         options  : Opt.t list ;
+        checksum : int ;
         payload  : Payload.t }
 
     let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80)
              ?(seq_num = SeqNum.o 0l) ?(ack_num = SeqNum.o 0l)
              ?(urg=false) ?(ack=false) ?(psh=false) ?(rst=false) ?(syn=false) ?(fin=false)
-             ?(win_size=1024) ?(urg_ptr=0)
-             ?(options=[])
+             ?(win_size=1024) ?(urg_ptr=0) ?(options=[]) ?(checksum=0)
              bits =
         { src_port ; dst_port ;
           seq_num  ; ack_num ;
           flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
-          win_size ;
-          urg_ptr  ; options ;
+          win_size ; urg_ptr  ; options ; checksum ;
           payload = Payload.o bits }
 
     let random () =
@@ -321,7 +319,7 @@ struct
             hdr_len lsr 2 : 4 ; 0 : 6 ;
             t.flags.urg : 1 ; t.flags.ack : 1 ; t.flags.psh : 1 ;
             t.flags.rst : 1 ; t.flags.syn : 1 ; t.flags.fin : 1 ;
-            t.win_size : 16 ; 0 : 16 ;
+            t.win_size : 16 ; t.checksum : 16 ;
             t.urg_ptr  : 16 ; options : -1 : bitstring |} in
         concat [ hdr ; (t.payload :> bitstring) ]
 
@@ -330,14 +328,14 @@ struct
              seq_num  : 32 ; ack_num  : 32 ;
              hdr_len  : 4  ; 0 : 6 ;
              urg : 1 ; ack : 1 ; psh : 1 ; rst : 1 ; syn : 1 ; fin : 1 ;
-             win_size : 16 ; _checksum : 16 ; urg_ptr  : 16 ;
+             win_size : 16 ; checksum : 16 ; urg_ptr  : 16 ;
              options : ((hdr_len lsl 2) - no_opt_hdr_len) * 8 : bitstring ;
              payload  : -1 : bitstring |} ->
-        Ok { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
-               seq_num  = SeqNum.o seq_num  ; ack_num  = SeqNum.o ack_num ;
-               flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
-               win_size ; urg_ptr  ; options = Opt.unpack options ;
-               payload = Payload.o payload }
+            Ok { src_port = Port.o src_port ; dst_port = Port.o dst_port ;
+                 seq_num  = SeqNum.o seq_num  ; ack_num  = SeqNum.o ack_num ;
+                 flags = { urg ; ack ; psh ; rst ; syn ; fin } ;
+                 win_size ; urg_ptr  ; options = Opt.unpack options ;
+                 checksum ; payload = Payload.o payload }
         | {| _ |} -> Error (lazy "Not TCP")
 
     (*$Q pack
@@ -356,9 +354,9 @@ struct
 
     (** What a segment holds, for the interface to show and, later, to edit.
      *
-     * No checksum: it is not in [t] either, being computed over fields of the
-     * IP header below (see [Ip.Pdu.pack]), so there is nothing here to show.
-     * The options are those of [Opt.Kinds.opt]. *)
+     * No checksum: it is normally computed over fields of the IP header below
+     * (see [Ip.Pdu.pack]), so there is nothing here to show.  The options are
+     * those of [Opt.Kinds.opt]. *)
     module Kinds =
     struct
         open SimTypes
@@ -461,7 +459,7 @@ struct
                     rst = raised 3 ; syn = raised 4 ; fin = raised 5 } ;
           (* Where the urgent data ends, which is nowhere unless Urg says so: *)
           urg_ptr = int Field.urg_ptr ~auto:(fun () -> 0) Kinds.urg_ptr ;
-          options ;
+          options ; checksum = 0 ;
           payload = Payload.o (payload_of_nth ?upper r Field.payload
                                               gen_values Kinds.payload) }
 

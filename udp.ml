@@ -31,18 +31,16 @@ module Port = Tcp.MakePort (struct let srv = "udp" end)
 module Pdu =
 struct
     (*$< Pdu *)
-    (** An unpacked UDP datagram. Notice the absence of the checksum, which
-     * will be set to 0 by {!Udp.Pdu.pack}, and filled in by {!Ip.Pdu.pack},
-     * since it's computed over some IP fields. *)
+    (** An unpacked UDP datagram. The checksum field will be overwritten
+     * by {!Ip.Pdu.pack{ if left to 0 (since it's computed over some IP fields). *)
     type t = {
         src_port : Port.t ; dst_port : Port.t ; length : int ; checksum : int ;
         payload  : Payload.t }
 
-    let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80) ?length ?checksum bits =
+    let make ?(src_port = Port.o 1024) ?(dst_port = Port.o 80) ?length ?(checksum=0) bits =
         let payload = Payload.o bits in
         let length = length |? Payload.length payload + 8 in
         (* Will be overwritten by Ip.pack_header for outgoing packets, anyway *)
-        let checksum = checksum |? 0 in
         { src_port ; dst_port ; length ; checksum ; payload }
 
     let random () =
