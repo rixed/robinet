@@ -485,17 +485,20 @@ let stmt = fix (fun stmt ->
         (* A stack sends a packet if its top layer is terminal, and is
          * otherwise that of the block that follows: *)
         (anchor ++
-         repeat ~min:1 ~sep:(maybe_next (slash -- nl_sp)) layer ++
-         optional ~def:None (body >>: Option.some) >>:
-            fun ((anchor, layers), body) ->
+         repeat ~min:1 ~sep:(maybe_next (slash -- nl_sp)) layer >>=
+            fun (anchor, layers) ->
                 let top = (List.last layers).layer_name in
-                (match body, terminal top with
-                | None, false ->
-                    reject "%s needs a block, or a layer on top that sends" top
-                | Some _, true ->
-                    reject "No block can follow %s, which sends" top
-                | _ -> ()) ;
-                Stack { anchor ; layers ; body }) |||
+                if terminal top then
+                    (* Refused at the brace, rather than at the block's end: *)
+                    optional ~def:() (sp -- item '{' >>: fun _ ->
+                        reject "No block can follow %s, which sends" top) >>:
+                    fun () -> Stack { anchor ; layers ; body = None }
+                else
+                    optional ~def:None (body >>: Option.some) >>: function
+                    | None ->
+                        reject "%s needs a block, or a layer on top that sends"
+                            top
+                    | body -> Stack { anchor ; layers ; body }) |||
         (block >>: fun b -> Block b) |||
         (variable ++ maybe_next (
             item '=' -- nay (item '=' ||| item '~') -- nl_sp -+ expr) >>:
@@ -607,6 +610,7 @@ let parse text =
   "x = (1 + 2)\ny = [1, 2]\nz = {a: 1, b: \"x\"}\n" \
     (reads "x = 1 +\n  2\ny = [1,\n 2,\n]\nz = {a: 1, b: \"x\",}")
   "x = a\n/IP {\n}\n" (reads "x = a\n/IP {}")
+  "/IP/UDP/Bytes(\"x\")\n{\n  y = 1\n}\n" (reads "/IP/UDP/Bytes(\"x\")\n{ y = 1 }")
   "IP!(ttl=1)/TCP!(flags=2)/Bytes(\"x\")\n" \
     (reads "IP!(ttl=1)\\TCP!(flags=2)/Bytes(\"x\")")
   "../../IP!/TCP!(flags=4)/Bytes\n" (reads "../../IP!/TCP!(flags=4)/Bytes()")
@@ -637,8 +641,10 @@ let parse text =
   "line 1, column 11: Expected end of statement" (reads "print(\"a\"))")
   "line 1, column 16: UDP needs a block, or a layer on top that sends" \
     (reads "/IP/UDP(dst=53)")
-  "line 1, column 19: No block can follow Bytes, which sends" \
+  "line 1, column 18: No block can follow Bytes, which sends" \
     (reads "/IP/UDP/Bytes() {}")
+  "line 4, column 21: No block can follow Bytes, which sends" \
+    (reads "/IP/UDP/Bytes(\"a\")\n{\n}\n/IP/UDP/Bytes(\"b\") {\n  x = 1\n}")
   "line 1, column 12: Expected end of statement" (reads "print(\"a\") print(\"b\")")
   "line 1, column 7: Expected end of statement" (reads "x = 1 2")
   "line 1, column 5: Expected expression in statement" (reads "x = ")
