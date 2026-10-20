@@ -150,12 +150,17 @@ type sniff_ret_ =
 
 external sniff_ : ?timeout:float -> pcap_handler -> sniff_ret_ = "wrap_pcap_read"
 
-(** [openif_ "eth0" true "port 80" 96] returns the iface representing eth0,
+(** Which packets of an interface are captured: those it receives ([In]),
+ * those it sends ([Out]), or both. On Linux, what is sent includes what is
+ * injected through the very same handle. *)
+type direction = InOut | In | Out
+
+(** [openif_ "eth0" true "port 80" 96 In] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is set to 0 then a "default" value
  * of 65535 will be chosen, which is probably not what you want. See
  * [default_caplen] for what you probably want. *)
-external openif_ : string -> bool -> string -> int -> pcap_handler = "wrap_pcap_make"
+external openif_ : string -> bool -> string -> int -> direction -> pcap_handler = "wrap_pcap_make"
 
 external closeif_ : pcap_handler -> unit = "wrap_pcap_close"
 
@@ -479,10 +484,10 @@ type iface_handler = {
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is not set then whole frames are
  * captured (see [default_caplen]). *)
-let openif ?(promisc=true) ?(filter="") ?caplen name =
+let openif ?(promisc=true) ?(filter="") ?caplen ?(direction=InOut) name =
     let caplen =
         Option.default_delayed (fun () -> default_caplen name) caplen in
-    { pcap = openif_ name promisc filter caplen ;
+    { pcap = openif_ name promisc filter caplen direction ;
       name ; caplen }
 
 let closeif handler =
@@ -1245,9 +1250,9 @@ type iface = { handler : iface_handler ;
 
 (* An iface if a pcap handler that's part of a simulation.
  * It needs a widget to log and pay for events. *)
-let open_iface ~(widget : Widget.t) ?promisc ?filter ?caplen ifname =
+let open_iface ~(widget : Widget.t) ?promisc ?filter ?caplen ?direction ifname =
     let iface = {
-        handler = openif ?promisc ?filter ?caplen ifname ;
+        handler = openif ?promisc ?filter ?caplen ?direction ifname ;
         widget
     } in
     (* A real interface only makes sense in a realtime simulation: *)

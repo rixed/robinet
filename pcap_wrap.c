@@ -73,7 +73,10 @@ static int set_filter(pcap_t *handle, char const *filter)
     return 0;
 }
 
-static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, size_t snaplen, char *errbuf)
+// The OCaml [Pcap.direction], in the order of its constructors:
+static pcap_direction_t const directions[] = { PCAP_D_INOUT, PCAP_D_IN, PCAP_D_OUT };
+
+static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, size_t snaplen, pcap_direction_t direction, char *errbuf)
 {
     if (! snaplen) snaplen = 65535; // FIXME: let libpcap deal with it
 
@@ -89,6 +92,7 @@ static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, s
     // We will implement timeout ourselves
     if (0 != pcap_activate(handle)) goto err;
     if (0 != set_filter(handle, filter)) goto err;
+    if (direction != PCAP_D_INOUT && 0 != pcap_setdirection(handle, direction)) goto err;
 
     return handle;
 err:
@@ -98,17 +102,18 @@ err1:
     return NULL;
 }
 
-CAMLprim value wrap_pcap_make(value ifname_, value promisc_, value filter_, value snaplen_)
+CAMLprim value wrap_pcap_make(value ifname_, value promisc_, value filter_, value snaplen_, value direction_)
 {
-    CAMLparam4(ifname_, promisc_, filter_, snaplen_);
+    CAMLparam5(ifname_, promisc_, filter_, snaplen_, direction_);
     char errbuf[PCAP_ERRBUF_SIZE] = "";
 
     char const *const ifname = String_val(ifname_);
     bool const promisc = Bool_val(promisc_);
     char const *const filter = String_val(filter_);
     unsigned const snaplen = Unsigned_int_val(snaplen_);
+    pcap_direction_t const direction = directions[Int_val(direction_)];
 
-    pcap_t *handle = make_pcap(ifname, promisc, filter, snaplen, errbuf);
+    pcap_t *handle = make_pcap(ifname, promisc, filter, snaplen, direction, errbuf);
     if (! handle) caml_failwith(errbuf);
 
     CAMLlocal1(v);
