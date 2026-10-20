@@ -46,6 +46,8 @@ type pick =
     | Local_address
     (* At random within these bounds, and distinct from the siblings': *)
     | Random_in of int * int
+    (* As [Random_in], within the port ranges of the tree for that layer: *)
+    | Local_port
 
 type field =
     { name : string ;
@@ -630,7 +632,6 @@ let field ?(set_in=[ Manual ]) ?(read_in=[ Manual ]) ?(discriminant=false)
           ?pick ?peer name typ =
     { name ; typ ; set_in ; read_in ; discriminant ; pick ; peer = peer |? name }
 
-let random_port = Random_in (49152, 65535)
 
 let unsendable name _ =
     let fail _ _ _ = V.fail "%s cannot be sent" name in
@@ -676,7 +677,7 @@ let tcp =
         ~constants:[ "FIN", Int 1 ; "SYN", Int 2 ; "RST", Int 4 ; "PSH", Int 8 ;
                      "ACK", Int 16 ; "URG", Int 32 ] [
         field "src" Type.Int ~set_in:both ~read_in:both ~discriminant:true
-              ~pick:random_port ~peer:"dst" ;
+              ~pick:Local_port ~peer:"dst" ;
         field "dst" Type.Int ~set_in:both ~read_in:both ~discriminant:true
               ~pick:Required ~peer:"src" ;
         field "seq_num" Type.Int ;
@@ -688,7 +689,7 @@ let tcp =
 
 let udp =
     layer "UDP" ~above:[ "ip" ] ~node:udp_node ~unpack:unpack_udp [
-        field "src" Type.Int ~discriminant:true ~pick:random_port ~peer:"dst" ;
+        field "src" Type.Int ~discriminant:true ~pick:Local_port ~peer:"dst" ;
         field "dst" Type.Int ~discriminant:true ~pick:Required ~peer:"src" ;
         field "length" Type.Int ;
         field "checksum" Type.Int ]

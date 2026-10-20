@@ -583,7 +583,10 @@ type status = Running | Done | Failed of error | Stopped
 
 type handle =
     { stop : unit -> unit ;
-      status : unit -> status }
+      status : unit -> status ;
+      (* How many nodes the tree has beside its root, streams still closing
+       * included: *)
+      nodes : unit -> int }
 
 (* Runs [program] on [power]'s simulation, starting at once, sending and
  * receiving through [tree] (from {!Crafty_tree.make_root}), writing with
@@ -604,7 +607,8 @@ let run_on_tree power tree ~print ~print_err ?(on_exit=ignore) (program : T.bloc
                 ~fail:root.fail ~break_:root.break_
                 (fun () -> cancel root ; exit Done)) ;
     { stop = (fun () -> cancel root ; exit Stopped) ;
-      status = (fun () -> !status) }
+      status = (fun () -> !status) ;
+      nodes = (fun () -> Crafty_tree.size tree - 1) }
 
 type program = Crafty_typing.block
 
@@ -624,20 +628,23 @@ let print_status oc = function
 
 (** Runs [program] on a new Ethernet interface under [parent], of address
  * [mac] and [ip] (in [netmask]), sending beyond its subnet to [gateway],
+ * answering ARP for [ip] unless [answer_arp] is false, picking the local
+ * ports it is not given from [ports] (as {!Crafty_tree.make_root} does),
  * printing with [print] and [print_err], and calling [on_exit] with how it
  * ends. Returns the device of the interface, and a handle to stop the
  * program or ask its status. The program starts at the next tick of the
  * simulation, once that device can be connected. *)
-let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?(print=ignore)
-        ?(print_err=ignore) ?(on_exit=ignore) (program : program) =
+let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
+        ?ports ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
+        (program : program) =
     let gateways =
         Option.map_default (fun gw ->
-            [ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw) ]) [] gateway in
+            [ Eth.State.gw_selector (), Some gw ]) [] gateway in
     let eth =
-        Eth.State.make ~parent ~name ~mac ~gateways
+        Eth.State.make ~parent ~name ~mac ~gateways ?answer_arp
             ~my_addresses:[ Eth.State.make_my_ip_address ?netmask ip ] () in
     let power = eth.iface.widget.power in
-    let tree = Crafty_tree.make_root eth in
+    let tree = Crafty_tree.make_root ?ports eth in
     let started = ref None and stopped = ref false in
     Simulation.asap power (fun () ->
         if not !stopped then
@@ -655,7 +662,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?(print=ignore)
       status = (fun () ->
         match !started with
         | Some h -> h.status ()
-        | None -> if !stopped then Stopped else Running) }
+        | None -> if !stopped then Stopped else Running) ;
+      nodes = (fun () -> Crafty_tree.size tree - 1) }
 
 (* [runs ?stop_at ?trees ?frames ?inject text] is what the program in that text
  * prints, each line with the time it is printed at (and with [trees], the
@@ -1152,7 +1160,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?(print=ignore)
           let dev, h =
               run ~parent:sim.SimTypes.root ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
                   ~ip:(Ip.Addr.of_string "10.0.0.1") ~netmask:(Ip.Addr.of_string "255.255.255.0")
-                  ~gateway:(Eth.Addr.of_string "02:00:00:00:00:fe")
+                  ~gateway:(Eth.Gateway.Mac (Eth.Addr.of_string "02:00:00:00:00:fe"))
                   ~print:line ~print_err:line
                   ~on_exit:(fun s -> line (IO.to_string print_status s)) p in
           let policer =
@@ -1181,4 +1189,43 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?(print=ignore)
   "0.110s: hit max-packet-rate\n0.110s: stopped\n110 frames" (policed ~max_packet_rate:100. pings)
   "0.100s: stopped\n100 frames" (policed ~stop_at:0.1 pings)
   "0.000s: stopped\n0 frames" (policed ~stop:true pings)
+*)
+(* Sharing the address of the host: the gateway found by ARP, no answer to
+ * ARP for the address, the local port from those given, and no node left
+ * once done: *)
+(*$R run
+  let sim = Simulation.make ~realtime:false "crafty-shared" in
+  let ip = Ip.Addr.of_string and mac = Eth.Addr.of_string in
+  let arp ?(from="02:00:00:00:00:fe") pdu =
+      Eth.Pdu.(pack (make Eth.Proto.arp (mac from) (mac "02:00:00:00:00:01") (Arp.Pdu.pack pdu))) in
+  let p = Result.get_ok (Crafty_interp.compile
+              "wait dur=1s\n/IP(dst=1.2.3.4)/UDP(dst=7)/Bytes(\"x\")") in
+  let dev, h =
+      run ~parent:sim.SimTypes.root ~mac:(mac "02:00:00:00:00:01") ~ip:(ip "10.0.0.1")
+          ~netmask:(ip "255.255.255.0") ~gateway:(Eth.Gateway.IPv4 (ip "10.0.0.254"))
+          ~answer_arp:false ~ports:[ "UDP", [ 5000, 5000 ] ] p in
+  let frames = ref [] in
+  Tools.(dev --> sink (fun bits ->
+      let d = describe bits in
+      frames := d :: !frames ;
+      (* The gateway answers its ARP requests, once they are sent: *)
+      if String.ends_with d " ARP" && String.starts_with d "02:00:00:00:00:01>FF" then
+          Simulation.delay sim.root.power (Clock.Interval.msec 1.) dev.Tools.write (arp
+              (Arp.Pdu.make_reply Arp.HwType.eth Arp.HwProto.ip4
+                  (mac "02:00:00:00:00:fe" :> Bitstring.bitstring) (Ip.Addr.to_bitstring (ip "10.0.0.254"))
+                  (mac "02:00:00:00:00:01" :> Bitstring.bitstring) (Ip.Addr.to_bitstring (ip "10.0.0.1"))))
+  )) ;
+  (* A neighbour asks for the address, which is not for the program to
+   * answer: *)
+  Simulation.at sim.root.power (Clock.Time.of_secs 0.5) dev.Tools.write (arp ~from:"02:00:00:00:00:02"
+      (Arp.Pdu.make_request Arp.HwType.eth Arp.HwProto.ip4
+          (mac "02:00:00:00:00:02" :> Bitstring.bitstring) (Ip.Addr.to_bitstring (ip "10.0.0.2"))
+          (Ip.Addr.to_bitstring (ip "10.0.0.1")))) ;
+  Simulation.run sim false ;
+  assert_equal ~printer:(String.concat "\n")
+      [ "02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP" ;
+        "02:00:00:00:00:01>02:00:00:00:00:FE IP 10.0.0.1>1.2.3.4 ttl=64 UDP 5000>7 \"x\"" ]
+      (List.rev !frames) ;
+  assert_equal Done (h.status ()) ;
+  assert_equal ~printer:string_of_int 0 (h.nodes ())
 *)

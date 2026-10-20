@@ -79,6 +79,8 @@ type node =
       (* Unused, it is finishing what it has to before going away: *)
       mutable closing : bool ;
       eth : Eth.State.t ;
+      (* The ranges of local ports to pick from, by layer name: *)
+      ports : string -> (int * int) list ;
       ops : L.ops ;
       (* Registered on it, by order of registration: *)
       mutable patterns : pattern list }
@@ -110,21 +112,29 @@ type entry = { node : node ; mode : L.mode ; options : (int * value) list }
 (* The children of [n] for layer [l]: *)
 let siblings n (l : L.layer) = Hashtbl.find_option n.children l.name
 
-(* A value of field [i] of [l] within [lo, hi] that no sibling has: *)
-let pick_random loc parent (l : L.layer) i lo hi =
+(* A value of field [i] of [l] within one of the [ranges] (inclusive and
+ * disjoint) that no sibling has: *)
+let pick_random loc parent (l : L.layer) i ranges =
+    let within v = List.exists (fun (lo, hi) -> v >= lo && v <= hi) ranges in
     let taken =
         Option.map_default (fun s ->
             Siblings.fold (fun k _ taken ->
                 match List.assoc_opt i k with
-                | Some (Int v) -> Set.Int.add v taken
+                | Some (Int v) when within v -> Set.Int.add v taken
                 | _ -> taken) s Set.Int.empty) Set.Int.empty (siblings parent l) in
-    let n = hi - lo + 1 in
+    let n = List.fold_left (fun n (lo, hi) -> n + hi - lo + 1) 0 ranges in
     if Set.Int.cardinal taken >= n then
         error loc "No %s left for another %s" l.fields.(i).name l.name ;
+    (* The [j]th value of all the ranges: *)
+    let rec nth j = function
+        | [] -> assert false
+        | (lo, hi) :: rest ->
+            if j <= hi - lo then lo + j else nth (j - (hi - lo + 1)) rest in
     (* The first free one from a random start: *)
-    let rec loop v =
-        if Set.Int.mem v taken then loop (if v = hi then lo else v + 1) else v in
-    Int (loop (lo + Random.int n))
+    let rec loop j =
+        let v = nth j ranges in
+        if Set.Int.mem v taken then loop ((j + 1) mod n) else v in
+    Int (loop (Random.int n))
 
 (* The fields of key [key] of layer [l], by name: *)
 let key_fields (l : L.layer) key name =
@@ -134,7 +144,7 @@ let key_fields (l : L.layer) key name =
 let make_child parent (l : L.layer) key =
     let c = { layer = l ; key ; parent = Some parent ;
               children = Hashtbl.create 3 ; users = 0 ; received = 0 ;
-              closing = false ; eth = parent.eth ;
+              closing = false ; eth = parent.eth ; ports = parent.ports ;
               ops = l.node { eth = parent.eth ; key = key_fields l key ;
                              below_key = key_fields parent.layer parent.key ;
                              below = Some parent.ops } ;
@@ -167,7 +177,10 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
                         error loc "No IPv4 address to send %s from" l.name)
                 | Some (L.Random_in (lo, hi)) ->
                     random := true ;
-                    i, pick_random loc parent l i lo hi
+                    i, pick_random loc parent l i [ lo, hi ]
+                | Some L.Local_port ->
+                    random := true ;
+                    i, pick_random loc parent l i (parent.ports l.name)
                 | Some L.Required | None ->
                     error loc "%s needs a %s" l.name l.fields.(i).name)
         ) (L.key_fields l) in
@@ -369,12 +382,23 @@ let decode frame : packet =
     | None -> []
     | Some u -> complete [ L.root, u ]
 
-(** The tree of an interface, which then receives through it. *)
-let make_root (eth : Eth.State.t) =
+(** The local ports picked by default, those that IANA leaves to dynamic
+ * use: *)
+let dynamic_ports = [ 49152, 65535 ]
+
+(** The tree of an interface, which then receives through it. Local ports
+ * that a stack leaves out are picked from [ports] for each layer that has
+ * some (inclusive and disjoint ranges, by layer name), and else from
+ * {!dynamic_ports}. *)
+let make_root ?(ports=[]) (eth : Eth.State.t) =
+    let ports name =
+        match List.assoc_opt (String.uppercase_ascii name) ports with
+        | Some (_ :: _ as ranges) -> ranges
+        | _ -> dynamic_ports in
     let root =
         { layer = L.root ; key = [] ; parent = None ;
           children = Hashtbl.create 10 ; users = 0 ; received = 0 ;
-          closing = false ; eth ;
+          closing = false ; eth ; ports ;
           ops = L.root.node { eth ; key = (fun _ -> None) ;
                               below_key = (fun _ -> None) ; below = None } ;
           patterns = [] } in
@@ -469,6 +493,19 @@ let to_string n = IO.to_string print n
   ignore (child loc ip l []) ; ignore (child loc ip l []) ;
   assert_raises (Crafty_value.Runtime_error (loc, "No id left for another Tiny"))
       (fun () -> child loc ip l [])
+*)
+(* Local ports are picked from the ranges of the tree, across them all: *)
+(*$R child
+  let root = make_root ~ports:[ "UDP", [ 10, 11 ; 20, 20 ] ] eth in
+  let ip = child loc root Crafty_layers.ip (ip_to "1.2.3.4") in
+  let src n = match List.assoc_opt 0 n.key with Some (Crafty_value.Int p) -> p | _ -> -1 in
+  let udp () = src (child loc ip Crafty_layers.udp [ 1, port 53 ]) in
+  let picked = List.sort Int.compare [ udp () ; udp () ; udp () ] in
+  assert_equal ~printer:dump [ 10 ; 11 ; 20 ] picked ;
+  assert_raises (Crafty_value.Runtime_error (loc, "No src left for another UDP"))
+      (fun () -> udp ()) ;
+  let tcp = child loc ip Crafty_layers.tcp [ 1, port 80 ] in
+  assert_bool "other layers keep the dynamic ports" (src tcp >= 49152)
 *)
 (*$= decode & ~printer:identity
   "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048)/IP(src=10.0.0.2, dst=10.0.0.1, proto=17, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=30, options=[], is_fragment=false)/UDP(src=53, dst=1000, length=10, checksum=32593)/Bytes(data=#6869)" \
