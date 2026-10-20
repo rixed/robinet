@@ -58,6 +58,7 @@ LIB_SOURCES  = \
 	gateway.ml \
 	device.ml \
 	topology.ml \
+	host_config.ml \
 	netns.ml \
 	opache.ml \
 	search.ml \

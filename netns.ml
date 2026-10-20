@@ -48,58 +48,10 @@
 *)
 open Batteries
 
-(* Through [ip] rather than through netlink: there is no netlink binding here,
- * this is a handful of commands, and [ip] is what anybody would check the
- * result with by hand in any case. Likewise [ethtool] for the offloads. *)
 let ip = "ip"
 
-exception Command_failed of string * string
-
-let () =
-    Printexc.register_printer (function
-        | Command_failed (cmd, how) ->
-            Some (Printf.sprintf "%S %s.\n\
-                                  Making a namespace or an interface is for \
-                                  root; Have you tried under sudo?" cmd how)
-        | _ -> None)
-
-(* Shells do not need to be told about a name or a keyword, and a line of them
- * quoted one by one is a line nobody can read back. *)
-let quote arg =
-    let plain c =
-        (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-        (c >= '0' && c <= '9') || String.contains "_-./:=@," c in
-    if arg <> "" && String.for_all plain arg then arg
-    else Filename.quote arg
-
-(* Run one [ip] command, or say which one would not run.
- *
- * [quiet] silences what the command itself has to say, never the line naming
- * it: a command that is undoing something reports on a state of affairs that
- * is already being given up on -- half of it may be gone before it runs -- and
- * the error that matters was reported before it. What was run is worth seeing
- * either way, so that a reader whose robinet was killed before it could tidy
- * up knows what is left and what to type. *)
-let run ?(quiet=false) args =
-    let cmd = String.concat " " (ip :: List.map quote args) in
-    (* Printed rather than logged, and this is the only thing in the library
-     * that prints: what is being changed here is the machine the simulation
-     * runs on, not anything in the simulation, and it outlives the run. A
-     * reader has to be able to see what was done to their interfaces, and to
-     * undo it by hand if robinet is killed before it can. *)
-    Printf.printf "%s\n%!" cmd ;
-    (* What is printed is what a reader would type; what is run is that, with
-     * its own noise thrown away when it is undoing something. *)
-    match Unix.system (if quiet then cmd ^" >/dev/null 2>&1" else cmd) with
-    | Unix.WEXITED 0 -> ()
-    | Unix.WEXITED n ->
-        raise (Command_failed (cmd, Printf.sprintf "exited with status %d" n))
-    | Unix.WSIGNALED n | Unix.WSTOPPED n ->
-        raise (Command_failed (cmd, Printf.sprintf "was signalled (%d)" n))
-
-(* What was asked for and what is there may already agree, and a command that
- * fails on the way out is not a reason to stop taking things down. *)
-let try_run args = try run ~quiet:true args with _ -> ()
+let run args = Host_config.run ip args
+let try_run args = Host_config.try_run ip args
 
 (** The far end of the pair for a portal called [ifname]: what it is called,
  * and the namespace it lives in. Both are named after the portal, so that
