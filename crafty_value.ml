@@ -84,6 +84,24 @@ let rec to_string (typ : A.Type.t) v =
         if t = A.Type.Void then n else n ^" "^ to_string t v
     | _ -> invalid_arg "Crafty_value.to_string"
 
+(* The value of type [typ] that a field takes when nothing tells it: *)
+let rec zero (typ : A.Type.t) =
+    match typ with
+    | Void -> Void
+    | Bool -> Bool false
+    | Byte -> Byte 0
+    | Int -> Int 0
+    | Float -> Float 0.
+    | String -> String ""
+    | Interval -> Interval Interval.zero
+    | Time -> Time (Clock.Wall.of_secs 0.)
+    | Ip -> Ip Ip.Addr.zero
+    | Mac -> Mac Eth.Addr.zero
+    | Record fs -> Record (Array.of_list (List.map (zero % snd) fs))
+    | Array _ -> Array [||]
+    | Variant ((n, t) :: _) -> Variant (n, zero t)
+    | Variant [] | Pattern -> invalid_arg "Crafty_value.zero"
+
 let rec equal a b =
     match a, b with
     | Ip a, Ip b -> Ip.Addr.compare a b = 0

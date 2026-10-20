@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 8c3ba65b127a90e352f572337e547b57) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 fd3696cdb1b59cb492e613fc61919bb1) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -149,8 +149,8 @@ true). Other conversions use the functions `int`, `float`, `bool`, `byte`,
     read their values when a packet arrives, not when the pattern starts
     waiting.
 -   Predefined variables: `MATCH` (the matched packet, within the block of an
-    `expect`, an `any` or an `on`) and the counter of a `repeat` (`I` by
-    default).
+    `expect`, an `any` or an `on`), `LAST` (the last packet sent, once a block
+    has sent one) and the counter of a `repeat` (`I` by default).
 
 ### Expressions
 
@@ -282,6 +282,11 @@ A packet matches a pattern in one mode at most:
 of layers. `MATCH[UDP]` selects the last UDP layer, `MATCH[IP^]` the last IP
 layer but one, `MATCH[^IP]` the first IP layer. Fields are then read with a dot:
 `MATCH[IP].src`, `MATCH[Bytes].data`.
+
+**`LAST`** is the last packet sent, an array of layers like `MATCH`. Defined
+after each terminal stack, shadowing the previous. Self-driven layers do not
+reveal the fields set by their internal engine: Picked source ports are
+accessible, checksums are unset.
 
 ### Special forms
 
@@ -655,9 +660,9 @@ UDP, the data of TCP, a fragment, a quote, or an unknown protocol.
 
 ### Not available yet
 
-The keywords `case` and `report`, the predefined `LAST` (the last packet sent),
-matching embedded packets with `=~`, variant literals, the HTTP layer, IPv6,
-VLANs and tunnels. Using any of them is reported as unsupported.
+The keywords `case` and `report`, matching embedded packets with `=~`, variant
+literals, the HTTP layer, IPv6, VLANs and tunnels. Using any of them is reported
+as unsupported.
 |crafty_manual}
 
 let examples = {crafty_manual|All these examples were run against a host with UDP and TCP echo servers on port

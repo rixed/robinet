@@ -41,7 +41,8 @@
    error reaching the program's block ends the program.
 
    [expect] waits for its pattern, failing after its timeout, then runs its
-   block once. [any] does the same with the first of its patterns to match. [on] lets its block go on, and runs its own block for every
+   block once. [any] does the same with the first of its patterns to match.
+   A packet sent defines [LAST] for the rest of its block, or updates it. [on] lets its block go on, and runs its own block for every
    match until its timeout, its [max] or a [break] out of it; a block ends
    only once its statements are done and its [on]s are over. The packet
    matched, [MATCH], is decoded to its top, and only if read. *)
@@ -370,14 +371,17 @@ let timeout_of eval what = function
         | _ -> assert false)
     | None -> Interval.min 1.
 
-(* [MATCH], from the packet that matched, the bottom first: *)
-let match_value packet =
+(* A packet, the bottom first: *)
+let packet_value packet =
     Array (Array.of_list (List.rev_map (fun ((l : Crafty_layers.layer), (u : Crafty_layers.unpacked)) ->
         match T.packet_record l with
         | A.Type.Record fields ->
             Variant (T.lname l.name, Record (Array.of_list (List.map (fun (name, _) ->
                 List.assoc name u.values) fields)))
-        | _ -> assert false) (Crafty_tree.complete packet)))
+        | _ -> assert false) packet))
+
+(* [MATCH], from the packet that matched, decoded to its top: *)
+let match_value packet = packet_value (Crafty_tree.complete packet)
 
 (* Registers [pattern] for block [b], its conditions evaluated in [env] at
  * match time; a relative pattern on the node of the stack it is on top of,
@@ -480,7 +484,7 @@ and exec t b env (s : T.stmt) k =
             let body = match c with Bool true -> then_ | _ -> else_ in
             ignore (run_block t b env body ~fail:b.fail ~break_:b.break_
                         (fun () -> k env)))
-    | T.Stack { depth ; overlay ; layers ; body = Some body } ->
+    | T.Stack { depth ; overlay ; layers ; body } ->
         (* The block holds the nodes of its stack: *)
         let enter b env =
             match push t b env depth overlay layers with
@@ -491,7 +495,7 @@ and exec t b env (s : T.stmt) k =
                 b.fail Crafty_parser.{ where ; message } ; None in
         ignore (run_block ~enter t b env body ~fail:b.fail ~break_:b.break_
                     (fun () -> k env))
-    | T.Stack { depth ; overlay ; layers ; body = None } ->
+    | T.Send { depth ; overlay ; layers ; last } ->
         (* A packet, leaving the current stack as it was, once it can go on
          * without waiting (as a blocking write does). Its frames reach the
          * interface through events of their own, due now, so the stack is
@@ -501,10 +505,15 @@ and exec t b env (s : T.stmt) k =
         guard (fun () ->
             try
                 let stack = push t b env depth overlay layers in
-                Crafty_tree.send stack ;
-                stack
+                stack, Crafty_tree.send stack
             with Failed msg -> error s.stmt_loc "%s" msg) |>
-        Option.may (fun stack ->
+        Option.may (fun (stack, packet) ->
+            (* The first packet of the block makes its [LAST], which the
+             * next ones update: *)
+            let x = packet_value packet in
+            let env =
+                if Env.mem last.id env.vars then (lookup env last := x ; env)
+                else bind env last x in
             let rec wait d =
                 let asked = ref false in
                 let ask () =
@@ -1021,6 +1030,21 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "500ms: failed: line 2, column 26: 5 bytes are no IP address" \
     (runs ~inject:[ 0.5, reply "pong!" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Bytes(IP.dst == data) {} }")
+*)
+(* LAST is the last packet sent by the block or an enclosing one: as packed
+ * down to the self-driven layers, which only their stack tells: *)
+(*$= runs & ~printer:identity
+  "3ps: [Eth {dst: 00:00:00:00:00:00, proto: 0, src: 00:00:00:00:00:00}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 0, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 0, ttl: 0}, UDP {checksum: 0, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n3ps: done" \
+    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"hi\")\n  print(\"${LAST}\") }")
+  "2ps: [Eth {dst: 00:00:00:00:00:00, proto: 2048, src: 00:00:00:00:00:00}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 7, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 30, ttl: 64}, UDP {checksum: 32593, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n2ps: done" \
+    (runs "/IP!(dst=10.0.0.2, id=7)/UDP(src=1000, dst=53)/Bytes(\"hi\")\nprint(\"${LAST}\")")
+  "9ps: #61 #6262 #62\n9ps: done" \
+    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"a\")\n  x = LAST\n  y = x\n  { Bytes(\"bb\")\n    y := LAST }\n  Bytes(\"b\")\n  print(\"${x[Bytes].data} ${y[Bytes].data} ${LAST[Bytes].data}\") }")
+  "400ms: b\n1s3ps: done" \
+    (runs ~inject:[ 0.4, reply "pong" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"a\")\n  on timeout=1s Bytes(\"pong\") { print(LAST[Bytes].data) }\n  Bytes(\"b\") }")
+  "2ps: 0\n4ps: 1\n4ps: done" \
+    (runs "repeat count=2 { /IP!(dst=10.0.0.2, id=I)/UDP(src=1000, dst=53)/Bytes(\"x\")\n  print(\"${LAST[IP].id}\") }")
 *)
 (* any runs the block of the first pattern to match, and no other: *)
 (*$= runs & ~printer:identity

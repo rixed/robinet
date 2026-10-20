@@ -101,9 +101,11 @@ and stmt_desc =
      * bottom (with none, from the root); a root that was left implicit is
      * the first layer. The first [overlay] layers are over the same layers
      * of the current stack, whose keys and options they take unless they
-     * give them. The stack of [body] if any, else a packet to send: *)
+     * give them. The stack of [body]: *)
     | Stack of { depth : int ; overlay : int ; layers : layer list ;
-                 body : block option }
+                 body : block }
+    (* The same, for a packet to send, which [last] is then: *)
+    | Send of { depth : int ; overlay : int ; layers : layer list ; last : var }
     | Block of block
     | Declare of var * expr
     | Assign of var * expr
@@ -252,7 +254,8 @@ let lookup_var env loc name =
         if List.mem name env.poisoned then raise Already_told ;
         if name = "MATCH" then
             error loc "MATCH is only defined in the blocks of expect, any and on" ;
-        if name = "LAST" then error loc "LAST is not supported yet" ;
+        if name = "LAST" then
+            error loc "LAST is only defined once a packet was sent, in that block or an enclosing one" ;
         error loc "Unknown variable %s" name
 
 (** {2 Expressions} *)
@@ -756,9 +759,21 @@ and stmt errors env (s : A.stmt) =
             (* Which the parser checked: *)
             let top = fst (List.hd stack) in
             assert (top.terminal = (body = None)) ;
-            let body = Option.map (block errors { env with stack }) body in
-            env, Some (mk (Stack { depth = List.length base ; overlay ;
-                                   layers = tls ; body }))
+            let depth = List.length base in
+            (match body with
+            | Some body ->
+                let body = block errors { env with stack } body in
+                env, Some (mk (Stack { depth ; overlay ; layers = tls ; body }))
+            | None ->
+                (* One [LAST] per block, that the packets it sends update: *)
+                let env, last =
+                    if List.mem "LAST" env.declared_here then
+                        env, lookup_var env loc "LAST"
+                    else
+                        let v = new_var "LAST" packet_type in
+                        { env with vars = v :: env.vars ;
+                                   declared_here = "LAST" :: env.declared_here }, v in
+                env, Some (mk (Send { depth ; overlay ; layers = tls ; last })))
         | A.Block b ->
             env, Some (mk (Block (block errors env b)))
         | A.Declare (name, e) ->
@@ -850,7 +865,7 @@ let rec declarations (b : block) =
     List.concat_map (fun s ->
         match s.stmt with
         | Declare (v, _) -> [ v ]
-        | Stack { body = Some b ; _ } | Block b | Retry { body = b ; _ } | Catch b
+        | Stack { body = b ; _ } | Block b | Retry { body = b ; _ } | Catch b
         | On { body = b ; _ } -> declarations b
         | Any { cases ; _ } -> List.concat_map (fun c -> declarations c.body) cases
         | If { then_ ; else_ ; _ } -> declarations then_ @ declarations else_
@@ -903,6 +918,8 @@ let check (program : A.program) =
     (types "repeat { on Bytes(\"x\") { break 2 } }")
   "x: int, y: ip" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { any Bytes(\"a\") { x = length(MATCH) } | ../ICMP { y = MATCH[IP].src } }")
+  "x: int, y: ip" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"a\")\n  { x = LAST[UDP].src }\n  Bytes(\"b\")\n  expect ../UDP(IP.src == LAST[IP].dst) { y = LAST[IP].src } }")
   "n: int, x: int, y: bool, z: float" \
     (types "n = 3\nif n & 1 { x = 1 } elsif n > 2 { y = true } else { z = 1.0 }")
   "" \
@@ -992,8 +1009,12 @@ let check (program : A.program) =
     (types "/IP(dst=1.2.3.4)/IP {}")
   "line 1, column 5: MATCH is only defined in the blocks of expect, any and on" \
     (types "x = MATCH")
-  "line 1, column 5: LAST is not supported yet" \
+  "line 1, column 5: LAST is only defined once a packet was sent, in that block or an enclosing one" \
     (types "x = LAST")
+  "line 2, column 5: LAST is only defined once a packet was sent, in that block or an enclosing one" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"a\") }\nx = LAST")
+  "line 1, column 36: LAST is only defined once a packet was sent, in that block or an enclosing one" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { x = LAST\n  Bytes(\"a\") }")
   "line 1, column 5: Fields of IP can only be read in a condition" \
     (types "x = IP.src")
   "line 1, column 5: =~ is not supported yet" \
@@ -1032,6 +1053,6 @@ let check (program : A.program) =
     (types (Tools.file_content "tests/crafty/pong_counter.crafty"))
   "line 4, column 19: flags cannot be read in a self-driven TCP" \
     (types (Tools.file_content "tests/crafty/not_acked.crafty"))
-  "line 4, column 19: LAST is not supported yet" \
+  "line 4, column 54: =~ is not supported yet" \
     (types (Tools.file_content "tests/crafty/icmp_error.crafty"))
 *)

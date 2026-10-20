@@ -139,7 +139,8 @@ string to bytes and back, bytes to an IP address (4 bytes) or a MAC address
   patterns read their values when a packet arrives, not when the pattern
   starts waiting.
 - Predefined variables: `MATCH` (the matched packet, within the block of an
-  `expect`, an `any` or an `on`) and the counter of a `repeat` (`I` by default).
+  `expect`, an `any` or an `on`), `LAST` (the last packet sent, once a block
+  has sent one) and the counter of a `repeat` (`I` by default).
 
 ### Expressions
 
@@ -260,6 +261,11 @@ A packet matches a pattern in one mode at most:
 array of layers. `MATCH[UDP]` selects the last UDP layer, `MATCH[IP^]` the
 last IP layer but one, `MATCH[^IP]` the first IP layer. Fields are then read
 with a dot: `MATCH[IP].src`, `MATCH[Bytes].data`.
+
+**`LAST`** is the last packet sent, an array of layers like `MATCH`. Defined
+after each terminal stack, shadowing the previous.  Self-driven layers do not
+reveal the fields set by their internal engine: Picked source ports are
+accessible, checksums are unset.
 
 ### Special forms
 
@@ -500,8 +506,7 @@ of UDP, the data of TCP, a fragment, a quote, or an unknown protocol.
 
 ### Not available yet
 
-The keywords `case` and `report`, the
-predefined `LAST` (the last packet sent), matching embedded packets with
+The keywords `case` and `report`, matching embedded packets with
 `=~`, variant literals, the HTTP
 layer, IPv6, VLANs and tunnels. Using any of them is reported as
 unsupported.

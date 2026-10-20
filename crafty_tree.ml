@@ -272,31 +272,62 @@ let fields_of e name =
         | Some _ as v -> v
         | None -> List.assoc_opt i e.options)
 
+(* A layer of [e] that no packet tells: what its stack gives, else [hints],
+ * else zeros: *)
+let assumed e hints =
+    let values =
+        Array.to_list e.node.layer.fields |>
+        List.filter_map (fun (f : L.field) ->
+            if f.read_in = [] then None else
+            Some (f.name,
+                  match fields_of e f.name with
+                  | Some v -> v
+                  | None -> List.assoc_opt f.name hints |? zero f.typ)) in
+    e.node.layer,
+    L.{ values ; upper = Nothing ; payload = Bitstring.empty_bitstring ;
+        up_hints = [] ; bits = Bitstring.empty_bitstring }
+
 (** Sends a packet down that stack, from its top (a terminal layer): each
  * manual layer packs what is above it, until a self-driven one takes it, or
- * the root, which emits it as it is. Raises [Failed]. *)
+ * the root, which emits it as it is. Returns the packet: what was packed,
+ * decoded, on top of the self-driven layers as their stack gives them (those
+ * may send it later, or never, or in several packets). Raises [Failed]. *)
 let send stack =
+    (* What the first self-driven layer is given, with the hints of the layer
+     * above it, and the layers from it down: *)
     let rec loop hints bits = function
         | [] ->
             invalid_arg "Crafty_tree.send: empty stack"
-        | e :: rest ->
+        | e :: rest as driven ->
             tell e.node hints ;
             (match e.mode with
             | L.Driven ->
-                e.node.ops.send (fields_of e) hints bits
+                e.node.ops.send (fields_of e) hints bits ;
+                bits, hints, driven
             | L.Manual ->
                 let bits, hints = e.node.ops.pack (fields_of e) hints bits in
                 (match rest with
                 | [] ->
                     let st = e.node.eth in
-                    Simulation.asap st.iface.widget.power st.iface.emit bits
+                    Simulation.asap st.iface.widget.power st.iface.emit bits ;
+                    bits, [], []
                 | rest ->
                     loop hints bits rest)) in
-    loop [] Bitstring.empty_bitstring stack ;
-    match stack with
+    let bits, hints, driven = loop [] Bitstring.empty_bitstring stack in
+    (match stack with
     | { node = { parent = Some { parent = None ; _ } ; _ } as n ; _ } :: _ ->
         prune n
-    | _ -> ()
+    | _ -> ()) ;
+    (* The packed layers, the bottom first: *)
+    let packed = List.rev (List.take (List.length stack - List.length driven) stack) in
+    let rec decode_up acc up_hints bits = function
+        | [] -> acc
+        | e :: above ->
+            (match e.node.layer.unpack up_hints bits with
+            | Some u -> decode_up ((e.node.layer, u) :: acc) u.up_hints u.payload above
+            | None -> List.rev_map (fun e -> assumed e []) above @ assumed e [] :: acc) in
+    decode_up [] [] bits packed @
+    List.mapi (fun i e -> assumed e (if i = 0 then hints else [])) driven
 
 (* The entries of that stack that what is sent goes through: down to the
  * first self-driven one that keeps it, or all of them: *)
@@ -591,16 +622,22 @@ let to_string n = IO.to_string print n
   let tcp = child loc ip Crafty_layers.tcp [ 1, port 80 ] in
   assert_bool "other layers keep the dynamic ports" (src tcp >= 49152)
 *)
-(* A terminal node of the root goes once sent, the root staying: *)
+(* A terminal node of the root goes once sent, the root staying; what was
+ * sent is told back: *)
 (*$R send
   let root = make_root eth in
   let bytes = child loc root Crafty_layers.bytes [] in
   assert_equal ~printer:identity "Eth{Bytes}" (to_string root) ;
-  send [ { node = bytes ; mode = Crafty_layers.Manual ; options = [] } ;
-         { node = root ; mode = Crafty_layers.Manual ;
-           options = [ 1, Crafty_value.Mac Eth.Addr.broadcast ;
-                       2, Crafty_value.Int 0x88b5 ] } ] ;
-  assert_equal ~printer:identity "Eth" (to_string root)
+  let sent =
+      send [ { node = bytes ; mode = Crafty_layers.Manual ;
+               options = [ 0, Crafty_value.bytes_of_string "hi" ] } ;
+             { node = root ; mode = Crafty_layers.Manual ;
+               options = [ 1, Crafty_value.Mac Eth.Addr.broadcast ;
+                           2, Crafty_value.Int 0x88b5 ] } ] in
+  assert_equal ~printer:identity "Eth" (to_string root) ;
+  assert_equal ~printer:identity
+      "Eth(src=02:00:00:00:00:01, dst=FF:FF:FF:FF:FF:FF, proto=34997)/Bytes(data=#6869)"
+      (IO.to_string print_packet sent)
 *)
 (*$= decode & ~printer:identity
   "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048)/IP(src=10.0.0.2, dst=10.0.0.1, proto=17, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=30, options=[], is_fragment=false)/UDP(src=53, dst=1000, length=10, checksum=32593)/Bytes(data=#6869)" \
