@@ -465,7 +465,9 @@ and exec t b env (s : T.stmt) k =
         (* A packet, leaving the current stack as it was, once it can go on
          * without waiting (as a blocking write does). Its frames reach the
          * interface through events of their own, due now, so the stack is
-         * asked a picosecond later, once they all ran: *)
+         * asked a picosecond later, once they all ran; and again once it
+         * said it would be ready, or a node of it says it is, whichever
+         * comes first: *)
         guard (fun () ->
             try
                 let stack = push t b env depth overlay layers in
@@ -473,13 +475,18 @@ and exec t b env (s : T.stmt) k =
                 stack
             with Failed msg -> error s.stmt_loc "%s" msg) |>
         Option.may (fun stack ->
-            let rec drain d =
-                Simulation.delay t.power d (fun () ->
-                    if b.live then
-                        let d = Crafty_tree.busy_for stack in
-                        if Interval.compare d Interval.zero <= 0 then k env
-                        else drain d) () in
-            drain (Interval.psec 1))
+            let rec wait d =
+                let asked = ref false in
+                let ask () =
+                    if not !asked then (
+                        asked := true ;
+                        if b.live then check ()) in
+                Simulation.delay t.power d ask () ;
+                Crafty_tree.on_ready stack ask
+            and check () =
+                let d = Crafty_tree.busy_for stack in
+                if Interval.compare d Interval.zero <= 0 then k env else wait d in
+            wait (Interval.psec 1))
     | T.Expect { timeout ; pattern ; match_ ; body } ->
         guard (fun () -> timeout_of eval "expect" timeout) |>
         Option.may (fun timeout ->

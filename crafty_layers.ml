@@ -125,7 +125,14 @@ type ops =
       close : (unit -> unit) -> unit ;
       (* How long what is sent now would wait in this node before it
        * leaves it, for senders to pace themselves on: *)
-      busy_for : unit -> Clock.Interval.t }
+      busy_for : unit -> Clock.Interval.t ;
+      (* Self-driven, it keeps what it is given until it can send it (TCP),
+       * so that how busy the nodes below it are is no concern of senders: *)
+      buffered : bool ;
+      (* Calls the function, once, from an event of its own, when the node
+       * is no longer busy, if it can tell sooner than [busy_for] did (TCP,
+       * once connected or once its send buffer drained); or never: *)
+      on_ready : (unit -> unit) -> unit }
 
 (** What a node is made with: *)
 type context =
@@ -184,7 +191,8 @@ let pass u = [ u, both ]
  * mode: *)
 let manual pack =
     { pack ; send = not_driven ; receive = pass ;
-      listen = ignore ; close = (fun k -> k ()) ; busy_for = Tools.never_busy }
+      listen = ignore ; close = (fun k -> k ()) ; busy_for = Tools.never_busy ;
+      buffered = false ; on_ready = ignore }
 
 let bytes_value bits = V.bytes_of_string (string_of_bitstring bits)
 
@@ -428,15 +436,34 @@ let tcp_node ctx =
         if s.closing && Tcp.TRX.is_established s.trx && not s.trx.sent_fin then
             s.trx.tcp_trx.close () ;
         removed s in
+    (* What is written before the connection is established waits for it, as
+     * what fills the send buffer does: *)
+    let busy_for () =
+        match !state with
+        | Stream s when List.fold_left (fun n b -> n + Tools.bytelength b) 0 s.pending
+                        >= s.trx.snd_buf ->
+            s.trx.rto
+        | Stream s -> Tcp.TRX.busy_for s.trx ()
+        | Idle | Listening -> Clock.Interval.zero in
+    (* Those waiting for the node not to be busy, told when the connection is
+     * established or fails, and as segments come in: *)
+    let waiters = ref [] in
+    let wake () =
+        if Clock.Interval.compare (busy_for ()) Clock.Interval.zero <= 0 then (
+            let ks = !waiters in
+            waiters := [] ;
+            List.iter (fun k -> Simulation.asap power k ()) ks) in
     let established s = function
         | Some _ ->
             List.iter (Tcp.TRX.tx s.trx) (List.rev s.pending) ;
             s.pending <- [] ;
-            try_close s
+            try_close s ;
+            wake ()
         | None ->
             Tcp.TRX.abort s.trx ;
             s.pending <- [] ;
-            removed s in
+            removed s ;
+            wake () in
     let new_stream ?(mss=st.mtu - 40) () =
         (match !state with
         | Stream s -> Tcp.TRX.abort s.trx ; removed s
@@ -522,6 +549,7 @@ let tcp_node ctx =
             let data = List.rev !received in
             received := [] ;
             removed s ;
+            wake () ;
             raw :: List.map (fun d ->
                 { u with payload = d ; upper = Any N.Bytes ; bits = d }, [ Driven ]) data
         | Idle | Listening -> [ raw ]) ;
@@ -537,15 +565,8 @@ let tcp_node ctx =
                 if Option.is_some s.on_closed then (
                     Tcp.TRX.abort s.trx ;
                     Option.may (fun k -> s.on_closed <- None ; k ()) s.on_closed)) ()) ;
-      (* What is written before the connection is established waits for
-       * it, as what fills the send buffer does: *)
-      busy_for = (fun () ->
-        match !state with
-        | Stream s when List.fold_left (fun n b -> n + Tools.bytelength b) 0 s.pending
-                        >= s.trx.snd_buf ->
-            s.trx.rto
-        | Stream s -> Tcp.TRX.busy_for s.trx ()
-        | Idle | Listening -> Clock.Interval.zero) }
+      busy_for ; buffered = true ;
+      on_ready = (fun k -> waiters := k :: !waiters) }
 
 let icmp_upper = function
     | 0 | 8 -> Only N.Echo

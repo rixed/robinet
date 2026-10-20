@@ -298,11 +298,23 @@ let send stack =
         prune n
     | _ -> ()
 
-(** How long what is sent down that stack now would wait before it leaves,
- * in the node that makes it wait the longest: *)
+(* The entries of that stack that what is sent goes through: down to the
+ * first self-driven one that keeps it, or all of them: *)
+let rec senders = function
+    | [] -> []
+    | e :: _ when e.mode = L.Driven && e.node.ops.buffered -> [ e ]
+    | e :: rest -> e :: senders rest
+
+(** How long what is sent down that stack now would wait before it is
+ * accepted, in the node that makes it wait the longest: *)
 let busy_for stack =
     List.fold_left (fun d e -> max d (e.node.ops.busy_for ()))
-        Clock.Interval.zero stack
+        Clock.Interval.zero (senders stack)
+
+(** Calls [k] when a node of that stack tells it is no longer busy, which
+ * the others may still be; possibly never, and possibly several times: *)
+let on_ready stack k =
+    List.iter (fun e -> e.node.ops.on_ready k) (senders stack)
 
 (** {2 Patterns} *)
 
