@@ -57,7 +57,7 @@ let quote arg =
 (** The command line of [prog] with [args], as a reader would type it. *)
 let command_line prog args = String.concat " " (List.map quote (prog :: args))
 
-(** Run [prog] with [args], or say which command would not run.
+(** Run the command line [cmd], or say which command would not run.
  *
  * [quiet] silences what the command itself has to say, never the line naming
  * it: a command that is undoing something reports on a state of affairs that
@@ -65,8 +65,7 @@ let command_line prog args = String.concat " " (List.map quote (prog :: args))
  * the error that matters was reported before it. What was run is worth seeing
  * either way, so that a reader whose program was killed before it could tidy
  * up knows what is left and what to type. *)
-let run ?(quiet=false) prog args =
-    let cmd = command_line prog args in
+let run_line ?(quiet=false) cmd =
     (* Printed rather than logged: what is being changed here is the machine
      * the simulation runs on, not anything in the simulation, and it
      * outlives the run. A reader has to be able to see what was done to
@@ -80,6 +79,9 @@ let run ?(quiet=false) prog args =
         raise (Command_failed (cmd, Printf.sprintf "exited with status %d" n))
     | Unix.WSIGNALED n | Unix.WSTOPPED n ->
         raise (Command_failed (cmd, Printf.sprintf "was signalled (%d)" n))
+
+(** As [run_line], for [prog] with [args]. *)
+let run ?quiet prog args = run_line ?quiet (command_line prog args)
 
 (** As [run], for a command that may fail without it mattering: what was asked
  * for and what is there may already agree, and a command that fails on the
@@ -310,3 +312,159 @@ let ruleset ~table ~ifname ?(ports=[]) ?forward_drop () =
     "}" ; "" ]) \
     (ruleset ~table:"t" ~ifname:"eth0" ~forward_drop:(Ip.Addr.of_string "10.0.0.1") ())
  *)
+
+(** {2 Changes and their undoing}
+ *
+ * A set of changes is undone in the reverse order of its changes, at the end
+ * of the program that made it, and also by any later one if that program was
+ * killed: each change first writes the command that undoes it to a file of
+ * the set, in {!state_dir}, named after the set, which also holds the pid of
+ * its program. *)
+
+let state_dir = "/run/robinet"
+
+type changes =
+    { name : string ;
+      file : string ;
+      (* The commands undoing what was done, the latest first: *)
+      mutable undo : string list ;
+      mutable undone : bool }
+
+(** A new set of changes called [name] (made of letters, digits and
+ * underscores, as it names an nftables table too), which the pid of this
+ * process is appended to. *)
+let changes name =
+    let name = Printf.sprintf "%s_%d" name (Unix.getpid ()) in
+    if not (String.for_all (fun c -> Char.is_letter c || Char.is_digit c ||
+                                      c = '_') name) then
+        invalid_arg (Printf.sprintf "Not a name for changes: %S" name) ;
+    run "mkdir" [ "-p" ; state_dir ] ;
+    let file = state_dir ^"/"^ name in
+    File.with_file_out file (fun oc ->
+        Printf.fprintf oc "pid %d\n" (Unix.getpid ())) ;
+    { name ; file ; undo = [] ; undone = false }
+
+(** Make a change by running [prog] with [args], after having recorded that
+ * running [undo] (a program and its arguments) undoes it. *)
+let change t ~undo prog args =
+    let undo = command_line (List.hd undo) (List.tl undo) in
+    File.with_file_out ~mode:[ `append ] t.file (fun oc ->
+        Printf.fprintf oc "%s\n" undo) ;
+    t.undo <- undo :: t.undo ;
+    run prog args
+
+(* Undo [cmds], the latest first, as best as possible: *)
+let undo_lines cmds =
+    List.iter (fun cmd -> try run_line ~quiet:true cmd with _ -> ()) cmds
+
+(** Undo what [t] did, once. *)
+let undo t =
+    if not t.undone then (
+        t.undone <- true ;
+        undo_lines t.undo ;
+        try_run "rm" [ "-f" ; t.file ; t.file ^".nft" ])
+
+(* The pid and the undoing commands, the latest first, of a file of
+ * changes: *)
+let read_changes file =
+    match File.lines_of file |> List.of_enum with
+    | pid :: cmds when String.starts_with pid "pid " ->
+        Some (int_of_string (String.lchop ~n:4 pid), List.rev cmds)
+    | _ | exception _ -> None
+
+(** Undo the changes left by processes that are no longer running, and
+ * return their names. *)
+let cleanup_stale () =
+    match Sys.readdir state_dir with
+    | exception Sys_error _ -> []
+    | files ->
+        Array.to_list files |>
+        List.filter (fun name -> not (String.ends_with name ".nft")) |>
+        List.filter_map (fun name ->
+            let file = state_dir ^"/"^ name in
+            match read_changes file with
+            | Some (pid, cmds) when not (Sys.file_exists (Printf.sprintf "/proc/%d" pid)) ->
+                undo_lines cmds ;
+                try_run "rm" [ "-f" ; file ; file ^".nft" ] ;
+                Some name
+            | _ -> None)
+
+(** {2 What can be changed} *)
+
+(** Install the nftables table of {!ruleset}, named after [t]. *)
+let firewall t ~ifname ?ports ?forward_drop () =
+    let script = t.file ^".nft" in
+    File.with_file_out script (fun oc ->
+        String.print oc (ruleset ~table:t.name ~ifname ?ports ?forward_drop ())) ;
+    change t ~undo:[ "nft" ; "delete" ; "table" ; "inet" ; t.name ]
+        "nft" [ "-f" ; script ]
+
+let reserved_ports_sysctl = "net.ipv4.ip_local_reserved_ports"
+
+(** [ports] added to the reserved ports [current] (as the sysctl gives them,
+ * which is ranges and ports separated by commas). *)
+let add_reserved_ports current ports =
+    let current = String.trim current in
+    let added =
+        List.map string_of_range ports |> List.unique |>
+        List.filter (fun r -> not (List.mem r (String.split_on_char ',' current))) in
+    String.concat "," ((if current = "" then [] else [ current ]) @ added)
+
+(*$= add_reserved_ports & ~printer:identity
+  "14000-14099,53" \
+    (add_reserved_ports "\n" [ port_range_of_string Tcp "14000-14099" ; \
+                                port_range_of_string Udp "53" ])
+  "8080,53" (add_reserved_ports "8080\n" [ port_range_of_string Udp "53" ; \
+                                           port_range_of_string Tcp "53" ])
+ *)
+
+(** Keep the kernel from picking [ports] as local ports of its own (TCP and
+ * UDP alike, IPv4 and IPv6). Undoing restores the reserved ports as they
+ * were, whatever reserved others since. *)
+let reserve_ports t ports =
+    let current =
+        File.with_file_in ("/proc/sys/net/ipv4/ip_local_reserved_ports") IO.read_all in
+    let set v = [ "sysctl" ; "-w" ; reserved_ports_sysctl ^"="^ v ] in
+    change t ~undo:(set (String.trim current))
+        "sysctl" (List.tl (set (add_reserved_ports current ports)))
+
+(** The features of [ethtool -k] output that gather received packets, and
+ * are on and can be turned off. *)
+let rx_offloads_on ethtool_k =
+    let features = [ "generic-receive-offload" ; "large-receive-offload" ;
+                     "rx-gro-hw" ; "rx-gro-list" ; "rx-udp-gro-forwarding" ] in
+    String.split_on_char '\n' ethtool_k |>
+    List.filter_map (fun line ->
+        match String.split (String.trim line) ~by:": " with
+        | feature, state when List.mem feature features &&
+                              String.starts_with state "on" &&
+                              not (String.exists state "[fixed]") ->
+            Some feature
+        | _ | exception Not_found -> None)
+
+(*$= rx_offloads_on & ~printer:(String.concat ",")
+  [ "generic-receive-offload" ; "rx-gro-list" ] \
+    (rx_offloads_on (String.concat "\n" [ \
+        "Features for wlp59s0:" ; \
+        "rx-checksumming: on" ; \
+        "generic-receive-offload: on" ; \
+        "large-receive-offload: off [fixed]" ; \
+        "rx-gro-hw: on [fixed]" ; \
+        "rx-gro-list: on" ; \
+        "rx-udp-gro-forwarding: off" ]))
+ *)
+
+(** Have [ifname] pass on received packets as they came, rather than
+ * gathered. *)
+let disable_rx_offloads t ifname =
+    output "ethtool" [ "-k" ; ifname ] |>
+    rx_offloads_on |>
+    List.iter (fun feature ->
+        change t ~undo:[ "ethtool" ; "-K" ; ifname ; feature ; "on" ]
+            "ethtool" [ "-K" ; ifname ; feature ; "off" ])
+
+(** Whether the kernel forwards IPv4 packets. *)
+let ip_forward () =
+    try File.with_file_in "/proc/sys/net/ipv4/ip_forward" IO.read_all |>
+        String.trim <> "0"
+    with Sys_error _ -> false
