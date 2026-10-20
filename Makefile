@@ -78,6 +78,7 @@ EXAMPLE_SOURCES = \
 	examples/beautify_html.ml \
 	examples/beautify_mac.ml \
 	examples/capecho.ml \
+	examples/crafty.ml \
 	examples/dns_query.ml \
 	examples/http_echo_server.ml \
 	examples/http_load.ml \
@@ -126,6 +127,7 @@ EXAMPLES_BYTE = \
 	examples/beautify_mac.byte \
 	examples/test_ping.byte \
 	examples/capecho.byte \
+	examples/crafty.byte \
 	examples/load_tester.byte \
 	examples/pcap_reorder.byte \
 	examples/admin_demo.byte
