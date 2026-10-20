@@ -185,7 +185,7 @@ struct
 
     let unpack_questions pkt rest num_qs =
         let rec aux qs rest num_qs =
-            if num_qs = 0 then Ok (qs, rest) else (
+            if num_qs = 0 then Ok (List.rev qs, rest) else (
                 Result.Monad.bind (unpack_name pkt rest)
                     (fun (name, rest) ->
                         let qtype = QType.o (read_n16 pkt rest)
@@ -198,7 +198,7 @@ struct
     let unpack_rrs pkt rest num_rrs =
         let rec aux rrs rest num_rrs =
             if num_rrs = 0 then (
-                Ok (rrs, rest)
+                Ok (List.rev rrs, rest)
             ) else (
                 Result.Monad.bind (unpack_questions pkt rest 1) (function
                     | [ name, qtype, qclass ], rest ->
@@ -351,6 +351,13 @@ struct
                  bitstring_of_bytes answers ;
                  bitstring_of_bytes authority ;
                  bitstring_of_bytes additional ]
+
+    (* Sections keep their order: *)
+    (*$T unpack
+      let rr n = n, QType.a, qclass_inet, 60l, Bytes.of_string "\001\002\003\004" in \
+      let t = make_answer 1 [ "a.", QType.a, 1 ; "b.", QType.a, 1 ] [ rr "a." ; rr "b." ] in \
+      Result.get_ok (unpack (pack t)) = t
+     *)
 
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))

@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 e9f7524fc17ad439636d1db000840db7) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 61433622660862cc17b5459548b35817) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -203,9 +203,9 @@ A stack is a list of layers, each optionally with options in parentheses:
     same connection, sent by hand.
 
 **Streams.** The layers of a stack are *nodes*, keyed by what tells streams
-apart. These keys are the IP addresses, the TCP and UDP ports, and the echo id.
-Two stacks that give the same keys share their nodes, and so the state of the
-protocol: the TCP connection, the IP ids, the echo sequence numbers.
+apart. These keys are the IP addresses, the TCP and UDP ports, and the echo and
+DNS ids. Two stacks that give the same keys share their nodes, and so the state
+of the protocol: the TCP connection, the IP ids, the echo sequence numbers.
 
 A TCP connection opens when its first message is sent, and closes once no block
 uses its stack any more. To insert a manual segment into it, overlay its layer:
@@ -247,6 +247,12 @@ expression, where `,` and `=` can replace `&&` and `==`. In conditions:
 -   Which fields can be read depends on the mode the layer is matched in (see
     [Layers](#layers)). A self-driven `TCP` shows only its ports, and a manual
     `TCP!` shows each segment's header.
+
+A layer whose header names what it carries (the `proto` of IP, the `type` of
+ICMP) is decoded only as that. What UDP and TCP carry is decoded as each layer
+that a stream or a pattern expects there, so that a datagram can match both
+`UDP/DNS/Query` and `UDP/Bytes`. `MATCH` is decoded past the pattern as `Bytes`
+only.
 
 A packet matches a pattern in one mode at most:
 
@@ -519,6 +525,62 @@ Constants for `code`: `NET_UNREACHABLE`, `HOST_UNREACHABLE`,
 (for `DestUnreachable`); `TTL_EXCEEDED`, `REASSEMBLY_TIMEOUT` (for
 `TimeExceeded`).
 
+#### `DNS` (on `UDP`)
+
++----------+------+-----+------+----------------------------+
+| Field    | Type | Set | Read |                            |
++==========+======+=====+======+============================+
+| **`id`** | int  | M   | M    | Default: a free random id. |
++----------+------+-----+------+----------------------------+
+
+`DNS` has no header of its own but the id. It is the stream of an id, on which
+`Query` and `Answer` messages go, told apart by the QR bit.
+
+#### `Query` and `Answer` (on `DNS`, terminal)
+
++---------------------+---------+-----+------+--------------------------+
+| Field               | Type    | Set | Read |                          |
++=====================+=========+=====+======+==========================+
+| `name`              | string  | M   | M    | Default field; required. |
++---------------------+---------+-----+------+--------------------------+
+| `type`              | int     | M   | M    | Default `TYPE_A`.        |
++---------------------+---------+-----+------+--------------------------+
+| `class`             | int     | M   | M    | Default `CLASS_IN`.      |
++---------------------+---------+-----+------+--------------------------+
+| `opcode`            | int     | M   | M    | Default 0.               |
++---------------------+---------+-----+------+--------------------------+
+| `authoritative`     | bool    | M   | M    | Default false.           |
++---------------------+---------+-----+------+--------------------------+
+| `truncated`         | bool    | M   | M    | Default false.           |
++---------------------+---------+-----+------+--------------------------+
+| `rec_desired`       | bool    | M   | M    | Default true.            |
++---------------------+---------+-----+------+--------------------------+
+| `rec_avail`         | bool    | M   | M    | Default false.           |
++---------------------+---------+-----+------+--------------------------+
+| `authentic_data`    | bool    | M   | M    | Default false.           |
++---------------------+---------+-----+------+--------------------------+
+| `checking_disabled` | bool    | M   | M    | Default false.           |
++---------------------+---------+-----+------+--------------------------+
+| `status`            | int     | M   | M    | Default `NOERROR`.       |
++---------------------+---------+-----+------+--------------------------+
+| `answers`           | records | M   | M    | Default none.            |
++---------------------+---------+-----+------+--------------------------+
+| `authority`         | records | M   | M    | Default none.            |
++---------------------+---------+-----+------+--------------------------+
+| `additional`        | records | M   | M    | Default none.            |
++---------------------+---------+-----+------+--------------------------+
+
+A message has one question, of `name`, `type` and `class`; of a received message
+with several, these are the first. Names are written without the trailing dot
+(`"example.com"`), but for the root (`"."`). The records of the three sections
+are `{name: string, type: int, class: int, ttl: int, data: bytes}`; the data of
+an A record converts to an IP address.
+
+Constants for `type`: `TYPE_A`, `TYPE_NS`, `TYPE_CNAME`, `TYPE_SOA`, `TYPE_PTR`,
+`TYPE_MX`, `TYPE_TXT`, `TYPE_AAAA`, `TYPE_SRV`, `TYPE_ANY`; for `class`:
+`CLASS_IN`; for `status`: `NOERROR`, `FORMERR`, `SERVFAIL`, `NXDOMAIN`,
+`NOTIMP`, `REFUSED`.
+
 #### `Bytes` (on `Eth`, `IP`, `TCP` or `UDP`, terminal)
 
 +--------+-------+-----+------+----------------+
@@ -534,8 +596,8 @@ UDP, the data of TCP, a fragment, or an unknown protocol.
 
 The keywords `if`, `elsif`, `else`, `case`, `any` and `report`, the predefined
 `LAST` (the last packet sent), matching embedded packets with `=~` (as in the
-payload of an ICMP error), variant literals, the DNS and HTTP layers, IPv6,
-VLANs and tunnels. Using any of them is reported as unsupported.
+payload of an ICMP error), variant literals, the HTTP layer, IPv6, VLANs and
+tunnels. Using any of them is reported as unsupported.
 |crafty_manual}
 
 let examples = {crafty_manual|All these examples were run against a host with UDP and TCP echo servers on port
@@ -565,6 +627,23 @@ let examples = {crafty_manual|All these examples were run against a host with UD
 
 The `Echo` stream picks an id, and its requests count their sequence numbers.
 The replies come back to that stream, so `Reply` needs no condition on the id.
+
+### Resolve, then ping
+
+    /IP(dst=192.0.2.53)/UDP(dst=53)/DNS {
+      Query("www.example.com")
+      expect timeout=2s Answer(status == NOERROR) {
+        a = MATCH[Answer].answers
+        assert(length(a) > 0 && a[0].type == TYPE_A, msg="no address")
+        /IP(dst=a[0].data)/ICMP/Echo {
+          Request("hi")
+          expect timeout=1s Reply { print("${a[0].name} is up") }
+        }
+      }
+    }
+
+The answer comes back on the `DNS` stream of the query's id. The first record is
+the address only if the name has no CNAME, which the `assert` checks.
 
 ### A UDP echo server
 

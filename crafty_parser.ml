@@ -670,7 +670,7 @@ let parse text =
   "line 1, column 10: match is a reserved name" (reads "match = 1")
   "line 1, column 19: LAST is a reserved name" (reads "repeat var=last {}")
   "line 1, column 20: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")
-  "line 1, column 8: Unknown layer DNS" (reads "/IP/DNS {}")
+  "line 1, column 9: Unknown layer HTTP" (reads "/IP/HTTP {}")
   "line 1, column 11: Carets on both sides of IP" (reads "x = a[^IP^]")
   "line 1, column 3: if is not supported yet" (reads "if x {}")
   "line 1, column 5: wait needs a duration" (reads "wait")

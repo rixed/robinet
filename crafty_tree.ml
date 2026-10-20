@@ -318,44 +318,57 @@ let check w packet modes (pending : pending list) =
                 w.met <- (p, Condition_error (where, message)) :: w.met ; None)
         | _ -> None) pending
 
-(* Decodes the layer on top of [packet], [node] being that of its top if
- * any, and goes on along the nodes of that stream, or as long as some
- * patterns are pending: *)
-let rec up w node packet pending =
+(* Of the layers that can be on top of [packet] (the one its header names,
+ * if it names one), those with nodes on [node], the node of its top if any,
+ * or that a pending pattern goes on with: *)
+let wanted node packet pending =
     let l, (u : L.unpacked) = List.hd packet in
-    match Option.bind u.upper (fun name -> L.find ~below:l name) with
+    let wants (ul : L.layer) =
+        Option.is_some (Option.bind node (fun n -> siblings n ul)) ||
+        List.exists (fun (_, pls) ->
+            match pls with pl :: _ -> pl.player == ul | [] -> false) pending in
+    (match u.upper with
+    | L.Nothing -> []
+    | L.Only name -> Option.map_default List.singleton [] (L.find ~below:l name)
+    | L.Any _ -> L.uppers l) |>
+    List.filter wants
+
+(* Decodes each layer wanted on top of [packet], and goes on along the nodes
+ * of that stream, or as long as some patterns are pending: *)
+let rec up w node packet pending =
+    List.iter (up_to w node packet pending) (wanted node packet pending)
+
+and up_to w node packet pending (ul : L.layer) =
+    let u = snd (List.hd packet) in
+    let streams = Option.bind node (fun n -> siblings n ul) in
+    match ul.unpack u.L.up_hints u.payload with
     | None -> ()
-    | Some ul ->
-        let streams = Option.bind node (fun n -> siblings n ul) in
-        if Option.is_some streams || not (List.is_empty pending) then
-        match ul.unpack u.up_hints u.payload with
-        | None -> ()
-        | Some uu ->
-            let key = incoming_key ul uu in
-            match Option.bind streams (fun s -> Siblings.find_option s key) with
-            | Some c -> enter w c packet uu pending
-            | None ->
-                let above = (ul, uu) :: packet in
-                (* The patterns that would make a node for that layer (but
-                 * for errors, told in [enter]): *)
-                let makers =
-                    if ul.terminal then [] else
-                    List.filter (fun (p, pls) ->
-                        not (met w p) &&
-                        match pls with
-                        | pl :: _ -> (try passes above L.both pl with Runtime_error _ -> false)
-                        | [] -> false) pending in
-                match node, makers with
-                | Some n, _ :: _ ->
-                    let c = make_child n ul key in
-                    List.iter (fun ((p : pattern), _) -> p.hold c) makers ;
-                    if List.exists (fun (_, pls) ->
-                           match pls with pl :: _ -> pl.pmode = L.Driven | [] -> false) makers
-                    then c.ops.listen () ;
-                    enter w c packet uu pending
-                | _ ->
-                    let pending = check w above L.both pending in
-                    if not (List.is_empty pending) then up w None above pending
+    | Some uu ->
+        let key = incoming_key ul uu in
+        match Option.bind streams (fun s -> Siblings.find_option s key) with
+        | Some c -> enter w c packet uu pending
+        | None ->
+            let above = (ul, uu) :: packet in
+            (* The patterns that would make a node for that layer (but
+             * for errors, told in [enter]): *)
+            let makers =
+                if ul.terminal then [] else
+                List.filter (fun (p, pls) ->
+                    not (met w p) &&
+                    match pls with
+                    | pl :: _ -> (try passes above L.both pl with Runtime_error _ -> false)
+                    | [] -> false) pending in
+            match node, makers with
+            | Some n, _ :: _ ->
+                let c = make_child n ul key in
+                List.iter (fun ((p : pattern), _) -> p.hold c) makers ;
+                if List.exists (fun (_, pls) ->
+                       match pls with pl :: _ -> pl.pmode = L.Driven | [] -> false) makers
+                then c.ops.listen () ;
+                enter w c packet uu pending
+            | _ ->
+                let pending = check w above L.both pending in
+                if not (List.is_empty pending) then up w None above pending
 
 (* What goes on from that layer of a packet, received by its node, with
  * the patterns registered there: *)
@@ -380,7 +393,11 @@ let receive root frame =
 (** [packet] with the layers on top of it, as decoded without any node. *)
 let rec complete (packet : packet) =
     let l, (u : L.unpacked) = List.hd packet in
-    match Option.bind u.upper (fun name -> L.find ~below:l name) with
+    let upper =
+        match u.upper with
+        | L.Nothing -> None
+        | L.Only name | L.Any name -> L.find ~below:l name in
+    match upper with
     | None -> packet
     | Some ul ->
         (match ul.unpack u.up_hints u.payload with

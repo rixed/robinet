@@ -82,12 +82,20 @@ type hints = (string * V.value) list
 (** The fields of a node by name: its key and the options of a stack. *)
 type fields = string -> V.value option
 
+(** What a decoded layer tells of the layer on top of it: *)
+type upper =
+    | Nothing
+    (* The one its header names (the protocol of IP): *)
+    | Only of string
+    (* Whichever can be on top of it, as each decodes it; but for this one
+     * when there is nothing to go by: *)
+    | Any of string
+
 (** A layer of a received packet, decoded: *)
 type unpacked =
     { (* The fields that can be read, by name: *)
       values : (string * V.value) list ;
-      (* The name of the layer on top, if any: *)
-      upper : string option ;
+      upper : upper ;
       payload : bitstring ;
       (* What the layer on top needs to know (the code of an ICMP error): *)
       up_hints : hints ;
@@ -172,7 +180,7 @@ let manual pack =
 
 let bytes_value bits = V.bytes_of_string (string_of_bitstring bits)
 
-let unpacked ?upper ?(up_hints=[]) ?(payload=empty_bitstring) values bits =
+let unpacked ?(upper=Nothing) ?(up_hints=[]) ?(payload=empty_bitstring) values bits =
     Some { values ; upper ; payload ; up_hints ; bits }
 
 let ip4 = (Eth.Proto.ip4 :> int)
@@ -202,7 +210,7 @@ let unpack_eth _ bits =
     | Ok e ->
         let proto = (e.proto :> int) in
         unpacked [ "src", V.Mac e.src ; "dst", V.Mac e.dst ; "proto", V.Int proto ]
-                 ~upper:(if proto = ip4 then "IP" else "Bytes")
+                 ~upper:(Only (if proto = ip4 then "IP" else "Bytes"))
                  ~payload:(e.payload :> bitstring) bits
 
 (* The root: an Ethernet interface, which a self-driven Eth sends IPv4
@@ -253,7 +261,7 @@ let unpack_ip _ bits =
     match Ip.Pdu.unpack bits with
     | Error _ -> None
     | Ok ip ->
-        unpacked (ip_values ip) ~upper:(ip_upper ip)
+        unpacked (ip_values ip) ~upper:(Only (ip_upper ip))
                  ~payload:(ip.payload :> bitstring) bits
 
 (* Both modes share the ids. A self-driven IP has a TRX per protocol. The
@@ -281,7 +289,7 @@ let ip_node ctx =
                                         Tools.bytelength payload ;
                               payload = Payload.o payload } in
                 [ fragment ;
-                  { values = ip_values ip ; upper = Some (ip_upper ip) ;
+                  { values = ip_values ip ; upper = Only (ip_upper ip) ;
                     payload ; up_hints = [] ; bits = Ip.Pdu.pack ip }, [ Driven ] ]) in
     let proto fields hints = int_of ~hints fields "IP" "proto" 0 0xff in
     { (manual @@ fun fields hints payload ->
@@ -330,7 +338,7 @@ let unpack_udp _ bits =
         let payload = (u.payload :> bitstring) in
         unpacked [ "src", V.Int (u.src_port :> int) ; "dst", V.Int (u.dst_port :> int) ;
                    "length", V.Int u.length ; "checksum", V.Int u.checksum ]
-                 ?upper:(if bitstring_length payload > 0 then Some "Bytes" else None)
+                 ~upper:(if bitstring_length payload > 0 then Any "Bytes" else Nothing)
                  ~payload bits
 
 (* The checksum is left to IP: *)
@@ -363,7 +371,7 @@ let unpack_tcp _ bits =
                    "ack_num", V.Int (int_of_seq_num t.ack_num) ;
                    "flags", V.Int flags ; "win_size", V.Int t.win_size ;
                    "urg_ptr", V.Int t.urg_ptr ; "checksum", V.Int t.checksum ]
-                 ?upper:(if bitstring_length payload > 0 then Some "Bytes" else None)
+                 ~upper:(if bitstring_length payload > 0 then Any "Bytes" else Nothing)
                  ~payload bits
 
 (* A connection: robinet's TRX, what was written before it was established,
@@ -502,7 +510,7 @@ let tcp_node ctx =
             received := [] ;
             removed s ;
             raw :: List.map (fun d ->
-                { u with payload = d ; upper = Some "Bytes" ; bits = d }, [ Driven ]) data
+                { u with payload = d ; upper = Any "Bytes" ; bits = d }, [ Driven ]) data
         | Idle | Listening -> [ raw ]) ;
       listen = (fun () -> match !state with Idle -> state := Listening | _ -> ()) ;
       close = (fun k ->
@@ -518,17 +526,17 @@ let tcp_node ctx =
                     Option.may (fun k -> s.on_closed <- None ; k ()) s.on_closed)) ()) }
 
 let icmp_upper = function
-    | 0 | 8 -> Some "Echo"
-    | 3 -> Some "DestUnreachable"
-    | 11 -> Some "TimeExceeded"
-    | _ -> None
+    | 0 | 8 -> Only "Echo"
+    | 3 -> Only "DestUnreachable"
+    | 11 -> Only "TimeExceeded"
+    | _ -> Nothing
 
 (* What is on top is what follows the checksum, and is told the type and
  * code: *)
 let unpack_icmp _ bits =
     match%bitstring bits with
     | {| typ : 8 ; code : 8 ; _checksum : 16 ; payload : -1 : bitstring |} ->
-        unpacked [ "type", V.Int typ ; "code", V.Int code ] ?upper:(icmp_upper typ)
+        unpacked [ "type", V.Int typ ; "code", V.Int code ] ~upper:(icmp_upper typ)
                  ~up_hints:[ "type", V.Int typ ; "code", V.Int code ] ~payload bits
     | {| _ |} -> None
 
@@ -552,10 +560,10 @@ let unpack_echo hints bits =
     | {| id : 16 ; payload : -1 : bitstring |} ->
         let upper =
             match List.assoc_opt "type" hints with
-            | Some (V.Int 8) -> Some "Request"
-            | Some (V.Int 0) -> Some "Reply"
-            | _ -> None in
-        unpacked [ "id", V.Int id ] ?upper ~payload bits
+            | Some (V.Int 8) -> Only "Request"
+            | Some (V.Int 0) -> Only "Reply"
+            | _ -> Nothing in
+        unpacked [ "id", V.Int id ] ~upper ~payload bits
     | {| _ |} -> None
 
 (* The id of the stream; the message on top tells its type: *)
@@ -604,6 +612,101 @@ let unpack_bytes _ bits = unpacked [ "data", bytes_value bits ] bits
 
 let bytes_node _ =
     manual (fun fields _ _ -> bytes_of fields "data", [])
+
+(* The message on top is given the whole of it, as its names can point
+ * anywhere in it: *)
+let unpack_dns _ bits =
+    match Dns.Pdu.unpack bits with
+    | Error _ -> None
+    | Ok m ->
+        unpacked [ "id", V.Int m.id ]
+                 ~upper:(Only (if m.is_query then "Query" else "Answer"))
+                 ~payload:bits bits
+
+(* The id of the stream, over that of the whole message on top: *)
+let dns_node _ =
+    manual (fun fields _ payload ->
+        let id = int_of fields "DNS" "id" 0 0xffff in
+        let%bitstring hdr = {| id : 16 |} in
+        concat [ hdr ; dropbits 16 payload ], [])
+
+(* As written, without the root label every name but the root ends with: *)
+let dns_name n = if n = "." then n else String.rchop n
+
+let dns_fqdn layer = function
+    | V.String n ->
+        (try Dns.Pdu.fqdn n
+        with Invalid_argument _ -> V.fail "%s: %S is not a DNS name" layer n)
+    | _ -> invalid_arg "Crafty_layers: a DNS name is not a string"
+
+(* With its fields in the order of [dns_rr], those of a record: *)
+let dns_rr_value (name, (typ : Dns.QType.t), cls, ttl, data) =
+    V.Record [| V.Int cls ; V.bytes_of_string (Bytes.to_string data) ;
+                V.String (dns_name name) ; V.Int (Tools.uint32 ttl) ;
+                V.Int (typ :> int) |]
+
+let dns_rrs_of layer (fields : fields) name =
+    match fields name with
+    | None -> []
+    | Some (V.Array rrs) ->
+        Array.to_list rrs |> List.map (function
+            | V.Record [| cls ; data ; n ; ttl ; typ |] ->
+                dns_fqdn layer n, Dns.QType.o (int_value "type" 0 0xffff typ),
+                int_value "class" 0 0xffff cls,
+                Int32.of_int (int_value "ttl" 0 0xffff_ffff ttl),
+                Bytes.of_string (string_of_bitstring (V.bits_of_bytes data))
+            | _ -> invalid_arg "Crafty_layers: not a DNS record")
+    | Some _ -> invalid_arg ("Crafty_layers: "^ name ^" is not an array")
+
+(* Of the questions of a message, the first: *)
+let unpack_dns_message _ bits =
+    match Dns.Pdu.unpack bits with
+    | Error _ -> None
+    | Ok m ->
+        let name, typ, cls =
+            match m.questions with
+            | (n, t, c) :: _ -> dns_name n, (t : Dns.QType.t :> int), c
+            | [] -> "", 0, 0 in
+        let rrs l = V.Array (Array.of_list (List.map dns_rr_value l)) in
+        unpacked [ "name", V.String name ; "type", V.Int typ ; "class", V.Int cls ;
+                   "opcode", V.Int m.opcode ;
+                   "authoritative", V.Bool m.is_auth ;
+                   "truncated", V.Bool m.truncated ;
+                   "rec_desired", V.Bool m.rec_desired ;
+                   "rec_avail", V.Bool m.rec_avlb ;
+                   "authentic_data", V.Bool m.authentic_data ;
+                   "checking_disabled", V.Bool m.checking_disabled ;
+                   "status", V.Int m.status ;
+                   "answers", rrs m.answer_rrs ;
+                   "authority", rrs m.authority_rrs ;
+                   "additional", rrs m.additional_rrs ] bits
+
+(* The whole message, with an id that the DNS layer below replaces: *)
+let dns_message_node layer ~query _ =
+    manual (fun fields _ _ ->
+        let int ~def name hi = int_of ~def fields layer name 0 hi
+        and bool ~def name = bool_of fields name ~def
+        and rrs = dns_rrs_of layer fields in
+        let name =
+            match fields "name" with
+            | Some n -> dns_fqdn layer n
+            | None -> V.fail "%s needs a name" layer in
+        Dns.Pdu.{
+            id = 0 ; is_query = query ;
+            opcode = int ~def:0 "opcode" 0xf ;
+            is_auth = bool ~def:false "authoritative" ;
+            truncated = bool ~def:false "truncated" ;
+            rec_desired = bool ~def:true "rec_desired" ;
+            rec_avlb = bool ~def:false "rec_avail" ;
+            authentic_data = bool ~def:false "authentic_data" ;
+            checking_disabled = bool ~def:false "checking_disabled" ;
+            status = int ~def:0 "status" 0xf ;
+            questions = [ name, Dns.QType.o (int ~def:1 "type" 0xffff),
+                          int ~def:1 "class" 0xffff ] ;
+            answer_rrs = rrs "answers" ;
+            authority_rrs = rrs "authority" ;
+            additional_rrs = rrs "additional" } |>
+        Dns.Pdu.pack, [])
 
 (** {2 Layers} *)
 
@@ -740,10 +843,48 @@ let bytes =
         ~node:bytes_node ~unpack:unpack_bytes
         ~default:"data" [ field "data" Type.bytes ]
 
+(* The stream of the messages of an id, whose constants are those of the
+ * messages on top: *)
+let dns =
+    layer "DNS" ~above:[ "udp" ] ~node:dns_node ~unpack:unpack_dns
+        ~constants:(List.map (fun (n, c) -> n, Int c) [
+            "TYPE_A", 1 ; "TYPE_NS", 2 ; "TYPE_CNAME", 5 ; "TYPE_SOA", 6 ;
+            "TYPE_PTR", 12 ; "TYPE_MX", 15 ; "TYPE_TXT", 16 ;
+            "TYPE_AAAA", 28 ; "TYPE_SRV", 33 ; "TYPE_ANY", 255 ;
+            "CLASS_IN", 1 ;
+            "NOERROR", 0 ; "FORMERR", 1 ; "SERVFAIL", 2 ; "NXDOMAIN", 3 ;
+            "NOTIMP", 4 ; "REFUSED", 5 ]) [
+        field "id" Type.Int ~discriminant:true ~pick:(Random_in (0, 65535)) ]
+
+(* A resource record, its fields sorted as those of every record type: *)
+let dns_rr =
+    Type.Record [ "class", Type.Int ; "data", Type.bytes ; "name", Type.String ;
+                  "ttl", Type.Int ; "type", Type.Int ]
+
+(* A query or an answer, with one question: *)
+let dns_message name ~query =
+    layer name ~above:[ "dns" ] ~terminal:true ~default:"name"
+          ~node:(dns_message_node name ~query) ~unpack:unpack_dns_message [
+        field "name" Type.String ;
+        field "type" Type.Int ;
+        field "class" Type.Int ;
+        field "opcode" Type.Int ;
+        field "authoritative" Type.Bool ;
+        field "truncated" Type.Bool ;
+        field "rec_desired" Type.Bool ;
+        field "rec_avail" Type.Bool ;
+        field "authentic_data" Type.Bool ;
+        field "checking_disabled" Type.Bool ;
+        field "status" Type.Int ;
+        field "answers" (Type.Array dns_rr) ;
+        field "authority" (Type.Array dns_rr) ;
+        field "additional" (Type.Array dns_rr) ]
+
 let all =
     [ eth ; ip ; tcp ; udp ; icmp ; echo ; echo_message "Request" 8 ;
       echo_message "Reply" 0 ;
-      dest_unreachable ; time_exceeded ; bytes ]
+      dest_unreachable ; time_exceeded ; dns ; dns_message "Query" ~query:true ;
+      dns_message "Answer" ~query:false ; bytes ]
 
 let same_name a b = String.lowercase_ascii a = String.lowercase_ascii b
 
@@ -809,6 +950,33 @@ let record_type (l : layer) mode =
   find ~below:icmp "Request" = None
   find ~below:tcp "Bytes" <> None
   find ~below:bytes "Bytes" = None
+  (find ~below:dns "query" |> Option.map (fun (l : layer) -> l.name)) = Some "Query"
+  find ~below:udp "Query" = None
+*)
+(* A message, decoded as sent, its names as written: *)
+(*$T
+  let fields = function \
+      | "name" -> Some (Crafty_value.String "example.com") \
+      | "answers" -> Some (Crafty_value.Array [| Crafty_value.Record [| \
+          Crafty_value.Int 1 ; Crafty_value.bytes_of_string "\001\002\003\004" ; \
+          Crafty_value.String "example.com" ; Crafty_value.Int 0xffff_ffff ; Crafty_value.Int 1 |] |]) \
+      | _ -> None in \
+  let eth = Eth.State.make ~parent:(Simulation.make ~realtime:false "dns").root ~name:"dns" \
+              ~mac:(Eth.Addr.of_string "02:00:00:00:00:01") () in \
+  let ctx = { eth ; key = (fun _ -> None) ; below_key = (fun _ -> None) ; below = None } in \
+  let answer = dns_message "Answer" ~query:false in \
+  let bits, _ = (answer.node ctx).pack fields [] Bitstring.empty_bitstring in \
+  match unpack_dns [] bits with \
+  | Some { upper = Only "Answer" ; payload ; _ } -> \
+      (match answer.unpack [] payload with \
+      | Some u -> \
+          List.assoc "name" u.values = Crafty_value.String "example.com" && \
+          List.assoc "rec_desired" u.values = Crafty_value.Bool true && \
+          (match List.assoc "answers" u.values with \
+           | Crafty_value.Array [| Crafty_value.Record [| _ ; _ ; Crafty_value.String "example.com" ; Crafty_value.Int 0xffff_ffff ; _ |] |] -> true \
+           | _ -> false) \
+      | None -> false) \
+  | _ -> false
 *)
 (*$T find_field
   find_field bytes "DATA" = Some 0
