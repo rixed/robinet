@@ -481,6 +481,180 @@ module Pdu = struct
       Enum.for_all (fun p -> Widget.check_value (kind_of p) (to_json p) = ())
       kind_of [] = Record [| "Data", Bytes |]
      *)
+
+    (** Packets as text, each printer for its own reader. A printer takes
+     * the layers outermost first, as [unpack] or {!of_frame} give them, and
+     * skips any [Pcap] layer. *)
+    module Printer =
+    struct
+        (*$< Printer *)
+        let without_pcap = List.filter (function Pcap _ -> false | _ -> true)
+
+        let str bits = string_of_bitstring bits
+        let pld (p : Payload.t) = str (p :> bitstring)
+
+        let ip_of_bits bits =
+            try Ip.Addr.to_dotted_string (Ip.Addr.of_bitstring bits)
+            with _ -> "?"
+
+        (* As tcpdump has them, ACK last: *)
+        let tcp_flags (f : Tcp.Pdu.flags) =
+            (if f.syn then "S" else "") ^ (if f.fin then "F" else "") ^
+            (if f.rst then "R" else "") ^ (if f.psh then "P" else "") ^
+            (if f.urg then "U" else "") ^ (if f.ack then "." else "")
+
+        (** A summary in the manner of tcpdump, addresses and ports first. *)
+        let oneline t =
+            let b = Stdlib.Buffer.create 80 in
+            let add fmt = Printf.bprintf b fmt in
+            let rec layer_3 = function
+                | Vlan v :: rest ->
+                    add "vlan %d " v.Vlan.Pdu.id ;
+                    layer_3 rest
+                | Arp a :: _ ->
+                    let tha = ip_of_bits a.Arp.Pdu.target_proto
+                    and sha = ip_of_bits a.sender_proto in
+                    if a.operation = Arp.Op.request then
+                        add "ARP who-has %s tell %s" tha sha
+                    else if a.operation = Arp.Op.reply then
+                        add "ARP %s is-at %s" sha
+                            (Eth.Addr.to_hexstring (Eth.Addr.o a.sender_hw))
+                    else
+                        add "ARP %s" (Arp.Op.to_string a.operation)
+                | Ip ip :: rest ->
+                    let fragment = ip.Ip.Pdu.more_frags || ip.frag_offset > 0 in
+                    if ip.frag_offset > 0 then
+                        add "%s > %s IP proto %d len %d"
+                            (Ip.Addr.to_dotted_string ip.src)
+                            (Ip.Addr.to_dotted_string ip.dst)
+                            (ip.proto :> int) (Payload.length ip.payload)
+                    else
+                        layer_4 ip.src ip.dst ip.proto ip.payload rest ;
+                    if fragment then
+                        add " (frag id %d off %d%s)" ip.id (ip.frag_offset * 8)
+                            (if ip.more_frags then "+" else "")
+                | Ip6 ip :: rest ->
+                    layer_4 ip.Ip6.Pdu.src ip.dst ip.proto ip.payload rest
+                | Eth e :: _ ->
+                    (* Only when what it carries could not be decoded: *)
+                    add "%s > %s proto 0x%04x len %d"
+                        (Eth.Addr.to_hexstring e.Eth.Pdu.src)
+                        (Eth.Addr.to_hexstring e.dst)
+                        (e.proto :> int) (Payload.length e.payload)
+                | _ ->
+                    add "?"
+            and layer_4 src dst proto payload rest =
+                let src = Ip.Addr.to_dotted_string src
+                and dst = Ip.Addr.to_dotted_string dst in
+                (match rest with
+                | Udp u :: _ ->
+                    add "%s:%d > %s:%d UDP len %d" src (u.Udp.Pdu.src_port :> int)
+                        dst (u.dst_port :> int) (Payload.length u.payload)
+                | Tcp t :: _ ->
+                    add "%s:%d > %s:%d TCP [%s] seq %lu ack %lu win %d len %d"
+                        src (t.Tcp.Pdu.src_port :> int) dst (t.dst_port :> int)
+                        (tcp_flags t.flags) (t.seq_num :> int32)
+                        (t.ack_num :> int32) t.win_size
+                        (Payload.length t.payload)
+                | Icmp i :: _ ->
+                    add "%s > %s ICMP %s" src dst
+                        (Icmp.MsgType.to_string i.Icmp.Pdu.msg_type) ;
+                    (match i.payload with
+                    | Icmp.Pdu.Ids (id, seq, p) ->
+                        add " id %d seq %d len %d" id seq (Payload.length p)
+                    | _ -> ())
+                | _ ->
+                    add "%s > %s IP proto %d len %d" src dst (proto :> int)
+                        (Payload.length payload)) ;
+                (* What the transport carries, when it is known: *)
+                match rest with
+                | _ :: (Dns _ | Dhcp _ as l) :: _ -> add " %s" (name_of_layer l)
+                | _ -> () in
+            (match without_pcap t with
+            | (Eth _ :: (Vlan _ | Arp _ | Ip _ | Ip6 _) :: _ as l)
+            | (Sll _ :: (Arp _ | Ip _ | Ip6 _) :: _ as l) ->
+                layer_3 (List.tl l)
+            | l -> layer_3 l) ;
+            Stdlib.Buffer.contents b
+
+        (*$= oneline & ~printer:identity
+          "10.0.0.1:1000 > 1.2.3.4:53 UDP len 2" \
+            (oneline (of_frame (Eth.Pdu.(pack (make Eth.Proto.ip4 \
+                (Eth.Addr.of_string "02:00:00:00:00:01") \
+                (Eth.Addr.of_string "02:00:00:00:00:02") \
+                (Ip.Pdu.(pack (make Ip.Proto.udp (Ip.Addr.of_string "10.0.0.1") \
+                    (Ip.Addr.of_string "1.2.3.4") \
+                    (Udp.Pdu.(pack (make ~src_port:(Udp.Port.o 1000) \
+                        ~dst_port:(Udp.Port.o 53) \
+                        (Bitstring.bitstring_of_string "hi"))))))))))))
+          "02:00:00:00:00:01 > FF:FF:FF:FF:FF:FF proto 0x88b5 len 3" \
+            (oneline (of_frame (Eth.Pdu.(pack (make (Eth.Proto.o 0x88b5) \
+                (Eth.Addr.of_string "02:00:00:00:00:01") Eth.Addr.broadcast \
+                (Bitstring.bitstring_of_string "abc"))))))
+          "?" (oneline [])
+         *)
+
+        (** What the tests show of a frame: Ethernet and IP addresses, IP
+         * TTL and DF flag, ports, ICMP type, code and ids, TCP flags, and the
+         * payloads; and "bad-checksum" after any layer whose checksum is
+         * wrong. *)
+        let for_tests t =
+            let b = Stdlib.Buffer.create 80 in
+            let add fmt = Printf.bprintf b fmt in
+            (match without_pcap t with
+            | Eth e :: rest ->
+                add "%s>%s" (Eth.Addr.to_hexstring e.Eth.Pdu.src)
+                    (Eth.Addr.to_hexstring e.dst) ;
+                (* A layer's bits are the payload of the one below it: *)
+                let bits = (e.payload :> bitstring) in
+                if e.proto = Eth.Proto.arp then add " ARP"
+                else if e.proto <> Eth.Proto.ip4 then
+                    add " proto=0x%x %S" (e.proto :> int) (str bits)
+                else (match rest with
+                | Ip ip :: rest ->
+                    add " IP %s>%s ttl=%d" (Ip.Addr.to_dotted_string ip.Ip.Pdu.src)
+                        (Ip.Addr.to_dotted_string ip.dst) ip.ttl ;
+                    if ip.dont_frag then add " df" ;
+                    if sum (takebits (8 * (20 + bytelength ip.options)) bits) <> 0 then
+                        add " bad-checksum" ;
+                    let l4 = (ip.payload :> bitstring) in
+                    let check_l4 () =
+                        if sum_list [ Ip.Pdu.pseudo_header ip () ; l4 ] <> 0 then
+                            add " bad-checksum" in
+                    if ip.proto = Ip.Proto.udp then (
+                        match rest with
+                        | Udp u :: _ ->
+                            add " UDP %d>%d %S" (u.Udp.Pdu.src_port :> int)
+                                (u.dst_port :> int) (pld u.payload) ;
+                            check_l4 ()
+                        | _ -> add " ?"
+                    ) else if ip.proto = Ip.Proto.icmp then (
+                        match rest with
+                        | Icmp i :: _ ->
+                            let typ, code = (i.Icmp.Pdu.msg_type :> int * int) in
+                            add " ICMP %d/%d" typ code ;
+                            (match i.payload with
+                            | Icmp.Pdu.Ids (id, seq, p) ->
+                                add " id=%d seq=%d %S" id seq (pld p)
+                            | Icmp.Pdu.Header { mtu ; pld = p ; _ } ->
+                                add " mtu=%d %S" mtu (pld p)
+                            | _ -> add " ?") ;
+                            if sum l4 <> 0 then add " bad-checksum"
+                        | _ -> add " ?"
+                    ) else if ip.proto = Ip.Proto.tcp then (
+                        match rest with
+                        | Tcp t :: _ ->
+                            add " TCP %d>%d %s %S" (t.Tcp.Pdu.src_port :> int)
+                                (t.dst_port :> int)
+                                (Tcp.Pdu.string_of_flags t.flags) (pld t.payload) ;
+                            check_l4 ()
+                        | _ -> add " ?"
+                    ) else add " proto=%d %S" (ip.proto :> int) (str l4)
+                | _ -> add " ?")
+            | _ -> add "?") ;
+            Stdlib.Buffer.contents b
+        (*$>*)
+    end
     (*$>*)
 end
 

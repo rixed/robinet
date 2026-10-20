@@ -681,55 +681,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?(print=ignore)
           (Some (Eth.Addr.of_string "02:00:00:00:00:02")) ;
       eth
 
-  let describe frame =
-      let b = Stdlib.Buffer.create 80 in
-      let add fmt = Printf.bprintf b fmt in
-      let str bits = Bitstring.string_of_bitstring bits in
-      let pld (p : Payload.t) = str (p :> Bitstring.bitstring) in
-      (match Eth.Pdu.unpack frame with
-      | Error _ -> add "?"
-      | Ok e ->
-          add "%s>%s" (Eth.Addr.to_hexstring e.Eth.Pdu.src) (Eth.Addr.to_hexstring e.dst) ;
-          let bits = (e.payload :> Bitstring.bitstring) in
-          if e.proto = Eth.Proto.arp then add " ARP"
-          else if e.proto <> Eth.Proto.ip4 then add " proto=0x%x %S" (e.proto :> int) (str bits)
-          else match Ip.Pdu.unpack bits with
-          | Error _ -> add " ?"
-          | Ok ip ->
-              add " IP %s>%s ttl=%d" (Ip.Addr.to_dotted_string ip.Ip.Pdu.src)
-                  (Ip.Addr.to_dotted_string ip.dst) ip.ttl ;
-              if ip.dont_frag then add " df" ;
-              if Tools.sum (Bitstring.takebits (8 * (20 + Tools.bytelength ip.options)) bits) <> 0 then
-                  add " bad-checksum" ;
-              let l4 = (ip.payload :> Bitstring.bitstring) in
-              if ip.proto = Ip.Proto.udp then (
-                  match Udp.Pdu.unpack l4 with
-                  | Error _ -> add " ?"
-                  | Ok u ->
-                      add " UDP %d>%d %S" (u.Udp.Pdu.src_port :> int) (u.dst_port :> int) (pld u.payload) ;
-                      if Tools.sum_list [ Ip.Pdu.pseudo_header ip () ; l4 ] <> 0 then
-                          add " bad-checksum"
-              ) else if ip.proto = Ip.Proto.icmp then (
-                  match Icmp.Pdu.unpack l4 with
-                  | Error _ -> add " ?"
-                  | Ok i ->
-                      let typ, code = (i.Icmp.Pdu.msg_type :> int * int) in
-                      add " ICMP %d/%d" typ code ;
-                      (match i.payload with
-                      | Icmp.Pdu.Ids (id, seq, p) -> add " id=%d seq=%d %S" id seq (pld p)
-                      | Icmp.Pdu.Header { mtu ; pld = p ; _ } -> add " mtu=%d %S" mtu (pld p)
-                      | _ -> add " ?") ;
-                      if Tools.sum l4 <> 0 then add " bad-checksum"
-              ) else if ip.proto = Ip.Proto.tcp then (
-                  match Tcp.Pdu.unpack l4 with
-                  | Error _ -> add " ?"
-                  | Ok t ->
-                      add " TCP %d>%d %s %S" (t.Tcp.Pdu.src_port :> int) (t.dst_port :> int)
-                          (Tcp.Pdu.string_of_flags t.flags) (pld t.payload) ;
-                      if Tools.sum_list [ Ip.Pdu.pseudo_header ip () ; l4 ] <> 0 then
-                          add " bad-checksum"
-              ) else add " proto=%d %S" (ip.proto :> int) (str l4)) ;
-      Stdlib.Buffer.contents b
+  let describe frame = Packet.Pdu.Printer.for_tests (Packet.of_frame frame)
 
   let peer_mac = Eth.Addr.of_string "02:00:00:00:00:02"
 
