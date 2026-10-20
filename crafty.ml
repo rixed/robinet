@@ -99,7 +99,7 @@ let () =
         "--max-bytes-per-secs", some_float max_throughput,
             "N send no more bytes per second" ;
         "--linger", interval linger,
-            "DURATION wait that long at most for streams to close (default 2s)" ;
+            "DURATION once done, stop after that long without traffic (default 2s)" ;
         "-p", Arg.Set print_packets, " print every packet sent and received" ;
         "--print-packets", Arg.Set print_packets, " same as -p" ;
         "--cleanup", Arg.Set cleanup,
@@ -184,6 +184,9 @@ let () =
         String.uppercase_ascii (Host_config.string_of_proto proto),
         List.filter_map (fun (r : Host_config.port_range) ->
             if r.proto = proto then Some (r.lo, r.hi) else None) !ports in
+    (* What the program sends, and what goes out and comes in: *)
+    let sent = ref 0 and pkts_out = ref 0 and pkts_in = ref 0
+    and bytes_out = ref 0 and bytes_in = ref 0 in
     let status = ref Crafty_interp.Running and limit = ref None in
     (* The handle, which the program is given no event before [run]
      * returns: *)
@@ -200,16 +203,22 @@ let () =
             ~on_exit:(fun s ->
                 status := s ;
                 (* Streams that are closing, and frames on their way, go on
-                 * for a while; checked from the next tick, once what was
-                 * sent last is out: *)
-                let deadline = secs () +. Clock.Interval.to_secs !linger in
+                 * for as long as packets keep going out or coming in, until
+                 * none did for [linger]; checked from the next tick, once
+                 * what was sent last is out: *)
+                let linger = Clock.Interval.to_secs !linger in
                 (* From a thread of its own, as stopping takes the lock this
                  * event runs under: *)
                 let stop () = ignore (Thread.create (Simulation.stop sim) ()) in
-                let rec check () =
+                let rec check pkts deadline =
                     Simulation.delay sim.root.power (Clock.Interval.msec 100.) (fun () ->
-                        if idle () || secs () >= deadline then stop () else check ()) () in
-                if s = Crafty_interp.Stopped then stop () else check ())
+                        let pkts' = !pkts_out + !pkts_in in
+                        let deadline =
+                            if pkts' <> pkts then secs () +. linger else deadline in
+                        if idle () || secs () >= deadline then stop ()
+                        else check pkts' deadline) () in
+                if s = Crafty_interp.Stopped then stop ()
+                else check (!pkts_out + !pkts_in) (secs () +. linger))
             program in
     handle := Some h ;
     let policer =
@@ -222,9 +231,6 @@ let () =
                     Printf.printf "Limit reached: %s.\n%!" (Policer.string_of_limit l) ;
                     h.stop ()))
             "policer" in
-    (* What the program sends, and what goes out and comes in: *)
-    let sent = ref 0 and pkts_out = ref 0 and pkts_in = ref 0
-    and bytes_out = ref 0 and bytes_in = ref 0 in
     let print dir bits =
         if !print_packets then
             Printf.printf "%s %.6f %s\n%!" dir (secs ())
