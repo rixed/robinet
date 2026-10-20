@@ -448,14 +448,21 @@ let () =
 
 (* Parameters of a special form, by name, or the single one it has (which
  * starts neither as a record nor as a layer, not to be mistaken for the
- * block or the pattern that follows): *)
-let params form names =
+ * block or the pattern that follows); only by name if not [unnamed], for a
+ * form followed by an expression: *)
+let params ?(unnamed=true) form names =
     let param_name =
         identifier >>= fun s -> if Layer_name.of_string s <> None then fail else return s in
+    (* Without [unnamed], a name not followed by [=] is no error, but the
+     * expression that follows: *)
+    let equal = if unnamed then item '=' else quiet (item '=') in
+    let named =
+        (param_name +- sp +- equal +- nay (item '=') +- sp >>: Option.some) ++
+        expr in
     let param =
         here ++
-        ((param_name +- sp +- item '=' +- nay (item '=') +- sp >>: Option.some) ++
-         expr |||
+        (if not unnamed then named else
+         named |||
          (nay (item '{' >>: ignore ||| (known_layer >>: ignore)) -+ expr >>:
             fun e -> None, e)) in
     repeat ~sep:none (maybe_next param) >>: fun ps ->
@@ -549,6 +556,11 @@ let stmt = fix (fun stmt ->
             Repeat { var = Option.map (var_name "variable name") (p "var") ;
                      count = p "count" ; every = p "every" ; for_ = p "for" ;
                      body }) |||
+        (keyword "foreach" -+
+         params ~unnamed:false "foreach" [ "var" ; "every" ; "for" ] +- sp ++
+         expr ++ body >>: fun ((p, items), body) ->
+            Foreach { var = Option.map (var_name "variable name") (p "var") ;
+                      items ; every = p "every" ; for_ = p "for" ; body }) |||
         (keyword "retry" -+ params "retry" [ "max" ] ++ body >>:
             fun (p, body) -> Retry { max = p "max" ; body }) |||
         (keyword "catch" -+ body >>: fun body -> Catch body) |||
@@ -680,6 +692,10 @@ let parse text =
     (reads "repeat var=i count=3 every=1ms for=1s { print(\"${i}\") }")
   "repeat count=(n * 2) every=(1s / n) {\n}\n" \
     (reads "repeat every=1s / n count=n*2 {}")
+  "foreach var=t [3, 5, 6] {\n  print(\"${t}\")\n}\n" \
+    (reads "foreach var=t [3, 5, 6] { print(\"${t}\") }")
+  "foreach every=(1s / n) for=1m ttls {\n}\n" (reads "foreach for=1m every=1s / n ttls {}")
+  "foreach var=x a.b[(i + 1)] {\n}\n" (reads "foreach var=\"x\" a.b[i + 1] {}")
   "on timeout=1s max=3 ../UDP {\n  n += 1\n  m := 2\n}\n" \
     (reads "on max=3 timeout=1s ../UDP { n += 1; m := 2 }")
   "expect UDP((IP^.ttl == 3) && (^IP.src == 1.2.3.4)) {\n}\n" \
@@ -740,7 +756,7 @@ let parse text =
     "x = 1m30s + 10ms + 1.5\xc2\xb5s" ; "x = [1.2.3.4 == y, aa:bb:cc:dd:ee:ff]" ; \
     "x = #1ee7 # a comment\nx = #f" ; "x = \"a ${x + 1} b \\${not} \\x41$\"" ; \
     "x = y =~ /IP/UDP(dport = 53)" ; "wait dur=1s * n" ; \
-    "repeat every=1s / n count=n*2 {}" ; \
+    "repeat every=1s / n count=n*2 {}" ; "foreach var=t every=1s * 2 [1, 2] {}" ; \
     "on max=3 timeout=1s ../UDP { n += 1; m := 2 }" ; \
     "expect UDP(IP^.ttl = 3, ^IP.src == 1.2.3.4) {}" ; \
     "expect ../../TCP!(flags & RST) {}" ; "IP!(ttl=1)/TCP!(flags=2)/Bytes(\"x\")" ; \
@@ -773,6 +789,10 @@ let parse text =
   "line 1, column 19: Expected name in pattern" (reads "expect timeout=5s {\n}")
   "line 1, column 13: Unknown parameter cnt for repeat (expected var, count, every, for)" \
     (reads "repeat cnt=3 {\n}")
+  "line 1, column 11: Expected '{' in block" (reads "foreach {}")
+  "line 1, column 19: Expected '{' in block" (reads "foreach var=t ttls")
+  "line 1, column 16: Unknown parameter count for foreach (expected var, every, for)" \
+    (reads "foreach count=3 ttls {}")
   "line 1, column 18: Parameter max of retry given twice" \
     (reads "retry max=1 max=2 {\n}")
   "line 1, column 10: Parameter depth of break given twice" (reads "break 2 3")

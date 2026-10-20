@@ -191,6 +191,9 @@ and stmt_desc =
     | Do of string * arg list
     | Repeat of { var : string option ; count : expr option ;
                   every : expr option ; for_ : expr option ; body : block }
+    (* A [Repeat] whose [var] is each of [items] in turn: *)
+    | Foreach of { var : string option ; items : expr ; every : expr option ;
+                   for_ : expr option ; body : block }
     (* Run [body], and again up to [max] times while it fails: *)
     | Retry of { max : expr option ; body : block }
     (* Run [body], leaving it on its first error: *)
@@ -222,8 +225,8 @@ let predefined = [ "match" ; "last" ]
 
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
-    [ "true" ; "false" ; "repeat" ; "retry" ; "catch" ; "if" ; "elsif" ;
-      "else" ; "break" ; "expect" ; "any" ; "on" ; "wait" ]
+    [ "true" ; "false" ; "repeat" ; "foreach" ; "retry" ; "catch" ; "if" ;
+      "elsif" ; "else" ; "break" ; "expect" ; "any" ; "on" ; "wait" ]
 
 (** Keywords of what the language will have but not yet. Lower case. *)
 let unsupported =
@@ -383,6 +386,12 @@ let rec print_stmt ~all indent oc s =
         Option.may (Printf.fprintf oc " var=%s") var ;
         param "count" count ; param "every" every ; param "for" for_ ;
         Char.print oc ' ' ; print_block ~all indent oc body
+    | Foreach { var ; items ; every ; for_ ; body } ->
+        String.print oc "foreach" ;
+        Option.may (Printf.fprintf oc " var=%s") var ;
+        param "every" every ; param "for" for_ ;
+        Printf.fprintf oc " %a " (print_expr_at ~bare:true ~all 0) items ;
+        print_block ~all indent oc body
     | Retry { max ; body } ->
         String.print oc "retry" ; param "max" max ;
         Char.print oc ' ' ; print_block ~all indent oc body

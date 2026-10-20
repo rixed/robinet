@@ -140,7 +140,8 @@ string to bytes and back, bytes to an IP address (4 bytes) or a MAC address
   starts waiting.
 - Predefined variables: `MATCH` (the matched packet, within the block of an
   `expect`, an `any` or an `on`), `LAST` (the last packet sent, once a block
-  has sent one) and the counter of a `repeat` (`I` by default).
+  has sent one), the counter of a `repeat` and the item of a `foreach` (`I`
+  by default).
 
 ### Expressions
 
@@ -279,7 +280,8 @@ also takes it unnamed (`break 2`, `wait 1s`).
 | `retry max=n { ... }` | Runs the block, and again up to `n` times (default 3) while it fails. If the last try fails too, its error escapes the retry block. |
 | `catch { ... }` | Leaves the block at its first error, which goes no further: the program goes on after the block. |
 | `if c { ... } elsif c { ... } else { ... }` | Runs the block of the first condition that holds, if any. An int condition holds unless it is 0 (`if flags & SYN`). There can be any number of `elsif`, and an `else` may start the line after the brace before it. |
-| `break depth=n` | Leaves the `n` (default 1, a literal) innermost enclosing `repeat` or `on` forms. |
+| `foreach var=v every=d for=d` `ARRAY { ... }` | A `repeat` that runs the block once per item of the array, in order, `v` (default `I`) being the item. The array is computed once, before the first iteration. `every` and `for` are as for `repeat`, and optional. |
+| `break depth=n` | Leaves the `n` (default 1, a literal) innermost enclosing `repeat`, `foreach` or `on` forms. |
 | `wait dur=d` | Pauses for `d`. A negative duration is an error. |
 | `expect timeout=d PATTERN { ... }` | Waits for one packet that matches (default timeout 1m), then runs the block with `MATCH` bound to it. A timeout is an error. |
 | `any timeout=d PATTERN { ... }` `\| PATTERN { ... } ...` | Waits for the first packet that matches any of the patterns (default timeout 1m), then runs the block of that pattern only, with `MATCH` bound to it. A `\|` may end a line or start the next one. A timeout is an error. |
@@ -678,7 +680,7 @@ print("moving on")
 host = {name: "gw", ip: 192.0.2.1}
 sizes = [64, 512, 1500]
 total = 0
-repeat var=i count=length(sizes) { total += sizes[i] }
+foreach var=s sizes { total += s }
 print("${host.name} is ${host.ip}; ${total} bytes in ${length(sizes)} packets")
 delay = interval(0.5) * 3
 print("waiting ${delay}")

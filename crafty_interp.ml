@@ -32,7 +32,8 @@
    [repeat] runs its iterations one after the other, each starting [every]
    after the previous one started (or as soon as it ends, if later), until
    it has run [count] of them or the next one would start once [for] has
-   elapsed since it started; it ends right after its last iteration.
+   elapsed since it started; it ends right after its last iteration. Over
+   [items], as from a [foreach], it runs one iteration per item.
    [retry max=N] runs its block again up to N times (3 by default) while it
    fails, the error of the last attempt going to the enclosing block.
    [wait] goes on with the next statement after that duration.
@@ -463,8 +464,8 @@ and exec t b env (s : T.stmt) k =
             | _ -> assert false) |>
         Option.may (fun i ->
             Simulation.delay t.power i (fun () -> if b.live then k env) ())
-    | T.Repeat { var ; count ; every ; for_ ; body } ->
-        repeat t b env var count every for_ body s.stmt_loc (fun () -> k env)
+    | T.Repeat { var ; count ; items ; every ; for_ ; body } ->
+        repeat t b env var count items every for_ body s.stmt_loc (fun () -> k env)
     | T.Retry { max ; body } ->
         guard (fun () ->
             match Option.map eval max with Some (Int n) -> n | _ -> 3) |>
@@ -603,16 +604,22 @@ and on t b env pattern match_ body timeout max =
         disarm () ;
         check_over ()) ()
 
-and repeat t b env var count every for_ body body_loc k =
+and repeat t b env var count items every for_ body body_loc k =
     let eval = eval t.output env in
     let interval d = function
         | Some e -> (match eval e with Interval i -> i | _ -> assert false)
         | None -> d in
     guard b (fun () ->
-        (match Option.map eval count with Some (Int n) -> Some n | _ -> None),
+        let items =
+            Option.map (fun e -> match eval e with Array a -> a | _ -> assert false) items in
+        (match items, Option.map eval count with
+        | Some a, _ -> Some (Array.length a)
+        | None, Some (Int n) -> Some n
+        | _ -> None),
+        items,
         interval Interval.zero every,
         interval (Interval.min 5.) for_) |>
-    Option.may (fun (count, every, for_) ->
+    Option.may (fun (count, items, every, for_) ->
     let now () = Simulation.now t.power.sim in
     let start = now () in
     let deadline = Clock.Time.add start for_ in
@@ -637,7 +644,8 @@ and repeat t b env var count every for_ body body_loc k =
                         error body_loc "This repeat runs %d times without the \
                                         time moving on" max_at_once))
                 else (
-                    let env = bind env var (Int !i) in
+                    let env =
+                        bind env var (match items with Some a -> a.(!i) | None -> Int !i) in
                     let break_ n =
                         if n <= 1 then (Option.may cancel !current ; k ())
                         else b.break_ (n - 1) in
@@ -878,6 +886,18 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "repeat var=i count=2 { repeat var=j count=2 { print(\"${i}.${j}\") } }")
   "0s: done" \
     (runs "repeat count=0 { print(\"never\") }")
+  "0s: 3\n0s: 5\n0s: 6\n0s: done" \
+    (runs "foreach var=t [3, 5, 6] { print(\"${t}\") }")
+  "0s: a\n1s: b\n1s: after\n1s: done" \
+    (runs "foreach var=s every=1s [\"a\", \"b\"] { print(s) }\nprint(\"after\")")
+  "0s: a\n1s: b\n1s: done" \
+    (runs "foreach var=s every=1s for=1500ms [\"a\", \"b\", \"c\"] { print(s) }")
+  "0s: done" \
+    (runs "foreach array(init=1, len=0) { print(\"never\") }")
+  "0s: 1\n0s: 2\n0s: [9]\n0s: done" \
+    (runs "x = [1, 2]\nforeach var=v x { x := [9]\n  print(\"${v}\") }\nprint(\"${x}\")")
+  "0s: 1\n0s: done" \
+    (runs "foreach [1, 2, 3] { if I == 2 { break }\n  print(\"${I}\") }")
   "0s: 0\n0s: after\n0s: done" \
     (runs "repeat count=5 every=1s { print(\"${I}\")\n  break }\nprint(\"after\")")
   "0s: 0\n0s: after\n0s: done" \

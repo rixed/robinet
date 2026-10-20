@@ -110,8 +110,9 @@ and stmt_desc =
     | Declare of var * expr
     | Assign of var * expr
     | Do of builtin * expr list
-    | Repeat of { var : var ; count : expr option ; every : expr option ;
-                  for_ : expr option ; body : block }
+    (* With [items], [var] is each of them in turn, rather than a counter: *)
+    | Repeat of { var : var ; count : expr option ; items : expr option ;
+                  every : expr option ; for_ : expr option ; body : block }
     | Retry of { max : expr option ; body : block }
     | Catch of block
     (* With no [else], an empty [else_]: *)
@@ -817,7 +818,23 @@ and stmt errors env (s : A.stmt) =
             let body =
                 block errors { env with vars = v :: env.vars ;
                                         loops = env.loops + 1 } body in
-            env, Some (mk (Repeat { var = v ; count ; every ; for_ ; body }))
+            env, Some (mk (Repeat { var = v ; count ; items = None ; every ;
+                                    for_ ; body }))
+        | A.Foreach { var ; items ; every ; for_ ; body } ->
+            let items = expr env items in
+            let t =
+                match items.typ with
+                | Type.Array t -> t
+                | t -> error items.loc "The items of foreach must be an array, not %s"
+                           (a_type t) in
+            let every = opt_expr env "The period of foreach" Type.Interval every
+            and for_ = opt_expr env "The duration of foreach" Type.Interval for_ in
+            let v = new_var (var |? "I") t in
+            let body =
+                block errors { env with vars = v :: env.vars ;
+                                        loops = env.loops + 1 } body in
+            env, Some (mk (Repeat { var = v ; count = None ; items = Some items ;
+                                    every ; for_ ; body }))
         | A.Retry { max ; body } ->
             let max = opt_expr env "The maximum of retry" Type.Int max in
             env, Some (mk (Retry { max ; body = block errors env body }))
@@ -835,7 +852,7 @@ and stmt errors env (s : A.stmt) =
                 | Some { desc = A.Lit (A.Int n) ; _ } when n > 0 -> n
                 | Some e -> error e.loc "The depth of break must be a positive integer" in
             if depth > env.loops then
-                error loc "Break out of %d repeat or on, but %s" depth
+                error loc "Break out of %d repeat, foreach or on, but %s" depth
                     (match env.loops with
                     | 0 -> "there is none"
                     | 1 -> "there is only one"
@@ -920,6 +937,8 @@ let check (program : A.program) =
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { any Bytes(\"a\") { x = length(MATCH) } | ../ICMP { y = MATCH[IP].src } }")
   "x: int, y: ip" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"a\")\n  { x = LAST[UDP].src }\n  Bytes(\"b\")\n  expect ../UDP(IP.src == LAST[IP].dst) { y = LAST[IP].src } }")
+  "t: float, x: float, p: {a: int}, y: int" \
+    (types "foreach var=t [1, 2.5] { x = t * 2 }\nforeach var=p [{a: 1}] { y = p.a }")
   "n: int, x: int, y: bool, z: float" \
     (types "n = 3\nif n & 1 { x = 1 } elsif n > 2 { y = true } else { z = 1.0 }")
   "" \
@@ -965,9 +984,9 @@ let check (program : A.program) =
     (types "x = assert(true)")
   "line 1, column 7: Argument s of print must be a string, not an int" \
     (types "print(1)")
-  "line 1, column 1: Break out of 1 repeat or on, but there is none" \
+  "line 1, column 1: Break out of 1 repeat, foreach or on, but there is none" \
     (types "break")
-  "line 1, column 10: Break out of 2 repeat or on, but there is only one" \
+  "line 1, column 10: Break out of 2 repeat, foreach or on, but there is only one" \
     (types "repeat { break 2 }")
   "line 1, column 4: The condition of if must be a bool, not a string" \
     (types "if \"x\" {}")
@@ -977,6 +996,12 @@ let check (program : A.program) =
     (types "any Bytes {} | Bytes { x = MATCH }\ny = MATCH")
   "line 1, column 11: The maximum of retry must be an int, not an interval" \
     (types "retry max=1s {}")
+  "line 1, column 15: The items of foreach must be an array, not an int" \
+    (types "foreach var=t 3 {}")
+  "line 1, column 15: The period of foreach must be an interval, not an int" \
+    (types "foreach every=1 [1] {}")
+  "line 2, column 2: Break out of 2 repeat, foreach or on, but there is only one" \
+    (types "foreach var=t [1] { x = t * 2.0\n break 2 }")
   "line 1, column 22: The period of repeat must be an interval, not an int" \
     (types "repeat count=3 every=1 {}")
   "line 1, column 6: The duration of wait must be an interval, not an int" \

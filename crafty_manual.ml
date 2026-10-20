@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 fd3696cdb1b59cb492e613fc61919bb1) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 dd46faa9dcecd7835c07079ba4cd258d) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -150,7 +150,8 @@ true). Other conversions use the functions `int`, `float`, `bool`, `byte`,
     waiting.
 -   Predefined variables: `MATCH` (the matched packet, within the block of an
     `expect`, an `any` or an `on`), `LAST` (the last packet sent, once a block
-    has sent one) and the counter of a `repeat` (`I` by default).
+    has sent one), the counter of a `repeat` and the item of a `foreach` (`I` by
+    default).
 
 ### Expressions
 
@@ -325,9 +326,16 @@ takes it unnamed (`break 2`, `wait 1s`).
 |                                      | start the line after the brace       |
 |                                      | before it.                           |
 +--------------------------------------+--------------------------------------+
+| `foreach var=v every=d for=d`        | A `repeat` that runs the block once  |
+| `ARRAY { ... }`                      | per item of the array, in order, `v` |
+|                                      | (default `I`) being the item. The    |
+|                                      | array is computed once, before the   |
+|                                      | first iteration. `every` and `for`   |
+|                                      | are as for `repeat`, and optional.   |
++--------------------------------------+--------------------------------------+
 | `break depth=n`                      | Leaves the `n` (default 1, a         |
 |                                      | literal) innermost enclosing         |
-|                                      | `repeat` or `on` forms.              |
+|                                      | `repeat`, `foreach` or `on` forms.   |
 +--------------------------------------+--------------------------------------+
 | `wait dur=d`                         | Pauses for `d`. A negative duration  |
 |                                      | is an error.                         |
@@ -803,7 +811,7 @@ destination port of the packet they quote: `MATCH[IP]` is the quoted probe, and
     host = {name: "gw", ip: 192.0.2.1}
     sizes = [64, 512, 1500]
     total = 0
-    repeat var=i count=length(sizes) { total += sizes[i] }
+    foreach var=s sizes { total += s }
     print("${host.name} is ${host.ip}; ${total} bytes in ${length(sizes)} packets")
     delay = interval(0.5) * 3
     print("waiting ${delay}")
