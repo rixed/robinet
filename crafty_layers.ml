@@ -362,7 +362,7 @@ let unpack_tcp _ bits =
                    "seq_num", V.Int (int_of_seq_num t.seq_num) ;
                    "ack_num", V.Int (int_of_seq_num t.ack_num) ;
                    "flags", V.Int flags ; "win_size", V.Int t.win_size ;
-                   "urg_ptr", V.Int t.urg_ptr ]
+                   "urg_ptr", V.Int t.urg_ptr ; "checksum", V.Int t.checksum ]
                  ?upper:(if bitstring_length payload > 0 then Some "Bytes" else None)
                  ~payload bits
 
@@ -472,7 +472,8 @@ let tcp_node ctx =
                 ~seq_num:(seq_num seq) ~ack_num:(seq_num (ack |? 0))
                 ~fin:(bit 1) ~syn:(bit 2) ~rst:(bit 4) ~psh:(bit 8) ~ack:(bit 16)
                 ~urg:(bit 32) ~win_size
-                ~urg_ptr:(int_of ~def:0 fields "TCP!" "urg_ptr" 0 0xffff) payload in
+                ~urg_ptr:(int_of ~def:0 fields "TCP!" "urg_ptr" 0 0xffff)
+                ?checksum:(opt_int fields "checksum" 0 0xffff) payload in
         (match seq_given, trx with
         | None, Some t -> Tcp.TRX.sent_manually t pdu
         | None, None ->
@@ -685,6 +686,7 @@ let tcp =
         field "flags" Type.Int ;
         field "win_size" Type.Int ;
         field "urg_ptr" Type.Int ;
+        field "checksum" Type.Int ;
         field "mss" Type.Int ~set_in:[ Driven ] ~read_in:[] ]
 
 let udp =
@@ -810,7 +812,7 @@ let record_type (l : layer) mode =
 *)
 (*$T find_field
   find_field bytes "DATA" = Some 0
-  find_field tcp "mss" = Some 7
+  find_field tcp "mss" = Some 8
   find_field tcp "payload" = None
 *)
 (* Defaults are found by name: *)
