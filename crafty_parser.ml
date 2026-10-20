@@ -150,6 +150,15 @@ let constant =
 let function_name =
     identifier >>= fun s -> if is_in functions s then return s else fail
 
+(* A name right before a parenthesis, which only a function or a layer can
+ * be, but is neither, refused once [args] are read (so that the rejection
+ * is found further than what other readings expect): *)
+let unknown_function args =
+    (quiet (identifier +- check (item '(')) >>= fun s ->
+        if is_keyword s || is_in functions s || Layer_name.of_string s <> None
+        then fail else return s) ++ args >>:
+    fun (s, _) -> reject "Unknown function %s" s
+
 let known_layer =
     identifier >>= fun s ->
         match Layer_name.of_string s with Some n -> return n | None -> fail
@@ -358,6 +367,7 @@ let make_expr ~cond ~self ~expr ~pattern =
             fun (loc, fs) -> { loc ; desc = Record fs }) |||
         (here ++ function_name ++ args expr >>:
             fun ((loc, f), args) -> { loc ; desc = Call (f, args) }) |||
+        unknown_function (args expr) |||
         (here ++ (name ||| predefined_var) >>:
             fun (loc, n) -> { loc ; desc = Var n }) |||
         (here ++ constant >>: fun (loc, (n, l)) -> { loc ; desc = Constant (n, l) }) |||
@@ -526,6 +536,9 @@ let stmt = fix (fun stmt ->
             (keyword "elsif" -+ with_loc if_ >>: fun s -> [ s ])) >>: Option.some) >>:
         fun ((cond, then_), else_) -> If { cond ; then_ ; else_ }) in
     with_loc (
+        (* Alone, a call rather than a stack, of an unknown layer: *)
+        unknown_function (quiet (args expr +-
+            check (sp -- ((item '\n' ||| item ';' ||| item '}' >>: ignore) ||| eof)))) |||
         (* A stack sends a packet if its top layer is terminal, and is
          * otherwise that of the block that follows: *)
         (anchor ++
@@ -806,6 +819,15 @@ let parse text =
   "line 1, column 19: LAST is a reserved name" (reads "repeat var=last {}")
   "line 1, column 20: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")
   "line 1, column 9: Unknown layer HTTP" (reads "/IP/HTTP {}")
+  "line 1, column 7: Unknown function foo" (reads "foo(1)")
+  "line 1, column 15: Unknown function foo" (reads "x := 1; foo(1); y := 2")
+  "line 1, column 4: Unknown layer foo" (reads "foo(1)/Bytes(\"x\")")
+  "line 1, column 4: Unknown layer foo" (reads "foo(1) {}")
+  "line 1, column 24: Unknown function get" (reads "x = get(a=[1], index=0)")
+  "line 1, column 14: Unknown function Foo" (reads "x = 1 + Foo()")
+  "line 1, column 18: Unknown function foo" (reads "expect UDP(foo(1)) {}")
+  "line 1, column 15: Unknown function foo" (reads "/IP(dst=foo(1))/UDP(dst=1)/Bytes(\"x\")")
+  "line 1, column 16: Unknown function foo" (reads "print(\"${foo(2)}\")")
   "line 1, column 11: Carets on both sides of IP" (reads "x = a[^IP^]")
   "line 1, column 5: case is not supported yet" (reads "case x {}")
   "line 1, column 5: Expected name in pattern" (reads "any {}")
