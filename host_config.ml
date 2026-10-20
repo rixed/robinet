@@ -103,18 +103,29 @@ let run ?quiet prog args = run_line ?quiet (command_line (find_prog prog) args)
 let try_run prog args = try run ~quiet:true prog args with _ -> ()
 
 (** What [prog] with [args] prints, which reading the configuration of the
- * host changes nothing of, so the command is not printed. *)
-let output prog args =
+ * host changes nothing of, so the command is not printed. With [quiet], what
+ * it prints on stderr is thrown away. *)
+let output ?(quiet=false) prog args =
     let prog = find_prog prog in
     (* UnixLabels, whose channels are those of the stdlib, unlike Batteries'
      * Unix: *)
-    let ic = UnixLabels.open_process_args_in prog (Array.of_list (prog :: args)) in
+    let r, w = UnixLabels.pipe ~cloexec:true () in
+    let err =
+        if quiet then UnixLabels.openfile "/dev/null" ~mode:[ O_WRONLY ; O_CLOEXEC ] ~perm:0
+        else UnixLabels.stderr in
+    let pid =
+        UnixLabels.create_process ~prog ~args:(Array.of_list (prog :: args))
+            ~stdin:UnixLabels.stdin ~stdout:w ~stderr:err in
+    UnixLabels.close w ;
+    if quiet then UnixLabels.close err ;
+    let ic = UnixLabels.in_channel_of_descr r in
     let out = Stdlib.In_channel.input_all ic in
+    Stdlib.close_in ic ;
     (* Failing to read is no matter of privileges, as {!Command_failed}
      * suggests: *)
     let fail how =
         failwith (Printf.sprintf "%S %s" (command_line prog args) how) in
-    match UnixLabels.close_process_in ic with
+    match snd (UnixLabels.waitpid ~mode:[] pid) with
     | Unix.WEXITED 0 -> out
     | Unix.WEXITED n -> fail (Printf.sprintf "exited with status %d" n)
     | Unix.WSIGNALED n | Unix.WSTOPPED n ->
@@ -225,6 +236,64 @@ let iface ifname =
         ~ip_addr:(output "ip" [ "addr" ; "show" ; "dev" ; ifname ])
         ~ip_route:(output "ip" [ "-4" ; "route" ; "show" ; "default" ;
                                  "dev" ; ifname ])
+
+(** The slowest Ethernet speed at least as fast as [mbps] Mb/s, the fastest
+ * past it, or none for a speed that is not positive (unknown). *)
+let eth_speed_of_mbps mbps =
+    if mbps <= 0 then None else
+    let speeds = Array.to_list Eth.Speed.all in
+    match List.filter (fun s -> Eth.Speed.to_bps s >= float mbps *. 1e6) speeds with
+    | [] -> Some (Eth.Speed.best speeds)
+    | faster -> Some (List.reduce min faster)
+
+(*$inject
+  let string_of_speed = Option.map_default Eth.Speed.to_string "?"
+  let string_of_link (s, d) =
+      string_of_speed s ^" "^
+      Option.map_default (fun d -> if d then "full" else "half") "?" d
+*)
+(*$= eth_speed_of_mbps & ~printer:string_of_speed
+  (Some Eth.Speed.Eth1Gbps) (eth_speed_of_mbps 1000)
+  (Some Eth.Speed.Eth10Gbps) (eth_speed_of_mbps 10000)
+  (Some Eth.Speed.Eth25Gbps) (eth_speed_of_mbps 20000)
+  (Some Eth.Speed.Eth100Gbps) (eth_speed_of_mbps 400000)
+  None (eth_speed_of_mbps (-1))
+ *)
+
+(** The speed and whether full duplex, from [ethtool IF] output, of what it
+ * knows of them: *)
+let link_of_ethtool out =
+    let value name =
+        String.split_on_char '\n' out |>
+        List.find_map_opt (fun line ->
+            match String.split (String.trim line) ~by:": " with
+            | n, v when n = name -> Some (String.trim v)
+            | _ | exception Not_found -> None) in
+    (match value "Speed" with
+     | Some v when String.ends_with v "Mb/s" ->
+         Option.bind (int_of_string_opt (String.rchop ~n:4 v)) eth_speed_of_mbps
+     | _ -> None),
+    (match value "Duplex" with
+     | Some "Full" -> Some true
+     | Some "Half" -> Some false
+     | _ -> None)
+
+(*$= link_of_ethtool & ~printer:string_of_link
+  (Some Eth.Speed.Eth10Gbps, Some true) \
+    (link_of_ethtool "Settings for veth0:\n\tSpeed: 10000Mb/s\n\tDuplex: Full\n\tLink detected: yes\n")
+  (Some Eth.Speed.Eth100Mbps, Some false) \
+    (link_of_ethtool "Settings for eth0:\n\tSpeed: 100Mb/s\n\tDuplex: Half\n")
+  (None, None) \
+    (link_of_ethtool "Settings for eth0:\n\tSpeed: Unknown!\n\tDuplex: Unknown! (255)\n")
+  (None, None) (link_of_ethtool "Settings for wlan0:\n\tLink detected: yes\n")
+ *)
+
+(** The speed of interface [ifname]'s link and whether it is full duplex, when
+ * ethtool can tell: not for most virtual or wireless interfaces, nor without
+ * a link, nor without ethtool. *)
+let link ifname =
+    try link_of_ethtool (output ~quiet:true "ethtool" [ ifname ])
+    with Failure _ -> None, None
 
 (** {2 Ports} *)
 

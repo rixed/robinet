@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 d21836f8ba5c9b332bb79ac3ccca3d7b) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 c2cb5ac283205df03293e352b9f23dd6) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -191,10 +191,8 @@ A stack is a list of layers, each optionally with options in parentheses:
 -   Followed by a block, a stack is the current stack of that block.
 -   Ending with a terminal layer (`Bytes`, `Request`, `Reply`, `Query`,
     `Answer`), a stack is a message, which is sent. The current stack stays as
-    it was: `Bytes("a")` then `Bytes("b")` both send on it. Sending lasts until
-    what is sent next would not wait, as a blocking write does: until the
-    interface is free, and for TCP until the rest of the data fits in the send
-    buffer (64KB).
+    it was: `Bytes("a")` then `Bytes("b")` both send on it. The execution
+    continue when the message has been sent.
 -   Options are named (`dst=...`), except that a lone option of a layer that has
     a default field is that field: `Bytes("x")` is `Bytes(data="x")`.
 -   Options belong to the stack, not to the stream: those of a block's stack

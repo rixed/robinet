@@ -54,7 +54,8 @@ let () =
     and linger = ref (Clock.Interval.sec 2.) and prog_file = ref None
     and max_duration = ref None and max_packets = ref None
     and max_volume = ref None and max_packet_rate = ref None
-    and max_throughput = ref None in
+    and max_throughput = ref None
+    and speed = ref None and full_duplex = ref None and mtu = ref None in
     let interval r = Arg.String (fun s ->
         try r := Clock.Interval.of_string s
         with Invalid_argument _ -> die "Not a duration: %S" s) in
@@ -82,6 +83,14 @@ let () =
         "--udp", port_range Host_config.Udp,
             "LO[-HI] UDP ports the program uses (repeatable)" ;
         "--fw", Arg.Set fw, " keep the kernel off the ports of --tcp and --udp" ;
+        "--speed",
+            Arg.Symbol (Array.to_list Eth.Speed.names, fun s ->
+                speed := Array.find_opt (fun x -> Eth.Speed.to_string x = s) Eth.Speed.all),
+            " the speed of the link, rather than the interface's (or else 1Gbps)" ;
+        "--duplex",
+            Arg.Symbol ([ "full" ; "half" ], fun s -> full_duplex := Some (s = "full")),
+            " the duplex of the link, rather than the interface's (or else full)" ;
+        "--mtu", some_int mtu, "N the MTU, rather than the interface's" ;
         "--max-duration", some_interval max_duration, "DURATION run no longer" ;
         "--max-packets", some_int max_packets, "N send no more packets" ;
         "--max-bytes", some_int max_volume, "N send no more bytes" ;
@@ -134,6 +143,13 @@ let () =
         | Some (ip, netmask), None -> ip, netmask
         | Some (_, netmask), Some ip -> ip, netmask
         | None, _ -> die "Interface %s has no IPv4 address." !ifname in
+    let speed, full_duplex =
+        let speed', full_duplex' = Host_config.link !ifname in
+        (match !speed, speed' with Some s, _ | None, Some s -> s | None, None -> Eth.Speed.Eth1Gbps),
+        (match !full_duplex, full_duplex' with Some d, _ | None, Some d -> d | None, None -> true)
+    and mtu = !mtu |? iface.mtu in
+    Printf.printf "Interface %s: %s %s-duplex, MTU %d.\n%!" !ifname
+        (Eth.Speed.to_string speed) (if full_duplex then "full" else "half") mtu ;
     let configure = !fw || !own_ip <> None in
     if configure && Unix.geteuid () <> 0 then
         die "Configuring interface %s is for root; Have you tried under sudo?"
@@ -161,7 +177,7 @@ let () =
     let pcap =
         Pcap.open_iface ~widget:(Widget.make ~parent:sim.root !ifname)
             ~promisc:false ~direction:Pcap.In
-            ~caplen:(Pcap.caplen_of_mtu iface.mtu)
+            ~caplen:(Pcap.caplen_of_mtu mtu)
             ~filter:(Host_config.pcap_filter ?ip:!own_ip !ports) !ifname in
     let secs () = Clock.Time.to_secs (Simulation.now sim) in
     let ports_of proto =
@@ -175,6 +191,7 @@ let () =
     let idle () = Option.map_default (fun h -> h.Crafty_interp.idle ()) true !handle in
     let dev, h =
         Crafty_interp.run ~parent:sim.root ~mac:iface.mac ~ip ~netmask
+            ~speed ~full_duplex ~mtu
             ?gateway:(Option.map (fun gw -> Eth.Gateway.IPv4 gw) iface.gateway)
             (* The kernel answers for its own address: *)
             ~answer_arp:(!own_ip <> None)

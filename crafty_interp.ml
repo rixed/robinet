@@ -663,14 +663,16 @@ let print_status oc = function
     | Stopped -> String.print oc "stopped"
 
 (** Runs [program] on a new Ethernet interface under [parent], of address
- * [mac] and [ip] (in [netmask]), sending beyond its subnet to [gateway],
- * answering ARP for [ip] unless [answer_arp] is false, picking the local
- * ports it is not given from [ports] (as {!Crafty_tree.make_root} does),
- * printing with [print] and [print_err], and calling [on_exit] with how it
- * ends. Returns the device of the interface, and a handle to stop the
+ * [mac] and [ip] (in [netmask]), of link [speed] (default 1Gbps), full
+ * duplex unless [full_duplex] is false, and of [mtu], sending beyond its
+ * subnet to [gateway], answering ARP for [ip] unless [answer_arp] is false,
+ * picking the local ports it is not given from [ports] (as
+ * {!Crafty_tree.make_root} does), printing with [print] and [print_err], and
+ * calling [on_exit] with how it ends. Returns the device of the interface, and a handle to stop the
  * program or ask its status. The program starts at the next tick of the
  * simulation, once that device can be connected. *)
 let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
+        ?(speed=Eth.Speed.Eth1Gbps) ?(full_duplex=true) ?mtu
         ?ports ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
         (program : program) =
     let gateways =
@@ -678,7 +680,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
             [ Eth.State.gw_selector (), Some gw ]) [] gateway in
     let eth =
         Eth.State.make ~parent ~name ~mac ~gateways ?answer_arp
+            ~speeds:[ speed ] ~full_duplex ?mtu
             ~my_addresses:[ Eth.State.make_my_ip_address ?netmask ip ] () in
+    (* No cable to negotiate with: the link is what the interface supports. *)
+    eth.iface.widget.ports.set_capabilities 0 Capabilities.Any ;
     let power = eth.iface.widget.power in
     let tree = Crafty_tree.make_root ?ports eth in
     let started = ref None and stopped = ref false in
@@ -1060,7 +1065,11 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
           | exception Not_found -> if String.ends_with d " ARP" then "ARP" else d in
       out := Printf.sprintf "a%s %.3fs: %s" dir (Clock.Time.to_secs (Simulation.now sim)) d :: !out
 
-  let plug sim ?(error_rate=0.) ?log a b =
+  let plug sim ?(error_rate=0.) ?log (a : SimTypes.widget) (b : SimTypes.widget) =
+      List.iter (fun (w : SimTypes.widget) ->
+          w.ports.set_capabilities 0
+              (Capabilities.Eth { speeds = [ Eth.Speed.Eth100Mbps ] ; full_duplex = true })
+      ) [ a ; b ] ;
       let cable = Eth.Cable.State.make ~parent:sim.SimTypes.root ~error_rate () in
       let trx = Eth.Cable.make cable in
       let trx =
@@ -1071,8 +1080,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
                   trx.ins with
                   write = (fun bits -> log ">" bits ; trx.ins.write bits) ;
                   set_read = (fun f busy -> trx.ins.set_read (fun bits -> log "<" bits ; f bits) busy) } } in
-      ignore Tools.(a -=> trx) ;
-      Tools.(trx <=- b)
+      ignore Tools.(a.ports.dev 0 -=> trx) ;
+      Tools.(trx <=- b.ports.dev 0)
 
   let without_counts s =
       let b = Stdlib.Buffer.create (String.length s) and skip = ref false in
@@ -1088,7 +1097,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
       let ea = crafty_peer sim 1 and eb = crafty_peer sim 2 in
       if arp then (knows ea 2 ; knows eb 1) ;
       let log = if frames then Some (frame_line sim out) else None in
-      plug sim ?error_rate ?log (Eth.Iface.dev ea.Eth.State.iface) (Eth.Iface.dev eb.Eth.State.iface) ;
+      plug sim ?error_rate ?log ea.Eth.State.iface.widget eb.Eth.State.iface.widget ;
       start sim out "b" eb b ;
       start sim out "a" ea a ;
       Simulation.run sim false ;
@@ -1100,7 +1109,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
       let ea = crafty_peer sim 1 in
       let h = Host.make ~parent:sim.SimTypes.root ~static_ip:(address 2) ~netmask "host" in
       let log = if frames then Some (frame_line sim out) else None in
-      plug sim ?log (Eth.Iface.dev ea.Eth.State.iface) (h.Host.trx.Host.widget.SimTypes.ports.SimTypes.dev 0) ;
+      plug sim ?log ea.Eth.State.iface.widget h.Host.trx.Host.widget ;
       Simulation.run_startup sim ;
       setup h (fun s ->
           out := Printf.sprintf "host %.3fs: %s" (Clock.Time.to_secs (Simulation.now sim)) s :: !out) ;
@@ -1112,7 +1121,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
  * 1.5s); a response counter; a TCP checksum given, then computed; the
  * counter with losses; ICMP echo requests answered by a program: *)
 (*$= & ~printer:identity
-  "b 1.500s: listening\nb 2.000s: ping from 10.0.0.1:1000\na 2.000s: pong from 10.0.0.2\na 2.000s: done Eth#2\nb 2.000s: done Eth#4" \
+  "b 1.500s: listening\nb 2.000s: ping from 10.0.0.1:1000\nb 2.000s: done Eth#4\na 2.000s: pong from 10.0.0.2\na 2.000s: done Eth#2" \
     (two "/IP(dst=10.0.0.2)/UDP(src=1000, dst=7) {\n  retry { Bytes(\"ping\")\n    expect timeout=1s Bytes(\"pong\") { print(\"pong from ${MATCH[IP].src}\") } } }" \
          "wait 1500ms\nprint(\"listening\")\nexpect /IP/UDP(dst == 7)/Bytes(\"ping\") {\n  print(\"ping from ${MATCH[IP].src}:${MATCH[UDP].src}\")\n  /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Bytes(\"pong\") }")
   "a 1.000s: 100 pongs\na 1.000s: done Eth#101\nb 2.000s: done Eth#101" \
@@ -1162,7 +1171,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 (*$= & ~printer:identity
   "a 0.000s: port 9 of 10.0.0.2, from 10.0.0.2, length 15\na 0.000s: done Eth#2" \
     (with_host "/IP(dst=10.0.0.2)/UDP(src=4000, dst=9)/Bytes(\"anyone?\")\nexpect timeout=1s /IP/ICMP/DestUnreachable(code == PORT_UNREACHABLE)/IP/UDP(src == 4000) {\n  print(\"port ${MATCH[UDP].dst} of ${MATCH[IP].dst}, from ${MATCH[^IP].src}, length ${MATCH[UDP].length}\") }")
-  "a 0.000s: udp to 33434, ttl 1, from 10.0.0.2\nb 0.000s: done Eth#1\na 0.000s: tcp seq 7, win 0\na 1.000s: done Eth#2" \
+  "b 0.000s: done Eth#1\na 0.000s: udp to 33434, ttl 1, from 10.0.0.2\na 0.000s: tcp seq 7, win 0\na 1.000s: done Eth#2" \
     (two ~arp:true "{ on timeout=1s /IP/ICMP/TimeExceeded/IP/UDP(src == 4000) {\n    print(\"udp to ${MATCH[UDP].dst}, ttl ${MATCH[IP].ttl}, from ${MATCH[^IP].src}\") }\n  on timeout=1s /IP/ICMP/TimeExceeded/IP/TCP(src == 4000) {\n    print(\"tcp seq ${MATCH[TCP].seq_num}, win ${MATCH[TCP].win_size}\") }\n  /IP(dst=10.0.0.2)/UDP(src=4000, dst=33434)/Bytes(\"probe\") }" \
          "expect timeout=1s /IP/UDP(dst == 33434)/Bytes {\n  /IP(dst=MATCH[IP].src)/ICMP/TimeExceeded/IP(src=MATCH[IP].src, dst=MATCH[IP].dst, ttl=1)/UDP(src=MATCH[UDP].src, dst=MATCH[UDP].dst)/Bytes(MATCH[Bytes].data)\n  /IP(dst=MATCH[IP].src)/ICMP/TimeExceeded/IP(src=MATCH[IP].src, dst=MATCH[IP].dst, proto=6, tot_len=60)/Bytes(#0fa0005000000007) }")
 *)
@@ -1227,10 +1236,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4001>22 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 22>4001 AckRst \"\"\na 0.000s: reset\na 0.000s: done Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4001, dst=22)#1{Bytes}}}" \
     (with_host ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4001, dst=22) {\n  Bytes(#1ee7)\n  expect timeout=1s ../TCP!(flags & RST) { print(\"reset\") } }")
-  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na 0.000s: connected!\na 0.000s: done Eth#2" \
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn \"\"\na 0.000s: connected!\na 0.000s: done Eth#2\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  ../TCP!(flags=SYN, seq_num=123)/Bytes()\n  expect timeout=1s ../TCP!(flags == SYN | ACK) {\n    ../TCP!(flags=ACK, seq_num=124, ack_num=MATCH[TCP].seq_num + 1)/Bytes()\n    print(\"connected!\") } }")
-  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hello\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hello\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \" world\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \" world\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Rst \"\"\na 0.000s: failed: line 7, column 3: This TCP connection is closed Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=4000, dst=7)#3{Bytes#4}}}" \
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hello\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hello\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \" world\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \" world\"\na 0.000s: failed: line 7, column 3: This TCP connection is closed Eth#4{IP(src=10.0.0.1, dst=10.0.0.2)#3{TCP(src=4000, dst=7)#3{Bytes#4}}}\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Rst \"\"" \
     (with_host ~setup:tcp_echo ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Bytes(\"hello\")\n  expect timeout=1s Bytes(\"hello\") {}\n  ../TCP!/Bytes(\" world\")\n  expect timeout=1s Bytes(\" world\") {}\n  ../TCP!(flags=RST)/Bytes()\n  Bytes(\"too late\") }")
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckRst \"\"\na 0.000s: 101\na 0.000s: done Eth#2" \
