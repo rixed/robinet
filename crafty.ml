@@ -51,6 +51,7 @@ let () =
 let () =
     let ifname = ref "" and own_ip = ref None and ports = ref []
     and fw = ref false and print_packets = ref false and cleanup = ref false
+    and check = ref false and format = ref false
     and linger = ref (Clock.Interval.sec 2.) and prog_file = ref None
     and max_duration = ref None and max_packets = ref None
     and max_volume = ref None and max_packet_rate = ref None
@@ -102,6 +103,9 @@ let () =
             "DURATION once done, stop after that long without traffic (default 2s)" ;
         "-p", Arg.Set print_packets, " print every packet sent and received" ;
         "--print-packets", Arg.Set print_packets, " same as -p" ;
+        "--check", Arg.Set check, " compile the program, and exit" ;
+        "--format", Arg.Set format,
+            " print the program back, normalised (without its comments), and exit" ;
         "--cleanup", Arg.Set cleanup,
             " undo what a killed crafty left on the host, and exit" ;
         "--reference", manual Crafty_manual.reference,
@@ -123,20 +127,30 @@ let () =
     let prog_file = match !prog_file with
         | Some f -> f
         | None -> die "No program given.\n%s" (Arg.usage_string !specs usage) in
+    let text = File.with_file_in prog_file IO.read_all in
+    let fail es =
+        List.iter (fun e ->
+            Printf.eprintf "%s: %s\n" prog_file
+                (IO.to_string Crafty_interp.print_error e)) es ;
+        exit 2 in
+    (* A typo in the program changes nothing on the host: *)
+    let compile () =
+        match Crafty_interp.compile text with Ok p -> p | Error es -> fail es in
+    if !format then (
+        if !check then ignore (compile ()) ;
+        (match Crafty_parser.parse text with
+        | Ok p -> print_string (Crafty_ast.string_of_program ~all:false p)
+        | Error e -> fail [ e ]) ;
+        exit 0) ;
+    let program = compile () in
+    if !check then (
+        Printf.printf "%s: OK\n" prog_file ;
+        exit 0) ;
     if !ifname = "" then die "No interface given (-i)." ;
     if !fw && !ports = [] then die "--fw needs ports (--tcp, --udp)." ;
     if !fw && !own_ip <> None then
         die "--fw and --ip do not go together: an address of the program's \
              own shares no port with the kernel." ;
-    (* A typo in the program changes nothing on the host: *)
-    let program =
-        match Crafty_interp.compile (File.with_file_in prog_file IO.read_all) with
-        | Ok p -> p
-        | Error es ->
-            List.iter (fun e ->
-                Printf.eprintf "%s: %s\n" prog_file
-                    (IO.to_string Crafty_interp.print_error e)) es ;
-            exit 2 in
     let iface = Host_config.iface !ifname in
     let ip, netmask =
         match iface.ip, !own_ip with

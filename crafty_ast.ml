@@ -226,7 +226,7 @@ let unsupported =
 (** {2 Printing}
  *
  * As source code that parses back into the same program, with every operation
- * in parentheses. *)
+ * in parentheses, or only those that need some. *)
 
 let string_of_binop = function
     | Add -> "+" | Sub -> "-" | Mul -> "*" | Div -> "/" | Mod -> "%"
@@ -267,7 +267,21 @@ let print_text oc s =
 let print_list print oc l =
     List.print ~first:"" ~last:"" ~sep:", " print oc l
 
-let rec print_expr oc e =
+(* How tightly an operation binds, as the parser reads them: *)
+let precedence = function
+    | Or -> 1 | And -> 2
+    | Eq | Ne | Lt | Le | Gt | Ge -> 3
+    | BitOr -> 4 | BitXor -> 5 | BitAnd -> 6
+    | Add | Sub -> 7 | Mul | Div | Mod -> 8
+
+let unary_precedence = 9
+
+(* [e] where an operation binding less than [p] needs parentheses, as do all
+ * of them with [all] (but the outermost one if [bare]): *)
+let rec print_expr_at ?(bare=false) ~all p oc e =
+    let paren q f =
+        if all && not bare || q < p then Printf.fprintf oc "(%t)" f else f oc in
+    let sub = print_expr_at ~all 0 in
     match e.desc with
     | Lit l -> print_literal oc l
     | Constant (n, _) -> String.print oc n
@@ -275,105 +289,121 @@ let rec print_expr oc e =
         Char.print oc '"' ;
         List.iter (function
             | Text s -> print_text oc s
-            | Interp e -> Printf.fprintf oc "${%a}" print_expr e) parts ;
+            | Interp e -> Printf.fprintf oc "${%a}" sub e) parts ;
         Char.print oc '"'
     | Var n -> String.print oc n
     | Layer { name ; from_start ; nth } ->
         let carets = String.make (if from_start then nth + 1 else nth) '^' in
         if from_start then Printf.fprintf oc "%s%a" carets Layer_name.print name
         else Printf.fprintf oc "%a%s" Layer_name.print name carets
-    | Field (e, f) -> Printf.fprintf oc "%a.%s" print_expr e f
-    | Index (e, i) -> Printf.fprintf oc "%a[%a]" print_expr e print_expr i
-    | Call (f, args) -> Printf.fprintf oc "%s(%a)" f print_args args
-    | Unop (Not, e) -> Printf.fprintf oc "(!%a)" print_expr e
-    (* With a space, not to make a negative literal of a positive one: *)
-    | Unop (Neg, e) -> Printf.fprintf oc "(- %a)" print_expr e
+    | Field (e, f) ->
+        Printf.fprintf oc "%a.%s" (print_expr_at ~all max_int) e f
+    | Index (e, i) ->
+        Printf.fprintf oc "%a[%a]" (print_expr_at ~all max_int) e sub i
+    | Call (f, args) -> Printf.fprintf oc "%s(%a)" f (print_args ~all) args
+    | Unop (Not, e) ->
+        paren unary_precedence (fun oc ->
+            Printf.fprintf oc "!%a" (print_expr_at ~all unary_precedence) e)
+    | Unop (Neg, e) ->
+        (* With a space before a digit, not to make a negative literal of a
+         * positive one: *)
+        let s = IO.to_string (print_expr_at ~all unary_precedence) e in
+        let sep = if all || s <> "" && Char.is_digit s.[0] then " " else "" in
+        paren unary_precedence (fun oc -> Printf.fprintf oc "-%s%s" sep s)
     | Binop (op, a, b) ->
-        Printf.fprintf oc "(%a %s %a)"
-            print_expr a (string_of_binop op) print_expr b
+        let q = precedence op in
+        (* Comparisons do not chain: *)
+        let pa, pb = if q = precedence Eq then q + 1, q + 1 else q, q + 1 in
+        paren q (fun oc ->
+            Printf.fprintf oc "%a %s %a"
+                (print_expr_at ~all pa) a (string_of_binop op)
+                (print_expr_at ~all pb) b)
     | Record fields ->
         Printf.fprintf oc "{%a}"
-            (print_list (fun oc (n, e) -> Printf.fprintf oc "%s: %a" n print_expr e))
+            (print_list (fun oc (n, e) -> Printf.fprintf oc "%s: %a" n sub e))
             fields
-    | Array es -> Printf.fprintf oc "[%a]" (print_list print_expr) es
-    | Matches (e, p) -> Printf.fprintf oc "(%a =~ %a)" print_expr e print_pattern p
+    | Array es -> Printf.fprintf oc "[%a]" (print_list sub) es
+    | Matches (e, pat) ->
+        let q = precedence Eq in
+        paren q (fun oc ->
+            Printf.fprintf oc "%a =~ %a"
+                (print_expr_at ~all (q + 1)) e (print_pattern ~all) pat)
 
-and print_args oc args =
+and print_args ~all oc args =
     print_list (fun oc a ->
         Option.may (Printf.fprintf oc "%s=") a.arg_name ;
-        print_expr oc a.value) oc args
-
-(* Without the parentheses around the outermost operation: *)
-and print_bare_expr oc e =
-    match e.desc with
-    | Unop (Not, e) -> Printf.fprintf oc "!%a" print_expr e
-    | Unop (Neg, e) -> Printf.fprintf oc "- %a" print_expr e
-    | Binop (op, a, b) ->
-        Printf.fprintf oc "%a %s %a"
-            print_expr a (string_of_binop op) print_expr b
-    | Matches (e, p) -> Printf.fprintf oc "%a =~ %a" print_expr e print_pattern p
-    | _ -> print_expr oc e
+        print_expr_at ~all 0 oc a.value) oc args
 
 and print_anchor oc = function
     | Absolute -> Char.print oc '/'
     | Relative n -> for _ = 1 to n do String.print oc "../" done
 
-and print_pattern oc p =
+and print_pattern ~all oc p =
     print_anchor oc p.anchor ;
     List.print ~first:"" ~last:"" ~sep:"/" (fun oc l ->
         Printf.fprintf oc "%a%s" Layer_name.print l.pl_name (if l.pl_manual then "!" else "") ;
-        Option.may (Printf.fprintf oc "(%a)" print_bare_expr) l.cond
+        Option.may (Printf.fprintf oc "(%a)" (print_expr_at ~bare:true ~all 0)) l.cond
     ) oc p.pat_layers
 
-let print_layer oc l =
-    Printf.fprintf oc "%a%s" Layer_name.print l.layer_name (if l.manual then "!" else "") ;
-    if l.options <> [] then Printf.fprintf oc "(%a)" print_args l.options
+(* With every operation in parentheses: *)
+let print_expr = print_expr_at ~all:true 0
 
-let rec print_stmt indent oc s =
-    let param name = Option.may (Printf.fprintf oc " %s=%a" name print_expr) in
+(* The same, but for the outermost operation: *)
+let print_bare_expr = print_expr_at ~bare:true ~all:true 0
+
+let print_layer ~all oc l =
+    Printf.fprintf oc "%a%s" Layer_name.print l.layer_name (if l.manual then "!" else "") ;
+    if l.options <> [] then Printf.fprintf oc "(%a)" (print_args ~all) l.options
+
+let rec print_stmt ~all indent oc s =
+    let expr = print_expr_at ~all 0 in
+    let param name = Option.may (Printf.fprintf oc " %s=%a" name expr) in
     String.print oc (String.make indent ' ') ;
     match s.stmt with
     | Stack { anchor ; layers ; body } ->
         print_anchor oc anchor ;
-        List.print ~first:"" ~last:"" ~sep:"/" print_layer oc layers ;
-        Option.may (fun b -> Char.print oc ' ' ; print_block indent oc b) body
-    | Block b -> print_block indent oc b
-    | Declare (v, e) -> Printf.fprintf oc "%s = %a" v print_expr e
+        List.print ~first:"" ~last:"" ~sep:"/" (print_layer ~all) oc layers ;
+        Option.may (fun b -> Char.print oc ' ' ; print_block ~all indent oc b) body
+    | Block b -> print_block ~all indent oc b
+    | Declare (v, e) -> Printf.fprintf oc "%s = %a" v expr e
     | Assign (v, op, e) ->
         Printf.fprintf oc "%s %s= %a" v
             (match op with None -> ":" | Some op -> string_of_binop op)
-            print_expr e
-    | Do (f, args) -> Printf.fprintf oc "%s(%a)" f print_args args
+            expr e
+    | Do (f, args) -> Printf.fprintf oc "%s(%a)" f (print_args ~all) args
     | Repeat { var ; count ; every ; for_ ; body } ->
         String.print oc "repeat" ;
         Option.may (Printf.fprintf oc " var=%s") var ;
         param "count" count ; param "every" every ; param "for" for_ ;
-        Char.print oc ' ' ; print_block indent oc body
+        Char.print oc ' ' ; print_block ~all indent oc body
     | Retry { max ; body } ->
         String.print oc "retry" ; param "max" max ;
-        Char.print oc ' ' ; print_block indent oc body
+        Char.print oc ' ' ; print_block ~all indent oc body
     | Catch body ->
-        String.print oc "catch " ; print_block indent oc body
+        String.print oc "catch " ; print_block ~all indent oc body
     | Break { depth } ->
         String.print oc "break" ; param "depth" depth
     | Wait dur ->
-        String.print oc "wait" ; param "dur" (Some dur)
+        if all then (String.print oc "wait" ; param "dur" (Some dur))
+        else Printf.fprintf oc "wait %a" expr dur
     | Expect { timeout ; pattern ; body } ->
         String.print oc "expect" ; param "timeout" timeout ;
-        Printf.fprintf oc " %a " print_pattern pattern ;
-        print_block indent oc body
+        Printf.fprintf oc " %a " (print_pattern ~all) pattern ;
+        print_block ~all indent oc body
     | On { timeout ; max ; pattern ; body } ->
         String.print oc "on" ; param "timeout" timeout ; param "max" max ;
-        Printf.fprintf oc " %a " print_pattern pattern ;
-        print_block indent oc body
+        Printf.fprintf oc " %a " (print_pattern ~all) pattern ;
+        print_block ~all indent oc body
 
-and print_block indent oc b =
+and print_block ~all indent oc b =
     String.print oc "{\n" ;
-    List.iter (fun s -> print_stmt (indent + 2) oc s ; Char.print oc '\n') b ;
+    List.iter (fun s -> print_stmt ~all (indent + 2) oc s ; Char.print oc '\n') b ;
     Printf.fprintf oc "%s}" (String.make indent ' ')
 
-let print_program oc p =
-    List.iter (fun s -> print_stmt 0 oc s ; Char.print oc '\n') p
+(** The program, with [all] operations in parentheses (default), or only those
+ * that need some: *)
+let print_program ?(all=true) oc p =
+    List.iter (fun s -> print_stmt ~all 0 oc s ; Char.print oc '\n') p
 
-let string_of_program p =
-    IO.to_string print_program p
+let string_of_program ?all p =
+    IO.to_string (print_program ?all) p

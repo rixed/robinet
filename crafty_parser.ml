@@ -581,11 +581,16 @@ let parse text =
         (* Only with error correction, which is not asked for *)
         assert false
 
-(* [reads text] is how the program in that text reads back, or the error. *)
+(* [reads text] is how the program in that text reads back, or the error;
+ * [formats text] is that program with only the parentheses it needs. *)
 (*$inject
   let reads text =
       match parse text with
       | Ok p -> Crafty_ast.string_of_program p
+      | Error e -> IO.to_string print_error e
+  let formats text =
+      match parse text with
+      | Ok p -> Crafty_ast.string_of_program ~all:false p
       | Error e -> IO.to_string print_error e
 *)
 
@@ -637,6 +642,41 @@ let parse text =
   "expect timeout=5s /IP(src == x)/UDP {\n}\n" \
     (reads "expect 5s /IP(src=x)/UDP {}")
   "expect timeout=5s /IP/UDP {\n}\n" (reads "expect timeout=5s /IP/UDP {}")
+*)
+
+(*$= formats & ~printer:identity
+  "x = 1 + 2 * 3 - 4 / 2 % 3\n" (formats "x = 1 + 2 * 3 - 4 / 2 % 3")
+  "x = (1 + 2) * 3\ny = 1 - (2 - 3)\nz = 1 - 2 - 3\n" \
+    (formats "x = (1 + 2) * 3\ny = 1 - (2 - 3)\nz = (1 - 2) - 3")
+  "x = a || b && c == d | e ^ f & g + h\n" \
+    (formats "x = a || b && c == d | e ^ f & g + h")
+  "x = (a || b) && c\ny = (a == b) == c\n" (formats "x = (a || b) && c\ny = (a == b) == c")
+  "x = !a && -b < 3\ny = !(a && b)\nz = -(1 + x)\nw = - 1\n" \
+    (formats "x = !a && -b < 3\ny = !(a && b)\nz = -(1 + x)\nw = - 1")
+  "x = (a + 1).b + [1 + 2][0]\n" (formats "x = (a + 1).b + [1 + 2][0]")
+  "x = \"a ${x + 1} b\"\nassert(a + 1 == 2)\n" \
+    (formats "x = \"a ${x + 1} b\"\nassert(a + 1 == 2)")
+  "x = y =~ /IP && z\ny = (a == b) =~ /IP\n" (formats "x = (y =~ /IP) && z\ny = (a == b) =~ /IP")
+  "wait 1s * n\nrepeat count=n * 2 {\n}\n" (formats "wait dur=1s * n\nrepeat count=n*2 {}")
+  "expect UDP(IP^.ttl == 3 && (a || b)) {\n}\n" \
+    (formats "expect UDP(IP^.ttl = 3, a || b) {}")
+*)
+
+(* Formatted, a program reads back as itself: *)
+(*$T formats
+  List.for_all (fun t -> reads (formats t) = reads t) [ \
+    "x = 1 + 2 * 3 - 4 / 2 % 3" ; "x = a || b && c == d | e ^ f & g + h" ; \
+    "x = !a && -b < 3" ; "x = -1 + -2.5 - -3s - - 1" ; "x = 3 -1" ; \
+    "x = 3 & 4 == 4" ; "x = MATCH[IP^].src + MATCH[^^IP].dst" ; \
+    "x = length(MATCH) * rand(max=3)" ; "x = - -1 - - (2 - 3)" ; \
+    "x = 1m30s + 10ms + 1.5\xc2\xb5s" ; "x = [1.2.3.4 == y, aa:bb:cc:dd:ee:ff]" ; \
+    "x = #1ee7 # a comment\nx = #f" ; "x = \"a ${x + 1} b \\${not} \\x41$\"" ; \
+    "x = y =~ /IP/UDP(dport = 53)" ; "wait dur=1s * n" ; \
+    "repeat every=1s / n count=n*2 {}" ; \
+    "on max=3 timeout=1s ../UDP { n += 1; m := 2 }" ; \
+    "expect UDP(IP^.ttl = 3, ^IP.src == 1.2.3.4) {}" ; \
+    "expect ../../TCP!(flags & RST) {}" ; "IP!(ttl=1)/TCP!(flags=2)/Bytes(\"x\")" ; \
+    "/IP/UDP/Bytes(\"x\")\n{ y = !(a == b) }" ]
 *)
 
 (* The errors, where they are found: *)
