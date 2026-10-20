@@ -372,6 +372,17 @@ let read_changes file =
         Some (int_of_string (String.lchop ~n:4 pid), List.rev cmds)
     | _ | exception _ -> None
 
+(* Whether process [pid] runs, which a zombie (as a killed process is, for
+ * a while) does not: *)
+let running pid =
+    match File.with_file_in (Printf.sprintf "/proc/%d/stat" pid) IO.read_all with
+    | exception Sys_error _ -> false
+    | stat ->
+        (* The state follows the command, which is within parentheses: *)
+        (match String.rsplit stat ~by:") " with
+        | _, state -> not (String.starts_with state "Z" || String.starts_with state "X")
+        | exception Not_found -> true)
+
 (** Undo the changes left by processes that are no longer running, and
  * return their names. *)
 let cleanup_stale () =
@@ -383,7 +394,7 @@ let cleanup_stale () =
         List.filter_map (fun name ->
             let file = state_dir ^"/"^ name in
             match read_changes file with
-            | Some (pid, cmds) when not (Sys.file_exists (Printf.sprintf "/proc/%d" pid)) ->
+            | Some (pid, cmds) when not (running pid) ->
                 undo_lines cmds ;
                 try_run "rm" [ "-f" ; file ; file ^".nft" ] ;
                 Some name
