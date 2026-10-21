@@ -504,7 +504,10 @@ let scalars = Type.[ Bool ; Int ; Float ; Byte ]
  * its arguments: *)
 let builtins =
     let num = param "x" "a number" (only Type.[ Float ]) in
-    let scalar = param "x" "a bool, int, float or byte" (only_exactly scalars) in
+    let scalar =
+        param "x" "a bool, int, float, byte or string"
+              (only_exactly (Type.String :: scalars)) in
+    let secs what = param "x" what (only_exactly Type.[ Int ; Float ; String ]) in
     let res t _ = t in
     [ "rand", Rand,
         [ param "max" "an int, bool or float" ~default:(Literal (A.Float 1.))
@@ -520,16 +523,16 @@ let builtins =
       "float", To_float, [ scalar ], res Type.Float ;
       "bool", To_bool, [ scalar ], res Type.Bool ;
       "byte", To_byte, [ scalar ], res Type.Byte ;
-      "interval", To_interval,
-        [ param "x" "a number of seconds" (only_exactly Type.[ Int ; Float ]) ],
+      "interval", To_interval, [ secs "a number of seconds or a string" ],
         res Type.Interval ;
-      "time", To_time,
-        [ param "x" "a number of seconds since 1970" (only_exactly Type.[ Int ; Float ]) ],
+      "time", To_time, [ secs "a number of seconds since 1970 or a string" ],
         res Type.Time ;
       "now", Now, [], res Type.Time ;
-      "ip_addr", To_ip, [ param "b" "4 bytes" (only_exactly Type.[ bytes ]) ],
+      "ip_addr", To_ip,
+        [ param "b" "4 bytes or a string" (only_exactly Type.[ bytes ; String ]) ],
         res Type.Ip ;
-      "mac_addr", To_mac, [ param "b" "6 bytes" (only_exactly Type.[ bytes ]) ],
+      "mac_addr", To_mac,
+        [ param "b" "6 bytes or a string" (only_exactly Type.[ bytes ; String ]) ],
         res Type.Mac ;
       "getenv", Getenv,
         [ param "name" "a string" (only Type.[ String ]) ;
@@ -1352,8 +1355,8 @@ let check (program : A.program) =
     (types "x = length(3)")
   "line 1, column 8: Argument cond of assert must be a bool or an int, not a string" \
     (types "assert(\"x\")")
-  "line 1, column 13: Argument b of ip_addr must be 4 bytes, not a string" \
-    (types "x = ip_addr(\"abcd\")")
+  "line 1, column 13: Argument b of ip_addr must be 4 bytes or a string, not an int" \
+    (types "x = ip_addr(1)")
   "line 1, column 1: x would have no value" \
     (types "x = assert(true)")
   "line 1, column 7: Argument s of print must be a string, not an int" \

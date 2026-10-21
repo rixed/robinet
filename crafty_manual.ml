@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 d220811a40b850bc674dfecd038c032d) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 388f61077aa81c670d82e2c3888448d2) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -121,8 +121,9 @@ expected, such as to `print`, are taken as text.
 string to bytes and back, bytes to an IP address (4 bytes) or a MAC address (6
 bytes, checked at run time). An int is a bool where one is expected (non-zero is
 true). Other conversions use the functions `int`, `float`, `bool`, `byte`,
-`interval` and `time`. The items of an array and the fields of a record convert
-likewise.
+`interval`, `time`, `ip_addr` and `mac_addr`, which also read a string as a
+literal: `ip_addr(getenv("SERVER"))`, `interval("1.5s")`. The items of an array
+and the fields of a record convert likewise.
 
 **Variants** need no declaration: `Ok(42)` is of the variant `(Ok int)`, which
 converts to any variant that has the constructor `Ok` holding an int (or what an

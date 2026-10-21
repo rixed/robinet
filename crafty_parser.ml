@@ -280,6 +280,20 @@ let literal =
     time_lit ||| interval_lit ||| bool_lit ||| ip_lit ||| mac_lit ||| float_lit |||
     int_lit
 
+(** The literal that is all of that text, if any. *)
+let parse_literal s =
+    match to_result ((literal +- eof) [] None Parsers.no_error_correction
+                                      (stream_of_string s)) with
+    | Ok (l, _) -> Some l
+    | Error _ -> None
+
+(*$= parse_literal & ~printer:(function None -> "None" | Some l -> IO.to_string Crafty_ast.print_literal l)
+  (Some (Crafty_ast.Int 16)) (parse_literal "0x10")
+  (Some (Crafty_ast.Float (-1.5))) (parse_literal "-1.5")
+  None (parse_literal "1.2.3.4 x")
+  None (parse_literal "")
+*)
+
 (* One byte, or an array of them when more than two digits: *)
 let bytes_lit =
     here ++ (item '#' -+ chars_of "hexadecimal digit" is_hex +- end_of_word) >>:

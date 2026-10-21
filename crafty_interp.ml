@@ -134,8 +134,31 @@ let rec convert loc (from : A.Type.t) (typ : A.Type.t) value =
 and convert_to loc from typ value =
     if from = typ then value else convert loc from typ value
 
-let call loc (b : T.builtin) args ~print ~print_err ~now =
+(* The value written in that string, if [ok] accepts it: *)
+let parsed loc what ok s =
+    match Option.map of_literal (Crafty_parser.parse_literal (String.trim s)) with
+    | Some v when ok v -> v
+    | _ -> error loc "Cannot convert %S to %s" s what
+
+let rec call loc (b : T.builtin) args ~print ~print_err ~now =
+    let number = function Bool _ | Int _ | Float _ -> true | _ -> false in
+    let reparse what ok s =
+        call loc b [ parsed loc what ok s ] ~print ~print_err ~now in
     match b, args with
+    | T.To_int, [ String s ] -> reparse "an int" number s
+    | T.To_float, [ String s ] -> reparse "a float" number s
+    | T.To_bool, [ String s ] -> reparse "a bool" number s
+    | T.To_byte, [ String s ] -> reparse "a byte" number s
+    | T.To_interval, [ String s ] ->
+        reparse "an interval" (fun v -> number v || match v with Interval _ -> true | _ -> false) s
+    | T.To_time, [ String s ] ->
+        reparse "a time" (fun v -> number v || match v with Time _ -> true | _ -> false) s
+    | T.To_ip, [ String s ] ->
+        parsed loc "an IP address" (function Ip _ -> true | _ -> false) s
+    | T.To_mac, [ String s ] ->
+        parsed loc "a MAC address" (function Mac _ -> true | _ -> false) s
+    | T.To_interval, [ Interval _ as i ] -> i
+    | T.To_time, [ Time _ as t ] -> t
     | T.Rand, [ max ] -> rand loc max
     | T.Randbytes, [ Int len ] ->
         if len < 0 then error loc "randbytes needs a length, not %d" len ;
@@ -986,6 +1009,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "x = ip_addr(#010203)")
   "0s: failed: line 1, column 5: 4 bytes are no MAC address" \
     (runs "x = mac_addr(#01020304)")
+  "0s: 16 -1.5 1 true #2c 1s500ms 2026-10-20T22:02:45Z 10.0.0.1 01:02:03:04:05:06\n0s: done" \
+    (runs "print(\"${int(\"0x10\")} ${float(\" -1.5 \")} ${int(\"1.9\")} ${bool(\"true\")} ${byte(\"300\")} ${interval(\"1.5s\")} ${time(\"2026-10-20T22:02:45Z\")} ${ip_addr(\"10.0.0.1\")} ${mac_addr(\"1:2:3:4:5:6\")}\")")
+  "0s: failed: line 1, column 5: Cannot convert \"1.2.3.4\" to an int" \
+    (runs "x = int(\"1.2.3.4\")")
+  "0s: failed: line 1, column 5: Cannot convert \"10.0.0\" to an IP address" \
+    (runs "x = ip_addr(\"10.0.0\")")
   ("0s: "^ Sys.getenv "HOME" ^"\n0s: done") \
     (runs "print(getenv(\"HOME\"))")
   "0s: failed: line 1, column 5: Environment variable CRAFTY_NO_SUCH_VAR is not set" \
