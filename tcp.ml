@@ -613,6 +613,7 @@ struct
         mutable probes : int ; (* window probes since we last sent data *)
         mutable unanswered_probes : int ; (* window probes since the peer last acked anything *)
         mutable cwnd : int ;  (* congestion window: bytes allowed in flight (sent_pld - sent_acked) *)
+        initial_window : int ; (* the cwnd before any data is sent, in segments *)
         mutable ssthresh : int ; (* slow start threshold (TODO: cached per dest in a host to avoid initial overshoot) *)
         mutable ca_acked : int ; (* bytes acked toward the next cwnd increase *)
         mutable dup_acks : int ; (* consecutive duplicate acks received *)
@@ -1016,7 +1017,7 @@ struct
                             | Pdu.Opt.Mss mss -> mss
                             | _ -> found) default_snd_mss tcp.Pdu.options in
                     t.snd_mss <- min t.rcv_mss (max min_snd_mss peer_mss) ;
-                    t.cwnd <- t.snd_mss ; (* no data was sent yet *)
+                    t.cwnd <- t.initial_window * t.snd_mss ; (* no data was sent yet *)
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: peer's MSS %d, sending segments up to %d" peer_mss t.snd_mss))) ;
                     inqueue_pkt t tcp
                 )
@@ -1150,10 +1151,11 @@ struct
     (* What the largest window scaling allows to advertise: *)
     let max_rcv_buf = 0xffff lsl 14
 
-    (* Retransmission defaults are those of Linux: *)
+    (* Retransmission defaults are those of Linux, as is the initial window
+     * (RFC 6928): *)
     (* With [sync_recv], what is received in order is handed to the reader
      * while the segment that completes it is being received. *)
-    let make power ?(sync_recv=false) ?isn ?(mss=536) ?(ssthresh=max_int) ?(snd_buf=default_snd_buf) ?(rcv_buf=default_rcv_buf)
+    let make power ?(sync_recv=false) ?isn ?(mss=536) ?(ssthresh=max_int) ?(initial_window=10) ?(snd_buf=default_snd_buf) ?(rcv_buf=default_rcv_buf)
              ?(initial_rto=Clock.Interval.sec 1.) ?(min_rto_var=Clock.Interval.msec 200.)
              ?(max_rto=Clock.Interval.sec 120.) ?(max_timeouts=15)
              src dst logger =
@@ -1164,7 +1166,7 @@ struct
                   emit_busy_for = never_busy ;
                   recv = ignore_bits ~logger ;
                   recv_busy_for = never_busy ;
-                  rcv_mss = mss ; snd_mss = mss ; cwnd = mss ; ssthresh ; ca_acked = 0 ; dup_acks = 0 ; recovery = Open ;
+                  rcv_mss = mss ; snd_mss = mss ; cwnd = initial_window * mss ; initial_window ; ssthresh ; ca_acked = 0 ; dup_acks = 0 ; recovery = Open ;
                   rtt = None ; rtt_probe = None ; rto = initial_rto ; rto_gen = 0 ;
                   min_rto_var ; max_rto ; max_timeouts ;
                   rto_armed = false ; timeouts = 0 ;
@@ -1271,8 +1273,9 @@ end
         connect a (fun _ -> a.tcp_trx.trx.ins.write (zeroes_bitstring (8 * size))) ;
         Simulation.run sim false ;
         a, !max_in_flight, !rcvd, !probes, !ahead in
-    let a, _, rcvd, _, _ = transfer 1000 in
+    let a, m, rcvd, _, _ = transfer 1000 in
     assert_equal ~printer:string_of_int ~msg:"all received" 1000 rcvd ;
+    assert_equal ~printer:string_of_int ~msg:"all in the initial window" 1000 m ;
     assert_equal ~printer:string_of_int ~msg:"default window, scaled" (6 * 1024 * 1024) a.snd_wnd ;
     assert_equal ~msg:"peer's shift" (Some 7) a.snd_wscale ;
     let _, m, rcvd, _, _ = transfer ~mss:1000 500_000 in
