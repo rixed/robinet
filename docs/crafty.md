@@ -414,6 +414,8 @@ and the nodes it held.
 - `has(m, k)`, `remove(m, k)`: Whether map `m` has key `k`; `m` without it.
 - `keys(m)`, `values(m)`: Arrays of the keys and the values of a map.
 - `count(a)`: Same as `length`.
+- `sum(a)`: Of the numbers or intervals of an array, or of the values of a
+  map; 0 if there are none.
 - `sorted(a)`: A sorted copy of an array of ordered values. `sort(a)`, a
   statement, sorts the array `a` (a variable, or an item of one).
 - `min(a)`, `max(a)`, `mean(a)`, `stddev(a)`, `percentile(a, p)`: Over the

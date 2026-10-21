@@ -240,7 +240,7 @@ let functions =
       "bool" ; "byte" ; "interval" ; "time" ; "now" ; "ip_addr" ; "mac_addr" ; "getenv" ;
       "array" ; "length" ; "concat" ; "append" ; "prepend" ;
       "map" ; "has" ; "remove" ; "keys" ; "values" ;
-      "count" ; "min" ; "max" ; "mean" ; "stddev" ; "percentile" ;
+      "count" ; "sum" ; "min" ; "max" ; "mean" ; "stddev" ; "percentile" ;
       "sort" ; "sorted" ;
       "print" ; "print_err" ; "assert" ]
 

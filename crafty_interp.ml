@@ -279,6 +279,17 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
                             | T.Mean -> "mean" | T.Stddev -> "standard deviation"
                             | _ -> "percentile") ;
         stat loc b vs args
+    | T.Sum, [ vs ; zero ] ->
+        let add a b =
+            match a, b with
+            | Int a, (Int b | Byte b) -> Int (a + b)
+            | Float a, Float b -> Float (a +. b)
+            | Interval a, Interval b -> Interval (Interval.add a b)
+            | _ -> assert false in
+        (match vs with
+        | Array a -> Array.fold_left add zero a
+        | Map (m, _) -> Map.PMap.fold (fun v s -> add s v) m zero
+        | _ -> assert false)
     | T.Sorted, [ Array a ] ->
         let a = Array.copy a in
         Array.stable_sort compare_values a ;
@@ -1124,6 +1135,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "a = [3, 1, 2]\nb = sorted(a)\nc = [[2, 1], [3]]\nsort(c[0])\nm = [\"b\": [2, 1]]\nsort(a=m[\"b\"])\nprint(\"${b} ${a} ${c} ${m}\")\nsort(a)\nassert(a == b)")
   "0s: 2s 1s500ms 2026-10-21T00:00:00Z 2026-10-21T00:00:00.25Z true\n0s: done" \
     (runs "t = time(1792540800.25)\nprint(\"${interval(2)} ${interval(1.5)} ${time(1792540800)} ${t} ${time(float(t)) == t && interval(float(90s)) == 90s}\")")
+  "0s: 6 2.5 1s500ms 300 0 0.0 0s\n0s: done" \
+    (runs "e = array(init=1, len=0)\nprint(\"${sum([1, 2, 3])} ${sum([1: 1, 2: 1.5])} ${sum([1s, 500ms])} ${sum([#ff, #2d])} ${sum(e)} ${sum(array(init=0.5, len=0))} ${sum(map(key=1, default=1s))}\")")
   "0s: 1.5 1 -2 1792540800.25 1792540800\n0s: done" \
     (runs "t = 2026-10-21T00:00:00.25Z\nprint(\"${float(1500ms)} ${int(1500ms)} ${int(-2500ms)} ${float(t)} ${int(t)}\")")
   "0s: failed: line 1, column 5: No minimum of no values" \

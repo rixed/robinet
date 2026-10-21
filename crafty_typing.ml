@@ -49,7 +49,7 @@ type builtin =
     | To_ip | To_mac | Getenv
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
-    | Min | Max | Mean | Stddev | Percentile | Sorted
+    | Min | Max | Mean | Stddev | Percentile | Sorted | Sum
     | Print | Print_err | Assert
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
@@ -596,6 +596,13 @@ let builtins =
       "min", Min, [ some_ordered ], item_type ;
       "max", Max, [ some_ordered ], item_type ;
       "mean", Mean, [ some_numbers ], float_or_interval ;
+      (* Given then the zero of its type, by [expr]: *)
+      "sum", Sum, [ some_numbers ],
+        (fun ts ->
+            match values_type (List.hd ts) with
+            | Some (Type.Int | Type.Byte) -> Type.Int
+            | Some t -> t
+            | None -> assert false) ;
       "stddev", Stddev, [ some_numbers ], float_or_interval ;
       "sorted", Sorted,
         [ param "a" "an array of ordered values" (function
@@ -756,6 +763,13 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 | Prepend -> error loc "Cannot prepend %s to %s" x y
                 | _ -> error loc "Cannot concatenate %s and %s" x y))
         | (Has | Remove as b), [ m ; k ], t -> map_call b loc t m k
+        | Sum, [ a ], t ->
+            let zero =
+                match t with
+                | Type.Float -> A.Float 0.
+                | Type.Interval -> A.Interval Clock.Interval.zero
+                | _ -> A.Int 0 in
+            mk t (Call (Sum, [ a ; { loc ; typ = t ; desc = Lit zero } ]))
         | b, args, t -> mk t (Call (b, args)))
     | A.Unop (A.Not, e) ->
         let e = as_bool "The operand of !" (expr env e) in
@@ -1438,6 +1452,8 @@ let check (program : A.program) =
     (types "m = [\"a\": 1, \"b\": 2.5]\nm[\"c\"] += 1\nm := remove(m, \"a\")\nn = [{a: 1}: 2]\nforeach m { k = I.key }")
   "I: int, x: int" (types "repeat count=2 { x = rand(max=3) }")
   "a: float, b: interval" (types "a = stddev([1, 2])\nb = stddev([1s])")
+  "a: int, b: int, c: float, d: interval" \
+    (types "a = sum([1])\nb = sum([#01])\nc = sum([1: 1.5])\nd = sum([1s])")
   "a: int, b: float, c: interval, d: float, e: string, f: int" \
     (types "a = min([3, 1])\nb = mean([1, 2])\nc = mean([1s, 2s])\nd = percentile([1.5, 2], 95)\ne = max([1: \"x\"])\nf = count([1: 2])")
   "x: float[][], i: int" \

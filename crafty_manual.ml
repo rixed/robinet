@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 a5d9a3a143f893a8ac310d05c8e85f62) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 86a2e39514238b6fe9e278e255c8aa4b) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -377,6 +377,8 @@ nodes it held.
 -   `has(m, k)`, `remove(m, k)`: Whether map `m` has key `k`; `m` without it.
 -   `keys(m)`, `values(m)`: Arrays of the keys and the values of a map.
 -   `count(a)`: Same as `length`.
+-   `sum(a)`: Of the numbers or intervals of an array, or of the values of a
+    map; 0 if there are none.
 -   `sorted(a)`: A sorted copy of an array of ordered values. `sort(a)`, a
     statement, sorts the array `a` (a variable, or an item of one).
 -   `min(a)`, `max(a)`, `mean(a)`, `stddev(a)`, `percentile(a, p)`: Over the
