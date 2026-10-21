@@ -290,6 +290,32 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
         | Array a -> Array.fold_left add zero a
         | Map (m, _) -> Map.PMap.fold (fun v s -> add s v) m zero
         | _ -> assert false)
+    | T.Histogram, [ vs ; bucket ] ->
+        let secs = function Interval i -> Interval.to_secs i | v -> float_of v in
+        let of_secs x =
+            match bucket with Interval _ -> Interval (Interval.of_secs x) | _ -> Float x in
+        let b = secs bucket in
+        if not (b > 0.) then error loc "The bucket of a histogram must be positive" ;
+        let xs =
+            match vs with
+            | Array a -> Array.map secs a
+            | Map (m, _) -> Array.of_enum (Enum.map secs (Map.PMap.values m))
+            | _ -> assert false in
+        Array.sort Float.compare xs ;
+        (* The fields in their order, of each bucket from the last: *)
+        let record n lo hi = Record [| Int n ; of_secs hi ; of_secs lo |] in
+        let buckets, last =
+            Array.fold_left (fun (buckets, cur) x ->
+                let k = floor (x /. b) in
+                match cur with
+                | Some (k', n, lo, _) when k' = k -> buckets, Some (k, n + 1, lo, x)
+                | Some (_, n, lo, hi) -> record n lo hi :: buckets, Some (k, 1, x, x)
+                | None -> buckets, Some (k, 1, x, x)) ([], None) xs in
+        let buckets =
+            match last with
+            | Some (_, n, lo, hi) -> record n lo hi :: buckets
+            | None -> buckets in
+        Array (Array.of_list (List.rev buckets))
     | T.Sorted, [ Array a ] ->
         let a = Array.copy a in
         Array.stable_sort compare_values a ;
@@ -1137,6 +1163,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "t = time(1792540800.25)\nprint(\"${interval(2)} ${interval(1.5)} ${time(1792540800)} ${t} ${time(float(t)) == t && interval(float(90s)) == 90s}\")")
   "0s: 6 2.5 1s500ms 300 0 0.0 0s\n0s: done" \
     (runs "e = array(init=1, len=0)\nprint(\"${sum([1, 2, 3])} ${sum([1: 1, 2: 1.5])} ${sum([1s, 500ms])} ${sum([#ff, #2d])} ${sum(e)} ${sum(array(init=0.5, len=0))} ${sum(map(key=1, default=1s))}\")")
+  "0s: [{count: 2, max: 2.0, min: 1.0}, {count: 1, max: 12.0, min: 12.0}, {count: 1, max: 15.0, min: 15.0}] []\n0s: done" \
+    (runs "print(\"${histogram([12, 1, 15, 2], bucket=5)} ${histogram(array(init=1.5, len=0), 1)}\")")
+  "0s: 2 [{count: 2, max: 7ms, min: 5ms}, {count: 1, max: 22ms, min: 22ms}]\n0s: done" \
+    (runs "h = histogram([1: 7ms, 2: 22ms, 3: 5ms], bucket=5ms)\nprint(\"${length(h)} ${h}\")")
+  "0s: failed: line 1, column 5: The bucket of a histogram must be positive" \
+    (runs "x = histogram([1], bucket=0)")
   "0s: 1.5 1 -2 1792540800.25 1792540800\n0s: done" \
     (runs "t = 2026-10-21T00:00:00.25Z\nprint(\"${float(1500ms)} ${int(1500ms)} ${int(-2500ms)} ${float(t)} ${int(t)}\")")
   "0s: failed: line 1, column 5: No minimum of no values" \

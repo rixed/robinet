@@ -49,7 +49,7 @@ type builtin =
     | To_ip | To_mac | Getenv
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
-    | Min | Max | Mean | Stddev | Percentile | Sorted | Sum
+    | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
     | Print | Print_err | Assert
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
@@ -609,6 +609,12 @@ let builtins =
             | Type.Array t as a when List.mem t ordered -> Some a
             | _ -> None) ],
         List.hd ;
+      (* Of a type that [expr] tells: *)
+      "histogram", Histogram,
+        [ some_numbers ;
+          param "bucket" "a number or an interval"
+                (only_exactly Type.[ Int ; Float ; Interval ]) ],
+        res Type.Void ;
       "percentile", Percentile,
         [ some_ordered ; param "p" "a number" (only Type.[ Float ]) ], item_type ;
       (* Of types that [array_join] checks: *)
@@ -763,6 +769,19 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 | Prepend -> error loc "Cannot prepend %s to %s" x y
                 | _ -> error loc "Cannot concatenate %s and %s" x y))
         | (Has | Remove as b), [ m ; k ], t -> map_call b loc t m k
+        | Histogram, [ a ; bucket ], _ ->
+            let t =
+                if values_type a.typ = Some Type.Interval then Type.Interval
+                else Type.Float in
+            let bucket =
+                match coerce bucket t with
+                | Some b -> b
+                | None ->
+                    error bucket.loc "The bucket of a histogram of %s must be %s, not %s"
+                        (a_type a.typ) (if t = Type.Float then "a number" else "an interval")
+                        (a_type bucket.typ) in
+            mk (Type.Array (record_type [ "min", t ; "count", Type.Int ; "max", t ]))
+               (Call (Histogram, [ a ; bucket ]))
         | Sum, [ a ], t ->
             let zero =
                 match t with
@@ -944,23 +963,32 @@ and layer_field env loc name from_start nth f =
  * of its result: *)
 and call env loc f args =
     let fname, b, params, result = find_builtin loc f in
+    let unnamed = List.filter (fun (a : A.arg) -> a.arg_name = None) args in
+    (* The parameters of the unnamed arguments, in order: the only one, else
+     * those that must be given and are not named, if as many: *)
+    let slots =
+        match params with
+        | [ p ] -> List.map (fun _ -> p) unnamed
+        | _ ->
+            List.filter (fun p ->
+                p.default = None &&
+                not (List.exists (fun (a : A.arg) ->
+                    Option.map_default (same_name p.pname) false a.arg_name) args)
+            ) params in
+    if unnamed <> [] && List.length unnamed <> List.length slots then
+        error (List.hd unnamed).arg_loc "The arguments of %s must be named" fname ;
+    let slots = ref slots in
     let named =
-        (* Unnamed, all the parameters in order if none has a default: *)
-        if List.length params > 1 && List.length args = List.length params &&
-           List.for_all (fun (a : A.arg) -> a.arg_name = None) args &&
-           List.for_all (fun p -> p.default = None) params then
-            List.map2 (fun p a -> p.pname, a) params args else
         List.map (fun (a : A.arg) ->
-            match a.arg_name, params with
-            | Some n, _ ->
+            match a.arg_name with
+            | Some n ->
                 (match List.find_opt (fun p -> same_name p.pname n) params with
                 | Some p -> p.pname, a
                 | None -> error a.arg_loc "%s has no parameter %s" fname n)
-            | None, [ p ] -> p.pname, a
-            (* Else for the only one that must be given, if any: *)
-            | None, _ when List.length (List.filter (fun p -> p.default = None) params) = 1 ->
-                (List.find (fun p -> p.default = None) params).pname, a
-            | None, _ -> error a.arg_loc "The arguments of %s must be named" fname
+            | None ->
+                let p = List.hd !slots in
+                slots := List.tl !slots ;
+                p.pname, a
         ) args in
     List.iter (fun p ->
         if List.length (List.filter (fun (n, _) -> n = p.pname) named) > 1 then
@@ -1452,6 +1480,14 @@ let check (program : A.program) =
     (types "m = [\"a\": 1, \"b\": 2.5]\nm[\"c\"] += 1\nm := remove(m, \"a\")\nn = [{a: 1}: 2]\nforeach m { k = I.key }")
   "I: int, x: int" (types "repeat count=2 { x = rand(max=3) }")
   "a: float, b: interval" (types "a = stddev([1, 2])\nb = stddev([1s])")
+  "h: {count: int, max: float, min: float}[], i: {count: int, max: interval, min: interval}[]" \
+    (types "h = histogram([1, 2], bucket=0.5)\ni = histogram(bucket=1s, a=[2: 3s])")
+  "line 1, column 28: The bucket of a histogram of an interval[] must be an interval, not an int" \
+    (types "h = histogram([1s], bucket=1)")
+  "line 1, column 27: The bucket of a histogram of an int[] must be a number, not an interval" \
+    (types "h = histogram([1], bucket=1s)")
+  "h: {count: int, max: float, min: float}[]" (types "h = histogram([1], 1)")
+  "line 1, column 15: The arguments of histogram must be named" (types "h = histogram([1])")
   "a: int, b: int, c: float, d: interval" \
     (types "a = sum([1])\nb = sum([#01])\nc = sum([1: 1.5])\nd = sum([1s])")
   "a: int, b: float, c: interval, d: float, e: string, f: int" \

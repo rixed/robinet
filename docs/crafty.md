@@ -424,11 +424,14 @@ and the nodes it held.
   intervals, the others anything ordered.
   `percentile` is the nearest rank: the smallest value that at least `p`
   percent of them do not exceed (`percentile(a, 50)`, the median).
+- `histogram(a, bucket=b)`: The values of an array, or of a map, counted in
+  buckets of width `b` (from 0): returns an array of `{min, count, max}`,
+  `min` and `max` being the extreme values seen in the bucket.
 
-An argument can be left unnamed when the function has a single parameter,
-when it is the only parameter without a default (`assert(x == 4)`), or when
-no parameter has a default and all are given in order (`append(a, x)`).
-Otherwise arguments are named.
+An argument can be left unnamed when the function has a single parameter.
+Otherwise, unnamed arguments take in order the parameters without a default
+that are not named, if as many: `assert(x == 4)`, `append(a, x)`,
+`histogram(rtts, bucket=5ms)`.
 
 ### Layers
 
