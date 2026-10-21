@@ -1374,6 +1374,7 @@ struct
         let light_speed = 3e8
 
         let delay length speed = Interval.sec (length /. speed)
+        (* Note: [int_of_float infinity] is 0 *)
         let success_rate error_rate = int_of_float (1. /. error_rate)
 
         (* A cable has no natural parent; hang it off the root of the
@@ -1473,6 +1474,8 @@ struct
         ) ;
         let bits =
             (* Beware that [int_of_float infinity] is 0: *)
+            (* Until FSC is implemented in Eth, maybe it would be safer to *drop*
+             * instead of currupt *)
             if st.success_rate > 0 then
                 let shift_pos = Random.int st.success_rate in
                 if shift_pos < len then (
