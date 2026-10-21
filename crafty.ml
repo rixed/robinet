@@ -103,6 +103,8 @@ let () =
             "DURATION once done, stop after that long without traffic (default 2s)" ;
         "-p", Arg.Set print_packets, " print every packet sent and received" ;
         "--print-packets", Arg.Set print_packets, " same as -p" ;
+        "--verbose", Arg.Set Host_config.verbose,
+            " print the interface's settings and the commands configuring it" ;
         "--check", Arg.Set check, " compile the program, and exit" ;
         "--format", Arg.Set format,
             " print the program back, normalised (without its comments), and exit" ;
@@ -162,8 +164,9 @@ let () =
         (match !speed, speed' with Some s, _ | None, Some s -> s | None, None -> Eth.Speed.Eth1Gbps),
         (match !full_duplex, full_duplex' with Some d, _ | None, Some d -> d | None, None -> true)
     and mtu = !mtu |? iface.mtu in
-    Printf.printf "Interface %s: %s %s-duplex, MTU %d.\n%!" !ifname
-        (Eth.Speed.to_string speed) (if full_duplex then "full" else "half") mtu ;
+    if !Host_config.verbose then
+        Printf.printf "Interface %s: %s %s-duplex, MTU %d.\n%!" !ifname
+            (Eth.Speed.to_string speed) (if full_duplex then "full" else "half") mtu ;
     let configure = !fw || !own_ip <> None in
     if configure && Unix.geteuid () <> 0 then
         die "Configuring interface %s is for root; Have you tried under sudo?"

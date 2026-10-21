@@ -92,6 +92,8 @@ type t =
       (* What to print on the console, [None] leaving [Log.console_lvl] as
        * it is. *)
       console_lvl : Log.level option ;
+      (* Whether to print the commands changing the host's configuration. *)
+      verbose : bool ;
       (* The documents to run, in the order they were given, each with the
        * options that were in force where it sat. *)
       documents : (string * clock) list ;
@@ -139,6 +141,7 @@ let usage =
      \  --warn, --info, --debug\n\
      \                  print log messages down to that level on the\n\
      \                  console, which otherwise only shows errors\n\
+     \  --verbose       print the commands changing the host's configuration\n\
      \  --help          this\n\
      \n\
      Options applying to every document that follows them:\n\
@@ -176,6 +179,7 @@ let parse args =
     and help = ref false
     and seed = ref default_seed
     and console_lvl = ref None
+    and verbose = ref false
     and clock = ref default_clock
     and documents = ref [] in
     let value ~flag = function
@@ -218,6 +222,7 @@ let parse args =
             | "--warn" -> no_value ~flag v ; console_lvl := Some Log.Warning
             | "--info" -> no_value ~flag v ; console_lvl := Some Log.Info
             | "--debug" -> no_value ~flag v ; console_lvl := Some Log.Debug
+            | "--verbose" -> no_value ~flag v ; verbose := true
             | "--help" | "-h" -> no_value ~flag v ; help := true
             | "--speed" ->
                 (match value ~flag v with
@@ -246,6 +251,7 @@ let parse args =
       portals = !portals ;
       seed = !seed ;
       console_lvl = !console_lvl ;
+      verbose = !verbose ;
       documents = List.rev !documents ;
       help = !help }
 

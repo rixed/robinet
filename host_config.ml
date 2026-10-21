@@ -71,22 +71,19 @@ let find_prog prog =
     try Filename.concat (List.find executable (path @ [ "/usr/sbin" ; "/sbin" ])) prog
     with Not_found -> prog
 
-(** Run the command line [cmd], or say which command would not run.
+(** Whether {!run_line} prints the commands it runs. *)
+let verbose = ref false
+
+(** Run the command line [cmd], or say which command would not run; with
+ * {!verbose}, print it first, so that a reader can see what was done to their
+ * machine and undo it by hand.
  *
- * [quiet] silences what the command itself has to say, never the line naming
- * it: a command that is undoing something reports on a state of affairs that
- * is already being given up on -- half of it may be gone before it runs -- and
- * the error that matters was reported before it. What was run is worth seeing
- * either way, so that a reader whose program was killed before it could tidy
- * up knows what is left and what to type. *)
+ * [quiet] silences what the command itself has to say: a command that is
+ * undoing something reports on a state of affairs that is already being given
+ * up on -- half of it may be gone before it runs -- and the error that matters
+ * was reported before it. *)
 let run_line ?(quiet=false) cmd =
-    (* Printed rather than logged: what is being changed here is the machine
-     * the simulation runs on, not anything in the simulation, and it
-     * outlives the run. A reader has to be able to see what was done to
-     * their machine, and to undo it by hand. *)
-    Printf.printf "%s\n%!" cmd ;
-    (* What is printed is what a reader would type; what is run is that, with
-     * its own noise thrown away when it is undoing something. *)
+    if !verbose then Printf.printf "%s\n%!" cmd ;
     match Unix.system (if quiet then cmd ^" >/dev/null 2>&1" else cmd) with
     | Unix.WEXITED 0 -> ()
     | Unix.WEXITED n ->

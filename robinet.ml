@@ -170,6 +170,7 @@ let main =
         print_string "Nothing to run: name a document, or ask for --admin.\n" ;
         exit 0) ;
     Option.may (fun l -> Log.console_lvl := l) opts.Cli.console_lvl ;
+    Host_config.verbose := opts.Cli.verbose ;
     set_seed opts.Cli.seed ;
     let sims = List.map open_document opts.Cli.documents in
     let ifnames =
