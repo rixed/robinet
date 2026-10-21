@@ -50,7 +50,8 @@ let () =
 
 let () =
     let ifname = ref "" and own_ip = ref None and ports = ref []
-    and fw = ref false and print_packets = ref false and cleanup = ref false
+    and fw = ref false and promisc = ref false and print_packets = ref false
+    and cleanup = ref false
     and check = ref false and format = ref false
     and linger = ref (Clock.Interval.sec 2.) and prog_file = ref None
     and max_duration = ref None and max_packets = ref None
@@ -84,6 +85,8 @@ let () =
         "--udp", port_range Host_config.Udp,
             "LO[-HI] UDP ports the program uses (repeatable)" ;
         "--fw", Arg.Set fw, " keep the kernel off the ports of --tcp and --udp" ;
+        "--promisc", Arg.Set promisc,
+            " receive the frames for other addresses too (promiscuous mode)" ;
         "--speed",
             Arg.Symbol (Array.to_list Eth.Speed.names, fun s ->
                 speed := Array.find_opt (fun x -> Eth.Speed.to_string x = s) Eth.Speed.all),
@@ -193,7 +196,7 @@ let () =
     let sim = Simulation.make "crafty" in
     let pcap =
         Pcap.open_iface ~widget:(Widget.make ~parent:sim.root !ifname)
-            ~promisc:false ~direction:Pcap.In
+            ~promisc:!promisc ~direction:Pcap.In
             ~caplen:(Pcap.caplen_of_mtu mtu)
             ~filter:(Host_config.pcap_filter ?ip:!own_ip !ports) !ifname in
     let secs () = Clock.Time.to_secs (Simulation.now sim) in
@@ -214,7 +217,7 @@ let () =
             ~speed ~full_duplex ~mtu
             ?gateway:(Option.map (fun gw -> Eth.Gateway.IPv4 gw) iface.gateway)
             (* The kernel answers for its own address: *)
-            ~answer_arp:(!own_ip <> None)
+            ~answer_arp:(!own_ip <> None) ~promisc:!promisc
             ~ports:[ ports_of Host_config.Tcp ; ports_of Host_config.Udp ]
             ~print:print_endline ~print_err:prerr_endline
             ~on_exit:(fun s ->

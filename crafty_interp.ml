@@ -800,12 +800,14 @@ let print_status oc = function
  * [mac] and [ip] (in [netmask]), of link [speed] (default 1Gbps), full
  * duplex unless [full_duplex] is false, and of [mtu], sending beyond its
  * subnet to [gateway], answering ARP for [ip] unless [answer_arp] is false,
+ * taking the frames for other addresses too if [promisc],
  * picking the local ports it is not given from [ports] (as
  * {!Crafty_tree.make_root} does), printing with [print] and [print_err], and
  * calling [on_exit] with how it ends. Returns the device of the interface, and a handle to stop the
  * program or ask its status. The program starts at the next tick of the
  * simulation, once that device can be connected. *)
 let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
+        ?(promisc=false)
         ?(speed=Eth.Speed.Eth1Gbps) ?(full_duplex=true) ?mtu
         ?ports ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
         (program : program) =
@@ -814,6 +816,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
             [ Eth.State.gw_selector (), Some gw ]) [] gateway in
     let eth =
         Eth.State.make ~parent ~name ~mac ~gateways ?answer_arp
+            ?promisc:(if promisc then Some ignore else None)
             ~speeds:[ speed ] ~full_duplex ?mtu
             ~my_addresses:[ Eth.State.make_my_ip_address ?netmask ip ] () in
     (* No cable to negotiate with: the link is what the interface supports. *)
@@ -846,14 +849,15 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
  * [frames], the frames it emits are among those lines, as [describe] tells
  * them (without their time, which depends on the scheduler by a few ps).
  * [inject] are frames it receives, with the time they arrive at, made with
- * the help of [incoming] (from 02:00:00:00:00:02). Its interface is 10.0.0.1/24, its gateway 02:00:00:00:00:fe, and it
+ * the help of [incoming] (from 02:00:00:00:00:02). With [promisc], its
+ * interface takes the frames for other addresses too. Its interface is 10.0.0.1/24, its gateway 02:00:00:00:00:fe, and it
  * knows the MAC address of 10.0.0.2. *)
 (*$inject
   let gw_mac = Eth.Addr.of_string "02:00:00:00:00:fe"
 
-  let crafty_eth sim =
+  let crafty_eth ?promisc sim =
       let eth =
-          Eth.State.make ~parent:sim.SimTypes.root ~name:"crafty"
+          Eth.State.make ~parent:sim.SimTypes.root ~name:"crafty" ?promisc
               ~mac:(Eth.Addr.of_string "02:00:00:00:00:01")
               ~gateways:[ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw_mac) ]
               ~my_addresses:[ Eth.State.make_my_ip_address
@@ -904,7 +908,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   let reply ?(sport=53) ?(dport=1000) data =
       incoming (Ip.Pdu.pack (udp_packet sport dport data))
 
-  let runs ?stop_at ?(trees=false) ?(frames=false) ?(inject=[]) text =
+  let runs ?stop_at ?(trees=false) ?(frames=false) ?(inject=[]) ?(promisc=false) text =
       match Crafty_parser.parse text with
       | Error e -> IO.to_string Crafty_parser.print_error e
       | Ok p ->
@@ -913,7 +917,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
               String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es)
           | Ok p ->
               let sim = Simulation.make ~realtime:false "crafty" in
-              let eth = crafty_eth sim in
+              let eth = crafty_eth ?promisc:(if promisc then Some ignore else None) sim in
               let tree = Crafty_tree.make_root eth in
               let out = ref [] in
               let line pfx s =
@@ -1151,6 +1155,19 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "500ms: failed: line 2, column 26: 5 bytes are no IP address" \
     (runs ~inject:[ 0.5, reply "pong!" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Bytes(IP.dst == data) {} }")
+*)
+(* Frames for other addresses are seen only if promiscuous: *)
+(*$= runs & ~printer:identity
+  "500ms: 02:00:00:00:00:09\n500ms: done" \
+    (runs ~promisc:true \
+        ~inject:[ 0.5, incoming ~dst_mac:(Eth.Addr.of_string "02:00:00:00:00:09") \
+                    (Ip.Pdu.pack (udp_packet 53 1000 "pong")) ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect timeout=1s Bytes(\"pong\") { print(\"${MATCH[Eth].dst}\") } }")
+  "1s: failed: line 2, column 3: Nothing matched within 1s" \
+    (runs \
+        ~inject:[ 0.5, incoming ~dst_mac:(Eth.Addr.of_string "02:00:00:00:00:09") \
+                    (Ip.Pdu.pack (udp_packet 53 1000 "pong")) ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect timeout=1s Bytes(\"pong\") { print(\"${MATCH[Eth].dst}\") } }")
 *)
 (* LAST is the last packet sent by the block or an enclosing one: as packed
  * down to the self-driven layers, which only their stack tells: *)

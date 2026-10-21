@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 388f61077aa81c670d82e2c3888448d2) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 92991088066bbeab04e8cf70ec6cd109) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -317,10 +317,10 @@ takes it unnamed (`break 2`, `wait 1s`).
     constructor of `X`'s value, or else the `else` block, if any. Without `var`,
     a variable `X` is itself what the constructor holds. A `|` may end a line or
     start the next one. Its value is that of the block it ran.
--   `foreach v every=d for=d ARRAY { ... }`: A `repeat` that runs the block
-    once per item of the array, in order, `v` (default `I`, also `var=v`) being
-    the item. The array is computed once, before the first iteration. `every`
-    and `for` are as for `repeat`, and optional.
+-   `foreach v every=d for=d ARRAY { ... }`: A `repeat` that runs the block once
+    per item of the array, in order, `v` (default `I`, also `var=v`) being the
+    item. The array is computed once, before the first iteration. `every` and
+    `for` are as for `repeat`, and optional.
 -   `break depth=n`: Leaves the `n` (default 1, a literal) innermost enclosing
     `repeat`, `foreach` or `on` forms.
 -   `wait dur=d`: Pauses for `d`. A negative duration is an error.
@@ -407,9 +407,8 @@ the `options` of the first one, and an `IP!` pattern sees each fragment. The
 `tos`, `ttl`, `dont_frag` and `options` fields apply to the packets it sends
 (only the options with the copied flag go into fragments after the first), but
 not to the segments of a self-driven TCP connection, which sends them on its
-own. `IP!`
-sends the header as given, but for the header checksum, which is always
-computed.
+own. `IP!` sends the header as given, but for the header checksum, which is
+always computed.
 
 #### `TCP` (on `IP`)
 

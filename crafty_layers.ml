@@ -231,7 +231,7 @@ let unpack_eth _ bits =
 
 (* The root: an Ethernet interface, which a self-driven Eth sends IPv4
  * through, resolving with ARP. It answers ARP itself, and takes the frames
- * for its address: *)
+ * for its address, or all of them if promiscuous: *)
 let eth_node ctx =
     let st = ctx.eth in
     let trx = Eth.TRX.make st in
@@ -240,7 +240,8 @@ let eth_node ctx =
         | V.Int p, _ when p = (Eth.Proto.arp :> int) ->
             Eth.TRX.rx st u.bits ;
             []
-        | _, V.Mac dst when Eth.Addr.eq dst st.mac || Eth.Addr.eq dst Eth.Addr.broadcast ->
+        | _, V.Mac dst when st.promisc <> None || Eth.Addr.eq dst st.mac ||
+                            Eth.Addr.eq dst Eth.Addr.broadcast ->
             pass u
         | _ -> [] in
     { (manual @@ fun fields hints payload ->
