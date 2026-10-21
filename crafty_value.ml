@@ -130,6 +130,89 @@ let rec to_json (typ : A.Type.t) v : Yojson.Basic.t =
         `List (Array.to_list (Array.map (to_json t) a))
     | _ -> `String (to_string typ v)
 
+(** JSON as text, with each float in the fewest digits that read back as
+ * that float (Yojson may write 17: [0.07144200000000001]). *)
+let rec json_to_string : Yojson.Basic.t -> string = function
+    | `Float f when Stdlib.Float.is_integer f && Float.abs f < 1e15 ->
+        Printf.sprintf "%.1f" f
+    | `Float f when Float.is_finite f ->
+        let s = Printf.sprintf "%.15g" f in
+        if float_of_string s = f then s else
+        let s = Printf.sprintf "%.16g" f in
+        if float_of_string s = f then s else Printf.sprintf "%.17g" f
+    | `List l -> "["^ String.concat "," (List.map json_to_string l) ^"]"
+    | `Assoc l ->
+        "{"^ String.concat "," (List.map (fun (k, v) ->
+            Yojson.Basic.to_string (`String k) ^":"^ json_to_string v) l) ^"}"
+    | j -> Yojson.Basic.to_string j
+
+(*$= json_to_string & ~printer:identity
+  "{\"a\":[0.071442,1e-12,2.0,0.1],\"b\\\"\":null}" \
+    (json_to_string (`Assoc [ "a", `List [ `Float (71442. /. 1e6) ; `Float 1e-12 ; \
+                                          `Float 2. ; `Float 0.1 ] ; \
+                              "b\"", `Null ]))
+*)
+
+(** How values are written: as {!to_string} does, as CSV, or as JSON. *)
+type format = Human | Csv | Json
+
+(** A field of CSV, quoted if it must be (RFC 4180). *)
+let csv_field s =
+    if String.exists s "," || String.exists s "\"" ||
+       String.contains s '\n' || String.contains s '\r' then
+        "\""^ String.nreplace ~str:s ~sub:"\"" ~by:"\"\"" ^"\""
+    else s
+
+(* A value with no others in it (bytes are one), as a CSV field: *)
+let csv_scalar (typ : A.Type.t) v =
+    match typ with
+    | Record _ | Map _ | Variant _ | Void | Pattern -> None
+    | Array t when t <> Byte -> None
+    | _ ->
+        Some (csv_field (match to_json typ v with
+            | `String s -> s
+            | j -> json_to_string j))
+
+(* As CSV: a scalar, or a record or array of scalars, as a line; a map of
+ * scalars as a line per key and value; and nothing else. *)
+let to_csv (typ : A.Type.t) v =
+    let row l =
+        String.concat "," (List.map (fun (t, v) ->
+            Option.get_exn (csv_scalar t v) Exit) l) in
+    try
+        Some (match typ, v with
+            | Record fs, Record vs -> row (List.mapi (fun i (_, t) -> t, vs.(i)) fs)
+            | Array t, Array a when t <> Byte ->
+                row (List.map (fun v -> t, v) (Array.to_list a))
+            | Map (k, t), Map (m, _) ->
+                String.concat "\n" (List.map (fun (key, v) ->
+                    row [ k, key ; t, v ]) (Map.PMap.bindings m))
+            | _ -> Option.get_exn (csv_scalar typ v) Exit)
+    with Exit -> None
+
+(*$= to_csv & ~printer:(function None -> "None" | Some s -> s)
+  (Some "1.5") (to_csv A.Type.Interval (Interval (Interval.of_secs 1.5)))
+  (Some "#0102") (to_csv A.Type.bytes (Array [| Byte 1 ; Byte 2 |]))
+  (Some "1,\"a,\"\"b\"\"\",true") \
+    (to_csv A.Type.(Record [ "x", Int ; "s", String ; "b", Bool ]) \
+            (Record [| Int 1 ; String "a,\"b\"" ; Bool true |]))
+  (Some "1,2") (to_csv A.Type.(Array Int) (Array [| Int 1 ; Int 2 |]))
+  (Some "") (to_csv A.Type.(Array Int) (Array [||]))
+  (Some "a,1\nb,2") \
+    (to_csv A.Type.(Map (String, Int)) \
+            (Map (Map.PMap.add (String "b") (Int 2) \
+                    (Map.PMap.add (String "a") (Int 1) (Map.PMap.create compare_keys)), None)))
+  None (to_csv A.Type.(Array (Array Int)) (Array [| Array [||] |]))
+  None (to_csv A.Type.(Record [ "a", Array Int ]) (Record [| Array [||] |]))
+*)
+
+(** [v] of type [typ] in that format, unless CSV cannot tell it. *)
+let format fmt typ v =
+    match fmt with
+    | Human -> Some (to_string typ v)
+    | Csv -> to_csv typ v
+    | Json -> Some (json_to_string (to_json typ v))
+
 (* The value of type [typ] that a field takes when nothing tells it: *)
 let rec zero (typ : A.Type.t) =
     match typ with

@@ -50,7 +50,7 @@ type builtin =
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
     | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
-    | Print | Print_err | Assert | Stats
+    | Print | Print_err | Format | Assert | Stats
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
 
@@ -644,6 +644,7 @@ let builtins =
       "print", Print, [ param "s" "a string" (only Type.[ String ]) ], res Type.Void ;
       "print_err", Print_err, [ param "s" "a string" (only Type.[ String ]) ],
         res Type.Void ;
+      "format", Format, [ param "x" "a value" any_value ], res Type.String ;
       (* Failing, as any error, where it is called: *)
       "assert", Assert,
         [ param "cond" "a bool or an int" (only_exactly Type.[ Bool ; Int ]) ;

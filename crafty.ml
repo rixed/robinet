@@ -36,8 +36,9 @@ let usage = "crafty [options] PROG.cfty\n\nOptions:"
 let die fmt =
     Printf.ksprintf (fun s -> prerr_endline s ; exit 2) fmt
 
-(* How crafty prints what it tells of packets, streams and its run: *)
-type format = Human | Csv | Json
+(* How crafty prints what it tells of packets, streams and its run, and
+ * what [format()] writes: *)
+type format = Crafty_value.format = Human | Csv | Json
 
 let formats = [ "human", Human ; "csv", Csv ; "json", Json ]
 
@@ -48,15 +49,11 @@ let record format ?(json=[]) kind fields =
     | Human -> invalid_arg "Crafty.record"
     | Csv ->
         let field = function
-            | `String s ->
-                if String.exists s "," || String.exists s "\"" ||
-                   String.contains s '\n' || String.contains s '\r' then
-                    "\""^ String.nreplace ~str:s ~sub:"\"" ~by:"\"\"" ^"\""
-                else s
-            | j -> Yojson.Basic.to_string j in
+            | `String s -> Crafty_value.csv_field s
+            | j -> Crafty_value.json_to_string j in
         String.concat "," (kind :: List.map (field % snd) fields)
     | Json ->
-        Yojson.Basic.to_string (`Assoc (("type", `String kind) :: fields @ json))
+        Crafty_value.json_to_string (`Assoc (("type", `String kind) :: fields @ json))
 
 (* Setuid root, crafty becomes root entirely, for the commands it runs to be
  * root as well (busybox's sh drops an effective uid that is not the real
@@ -294,6 +291,7 @@ let () =
             (* The kernel answers for its own address: *)
             ~answer_arp:(!own_ip <> None) ~promisc:!promisc
             ~ports:[ ports_of Host_config.Tcp ; ports_of Host_config.Udp ]
+            ~format
             ~print:(fun s ->
                 if format = Human then print_endline s
                 else emit "print" [ "text", `String s ])

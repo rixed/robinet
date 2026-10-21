@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 8107011e36e7a31fdd4471039cbd1845) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 f9516c6c55c4f74a7f341aa331ba344b) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -370,6 +370,10 @@ nodes it held.
 
 -   `print(s)`, `print_err(s)`: Writes the string to the output, or to the error
     output.
+-   `format(x)`: Any value as a string, in the format of `--format`. CSV accepts
+    only a scalar, or a record, array or map of scalars: a record or an array
+    makes a line, a map a line per key and value. Record fields come in the
+    order of their names: `print(format(stats()))`.
 -   `assert(cond, msg=s)`: Fails if `cond` is false. The default message quotes
     the condition.
 -   `rand(max)`: A random int in `[0, max)`, a float in `[0, max)` (default

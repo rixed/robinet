@@ -246,7 +246,7 @@ let functions =
       "map" ; "has" ; "remove" ; "keys" ; "values" ;
       "count" ; "sum" ; "min" ; "max" ; "mean" ; "stddev" ; "percentile" ;
       "sort" ; "sorted" ; "histogram" ;
-      "print" ; "print_err" ; "assert" ; "stats" ]
+      "print" ; "print_err" ; "format" ; "assert" ; "stats" ]
 
 (** Variables that the language defines, which are case insensitive as are
  * all the names that the user does not choose. Lower case. *)

@@ -374,7 +374,9 @@ let arith loc op a b =
 (* Where a program writes, and the date it reads: *)
 type output =
     { print : string -> unit ; print_err : string -> unit ;
-      now : unit -> Clock.Wall.t }
+      now : unit -> Clock.Wall.t ;
+      (* What [format()] writes: *)
+      format : format }
 
 let rec eval output (env : env) (e : T.expr) =
     let eval = eval output env in
@@ -415,6 +417,12 @@ let rec eval output (env : env) (e : T.expr) =
         | A.Type.Record fields ->
             Record (Array.of_list (List.map (fun (n, _) -> List.assoc n stats) fields))
         | _ -> assert false)
+    | T.Call (T.Format, [ x ]) ->
+        (match Crafty_value.format output.format x.typ (eval x) with
+        | Some s -> String s
+        | None ->
+            error e.loc "Only a scalar, or a record, array or map of scalars, \
+                         makes CSV, not %s" (A.Type.to_string x.typ))
     | T.Call (b, args) ->
         call e.loc b (List.map eval args)
              ~print:output.print ~print_err:output.print_err ~now:output.now
@@ -959,11 +967,11 @@ let idle (tree : Crafty_tree.node) () =
 
 let open_streams tree () = Crafty_tree.streams tree
 
-let output_of power ~print ~print_err =
+let output_of power ?(format=Human) ~print ~print_err () =
     let now () =
         let sim = power.SimTypes.sim in
         Simulation.date_of sim (Simulation.now sim) in
-    { print ; print_err ; now }
+    { print ; print_err ; now ; format }
 
 let matches output tree (p : filter) =
     let layers =
@@ -980,9 +988,9 @@ let matches output tree (p : filter) =
  * receiving through [tree] (from {!Crafty_tree.make_root}), writing with
  * [print] and [print_err], and calling [on_exit] with its final status
  * (possibly before returning). *)
-let run_on_tree power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
+let run_on_tree power tree ?format ~print ~print_err ?(on_exit=ignore) (program : T.block) =
     let status = ref Running in
-    let t = { power ; output = output_of power ~print ~print_err ; tree ;
+    let t = { power ; output = output_of power ?format ~print ~print_err () ; tree ;
               awaited = ref [] } in
     let exit s =
         if !status = Running then (
@@ -1029,6 +1037,7 @@ let print_status oc = function
  * taking the frames for other addresses too if [promisc],
  * picking the local ports it is not given from [ports] (as
  * {!Crafty_tree.make_root} does), printing with [print] and [print_err],
+ * [format()] writing in [format] (default {!Crafty_value.Human}),
  * calling [on_exit] with how it ends, and [on_closed] with the node of each
  * stream that goes away. Unless [rx_wire], what is written to the device was
  * received already (captured) and is taken at once, in order. Returns the device of the interface, and a handle to stop the
@@ -1037,7 +1046,7 @@ let print_status oc = function
 let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         ?(promisc=false)
         ?(speed=Eth.Speed.Eth1Gbps) ?(full_duplex=true) ?mtu
-        ?ports ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
+        ?ports ?format ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
         ?(on_closed=ignore) ?(rx_wire=true) (program : program) =
     let gateways =
         Option.map_default (fun gw ->
@@ -1058,7 +1067,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     Simulation.asap power (fun () ->
         if not !stopped then
             started :=
-                Some (run_on_tree power tree ~print ~print_err ~on_exit program)
+                Some (run_on_tree power tree ?format ~print ~print_err ~on_exit program)
     ) () ;
     Eth.Iface.dev eth.iface,
     { stop = (fun () ->
@@ -1074,7 +1083,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         | None -> if !stopped then Stopped else Running) ;
       idle = idle tree ;
       emitted = (fun frame -> Option.may (fun (h : handle) -> h.emitted frame) !started) ;
-      matches = matches (output_of power ~print ~print_err) tree ;
+      matches = matches (output_of power ?format ~print ~print_err ()) tree ;
       open_streams = open_streams tree }
 
 (* [runs ?stop_at ?trees ?frames ?sent ?inject text] is what the program in that text
@@ -1143,7 +1152,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   let reply ?(sport=53) ?(dport=1000) data =
       incoming (Ip.Pdu.pack (udp_packet sport dport data))
 
-  let runs ?stop_at ?(trees=false) ?(frames=false) ?(sent=false) ?(inject=[]) ?(promisc=false) text =
+  let runs ?stop_at ?(trees=false) ?(frames=false) ?(sent=false) ?(inject=[]) ?(promisc=false) ?format text =
       match Crafty_parser.parse text with
       | Error e -> IO.to_string Crafty_parser.print_error e
       | Ok p ->
@@ -1170,7 +1179,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
                   Simulation.at sim.root.power (Clock.Time.of_secs t)
                       (fun () -> eth.Eth.State.iface.Eth.Iface.recv frame) ()) inject ;
               let h =
-                  run_on_tree sim.root.power tree ~print:(line "") ~print_err:(line "err ")
+                  run_on_tree sim.root.power tree ?format ~print:(line "") ~print_err:(line "err ")
                       ~on_exit:(function
                           | Done -> line "" "done"
                           | Failed e ->
@@ -1315,6 +1324,14 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "x = getenv(\"CRAFTY_NO_SUCH_VAR\")")
   ("0s: default "^ Sys.getenv "HOME" ^"\n0s: done") \
     (runs "print(\"${getenv(\"CRAFTY_NO_SUCH_VAR\", default=\"default\")} ${getenv(\"HOME\", default=\"\")}\")")
+  "0s: {ip: 10.0.0.2, ok: true, rtt: 1ms500µs}\n0s: done" \
+    (runs "print(format({ip: 10.0.0.2, rtt: 1.5ms, ok: true}))")
+  "0s: {\"data\":\"#0102\",\"ip\":\"10.0.0.2\",\"rtt\":0.0015,\"tags\":[\"a\",\"b\"]}\n0s: done" \
+    (runs ~format:Json "print(format({ip: 10.0.0.2, rtt: 1.5ms, tags: [\"a\", \"b\"], data: #0102}))")
+  "0s: 10.0.0.2,0.0015,\"a,b\"\n0s: 1,2,3\n0s: done" \
+    (runs ~format:Csv "print(format({ip: 10.0.0.2, rtt: 1.5ms, s: \"a,b\"})) ; print(format([1, 2, 3]))")
+  "0s: failed: line 1, column 7: Only a scalar, or a record, array or map of scalars, makes CSV, not {a: int[]}" \
+    (runs ~format:Csv "print(format({a: [1]}))")
   "0s: [1.5, 1.5] 2 1.5 4\n0s: done" \
     (runs "x = array(init=1.5, len=2)\nprint(\"${x} ${length(x)} ${x[1]} ${length(randbytes(4))}\")")
   "0s: failed: line 3, column 1: Assertion failed: (x * 2) == 5" \
@@ -1946,7 +1963,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
       | Ok f ->
           let sim = Simulation.make ~realtime:false "crafty" in
           let tree = Crafty_tree.make_root (crafty_eth sim) in
-          let output = output_of sim.root.power ~print:ignore ~print_err:ignore in
+          let output = output_of sim.root.power ~print:ignore ~print_err:ignore () in
           string_of_bool (matches output tree f frame)
 *)
 
