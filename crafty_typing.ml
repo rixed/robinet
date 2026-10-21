@@ -127,7 +127,9 @@ and stmt_desc =
     (* Its value unused, or that of the block it ends: *)
     | Expr of expr
     | Declare of var * expr
-    | Assign of var * expr
+    (* [var], or its item at [path]: each index is bound to its variable
+     * before [value], which reads them, is evaluated: *)
+    | Assign of { var : var ; path : (var * expr) list ; value : expr }
     (* With [items], [var] is each of them in turn, rather than a counter: *)
     | Repeat of { var : var ; count : expr option ; items : expr option ;
                   every : expr option ; for_ : expr option ; body : block }
@@ -1100,7 +1102,31 @@ and stmt errors env (s : A.stmt) =
             | exception (Error _ | Already_told as ex) ->
                 tell errors ex ;
                 poisoned ())
-        | A.Assign (name, op, e) ->
+        | A.Assign (name, (_ :: _ as is), op, e) ->
+            let v = lookup_var env loc name in
+            (* Each index is evaluated once, into a variable no program can
+             * name, [x[i] op= e] being [x[#0] op e]: *)
+            let typ, path, lhs, env' =
+                List.fold_lefti (fun (t, path, lhs, env') n i ->
+                    match t with
+                    | Type.Array t ->
+                        let i = expect "An index" (expr env i) Type.Int in
+                        let iv = new_var ("#"^ string_of_int n) Type.Int in
+                        t, (iv, i) :: path,
+                        { A.loc ; A.desc = A.Index (lhs, { A.loc ; A.desc = A.Var iv.name }) },
+                        { env' with vars = iv :: env'.vars }
+                    | t -> error loc "Cannot index %s" (a_type t)
+                ) (v.typ, [], { A.loc ; A.desc = A.Var name }, env) is in
+            let e =
+                match op with
+                | None -> expr ~tail:true env e
+                | Some op -> binop env' loc op lhs e in
+            (match coerce e typ with
+            | Some value -> env, Some (mk (Assign { var = v ; path = List.rev path ; value }))
+            | None ->
+                error loc "Cannot assign %s to an item of %s, which is %s"
+                    (a_type e.typ) name (a_type typ))
+        | A.Assign (name, [], op, e) ->
             let v = lookup_var env loc name in
             let e =
                 match op with
@@ -1108,7 +1134,7 @@ and stmt errors env (s : A.stmt) =
                 | Some op ->
                     binop env loc op { A.loc ; A.desc = A.Var name } e in
             (match coerce e v.typ, Hashtbl.find_opt env.declared_at v.id with
-            | Some e, _ -> env, Some (mk (Assign (v, e)))
+            | Some e, _ -> env, Some (mk (Assign { var = v ; path = [] ; value = e }))
             | None, Some at when widens env at v.typ e.typ ->
                 (* The program is typed again, with that variable of a
                  * variant of the constructors of both: *)
@@ -1185,7 +1211,9 @@ let rec declarations (b : block) =
     List.concat_map (fun s ->
         match s.stmt with
         | Declare (v, e) -> v :: expr_declarations e
-        | Assign (_, e) | Expr e -> expr_declarations e
+        | Assign { path ; value ; _ } ->
+            List.concat_map (expr_declarations % snd) path @ expr_declarations value
+        | Expr e -> expr_declarations e
         | Stack { body = b ; _ } | Retry { body = b ; _ } | Catch b
         | On { body = b ; _ } -> declarations b
         | Any { cases ; _ } -> List.concat_map (fun (c : case) -> declarations c.body) cases
@@ -1255,6 +1283,8 @@ let check (program : A.program) =
     (types "x = int(1.5) + log2(8)\ny = 1.2.3.4 == #01020304\nz = -1s\nb = !3 && 1")
   "x: float" \
     (types "x = 1.0\nx += 1")
+  "x: float[][], i: int" \
+    (types "x = [[1.0]]\ni = 0\nx[i][0] += 1\nx[0] := [2]")
   "x: int, y: int" \
     (types "x = SYN | ACK\ny = port_unreachable")
   "" \
@@ -1345,6 +1375,10 @@ let check (program : A.program) =
     (types "x := 1")
   "line 2, column 1: Cannot assign a float to x, which is an int" \
     (types "x = 1\nx += 1.5")
+  "line 2, column 1: Cannot assign a float to an item of x, which is an int" \
+    (types "x = [[1]]\nx[0][0] += 1.5")
+  "line 2, column 1: Cannot index an int" \
+    (types "x = [1]\nx[0][0] := 1")
   "line 1, column 5: Cannot tell the type of the items of an empty array" \
     (types "x = []")
   "line 1, column 1: x would have no value" \

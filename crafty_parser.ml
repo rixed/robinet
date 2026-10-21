@@ -625,8 +625,16 @@ let stmt =
         (variable ++ maybe_next (
             item '=' -- nay (item '=' ||| item '~') -- nl_sp -+ expr) >>:
             fun (v, e) -> Declare (check_var v, e)) |||
-        (variable ++ maybe_next (assign_op +- nl_sp ++ expr) >>:
-            fun (v, (op, e)) -> Assign (check_var v, op, e)) |||
+        (* Quiet, not to expect indices after any name: *)
+        (variable ++ repeat_greedy ~sep:none (
+            quiet (item '[') -- nl_sp -+ expr +- nl_sp +- item ']') >>=
+         fun (v, is) ->
+            maybe_next (
+                (assign_op +- nl_sp ++ expr >>:
+                    fun (op, e) -> Assign (check_var v, is, op, e)) |||
+                (if is = [] then fail else
+                 item '=' -- nay (item '=' ||| item '~') >>:
+                    fun _ -> reject "An item is not declared (:= changes it)"))) |||
         (keyword "repeat" -+ params "repeat" [ "var" ; "count" ; "every" ; "for" ] ++
          body >>: fun (p, body) ->
             Repeat { var = Option.map (var_name "variable name") (p "var") ;
@@ -791,6 +799,7 @@ let parse text =
   "foreach t ts {\n}\nforeach a - b {\n}\n" (reads "foreach t\tts {}\nforeach a - b {}")
   "foreach every=(1s / n) for=1m ttls {\n}\n" (reads "foreach for=1m every=1s / n ttls {}")
   "foreach x a.b[(i + 1)] {\n}\n" (reads "foreach var=\"x\" a.b[i + 1] {}")
+  "x[1][(i + 1)] += 2\nx[0] := [1]\n" (reads "x[1][i+1] += 2\nx[0]:=[1]")
   "on timeout=1s max=3 ../UDP {\n  n += 1\n  m := 2\n}\n" \
     (reads "on max=3 timeout=1s ../UDP { n += 1; m := 2 }")
   "expect UDP((IP^.ttl == 3) && (^IP.src == 1.2.3.4)) {\n}\n" \
@@ -928,6 +937,7 @@ let parse text =
   "line 1, column 5: Expected expression in statement" (reads "x = IP")
   "line 1, column 7: ip is a reserved name" (reads "ip = 3")
   "line 1, column 11: print is a reserved name" (reads "print += 3")
+  "line 1, column 7: An item is not declared (:= changes it)" (reads "x[0] = 1")
   "line 1, column 10: match is a reserved name" (reads "match = 1")
   "line 1, column 19: LAST is a reserved name" (reads "repeat var=last {}")
   "line 1, column 20: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")

@@ -599,6 +599,25 @@ the address only if the name has no CNAME, which the `assert` checks.
 The pattern is absolute, as there is no current stack. The answer's stack names
 the stream the request came on, so it uses the node that the pattern created.
 
+### Losses per flow
+
+    # 4 flows of 25 datagrams to the UDP echo server: how many get no echo?
+    target = 192.0.2.10
+    lost = array(init=25, len=4)
+    {
+      on timeout=2s /IP(src == target)/UDP(src == 7, dst >= 40000, dst < 40004) {
+        lost[MATCH[UDP].dst - 40000] -= 1
+      }
+      repeat count=100 every=10ms {
+        /IP(dst=target)/UDP(src=40000 + I % 4, dst=7)/Bytes("ping")
+      }
+    }
+    repeat var=f count=4 { print("flow ${f}: ${lost[f]} lost") }
+
+    % sudo crafty -i eth0 --udp 40000-40003 --fw losses.cfty
+    flow 0: 0 lost
+    ...
+
 ### Is a port closed?
 
     /IP(dst=192.0.2.10)/TCP(src=40001, dst=22) {

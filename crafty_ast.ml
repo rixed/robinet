@@ -201,8 +201,9 @@ and stmt_desc =
     | Expr of expr
     (* [x = e]: *)
     | Declare of string * expr
-    (* [x := e], or [x op= e] with that [binop]: *)
-    | Assign of string * binop option * expr
+    (* [x := e], or [x op= e] with that [binop]; [x[i][j] := e] with the
+     * indices [i; j]: *)
+    | Assign of string * expr list * binop option * expr
     | Repeat of { var : string option ; count : expr option ;
                   every : expr option ; for_ : expr option ; body : block }
     (* A [Repeat] whose [var] is each of [items] in turn: *)
@@ -411,8 +412,10 @@ and print_stmt ~all indent oc s =
         Option.may (fun b -> Char.print oc ' ' ; print_block ~all indent oc b) body
     | Expr e -> print_expr_at ~bare:true ~all ~indent 0 oc e
     | Declare (v, e) -> Printf.fprintf oc "%s = %a" v expr e
-    | Assign (v, op, e) ->
-        Printf.fprintf oc "%s %s= %a" v
+    | Assign (v, is, op, e) ->
+        Printf.fprintf oc "%s%a %s= %a" v
+            (List.print ~first:"" ~last:"" ~sep:"" (fun oc i ->
+                Printf.fprintf oc "[%a]" expr i)) is
             (match op with None -> ":" | Some op -> string_of_binop op)
             expr e
     | Repeat { var ; count ; every ; for_ ; body } ->

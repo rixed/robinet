@@ -85,6 +85,21 @@ let bind env (v : T.var) value =
 let bind_lazy env (v : T.var) f =
     { env with vars = Env.add v.id (lazy (ref (f ()))) env.vars }
 
+let item loc a i =
+    if i < 0 || i >= Array.length a then
+        error loc "No item %d in an array of length %d" i (Array.length a) ;
+    a.(i)
+
+(* A copy of [x] with [y] at that path of indices: *)
+let rec set_item loc x path y =
+    match x, path with
+    | _, [] -> y
+    | Array a, Int i :: path ->
+        let a' = Array.copy a in
+        a'.(i) <- set_item loc (item loc a i) path y ;
+        Array a'
+    | _ -> assert false
+
 let rand loc = function
     | Int max ->
         if max <= 0 then error loc "rand needs a positive maximum, not %d" max ;
@@ -267,10 +282,7 @@ let rec eval output (env : env) (e : T.expr) =
         (match eval r with Record vs -> vs.(i) | _ -> assert false)
     | T.Index (a, i) ->
         (match eval a, eval i with
-        | Array a, Int i ->
-            if i < 0 || i >= Array.length a then
-                error e.loc "No item %d in an array of length %d" i (Array.length a) ;
-            a.(i)
+        | Array a, Int i -> item e.loc a i
         | _ -> assert false)
     | T.Select { packet ; layer ; from_start ; nth } ->
         (match eval packet with
@@ -339,9 +351,22 @@ and eval_block output env (b : T.block) =
     List.fold_left (fun (env, _) (s : T.stmt) ->
         match s.stmt with
         | T.Declare (v, e) -> bind env v (eval output env e), Void
-        | T.Assign (v, e) -> (lookup env v) := eval output env e ; env, Void
+        | T.Assign { var ; path ; value } ->
+            let is, env' = bind_path output env path in
+            let x = eval output env' value in
+            let cell = lookup env var in
+            cell := set_item s.stmt_loc !cell is x ;
+            env, Void
         | T.Expr e -> env, eval output env e
         | _ -> assert false) (env, Void) b |> snd
+
+(* The indices of an assignment's path, and the environment with each bound
+ * to its variable: *)
+and bind_path output env path =
+    List.fold_left (fun (is, env) (v, i) ->
+        let i = eval output env i in
+        i :: is, bind env v i) ([], env) path |>
+    fun (is, env) -> List.rev is, env
 
 (** {2 Blocks} *)
 
@@ -528,7 +553,13 @@ and exec t b env (s : T.stmt) k =
     let guard f = guard b f in
     match s.stmt with
     | T.Declare (v, e) -> exec_value t b env e (fun x -> k (bind env v x))
-    | T.Assign (v, e) -> exec_value t b env e (fun x -> (lookup env v) := x ; k env)
+    | T.Assign { var ; path ; value } ->
+        Option.may (fun (is, env') ->
+            exec_value t b env' value (fun x ->
+                let cell = lookup env var in
+                Option.may (fun y -> cell := y ; k env)
+                    (guard (fun () -> set_item s.stmt_loc !cell is x))))
+            (guard (fun () -> bind_path t.output env path))
     | T.Expr e -> exec_value t b env e (fun _ -> k env)
     | T.Break n -> b.break_ n
     | T.Wait dur ->
@@ -977,6 +1008,14 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "repeat count=5 every=1s { print(\"${I}\")\n  break }\nprint(\"after\")")
   "0s: 0\n0s: after\n0s: done" \
     (runs "repeat var=i count=3 { repeat { print(\"${i}\")\n    break 2 } }\nprint(\"after\")")
+  "0s: [1, 5] [9, 2]\n0s: done" \
+    (runs "x = [1, 2]\ny = x\nx[1] += 3\ny[0] := 9\nprint(\"${x} ${y}\")")
+  "0s: [[1], [0]]\n0s: done" \
+    (runs "a = array(init=[0], len=2)\na[0][0] := 1\nprint(\"${a}\")")
+  "0s: 1 [0, 5]\n0s: done" \
+    (runs "n = 0\nx = [0, 0]\nx[{ n += 1 ; n }] += 5\nprint(\"${n} ${x}\")")
+  "0s: failed: line 2, column 1: No item 1 in an array of length 1" \
+    (runs "x = [1]\nx[1] := 2")
   "0s: 499999500000\n0s: done" \
     (runs "n = 0\nrepeat count=1000000 { n += I }\nprint(\"${n}\")")
   "0s: 0\n0s: 2\n0s: 4\n0s: done" \
