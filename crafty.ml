@@ -51,7 +51,7 @@ let () =
 let () =
     let ifname = ref "" and own_ip = ref None and ports = ref []
     and fw = ref false and promisc = ref false and print_packets = ref false
-    and cleanup = ref false
+    and print_only = ref None and cleanup = ref false
     and check = ref false and format = ref false
     and linger = ref (Clock.Interval.sec 2.) and prog_file = ref None
     and max_duration = ref None and max_packets = ref None
@@ -71,6 +71,16 @@ let () =
         with Invalid_argument e -> die "%s" e) in
     (* The options, which [--help] lists: *)
     let specs = ref [] in
+    (* With the next argument if it is an absolute pattern rather than a
+     * program: *)
+    let print_packets_spec = Arg.Unit (fun () ->
+        print_packets := true ;
+        let next = !Arg.current + 1 in
+        if next < Array.length Sys.argv then
+            let s = Sys.argv.(next) in
+            if String.starts_with s "/" && not (Sys.file_exists s) then (
+                print_only := Some s ;
+                Arg.current := next)) in
     let manual text = Arg.Unit (fun () -> print_string text ; exit 0) in
     let help () =
         print_string (Arg.usage_string !specs usage) ;
@@ -104,8 +114,9 @@ let () =
             "N send no more bytes per second" ;
         "--linger", interval linger,
             "DURATION once done, stop after that long without traffic (default 2s)" ;
-        "-p", Arg.Set print_packets, " print every packet sent and received" ;
-        "--print-packets", Arg.Set print_packets, " same as -p" ;
+        "-p", print_packets_spec,
+            "[/PATTERN] print every packet sent and received, or those that match" ;
+        "--print-packets", print_packets_spec, "[/PATTERN] same as -p" ;
         "--verbose", Arg.Set Host_config.verbose,
             " print the interface's settings and the commands configuring it" ;
         "--check", Arg.Set check, " compile the program, and exit" ;
@@ -148,6 +159,13 @@ let () =
         | Error e -> fail [ e ]) ;
         exit 0) ;
     let program = compile () in
+    let print_only =
+        Option.map (fun s ->
+            match Crafty_interp.compile_filter s with
+            | Ok f -> f
+            | Error e ->
+                Printf.eprintf "-p: %s\n" (IO.to_string Crafty_interp.print_error e) ;
+                exit 2) !print_only in
     if !check then (
         Printf.printf "%s: OK\n" prog_file ;
         exit 0) ;
@@ -260,7 +278,8 @@ let () =
                     h.stop ()))
             "policer" in
     let print dir bits =
-        if !print_packets then
+        if !print_packets &&
+           Option.map_default (fun f -> h.matches f bits) true print_only then
             Printf.printf "%s %.6f %s\n%!" dir (secs ())
                 (Packet.Pdu.Printer.oneline (Packet.of_frame bits)) in
     let before = Hub.VirtTap.make ~rev_mirror:ignore (fun _ -> incr sent)

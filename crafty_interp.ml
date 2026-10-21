@@ -939,10 +939,32 @@ type handle =
        * closing included, and no frame waits for an address resolution: *)
       idle : unit -> bool ;
       (* Tells a frame the interface sent, as captured on its way out: *)
-      emitted : Bitstring.bitstring -> unit }
+      emitted : Bitstring.bitstring -> unit ;
+      (* Whether a frame, sent or received, matches a filter: *)
+      matches : filter -> Bitstring.bitstring -> bool }
+
+(** An absolute pattern, matched against a frame on its own: *)
+and filter = T.pattern
 
 let idle (tree : Crafty_tree.node) () =
     Crafty_tree.size tree = 1 && Tools.BitHash.length tree.eth.Eth.State.postponed = 0
+
+let output_of power ~print ~print_err =
+    let now () =
+        let sim = power.SimTypes.sim in
+        Simulation.date_of sim (Simulation.now sim) in
+    { print ; print_err ; now }
+
+let matches output tree (p : filter) =
+    let layers =
+        List.map (fun (pl : T.pattern_layer) ->
+            Crafty_tree.{
+                player = pl.pl_layer ; pmode = pl.pl_mode ;
+                test = Option.map (fun c packet ->
+                    match eval output { vars = Env.empty ; stack = [] ; packet } c with
+                    | Bool b -> b
+                    | _ -> assert false) pl.cond }) p.pat_layers in
+    Crafty_tree.matches tree layers
 
 (* Runs [program] on [power]'s simulation, starting at once, sending and
  * receiving through [tree] (from {!Crafty_tree.make_root}), writing with
@@ -950,10 +972,8 @@ let idle (tree : Crafty_tree.node) () =
  * (possibly before returning). *)
 let run_on_tree power tree ~print ~print_err ?(on_exit=ignore) (program : T.block) =
     let status = ref Running in
-    let now () =
-        let sim = power.SimTypes.sim in
-        Simulation.date_of sim (Simulation.now sim) in
-    let t = { power ; output = { print ; print_err ; now } ; tree ; awaited = ref [] } in
+    let t = { power ; output = output_of power ~print ~print_err ; tree ;
+              awaited = ref [] } in
     let exit s =
         if !status = Running then (
             status := s ;
@@ -968,7 +988,8 @@ let run_on_tree power tree ~print ~print_err ?(on_exit=ignore) (program : T.bloc
     { stop = (fun () -> cancel root ; exit Stopped) ;
       status = (fun () -> !status) ;
       idle = idle tree ;
-      emitted = emitted t }
+      emitted = emitted t ;
+      matches = matches t.output tree }
 
 type program = Crafty_typing.block
 
@@ -979,6 +1000,10 @@ let compile text : (program, error list) result =
     match Crafty_parser.parse text with
     | Error e -> Error [ e ]
     | Ok p -> Crafty_typing.check p
+
+(** The filter of that text, an absolute pattern, or what is wrong with it. *)
+let compile_filter text : (filter, error) result =
+    Result.bind (Crafty_parser.parse_pattern text) Crafty_typing.check_pattern
 
 let print_status oc = function
     | Running -> String.print oc "running"
@@ -1032,7 +1057,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         | Some h -> h.status ()
         | None -> if !stopped then Stopped else Running) ;
       idle = idle tree ;
-      emitted = (fun frame -> Option.may (fun (h : handle) -> h.emitted frame) !started) }
+      emitted = (fun frame -> Option.may (fun (h : handle) -> h.emitted frame) !started) ;
+      matches = matches (output_of power ~print ~print_err) tree }
 
 (* [runs ?stop_at ?trees ?frames ?sent ?inject text] is what the program in that text
  * prints, each line with the time it is printed at (and with [trees], the
@@ -1857,4 +1883,32 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
       (List.rev !frames) ;
   assert_equal Done (h.status ()) ;
   assert_bool "idle" (h.idle ())
+*)
+
+(* [filters text frame] is whether that frame matches the filter of that
+ * text, or why it is no filter: *)
+(*$inject
+  let filters text frame =
+      match compile_filter text with
+      | Error e -> IO.to_string print_error e
+      | Ok f ->
+          let sim = Simulation.make ~realtime:false "crafty" in
+          let tree = Crafty_tree.make_root (crafty_eth sim) in
+          let output = output_of sim.root.power ~print:ignore ~print_err:ignore in
+          string_of_bool (matches output tree f frame)
+*)
+
+(*$= filters & ~printer:identity
+  "true" (filters "/IP/UDP" (reply "x"))
+  "true" (filters " /ip(src == 10.0.0.2)/UDP(dst == 1000) " (reply "x"))
+  "false" (filters "/IP/UDP(dst == 7)" (reply "x"))
+  "true" (filters "/IP/UDP/Bytes(\"x\")" (reply "x"))
+  "false" (filters "/IP/UDP/Bytes(\"y\")" (reply "x"))
+  "false" (filters "/IP/TCP" (reply "x"))
+  "false" (filters "/IP" (arp "10.0.0.2"))
+  "true" (filters "/Eth" (arp "10.0.0.2"))
+  "line 1, column 1: The pattern must be absolute (start with /)" \
+    (filters "IP/UDP" (reply "x"))
+  "line 1, column 9: Unknown variable x" (filters "/IP/UDP(x == 1)" (reply "x"))
+  "line 1, column 9: Expected end of pattern" (filters "/IP/UDP {}" (reply "x"))
 *)

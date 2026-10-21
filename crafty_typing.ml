@@ -1475,6 +1475,19 @@ let check (program : A.program) =
             Crafty_parser.{ where ; message }) !errors |>
             List.sort (fun (a : Crafty_parser.error) b -> compare a.where b.where))
 
+(** The typed pattern, absolute and with no variable but the fields of its
+ * layers, or what is wrong with it. *)
+let check_pattern (p : A.pattern) =
+    let env = { vars = [] ; declared_here = [] ; poisoned = [] ; stack = [] ;
+                loops = 0 ; layer_ctx = None ; may_wait = false ;
+                errors = ref [] ; declared_at = Hashtbl.create 1 ;
+                widened = Hashtbl.create 1 ; widening = ref false } in
+    try
+        if p.anchor <> A.Absolute then
+            error p.pat_loc "The pattern must be absolute (start with /)" ;
+        Ok (pattern env p)
+    with Error (where, message) -> Error Crafty_parser.{ where ; message }
+
 (* [types text] is what the program in that text declares, with the types,
  * or what is wrong with it. *)
 (*$inject

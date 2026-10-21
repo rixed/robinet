@@ -746,10 +746,10 @@ let message_of what =
                     else w in
             "Expected "^ w ^ in_ ctx)
 
-(** Parse that text, or tell where and why it does not parse. *)
-let parse text =
-    match to_result (program [] None Parsers.no_error_correction
-                             (stream_of_string text)) with
+(* That text read with [p], or where and why it is not: *)
+let parse_with p text =
+    match to_result (p [] None Parsers.no_error_correction
+                       (stream_of_string text)) with
     | Ok (p, _) -> Ok p
     | Error (NoSolution None) ->
         Error { where = { line = 1 ; column = 1 } ; message = "Syntax error" }
@@ -762,6 +762,13 @@ let parse text =
     | Error (Approximation _) ->
         (* Only with error correction, which is not asked for *)
         assert false
+
+(** Parse that text, or tell where and why it does not parse. *)
+let parse text = parse_with program text
+
+(** Parse that text as a single pattern. *)
+let parse_pattern text =
+    parse_with (sp -+ pattern +- sp +- (eof |? "end of pattern")) text
 
 (* [reads text] is how the program in that text reads back, or the error;
  * [formats text] is that program with only the parentheses it needs. *)

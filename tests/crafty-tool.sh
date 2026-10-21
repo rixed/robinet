@@ -118,6 +118,14 @@ state > "$DIR/before"
 "$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 -p "$DIR/udp.cfty" > "$DIR/out" 2>&1
 check "UDP with an address of its own" 0 $? "echo 2"
 
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 -p '/IP/UDP(src == 7)' "$DIR/udp.cfty" > "$DIR/out" 2>&1
+check "printing the packets of a pattern" 0 $? "echo 2"
+if [ "$(grep -c '^< ' "$DIR/out")" = 3 ] && ! grep -q '^> ' "$DIR/out" ; then
+    echo "ok   only the echoes are printed"
+else
+    echo "FAIL not only the echoes are printed:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
+fi
+
 "$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/ts.cfty" > "$DIR/out" 2>&1
 check "frames are dated by their capture" 0 $? "captured "
 

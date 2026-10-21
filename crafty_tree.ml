@@ -545,6 +545,34 @@ let captured root frame : packet =
     | None -> []
     | Some u -> complete [ L.root, u ]
 
+(** Whether [frame], with its [ts] as {!receive} tells it, has the layers of
+ * a pattern registered on [root], each of them decoded as the one below
+ * names it or allows it, without any node; seen in any mode. A condition
+ * that fails does not hold. *)
+let matches root layers frame =
+    let rec loop packet = function
+        | [] -> true
+        | pl :: rest ->
+            let l, (u : L.unpacked) = List.hd packet in
+            let named =
+                match u.upper with
+                | L.Nothing -> false
+                | L.Only name ->
+                    Option.map_default ((==) pl.player) false (L.find ~below:l name)
+                | L.Any _ -> List.memq pl.player (L.uppers l) in
+            named &&
+            match pl.player.unpack u.up_hints u.payload with
+            | None -> false
+            | Some uu -> on_top ((pl.player, uu) :: packet) pl rest
+    and on_top packet pl rest =
+        (match pl.test with
+        | None -> true
+        | Some test -> (try test packet with Runtime_error _ -> false)) &&
+        loop packet rest in
+    match layers, unpack_root root frame with
+    | pl :: rest, Some u when pl.player == L.root -> on_top [ L.root, u ] pl rest
+    | _ -> false
+
 (** The local ports picked by default, those that IANA leaves to dynamic
  * use: *)
 let dynamic_ports = [ 49152, 65535 ]
