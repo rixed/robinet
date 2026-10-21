@@ -46,7 +46,7 @@ type var = { name : string ; id : int ; typ : Type.t }
 type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
     | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
-    | To_ip | To_mac
+    | To_ip | To_mac | Getenv
     | Make_array | Length | Print | Print_err | Assert
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
@@ -476,6 +476,8 @@ type default =
     | Literal of A.literal
     (* The source of the argument for that parameter, after this text: *)
     | Quote of string * string
+    (* No argument at all: *)
+    | Omitted
 
 type param =
     { pname : string ;
@@ -529,6 +531,10 @@ let builtins =
         res Type.Ip ;
       "mac_addr", To_mac, [ param "b" "6 bytes" (only_exactly Type.[ bytes ]) ],
         res Type.Mac ;
+      "getenv", Getenv,
+        [ param "name" "a string" (only Type.[ String ]) ;
+          param "default" "a string" (only Type.[ String ]) ~default:Omitted ],
+        res Type.String ;
       "array", Make_array,
         [ param "init" "a value" any_value ; param "len" "an int" (only Type.[ Int ]) ],
         (fun ts -> Type.Array (List.hd ts)) ;
@@ -820,22 +826,23 @@ and call env loc f args =
         if List.length (List.filter (fun (n, _) -> n = p.pname) named) > 1 then
             error loc "Argument %s of %s given twice" p.pname fname) params ;
     let args =
-        List.map (fun p ->
+        List.filter_map (fun p ->
             match List.assoc p.pname named with
             | (a : A.arg) ->
                 let e = expr env a.value in
                 (match p.accept e.typ with
-                | Some t -> expect "" e t
+                | Some t -> Some (expect "" e t)
                 | None ->
                     error e.loc "Argument %s of %s must be %s, not %s"
                         p.pname fname p.descr (a_type e.typ))
             | exception Not_found ->
                 (match p.default with
-                | Some (Literal l) -> { loc ; typ = type_of_literal l ; desc = Lit l }
+                | Some (Literal l) -> Some { loc ; typ = type_of_literal l ; desc = Lit l }
                 | Some (Quote (text, quoted)) ->
                     let (a : A.arg) = List.assoc quoted named in
-                    { loc ; typ = Type.String ;
-                      desc = String [ Text (text ^ IO.to_string A.print_bare_expr a.value) ] }
+                    Some { loc ; typ = Type.String ;
+                           desc = String [ Text (text ^ IO.to_string A.print_bare_expr a.value) ] }
+                | Some Omitted -> None
                 | None -> error loc "%s needs an argument %s" fname p.pname)
         ) params in
     b, args, result (List.map (fun e -> e.typ) args)

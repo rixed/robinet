@@ -392,6 +392,8 @@ and the nodes it held.
 - `time(secs)`: The time that many seconds after 1970-01-01T00:00:00Z.
 - `now()`: The current time: the clock of the host when crafty runs a
   program.
+- `getenv(name, default=s)`: An environment variable (fails if unset and
+  no default).
 - `array(init=v, len=n)`: An array of `n` items, all `v`.
 - `length(a)`: The length of an array or a string.
 

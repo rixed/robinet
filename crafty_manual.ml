@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 95cfec78b65ecaa2997f7afb4c9604a7) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 d220811a40b850bc674dfecd038c032d) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -356,6 +356,8 @@ nodes it held.
 -   `interval(secs)`: The interval of that many seconds.
 -   `time(secs)`: The time that many seconds after 1970-01-01T00:00:00Z.
 -   `now()`: The current time: the clock of the host when crafty runs a program.
+-   `getenv(name, default=s)`: An environment variable (fails if unset and no
+    default).
 -   `array(init=v, len=n)`: An array of `n` items, all `v`.
 -   `length(a)`: The length of an array or a string.
 

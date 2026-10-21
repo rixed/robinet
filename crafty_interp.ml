@@ -164,6 +164,11 @@ let call loc (b : T.builtin) args ~print ~print_err ~now =
     | T.Now, [] -> Time (now ())
     | T.To_ip, [ b ] -> convert loc A.Type.bytes A.Type.Ip b
     | T.To_mac, [ b ] -> convert loc A.Type.bytes A.Type.Mac b
+    | T.Getenv, String name :: default ->
+        (match Sys.getenv_opt name, default with
+        | Some v, _ -> String v
+        | None, [ d ] -> d
+        | None, _ -> error loc "Environment variable %s is not set" name)
     | T.Make_array, [ init ; Int len ] ->
         if len < 0 then error loc "array needs a length, not %d" len ;
         Array (Array.make len init)
@@ -981,6 +986,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "x = ip_addr(#010203)")
   "0s: failed: line 1, column 5: 4 bytes are no MAC address" \
     (runs "x = mac_addr(#01020304)")
+  ("0s: "^ Sys.getenv "HOME" ^"\n0s: done") \
+    (runs "print(getenv(\"HOME\"))")
+  "0s: failed: line 1, column 5: Environment variable CRAFTY_NO_SUCH_VAR is not set" \
+    (runs "x = getenv(\"CRAFTY_NO_SUCH_VAR\")")
+  ("0s: default "^ Sys.getenv "HOME" ^"\n0s: done") \
+    (runs "print(\"${getenv(\"CRAFTY_NO_SUCH_VAR\", default=\"default\")} ${getenv(\"HOME\", default=\"\")}\")")
   "0s: [1.5, 1.5] 2 1.5 4\n0s: done" \
     (runs "x = array(init=1.5, len=2)\nprint(\"${x} ${length(x)} ${x[1]} ${length(randbytes(4))}\")")
   "0s: failed: line 3, column 1: Assertion failed: (x * 2) == 5" \
