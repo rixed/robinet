@@ -553,11 +553,13 @@ module Pdu = struct
                     add "%s:%d > %s:%d UDP len %d" src (u.Udp.Pdu.src_port :> int)
                         dst (u.dst_port :> int) (Payload.length u.payload)
                 | Tcp t :: _ ->
-                    add "%s:%d > %s:%d TCP [%s] seq %lu ack %lu win %d len %d"
+                    add "%s:%d > %s:%d TCP [%s] seq %lu ack %lu win %d"
                         src (t.Tcp.Pdu.src_port :> int) dst (t.dst_port :> int)
                         (tcp_flags t.flags) (t.seq_num :> int32)
-                        (t.ack_num :> int32) t.win_size
-                        (Payload.length t.payload)
+                        (t.ack_num :> int32) t.win_size ;
+                    if t.options <> [] then
+                        add " options [%s]" (Tcp.Pdu.Opt.list_to_string t.options) ;
+                    add " len %d" (Payload.length t.payload)
                 | Icmp i :: _ ->
                     add "%s > %s ICMP %s" src dst
                         (Icmp.MsgType.to_string i.Icmp.Pdu.msg_type) ;
@@ -597,6 +599,16 @@ module Pdu = struct
                     (Ip.Proto.o 99) (Ip.Addr.of_string "10.0.0.1") \
                     (Ip.Addr.of_string "1.2.3.4") \
                     (Bitstring.bitstring_of_string "x")))))))))
+          "10.0.0.1:1000 > 1.2.3.4:80 TCP [S] seq 1 ack 0 win 1024 options [mss 1460,nop,wscale 7] len 0" \
+            (oneline (of_frame (Eth.Pdu.(pack (make Eth.Proto.ip4 \
+                (Eth.Addr.of_string "02:00:00:00:00:01") \
+                (Eth.Addr.of_string "02:00:00:00:00:02") \
+                (Ip.Pdu.(pack (make Ip.Proto.tcp (Ip.Addr.of_string "10.0.0.1") \
+                    (Ip.Addr.of_string "1.2.3.4") \
+                    (Tcp.Pdu.(pack (make ~src_port:(Tcp.Port.o 1000) ~syn:true \
+                        ~seq_num:(Tcp.SeqNum.o 1l) \
+                        ~options:Opt.[ Mss 1460 ; Nop ; Wscale 7 ] \
+                        Bitstring.empty_bitstring)))))))))))
           "02:00:00:00:00:01 > FF:FF:FF:FF:FF:FF proto 0x88b5 len 3" \
             (oneline (of_frame (Eth.Pdu.(pack (make (Eth.Proto.o 0x88b5) \
                 (Eth.Addr.of_string "02:00:00:00:00:01") Eth.Addr.broadcast \
@@ -656,9 +668,11 @@ module Pdu = struct
                     ) else if ip.proto = Ip.Proto.tcp then (
                         match rest with
                         | Tcp t :: _ ->
-                            add " TCP %d>%d %s %S" (t.Tcp.Pdu.src_port :> int)
-                                (t.dst_port :> int)
-                                (Tcp.Pdu.string_of_flags t.flags) (pld t.payload) ;
+                            add " TCP %d>%d %s" (t.Tcp.Pdu.src_port :> int)
+                                (t.dst_port :> int) (Tcp.Pdu.string_of_flags t.flags) ;
+                            if t.options <> [] then
+                                add " opts=[%s]" (Tcp.Pdu.Opt.list_to_string t.options) ;
+                            add " %S" (pld t.payload) ;
                             check_l4 ()
                         | _ -> add " ?"
                     ) else add " proto=%d %S" (ip.proto :> int) (str l4)
