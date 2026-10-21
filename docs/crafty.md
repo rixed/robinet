@@ -182,7 +182,8 @@ Operators, from the tightest binding to the loosest:
    divided by a number.
 3. `+`, `-`: on ints and floats, and between intervals; a time minus a time
    is an interval, and a time plus or minus an interval, or a number of
-   seconds, is a time.
+   seconds, is a time. `+` also concatenates two arrays (`[1] + [2, 3]`), and
+   appends or prepends an item (`[1, 2] + 3`, `0 + [1, 2]`).
 4. `&`: bitwise and (ints or bytes).
 5. `^`: bitwise exclusive or.
 6. `|`: bitwise or.
@@ -397,9 +398,11 @@ and the nodes it held.
   no default).
 - `array(init=v, len=n)`: An array of `n` items, all `v`.
 - `length(a)`: The length of an array or a string.
+- `concat(a, b)`, `append(a, x)`, `prepend(x, a)`: as with `+`.
 
 An argument can be left unnamed when the function has a single parameter,
-or when it is the only parameter without a default (`assert(x == 4)`).
+when it is the only parameter without a default (`assert(x == 4)`), or when
+no parameter has a default and all are given in order (`append(a, x)`).
 Otherwise arguments are named.
 
 ### Layers
@@ -655,6 +658,29 @@ on timeout=1m /IP/UDP(dst == 7)/Bytes {
 The pattern is absolute, as there is no current stack. The answer's stack
 names the stream the request came on, so it uses the node that the pattern
 created.
+
+### Losses per flow
+
+```
+# 4 flows of 25 datagrams to the UDP echo server: how many get no echo?
+target = 192.0.2.10
+lost = array(init=25, len=4)
+{
+  on timeout=2s /IP(src == target)/UDP(src == 7, dst >= 40000, dst < 40004) {
+    lost[MATCH[UDP].dst - 40000] -= 1
+  }
+  repeat count=100 every=10ms {
+    /IP(dst=target)/UDP(src=40000 + I % 4, dst=7)/Bytes("ping")
+  }
+}
+repeat var=f count=4 { print("flow ${f}: ${lost[f]} lost") }
+```
+
+```
+% sudo crafty -i eth0 --udp 40000-40003 --fw losses.cfty
+flow 0: 0 lost
+...
+```
 
 ### Is a port closed?
 

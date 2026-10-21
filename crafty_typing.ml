@@ -47,7 +47,7 @@ type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
     | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
     | To_ip | To_mac | Getenv
-    | Make_array | Length | Print | Print_err | Assert
+    | Make_array | Length | Concat | Append | Prepend | Print | Print_err | Assert
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
 
@@ -547,6 +547,14 @@ let builtins =
         [ param "a" "an array" (fun t ->
             if t = Type.String then Some t else any_array t) ],
         res Type.Int ;
+      (* Of types that [array_join] checks: *)
+      "concat", Concat,
+        [ param "a" "an array" any_array ; param "b" "an array" any_array ], List.hd ;
+      "append", Append,
+        [ param "a" "an array" any_array ; param "x" "a value" any_value ], List.hd ;
+      "prepend", Prepend,
+        [ param "x" "a value" any_value ; param "a" "an array" any_array ],
+        (fun ts -> List.nth ts 1) ;
       "print", Print, [ param "s" "a string" (only Type.[ String ]) ], res Type.Void ;
       "print_err", Print_err, [ param "s" "a string" (only Type.[ String ]) ],
         res Type.Void ;
@@ -563,6 +571,21 @@ let find_builtin loc name =
     | None -> error loc "Unknown function %s" name
 
 let numeric t = t = Type.Int || t = Type.Float
+
+(* That call of [Concat], [Append] or [Prepend], if [x] and [y] convert to
+ * arrays and items of the same type: *)
+let array_join f loc x y =
+    let mk x y = Some { loc ; typ = (if f = Prepend then y else x).typ ;
+                        desc = Call (f, [ x ; y ]) } in
+    match f, x.typ, y.typ with
+    | Concat, Type.Array _, Type.Array _ ->
+        (match coerce y x.typ, coerce x y.typ with
+        | Some y, _ -> mk x y
+        | _, Some x -> mk x y
+        | None, None -> None)
+    | Append, Type.Array t, _ -> Option.bind (coerce y t) (mk x)
+    | Prepend, _, Type.Array t -> Option.bind (coerce x t) (fun x -> mk x y)
+    | _ -> None
 
 (* Both of the same type, converting one to the other's if need be: *)
 let unify what a b =
@@ -641,8 +664,17 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         | Type.Array t -> mk t (Index (a, expect "An index" i Type.Int))
         | t -> error loc "Cannot index %s" (a_type t))
     | A.Call (f, args) ->
-        let b, args, t = call env loc f args in
-        mk t (Call (b, args))
+        (match call env loc f args with
+        | (Concat | Append | Prepend as b), [ x ; y ], _ ->
+            (match array_join b loc x y with
+            | Some e -> e
+            | None ->
+                let x, y = a_type x.typ, a_type y.typ in
+                (match b with
+                | Append -> error loc "Cannot append %s to %s" y x
+                | Prepend -> error loc "Cannot prepend %s to %s" x y
+                | _ -> error loc "Cannot concatenate %s and %s" x y))
+        | b, args, t -> mk t (Call (b, args)))
     | A.Unop (A.Not, e) ->
         let e = as_bool "The operand of !" (expr env e) in
         mk Type.Bool (Unop (A.Not, e))
@@ -815,6 +847,11 @@ and layer_field env loc name from_start nth f =
 and call env loc f args =
     let fname, b, params, result = find_builtin loc f in
     let named =
+        (* Unnamed, all the parameters in order if none has a default: *)
+        if List.length params > 1 && List.length args = List.length params &&
+           List.for_all (fun (a : A.arg) -> a.arg_name = None) args &&
+           List.for_all (fun p -> p.default = None) params then
+            List.map2 (fun p a -> p.pname, a) params args else
         List.map (fun (a : A.arg) ->
             match a.arg_name, params with
             | Some n, _ ->
@@ -881,6 +918,12 @@ and binop env loc op a b =
             mk Type.Time (Binop (op, a, expect "" b Type.Float))
         | (Type.Int | Type.Float), Type.Time when op = A.Add ->
             mk Type.Time (Binop (op, expect "" a Type.Float, b))
+        (* A concatenation, else an append, else a prepend: *)
+        | (Type.Array _, _ | _, Type.Array _) when op = A.Add ->
+            (match List.filter_map (fun f -> array_join f loc a b)
+                                   [ Concat ; Append ; Prepend ] with
+            | e :: _ -> e
+            | [] -> cannot ())
         | _ -> cannot ())
     | A.BitAnd | A.BitOr | A.BitXor ->
         (match a.typ, b.typ with
@@ -1283,6 +1326,10 @@ let check (program : A.program) =
     (types "x = int(1.5) + log2(8)\ny = 1.2.3.4 == #01020304\nz = -1s\nb = !3 && 1")
   "x: float" \
     (types "x = 1.0\nx += 1")
+  "a: int[], b: int[], c: float[], d: int[][]" \
+    (types "a = [1] + [2]\nb = [1] + 2\nc = 1 + [2.5]\nd = [[1]] + [2]")
+  "a: int[], b: float[], c: int[], d: float[]" \
+    (types "a = [1]\na += 2\nb = append([1.5], 1)\nc = prepend(a=[2], x=1)\nd = concat([1], [2.5])")
   "x: float[][], i: int" \
     (types "x = [[1.0]]\ni = 0\nx[i][0] += 1\nx[0] := [2]")
   "x: int, y: int" \
@@ -1377,6 +1424,16 @@ let check (program : A.program) =
     (types "x = 1\nx += 1.5")
   "line 2, column 1: Cannot assign a float to an item of x, which is an int" \
     (types "x = [[1]]\nx[0][0] += 1.5")
+  "line 1, column 5: Cannot apply + to an int[] and a string" \
+    (types "x = [1] + \"a\"")
+  "line 1, column 5: Cannot append a string to an int[]" \
+    (types "x = append([1], \"a\")")
+  "line 1, column 5: Cannot prepend an int[] to an int[]" \
+    (types "x = prepend([1], [2])")
+  "line 1, column 5: Cannot concatenate an int[] and a float[][]" \
+    (types "x = concat([1], [[2.5]])")
+  "line 1, column 11: The arguments of array must be named" \
+    (types "x = array(1)")
   "line 2, column 1: Cannot index an int" \
     (types "x = [1]\nx[0][0] := 1")
   "line 1, column 5: Cannot tell the type of the items of an empty array" \

@@ -211,6 +211,9 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
         if len < 0 then error loc "array needs a length, not %d" len ;
         Array (Array.make len init)
     | T.Length, [ Array a ] -> Int (Array.length a)
+    | T.Concat, [ Array a ; Array b ] -> Array (Array.append a b)
+    | T.Append, [ Array a ; x ] -> Array (Array.append a [| x |])
+    | T.Prepend, [ x ; Array a ] -> Array (Array.append [| x |] a)
     | T.Length, [ String s ] -> Int (String.length s)
     | T.Print, [ String s ] -> print s ; Void
     | T.Print_err, [ String s ] -> print_err s ; Void
@@ -1008,6 +1011,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "repeat count=5 every=1s { print(\"${I}\")\n  break }\nprint(\"after\")")
   "0s: 0\n0s: after\n0s: done" \
     (runs "repeat var=i count=3 { repeat { print(\"${i}\")\n    break 2 } }\nprint(\"after\")")
+  "0s: [0, 1, 2, 3, 4] [0, 1, 2, 5] [9, 0, 1, 2] [0, 1, 2, 0, 1, 2] [7]\n0s: done" \
+    (runs "x = [1]\nx += 2\nx := 0 + x\ny = array(0, 0) + 7\nprint(\"${x + [3, 4]} ${append(x, 5)} ${prepend(9, x)} ${concat(x, x)} ${y}\")")
   "0s: [1, 5] [9, 2]\n0s: done" \
     (runs "x = [1, 2]\ny = x\nx[1] += 3\ny[0] := 9\nprint(\"${x} ${y}\")")
   "0s: [[1], [0]]\n0s: done" \

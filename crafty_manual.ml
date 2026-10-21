@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 92991088066bbeab04e8cf70ec6cd109) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 12cd377d22f95f6c16ee98c8fa80daea) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -163,7 +163,8 @@ Operators, from the tightest binding to the loosest:
     by a number.
 3.  `+`, `-`: on ints and floats, and between intervals; a time minus a time is
     an interval, and a time plus or minus an interval, or a number of seconds,
-    is a time.
+    is a time. `+` also concatenates two arrays (`[1] + [2, 3]`), and appends or
+    prepends an item (`[1, 2] + 3`, `0 + [1, 2]`).
 4.  `&`: bitwise and (ints or bytes).
 5.  `^`: bitwise exclusive or.
 6.  `|`: bitwise or.
@@ -361,9 +362,11 @@ nodes it held.
     default).
 -   `array(init=v, len=n)`: An array of `n` items, all `v`.
 -   `length(a)`: The length of an array or a string.
+-   `concat(a, b)`, `append(a, x)`, `prepend(x, a)`: as with `+`.
 
-An argument can be left unnamed when the function has a single parameter, or
-when it is the only parameter without a default (`assert(x == 4)`). Otherwise
+An argument can be left unnamed when the function has a single parameter, when
+it is the only parameter without a default (`assert(x == 4)`), or when no
+parameter has a default and all are given in order (`append(a, x)`). Otherwise
 arguments are named.
 
 ### Layers
