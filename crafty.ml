@@ -208,9 +208,11 @@ let () =
         String.uppercase_ascii (Host_config.string_of_proto proto),
         List.filter_map (fun (r : Host_config.port_range) ->
             if r.proto = proto then Some (r.lo, r.hi) else None) !ports in
-    (* What the program sends, and what goes out and comes in: *)
+    (* What the program sends, what goes out and comes in, and what is
+     * captured going out, the host's included: *)
     let sent = ref 0 and pkts_out = ref 0 and pkts_in = ref 0
-    and bytes_out = ref 0 and bytes_in = ref 0 in
+    and bytes_out = ref 0 and bytes_in = ref 0
+    and wire_pkts = ref 0 and wire_bytes = ref 0 in
     let status = ref Crafty_interp.Running and limit = ref None in
     (* The handle, which the program is given no event before [run]
      * returns: *)
@@ -273,7 +275,9 @@ let () =
     Simulation.run_startup sim ;
     Simulation.power_up policer.widget.power ;
     ignore (Pcap.sniffer pcap after.out.write) ;
-    ignore (Pcap.sniffer pcap_out h.emitted) ;
+    ignore (Pcap.sniffer pcap_out (fun bits ->
+        incr wire_pkts ; wire_bytes := !wire_bytes + Tools.bytelength bits ;
+        h.emitted bits)) ;
     print_endline "Running..." ;
     Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ] (fun () ->
         Simulation.run sim true) ;
@@ -290,4 +294,5 @@ let () =
         !pkts_out !pkts_in !bytes_out !bytes_in ;
     if !sent > !pkts_out then
         Printf.printf "Dropped by the policer: %d packets.\n" (!sent - !pkts_out) ;
+    Printf.printf "Captured going out: %d packets, %d bytes.\n" !wire_pkts !wire_bytes ;
     exit code
