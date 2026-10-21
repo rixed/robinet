@@ -73,6 +73,8 @@ struct
         | Void | Bool | Byte | Int | Float | String | Interval | Time | Ip | Mac
         | Record of (string * t) list
         | Array of t
+        (* Of the keys, then of the values: *)
+        | Map of t * t
         | Variant of (string * t) list
         | Pattern
 
@@ -93,6 +95,7 @@ struct
             List.print ~first:"{" ~last:"}" ~sep:", " (fun oc (n, t) ->
                 Printf.fprintf oc "%s: %a" n print t) oc fs
         | Array t -> Printf.fprintf oc "%a[]" print t
+        | Map (k, v) -> Printf.fprintf oc "%a[%a]" print v print k
         | Variant cs ->
             List.print ~first:"(" ~last:")" ~sep:" | " (fun oc (n, t) ->
                 if t = Void then String.print oc n
@@ -142,6 +145,8 @@ and expr_desc =
     | Binop of binop * expr * expr
     | Record of (string * expr) list
     | Array of expr list
+    (* Never empty, as [[]] is an array: *)
+    | Map of (expr * expr) list
     | Matches of expr * pattern
     (* A constructor of a variant, with what it holds ([Ok(42)]) or nothing
      * ([Pending()]); without the parentheses, a constructor is read as a
@@ -234,6 +239,7 @@ let functions =
     [ "rand" ; "randbytes" ; "exp" ; "ln" ; "log" ; "log2" ; "int" ; "float" ;
       "bool" ; "byte" ; "interval" ; "time" ; "now" ; "ip_addr" ; "mac_addr" ; "getenv" ;
       "array" ; "length" ; "concat" ; "append" ; "prepend" ;
+      "map" ; "has" ; "remove" ; "keys" ; "values" ;
       "print" ; "print_err" ; "assert" ]
 
 (** Variables that the language defines, which are case insensitive as are
@@ -353,6 +359,9 @@ let rec print_expr_at ?(bare=false) ~all ~indent p oc e =
             (print_list (fun oc (n, e) -> Printf.fprintf oc "%s: %a" n sub e))
             fields
     | Array es -> Printf.fprintf oc "[%a]" (print_list sub) es
+    | Map kvs ->
+        Printf.fprintf oc "[%a]" (print_list (fun oc (k, v) ->
+            Printf.fprintf oc "%a: %a" sub k sub v)) kvs
     | Matches (e, pat) ->
         let q = precedence Eq in
         paren q (fun oc ->

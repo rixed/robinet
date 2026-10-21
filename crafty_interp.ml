@@ -90,14 +90,26 @@ let item loc a i =
         error loc "No item %d in an array of length %d" i (Array.length a) ;
     a.(i)
 
-(* A copy of [x] with [y] at that path of indices: *)
+(* The value of key [k], of type [typ], in map [m] of default [d]: *)
+let find loc typ m d k =
+    match Map.PMap.find k m with
+    | v -> v
+    | exception Not_found ->
+        (match d with
+        | Some v -> v
+        | None -> error loc "No key %s in this map" (to_string typ k))
+
+(* A copy of [x] with [y] at that path of indices, each with its type: *)
 let rec set_item loc x path y =
     match x, path with
     | _, [] -> y
-    | Array a, Int i :: path ->
+    | Array a, (_, Int i) :: path ->
         let a' = Array.copy a in
         a'.(i) <- set_item loc (item loc a i) path y ;
         Array a'
+    | Map (m, d), (typ, k) :: path ->
+        let v = if path = [] then y else set_item loc (find loc typ m d k) path y in
+        Map (Map.PMap.add k v m, d)
     | _ -> assert false
 
 let rand loc = function
@@ -144,6 +156,9 @@ let rec convert loc (from : A.Type.t) (typ : A.Type.t) value =
         Record (Array.of_list (List.mapi (fun i ((_, t), (_, t')) ->
             convert_to loc t t' vs.(i)) (List.combine fs gs)))
     | Array t, Array t', Array a -> Array (Array.map (convert_to loc t t') a)
+    | Map (_, t), Map (_, t'), Map (m, d) ->
+        let conv = convert_to loc t t' in
+        Map (Map.PMap.map conv m, Option.map conv d)
     | _ -> invalid_arg "Crafty_interp.convert"
 
 and convert_to loc from typ value =
@@ -214,6 +229,12 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
     | T.Concat, [ Array a ; Array b ] -> Array (Array.append a b)
     | T.Append, [ Array a ; x ] -> Array (Array.append a [| x |])
     | T.Prepend, [ x ; Array a ] -> Array (Array.append [| x |] a)
+    | T.Length, [ Map (m, _) ] -> Int (Map.PMap.cardinal m)
+    | T.Make_map, [ _ ; default ] -> empty_map (Some default)
+    | T.Has, [ Map (m, _) ; k ] -> Bool (Map.PMap.mem k m)
+    | T.Remove, [ Map (m, d) ; k ] -> Map (Map.PMap.remove k m, d)
+    | T.Keys, [ Map (m, _) ] -> Array (Array.of_enum (Map.PMap.keys m))
+    | T.Values, [ Map (m, _) ] -> Array (Array.of_enum (Map.PMap.values m))
     | T.Length, [ String s ] -> Int (String.length s)
     | T.Print, [ String s ] -> print s ; Void
     | T.Print_err, [ String s ] -> print_err s ; Void
@@ -286,6 +307,7 @@ let rec eval output (env : env) (e : T.expr) =
     | T.Index (a, i) ->
         (match eval a, eval i with
         | Array a, Int i -> item e.loc a i
+        | Map (m, d), k -> find e.loc i.T.typ m d k
         | _ -> assert false)
     | T.Select { packet ; layer ; from_start ; nth } ->
         (match eval packet with
@@ -328,6 +350,12 @@ let rec eval output (env : env) (e : T.expr) =
         | op -> arith e.loc op a b)
     | T.Record es -> Record (Array.of_list (List.map eval es))
     | T.Array es -> Array (Array.of_list (List.map eval es))
+    | T.Map kvs ->
+        (match empty_map None with
+        | Map (m, d) ->
+            Map (List.fold_left (fun m (k, v) ->
+                let k = eval k in Map.PMap.add k (eval v) m) m kvs, d)
+        | _ -> assert false)
     | T.Convert a -> convert e.loc a.typ e.typ (eval a)
     | T.Construct (c, a) -> Variant (c, Option.map_default eval Void a)
     | T.Block b -> eval_block output env b
@@ -368,7 +396,7 @@ and eval_block output env (b : T.block) =
 and bind_path output env path =
     List.fold_left (fun (is, env) (v, i) ->
         let i = eval output env i in
-        i :: is, bind env v i) ([], env) path |>
+        ((v : T.var).typ, i) :: is, bind env v i) ([], env) path |>
     fun (is, env) -> List.rev is, env
 
 (** {2 Blocks} *)
@@ -716,7 +744,14 @@ and repeat t b env var count items every for_ body body_loc k =
         | None -> d in
     guard b (fun () ->
         let items =
-            Option.map (fun e -> match eval e with Array a -> a | _ -> assert false) items in
+            Option.map (fun e ->
+                match eval e with
+                | Array a -> a
+                (* Records of a key then a value, as their fields sort: *)
+                | Map (m, _) ->
+                    Array.of_list (List.map (fun (k, v) -> Record [| k ; v |])
+                                            (Map.PMap.bindings m))
+                | _ -> assert false) items in
         (match items, Option.map eval count with
         | Some a, _ -> Some (Array.length a)
         | None, Some (Int n) -> Some n
@@ -1013,6 +1048,20 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "repeat var=i count=3 { repeat { print(\"${i}\")\n    break 2 } }\nprint(\"after\")")
   "0s: [0, 1, 2, 3, 4] [0, 1, 2, 5] [9, 0, 1, 2] [0, 1, 2, 0, 1, 2] [7]\n0s: done" \
     (runs "x = [1]\nx += 2\nx := 0 + x\ny = array(0, 0) + 7\nprint(\"${x + [3, 4]} ${append(x, 5)} ${prepend(9, x)} ${concat(x, x)} ${y}\")")
+  "0s: [a: 2, b: 1] 2 0\n0s: done" \
+    (runs "count = map(key=\"\", default=0)\nforeach w [\"a\", \"b\", \"a\"] { count[w] += 1 }\nprint(\"${count} ${length(count)} ${count[\"z\"]}\")")
+  "0s: 2=b\n0s: 3=c\n0s: [1: a, 2: b, 3: c] [2, 3] [b, c] false\n0s: done" \
+    (runs "m = [2: \"b\", 1: \"a\"]\nm[3] := \"c\"\nn = m\nm := remove(m, 1)\nforeach m { print(\"${I.key}=${I.value}\") }\nprint(\"${n} ${keys(m)} ${values(m)} ${has(m, 1)}\")")
+  "0s: [1: [5]] true false\n0s: done" \
+    (runs "m = map(key=0, default=[0])\nm[1][0] += 5\nprint(\"${m} ${m == [1: [5]]} ${m == [1: [6]]}\")")
+  "0s: failed: line 2, column 5: No key 3 in this map" \
+    (runs "m = [1: 2]\nx = m[3]")
+  "0s: failed: line 2, column 1: No key 2 in this map" \
+    (runs "m = [1: [0]]\nm[2][0] := 1")
+  "0s: [1: 2.0]\n0s: done" \
+    (runs "m = map(key=1, default=0.5)\nm := [1: 2]\nprint(\"${m}\")")
+  "0s: [tcp: 1, udp: 2], and 0 icmp\n0s: done" \
+    (runs "seen = map(key=\"\", default=0)\nforeach p [\"udp\", \"tcp\", \"udp\"] { seen[p] += 1 }\nprint(\"${seen}, and ${seen[\"icmp\"]} icmp\")")
   "0s: [1, 5] [9, 2]\n0s: done" \
     (runs "x = [1, 2]\ny = x\nx[1] += 3\ny[0] := 9\nprint(\"${x} ${y}\")")
   "0s: [[1], [0]]\n0s: done" \

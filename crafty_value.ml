@@ -36,6 +36,8 @@ type value =
     (* In the order of the fields of the record type: *)
     | Record of value array
     | Array of value array
+    (* Ordered by [compare_keys], with the value of the missing keys if any: *)
+    | Map of (value, value) Map.PMap.t * value option
     | Variant of string * value
 
 let of_literal = function
@@ -56,6 +58,30 @@ let string_of_bytes a =
         match a.(i) with Byte b -> Char.chr b | _ -> assert false)
 
 let mac_bits mac = (mac : Eth.Addr.t :> Bitstring.bitstring)
+
+(* A total order that agrees with [equal], which ignores the defaults of
+ * maps: *)
+let rec compare_keys a b =
+    let compare_arrays a b =
+        match Int.compare (Array.length a) (Array.length b) with
+        | 0 ->
+            let rec loop i =
+                if i >= Array.length a then 0 else
+                match compare_keys a.(i) b.(i) with 0 -> loop (i + 1) | c -> c in
+            loop 0
+        | c -> c in
+    match a, b with
+    | Ip a, Ip b -> Ip.Addr.compare a b
+    | Mac a, Mac b -> Bitstring.compare (mac_bits a) (mac_bits b)
+    | Interval a, Interval b -> Interval.compare a b
+    | Time a, Time b -> Clock.Wall.compare a b
+    | Record a, Record b | Array a, Array b -> compare_arrays a b
+    | Map (a, _), Map (b, _) -> Map.PMap.compare compare_keys a b
+    | Variant (n, a), Variant (m, b) ->
+        (match String.compare n m with 0 -> compare_keys a b | c -> c)
+    | a, b -> compare a b
+
+let empty_map default = Map (Map.PMap.create compare_keys, default)
 
 (* How a value of type [typ] is written into a string: *)
 let rec to_string (typ : A.Type.t) v =
@@ -79,6 +105,10 @@ let rec to_string (typ : A.Type.t) v =
             | Byte b -> Printf.sprintf "%02x" b | _ -> assert false) a))
     | Array t, Array a ->
         "["^ String.concat ", " (Array.to_list (Array.map (to_string t) a)) ^"]"
+    | Map (_, _), Map (m, _) when Map.PMap.is_empty m -> "[:]"
+    | Map (k, t), Map (m, _) ->
+        "["^ String.concat ", " (List.map (fun (key, v) ->
+            to_string k key ^": "^ to_string t v) (Map.PMap.bindings m)) ^"]"
     | Variant cs, Variant (n, v) ->
         let t = try List.assoc n cs with Not_found -> A.Type.Void in
         if t = A.Type.Void then n else n ^" "^ to_string t v
@@ -99,6 +129,7 @@ let rec zero (typ : A.Type.t) =
     | Mac -> Mac Eth.Addr.zero
     | Record fs -> Record (Array.of_list (List.map (zero % snd) fs))
     | Array _ -> Array [||]
+    | Map (_, t) -> empty_map (Some (zero t))
     | Variant ((n, t) :: _) -> Variant (n, zero t)
     | Variant [] | Pattern -> invalid_arg "Crafty_value.zero"
 
@@ -109,6 +140,7 @@ let rec equal a b =
     | Record a, Record b | Array a, Array b ->
         Array.length a = Array.length b && Array.for_all2 equal a b
     | Variant (n, a), Variant (m, b) -> n = m && equal a b
+    | Map _, Map _ -> compare_keys a b = 0
     | a, b -> a = b
 
 (* Only what the typer lets be ordered: *)

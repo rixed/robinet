@@ -118,10 +118,11 @@ let maybe_next p = sp -+ dismiss_error_if (parsed_fewer_than 1) p
 
 let slash = (item '/' ||| item '\\') >>: ignore |? "'/'"
 
-(* What a word or a literal cannot be followed by: *)
+(* What a word or a literal cannot be followed by; a colon can, for the key
+ * of a map: *)
 let end_of_word =
     quiet (nay (char_if "end of word" (fun c ->
-        is_word c || c = '.' || c = ':' || Char.code c >= 128)))
+        is_word c || c = '.' || Char.code c >= 128)))
 
 (* Failing only at its first letter: *)
 let identifier =
@@ -460,8 +461,18 @@ let make_expr ~cond ~self ~expr ~pattern ~block =
         bytes_lit |||
         string_lit expr |||
         in_ '(' self ')' |||
-        (here ++ in_ '[' (list_of expr) ']' >>:
-            fun (loc, es) -> { loc ; desc = Array es }) |||
+        (* The items of an array, or the keys and values of a map: *)
+        (here ++ in_ '[' (list_of (
+            expr ++ optional ~def:None (
+                sp -- item ':' -- nl_sp -+ expr >>: Option.some))) ']' >>:
+            fun (loc, es) ->
+                let desc =
+                    if List.for_all (Option.is_none % snd) es then
+                        Array (List.map fst es)
+                    else if List.for_all (Option.is_some % snd) es then
+                        Map (List.map (fun (k, v) -> k, Option.get v) es)
+                    else reject "Items without keys in a map" in
+                { loc ; desc }) |||
         (here ++ in_ '{' (
             repeat ~min:1 ~sep:(nl_sp -- item ',' -- nl_sp) field +-
             optional ~def:() (nl_sp -- item ',')) '}' >>:
@@ -800,6 +811,9 @@ let parse text =
   "foreach every=(1s / n) for=1m ttls {\n}\n" (reads "foreach for=1m every=1s / n ttls {}")
   "foreach x a.b[(i + 1)] {\n}\n" (reads "foreach var=\"x\" a.b[i + 1] {}")
   "x[1][(i + 1)] += 2\nx[0] := [1]\n" (reads "x[1][i+1] += 2\nx[0]:=[1]")
+  "x = [1: \"a\", (2 + 3): \"b\"]\n" (reads "x = [1:\"a\", 2+3 : \"b\",]")
+  "x = [true: 1, 1.2.3.4: 2, AA:BB:CC:DD:EE:FF: 3, y: [4]]\n" \
+    (reads "x = [true: 1, 1.2.3.4: 2, aa:bb:cc:dd:ee:ff: 3, y: [4]]")
   "on timeout=1s max=3 ../UDP {\n  n += 1\n  m := 2\n}\n" \
     (reads "on max=3 timeout=1s ../UDP { n += 1; m := 2 }")
   "expect UDP((IP^.ttl == 3) && (^IP.src == 1.2.3.4)) {\n}\n" \
@@ -938,6 +952,7 @@ let parse text =
   "line 1, column 7: ip is a reserved name" (reads "ip = 3")
   "line 1, column 11: print is a reserved name" (reads "print += 3")
   "line 1, column 7: An item is not declared (:= changes it)" (reads "x[0] = 1")
+  "line 1, column 14: Items without keys in a map" (reads "x = [1: 2, 3]")
   "line 1, column 10: match is a reserved name" (reads "match = 1")
   "line 1, column 19: LAST is a reserved name" (reads "repeat var=last {}")
   "line 1, column 20: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")

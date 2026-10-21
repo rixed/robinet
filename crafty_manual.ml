@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 12cd377d22f95f6c16ee98c8fa80daea) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 6c4a57df77f9314364e55a2e6562c570) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -100,6 +100,10 @@ let reference = {crafty_manual|### Lexical conventions
 -   `ip`: `192.0.2.1`. IPv4 only.
 -   `mac`: `aa:bb:cc:dd:ee:ff`.
 -   arrays: `[1, 2, 3]`. Items of one type.
+-   maps: `[192.0.2.1: "gw", 192.0.2.2: "dns"]`, a `string[ip]`. Keys of any one
+    type, values of one type, in no particular order. `map(key=k, default=v)` is
+    an empty map with the type of `k` as keys, and `v` as the value of missing
+    keys.
 -   records: `{name: "gw", ip: 192.0.2.1}`. Field names are case insensitive.
     Braces with no field in them, `{}`, are an empty block, not a record.
 -   variants: `Ok(42)`, `Failed("timeout")`, `Pending` (or `Pending()`). A
@@ -122,8 +126,8 @@ string to bytes and back, bytes to an IP address (4 bytes) or a MAC address (6
 bytes, checked at run time). An int is a bool where one is expected (non-zero is
 true). Other conversions use the functions `int`, `float`, `bool`, `byte`,
 `interval`, `time`, `ip_addr` and `mac_addr`, which also read a string as a
-literal: `ip_addr(getenv("SERVER"))`, `interval("1.5s")`. The items of an array
-and the fields of a record convert likewise.
+literal: `ip_addr(getenv("SERVER"))`, `interval("1.5s")`. The items of an array,
+the values of a map and the fields of a record convert likewise.
 
 **Variants** need no declaration: `Ok(42)` is of the variant `(Ok int)`, which
 converts to any variant that has the constructor `Ok` holding an int (or what an
@@ -178,8 +182,11 @@ Bitwise operators bind tighter than comparisons, so `flags & RST == 0` means
 Strings are not added together; use interpolation instead.
 
 Also: `r.field` (a record's field), `a[i]` (an array's item, from 0, checked at
-run time), `f(arg, name=arg)` (a function call), and the layer selectors
-described under [Patterns](#patterns).
+run time), `m[k]` (a map's value for key `k`, else its default, else an error),
+`f(arg, name=arg)` (a function call), and the layer selectors described under
+[Patterns](#patterns). `a[i] := v` and `m[k] += 1` change an item, or a key's
+value, adding the key if need be. Two maps are equal when their keys and values
+are.
 
 **Blocks, `if` and `case` are expressions.**:
 
@@ -321,7 +328,8 @@ takes it unnamed (`break 2`, `wait 1s`).
 -   `foreach v every=d for=d ARRAY { ... }`: A `repeat` that runs the block once
     per item of the array, in order, `v` (default `I`, also `var=v`) being the
     item. The array is computed once, before the first iteration. `every` and
-    `for` are as for `repeat`, and optional.
+    `for` are as for `repeat`, and optional. The items of a map are records
+    `{key: k, value: v}`.
 -   `break depth=n`: Leaves the `n` (default 1, a literal) innermost enclosing
     `repeat`, `foreach` or `on` forms.
 -   `wait dur=d`: Pauses for `d`. A negative duration is an error.
@@ -361,8 +369,11 @@ nodes it held.
 -   `getenv(name, default=s)`: An environment variable (fails if unset and no
     default).
 -   `array(init=v, len=n)`: An array of `n` items, all `v`.
--   `length(a)`: The length of an array or a string.
+-   `length(a)`: The length of an array, a map or a string.
 -   `concat(a, b)`, `append(a, x)`, `prepend(x, a)`: as with `+`.
+-   `map(key=k, default=v)`: see maps above.
+-   `has(m, k)`, `remove(m, k)`: Whether map `m` has key `k`; `m` without it.
+-   `keys(m)`, `values(m)`: Arrays of the keys and the values of a map.
 
 An argument can be left unnamed when the function has a single parameter, when
 it is the only parameter without a default (`assert(x == 4)`), or when no
@@ -704,6 +715,9 @@ destination port of the packet they quote: `MATCH[IP]` is the quoted probe, and
     total = 0
     foreach s sizes { total += s }
     print("${host.name} is ${host.ip}; ${total} bytes in ${length(sizes)} packets")
+    seen = map(key="", default=0)
+    foreach p ["udp", "tcp", "udp"] { seen[p] += 1 }
+    print("${seen}, and ${seen["icmp"]} icmp")
     delay = interval(0.5) * 3
     print("waiting ${delay}")
     wait delay
@@ -713,5 +727,6 @@ destination port of the packet they quote: `MATCH[IP]` is the quoted probe, and
 prints:
 
     gw is 192.0.2.1; 2076 bytes in 3 packets
+    [tcp: 1, udp: 2], and 0 icmp
     waiting 1s500ms
 |crafty_manual}

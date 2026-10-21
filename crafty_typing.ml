@@ -47,7 +47,9 @@ type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
     | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
     | To_ip | To_mac | Getenv
-    | Make_array | Length | Concat | Append | Prepend | Print | Print_err | Assert
+    | Make_array | Length | Concat | Append | Prepend
+    | Make_map | Has | Keys | Values | Remove
+    | Print | Print_err | Assert
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
 
@@ -72,6 +74,7 @@ and desc =
     (* In the order of the record type's fields: *)
     | Record of expr list
     | Array of expr list
+    | Map of (expr * expr) list
     (* The value of that expression, as this one's type: *)
     | Convert of expr
     (* A constructor of a variant, with what it holds unless void: *)
@@ -241,13 +244,14 @@ let rec converts a b =
         List.for_all2 (fun (n, t) (n', t') -> n = n' && converts_to t t') fs gs &&
         a <> b
     | Type.Array a, Type.Array b -> converts a b
+    | Type.Map (k, a), Type.Map (k', b) -> k = k' && converts a b
     | _ -> false
 
 (* Whether a value of that type holds a variant: *)
 let rec has_variant = function
     | Type.Variant _ -> true
     | Type.Record fs -> List.exists (has_variant % snd) fs
-    | Type.Array t -> has_variant t
+    | Type.Array t | Type.Map (_, t) -> has_variant t
     | _ -> false
 
 (* The type that values of types [a] and [b] both convert to, if any; [a]
@@ -271,6 +275,8 @@ let rec join_types a b =
             Option.map (fun t -> n, t) (join_types t t')) fs gs |>
         all_some |> Option.map (fun fs -> Type.Record fs)
     | Type.Array a, Type.Array b -> Option.map (fun t -> Type.Array t) (join_types a b)
+    | Type.Map (k, a), Type.Map (k', b) when k = k' ->
+        Option.map (fun t -> Type.Map (k, t)) (join_types a b)
     | _ -> None
 
 (* Whether that block ends only with a break: *)
@@ -349,6 +355,17 @@ let expect what e typ =
     match coerce e typ with
     | Some e -> e
     | None -> error e.loc "%s must be %s, not %s" what (a_type typ) (a_type e.typ)
+
+(* The type that all of [es] convert to: the [expected] one if they all do,
+ * else the first one's, which the others are then told not to be: *)
+let common_type expected es =
+    match expected with
+    | Some t when List.for_all (fun e -> coerce e t <> None) es -> t
+    | _ ->
+        let first = (List.hd es).typ in
+        List.fold_left (fun acc e -> Option.bind acc (join_types e.typ))
+            (Some first) es |>
+        Option.default first
 
 (* Conditions take integers as well, non zero being true: *)
 let as_bool what e =
@@ -500,6 +517,8 @@ let any_value t =
 
 let any_array t = match t with Type.Array _ -> Some t | _ -> None
 
+let any_map t = match t with Type.Map _ -> Some t | _ -> None
+
 let scalars = Type.[ Bool ; Int ; Float ; Byte ]
 
 (* Each function's name, parameters, and type of result given the types of
@@ -544,8 +563,9 @@ let builtins =
         [ param "init" "a value" any_value ; param "len" "an int" (only Type.[ Int ]) ],
         (fun ts -> Type.Array (List.hd ts)) ;
       "length", Length,
-        [ param "a" "an array" (fun t ->
-            if t = Type.String then Some t else any_array t) ],
+        [ param "a" "an array, a map or a string" (function
+            | Type.String | Type.Array _ | Type.Map _ as t -> Some t
+            | _ -> None) ],
         res Type.Int ;
       (* Of types that [array_join] checks: *)
       "concat", Concat,
@@ -555,6 +575,18 @@ let builtins =
       "prepend", Prepend,
         [ param "x" "a value" any_value ; param "a" "an array" any_array ],
         (fun ts -> List.nth ts 1) ;
+      "map", Make_map,
+        [ param "key" "a value" any_value ; param "default" "a value" any_value ],
+        (fun ts -> Type.Map (List.hd ts, List.nth ts 1)) ;
+      (* Of a key that [map_call] checks: *)
+      "has", Has, [ param "m" "a map" any_map ; param "k" "a value" any_value ],
+        res Type.Bool ;
+      "remove", Remove, [ param "m" "a map" any_map ; param "k" "a value" any_value ],
+        List.hd ;
+      "keys", Keys, [ param "m" "a map" any_map ],
+        (function [ Type.Map (k, _) ] -> Type.Array k | _ -> assert false) ;
+      "values", Values, [ param "m" "a map" any_map ],
+        (function [ Type.Map (_, v) ] -> Type.Array v | _ -> assert false) ;
       "print", Print, [ param "s" "a string" (only Type.[ String ]) ], res Type.Void ;
       "print_err", Print_err, [ param "s" "a string" (only Type.[ String ]) ],
         res Type.Void ;
@@ -586,6 +618,15 @@ let array_join f loc x y =
     | Append, Type.Array t, _ -> Option.bind (coerce y t) (mk x)
     | Prepend, _, Type.Array t -> Option.bind (coerce x t) (fun x -> mk x y)
     | _ -> None
+
+(* That call of [Has] or [Remove] on map [m], if [k] converts to its keys: *)
+let map_call f loc typ m k =
+    match m.typ with
+    | Type.Map (kt, _) ->
+        (match coerce k kt with
+        | Some k -> { loc ; typ ; desc = Call (f, [ m ; k ]) }
+        | None -> error k.loc "The keys of %s are not %s" (a_type m.typ) (a_type k.typ))
+    | _ -> assert false
 
 (* Both of the same type, converting one to the other's if need be: *)
 let unify what a b =
@@ -659,9 +700,10 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             | None -> error loc "No %s in %s" (lname name) (a_type a.typ))
         | t -> error loc "Cannot select a layer of %s" (a_type t))
     | A.Index (a, i) ->
-        let a = expr env a and i = expr env i in
+        let a = expr env a in
         (match a.typ with
-        | Type.Array t -> mk t (Index (a, expect "An index" i Type.Int))
+        | Type.Array t -> mk t (Index (a, expect "An index" (expr env i) Type.Int))
+        | Type.Map (k, v) -> mk v (Index (a, expect "A key" (expr ~expected:k env i) k))
         | t -> error loc "Cannot index %s" (a_type t))
     | A.Call (f, args) ->
         (match call env loc f args with
@@ -674,6 +716,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 | Append -> error loc "Cannot append %s to %s" y x
                 | Prepend -> error loc "Cannot prepend %s to %s" x y
                 | _ -> error loc "Cannot concatenate %s and %s" x y))
+        | (Has | Remove as b), [ m ; k ], t -> map_call b loc t m k
         | b, args, t -> mk t (Call (b, args)))
     | A.Unop (A.Not, e) ->
         let e = as_bool "The operand of !" (expr env e) in
@@ -707,18 +750,20 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         let expected_item =
             match expected with Some (Type.Array t) -> Some t | _ -> None in
         let items = List.map (expr ?expected:expected_item env) items in
-        let item_typ =
-            match expected_item with
-            | Some t when List.for_all (fun i -> coerce i t <> None) items -> t
-            | _ ->
-                let first = (List.hd items).typ in
-                (* Else the first item's, which the others are then told not
-                 * to be: *)
-                List.fold_left (fun acc i -> Option.bind acc (join_types i.typ))
-                    (Some first) items |>
-                Option.default first in
+        let item_typ = common_type expected_item items in
         let items = List.map (fun i -> expect "An item of this array" i item_typ) items in
         mk (Type.Array item_typ) (Array items)
+    | A.Map kvs ->
+        let ek, ev =
+            match expected with
+            | Some (Type.Map (k, v)) -> Some k, Some v
+            | _ -> None, None in
+        let ks = List.map (fun (k, _) -> expr ?expected:ek env k) kvs
+        and vs = List.map (fun (_, v) -> expr ?expected:ev env v) kvs in
+        let kt = common_type ek ks and vt = common_type ev vs in
+        let ks = List.map (fun k -> expect "A key of this map" k kt) ks
+        and vs = List.map (fun v -> expect "A value of this map" v vt) vs in
+        mk (Type.Map (kt, vt)) (Map (List.combine ks vs))
     | A.Matches _ -> error loc "=~ is not supported yet"
     | A.Block b ->
         let b, typ = branch b in
@@ -1151,14 +1196,15 @@ and stmt errors env (s : A.stmt) =
              * name, [x[i] op= e] being [x[#0] op e]: *)
             let typ, path, lhs, env' =
                 List.fold_lefti (fun (t, path, lhs, env') n i ->
-                    match t with
-                    | Type.Array t ->
-                        let i = expect "An index" (expr env i) Type.Int in
-                        let iv = new_var ("#"^ string_of_int n) Type.Int in
-                        t, (iv, i) :: path,
-                        { A.loc ; A.desc = A.Index (lhs, { A.loc ; A.desc = A.Var iv.name }) },
-                        { env' with vars = iv :: env'.vars }
-                    | t -> error loc "Cannot index %s" (a_type t)
+                    let t, i =
+                        match t with
+                        | Type.Array t -> t, expect "An index" (expr env i) Type.Int
+                        | Type.Map (k, t) -> t, expect "A key" (expr ~expected:k env i) k
+                        | t -> error loc "Cannot index %s" (a_type t) in
+                    let iv = new_var ("#"^ string_of_int n) i.typ in
+                    t, (iv, i) :: path,
+                    { A.loc ; A.desc = A.Index (lhs, { A.loc ; A.desc = A.Var iv.name }) },
+                    { env' with vars = iv :: env'.vars }
                 ) (v.typ, [], { A.loc ; A.desc = A.Var name }, env) is in
             let e =
                 match op with
@@ -1202,7 +1248,8 @@ and stmt errors env (s : A.stmt) =
             let t =
                 match items.typ with
                 | Type.Array t -> t
-                | t -> error items.loc "The items of foreach must be an array, not %s"
+                | Type.Map (k, v) -> record_type [ "key", k ; "value", v ]
+                | t -> error items.loc "The items of foreach must be an array or a map, not %s"
                            (a_type t) in
             let every = opt_expr env "The period of foreach" Type.Interval every
             and for_ = opt_expr env "The duration of foreach" Type.Interval for_ in
@@ -1276,6 +1323,8 @@ and expr_declarations e =
         expr_declarations e
     | Index (a, b) | Binop (_, a, b) -> expr_declarations a @ expr_declarations b
     | Call (_, es) | Record es | Array es -> List.concat_map expr_declarations es
+    | Map kvs ->
+        List.concat_map (fun (k, v) -> expr_declarations k @ expr_declarations v) kvs
     | String parts ->
         List.concat_map (function Interp e -> expr_declarations e | Text _ -> []) parts
     | Construct (_, e) -> Option.map_default expr_declarations [] e
@@ -1330,6 +1379,10 @@ let check (program : A.program) =
     (types "a = [1] + [2]\nb = [1] + 2\nc = 1 + [2.5]\nd = [[1]] + [2]")
   "a: int[], b: float[], c: int[], d: float[]" \
     (types "a = [1]\na += 2\nb = append([1.5], 1)\nc = prepend(a=[2], x=1)\nd = concat([1], [2.5])")
+  "m: string[int], n: int[ip], c: int, k: ip[], v: int[], b: bool, l: int" \
+    (types "m = [1: \"a\"]\nn = map(key=0.0.0.0, default=0)\nc = n[1.2.3.4]\nk = keys(n)\nv = values(n)\nb = has(n, 1.2.3.4)\nl = length(m)")
+  "m: float[string], n: int[{a: int}], I: {key: string, value: float}, k: string" \
+    (types "m = [\"a\": 1, \"b\": 2.5]\nm[\"c\"] += 1\nm := remove(m, \"a\")\nn = [{a: 1}: 2]\nforeach m { k = I.key }")
   "x: float[][], i: int" \
     (types "x = [[1.0]]\ni = 0\nx[i][0] += 1\nx[0] := [2]")
   "x: int, y: int" \
@@ -1434,6 +1487,14 @@ let check (program : A.program) =
     (types "x = concat([1], [[2.5]])")
   "line 1, column 11: The arguments of array must be named" \
     (types "x = array(1)")
+  "line 2, column 7: A key must be an int, not a string" \
+    (types "m = [1: 2]\nx = m[\"a\"]")
+  "line 2, column 12: The keys of an int[int] are not a string" \
+    (types "m = [1: 2]\nx = has(m, \"a\")")
+  "line 1, column 5: map needs an argument default" \
+    (types "m = map(key=1)")
+  "line 1, column 5: Cannot tell the type of the items of an empty array" \
+    (types "m = []")
   "line 2, column 1: Cannot index an int" \
     (types "x = [1]\nx[0][0] := 1")
   "line 1, column 5: Cannot tell the type of the items of an empty array" \
@@ -1442,7 +1503,7 @@ let check (program : A.program) =
     (types "x = print(\"a\")")
   "line 1, column 1: The result of rand is not used" \
     (types "rand(3)")
-  "line 1, column 12: Argument a of length must be an array, not an int" \
+  "line 1, column 12: Argument a of length must be an array, a map or a string, not an int" \
     (types "x = length(3)")
   "line 1, column 8: Argument cond of assert must be a bool or an int, not a string" \
     (types "assert(\"x\")")
@@ -1464,7 +1525,7 @@ let check (program : A.program) =
     (types "any Bytes {} | Bytes { x = MATCH }\ny = MATCH")
   "line 1, column 11: The maximum of retry must be an int, not an interval" \
     (types "retry max=1s {}")
-  "line 1, column 11: The items of foreach must be an array, not an int" \
+  "line 1, column 11: The items of foreach must be an array or a map, not an int" \
     (types "foreach t 3 {}")
   "line 1, column 15: The period of foreach must be an interval, not an int" \
     (types "foreach every=1 [1] {}")
