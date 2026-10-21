@@ -593,6 +593,12 @@ let stmt =
             if is_keyword s || is_in functions s ||
                is_constructor s && not (is_reserved s) then fail else return ()) --
         item '(' in
+    (* The variable of a foreach, unnamed: a name then, after a space, what
+     * starts its items rather than continues an expression: *)
+    let foreach_var =
+        quiet (variable +- char_if "space" (fun c -> c = ' ' || c = '\t') +-
+               sp +- check (char_if "" (fun c ->
+                   is_word c || c = '[' || c = '(' || c = '"'))) in
     with_loc (
         (* Alone, a call rather than a stack, of an unknown layer: *)
         unknown_function (quiet (args expr +-
@@ -627,10 +633,22 @@ let stmt =
                      count = p "count" ; every = p "every" ; for_ = p "for" ;
                      body }) |||
         (keyword "foreach" -+
-         params ~unnamed:false "foreach" [ "var" ; "every" ; "for" ] +- sp ++
-         expr ++ body >>: fun ((p, items), body) ->
-            Foreach { var = Option.map (var_name "variable name") (p "var") ;
-                      items ; every = p "every" ; for_ = p "for" ; body }) |||
+         (optional ~def:None (sp -+ foreach_var >>: Option.some) ++ here ++
+          params ~unnamed:false "foreach" [ "var" ; "every" ; "for" ] ++ here >>=
+          (* After the parameters too, if any, not to read it twice: *)
+          fun (((v1, l1), p), l2) ->
+            optional ~def:None (
+                if v1 = None && l1 <> l2 then sp -+ foreach_var >>: Option.some
+                else fail) >>: fun v2 -> (v1, p), v2) +- sp ++
+         expr ++ body >>: fun ((((v1, p), v2), items), body) ->
+            let var =
+                match v1, v2, Option.map (var_name "variable name") (p "var") with
+                | None, None, v -> v
+                | (Some _ as v), None, None | None, (Some _ as v), None ->
+                    Option.map check_var v
+                | _ -> reject "Variable name of foreach given twice" in
+            Foreach { var ; items ; every = p "every" ; for_ = p "for" ;
+                      body }) |||
         (keyword "retry" -+ params "retry" [ "max" ] ++ body >>:
             fun (p, body) -> Retry { max = p "max" ; body }) |||
         (keyword "catch" -+ body >>: fun body -> Catch body) |||
@@ -766,10 +784,13 @@ let parse text =
     (reads "repeat var=i count=3 every=1ms for=1s { print(\"${i}\") }")
   "repeat count=(n * 2) every=(1s / n) {\n}\n" \
     (reads "repeat every=1s / n count=n*2 {}")
-  "foreach var=t [3, 5, 6] {\n  print(\"${t}\")\n}\n" \
-    (reads "foreach var=t [3, 5, 6] { print(\"${t}\") }")
+  "foreach t [3, 5, 6] {\n  print(\"${t}\")\n}\n" \
+    (reads "foreach t [3, 5, 6] { print(\"${t}\") }")
+  "foreach t every=1s ts {\n}\nforeach t for=1m ts {\n}\nforeach t ts {\n}\n" \
+    (reads "foreach t every=1s ts {}\nforeach for=1m t (ts) {}\nforeach var=t ts {}")
+  "foreach t ts {\n}\nforeach a - b {\n}\n" (reads "foreach t\tts {}\nforeach a - b {}")
   "foreach every=(1s / n) for=1m ttls {\n}\n" (reads "foreach for=1m every=1s / n ttls {}")
-  "foreach var=x a.b[(i + 1)] {\n}\n" (reads "foreach var=\"x\" a.b[i + 1] {}")
+  "foreach x a.b[(i + 1)] {\n}\n" (reads "foreach var=\"x\" a.b[i + 1] {}")
   "on timeout=1s max=3 ../UDP {\n  n += 1\n  m := 2\n}\n" \
     (reads "on max=3 timeout=1s ../UDP { n += 1; m := 2 }")
   "expect UDP((IP^.ttl == 3) && (^IP.src == 1.2.3.4)) {\n}\n" \
@@ -854,7 +875,7 @@ let parse text =
     "x = 1m30s + 10ms + 1.5\xc2\xb5s" ; "x = [1.2.3.4 == y, aa:bb:cc:dd:ee:ff]" ; \
     "x = #1ee7 # a comment\nx = #f" ; "x = \"a ${x + 1} b \\${not} \\x41$\"" ; \
     "x = y =~ /IP/UDP(dport = 53)" ; "wait dur=1s * n" ; \
-    "repeat every=1s / n count=n*2 {}" ; "foreach var=t every=1s * 2 [1, 2] {}" ; \
+    "repeat every=1s / n count=n*2 {}" ; "foreach t every=1s * 2 [1, 2] {}" ; \
     "on max=3 timeout=1s ../UDP { n += 1; m := 2 }" ; \
     "expect UDP(IP^.ttl = 3, ^IP.src == 1.2.3.4) {}" ; \
     "expect ../../TCP!(flags & RST) {}" ; "IP!(ttl=1)/TCP!(flags=2)/Bytes(\"x\")" ; \
@@ -895,6 +916,9 @@ let parse text =
   "line 1, column 19: Expected '{' in block" (reads "foreach var=t ttls")
   "line 1, column 16: Unknown parameter count for foreach (expected var, every, for)" \
     (reads "foreach count=3 ttls {}")
+  "line 1, column 22: Variable name of foreach given twice" \
+    (reads "foreach t var=u ts {}")
+  "line 1, column 21: MATCH is a reserved name" (reads "foreach MATCH [1] {}")
   "line 1, column 18: Parameter max of retry given twice" \
     (reads "retry max=1 max=2 {\n}")
   "line 1, column 10: Parameter depth of break given twice" (reads "break 2 3")

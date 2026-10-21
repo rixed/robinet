@@ -958,15 +958,15 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: done" \
     (runs "repeat count=0 { print(\"never\") }")
   "0s: 3\n0s: 5\n0s: 6\n0s: done" \
-    (runs "foreach var=t [3, 5, 6] { print(\"${t}\") }")
+    (runs "foreach t [3, 5, 6] { print(\"${t}\") }")
   "0s: a\n1s: b\n1s: after\n1s: done" \
-    (runs "foreach var=s every=1s [\"a\", \"b\"] { print(s) }\nprint(\"after\")")
+    (runs "foreach s every=1s [\"a\", \"b\"] { print(s) }\nprint(\"after\")")
   "0s: a\n1s: b\n1s: done" \
-    (runs "foreach var=s every=1s for=1500ms [\"a\", \"b\", \"c\"] { print(s) }")
+    (runs "foreach s every=1s for=1500ms [\"a\", \"b\", \"c\"] { print(s) }")
   "0s: done" \
     (runs "foreach array(init=1, len=0) { print(\"never\") }")
   "0s: 1\n0s: 2\n0s: [9]\n0s: done" \
-    (runs "x = [1, 2]\nforeach var=v x { x := [9]\n  print(\"${v}\") }\nprint(\"${x}\")")
+    (runs "x = [1, 2]\nforeach v x { x := [9]\n  print(\"${v}\") }\nprint(\"${x}\")")
   "0s: 1\n0s: done" \
     (runs "foreach [1, 2, 3] { if I == 2 { break }\n  print(\"${I}\") }")
   "0s: 0\n0s: after\n0s: done" \

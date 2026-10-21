@@ -352,10 +352,10 @@ also takes it unnamed (`break 2`, `wait 1s`).
   Without `var`, a variable `X` is itself what the constructor holds.
   A `|` may end a line or start the next one. Its value is that of the block
   it ran.
-- `foreach var=v every=d for=d ARRAY { ... }`: A `repeat` that runs the
-  block once per item of the array, in order, `v` (default `I`) being the
-  item. The array is computed once, before the first iteration. `every` and
-  `for` are as for `repeat`, and optional.
+- `foreach v every=d for=d ARRAY { ... }`: A `repeat` that runs the
+  block once per item of the array, in order, `v` (default `I`, also
+  `var=v`) being the item. The array is computed once, before the first
+  iteration. `every` and `for` are as for `repeat`, and optional.
 - `break depth=n`: Leaves the `n` (default 1, a literal) innermost enclosing
   `repeat`, `foreach` or `on` forms.
 - `wait dur=d`: Pauses for `d`. A negative duration is an error.
@@ -750,7 +750,7 @@ print("moving on")
 host = {name: "gw", ip: 192.0.2.1}
 sizes = [64, 512, 1500]
 total = 0
-foreach var=s sizes { total += s }
+foreach s sizes { total += s }
 print("${host.name} is ${host.ip}; ${total} bytes in ${length(sizes)} packets")
 delay = interval(0.5) * 3
 print("waiting ${delay}")

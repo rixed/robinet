@@ -422,7 +422,7 @@ and print_stmt ~all indent oc s =
         Char.print oc ' ' ; print_block ~all indent oc body
     | Foreach { var ; items ; every ; for_ ; body } ->
         String.print oc "foreach" ;
-        Option.may (Printf.fprintf oc " var=%s") var ;
+        Option.may (Printf.fprintf oc " %s") var ;
         param "every" every ; param "for" for_ ;
         Printf.fprintf oc " %a " (print_expr_at ~bare:true ~all ~indent 0) items ;
         print_block ~all indent oc body

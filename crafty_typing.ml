@@ -1266,7 +1266,7 @@ let check (program : A.program) =
   "x: int, y: ip" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"a\")\n  { x = LAST[UDP].src }\n  Bytes(\"b\")\n  expect ../UDP(IP.src == LAST[IP].dst) { y = LAST[IP].src } }")
   "t: float, x: float, p: {a: int}, y: int" \
-    (types "foreach var=t [1, 2.5] { x = t * 2 }\nforeach var=p [{a: 1}] { y = p.a }")
+    (types "foreach t [1, 2.5] { x = t * 2 }\nforeach p [{a: 1}] { y = p.a }")
   "n: int, x: int, y: bool, z: float" \
     (types "n = 3\nif n & 1 { x = 1 } elsif n > 2 { y = true } else { z = 1.0 }")
   "" \
@@ -1373,12 +1373,12 @@ let check (program : A.program) =
     (types "any Bytes {} | Bytes { x = MATCH }\ny = MATCH")
   "line 1, column 11: The maximum of retry must be an int, not an interval" \
     (types "retry max=1s {}")
-  "line 1, column 15: The items of foreach must be an array, not an int" \
-    (types "foreach var=t 3 {}")
+  "line 1, column 11: The items of foreach must be an array, not an int" \
+    (types "foreach t 3 {}")
   "line 1, column 15: The period of foreach must be an interval, not an int" \
     (types "foreach every=1 [1] {}")
   "line 2, column 2: Break out of 2 repeat, foreach or on, but there is only one" \
-    (types "foreach var=t [1] { x = t * 2.0\n break 2 }")
+    (types "foreach t [1] { x = t * 2.0\n break 2 }")
   "line 1, column 22: The period of repeat must be an interval, not an int" \
     (types "repeat count=3 every=1 {}")
   "line 1, column 6: The duration of wait must be an interval, not an int" \
