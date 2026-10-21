@@ -283,12 +283,16 @@ let unpack_ip _ bits =
 
 let ip_proto fields hints = int_of ~hints fields "IP" "proto" 0 0xff
 
+let ip_options fields =
+    let options = bytes_of fields "options" in
+    if Tools.bytelength options mod 4 <> 0 || Tools.bytelength options > 40 then
+        V.fail "The options of IP must be a multiple of 4 bytes, up to 40" ;
+    options
+
 (* An IPv4 header as given around [payload], its id from [next_id] if not: *)
 let pack_ip next_id fields hints payload =
     let int ~def name hi = int_of ~def fields "IP!" name 0 hi
-    and options = bytes_of fields "options" in
-    if Tools.bytelength options mod 4 <> 0 || Tools.bytelength options > 40 then
-        V.fail "The options of IP must be a multiple of 4 bytes, up to 40" ;
+    and options = ip_options fields in
     let tot_len = opt_int fields "tot_len" 0 0xffff in
     if tot_len = None &&
        20 + Tools.bytelength options + Tools.bytelength payload > 0xffff then
@@ -334,7 +338,8 @@ let ip_node ctx =
       send = (fun fields hints payload ->
         if Tools.bytelength payload = 0 then
             V.fail "A self-driven IP sends no empty packet: use IP!" ;
-        let proto = ip_proto fields hints in
+        let proto = ip_proto fields hints
+        and options = ip_options fields in
         let t =
             match Hashtbl.find_option trxs proto with
             | Some t -> t
@@ -349,7 +354,7 @@ let ip_node ctx =
                 t in
         Ip.TRX.tx ?tos:(Option.map Ip.ToS.o (opt_int fields "tos" 0 0xff))
                   ?ttl:(opt_int fields "ttl" 0 0xff)
-                  ?dont_frag:(opt_bool fields "dont_frag") t payload) ;
+                  ?dont_frag:(opt_bool fields "dont_frag") ~options t payload) ;
       receive }
 
 let unpack_udp _ bits =
@@ -908,7 +913,7 @@ let ip =
         field "more_frags" Type.Bool ;
         field "frag_offset" Type.Int ;
         field "tot_len" Type.Int ;
-        field "options" Type.bytes ~read_in:both ;
+        field "options" Type.bytes ~set_in:both ~read_in:both ;
         field "is_fragment" Type.Bool ~set_in:[] ]
 
 let tcp =

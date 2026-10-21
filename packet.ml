@@ -615,6 +615,8 @@ module Pdu = struct
                     add " IP %s>%s ttl=%d" (Ip.Addr.to_dotted_string ip.Ip.Pdu.src)
                         (Ip.Addr.to_dotted_string ip.dst) ip.ttl ;
                     if ip.dont_frag then add " df" ;
+                    if bytelength ip.options > 0 then
+                        add " opts=%S" (str ip.options) ;
                     if sum (takebits (8 * (20 + bytelength ip.options)) bits) <> 0 then
                         add " bad-checksum" ;
                     let l4 = (ip.payload :> bitstring) in

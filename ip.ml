@@ -1116,9 +1116,11 @@ module TRX = struct
         dont_frag : bool ;
         (* Perform reassembly before handing over received frames: *)
         reassemble : bool ;
-        (* [tos] and [ttl] for all emitted packets, unless [tx] is told otherwise: *)
+        (* [tos], [ttl] and [options] (a multiple of 4 bytes, up to 40) for all
+         * emitted packets, unless [tx] is told otherwise: *)
         tos : ToS.t ;
         ttl : int ;
+        options : bitstring ;
         next_id : unit -> int ;
         mutable emit : bitstring -> unit ;
         mutable emit_busy_for : unit -> Clock.Interval.t ;
@@ -1132,16 +1134,23 @@ module TRX = struct
      * error, wtv) so let's use the IPs in additon to the ID to identify reassembled packets: *)
     and reassemble_key = Addr.t * Addr.t * Proto.t * int (* src, dst, proto, id *)
 
-    (* Emitted packets have no options, thus a 20 bytes header: *)
-    let hdr_len = Pdu.no_opt_hdr_len
+    let check_options options =
+        let len = bytelength options in
+        ensure (len mod 4 = 0 && len <= 40)
+            "Ip: options must be a multiple of 4 bytes, up to 40"
 
-    let tx ?tos ?ttl ?id ?dont_frag t bits =
+    (* Raises Invalid_argument if the MTU leaves no room for 8 bytes of
+     * payload after the options: *)
+    let tx ?tos ?ttl ?id ?dont_frag ?options t bits =
+        Option.may check_options options ;
         if bitstring_length bits > 0 then (
             let tos = tos |? t.tos
             and ttl = ttl |? t.ttl
             and id = may_default id t.next_id
-            and dont_frag = dont_frag |? t.dont_frag in
-            let pdu = Pdu.make ~tos ~ttl ~id ~dont_frag t.proto t.src t.dst bits in
+            and dont_frag = dont_frag |? t.dont_frag
+            and options = options |? t.options in
+            let pdu =
+                Pdu.make ~tos ~ttl ~id ~dont_frag ~options t.proto t.src t.dst bits in
             Pdu.fragment t.mtu pdu |>
             List.iter (fun bits ->
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (Payload.length pdu.payload) (hexstring_of_bitstring bits)))) ;
@@ -1230,10 +1239,13 @@ module TRX = struct
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)
     let create power ?(mtu=1500) ?(dont_frag=false) ?(reassemble=true)
-               ?(tos=ToS.o 0) ?(ttl=64) ?(next_id=Pdu.next_id) src dst proto logger =
-        ensure (mtu >= hdr_len + 8) "Ip: MTU must leave room for at least 8 bytes of payload" ;
+               ?(tos=ToS.o 0) ?(ttl=64) ?(options=empty_bitstring) ?(next_id=Pdu.next_id)
+               src dst proto logger =
+        check_options options ;
+        ensure (mtu >= Pdu.no_opt_hdr_len + bytelength options + 8)
+            "Ip: MTU must leave room for at least 8 bytes of payload" ;
         { logger ; power ; src ; dst ; proto ; mtu ; dont_frag ; reassemble ;
-          tos ; ttl ; next_id ;
+          tos ; ttl ; options ; next_id ;
           emit = ignore_bits ~logger ; emit_busy_for = never_busy ;
           recv = ignore_bits ~logger ; recv_busy_for = never_busy ;
           reassembled = Hashtbl.create 10 }
@@ -1248,9 +1260,10 @@ module TRX = struct
                   set_read = fun f busy_for ->
                       t.emit <- f ; t.emit_busy_for <- busy_for } }
 
-    let make power ?mtu ?dont_frag ?reassemble ?tos ?ttl ?next_id src dst proto logger =
-        trx_of (create power ?mtu ?dont_frag ?reassemble ?tos ?ttl ?next_id
-                       src dst proto logger)
+    let make power ?mtu ?dont_frag ?reassemble ?tos ?ttl ?options ?next_id
+             src dst proto logger =
+        trx_of (create power ?mtu ?dont_frag ?reassemble ?tos ?ttl ?options
+                       ?next_id src dst proto logger)
 
     (*$< TRX *)
     (* [frags_of s] is what a TRX from [a] to [b] emits for [s]; [frag off len mf]
@@ -1363,6 +1376,17 @@ module TRX = struct
       tx ~dont_frag:false t (Bitstring.bitstring_of_string "b") ;
       Simulation.run sim false ;
       assert_equal [ true ; false ] (List.rev !dfs)
+    *)
+    (*$R tx
+      let t = create sim.root.power ~options:(Bitstring.bitstring_of_string "\x94\x04\x00\x00")
+                     a b (Proto.o 99) sim.root.logger in
+      let opts = ref [] in
+      (trx_of t).out --> sink (fun bits ->
+          opts := Bitstring.string_of_bitstring (Result.get_ok (Pdu.unpack bits)).Pdu.options :: !opts) ;
+      tx t (Bitstring.bitstring_of_string "a") ;
+      tx ~options:Bitstring.empty_bitstring t (Bitstring.bitstring_of_string "b") ;
+      Simulation.run sim false ;
+      assert_equal ~printer [ "\x94\x04\x00\x00" ; "" ] (List.rev !opts)
     *)
     (*$= frags_of & ~printer:string_of_int
       1 (List.length (frags_of ~mtu:60 msg))

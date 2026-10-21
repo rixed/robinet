@@ -434,15 +434,16 @@ the host (without the `--ip` command line argument), whose kernel answers.
 - `more_frags`: bool; set M; read M.
 - `frag_offset`: int; set M; read M.
 - `tot_len`: int; set M; read M. Default: computed.
-- `options`: bytes; set M; read M, S.
+- `options`: bytes; set M, S; read M, S.
 - `is_fragment`: bool; cannot be set; read M.
 
 Self-driven IP fragments to the interface's MTU and reassembles: an `IP`
 pattern sees a fragmented packet once complete, with the `id` its fragments
 share and the `options` of the first one, and an `IP!` pattern sees each
-fragment. The `tos`, `ttl` and `dont_frag` options apply to the packets it
-sends, but not to the segments of a self-driven TCP connection, which sends
-them on its own. `IP!` sends the header as given, but for the header
+fragment. The `tos`, `ttl`, `dont_frag` and `options` fields apply to the
+packets it sends (only the options with the copied flag go into fragments
+after the first), but not to the segments of a self-driven TCP connection,
+which sends them on its own. `IP!` sends the header as given, but for the header
 checksum, which is always computed.
 
 #### `TCP` (on `IP`)
