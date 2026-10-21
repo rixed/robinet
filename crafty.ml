@@ -192,13 +192,17 @@ let () =
                     (Printexc.to_string e) ;
                 exit 1) ;
             Some t) in
-    (* The simulation: crafty, a policer and the interface. *)
+    (* The simulation: crafty, a policer and the interface, captured each
+     * way. What is sent goes through the capture of what comes in, which
+     * does not see it, unlike that of what goes out: *)
     let sim = Simulation.make "crafty" in
-    let pcap =
+    let capture direction ~outgoing =
         Pcap.open_iface ~widget:(Widget.make ~parent:sim.root !ifname)
-            ~promisc:!promisc ~direction:Pcap.In
+            ~promisc:!promisc ~direction
             ~caplen:(Pcap.caplen_of_mtu mtu)
-            ~filter:(Host_config.pcap_filter ?ip:!own_ip !ports) !ifname in
+            ~filter:(Host_config.pcap_filter ~outgoing ?ip:!own_ip !ports) !ifname in
+    let pcap = capture Pcap.In ~outgoing:false
+    and pcap_out = capture Pcap.Out ~outgoing:true in
     let secs () = Clock.Time.to_secs (Simulation.now sim) in
     let ports_of proto =
         String.uppercase_ascii (Host_config.string_of_proto proto),
@@ -269,6 +273,7 @@ let () =
     Simulation.run_startup sim ;
     Simulation.power_up policer.widget.power ;
     ignore (Pcap.sniffer pcap after.out.write) ;
+    ignore (Pcap.sniffer pcap_out h.emitted) ;
     print_endline "Running..." ;
     Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ] (fun () ->
         Simulation.run sim true) ;

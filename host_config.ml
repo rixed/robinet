@@ -327,21 +327,23 @@ let string_of_range r =
     if r.lo = r.hi then string_of_int r.lo else Printf.sprintf "%d-%d" r.lo r.hi
 
 (** A pcap filter for what a program may receive: ARP, and IPv4 to [ip] if
- * given, of which ICMP and the TCP and UDP ports of [ports], if any. *)
-let pcap_filter ?ip ports =
+ * given, of which ICMP and the TCP and UDP ports of [ports], if any. With
+ * [outgoing], for what it may send: from [ip] and from those ports. *)
+let pcap_filter ?(outgoing=false) ?ip ports =
+    let local = if outgoing then "src" else "dst" in
     let l4 =
         if ports = [] then None
         else Some (String.concat " or " (
             "icmp" :: List.map (fun r ->
-                Printf.sprintf "(%s dst portrange %d-%d)"
-                    (string_of_proto r.proto) r.lo r.hi) ports)) in
+                Printf.sprintf "(%s %s portrange %d-%d)"
+                    (string_of_proto r.proto) local r.lo r.hi) ports)) in
     match ip, l4 with
     | None, None -> ""
     | None, Some l4 -> "arp or "^ l4
-    | Some ip, None -> "arp or dst host "^ Ip.Addr.to_dotted_string ip
+    | Some ip, None -> Printf.sprintf "arp or %s host %s" local (Ip.Addr.to_dotted_string ip)
     | Some ip, Some l4 ->
-        Printf.sprintf "arp or (dst host %s and (%s))"
-            (Ip.Addr.to_dotted_string ip) l4
+        Printf.sprintf "arp or (%s host %s and (%s))"
+            local (Ip.Addr.to_dotted_string ip) l4
 
 (*$= pcap_filter & ~printer:identity
   "" (pcap_filter [])
@@ -350,6 +352,8 @@ let pcap_filter ?ip ports =
     (pcap_filter [ port_range_of_string Tcp "14000-14099" ; port_range_of_string Udp "53" ])
   "arp or (dst host 10.0.0.1 and (icmp or (udp dst portrange 1-2)))" \
     (pcap_filter ~ip:(Ip.Addr.of_string "10.0.0.1") [ port_range_of_string Udp "1-2" ])
+  "arp or (src host 10.0.0.1 and (icmp or (udp src portrange 1-2)))" \
+    (pcap_filter ~outgoing:true ~ip:(Ip.Addr.of_string "10.0.0.1") [ port_range_of_string Udp "1-2" ])
  *)
 
 (** {2 Firewall} *)

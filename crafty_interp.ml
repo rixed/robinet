@@ -906,7 +906,9 @@ type handle =
       status : unit -> status ;
       (* Whether the tree has no node beside its root, streams still
        * closing included, and no frame waits for an address resolution: *)
-      idle : unit -> bool }
+      idle : unit -> bool ;
+      (* Tells a frame the interface sent, as captured on its way out: *)
+      emitted : Bitstring.bitstring -> unit }
 
 let idle (tree : Crafty_tree.node) () =
     Crafty_tree.size tree = 1 && Tools.BitHash.length tree.eth.Eth.State.postponed = 0
@@ -934,7 +936,8 @@ let run_on_tree power tree ~print ~print_err ?(on_exit=ignore) (program : T.bloc
                 (fun _ -> cancel root ; exit Done)) ;
     { stop = (fun () -> cancel root ; exit Stopped) ;
       status = (fun () -> !status) ;
-      idle = idle tree }
+      idle = idle tree ;
+      emitted = Crafty_tree.emitted tree }
 
 type program = Crafty_typing.block
 
@@ -960,7 +963,7 @@ let print_status oc = function
  * picking the local ports it is not given from [ports] (as
  * {!Crafty_tree.make_root} does), printing with [print] and [print_err], and
  * calling [on_exit] with how it ends. Returns the device of the interface, and a handle to stop the
- * program or ask its status. The program starts at the next tick of the
+ * program, ask its status or tell it what the interface sent. The program starts at the next tick of the
  * simulation, once that device can be connected. *)
 let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         ?(promisc=false)
@@ -997,7 +1000,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         match !started with
         | Some h -> h.status ()
         | None -> if !stopped then Stopped else Running) ;
-      idle = idle tree }
+      idle = idle tree ;
+      emitted = Crafty_tree.emitted tree }
 
 (* [runs ?stop_at ?trees ?frames ?inject text] is what the program in that text
  * prints, each line with the time it is printed at (and with [trees], the

@@ -84,8 +84,10 @@ type node =
       (* The ranges of local ports to pick from, by layer name: *)
       ports : string -> (int * int) list ;
       ops : L.ops ;
-      (* Registered on it, by order of registration: *)
-      mutable patterns : pattern list }
+      (* Registered on it, by order of registration, for what it receives
+       * and for what it sends: *)
+      mutable patterns : pattern list ;
+      mutable sent_patterns : pattern list }
 
 (* Of patterns, whose layers are matched from that of the node they are
  * registered on: *)
@@ -154,7 +156,7 @@ let make_child parent (l : L.layer) key =
                              key = (fun name -> key_fields l (current ()) name) ;
                              below_key = (fun name -> key_fields parent.layer parent.key name) ;
                              below = Some parent.ops } ;
-              patterns = [] } in
+              patterns = [] ; sent_patterns = [] } in
     self := Some c ;
     let s =
         match siblings parent l with
@@ -352,17 +354,20 @@ let on_ready stack k =
 let next_seq = ref 0
 
 (** Registers a pattern on [node], which it holds until the function
- * returned unregisters it; [layers] start with that of [node]. *)
-let register node layers ~hold ~matched ~failed =
+ * returned unregisters it; [layers] start with that of [node]. With
+ * [sent], it matches what is sent rather than what is received. *)
+let register ?(sent=false) node layers ~hold ~matched ~failed =
     incr next_seq ;
     let p = { seq = !next_seq ; layers ; hold ; matched ; failed } in
+    let get () = if sent then node.sent_patterns else node.patterns
+    and set ps = if sent then node.sent_patterns <- ps else node.patterns <- ps in
     acquire node ;
-    node.patterns <- node.patterns @ [ p ] ;
+    set (get () @ [ p ]) ;
     let registered = ref true in
     fun () ->
         if !registered then (
             registered := false ;
-            node.patterns <- List.filter ((!=) p) node.patterns ;
+            set (List.filter ((!=) p) (get ())) ;
             release node)
 
 (** {2 Receiving} *)
@@ -370,6 +375,10 @@ let register node layers ~hold ~matched ~failed =
 (* The key of the node of [l] that a packet with this layer belongs to: *)
 let incoming_key (l : L.layer) (u : L.unpacked) =
     List.map (fun i -> i, List.assoc l.fields.(i).peer u.values) (L.key_fields l)
+
+(* The same, for a packet sent: *)
+let outgoing_key (l : L.layer) (u : L.unpacked) =
+    List.map (fun i -> i, List.assoc l.fields.(i).name u.values) (L.key_fields l)
 
 (** Whether a received layer, of that of [n], is of the stream of [n]: of
  * the root, any is. *)
@@ -380,8 +389,12 @@ let of_stream n (u : L.unpacked) =
 type event = Match of packet | Condition_error of A.location * string
 
 (* What a packet did to the patterns it met, the last first; at most one
- * thing to each: *)
-type walk = { mutable met : (pattern * event) list }
+ * thing to each. A packet sent goes along the nodes it was sent from, with
+ * their sent patterns, without telling them, and each layer is seen as it
+ * is, in manual mode: *)
+type walk = { sent : bool ; mutable met : (pattern * event) list }
+
+let modes_of w = if w.sent then [ L.Manual ] else L.both
 
 let met w p = List.exists (fun (p', _) -> p' == p) w.met
 
@@ -433,7 +446,7 @@ and up_to w node packet pending (ul : L.layer) =
     match ul.unpack u.L.up_hints u.payload with
     | None -> ()
     | Some uu ->
-        let key = incoming_key ul uu in
+        let key = (if w.sent then outgoing_key else incoming_key) ul uu in
         match Option.bind streams (fun s -> Siblings.find_option s key) with
         | Some c -> enter w c packet uu pending
         | None ->
@@ -441,7 +454,7 @@ and up_to w node packet pending (ul : L.layer) =
             (* The patterns that would make a node for that layer (but
              * for errors, told in [enter]): *)
             let makers =
-                if ul.terminal then [] else
+                if ul.terminal || w.sent then [] else
                 List.filter (fun (p, pls) ->
                     not (met w p) &&
                     match pls with
@@ -456,24 +469,27 @@ and up_to w node packet pending (ul : L.layer) =
                 then c.ops.listen () ;
                 enter w c packet uu pending
             | _ ->
-                let pending = check w above L.both pending in
+                let pending = check w above (modes_of w) pending in
                 if not (List.is_empty pending) then up w None above pending
 
 (* What goes on from that layer of a packet, received by its node, with
  * the patterns registered there: *)
 and enter w node packet u pending =
-    node.received <- node.received + 1 ;
-    let pending = pending @ List.map (fun p -> p, p.layers) node.patterns in
+    let patterns, seen =
+        if w.sent then node.sent_patterns, [ u, modes_of w ] else (
+            node.received <- node.received + 1 ;
+            node.patterns, node.ops.receive u) in
+    let pending = pending @ List.map (fun p -> p, p.layers) patterns in
     List.iter (fun (u, modes) ->
         let packet = (node.layer, u) :: packet in
         up w (Some node) packet (check w packet modes pending)
-    ) (node.ops.receive u)
+    ) seen
 
-(** Takes a frame from the interface, then tells the patterns it met. Its
- * [ts] is when it was captured, if it was, else when it arrived, as dated
- * by the simulation. *)
-let receive root frame =
-    let w = { met = [] } in
+(* Walks [frame] up the tree from [root], its [ts] when it was captured, if
+ * it was, else now, as dated by the simulation; then tells the patterns
+ * it met: *)
+let walk ~sent root frame =
+    let w = { sent ; met = [] } in
     let sim = Simulation.of_widget root.eth.iface.widget in
     let ts =
         match Pcap.captured frame with
@@ -488,6 +504,13 @@ let receive root frame =
         match e with
         | Match packet -> p.matched packet
         | Condition_error (where, message) -> p.failed where message)
+
+(** Takes a frame from the interface, then tells the patterns it met. *)
+let receive root frame = walk ~sent:false root frame
+
+(** Takes a frame the interface sent, as captured on its way out, then tells
+ * the sent patterns it met. The nodes are not told. *)
+let emitted root frame = walk ~sent:true root frame
 
 (** [packet] with the layers on top of it, as decoded without any node: of
  * those that could be, the one named, else [Bytes]. *)
@@ -532,7 +555,7 @@ let make_root ?(ports=[]) (eth : Eth.State.t) =
           closing = false ; eth ; ports ;
           ops = L.root.node { eth ; key = (fun _ -> None) ;
                               below_key = (fun _ -> None) ; below = None } ;
-          patterns = [] } in
+          patterns = [] ; sent_patterns = [] } in
     eth.iface.recv <- receive root ;
     root
 
@@ -631,6 +654,41 @@ let to_string n = IO.to_string print n
       (fun () -> udp ()) ;
   let tcp = child loc ip Crafty_layers.tcp [ 1, port 80 ] in
   assert_bool "other layers keep the dynamic ports" (src tcp >= 49152)
+*)
+(* What is sent goes along the nodes of its stream, to their sent patterns
+ * only, in manual mode only, and leaves the nodes as they were: *)
+(*$R emitted
+  let root = make_root eth in
+  let ip = child loc root Crafty_layers.ip (ip_to "10.0.0.2") in
+  acquire ip ;
+  let udp = child loc ip Crafty_layers.udp [ 0, port 1000 ; 1, port 53 ] in
+  acquire udp ;
+  let count ?sent node mode =
+      let n = ref 0 in
+      ignore (register ?sent node [ { player = node.layer ; pmode = mode ; test = None } ]
+                  ~hold:ignore ~matched:(fun _ -> incr n) ~failed:(fun _ _ -> ())) ;
+      n in
+  let sent = count ~sent:true udp Crafty_layers.Manual
+  and sent_driven = count ~sent:true udp Crafty_layers.Driven
+  and received = count udp Crafty_layers.Manual in
+  let frame ~src ~dst ~sport ~dport =
+      let a = Ip.Addr.of_string in
+      Eth.Pdu.(pack (make Eth.Proto.ip4
+          (Eth.Addr.of_string (if src = "10.0.0.1" then "02:00:00:00:00:01" else "02:00:00:00:00:02"))
+          (Eth.Addr.of_string (if dst = "10.0.0.1" then "02:00:00:00:00:01" else "02:00:00:00:00:02"))
+          (Ip.Pdu.pack (Ip.Pdu.make ~id:1 Ip.Proto.udp (a src) (a dst)
+              (Udp.Pdu.(pack (make ~src_port:(Udp.Port.o sport) ~dst_port:(Udp.Port.o dport)
+                  (Bitstring.bitstring_of_string "hi")))))))) in
+  let out = frame ~src:"10.0.0.1" ~dst:"10.0.0.2" ~sport:1000 ~dport:53
+  and in_ = frame ~src:"10.0.0.2" ~dst:"10.0.0.1" ~sport:53 ~dport:1000 in
+  emitted root out ;
+  emitted root in_ ;
+  emitted root (frame ~src:"10.0.0.1" ~dst:"10.0.0.2" ~sport:1001 ~dport:53) ;
+  assert_equal ~printer:dump (1, 0, 0) (!sent, !sent_driven, !received) ;
+  assert_equal ~printer:identity
+      "Eth{IP(src=10.0.0.1, dst=10.0.0.2)*1{UDP(src=1000, dst=53)*4}}" (to_string root) ;
+  receive root in_ ;
+  assert_equal ~printer:dump (1, 0, 1) (!sent, !sent_driven, !received)
 *)
 (* A terminal node of the root goes once sent, the root staying; what was
  * sent is told back: *)
