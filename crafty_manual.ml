@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 c023d6351093db2411f2051d65333ea7) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 728f0ace38635c585098e9fb2047781d) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -280,6 +280,8 @@ not.
     stack. In a block on `IP/UDP`, these are the ICMP errors the IP stream
     receives. On the same layer as the stack's, a pattern sees only that stream:
     in a block on `IP/TCP`, `../TCP!` sees that connection's segments.
+-   `Bytes("pong") | ../ICMP`: alternatives, wherever a pattern goes (`-p` too).
+    A packet that matches several matches once.
 
 Conditions in parentheses are boolean expressions, where `,` and `=` can stand
 for `&&` and `==`:

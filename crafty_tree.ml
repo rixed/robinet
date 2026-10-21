@@ -94,7 +94,7 @@ type node =
       mutable patterns : pattern list }
 
 (* Of patterns, whose layers are matched from that of the node they are
- * registered on: *)
+ * registered on; alternatives share their [seq]: *)
 and pattern =
     { seq : int ;
       layers : pattern_layer list ;
@@ -432,19 +432,24 @@ let stats_line n =
 
 let next_seq = ref 0
 
-(** Registers a pattern on [node], which it holds until the function
- * returned unregisters it; [layers] start with that of [node]. *)
-let register node layers ~hold ~matched ~failed =
+(** Registers alternative patterns, each a node and layers starting with
+ * that of the node, which it holds until the function returned unregisters
+ * them all. A packet is told to at most one of them. *)
+let register alternatives ~hold ~matched ~failed =
     incr next_seq ;
-    let p = { seq = !next_seq ; layers ; hold ; matched ; failed } in
-    acquire node ;
-    node.patterns <- node.patterns @ [ p ] ;
+    let ps =
+        List.map (fun (node, layers) ->
+            let p = { seq = !next_seq ; layers ; hold ; matched ; failed } in
+            acquire node ;
+            node.patterns <- node.patterns @ [ p ] ;
+            node, p) alternatives in
     let registered = ref true in
     fun () ->
         if !registered then (
             registered := false ;
-            node.patterns <- List.filter ((!=) p) node.patterns ;
-            release node)
+            List.iter (fun (node, p) ->
+                node.patterns <- List.filter ((!=) p) node.patterns ;
+                release node) ps)
 
 (** {2 Receiving} *)
 
@@ -461,10 +466,10 @@ let of_stream n (u : L.unpacked) =
 type event = Match of packet | Condition_error of A.location * string
 
 (* What a packet did to the patterns it met, the last first; at most one
- * thing to each: *)
+ * thing to each, alternatives counting as one: *)
 type walk = { mutable met : (pattern * event) list }
 
-let met w p = List.exists (fun (p', _) -> p' == p) w.met
+let met w p = List.exists (fun (p', _) -> p'.seq = p.seq) w.met
 
 (* Whether [pl] matches the top of [packet], seen in [modes]: *)
 let passes packet modes pl =

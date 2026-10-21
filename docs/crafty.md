@@ -297,6 +297,8 @@ is not.
   stack. In a block on `IP/UDP`, these are the ICMP errors the IP stream
   receives. On the same layer as the stack's, a pattern sees only that
   stream: in a block on `IP/TCP`, `../TCP!` sees that connection's segments.
+- `Bytes("pong") | ../ICMP`: alternatives, wherever a pattern goes (`-p`
+  too). A packet that matches several matches once.
 
 Conditions in parentheses are boolean expressions, where `,` and `=` can
 stand for `&&` and `==`:

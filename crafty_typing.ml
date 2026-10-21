@@ -146,11 +146,12 @@ and stmt_desc =
     | Wait of expr
     (* An [expect] being an [any] of a single case; [form] is which: *)
     | Any of { form : string ; timeout : expr option ; cases : case list }
-    | On of { timeout : expr option ; max : expr option ; pattern : pattern ;
-              match_ : var ; body : block }
+    | On of { timeout : expr option ; max : expr option ;
+              patterns : pattern list ; match_ : var ; body : block }
 
-(* [match_] is the variable [MATCH] of the block: *)
-and case = { pattern : pattern ; match_ : var ; body : block }
+(* Of alternative [patterns]; [match_] is the variable [MATCH] of the
+ * block: *)
+and case = { patterns : pattern list ; match_ : var ; body : block }
 
 and block = stmt list
 
@@ -1202,11 +1203,11 @@ and stmt errors env (s : A.stmt) =
         let timeout =
             opt_expr env ("The timeout of "^ form) Type.Interval timeout in
         let cases =
-            List.map (fun (p, body) ->
-                let pattern = pattern env p in
+            List.map (fun (ps, body) ->
+                let patterns = List.map (pattern env) ps in
                 let match_ = new_var "MATCH" packet_type in
                 let body = block errors { env with vars = match_ :: env.vars } body in
-                { pattern ; match_ ; body }) cases in
+                { patterns ; match_ ; body }) cases in
         env, Some (mk (Any { form ; timeout ; cases })) in
     let declare_typ env name typ =
         if List.mem name env.declared_here then
@@ -1413,19 +1414,19 @@ and stmt errors env (s : A.stmt) =
             env, Some (mk (Break depth))
         | A.Wait dur ->
             env, Some (mk (Wait (expect "The duration of wait" (expr env dur) Type.Interval)))
-        | A.Expect { timeout ; pattern ; body } ->
-            any "expect" timeout [ pattern, body ]
+        | A.Expect { timeout ; patterns ; body } ->
+            any "expect" timeout [ patterns, body ]
         | A.Any { timeout ; cases } ->
             any "any" timeout cases
-        | A.On { timeout ; max ; pattern = p ; body } ->
+        | A.On { timeout ; max ; patterns = ps ; body } ->
             let timeout = opt_expr env "The timeout of on" Type.Interval timeout
             and max = opt_expr env "The maximum of on" Type.Int max in
-            let pattern = pattern env p in
+            let patterns = List.map (pattern env) ps in
             let match_ = new_var "MATCH" packet_type in
             let body =
                 block errors { env with vars = match_ :: env.vars ;
                                         loops = env.loops + 1 } body in
-            env, Some (mk (On { timeout ; max ; pattern ; match_ ; body }))
+            env, Some (mk (On { timeout ; max ; patterns ; match_ ; body }))
     with Error _ | Already_told as ex ->
         tell errors ex ;
         env, None
@@ -1483,17 +1484,18 @@ let check (program : A.program) =
             Crafty_parser.{ where ; message }) !errors |>
             List.sort (fun (a : Crafty_parser.error) b -> compare a.where b.where))
 
-(** The typed pattern, absolute and with no variable but the fields of its
- * layers, or what is wrong with it. *)
-let check_pattern (p : A.pattern) =
+(** The typed patterns, absolute and with no variable but the fields of their
+ * layers, or what is wrong with them. *)
+let check_patterns (ps : A.patterns) =
     let env = { vars = [] ; declared_here = [] ; poisoned = [] ; stack = [] ;
                 loops = 0 ; layer_ctx = None ; may_wait = false ;
                 errors = ref [] ; declared_at = Hashtbl.create 1 ;
                 widened = Hashtbl.create 1 ; widening = ref false } in
     try
-        if p.anchor <> A.Absolute then
-            error p.pat_loc "The pattern must be absolute (start with /)" ;
-        Ok (pattern env p)
+        Ok (List.map (fun (p : A.pattern) ->
+            if p.anchor <> A.Absolute then
+                error p.pat_loc "The pattern must be absolute (start with /)" ;
+            pattern env p) ps)
     with Error (where, message) -> Error Crafty_parser.{ where ; message }
 
 (* [types text] is what the program in that text declares, with the types,

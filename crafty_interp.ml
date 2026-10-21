@@ -634,35 +634,35 @@ let packet_value packet =
 (* [MATCH], from the packet that matched, decoded to its top: *)
 let match_value packet = packet_value (Crafty_tree.complete packet)
 
-(* Registers [pattern] for block [b], its conditions evaluated in [env] at
- * match time; a relative pattern on the node of the stack it is on top of,
- * which is seen in the mode of the stack. Its layers that are over layers
- * of the stack match only the streams of their nodes. Returns what
- * unregisters it: *)
-let register t b env (p : T.pattern) ~matched ~failed =
-    let over = List.rev (List.take (List.length env.stack - p.depth) env.stack) in
-    let layers =
-        List.mapi (fun j (pl : T.pattern_layer) ->
-            let cond =
-                Option.map (fun c packet ->
-                    match eval t.output { env with packet } c with
-                    | Bool b -> b
-                    | _ -> assert false) pl.cond in
-            let test =
-                if j >= p.overlay then cond else
-                let (o : Crafty_tree.entry) = List.nth over j in
-                Some (fun packet ->
-                    Crafty_tree.of_stream o.node (snd (List.hd packet)) &&
-                    Option.map_default (fun c -> c packet) true cond) in
-            Crafty_tree.{ player = pl.pl_layer ; pmode = pl.pl_mode ; test }
-        ) p.pat_layers in
-    let node, layers =
+(* Registers alternative [patterns] for block [b], their conditions
+ * evaluated in [env] at match time; a relative pattern on the node of the
+ * stack it is on top of, which is seen in the mode of the stack. Its layers
+ * that are over layers of the stack match only the streams of their nodes.
+ * Returns what unregisters them: *)
+let register t b env (patterns : T.pattern list) ~matched ~failed =
+    let alternative (p : T.pattern) =
+        let over = List.rev (List.take (List.length env.stack - p.depth) env.stack) in
+        let layers =
+            List.mapi (fun j (pl : T.pattern_layer) ->
+                let cond =
+                    Option.map (fun c packet ->
+                        match eval t.output { env with packet } c with
+                        | Bool b -> b
+                        | _ -> assert false) pl.cond in
+                let test =
+                    if j >= p.overlay then cond else
+                    let (o : Crafty_tree.entry) = List.nth over j in
+                    Some (fun packet ->
+                        Crafty_tree.of_stream o.node (snd (List.hd packet)) &&
+                        Option.map_default (fun c -> c packet) true cond) in
+                Crafty_tree.{ player = pl.pl_layer ; pmode = pl.pl_mode ; test }
+            ) p.pat_layers in
         if p.depth = 0 then t.tree, layers else
         let (e : Crafty_tree.entry) =
             List.nth env.stack (List.length env.stack - p.depth) in
         e.node,
         Crafty_tree.{ player = e.node.layer ; pmode = e.mode ; test = None } :: layers in
-    Crafty_tree.register node layers ~matched ~failed ~hold:(fun n ->
+    Crafty_tree.register (List.map alternative patterns) ~matched ~failed ~hold:(fun n ->
         Crafty_tree.acquire n ;
         b.cleanups <- (fun () -> Crafty_tree.release n) :: b.cleanups)
 
@@ -800,7 +800,7 @@ and exec t b env (s : T.stmt) k =
             let fire f = if !armed && b.live then (disarm () ; f ()) in
             unregisters :=
                 List.map (fun (c : T.case) ->
-                    register t b env c.pattern
+                    register t b env c.patterns
                         ~matched:(fun packet -> fire (fun () ->
                             let inner =
                                 bind_lazy env c.match_ (fun () -> match_value packet) in
@@ -813,17 +813,17 @@ and exec t b env (s : T.stmt) k =
                 ignore (guard (fun () ->
                     error s.stmt_loc "Nothing matched within %s"
                         (Interval.to_string timeout))))) ())
-    | T.On { timeout ; max ; pattern ; match_ ; body } ->
+    | T.On { timeout ; max ; patterns ; match_ ; body } ->
         guard (fun () ->
             timeout_of eval "on" timeout,
             Option.map (fun e -> match eval e with Int n -> n | _ -> assert false) max) |>
         Option.may (fun (timeout, max) ->
             (* Like [repeat count=0], [max=0] does nothing: *)
             if Option.map_default (fun m -> m > 0) true max then
-                on t b env pattern match_ body timeout max ;
+                on t b env patterns match_ body timeout max ;
             k env)
 
-and on t b env pattern match_ body timeout max =
+and on t b env patterns match_ body timeout max =
     let armed = ref true and over = ref false and unregister = ref ignore in
     let matches = ref 0 in
     (* The instances of its block that are running: *)
@@ -842,7 +842,7 @@ and on t b env pattern match_ body timeout max =
         check_over () in
     b.busy <- b.busy + 1 ;
     unregister :=
-        register t b env pattern
+        register t b env patterns
             ~matched:(fun packet ->
                 if !armed && b.live then (
                     incr matches ;
@@ -959,8 +959,8 @@ type handle =
       (* The streams still open: *)
       open_streams : unit -> Crafty_tree.node list }
 
-(** An absolute pattern, matched against a frame on its own: *)
-and filter = T.pattern
+(** Alternative absolute patterns, matched against a frame on its own: *)
+and filter = T.pattern list
 
 let idle (tree : Crafty_tree.node) () =
     Crafty_tree.size tree = 1 && Tools.BitHash.length tree.eth.Eth.State.postponed = 0
@@ -973,7 +973,8 @@ let output_of power ?(format=Human) ~print ~print_err () =
         Simulation.date_of sim (Simulation.now sim) in
     { print ; print_err ; now ; format }
 
-let matches output tree (p : filter) =
+let matches output tree (ps : filter) frame =
+    List.exists (fun (p : T.pattern) ->
     let layers =
         List.map (fun (pl : T.pattern_layer) ->
             Crafty_tree.{
@@ -982,7 +983,7 @@ let matches output tree (p : filter) =
                     match eval output { vars = Env.empty ; stack = [] ; packet } c with
                     | Bool b -> b
                     | _ -> assert false) pl.cond }) p.pat_layers in
-    Crafty_tree.matches tree layers
+    Crafty_tree.matches tree layers frame) ps
 
 (* Runs [program] on [power]'s simulation, starting at once, sending and
  * receiving through [tree] (from {!Crafty_tree.make_root}), writing with
@@ -1020,9 +1021,10 @@ let compile text : (program, error list) result =
     | Error e -> Error [ e ]
     | Ok p -> Crafty_typing.check p
 
-(** The filter of that text, an absolute pattern, or what is wrong with it. *)
+(** The filter of that text, alternative absolute patterns, or what is wrong
+ * with it. *)
 let compile_filter text : (filter, error) result =
-    Result.bind (Crafty_parser.parse_pattern text) Crafty_typing.check_pattern
+    Result.bind (Crafty_parser.parse_patterns text) Crafty_typing.check_patterns
 
 let print_status oc = function
     | Running -> String.print oc "running"
@@ -1537,6 +1539,18 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  any timeout=1s Bytes(\"a\") {} | Bytes(\"b\") {} }")
   "0s: failed: line 1, column 13: The timeout of any cannot be negative" \
     (runs "any timeout=-1s Bytes(\"x\") {} | Bytes(\"y\") {}")
+  "500ms: b\n500ms: done" \
+    (runs ~inject:[ 0.3, reply "nope" ; 0.5, reply "b" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  any Bytes(\"a\") | Bytes(\"b\") { print(MATCH[Bytes].data) } | Bytes(\"c\") { print(\"c\") } }")
+*)
+(* A pattern can be alternatives, which match a packet at most once: *)
+(*$= runs & ~printer:identity
+  "300ms: pong\n300ms: done" \
+    (runs ~inject:[ 0.3, reply "pong" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Bytes(\"ping\")\n    | /IP/UDP(src == 53)/Bytes(\"pong\") { print(MATCH[Bytes].data) } }")
+  "1s: 2\n1s: done" \
+    (runs ~inject:[ 0.1, reply "pong" ; 0.2, reply "pang" ; 0.3, reply "x" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  { on timeout=1s Bytes(\"pong\") | Bytes(\"pang\") | Bytes(\"pong\") { n += 1 } }\n  print(\"${n}\") }")
 *)
 (* A constructor makes a variant, which converts to a wider one, what it
  * holds converted along: *)
@@ -1980,4 +1994,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (filters "IP/UDP" (reply "x"))
   "line 1, column 9: Unknown variable x" (filters "/IP/UDP(x == 1)" (reply "x"))
   "line 1, column 9: Expected end of pattern" (filters "/IP/UDP {}" (reply "x"))
+  "true" (filters "/IP | /Eth" (arp "10.0.0.2"))
+  "false" (filters "/IP/TCP | /IP/UDP(dst == 7)" (reply "x"))
+  "line 1, column 11: The pattern must be absolute (start with /)" \
+    (filters "/IP/TCP | UDP" (reply "x"))
 *)

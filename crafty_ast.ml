@@ -224,11 +224,14 @@ and stmt_desc =
     | Catch of block
     | Break of { depth : expr option }
     | Wait of expr
-    | Expect of { timeout : expr option ; pattern : pattern ; body : block }
+    | Expect of { timeout : expr option ; patterns : patterns ; body : block }
     (* The block of the first of those patterns to match, never empty: *)
-    | Any of { timeout : expr option ; cases : (pattern * block) list }
+    | Any of { timeout : expr option ; cases : (patterns * block) list }
     | On of { timeout : expr option ; max : expr option ;
-              pattern : pattern ; body : block }
+              patterns : patterns ; body : block }
+
+(* Alternatives, never empty: *)
+and patterns = pattern list
 
 and block = stmt list
 
@@ -411,6 +414,9 @@ and print_pattern ~all ~indent oc p =
         Option.may (Printf.fprintf oc "(%a)" (print_expr_at ~bare:true ~all ~indent 0)) l.cond
     ) oc p.pat_layers
 
+and print_patterns ~all ~indent oc ps =
+    List.print ~first:"" ~last:"" ~sep:" | " (print_pattern ~all ~indent) oc ps
+
 and print_layer ~all ~indent oc l =
     Printf.fprintf oc "%a%s" Layer_name.print l.layer_name (if l.manual then "!" else "") ;
     if l.options <> [] then Printf.fprintf oc "(%a)" (print_args ~all ~indent) l.options
@@ -418,7 +424,7 @@ and print_layer ~all ~indent oc l =
 and print_stmt ~all indent oc s =
     let expr = print_expr_at ~all ~indent 0 in
     let param name = Option.may (Printf.fprintf oc " %s=%a" name expr) in
-    let pattern = print_pattern ~all ~indent in
+    let pattern = print_patterns ~all ~indent in
     String.print oc (String.make indent ' ') ;
     match s.stmt with
     | Stack { anchor ; layers ; body } ->
@@ -458,7 +464,7 @@ and print_stmt ~all indent oc s =
     | Wait dur ->
         if all then (String.print oc "wait" ; param "dur" (Some dur))
         else Printf.fprintf oc "wait %a" expr dur
-    | Expect { timeout ; pattern = p ; body } ->
+    | Expect { timeout ; patterns = p ; body } ->
         String.print oc "expect" ; param "timeout" timeout ;
         Printf.fprintf oc " %a " pattern p ;
         print_block ~all indent oc body
@@ -467,7 +473,7 @@ and print_stmt ~all indent oc s =
         List.iteri (fun i (p, body) ->
             Printf.fprintf oc "%s%a " (if i = 0 then " " else " | ") pattern p ;
             print_block ~all indent oc body) cases
-    | On { timeout ; max ; pattern = p ; body } ->
+    | On { timeout ; max ; patterns = p ; body } ->
         String.print oc "on" ; param "timeout" timeout ; param "max" max ;
         Printf.fprintf oc " %a " pattern p ;
         print_block ~all indent oc body

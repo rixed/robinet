@@ -569,6 +569,9 @@ let expr, set_expr = forward ()
 let cond_expr, set_cond_expr = forward ()
 let block, set_block = forward ()
 let pattern = make_pattern cond_expr
+(* Separated by bars that may start or end lines: *)
+let patterns =
+    repeat ~min:1 ~sep:(nl_sp -- item '|' -- nl_sp) pattern |? "patterns"
 let () =
     set_expr (make_expr ~cond:false ~self:expr ~expr ~pattern ~block) ;
     set_cond_expr (make_expr ~cond:true ~self:cond_expr ~expr ~pattern ~block)
@@ -699,16 +702,16 @@ let stmt =
                 match p "dur" with
                 | Some d -> Wait d
                 | None -> reject "wait needs a duration") |||
-        (keyword "expect" -+ params "expect" [ "timeout" ] +- sp ++ pattern ++
-         body >>: fun ((p, pattern), body) ->
-            Expect { timeout = p "timeout" ; pattern ; body }) |||
+        (keyword "expect" -+ params "expect" [ "timeout" ] +- sp ++ patterns ++
+         body >>: fun ((p, patterns), body) ->
+            Expect { timeout = p "timeout" ; patterns ; body }) |||
         (* Its cases, separated by bars that may start or end lines: *)
         (keyword "any" -+ params "any" [ "timeout" ] +- sp ++
-         repeat ~min:1 ~sep:(nl_sp -- item '|' -- nl_sp) (pattern ++ body) >>:
+         repeat ~min:1 ~sep:(nl_sp -- item '|' -- nl_sp) (patterns ++ body) >>:
             fun (p, cases) -> Any { timeout = p "timeout" ; cases }) |||
-        (keyword "on" -+ params "on" [ "timeout" ; "max" ] +- sp ++ pattern ++
-         body >>: fun ((p, pattern), body) ->
-            On { timeout = p "timeout" ; max = p "max" ; pattern ; body }) |||
+        (keyword "on" -+ params "on" [ "timeout" ; "max" ] +- sp ++ patterns ++
+         body >>: fun ((p, patterns), body) ->
+            On { timeout = p "timeout" ; max = p "max" ; patterns ; body }) |||
         (identifier >>= (fun s ->
             if List.mem (String.lowercase_ascii s) unsupported then return s
             else fail) >>:
@@ -766,9 +769,9 @@ let parse_with p text =
 (** Parse that text, or tell where and why it does not parse. *)
 let parse text = parse_with program text
 
-(** Parse that text as a single pattern. *)
-let parse_pattern text =
-    parse_with (sp -+ pattern +- sp +- (eof |? "end of pattern")) text
+(** Parse that text as patterns, alternatives. *)
+let parse_patterns text =
+    parse_with (sp -+ patterns +- sp +- (eof |? "end of pattern")) text
 
 (* [reads text] is how the program in that text reads back, or the error;
  * [formats text] is that program with only the parentheses it needs. *)
@@ -1005,6 +1008,7 @@ let parse_pattern text =
   "line 2, column 18: Expected expression in statement" (reads "x = 1\ncase x else {} | IP {}")
   "line 1, column 5: Expected name in pattern" (reads "any {}")
   "line 1, column 21: Expected name in pattern" (reads "any Bytes(\"a\") {} | {}")
+  "line 1, column 16: Expected name in pattern" (reads "expect Bytes | {}")
   "line 1, column 5: wait needs a duration" (reads "wait")
   "line 1, column 5: Expected '{' in block" (reads "if x\n{}")
   "line 1, column 1: Expected end of statement" (reads "else {}")
