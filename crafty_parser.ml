@@ -154,12 +154,13 @@ let constant =
 let function_name =
     identifier >>= fun s -> if is_in functions s then return s else fail
 
-(* A name right before a parenthesis, which only a function or a layer can
- * be, but is neither, refused once [args] are read (so that the rejection
- * is found further than what other readings expect): *)
+(* A name right before a parenthesis, which only a function, a layer or a
+ * constructor can be, but is neither, refused once [args] are read (so that
+ * the rejection is found further than what other readings expect): *)
 let unknown_function args =
     (quiet (identifier +- check (item '(')) >>= fun s ->
-        if is_keyword s || is_in functions s || Layer_name.of_string s <> None
+        if is_keyword s || is_in functions s || Layer_name.of_string s <> None ||
+           is_constructor s && not (is_reserved s)
         then fail else return s) ++ args >>:
     fun (s, _) -> reject "Unknown function %s" s
 
@@ -457,6 +458,9 @@ let make_expr ~cond ~self ~expr ~pattern ~block =
         (here ++ function_name ++ args expr >>:
             fun ((loc, f), args) -> { loc ; desc = Call (f, args) }) |||
         unknown_function (args expr) |||
+        (here ++ (name >>= fun s -> if is_constructor s then return s else fail) ++
+         in_ '(' (optional ~def:None (expr >>: Option.some)) ')' >>:
+            fun ((loc, c), e) -> { loc ; desc = Construct (c, e) }) |||
         (here ++ (name ||| predefined_var) >>:
             fun (loc, n) -> { loc ; desc = Var n }) |||
         (here ++ constant >>: fun (loc, (n, l)) -> { loc ; desc = Constant (n, l) }) |||
@@ -569,10 +573,11 @@ let stmt =
     let variable =
         identifier >>= fun s -> if is_keyword s then fail else return s in
     (* A name and a parenthesis, which only a stack (or an unknown function)
-     * starts with, unless a function's: *)
+     * starts with, unless a function's or a constructor's: *)
     let call_of_no_function =
         quiet (identifier >>= fun s ->
-            if is_keyword s || is_in functions s then fail else return ()) --
+            if is_keyword s || is_in functions s ||
+               is_constructor s && not (is_reserved s) then fail else return ()) --
         item '(' in
     with_loc (
         (* Alone, a call rather than a stack, of an unknown layer: *)
@@ -784,6 +789,8 @@ let parse text =
   "x = case y IP {\n  1\n} | TCP {\n  2\n} else {\n  3\n}\n" \
     (reads "x = case y IP { 1 } | TCP { 2 }\n  else { 3 }")
   "case x else {\n}\n" (reads "case x else {}")
+  "x = Ok(1 + 2)\ny = [Pending, Err(\"a\")]\n" (reads "x = Ok(1 + 2)\ny = [Pending, Err(\"a\")]")
+  "x = [Pending(), Pending]\n" (reads "x = [Pending( ), Pending]")
   "print(case x Bytes {\n  \"b\"\n} else {\n  \"?\"\n})\n" \
     (reads "print(case x Bytes { \"b\" } | else { \"?\" })")
 *)
@@ -843,6 +850,7 @@ let parse text =
     "x = 1 + if a { { y = 1; y * 2 } } elsif b { 2 } else { 3 }" ; \
     "x = case var=l MATCH[0] Eth { l.src } | IP { if a { 1 } else { 2 } } | else { 0 }" ; \
     "x = case y IP { 1 }\nelse { 2 }" ; \
+    "x = [Ok(1 + 2), Pending, Pending()]\ny = Got({a: Ok(-1)})" ; \
     "y = [{a: 1}, {}]" ]
 *)
 
@@ -891,7 +899,7 @@ let parse text =
   "line 1, column 4: Unknown layer foo" (reads "foo(1)/Bytes(\"x\")")
   "line 1, column 4: Unknown layer foo" (reads "foo(1) {}")
   "line 1, column 24: Unknown function get" (reads "x = get(a=[1], index=0)")
-  "line 1, column 14: Unknown function Foo" (reads "x = 1 + Foo()")
+  "line 1, column 14: Unknown function foo" (reads "x = 1 + foo()")
   "line 1, column 18: Unknown function foo" (reads "expect UDP(foo(1)) {}")
   "line 1, column 15: Unknown function foo" (reads "/IP(dst=foo(1))/UDP(dst=1)/Bytes(\"x\")")
   "line 1, column 16: Unknown function foo" (reads "print(\"${foo(2)}\")")

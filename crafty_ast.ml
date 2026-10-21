@@ -143,6 +143,10 @@ and expr_desc =
     | Record of (string * expr) list
     | Array of expr list
     | Matches of expr * pattern
+    (* A constructor of a variant, with what it holds ([Ok(42)]) or nothing
+     * ([Pending()]); without the parentheses, a constructor is read as a
+     * [Var]: *)
+    | Construct of string * expr option
     (* The value of a block is that of its last statement, if an expression,
      * and else void: *)
     | Block of block
@@ -219,6 +223,9 @@ and stmt_desc =
 and block = stmt list
 
 type program = block
+
+(** Whether that name is a constructor's: it starts with a capital letter. *)
+let is_constructor s = s <> "" && Char.is_uppercase s.[0]
 
 (** The functions a statement can call (any other name being a layer).
  * Lower case. *)
@@ -349,6 +356,8 @@ let rec print_expr_at ?(bare=false) ~all ~indent p oc e =
         paren q (fun oc ->
             Printf.fprintf oc "%a =~ %a"
                 (at (q + 1)) e (print_pattern ~all ~indent) pat)
+    | Construct (c, e) ->
+        Printf.fprintf oc "%s(%a)" c (fun oc -> Option.may (bare_sub oc)) e
     | Block b -> block oc b
     | If { cond ; then_ ; else_ } ->
         let rec print_if kw cond then_ else_ =

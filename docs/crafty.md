@@ -93,8 +93,8 @@ Done after 0.2s, status: OK.
 - Comments run from a `#` to the end of the line. A `#` followed by a
   hexadecimal digit is a byte literal instead.
 - Names of layers, fields, functions, constants and keywords are case
-  insensitive, and all but field names are reserved. Variables are case
-  sensitive.
+  insensitive, and all but field names are reserved. Variables and
+  constructors are case sensitive.
 
 ### Types and literals
 
@@ -117,6 +117,12 @@ Done after 0.2s, status: OK.
 - arrays: `[1, 2, 3]`. Items of one type.
 - records: `{name: "gw", ip: 192.0.2.1}`. Field names are case insensitive.
   Braces with no field in them, `{}`, are an empty block, not a record.
+- variants: `Ok(42)`, `Failed("timeout")`, `Pending` (or `Pending()`). A
+  constructor is a name that starts with a capital letter, followed by what
+  it holds in parentheses, or by nothing. A bare name is a variable rather
+  than a constructor wherever a variable of that name is defined; with
+  parentheses, it is always a constructor. Each layer of a packet is a
+  variant too, whose constructors are the layers' names.
 
 Literals are read as whole words: `1.2.3.4` is an IP address, `5s` an
 interval.
@@ -131,7 +137,25 @@ expected, such as to `print`, are taken as text.
 string to bytes and back, bytes to an IP address (4 bytes) or a MAC address
 (6 bytes, checked at run time). An int is a bool where one is expected
 (non-zero is true). Other conversions use the functions `int`, `float`,
-`bool`, `byte`, `interval` and `time`.
+`bool`, `byte`, `interval` and `time`. The items of an array and the fields
+of a record convert likewise.
+
+**Variants** need no declaration: `Ok(42)` is of the variant `(Ok int)`,
+which converts to any variant that has the constructor `Ok` holding an int
+(or what an int converts to). Where variants meet, as the items of an
+array, the branches of an `if` or a `case`, the operands of `==`, or the
+values assigned to a variable, they make one variant with the constructors
+of all:
+
+```
+result = Pending                   # of type (Failed string | Got int | Pending)
+any Bytes("pong") { result := Got(length(MATCH)) }
+  | ../ICMP { result := Failed("unreachable") }
+print(case result Got { "${result} bytes" } else { "${result}" })
+```
+
+A `case` tells the constructors apart. Interpolated, a variant is written
+as its constructor followed by what it holds: `Got 4`, `Pending`.
 
 ### Variables
 
@@ -322,7 +346,7 @@ also takes it unnamed (`break 2`, `wait 1s`).
   flags & SYN`). There can be any number of `elsif`, and an `else` may start
   the line after the brace before it. Its value is that of the block it
   ran.
-- `case var=v X C { ... } | C { ... } ... | else { ... }`: Runs the block of
+- `case var=v X C { ... } | C { ... } ... else { ... }`: Runs the block of
   the constructor of `X`'s value, or else the `else` block, if any.
   Without `var`, a variable `X` is itself what the constructor holds.
   A `|` may end a line or start the next one. Its value is that of the block
@@ -552,7 +576,7 @@ of UDP, the data of TCP, a fragment, a quote, or an unknown protocol.
 ### Not available yet
 
 The keyword `report`, matching embedded packets with
-`=~`, variant literals, the HTTP
+`=~`, the HTTP
 layer, IPv6, VLANs and tunnels. Using any of them is reported as
 unsupported.
 

@@ -73,6 +73,8 @@ and desc =
     | Array of expr list
     (* The value of that expression, as this one's type: *)
     | Convert of expr
+    (* A constructor of a variant, with what it holds unless void: *)
+    | Construct of string * expr option
     (* The value of its last statement, if an expression, or else void: *)
     | Block of block
     (* With no [else], an empty [else_]: *)
@@ -162,11 +164,16 @@ let packet_record (l : L.layer) =
     record_type (Array.to_list l.fields |> List.filter_map (fun (f : L.field) ->
         if f.read_in = [] then None else Some (f.name, f.typ)))
 
+(* Variants are compared constructor by constructor, whatever the order they
+ * were met in: *)
+let variant_type ctors =
+    Type.Variant (List.sort (fun (a, _) (b, _) -> String.compare a b) ctors)
+
 (** The type of packets, such as [MATCH]: their layers from the bottom. A
  * name is one variant, which the layers that share it all read the same
  * record as: *)
 let packet_type =
-    Type.Array (Type.Variant (List.map (fun (l : L.layer) ->
+    Type.Array (variant_type (List.map (fun (l : L.layer) ->
         lname l.name, packet_record l) L.all |> List.unique))
 
 (*$T packet_type
@@ -206,15 +213,62 @@ let a_type t =
 
 let convert e typ = { e with typ ; desc = Convert e }
 
+let all_some l =
+    if List.for_all Option.is_some l then Some (List.map Option.get l) else None
+
 (* Whether a value of type [a] converts to a [b] (the conversions to IP and
- * MAC addresses checking the length at run time): *)
-let converts a b =
+ * MAC addresses checking the length at run time). A variant converts to one
+ * with the same constructors and more; what they hold, the fields of a
+ * record and the items of an array converting as well: *)
+let rec converts a b =
+    let converts_to a b = a = b || converts a b in
     match a, b with
     | Type.Int, Type.Float
     | Type.Byte, Type.Int
     | Type.String, Type.Array Type.Byte
     | Type.Array Type.Byte, (Type.String | Type.Ip | Type.Mac) -> true
+    | Type.Variant cs, Type.Variant ds ->
+        a <> b &&
+        List.for_all (fun (n, t) ->
+            match List.assoc_opt n ds with
+            | Some t' -> converts_to t t'
+            | None -> false) cs
+    | Type.Record fs, Type.Record gs ->
+        List.length fs = List.length gs &&
+        List.for_all2 (fun (n, t) (n', t') -> n = n' && converts_to t t') fs gs &&
+        a <> b
+    | Type.Array a, Type.Array b -> converts a b
     | _ -> false
+
+(* Whether a value of that type holds a variant: *)
+let rec has_variant = function
+    | Type.Variant _ -> true
+    | Type.Record fs -> List.exists (has_variant % snd) fs
+    | Type.Array t -> has_variant t
+    | _ -> false
+
+(* The type that values of types [a] and [b] both convert to, if any; [a]
+ * if they convert to each other. Variants make one with the constructors of
+ * both: *)
+let rec join_types a b =
+    match a, b with
+    | _ when a = b || converts b a -> Some a
+    | _ when converts a b -> Some b
+    | Type.Variant cs, Type.Variant ds ->
+        List.fold_left (fun acc (n, t) ->
+            Option.bind acc (fun acc ->
+                match List.assoc_opt n acc with
+                | None -> Some ((n, t) :: acc)
+                | Some t' ->
+                    Option.map (fun t -> (n, t) :: List.remove_assoc n acc)
+                        (join_types t' t))) (Some cs) ds |>
+        Option.map variant_type
+    | Type.Record fs, Type.Record gs when List.map fst fs = List.map fst gs ->
+        List.map2 (fun (n, t) (_, t') ->
+            Option.map (fun t -> n, t) (join_types t t')) fs gs |>
+        all_some |> Option.map (fun fs -> Type.Record fs)
+    | Type.Array a, Type.Array b -> Option.map (fun t -> Type.Array t) (join_types a b)
+    | _ -> None
 
 (* Whether that block ends only with a break: *)
 let rec diverges (b : block) =
@@ -234,9 +288,6 @@ let block_type (b : block) =
     match List.rev b with
     | { stmt = Expr e ; _ } :: _ -> e.typ
     | _ -> Type.Void
-
-let all_some l =
-    if List.for_all Option.is_some l then Some (List.map Option.get l) else None
 
 (* [e] as a [typ], if it converts to one; that of a block, an [if] or a
  * [case] is the value of each of its branches converted: *)
@@ -282,11 +333,12 @@ let join loc what branches =
             if diverges b then acc else
             match acc with
             | None -> Some t
-            | Some a when a = t || converts t a -> acc
-            | Some a when converts a t -> Some t
             | Some a ->
-                error loc "The branches of this %s are of different types: %s and %s"
-                    what (a_type a) (a_type t)) None branches |>
+                (match join_types a t with
+                | Some _ as acc -> acc
+                | None ->
+                    error loc "The branches of this %s are of different types: %s and %s"
+                        what (a_type a) (a_type t))) None branches |>
         Option.default Type.Void in
     typ, List.map (fun (b, _) -> Option.get (coerce_tail b typ)) branches
 
@@ -335,7 +387,26 @@ type env =
        * loop, break), which they cannot in a block within an expression but
        * for the value of a declaration, an assignment or a statement: *)
       may_wait : bool ;
-      errors : errors }
+      errors : errors ;
+      (* Where the variables of the declarations are declared, by id: *)
+      declared_at : (int, A.location) Hashtbl.t ;
+      (* The type of the variables declared there, when wider than that of
+       * their value, as their assignments tell: *)
+      widened : (A.location, Type.t) Hashtbl.t ;
+      (* Whether a variable was widened while typing: *)
+      widening : bool ref }
+
+let bound env name =
+    List.exists (fun (v : var) -> v.name = name) env.vars ||
+    List.mem name env.poisoned
+
+(* Whether a variable declared [at] that type [a] would be of a wider type
+ * than it was, to be assigned a [b]: *)
+let widens env at a b =
+    has_variant a &&
+    match join_types a b with
+    | Some t -> Hashtbl.find_opt env.widened at <> Some t
+    | None -> false
 
 let new_var =
     let next = ref 0 in
@@ -480,11 +551,19 @@ let numeric t = t = Type.Int || t = Type.Float
 (* Both of the same type, converting one to the other's if need be: *)
 let unify what a b =
     if a.typ = b.typ then a, b else
+    let cannot () =
+        error a.loc "Cannot %s %s and %s" what (a_type a.typ) (a_type b.typ) in
     match coerce a b.typ, coerce b a.typ with
     | Some a, _ -> a, b
     | _, Some b -> a, b
     | None, None ->
-        error a.loc "Cannot %s %s and %s" what (a_type a.typ) (a_type b.typ)
+        (* Two variants, as one with the constructors of both: *)
+        match join_types a.typ b.typ with
+        | Some t ->
+            (match coerce a t, coerce b t with
+            | Some a, Some b -> a, b
+            | _ -> cannot ())
+        | None -> cannot ()
 
 (* With [tail], [e] is the value of a declaration, an assignment or a
  * statement, which can wait if its block can. Without [used], the value of
@@ -505,7 +584,16 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 if any_value e.typ = None then
                     error e.loc "Cannot print %s" (a_type e.typ) ;
                 Interp e) parts))
+    | A.Var name when A.is_constructor name && not (Crafty_parser.is_reserved name) &&
+                      not (bound env name) ->
+        mk (variant_type [ name, Type.Void ]) (Construct (name, None))
     | A.Var name -> var env loc name
+    | A.Construct (c, None) -> mk (variant_type [ c, Type.Void ]) (Construct (c, None))
+    | A.Construct (c, Some e) ->
+        let e = expr env e in
+        if any_value e.typ = None then
+            error e.loc "A constructor cannot hold %s" (a_type e.typ) ;
+        mk (variant_type [ c, e.typ ]) (Construct (c, Some e))
     | A.Layer { name ; _ } ->
         error loc "A layer is no value: %s needs a field, as in %s.src, or to \
                    select a layer of a packet, as in MATCH[%s]"
@@ -575,10 +663,12 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             match expected_item with
             | Some t when List.for_all (fun i -> coerce i t <> None) items -> t
             | _ ->
-                let first = List.hd items in
-                if List.exists (fun i -> i.typ = Type.Float) items &&
-                   List.for_all (fun i -> numeric i.typ) items then Type.Float
-                else first.typ in
+                let first = (List.hd items).typ in
+                (* Else the first item's, which the others are then told not
+                 * to be: *)
+                List.fold_left (fun acc i -> Option.bind acc (join_types i.typ))
+                    (Some first) items |>
+                Option.default first in
         let items = List.map (fun i -> expect "An item of this array" i item_typ) items in
         mk (Type.Array item_typ) (Array items)
     | A.Matches _ -> error loc "=~ is not supported yet"
@@ -613,7 +703,11 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             | _ -> None in
         let arms =
             List.fold_left (fun arms (a : A.arm) ->
-                match List.find_opt (fun (n, _) -> same_name n a.ctor) ctors with
+                let ctor =
+                    match List.find_opt (fun (n, _) -> n = a.ctor) ctors with
+                    | None -> List.find_opt (fun (n, _) -> same_name n a.ctor) ctors
+                    | c -> c in
+                match ctor with
                 | None ->
                     error a.arm_loc "%s is none of %s" a.ctor
                         (String.concat ", " (List.map fst ctors))
@@ -975,12 +1069,18 @@ and stmt errors env (s : A.stmt) =
             let poisoned () =
                 { env with poisoned = name :: env.poisoned ;
                            declared_here = name :: env.declared_here }, None in
-            (match expr ~tail:true env e with
+            (* Of the type that its assignments widened it to: *)
+            let widen e =
+                match Hashtbl.find_opt env.widened loc with
+                | Some t -> Option.default e (coerce e t)
+                | None -> e in
+            (match widen (expr ~tail:true env e) with
             | e when e.typ = Type.Void ->
                 tell errors (Error (loc, name ^" would have no value")) ;
                 poisoned ()
             | e ->
                 let env, v = declare env name e in
+                Hashtbl.replace env.declared_at v.id loc ;
                 env, Some (mk (Declare (v, e)))
             | exception (Error _ | Already_told as ex) ->
                 tell errors ex ;
@@ -992,9 +1092,15 @@ and stmt errors env (s : A.stmt) =
                 | None -> expr ~tail:true env e
                 | Some op ->
                     binop env loc op { A.loc ; A.desc = A.Var name } e in
-            (match coerce e v.typ with
-            | Some e -> env, Some (mk (Assign (v, e)))
-            | None ->
+            (match coerce e v.typ, Hashtbl.find_opt env.declared_at v.id with
+            | Some e, _ -> env, Some (mk (Assign (v, e)))
+            | None, Some at when widens env at v.typ e.typ ->
+                (* The program is typed again, with that variable of a
+                 * variant of the constructors of both: *)
+                Hashtbl.replace env.widened at (Option.get (join_types v.typ e.typ)) ;
+                env.widening := true ;
+                env, None
+            | None, _ ->
                 error loc "Cannot assign %s to %s, which is %s"
                     (a_type e.typ) name (a_type v.typ))
         | A.Repeat { var ; count ; every ; for_ ; body } ->
@@ -1086,14 +1192,22 @@ and expr_declarations e =
     | Call (_, es) | Record es | Array es -> List.concat_map expr_declarations es
     | String parts ->
         List.concat_map (function Interp e -> expr_declarations e | Text _ -> []) parts
+    | Construct (_, e) -> Option.map_default expr_declarations [] e
     | Lit _ | Var _ | Packet_field _ -> []
 
 (** The typed program, or the errors, in the order of the source. *)
 let check (program : A.program) =
-    let errors = ref [] in
-    let env = { vars = [] ; declared_here = [] ; poisoned = [] ; stack = [] ;
-                loops = 0 ; layer_ctx = None ; may_wait = true ; errors } in
-    let p = block errors env program in
+    let widened = Hashtbl.create 7 in
+    (* Until no variable is widened, which types grow until they have all
+     * the constructors of the program: *)
+    let rec typed () =
+        let errors = ref [] in
+        let env = { vars = [] ; declared_here = [] ; poisoned = [] ; stack = [] ;
+                    loops = 0 ; layer_ctx = None ; may_wait = true ; errors ;
+                    declared_at = Hashtbl.create 7 ; widened ; widening = ref false } in
+        let p = block errors env program in
+        if !(env.widening) then typed () else p, errors in
+    let p, errors = typed () in
     if !errors = [] then Ok p
     else
         Error (List.rev_map (fun (where, message) ->
@@ -1171,8 +1285,38 @@ let check (program : A.program) =
     (types "expect /IP { x = case MATCH[1] IP { wait 1s\n  1 } | else { 2 }\n  y = { expect Bytes {}\n  3 } }")
 *)
 
+(* A constructor makes a variant of its own; where variants meet, as values
+ * of a variable, branches, items or operands, they make one of the
+ * constructors of all: *)
+(*$= types & ~printer:identity
+  "r: (Failed string | Got int | Pending), r: int, n: int" \
+    (types "r = Pending\nr := Got(3)\nif true { r := Failed(\"x\") }\ncase r Got { n = r } else {}")
+  "x: (Err string | Ok float)[], y: (Nope | Ok int), z: bool" \
+    (types "x = [Ok(1), Err(\"a\"), Ok(2.5)]\ny = if true { Ok(1) } else { Nope }\nz = Ok(1) == Err(\"a\")")
+  "Pending: int, y: int" (types "Pending = 3\ny = Pending + 1")
+  "Pending: int, y: (Got int | Pending)" \
+    (types "Pending = 3\ny = Pending()\ny := Got(Pending)")
+  "x: (A {b: (C | D)}), y: (Got int | Pending)[]" \
+    (types "x = A({b: C})\nx := A({b: D})\ny = [Pending]\ny := [Got(1)]")
+  "x: float[], y: {a: float}" (types "x = [1.5]\nx := [1]\ny = {a: 2.5}\ny := {a: 1}")
+*)
+
 (* What makes no sense, and where; after an error in a declaration, the uses
  * of that variable are not reported: *)
+(*$= types & ~printer:identity
+  "line 2, column 1: Cannot assign a float[] to x, which is an int[]" \
+    (types "x = [1]\nx := [2.5]")
+  "line 2, column 1: Cannot assign an int to x, which is a (Ok int)" \
+    (types "x = Ok(1)\nx := 3")
+  "line 2, column 1: Cannot assign a (Ok string) to r, which is a (Ok int)" \
+    (types "r = Ok(1)\nr := Ok(\"s\")")
+  "line 1, column 8: A constructor cannot hold a void" \
+    (types "x = Ok(print(\"a\"))")
+  "line 1, column 5: Cannot compare a (Ok int) and a (Ok string)" \
+    (types "x = Ok(1) == Ok(\"a\")")
+  "line 2, column 8: Nope is none of Ok" \
+    (types "x = Ok(1)\ncase x Nope {}")
+*)
 (*$= types & ~printer:identity
   "line 1, column 5: Cannot apply + to a string and an int" \
     (types "x = \"a\" + 1")
@@ -1300,15 +1444,15 @@ let check (program : A.program) =
     (types "print(\"${ { wait 1s ; 1 } }\")")
   "line 1, column 6: The subject of case must be a variant, such as a layer of a packet, not an int" \
     (types "case 3 IP {}")
-  "line 1, column 36: Foo is none of Eth, ICMP, Echo, Request, Reply, DestUnreachable, TimeExceeded, IP, UDP, TCP, DNS, Query, Answer, Bytes" \
+  "line 1, column 36: Foo is none of Answer, Bytes, DNS, DestUnreachable, Echo, Eth, ICMP, IP, Query, Reply, Request, TCP, TimeExceeded, UDP" \
     (types "expect /IP { case MATCH[0] IP {} | Foo {} }")
   "line 1, column 36: IP already has a block in this case" \
     (types "expect /IP { case MATCH[0] IP {} | ip {} }")
-  "line 1, column 18: This case needs an else, or a block for each of Eth, ICMP, Echo, Request, Reply, DestUnreachable, TimeExceeded, UDP, DNS, Query, Answer, Bytes, to have a value" \
+  "line 1, column 18: This case needs an else, or a block for each of Answer, Bytes, DNS, DestUnreachable, Echo, Eth, ICMP, Query, Reply, Request, TimeExceeded, UDP, to have a value" \
     (types "expect /IP { x = case MATCH[1] IP { 1 } | TCP { 2 } }")
   "line 1, column 18: The branches of this case are of different types: a string and an int" \
     (types "expect /IP { x = case MATCH[1] Bytes { \"a\" } | IP { 1 } | else { 2 } }")
-  "line 1, column 18: This case has a block for each of Eth, ICMP, Echo, Request, Reply, DestUnreachable, TimeExceeded, IP, UDP, TCP, DNS, Query, Answer, Bytes: its else is never run" \
+  "line 1, column 18: This case has a block for each of Answer, Bytes, DNS, DestUnreachable, Echo, Eth, ICMP, IP, Query, Reply, Request, TCP, TimeExceeded, UDP: its else is never run" \
     (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Bytes { 13 } | else { 0 } }")
   "line 1, column 40: Unknown variable l" \
     (types "expect /IP { case MATCH[1] Bytes { x = l.data } }")

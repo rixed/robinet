@@ -148,7 +148,7 @@ let call loc (b : T.builtin) args ~print ~print_err ~now =
     | _ -> assert false
 
 (* The [value] of type [from] as a [typ]: *)
-let convert loc (from : A.Type.t) (typ : A.Type.t) value =
+let rec convert loc (from : A.Type.t) (typ : A.Type.t) value =
     match from, typ, value with
     | Int, Float, Int i -> Float (float_of_int i)
     | Byte, Int, Byte b -> Int b
@@ -163,7 +163,16 @@ let convert loc (from : A.Type.t) (typ : A.Type.t) value =
         if Array.length a <> 6 then
             error loc "%d bytes are no MAC address" (Array.length a) ;
         Mac (Eth.Addr.o (Bitstring.bitstring_of_string (string_of_bytes a)))
+    | Variant cs, Variant ds, Variant (n, v) ->
+        Variant (n, convert_to loc (List.assoc n cs) (List.assoc n ds) v)
+    | Record fs, Record gs, Record vs ->
+        Record (Array.of_list (List.mapi (fun i ((_, t), (_, t')) ->
+            convert_to loc t t' vs.(i)) (List.combine fs gs)))
+    | Array t, Array t', Array a -> Array (Array.map (convert_to loc t t') a)
     | _ -> invalid_arg "Crafty_interp.convert"
+
+and convert_to loc from typ value =
+    if from = typ then value else convert loc from typ value
 
 let arith loc op a b =
     match op, a, b with
@@ -275,6 +284,7 @@ let rec eval output (env : env) (e : T.expr) =
     | T.Record es -> Record (Array.of_list (List.map eval es))
     | T.Array es -> Array (Array.of_list (List.map eval es))
     | T.Convert a -> convert e.loc a.typ e.typ (eval a)
+    | T.Construct (c, a) -> Variant (c, Option.map_default eval Void a)
     | T.Block b -> eval_block output env b
     | T.If { cond ; then_ ; else_ } ->
         eval_block output env (match eval cond with Bool true -> then_ | _ -> else_)
@@ -1117,6 +1127,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  any timeout=1s Bytes(\"a\") {} | Bytes(\"b\") {} }")
   "0s: failed: line 1, column 13: The timeout of any cannot be negative" \
     (runs "any timeout=-1s Bytes(\"x\") {} | Bytes(\"y\") {}")
+*)
+(* A constructor makes a variant, which converts to a wider one, what it
+ * holds converted along: *)
+(*$= runs & ~printer:identity
+  "0s: pending\n0s: got 2\n0s: Failed late\n0s: [Ok 1.0, Err a, Ok 2.5] true false A {b: [C]}\n0s: done" \
+    (runs "assert(Pending() == Pending)\nr = Pending\nforeach [1, 2, 3] {\n  if I == 2 { r := Got(I) } elsif I == 3 { r := Failed(\"late\") }\n  print(case r Pending { \"pending\" } | Got { \"got ${r}\" } else { \"${r}\" }) }\nx = [Ok(1), Err(\"a\"), Ok(2.5)]\nprint(\"${x} ${x[0] == Ok(1.0)} ${x[1] == Ok(1)} ${A({b: [C]})}\")")
 *)
 (* case runs the arm of a value's constructor, in which the variable that
  * was cased is what that constructor holds: *)
