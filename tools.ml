@@ -1017,6 +1017,10 @@ let escape_fname str =
       "say \"hi\"\nGET /" ]
  *)
 
+let unsafe_getenv_opt s =
+    try Some (Unix.unsafe_getenv s)
+    with _ -> None
+
 module Infix =
 struct
     let (-->) = (-->)

@@ -252,7 +252,7 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
     | T.To_ip, [ b ] -> convert loc A.Type.bytes A.Type.Ip b
     | T.To_mac, [ b ] -> convert loc A.Type.bytes A.Type.Mac b
     | T.Getenv, String name :: default ->
-        (match Sys.getenv_opt name, default with
+        (match Tools.unsafe_getenv_opt name, default with
         | Some v, _ -> String v
         | None, [ d ] -> d
         | None, _ -> error loc "Environment variable %s is not set" name)
