@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 ec1c9498896e6be1a393d4dda5de5b87) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 cded232fbfab5b7dabff703468b8007d) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -84,45 +84,23 @@ let reference = {crafty_manual|### Lexical conventions
 
 ### Types and literals
 
-+------------+-------------------------------+-------------------------------+
-| Type       | Literals                      | Notes                         |
-+============+===============================+===============================+
-| `bool`     | `true`, `false`               |                               |
-+------------+-------------------------------+-------------------------------+
-| `int`      | `42`, `-1`, `0x1f`, `0o17`,   |                               |
-|            | `0b101`                       |                               |
-+------------+-------------------------------+-------------------------------+
-| `float`    | `1.5`, `2e-3`                 |                               |
-+------------+-------------------------------+-------------------------------+
-| `byte`     | `#1f`                         |                               |
-+------------+-------------------------------+-------------------------------+
-| bytes      | `#deadbeef`, or a string      | An array of bytes; an odd     |
-|            | where bytes are expected      | number of digits is an error. |
-+------------+-------------------------------+-------------------------------+
-| `string`   | `"text ${expr}"`              | See below.                    |
-+------------+-------------------------------+-------------------------------+
-| `interval` | `5s`, `10ms`, `1m30s`,        | Units: `d`, `h`, `m`, `s`,    |
-|            | `1.5ms`, `-2s`                | `ms`, `us` (or `µs`), `ns`,   |
-|            |                               | `ps`.                         |
-+------------+-------------------------------+-------------------------------+
-| `time`     | `2026-10-20T22:02:45Z`,       | ISO 8601, with the `T` and    |
-|            | `2026-10-20T22:02+02:00`,     | the hour and minute; seconds  |
-|            | `2026-10-20T22:02`            | (with a fraction, as in       |
-|            |                               | `:45.25`) and zone are        |
-|            |                               | optional. Without a zone, in  |
-|            |                               | the local time of the host.   |
-|            |                               | Written in UTC                |
-|            |                               | (`2026-10-20T20:02:00Z`).     |
-+------------+-------------------------------+-------------------------------+
-| `ip`       | `192.0.2.1`                   | IPv4 only.                    |
-+------------+-------------------------------+-------------------------------+
-| `mac`      | `aa:bb:cc:dd:ee:ff`           |                               |
-+------------+-------------------------------+-------------------------------+
-| arrays     | `[1, 2, 3]`                   | Items of one type.            |
-+------------+-------------------------------+-------------------------------+
-| records    | `{name: "gw", ip: 192.0.2.1}` | Field names are case          |
-|            |                               | insensitive.                  |
-+------------+-------------------------------+-------------------------------+
+-   `bool`: `true`, `false`.
+-   `int`: `42`, `-1`, `0x1f`, `0o17`, `0b101`.
+-   `float`: `1.5`, `2e-3`.
+-   `byte`: `#1f`.
+-   bytes: `#deadbeef`, or a string where bytes are expected. An array of bytes;
+    an odd number of digits is an error.
+-   `string`: `"text ${expr}"`. See below.
+-   `interval`: `5s`, `10ms`, `1m30s`, `1.5ms`, `-2s`. Units: `d`, `h`, `m`,
+    `s`, `ms`, `us` (or `µs`), `ns`, `ps`.
+-   `time`: `2026-10-20T22:02:45Z`, `2026-10-20T22:02+02:00`,
+    `2026-10-20T22:02`. ISO 8601, with the `T` and the hour and minute; seconds
+    (with a fraction, as in `:45.25`) and zone are optional. Without a zone, in
+    the local time of the host. Written in UTC (`2026-10-20T20:02:00Z`).
+-   `ip`: `192.0.2.1`. IPv4 only.
+-   `mac`: `aa:bb:cc:dd:ee:ff`.
+-   arrays: `[1, 2, 3]`. Items of one type.
+-   records: `{name: "gw", ip: 192.0.2.1}`. Field names are case insensitive.
 
 Literals are read as whole words: `1.2.3.4` is an IP address, `5s` an interval.
 
@@ -157,34 +135,19 @@ true). Other conversions use the functions `int`, `float`, `bool`, `byte`,
 
 Operators, from the tightest binding to the loosest:
 
-+----------------------------------+------------------------------------------+
-| Operators                        | Meaning                                  |
-+==================================+==========================================+
-| `!x`, `-x`                       | not, negation                            |
-+----------------------------------+------------------------------------------+
-| `*`, `/`, `%`                    | on ints and floats; an interval can be   |
-|                                  | multiplied or divided by a number        |
-+----------------------------------+------------------------------------------+
-| `+`, `-`                         | on ints and floats, and between          |
-|                                  | intervals; a time minus a time is an     |
-|                                  | interval, and a time plus or minus an    |
-|                                  | interval, or a number of seconds, is a   |
-|                                  | time                                     |
-+----------------------------------+------------------------------------------+
-| `&`                              | bitwise and (ints or bytes)              |
-+----------------------------------+------------------------------------------+
-| `^`                              | bitwise exclusive or                     |
-+----------------------------------+------------------------------------------+
-| `|`                              | bitwise or                               |
-+----------------------------------+------------------------------------------+
-| `==`, `!=`, `<`, `<=`, `>`, `>=` | comparisons, which do not chain;         |
-|                                  | ordering works on numbers, bytes,        |
-|                                  | intervals, times and strings             |
-+----------------------------------+------------------------------------------+
-| `&&`                             | and                                      |
-+----------------------------------+------------------------------------------+
-| `||`                             | or                                       |
-+----------------------------------+------------------------------------------+
+1.  `!x`, `-x`: not, negation.
+2.  `*`, `/`, `%`: on ints and floats; an interval can be multiplied or divided
+    by a number.
+3.  `+`, `-`: on ints and floats, and between intervals; a time minus a time is
+    an interval, and a time plus or minus an interval, or a number of seconds,
+    is a time.
+4.  `&`: bitwise and (ints or bytes).
+5.  `^`: bitwise exclusive or.
+6.  `|`: bitwise or.
+7.  `==`, `!=`, `<`, `<=`, `>`, `>=`: comparisons, which do not chain; ordering
+    works on numbers, bytes, intervals, times and strings.
+8.  `&&`: and.
+9.  `||`: or.
 
 Bitwise operators bind tighter than comparisons, so `flags & RST == 0` means
 `(flags & RST) == 0`, and `flags == SYN | ACK` means `flags == (SYN | ACK)`.
@@ -294,73 +257,39 @@ accessible, checksums are unset.
 Their parameters are written `name=value`. A form with a single parameter also
 takes it unnamed (`break 2`, `wait 1s`).
 
-+--------------------------------------+--------------------------------------+
-| Form                                 | Meaning                              |
-+======================================+======================================+
-| `{ ... }`                            | A block of its own: its variables    |
-|                                      | and patterns end with it.            |
-+--------------------------------------+--------------------------------------+
-| `repeat                              | Runs the block `count` times, or as  |
-| var=v count=n every=d for=d { ... }` | long as `for` (default 5m) has not   |
-|                                      | elapsed. An iteration starts `every` |
-|                                      | after the previous one started, or   |
-|                                      | when that one ends if it ends later. |
-|                                      | `v` (default `I`) counts from 0. All |
-|                                      | parameters are optional. `count=0`   |
-|                                      | runs nothing.                        |
-+--------------------------------------+--------------------------------------+
-| `retry max=n { ... }`                | Runs the block, and again up to `n`  |
-|                                      | times (default 3) while it fails. If |
-|                                      | the last try fails too, its error    |
-|                                      | escapes the retry block.             |
-+--------------------------------------+--------------------------------------+
-| `catch { ... }`                      | Leaves the block at its first error, |
-|                                      | which goes no further: the program   |
-|                                      | goes on after the block.             |
-+--------------------------------------+--------------------------------------+
-| `if c {                              | Runs the block of the first          |
-|  ... } elsif c { ... } else { ... }` | condition that holds, if any. An int |
-|                                      | condition holds unless it is 0       |
-|                                      | (`if flags & SYN`). There can be any |
-|                                      | number of `elsif`, and an `else` may |
-|                                      | start the line after the brace       |
-|                                      | before it.                           |
-+--------------------------------------+--------------------------------------+
-| `foreach var=v every=d for=d`        | A `repeat` that runs the block once  |
-| `ARRAY { ... }`                      | per item of the array, in order, `v` |
-|                                      | (default `I`) being the item. The    |
-|                                      | array is computed once, before the   |
-|                                      | first iteration. `every` and `for`   |
-|                                      | are as for `repeat`, and optional.   |
-+--------------------------------------+--------------------------------------+
-| `break depth=n`                      | Leaves the `n` (default 1, a         |
-|                                      | literal) innermost enclosing         |
-|                                      | `repeat`, `foreach` or `on` forms.   |
-+--------------------------------------+--------------------------------------+
-| `wait dur=d`                         | Pauses for `d`. A negative duration  |
-|                                      | is an error.                         |
-+--------------------------------------+--------------------------------------+
-| `expect timeout=d PATTERN { ... }`   | Waits for one packet that matches    |
-|                                      | (default timeout 1m), then runs the  |
-|                                      | block with `MATCH` bound to it. A    |
-|                                      | timeout is an error.                 |
-+--------------------------------------+--------------------------------------+
-| `any timeout=d PATTERN { ... }`      | Waits for the first packet that      |
-| `| PATTERN { ... } ...`              | matches any of the patterns (default |
-|                                      | timeout 1m), then runs the block of  |
-|                                      | that pattern only, with `MATCH`      |
-|                                      | bound to it. A `|` may end a line or |
-|                                      | start the next one. A timeout is an  |
-|                                      | error.                               |
-+--------------------------------------+--------------------------------------+
-| `on timeout=d max=n PATTERN { ... }` | Lets the enclosing block go on, and  |
-|                                      | runs a new block for each matching   |
-|                                      | packet, each with its own `MATCH`.   |
-|                                      | It ends at its timeout (default 1m,  |
-|                                      | not an error), after its `max`th     |
-|                                      | match, or at a `break` from one of   |
-|                                      | its blocks.                          |
-+--------------------------------------+--------------------------------------+
+-   `{ ... }`: A block of its own: its variables and patterns end with it.
+-   `repeat var=v count=n every=d for=d { ... }`: Runs the block `count` times,
+    or as long as `for` (default 5m) has not elapsed. An iteration starts
+    `every` after the previous one started, or when that one ends if it ends
+    later. `v` (default `I`) counts from 0. All parameters are optional.
+    `count=0` runs nothing.
+-   `retry max=n { ... }`: Runs the block, and again up to `n` times (default 3)
+    while it fails. If the last try fails too, its error escapes the retry
+    block.
+-   `catch { ... }`: Leaves the block at its first error, which goes no further:
+    the program goes on after the block.
+-   `if c { ... } elsif c { ... } else { ... }`: Runs the block of the first
+    condition that holds, if any. An int condition holds unless it is 0
+    (`if flags & SYN`). There can be any number of `elsif`, and an `else` may
+    start the line after the brace before it.
+-   `foreach var=v every=d for=d ARRAY { ... }`: A `repeat` that runs the block
+    once per item of the array, in order, `v` (default `I`) being the item. The
+    array is computed once, before the first iteration. `every` and `for` are as
+    for `repeat`, and optional.
+-   `break depth=n`: Leaves the `n` (default 1, a literal) innermost enclosing
+    `repeat`, `foreach` or `on` forms.
+-   `wait dur=d`: Pauses for `d`. A negative duration is an error.
+-   `expect timeout=d PATTERN { ... }`: Waits for one packet that matches
+    (default timeout 1m), then runs the block with `MATCH` bound to it. A
+    timeout is an error.
+-   `any timeout=d PATTERN { ... } | PATTERN { ... } ...`: Waits for the first
+    packet that matches any of the patterns (default timeout 1m), then runs the
+    block of that pattern only, with `MATCH` bound to it. A `|` may end a line
+    or start the next one. A timeout is an error.
+-   `on timeout=d max=n PATTERN { ... }`: Lets the enclosing block go on, and
+    runs a new block for each matching packet, each with its own `MATCH`. It
+    ends at its timeout (default 1m, not an error), after its `max`th match, or
+    at a `break` from one of its blocks.
 
 A block completes when its statements are done and all its `on` forms have
 ended, including their running blocks. Leaving a block, normally or on an error,
@@ -369,44 +298,22 @@ nodes it held.
 
 ### Functions
 
-+--------------------------------------+--------------------------------------+
-| Function                             | Result                               |
-+======================================+======================================+
-| `print(s)`, `print_err(s)`           | Writes the string to the output, or  |
-|                                      | to the error output.                 |
-+--------------------------------------+--------------------------------------+
-| `assert(cond, msg=s)`                | Fails if `cond` is false. The        |
-|                                      | default message quotes the           |
-|                                      | condition.                           |
-+--------------------------------------+--------------------------------------+
-| `rand(max)`                          | A random int in `[0, max)`, a float  |
-|                                      | in `[0, max)` (default `max` is      |
-|                                      | 1.0), or a random bool if `max` is   |
-|                                      | `true`.                              |
-+--------------------------------------+--------------------------------------+
-| `randbytes(len)`                     | `len` random bytes.                  |
-+--------------------------------------+--------------------------------------+
-| `exp(x)`, `ln(x)`, `log(x)`          | Floats; `log` is in base 10.         |
-+--------------------------------------+--------------------------------------+
-| `log2(n)`                            | The integer base 2 logarithm of a    |
-|                                      | positive int.                        |
-+--------------------------------------+--------------------------------------+
-| `int(x)`, `float(x)`, `bool(x)`,     | Conversions between bools, ints,     |
-| `byte(x)`                            | floats and bytes (`byte` keeps the   |
-|                                      | low 8 bits).                         |
-+--------------------------------------+--------------------------------------+
-| `interval(secs)`                     | The interval of that many seconds.   |
-+--------------------------------------+--------------------------------------+
-| `time(secs)`                         | The time that many seconds after     |
-|                                      | 1970-01-01T00:00:00Z.                |
-+--------------------------------------+--------------------------------------+
-| `now()`                              | The current time: the clock of the   |
-|                                      | host when crafty runs a program.     |
-+--------------------------------------+--------------------------------------+
-| `array(init=v, len=n)`               | An array of `n` items, all `v`.      |
-+--------------------------------------+--------------------------------------+
-| `length(a)`                          | The length of an array or a string.  |
-+--------------------------------------+--------------------------------------+
+-   `print(s)`, `print_err(s)`: Writes the string to the output, or to the error
+    output.
+-   `assert(cond, msg=s)`: Fails if `cond` is false. The default message quotes
+    the condition.
+-   `rand(max)`: A random int in `[0, max)`, a float in `[0, max)` (default
+    `max` is 1.0), or a random bool if `max` is `true`.
+-   `randbytes(len)`: `len` random bytes.
+-   `exp(x)`, `ln(x)`, `log(x)`: Floats; `log` is in base 10.
+-   `log2(n)`: The integer base 2 logarithm of a positive int.
+-   `int(x)`, `float(x)`, `bool(x)`, `byte(x)`: Conversions between bools, ints,
+    floats and bytes (`byte` keeps the low 8 bits).
+-   `interval(secs)`: The interval of that many seconds.
+-   `time(secs)`: The time that many seconds after 1970-01-01T00:00:00Z.
+-   `now()`: The current time: the clock of the host when crafty runs a program.
+-   `array(init=v, len=n)`: An array of `n` items, all `v`.
+-   `length(a)`: The length of an array or a string.
 
 An argument can be left unnamed when the function has a single parameter, or
 when it is the only parameter without a default (`assert(x == 4)`). Otherwise
@@ -414,24 +321,17 @@ arguments are named.
 
 ### Layers
 
-In the tables, *set* and *read* say in which modes a field can be given as an
-option and read in a condition or in `MATCH`: **M** for manual, **S** for
-self-driven. A layer with a single mode is always manual. The fields in **bold**
-are the keys of a stream.
+Each field is listed with its type, then *set* and *read* say in which modes it
+can be given as an option and read in a condition or in `MATCH`: **M** for
+manual, **S** for self-driven. A layer with a single mode is always manual.
+Fields marked *(key)* are the keys of a stream.
 
 #### `Eth`: Ethernet (bottom of every stack)
 
-+---------+------+-----+------+--------------------------------------------+
-| Field   | Type | Set | Read |                                            |
-+=========+======+=====+======+============================================+
-| `src`   | mac  | M   | M S  | Default: the interface's address.          |
-+---------+------+-----+------+--------------------------------------------+
-| `dst`   | mac  | M   | M S  | Default: what the interface knows of the   |
-|         |      |     |      | destination (ARP cache, gateway), without  |
-|         |      |     |      | asking.                                    |
-+---------+------+-----+------+--------------------------------------------+
-| `proto` | int  | M   | M S  | Default: what the layer on top is.         |
-+---------+------+-----+------+--------------------------------------------+
+-   `src`: mac; set M; read M, S. Default: the interface's address.
+-   `dst`: mac; set M; read M, S. Default: what the interface knows of the
+    destination (ARP cache, gateway), without asking.
+-   `proto`: int; set M; read M, S. Default: what the layer on top is.
 
 Self-driven, it carries only IPv4, and finds destinations with ARP. The
 interface answers ARP for its address, unless it shares that address with the
@@ -440,33 +340,19 @@ frames are emitted as they are.
 
 #### `IP`: IPv4 (on `Eth`)
 
-+---------------+-------+-----+------+-----------------------------------------------------+
-| Field         | Type  | Set | Read |                                                     |
-+===============+=======+=====+======+=====================================================+
-| **`src`**     | ip    | M S | M S  | Default: the interface's address.                   |
-+---------------+-------+-----+------+-----------------------------------------------------+
-| **`dst`**     | ip    | M S | M S  | Required.                                           |
-+---------------+-------+-----+------+-----------------------------------------------------+
-| `proto`       | int   | M S | M S  | Default: what the layer on top is.                  |
-+---------------+-------+-----+------+-----------------------------------------------------+
-| `tos`         | int   | M S | M S  |                                                     |
-+---------------+-------+-----+------+-----------------------------------------------------+
-| `ttl`         | int   | M S | M S  | Default 64.                                         |
-+---------------+-------+-----+------+-----------------------------------------------------+
-| `dont_frag`   | bool  | M S | M S  | Default false.                                      |
-+---------------+-------+-----+------+-----------------------------------------------------+
-| `id`          | int   | M   | M S  | Default: the stream's counter, from a random value. |
-+---------------+-------+-----+------+-----------------------------------------------------+
-| `more_frags`  | bool  | M   | M    |                                                     |
-+---------------+-------+-----+------+-----------------------------------------------------+
-| `frag_offset` | int   | M   | M    |                                                     |
-+---------------+-------+-----+------+-----------------------------------------------------+
-| `tot_len`     | int   | M   | M    | Default: computed.                                  |
-+---------------+-------+-----+------+-----------------------------------------------------+
-| `options`     | bytes | M   | M S  |                                                     |
-+---------------+-------+-----+------+-----------------------------------------------------+
-| `is_fragment` | bool  |     | M    |                                                     |
-+---------------+-------+-----+------+-----------------------------------------------------+
+-   `src` (key): ip; set M, S; read M, S. Default: the interface's address.
+-   `dst` (key): ip; set M, S; read M, S. Required.
+-   `proto`: int; set M, S; read M, S. Default: what the layer on top is.
+-   `tos`: int; set M, S; read M, S.
+-   `ttl`: int; set M, S; read M, S. Default 64.
+-   `dont_frag`: bool; set M, S; read M, S. Default false.
+-   `id`: int; set M; read M, S. Default: the stream's counter, from a random
+    value.
+-   `more_frags`: bool; set M; read M.
+-   `frag_offset`: int; set M; read M.
+-   `tot_len`: int; set M; read M. Default: computed.
+-   `options`: bytes; set M; read M, S.
+-   `is_fragment`: bool; cannot be set; read M.
 
 Self-driven IP fragments to the interface's MTU and reassembles: an `IP` pattern
 sees a fragmented packet once complete, with the `id` its fragments share and
@@ -478,27 +364,16 @@ computed.
 
 #### `TCP` (on `IP`)
 
-+------------+------+-----+------+-----------------------------------------------------+
-| Field      | Type | Set | Read |                                                     |
-+============+======+=====+======+=====================================================+
-| **`src`**  | int  | M S | M S  | Default: a free local port.                         |
-+------------+------+-----+------+-----------------------------------------------------+
-| **`dst`**  | int  | M S | M S  | Required.                                           |
-+------------+------+-----+------+-----------------------------------------------------+
-| `seq_num`  | int  | M   | M    |                                                     |
-+------------+------+-----+------+-----------------------------------------------------+
-| `ack_num`  | int  | M   | M    |                                                     |
-+------------+------+-----+------+-----------------------------------------------------+
-| `flags`    | int  | M   | M    | Constants `FIN`, `SYN`, `RST`, `PSH`, `ACK`, `URG`. |
-+------------+------+-----+------+-----------------------------------------------------+
-| `win_size` | int  | M   | M    |                                                     |
-+------------+------+-----+------+-----------------------------------------------------+
-| `urg_ptr`  | int  | M   | M    |                                                     |
-+------------+------+-----+------+-----------------------------------------------------+
-| `checksum` | int  | M   | M    | Default: computed, as it is when given 0.           |
-+------------+------+-----+------+-----------------------------------------------------+
-| `mss`      | int  | S   |      | The MSS of the connection.                          |
-+------------+------+-----+------+-----------------------------------------------------+
+-   `src` (key): int; set M, S; read M, S. Default: a free local port.
+-   `dst` (key): int; set M, S; read M, S. Required.
+-   `seq_num`: int; set M; read M.
+-   `ack_num`: int; set M; read M.
+-   `flags`: int; set M; read M. Constants `FIN`, `SYN`, `RST`, `PSH`, `ACK`,
+    `URG`.
+-   `win_size`: int; set M; read M.
+-   `urg_ptr`: int; set M; read M.
+-   `checksum`: int; set M; read M. Default: computed, as it is when given 0.
+-   `mss`: int; set S; cannot be read. The MSS of the connection.
 
 Self-driven, the first packet sent on a TCP node connects it, and what follows
 waits for the connection. A TCP node created by a pattern accepts the connection
@@ -513,37 +388,21 @@ one.
 
 #### `UDP` (on `IP`)
 
-+------------+------+-----+------+--------------------------------------------+
-| Field      | Type | Set | Read |                                            |
-+============+======+=====+======+============================================+
-| **`src`**  | int  | M   | M    | Default: a free local port.                |
-+------------+------+-----+------+--------------------------------------------+
-| **`dst`**  | int  | M   | M    | Required, unless told by the layer on top. |
-+------------+------+-----+------+--------------------------------------------+
-| `length`   | int  | M   | M    | Default: computed.                         |
-+------------+------+-----+------+--------------------------------------------+
-| `checksum` | int  | M   | M    | Default: computed, as it is when given 0.  |
-+------------+------+-----+------+--------------------------------------------+
+-   `src` (key): int; set M; read M. Default: a free local port.
+-   `dst` (key): int; set M; read M. Required, unless told by the layer on top.
+-   `length`: int; set M; read M. Default: computed.
+-   `checksum`: int; set M; read M. Default: computed, as it is when given 0.
 
 #### `ICMP` (on `IP`)
 
-+--------+------+-----+------+
-| Field  | Type | Set | Read |
-+========+======+=====+======+
-| `type` | int  |     | M    |
-+--------+------+-----+------+
-| `code` | int  |     | M    |
-+--------+------+-----+------+
+-   `type`: int; cannot be set; read M.
+-   `code`: int; cannot be set; read M.
 
 Its type and code are set by the message on top of it.
 
 #### `Echo` (on `ICMP`)
 
-+----------+------+-----+------+----------------------------+
-| Field    | Type | Set | Read |                            |
-+==========+======+=====+======+============================+
-| **`id`** | int  | M   | M    | Default: a free random id. |
-+----------+------+-----+------+----------------------------+
+-   `id` (key): int; set M; read M. Default: a free random id.
 
 `Echo` has no header of its own. It is the stream of an echo id, on which
 `Request` and `Reply` messages go. The sequence numbers of its messages are
@@ -551,23 +410,13 @@ counted per stream.
 
 #### `Request` and `Reply` (on `Echo`, terminal)
 
-+-----------+-------+-----+------+----------------------------------------+
-| Field     | Type  | Set | Read |                                        |
-+===========+=======+=====+======+========================================+
-| `seq`     | int   | M   | M    | Default: the stream's counter, from 1. |
-+-----------+-------+-----+------+----------------------------------------+
-| `payload` | bytes | M   | M    | Default field.                         |
-+-----------+-------+-----+------+----------------------------------------+
+-   `seq`: int; set M; read M. Default: the stream's counter, from 1.
+-   `payload`: bytes; set M; read M. Default field.
 
 #### `DestUnreachable` and `TimeExceeded` (on `ICMP`)
 
-+--------+------+-----+------+------------------------------------+
-| Field  | Type | Set | Read |                                    |
-+========+======+=====+======+====================================+
-| `code` | int  | M   | M    | Default 0.                         |
-+--------+------+-----+------+------------------------------------+
-| `mtu`  | int  | M   | M    | `DestUnreachable` only; default 0. |
-+--------+------+-----+------+------------------------------------+
+-   `code`: int; set M; read M. Default 0.
+-   `mtu`: int; set M; read M. `DestUnreachable` only; default 0.
 
 Constants for `code`: `NET_UNREACHABLE`, `HOST_UNREACHABLE`,
 `PROTOCOL_UNREACHABLE`, `PORT_UNREACHABLE`, `FRAG_NEEDED`, `SOURCE_ROUTE_FAILED`
@@ -599,48 +448,27 @@ unless given, as are the checksums of `UDP` and `TCP`.
 
 #### `DNS` (on `UDP`)
 
-+----------+------+-----+------+----------------------------+
-| Field    | Type | Set | Read |                            |
-+==========+======+=====+======+============================+
-| **`id`** | int  | M   | M    | Default: a free random id. |
-+----------+------+-----+------+----------------------------+
+-   `id` (key): int; set M; read M. Default: a free random id.
 
 `DNS` has no header of its own but the id. It is the stream of an id, on which
 `Query` and `Answer` messages go, told apart by the QR bit.
 
 #### `Query` and `Answer` (on `DNS`, terminal)
 
-+---------------------+---------+-----+------+--------------------------+
-| Field               | Type    | Set | Read |                          |
-+=====================+=========+=====+======+==========================+
-| `name`              | string  | M   | M    | Default field; required. |
-+---------------------+---------+-----+------+--------------------------+
-| `type`              | int     | M   | M    | Default `TYPE_A`.        |
-+---------------------+---------+-----+------+--------------------------+
-| `class`             | int     | M   | M    | Default `CLASS_IN`.      |
-+---------------------+---------+-----+------+--------------------------+
-| `opcode`            | int     | M   | M    | Default 0.               |
-+---------------------+---------+-----+------+--------------------------+
-| `authoritative`     | bool    | M   | M    | Default false.           |
-+---------------------+---------+-----+------+--------------------------+
-| `truncated`         | bool    | M   | M    | Default false.           |
-+---------------------+---------+-----+------+--------------------------+
-| `rec_desired`       | bool    | M   | M    | Default true.            |
-+---------------------+---------+-----+------+--------------------------+
-| `rec_avail`         | bool    | M   | M    | Default false.           |
-+---------------------+---------+-----+------+--------------------------+
-| `authentic_data`    | bool    | M   | M    | Default false.           |
-+---------------------+---------+-----+------+--------------------------+
-| `checking_disabled` | bool    | M   | M    | Default false.           |
-+---------------------+---------+-----+------+--------------------------+
-| `status`            | int     | M   | M    | Default `NOERROR`.       |
-+---------------------+---------+-----+------+--------------------------+
-| `answers`           | records | M   | M    | Default none.            |
-+---------------------+---------+-----+------+--------------------------+
-| `authority`         | records | M   | M    | Default none.            |
-+---------------------+---------+-----+------+--------------------------+
-| `additional`        | records | M   | M    | Default none.            |
-+---------------------+---------+-----+------+--------------------------+
+-   `name`: string; set M; read M. Default field; required.
+-   `type`: int; set M; read M. Default `TYPE_A`.
+-   `class`: int; set M; read M. Default `CLASS_IN`.
+-   `opcode`: int; set M; read M. Default 0.
+-   `authoritative`: bool; set M; read M. Default false.
+-   `truncated`: bool; set M; read M. Default false.
+-   `rec_desired`: bool; set M; read M. Default true.
+-   `rec_avail`: bool; set M; read M. Default false.
+-   `authentic_data`: bool; set M; read M. Default false.
+-   `checking_disabled`: bool; set M; read M. Default false.
+-   `status`: int; set M; read M. Default `NOERROR`.
+-   `answers`: records; set M; read M. Default none.
+-   `authority`: records; set M; read M. Default none.
+-   `additional`: records; set M; read M. Default none.
 
 A message has one question, of `name`, `type` and `class`; of a received message
 with several, these are the first. Names are written without the trailing dot
@@ -655,11 +483,7 @@ Constants for `type`: `TYPE_A`, `TYPE_NS`, `TYPE_CNAME`, `TYPE_SOA`, `TYPE_PTR`,
 
 #### `Bytes` (on `Eth`, `IP`, `TCP`, `UDP`, the ICMP errors and the quoted layers, terminal)
 
-+--------+-------+-----+------+----------------+
-| Field  | Type  | Set | Read |                |
-+========+=======+=====+======+================+
-| `data` | bytes | M   | M    | Default field. |
-+--------+-------+-----+------+----------------+
+-   `data`: bytes; set M; read M. Default field.
 
 It is what a layer carries when it is not decoded any further: the payload of
 UDP, the data of TCP, a fragment, a quote, or an unknown protocol.
