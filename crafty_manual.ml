@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 6c4a57df77f9314364e55a2e6562c570) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 214dfd6facb4cd39add0d76be2d72e19) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -374,6 +374,13 @@ nodes it held.
 -   `map(key=k, default=v)`: see maps above.
 -   `has(m, k)`, `remove(m, k)`: Whether map `m` has key `k`; `m` without it.
 -   `keys(m)`, `values(m)`: Arrays of the keys and the values of a map.
+-   `count(a)`: Same as `length`.
+-   `min(a)`, `max(a)`, `mean(a)`, `stddev(a)`, `percentile(a, p)`: Over the
+    items of an array, or the values of a map; an error if there are none.
+    `mean` and `stddev` (of the population) take numbers (giving a float) or
+    intervals, the others anything ordered. `percentile` is the nearest rank:
+    the smallest value that at least `p` percent of them do not exceed
+    (`percentile(a, 50)`, the median).
 
 An argument can be left unnamed when the function has a single parameter, when
 it is the only parameter without a default (`assert(x == 4)`), or when no
@@ -718,6 +725,7 @@ destination port of the packet they quote: `MATCH[IP]` is the quoted probe, and
     seen = map(key="", default=0)
     foreach p ["udp", "tcp", "udp"] { seen[p] += 1 }
     print("${seen}, and ${seen["icmp"]} icmp")
+    print("${min(sizes)} to ${max(sizes)}, median ${percentile(sizes, 50)}")
     delay = interval(0.5) * 3
     print("waiting ${delay}")
     wait delay
@@ -728,5 +736,6 @@ prints:
 
     gw is 192.0.2.1; 2076 bytes in 3 packets
     [tcp: 1, udp: 2], and 0 icmp
+    64 to 1500, median 512
     waiting 1s500ms
 |crafty_manual}

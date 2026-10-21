@@ -170,6 +170,36 @@ let parsed loc what ok s =
     | Some v when ok v -> v
     | _ -> error loc "Cannot convert %S to %s" s what
 
+(* That statistic over the values [vs], of which there is at least one: *)
+let stat loc (b : T.builtin) vs args =
+    let best better = Array.fold_left (fun a v -> if better v a then v else a) vs.(0) vs in
+    match b, args with
+    | T.Min, [] -> best (fun v a -> compare_values v a < 0)
+    | T.Max, [] -> best (fun v a -> compare_values v a > 0)
+    | (T.Mean | T.Stddev), [] ->
+        let is_interval = match vs.(0) with Interval _ -> true | _ -> false in
+        let xs = Array.map (function
+            | Interval i -> Interval.to_secs i
+            | v -> float_of v) vs in
+        let n = float_of_int (Array.length xs) in
+        let mean = Array.fold_left (+.) 0. xs /. n in
+        (* Of the population: *)
+        let x =
+            if b = T.Mean then mean else
+            sqrt (Array.fold_left (fun s x -> s +. (x -. mean) ** 2.) 0. xs /. n) in
+        if is_interval then Interval (Interval.of_secs x) else Float x
+    (* The nearest rank: the smallest value that [p] percent of them are not
+     * above: *)
+    | T.Percentile, [ p ] ->
+        let p = float_of p in
+        if not (p >= 0. && p <= 100.) then
+            error loc "No percentile %s, which is not within 0 and 100" (A.string_of_float p) ;
+        let vs = Array.copy vs in
+        Array.sort compare_values vs ;
+        let rank = int_of_float (ceil (p /. 100. *. float_of_int (Array.length vs))) in
+        vs.(max 0 (rank - 1))
+    | _ -> assert false
+
 let rec call loc (b : T.builtin) args ~print ~print_err ~now =
     let number = function Bool _ | Int _ | Float _ -> true | _ -> false in
     let reparse what ok s =
@@ -233,6 +263,18 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
     | T.Make_map, [ _ ; default ] -> empty_map (Some default)
     | T.Has, [ Map (m, _) ; k ] -> Bool (Map.PMap.mem k m)
     | T.Remove, [ Map (m, d) ; k ] -> Map (Map.PMap.remove k m, d)
+    | (T.Min | T.Max | T.Mean | T.Stddev | T.Percentile as b), vs :: args ->
+        let vs =
+            match vs with
+            | Array a -> a
+            | Map (m, _) -> Array.of_enum (Map.PMap.values m)
+            | _ -> assert false in
+        if Array.length vs = 0 then
+            error loc "No %s of no values"
+                (match b with T.Min -> "minimum" | T.Max -> "maximum"
+                            | T.Mean -> "mean" | T.Stddev -> "standard deviation"
+                            | _ -> "percentile") ;
+        stat loc b vs args
     | T.Keys, [ Map (m, _) ] -> Array (Array.of_enum (Map.PMap.keys m))
     | T.Values, [ Map (m, _) ] -> Array (Array.of_enum (Map.PMap.values m))
     | T.Length, [ String s ] -> Int (String.length s)
@@ -1049,7 +1091,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: [0, 1, 2, 3, 4] [0, 1, 2, 5] [9, 0, 1, 2] [0, 1, 2, 0, 1, 2] [7]\n0s: done" \
     (runs "x = [1]\nx += 2\nx := 0 + x\ny = array(0, 0) + 7\nprint(\"${x + [3, 4]} ${append(x, 5)} ${prepend(9, x)} ${concat(x, x)} ${y}\")")
   "0s: [a: 2, b: 1] 2 0\n0s: done" \
-    (runs "count = map(key=\"\", default=0)\nforeach w [\"a\", \"b\", \"a\"] { count[w] += 1 }\nprint(\"${count} ${length(count)} ${count[\"z\"]}\")")
+    (runs "n = map(key=\"\", default=0)\nforeach w [\"a\", \"b\", \"a\"] { n[w] += 1 }\nprint(\"${n} ${length(n)} ${n[\"z\"]}\")")
   "0s: 2=b\n0s: 3=c\n0s: [1: a, 2: b, 3: c] [2, 3] [b, c] false\n0s: done" \
     (runs "m = [2: \"b\", 1: \"a\"]\nm[3] := \"c\"\nn = m\nm := remove(m, 1)\nforeach m { print(\"${I.key}=${I.value}\") }\nprint(\"${n} ${keys(m)} ${values(m)} ${has(m, 1)}\")")
   "0s: [1: [5]] true false\n0s: done" \
@@ -1062,6 +1104,18 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "m = map(key=1, default=0.5)\nm := [1: 2]\nprint(\"${m}\")")
   "0s: [tcp: 1, udp: 2], and 0 icmp\n0s: done" \
     (runs "seen = map(key=\"\", default=0)\nforeach p [\"udp\", \"tcp\", \"udp\"] { seen[p] += 1 }\nprint(\"${seen}, and ${seen[\"icmp\"]} icmp\")")
+  "0s: 1 7 1.5 1s500ms 2 3 1 2\n0s: done" \
+    (runs "a = [5, 1, 4, 2, 3]\nprint(\"${min([3, 1, 2])} ${max([1: 5, 2: 7])} ${mean([1, 2])} ${mean([1s, 2s])} ${percentile(a, 40)} ${percentile(a, 40.1)} ${percentile([1], 0)} ${count([1, 2])}\")")
+  "0s: 64 to 1500, median 512\n0s: done" \
+    (runs "sizes = [64, 512, 1500]\nprint(\"${min(sizes)} to ${max(sizes)}, median ${percentile(sizes, 50)}\")")
+  "0s: 2.0 1s 0.0\n0s: done" \
+    (runs "print(\"${stddev([2, 4, 4, 4, 5, 5, 7, 9])} ${stddev([1: 1s, 2: 3s])} ${stddev([3.5])}\")")
+  "0s: failed: line 1, column 5: No standard deviation of no values" \
+    (runs "x = stddev(array(init=1s, len=0))")
+  "0s: failed: line 1, column 5: No minimum of no values" \
+    (runs "x = min(array(init=1, len=0))")
+  "0s: failed: line 1, column 5: No percentile 101.0, which is not within 0 and 100" \
+    (runs "x = percentile([1], 101)")
   "0s: [1, 5] [9, 2]\n0s: done" \
     (runs "x = [1, 2]\ny = x\nx[1] += 3\ny[0] := 9\nprint(\"${x} ${y}\")")
   "0s: [[1], [0]]\n0s: done" \

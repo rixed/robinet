@@ -49,6 +49,7 @@ type builtin =
     | To_ip | To_mac | Getenv
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
+    | Min | Max | Mean | Stddev | Percentile
     | Print | Print_err | Assert
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
@@ -519,6 +520,17 @@ let any_array t = match t with Type.Array _ -> Some t | _ -> None
 
 let any_map t = match t with Type.Map _ -> Some t | _ -> None
 
+let ordered = Type.[ Int ; Float ; Byte ; Interval ; Time ; String ]
+
+(* The type of the items of an array, or of the values of a map: *)
+let values_type = function
+    | Type.Array t | Type.Map (_, t) -> Some t
+    | _ -> None
+
+(* An array, or a map, of values of one of [typs]: *)
+let values_of typs t =
+    Option.bind (values_type t) (fun v -> if List.mem v typs then Some t else None)
+
 let scalars = Type.[ Bool ; Int ; Float ; Byte ]
 
 (* Each function's name, parameters, and type of result given the types of
@@ -530,6 +542,19 @@ let builtins =
               (only_exactly (Type.String :: scalars)) in
     let secs what = param "x" what (only_exactly Type.[ Int ; Float ; String ]) in
     let res t _ = t in
+    let sized =
+        param "a" "an array, a map or a string" (function
+            | Type.String | Type.Array _ | Type.Map _ as t -> Some t
+            | _ -> None) in
+    let some_ordered =
+        param "a" "an array or a map of ordered values" (values_of ordered) in
+    let item_type ts = Option.get (values_type (List.hd ts)) in
+    let some_numbers =
+        param "a" "an array or a map of numbers or intervals"
+              (values_of Type.[ Int ; Float ; Byte ; Interval ]) in
+    let float_or_interval = function
+        | [ t ] when values_type t = Some Type.Interval -> Type.Interval
+        | _ -> Type.Float in
     [ "rand", Rand,
         [ param "max" "an int, bool or float" ~default:(Literal (A.Float 1.))
                 (only_exactly Type.[ Int ; Bool ; Float ]) ],
@@ -562,11 +587,14 @@ let builtins =
       "array", Make_array,
         [ param "init" "a value" any_value ; param "len" "an int" (only Type.[ Int ]) ],
         (fun ts -> Type.Array (List.hd ts)) ;
-      "length", Length,
-        [ param "a" "an array, a map or a string" (function
-            | Type.String | Type.Array _ | Type.Map _ as t -> Some t
-            | _ -> None) ],
-        res Type.Int ;
+      "length", Length, [ sized ], res Type.Int ;
+      "count", Length, [ sized ], res Type.Int ;
+      "min", Min, [ some_ordered ], item_type ;
+      "max", Max, [ some_ordered ], item_type ;
+      "mean", Mean, [ some_numbers ], float_or_interval ;
+      "stddev", Stddev, [ some_numbers ], float_or_interval ;
+      "percentile", Percentile,
+        [ some_ordered ; param "p" "a number" (only Type.[ Float ]) ], item_type ;
       (* Of types that [array_join] checks: *)
       "concat", Concat,
         [ param "a" "an array" any_array ; param "b" "an array" any_array ], List.hd ;
@@ -986,7 +1014,7 @@ and binop env loc op a b =
         mk Type.Bool (Binop (op, a, b))
     | A.Lt | A.Le | A.Gt | A.Ge ->
         let a, b = unify "compare" a b in
-        if not (List.mem a.typ Type.[ Int ; Float ; Byte ; Interval ; Time ; String ]) then
+        if not (List.mem a.typ ordered) then
             error loc "Cannot order values of type %s" (tname a.typ) ;
         mk Type.Bool (Binop (op, a, b))
 
@@ -1383,6 +1411,10 @@ let check (program : A.program) =
     (types "m = [1: \"a\"]\nn = map(key=0.0.0.0, default=0)\nc = n[1.2.3.4]\nk = keys(n)\nv = values(n)\nb = has(n, 1.2.3.4)\nl = length(m)")
   "m: float[string], n: int[{a: int}], I: {key: string, value: float}, k: string" \
     (types "m = [\"a\": 1, \"b\": 2.5]\nm[\"c\"] += 1\nm := remove(m, \"a\")\nn = [{a: 1}: 2]\nforeach m { k = I.key }")
+  "I: int, x: int" (types "repeat count=2 { x = rand(max=3) }")
+  "a: float, b: interval" (types "a = stddev([1, 2])\nb = stddev([1s])")
+  "a: int, b: float, c: interval, d: float, e: string, f: int" \
+    (types "a = min([3, 1])\nb = mean([1, 2])\nc = mean([1s, 2s])\nd = percentile([1.5, 2], 95)\ne = max([1: \"x\"])\nf = count([1: 2])")
   "x: float[][], i: int" \
     (types "x = [[1.0]]\ni = 0\nx[i][0] += 1\nx[0] := [2]")
   "x: int, y: int" \
@@ -1491,6 +1523,13 @@ let check (program : A.program) =
     (types "m = [1: 2]\nx = m[\"a\"]")
   "line 2, column 12: The keys of an int[int] are not a string" \
     (types "m = [1: 2]\nx = has(m, \"a\")")
+  "line 1, column 9: Argument a of min must be an array or a map of ordered values, not a bool[]" \
+    (types "x = min([true])")
+  "line 1, column 10: Argument a of mean must be an array or a map of numbers or intervals, not an ip[]" \
+    (types "x = mean([1.2.3.4])")
+  "line 1, column 21: Argument p of percentile must be a number, not a string" \
+    (types "x = percentile([1], \"a\")")
+  "line 1, column 10: count is a reserved name" (types "count = 1")
   "line 1, column 5: map needs an argument default" \
     (types "m = map(key=1)")
   "line 1, column 5: Cannot tell the type of the items of an empty array" \

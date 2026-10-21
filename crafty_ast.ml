@@ -240,6 +240,7 @@ let functions =
       "bool" ; "byte" ; "interval" ; "time" ; "now" ; "ip_addr" ; "mac_addr" ; "getenv" ;
       "array" ; "length" ; "concat" ; "append" ; "prepend" ;
       "map" ; "has" ; "remove" ; "keys" ; "values" ;
+      "count" ; "min" ; "max" ; "mean" ; "stddev" ; "percentile" ;
       "print" ; "print_err" ; "assert" ]
 
 (** Variables that the language defines, which are case insensitive as are
