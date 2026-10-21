@@ -247,7 +247,7 @@ module Pdu = struct
     let make_ttl_expired_during_reassembly = make_ttl_expired 1
 
     let make_destination_unreachable ?(next_hop_mtu=0) code ip =
-        let hdr_len = 20 + bytelength ip.Ip.Pdu.options in
+        let hdr_len = Ip.Pdu.hdr_len ip in
         let ip_start =
             let ip_bits = Ip.Pdu.pack ip in
             try takebits ((hdr_len + 8) * 8) ip_bits

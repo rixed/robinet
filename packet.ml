@@ -105,7 +105,7 @@ Some
     Ip.Pdu.dont_frag = true; Ip.Pdu.more_frags = false;
     Ip.Pdu.frag_offset = 0; Ip.Pdu.ttl = 62; Ip.Pdu.proto = tcp;
     Ip.Pdu.src = 193.51.52.41;
-    Ip.Pdu.dst = 91.202.200.31; Ip.Pdu.options = ;
+    Ip.Pdu.dst = 91.202.200.31; Ip.Pdu.options = [];
     Ip.Pdu.payload = 40 bytes};
   Packet.Pdu.Tcp
    {Tcp.Pdu.src_port = 44994; Tcp.Pdu.dst_port = www;
@@ -532,7 +532,9 @@ module Pdu = struct
                         layer_4 ip.src ip.dst ip.proto ip.payload rest ;
                     if fragment then
                         add " (frag id %d off %d%s)" ip.id (ip.frag_offset * 8)
-                            (if ip.more_frags then "+" else "")
+                            (if ip.more_frags then "+" else "") ;
+                    if ip.options <> [] then
+                        add " (options %s)" (Ip.Pdu.Opt.list_to_string ip.options)
                 | Ip6 ip :: rest ->
                     layer_4 ip.Ip6.Pdu.src ip.dst ip.proto ip.payload rest
                 | Eth e :: _ ->
@@ -587,6 +589,14 @@ module Pdu = struct
                     (Udp.Pdu.(pack (make ~src_port:(Udp.Port.o 1000) \
                         ~dst_port:(Udp.Port.o 53) \
                         (Bitstring.bitstring_of_string "hi"))))))))))))
+          "10.0.0.1 > 1.2.3.4 IP proto 99 len 1 (options RR ptr=4 0.0.0.0, NOP)" \
+            (oneline (of_frame (Eth.Pdu.(pack (make Eth.Proto.ip4 \
+                (Eth.Addr.of_string "02:00:00:00:00:01") \
+                (Eth.Addr.of_string "02:00:00:00:00:02") \
+                (Ip.Pdu.(pack (make ~options:Opt.[ Rr (4, [ Ip.Addr.zero ]) ; Nop ] \
+                    (Ip.Proto.o 99) (Ip.Addr.of_string "10.0.0.1") \
+                    (Ip.Addr.of_string "1.2.3.4") \
+                    (Bitstring.bitstring_of_string "x")))))))))
           "02:00:00:00:00:01 > FF:FF:FF:FF:FF:FF proto 0x88b5 len 3" \
             (oneline (of_frame (Eth.Pdu.(pack (make (Eth.Proto.o 0x88b5) \
                 (Eth.Addr.of_string "02:00:00:00:00:01") Eth.Addr.broadcast \
@@ -615,9 +625,9 @@ module Pdu = struct
                     add " IP %s>%s ttl=%d" (Ip.Addr.to_dotted_string ip.Ip.Pdu.src)
                         (Ip.Addr.to_dotted_string ip.dst) ip.ttl ;
                     if ip.dont_frag then add " df" ;
-                    if bytelength ip.options > 0 then
-                        add " opts=%S" (str ip.options) ;
-                    if sum (takebits (8 * (20 + bytelength ip.options)) bits) <> 0 then
+                    if ip.options <> [] then
+                        add " opts=[%s]" (Ip.Pdu.Opt.list_to_string ip.options) ;
+                    if sum (takebits (8 * Ip.Pdu.hdr_len ip) bits) <> 0 then
                         add " bad-checksum" ;
                     let l4 = (ip.payload :> bitstring) in
                     let check_l4 () =

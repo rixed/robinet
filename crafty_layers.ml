@@ -270,7 +270,7 @@ let ip_values (ip : Ip.Pdu.t) =
       "tos", V.Int (ip.tos :> int) ; "ttl", V.Int ip.ttl ;
       "dont_frag", V.Bool ip.dont_frag ; "id", V.Int ip.id ;
       "more_frags", V.Bool ip.more_frags ; "frag_offset", V.Int ip.frag_offset ;
-      "tot_len", V.Int ip.tot_len ; "options", bytes_value ip.options ;
+      "tot_len", V.Int ip.tot_len ; "options", bytes_value (Ip.Pdu.Opt.pack ip.options) ;
       "is_fragment", V.Bool (Ip.Pdu.is_fragment ip) ]
 
 (* A fragment goes on as bytes: *)
@@ -283,11 +283,12 @@ let unpack_ip _ bits =
 
 let ip_proto fields hints = int_of ~hints fields "IP" "proto" 0 0xff
 
+(* Bytes in crafty, that unpack to options that pack back to them: *)
 let ip_options fields =
     let options = bytes_of fields "options" in
     if Tools.bytelength options mod 4 <> 0 || Tools.bytelength options > 40 then
         V.fail "The options of IP must be a multiple of 4 bytes, up to 40" ;
-    options
+    Ip.Pdu.Opt.unpack options
 
 (* An IPv4 header as given around [payload], its id from [next_id] if not: *)
 let pack_ip next_id fields hints payload =
@@ -295,7 +296,7 @@ let pack_ip next_id fields hints payload =
     and options = ip_options fields in
     let tot_len = opt_int fields "tot_len" 0 0xffff in
     if tot_len = None &&
-       20 + Tools.bytelength options + Tools.bytelength payload > 0xffff then
+       20 + Tools.bytelength (Ip.Pdu.Opt.pack options) + Tools.bytelength payload > 0xffff then
         V.fail "Too long for an IP packet" ;
     let id = Option.default_delayed next_id (opt_int fields "id" 0 0xffff) in
     Ip.Pdu.make ~tos:(Ip.ToS.o (int ~def:0 "tos" 0xff)) ?tot_len ~id
@@ -328,8 +329,7 @@ let ip_node ctx =
             | Some payload ->
                 let ip =
                     { ip with more_frags = false ; frag_offset = 0 ;
-                              tot_len = 20 + Tools.bytelength ip.options +
-                                        Tools.bytelength payload ;
+                              tot_len = Ip.Pdu.hdr_len ip + Tools.bytelength payload ;
                               payload = Payload.o payload } in
                 [ fragment ;
                   { values = ip_values ip ; upper = Only (ip_upper ip) ;

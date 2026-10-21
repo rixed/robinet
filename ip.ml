@@ -20,7 +20,6 @@
 (**
  * Everything related to IPv4 packets: (un)packing, addresses, transceiver...
  *
- * TODO: Some usual IP options should be understood.
  *)
 open Batteries
 open Bitstring
@@ -687,6 +686,321 @@ module Pdu = struct
     (* Size of an IP header without options: *)
     let no_opt_hdr_len = 20
 
+    (** The options of an IP header (RFC 791). *)
+    module Opt =
+    struct
+        (*$< Opt *)
+
+        (* What a timestamp option records, according to its flag: *)
+        type stamps =
+            | Stamps of int32 list (* flag 0 *)
+            | Addr_stamps of (Addr.t * int32) list (* flag 1 *)
+            | Prespecified of (Addr.t * int32) list (* flag 3 *)
+
+        (* Pointers are in bytes from the start of the option, 1 based: *)
+        type t =
+            | Eol of bitstring (* the padding *)
+            | Nop
+            | Rr of int * Addr.t list (* pointer and route *)
+            | Lsr of int * Addr.t list
+            | Ssr of int * Addr.t list
+            | Ts of int * int * stamps (* pointer, overflow and stamps *)
+            | Other of bitstring (* an unknown or malformed option, type and length included *)
+
+        (* For the header length to fit in its 4 bits: *)
+        let max_len = 40
+
+        (* Whether the fragments after the first carry it too: *)
+        let copied = function
+            | Lsr _ | Ssr _ -> true
+            | Other bits -> bitstring_length bits > 0 && is_set bits 0
+            | Eol _ | Nop | Rr _ | Ts _ -> false
+
+        let pack_addr a = [%bitstring {| (Addr.to_int32 a) : 32 |}]
+
+        let pack_route typ ptr route =
+            concat ([%bitstring {| typ : 8 ; 3 + 4 * List.length route : 8 ; ptr : 8 |}] ::
+                    List.map pack_addr route)
+
+        let pack_one = function
+            | Eol rest ->
+                concat [ [%bitstring {| 0 : 8 |}] ; rest ]
+            | Nop ->
+                [%bitstring {| 1 : 8 |}]
+            | Rr (ptr, route) ->
+                pack_route 7 ptr route
+            | Lsr (ptr, route) ->
+                pack_route 131 ptr route
+            | Ssr (ptr, route) ->
+                pack_route 137 ptr route
+            | Ts (ptr, overflow, stamps) ->
+                let stamp s = [%bitstring {| s : 32 |}] in
+                let addr_stamp (a, s) = concat [ pack_addr a ; stamp s ] in
+                let flag, data =
+                    match stamps with
+                    | Stamps l -> 0, List.map stamp l
+                    | Addr_stamps l -> 1, List.map addr_stamp l
+                    | Prespecified l -> 3, List.map addr_stamp l in
+                let data = concat data in
+                concat [ [%bitstring {| 68 : 8 ; 4 + bytelength data : 8 ; ptr : 8 ;
+                                        overflow : 4 ; flag : 4 |}] ; data ]
+            | Other bits ->
+                bits
+
+        (* Zero padded to a whole number of 32 bits words: *)
+        let pack opts =
+            let bits = concat (List.map pack_one opts) in
+            match bytelength bits land 3 with
+            | 0 -> bits
+            | r -> concat [ bits ; zeroes_bitstring (8 * (4 - r)) ]
+
+        let rec addrs bits =
+            match%bitstring bits with
+            | {| a : 32 ; rest : -1 : bitstring |} -> Addr.o32 a :: addrs rest
+            | {| _ |} -> []
+
+        let rec stamps bits =
+            match%bitstring bits with
+            | {| s : 32 ; rest : -1 : bitstring |} -> s :: stamps rest
+            | {| _ |} -> []
+
+        let rec addr_stamps bits =
+            match%bitstring bits with
+            | {| a : 32 ; s : 32 ; rest : -1 : bitstring |} -> (Addr.o32 a, s) :: addr_stamps rest
+            | {| _ |} -> []
+
+        (* [tlv] is a whole option, of the length it says: *)
+        let decode tlv =
+            match%bitstring tlv with
+            | {| typ : 8 ; len : 8 ; ptr : 8 ; route : -1 : bitstring |}
+              when (typ = 7 || typ = 131 || typ = 137) && (len - 3) land 3 = 0 ->
+                let route = addrs route in
+                if typ = 7 then Rr (ptr, route)
+                else if typ = 131 then Lsr (ptr, route)
+                else Ssr (ptr, route)
+            | {| 68 : 8 ; len : 8 ; ptr : 8 ; overflow : 4 ; flag : 4 ; data : -1 : bitstring |}
+              when flag = 0 && (len - 4) land 3 = 0 ->
+                Ts (ptr, overflow, Stamps (stamps data))
+            | {| 68 : 8 ; len : 8 ; ptr : 8 ; overflow : 4 ; flag : 4 ; data : -1 : bitstring |}
+              when (flag = 1 || flag = 3) && (len - 4) land 7 = 0 ->
+                let l = addr_stamps data in
+                Ts (ptr, overflow, if flag = 1 then Addr_stamps l else Prespecified l)
+            | {| _ |} -> Other tlv
+
+        (* Past an option whose length cannot be right, there is no telling
+         * where the next one starts: *)
+        let rec unpack bits =
+            match%bitstring bits with
+            | {| 0 : 8 ; rest : -1 : bitstring |} ->
+                [ Eol rest ]
+            | {| 1 : 8 ; rest : -1 : bitstring |} ->
+                Nop :: unpack rest
+            | {| _ : 8 ; len : 8 |} when len >= 2 && 8 * len <= bitstring_length bits ->
+                decode (takebytes len bits) :: unpack (dropbytes len bits)
+            | {| _ |} ->
+                if bitstring_length bits = 0 then [] else [ Other bits ]
+
+        (* In the manner of tcpdump, empty slots of a route included: *)
+        let to_string =
+            let route name ptr route =
+                Printf.sprintf "%s ptr=%d%s" name ptr
+                    (String.concat "" (List.map (fun a ->
+                        " "^ Addr.to_dotted_string a) route))
+            and addr_stamps l =
+                String.concat "" (List.map (fun (a, s) ->
+                    Printf.sprintf " %s@%lu" (Addr.to_dotted_string a) s) l) in
+            function
+            | Eol _ -> "EOL"
+            | Nop -> "NOP"
+            | Rr (ptr, r) -> route "RR" ptr r
+            | Lsr (ptr, r) -> route "LSR" ptr r
+            | Ssr (ptr, r) -> route "SSR" ptr r
+            | Ts (ptr, overflow, stamps) ->
+                Printf.sprintf "TS ptr=%d oflw=%d%s" ptr overflow
+                    (match stamps with
+                    | Stamps l ->
+                        String.concat "" (List.map (Printf.sprintf " %lu") l)
+                    | Addr_stamps l -> " addr" ^ addr_stamps l
+                    | Prespecified l -> " prespec" ^ addr_stamps l)
+            | Other bits -> "opt " ^ hexstring ~sep:"" (string_of_bitstring bits)
+
+        let list_to_string opts =
+            String.concat ", " (List.map to_string opts)
+
+        (*$= unpack & ~printer:identity
+          "RR ptr=8 1.2.3.4 0.0.0.0, NOP, EOL" \
+            (list_to_string (unpack (bitstring_of_string \
+              "\x07\x0b\x08\x01\x02\x03\x04\x00\x00\x00\x00\x01\x00\x00\x00\x00")))
+          "LSR ptr=4 10.0.0.1, SSR ptr=4 10.0.0.2" \
+            (list_to_string (unpack (bitstring_of_string \
+              "\x83\x07\x04\x0a\x00\x00\x01\x89\x07\x04\x0a\x00\x00\x02")))
+          "TS ptr=9 oflw=2 1 2, EOL" \
+            (list_to_string (unpack (bitstring_of_string \
+              "\x44\x0c\x09\x20\x00\x00\x00\x01\x00\x00\x00\x02\x00\x00\x00\x00")))
+          "TS ptr=13 oflw=0 addr 1.2.3.4@7, TS ptr=5 oflw=0 prespec 5.6.7.8@0" \
+            (list_to_string (unpack (bitstring_of_string \
+              ("\x44\x0c\x0d\x01\x01\x02\x03\x04\x00\x00\x00\x07" ^ \
+               "\x44\x0c\x05\x03\x05\x06\x07\x08\x00\x00\x00\x00"))))
+          "opt 820300, NOP" \
+            (list_to_string (unpack (bitstring_of_string "\x82\x03\x00\x01")))
+          "opt 07040000, NOP" \
+            (list_to_string (unpack (bitstring_of_string "\x07\x04\x00\x00\x01")))
+          "NOP, opt 070800" \
+            (list_to_string (unpack (bitstring_of_string "\x01\x07\x08\x00")))
+          "opt 440500004E, NOP" \
+            (list_to_string (unpack (bitstring_of_string "\x44\x05\x00\x00\x4e\x01")))
+         *)
+        (*$Q unpack
+          Q.(int_bound 10) (fun n -> \
+            let b = randbs (4 * n) in Bitstring.equals b (pack (unpack b)))
+         *)
+        (*$= copied & ~printer:identity
+          "opt 820300, LSR ptr=4" \
+            (list_to_string (List.filter copied (unpack (bitstring_of_string \
+              "\x07\x03\x00\x01\x82\x03\x00\x83\x03\x04\x00\x00"))))
+         *)
+
+        let random () =
+            let route () = List.init (Random.int 3) (fun _ -> Addr.random ()) in
+            let ptr () = 4 + 4 * Random.int 3 in
+            let addr_stamps () =
+                List.init (Random.int 3) (fun _ -> Addr.random (), rand32 ()) in
+            let one () =
+                match Random.int 6 with
+                | 0 -> Nop
+                | 1 -> Rr (ptr (), route ())
+                | 2 -> if Random.bool () then Lsr (ptr (), route ())
+                       else Ssr (ptr (), route ())
+                | 3 ->
+                    let stamps =
+                        match Random.int 3 with
+                        | 0 -> Stamps (List.init (Random.int 3) (fun _ -> rand32 ()))
+                        | 1 -> Addr_stamps (addr_stamps ())
+                        | _ -> Prespecified (addr_stamps ()) in
+                    Ts (1 + ptr (), Random.int 16, stamps)
+                | _ ->
+                    let typ = 30 + 32 * Random.int 3 (* experimental, RFC 4727 *)
+                    and len = 2 + Random.int 5 in
+                    Other (concat [ [%bitstring {| typ : 8 ; len : 8 |}] ; randbs (len - 2) ]) in
+            let opts = List.init (Random.int 4) (fun _ -> one ()) in
+            let opts =
+                if Random.bool () then opts
+                else opts @ [ Eol (randbs (Random.int 4)) ] in
+            let rec fit opts =
+                if bytelength (pack opts) <= max_len then opts
+                else fit (List.take (List.length opts - 1) opts) in
+            fit opts
+
+        module Kinds =
+        struct
+            open SimTypes
+            let after_eol = BRange (0, max_len - 1)
+            let ptr = IRange (0, 0xff)
+            let addr = Widget.hint "192.168.0.1" Ipv4
+            let route = Widget.record [| "pointer", ptr ; "route", Widget.list addr |]
+            let stamp = IRange (0, 0xffff_ffff)
+            let addr_stamp = Widget.row [| "address", addr ; "timestamp", stamp |]
+            let stamps =
+                Widget.variant [|
+                    "timestamps", Some (Widget.list stamp) ;
+                    "addresses and timestamps", Some (Widget.list addr_stamp) ;
+                    "prespecified", Some (Widget.list addr_stamp) |]
+            let overflow = IRange (0, 15)
+            let timestamp =
+                Widget.record [| "pointer", ptr ; "overflow", overflow ; "stamps", stamps |]
+            let other = BRange (1, max_len)
+            let opt =
+                Widget.variant [|
+                    "EOL", Some after_eol ;
+                    "NOP", None ;
+                    "record route", Some route ;
+                    "loose source route", Some route ;
+                    "strict source route", Some route ;
+                    "timestamp", Some timestamp ;
+                    "other", Some other |]
+        end
+
+        let to_json opt : Yojson.Basic.t =
+            let u32 n = `Int (uint32 n) in
+            let route ptr r =
+                `Assoc [ "pointer", `Int ptr ; "route", `List (List.map Addr.to_json r) ]
+            and addr_stamps l =
+                `List (List.map (fun (a, s) ->
+                    `Assoc [ "address", Addr.to_json a ; "timestamp", u32 s ]) l) in
+            match opt with
+            | Eol rest -> `Assoc [ "EOL", Widget.json_of_bytes rest ]
+            | Nop -> `Assoc [ "NOP", `Null ]
+            | Rr (ptr, r) -> `Assoc [ "record route", route ptr r ]
+            | Lsr (ptr, r) -> `Assoc [ "loose source route", route ptr r ]
+            | Ssr (ptr, r) -> `Assoc [ "strict source route", route ptr r ]
+            | Ts (ptr, overflow, stamps) ->
+                let stamps =
+                    match stamps with
+                    | Stamps l -> `Assoc [ "timestamps", `List (List.map u32 l) ]
+                    | Addr_stamps l -> `Assoc [ "addresses and timestamps", addr_stamps l ]
+                    | Prespecified l -> `Assoc [ "prespecified", addr_stamps l ] in
+                `Assoc [ "timestamp", `Assoc [ "pointer", `Int ptr ;
+                                               "overflow", `Int overflow ;
+                                               "stamps", stamps ] ]
+            | Other bits -> `Assoc [ "other", Widget.json_of_bytes bits ]
+
+        (* [js] is the synth of an option of [Kinds.opt], as [Generator.expand]
+         * leaves it. Automatic values make an option with one empty slot: *)
+        let of_synth gen_values js =
+            let open Generator in
+            let int ~auto name kind v = int_of_field name gen_values ~auto kind identity v
+            and addr v =
+                of_value gen_values ~auto:(fun () -> Addr.zero) Kinds.addr
+                         (Addr.of_dotted_string % Widget.to_string) v
+            and stamp v =
+                Int32.of_int (of_value gen_values ~auto:(fun () -> 0) Kinds.stamp
+                                       Widget.to_int v) in
+            (* An automatic list has one element: *)
+            let list kind f = function
+                | `Null -> [ f `Null ]
+                | v -> expand gen_values kind v |> Widget.to_list f in
+            let addr_stamp v =
+                let v = expand gen_values Kinds.addr_stamp v in
+                Widget.to_field "address" addr v, Widget.to_field "timestamp" stamp v in
+            let route make v =
+                let v = expand gen_values Kinds.route v in
+                make (int ~auto:(fun () -> 4) "pointer" Kinds.ptr v,
+                      Widget.to_field "route" (list (Widget.list Kinds.addr) addr) v) in
+            match js with
+            | `Assoc [ "EOL", v ] ->
+                Eol (bs_of_value gen_values ~auto:(fun () -> empty_bitstring)
+                                 Kinds.after_eol v)
+            | `Assoc [ "NOP", _ ] ->
+                Nop
+            | `Assoc [ "record route", v ] -> route (fun (p, r) -> Rr (p, r)) v
+            | `Assoc [ "loose source route", v ] -> route (fun (p, r) -> Lsr (p, r)) v
+            | `Assoc [ "strict source route", v ] -> route (fun (p, r) -> Ssr (p, r)) v
+            | `Assoc [ "timestamp", v ] ->
+                let v = expand gen_values Kinds.timestamp v in
+                let stamps =
+                    match Widget.to_field "stamps" identity v with
+                    | `Null -> Stamps [ 0l ]
+                    | s ->
+                        (match expand gen_values Kinds.stamps s with
+                        | `Assoc [ "timestamps", l ] ->
+                            Stamps (list (Widget.list Kinds.stamp) stamp l)
+                        | `Assoc [ "addresses and timestamps", l ] ->
+                            Addr_stamps (list (Widget.list Kinds.addr_stamp) addr_stamp l)
+                        | `Assoc [ "prespecified", l ] ->
+                            Prespecified (list (Widget.list Kinds.addr_stamp) addr_stamp l)
+                        | js -> Widget.bad_value "not timestamps: %s" (Yojson.Basic.to_string js)) in
+                Ts (int ~auto:(fun () -> 5) "pointer" Kinds.ptr v,
+                    int ~auto:(fun () -> 0) "overflow" Kinds.overflow v, stamps)
+            | `Assoc [ "other", v ] ->
+                (* An option of an experimental type (RFC 4727), carrying nothing: *)
+                Other (bs_of_value gen_values ~auto:(fun () -> bitstring_of_string "\x1e\x02")
+                                   Kinds.other v)
+            | js ->
+                Widget.bad_value "not an IP option: %s" (Yojson.Basic.to_string js)
+
+        (*$>*)
+    end
+
     (* IP ids are the top 16 bits of a xorshift32 generator: not sequential,
      * and of period 2^32-1. Faster than what's doable with Random and
      * independent of the simulation random generator. *)
@@ -703,14 +1017,16 @@ module Pdu = struct
     type t = { tos : ToS.t ; tot_len : int ;
                id : int ; dont_frag : bool ; more_frags : bool ; frag_offset : int ;
                ttl : int ; proto : Proto.t ; src : Addr.t ; dst : Addr.t ;
-               options : bitstring ; payload : Payload.t }
+               options : Opt.t list ; payload : Payload.t }
+
+    let hdr_len t = no_opt_hdr_len + bytelength (Opt.pack t.options)
 
     let make ?(tos=ToS.o 0) ?tot_len
              ?id ?(dont_frag=false) ?(more_frags=false)
              ?(frag_offset=0) ?(ttl=64)
-             ?(options=empty_bitstring)
+             ?(options=[])
              proto src dst bits =
-        let hdr_len = no_opt_hdr_len + bytelength options
+        let hdr_len = no_opt_hdr_len + bytelength (Opt.pack options)
         and id = may_default id next_id in
         let tot_len = match tot_len with Some v -> v | None ->
             bytelength bits + hdr_len in
@@ -720,7 +1036,7 @@ module Pdu = struct
     let random () =
         make ~tos:(ToS.random ()) ~id:(randi 16) ~dont_frag:(randb ())
              ~more_frags:(randb ()) ~frag_offset:(randi 13)
-             ~ttl:(randi 8) ~options:(randbs (4*(randi 3)))
+             ~ttl:(randi 8) ~options:(Opt.random ())
              (Proto.random ()) (Addr.random ()) (Addr.random ()) (randbs (Random.int 10 + no_opt_hdr_len))
 
     let pseudo_header t () =
@@ -755,8 +1071,10 @@ module Pdu = struct
             Payload.o bits
 
     let pack_header t =
-        let hdr_len = no_opt_hdr_len + bytelength t.options in
-        assert (hdr_len < 64) ;
+        let options = Opt.pack t.options in
+        if bytelength options > Opt.max_len then
+            invalid_arg "Ip.Pdu.pack: more than 40 bytes of options" ;
+        let hdr_len = no_opt_hdr_len + bytelength options in
         assert (t.tot_len < 65536) ;
         assert (t.id < 65536) ;
         assert (t.frag_offset < 8192) ;
@@ -768,7 +1086,7 @@ module Pdu = struct
             t.id : 16 ; false : 1 ; t.dont_frag : 1 ; t.more_frags : 1 ; t.frag_offset : 13 ;
             t.ttl : 8 ; (t.proto :> int) : 8 ; 0 : 16 ;
             (Addr.to_int32 t.src) : 32 ; (Addr.to_int32 t.dst) : 32 |} in
-        let header = concat [ hdr ; t.options ] in
+        let header = concat [ hdr ; options ] in
         let%bitstring s = {| sum header : 16 |} in
         concat [ takebits 80 header ; s ; dropbits 96 header ]
 
@@ -831,34 +1149,13 @@ module Pdu = struct
         Bitstring.equals (decr_ttl (pack t)) (pack { t with ttl = t.ttl - 1 }))
      *)
 
-    (* The options that go into every fragment (copied flag set), padded to
-     * a multiple of 4 bytes: *)
-    let copied_options opts =
-        let rec loop acc opts =
-            match%bitstring opts with
-            | {| 0 : 8 ; _ : -1 : bitstring |} -> acc (* end of options *)
-            | {| 1 : 8 ; rest : -1 : bitstring |} -> loop acc rest (* no-op *)
-            | {| copied : 1 ; _ : 7 ; len : 8 ;
-                 _ : (len - 2) * 8 : bitstring ; rest : -1 : bitstring |} ->
-                loop (if copied then takebits (len * 8) opts :: acc else acc) rest
-            | {| _ |} -> acc in
-        let opts = concat (List.rev (loop [] opts)) in
-        let pad = (4 - bytelength opts mod 4) mod 4 in
-        concat [ opts ; zeroes_bitstring (pad * 8) ]
-    (*$= copied_options & ~printer:identity
-      "\x82\x03\x00\x00" \
-        (Bitstring.string_of_bitstring (copied_options \
-          (Bitstring.bitstring_of_string "\x07\x03\x00\x01\x82\x03\x00\x00")))
-      "" (Bitstring.string_of_bitstring (copied_options Bitstring.empty_bitstring))
-    *)
-
     (** Split [t] into packets of at most [mtu] bytes. [t] can itself be a
      * fragment, so offsets and MF flag are relative to its own. The DF flag is
      * not checked.
      * Raises Invalid_argument if [mtu] leaves no room for 8 bytes of payload. *)
     let fragment mtu t =
         let len = Payload.length t.payload in
-        let hdr_len opts = no_opt_hdr_len + bytelength opts in
+        let hdr_len options = hdr_len { t with options } in
         if hdr_len t.options + len <= mtu then [ pack t ] else
         let t = { t with payload = pack_payload t } in (* before splitting *)
         let rec loop options pos acc =
@@ -873,7 +1170,7 @@ module Pdu = struct
                          payload = Payload.sub pos n t.payload } in
             let bits = pack frag in
             if last then List.rev (bits :: acc)
-            else loop (copied_options t.options) (pos + n) (bits:: acc) in
+            else loop (List.filter Opt.copied t.options) (pos + n) (bits:: acc) in
         loop t.options 0 []
 
     let unpack bits = match%bitstring bits with
@@ -897,8 +1194,8 @@ module Pdu = struct
             Ok { tos = ToS.o tos ; tot_len ;
                id ; dont_frag ; more_frags ; frag_offset ;
                ttl ; proto = Proto.o proto ;
-               src = Addr.o32 src ; dst = Addr.o32 dst ; options ;
-               payload = Payload.o payload }
+               src = Addr.o32 src ; dst = Addr.o32 dst ;
+               options = Opt.unpack options ; payload = Payload.o payload }
         | {| 4 : 4 ; hdr_len : 4 ; _tos : 8 ; tot_len : 16 ; _ |} ->
             Error (lazy (Printf.sprintf
                 "Bogus IPv4 header: announces a header of %d bytes in a \
@@ -985,7 +1282,7 @@ module Pdu = struct
         let ttl = IRange (0, 0xff)
         let proto = Widget.one_of ~range:(0, 0xff) Proto.choices
         let addr = Widget.hint "192.168.0.1" Ipv4
-        let options = BRange (0, 40)
+        let options = Widget.list Opt.Kinds.opt
         let payload = BRange (0, 0xffff - no_opt_hdr_len)
     end
 
@@ -1018,7 +1315,7 @@ module Pdu = struct
                     host instead: what is shown is what can be typed back. *)
                  "source", Addr.to_json t.src ;
                  "destination", Addr.to_json t.dst ;
-                 "options", Widget.json_of_bytes t.options ;
+                 "options", `List (List.map Opt.to_json t.options) ;
                  "payload", Widget.json_of_bytes (t.payload :> bitstring) ]
 
     (* Where each field is in [kind], which [of_synth] reads them by: *)
@@ -1051,18 +1348,23 @@ module Pdu = struct
                    (Addr.of_dotted_string % Widget.to_string) in
         (* An automatic value is what a packet would plausibly carry and not
          * any value the field could hold: a random fragment offset makes a
-         * fragment of every packet, and random option bytes a header nothing
+         * fragment of every packet, and random options a header nothing
          * can read past -- either way what is above is no longer a segment
          * anybody recognises. *)
         let options =
-            bs_of_nth r Field.options gen_values
-                      ~auto:(fun () -> empty_bitstring) Kinds.options
-        and payload = payload_of_nth ?upper r Field.payload gen_values
+            nth r Field.options (function
+                | `Null -> []
+                | js -> expand gen_values Kinds.options js |>
+                        Widget.to_list (Opt.of_synth gen_values)) in
+        let options_len = bytelength (Opt.pack options) in
+        if options_len > Opt.max_len then
+            Widget.bad_value "options: %d bytes, more than %d" options_len Opt.max_len ;
+        let payload = payload_of_nth ?upper r Field.payload gen_values
                                      Kinds.payload in
         { tos = int Field.tos ~auto:(fun () -> ToS.o 0) Kinds.tos ToS.o ;
           tot_len = int Field.tot_len
                         ~auto:(fun () ->
-                            no_opt_hdr_len + bytelength options + bytelength payload)
+                            no_opt_hdr_len + options_len + bytelength payload)
                         Kinds.tot_len identity ;
           id = int Field.id ?auto:(Option.map (fun p () ->
                                       (p.id + 1) land 0xffff) prev)
@@ -1116,11 +1418,11 @@ module TRX = struct
         dont_frag : bool ;
         (* Perform reassembly before handing over received frames: *)
         reassemble : bool ;
-        (* [tos], [ttl] and [options] (a multiple of 4 bytes, up to 40) for all
-         * emitted packets, unless [tx] is told otherwise: *)
+        (* [tos], [ttl] and [options] (up to 40 bytes) for all emitted
+         * packets, unless [tx] is told otherwise: *)
         tos : ToS.t ;
         ttl : int ;
-        options : bitstring ;
+        options : Pdu.Opt.t list ;
         next_id : unit -> int ;
         mutable emit : bitstring -> unit ;
         mutable emit_busy_for : unit -> Clock.Interval.t ;
@@ -1134,10 +1436,10 @@ module TRX = struct
      * error, wtv) so let's use the IPs in additon to the ID to identify reassembled packets: *)
     and reassemble_key = Addr.t * Addr.t * Proto.t * int (* src, dst, proto, id *)
 
+    let options_len options = bytelength (Pdu.Opt.pack options)
+
     let check_options options =
-        let len = bytelength options in
-        ensure (len mod 4 = 0 && len <= 40)
-            "Ip: options must be a multiple of 4 bytes, up to 40"
+        ensure (options_len options <= Pdu.Opt.max_len) "Ip: options must fit in 40 bytes"
 
     (* Raises Invalid_argument if the MTU leaves no room for 8 bytes of
      * payload after the options: *)
@@ -1239,10 +1541,10 @@ module TRX = struct
      *       we must add the destination to any tx call, making host layer simpler only at the expense of
      *       this layer. *)
     let create power ?(mtu=1500) ?(dont_frag=false) ?(reassemble=true)
-               ?(tos=ToS.o 0) ?(ttl=64) ?(options=empty_bitstring) ?(next_id=Pdu.next_id)
+               ?(tos=ToS.o 0) ?(ttl=64) ?(options=[]) ?(next_id=Pdu.next_id)
                src dst proto logger =
         check_options options ;
-        ensure (mtu >= Pdu.no_opt_hdr_len + bytelength options + 8)
+        ensure (mtu >= Pdu.no_opt_hdr_len + options_len options + 8)
             "Ip: MTU must leave room for at least 8 bytes of payload" ;
         { logger ; power ; src ; dst ; proto ; mtu ; dont_frag ; reassemble ;
           tos ; ttl ; options ; next_id ;
@@ -1303,7 +1605,7 @@ module TRX = struct
 
       let with_opts =
         Bitstring.bitstring_of_string msg |>
-        Pdu.make ~options:(Bitstring.bitstring_of_string "\x07\x03\x00\x01\x82\x03\x00\x00")
+        Pdu.make ~options:(Pdu.Opt.unpack (Bitstring.bitstring_of_string "\x07\x03\x00\x01\x82\x03\x00\x00"))
                  Proto.udp a b
 
       let udp_wants_chk = "\x00\x01\x00\x02\x00\x30\x00\x00" ^ msg
@@ -1378,15 +1680,15 @@ module TRX = struct
       assert_equal [ true ; false ] (List.rev !dfs)
     *)
     (*$R tx
-      let t = create sim.root.power ~options:(Bitstring.bitstring_of_string "\x94\x04\x00\x00")
+      let t = create sim.root.power ~options:Pdu.Opt.[ Rr (4, [ Addr.zero ]) ]
                      a b (Proto.o 99) sim.root.logger in
       let opts = ref [] in
       (trx_of t).out --> sink (fun bits ->
-          opts := Bitstring.string_of_bitstring (Result.get_ok (Pdu.unpack bits)).Pdu.options :: !opts) ;
+          opts := Pdu.Opt.list_to_string (Result.get_ok (Pdu.unpack bits)).Pdu.options :: !opts) ;
       tx t (Bitstring.bitstring_of_string "a") ;
-      tx ~options:Bitstring.empty_bitstring t (Bitstring.bitstring_of_string "b") ;
+      tx ~options:[] t (Bitstring.bitstring_of_string "b") ;
       Simulation.run sim false ;
-      assert_equal ~printer [ "\x94\x04\x00\x00" ; "" ] (List.rev !opts)
+      assert_equal ~printer [ "RR ptr=4 0.0.0.0, EOL" ; "" ] (List.rev !opts)
     *)
     (*$= frags_of & ~printer:string_of_int
       1 (List.length (frags_of ~mtu:60 msg))
@@ -1400,7 +1702,7 @@ module TRX = struct
       4 (match Pdu.fragment 36 with_opts with \
          | _ :: f :: _ -> \
              let f = Pdu.unpack f |> Result.get_ok in \
-             Bitstring.bitstring_length f.options / 8 \
+             Bitstring.bitstring_length (Pdu.Opt.pack f.options) / 8 \
          | _ -> -1)
     *)
     (*$>*)

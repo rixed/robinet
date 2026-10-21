@@ -656,8 +656,7 @@ and kind =
      * kinds of the protocols themselves rather than anything said here. *)
     | Synth
     (* A run of octets with nothing said about what is in them, as a
-     * hexstring: what a payload is, and what the options of an IP header are
-     * until somebody writes the kind that describes them.
+     * hexstring: what a payload is.
      *
      * The interface shows the two ends of the run and offers the whole of it
      * to be read, rather than an input: the bytes of a payload that was sent

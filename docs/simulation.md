@@ -560,9 +560,18 @@ object naming it with a synth for what it carries: `{"MSS": {"const": 1460}}`,
 it) or `{"other": …}` (raw bytes, kind and length included).
 At most 40 bytes of them, zero padded to a multiple of 4.
 
+IP `options` are alike: `{"NOP": null}`, `{"EOL": …}`, `{"other": …}`,
+`{"record route": {"pointer": …, "route": [ "10.0.0.1", … ]}}`, the same for
+`"loose source route"` and `"strict source route"`, and
+`{"timestamp": {"pointer": …, "overflow": …, "stamps": …}}`, the stamps being
+one of `{"timestamps": [ … ]}`, `{"addresses and timestamps": [{"address": …,
+"timestamp": …}]}` or `{"prespecified": [ … ]}`. Pointers count bytes from the
+start of the option, from 1. Left automatic, a route or a list of stamps has
+one empty slot.
+
 An automatic value is a *plausible* one and not any the field could hold: a
 protocol number says what is above it, a length counts what is below, a TTL is
-64, an IP id is the previous packet's plus one, TCP options are none. `Data`
+64, an IP id is the previous packet's plus one, IP and TCP options are none. `Data`
 is the raw bottom layer and its whole `fields` is one value: from a generator,
 it is that many random bytes. Layer names are `Eth`, `Arp`, `Ip`, `Ip6`, `Udp`,
 `Tcp`, `Icmp`, `Dns`, `Dhcp`, `Vlan`, `Sll`, `Pcap`, `Data`; a field left out

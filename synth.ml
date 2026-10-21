@@ -375,7 +375,7 @@ struct
           assert_equal ~printer (8 + Payload.length udp.Udp.Pdu.payload)
             udp.Udp.Pdu.length ;
           assert_equal ~printer
-            (20 + bytelength ip.Ip.Pdu.options + Payload.length ip.Ip.Pdu.payload)
+            (Ip.Pdu.hdr_len ip + Payload.length ip.Ip.Pdu.payload)
             ip.Ip.Pdu.tot_len ;
           assert_equal ~printer ((ip.Ip.Pdu.id + 1) land 0xffff) ip2.Ip.Pdu.id ;
           assert_equal ~printer ((dns.Dns.Pdu.id + 1) land 0xffff) dns2.Dns.Pdu.id
@@ -449,9 +449,9 @@ let default_packet () : Yojson.Basic.t =
                  "fields",
                      Generator.wrap (Packet.Pdu.kind_of_layer l) (fun _ -> `Null)
                          (Packet.Pdu.json_of_layer l) ] in
+    (* A list keeps its length through [wrap], so no options: *)
     `List [ layer "Eth" (Packet.Pdu.Eth (Eth.Pdu.random ())) ;
-            layer "Ip" (Packet.Pdu.Ip (Ip.Pdu.random ())) ;
-            (* A list keeps its length through [wrap], so none: *)
+            layer "Ip" (Packet.Pdu.Ip { (Ip.Pdu.random ()) with options = [] }) ;
             layer "Tcp" (Packet.Pdu.Tcp { (Tcp.Pdu.random ()) with options = [] }) ]
 
 (* Check that the stream and packet definitions match the available generators.
@@ -484,7 +484,7 @@ let check ~generators ~stream ~packet =
         "a packet whole rather than a fragment of one" @?
           (ip.Ip.Pdu.frag_offset = 0 && not ip.Ip.Pdu.more_frags) ;
         "a header with nothing in the way of what follows it" @?
-          bitstring_is_empty ip.Ip.Pdu.options ;
+          (ip.Ip.Pdu.options = []) ;
         "hops enough to get anywhere" @? (ip.Ip.Pdu.ttl > 0) ;
         "a segment with no options either" @?
           (tcp.Tcp.Pdu.options = []) ;
