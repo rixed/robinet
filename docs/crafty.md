@@ -116,6 +116,7 @@ Done after 0.2s, status: OK.
 - `mac`: `aa:bb:cc:dd:ee:ff`.
 - arrays: `[1, 2, 3]`. Items of one type.
 - records: `{name: "gw", ip: 192.0.2.1}`. Field names are case insensitive.
+  Braces with no field in them, `{}`, are an empty block, not a record.
 
 Literals are read as whole words: `1.2.3.4` is an IP address, `5s` an
 interval.
@@ -172,6 +173,21 @@ Strings are not added together; use interpolation instead.
 Also: `r.field` (a record's field), `a[i]` (an array's item, from 0, checked
 at run time), `f(arg, name=arg)` (a function call), and the layer selectors
 described under [Patterns](#patterns).
+
+**Blocks, `if` and `case` are expressions.**:
+
+```
+y = if c { 1 } else { 2 }
+ttl = case var=h MATCH[1] IP { h.ttl } else { 0 }
+```
+
+A block can wait, send, receive, loop or `break` only when it gives the
+value of a declaration, of an assignment or of a statement:
+
+```
+rtt = { t0 = now() ; Request("ping") ; expect Reply {} ; now() - t0 }  # fine
+n = 1 + { wait 1s ; 1 } # error
+```
 
 ### Protocol stacks
 
@@ -268,7 +284,15 @@ A packet matches a pattern in one mode at most:
 **`MATCH`** is the packet that matched, decoded up to its top layer, as an
 array of layers. `MATCH[UDP]` selects the last UDP layer, `MATCH[IP^]` the
 last IP layer but one, `MATCH[^IP]` the first IP layer. Fields are then read
-with a dot: `MATCH[IP].src`, `MATCH[Bytes].data`.
+with a dot: `MATCH[IP].src`, `MATCH[Bytes].data`. An item of the array,
+such as `MATCH[0]`, is a layer of any kind: a `case` tells which, and reads
+its fields:
+
+```
+foreach MATCH {
+  print(case I IP { "IP from ${I.src}" } | UDP { "UDP to ${I.dst}" } else { "other" })
+}
+```
 
 **`LAST`** is the last packet sent, an array of layers like `MATCH`. Defined
 after each terminal stack, shadowing the previous.  Self-driven layers do not
@@ -281,6 +305,8 @@ Their parameters are written `name=value`. A form with a single parameter
 also takes it unnamed (`break 2`, `wait 1s`).
 
 - `{ ... }`: A block of its own: its variables and patterns end with it.
+  Its value is that of its last statement (see
+  [Expressions](#expressions)).
 - `repeat var=v count=n every=d for=d { ... }`: Runs the block `count`
   times, or as long as `for` (default 5m) has not elapsed. An iteration
   starts `every` after the previous one started, or when that one ends if it
@@ -294,7 +320,13 @@ also takes it unnamed (`break 2`, `wait 1s`).
 - `if c { ... } elsif c { ... } else { ... }`: Runs the block of the first
   condition that holds, if any. An int condition holds unless it is 0 (`if
   flags & SYN`). There can be any number of `elsif`, and an `else` may start
-  the line after the brace before it.
+  the line after the brace before it. Its value is that of the block it
+  ran.
+- `case var=v X C { ... } | C { ... } ... | else { ... }`: Runs the block of
+  the constructor of `X`'s value, or else the `else` block, if any.
+  Without `var`, a variable `X` is itself what the constructor holds.
+  A `|` may end a line or start the next one. Its value is that of the block
+  it ran.
 - `foreach var=v every=d for=d ARRAY { ... }`: A `repeat` that runs the
   block once per item of the array, in order, `v` (default `I`) being the
   item. The array is computed once, before the first iteration. `every` and
@@ -519,7 +551,7 @@ of UDP, the data of TCP, a fragment, a quote, or an unknown protocol.
 
 ### Not available yet
 
-The keywords `case` and `report`, matching embedded packets with
+The keyword `report`, matching embedded packets with
 `=~`, variant literals, the HTTP
 layer, IPv6, VLANs and tunnels. Using any of them is reported as
 unsupported.

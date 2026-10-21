@@ -31,6 +31,9 @@
    A layer name in an expression is a layer of a packet, which must be
    followed by a field ([IP.src]) or be a selector ([MATCH[IP]]).
 
+   Blocks, [if] and [case] are expressions, and any expression is a
+   statement. Braces with no field in them are a block, not a record.
+
    Every reading of the program is considered, and one that can be read in
    several ways is an error. *)
 open Batteries
@@ -120,8 +123,9 @@ let end_of_word =
     quiet (nay (char_if "end of word" (fun c ->
         is_word c || c = '.' || c = ':' || Char.code c >= 128)))
 
+(* Failing only at its first letter: *)
 let identifier =
-    char_if "letter" is_alpha ++ chars_of ~min:0 "letter or digit" is_word >>:
+    char_if "letter" is_alpha ++ quiet (chars_of ~min:0 "letter or digit" is_word) >>:
     (fun (c, s) -> String.make 1 c ^ s) |? "name"
 
 let is_in names s = List.mem (String.lowercase_ascii s) names
@@ -221,8 +225,10 @@ let ip_lit =
             reject "Invalid IP address %s" s ;
         Ip (Ip.Addr.of_dotted_string s)
 
+(* No error before its first colon, as a word can start like a byte: *)
 let mac_lit =
     let byte = chars_of ~max:2 "hexadecimal digit" is_hex in
+    quiet (check (byte -- item ':')) -+
     byte ++ times 5 ~sep:none (item ':' -+ byte) +- end_of_word >>:
     fun (b, bs) -> Mac (Eth.Addr.of_string (String.concat ":" (b :: bs)))
 
@@ -338,6 +344,57 @@ let args expr =
         fun ((arg_loc, arg_name), value) -> { arg_loc ; arg_name ; value } in
     in_ '(' (list_of arg) ')' |? "arguments"
 
+let check_var n =
+    if is_reserved n then reject "%s is a reserved name" n ;
+    n
+
+(* The name of a variable, given as a parameter: *)
+let var_name what e =
+    match e.desc with
+    | Var n -> check_var n
+    | String [ Text n ] -> check_var n
+    | String [] -> reject "The %s cannot be empty" what
+    | _ -> reject "The %s must be a name" what
+
+(* Parameters of a special form, by name, or the single one it has (which
+ * starts neither as a record nor as a layer, not to be mistaken for the
+ * block or the pattern that follows); only by name if not [unnamed], for a
+ * form followed by an expression ([expr]): *)
+let params_of expr ?(unnamed=true) form names =
+    let param_name =
+        identifier >>= fun s -> if Layer_name.of_string s <> None then fail else return s in
+    (* Without [unnamed], a name not followed by [=] is no error, but the
+     * expression that follows: *)
+    let equal = if unnamed then item '=' else quiet (item '=') in
+    let named =
+        (param_name +- sp +- equal +- nay (item '=') +- sp >>: Option.some) ++
+        expr in
+    let param =
+        here ++
+        (if not unnamed then named else
+         named |||
+         (nay (item '{' >>: ignore ||| (known_layer >>: ignore)) -+ expr >>:
+            fun e -> None, e)) in
+    repeat ~sep:none (maybe_next param) >>: fun ps ->
+        let ps =
+            List.map (fun (_loc, (n, e)) ->
+                match n with
+                | Some n ->
+                    let n' = String.lowercase_ascii n in
+                    if not (List.mem n' names) then
+                        reject "Unknown parameter %s for %s (expected %s)"
+                            n form (String.concat ", " names) ;
+                    n', e
+                | None ->
+                    (match names with
+                    | [ n ] -> n, e
+                    | _ -> reject "Parameters of %s must be named" form)
+            ) ps in
+        List.iter (fun n ->
+            if List.length (List.filter (fun (n', _) -> n' = n) ps) > 1 then
+                reject "Parameter %s of %s given twice" n form) names ;
+        fun n -> try Some (List.assoc n ps) with Not_found -> None
+
 let carets = repeat_greedy ~sep:none ~min:1 (item '^') >>: List.length
 
 let left_assoc op term =
@@ -354,7 +411,35 @@ let op_not_before s c v = word s -- nay (item c) >>: fun () -> v
 (* [self] is the grammar being built: that of normal expressions, or that of
  * conditions, where [=] compares. [expr] is that of normal expressions, used
  * within brackets. *)
-let make_expr ~cond ~self ~expr ~pattern =
+let make_expr ~cond ~self ~expr ~pattern ~block =
+    let body = sp -+ block in
+    (* What follows [if] or [elsif], the else on the same line as the brace
+     * that ends the block before it or on the next ones: *)
+    let if_ = fix (fun if_ ->
+        sp -+ expr ++ body ++
+        optional ~def:None (nl_sp -+ (
+            (keyword "else" -+ body) |||
+            (keyword "elsif" -+ here ++ if_ >>:
+                fun (loc, desc) -> [ { stmt_loc = loc ; stmt = Expr { loc ; desc } } ])) >>:
+            Option.some) >>:
+        fun ((cond, then_), else_) -> If { cond ; then_ ; else_ }) in
+    (* Its cases, separated by bars that may start or end lines, then maybe
+     * an [else], with or without a bar before it: *)
+    let case =
+        let sep = nl_sp -- item '|' -- nl_sp in
+        let arm =
+            here ++ (identifier >>= fun s -> if is_keyword s then fail else return s) ++
+            body >>: fun ((arm_loc, ctor), body) -> { arm_loc ; ctor ; body } in
+        let else_ = keyword "else" -+ body in
+        let arms =
+            (repeat ~min:1 ~sep arm ++
+             optional ~def:None ((sep ||| nl_sp) -+ else_ >>: Option.some)) |||
+            (else_ >>: fun b -> [], Some b) in
+        (params_of expr ~unnamed:false "case" [ "var" ] >>:
+            fun p -> Option.map (var_name "variable name") (p "var")) +- sp ++
+        expr ++ (nl_sp -+ arms |? "constructor") >>:
+        fun ((var, subject), (arms, else_)) -> Case { var ; subject ; arms ; else_ } in
+    let field = identifier +- sp +- item ':' +- nl_sp ++ expr in
     let atom =
         (here ++ literal >>: fun (loc, l) -> { loc ; desc = Lit l }) |||
         bytes_lit |||
@@ -362,9 +447,13 @@ let make_expr ~cond ~self ~expr ~pattern =
         in_ '(' self ')' |||
         (here ++ in_ '[' (list_of expr) ']' >>:
             fun (loc, es) -> { loc ; desc = Array es }) |||
-        (here ++ in_ '{' (list_of (
-            identifier +- sp +- item ':' +- nl_sp ++ expr)) '}' >>:
+        (here ++ in_ '{' (
+            repeat ~min:1 ~sep:(nl_sp -- item ',' -- nl_sp) field +-
+            optional ~def:() (nl_sp -- item ',')) '}' >>:
             fun (loc, fs) -> { loc ; desc = Record fs }) |||
+        (here ++ block >>: fun (loc, b) -> { loc ; desc = Block b }) |||
+        (here ++ (keyword "if" -+ if_) >>: fun (loc, desc) -> { loc ; desc }) |||
+        (here ++ (keyword "case" -+ case) >>: fun (loc, desc) -> { loc ; desc }) |||
         (here ++ function_name ++ args expr >>:
             fun ((loc, f), args) -> { loc ; desc = Call (f, args) }) |||
         unknown_function (args expr) |||
@@ -449,51 +538,15 @@ let make_pattern cond_expr =
 
 let expr, set_expr = forward ()
 let cond_expr, set_cond_expr = forward ()
+let block, set_block = forward ()
 let pattern = make_pattern cond_expr
 let () =
-    set_expr (make_expr ~cond:false ~self:expr ~expr ~pattern) ;
-    set_cond_expr (make_expr ~cond:true ~self:cond_expr ~expr ~pattern)
+    set_expr (make_expr ~cond:false ~self:expr ~expr ~pattern ~block) ;
+    set_cond_expr (make_expr ~cond:true ~self:cond_expr ~expr ~pattern ~block)
 
 (** {2 Statements} *)
 
-(* Parameters of a special form, by name, or the single one it has (which
- * starts neither as a record nor as a layer, not to be mistaken for the
- * block or the pattern that follows); only by name if not [unnamed], for a
- * form followed by an expression: *)
-let params ?(unnamed=true) form names =
-    let param_name =
-        identifier >>= fun s -> if Layer_name.of_string s <> None then fail else return s in
-    (* Without [unnamed], a name not followed by [=] is no error, but the
-     * expression that follows: *)
-    let equal = if unnamed then item '=' else quiet (item '=') in
-    let named =
-        (param_name +- sp +- equal +- nay (item '=') +- sp >>: Option.some) ++
-        expr in
-    let param =
-        here ++
-        (if not unnamed then named else
-         named |||
-         (nay (item '{' >>: ignore ||| (known_layer >>: ignore)) -+ expr >>:
-            fun e -> None, e)) in
-    repeat ~sep:none (maybe_next param) >>: fun ps ->
-        let ps =
-            List.map (fun (_loc, (n, e)) ->
-                match n with
-                | Some n ->
-                    let n' = String.lowercase_ascii n in
-                    if not (List.mem n' names) then
-                        reject "Unknown parameter %s for %s (expected %s)"
-                            n form (String.concat ", " names) ;
-                    n', e
-                | None ->
-                    (match names with
-                    | [ n ] -> n, e
-                    | _ -> reject "Parameters of %s must be named" form)
-            ) ps in
-        List.iter (fun n ->
-            if List.length (List.filter (fun (n', _) -> n' = n) ps) > 1 then
-                reject "Parameter %s of %s given twice" n form) names ;
-        fun n -> try Some (List.assoc n ps) with Not_found -> None
+let params ?unnamed form names = params_of expr ?unnamed form names
 
 let stmt_sep = sp -- (item '\n' ||| item ';') -- nl_sp |? "end of statement"
 
@@ -509,32 +562,18 @@ let assign_op =
     op "/=" (Some Div) ||| op "%=" (Some Mod) ||| op "|=" (Some BitOr) |||
     op "&=" (Some BitAnd) ||| op "^=" (Some BitXor)
 
-let stmt = fix (fun stmt ->
-    let block =
-        in_ '{' (repeat ~sep:stmt_sep stmt +- optional ~def:() (sp -- item ';'))
-            '}' |? "block" in
+let stmt =
     let body = sp -+ block in
     let with_loc p = here ++ p >>: fun (stmt_loc, stmt) -> { stmt_loc ; stmt } in
     (* Any name, that is then refused if reserved, for a better message: *)
     let variable =
         identifier >>= fun s -> if is_keyword s then fail else return s in
-    let check_var n =
-        if is_reserved n then reject "%s is a reserved name" n ;
-        n in
-    let var_name what e =
-        match e.desc with
-        | Var n -> check_var n
-        | String [ Text n ] -> check_var n
-        | String [] -> reject "The %s cannot be empty" what
-        | _ -> reject "The %s must be a name" what in
-    (* What follows [if] or [elsif], the else on the same line as the brace
-     * that ends the block before it or on the next ones: *)
-    let if_ = fix (fun if_ ->
-        sp -+ expr ++ body ++
-        optional ~def:None (nl_sp -+ (
-            (keyword "else" -+ body) |||
-            (keyword "elsif" -+ with_loc if_ >>: fun s -> [ s ])) >>: Option.some) >>:
-        fun ((cond, then_), else_) -> If { cond ; then_ ; else_ }) in
+    (* A name and a parenthesis, which only a stack (or an unknown function)
+     * starts with, unless a function's: *)
+    let call_of_no_function =
+        quiet (identifier >>= fun s ->
+            if is_keyword s || is_in functions s then fail else return ()) --
+        item '(' in
     with_loc (
         (* Alone, a call rather than a stack, of an unknown layer: *)
         unknown_function (quiet (args expr +-
@@ -557,13 +596,12 @@ let stmt = fix (fun stmt ->
                         reject "%s needs a block, or a layer on top that sends"
                             (Layer_name.to_string top)
                     | body -> Stack { anchor ; layers ; body }) |||
-        (block >>: fun b -> Block b) |||
+        (nay call_of_no_function -+ expr >>: fun e -> Expr e) |||
         (variable ++ maybe_next (
             item '=' -- nay (item '=' ||| item '~') -- nl_sp -+ expr) >>:
             fun (v, e) -> Declare (check_var v, e)) |||
         (variable ++ maybe_next (assign_op +- nl_sp ++ expr) >>:
             fun (v, (op, e)) -> Assign (check_var v, op, e)) |||
-        (function_name ++ args expr >>: fun (f, args) -> Do (f, args)) |||
         (keyword "repeat" -+ params "repeat" [ "var" ; "count" ; "every" ; "for" ] ++
          body >>: fun (p, body) ->
             Repeat { var = Option.map (var_name "variable name") (p "var") ;
@@ -577,7 +615,6 @@ let stmt = fix (fun stmt ->
         (keyword "retry" -+ params "retry" [ "max" ] ++ body >>:
             fun (p, body) -> Retry { max = p "max" ; body }) |||
         (keyword "catch" -+ body >>: fun body -> Catch body) |||
-        (keyword "if" -+ if_) |||
         (keyword "break" -+ params "break" [ "depth" ] >>:
             fun p -> Break { depth = p "depth" }) |||
         (keyword "wait" -+ params "wait" [ "dur" ] >>:
@@ -598,7 +635,12 @@ let stmt = fix (fun stmt ->
         (identifier >>= (fun s ->
             if List.mem (String.lowercase_ascii s) unsupported then return s
             else fail) >>:
-            fun s -> reject "%s is not supported yet" s)) |? "statement")
+            fun s -> reject "%s is not supported yet" s)) |? "statement"
+
+let () =
+    set_block (
+        in_ '{' (repeat ~sep:stmt_sep stmt +- optional ~def:() (sp -- item ';'))
+            '}' |? "block")
 
 let program =
     nl_sp -+ repeat ~sep:stmt_sep stmt +- optional ~def:() (sp -- item ';') +-
@@ -724,6 +766,28 @@ let parse text =
     (reads "any Bytes(data = \"a\") {}\n| ../ICMP {} |\n/IP(src=x)/UDP {}\nx := 1")
 *)
 
+(* Blocks, if and case are expressions, and an expression is a statement;
+ * braces with no field are a block: *)
+(*$= reads & ~printer:identity
+  "x = {\n  y = 2\n  y * 3\n}\n" (reads "x = { y = 2; y * 3 }")
+  "x = {\n}\ny = {a: 1}\n" (reads "x = {}\ny = {a: 1,}")
+  "x == 1\n{\n  rand(3)\n}\n" (reads "x == 1\n{ rand(3) }")
+  "x = if a > 1 {\n  1\n} else {\n  2.5\n}\n" (reads "x = if a > 1 { 1 } else { 2.5 }")
+  "x = (1 + if a {\n  1\n} elsif b {\n  2\n} else {\n  3\n})\n" \
+    (reads "x = 1 + if a { 1 } elsif b { 2 }\n  else { 3 }")
+  "x = {\n  y = if a {\n    1\n  } else {\n    2\n  }\n}.f\n" \
+    (reads "x = { y = if a { 1 } else { 2 } }.f")
+  "case I IP {\n  print(\"ip\")\n} | UDP {\n} else {\n  x := 1\n}\n" \
+    (reads "case I\n  IP { print(\"ip\") }\n  | UDP {} |\n  else { x := 1 }")
+  "x = case var=l MATCH[0] Eth {\n  l.src\n} else {\n  0\n}\n" \
+    (reads "x = case var=\"l\" MATCH[0] Eth { l.src } else { 0 }")
+  "x = case y IP {\n  1\n} | TCP {\n  2\n} else {\n  3\n}\n" \
+    (reads "x = case y IP { 1 } | TCP { 2 }\n  else { 3 }")
+  "case x else {\n}\n" (reads "case x else {}")
+  "print(case x Bytes {\n  \"b\"\n} else {\n  \"?\"\n})\n" \
+    (reads "print(case x Bytes { \"b\" } | else { \"?\" })")
+*)
+
 (*$= formats & ~printer:identity
   "x = 1 + 2 * 3 - 4 / 2 % 3\n" (formats "x = 1 + 2 * 3 - 4 / 2 % 3")
   "x = (1 + 2) * 3\ny = 1 - (2 - 3)\nz = 1 - 2 - 3\n" \
@@ -775,7 +839,11 @@ let parse text =
     "expect ../../TCP!(flags & RST) {}" ; "IP!(ttl=1)/TCP!(flags=2)/Bytes(\"x\")" ; \
     "/IP/UDP/Bytes(\"x\")\n{ y = !(a == b) }" ; \
     "if a & 1 {} elsif (b || c) && d { x := 1 }\nelse { if e {} }" ; \
-    "any timeout=2s * n Bytes(\"a\") {} | ../TCP!(flags & (SYN | RST)) {}" ]
+    "any timeout=2s * n Bytes(\"a\") {} | ../TCP!(flags & (SYN | RST)) {}" ; \
+    "x = 1 + if a { { y = 1; y * 2 } } elsif b { 2 } else { 3 }" ; \
+    "x = case var=l MATCH[0] Eth { l.src } | IP { if a { 1 } else { 2 } } | else { 0 }" ; \
+    "x = case y IP { 1 }\nelse { 2 }" ; \
+    "y = [{a: 1}, {}]" ]
 *)
 
 (* The errors, where they are found: *)
@@ -796,7 +864,6 @@ let parse text =
   "line 1, column 11: Expected ')' in expression" (reads "x = (1 + 2")
   "line 1, column 10: Expected ']' in expression" (reads "x = [1, 2")
   "line 1, column 14: Expected ':' in expression" (reads "x = {a: 1, b 2}")
-  "line 1, column 4: Unexpected input in statement" (reads "x == 1")
   "line 2, column 1: Expected '}' in block" \
     (reads "expect Bytes(\"x\") { print(\"ok\")\n")
   "line 1, column 19: Expected name in pattern" (reads "expect timeout=5s {\n}")
@@ -829,7 +896,11 @@ let parse text =
   "line 1, column 15: Unknown function foo" (reads "/IP(dst=foo(1))/UDP(dst=1)/Bytes(\"x\")")
   "line 1, column 16: Unknown function foo" (reads "print(\"${foo(2)}\")")
   "line 1, column 11: Carets on both sides of IP" (reads "x = a[^IP^]")
-  "line 1, column 5: case is not supported yet" (reads "case x {}")
+  "line 1, column 7: report is not supported yet" (reads "report")
+  "line 1, column 8: Expected constructor in expression" (reads "case x {}")
+  "line 1, column 10: Expected '{' in block" (reads "case x IP")
+  "line 2, column 15: MATCH is a reserved name" (reads "x = 1\ncase var=match x IP {}")
+  "line 2, column 18: Expected expression in statement" (reads "x = 1\ncase x else {} | IP {}")
   "line 1, column 5: Expected name in pattern" (reads "any {}")
   "line 1, column 21: Expected name in pattern" (reads "any Bytes(\"a\") {} | {}")
   "line 1, column 5: wait needs a duration" (reads "wait")

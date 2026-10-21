@@ -38,8 +38,12 @@
    fails, the error of the last attempt going to the enclosing block.
    [wait] goes on with the next statement after that duration.
    [catch] leaves its block on its first error, which goes no further. [if]
-   runs the block of the first condition that holds, if any. An
-   error reaching the program's block ends the program.
+   runs the block of the first condition that holds, if any, and [case] that
+   of its value's constructor. A block, an [if] or a [case] that is the
+   value of a declaration, an assignment or a statement runs as a block of
+   its own, which ends with that value; within another expression, the
+   typer lets it only compute, and it is evaluated at once. An error
+   reaching the program's block ends the program.
 
    [expect] waits for its pattern, failing after its timeout, then runs its
    block once. [any] does the same with the first of its patterns to match.
@@ -271,6 +275,33 @@ let rec eval output (env : env) (e : T.expr) =
     | T.Record es -> Record (Array.of_list (List.map eval es))
     | T.Array es -> Array (Array.of_list (List.map eval es))
     | T.Convert a -> convert e.loc a.typ e.typ (eval a)
+    | T.Block b -> eval_block output env b
+    | T.If { cond ; then_ ; else_ } ->
+        eval_block output env (match eval cond with Bool true -> then_ | _ -> else_)
+    | T.Case { subject ; arms ; else_ } ->
+        let env, b = branch env (eval subject) arms else_ in
+        eval_block output env b
+
+(* The block of a [case] for that value, and the environment to run it in: *)
+and branch env v (arms : T.arm list) else_ =
+    match v with
+    | Variant (n, x) ->
+        (match List.find_opt (fun (a : T.arm) -> a.ctor = n) arms, else_ with
+        | Some a, _ -> Option.map_default (fun h -> bind env h x) env a.held, a.branch
+        | None, Some b -> env, b
+        (* The typer has an [else] unless every constructor has an arm: *)
+        | None, None -> assert false)
+    | _ -> assert false
+
+(* That of a block within an expression, which the typer lets have only
+ * declarations, assignments and expressions: *)
+and eval_block output env (b : T.block) =
+    List.fold_left (fun (env, _) (s : T.stmt) ->
+        match s.stmt with
+        | T.Declare (v, e) -> bind env v (eval output env e), Void
+        | T.Assign (v, e) -> (lookup env v) := eval output env e ; env, Void
+        | T.Expr e -> env, eval output env e
+        | _ -> assert false) (env, Void) b |> snd
 
 (** {2 Blocks} *)
 
@@ -422,14 +453,33 @@ let rec run_block ?(enter=fun _ env -> Some env) t parent env (stmts : T.block)
           fail = (fun e -> cancel b ; fail e) ;
           break_ ; busy = 0 ; finish = None } in
     parent.children <- b :: parent.children ;
+    let finish v =
+        b.finish <- Some (fun () -> cancel b ; k v) ;
+        settle b in
     let rec loop env = function
-        | [] ->
-            b.finish <- Some (fun () -> cancel b ; k ()) ;
-            settle b
+        | [] -> finish Void
+        | [ { T.stmt = T.Expr e ; _ } ] ->
+            exec_value t b env e (fun v -> if b.live then finish v)
         | s :: rest ->
             exec t b env s (fun env -> if b.live then loop env rest) in
     Option.may (fun env -> loop env stmts) (enter b env) ;
     b
+
+(* Computes [e] in block [b], then [k] with its value; a block, an [if] or a
+ * [case] runs as a block within [b]: *)
+and exec_value t b env (e : T.expr) k =
+    let run env body =
+        ignore (run_block t b env body ~fail:b.fail ~break_:b.break_ k) in
+    let eval e = guard b (fun () -> eval t.output env e) in
+    match e.desc with
+    | T.Block body -> run env body
+    | T.If { cond ; then_ ; else_ } ->
+        Option.may (fun c -> run env (match c with Bool true -> then_ | _ -> else_))
+            (eval cond)
+    | T.Case { subject ; arms ; else_ } ->
+        Option.may (fun v -> let env, body = branch env v arms else_ in run env body)
+            (eval subject)
+    | _ -> Option.may k (eval e)
 
 (* Runs that statement in block [b], then [k] with the environment for the
  * next statements: *)
@@ -437,18 +487,9 @@ and exec t b env (s : T.stmt) k =
     let eval e = eval t.output env e in
     let guard f = guard b f in
     match s.stmt with
-    | T.Declare (v, e) -> Option.may (fun x -> k (bind env v x)) (guard (fun () -> eval e))
-    | T.Assign (v, e) ->
-        Option.may (fun x -> (lookup env v) := x ; k env) (guard (fun () -> eval e))
-    | T.Do (f, args) ->
-        guard (fun () ->
-            ignore (call s.stmt_loc f (List.map eval args)
-                         ~print:t.output.print ~print_err:t.output.print_err
-                         ~now:t.output.now)) |>
-        Option.may (fun () -> k env)
-    | T.Block body ->
-        ignore (run_block t b env body ~fail:b.fail ~break_:b.break_
-                    (fun () -> k env))
+    | T.Declare (v, e) -> exec_value t b env e (fun x -> k (bind env v x))
+    | T.Assign (v, e) -> exec_value t b env e (fun x -> (lookup env v) := x ; k env)
+    | T.Expr e -> exec_value t b env e (fun _ -> k env)
     | T.Break n -> b.break_ n
     | T.Wait dur ->
         guard (fun () ->
@@ -467,20 +508,14 @@ and exec t b env (s : T.stmt) k =
             match Option.map eval max with Some (Int n) -> n | _ -> 3) |>
         Option.may (fun max ->
             let rec attempt retries =
-                ignore (run_block t b env body ~break_:b.break_ (fun () -> k env)
+                ignore (run_block t b env body ~break_:b.break_ (fun _ -> k env)
                     ~fail:(fun e ->
                         if retries < max && b.live then attempt (retries + 1)
                         else b.fail e)) in
             attempt 0)
     | T.Catch body ->
-        ignore (run_block t b env body ~break_:b.break_ (fun () -> k env)
+        ignore (run_block t b env body ~break_:b.break_ (fun _ -> k env)
                     ~fail:(fun _ -> if b.live then k env))
-    | T.If { cond ; then_ ; else_ } ->
-        guard (fun () -> eval cond) |>
-        Option.may (fun c ->
-            let body = match c with Bool true -> then_ | _ -> else_ in
-            ignore (run_block t b env body ~fail:b.fail ~break_:b.break_
-                        (fun () -> k env)))
     | T.Stack { depth ; overlay ; layers ; body } ->
         (* The block holds the nodes of its stack: *)
         let enter b env =
@@ -491,7 +526,7 @@ and exec t b env (s : T.stmt) k =
             | exception Runtime_error (where, message) ->
                 b.fail Crafty_parser.{ where ; message } ; None in
         ignore (run_block ~enter t b env body ~fail:b.fail ~break_:b.break_
-                    (fun () -> k env))
+                    (fun _ -> k env))
     | T.Send { depth ; overlay ; layers ; last } ->
         (* A packet, leaving the current stack as it was, once it can go on
          * without waiting (as a blocking write does). Its frames reach the
@@ -536,7 +571,7 @@ and exec t b env (s : T.stmt) k =
                             let inner =
                                 bind_lazy env c.match_ (fun () -> match_value packet) in
                             ignore (run_block t b inner c.body ~fail:b.fail
-                                        ~break_:b.break_ (fun () -> k env))))
+                                        ~break_:b.break_ (fun _ -> k env))))
                         ~failed:(fun where message -> fire (fun () ->
                             b.fail Crafty_parser.{ where ; message }))) cases ;
             b.cleanups <- disarm :: b.cleanups ;
@@ -583,7 +618,7 @@ and on t b env pattern match_ body timeout max =
                     let instance =
                         run_block t b inner body ~fail:b.fail
                             ~break_:(fun n -> if n <= 1 then stop () else b.break_ (n - 1))
-                            (fun () ->
+                            (fun _ ->
                                 running := List.filter (fun i -> i.live) !running ;
                                 check_over ()) in
                     (* Unless it was left already, with a break: *)
@@ -648,7 +683,7 @@ and repeat t b env var count items every for_ body body_loc k =
                     let running = ref true and ended = ref false in
                     let this = !i in
                     current := Some (
-                        run_block t b env body ~fail:b.fail ~break_ (fun () ->
+                        run_block t b env body ~fail:b.fail ~break_ (fun _ ->
                             let next =
                                 Clock.Time.add start
                                     (Interval.mul every (float_of_int (this + 1))) in
@@ -700,7 +735,7 @@ let run_on_tree power tree ~print ~print_err ?(on_exit=ignore) (program : T.bloc
           break_ = (fun _ -> assert false) ; busy = 0 ; finish = None } in
     ignore (run_block t root { vars = Env.empty ; stack = [] ; packet = [] } program
                 ~fail:root.fail ~break_:root.break_
-                (fun () -> cancel root ; exit Done)) ;
+                (fun _ -> cancel root ; exit Done)) ;
     { stop = (fun () -> cancel root ; exit Stopped) ;
       status = (fun () -> !status) ;
       idle = idle tree }
@@ -942,6 +977,16 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "repeat { if I == 2 { break }\n  print(\"${I}\") }\nprint(\"after\")")
   "0s: failed: line 1, column 4: Division by zero" \
     (runs "if 1 / 0 > 0 {}\nprint(\"not reached\")")
+  "0s: 1.0 6 11 small\n0s: done" \
+    (runs "x = if 1 > 0 { 1 } else { 2.5 }\ny = { z = 2 ; z * 3 }\nprint(\"${x} ${y} ${1 + if y > 5 { 10 } else { 20 }} ${if y > 9 { \"big\" } else { \"small\" }}\")")
+  "1s: 2\n1s: 3\n1s: done" \
+    (runs "x = if true { wait 1s\n  2 } else { 3 }\nprint(\"${x}\")\nx := { y = x + 1\n  y }\nprint(\"${x}\")")
+  "0s: 0\n0s: 1\n0s: 2\n0s: after\n0s: done" \
+    (runs "repeat { x = if I > 2 { break } else { I }\n  print(\"${x}\") }\nprint(\"after\")")
+  "0s: failed: line 1, column 23: Division by zero" \
+    (runs "x = 1 + { y = 0 ; z = 1 / y ; z }\nprint(\"not reached\")")
+  "1s: in\n1s: failed: line 2, column 17: Division by zero" \
+    (runs "x = { wait 1s\n  print(\"in\") ; 1 / 0 }\nprint(\"not reached\")")
   "0s: failed: line 1, column 5: No item -1 in an array of length 1" \
     (runs "x = [1][-1]")
   "line 2, column 1: Unknown variable y" \
@@ -1072,6 +1117,13 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  any timeout=1s Bytes(\"a\") {} | Bytes(\"b\") {} }")
   "0s: failed: line 1, column 13: The timeout of any cannot be negative" \
     (runs "any timeout=-1s Bytes(\"x\") {} | Bytes(\"y\") {}")
+*)
+(* case runs the arm of a value's constructor, in which the variable that
+ * was cased is what that constructor holds: *)
+(*$= runs & ~printer:identity
+  "500ms: other\n500ms: ip 10.0.0.2\n500ms: udp 53\n500ms: other\n500ms: Bytes\n1s500ms: 64\n1s500ms: done" \
+    (runs ~inject:[ 0.5, reply "pong" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Bytes(\"pong\") {\n    foreach MATCH { print(case I IP { \"ip ${I.src}\" } | UDP { \"udp ${I.src}\" } | else { \"other\" }) }\n    case var=l MATCH[3] Bytes { print(\"Bytes\") }\n    case MATCH[3] IP { print(\"not reached\") }\n    ttl = case var=h MATCH[1] IP { wait 1s\n      h.ttl } | else { 0 }\n    print(\"${ttl}\") } }")
 *)
 (* on runs its block for every match, and its block waits for it: *)
 (*$= runs & ~printer:identity

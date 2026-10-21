@@ -27,7 +27,12 @@
 
    Within a pattern's condition, a name is a field of that layer if it has
    one, else a variable; [IP.src] is a field of the nearest IP below ([IP^]
-   the next one, [^IP] the first one of the packet). *)
+   the next one, [^IP] the first one of the packet).
+
+   A block, an [if] or a [case] has the value of the branch it runs, and can
+   wait (or send, receive, loop, break) only as the value of a declaration,
+   an assignment or a statement, or as a branch of such a one: elsewhere in
+   an expression, it is computed at once. *)
 open Batteries
 module A = Crafty_ast
 module L = Crafty_layers
@@ -68,23 +73,33 @@ and desc =
     | Array of expr list
     (* The value of that expression, as this one's type: *)
     | Convert of expr
+    (* The value of its last statement, if an expression, or else void: *)
+    | Block of block
+    (* With no [else], an empty [else_]: *)
+    | If of { cond : expr ; then_ : block ; else_ : block }
+    (* The branch of the arm of the constructor of [subject]'s value, else
+     * [else_], which is [None] when the arms are for every constructor: *)
+    | Case of { subject : expr ; arms : arm list ; else_ : block option }
 
 and part = Text of string | Interp of expr
 
-type layer =
+(* [held] is what the constructor holds, unless void or not named: *)
+and arm = { ctor : string ; held : var option ; branch : block }
+
+and layer =
     { layer_loc : A.location ;
       layer : L.layer ;
       mode : L.mode ;
       (* By index of the field in the registry: *)
       options : (int * expr) list }
 
-type pattern_layer =
+and pattern_layer =
     { pl_loc : A.location ;
       pl_layer : L.layer ;
       pl_mode : L.mode ;
       cond : expr option }
 
-type pattern =
+and pattern =
     { pat_loc : A.location ;
       (* How many layers of the current stack, from its bottom, are below the
        * pattern; with none, the pattern starts from the root: *)
@@ -94,7 +109,7 @@ type pattern =
       overlay : int ;
       pat_layers : pattern_layer list }
 
-type stmt = { stmt_loc : A.location ; stmt : stmt_desc }
+and stmt = { stmt_loc : A.location ; stmt : stmt_desc }
 
 and stmt_desc =
     (* On top of the [depth] first layers of the current stack, from its
@@ -106,17 +121,15 @@ and stmt_desc =
                  body : block }
     (* The same, for a packet to send, which [last] is then: *)
     | Send of { depth : int ; overlay : int ; layers : layer list ; last : var }
-    | Block of block
+    (* Its value unused, or that of the block it ends: *)
+    | Expr of expr
     | Declare of var * expr
     | Assign of var * expr
-    | Do of builtin * expr list
     (* With [items], [var] is each of them in turn, rather than a counter: *)
     | Repeat of { var : var ; count : expr option ; items : expr option ;
                   every : expr option ; for_ : expr option ; body : block }
     | Retry of { max : expr option ; body : block }
     | Catch of block
-    (* With no [else], an empty [else_]: *)
-    | If of { cond : expr ; then_ : block ; else_ : block }
     (* How many enclosing [repeat] and [on] to leave: *)
     | Break of int
     | Wait of expr
@@ -203,11 +216,79 @@ let converts a b =
     | Type.Array Type.Byte, (Type.String | Type.Ip | Type.Mac) -> true
     | _ -> false
 
-(* [e] as a [typ], if it converts to one: *)
-let coerce e typ =
-    if e.typ = typ then Some e
-    else if converts e.typ typ then Some (convert e typ)
-    else None
+(* Whether that block ends only with a break: *)
+let rec diverges (b : block) =
+    match List.rev b with
+    | { stmt = Break _ ; _ } :: _ -> true
+    | { stmt = Expr e ; _ } :: _ ->
+        (match e.desc with
+        | Block b -> diverges b
+        | If { then_ ; else_ ; _ } -> diverges then_ && diverges else_
+        | Case { arms ; else_ ; _ } ->
+            List.for_all (fun a -> diverges a.branch) arms &&
+            Option.map_default diverges true else_
+        | _ -> false)
+    | _ -> false
+
+let block_type (b : block) =
+    match List.rev b with
+    | { stmt = Expr e ; _ } :: _ -> e.typ
+    | _ -> Type.Void
+
+let all_some l =
+    if List.for_all Option.is_some l then Some (List.map Option.get l) else None
+
+(* [e] as a [typ], if it converts to one; that of a block, an [if] or a
+ * [case] is the value of each of its branches converted: *)
+let rec coerce e typ =
+    if e.typ = typ then Some e else
+    let with_desc = Option.map (fun desc -> { e with typ ; desc }) in
+    match e.desc with
+    | Block b -> with_desc (Option.map (fun b -> Block b) (coerce_tail b typ))
+    | If { cond ; then_ ; else_ } ->
+        with_desc (
+            match coerce_tail then_ typ, coerce_tail else_ typ with
+            | Some then_, Some else_ -> Some (If { cond ; then_ ; else_ })
+            | _ -> None)
+    | Case { subject ; arms ; else_ } ->
+        let arms =
+            all_some (List.map (fun a ->
+                Option.map (fun branch -> { a with branch })
+                    (coerce_tail a.branch typ)) arms) in
+        let else_ =
+            match else_ with
+            | None -> Some None
+            | Some b -> Option.map Option.some (coerce_tail b typ) in
+        with_desc (
+            match arms, else_ with
+            | Some arms, Some else_ -> Some (Case { subject ; arms ; else_ })
+            | _ -> None)
+    | _ -> if converts e.typ typ then Some (convert e typ) else None
+
+(* The block with its value converted to [typ]: *)
+and coerce_tail b typ =
+    if diverges b || block_type b = typ then Some b else
+    match List.rev b with
+    | ({ stmt = Expr e ; _ } as s) :: rest ->
+        Option.map (fun e -> List.rev ({ s with stmt = Expr e } :: rest))
+            (coerce e typ)
+    | _ -> None
+
+(* The type of the values of those blocks (of those types), to which they
+ * are converted; those that end only with a break have none: *)
+let join loc what branches =
+    let typ =
+        List.fold_left (fun acc (b, t) ->
+            if diverges b then acc else
+            match acc with
+            | None -> Some t
+            | Some a when a = t || converts t a -> acc
+            | Some a when converts a t -> Some t
+            | Some a ->
+                error loc "The branches of this %s are of different types: %s and %s"
+                    what (a_type a) (a_type t)) None branches |>
+        Option.default Type.Void in
+    typ, List.map (fun (b, _) -> Option.get (coerce_tail b typ)) branches
 
 let expect what e typ =
     match coerce e typ with
@@ -222,6 +303,13 @@ let as_bool what e =
     | t -> error e.loc "%s must be a bool, not %s" what (a_type t)
 
 (** {2 Environment} *)
+
+(* The errors found so far, last first: *)
+type errors = (A.location * string) list ref
+
+let tell errors = function
+    | Error (loc, msg) -> errors := (loc, msg) :: !errors
+    | _ -> ()
 
 (* Where a layer's options or conditions are typed: *)
 type layer_ctx =
@@ -242,7 +330,12 @@ type env =
       stack : (L.layer * L.mode) list ;
       (* How many [repeat] and [on] enclose: *)
       loops : int ;
-      layer_ctx : layer_ctx option }
+      layer_ctx : layer_ctx option ;
+      (* Whether the statements of the block can wait (or send, receive,
+       * loop, break), which they cannot in a block within an expression but
+       * for the value of a declaration, an assignment or a statement: *)
+      may_wait : bool ;
+      errors : errors }
 
 let new_var =
     let next = ref 0 in
@@ -258,6 +351,52 @@ let lookup_var env loc name =
         if name = "LAST" then
             error loc "LAST is only defined once a packet was sent, in that block or an enclosing one" ;
         error loc "Unknown variable %s" name
+
+(** {2 Stacks and patterns} *)
+
+(* [base] (top first) with layer [name] on top, and the layer: the root is
+ * put below it if need be: *)
+let push loc base name =
+    let below = match base with [] -> None | (b, _) :: _ -> Some b in
+    match L.find ?below name, below with
+    | Some l, _ -> base, l
+    | None, None ->
+        (match L.find ~below:L.root name with
+        | Some l -> [ L.root, L.Driven ], l
+        | None -> error loc "%s cannot be at the bottom of a stack" (lname name))
+    | None, Some (b : L.layer) ->
+        if b.terminal then error loc "Nothing can be on top of %s" (L.to_string b)
+        else error loc "%s cannot be on top of %s" (lname name) (L.to_string b)
+
+let mode_on loc base (l : L.layer) ~bang =
+    let mode = L.mode_of l ~bang in
+    if mode = L.Driven then
+        Option.may (fun ((b : L.layer), _) ->
+            error loc "%s cannot be self-driven on top of a manual %s"
+                (L.to_string l) (L.to_string b)
+        ) (List.find_opt (fun ((b : L.layer), m) -> b.driven && m = L.Manual) base) ;
+    mode
+
+let implicit_root loc = { layer_loc = loc ; layer = L.root ; mode = L.Driven ; options = [] }
+
+(* How many of [layers] (bottom first), from the first, are the same as
+ * those of [over]: *)
+let overlay over (layers : L.layer list) =
+    let rec loop n = function
+        | (o : L.layer) :: over, (l : L.layer) :: layers when o == l ->
+            loop (n + 1) (over, layers)
+        | _ -> n in
+    loop 0 (over, layers)
+
+(* Where the layers of a stack or pattern go: on top of the root, or on top
+ * of the current stack once [n] layers are taken off. Returns that base and
+ * the layers taken off, bottom first: *)
+let anchor_base env loc = function
+    | A.Absolute -> [], []
+    | A.Relative n ->
+        if n > List.length env.stack then
+            error loc "../ goes below the bottom of the stack" ;
+        List.drop n env.stack, List.rev_map fst (List.take n env.stack)
 
 (** {2 Expressions} *)
 
@@ -347,9 +486,15 @@ let unify what a b =
     | None, None ->
         error a.loc "Cannot %s %s and %s" what (a_type a.typ) (a_type b.typ)
 
-let rec expr ?expected env (e : A.expr) =
+(* With [tail], [e] is the value of a declaration, an assignment or a
+ * statement, which can wait if its block can. Without [used], the value of
+ * a block, [if] or [case] is that of a statement: void. *)
+let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
     let loc = e.loc in
     let mk typ desc = { loc ; typ ; desc } in
+    (* Where the branches of a block, an [if] or a [case] are typed: *)
+    let inner = if tail then env else { env with may_wait = false } in
+    let branch ?(env=inner) b = block_value ?expected ~used env.errors env b in
     match e.desc with
     | A.Lit l | A.Constant (_, l) -> mk (type_of_literal l) (Lit l)
     | A.String parts ->
@@ -437,6 +582,80 @@ let rec expr ?expected env (e : A.expr) =
         let items = List.map (fun i -> expect "An item of this array" i item_typ) items in
         mk (Type.Array item_typ) (Array items)
     | A.Matches _ -> error loc "=~ is not supported yet"
+    | A.Block b ->
+        let b, typ = branch b in
+        mk typ (Block b)
+    | A.If { cond ; then_ ; else_ = None } ->
+        let cond = as_bool "The condition of if" (expr env cond) in
+        let then_, typ = branch then_ in
+        if typ <> Type.Void && not (diverges then_) then
+            error loc "This if needs an else, to have a value when its condition is false" ;
+        mk Type.Void (If { cond ; then_ ; else_ = [] })
+    | A.If { cond ; then_ ; else_ = Some else_ } ->
+        let cond = as_bool "The condition of if" (expr env cond) in
+        let then_ = branch then_ in
+        let else_ = branch else_ in
+        (match join loc "if" [ then_ ; else_ ] with
+        | typ, [ then_ ; else_ ] -> mk typ (If { cond ; then_ ; else_ })
+        | _ -> assert false)
+    | A.Case { var ; subject ; arms ; else_ } ->
+        let subject = expr env subject in
+        let ctors =
+            match subject.typ with
+            | Type.Variant cs -> cs
+            | t -> error subject.loc "The subject of case must be a variant, \
+                                      such as a layer of a packet, not %s" (a_type t) in
+        (* The name of what each constructor holds: *)
+        let name =
+            match var, subject.desc with
+            | Some n, _ -> Some n
+            | None, Var v -> Some v.name
+            | _ -> None in
+        let arms =
+            List.fold_left (fun arms (a : A.arm) ->
+                match List.find_opt (fun (n, _) -> same_name n a.ctor) ctors with
+                | None ->
+                    error a.arm_loc "%s is none of %s" a.ctor
+                        (String.concat ", " (List.map fst ctors))
+                | Some (ctor, t) ->
+                    if List.exists (fun (n, _, _) -> n = ctor) arms then
+                        error a.arm_loc "%s already has a block in this case" ctor ;
+                    let held =
+                        match name with
+                        | Some n when t <> Type.Void -> Some (new_var n t)
+                        | _ -> None in
+                    let env =
+                        Option.map_default (fun v -> { inner with vars = v :: inner.vars })
+                            inner held in
+                    (ctor, held, branch ~env a.body) :: arms) [] arms |>
+            List.rev in
+        let missing =
+            List.filter (fun (n, _) ->
+                not (List.exists (fun (n', _, _) -> n' = n) arms)) ctors |>
+            List.map fst in
+        let else_ =
+            Option.map (fun b ->
+                if missing = [] then
+                    error loc "This case has a block for each of %s: its else is never run"
+                        (String.concat ", " (List.map fst ctors)) ;
+                branch b) else_ in
+        let with_branches bs =
+            List.map2 (fun (ctor, held, _) branch -> { ctor ; held ; branch }) arms bs in
+        let branches = List.map (fun (_, _, b) -> b) arms in
+        if missing <> [] && else_ = None then (
+            (* With no value when no block is run: *)
+            List.iter (fun (b, typ) ->
+                if typ <> Type.Void && not (diverges b) then
+                    error loc "This case needs an else, or a block for each of %s, \
+                               to have a value" (String.concat ", " missing)) branches ;
+            mk Type.Void (Case { subject ; arms = with_branches (List.map fst branches) ;
+                                 else_ = Some [] }))
+        else
+            let typ, bs =
+                join loc "case" (branches @ Option.map_default (fun b -> [ b ]) [] else_) in
+            let arm_bs, else_bs = List.split_at (List.length arms) bs in
+            mk typ (Case { subject ; arms = with_branches arm_bs ;
+                           else_ = List.Exceptionless.hd else_bs })
 
 and var env loc name =
     let mk typ desc = { loc ; typ ; desc } in
@@ -572,57 +791,11 @@ and binop env loc op a b =
             error loc "Cannot order values of type %s" (tname a.typ) ;
         mk Type.Bool (Binop (op, a, b))
 
-(** {2 Stacks and patterns} *)
-
-(* [base] (top first) with layer [name] on top, and the layer: the root is
- * put below it if need be: *)
-let push loc base name =
-    let below = match base with [] -> None | (b, _) :: _ -> Some b in
-    match L.find ?below name, below with
-    | Some l, _ -> base, l
-    | None, None ->
-        (match L.find ~below:L.root name with
-        | Some l -> [ L.root, L.Driven ], l
-        | None -> error loc "%s cannot be at the bottom of a stack" (lname name))
-    | None, Some (b : L.layer) ->
-        if b.terminal then error loc "Nothing can be on top of %s" (L.to_string b)
-        else error loc "%s cannot be on top of %s" (lname name) (L.to_string b)
-
-let mode_on loc base (l : L.layer) ~bang =
-    let mode = L.mode_of l ~bang in
-    if mode = L.Driven then
-        Option.may (fun ((b : L.layer), _) ->
-            error loc "%s cannot be self-driven on top of a manual %s"
-                (L.to_string l) (L.to_string b)
-        ) (List.find_opt (fun ((b : L.layer), m) -> b.driven && m = L.Manual) base) ;
-    mode
-
-let implicit_root loc = { layer_loc = loc ; layer = L.root ; mode = L.Driven ; options = [] }
-
-(* How many of [layers] (bottom first), from the first, are the same as
- * those of [over]: *)
-let overlay over (layers : L.layer list) =
-    let rec loop n = function
-        | (o : L.layer) :: over, (l : L.layer) :: layers when o == l ->
-            loop (n + 1) (over, layers)
-        | _ -> n in
-    loop 0 (over, layers)
-
-(* Where the layers of a stack or pattern go: on top of the root, or on top
- * of the current stack once [n] layers are taken off. Returns that base and
- * the layers taken off, bottom first: *)
-let anchor_base env loc = function
-    | A.Absolute -> [], []
-    | A.Relative n ->
-        if n > List.length env.stack then
-            error loc "../ goes below the bottom of the stack" ;
-        List.drop n env.stack, List.rev_map fst (List.take n env.stack)
-
 (* The layers of a stack statement on top of [base], over the layers [over]
  * (bottom first) that were taken off the current stack, and the new stack.
  * The layers that are over the same ones take their key, which they need
  * not give: *)
-let stack_layers env base over (layers : A.layer list) =
+and stack_layers env base over (layers : A.layer list) =
     List.fold_left (fun (base, tls) (al : A.layer) ->
         let base', l = push al.layer_loc base al.layer_name in
         let tls =
@@ -670,7 +843,7 @@ let stack_layers env base over (layers : A.layer list) =
                 ) tl.layer.fields) tls ;
         base, tls, n
 
-let pattern env (p : A.pattern) =
+and pattern env (p : A.pattern) =
     let base, over = anchor_base env p.pat_loc p.anchor in
     let depth = List.length base in
     let _, pls =
@@ -711,22 +884,24 @@ let pattern env (p : A.pattern) =
 
 (** {2 Statements} *)
 
-(* The errors found so far, last first: *)
-type errors = (A.location * string) list ref
+and opt_expr env what typ = Option.map (fun e -> expect what (expr env e) typ)
 
-let tell errors = function
-    | Error (loc, msg) -> errors := (loc, msg) :: !errors
-    | _ -> ()
-
-let opt_expr env what typ = Option.map (fun e -> expect what (expr env e) typ)
-
-let rec block errors env stmts =
+(* The statements of a block, and its type: that of its last statement if an
+ * expression whose value is [used], else void: *)
+and block_value ?expected ~used errors env stmts =
     let env = { env with declared_here = [] } in
-    List.fold_left (fun (env, ss) s ->
-        match stmt errors env s with
-        | env, Some s -> env, s :: ss
-        | env, None -> env, ss
-    ) (env, []) stmts |> snd |> List.rev
+    let rec loop env ss = function
+        | [] -> List.rev ss, Type.Void
+        | [ { A.stmt = A.Expr e ; stmt_loc } ] when used ->
+            let e = expr ?expected ~tail:true env e in
+            List.rev ({ stmt_loc ; stmt = Expr e } :: ss), e.typ
+        | s :: rest ->
+            match stmt errors env s with
+            | env, Some s -> loop env (s :: ss) rest
+            | env, None -> loop env ss rest in
+    loop env [] stmts
+
+and block errors env stmts = fst (block_value ~used:false errors env stmts)
 
 (* The environment for the next statements, and the statement unless it is
  * in error: *)
@@ -750,6 +925,21 @@ and stmt errors env (s : A.stmt) =
         { env with vars = v :: env.vars ;
                    declared_here = name :: env.declared_here }, v in
     try
+        if not env.may_wait then (
+            let what =
+                match s.stmt with
+                | A.Stack { body = None ; _ } -> Some "A packet"
+                | A.Stack _ -> Some "A stack"
+                | A.Repeat _ -> Some "repeat" | A.Foreach _ -> Some "foreach"
+                | A.Retry _ -> Some "retry" | A.Catch _ -> Some "catch"
+                | A.Break _ -> Some "break" | A.Wait _ -> Some "wait"
+                | A.Expect _ -> Some "expect" | A.Any _ -> Some "any"
+                | A.On _ -> Some "on"
+                | A.Expr _ | A.Declare _ | A.Assign _ -> None in
+            Option.may (fun what ->
+                error loc "%s cannot be in a block within an expression, but for \
+                           the value of a declaration, an assignment or a statement"
+                      what) what) ;
         match s.stmt with
         | A.Stack { anchor ; layers ; body } ->
             let base, over = anchor_base env s.stmt_loc anchor in
@@ -772,15 +962,20 @@ and stmt errors env (s : A.stmt) =
                         { env with vars = v :: env.vars ;
                                    declared_here = "LAST" :: env.declared_here }, v in
                 env, Some (mk (Send { depth ; overlay ; layers = tls ; last })))
-        | A.Block b ->
-            env, Some (mk (Block (block errors env b)))
+        | A.Expr e ->
+            let te = expr ~tail:true ~used:false env e in
+            if te.typ <> Type.Void then (
+                match e.desc with
+                | A.Call (f, _) -> error loc "The result of %s is not used" f
+                | _ -> error loc "This %s is not used" (tname te.typ)) ;
+            env, Some (mk (Expr te))
         | A.Declare (name, e) ->
             (* A declaration in error still declares its variable, so that
              * its uses are not reported as well: *)
             let poisoned () =
                 { env with poisoned = name :: env.poisoned ;
                            declared_here = name :: env.declared_here }, None in
-            (match expr env e with
+            (match expr ~tail:true env e with
             | e when e.typ = Type.Void ->
                 tell errors (Error (loc, name ^" would have no value")) ;
                 poisoned ()
@@ -794,7 +989,7 @@ and stmt errors env (s : A.stmt) =
             let v = lookup_var env loc name in
             let e =
                 match op with
-                | None -> expr env e
+                | None -> expr ~tail:true env e
                 | Some op ->
                     binop env loc op { A.loc ; A.desc = A.Var name } e in
             (match coerce e v.typ with
@@ -802,11 +997,6 @@ and stmt errors env (s : A.stmt) =
             | None ->
                 error loc "Cannot assign %s to %s, which is %s"
                     (a_type e.typ) name (a_type v.typ))
-        | A.Do (f, args) ->
-            let b, args, t = call env loc f args in
-            if t <> Type.Void then
-                error loc "The result of %s is not used" f ;
-            env, Some (mk (Do (b, args)))
         | A.Repeat { var ; count ; every ; for_ ; body } ->
             let count = opt_expr env "The count of repeat" Type.Int count
             and every = opt_expr env "The period of repeat" Type.Interval every
@@ -837,11 +1027,6 @@ and stmt errors env (s : A.stmt) =
             env, Some (mk (Retry { max ; body = block errors env body }))
         | A.Catch body ->
             env, Some (mk (Catch (block errors env body)))
-        | A.If { cond ; then_ ; else_ } ->
-            let cond = as_bool "The condition of if" (expr env cond) in
-            let then_ = block errors env then_
-            and else_ = Option.map_default (block errors env) [] else_ in
-            env, Some (mk (If { cond ; then_ ; else_ }))
         | A.Break { depth } ->
             let depth =
                 match depth with
@@ -878,19 +1063,36 @@ and stmt errors env (s : A.stmt) =
 let rec declarations (b : block) =
     List.concat_map (fun s ->
         match s.stmt with
-        | Declare (v, _) -> [ v ]
-        | Stack { body = b ; _ } | Block b | Retry { body = b ; _ } | Catch b
+        | Declare (v, e) -> v :: expr_declarations e
+        | Assign (_, e) | Expr e -> expr_declarations e
+        | Stack { body = b ; _ } | Retry { body = b ; _ } | Catch b
         | On { body = b ; _ } -> declarations b
-        | Any { cases ; _ } -> List.concat_map (fun c -> declarations c.body) cases
-        | If { then_ ; else_ ; _ } -> declarations then_ @ declarations else_
+        | Any { cases ; _ } -> List.concat_map (fun (c : case) -> declarations c.body) cases
         | Repeat { var ; body ; _ } -> var :: declarations body
         | _ -> []) b
+
+and expr_declarations e =
+    match e.desc with
+    | Block b -> declarations b
+    | If { cond ; then_ ; else_ } ->
+        expr_declarations cond @ declarations then_ @ declarations else_
+    | Case { subject ; arms ; else_ } ->
+        expr_declarations subject @
+        List.concat_map (fun a -> (match a.held with Some v -> [ v ] | None -> []) @ declarations a.branch) arms @
+        Option.map_default declarations [] else_
+    | Field (e, _) | Unop (_, e) | Convert e | Select { packet = e ; _ } ->
+        expr_declarations e
+    | Index (a, b) | Binop (_, a, b) -> expr_declarations a @ expr_declarations b
+    | Call (_, es) | Record es | Array es -> List.concat_map expr_declarations es
+    | String parts ->
+        List.concat_map (function Interp e -> expr_declarations e | Text _ -> []) parts
+    | Lit _ | Var _ | Packet_field _ -> []
 
 (** The typed program, or the errors, in the order of the source. *)
 let check (program : A.program) =
     let errors = ref [] in
     let env = { vars = [] ; declared_here = [] ; poisoned = [] ; stack = [] ;
-                loops = 0 ; layer_ctx = None } in
+                loops = 0 ; layer_ctx = None ; may_wait = true ; errors } in
     let p = block errors env program in
     if !errors = [] then Ok p
     else
@@ -950,6 +1152,23 @@ let check (program : A.program) =
     (types "/IP(dst=1.2.3.4)/TCP(dst=80) { expect ../TCP!(flags & RST, seq_num > 3) {}\n  expect ../TCP!/Bytes(data == \"x\") {} }")
   "t: time, d: interval, u: time, v: time, w: bool" \
     (types "t = now()\nd = t - time(0)\nu = t + 1\nv = 2.5 + t - 1s\nw = t < u")
+*)
+
+(* Blocks, if and case have the value of their branches, converted to the
+ * same type; one ending with a break has none: *)
+(*$= types & ~printer:identity
+  "x: float, y: int, z: int, w: int" \
+    (types "x = if 1 > 0 { 1 } else { 2.5 }\ny = { z = 2; z * 3 }\nw = 1 + if x > 1 { 1 } else { 2 }")
+  "x: string, y: byte[]" \
+    (types "x = if true { \"a\" } elsif false { #4142 } else { \"b\" }\ny = if true { #4142 } else { \"b\" }")
+  "I: int, x: int" \
+    (types "repeat { x = if I > 3 { break } else { I } }")
+  "x: int" (types "if 1 { wait 1s }\nx = 1\nif x > 0 { print(\"a\") } else { x := 2 }")
+  "x: ip, b: {data: byte[]}, y: byte[]" \
+    (types "expect /IP { x = case MATCH[1] IP { MATCH[IP].src } | else { 0.0.0.0 }\n  case var=b MATCH[2] Bytes { y = b.data } }")
+  "x: int" (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Bytes { 13 } }")
+  "x: int, y: int" \
+    (types "expect /IP { x = case MATCH[1] IP { wait 1s\n  1 } | else { 2 }\n  y = { expect Bytes {}\n  3 } }")
 *)
 
 (* What makes no sense, and where; after an error in a declaration, the uses
@@ -1065,6 +1284,34 @@ let check (program : A.program) =
     (types "x = 1 - now()")
   "line 1, column 5: Unknown variable z\nline 3, column 1: Unknown variable w\nline 4, column 7: Argument s of print must be a string, not an int" \
     (types "x = z\ny = x + 1\nw := 1\nprint(2)")
+  "line 2, column 1: This bool is not used" \
+    (types "x = 1\nx == 1")
+  "line 1, column 11: This int is not used\nline 1, column 22: This int is not used" \
+    (types "if true { 1 } else { 2 }")
+  "line 1, column 1: x would have no value" \
+    (types "x = { y = 1 }")
+  "line 1, column 9: This if needs an else, to have a value when its condition is false" \
+    (types "y = 1 + if true { 1 }")
+  "line 1, column 5: The branches of this if are of different types: an int and a string" \
+    (types "x = if true { 1 } else { \"a\" }")
+  "line 1, column 19: A packet cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \
+    (types "x = 1 + if true { /IP(dst=1.2.3.4)/UDP(dst=53)/Bytes(\"x\") ; 1 } else { 2 }")
+  "line 1, column 13: wait cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \
+    (types "print(\"${ { wait 1s ; 1 } }\")")
+  "line 1, column 6: The subject of case must be a variant, such as a layer of a packet, not an int" \
+    (types "case 3 IP {}")
+  "line 1, column 36: Foo is none of Eth, ICMP, Echo, Request, Reply, DestUnreachable, TimeExceeded, IP, UDP, TCP, DNS, Query, Answer, Bytes" \
+    (types "expect /IP { case MATCH[0] IP {} | Foo {} }")
+  "line 1, column 36: IP already has a block in this case" \
+    (types "expect /IP { case MATCH[0] IP {} | ip {} }")
+  "line 1, column 18: This case needs an else, or a block for each of Eth, ICMP, Echo, Request, Reply, DestUnreachable, TimeExceeded, UDP, DNS, Query, Answer, Bytes, to have a value" \
+    (types "expect /IP { x = case MATCH[1] IP { 1 } | TCP { 2 } }")
+  "line 1, column 18: The branches of this case are of different types: a string and an int" \
+    (types "expect /IP { x = case MATCH[1] Bytes { \"a\" } | IP { 1 } | else { 2 } }")
+  "line 1, column 18: This case has a block for each of Eth, ICMP, Echo, Request, Reply, DestUnreachable, TimeExceeded, IP, UDP, TCP, DNS, Query, Answer, Bytes: its else is never run" \
+    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Bytes { 13 } | else { 0 } }")
+  "line 1, column 40: Unknown variable l" \
+    (types "expect /IP { case MATCH[1] Bytes { x = l.data } }")
 *)
 
 (* The examples of the spec that use only v1 features: *)

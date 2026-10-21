@@ -143,6 +143,17 @@ and expr_desc =
     | Record of (string * expr) list
     | Array of expr list
     | Matches of expr * pattern
+    (* The value of a block is that of its last statement, if an expression,
+     * and else void: *)
+    | Block of block
+    (* [elsif] being an [else] block of a single [If]: *)
+    | If of { cond : expr ; then_ : block ; else_ : block option }
+    (* The block of the constructor of [subject]'s value, in which [var]
+     * (or else [subject], if a variable) is what that constructor holds: *)
+    | Case of { var : string option ; subject : expr ; arms : arm list ;
+                else_ : block option }
+
+and arm = { arm_loc : location ; ctor : string ; body : block }
 
 and string_part = Text of string | Interp of expr
 
@@ -169,26 +180,25 @@ and pattern_layer =
        * and [=] already read as [Eq]: *)
       cond : expr option }
 
-(** A layer of a protocol stack, with its options. *)
-type layer =
+(* A layer of a protocol stack, with its options: *)
+and layer =
     { layer_loc : location ;
       layer_name : Layer_name.t ;
       manual : bool ;
       options : arg list }
 
-type stmt = { stmt_loc : location ; stmt : stmt_desc }
+and stmt = { stmt_loc : location ; stmt : stmt_desc }
 
 and stmt_desc =
     (* Those layers on top of the [anchor]: the stack of [body] if any, or
      * else a packet to send, its top layer being terminal: *)
     | Stack of { anchor : anchor ; layers : layer list ; body : block option }
-    | Block of block
+    (* Its value unused: *)
+    | Expr of expr
     (* [x = e]: *)
     | Declare of string * expr
     (* [x := e], or [x op= e] with that [binop]: *)
     | Assign of string * binop option * expr
-    (* A function called for its effect, such as [print]: *)
-    | Do of string * arg list
     | Repeat of { var : string option ; count : expr option ;
                   every : expr option ; for_ : expr option ; body : block }
     (* A [Repeat] whose [var] is each of [items] in turn: *)
@@ -198,8 +208,6 @@ and stmt_desc =
     | Retry of { max : expr option ; body : block }
     (* Run [body], leaving it on its first error: *)
     | Catch of block
-    (* [elsif] being an [else] block of a single [If]: *)
-    | If of { cond : expr ; then_ : block ; else_ : block option }
     | Break of { depth : expr option }
     | Wait of expr
     | Expect of { timeout : expr option ; pattern : pattern ; body : block }
@@ -226,11 +234,11 @@ let predefined = [ "match" ; "last" ]
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
     [ "true" ; "false" ; "repeat" ; "foreach" ; "retry" ; "catch" ; "if" ;
-      "elsif" ; "else" ; "break" ; "expect" ; "any" ; "on" ; "wait" ]
+      "elsif" ; "else" ; "case" ; "break" ; "expect" ; "any" ; "on" ; "wait" ]
 
 (** Keywords of what the language will have but not yet. Lower case. *)
 let unsupported =
-    [ "case" ; "report" ]
+    [ "report" ]
 
 (** {2 Printing}
  *
@@ -287,11 +295,15 @@ let precedence = function
 let unary_precedence = 9
 
 (* [e] where an operation binding less than [p] needs parentheses, as do all
- * of them with [all] (but the outermost one if [bare]): *)
-let rec print_expr_at ?(bare=false) ~all p oc e =
+ * of them with [all] (but the outermost one if [bare]), its blocks at that
+ * [indent]: *)
+let rec print_expr_at ?(bare=false) ~all ~indent p oc e =
     let paren q f =
         if all && not bare || q < p then Printf.fprintf oc "(%t)" f else f oc in
-    let sub = print_expr_at ~all 0 in
+    let at = print_expr_at ~all ~indent in
+    let sub = at 0 in
+    let bare_sub = print_expr_at ~bare:true ~all ~indent 0 in
+    let block = print_block ~all indent in
     match e.desc with
     | Lit l -> print_literal oc l
     | Constant (n, _) -> String.print oc n
@@ -307,17 +319,17 @@ let rec print_expr_at ?(bare=false) ~all p oc e =
         if from_start then Printf.fprintf oc "%s%a" carets Layer_name.print name
         else Printf.fprintf oc "%a%s" Layer_name.print name carets
     | Field (e, f) ->
-        Printf.fprintf oc "%a.%s" (print_expr_at ~all max_int) e f
+        Printf.fprintf oc "%a.%s" (at max_int) e f
     | Index (e, i) ->
-        Printf.fprintf oc "%a[%a]" (print_expr_at ~all max_int) e sub i
-    | Call (f, args) -> Printf.fprintf oc "%s(%a)" f (print_args ~all) args
+        Printf.fprintf oc "%a[%a]" (at max_int) e sub i
+    | Call (f, args) -> Printf.fprintf oc "%s(%a)" f (print_args ~all ~indent) args
     | Unop (Not, e) ->
         paren unary_precedence (fun oc ->
-            Printf.fprintf oc "!%a" (print_expr_at ~all unary_precedence) e)
+            Printf.fprintf oc "!%a" (at unary_precedence) e)
     | Unop (Neg, e) ->
         (* With a space before a digit, not to make a negative literal of a
          * positive one: *)
-        let s = IO.to_string (print_expr_at ~all unary_precedence) e in
+        let s = IO.to_string (at unary_precedence) e in
         let sep = if all || s <> "" && Char.is_digit s.[0] then " " else "" in
         paren unary_precedence (fun oc -> Printf.fprintf oc "-%s%s" sep s)
     | Binop (op, a, b) ->
@@ -326,8 +338,7 @@ let rec print_expr_at ?(bare=false) ~all p oc e =
         let pa, pb = if q = precedence Eq then q + 1, q + 1 else q, q + 1 in
         paren q (fun oc ->
             Printf.fprintf oc "%a %s %a"
-                (print_expr_at ~all pa) a (string_of_binop op)
-                (print_expr_at ~all pb) b)
+                (at pa) a (string_of_binop op) (at pb) b)
     | Record fields ->
         Printf.fprintf oc "{%a}"
             (print_list (fun oc (n, e) -> Printf.fprintf oc "%s: %a" n sub e))
@@ -337,50 +348,63 @@ let rec print_expr_at ?(bare=false) ~all p oc e =
         let q = precedence Eq in
         paren q (fun oc ->
             Printf.fprintf oc "%a =~ %a"
-                (print_expr_at ~all (q + 1)) e (print_pattern ~all) pat)
+                (at (q + 1)) e (print_pattern ~all ~indent) pat)
+    | Block b -> block oc b
+    | If { cond ; then_ ; else_ } ->
+        let rec print_if kw cond then_ else_ =
+            Printf.fprintf oc "%s %a " kw bare_sub cond ;
+            block oc then_ ;
+            match else_ with
+            | None -> ()
+            | Some [ { stmt = Expr { desc = If { cond ; then_ ; else_ } ; _ } ; _ } ] ->
+                print_if " elsif" cond then_ else_
+            | Some b -> String.print oc " else " ; block oc b in
+        print_if "if" cond then_ else_
+    | Case { var ; subject ; arms ; else_ } ->
+        String.print oc "case" ;
+        Option.may (Printf.fprintf oc " var=%s") var ;
+        Printf.fprintf oc " %a" bare_sub subject ;
+        List.iteri (fun i a ->
+            Printf.fprintf oc "%s%s " (if i = 0 then " " else " | ") a.ctor ;
+            block oc a.body) arms ;
+        Option.may (fun b -> String.print oc " else " ; block oc b) else_
 
-and print_args ~all oc args =
+and print_args ~all ~indent oc args =
     print_list (fun oc a ->
         Option.may (Printf.fprintf oc "%s=") a.arg_name ;
-        print_expr_at ~all 0 oc a.value) oc args
+        print_expr_at ~all ~indent 0 oc a.value) oc args
 
 and print_anchor oc = function
     | Absolute -> Char.print oc '/'
     | Relative n -> for _ = 1 to n do String.print oc "../" done
 
-and print_pattern ~all oc p =
+and print_pattern ~all ~indent oc p =
     print_anchor oc p.anchor ;
     List.print ~first:"" ~last:"" ~sep:"/" (fun oc l ->
         Printf.fprintf oc "%a%s" Layer_name.print l.pl_name (if l.pl_manual then "!" else "") ;
-        Option.may (Printf.fprintf oc "(%a)" (print_expr_at ~bare:true ~all 0)) l.cond
+        Option.may (Printf.fprintf oc "(%a)" (print_expr_at ~bare:true ~all ~indent 0)) l.cond
     ) oc p.pat_layers
 
-(* With every operation in parentheses: *)
-let print_expr = print_expr_at ~all:true 0
-
-(* The same, but for the outermost operation: *)
-let print_bare_expr = print_expr_at ~bare:true ~all:true 0
-
-let print_layer ~all oc l =
+and print_layer ~all ~indent oc l =
     Printf.fprintf oc "%a%s" Layer_name.print l.layer_name (if l.manual then "!" else "") ;
-    if l.options <> [] then Printf.fprintf oc "(%a)" (print_args ~all) l.options
+    if l.options <> [] then Printf.fprintf oc "(%a)" (print_args ~all ~indent) l.options
 
-let rec print_stmt ~all indent oc s =
-    let expr = print_expr_at ~all 0 in
+and print_stmt ~all indent oc s =
+    let expr = print_expr_at ~all ~indent 0 in
     let param name = Option.may (Printf.fprintf oc " %s=%a" name expr) in
+    let pattern = print_pattern ~all ~indent in
     String.print oc (String.make indent ' ') ;
     match s.stmt with
     | Stack { anchor ; layers ; body } ->
         print_anchor oc anchor ;
-        List.print ~first:"" ~last:"" ~sep:"/" (print_layer ~all) oc layers ;
+        List.print ~first:"" ~last:"" ~sep:"/" (print_layer ~all ~indent) oc layers ;
         Option.may (fun b -> Char.print oc ' ' ; print_block ~all indent oc b) body
-    | Block b -> print_block ~all indent oc b
+    | Expr e -> print_expr_at ~bare:true ~all ~indent 0 oc e
     | Declare (v, e) -> Printf.fprintf oc "%s = %a" v expr e
     | Assign (v, op, e) ->
         Printf.fprintf oc "%s %s= %a" v
             (match op with None -> ":" | Some op -> string_of_binop op)
             expr e
-    | Do (f, args) -> Printf.fprintf oc "%s(%a)" f (print_args ~all) args
     | Repeat { var ; count ; every ; for_ ; body } ->
         String.print oc "repeat" ;
         Option.may (Printf.fprintf oc " var=%s") var ;
@@ -390,47 +414,42 @@ let rec print_stmt ~all indent oc s =
         String.print oc "foreach" ;
         Option.may (Printf.fprintf oc " var=%s") var ;
         param "every" every ; param "for" for_ ;
-        Printf.fprintf oc " %a " (print_expr_at ~bare:true ~all 0) items ;
+        Printf.fprintf oc " %a " (print_expr_at ~bare:true ~all ~indent 0) items ;
         print_block ~all indent oc body
     | Retry { max ; body } ->
         String.print oc "retry" ; param "max" max ;
         Char.print oc ' ' ; print_block ~all indent oc body
     | Catch body ->
         String.print oc "catch " ; print_block ~all indent oc body
-    | If { cond ; then_ ; else_ } ->
-        let rec print_if kw cond then_ else_ =
-            Printf.fprintf oc "%s %a " kw (print_expr_at ~bare:true ~all 0) cond ;
-            print_block ~all indent oc then_ ;
-            match else_ with
-            | None -> ()
-            | Some [ { stmt = If { cond ; then_ ; else_ } ; _ } ] ->
-                print_if " elsif" cond then_ else_
-            | Some b -> String.print oc " else " ; print_block ~all indent oc b in
-        print_if "if" cond then_ else_
     | Break { depth } ->
         String.print oc "break" ; param "depth" depth
     | Wait dur ->
         if all then (String.print oc "wait" ; param "dur" (Some dur))
         else Printf.fprintf oc "wait %a" expr dur
-    | Expect { timeout ; pattern ; body } ->
+    | Expect { timeout ; pattern = p ; body } ->
         String.print oc "expect" ; param "timeout" timeout ;
-        Printf.fprintf oc " %a " (print_pattern ~all) pattern ;
+        Printf.fprintf oc " %a " pattern p ;
         print_block ~all indent oc body
     | Any { timeout ; cases } ->
         String.print oc "any" ; param "timeout" timeout ;
-        List.iteri (fun i (pattern, body) ->
-            Printf.fprintf oc "%s%a " (if i = 0 then " " else " | ")
-                (print_pattern ~all) pattern ;
+        List.iteri (fun i (p, body) ->
+            Printf.fprintf oc "%s%a " (if i = 0 then " " else " | ") pattern p ;
             print_block ~all indent oc body) cases
-    | On { timeout ; max ; pattern ; body } ->
+    | On { timeout ; max ; pattern = p ; body } ->
         String.print oc "on" ; param "timeout" timeout ; param "max" max ;
-        Printf.fprintf oc " %a " (print_pattern ~all) pattern ;
+        Printf.fprintf oc " %a " pattern p ;
         print_block ~all indent oc body
 
 and print_block ~all indent oc b =
     String.print oc "{\n" ;
     List.iter (fun s -> print_stmt ~all (indent + 2) oc s ; Char.print oc '\n') b ;
     Printf.fprintf oc "%s}" (String.make indent ' ')
+
+(* With every operation in parentheses: *)
+let print_expr = print_expr_at ~all:true ~indent:0 0
+
+(* The same, but for the outermost operation: *)
+let print_bare_expr = print_expr_at ~bare:true ~all:true ~indent:0 0
 
 (** The program, with [all] operations in parentheses (default), or only those
  * that need some: *)
