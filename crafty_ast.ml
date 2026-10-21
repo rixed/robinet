@@ -202,6 +202,10 @@ and stmt_desc =
     (* Those layers on top of the [anchor]: the stack of [body] if any, or
      * else a packet to send, its top layer being terminal: *)
     | Stack of { anchor : anchor ; layers : layer list ; body : block option }
+    (* [x = STACK], or [x := STACK] with [declare] false: sends the packet of
+     * that stack, then [x] is that packet as captured on its way out: *)
+    | Capture of { var : string ; declare : bool ; anchor : anchor ;
+                   layers : layer list }
     (* Its value unused: *)
     | Expr of expr
     (* [x = e]: *)
@@ -421,6 +425,10 @@ and print_stmt ~all indent oc s =
         print_anchor oc anchor ;
         List.print ~first:"" ~last:"" ~sep:"/" (print_layer ~all ~indent) oc layers ;
         Option.may (fun b -> Char.print oc ' ' ; print_block ~all indent oc b) body
+    | Capture { var ; declare ; anchor ; layers } ->
+        Printf.fprintf oc "%s %s " var (if declare then "=" else ":=") ;
+        print_anchor oc anchor ;
+        List.print ~first:"" ~last:"" ~sep:"/" (print_layer ~all ~indent) oc layers
     | Expr e -> print_expr_at ~bare:true ~all ~indent 0 oc e
     | Declare (v, e) -> Printf.fprintf oc "%s = %a" v expr e
     | Assign (v, is, op, e) ->

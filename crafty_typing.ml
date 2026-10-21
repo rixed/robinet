@@ -127,7 +127,9 @@ and stmt_desc =
     | Stack of { depth : int ; overlay : int ; layers : layer list ;
                  body : block }
     (* The same, for a packet to send, which [last] is then: *)
-    | Send of { depth : int ; overlay : int ; layers : layer list ; last : var }
+    | Send of { depth : int ; overlay : int ; layers : layer list ; last : var ;
+                (* Set to the packet as captured on its way out, once it is: *)
+                capture : var option }
     (* Its value unused, or that of the block it ends: *)
     | Expr of expr
     | Declare of var * expr
@@ -1198,17 +1200,18 @@ and stmt errors env (s : A.stmt) =
                 let body = block errors { env with vars = match_ :: env.vars } body in
                 { pattern ; match_ ; body }) cases in
         env, Some (mk (Any { form ; timeout ; cases })) in
-    let declare env name e =
+    let declare_typ env name typ =
         if List.mem name env.declared_here then
             error loc "%s is already declared in this block (:= changes it)" name ;
-        let v = new_var name e.typ in
+        let v = new_var name typ in
         { env with vars = v :: env.vars ;
                    declared_here = name :: env.declared_here }, v in
+    let declare env name e = declare_typ env name e.typ in
     try
         if not env.may_wait then (
             let what =
                 match s.stmt with
-                | A.Stack { body = None ; _ } -> Some "A packet"
+                | A.Stack { body = None ; _ } | A.Capture _ -> Some "A packet"
                 | A.Stack _ -> Some "A stack"
                 | A.Repeat _ -> Some "repeat" | A.Foreach _ -> Some "foreach"
                 | A.Retry _ -> Some "retry" | A.Catch _ -> Some "catch"
@@ -1241,7 +1244,35 @@ and stmt errors env (s : A.stmt) =
                         let v = new_var "LAST" packet_type in
                         { env with vars = v :: env.vars ;
                                    declared_here = "LAST" :: env.declared_here }, v in
-                env, Some (mk (Send { depth ; overlay ; layers = tls ; last })))
+                env, Some (mk (Send { depth ; overlay ; layers = tls ; last ;
+                                      capture = None })))
+        | A.Capture { var ; declare = decl ; anchor ; layers } ->
+            let base, over = anchor_base env s.stmt_loc anchor in
+            let stack, tls, overlay = stack_layers env base over layers in
+            (* What a self-driven layer sends is no one frame that could be
+             * waited for, but for the interface's: *)
+            List.iter (fun ((l : L.layer), m) ->
+                if m = L.Driven && l != L.root then
+                    error s.stmt_loc "Only a packet sent through manual layers can \
+                                      be seen leaving, and %s is self-driven"
+                        (L.to_string l)) stack ;
+            let env, last =
+                if List.mem "LAST" env.declared_here then
+                    env, lookup_var env loc "LAST"
+                else
+                    let v = new_var "LAST" packet_type in
+                    { env with vars = v :: env.vars ;
+                               declared_here = "LAST" :: env.declared_here }, v in
+            let env, capture =
+                if decl then
+                    declare_typ env var packet_type
+                else
+                    let v = lookup_var env loc var in
+                    if v.typ <> packet_type then
+                        error loc "%s is %s, not a packet" var (a_type v.typ) ;
+                    env, v in
+            env, Some (mk (Send { depth = List.length base ; overlay ; layers = tls ;
+                                  last ; capture = Some capture }))
         (* [sort(x[i])] is [x[i] := sorted(x[i])]: *)
         | A.Expr { desc = A.Call (f, [ arg ]) ; _ }
           when same_name f "sort" && (arg.arg_name = None || arg.arg_name = Some "a") ->
@@ -1760,4 +1791,19 @@ let check (program : A.program) =
     (types (Tools.file_content "tests/crafty/not_acked.crafty"))
   "line 4, column 54: =~ is not supported yet" \
     (types (Tools.file_content "tests/crafty/icmp_error.crafty"))
+*)
+
+(* A packet sent into a variable must go through manual layers only, but the
+ * interface: *)
+(*$= types & ~printer:identity
+  "" (types "/IP!(dst=1.2.3.4)/UDP(dst=53) { p = Bytes(\"x\") }")
+  "" (types "/IP(dst=1.2.3.4)/TCP(dst=80) { p = ../../IP!/TCP!/Bytes(\"GET /\") }")
+  "line 1, column 32: Only a packet sent through manual layers can be seen leaving, and TCP is self-driven" \
+    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { p = Bytes(\"GET /\") }")
+  "line 1, column 32: Only a packet sent through manual layers can be seen leaving, and IP is self-driven" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { p = Bytes(\"x\") }")
+  "line 2, column 33: p is an int, not a packet" \
+    (types "p = 1\n/IP!(dst=1.2.3.4)/UDP(dst=53) { p := Bytes(\"x\") }")
+  "line 1, column 7: A packet cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \
+    (types "x = { p = /IP!(dst=1.2.3.4)/UDP(dst=53)/Bytes(\"x\") ; 1 } + 1")
 *)

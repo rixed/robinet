@@ -636,6 +636,27 @@ let stmt =
         (variable ++ maybe_next (
             item '=' -- nay (item '=' ||| item '~') -- nl_sp -+ expr) >>:
             fun (v, e) -> Declare (check_var v, e)) |||
+        (* The packet of a stack, as it leaves: what starts like a stack
+         * rather than an expression, up to the end of the statement: *)
+        (let assign =
+            (item '=' -- nay (item '=' ||| item '~') >>: fun _ -> true) |||
+            (item ':' -- item '=' >>: fun _ -> false) in
+         let stack_start =
+            slash ||| (item '.' -- item '.') |||
+            (identifier >>= fun s ->
+                if not (is_keyword s) && Layer_name.of_string s <> None
+                then return () else fail) in
+         check (quiet (variable -- sp -- assign -- nl_sp -- stack_start)) -+
+         variable ++ maybe_next assign +- nl_sp ++
+         anchor ++ repeat ~min:1 ~sep:(maybe_next (slash -- nl_sp)) layer +-
+         check (sp -- ((item '\n' ||| item ';' ||| item '}' >>: ignore) ||| eof)) >>:
+            fun (((v, declare), anchor), layers) ->
+                let top = (List.last layers).layer_name in
+                if terminal top then
+                    Capture { var = check_var v ; declare ; anchor ; layers }
+                else
+                    reject "Only a packet can be sent, and %s is not terminal"
+                        (Layer_name.to_string top)) |||
         (* Quiet, not to expect indices after any name: *)
         (variable ++ repeat_greedy ~sep:none (
             quiet (item '[') -- nl_sp -+ expr +- nl_sp +- item ']') >>=
@@ -823,6 +844,9 @@ let parse text =
   "expect timeout=5s /IP(src == x)/UDP {\n}\n" \
     (reads "expect 5s /IP(src=x)/UDP {}")
   "expect timeout=5s /IP/UDP {\n}\n" (reads "expect timeout=5s /IP/UDP {}")
+  "p = Bytes(\"a\")\n" (reads "p = Bytes(\"a\")")
+  "p := ../../IP!/UDP(dst=7)/Bytes(\"a\")\n" (reads "p:=../../IP!/UDP(dst=7)/Bytes(\"a\")")
+  "line 1, column 13: Only a packet can be sent, and UDP is not terminal" (reads "p = /IP!/UDP")
   "any timeout=1s Bytes(\"a\") {\n} | Bytes(\"b\") {\n  x := 1\n}\n" \
     (reads "any 1s Bytes(\"a\") {} | Bytes(\"b\") { x := 1 }")
   "any Bytes(data == \"a\") {\n} | ../ICMP {\n} | /IP(src == x)/UDP {\n}\nx := 1\n" \
@@ -948,7 +972,7 @@ let parse text =
   "line 1, column 6: Parameters of on must be named" \
     (reads "on 1s Bytes(\"x\") {\n}")
   "line 1, column 18: Expected '=' in statement" (reads "repeat count=3 x {\n}")
-  "line 1, column 5: Expected expression in statement" (reads "x = IP")
+  "line 1, column 7: Only a packet can be sent, and IP is not terminal" (reads "x = IP")
   "line 1, column 7: ip is a reserved name" (reads "ip = 3")
   "line 1, column 11: print is a reserved name" (reads "print += 3")
   "line 1, column 7: An item is not declared (:= changes it)" (reads "x[0] = 1")

@@ -99,6 +99,16 @@ cat > "$DIR/ts.cfty" <<'EOF'
   }
 }
 EOF
+# A packet sent into a variable is that packet as captured on its way out:
+cat > "$DIR/sent.cfty" <<'EOF'
+/IP!(dst=10.77.0.2)/UDP(dst=7) {
+  p = Bytes("ping")
+  expect timeout=1s Bytes {
+    d = MATCH[Eth].ts - p[Eth].ts
+    print(if d > 0s && d < 100ms { "round trip ${d}" } else { "no round trip: ${d}" })
+  }
+}
+EOF
 printf 'x = "a" + 1\n' > "$DIR/bad.cfty"
 
 setup
@@ -110,6 +120,9 @@ check "UDP with an address of its own" 0 $? "echo 2"
 
 "$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/ts.cfty" > "$DIR/out" 2>&1
 check "frames are dated by their capture" 0 $? "captured "
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/sent.cfty" > "$DIR/out" 2>&1
+check "a packet sent is seen leaving" 0 $? "round trip "
 
 ip netns exec $NS timeout 6 tcpdump -n -i $NS_IF -w "$DIR/tcp.pcap" tcp 2>/dev/null &
 TCPDUMP=$!

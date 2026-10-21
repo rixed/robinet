@@ -531,7 +531,33 @@ let guard b f =
 type t =
     { power : Simulation.power ;
       output : output ;
-      tree : Crafty_tree.node }
+      tree : Crafty_tree.node ;
+      (* What was sent and is waited for on its way out, by order of
+       * sending, and who waits for it: *)
+      awaited : (Crafty_tree.emitted * (Crafty_tree.packet -> unit)) list ref }
+
+(* How long a packet sent may take to be seen leaving: *)
+let capture_timeout = Interval.sec 1.
+
+(* Calls [k] with the packet that the interface emits as [e], once it is
+ * captured on its way out, or else fails [b] at [loc]: *)
+let await t b loc e k =
+    let rec w = e, (fun p -> if b.live then (disarm () ; k p))
+    and disarm () = t.awaited := List.filter ((!=) w) !(t.awaited) in
+    t.awaited := !(t.awaited) @ [ w ] ;
+    b.cleanups <- disarm :: b.cleanups ;
+    Simulation.delay t.power capture_timeout (fun () ->
+        if List.memq w !(t.awaited) && b.live then (
+            disarm () ;
+            ignore (guard b (fun () ->
+                error loc "The packet sent was not seen leaving within %s"
+                    (Interval.to_string capture_timeout))))) ()
+
+(* Tells the first that waits for [frame], captured on its way out: *)
+let emitted t frame =
+    match List.find_opt (fun (e, _) -> Crafty_tree.is_emitted e frame) !(t.awaited) with
+    | Some (_, k) -> k (Crafty_tree.captured t.tree frame)
+    | None -> ()
 
 (* The stack of [env] with these layers on top of its [depth] first ones,
  * their nodes held by [b] (but for the root, which stays, and for a terminal
@@ -716,7 +742,7 @@ and exec t b env (s : T.stmt) k =
                 b.fail Crafty_parser.{ where ; message } ; None in
         ignore (run_block ~enter t b env body ~fail:b.fail ~break_:b.break_
                     (fun _ -> k env))
-    | T.Send { depth ; overlay ; layers ; last } ->
+    | T.Send { depth ; overlay ; layers ; last ; capture } ->
         (* A packet, leaving the current stack as it was, once it can go on
          * without waiting (as a blocking write does). Its frames reach the
          * interface through events of their own, due now, so the stack is
@@ -728,13 +754,18 @@ and exec t b env (s : T.stmt) k =
                 let stack = push t b env depth overlay layers in
                 stack, Crafty_tree.send stack
             with Failed msg -> error s.stmt_loc "%s" msg) |>
-        Option.may (fun (stack, packet) ->
+        Option.may (fun (stack, (packet, emitted)) ->
             (* The first packet of the block makes its [LAST], which the
-             * next ones update: *)
-            let x = packet_value packet in
-            let env =
-                if Env.mem last.id env.vars then (lookup env last := x ; env)
-                else bind env last x in
+             * next ones update, as the first capture does its variable: *)
+            let set env v x =
+                if Env.mem v.T.id env.vars then (lookup env v := x ; env)
+                else bind env v x in
+            let env = set env last (packet_value packet) in
+            match capture, emitted with
+            | Some v, Some e ->
+                await t b s.stmt_loc e (fun p -> k (set env v (packet_value p)))
+            | Some _, None -> assert false (* the typer said so *)
+            | None, _ ->
             let rec wait d =
                 let asked = ref false in
                 let ask () =
@@ -922,7 +953,7 @@ let run_on_tree power tree ~print ~print_err ?(on_exit=ignore) (program : T.bloc
     let now () =
         let sim = power.SimTypes.sim in
         Simulation.date_of sim (Simulation.now sim) in
-    let t = { power ; output = { print ; print_err ; now } ; tree } in
+    let t = { power ; output = { print ; print_err ; now } ; tree ; awaited = ref [] } in
     let exit s =
         if !status = Running then (
             status := s ;
@@ -937,7 +968,7 @@ let run_on_tree power tree ~print ~print_err ?(on_exit=ignore) (program : T.bloc
     { stop = (fun () -> cancel root ; exit Stopped) ;
       status = (fun () -> !status) ;
       idle = idle tree ;
-      emitted = Crafty_tree.emitted tree }
+      emitted = emitted t }
 
 type program = Crafty_typing.block
 
@@ -1001,15 +1032,16 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         | Some h -> h.status ()
         | None -> if !stopped then Stopped else Running) ;
       idle = idle tree ;
-      emitted = Crafty_tree.emitted tree }
+      emitted = (fun frame -> Option.may (fun (h : handle) -> h.emitted frame) !started) }
 
-(* [runs ?stop_at ?trees ?frames ?inject text] is what the program in that text
+(* [runs ?stop_at ?trees ?frames ?sent ?inject text] is what the program in that text
  * prints, each line with the time it is printed at (and with [trees], the
  * tree of parsers then), then how it ends; or why it cannot run. With
  * [frames], the frames it emits are among those lines, as [describe] tells
  * them (without their time, which depends on the scheduler by a few ps).
  * [inject] are frames it receives, with the time they arrive at, made with
- * the help of [incoming] (from 02:00:00:00:00:02). With [promisc], its
+ * the help of [incoming] (from 02:00:00:00:00:02). With [sent], the frames
+ * it emits are told back to it as captured on their way out. With [promisc], its
  * interface takes the frames for other addresses too. Its interface is 10.0.0.1/24, its gateway 02:00:00:00:00:fe, and it
  * knows the MAC address of 10.0.0.2. *)
 (*$inject
@@ -1068,7 +1100,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   let reply ?(sport=53) ?(dport=1000) data =
       incoming (Ip.Pdu.pack (udp_packet sport dport data))
 
-  let runs ?stop_at ?(trees=false) ?(frames=false) ?(inject=[]) ?(promisc=false) text =
+  let runs ?stop_at ?(trees=false) ?(frames=false) ?(sent=false) ?(inject=[]) ?(promisc=false) text =
       match Crafty_parser.parse text with
       | Error e -> IO.to_string Crafty_parser.print_error e
       | Ok p ->
@@ -1085,9 +1117,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
                   out := Printf.sprintf "%s%s: %s%s" pfx
                       (Clock.Time.to_string (Simulation.now sim)) s
                       (if trees then " "^ Crafty_tree.to_string tree else "") :: !out in
-              if frames then
+              let emitted = ref ignore in
+              if frames || sent then
                   Tools.(Eth.Iface.dev eth.Eth.State.iface -->
-                      sink (fun bits -> out := ("> "^ describe bits) :: !out)) ;
+                      sink (fun bits ->
+                          if frames then out := ("> "^ describe bits) :: !out ;
+                          if sent then Simulation.asap sim.root.power !emitted bits)) ;
               List.iter (fun (t, frame) ->
                   Simulation.at sim.root.power (Clock.Time.of_secs t)
                       (fun () -> eth.Eth.State.iface.Eth.Iface.recv frame) ()) inject ;
@@ -1099,6 +1134,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
                               line "" ("failed: "^ IO.to_string Crafty_parser.print_error e)
                           | Stopped -> line "" "stopped"
                           | Running -> ()) p in
+              emitted := h.emitted ;
               Option.may (fun t ->
                   Simulation.at sim.root.power t h.stop ()) stop_at ;
               Simulation.run sim false ;
@@ -1351,6 +1387,26 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP\n4µs320ns2ps: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 ARP\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.3 ttl=64 UDP 1>2 \"who\"" \
     (runs ~frames:true ~inject:[ 0.1, arp "10.0.0.2" ; 0.2, arp ~reply:true "10.0.0.3" ] \
         "/IP(dst=10.0.0.3)/UDP(src=1, dst=2)/Bytes(\"who\")")
+*)
+(* A packet sent into a variable is waited for until seen leaving, and is
+ * then that very frame, even among others alike: *)
+(*$= runs & ~printer:identity
+  "4µs640ns2ps: true true true 3ps 4µs639ns999ps\n9µs280ns2ps: pong\n9µs280ns2ps: done" \
+    (runs ~sent:true \
+        "/IP!(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n\
+           a = Bytes(\"ping\")\n\
+           ida = LAST[IP].id\n\
+           b = Bytes(\"ping\")\n\
+           print(\"${a[IP].id == ida} ${b[IP].id == LAST[IP].id} ${a[IP].id != b[IP].id} ${a[Eth].ts - time(0)} ${b[Eth].ts - a[Eth].ts}\")\n\
+           b := Bytes(\"pong\")\n\
+           print(b[Bytes].data) }")
+  "3ps: 53 #78\n3ps: done" \
+    (runs ~sent:true \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n\
+           p = ../../IP!/UDP/Bytes(\"x\")\n\
+           print(\"${p[UDP].dst} ${p[Bytes].data}\") }")
+  "1s: failed: line 1, column 44: The packet sent was not seen leaving within 1s" \
+    (runs "/IP!(dst=10.0.0.2)/UDP(src=1000, dst=53) { p = Bytes(\"ping\") }")
 *)
 (* A frame's [ts] is when it came in, which conditions can read: *)
 (*$= runs & ~printer:identity

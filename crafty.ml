@@ -192,17 +192,19 @@ let () =
                     (Printexc.to_string e) ;
                 exit 1) ;
             Some t) in
-    (* The simulation: crafty, a policer and the interface, captured each
-     * way. What is sent goes through the capture of what comes in, which
-     * does not see it, unlike that of what goes out: *)
+    (* The simulation: crafty, a policer and the interface. What is sent is
+     * injected through a handle that captures nothing, so that the other
+     * one, capturing either way, sees it leave, before whatever it causes
+     * comes back: *)
     let sim = Simulation.make "crafty" in
-    let capture direction ~outgoing =
+    let open_iface ~direction ~filter =
         Pcap.open_iface ~widget:(Widget.make ~parent:sim.root !ifname)
-            ~promisc:!promisc ~direction
-            ~caplen:(Pcap.caplen_of_mtu mtu)
-            ~filter:(Host_config.pcap_filter ~outgoing ?ip:!own_ip !ports) !ifname in
-    let pcap = capture Pcap.In ~outgoing:false
-    and pcap_out = capture Pcap.Out ~outgoing:true in
+            ~promisc:!promisc ~direction ~caplen:(Pcap.caplen_of_mtu mtu)
+            ~filter !ifname in
+    let injector = open_iface ~direction:Pcap.Out ~filter:"less 0"
+    and pcap =
+        open_iface ~direction:Pcap.InOut
+            ~filter:(Host_config.pcap_filter ?ip:!own_ip !ports) in
     let secs () = Clock.Time.to_secs (Simulation.now sim) in
     let ports_of proto =
         String.uppercase_ascii (Host_config.string_of_proto proto),
@@ -271,13 +273,31 @@ let () =
     Tools.(dev <--> before.ins) ;
     Tools.(before.out <--> policer.widget.ports.dev 0) ;
     Tools.(policer.widget.ports.dev 1 <--> after.ins) ;
-    Tools.(after.out --> sink (Pcap.inject pcap.handler)) ;
+    (* What was injected and not seen leaving yet, oldest first, of which
+     * those that are never seen are passed by the next that is: *)
+    let injected = Queue.create () in
+    let was_injected frame =
+        let is_it bits = Crafty_tree.(is_emitted (Frame bits) frame) in
+        if Queue.fold (fun found bits -> found || is_it bits) false injected then (
+            while not (is_it (Queue.pop injected)) do () done ;
+            true
+        ) else false in
+    Tools.(after.out --> sink (fun bits ->
+        Queue.push bits injected ;
+        Pcap.inject injector.handler bits)) ;
     Simulation.run_startup sim ;
     Simulation.power_up policer.widget.power ;
-    ignore (Pcap.sniffer pcap after.out.write) ;
-    ignore (Pcap.sniffer pcap_out (fun bits ->
-        incr wire_pkts ; wire_bytes := !wire_bytes + Tools.bytelength bits ;
-        h.emitted bits)) ;
+    (* What leaves is what crafty injected, or else what the host sends,
+     * which has the interface's address: *)
+    ignore (Pcap.sniffer pcap (fun bits ->
+        if was_injected bits ||
+           (match Eth.Pdu.unpack bits with
+           | Ok f -> Eth.Addr.eq f.src iface.mac
+           | Error _ -> false)
+        then (
+            incr wire_pkts ; wire_bytes := !wire_bytes + Tools.bytelength bits ;
+            h.emitted bits
+        ) else after.out.write bits)) ;
     print_endline "Running..." ;
     Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ] (fun () ->
         Simulation.run sim true) ;

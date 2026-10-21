@@ -326,34 +326,35 @@ let port_range_of_string proto s =
 let string_of_range r =
     if r.lo = r.hi then string_of_int r.lo else Printf.sprintf "%d-%d" r.lo r.hi
 
-(** A pcap filter for what a program may receive: ARP, and IPv4 to [ip] if
- * given, of which ICMP and the TCP and UDP ports of [ports], if any. With
- * [outgoing], for what it may send: from [ip] and from those ports. *)
-let pcap_filter ?(outgoing=false) ?ip ports =
-    let local = if outgoing then "src" else "dst" in
-    let l4 =
+(** A pcap filter for what a program may receive and send: ARP, and IPv4
+ * to and from [ip] if given, of which ICMP and the TCP and UDP ports of
+ * [ports], if any, as destination and as source respectively. *)
+let pcap_filter ?ip ports =
+    (* With the ports as [dirs]: *)
+    let l4 dirs =
         if ports = [] then None
         else Some (String.concat " or " (
-            "icmp" :: List.map (fun r ->
+            "icmp" :: List.concat_map (fun dir -> List.map (fun r ->
                 Printf.sprintf "(%s %s portrange %d-%d)"
-                    (string_of_proto r.proto) local r.lo r.hi) ports)) in
-    match ip, l4 with
-    | None, None -> ""
-    | None, Some l4 -> "arp or "^ l4
-    | Some ip, None -> Printf.sprintf "arp or %s host %s" local (Ip.Addr.to_dotted_string ip)
-    | Some ip, Some l4 ->
-        Printf.sprintf "arp or (%s host %s and (%s))"
-            local (Ip.Addr.to_dotted_string ip) l4
+                    (string_of_proto r.proto) dir r.lo r.hi) ports) dirs)) in
+    match ip with
+    | None -> Option.map_default (fun l4 -> "arp or "^ l4) "" (l4 [ "dst" ; "src" ])
+    | Some ip ->
+        let ip = Ip.Addr.to_dotted_string ip in
+        let one dir =
+            match l4 [ dir ] with
+            | None -> Printf.sprintf "%s host %s" dir ip
+            | Some l4 -> Printf.sprintf "(%s host %s and (%s))" dir ip l4 in
+        Printf.sprintf "arp or %s or %s" (one "dst") (one "src")
 
 (*$= pcap_filter & ~printer:identity
   "" (pcap_filter [])
-  "arp or dst host 10.0.0.1" (pcap_filter ~ip:(Ip.Addr.of_string "10.0.0.1") [])
-  "arp or icmp or (tcp dst portrange 14000-14099) or (udp dst portrange 53-53)" \
+  "arp or dst host 10.0.0.1 or src host 10.0.0.1" \
+    (pcap_filter ~ip:(Ip.Addr.of_string "10.0.0.1") [])
+  "arp or icmp or (tcp dst portrange 14000-14099) or (udp dst portrange 53-53) or (tcp src portrange 14000-14099) or (udp src portrange 53-53)" \
     (pcap_filter [ port_range_of_string Tcp "14000-14099" ; port_range_of_string Udp "53" ])
-  "arp or (dst host 10.0.0.1 and (icmp or (udp dst portrange 1-2)))" \
+  "arp or (dst host 10.0.0.1 and (icmp or (udp dst portrange 1-2))) or (src host 10.0.0.1 and (icmp or (udp src portrange 1-2)))" \
     (pcap_filter ~ip:(Ip.Addr.of_string "10.0.0.1") [ port_range_of_string Udp "1-2" ])
-  "arp or (src host 10.0.0.1 and (icmp or (udp src portrange 1-2)))" \
-    (pcap_filter ~outgoing:true ~ip:(Ip.Addr.of_string "10.0.0.1") [ port_range_of_string Udp "1-2" ])
  *)
 
 (** {2 Firewall} *)

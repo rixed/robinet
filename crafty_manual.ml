@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 0965440a792912f447e93eb8d7c4e8f0) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 08aff4e545f3e7bd565017179261fc15) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -212,6 +212,10 @@ A stack is a list of layers, each optionally with options in parentheses:
     `Answer`), a stack is a message, which is sent. The current stack stays as
     it was: `Bytes("a")` then `Bytes("b")` both send on it. The execution
     continue when the message has been sent.
+-   `p = STACK` (or `p := STACK`), with a message, sends it and waits until the
+    interface is seen sending it (an error after 1s): `p` is that packet as
+    captured, `p[Eth].ts` when it left. Every layer but `Eth` must be manual, so
+    that it is one frame. See [When did it leave?](#when-did-it-leave).
 -   Options are named (`dst=...`), except that a lone option of a layer that has
     a default field is that field: `Bytes("x")` is `Bytes(data="x")`.
 -   Options belong to the stack, not to the stream: those of a block's stack
@@ -660,6 +664,16 @@ the stream the request came on, so it uses the node that the pattern created.
 The self-driven connection sends a SYN. A reset is not data, so a pattern on top
 of `TCP` would never see it, while `../TCP!` sees the segments of that
 connection.
+
+### When did it leave?
+
+    /IP!(dst=192.0.2.10)/UDP(dst=7) {
+      p = Bytes("ping")
+      expect timeout=1s Bytes { print("rtt: ${MATCH[Eth].ts - p[Eth].ts}") }
+    }
+
+Both times are those of captures: of the ping on its way out, and of the echo on
+its way in.
 
 ### A TCP port scan
 
