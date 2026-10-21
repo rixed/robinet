@@ -555,7 +555,7 @@ let add_reserved_ports current ports =
 let reserve_ports t ports =
     let current =
         File.with_file_in ("/proc/sys/net/ipv4/ip_local_reserved_ports") IO.read_all in
-    let set v = [ "sysctl" ; "-w" ; reserved_ports_sysctl ^"="^ v ] in
+    let set v = [ "sysctl" ; "-q" ; "-w" ; reserved_ports_sysctl ^"="^ v ] in
     change t ~undo:(set (String.trim current))
         "sysctl" (List.tl (set (add_reserved_ports current ports)))
 

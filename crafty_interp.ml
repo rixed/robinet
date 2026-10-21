@@ -948,9 +948,8 @@ type handle =
       emitted : Bitstring.bitstring -> unit ;
       (* Whether a frame, sent or received, matches a filter: *)
       matches : filter -> Bitstring.bitstring -> bool ;
-      (* The stats of the streams still open, as {!Crafty_tree.stats_line}
-       * tells them: *)
-      open_streams : unit -> string list }
+      (* The streams still open: *)
+      open_streams : unit -> Crafty_tree.node list }
 
 (** An absolute pattern, matched against a frame on its own: *)
 and filter = T.pattern
@@ -958,8 +957,7 @@ and filter = T.pattern
 let idle (tree : Crafty_tree.node) () =
     Crafty_tree.size tree = 1 && Tools.BitHash.length tree.eth.Eth.State.postponed = 0
 
-let open_streams tree () =
-    List.map Crafty_tree.stats_line (Crafty_tree.streams tree)
+let open_streams tree () = Crafty_tree.streams tree
 
 let output_of power ~print ~print_err =
     let now () =
@@ -1031,7 +1029,7 @@ let print_status oc = function
  * taking the frames for other addresses too if [promisc],
  * picking the local ports it is not given from [ports] (as
  * {!Crafty_tree.make_root} does), printing with [print] and [print_err],
- * calling [on_exit] with how it ends, and [on_closed] with the stats of each
+ * calling [on_exit] with how it ends, and [on_closed] with the node of each
  * stream that goes away. Unless [rx_wire], what is written to the device was
  * received already (captured) and is taken at once, in order. Returns the device of the interface, and a handle to stop the
  * program, ask its status or tell it what the interface sent. The program starts at the next tick of the
@@ -1055,7 +1053,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     let power = eth.iface.widget.power in
     let tree =
         Crafty_tree.make_root ?ports eth
-            ~on_removed:(fun n -> on_closed (Crafty_tree.stats_line n)) in
+            ~on_removed:on_closed in
     let started = ref None and stopped = ref false in
     Simulation.asap power (fun () ->
         if not !stopped then

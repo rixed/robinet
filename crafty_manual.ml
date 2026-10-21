@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 5815c3416473f2fe891efbbb3dc31583) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 8107011e36e7a31fdd4471039cbd1845) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -69,6 +69,18 @@ Run against a real echo server:
     ping 2
     3 answers out of 3
     Done after 0.2s, status: OK.
+
+With `--format json`, each line is instead a JSON object: what the program
+`print`s, the packets of `-p` (also with their `layers`), the streams of
+`--stats`, and the outcome; crafty's own messages go to stderr:
+
+    % sudo crafty -i eth0 --udp 40000-40010 --fw --format json intro.cfty
+    {"type":"print","ts":0.000412,"text":"ping 0"}
+    ...
+    {"type":"done","ts":0.215302,"status":"OK","packets_out":3,"packets_in":3,...}
+
+With `--format csv`, each line has these values, in that order, but `layers`.
+Times are in seconds since the start, durations in seconds.
 |crafty_manual}
 
 let reference = {crafty_manual|### Lexical conventions

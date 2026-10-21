@@ -417,12 +417,16 @@ let streams root =
         ) acc (children n) in
     List.rev (loop [] root)
 
+(** {!stats} with the type of each value. *)
+let typed_stats n =
+    let types = L.stream_stats @ n.layer.stats in
+    List.map (fun (name, v) -> name, List.assoc name types, v) (stats n)
+
 (** What {!stats} tells of [n], after its name, as [name=value]s. *)
 let stats_line n =
-    let types = L.stream_stats @ n.layer.stats in
     stream_name n ^": "^
-    String.concat " " (List.map (fun (name, v) ->
-        name ^"="^ to_string (List.assoc name types) v) (stats n))
+    String.concat " " (List.map (fun (name, typ, v) ->
+        name ^"="^ to_string typ v) (typed_stats n))
 
 (** {2 Patterns} *)
 

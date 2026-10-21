@@ -36,6 +36,28 @@ let usage = "crafty [options] PROG.cfty\n\nOptions:"
 let die fmt =
     Printf.ksprintf (fun s -> prerr_endline s ; exit 2) fmt
 
+(* How crafty prints what it tells of packets, streams and its run: *)
+type format = Human | Csv | Json
+
+let formats = [ "human", Human ; "csv", Csv ; "json", Json ]
+
+(* A record of that kind, a line of CSV or a JSON object, with the [json]
+ * fields too in JSON: *)
+let record format ?(json=[]) kind fields =
+    match format with
+    | Human -> invalid_arg "Crafty.record"
+    | Csv ->
+        let field = function
+            | `String s ->
+                if String.exists s "," || String.exists s "\"" ||
+                   String.contains s '\n' || String.contains s '\r' then
+                    "\""^ String.nreplace ~str:s ~sub:"\"" ~by:"\"\"" ^"\""
+                else s
+            | j -> Yojson.Basic.to_string j in
+        String.concat "," (kind :: List.map (field % snd) fields)
+    | Json ->
+        Yojson.Basic.to_string (`Assoc (("type", `String kind) :: fields @ json))
+
 (* Setuid root, crafty becomes root entirely, for the commands it runs to be
  * root as well (busybox's sh drops an effective uid that is not the real
  * one), and starts over in an environment of its own, since the user's
@@ -52,7 +74,7 @@ let () =
     let ifname = ref "" and own_ip = ref None and ports = ref []
     and fw = ref false and promisc = ref false and print_packets = ref false
     and print_only = ref None and stats = ref false and cleanup = ref false
-    and check = ref false and format = ref false
+    and check = ref false and normalize = ref false and format = ref Human
     and linger = ref (Clock.Interval.sec 2.) and prog_file = ref None
     and max_duration = ref None and max_packets = ref None
     and max_volume = ref None and max_packet_rate = ref None
@@ -122,7 +144,10 @@ let () =
         "--verbose", Arg.Set Host_config.verbose,
             " print the interface's settings and the commands configuring it" ;
         "--check", Arg.Set check, " compile the program, and exit" ;
-        "--format", Arg.Set format,
+        "--format",
+            Arg.Symbol (List.map fst formats, fun s -> format := List.assoc s formats),
+            " print packets, stats and the outcome as text (default), CSV or JSON" ;
+        "--normalize", Arg.Set normalize,
             " print the program back, normalised (without its comments), and exit" ;
         "--cleanup", Arg.Set cleanup,
             " undo what a killed crafty left on the host, and exit" ;
@@ -154,13 +179,20 @@ let () =
     (* A typo in the program changes nothing on the host: *)
     let compile () =
         match Crafty_interp.compile text with Ok p -> p | Error es -> fail es in
-    if !format then (
+    if !normalize then (
         if !check then ignore (compile ()) ;
         (match Crafty_parser.parse text with
         | Ok p -> print_string (Crafty_ast.string_of_program ~all:false p)
         | Error e -> fail [ e ]) ;
         exit 0) ;
     let program = compile () in
+    let format = !format in
+    (* What crafty tells of how it goes, on stderr unless as text, out of the
+     * way of the records: *)
+    let info fmt =
+        Printf.ksprintf (fun s ->
+            let oc = if format = Human then stdout else stderr in
+            Printf.fprintf oc "%s\n%!" s) fmt in
     let print_only =
         Option.map (fun s ->
             match Crafty_interp.compile_filter s with
@@ -188,7 +220,7 @@ let () =
         (match !full_duplex, full_duplex' with Some d, _ | None, Some d -> d | None, None -> true)
     and mtu = !mtu |? iface.mtu in
     if !Host_config.verbose then
-        Printf.printf "Interface %s: %s %s-duplex, MTU %d.\n%!" !ifname
+        info "Interface %s: %s %s-duplex, MTU %d." !ifname
             (Eth.Speed.to_string speed) (if full_duplex then "full" else "half") mtu ;
     let configure = !fw || !own_ip <> None in
     if configure && Unix.geteuid () <> 0 then
@@ -197,7 +229,7 @@ let () =
     (* Configuring the host: *)
     let changes =
         if not configure then None else (
-            Printf.printf "Configuring interface %s...\n%!" !ifname ;
+            info "Configuring interface %s..." !ifname ;
             let t = Host_config.changes "crafty" in
             at_exit (fun () -> Host_config.undo t) ;
             (try
@@ -226,6 +258,21 @@ let () =
         open_iface ~direction:Pcap.InOut
             ~filter:(Host_config.pcap_filter ?ip:!own_ip !ports) in
     let secs () = Clock.Time.to_secs (Simulation.now sim) in
+    (* Dated to the microsecond, as the text and captures are: *)
+    let emit ?json kind fields =
+        let ts = Float.round (secs () *. 1e6) /. 1e6 in
+        print_endline (record format ?json kind (("ts", `Float ts) :: fields)) ;
+        flush stdout in
+    let print_stats what n =
+        if !stats then
+            if format = Human then
+                Printf.printf "%s %s\n%!" (String.capitalize_ascii what)
+                    (Crafty_tree.stats_line n)
+            else
+                emit what (
+                    ("stream", `String (Crafty_tree.stream_name n)) ::
+                    List.map (fun (name, typ, v) -> name, Crafty_value.to_json typ v)
+                        (Crafty_tree.typed_stats n)) in
     let ports_of proto =
         String.uppercase_ascii (Host_config.string_of_proto proto),
         List.filter_map (fun (r : Host_config.port_range) ->
@@ -247,8 +294,11 @@ let () =
             (* The kernel answers for its own address: *)
             ~answer_arp:(!own_ip <> None) ~promisc:!promisc
             ~ports:[ ports_of Host_config.Tcp ; ports_of Host_config.Udp ]
-            ~print:print_endline ~print_err:prerr_endline
-            ~on_closed:(fun s -> if !stats then Printf.printf "Closed %s\n%!" s)
+            ~print:(fun s ->
+                if format = Human then print_endline s
+                else emit "print" [ "text", `String s ])
+            ~print_err:prerr_endline
+            ~on_closed:(print_stats "closed")
             (* What comes in was received by the real interface already: *)
             ~rx_wire:false
             ~on_exit:(fun s ->
@@ -279,14 +329,21 @@ let () =
             ~on_limit:(fun l ->
                 if !limit = None then (
                     limit := Some l ;
-                    Printf.printf "Limit reached: %s.\n%!" (Policer.string_of_limit l) ;
+                    info "Limit reached: %s." (Policer.string_of_limit l) ;
                     h.stop ()))
             "policer" in
     let print dir bits =
         if !print_packets &&
            Option.map_default (fun f -> h.matches f bits) true print_only then
-            Printf.printf "%s %.6f %s\n%!" dir (secs ())
-                (Packet.Pdu.Printer.oneline (Packet.of_frame bits)) in
+            let packet = Packet.of_frame bits in
+            let summary = Packet.Pdu.Printer.oneline packet in
+            if format = Human then
+                Printf.printf "%s %.6f %s\n%!" dir (secs ()) summary
+            else
+                emit "packet" ~json:[ "layers", Packet.Pdu.to_json packet ]
+                    [ "dir", `String (if dir = ">" then "out" else "in") ;
+                      "bytes", `Int (Tools.bytelength bits) ;
+                      "summary", `String summary ] in
     let before = Hub.VirtTap.make ~rev_mirror:ignore (fun _ -> incr sent)
     and after =
         Hub.VirtTap.make
@@ -322,11 +379,11 @@ let () =
             incr wire_pkts ; wire_bytes := !wire_bytes + Tools.bytelength bits ;
             h.emitted bits
         ) else after.out.write bits)) ;
-    print_endline "Running..." ;
+    info "Running..." ;
     Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ] (fun () ->
         Simulation.run sim true) ;
     Option.may Host_config.undo changes ;
-    if !stats then List.iter (Printf.printf "Open %s\n") (h.open_streams ()) ;
+    List.iter (print_stats "open") (h.open_streams ()) ;
     let status_str, code =
         match !status, !limit with
         | Crafty_interp.Done, _ -> "OK", 0
@@ -334,10 +391,19 @@ let () =
         | Stopped, Some l -> "stopped: "^ Policer.string_of_limit l, 3
         | Stopped, None -> "stopped", 3
         | Running, _ -> "interrupted", 130 in
-    Printf.printf "Done after %.1fs, status: %s.\n" (secs ()) status_str ;
-    Printf.printf "Packets: %d out, %d in. Bytes: %d out, %d in.\n"
-        !pkts_out !pkts_in !bytes_out !bytes_in ;
-    if !sent > !pkts_out then
-        Printf.printf "Dropped by the policer: %d packets.\n" (!sent - !pkts_out) ;
-    Printf.printf "Captured going out: %d packets, %d bytes.\n" !wire_pkts !wire_bytes ;
+    if format = Human then (
+        Printf.printf "Done after %.1fs, status: %s.\n" (secs ()) status_str ;
+        Printf.printf "Packets: %d out, %d in. Bytes: %d out, %d in.\n"
+            !pkts_out !pkts_in !bytes_out !bytes_in ;
+        if !sent > !pkts_out then
+            Printf.printf "Dropped by the policer: %d packets.\n" (!sent - !pkts_out) ;
+        Printf.printf "Captured going out: %d packets, %d bytes.\n" !wire_pkts !wire_bytes
+    ) else
+        emit "done"
+            [ "status", `String status_str ;
+              "packets_out", `Int !pkts_out ; "packets_in", `Int !pkts_in ;
+              "bytes_out", `Int !bytes_out ; "bytes_in", `Int !bytes_in ;
+              "dropped", `Int (!sent - !pkts_out) ;
+              "captured_packets", `Int !wire_pkts ;
+              "captured_bytes", `Int !wire_bytes ] ;
     exit code

@@ -229,7 +229,7 @@ end = struct
 
     let abs (t : t) = o (Int.abs (t :> int))
 
-    let to_secs (t : t) = float_of_int (t :> int) *. 1e-12
+    let to_secs (t : t) = float_of_int (t :> int) /. 1e12
 
     let to_yojson (t : t) = `Float (to_secs t)
 
@@ -296,7 +296,7 @@ end = struct
 
     let to_interval (t : t) = Interval.o (t :> int)
 
-    let to_secs (t : t) = float_of_int (t :> int) *. 1e-12
+    let to_secs (t : t) = float_of_int (t :> int) /. 1e12
 
     (** Adds a time and an interval. *)
     let add (t : t) (i : Interval.t) = o ((t :> int) + (i :> int))

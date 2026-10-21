@@ -172,6 +172,28 @@ else
     echo "FAIL no stats of the stream as it closes:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
 fi
 
+"$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw --stats -p --format csv "$DIR/tcp.cfty" > "$DIR/out" 2> "$DIR/err"
+check "CSV" 0 $? '^closed,[0-9.]*,"/IP(src=10.77.0.1, dst=10.77.0.2)/TCP(src=140[0-9][0-9], dst=7)",[0-9]*,5,'
+if grep -q '^packet,[0-9.]*,out,' "$DIR/out" && grep -q '^print,[0-9.]*,hello$' "$DIR/out" &&
+   grep -q '^done,[0-9.]*,OK,' "$DIR/out" && grep -q '^Running' "$DIR/err" ; then
+    echo "ok   packets, prints and the outcome in CSV, the rest on stderr"
+else
+    echo "FAIL not all in CSV:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
+fi
+
+"$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw --stats -p --format json "$DIR/tcp.cfty" > "$DIR/out" 2> "$DIR/err"
+check "JSON" 0 $?
+if python3 -c 'import json, sys
+rs = [ json.loads(l) for l in open(sys.argv[1]) ]
+assert any(r["type"] == "print" and r["text"] == "hello" for r in rs)
+assert any(r["type"] == "closed" and r.get("bytes_acked") == 5 for r in rs)
+assert any(r["type"] == "packet" and "Tcp" in r["layers"] for r in rs)
+assert rs[-1]["type"] == "done" and rs[-1]["status"] == "OK"' "$DIR/out" ; then
+    echo "ok   every line is a JSON record"
+else
+    echo "FAIL not all in JSON:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
+fi
+
 "$CRAFTY" -i $HOST_IF --udp 40000-40010 --fw --max-packets 3 "$DIR/flood.cfty" > "$DIR/out" 2>&1
 check "a budget stops the program" 3 $? "stopped: max-packets"
 

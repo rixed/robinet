@@ -83,6 +83,20 @@ ping 2
 Done after 0.2s, status: OK.
 ```
 
+With `--format json`, each line is instead a JSON object: what the program
+`print`s, the packets of `-p` (also with their `layers`), the streams of
+`--stats`, and the outcome; crafty's own messages go to stderr:
+
+```
+% sudo crafty -i eth0 --udp 40000-40010 --fw --format json intro.cfty
+{"type":"print","ts":0.000412,"text":"ping 0"}
+...
+{"type":"done","ts":0.215302,"status":"OK","packets_out":3,"packets_in":3,...}
+```
+
+With `--format csv`, each line has these values, in that order, but
+`layers`. Times are in seconds since the start, durations in seconds.
+
 ## 2. Reference
 
 ### Lexical conventions

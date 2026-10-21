@@ -114,6 +114,22 @@ let rec to_string (typ : A.Type.t) v =
         if t = A.Type.Void then n else n ^" "^ to_string t v
     | _ -> invalid_arg "Crafty_value.to_string"
 
+(* As JSON, with durations in seconds, and what JSON has no type for as
+ * {!to_string} writes it: *)
+let rec to_json (typ : A.Type.t) v : Yojson.Basic.t =
+    match typ, v with
+    | _, Void -> `Null
+    | _, Bool b -> `Bool b
+    | _, Int i -> `Int i
+    | _, Float f -> `Float f
+    | _, String s -> `String s
+    | _, Interval i -> `Float (Interval.to_secs i)
+    | Record fs, Record vs ->
+        `Assoc (List.mapi (fun i (n, t) -> n, to_json t vs.(i)) fs)
+    | Array t, Array a when t <> Byte ->
+        `List (Array.to_list (Array.map (to_json t) a))
+    | _ -> `String (to_string typ v)
+
 (* The value of type [typ] that a field takes when nothing tells it: *)
 let rec zero (typ : A.Type.t) =
     match typ with
