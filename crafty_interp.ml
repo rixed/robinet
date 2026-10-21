@@ -1126,11 +1126,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         "/IP(dst=10.0.0.2)/ICMP {\n  Echo(id=7) { Request(\"hi\")\n    expect Reply { assert(MATCH[Echo].id == 7)\n      print(\"${MATCH[Echo].id} ${MATCH[Reply]}\") } }\n  expect DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
 *)
 
-(* [two ?error_rate ?arp ?frames a b] is what programs [a] (at 10.0.0.1)
+(* [two ?loss ?arp ?frames a b] is what programs [a] (at 10.0.0.1)
  * and [b] (at 10.0.0.2, started first) print, each line with the name of
  * the program and the time to the millisecond, then how they end and their
  * trees then, when they are at both ends of a cable (that knows each
- * other's MAC address already with [arp]); with [frames], the frames [a]
+ * other's MAC address already with [arp]), each interface dropping that
+ * ratio [loss] of the packets it sends; with [frames], the frames [a]
  * sends ("a>") and receives ("a<") too, from their IP layer.
  * [without_counts] removes the numbers of packets received from the trees.
  * [with_host] is the same with a simulated host at 10.0.0.2, set up by
@@ -1174,12 +1175,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
           | exception Not_found -> if String.ends_with d " ARP" then "ARP" else d in
       out := Printf.sprintf "a%s %.3fs: %s" dir (Clock.Time.to_secs (Simulation.now sim)) d :: !out
 
-  let plug sim ?(error_rate=0.) ?log (a : SimTypes.widget) (b : SimTypes.widget) =
+  let plug sim ?log (a : SimTypes.widget) (b : SimTypes.widget) =
       List.iter (fun (w : SimTypes.widget) ->
           w.ports.set_capabilities 0
               (Capabilities.Eth { speeds = [ Eth.Speed.Eth100Mbps ] ; full_duplex = true })
       ) [ a ; b ] ;
-      let cable = Eth.Cable.State.make ~parent:sim.SimTypes.root ~error_rate () in
+      let cable = Eth.Cable.State.make ~parent:sim.SimTypes.root () in
       let trx = Eth.Cable.make cable in
       let trx =
           match log with
@@ -1200,13 +1201,14 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
               skip := false ; Stdlib.Buffer.add_char b c)) s ;
       Stdlib.Buffer.contents b
 
-  let two ?error_rate ?(arp=false) ?(frames=false) a b =
+  let two ?(loss=0.) ?(arp=false) ?(frames=false) a b =
       let sim = Simulation.make ~realtime:false "crafty-pair" in
       let out = ref [] in
       let ea = crafty_peer sim 1 and eb = crafty_peer sim 2 in
+      ea.loss <- loss ; eb.loss <- loss ;
       if arp then (knows ea 2 ; knows eb 1) ;
       let log = if frames then Some (frame_line sim out) else None in
-      plug sim ?error_rate ?log ea.Eth.State.iface.widget eb.Eth.State.iface.widget ;
+      plug sim ?log ea.Eth.State.iface.widget eb.Eth.State.iface.widget ;
       start sim out "b" eb b ;
       start sim out "a" ea a ;
       Simulation.run sim false ;
@@ -1228,7 +1230,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 *)
 (* Two programs: a UDP ping retried until the other end listens (after
  * 1.5s); a response counter; a TCP checksum given, then computed; the
- * counter with losses; ICMP echo requests answered by a program: *)
+ * counter with losses; losses sparing ARP; ICMP echo requests answered by a
+ * program: *)
 (*$= & ~printer:identity
   "b 1.500s: listening\nb 2.000s: ping from 10.0.0.1:1000\na 2.000s: pong from 10.0.0.2\na 2.000s: done Eth#2\nb 2.000s: done Eth#4" \
     (two "/IP(dst=10.0.0.2)/UDP(src=1000, dst=7) {\n  retry { Bytes(\"ping\")\n    expect timeout=1s Bytes(\"pong\") { print(\"pong from ${MATCH[IP].src}\") } } }" \
@@ -1240,8 +1243,11 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (two ~frames:true "wait 10ms\n/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=1, checksum=0x1234)/Bytes()\n/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=1)/Bytes()" \
          "on timeout=1s /IP/TCP!(dst == 7) { print(\"${MATCH[TCP].checksum}\") }")
   "a 1.000s: some lost\na 1.000s: done Eth#\nb 2.000s: done Eth#" \
-    (without_counts @@ two ~arp:true ~error_rate:5e-4 "/IP(dst=10.0.0.2)/UDP(src=1000, dst=7) {\n  n = 0\n  { on timeout=1s Bytes(\"pong\") { n += 1 }\n    repeat count=100 every=1ms { Bytes(\"ping\") } }\n  assert(n > 30 && n < 100, msg=\"${n} pongs\")\n  print(\"some lost\") }" \
+    (without_counts @@ two ~arp:true ~loss:0.2 "/IP(dst=10.0.0.2)/UDP(src=1000, dst=7) {\n  n = 0\n  { on timeout=1s Bytes(\"pong\") { n += 1 }\n    repeat count=100 every=1ms { Bytes(\"ping\") } }\n  assert(n > 30 && n < 100, msg=\"${n} pongs\")\n  print(\"some lost\") }" \
          "on timeout=2s /IP/UDP(dst == 7)/Bytes(\"ping\") {\n  /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Bytes(\"pong\") }")
+  "a> 0.000s: ARP\na< 0.000s: ARP\na 0.000s: done Eth\nb 1.000s: done Eth#1" \
+    (two ~frames:true ~loss:1. "/IP(dst=10.0.0.2)/UDP(src=1000, dst=7)/Bytes(\"x\")" \
+         "on timeout=1s /IP/UDP { print(\"got\") }")
   "a 0.000s: seq 1\na 0.100s: seq 2\na 0.200s: seq 3\na 0.200s: done Eth#4\nb 1.000s: done Eth#4" \
     (two "/IP(dst=10.0.0.2)/ICMP/Echo { repeat count=3 every=100ms { Request(\"hi\")\n    expect timeout=1s Reply { assert(MATCH[Reply].payload == \"hi\")\n      print(\"seq ${MATCH[Reply].seq}\") } } }" \
          "on timeout=1s /IP/ICMP/Echo/Request {\n  /IP(dst=MATCH[IP].src)/ICMP/Echo(id=MATCH[Echo].id)/Reply(seq=MATCH[Request].seq, payload=MATCH[Request].payload) }")
