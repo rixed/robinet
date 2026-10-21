@@ -643,13 +643,6 @@ Constants for `type`: `TYPE_A`, `TYPE_NS`, `TYPE_CNAME`, `TYPE_SOA`,
 It is what a layer carries when it is not decoded any further: the payload
 of UDP, the data of TCP, a fragment, a quote, or an unknown protocol.
 
-### Not available yet
-
-The keyword `report`, matching embedded packets with
-`=~`, the HTTP
-layer, IPv6, VLANs and tunnels. Using any of them is reported as
-unsupported.
-
 ## 3. Examples
 
 All these examples were run against a host with UDP and TCP echo servers on
