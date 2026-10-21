@@ -469,10 +469,20 @@ and enter w node packet u pending =
         up w (Some node) packet (check w packet modes pending)
     ) (node.ops.receive u)
 
-(** Takes a frame from the interface, then tells the patterns it met. *)
+(** Takes a frame from the interface, then tells the patterns it met. Its
+ * [ts] is when it was captured, if it was, else when it arrived, as dated
+ * by the simulation. *)
 let receive root frame =
     let w = { met = [] } in
-    Option.may (fun u -> enter w root [] u []) (L.root.unpack [] frame) ;
+    let sim = Simulation.of_widget root.eth.iface.widget in
+    let ts =
+        match Pcap.captured frame with
+        | Some ts -> Simulation.date_of sim (Simulation.of_wall_clock sim ts)
+        | None -> Simulation.date_of sim (Simulation.now sim) in
+    L.root.unpack [] frame |>
+    Option.may (fun (u : L.unpacked) ->
+        let u = { u with values = ("ts", Time ts) :: List.remove_assoc "ts" u.values } in
+        enter w root [] u []) ;
     List.sort (fun (a, _) (b, _) -> Int.compare a.seq b.seq) w.met |>
     List.iter (fun (p, e) ->
         match e with
@@ -636,17 +646,17 @@ let to_string n = IO.to_string print n
                            2, Crafty_value.Int 0x88b5 ] } ] in
   assert_equal ~printer:identity "Eth" (to_string root) ;
   assert_equal ~printer:identity
-      "Eth(src=02:00:00:00:00:01, dst=FF:FF:FF:FF:FF:FF, proto=34997)/Bytes(data=#6869)"
+      "Eth(src=02:00:00:00:00:01, dst=FF:FF:FF:FF:FF:FF, proto=34997, ts=1970-01-01T00:00:00Z)/Bytes(data=#6869)"
       (IO.to_string print_packet sent)
 *)
 (*$= decode & ~printer:identity
-  "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048)/IP(src=10.0.0.2, dst=10.0.0.1, proto=17, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=30, options=[], is_fragment=false)/UDP(src=53, dst=1000, length=10, checksum=32593)/Bytes(data=#6869)" \
+  "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048, ts=1970-01-01T00:00:00Z)/IP(src=10.0.0.2, dst=10.0.0.1, proto=17, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=30, options=[], is_fragment=false)/UDP(src=53, dst=1000, length=10, checksum=32593)/Bytes(data=#6869)" \
     (IO.to_string print_packet (decode (Eth.Pdu.(pack (make Eth.Proto.ip4 \
         (Eth.Addr.of_string "02:00:00:00:00:02") (Eth.Addr.of_string "02:00:00:00:00:01") \
         (Ip.Pdu.pack (Ip.Pdu.make ~id:1 Ip.Proto.udp (Ip.Addr.of_string "10.0.0.2") (Ip.Addr.of_string "10.0.0.1") \
             (Udp.Pdu.(pack (make ~src_port:(Udp.Port.o 53) ~dst_port:(Udp.Port.o 1000) \
                 (Bitstring.bitstring_of_string "hi")))))))))))
-  "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048)/IP(src=10.0.0.2, dst=10.0.0.1, proto=1, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=29, options=[], is_fragment=false)/ICMP(type=3, code=3)/DestUnreachable(mtu=0, code=3)/Bytes(data=#41)" \
+  "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048, ts=1970-01-01T00:00:00Z)/IP(src=10.0.0.2, dst=10.0.0.1, proto=1, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=29, options=[], is_fragment=false)/ICMP(type=3, code=3)/DestUnreachable(mtu=0, code=3)/Bytes(data=#41)" \
     (IO.to_string print_packet (decode (Eth.Pdu.(pack (make Eth.Proto.ip4 \
         (Eth.Addr.of_string "02:00:00:00:00:02") (Eth.Addr.of_string "02:00:00:00:00:01") \
         (Ip.Pdu.pack (Ip.Pdu.make ~id:1 Ip.Proto.icmp (Ip.Addr.of_string "10.0.0.2") (Ip.Addr.of_string "10.0.0.1") \

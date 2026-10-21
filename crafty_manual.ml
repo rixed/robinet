@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 72683695e8ef61156c2dfe52cdcd4491) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 0965440a792912f447e93eb8d7c4e8f0) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -409,6 +409,8 @@ Fields marked *(key)* are the keys of a stream.
 -   `dst`: mac; set M; read M, S. Default: what the interface knows of the
     destination (ARP cache, gateway), without asking.
 -   `proto`: int; set M; read M, S. Default: what the layer on top is.
+-   `ts`: time; cannot be set; read M, S. When the frame was captured; for what
+    is reassembled, the frame that completed it. unset in `LAST`.
 
 Self-driven, it carries only IPv4, and finds destinations with ARP. The
 interface answers ARP for its address, unless it shares that address with the

@@ -1278,6 +1278,28 @@ let packets_sniffed_ok = Metric.Atomic.make "Pcap/Packets/Sniffed"
 let bytes_in           = Metric.Counter.make "Pcap/Bytes/In" "bytes"
 *)
 
+(* When each frame still around was captured, by the buffer it was captured
+ * in, which whatever the frame goes through shares: *)
+module Captures = Ephemeron.K1.Make (struct
+    type t = Bytes.t
+    let equal = (==)
+    let hash = Stdlib.Hashtbl.hash
+end)
+
+let captures = Captures.create 100
+let captures_lock = Mutex.create ()
+
+let with_captures f =
+    Mutex.lock captures_lock ;
+    match f captures with
+    | x -> Mutex.unlock captures_lock ; x
+    | exception e -> Mutex.unlock captures_lock ; raise e
+
+(** When [bits] was captured by a {!sniffer}, if it is (part of) a frame one
+ * captured. *)
+let captured ((buf, _, _) : bitstring) =
+    with_captures (fun c -> Captures.find_opt c buf)
+
 (** [sniffer iface rx] returns a thread that continuously sniff packets
  * and pass them to the [rx] function (via the Clock). *)
 let sniffer iface ?(while_=(fun () -> true)) rx =
@@ -1306,9 +1328,11 @@ let sniffer iface ?(while_=(fun () -> true)) rx =
                 let ts =
                     Simulation.of_wall_clock
                         (Simulation.of_widget iface.widget) pdu.Pdu.ts in
+                let bits = (pdu.Pdu.payload :> bitstring) in
+                let buf, _, _ = bits in
+                with_captures (fun c -> Captures.replace c buf pdu.Pdu.ts) ;
                 (* TODO: optionally, fragment and/or checksum that pdu *)
-                Simulation.at iface.widget.power ts rx
-                              (pdu.Pdu.payload :> bitstring) ;
+                Simulation.at iface.widget.power ts rx bits ;
                 loop () in
     Thread.create loop ()
 

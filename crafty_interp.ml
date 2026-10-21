@@ -1073,6 +1073,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
               String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es)
           | Ok p ->
               let sim = Simulation.make ~realtime:false "crafty" in
+              sim.epoch <- Clock.Wall.of_secs 0. ;
               let eth = crafty_eth ?promisc:(if promisc then Some ignore else None) sim in
               let tree = Crafty_tree.make_root eth in
               let out = ref [] in
@@ -1347,10 +1348,16 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs ~frames:true ~inject:[ 0.1, arp "10.0.0.2" ; 0.2, arp ~reply:true "10.0.0.3" ] \
         "/IP(dst=10.0.0.3)/UDP(src=1, dst=2)/Bytes(\"who\")")
 *)
+(* A frame's [ts] is when it came in, which conditions can read: *)
+(*$= runs & ~printer:identity
+  "500ms: 500ms\n700ms: 700ms\n1s: done" \
+    (runs ~inject:[ 0.2, reply "a" ; 0.5, reply "b" ; 0.7, reply "c" ] \
+        "t0 = time(0)\non timeout=1s /Eth(ts > t0 + 300ms)/IP/UDP { print(\"${MATCH[Eth].ts - t0}\") }")
+*)
 (* expect waits for its pattern, on the stream of the stack, conditions
  * evaluated at match time: *)
 (*$= runs & ~printer:identity
-  "500ms: 10.0.0.2 53 [Eth {dst: 02:00:00:00:00:01, proto: 2048, src: 02:00:00:00:00:02}, IP {dont_frag: false, dst: 10.0.0.1, frag_offset: 0, id: 1, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.2, tos: 0, tot_len: 32, ttl: 64}, UDP {checksum: 2272, dst: 1000, length: 12, src: 53}, Bytes {data: #706f6e67}]\n500ms: after\n500ms: done" \
+  "500ms: 10.0.0.2 53 [Eth {dst: 02:00:00:00:00:01, proto: 2048, src: 02:00:00:00:00:02, ts: 1970-01-01T00:00:00.5Z}, IP {dont_frag: false, dst: 10.0.0.1, frag_offset: 0, id: 1, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.2, tos: 0, tot_len: 32, ttl: 64}, UDP {checksum: 2272, dst: 1000, length: 12, src: 53}, Bytes {data: #706f6e67}]\n500ms: after\n500ms: done" \
     (runs ~inject:[ 0.2, reply ~sport:54 "pong" ; 0.3, reply "nope" ; 0.5, reply "pong" ; 0.6, reply "pong" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Bytes(\"pong\") { print(\"${MATCH[IP].src} ${MATCH[UDP].src} ${MATCH}\") }\n  print(\"after\") }")
   "1s: failed: line 2, column 3: Nothing matched within 1s" \
@@ -1378,9 +1385,9 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 (* LAST is the last packet sent by the block or an enclosing one: as packed
  * down to the self-driven layers, which only their stack tells: *)
 (*$= runs & ~printer:identity
-  "3ps: [Eth {dst: 00:00:00:00:00:00, proto: 0, src: 00:00:00:00:00:00}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 0, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 0, ttl: 0}, UDP {checksum: 0, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n3ps: done" \
+  "3ps: [Eth {dst: 00:00:00:00:00:00, proto: 0, src: 00:00:00:00:00:00, ts: 1970-01-01T00:00:00Z}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 0, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 0, ttl: 0}, UDP {checksum: 0, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n3ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"hi\")\n  print(\"${LAST}\") }")
-  "2ps: [Eth {dst: 00:00:00:00:00:00, proto: 2048, src: 00:00:00:00:00:00}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 7, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 30, ttl: 64}, UDP {checksum: 32593, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n2ps: done" \
+  "2ps: [Eth {dst: 00:00:00:00:00:00, proto: 2048, src: 00:00:00:00:00:00, ts: 1970-01-01T00:00:00Z}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 7, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 30, ttl: 64}, UDP {checksum: 32593, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n2ps: done" \
     (runs "/IP!(dst=10.0.0.2, id=7)/UDP(src=1000, dst=53)/Bytes(\"hi\")\nprint(\"${LAST}\")")
   "9ps: #61 #6262 #62\n9ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"a\")\n  x = LAST\n  y = x\n  { Bytes(\"bb\")\n    y := LAST }\n  Bytes(\"b\")\n  print(\"${x[Bytes].data} ${y[Bytes].data} ${LAST[Bytes].data}\") }")

@@ -225,7 +225,9 @@ let unpack_eth _ bits =
     | Error _ -> None
     | Ok e ->
         let proto = (e.proto :> int) in
-        unpacked [ "src", V.Mac e.src ; "dst", V.Mac e.dst ; "proto", V.Int proto ]
+        (* [ts] is for the receiver to tell: *)
+        unpacked [ "src", V.Mac e.src ; "dst", V.Mac e.dst ; "proto", V.Int proto ;
+                   "ts", V.Time (Clock.Wall.of_secs 0.) ]
                  ~upper:(Only (if proto = ip4 then N.IP else N.Bytes))
                  ~payload:(e.payload :> bitstring) bits
 
@@ -898,7 +900,8 @@ let eth =
     layer N.Eth ~driven:true ~node:eth_node ~unpack:unpack_eth [
         field "src" Type.Mac ~read_in:both ;
         field "dst" Type.Mac ~read_in:both ;
-        field "proto" Type.Int ~read_in:both ~discriminant:true ]
+        field "proto" Type.Int ~read_in:both ~discriminant:true ;
+        field "ts" Type.Time ~set_in:[] ~read_in:both ]
 
 let ip =
     layer N.IP ~above:[ eth ] ~driven:true ~node:ip_node ~unpack:unpack_ip [

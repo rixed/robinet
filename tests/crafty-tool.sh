@@ -89,6 +89,16 @@ cat > "$DIR/flood.cfty" <<'EOF'
   repeat count=1000 every=10ms { Bytes("x") }
 }
 EOF
+# A frame comes in after its capture, by its serialization at least:
+cat > "$DIR/ts.cfty" <<'EOF'
+/IP(dst=10.77.0.2)/UDP(dst=7) {
+  Bytes("stamp")
+  expect timeout=1s Bytes {
+    d = now() - MATCH[Eth].ts
+    print(if d > 0s && d < 10ms { "captured ${d} before" } else { "not captured then: ${d}" })
+  }
+}
+EOF
 printf 'x = "a" + 1\n' > "$DIR/bad.cfty"
 
 setup
@@ -97,6 +107,9 @@ state > "$DIR/before"
 
 "$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 -p "$DIR/udp.cfty" > "$DIR/out" 2>&1
 check "UDP with an address of its own" 0 $? "echo 2"
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/ts.cfty" > "$DIR/out" 2>&1
+check "frames are dated by their capture" 0 $? "captured "
 
 ip netns exec $NS timeout 6 tcpdump -n -i $NS_IF -w "$DIR/tcp.pcap" tcp 2>/dev/null &
 TCPDUMP=$!
