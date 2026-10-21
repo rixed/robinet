@@ -101,10 +101,11 @@ let () =
                 print_only := Some s ;
                 Arg.current := next)) in
     let manual text = Arg.Unit (fun () -> print_string text ; exit 0) in
+    (* The introduction describes the options: *)
     let help () =
-        print_string (Arg.usage_string !specs usage) ;
-        print_string ("\n"^ Crafty_manual.introduction) ;
+        print_string ("Usage: crafty [options] PROG.cfty\n\n"^ Crafty_manual.introduction) ;
         exit 0 in
+    (* BEWARE: Update docs/crafty.md every time you update the CLI! *)
     specs := Arg.align [
         "-i", Arg.Set_string ifname, "IFACE the interface to use (required)" ;
         "--ip", Arg.String (fun s -> own_ip := Some (Ip.Addr.of_dotted_string s)),
@@ -154,6 +155,7 @@ let () =
             " print examples of crafty programs, and exit" ;
         "-help", Arg.Unit help, " print this help and an introduction to crafty" ;
         "--help", Arg.Unit help, " same as -help" ] ;
+    (* BEWARE: Update docs/crafty.md every time you update the CLI! *)
     Arg.parse !specs
         (fun s ->
             if !prog_file <> None then die "Only one program, please" ;
