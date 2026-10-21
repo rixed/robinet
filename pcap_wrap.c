@@ -89,6 +89,8 @@ static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, s
     if (0 != pcap_set_immediate_mode(handle, 1)) goto err;
     // Also, not to wait when there are no packets at all:
     if (0 != pcap_setnonblock(handle, 1, errbuf)) goto err1;
+    // Nanosecond timestamps where the platform has them (else microseconds):
+    (void)pcap_set_tstamp_precision(handle, PCAP_TSTAMP_PRECISION_NANO);
     // We will implement timeout ourselves
     if (0 != pcap_activate(handle)) goto err;
     if (0 != set_filter(handle, filter)) goto err;
@@ -214,7 +216,11 @@ retry:
     memcpy((char *)String_val(pkt), bytes, hdr->caplen);
     // caml_alloc_string already placed a nul terminator at the end
 
-    ts = caml_copy_double(hdr->ts.tv_sec + (double)hdr->ts.tv_usec * 0.000001);
+    // tv_usec holds nanoseconds when the handle has that precision:
+    double const subsec =
+        pcap_get_tstamp_precision(handle) == PCAP_TSTAMP_PRECISION_NANO ?
+            1e-9 : 1e-6;
+    ts = caml_copy_double(hdr->ts.tv_sec + (double)hdr->ts.tv_usec * subsec);
 
     result = caml_alloc_tuple(4);
     Field(result, 0) = ts;
