@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 728f0ace38635c585098e9fb2047781d) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 52c17074b16b7cbdfe0db9fb5c61f5d1) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -61,6 +61,11 @@ The language is statically typed. Comments start with `#`.
 
     sudo crafty -i eth0 --tcp 40000-40099 --udp 40000-40099 --fw prog.cfty
     sudo crafty -i eth0 --ip 192.0.2.5 --udp 40000-40099 prog.cfty
+    sudo crafty -i eth0 --ip 192.0.2.5 -e '/IP(dst=192.0.2.10)/ICMP/Echo {
+      Request("hi")
+      expect timeout=1s Reply { print("up") } }'
+
+-   `-e PROG`: the program itself, rather than a file.
 
 -   `-i IFACE`: the interface to send from and capture on. Crafty needs root.
 

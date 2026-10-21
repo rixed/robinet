@@ -31,7 +31,8 @@
 *)
 open Batteries
 
-let usage = "crafty [options] PROG.cfty\n\nOptions:"
+let synopsis = "crafty [options] (PROG.cfty | -e PROG)"
+let usage = synopsis ^"\n\nOptions:"
 
 let die fmt =
     Printf.ksprintf (fun s -> prerr_endline s ; exit 2) fmt
@@ -72,7 +73,9 @@ let () =
     and fw = ref false and promisc = ref false and print_packets = ref false
     and print_only = ref None and stats = ref false and cleanup = ref false
     and check = ref false and normalize = ref false and format = ref Human
-    and linger = ref (Clock.Interval.sec 2.) and prog_file = ref None
+    and linger = ref (Clock.Interval.sec 2.)
+    (* What the errors name it after, and its text: *)
+    and prog = ref None
     and max_duration = ref None and max_packets = ref None
     and max_volume = ref None and max_packet_rate = ref None
     and max_throughput = ref None
@@ -103,11 +106,16 @@ let () =
     let manual text = Arg.Unit (fun () -> print_string text ; exit 0) in
     (* The introduction describes the options: *)
     let help () =
-        print_string ("Usage: crafty [options] PROG.cfty\n\n"^ Crafty_manual.introduction) ;
+        print_string ("Usage: "^ synopsis ^"\n\n"^ Crafty_manual.introduction) ;
         exit 0 in
+    let set_prog name text =
+        if !prog <> None then die "Only one program, please" ;
+        prog := Some (name, text) in
     (* BEWARE: Update docs/crafty.md every time you update the CLI! *)
     specs := Arg.align [
         "-i", Arg.Set_string ifname, "IFACE the interface to use (required)" ;
+        "-e", Arg.String (fun s -> set_prog "-e" (lazy s)),
+            "PROG the program, rather than from a file" ;
         "--ip", Arg.String (fun s -> own_ip := Some (Ip.Addr.of_dotted_string s)),
             "ADDR use this address, rather than the interface's" ;
         "--tcp", port_range Host_config.Tcp,
@@ -157,22 +165,19 @@ let () =
         "--help", Arg.Unit help, " same as -help" ] ;
     (* BEWARE: Update docs/crafty.md every time you update the CLI! *)
     Arg.parse !specs
-        (fun s ->
-            if !prog_file <> None then die "Only one program, please" ;
-            prog_file := Some s)
+        (fun f -> set_prog f (lazy (File.with_file_in f IO.read_all)))
         usage ;
     if !cleanup then (
         (match Host_config.cleanup_stale () with
         | [] -> print_endline "Nothing to clean up."
         | names -> List.iter (Printf.printf "Cleaned up after %s.\n") names) ;
         exit 0) ;
-    let prog_file = match !prog_file with
-        | Some f -> f
+    let prog_name, text = match !prog with
+        | Some (name, text) -> name, Lazy.force text
         | None -> die "No program given.\n%s" (Arg.usage_string !specs usage) in
-    let text = File.with_file_in prog_file IO.read_all in
     let fail es =
         List.iter (fun e ->
-            Printf.eprintf "%s: %s\n" prog_file
+            Printf.eprintf "%s: %s\n" prog_name
                 (IO.to_string Crafty_interp.print_error e)) es ;
         exit 2 in
     (* A typo in the program changes nothing on the host: *)
@@ -200,7 +205,7 @@ let () =
                 Printf.eprintf "-p: %s\n" (IO.to_string Crafty_interp.print_error e) ;
                 exit 2) !print_only in
     if !check then (
-        Printf.printf "%s: OK\n" prog_file ;
+        Printf.printf "%s: OK\n" prog_name ;
         exit 0) ;
     if !ifname = "" then die "No interface given (-i)." ;
     if !fw && !ports = [] then die "--fw needs ports (--tcp, --udp)." ;

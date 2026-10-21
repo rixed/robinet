@@ -76,8 +76,12 @@ The language is statically typed. Comments start with `#`.
 ```
 sudo crafty -i eth0 --tcp 40000-40099 --udp 40000-40099 --fw prog.cfty
 sudo crafty -i eth0 --ip 192.0.2.5 --udp 40000-40099 prog.cfty
+sudo crafty -i eth0 --ip 192.0.2.5 -e '/IP(dst=192.0.2.10)/ICMP/Echo {
+  Request("hi")
+  expect timeout=1s Reply { print("up") } }'
 ```
 
+- `-e PROG`: the program itself, rather than a file.
 - `-i IFACE`: the interface to send from and capture on. Crafty needs root.
 - `--tcp LO-HI`, `--udp LO-HI` (repeatable): the ports to pick source ports
   from. A program that sends TCP or UDP without a `src` needs them.
