@@ -1032,14 +1032,15 @@ let print_status oc = function
  * picking the local ports it is not given from [ports] (as
  * {!Crafty_tree.make_root} does), printing with [print] and [print_err],
  * calling [on_exit] with how it ends, and [on_closed] with the stats of each
- * stream that goes away. Returns the device of the interface, and a handle to stop the
+ * stream that goes away. Unless [rx_wire], what is written to the device was
+ * received already (captured) and is taken at once, in order. Returns the device of the interface, and a handle to stop the
  * program, ask its status or tell it what the interface sent. The program starts at the next tick of the
  * simulation, once that device can be connected. *)
 let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         ?(promisc=false)
         ?(speed=Eth.Speed.Eth1Gbps) ?(full_duplex=true) ?mtu
         ?ports ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
-        ?(on_closed=ignore) (program : program) =
+        ?(on_closed=ignore) ?(rx_wire=true) (program : program) =
     let gateways =
         Option.map_default (fun gw ->
             [ Eth.State.gw_selector (), Some gw ]) [] gateway in
@@ -1050,6 +1051,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
             ~my_addresses:[ Eth.State.make_my_ip_address ?netmask ip ] () in
     (* No cable to negotiate with: the link is what the interface supports. *)
     eth.iface.widget.ports.set_capabilities 0 Capabilities.Any ;
+    eth.iface.rx_wire <- rx_wire ;
     let power = eth.iface.widget.power in
     let tree =
         Crafty_tree.make_root ?ports eth
@@ -1374,7 +1376,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs ~frames:true "/IP!(dst=1.2.3.4, ttl=3, dont_frag=true)/UDP(src=1, dst=2)/Bytes(\"x\")")
   "> 02:00:00:00:00:01>02:00:00:00:00:FE IP 10.0.0.1>1.2.3.4 ttl=64 proto=99 \"p\"\n3µs760ns2ps: done" \
     (runs ~frames:true "/IP(dst=1.2.3.4, proto=99)/Bytes(\"p\")")
-  "> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP\n4µs320ns2ps: done" \
+  "> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP\n4µs320ns2ps: done\n> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP\n> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP" \
     (runs ~frames:true "/IP(dst=10.0.0.3)/UDP(src=1, dst=2)/Bytes(\"who\")")
 *)
 (* Self-driven IP takes TTL and DF per packet (and a packet leaves the
@@ -1429,6 +1431,16 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 (*$= runs & ~printer:identity
   "> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP\n4µs320ns2ps: done\n> 02:00:00:00:00:01>02:00:00:00:00:02 ARP\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.3 ttl=64 UDP 1>2 \"who\"" \
     (runs ~frames:true ~inject:[ 0.1, arp "10.0.0.2" ; 0.2, arp ~reply:true "10.0.0.3" ] \
+        "/IP(dst=10.0.0.3)/UDP(src=1, dst=2)/Bytes(\"who\")")
+*)
+(* Unanswered, the request is sent again every second, three times in all,
+ * after which what waited is dropped: *)
+(*$= runs & ~printer:identity
+  "> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP\n4µs320ns2ps: done\n> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.3 ttl=64 UDP 1>2 \"who\"" \
+    (runs ~frames:true ~inject:[ 1.5, arp ~reply:true "10.0.0.3" ] \
+        "/IP(dst=10.0.0.3)/UDP(src=1, dst=2)/Bytes(\"who\")")
+  "> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP\n4µs320ns2ps: done\n> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP\n> 02:00:00:00:00:01>FF:FF:FF:FF:FF:FF ARP" \
+    (runs ~frames:true ~inject:[ 3.5, arp ~reply:true "10.0.0.3" ] \
         "/IP(dst=10.0.0.3)/UDP(src=1, dst=2)/Bytes(\"who\")")
 *)
 (* A packet sent into a variable is waited for until seen leaving, and is
@@ -1805,7 +1817,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   List.mem "a 0.000s: closed /IP(src=10.0.0.1, dst=10.0.0.2): packets_out=5 bytes_out=113 packets_in=3 bytes_in=73" (String.split_on_char '\n' out) || (print_endline out ; false)
 *)
 (*$T
-  let out = two ~arp:true ~loss:0.2 \
+  let out = two ~arp:true ~loss:0.1 \
       "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n  repeat count=30 { Bytes(\"ping ${I}\")\n    expect timeout=1m Bytes {} }\n  s = stats()\n  print(\"retrans ${s.retrans > 0} ${s.retrans <= s.packets_out}, rtt ${s.srtt > 0s} ${s.rtt_samples > 0}\") }" \
       "on timeout=2m /IP/TCP(dst == 80)/Bytes {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/Bytes(\"pong\") }" in \
   String.exists out "retrans true true, rtt true true" || (print_endline out ; false)

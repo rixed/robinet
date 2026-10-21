@@ -1058,7 +1058,8 @@ let make_from_addrs
     let sim = Simulation.make ~realtime:false "test-router" in
     let router = make_from_addrs ~parent:sim.root addrs "test" in
 
-    (* Now we will count incoming packets from each iface (ARP requests, actually) : *)
+    (* Now we will count incoming packets from each iface (ARP requests, actually,
+     * none of them answered) : *)
     let counts = Array.create 3 0 in
     for i = 0 to Array.length counts - 1 do
         router.ifaces.(i).trx =-> sink (fun _ -> counts.(i) <- succ counts.(i))
@@ -1092,12 +1093,13 @@ let make_from_addrs
     reset_count () ;
     easy_send 0 "192.168.3.42" ;
     Simulation.run sim false ;
-    "route from 0 to 2" @? (counts = [| 0;0;1 |]) ;
+    let n = Eth.TRX.arp_max_requests in
+    "route from 0 to 2" @? (counts = [| 0;0;n |]) ;
 
     reset_count () ;
     easy_send 2 "192.168.2.42" ;
     Simulation.run sim false ;
-    "route from 2 to 1" @? (counts = [| 0;1;0 |]) ;
+    "route from 2 to 1" @? (counts = [| 0;n;0 |]) ;
 
     reset_count () ;
     easy_send 0 "192.168.1.42" ;
@@ -1163,7 +1165,7 @@ let make_from_addrs
     reset_count () ;
     easy_send 0 "192.168.3.42" ;
     Simulation.run sim false ;
-    "and routes again once switched back on" @? (counts = [| 0;0;1 |]) ;
+    "and routes again once switched back on" @? (counts = [| 0;0;n |]) ;
 
     (* An expiring packet is reported back the way it came, which here
      * starts with an ARP request for its sender; a new sender each time,
@@ -1179,14 +1181,14 @@ let make_from_addrs
     reset_count () ;
     expire "192.168.1.43" ;
     Simulation.run sim false ;
-    "expiry is reported" @? (counts = [| 1;0;0 |]) ;
+    "expiry is reported" @? (counts = [| n;0;0 |]) ;
 
     router.ifaces.(2).notify_errs.probability <- 0. ;
     reset_count () ;
     expire "192.168.1.44" ;
     Simulation.run sim false ;
     "as the receiving port allows, not the leaving one" @?
-        (counts = [| 1;0;0 |]) ;
+        (counts = [| n;0;0 |]) ;
 
     router.ifaces.(0).notify_errs.probability <- 0. ;
     reset_count () ;

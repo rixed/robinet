@@ -819,9 +819,28 @@ let synch_locked ?upto (t : t) =
 
 (** Synchronize internal clock with realtime clock.
  * You must call this after real time passes (for instance after a blocking call).
- * Otherwise, time jumps from one registered event to the next. *)
+ * Otherwise, time jumps from one registered event to the next.
+ * The clock stops at the next event, which has yet to run: what is then
+ * scheduled for now would otherwise run before it. *)
 let synch (t : t) =
-    with_lock t synch_locked t
+    with_lock t (fun () ->
+        let upto = try Some (Events.next_ts t.events) with Not_found -> None in
+        synch_locked ?upto t) ()
+
+(* The clock follows the wall clock up to an event yet to run, and no further: *)
+(*$T synch
+  let t = make "synch" in \
+  let ts = Clock.Time.add (now t) (Clock.Interval.msec 1.) in \
+  at t.root.power ts ignore () ; \
+  Unix.sleepf 0.01 ; \
+  synch t ; \
+  Clock.Time.compare (now t) ts = 0
+  let t = make "synch-idle" in \
+  let before = now t in \
+  Unix.sleepf 0.01 ; \
+  synch t ; \
+  Clock.Interval.(compare (Clock.Time.diff (now t) before) (msec 5.)) > 0
+*)
 
 (*
  * Pausing

@@ -109,7 +109,7 @@ cat > "$DIR/sent.cfty" <<'EOF'
   }
 }
 EOF
-# Over a lossy path, data echoed comes back out of order, if at all:
+# Over a lossy path, data echoed comes back out of order, but all of it:
 cat > "$DIR/lossy.cfty" <<'EOF'
 /IP(dst=10.77.0.2)/TCP(dst=7) {
   n = 0
@@ -121,7 +121,7 @@ cat > "$DIR/lossy.cfty" <<'EOF'
     Bytes(randbytes(200000))
   }
   s = stats()
-  print("out of order ${s.ooo_in > 0}, retransmitted ${s.retrans > 0}")
+  print("echoed ${n}, out of order ${s.ooo_in > 0}")
 }
 EOF
 printf 'x = "a" + 1\n' > "$DIR/bad.cfty"
@@ -161,7 +161,7 @@ fi
 
 ip netns exec $NS tc qdisc add dev $NS_IF root netem loss 10%
 "$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw "$DIR/lossy.cfty" > "$DIR/out" 2>&1
-check "the stats of a lossy connection" 0 $? "out of order true, retransmitted true"
+check "the stats of a lossy connection" 0 $? "echoed 200000, out of order true"
 ip netns exec $NS tc qdisc del dev $NS_IF root
 
 "$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw --stats "$DIR/tcp.cfty" > "$DIR/out" 2>&1

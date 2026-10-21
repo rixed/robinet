@@ -455,6 +455,11 @@ struct
            * as that many bits have been deserialized (see cut-through switches
            * and routers): *)
           mutable can_forward_after : int option ;
+          (* Whether a frame written takes its time on the wire to be
+           * received, colliding with any it overlaps; or was received
+           * already, as one captured from a real interface, and is taken at
+           * once: *)
+          mutable rx_wire : bool ;
           mutable is_connected : bool ;
           (* It's very common for a single switch to have ports with different
            * characteristics: *)
@@ -480,6 +485,11 @@ struct
     (* Reception *)
     let write t pld =
         match t.widget.power.on, t.negotiated with
+        | true, Some _ when not t.rx_wire ->
+            let now = Simulation.Widget.now t.widget in
+            Metric.(Counter.add t.volume ~now ~params:ingress (bytelength pld)) ;
+            Metric.(Counter.inc t.packets ~now ~params:ingress) ;
+            Simulation.asap t.widget.power t.recv pld
         | true, Some (speed, full_duplex) ->
             (* On reception, accept no inter-frame-gap. IFG is a discipline for
              * the sender. *)
@@ -629,7 +639,7 @@ struct
             { widget ;
               emit = ignore_disconnected ~logger:widget.logger ;
               recv = recv |? ignore_bits ~logger:widget.logger ;
-              is_connected = false ; can_forward_after ;
+              is_connected = false ; can_forward_after ; rx_wire = true ;
               tx_busy_until = Time.beginning_of_time ;
               rx_busy_until = Time.beginning_of_time ;
               speeds ; full_duplex ; negotiated ; inter_frame_gap ;
@@ -702,6 +712,18 @@ struct
                     Log.(log widget.logger Warning (lazy "Failed negotiation")))
         } ;
         t
+
+    (* Frames written at once collide on the wire, but not once received: *)
+    (*$T
+      List.map (fun rx_wire -> \
+          let sim = Simulation.make ~realtime:false "rx-wire" in \
+          let got = ref [] in \
+          let t = Iface.make ~parent:sim.root ~recv:(fun b -> got := Bitstring.string_of_bitstring b :: !got) "eth" in \
+          t.Iface.rx_wire <- rx_wire ; \
+          List.iter (fun s -> Iface.write t (Bitstring.bitstring_of_string s)) [ "a" ; "b" ; "c" ] ; \
+          Simulation.run sim false ; \
+          List.rev !got) [ true ; false ] = [ [ "a" ] ; [ "a" ; "b" ; "c" ] ]
+    *)
 end
 
 (** {2 Stateful Eth adapters} *)
@@ -1031,12 +1053,28 @@ struct
         else
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Dropping packet of proto %s from %s" (Proto.to_string proto) (Addr.to_string st.mac))))
 
+    (* As Linux's retrans_time and mcast_solicit: *)
+    let arp_retrans_time = Interval.sec 1.
+    let arp_max_requests = 3
+
+    (* Asks again while unanswered, then gives up on the address, dropping what
+     * waited for it, so that the next frame for it asks anew: *)
     let resolve_proto_addr (st : State.t) bits sender_proto_addr target_proto_addr =
         (* Add the msg to postponed messages _before_ sending the query *)
         Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Postponing a msg for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
         BitHash.add st.postponed target_proto_addr bits ;
         let request = Arp.Pdu.make_request Arp.HwType.eth st.proto (st.mac :> bitstring) sender_proto_addr target_proto_addr in
-        send st Proto.arp Addr.broadcast (Arp.Pdu.pack request)
+        let rec ask n =
+            send st Proto.arp Addr.broadcast (Arp.Pdu.pack request) ;
+            Simulation.delay st.iface.widget.power arp_retrans_time (fun () ->
+                match BitHash.find_opt st.arp_cache target_proto_addr with
+                | Some None when n < arp_max_requests -> ask (n + 1)
+                | Some None ->
+                    Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "No answer for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
+                    BitHash.remove_all st.arp_cache target_proto_addr ;
+                    BitHash.remove_all st.postponed target_proto_addr
+                | _ -> ()) () in
+        ask 1
 
     type dst = Postponed | Dst of Addr.t
 

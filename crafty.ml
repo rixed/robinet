@@ -249,6 +249,8 @@ let () =
             ~ports:[ ports_of Host_config.Tcp ; ports_of Host_config.Udp ]
             ~print:print_endline ~print_err:prerr_endline
             ~on_closed:(fun s -> if !stats then Printf.printf "Closed %s\n%!" s)
+            (* What comes in was received by the real interface already: *)
+            ~rx_wire:false
             ~on_exit:(fun s ->
                 status := s ;
                 (* Streams that are closing, and frames on their way, go on
