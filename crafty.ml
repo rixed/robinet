@@ -51,7 +51,7 @@ let () =
 let () =
     let ifname = ref "" and own_ip = ref None and ports = ref []
     and fw = ref false and promisc = ref false and print_packets = ref false
-    and print_only = ref None and cleanup = ref false
+    and print_only = ref None and stats = ref false and cleanup = ref false
     and check = ref false and format = ref false
     and linger = ref (Clock.Interval.sec 2.) and prog_file = ref None
     and max_duration = ref None and max_packets = ref None
@@ -117,6 +117,8 @@ let () =
         "-p", print_packets_spec,
             "[/PATTERN] print every packet sent and received, or those that match" ;
         "--print-packets", print_packets_spec, "[/PATTERN] same as -p" ;
+        "--stats", Arg.Set stats,
+            " print the stats of each stream, as it closes or when crafty exits" ;
         "--verbose", Arg.Set Host_config.verbose,
             " print the interface's settings and the commands configuring it" ;
         "--check", Arg.Set check, " compile the program, and exit" ;
@@ -246,6 +248,7 @@ let () =
             ~answer_arp:(!own_ip <> None) ~promisc:!promisc
             ~ports:[ ports_of Host_config.Tcp ; ports_of Host_config.Udp ]
             ~print:print_endline ~print_err:prerr_endline
+            ~on_closed:(fun s -> if !stats then Printf.printf "Closed %s\n%!" s)
             ~on_exit:(fun s ->
                 status := s ;
                 (* Streams that are closing, and frames on their way, go on
@@ -321,6 +324,7 @@ let () =
     Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ] (fun () ->
         Simulation.run sim true) ;
     Option.may Host_config.undo changes ;
+    if !stats then List.iter (Printf.printf "Open %s\n") (h.open_streams ()) ;
     let status_str, code =
         match !status, !limit with
         | Crafty_interp.Done, _ -> "OK", 0

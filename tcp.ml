@@ -556,6 +556,20 @@ struct
         | Fast of int (* after 3 dup acks *)
         | Timeout of int (* after the retransmission timer expired *)
 
+    (* What went on since the TRX was made: *)
+    type counters = {
+        mutable segs_out : int ; (* manual ones and retransmissions included *)
+        mutable bytes_out : int ; (* of their payloads *)
+        mutable segs_in : int ;
+        mutable bytes_in : int ; (* of their payloads, duplicates included *)
+        mutable bytes_acked : int ; (* of what was sent *)
+        mutable bytes_received : int ; (* handed in order to the reader *)
+        mutable retrans : int ; (* segments retransmitted *)
+        mutable dupacks : int ; (* duplicate acks received *)
+        mutable rto_expired : int ;
+        mutable ooo_in : int ; (* segments with data beyond what was received in order *)
+        mutable rtt_samples : int }
+
     type tcp_trx = {
         trx : trx ;
         close : unit -> unit ; (* close the trx (only once established) *)
@@ -613,6 +627,7 @@ struct
         mutable rto_armed : bool ;
         mutable timeouts : int ; (* consecutive expirations of the retransmission timer *)
         mutable cnx_established_cont : (tcp_trx option -> unit) option ; (* what to do when the cnx is established *)
+        counters : counters ;
         sync_recv : bool (* whether what is received is handed to the reader at once rather than from the scheduler *) }
 
     (* FIXME: ideally, wait 2 minutes after the complete close *)
@@ -624,6 +639,14 @@ struct
         else Simulation.asap t.power t.recv bits
 
     let int_of_bool x = if x then 1 else 0
+
+    let count_out t (tcp : Pdu.t) =
+        t.counters.segs_out <- t.counters.segs_out + 1 ;
+        t.counters.bytes_out <- t.counters.bytes_out + Payload.length tcp.payload
+
+    let emit_segment t tcp =
+        count_out t tcp ;
+        Simulation.asap t.power t.emit (Pdu.pack tcp)
     let (+/) = Int32.add and (-/) = Int32.sub
     let next_seq_num t = SeqNum.o ((Int32.of_int t.sent_pld) +/ (t.isn :> int32))
     let next_ack_num t =
@@ -682,7 +705,8 @@ struct
                                flags = { tcp.flags with ack = true } }
                 | None ->
                     tcp in
-            Simulation.asap t.power t.emit (Pdu.pack tcp)
+            t.counters.retrans <- t.counters.retrans + 1 ;
+            emit_segment t tcp
 
     (* Retransmission timer (RFC 6298), with a lower bound on the variation term
      * (as Linux does) so that delayed acks do not cause spurious timeouts: *)
@@ -696,6 +720,7 @@ struct
                 Interval.(add (mul srtt 0.875) (mul sample 0.125)),
                 Interval.(add (mul rttvar 0.75) (mul (abs (sub srtt sample)) 0.25)) in
         t.rtt <- Some (srtt, rttvar) ;
+        t.counters.rtt_samples <- t.counters.rtt_samples + 1 ;
         t.rto <- min t.max_rto (Interval.add srtt (max t.min_rto_var (Interval.mul rttvar 4.))) ;
         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: RTT sample %s, srtt %s, rto %s"
             (Interval.to_string sample) (Interval.to_string srtt) (Interval.to_string t.rto))))
@@ -725,6 +750,7 @@ struct
     and on_rto t gen =
         if gen = t.rto_gen then (
             t.timeouts <- t.timeouts + 1 ;
+            t.counters.rto_expired <- t.counters.rto_expired + 1 ;
             Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Retransmission timeout #%d" t.timeouts))) ;
             if t.timeouts > t.max_timeouts then (
                 abort t ;
@@ -752,7 +778,7 @@ struct
                                ~win_size:(adv_wnd ~syn t) ~ack ~psh ~rst ~syn ~fin
                                ~options:(if syn then syn_options t else []) bits in
             Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Emitting a packet from %s to %s, seq %s, length %d, content '%s'" (Port.to_string src_port) (Port.to_string dst_port) (SeqNum.to_string seq_num) (bytelength bits) (string_of_bitstring bits)))) ;
-            Simulation.asap t.power t.emit (Pdu.pack tcp) ;
+            emit_segment t tcp ;
             if ack then t.rcvd_acked <- t.rcvd_pld ;
             let seq_len = bytelength bits + int_of_bool syn + int_of_bool fin in
             if seq_len > 0 then (
@@ -822,6 +848,7 @@ struct
                     let pld = dropbytes skip (tcp.Pdu.payload :> bitstring) in
                     t.rcvd_pld <- t.rcvd_pld + (bytelength pld) ;
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: I have now read %d bytes" t.rcvd_pld))) ;
+                    t.counters.bytes_received <- t.counters.bytes_received + bytelength pld ;
                     if bitstring_length pld > 0 then deliver t pld ;
                     if tcp.Pdu.flags.Pdu.fin && not t.rcvd_fin then (
                         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: received a FIN"))) ;
@@ -878,6 +905,9 @@ struct
                 ) else (
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Acked %d/%d" acked t.sent_pld))) ;
                     let newly_acked = acked - max 1 t.sent_acked (* the SYN does not count *) in
+                    t.counters.bytes_acked <-
+                        t.counters.bytes_acked + newly_acked -
+                        int_of_bool (t.sent_fin && acked = t.sent_pld) ;
                     t.sent_acked <- acked ;
                     t.dup_acks <- 0 ;
                     drop_unacked_tx t ;
@@ -911,6 +941,7 @@ struct
                       not (tcp.Pdu.flags.Pdu.syn || tcp.Pdu.flags.Pdu.fin) &&
                       not (Streambuf.is_empty t.unacked_tx) then (
                 t.dup_acks <- t.dup_acks + 1 ;
+                t.counters.dupacks <- t.counters.dupacks + 1 ;
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Duplicate ack #%d for %d" t.dup_acks acked))) ;
                 match t.recovery with
                 | Open -> if t.dup_acks = 3 then fast_retransmit t
@@ -929,6 +960,8 @@ struct
         (* Out of order, filling a gap, or already received: *)
         let unexpected = offset <> t.rcvd_pld || not (Streambuf.is_empty t.rcvd_pkts) in
         let is_probe = len = 0 && offset < t.rcvd_pld in
+        if len > 0 && offset > t.rcvd_pld then
+            t.counters.ooo_in <- t.counters.ooo_in + 1 ;
         (* With an application that reads at once, our window is all of rcv_buf,
          * out of order data included: *)
         let beyond_wnd = len > 0 && offset >= t.rcvd_pld + rcv_wnd t in
@@ -959,6 +992,8 @@ struct
             Log.(log t.logger Warning s)
         | Ok tcp ->
             Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Received a segment!"))) ;
+            t.counters.segs_in <- t.counters.segs_in + 1 ;
+            t.counters.bytes_in <- t.counters.bytes_in + Payload.length tcp.Pdu.payload ;
             (* TODO: check checksum *)
             if tcp.Pdu.flags.Pdu.syn then (
                 if t.rcvd_pld > 0 then (
@@ -1038,7 +1073,7 @@ struct
         if ack_num <> None then t.rcvd_acked <- t.rcvd_pld ;
         let tcp = Pdu.make ~src_port:t.src ~dst_port:t.dst ~seq_num ?ack_num
                            ~ack:(ack_num <> None) ~win_size:(adv_wnd t) empty_bitstring in
-        Simulation.asap t.power t.emit (Pdu.pack tcp)
+        emit_segment t tcp
 
     and try_really_tx t = tx_queued t false
 
@@ -1149,6 +1184,10 @@ struct
                   snd_wnd = 0 ; snd_wl1 = -1 ; snd_wl2 = 0 ; max_snd_wnd = 0 ;
                   persist_gen = 0 ; persist_armed = false ; probes = 0 ; unanswered_probes = 0 ;
                   cnx_established_cont = None ; sync_recv ;
+                  counters = { segs_out = 0 ; bytes_out = 0 ; segs_in = 0 ; bytes_in = 0 ;
+                               bytes_acked = 0 ; bytes_received = 0 ;
+                               retrans = 0 ; dupacks = 0 ; rto_expired = 0 ; ooo_in = 0 ;
+                               rtt_samples = 0 } ;
                   tcp_trx = { trx = null_trx ~logger ;
                               close = ignore ;
                               is_closed = (fun _ -> true) ;
@@ -1185,6 +1224,7 @@ struct
      * the sequence numbers, a FIN closes the stream and a RST aborts it. Not
      * being retransmitted, such a segment that is lost stalls the stream. *)
     let sent_manually t (tcp : Pdu.t) =
+        count_out t tcp ;
         if tcp.flags.ack && Some tcp.ack_num = next_ack_num t then
             t.rcvd_acked <- t.rcvd_pld ;
         t.sent_pld <- t.sent_pld + Payload.length tcp.payload +

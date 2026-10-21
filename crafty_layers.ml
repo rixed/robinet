@@ -132,7 +132,10 @@ type ops =
       (* Calls the function, once, from an event of its own, when the node
        * is no longer busy, if it can tell sooner than [busy_for] did (TCP,
        * once connected or once its send buffer drained); or never: *)
-      on_ready : (unit -> unit) -> unit }
+      on_ready : (unit -> unit) -> unit ;
+      (* What it tells of its stream, by name, among the [stats] of its layer
+       * or the counts of {!stream_stats}, which it then replaces: *)
+      stats : unit -> (string * V.value) list }
 
 (** What a node is made with: *)
 type context =
@@ -192,7 +195,7 @@ let pass u = [ u, both ]
 let manual pack =
     { pack ; send = not_driven ; receive = pass ;
       listen = ignore ; close = (fun k -> k ()) ; busy_for = Tools.never_busy ;
-      buffered = false ; on_ready = ignore }
+      buffered = false ; on_ready = ignore ; stats = (fun () -> []) }
 
 let bytes_value bits = V.bytes_of_string (string_of_bitstring bits)
 
@@ -558,8 +561,13 @@ let tcp_node ctx =
             received := [] ;
             removed s ;
             wake () ;
-            raw :: List.map (fun d ->
-                { u with payload = d ; upper = Any N.Bytes ; bits = d }, [ Driven ]) data
+            (* What a segment that fills a gap releases comes up at once, as
+             * a pattern matches at most once per segment: *)
+            raw :: (match data with
+                | [] -> []
+                | data ->
+                    let d = Bitstring.concat data in
+                    [ { u with payload = d ; upper = Any N.Bytes ; bits = d }, [ Driven ] ])
         | Idle | Listening -> [ raw ]) ;
       listen = (fun () -> match !state with Idle -> state := Listening | _ -> ()) ;
       close = (fun k ->
@@ -574,7 +582,26 @@ let tcp_node ctx =
                     Tcp.TRX.abort s.trx ;
                     Option.may (fun k -> s.on_closed <- None ; k ()) s.on_closed)) ()) ;
       busy_for ; buffered = true ;
-      on_ready = (fun k -> waiters := k :: !waiters) }
+      on_ready = (fun k -> waiters := k :: !waiters) ;
+      stats = (fun () ->
+        match !state with
+        | Idle | Listening -> []
+        | Stream s ->
+            let t = s.trx and c = s.trx.counters in
+            let srtt, rttvar = t.rtt |? Clock.Interval.(zero, zero) in
+            [ "packets_out", V.Int c.segs_out ; "bytes_out", V.Int c.bytes_out ;
+              "packets_in", V.Int c.segs_in ; "bytes_in", V.Int c.bytes_in ;
+              "bytes_acked", V.Int c.bytes_acked ;
+              "bytes_received", V.Int c.bytes_received ;
+              "retrans", V.Int c.retrans ; "dupacks", V.Int c.dupacks ;
+              "timeouts", V.Int c.rto_expired ; "ooo_in", V.Int c.ooo_in ;
+              "srtt", V.Interval srtt ; "rttvar", V.Interval rttvar ;
+              "rtt_samples", V.Int c.rtt_samples ; "rto", V.Interval t.rto ;
+              "snd_mss", V.Int t.snd_mss ; "rcv_mss", V.Int t.rcv_mss ;
+              (* Infinite until a loss, which Linux tells as 2^31-1: *)
+              "cwnd", V.Int t.cwnd ; "ssthresh", V.Int (min t.ssthresh 0x7fff_ffff) ;
+              "snd_wnd", V.Int t.snd_wnd ; "rcv_wnd", V.Int (Tcp.TRX.rcv_wnd t) ;
+              "established", V.Bool (Tcp.TRX.is_established t) ]) }
 
 let icmp_upper = function
     | 0 | 8 -> Only N.Echo
@@ -859,6 +886,8 @@ type layer =
       constants : (string * literal) list ;
       (* The operations of a new node of this layer: *)
       node : context -> ops ;
+      (* What its nodes tell of their streams beside {!stream_stats}: *)
+      stats : (string * Type.t) list ;
       (* Decodes this layer of a received packet, given the hints of the
        * layer below: *)
       unpack : hints -> bitstring -> unpacked option }
@@ -873,7 +902,7 @@ let unsendable name _ =
     { (manual fail) with send = fail }
 
 let layer ?(above=[]) ?(quoted=false) ?(driven=false) ?(terminal=false) ?default
-          ?(constants=[]) ?node ?(unpack=fun _ _ -> None) name fields =
+          ?(constants=[]) ?node ?(stats=[]) ?(unpack=fun _ _ -> None) name fields =
     let fields = Array.of_list fields in
     let default_field =
         Option.map (fun d ->
@@ -882,7 +911,7 @@ let layer ?(above=[]) ?(quoted=false) ?(driven=false) ?(terminal=false) ?default
                 invalid_arg ("Crafty_layers: no field "^ d ^" in "^ N.to_string name)
         ) default in
     { name ; above ; quoted ; driven ; terminal ; fields ; default_field ;
-      constants ; node = node |? unsendable name ; unpack }
+      constants ; node = node |? unsendable name ; stats ; unpack }
 
 (** As in error messages: [IP?] for a quoted IP. *)
 let to_string (l : layer) = N.to_string l.name ^ if l.quoted then "?" else ""
@@ -920,8 +949,20 @@ let ip =
         field "options" Type.bytes ~set_in:both ~read_in:both ;
         field "is_fragment" Type.Bool ~set_in:[] ]
 
+(** What the node of any layer tells of its stream: the packets that went
+ * through it, and the bytes of their payloads at that layer. *)
+let stream_stats =
+    [ "packets_out", Type.Int ; "bytes_out", Type.Int ;
+      "packets_in", Type.Int ; "bytes_in", Type.Int ]
+
 let tcp =
     layer N.TCP ~above:[ ip ] ~driven:true ~node:tcp_node ~unpack:unpack_tcp
+        ~stats:Type.[
+            "bytes_acked", Int ; "bytes_received", Int ; "retrans", Int ;
+            "dupacks", Int ; "timeouts", Int ; "ooo_in", Int ;
+            "srtt", Interval ; "rttvar", Interval ; "rtt_samples", Int ;
+            "rto", Interval ; "snd_mss", Int ; "rcv_mss", Int ; "cwnd", Int ;
+            "ssthresh", Int ; "snd_wnd", Int ; "rcv_wnd", Int ; "established", Bool ]
         ~constants:[ "FIN", Int 1 ; "SYN", Int 2 ; "RST", Int 4 ; "PSH", Int 8 ;
                      "ACK", Int 16 ; "URG", Int 32 ] [
         field "src" Type.Int ~set_in:both ~read_in:both ~discriminant:true

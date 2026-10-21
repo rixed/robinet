@@ -76,13 +76,19 @@ type node =
       children : (L.N.t, node Siblings.t) Hashtbl.t ;
       (* How many stacks and patterns hold it: *)
       mutable users : int ;
-      (* How many received packets went through it: *)
+      (* How many received packets went through it, and the bytes of their
+       * payloads at its layer; and of those sent: *)
       mutable received : int ;
+      mutable received_bytes : int ;
+      mutable sent : int ;
+      mutable sent_bytes : int ;
       (* Unused, it is finishing what it has to before going away: *)
       mutable closing : bool ;
       eth : Eth.State.t ;
       (* The ranges of local ports to pick from, by layer name: *)
       ports : string -> (int * int) list ;
+      (* Told the nodes of streams that go away, terminal ones aside: *)
+      removed : node -> unit ;
       ops : L.ops ;
       (* Registered on it, by order of registration: *)
       mutable patterns : pattern list }
@@ -142,18 +148,28 @@ let pick_random loc parent (l : L.layer) i ranges =
 let key_fields (l : L.layer) key name =
     Option.bind (L.find_field l name) (fun i -> List.assoc_opt i key)
 
+let count_sent n bits =
+    n.sent <- n.sent + 1 ;
+    n.sent_bytes <- n.sent_bytes + Tools.bytelength bits
+
 (* A new child of [parent], with no user. Its operations read the keys as
- * they are, which a told one completes: *)
+ * they are, which a told one completes, and what they send through
+ * [parent] counts as sent by it: *)
 let make_child parent (l : L.layer) key =
     let self = ref None in
     let current () = match !self with Some c -> c.key | None -> key in
     let c = { layer = l ; key ; parent = Some parent ;
               children = Hashtbl.create 3 ; users = 0 ; received = 0 ;
+              received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
               closing = false ; eth = parent.eth ; ports = parent.ports ;
+              removed = parent.removed ;
               ops = l.node { eth = parent.eth ;
                              key = (fun name -> key_fields l (current ()) name) ;
                              below_key = (fun name -> key_fields parent.layer parent.key name) ;
-                             below = Some parent.ops } ;
+                             below = Some { parent.ops with
+                                 send = (fun fields hints bits ->
+                                     count_sent parent bits ;
+                                     parent.ops.send fields hints bits) } } ;
               patterns = [] } in
     self := Some c ;
     let s =
@@ -223,6 +239,7 @@ let rec prune n =
                         Siblings.remove s n.key ;
                         if Siblings.length s = 0 then Hashtbl.remove p.children n.layer.name
                     ) (siblings p n.layer) ;
+                    if not n.layer.terminal then n.removed n ;
                     prune p))) n.parent
 
 let release n =
@@ -319,6 +336,7 @@ let send stack =
             invalid_arg "Crafty_tree.send: empty stack"
         | e :: rest as driven ->
             tell e.node hints ;
+            count_sent e.node bits ;
             (match e.mode with
             | L.Driven ->
                 e.node.ops.send (fields_of e) hints bits ;
@@ -367,6 +385,44 @@ let busy_for stack =
  * the others may still be; possibly never, and possibly several times: *)
 let on_ready stack k =
     List.iter (fun e -> e.node.ops.on_ready k) (senders stack)
+
+(** What [n] tells of its stream: {!L.stream_stats}, then the [stats] of its
+ * layer, zero for those it does not tell yet. *)
+let stats n =
+    let own = n.ops.stats () in
+    let counts =
+        [ "packets_out", Int n.sent ; "bytes_out", Int n.sent_bytes ;
+          "packets_in", Int n.received ; "bytes_in", Int n.received_bytes ] in
+    List.map (fun (name, typ) ->
+        name,
+        match List.assoc_opt name own with
+        | Some v -> v
+        | None -> List.assoc_opt name counts |? zero typ
+    ) (L.stream_stats @ n.layer.stats)
+
+(** The stack of [n], from the root up, with the keys of its nodes, as
+ * [/IP(src=..., dst=..., proto=6)/TCP(src=..., dst=...)]. *)
+let rec stream_name n =
+    match n.parent with
+    | None -> ""
+    | Some p ->
+        stream_name p ^"/"^ L.to_string n.layer ^
+        if n.key = [] then "" else "("^ key_string n ^")"
+
+(** The nodes of streams of the tree of [root], parents first. *)
+let streams root =
+    let rec loop acc n =
+        List.fold_left (fun acc c ->
+            if c.layer.terminal then acc else loop (c :: acc) c
+        ) acc (children n) in
+    List.rev (loop [] root)
+
+(** What {!stats} tells of [n], after its name, as [name=value]s. *)
+let stats_line n =
+    let types = L.stream_stats @ n.layer.stats in
+    stream_name n ^": "^
+    String.concat " " (List.map (fun (name, v) ->
+        name ^"="^ to_string (List.assoc name types) v) (stats n))
 
 (** {2 Patterns} *)
 
@@ -484,6 +540,7 @@ and up_to w node packet pending (ul : L.layer) =
  * the patterns registered there: *)
 and enter w node packet u pending =
     node.received <- node.received + 1 ;
+    node.received_bytes <- node.received_bytes + Tools.bytelength u.payload ;
     let pending = pending @ List.map (fun p -> p, p.layers) node.patterns in
     List.iter (fun (u, modes) ->
         let packet = (node.layer, u) :: packet in
@@ -581,7 +638,7 @@ let dynamic_ports = [ 49152, 65535 ]
  * that a stack leaves out are picked from [ports] for each layer that has
  * some (inclusive and disjoint ranges, by layer name), and else from
  * {!dynamic_ports}. *)
-let make_root ?(ports=[]) (eth : Eth.State.t) =
+let make_root ?(ports=[]) ?(on_removed=ignore) (eth : Eth.State.t) =
     let ports name =
         match List.assoc_opt (String.uppercase_ascii name) ports with
         | Some (_ :: _ as ranges) -> ranges
@@ -589,7 +646,8 @@ let make_root ?(ports=[]) (eth : Eth.State.t) =
     let root =
         { layer = L.root ; key = [] ; parent = None ;
           children = Hashtbl.create 10 ; users = 0 ; received = 0 ;
-          closing = false ; eth ; ports ;
+          received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
+          closing = false ; eth ; ports ; removed = on_removed ;
           ops = L.root.node { eth ; key = (fun _ -> None) ;
                               below_key = (fun _ -> None) ; below = None } ;
           patterns = [] } in

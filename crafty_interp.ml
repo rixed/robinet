@@ -409,6 +409,12 @@ let rec eval output (env : env) (e : T.expr) =
             | Some v -> v
             | None -> error e.loc "No such %s in this packet" (T.lname layer.name))
         | _ -> assert false)
+    | T.Call (T.Stats, []) ->
+        let stats = Crafty_tree.stats (List.hd env.stack).node in
+        (match e.typ with
+        | A.Type.Record fields ->
+            Record (Array.of_list (List.map (fun (n, _) -> List.assoc n stats) fields))
+        | _ -> assert false)
     | T.Call (b, args) ->
         call e.loc b (List.map eval args)
              ~print:output.print ~print_err:output.print_err ~now:output.now
@@ -941,13 +947,19 @@ type handle =
       (* Tells a frame the interface sent, as captured on its way out: *)
       emitted : Bitstring.bitstring -> unit ;
       (* Whether a frame, sent or received, matches a filter: *)
-      matches : filter -> Bitstring.bitstring -> bool }
+      matches : filter -> Bitstring.bitstring -> bool ;
+      (* The stats of the streams still open, as {!Crafty_tree.stats_line}
+       * tells them: *)
+      open_streams : unit -> string list }
 
 (** An absolute pattern, matched against a frame on its own: *)
 and filter = T.pattern
 
 let idle (tree : Crafty_tree.node) () =
     Crafty_tree.size tree = 1 && Tools.BitHash.length tree.eth.Eth.State.postponed = 0
+
+let open_streams tree () =
+    List.map Crafty_tree.stats_line (Crafty_tree.streams tree)
 
 let output_of power ~print ~print_err =
     let now () =
@@ -989,7 +1001,8 @@ let run_on_tree power tree ~print ~print_err ?(on_exit=ignore) (program : T.bloc
       status = (fun () -> !status) ;
       idle = idle tree ;
       emitted = emitted t ;
-      matches = matches t.output tree }
+      matches = matches t.output tree ;
+      open_streams = open_streams tree }
 
 type program = Crafty_typing.block
 
@@ -1017,15 +1030,16 @@ let print_status oc = function
  * subnet to [gateway], answering ARP for [ip] unless [answer_arp] is false,
  * taking the frames for other addresses too if [promisc],
  * picking the local ports it is not given from [ports] (as
- * {!Crafty_tree.make_root} does), printing with [print] and [print_err], and
- * calling [on_exit] with how it ends. Returns the device of the interface, and a handle to stop the
+ * {!Crafty_tree.make_root} does), printing with [print] and [print_err],
+ * calling [on_exit] with how it ends, and [on_closed] with the stats of each
+ * stream that goes away. Returns the device of the interface, and a handle to stop the
  * program, ask its status or tell it what the interface sent. The program starts at the next tick of the
  * simulation, once that device can be connected. *)
 let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         ?(promisc=false)
         ?(speed=Eth.Speed.Eth1Gbps) ?(full_duplex=true) ?mtu
         ?ports ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
-        (program : program) =
+        ?(on_closed=ignore) (program : program) =
     let gateways =
         Option.map_default (fun gw ->
             [ Eth.State.gw_selector (), Some gw ]) [] gateway in
@@ -1037,7 +1051,9 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (* No cable to negotiate with: the link is what the interface supports. *)
     eth.iface.widget.ports.set_capabilities 0 Capabilities.Any ;
     let power = eth.iface.widget.power in
-    let tree = Crafty_tree.make_root ?ports eth in
+    let tree =
+        Crafty_tree.make_root ?ports eth
+            ~on_removed:(fun n -> on_closed (Crafty_tree.stats_line n)) in
     let started = ref None and stopped = ref false in
     Simulation.asap power (fun () ->
         if not !stopped then
@@ -1058,7 +1074,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         | None -> if !stopped then Stopped else Running) ;
       idle = idle tree ;
       emitted = (fun frame -> Option.may (fun (h : handle) -> h.emitted frame) !started) ;
-      matches = matches (output_of power ~print ~print_err) tree }
+      matches = matches (output_of power ~print ~print_err) tree ;
+      open_streams = open_streams tree }
 
 (* [runs ?stop_at ?trees ?frames ?sent ?inject text] is what the program in that text
  * prints, each line with the time it is printed at (and with [trees], the
@@ -1590,10 +1607,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   let knows (eth : Eth.State.t) n =
       Tools.BitHash.replace eth.arp_cache (Ip.Addr.to_bitstring (address n)) (Some (mac n))
 
-  let start sim out name eth text =
-      let tree = Crafty_tree.make_root eth in
+  let start ?(closed=false) sim out name eth text =
       let line s =
           out := Printf.sprintf "%s %.3fs: %s" name (Clock.Time.to_secs (Simulation.now sim)) s :: !out in
+      let tree =
+          Crafty_tree.make_root eth ~on_removed:(fun n ->
+              if closed then line ("closed "^ Crafty_tree.stats_line n)) in
       ignore (run_on_tree sim.SimTypes.root.power tree ~print:line ~print_err:(fun s -> line ("err "^ s))
           ~on_exit:(function
               | Done -> line ("done "^ Crafty_tree.to_string tree)
@@ -1635,7 +1654,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
               skip := false ; Stdlib.Buffer.add_char b c)) s ;
       Stdlib.Buffer.contents b
 
-  let two ?(loss=0.) ?(arp=false) ?(frames=false) a b =
+  let two ?(loss=0.) ?(arp=false) ?(frames=false) ?closed a b =
       let sim = Simulation.make ~realtime:false "crafty-pair" in
       let out = ref [] in
       let ea = crafty_peer sim 1 and eb = crafty_peer sim 2 in
@@ -1643,12 +1662,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
       if arp then (knows ea 2 ; knows eb 1) ;
       let log = if frames then Some (frame_line sim out) else None in
       plug sim ?log ea.Eth.State.iface.widget eb.Eth.State.iface.widget ;
-      start sim out "b" eb b ;
-      start sim out "a" ea a ;
+      start ?closed sim out "b" eb b ;
+      start ?closed sim out "a" ea a ;
       Simulation.run sim false ;
       String.concat "\n" (List.rev !out)
 
-  let with_host ?(setup=fun _ _ -> ()) ?(frames=false) text =
+  let with_host ?(setup=fun _ _ -> ()) ?(frames=false) ?closed text =
       let sim = Simulation.make ~realtime:false "crafty-host" in
       let out = ref [] in
       let ea = crafty_peer sim 1 in
@@ -1658,7 +1677,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
       Simulation.run_startup sim ;
       setup h (fun s ->
           out := Printf.sprintf "host %.3fs: %s" (Clock.Time.to_secs (Simulation.now sim)) s :: !out) ;
-      start sim out "a" ea text ;
+      start ?closed sim out "a" ea text ;
       Simulation.run sim false ;
       String.concat "\n" (List.rev !out)
 *)
@@ -1767,6 +1786,29 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "a 0.000s: pong\na 0.000s: pong\na 0.000s: pong\na 0.000s: done Eth#5{IP(src=10.0.0.1, dst=10.0.0.2)#4{TCP(src=5000, dst=80)#4{Bytes#6}}}\nb 1.000s: done Eth#8{IP(src=10.0.0.2, dst=10.0.0.1)#7{TCP(src=80, dst=5000)#7{Bytes#4}}}" \
     (two "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n  repeat count=3 { Bytes(\"ping ${I}\")\n    expect timeout=1s Bytes { print(MATCH[Bytes].data) } } }" \
          "on timeout=1s /IP/TCP(dst == 80)/Bytes {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/Bytes(\"pong\") }")
+*)
+(* The stats of a TCP stream, as data is echoed, then of each stream as it
+ * goes away; of a UDP one; with losses: *)
+(*$= & ~printer:identity
+  "a 0.000s: out 3 5, in 2 5, acked 5, received 5, retrans 0, mss 1460, established true\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Bytes#2}}}" \
+    (with_host ~setup:tcp_echo \
+        "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Bytes(\"hello\")\n  expect timeout=1s Bytes {\n    s = stats()\n    print(\"out ${s.packets_out} ${s.bytes_out}, in ${s.packets_in} ${s.bytes_in}, acked ${s.bytes_acked}, received ${s.bytes_received}, retrans ${s.retrans}, mss ${s.snd_mss}, established ${s.established}\") } }")
+  "a 0.000s: 2 echoes, out 2 12, in 2 12\na 0.000s: done Eth#3" \
+    (with_host ~setup:(fun h _ -> h.Host.trx.Host.udp_server_start (Udp.Port.o 7) (fun udp -> \
+        Tools.(udp.Udp.TRX.trx.ins --> sink (fun bits -> tx udp.Udp.TRX.trx bits)))) \
+        "/IP(dst=10.0.0.2)/UDP(src=4000, dst=7) { repeat count=2 { Bytes(\"echo ${I}\")\n    expect timeout=1s Bytes {} }\n  s = stats()\n  print(\"2 echoes, out ${s.packets_out} ${s.bytes_out}, in ${s.packets_in} ${s.bytes_in}\") }")
+*)
+(*$T
+  let out = with_host ~setup:tcp_echo ~closed:true \
+      "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Bytes(\"hello\")\n  expect timeout=1s Bytes {} }" in \
+  List.exists (fun l -> String.starts_with l "a 0.000s: closed /IP(src=10.0.0.1, dst=10.0.0.2)/TCP(src=4000, dst=7): packets_out=5 bytes_out=5 packets_in=3 bytes_in=5 bytes_acked=5 bytes_received=5 retrans=0 dupacks=0 timeouts=0 ooo_in=0 ") (String.split_on_char '\n' out) && \
+  List.mem "a 0.000s: closed /IP(src=10.0.0.1, dst=10.0.0.2): packets_out=5 bytes_out=113 packets_in=3 bytes_in=73" (String.split_on_char '\n' out) || (print_endline out ; false)
+*)
+(*$T
+  let out = two ~arp:true ~loss:0.2 \
+      "/IP(dst=10.0.0.2)/TCP(src=5000, dst=80) {\n  repeat count=30 { Bytes(\"ping ${I}\")\n    expect timeout=1m Bytes {} }\n  s = stats()\n  print(\"retrans ${s.retrans > 0} ${s.retrans <= s.packets_out}, rtt ${s.srtt > 0s} ${s.rtt_samples > 0}\") }" \
+      "on timeout=2m /IP/TCP(dst == 80)/Bytes {\n  /IP(dst=MATCH[IP].src)/TCP(src=80, dst=MATCH[TCP].src)/Bytes(\"pong\") }" in \
+  String.exists out "retrans true true, rtt true true" || (print_endline out ; false)
 *)
 (* Writing more than the send buffer takes until the rest fits in it: *)
 (*$inject

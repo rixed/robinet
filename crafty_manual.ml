@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 08aff4e545f3e7bd565017179261fc15) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 5815c3416473f2fe891efbbb3dc31583) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -374,6 +374,16 @@ nodes it held.
 -   `now()`: The current time: the clock of the host when crafty runs a program.
 -   `getenv(name, default=s)`: An environment variable (fails if unset and no
     default).
+-   `stats()`: The stats of the stream at the top of the stack, so far: its
+    `packets_out`, `packets_in`, and the `bytes_out`, `bytes_in` of their
+    payloads at that layer. A self-driven TCP connection tells instead those of
+    its segments (retransmissions and duplicates included), and also, as Linux's
+    `tcp_info`: `bytes_acked`, `bytes_received` (in order), `retrans`,
+    `dupacks`, `timeouts`, `ooo_in` (segments received out of order), `srtt`,
+    `rttvar` (0s before any `rtt_samples`), `rto`, `snd_mss`, `rcv_mss`, `cwnd`,
+    `ssthresh` (2\^31-1 before any loss), `snd_wnd` (the peer's window),
+    `rcv_wnd` (bytes) and `established`. With `--stats`, crafty prints them for
+    each stream as it closes, and for those still open when it exits.
 -   `array(init=v, len=n)`: An array of `n` items, all `v`.
 -   `length(a)`: The length of an array, a map or a string.
 -   `concat(a, b)`, `append(a, x)`, `prepend(x, a)`: as with `+`.
@@ -674,6 +684,18 @@ connection.
 
 Both times are those of captures: of the ping on its way out, and of the echo on
 its way in.
+
+### How is the connection doing?
+
+    /IP(dst=192.0.2.10)/TCP(dst=7) {
+      Bytes("hello")
+      expect timeout=1s Bytes {
+        s = stats()
+        print("srtt ${s.srtt}, mss ${s.snd_mss}, peer window ${s.snd_wnd}")
+      }
+    }
+
+The stats are as of the call: the close is yet to come, which `--stats` reports.
 
 ### A TCP port scan
 

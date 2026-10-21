@@ -109,6 +109,21 @@ cat > "$DIR/sent.cfty" <<'EOF'
   }
 }
 EOF
+# Over a lossy path, data echoed comes back out of order, if at all:
+cat > "$DIR/lossy.cfty" <<'EOF'
+/IP(dst=10.77.0.2)/TCP(dst=7) {
+  n = 0
+  {
+    on timeout=20s Bytes {
+      n += length(MATCH[Bytes].data)
+      if n >= 200000 { break }
+    }
+    Bytes(randbytes(200000))
+  }
+  s = stats()
+  print("out of order ${s.ooo_in > 0}, retransmitted ${s.retrans > 0}")
+}
+EOF
 printf 'x = "a" + 1\n' > "$DIR/bad.cfty"
 
 setup
@@ -142,6 +157,19 @@ if tcpdump -n -r "$DIR/tcp.pcap" 2>/dev/null | grep -q 'Flags \[R' ; then
     echo "FAIL the kernel reset the connection" ; FAILED=1
 else
     echo "ok   the kernel did not reset the connection"
+fi
+
+ip netns exec $NS tc qdisc add dev $NS_IF root netem loss 10%
+"$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw "$DIR/lossy.cfty" > "$DIR/out" 2>&1
+check "the stats of a lossy connection" 0 $? "out of order true, retransmitted true"
+ip netns exec $NS tc qdisc del dev $NS_IF root
+
+"$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw --stats "$DIR/tcp.cfty" > "$DIR/out" 2>&1
+check "--stats with TCP" 0 $? "hello"
+if grep -q '^Closed /IP(src=10.77.0.1, dst=10.77.0.2)/TCP(src=140[0-9][0-9], dst=7): packets_out=[0-9]* bytes_out=5 .* bytes_acked=5 bytes_received=5 .* established=true$' "$DIR/out" ; then
+    echo "ok   the stats of a stream are printed as it closes"
+else
+    echo "FAIL no stats of the stream as it closes:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
 fi
 
 "$CRAFTY" -i $HOST_IF --udp 40000-40010 --fw --max-packets 3 "$DIR/flood.cfty" > "$DIR/out" 2>&1

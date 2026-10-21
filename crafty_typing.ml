@@ -50,7 +50,7 @@ type builtin =
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
     | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
-    | Print | Print_err | Assert
+    | Print | Print_err | Assert | Stats
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
 
@@ -580,6 +580,8 @@ let builtins =
       "time", To_time, [ secs "a number of seconds since 1970 or a string" ],
         res Type.Time ;
       "now", Now, [], res Type.Time ;
+      (* Of a type that [expr] tells: *)
+      "stats", Stats, [], res Type.Void ;
       "ip_addr", To_ip,
         [ param "b" "4 bytes or a string" (only_exactly Type.[ bytes ; String ]) ],
         res Type.Ip ;
@@ -771,6 +773,11 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 | Prepend -> error loc "Cannot prepend %s to %s" x y
                 | _ -> error loc "Cannot concatenate %s and %s" x y))
         | (Has | Remove as b), [ m ; k ], t -> map_call b loc t m k
+        | Stats, [], _ ->
+            (match env.stack with
+            | [] -> error loc "stats() is only defined on a protocol stack"
+            | (l, _) :: _ ->
+                mk (record_type (L.stream_stats @ l.stats)) (Call (Stats, [])))
         | Histogram, [ a ; bucket ], _ ->
             let t =
                 if values_type a.typ = Some Type.Interval then Type.Interval
@@ -1819,4 +1826,15 @@ let check_pattern (p : A.pattern) =
     (types "p = 1\n/IP!(dst=1.2.3.4)/UDP(dst=53) { p := Bytes(\"x\") }")
   "line 1, column 7: A packet cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \
     (types "x = { p = /IP!(dst=1.2.3.4)/UDP(dst=53)/Bytes(\"x\") ; 1 } + 1")
+*)
+
+(* The stats of the stream at the top of the stack: *)
+(*$= types & ~printer:identity
+  "line 1, column 5: stats() is only defined on a protocol stack" (types "x = stats()")
+  "s: {bytes_in: int, bytes_out: int, packets_in: int, packets_out: int}" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=7) { s = stats() }")
+  "line 1, column 35: No field cwnd in {bytes_in: int, bytes_out: int, packets_in: int, packets_out: int}" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=7) { x = stats().cwnd }")
+  "x: int, y: interval" \
+    (types "/IP(dst=1.2.3.4)/TCP!(dst=7) { x = stats().cwnd\ny = stats().srtt }")
 *)
