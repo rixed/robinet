@@ -275,6 +275,10 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
                             | T.Mean -> "mean" | T.Stddev -> "standard deviation"
                             | _ -> "percentile") ;
         stat loc b vs args
+    | T.Sorted, [ Array a ] ->
+        let a = Array.copy a in
+        Array.stable_sort compare_values a ;
+        Array a
     | T.Keys, [ Map (m, _) ] -> Array (Array.of_enum (Map.PMap.keys m))
     | T.Values, [ Map (m, _) ] -> Array (Array.of_enum (Map.PMap.values m))
     | T.Length, [ String s ] -> Int (String.length s)
@@ -1112,6 +1116,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "print(\"${stddev([2, 4, 4, 4, 5, 5, 7, 9])} ${stddev([1: 1s, 2: 3s])} ${stddev([3.5])}\")")
   "0s: failed: line 1, column 5: No standard deviation of no values" \
     (runs "x = stddev(array(init=1s, len=0))")
+  "0s: [1, 2, 3] [3, 1, 2] [[1, 2], [3]] [b: [1, 2]]\n0s: done" \
+    (runs "a = [3, 1, 2]\nb = sorted(a)\nc = [[2, 1], [3]]\nsort(c[0])\nm = [\"b\": [2, 1]]\nsort(a=m[\"b\"])\nprint(\"${b} ${a} ${c} ${m}\")\nsort(a)\nassert(a == b)")
   "0s: failed: line 1, column 5: No minimum of no values" \
     (runs "x = min(array(init=1, len=0))")
   "0s: failed: line 1, column 5: No percentile 101.0, which is not within 0 and 100" \

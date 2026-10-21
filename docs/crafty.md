@@ -154,7 +154,7 @@ values assigned to a variable, they make one variant with the constructors
 of all:
 
 ```
-result = Pending                   # of type (Failed string | Got int | Pending)
+result = Pending   # of type (Failed string | Got int | Pending)
 any Bytes("pong") { result := Got(length(MATCH)) }
   | ../ICMP { result := Failed("unreachable") }
 print(case result Got { "${result} bytes" } else { "${result}" })
@@ -412,6 +412,8 @@ and the nodes it held.
 - `has(m, k)`, `remove(m, k)`: Whether map `m` has key `k`; `m` without it.
 - `keys(m)`, `values(m)`: Arrays of the keys and the values of a map.
 - `count(a)`: Same as `length`.
+- `sorted(a)`: A sorted copy of an array of ordered values. `sort(a)`, a
+  statement, sorts the array `a` (a variable, or an item of one).
 - `min(a)`, `max(a)`, `mean(a)`, `stddev(a)`, `percentile(a, p)`: Over the
   items of an array, or the values of a map; an error if there are none.
   `mean` and `stddev` (of the population) take numbers (giving a float) or

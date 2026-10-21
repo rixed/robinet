@@ -241,6 +241,7 @@ let functions =
       "array" ; "length" ; "concat" ; "append" ; "prepend" ;
       "map" ; "has" ; "remove" ; "keys" ; "values" ;
       "count" ; "min" ; "max" ; "mean" ; "stddev" ; "percentile" ;
+      "sort" ; "sorted" ;
       "print" ; "print_err" ; "assert" ]
 
 (** Variables that the language defines, which are case insensitive as are

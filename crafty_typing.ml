@@ -49,7 +49,7 @@ type builtin =
     | To_ip | To_mac | Getenv
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
-    | Min | Max | Mean | Stddev | Percentile
+    | Min | Max | Mean | Stddev | Percentile | Sorted
     | Print | Print_err | Assert
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
@@ -593,6 +593,11 @@ let builtins =
       "max", Max, [ some_ordered ], item_type ;
       "mean", Mean, [ some_numbers ], float_or_interval ;
       "stddev", Stddev, [ some_numbers ], float_or_interval ;
+      "sorted", Sorted,
+        [ param "a" "an array of ordered values" (function
+            | Type.Array t as a when List.mem t ordered -> Some a
+            | _ -> None) ],
+        List.hd ;
       "percentile", Percentile,
         [ some_ordered ; param "p" "a number" (only Type.[ Float ]) ], item_type ;
       (* Of types that [array_join] checks: *)
@@ -733,6 +738,8 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         | Type.Array t -> mk t (Index (a, expect "An index" (expr env i) Type.Int))
         | Type.Map (k, v) -> mk v (Index (a, expect "A key" (expr ~expected:k env i) k))
         | t -> error loc "Cannot index %s" (a_type t))
+    | A.Call (f, _) when same_name f "sort" ->
+        error loc "sort changes its array and has no value; sorted(a) is a sorted copy"
     | A.Call (f, args) ->
         (match call env loc f args with
         | (Concat | Append | Prepend as b), [ x ; y ], _ ->
@@ -1189,6 +1196,20 @@ and stmt errors env (s : A.stmt) =
                         { env with vars = v :: env.vars ;
                                    declared_here = "LAST" :: env.declared_here }, v in
                 env, Some (mk (Send { depth ; overlay ; layers = tls ; last })))
+        (* [sort(x[i])] is [x[i] := sorted(x[i])]: *)
+        | A.Expr { desc = A.Call (f, [ arg ]) ; _ }
+          when same_name f "sort" && (arg.arg_name = None || arg.arg_name = Some "a") ->
+            let rec target (e : A.expr) =
+                match e.desc with
+                | A.Var n -> n, []
+                | A.Index (a, i) -> let n, is = target a in n, is @ [ i ]
+                | _ -> error e.loc "sort needs a variable, or an item of one" in
+            let name, is = target arg.value in
+            (match (expr env arg.value).typ with
+            | Type.Array t when List.mem t ordered -> ()
+            | t -> error arg.value.loc "sort needs an array of ordered values, not %s" (a_type t)) ;
+            let sorted = { arg.value with desc = A.Call ("sorted", [ arg ]) } in
+            stmt errors env { s with stmt = A.Assign (name, is, None, sorted) }
         | A.Expr e ->
             let te = expr ~tail:true ~used:false env e in
             if te.typ <> Type.Void then (
@@ -1530,6 +1551,13 @@ let check (program : A.program) =
   "line 1, column 21: Argument p of percentile must be a number, not a string" \
     (types "x = percentile([1], \"a\")")
   "line 1, column 10: count is a reserved name" (types "count = 1")
+  "line 1, column 5: sort changes its array and has no value; sorted(a) is a sorted copy" \
+    (types "x = sort([1])")
+  "line 1, column 6: sort needs a variable, or an item of one" (types "sort([1])")
+  "line 2, column 6: sort needs an array of ordered values, not an int[int]" \
+    (types "m = [1: 2]\nsort(m)")
+  "line 1, column 12: Argument a of sorted must be an array of ordered values, not a bool[]" \
+    (types "x = sorted([true])")
   "line 1, column 5: map needs an argument default" \
     (types "m = map(key=1)")
   "line 1, column 5: Cannot tell the type of the items of an empty array" \
