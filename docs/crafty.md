@@ -398,7 +398,9 @@ and the nodes it held.
 - `exp(x)`, `ln(x)`, `log(x)`: Floats; `log` is in base 10.
 - `log2(n)`: The integer base 2 logarithm of a positive int.
 - `int(x)`, `float(x)`, `bool(x)`, `byte(x)`: Conversions between bools,
-  ints, floats and bytes (`byte` keeps the low 8 bits).
+  ints, floats and bytes (`byte` keeps the low 8 bits). `int` and `float`
+  also take an interval, as seconds, and a time, as seconds since 1970
+  (`int` truncates).
 - `interval(secs)`: The interval of that many seconds.
 - `time(secs)`: The time that many seconds after 1970-01-01T00:00:00Z.
 - `now()`: The current time: the clock of the host when crafty runs a

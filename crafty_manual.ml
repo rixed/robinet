@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 de638e5672d84a8a100b2646b075e6d1) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 a5d9a3a143f893a8ac310d05c8e85f62) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### Basic principles
 
 **Protocol stacks** are layers, with their options, separated by slashes:
@@ -135,7 +135,7 @@ int converts to). Where variants meet, as the items of an array, the branches of
 an `if` or a `case`, the operands of `==`, or the values assigned to a variable,
 they make one variant with the constructors of all:
 
-    result = Pending                   # of type (Failed string | Got int | Pending)
+    result = Pending   # of type (Failed string | Got int | Pending)
     any Bytes("pong") { result := Got(length(MATCH)) }
       | ../ICMP { result := Failed("unreachable") }
     print(case result Got { "${result} bytes" } else { "${result}" })
@@ -362,7 +362,9 @@ nodes it held.
 -   `exp(x)`, `ln(x)`, `log(x)`: Floats; `log` is in base 10.
 -   `log2(n)`: The integer base 2 logarithm of a positive int.
 -   `int(x)`, `float(x)`, `bool(x)`, `byte(x)`: Conversions between bools, ints,
-    floats and bytes (`byte` keeps the low 8 bits).
+    floats and bytes (`byte` keeps the low 8 bits). `int` and `float` also take
+    an interval, as seconds, and a time, as seconds since 1970 (`int`
+    truncates).
 -   `interval(secs)`: The interval of that many seconds.
 -   `time(secs)`: The time that many seconds after 1970-01-01T00:00:00Z.
 -   `now()`: The current time: the clock of the host when crafty runs a program.

@@ -126,12 +126,16 @@ let int_of loc = function
     | Float f ->
         if Float.is_finite f then int_of_float f
         else error loc "Cannot convert %s to an int" (A.string_of_float f)
+    | Interval i -> int_of_float (Interval.to_secs i)
+    | Time t -> int_of_float (Clock.Wall.to_secs t)
     | _ -> assert false
 
 let float_of = function
     | Bool b -> if b then 1. else 0.
     | Int i | Byte i -> float_of_int i
     | Float f -> f
+    | Interval i -> Interval.to_secs i
+    | Time t -> Clock.Wall.to_secs t
     | _ -> assert false
 
 (* The [value] of type [from] as a [typ]: *)
@@ -1118,6 +1122,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "x = stddev(array(init=1s, len=0))")
   "0s: [1, 2, 3] [3, 1, 2] [[1, 2], [3]] [b: [1, 2]]\n0s: done" \
     (runs "a = [3, 1, 2]\nb = sorted(a)\nc = [[2, 1], [3]]\nsort(c[0])\nm = [\"b\": [2, 1]]\nsort(a=m[\"b\"])\nprint(\"${b} ${a} ${c} ${m}\")\nsort(a)\nassert(a == b)")
+  "0s: 2s 1s500ms 2026-10-21T00:00:00Z 2026-10-21T00:00:00.25Z true\n0s: done" \
+    (runs "t = time(1792540800.25)\nprint(\"${interval(2)} ${interval(1.5)} ${time(1792540800)} ${t} ${time(float(t)) == t && interval(float(90s)) == 90s}\")")
+  "0s: 1.5 1 -2 1792540800.25 1792540800\n0s: done" \
+    (runs "t = 2026-10-21T00:00:00.25Z\nprint(\"${float(1500ms)} ${int(1500ms)} ${int(-2500ms)} ${float(t)} ${int(t)}\")")
   "0s: failed: line 1, column 5: No minimum of no values" \
     (runs "x = min(array(init=1, len=0))")
   "0s: failed: line 1, column 5: No percentile 101.0, which is not within 0 and 100" \

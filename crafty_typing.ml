@@ -540,6 +540,10 @@ let builtins =
     let scalar =
         param "x" "a bool, int, float, byte or string"
               (only_exactly (Type.String :: scalars)) in
+    (* Times and intervals as numbers of seconds: *)
+    let number =
+        param "x" "a bool, int, float, byte, interval, time or string"
+              (only_exactly Type.(String :: Interval :: Time :: scalars)) in
     let secs what = param "x" what (only_exactly Type.[ Int ; Float ; String ]) in
     let res t _ = t in
     let sized =
@@ -565,8 +569,8 @@ let builtins =
       "ln", Ln, [ num ], res Type.Float ;
       "log", Log, [ num ], res Type.Float ;
       "log2", Log2, [ param "x" "an int" (only Type.[ Int ]) ], res Type.Int ;
-      "int", To_int, [ scalar ], res Type.Int ;
-      "float", To_float, [ scalar ], res Type.Float ;
+      "int", To_int, [ number ], res Type.Int ;
+      "float", To_float, [ number ], res Type.Float ;
       "bool", To_bool, [ scalar ], res Type.Bool ;
       "byte", To_byte, [ scalar ], res Type.Byte ;
       "interval", To_interval, [ secs "a number of seconds or a string" ],
