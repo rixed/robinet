@@ -130,7 +130,8 @@ sudo crafty -i eth0 --ip 192.0.2.5 -e '/IP(dst=192.0.2.10)/ICMP/Echo {
 - `--verbose`: prints the interface's settings and the commands configuring
   it.
 - `--normalize`: prints the program back, without its comments.
-- `--reference`, `--examples`: print the rest of this manual.
+- `--reference`: print the reference manual.
+- `--examples`: print examples of use.
 
 Exit status: 0 when the program completes, 1 when an error ends it, 2 when it
 does not compile, 3 when a budget stops it, 130 when interrupted.
@@ -160,7 +161,8 @@ does not compile, 3 when a budget stops it, 130 when interrupted.
 - `interval`: `5s`, `10ms`, `1m30s`, `1.5ms`, `-2s`. Units: `d`, `h`, `m`,
   `s`, `ms`, `us` (or `µs`), `ns`, `ps`. Printed as `1s500ms`.
 - `time`: `2026-10-20T22:02:45.25Z`, `2026-10-20T22:02+02:00`,
-  `2026-10-20T22:02` (local time). Printed in UTC.
+  `2026-10-20T22:02` (local time). Printed in UTC. `int(t)` and `float(t)`
+  give its unix timestamp, `time(secs)` the reverse.
 - `ip`: `192.0.2.1`. IPv4 only.
 - `mac`: `aa:bb:cc:dd:ee:ff`.
 - arrays: `[1, 2, 3]`. Items of one type.
@@ -401,8 +403,8 @@ that are not named: `append(a, x)`, `histogram(rtts, bucket=5ms)`.
 - `rand(max)`: an int or a float in `[0, max)` (default 1.0), or a bool if
   `max` is `true`. `randbytes(len)`: random bytes.
 - `int(x)`, `float(x)`, `bool(x)`, `byte(x)` (the low 8 bits): `int` and
-  `float` also take an interval, as seconds, and a time, as seconds since
-  1970. `interval(secs)`, `time(secs)`: the reverse.
+  `float` also take an interval, as seconds, and a time (see `time` above).
+  `interval(secs)`: the reverse.
 - `exp(x)`, `ln(x)`, `log(x)` (base 10). `log2(n)`: the integer base 2
   logarithm of a positive int.
 - `array(init=v, len=n)`, `length(a)` (or `count(a)`, of an array, a map or a
