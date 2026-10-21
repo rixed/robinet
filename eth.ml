@@ -1026,7 +1026,7 @@ struct
                          st.iface.emit (Pdu.pack pdu)
 
     let send (st : State.t) proto dst bits =
-        if st.proto = Proto.arp || st.loss = 0. || Random.float 1. >= st.loss then
+        if proto = Proto.arp || st.loss = 0. || Random.float 1. >= st.loss then
             really_send st proto dst bits
         else
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Dropping packet of proto %s from %s" (Proto.to_string proto) (Addr.to_string st.mac))))
