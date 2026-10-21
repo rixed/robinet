@@ -231,7 +231,8 @@ let is_constructor s = s <> "" && Char.is_uppercase s.[0]
  * Lower case. *)
 let functions =
     [ "rand" ; "randbytes" ; "exp" ; "ln" ; "log" ; "log2" ; "int" ; "float" ;
-      "bool" ; "byte" ; "interval" ; "time" ; "now" ; "array" ; "length" ;
+      "bool" ; "byte" ; "interval" ; "time" ; "now" ; "ip_addr" ; "mac_addr" ;
+      "array" ; "length" ;
       "print" ; "print_err" ; "assert" ]
 
 (** Variables that the language defines, which are case insensitive as are

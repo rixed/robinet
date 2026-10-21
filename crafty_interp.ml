@@ -107,6 +107,33 @@ let float_of = function
     | Float f -> f
     | _ -> assert false
 
+(* The [value] of type [from] as a [typ]: *)
+let rec convert loc (from : A.Type.t) (typ : A.Type.t) value =
+    match from, typ, value with
+    | Int, Float, Int i -> Float (float_of_int i)
+    | Byte, Int, Byte b -> Int b
+    | Int, Bool, Int i -> Bool (i <> 0)
+    | String, Array Byte, String s -> bytes_of_string s
+    | Array Byte, String, Array a -> String (string_of_bytes a)
+    | Array Byte, Ip, Array a ->
+        if Array.length a <> 4 then
+            error loc "%d bytes are no IP address" (Array.length a) ;
+        Ip (Ip.Addr.of_bytes (Bytes.of_string (string_of_bytes a)))
+    | Array Byte, Mac, Array a ->
+        if Array.length a <> 6 then
+            error loc "%d bytes are no MAC address" (Array.length a) ;
+        Mac (Eth.Addr.o (Bitstring.bitstring_of_string (string_of_bytes a)))
+    | Variant cs, Variant ds, Variant (n, v) ->
+        Variant (n, convert_to loc (List.assoc n cs) (List.assoc n ds) v)
+    | Record fs, Record gs, Record vs ->
+        Record (Array.of_list (List.mapi (fun i ((_, t), (_, t')) ->
+            convert_to loc t t' vs.(i)) (List.combine fs gs)))
+    | Array t, Array t', Array a -> Array (Array.map (convert_to loc t t') a)
+    | _ -> invalid_arg "Crafty_interp.convert"
+
+and convert_to loc from typ value =
+    if from = typ then value else convert loc from typ value
+
 let call loc (b : T.builtin) args ~print ~print_err ~now =
     match b, args with
     | T.Rand, [ max ] -> rand loc max
@@ -135,6 +162,8 @@ let call loc (b : T.builtin) args ~print ~print_err ~now =
             error loc "%s is not a number of seconds" (A.string_of_float s) ;
         Time (Clock.Wall.of_secs s)
     | T.Now, [] -> Time (now ())
+    | T.To_ip, [ b ] -> convert loc A.Type.bytes A.Type.Ip b
+    | T.To_mac, [ b ] -> convert loc A.Type.bytes A.Type.Mac b
     | T.Make_array, [ init ; Int len ] ->
         if len < 0 then error loc "array needs a length, not %d" len ;
         Array (Array.make len init)
@@ -146,33 +175,6 @@ let call loc (b : T.builtin) args ~print ~print_err ~now =
         if cond = Bool false || cond = Int 0 then error loc "%s" msg ;
         Void
     | _ -> assert false
-
-(* The [value] of type [from] as a [typ]: *)
-let rec convert loc (from : A.Type.t) (typ : A.Type.t) value =
-    match from, typ, value with
-    | Int, Float, Int i -> Float (float_of_int i)
-    | Byte, Int, Byte b -> Int b
-    | Int, Bool, Int i -> Bool (i <> 0)
-    | String, Array Byte, String s -> bytes_of_string s
-    | Array Byte, String, Array a -> String (string_of_bytes a)
-    | Array Byte, Ip, Array a ->
-        if Array.length a <> 4 then
-            error loc "%d bytes are no IP address" (Array.length a) ;
-        Ip (Ip.Addr.of_bytes (Bytes.of_string (string_of_bytes a)))
-    | Array Byte, Mac, Array a ->
-        if Array.length a <> 6 then
-            error loc "%d bytes are no MAC address" (Array.length a) ;
-        Mac (Eth.Addr.o (Bitstring.bitstring_of_string (string_of_bytes a)))
-    | Variant cs, Variant ds, Variant (n, v) ->
-        Variant (n, convert_to loc (List.assoc n cs) (List.assoc n ds) v)
-    | Record fs, Record gs, Record vs ->
-        Record (Array.of_list (List.mapi (fun i ((_, t), (_, t')) ->
-            convert_to loc t t' vs.(i)) (List.combine fs gs)))
-    | Array t, Array t', Array a -> Array (Array.map (convert_to loc t t') a)
-    | _ -> invalid_arg "Crafty_interp.convert"
-
-and convert_to loc from typ value =
-    if from = typ then value else convert loc from typ value
 
 let arith loc op a b =
     match op, a, b with
@@ -973,6 +975,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "t = now()\nwait 1500ms\nprint(\"${now() - t}\")")
   "0s: failed: line 1, column 10: 2026-10-20T00:00:00Z - 1970-01-01T00:00:00Z is too long an interval" \
     (runs "print(\"${2026-10-20T00:00Z - time(0)}\")")
+  "0s: 10.0.0.1 true 01:02:03:04:05:06\n0s: done" \
+    (runs "x = ip_addr(#0a000001)\nprint(\"${x} ${x == 10.0.0.1} ${mac_addr(#010203040506)}\")")
+  "0s: failed: line 1, column 5: 3 bytes are no IP address" \
+    (runs "x = ip_addr(#010203)")
+  "0s: failed: line 1, column 5: 4 bytes are no MAC address" \
+    (runs "x = mac_addr(#01020304)")
   "0s: [1.5, 1.5] 2 1.5 4\n0s: done" \
     (runs "x = array(init=1.5, len=2)\nprint(\"${x} ${length(x)} ${x[1]} ${length(randbytes(4))}\")")
   "0s: failed: line 3, column 1: Assertion failed: (x * 2) == 5" \

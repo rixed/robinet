@@ -46,6 +46,7 @@ type var = { name : string ; id : int ; typ : Type.t }
 type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
     | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
+    | To_ip | To_mac
     | Make_array | Length | Print | Print_err | Assert
 
 type expr = { loc : A.location ; typ : Type.t ; desc : desc }
@@ -524,6 +525,10 @@ let builtins =
         [ param "x" "a number of seconds since 1970" (only_exactly Type.[ Int ; Float ]) ],
         res Type.Time ;
       "now", Now, [], res Type.Time ;
+      "ip_addr", To_ip, [ param "b" "4 bytes" (only_exactly Type.[ bytes ]) ],
+        res Type.Ip ;
+      "mac_addr", To_mac, [ param "b" "6 bytes" (only_exactly Type.[ bytes ]) ],
+        res Type.Mac ;
       "array", Make_array,
         [ param "init" "a value" any_value ; param "len" "an int" (only Type.[ Int ]) ],
         (fun ts -> Type.Array (List.hd ts)) ;
@@ -1340,6 +1345,8 @@ let check (program : A.program) =
     (types "x = length(3)")
   "line 1, column 8: Argument cond of assert must be a bool or an int, not a string" \
     (types "assert(\"x\")")
+  "line 1, column 13: Argument b of ip_addr must be 4 bytes, not a string" \
+    (types "x = ip_addr(\"abcd\")")
   "line 1, column 1: x would have no value" \
     (types "x = assert(true)")
   "line 1, column 7: Argument s of print must be a string, not an int" \
