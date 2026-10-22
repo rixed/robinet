@@ -123,6 +123,7 @@ sudo crafty -i eth0 --ip 192.0.2.5 -e '/IP(dst=192.0.2.10)/ICMP/Echo {
   stop, so that connections close (default 2s).
 - `--check`: only compiles the program.
 - `--warn-error`: the warnings (on stderr) are errors.
+- `--no-warning`: no warnings.
 - `--cleanup`: undoes what a killed crafty left on the host (firewall rules,
   reserved ports).
 - `--promisc`: receives the frames for other addresses too.

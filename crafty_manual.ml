@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 63ad60d31cc7639da08fc53791a210ec) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 912f3b03dcdb85dc64b90f4fe0baadfc) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -109,6 +109,8 @@ The language is statically typed. Comments start with `#`.
 -   `--check`: only compiles the program.
 
 -   `--warn-error`: the warnings (on stderr) are errors.
+
+-   `--no-warning`: no warnings.
 
 -   `--cleanup`: undoes what a killed crafty left on the host (firewall rules,
     reserved ports).
