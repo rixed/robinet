@@ -828,19 +828,24 @@ let test_power () =
        held back waiting on an ARP that nobody answered leaves the adapter
        believing a request is in flight; left there across a power cut, the
        next frame for that address joins the queue and no request ever goes
-       out again. *)
+       out again. The cut comes before the adapter gives up on the address
+       (see [Eth.arp_max_requests]), which would clear it as well. *)
     let waiting () =
         Tools.BitHash.length h2.Host.eth_state.Eth.State.postponed in
-    let to_nowhere () =
+    let to_nowhere ?(meanwhile=ignore) () =
         h2.Host.trx.Host.udp_send
             (Host.IPv4 (Ip.Addr.of_dotted_string "10.2.0.99"))
             (Udp.Port.o 1234) (Bitstring.zeroes_bitstring 64) ;
+        Simulation.delay sim.root.power (Clock.Interval.msec 500.) meanwhile () ;
         Simulation.run sim false in
-    to_nowhere () ;
+    let waited = ref 0 and left = ref (-1) in
+    to_nowhere ~meanwhile:(fun () ->
+        waited := waiting () ;
+        Simulation.power_down h2.trx.widget.power ;
+        left := waiting ()) () ;
     check "a frame for nobody leaves the adapter waiting on an ARP"
-        (waiting () > 0) ;
-    Simulation.power_down h2.trx.widget.power ;
-    check "which a power cut clears" (waiting () = 0) ;
+        (!waited > 0) ;
+    check "which a power cut clears" (!left = 0) ;
     (* And having forgotten, it asks again rather than queueing in silence. *)
     let carried () =
         match List.find (fun (p : Widget.property) -> p.name = "total bits")
