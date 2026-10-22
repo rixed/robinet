@@ -1069,7 +1069,16 @@ and layer_field env loc name from_start nth f =
     let ctx =
         match env.layer_ctx with
         | Some ctx when ctx.in_cond -> ctx
-        | _ -> error loc "Fields of %s can only be read in a condition" (lname name) in
+        | ctx ->
+            let n = lname name in
+            error loc "%s.%s is a field of a packet being matched, which only the \
+                       condition of a pattern can read (as in \"expect Bytes(%s.%s == x)\")%s.\n  \
+                       Of a packet in a variable, it is \"p[%s].%s\": \"LAST[%s].%s\" for the \
+                       last one sent, \"MATCH[%s].%s\" for the one that matched."
+                n f n f
+                (if Option.is_none ctx then ""
+                 else "; the options of a stack cannot read the layers below")
+                n f n f n f in
     let positions =
         Array.to_list ctx.below |>
         List.mapi (fun i (l, m) -> i, l, m) |>
@@ -1992,8 +2001,10 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"a\") }\nx = LAST")
   "line 1, column 36: LAST is only defined once a packet was sent, in that block or an enclosing one" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { x = LAST\n  Bytes(\"a\") }")
-  "line 1, column 5: Fields of IP can only be read in a condition" \
+  "line 1, column 5: IP.src is a field of a packet being matched, which only the condition of a pattern can read (as in \"expect Bytes(IP.src == x)\").\n  Of a packet in a variable, it is \"p[IP].src\": \"LAST[IP].src\" for the last one sent, \"MATCH[IP].src\" for the one that matched." \
     (types "x = IP.src")
+  "line 1, column 44: IP.ttl is a field of a packet being matched, which only the condition of a pattern can read (as in \"expect Bytes(IP.ttl == x)\"); the options of a stack cannot read the layers below.\n  Of a packet in a variable, it is \"p[IP].ttl\": \"LAST[IP].ttl\" for the last one sent, \"MATCH[IP].ttl\" for the one that matched." \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=7) { Bytes(\"ttl ${IP.ttl}\") }")
   "line 1, column 5: =~ is not supported yet" \
     (types "x = y =~ /IP")
   "line 1, column 39: ../ goes below the bottom of the stack\n  In this block, the stack is /IP/UDP (../ goes back to /IP, ../../ to /Eth).\n  Do you mean \"../UDP\"?" \
