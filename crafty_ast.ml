@@ -303,10 +303,6 @@ let keywords =
     [ "true" ; "false" ; "repeat" ; "foreach" ; "retry" ; "catch" ; "if" ;
       "elsif" ; "else" ; "case" ; "break" ; "expect" ; "any" ; "on" ; "wait" ]
 
-(** Keywords of what the language will have but not yet. Lower case. *)
-let unsupported =
-    [ "report" ]
-
 (** {2 Printing}
  *
  * As source code that parses back into the same program, with every operation

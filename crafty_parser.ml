@@ -171,7 +171,7 @@ let identifier =
 
 let is_in names s = List.mem (String.lowercase_ascii s) names
 
-let is_keyword s = is_in keywords s || is_in unsupported s
+let is_keyword s = is_in keywords s
 
 let is_reserved s =
     is_keyword s || is_in functions s || Layer_name.of_string s <> None ||
@@ -756,11 +756,7 @@ let stmt =
          params ~pattern:true "on" [ "for" ; "linger" ; "timeout" ; "max" ] +- sp ++
          patterns ++ body >>: fun ((p, patterns), body) ->
             On { for_ = p "for" ; linger = p "linger" ; timeout = p "timeout" ;
-                 max = p "max" ; patterns ; body }) |||
-        (identifier >>= (fun s ->
-            if List.mem (String.lowercase_ascii s) unsupported then return s
-            else fail) >>:
-            fun s -> reject "%s is not supported yet" s)) |? "statement"
+                 max = p "max" ; patterns ; body })) |? "statement"
 
 let () =
     set_block (
@@ -1057,7 +1053,6 @@ let parse_patterns text =
   "line 1, column 15: Unknown function foo" (reads "/IP(dst=foo(1))/UDP(dst=1)/Bytes(\"x\")")
   "line 1, column 16: Unknown function foo" (reads "print(\"${foo(2)}\")")
   "line 1, column 11: Carets on both sides of IP" (reads "x = a[^IP^]")
-  "line 1, column 7: report is not supported yet" (reads "report")
   "line 1, column 8: Expected constructor in expression" (reads "case x {}")
   "line 1, column 10: Expected '{' in block" (reads "case x IP")
   "line 2, column 15: MATCH is a reserved name" (reads "x = 1\ncase var=MATCH x IP {}")

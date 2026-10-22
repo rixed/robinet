@@ -1234,7 +1234,7 @@ let record_type (l : layer) mode =
   List.length (List.unique names) = List.length names && \
   List.for_all (fun n -> \
       N.of_string n = None && \
-      not (List.mem n Crafty_ast.(keywords @ unsupported @ functions @ \
+      not (List.mem n Crafty_ast.(keywords @ functions @ \
                                   List.map String.lowercase_ascii predefined)) && \
       List.for_all (fun (l : layer) -> find_field l n = None) all) names
 *)
