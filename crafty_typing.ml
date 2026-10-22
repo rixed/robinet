@@ -404,6 +404,8 @@ type env =
       poisoned : string list ;
       (* The current protocol stack, top first: *)
       stack : (L.layer * L.mode) list ;
+      (* Its layers as written, for messages: *)
+      stack_text : string list ;
       (* How many [repeat] and [on] enclose: *)
       loops : int ;
       layer_ctx : layer_ctx option ;
@@ -412,6 +414,7 @@ type env =
        * for the value of a declaration, an assignment or a statement: *)
       may_wait : bool ;
       errors : errors ;
+      warnings : errors ;
       (* Where the variables of the declarations are declared, by id: *)
       declared_at : (int, A.location) Hashtbl.t ;
       (* The type of the variables declared there, when wider than that of
@@ -458,6 +461,11 @@ let string_of_layers stack =
         List.filter_map (fun ((l : L.layer), _) ->
             if l == L.root then None else Some ("/"^ L.to_string l)) stack |>
         String.concat ""
+
+(* A stack as written (top first), without the implicit root: *)
+let string_of_stack_text texts =
+    match List.rev texts with
+    | "Eth" :: (_ :: _ as texts) | texts -> "/"^ String.concat "/" texts
 
 (* [base] (top first) with layer [name] on top, and the layer: the root is
  * put below it if need be: *)
@@ -1184,6 +1192,24 @@ and stack_hint env anchor (layers : A.layer list) ~sends =
         { w_name = al.layer_name ; bang = al.manual ; plain = al.options = [] ;
           text = A.string_of_stack ~sends (A.Relative 0) [ al ] }) layers)
 
+(* The stack as written (top first) that [tls], typed from [layers], make on
+ * top of the [depth] first layers of the current stack; a layer that overlays
+ * one of the same mode without options is written as that one: *)
+and stack_text env depth overlay (layers : A.layer list) tls =
+    let n = List.length env.stack - depth in
+    let over = List.rev (List.take n (List.combine env.stack env.stack_text)) in
+    let written =
+        List.map (fun (al : A.layer) ->
+            al.options = [], A.string_of_stack (A.Relative 0) [ al ]) layers in
+    let written =
+        if List.length tls > List.length layers then (true, "Eth") :: written
+        else written in
+    List.rev (List.mapi (fun i ((plain, w), tl) ->
+        match List.nth_opt over i with
+        | Some ((_, m), ow) when i < overlay && plain && tl.mode = m -> ow
+        | _ -> w) (List.combine written tls)) @
+    List.drop n env.stack_text
+
 (* The layers of a stack statement on top of [base], over the layers [over]
  * (bottom first) that were taken off the current stack, and the new stack.
  * The layers that are over the same ones take their key, which they need
@@ -1278,8 +1304,36 @@ and pattern env (p : A.pattern) =
             { pl_loc = pl.pl_loc ; pl_layer = l ; pl_mode = mode ; cond } :: pls
         ) (base, []) p.pat_layers in
     let pat_layers = List.rev pls in
+    if p.anchor = A.Absolute then overreach env p pat_layers ;
     { pat_loc = p.pat_loc ; depth ; pat_layers ;
       overlay = overlay over (List.map (fun pl -> pl.pl_layer) pat_layers) }
+
+(* Warns of an absolute pattern [p] that shares with the current stack more
+ * than its IP layer, or all of it, but without a condition on those, which
+ * then matches the packets of any stream rather than of the stack's; the
+ * relative pattern suggested instead overlays from the lowest shared layer
+ * that has a condition: *)
+and overreach env (p : A.pattern) pat_layers =
+    let n = List.length env.stack in
+    let shared =
+        overlay (List.rev_map fst env.stack) (List.map (fun pl -> pl.pl_layer) pat_layers) in
+    let cond i = (List.nth pat_layers i).cond <> None in
+    if shared >= 2 && (shared >= 3 || shared = n) && not (cond 0 || cond 1) then
+        let i0 =
+            List.find_opt (fun i -> i >= 2 && cond i) (List.init shared identity) |? (
+                if shared = List.length pat_layers then shared - 1 else shared) in
+        let written = List.length pat_layers - List.length p.pat_layers in
+        let fix =
+            { p with anchor = A.Relative (n - i0) ;
+                     pat_layers = List.drop (i0 - written) p.pat_layers } in
+        env.warnings :=
+            (p.pat_loc,
+             Printf.sprintf "This pattern matches any %s, not only those of the \
+                             current stack %s.\n  Do you mean \"%s\"?"
+                (string_of_layers (List.rev_map (fun pl -> pl.pl_layer, pl.pl_mode) pat_layers))
+                (string_of_stack_text env.stack_text)
+                (IO.to_string (A.print_pattern ~all:false ~indent:0) fix)) ::
+            !(env.warnings)
 
 (** {2 Statements} *)
 
@@ -1351,7 +1405,8 @@ and stmt errors env (s : A.stmt) =
             let depth = List.length base in
             (match body with
             | Some body ->
-                let body = block errors { env with stack } body in
+                let stack_text = stack_text env depth overlay layers tls in
+                let body = block errors { env with stack ; stack_text } body in
                 env, Some (mk (Stack { depth ; overlay ; layers = tls ; body }))
             | None ->
                 (* One [LAST] per block, that the packets it sends update: *)
@@ -1575,31 +1630,32 @@ and expr_declarations e =
     | Construct (_, e) -> Option.map_default expr_declarations [] e
     | Lit _ | Var _ | Packet_field _ -> []
 
-(** The typed program, or the errors, in the order of the source. *)
-let check (program : A.program) =
+(** The typed program, or the errors, in the order of the source; and in
+ * [warnings], what makes sense but is likely not what was meant. *)
+let check ?(warnings=ref []) (program : A.program) =
     let widened = Hashtbl.create 7 in
     (* Until no variable is widened, which types grow until they have all
      * the constructors of the program: *)
     let rec typed () =
-        let errors = ref [] in
         let env = { vars = [] ; declared_here = [] ; poisoned = [] ; stack = [] ;
-                    loops = 0 ; layer_ctx = None ; may_wait = true ; errors ;
+                    stack_text = [] ; loops = 0 ; layer_ctx = None ;
+                    may_wait = true ; errors = ref [] ; warnings = ref [] ;
                     declared_at = Hashtbl.create 7 ; widened ; widening = ref false } in
-        let p = block errors env program in
-        if !(env.widening) then typed () else p, errors in
-    let p, errors = typed () in
-    if !errors = [] then Ok p
-    else
-        Error (List.rev_map (fun (where, message) ->
-            Crafty_parser.{ where ; message }) !errors |>
-            List.sort (fun (a : Crafty_parser.error) b -> compare a.where b.where))
+        let p = block env.errors env program in
+        if !(env.widening) then typed () else p, env in
+    let p, env = typed () in
+    let in_order es =
+        List.rev_map (fun (where, message) -> Crafty_parser.{ where ; message }) es |>
+        List.sort (fun (a : Crafty_parser.error) b -> compare a.where b.where) in
+    warnings := in_order !(env.warnings) ;
+    if !(env.errors) = [] then Ok p else Error (in_order !(env.errors))
 
 (** The typed patterns, absolute and with no variable but the fields of their
  * layers, or what is wrong with them. *)
 let check_patterns (ps : A.patterns) =
     let env = { vars = [] ; declared_here = [] ; poisoned = [] ; stack = [] ;
-                loops = 0 ; layer_ctx = None ; may_wait = false ;
-                errors = ref [] ; declared_at = Hashtbl.create 1 ;
+                stack_text = [] ; loops = 0 ; layer_ctx = None ; may_wait = false ;
+                errors = ref [] ; warnings = ref [] ; declared_at = Hashtbl.create 1 ;
                 widened = Hashtbl.create 1 ; widening = ref false } in
     try
         Ok (List.map (fun (p : A.pattern) ->
@@ -1621,6 +1677,31 @@ let check_patterns (ps : A.patterns) =
                   v.name ^": "^ Type.to_string v.typ) (declarations b))
           | Error es ->
               String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es)
+*)
+
+(* [warns text] is what the program in that text is warned of. *)
+(*$inject
+  let warns text =
+      let warnings = ref [] in
+      ignore (check ~warnings (Result.get_ok (Crafty_parser.parse text))) ;
+      String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) !warnings)
+*)
+
+(*$= warns & ~printer:identity
+  "line 2, column 9: This pattern matches any /IP/UDP/DNS/Answer, not only those of the current stack /IP(dst=1.2.3.4)/UDP(dst=53)/DNS.\n  Do you mean \"Answer\"?" \
+    (warns "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { Query(\"x\")\n expect /IP/UDP/DNS/Answer {} }")
+  "line 1, column 43: This pattern matches any /IP/UDP/DNS/Answer, not only those of the current stack /IP(dst=1.2.3.4)/UDP(dst=53)/DNS.\n  Do you mean \"../../UDP(src == 53)/DNS/Answer\"?" \
+    (warns "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { expect /IP/UDP(src == 53)/DNS/Answer {} }")
+  "line 1, column 39: This pattern matches any /IP/UDP, not only those of the current stack /IP(dst=1.2.3.4)/UDP(dst=53).\n  Do you mean \"../UDP\"?" \
+    (warns "/IP(dst=1.2.3.4)/UDP(dst=53) { expect /IP/UDP {} }")
+  "line 1, column 27: This pattern matches any /IP/ICMP, not only those of the current stack /IP(dst=1.2.3.4).\n  Do you mean \"ICMP\"?" \
+    (warns "/IP(dst=1.2.3.4) { expect /IP/ICMP {} }")
+  "line 1, column 52: This pattern matches any /IP/UDP/DNS/Answer, not only those of the current stack /IP(dst=1.2.3.4)/UDP(dst=53)/DNS.\n  Do you mean \"Answer\"?" \
+    (warns "/IP(dst=1.2.3.4)/UDP(dst=53) { ../UDP/DNS { expect /IP/UDP/DNS/Answer {} } }")
+  "" (warns "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { expect /IP(src == 1.2.3.4)/UDP/DNS/Answer {} }")
+  "" (warns "/IP(dst=1.2.3.4)/UDP(dst=53) { expect /IP/ICMP {} }")
+  "" (warns "/IP(dst=1.2.3.4)/TCP(dst=53) { expect /IP/UDP/DNS/Answer {} }")
+  "" (warns "expect /IP/UDP/DNS/Answer {}")
 *)
 
 (*$= types & ~printer:identity

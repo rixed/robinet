@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 3dee7b0be067d8aa8b56252a208c5781) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 63ad60d31cc7639da08fc53791a210ec) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -107,6 +107,8 @@ The language is statically typed. Comments start with `#`.
     stop, so that connections close (default 2s).
 
 -   `--check`: only compiles the program.
+
+-   `--warn-error`: the warnings (on stderr) are errors.
 
 -   `--cleanup`: undoes what a killed crafty left on the host (firewall rules,
     reserved ports).
@@ -281,7 +283,10 @@ not.
 
 ### Patterns
 
--   `/IP/UDP(dst == 7)/Bytes`: *absolute*, matched from the interface up.
+-   `/IP/UDP(dst == 7)/Bytes`: *absolute*, matched from the interface up, on any
+    stream. In a block, one that shares with its stack more than `IP`, or all of
+    it, with no condition on `IP`, is warned of: `/IP/UDP/DNS/Answer` in a block
+    on `/IP/UDP/DNS` is likely meant as `Answer`.
 -   `Bytes("pong")`: *relative*, on top of the current stack, so only on its
     stream.
 -   `../ICMP/DestUnreachable`: relative to a layer below the top of the current

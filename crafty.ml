@@ -73,6 +73,7 @@ let () =
     and fw = ref false and promisc = ref false and print_packets = ref false
     and print_only = ref None and stats = ref false and cleanup = ref false
     and check = ref false and normalize = ref false and format = ref Human
+    and warn_error = ref false
     and linger = ref (Clock.Interval.sec 2.)
     (* What the errors name it after, and its text: *)
     and prog = ref None
@@ -150,6 +151,7 @@ let () =
         "--verbose", Arg.Set Host_config.verbose,
             " print the interface's settings and the commands configuring it" ;
         "--check", Arg.Set check, " compile the program, and exit" ;
+        "--warn-error", Arg.Set warn_error, " take the warnings as errors" ;
         "--format",
             Arg.Symbol (List.map fst formats, fun s -> format := List.assoc s formats),
             " print packets, stats and the outcome as text (default), CSV or JSON" ;
@@ -182,7 +184,15 @@ let () =
         exit 2 in
     (* A typo in the program changes nothing on the host: *)
     let compile () =
-        match Crafty_interp.compile text with Ok p -> p | Error es -> fail es in
+        let warnings = ref [] in
+        let res = Crafty_interp.compile ~warnings text in
+        List.iter (fun e ->
+            Printf.eprintf "%s: %a: Warning: %s\n%!" prog_name
+                Crafty_ast.print_location e.Crafty_parser.where e.message) !warnings ;
+        match res with
+        | Error es -> fail es
+        | Ok _ when !warn_error && !warnings <> [] -> exit 2
+        | Ok p -> p in
     if !normalize then (
         if !check then ignore (compile ()) ;
         (match Crafty_parser.parse text with

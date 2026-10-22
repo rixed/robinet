@@ -1015,11 +1015,12 @@ type program = Crafty_typing.block
 
 let print_error = Crafty_parser.print_error
 
-(** The program, or all the errors found in it, in the order of the source. *)
-let compile text : (program, error list) result =
+(** The program, or all the errors found in it, in the order of the source;
+ * and in [warnings], what is likely not what was meant. *)
+let compile ?warnings text : (program, error list) result =
     match Crafty_parser.parse text with
     | Error e -> Error [ e ]
-    | Ok p -> Crafty_typing.check p
+    | Ok p -> Crafty_typing.check ?warnings p
 
 (** The filter of that text, alternative absolute patterns, or what is wrong
  * with it. *)

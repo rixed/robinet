@@ -122,6 +122,7 @@ sudo crafty -i eth0 --ip 192.0.2.5 -e '/IP(dst=192.0.2.10)/ICMP/Echo {
 - `--linger D`: once the program is done, how long to wait for the traffic to
   stop, so that connections close (default 2s).
 - `--check`: only compiles the program.
+- `--warn-error`: the warnings (on stderr) are errors.
 - `--cleanup`: undoes what a killed crafty left on the host (firewall rules,
   reserved ports).
 - `--promisc`: receives the frames for other addresses too.
@@ -296,7 +297,10 @@ is not.
 
 ### Patterns
 
-- `/IP/UDP(dst == 7)/Bytes`: *absolute*, matched from the interface up.
+- `/IP/UDP(dst == 7)/Bytes`: *absolute*, matched from the interface up, on
+  any stream. In a block, one that shares with its stack more than `IP`, or
+  all of it, with no condition on `IP`, is warned of: `/IP/UDP/DNS/Answer` in
+  a block on `/IP/UDP/DNS` is likely meant as `Answer`.
 - `Bytes("pong")`: *relative*, on top of the current stack, so only on its
   stream.
 - `../ICMP/DestUnreachable`: relative to a layer below the top of the current
