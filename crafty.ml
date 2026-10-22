@@ -245,7 +245,8 @@ let () =
     (* Configuring the host: *)
     let changes =
         if not configure then None else (
-            info "Configuring interface %s..." !ifname ;
+            if !Host_config.verbose then
+                info "Configuring interface %s..." !ifname ;
             let t = Host_config.changes "crafty" in
             at_exit (fun () -> Host_config.undo t) ;
             (try
