@@ -1176,6 +1176,15 @@ and binop env loc op a b =
             mk Type.Interval (Binop (op, a, expect "" b Type.Float))
         | (Type.Int | Type.Float), Type.Interval when op = A.Mul ->
             mk Type.Interval (Binop (op, expect "" a Type.Float, b))
+        (* A repetition, of a byte as of bytes: *)
+        | (Type.Array _ | Type.Byte), Type.Int | Type.Int, (Type.Array _ | Type.Byte)
+          when op = A.Mul ->
+            let as_array x =
+                if x.typ = Type.Byte then
+                    { x with typ = Type.Array Type.Byte ; desc = Array [ x ] }
+                else x in
+            let a = as_array a and b = as_array b in
+            mk (if b.typ = Type.Int then a.typ else b.typ) (Binop (op, a, b))
         (* Numbers offset times by that many seconds: *)
         | Type.Time, Type.Time when op = A.Sub ->
             mk Type.Interval (Binop (op, a, b))
@@ -1764,6 +1773,10 @@ let check_patterns (ps : A.patterns) =
     (types "x = 1.0\nx += 1")
   "a: int[], b: int[], c: float[], d: int[][]" \
     (types "a = [1] + [2]\nb = [1] + 2\nc = 1 + [2.5]\nd = [[1]] + [2]")
+  "a: byte[], b: byte[], c: int[], d: byte[]" \
+    (types "a = #01 * 2\nb = 3 * #0102\nc = [1] * 2\nd = #0001\nd *= 4")
+  "line 1, column 5: Cannot apply * to a byte and a byte" \
+    (types "a = #01 * #02")
   "a: int[], b: float[], c: int[], d: float[]" \
     (types "a = [1]\na += 2\nb = append([1.5], 1)\nc = prepend(a=[2], x=1)\nd = concat([1], [2.5])")
   "m: string[int], n: int[ip], c: int, k: ip[], v: int[], b: bool, l: int" \

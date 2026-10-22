@@ -347,6 +347,9 @@ let arith loc op a b =
     | A.Sub, Interval a, Interval b -> Interval (Interval.sub a b)
     | A.Mul, Interval a, Float b | A.Mul, Float b, Interval a ->
         Interval (Interval.mul a b)
+    | A.Mul, Array a, Int n | A.Mul, Int n, Array a ->
+        if n < 0 then error loc "Cannot repeat %d times" n ;
+        Array (Array.concat (List.make n a))
     | A.Div, Interval _, Float 0. -> error loc "Division by zero"
     | A.Div, Interval a, Float b -> Interval (Interval.div a b)
     | A.Sub, Time a, Time b ->
@@ -1349,6 +1352,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "repeat { if I == 2 { break }\n  print(\"${I}\") }\nprint(\"after\")")
   "0s: failed: line 1, column 4: Division by zero" \
     (runs "if 1 / 0 > 0 {}\nprint(\"not reached\")")
+  "0s: #0101 #010201020102 [1, 2, 1, 2] 0\n0s: done" \
+    (runs "x = 0\nprint(\"${#01 * 2} ${3 * #0102} ${[1, 2] * 2} ${length(#00 * x)}\")")
+  "0s: failed: line 1, column 10: Cannot repeat -1 times" \
+    (runs "print(\"${#01 * -1}\")")
   "0s: 1.0 6 11 small\n0s: done" \
     (runs "x = if 1 > 0 { 1 } else { 2.5 }\ny = { z = 2 ; z * 3 }\nprint(\"${x} ${y} ${1 + if y > 5 { 10 } else { 20 }} ${if y > 9 { \"big\" } else { \"small\" }}\")")
   "1s: 2\n1s: 3\n1s: done" \

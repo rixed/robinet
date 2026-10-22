@@ -320,7 +320,8 @@ Operators, from the tightest binding to the loosest:
 
 1. `!x`, `-x`.
 2. `*`, `/`, `%`: on numbers; an interval can be multiplied or divided by a
-   number.
+   number. An array (or a byte) times an int repeats it: `#01 * 2` is
+   `#0101`, `[0] * 3` is `[0, 0, 0]`.
 3. `+`, `-`: on numbers and intervals; a time minus a time is an interval, a
    time plus an interval (or a number of seconds) is a time. `+` also
    concatenates arrays (`[1] + [2, 3]`) and appends or prepends an item
