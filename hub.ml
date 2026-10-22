@@ -27,7 +27,7 @@ open Tools
 module Repeater =
 struct
     type t = { ports : ((bitstring -> unit) * bool) array ;
-       mutable speed : Eth.Speed.t ;  (* One of [speeds] *)
+       mutable speed : EthSpeed.t ;  (* One of [speeds] *)
   (* A Repeater can only transmit one frame at a time. If another is received
    * while one is copied then both are garbage. The hub will emit a jamming
    * signal for 32bits on all ports, and the hub is effectively unusable during
@@ -69,7 +69,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
             Metric.Counter.inc t.collisions ~now ~params
         ) else (
             (* Mark the hub as busy and do transfers that frame *)
-            let ttime = Eth.Speed.duration t.speed (bitstring_length pld) in
+            let ttime = EthSpeed.duration t.speed (bitstring_length pld) in
             t.busy_until <- Clock.Time.add now ttime ;
             Metric.(Counter.add t.volume ~now (bytelength pld)
                                 ~params:(dir_params ~port:n "ingress")) ;
@@ -108,14 +108,14 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
 
     (* What a repeater can be clocked at, and nothing else: a hub is a 10 or a
      * 100Mbps device, the faster ones having never been built as repeaters. *)
-    let speeds = Eth.Speed.[| Eth10Mbps ; Eth100Mbps |]
-    let speed_names = Array.map Eth.Speed.to_string speeds
+    let speeds = EthSpeed.[| Eth10Mbps ; Eth100Mbps |]
+    let speed_names = Array.map EthSpeed.to_string speeds
 
-    let make ~parent ?(own_power=true) ?location ?(speed=Eth.Speed.Eth100Mbps)
+    let make ~parent ?(own_power=true) ?location ?(speed=EthSpeed.Eth100Mbps)
              n name =
         if not (Array.mem speed speeds) then
             invalid_arg ("Hub.Repeater.make: no hub runs at "^
-                         Eth.Speed.to_string speed) ;
+                         EthSpeed.to_string speed) ;
         let widget =
             Widget.make ~parent ?location ~device_type:"hub" ~own_power
                         name in
@@ -123,7 +123,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
             ports = Array.make n (ignore_bits ~logger:widget.logger, false) ;
             speed ;
             busy_until = Clock.Time.beginning_of_time ;
-            jamming_time = Eth.Speed.duration speed 32 ;
+            jamming_time = EthSpeed.duration speed 32 ;
             widget ;
             volume = Metric.Counter.make () ;
             collisions = Metric.Counter.make () } in
@@ -146,7 +146,7 @@ mutable jamming_time : Clock.Interval.t ; (** Cached from hub's speed *)
                 ~getter:(fun () -> `Int (Array.findi ((=) t.speed) speeds))
                 ~setter:(fun v ->
                     t.speed <- speeds.(to_choice (choices speed_names) v) ;
-                    t.jamming_time <- Eth.Speed.duration t.speed 32) ;
+                    t.jamming_time <- EthSpeed.duration t.speed 32) ;
             metric_property "volume" ~descr:"Volume received and emitted."
                 ~units:"bytes"
                 (Metric.Counter.T t.volume) ;
@@ -546,11 +546,11 @@ struct
             let msg = if order then "(near end first)" else "(far end first)" in
             assert_equal ~printer ~msg:("the fastest both have "^ msg)
                 ("1Gbps full-duplex", "1Gbps full-duplex")
-                (link Eth.Speed.[ Eth10Mbps ; Eth1Gbps ; Eth5Gbps ]
-                      Eth.Speed.[ Eth100Mbps ; Eth1Gbps ] order) ;
+                (link EthSpeed.[ Eth10Mbps ; Eth1Gbps ; Eth5Gbps ]
+                      EthSpeed.[ Eth100Mbps ; Eth1Gbps ] order) ;
             assert_equal ~printer ~msg:("nothing in common is no link "^ msg)
                 ("down", "down")
-                (link Eth.Speed.[ Eth10Mbps ] Eth.Speed.[ Eth1Gbps ] order)
+                (link EthSpeed.[ Eth10Mbps ] EthSpeed.[ Eth1Gbps ] order)
         ) [ true ; false ]
      *)
     (*$>*)

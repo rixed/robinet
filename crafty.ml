@@ -30,6 +30,7 @@
   killed.
 *)
 open Batteries
+module EthSpeed = SimTypes.EthSpeed
 
 let synopsis = "crafty [options] (PROG.cfty | -e PROG)"
 let usage = synopsis ^"\n\nOptions:"
@@ -127,8 +128,8 @@ let () =
         "--promisc", Arg.Set promisc,
             " receive the frames for other addresses too (promiscuous mode)" ;
         "--speed",
-            Arg.Symbol (Array.to_list Eth.Speed.names, fun s ->
-                speed := Array.find_opt (fun x -> Eth.Speed.to_string x = s) Eth.Speed.all),
+            Arg.Symbol (Array.to_list EthSpeed.names, fun s ->
+                speed := Array.find_opt (fun x -> EthSpeed.to_string x = s) EthSpeed.all),
             " the speed of the link, rather than the interface's (or else 1Gbps)" ;
         "--duplex",
             Arg.Symbol ([ "full" ; "half" ], fun s -> full_duplex := Some (s = "full")),
@@ -232,12 +233,12 @@ let () =
         | None, _ -> die "Interface %s has no IPv4 address." !ifname in
     let speed, full_duplex =
         let speed', full_duplex' = Host_config.link !ifname in
-        (match !speed, speed' with Some s, _ | None, Some s -> s | None, None -> Eth.Speed.Eth1Gbps),
+        (match !speed, speed' with Some s, _ | None, Some s -> s | None, None -> EthSpeed.Eth1Gbps),
         (match !full_duplex, full_duplex' with Some d, _ | None, Some d -> d | None, None -> true)
     and mtu = !mtu |? iface.mtu in
     if !Host_config.verbose then
         info "Interface %s: %s %s-duplex, MTU %d." !ifname
-            (Eth.Speed.to_string speed) (if full_duplex then "full" else "half") mtu ;
+            (EthSpeed.to_string speed) (if full_duplex then "full" else "half") mtu ;
     let configure = !fw || !own_ip <> None in
     if configure && Unix.geteuid () <> 0 then
         die "Configuring interface %s is for root; Have you tried under sudo?"

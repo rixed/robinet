@@ -304,6 +304,16 @@ is handed TCP segments far larger than the MTU. `--portals=veth` turns both off
 | `filter` | string | `""` | pcap filter for what to capture. |
 | `caplen` | optional 1…65535 | `null` | Defaults to a whole frame at the interface MTU: the MTU plus 18 bytes, for the Ethernet header and a VLAN tag. |
 
+A veth sends as fast as the kernel writes, so the portal stands for the real
+machine's adapter: what it captures goes onto the cable one frame after the
+other at the speed the cable negotiated, a burst waiting in the portal's queue
+rather than colliding at the other end. A frame captured while that queue is
+full is dropped, and counted as `rx-dropped` in its `volume`.
+
+| property | kind | default | |
+| --- | --- | --- | --- |
+| `tx queue length` | 0… | `1000` | Frames that may wait for the link, as Linux's `txqueuelen`. |
+
 ### recorder
 
 Writes every packet that reaches it into a pcap file. One port. It has no power

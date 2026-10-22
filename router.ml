@@ -394,7 +394,7 @@ let target_routes ?in_iface ?src_ip ?dst_ip ?proto ?src_port ?dst_port t =
  * drops everything anyway): *)
 let max_backlog iface =
     Option.map (fun (speed, _) ->
-        int_of_float (iface.max_queue_delay *. Eth.Speed.to_bps speed /. 8.)
+        int_of_float (iface.max_queue_delay *. EthSpeed.to_bps speed /. 8.)
     ) iface.eth.iface.negotiated
 
 let actual_buffer_capacity t =
@@ -1243,7 +1243,7 @@ let make_from_addrs
     let sim = Simulation.make ~realtime:false "router-congestion" in
     let via = Some (Eth.Gateway.Mac (Eth.Addr.random ())) in
     let routes = [ Route.make (Forward { out_iface = 2 ; via }) ] in
-    let r = make ~parent:sim.root ~speeds:[ Eth.Speed.Eth10Mbps ]
+    let r = make ~parent:sim.root ~speeds:[ EthSpeed.Eth10Mbps ]
                  ~buffer_capacity:30_000 3 routes "r" in
     Simulation.power_up r.widget.power ;
     Array.iter (fun iface ->
@@ -1300,7 +1300,7 @@ let make_from_addrs
     let via = Some (Eth.Gateway.Mac (Eth.Addr.random ())) in
     let routes = [ Route.make (Forward { out_iface = 2 ; via }) ] in
     let r = make ~parent:sim.root
-                 ~speeds:Eth.Speed.[ Eth10Mbps ; Eth100Mbps ] 3 routes "r" in
+                 ~speeds:EthSpeed.[ Eth10Mbps ; Eth100Mbps ] 3 routes "r" in
     Simulation.power_up r.widget.power ;
     assert_equal ~msg:"no link, no buffer" ~printer:string_of_int
                  0 (actual_buffer_capacity r) ;

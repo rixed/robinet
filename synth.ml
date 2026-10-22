@@ -621,7 +621,7 @@ let rec emit_next t gen state =
         let speed =
             match iface.negotiated with
             | Some (speed, _) -> speed
-            | None -> Eth.Speed.best iface.speeds in
+            | None -> EthSpeed.best iface.speeds in
         let bitlen = bitstring_length bits in
         let d =
             Stream.bits_to_next t.stream gen_values
@@ -631,7 +631,7 @@ let rec emit_next t gen state =
          * distance of nothing at all would be an unending run of packets at
          * one instant of the clock. *)
         let d = max d (bitlen + iface.inter_frame_gap) in
-        Simulation.delay t.widget.power (Eth.Speed.duration speed d)
+        Simulation.delay t.widget.power (EthSpeed.duration speed d)
                          (emit_next t gen) state)
 
 (* Stop/start act on the stream as opposed to merely pausing packet generation.

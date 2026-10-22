@@ -73,8 +73,8 @@ type model =
                     max_volume : int option ; max_packet_rate : float option ;
                     max_throughput : float option ;
                     max_duration : float option }
-    | THub of { ports : int ; speed : Eth.Speed.t }
-    | TSwitch of { ports : int ; speeds : Eth.Speed.t list ;
+    | THub of { ports : int ; speed : EthSpeed.t }
+    | TSwitch of { ports : int ; speeds : EthSpeed.t list ;
                    full_duplex : bool ; macs : int }
     | THost of { static_ip : Ip.Addr.t option ; netmask : Ip.Addr.t option ;
                  gateway : Ip.Addr.t option ; nameserver : Ip.Addr.t option ;
@@ -90,7 +90,7 @@ type model =
        themselves. A model that has been built carries the addresses and an
        empty range: once they are written down the range has nothing left to
        say. *)
-    | TRouter of { ports : int ; speeds : Eth.Speed.t list ;
+    | TRouter of { ports : int ; speeds : EthSpeed.t list ;
                    mac_range : string ; macs : Eth.Addr.t list }
     | TGateway of { public : Ip.Addr.t ;
                     public_netmask : Ip.Addr.t option ;
@@ -101,7 +101,7 @@ type model =
     | TRecorder of { fname : string option ; flush : bool ;
                      caplen : int option ; dlt : Pcap.Dlt.t option }
     | TReplayer of { fname : string option ; loop : bool }
-    | TSynth of { adapters : int ; speeds : Eth.Speed.t list ;
+    | TSynth of { adapters : int ; speeds : EthSpeed.t list ;
                   independent : bool }
     | TNote of { text : string }
 
@@ -297,8 +297,8 @@ let switch =
       params = [
           param "ports" ~kind:(IRange (2, 1024)) ~default:(`Int 8)
               ~descr:"How many cables it takes." ;
-          param "speeds" ~kind:(Set (Widget.choices Eth.Speed.names))
-              ~default:(`List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
+          param "speeds" ~kind:(Set (Widget.choices EthSpeed.names))
+              ~default:(`List (List.map (fun s -> `Int (EthSpeed.to_enum s))
                                         Eth.Iface.default_speeds))
               ~descr:"Speeds accepted by every ports (can be updated later)." ;
           param "full duplex" ~kind:Bool ~default:(`Bool true)
@@ -310,8 +310,8 @@ let switch =
               ports = int args "ports" ;
               speeds =
                   list args "speeds" (fun v ->
-                      Eth.Speed.all.(Widget.to_choice
-                                         (Widget.choices Eth.Speed.names) v)) ;
+                      EthSpeed.all.(Widget.to_choice
+                                         (Widget.choices EthSpeed.names) v)) ;
               full_duplex = bool args "full duplex" ;
               macs = int args "MACs" } }
 
@@ -448,8 +448,8 @@ let router =
       params =
           param "ports" ~kind:(IRange (1, 1024)) ~default:(`Int 4)
               ~descr:"How many interfaces it has, each taking one cable." ::
-          param "speeds" ~kind:(Set (Widget.choices Eth.Speed.names))
-              ~default:(`List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
+          param "speeds" ~kind:(Set (Widget.choices EthSpeed.names))
+              ~default:(`List (List.map (fun s -> `Int (EthSpeed.to_enum s))
                                         Eth.Iface.default_speeds))
               ~descr:"Speeds of the adapters (can be updated later on a port \
                       per port basis)." ::
@@ -459,8 +459,8 @@ let router =
               ports = int args "ports" ;
               speeds =
                   list args "speeds" (fun v ->
-                      Eth.Speed.all.(Widget.to_choice
-                                         (Widget.choices Eth.Speed.names) v)) ;
+                      EthSpeed.all.(Widget.to_choice
+                                         (Widget.choices EthSpeed.names) v)) ;
               mac_range = String.trim (string args "MAC range") ;
               macs = macs_of_string "MACs" (string args "MACs") } }
 
@@ -580,8 +580,8 @@ let synthesizer =
            * own. *)
           param "adapters" ~kind:(IRange (1, 1024)) ~default:(`Int 1)
               ~descr:"How many Ethernet adapters it has." ;
-          param "speeds" ~kind:(Set (Widget.choices Eth.Speed.names))
-              ~default:(`List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
+          param "speeds" ~kind:(Set (Widget.choices EthSpeed.names))
+              ~default:(`List (List.map (fun s -> `Int (EthSpeed.to_enum s))
                                         Eth.Iface.default_speeds))
               ~descr:"Speeds accepted by every adapters." ;
           param "independent" ~kind:Bool ~default:(`Bool false)
@@ -592,8 +592,8 @@ let synthesizer =
               adapters = int args "adapters" ;
               speeds =
                   list args "speeds" (fun v ->
-                      Eth.Speed.all.(Widget.to_choice
-                                         (Widget.choices Eth.Speed.names) v)) ;
+                      EthSpeed.all.(Widget.to_choice
+                                         (Widget.choices EthSpeed.names) v)) ;
               independent = bool args "independent" } }
 
 (* The one entry that is not a device at all: a label on the map, with no
@@ -666,7 +666,7 @@ let to_params =
           "speed", `Int (Array.findi ((=) speed) Hub.Repeater.speeds) ]
     | TSwitch { ports ; speeds ; full_duplex ; macs } ->
         [ "ports", `Int ports ;
-          "speeds", `List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
+          "speeds", `List (List.map (fun s -> `Int (EthSpeed.to_enum s))
                                     speeds) ;
           "full duplex", `Bool full_duplex ;
           "MACs", `Int macs ]
@@ -688,7 +688,7 @@ let to_params =
           "error rate", `Float error_rate ]
     | TRouter { ports ; speeds ; mac_range ; macs } ->
         [ "ports", `Int ports ;
-          "speeds", `List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
+          "speeds", `List (List.map (fun s -> `Int (EthSpeed.to_enum s))
                                     speeds) ;
           "MAC range", `String mac_range ;
           "MACs", `String (string_of_macs macs) ]
@@ -720,7 +720,7 @@ let to_params =
           "loop", `Bool loop ]
     | TSynth { adapters ; speeds ; independent } ->
         [ "adapters", `Int adapters ;
-          "speeds", `List (List.map (fun s -> `Int (Eth.Speed.to_enum s))
+          "speeds", `List (List.map (fun s -> `Int (EthSpeed.to_enum s))
                                     speeds) ;
           "independent", `Bool independent ]
     | TNote { text } ->

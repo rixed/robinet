@@ -384,51 +384,6 @@ struct
         String.print oc (to_string a)
 end
 
-(** {2 Standard transceiver speeds} *)
-
-module Speed =
-struct
-    (* Possible adapter speeds: *)
-    include Capabilities.EthSpeed
-
-    let to_bps = function
-        | Capabilities.EthSpeed.Eth10Mbps -> 10e6
-        | Eth100Mbps -> 100e6
-        | Eth1Gbps -> 1000e6
-        | Eth2_5Gbps -> 2.5e9
-        | Eth5Gbps -> 5e9
-        | Eth10Gbps -> 10e9
-        | Eth25Gbps -> 25e9
-        | Eth40Gbps -> 40e9
-        | Eth100Gbps -> 100e9
-
-    let to_string = function
-        | Capabilities.EthSpeed.Eth10Mbps -> "10Mbps"
-        | Eth100Mbps -> "100Mbps"
-        | Eth1Gbps -> "1Gbps"
-        | Eth2_5Gbps -> "2.5Gbps"
-        | Eth5Gbps -> "5Gbps"
-        | Eth10Gbps -> "10Gbps"
-        | Eth25Gbps -> "25Gbps"
-        | Eth40Gbps -> "40Gbps"
-        | Eth100Gbps -> "100Gbps"
-
-    (* Every speed and its name, in the order the enum numbers them.
-     *
-     * That order is what a property of a speed is made of: an [Enum] kind
-     * offers [names], and the value of such a property is a place in it. The
-     * two arrays are built from the same enumeration, so a speed added to the
-     * type above is offered and read back without anything else to change. *)
-    let all = Array.init (t_max + 1) (fun i -> Option.get (of_enum i))
-    let names = Array.map to_string all
-
-    let duration speed num_bits =
-        Interval.of_secs (float num_bits /. to_bps speed)
-
-    let best speeds =
-        List.reduce max speeds
-end
-
 (** {2 Transceiver: basic state, connection, speed, etc}
  * An Iface is used by both address-less Ethernet switches as well as independent
  * adapters with a MAC address etc.
@@ -463,9 +418,9 @@ struct
           mutable is_connected : bool ;
           (* It's very common for a single switch to have ports with different
            * characteristics: *)
-          mutable speeds : Speed.t list ;
+          mutable speeds : EthSpeed.t list ;
           mutable full_duplex : bool ;
-          mutable negotiated : (Speed.t * bool (* duplex *)) option ;
+          mutable negotiated : (EthSpeed.t * bool (* duplex *)) option ;
           (* IFP: gap (in bits) to leave in between two frames. *)
           mutable inter_frame_gap : int ;
           mutable tx_busy_until : Time.t ;
@@ -479,7 +434,7 @@ struct
         | None ->
             "down"
         | Some (speed, full_duplex) ->
-            Speed.to_string speed ^" "^
+            EthSpeed.to_string speed ^" "^
             (if full_duplex then "full" else "half")^ "-duplex"
 
     (* Reception *)
@@ -508,7 +463,7 @@ struct
                 if full_duplex then t.rx_busy_until
                 else max t.rx_busy_until t.tx_busy_until in
             let dbl_recept = now < busy_until in
-            let ser_delay = Speed.duration speed bitlen in
+            let ser_delay = EthSpeed.duration speed bitlen in
             let rx_stop = Time.add now ser_delay in
             t.rx_busy_until <- max t.rx_busy_until rx_stop ;
             if dbl_recept then
@@ -518,7 +473,7 @@ struct
                 let recv_ts =
                     match t.can_forward_after with
                     | Some b when b < bitlen ->
-                        Time.add now (Speed.duration speed b)
+                        Time.add now (EthSpeed.duration speed b)
                     | _ ->
                         rx_stop in
                 Simulation.at t.widget.power recv_ts t.recv pld
@@ -537,7 +492,7 @@ struct
          * carrier, or the link would appear busy when receiving in
          * half duplex). *)
         let quiet_until =
-            Time.add busy_until (Speed.duration speed t.inter_frame_gap) in
+            Time.add busy_until (EthSpeed.duration speed t.inter_frame_gap) in
         max now quiet_until
 
     (** How long a frame emitted now would wait before it starts. *)
@@ -562,7 +517,7 @@ struct
                 Metric.(Counter.add t.volume ~now ~params:egress
                                     (bytelength pld)) ;
                 Metric.(Counter.inc t.packets ~now ~params:egress) ;
-                let ser_delay = Speed.duration speed bitlen in
+                let ser_delay = EthSpeed.duration speed bitlen in
                 let tx_start = tx_start t speed full_duplex now in
                 t.tx_busy_until <- Time.add tx_start ser_delay ;
                 Simulation.at t.widget.power tx_start f pld
@@ -583,7 +538,7 @@ struct
             let now = Simulation.Widget.now t.widget in
             if Time.compare t.tx_busy_until now <= 0 then 0 else
             let secs = Interval.to_secs (Time.diff t.tx_busy_until now) in
-            int_of_float (secs *. Speed.to_bps speed /. 8.)
+            int_of_float (secs *. EthSpeed.to_bps speed /. 8.)
 
     (** Turns an iface into a device *)
     let dev (t : t) =
@@ -611,7 +566,7 @@ struct
                 t.widget.name)))
 
     let default_speeds =
-        Speed.[ Eth10Mbps ; Eth100Mbps ; Eth1Gbps ; Eth2_5Gbps ; Eth5Gbps ]
+        EthSpeed.[ Eth10Mbps ; Eth100Mbps ; Eth1Gbps ; Eth2_5Gbps ; Eth5Gbps ]
 
     let ifg_min = 32
 
@@ -626,7 +581,7 @@ struct
          * Also half-duplex so a non negotiating iface can go through most
          * repeaters. *)
         let negotiated =
-            if speeds = None then Some (Speed.Eth100Mbps, false)
+            if speeds = None then Some (EthSpeed.Eth100Mbps, false)
             else None in
         let speeds = speeds |? default_speeds in
         if speeds = [] then
@@ -653,16 +608,16 @@ struct
                 ~descr:"Is the link up?"
                 ~getter:(fun () ->
                     `String (string_of_negotiated t.negotiated)) ;
-            property "speeds" ~kind:(Set (choices Speed.names))
+            property "speeds" ~kind:(Set (choices EthSpeed.names))
                 ~descr:"Supported speeds"
                 ~getter:(fun () ->
-                    `List (List.map (fun s -> `Int (Speed.to_enum s))
+                    `List (List.map (fun s -> `Int (EthSpeed.to_enum s))
                                     t.speeds))
                 ~setter:(fun v ->
                     (* TODO: Also renegotiate [negotiated] *)
                     let speeds =
-                        List.map (fun i -> Speed.all.(i))
-                                 (to_choices (choices Speed.names) v) in
+                        List.map (fun i -> EthSpeed.all.(i))
+                                 (to_choices (choices EthSpeed.names) v) in
                     (* As [make] refuses to build one: an adapter that supports
                      * no speed at all has nothing to negotiate with, and
                      * nothing to fall back on either. *)
@@ -699,13 +654,13 @@ struct
                                    full_duplex = t.full_duplex }) ;
             set_capabilities = (fun _ -> function
                 | Capabilities.Eth { speeds ; full_duplex } when speeds <> [] ->
-                    t.negotiated <- Some (Speed.best speeds, full_duplex) ;
+                    t.negotiated <- Some (EthSpeed.best speeds, full_duplex) ;
                     Log.(log widget.logger Info (lazy (Printf.sprintf
                         "Negotiated %s" (string_of_negotiated t.negotiated))))
                 | Any ->
                     (* [t.speeds] and not the list this was built with: the
                      * supported speeds are editable. *)
-                    t.negotiated <- Some (Speed.best t.speeds, t.full_duplex) ;
+                    t.negotiated <- Some (EthSpeed.best t.speeds, t.full_duplex) ;
                     Log.(log widget.logger Info (lazy "Using best performances"))
                 | _ ->
                     t.negotiated <- None ;

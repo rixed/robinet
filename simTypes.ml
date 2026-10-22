@@ -20,6 +20,7 @@
 (**
   Recursive types describing simulations, widget, power sources etc
  *)
+open Batteries
 open Clock
 
 (** {2 Locations}
@@ -32,7 +33,8 @@ type location = { lat : float ; lon : float }
  *
  * Here rather than in [Eth] because a port's capabilities are part of what a
  * widget is, and those are settled before there is an adapter to settle them
- * for. [Eth.Speed] includes this and adds what a speed is good for. *)
+ * for, and because a portal paces what it captured at its link's speed.
+ * [Eth.Speed] includes this and adds the rest. *)
 module EthSpeed =
 struct
     type t =
@@ -52,6 +54,45 @@ struct
 
     let max s1 s2 =
         if s1 >= s2 then s1 else s2
+
+    (* Possible adapter speeds: *)
+    let to_string = function
+        | Eth10Mbps -> "10Mbps"
+        | Eth100Mbps -> "100Mbps"
+        | Eth1Gbps -> "1Gbps"
+        | Eth2_5Gbps -> "2.5Gbps"
+        | Eth5Gbps -> "5Gbps"
+        | Eth10Gbps -> "10Gbps"
+        | Eth25Gbps -> "25Gbps"
+        | Eth40Gbps -> "40Gbps"
+        | Eth100Gbps -> "100Gbps"
+
+    (* Every speed and its name, in the order the enum numbers them.
+     *
+     * That order is what a property of a speed is made of: an [Enum] kind
+     * offers [names], and the value of such a property is a place in it. The
+     * two arrays are built from the same enumeration, so a speed added to the
+     * type above is offered and read back without anything else to change. *)
+    let all = Array.init (t_max + 1) (fun i -> Option.get (of_enum i))
+    let names = Array.map to_string all
+
+    let best speeds =
+        List.reduce max speeds
+
+    let to_bps = function
+        | Eth10Mbps -> 10e6
+        | Eth100Mbps -> 100e6
+        | Eth1Gbps -> 1000e6
+        | Eth2_5Gbps -> 2.5e9
+        | Eth5Gbps -> 5e9
+        | Eth10Gbps -> 10e9
+        | Eth25Gbps -> 25e9
+        | Eth40Gbps -> 40e9
+        | Eth100Gbps -> 100e9
+
+    (* How long [num_bits] take on a wire at that speed: *)
+    let duration speed num_bits =
+        Interval.of_secs (float num_bits /. to_bps speed)
 end
 
 (** {2 Devices}

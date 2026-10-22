@@ -28,6 +28,7 @@
   to ask for: a capability given to robinet is not given to what it runs.
 *)
 open Batteries
+module EthSpeed = SimTypes.EthSpeed
 
 exception Command_failed of string * string
 
@@ -238,22 +239,22 @@ let iface ifname =
  * past it, or none for a speed that is not positive (unknown). *)
 let eth_speed_of_mbps mbps =
     if mbps <= 0 then None else
-    let speeds = Array.to_list Eth.Speed.all in
-    match List.filter (fun s -> Eth.Speed.to_bps s >= float mbps *. 1e6) speeds with
-    | [] -> Some (Eth.Speed.best speeds)
+    let speeds = Array.to_list EthSpeed.all in
+    match List.filter (fun s -> EthSpeed.to_bps s >= float mbps *. 1e6) speeds with
+    | [] -> Some (EthSpeed.best speeds)
     | faster -> Some (List.reduce min faster)
 
 (*$inject
-  let string_of_speed = Option.map_default Eth.Speed.to_string "?"
+  let string_of_speed = Option.map_default EthSpeed.to_string "?"
   let string_of_link (s, d) =
       string_of_speed s ^" "^
       Option.map_default (fun d -> if d then "full" else "half") "?" d
 *)
 (*$= eth_speed_of_mbps & ~printer:string_of_speed
-  (Some Eth.Speed.Eth1Gbps) (eth_speed_of_mbps 1000)
-  (Some Eth.Speed.Eth10Gbps) (eth_speed_of_mbps 10000)
-  (Some Eth.Speed.Eth25Gbps) (eth_speed_of_mbps 20000)
-  (Some Eth.Speed.Eth100Gbps) (eth_speed_of_mbps 400000)
+  (Some EthSpeed.Eth1Gbps) (eth_speed_of_mbps 1000)
+  (Some EthSpeed.Eth10Gbps) (eth_speed_of_mbps 10000)
+  (Some EthSpeed.Eth25Gbps) (eth_speed_of_mbps 20000)
+  (Some EthSpeed.Eth100Gbps) (eth_speed_of_mbps 400000)
   None (eth_speed_of_mbps (-1))
  *)
 
@@ -276,9 +277,9 @@ let link_of_ethtool out =
      | _ -> None)
 
 (*$= link_of_ethtool & ~printer:string_of_link
-  (Some Eth.Speed.Eth10Gbps, Some true) \
+  (Some EthSpeed.Eth10Gbps, Some true) \
     (link_of_ethtool "Settings for veth0:\n\tSpeed: 10000Mb/s\n\tDuplex: Full\n\tLink detected: yes\n")
-  (Some Eth.Speed.Eth100Mbps, Some false) \
+  (Some EthSpeed.Eth100Mbps, Some false) \
     (link_of_ethtool "Settings for eth0:\n\tSpeed: 100Mb/s\n\tDuplex: Half\n")
   (None, None) \
     (link_of_ethtool "Settings for eth0:\n\tSpeed: Unknown!\n\tDuplex: Unknown! (255)\n")

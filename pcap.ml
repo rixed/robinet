@@ -1372,7 +1372,16 @@ type portal = {
   mutable caplen : int option ;
     mutable emit : (bitstring -> unit) option ;
   mutable reader : Thread.t option ;
-          volume : Metric.Counter.t }
+          volume : Metric.Counter.t ;
+  (* The speed of the link the cable negotiated, at which the frames captured
+   * are emitted one after the other, as a real interface of that speed would
+   * (a veth sends them all at once): *)
+  mutable link_speed : SimTypes.EthSpeed.t option ;
+  mutable tx_busy_until : Clock.Time.t ;
+  (* Frames captured and waiting for the link, and how many may (as Linux's
+   * txqueuelen) before the next is dropped: *)
+  mutable queued : int ;
+  mutable tx_queue_len : int }
 
 type Widget.device += Portal of portal
 
@@ -1389,6 +1398,46 @@ let set_read (portal : portal) f _busy_for =
 
 let is_connected portal =
     portal.emit <> None
+
+let set_capabilities portal = function
+    | Capabilities.Eth { speeds ; _ } when speeds <> [] ->
+        portal.link_speed <- Some (List.reduce SimTypes.EthSpeed.max speeds)
+    | _ ->
+        portal.link_speed <- None
+
+let reset_link portal =
+    portal.tx_busy_until <- Clock.Time.beginning_of_time ;
+    portal.queued <- 0
+
+(* The inter-frame gap left between two frames, in bits: *)
+let inter_frame_gap = 96
+
+(* Emit [bits], captured, once the link is done with those before it. Returns
+ * whether it is emitted or queued rather than dropped. *)
+let emit_captured portal bits =
+    (* The current emit function, not the one at open_portal: *)
+    let emit bits = Option.may (fun emit -> emit bits) portal.emit in
+    match portal.emit, portal.link_speed with
+    | None, _ ->
+        false
+    | Some _, None ->
+        emit bits ; true
+    | Some _, Some _ when portal.queued >= portal.tx_queue_len ->
+        false
+    | Some _, Some speed ->
+        let open Clock in
+        let now = Simulation.Widget.now portal.widget in
+        let quiet_until =
+            Time.add portal.tx_busy_until
+                     (SimTypes.EthSpeed.duration speed inter_frame_gap) in
+        let start = max now quiet_until in
+        portal.tx_busy_until <-
+            Time.add start (SimTypes.EthSpeed.duration speed (bitstring_length bits)) ;
+        portal.queued <- portal.queued + 1 ;
+        Simulation.at portal.widget.power start (fun () ->
+            portal.queued <- portal.queued - 1 ;
+            emit bits) () ;
+        true
 
 let dev (portal : portal) =
     { write = (fun bits ->
@@ -1417,7 +1466,8 @@ let disconnect portal =
     if is_connected portal then (
         Log.(log portal.widget.logger Debug (lazy (Printf.sprintf
             "Disconnecting portal %s" portal.ifname))) ;
-        portal.emit <- None
+        portal.emit <- None ;
+        reset_link portal
     ) else
         Log.(log portal.widget.logger Debug (lazy (Printf.sprintf
             "Ignoring request to disconnect portal %s, which is not \
@@ -1449,6 +1499,8 @@ let close_portal portal =
 let open_portal portal =
     Log.(log portal.widget.logger Info (lazy ("Opening portal to "^ portal.ifname))) ;
     if portal.iface <> None then close_portal portal ;
+    (* What was queued went with the power: *)
+    reset_link portal ;
     let iface =
         open_iface ~widget:portal.widget ~promisc:portal.promisc
                    ~filter:portal.filter ?caplen:portal.caplen portal.ifname in
@@ -1462,11 +1514,9 @@ let open_portal portal =
                 let len = bytelength bits in
                 let now = Simulation.Widget.now portal.widget in
                 let params =
-                    if portal.emit = None then Metric.rx_dropped
-                                          else Metric.ingress in
-                Metric.Counter.add portal.volume ~now ~params len ;
-                (* Use the current emit function not the one at open_portal: *)
-                Option.may (fun emit -> emit bits) portal.emit))
+                    if emit_captured portal bits then Metric.ingress
+                                                 else Metric.rx_dropped in
+                Metric.Counter.add portal.volume ~now ~params len))
 
 (* Create a portal.
  * [location] is where that interface is: a real one injecting real traffic is
@@ -1485,7 +1535,11 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
         ifname ; widget ; promisc ; filter ; caplen ;
         emit = None ;
         reader = None ;
-        volume = Metric.Counter.make () } in
+        volume = Metric.Counter.make () ;
+        link_speed = None ;
+        tx_busy_until = Clock.Time.beginning_of_time ;
+        queued = 0 ;
+        tx_queue_len = 1000 } in
     widget.device <- Some (Portal portal) ;
     (* Switching this one on opens the interface of the machine it names, and
      * switching it off closes it. *)
@@ -1500,7 +1554,7 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
         owner = (fun _ -> widget) ;
         disconnect = (fun _ -> disconnect portal) ;
         get_capabilities = (fun ?peer:_ _ -> Capabilities.Any) ;
-        set_capabilities = (fun _ _ -> ()) } ;
+        set_capabilities = (fun _ c -> set_capabilities portal c) } ;
     (* TODO: a property to enable fragmentation and/or checksumming of packets
      * before to inject them in the simulation. *)
     Widget.add_properties widget Widget.[
@@ -1522,7 +1576,31 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
                 | Some i -> `Int i)
             ~setter:(fun v ->
                 portal.caplen <- to_option (to_int_range ~min:1 ~max:65535) v) ;
+        property "tx queue length" ~kind:(IRange (0, max_int)) ~units:"frames"
+            ~descr:"Frames captured that may wait for the link before the \
+                    next is dropped."
+            ~getter:(fun () -> `Int portal.tx_queue_len)
+            ~setter:(fun v -> portal.tx_queue_len <- to_int_range ~min:0 v) ;
         metric_property "volume" ~units:"bytes"
             ~descr:"Volume of traffic that went through the portal."
             (Metric.Counter.T portal.volume) ] ;
     portal
+
+(* What is captured at once leaves at the link's speed, 1000 bytes and the
+ * inter-frame gap every 809.6us at 10Mbps, as many as the queue holds: *)
+(*$R emit_captured
+    let sim = Simulation.make ~realtime:false "portal-pacing" in
+    let p = portal ~parent:sim.root "robinet-no-such-iface" in
+    Simulation.power_up p.widget.power ;
+    let sent = ref [] in
+    set_read p (fun _ -> sent := Simulation.Widget.now p.widget :: !sent) never_busy ;
+    set_capabilities p Capabilities.(Eth { speeds = [ EthSpeed.Eth10Mbps ] ;
+                                           full_duplex = true }) ;
+    p.tx_queue_len <- 3 ;
+    let frame = bitstring_of_string (String.make 1000 'x') in
+    let kept = List.init 4 (fun _ -> emit_captured p frame) in
+    Simulation.run sim false ;
+    assert_equal ~printer:dump [ true ; true ; true ; false ] kept ;
+    assert_equal ~printer:dump [ 0. ; 809.6e-6 ; 1619.2e-6 ]
+        (List.rev_map (fun t -> Float.round (Clock.Time.to_secs t *. 1e7) /. 1e7) !sent)
+ *)

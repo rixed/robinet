@@ -53,6 +53,7 @@
    matched, [MATCH], is decoded to its top, and only if read. *)
 open Batteries
 open Crafty_value
+module EthSpeed = SimTypes.EthSpeed
 module A = Crafty_ast
 module T = Crafty_typing
 module Interval = Clock.Interval
@@ -1051,7 +1052,7 @@ let print_status oc = function
  * simulation, once that device can be connected. *)
 let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         ?(promisc=false)
-        ?(speed=Eth.Speed.Eth1Gbps) ?(full_duplex=true) ?mtu
+        ?(speed=EthSpeed.Eth1Gbps) ?(full_duplex=true) ?mtu
         ?ports ?format ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
         ?(on_closed=ignore) ?(rx_wire=true) (program : program) =
     let gateways =
@@ -1682,7 +1683,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   let plug sim ?log (a : SimTypes.widget) (b : SimTypes.widget) =
       List.iter (fun (w : SimTypes.widget) ->
           w.ports.set_capabilities 0
-              (Capabilities.Eth { speeds = [ Eth.Speed.Eth100Mbps ] ; full_duplex = true })
+              (Capabilities.Eth { speeds = [ EthSpeed.Eth100Mbps ] ; full_duplex = true })
       ) [ a ; b ] ;
       let cable = Eth.Cable.State.make ~parent:sim.SimTypes.root () in
       let trx = Eth.Cable.make cable in
