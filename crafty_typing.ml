@@ -525,7 +525,7 @@ let fits base ws =
  * about where they are put: the current stack, if [anchor] is relative to
  * it, and the nearest other anchor they fit on (with its shortest form, if
  * they overlay some of its layers with neither options nor another mode),
- * or the layers they need below if absolute: *)
+ * or the layers they need below if absolute or out of any stack: *)
 let where_to_hint env anchor ws =
     lazy (
         match anchor with
@@ -558,7 +558,7 @@ let where_to_hint env anchor ws =
                     (if m = 0 || m = List.length ws then ""
                      else Printf.sprintf " (the same as \"%s\")"
                             (string_of_written (A.Relative (j - m)) (List.drop m ws))))
-        | A.Absolute when fits [] ws = None ->
+        | A.Relative _ | A.Absolute when anchor <> A.Absolute || fits [] ws = None ->
             (* The fewest layers to put below, from the root: *)
             let rec search = function
                 | [] -> ""
@@ -604,6 +604,9 @@ let overlay over (layers : L.layer list) =
 let anchor_base ?(hint=lazy "") env loc = function
     | A.Absolute -> [], []
     | A.Relative n ->
+        if env.stack = [] && n > 0 then
+            error loc "../ goes back in the current stack, and there is none \
+                       out of a block%s" (Lazy.force hint) ;
         if n > List.length env.stack then
             error loc "../ goes below the bottom of the stack%s" (Lazy.force hint) ;
         List.drop n env.stack, List.rev_map fst (List.take n env.stack)
@@ -2005,6 +2008,12 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/TCP(dst=80) { TCP!(flags=RST)/Bytes() }")
   "line 1, column 2: DNS cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP/DNS/Query(\"x\")\"?" \
     (types "/DNS/Query(\"x\")")
+  "line 1, column 1: DNS cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP/DNS/Query(\"x\")\"?" \
+    (types "DNS/Query(\"x\")")
+  "line 1, column 8: UDP cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP\"?" \
+    (types "expect udp {}")
+  "line 1, column 8: ../ goes back in the current stack, and there is none out of a block\n  Do you mean \"/IP/UDP\"?" \
+    (types "expect ../UDP {}")
   "line 1, column 46: There is no TCP below UDP" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(TCP.src == 1) {} }")
   "line 1, column 46: There is only one IP below UDP" \
