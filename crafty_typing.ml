@@ -186,7 +186,7 @@ let packet_type =
     Type.Array (variant_type (List.map (fun (l : L.layer) ->
         lname l.name, packet_record l) L.all |> List.unique))
 
-(*$T packet_type
+(*$T packet_record
   List.for_all (fun (a : Crafty_layers.layer) -> List.for_all (fun (b : Crafty_layers.layer) -> \
       a.name <> b.name || packet_record a = packet_record b) Crafty_layers.all) Crafty_layers.all
 *)
