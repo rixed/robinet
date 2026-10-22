@@ -604,9 +604,9 @@ let tcp_node ctx =
               (* Infinite until a loss, which Linux tells as 2^31-1: *)
               "cwnd", V.Int t.cwnd ; "ssthresh", V.Int (min t.ssthresh 0x7fff_ffff) ;
               "snd_wnd", V.Int t.snd_wnd ; "rcv_wnd", V.Int (Tcp.TRX.rcv_wnd t) ;
-              (* Both 0 unless both ends offered window scaling: *)
-              "snd_wscale", V.Int (t.snd_wscale |? 0) ;
-              "rcv_wscale", V.Int (if t.snd_wscale = None then 0 else t.rcv_wscale) ;
+              (* -1 for a side that offered no window scaling: *)
+              "snd_wscale", V.Int (t.snd_wscale |? -1) ;
+              "rcv_wscale", V.Int (if t.offered_wscale then t.rcv_wscale else -1) ;
               "established", V.Bool (Tcp.TRX.is_established t) ]) }
 
 let icmp_upper = function

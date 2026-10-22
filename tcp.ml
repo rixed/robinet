@@ -604,6 +604,7 @@ struct
         mutable rcvd_fin : bool ; (* if we already passed the fin to the application *)
         rcv_buf : int ; (* the window we advertise and enforce (at most 0xffff without window scaling) *)
         rcv_wscale : int ; (* the shift we offer: the smallest that makes rcv_buf fit in 16 bits *)
+        mutable offered_wscale : bool ; (* once a SYN of ours offered rcv_wscale *)
         mutable snd_wscale : int option ; (* the peer's shift, once its SYN offered one (RFC 7323) *)
         mutable snd_wnd : int ; (* the window the peer advertises: bytes allowed in flight *)
         mutable snd_wl1 : int ; (* rcvd offset of the segment that set snd_wnd... *)
@@ -776,9 +777,12 @@ struct
         and seq_num = next_seq_num t and ack_num = next_ack_num t in
         let ack = ack_num <> None in
         if ack || psh || rst || syn || fin || bitstring_length bits > 0 then (
+            let options = if syn then syn_options t else [] in
+            if List.exists (function Pdu.Opt.Wscale _ -> true | _ -> false) options then
+                t.offered_wscale <- true ;
             let tcp = Pdu.make ~src_port ~dst_port ~seq_num ?ack_num
                                ~win_size:(adv_wnd ~syn t) ~ack ~psh ~rst ~syn ~fin
-                               ~options:(if syn then syn_options t else []) bits in
+                               ~options bits in
             Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Emitting a packet from %s to %s, seq %s, length %d, content '%s'" (Port.to_string src_port) (Port.to_string dst_port) (SeqNum.to_string seq_num) (bytelength bits) (string_of_bitstring bits)))) ;
             emit_segment t tcp ;
             if ack then t.rcvd_acked <- t.rcvd_pld ;
@@ -1181,7 +1185,7 @@ struct
                   to_send = [] ; to_send_len = 0 ; snd_buf ;
                   unacked_tx = Streambuf.empty ;
                   rcvd_fin = false ;
-                  rcv_buf ; snd_wscale = None ;
+                  rcv_buf ; snd_wscale = None ; offered_wscale = false ;
                   rcv_wscale = (let rec shift s =
                                     if s >= 14 || rcv_buf lsr s <= 0xffff then s
                                     else shift (s + 1) in
@@ -1283,6 +1287,7 @@ end
     assert_equal ~printer:string_of_int ~msg:"all in the initial window" 1000 m ;
     assert_equal ~printer:string_of_int ~msg:"default window, scaled" (6 * 1024 * 1024) a.snd_wnd ;
     assert_equal ~msg:"peer's shift" (Some 7) a.snd_wscale ;
+    assert_bool "offered by both" (a.offered_wscale && (Option.get !last_b).offered_wscale) ;
     let _, m, rcvd, _, _ = transfer ~mss:1000 500_000 in
     assert_equal ~printer:string_of_int ~msg:"all received" 500_000 rcvd ;
     assert_bool "more than 64KiB in flight" (m > 0xffff) ;
@@ -1291,6 +1296,7 @@ end
     let a, m, rcvd, _, _ = transfer ~mss:1000 ~a_to_b 500_000 in
     assert_equal ~printer:string_of_int ~msg:"all received" 500_000 rcvd ;
     assert_equal ~msg:"no shift" None a.snd_wscale ;
+    assert_bool "offered by the opener only" (a.offered_wscale && not (Option.get !last_b).offered_wscale) ;
     assert_equal ~printer:string_of_int ~msg:"unscaled window" 0xffff a.snd_wnd ;
     assert_bool "at most 64KiB in flight" (m <= 0xffff) ;
     (* Segments are sized for the smaller MSS, or 536 if the peer gives none: *)

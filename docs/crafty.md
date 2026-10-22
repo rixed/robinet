@@ -504,8 +504,8 @@ that are not named: `append(a, x)`, `histogram(rtts, bucket=5ms)`.
   peer's spurious retransmissions), `srtt`, `rttvar`, `rtt_samples`, `rto`,
   `snd_mss`, `rcv_mss`, `cwnd`, `ssthresh` (2^31-1 before any loss),
   `snd_wnd` (the peer's window), `rcv_wnd`, `snd_wscale` and `rcv_wscale`
-  (the peer's and our window shifts, 0 unless both offered one) and
-  `established`.
+  (the window shifts the peer and we offered, -1 if none; scaling is on only
+  if both offered one) and `established`.
 - `getenv(name, default=s)`: fails if unset and no default.
 - `rand(max)`: an int or a float in `[0, max)` (default 1.0), or a bool if
   `max` is `true`. `randbytes(len)`: random bytes.
