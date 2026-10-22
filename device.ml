@@ -72,7 +72,8 @@ type model =
     | TPolicer of { start : Policer.start ; max_packets : int option ;
                     max_volume : int option ; max_packet_rate : float option ;
                     max_throughput : float option ;
-                    max_duration : float option }
+                    max_duration : float option ;
+                    max_syns : int option ; max_syn_rate : float option }
     | THub of { ports : int ; speed : EthSpeed.t }
     | TSwitch of { ports : int ; speeds : EthSpeed.t list ;
                    full_duplex : bool ; macs : int }
@@ -253,7 +254,8 @@ let policer =
     { name = "policer" ;
       descr = "Drops what goes from its port 0 to its port 1 beyond some \
                limits: totals that, once reached, drop everything until \
-               reset, and rates beyond which it drops." ;
+               reset, and rates beyond which it drops; likewise for TCP \
+               SYNs, but dropping only SYNs." ;
       params = [
           param "start" ~kind:(Widget.one_of (Widget.choices Policer.start_names))
               ~default:(`Int 0)
@@ -267,7 +269,11 @@ let policer =
           param "max packet rate" ~kind:(Widget.optional (FRange (0., infinity)))
               ~descr:"How many packets may pass per second." ;
           param "max throughput" ~kind:(Widget.optional (FRange (0., infinity)))
-              ~descr:"How many bytes of frames may pass per second." ] ;
+              ~descr:"How many bytes of frames may pass per second." ;
+          param "max syns" ~kind:(Widget.optional (IRange (0, max_int)))
+              ~descr:"How many TCP SYNs (without ACK) may pass." ;
+          param "max syn rate" ~kind:(Widget.optional (FRange (0., infinity)))
+              ~descr:"How many TCP SYNs (without ACK) may pass per second." ] ;
       of_params = fun args ->
           TPolicer {
               start = Policer.start_of_int (int args "start") ;
@@ -275,7 +281,9 @@ let policer =
               max_volume = opt args "max volume" Widget.to_int ;
               max_duration = opt args "max duration" Widget.to_float ;
               max_packet_rate = opt args "max packet rate" Widget.to_float ;
-              max_throughput = opt args "max throughput" Widget.to_float } }
+              max_throughput = opt args "max throughput" Widget.to_float ;
+              max_syns = opt args "max syns" Widget.to_int ;
+              max_syn_rate = opt args "max syn rate" Widget.to_float } }
 
 let hub =
     { name = "hub" ;
@@ -654,13 +662,15 @@ let to_params =
     | TTap ->
         []
     | TPolicer { start ; max_packets ; max_volume ; max_packet_rate ;
-                 max_throughput ; max_duration } ->
+                 max_throughput ; max_duration ; max_syns ; max_syn_rate } ->
         [ "start", `Int (Policer.int_of_start start) ;
           "max packets", int_opt max_packets ;
           "max volume", int_opt max_volume ;
           "max duration", float_opt max_duration ;
           "max packet rate", float_opt max_packet_rate ;
-          "max throughput", float_opt max_throughput ]
+          "max throughput", float_opt max_throughput ;
+          "max syns", int_opt max_syns ;
+          "max syn rate", float_opt max_syn_rate ]
     | THub { ports ; speed } ->
         [ "ports", `Int ports ;
           "speed", `Int (Array.findi ((=) speed) Hub.Repeater.speeds) ]
@@ -734,10 +744,10 @@ let build ~parent name = function
         let t = Hub.Tap.make ~parent name in
         t.Hub.Tap.widget, TTap
     | TPolicer { start ; max_packets ; max_volume ; max_packet_rate ;
-                 max_throughput ; max_duration } as m ->
+                 max_throughput ; max_duration ; max_syns ; max_syn_rate } as m ->
         let t =
             Policer.make ~parent ~start ?max_packets ?max_volume
-                ?max_packet_rate ?max_throughput
+                ?max_packet_rate ?max_throughput ?max_syns ?max_syn_rate
                 ?max_duration:(Option.map Clock.Interval.of_secs max_duration)
                 name in
         t.Policer.widget, m

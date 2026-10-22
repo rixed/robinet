@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 4765ab5d9b389f066e640b3da7392c02) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 2adf075bb7f599f95cff01df2f86d61d) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -186,8 +186,9 @@ segment, even without data.
         {"type":"done","ts":0.215302,"status":"OK","packets_out":3,"packets_in":3,...}
 
 -   `--max-duration D`, `--max-packets N`, `--max-bytes N`,
-    `--max-packets-per-secs N`, `--max-bytes-per-secs N`: budgets; exceeding one
-    stops the program.
+    `--max-packets-per-secs N`, `--max-bytes-per-secs N`, `--max-syns N`,
+    `--max-syns-per-secs N`: budgets; exceeding one stops the program. SYNs are
+    TCP SYNs without ACK, i.e. connection attempts.
 
 -   `--linger D`: once the program is done, how long to wait for the traffic to
     stop, so that connections close (default 2s).

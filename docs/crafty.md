@@ -214,8 +214,9 @@ sudo crafty -i eth0 --ip 192.0.2.5 -e '/IP(dst=192.0.2.10)/ICMP/Echo {
   ```
 
 - `--max-duration D`, `--max-packets N`, `--max-bytes N`,
-  `--max-packets-per-secs N`, `--max-bytes-per-secs N`: budgets; exceeding
-  one stops the program.
+  `--max-packets-per-secs N`, `--max-bytes-per-secs N`, `--max-syns N`,
+  `--max-syns-per-secs N`: budgets; exceeding one stops the program. SYNs are
+  TCP SYNs without ACK, i.e. connection attempts.
 - `--linger D`: once the program is done, how long to wait for the traffic to
   stop, so that connections close (default 2s).
 - `--check`: only compiles the program.

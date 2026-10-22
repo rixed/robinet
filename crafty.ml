@@ -80,7 +80,7 @@ let () =
     and prog = ref None
     and max_duration = ref None and max_packets = ref None
     and max_volume = ref None and max_packet_rate = ref None
-    and max_throughput = ref None
+    and max_throughput = ref None and max_syns = ref None and max_syn_rate = ref None
     and speed = ref None and full_duplex = ref None and mtu = ref None in
     let interval r = Arg.String (fun s ->
         try r := Clock.Interval.of_string s
@@ -142,6 +142,9 @@ let () =
             "N send no more packets per second" ;
         "--max-bytes-per-secs", some_float max_throughput,
             "N send no more bytes per second" ;
+        "--max-syns", some_int max_syns, "N send no more TCP SYNs (without ACK)" ;
+        "--max-syns-per-secs", some_float max_syn_rate,
+            "N send no more TCP SYNs (without ACK) per second" ;
         "--linger", interval linger,
             "DURATION once done, stop after that long without traffic (default 2s)" ;
         "-p", print_packets_spec,
@@ -345,6 +348,7 @@ let () =
         Policer.make ~parent:sim.root ?max_packets:!max_packets
             ?max_volume:!max_volume ?max_packet_rate:!max_packet_rate
             ?max_throughput:!max_throughput ?max_duration:!max_duration
+            ?max_syns:!max_syns ?max_syn_rate:!max_syn_rate
             ~on_limit:(fun l ->
                 if !limit = None then (
                     limit := Some l ;
