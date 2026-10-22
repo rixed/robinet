@@ -435,17 +435,19 @@ let stats_line n =
 
 let next_seq = ref 0
 
-(** Registers alternative patterns, each a node and layers starting with
- * that of the node, which it holds until the function returned unregisters
- * them all. A packet is told to at most one of them. *)
-let register alternatives ~hold ~matched ~failed =
+(** Registers cases of alternative patterns, each a node and layers starting
+ * with that of the node, which it holds until the function returned
+ * unregisters them all. A packet is told to at most one of them, which tells
+ * the [matched] of its case. *)
+let register cases ~hold ~failed =
     incr next_seq ;
     let ps =
-        List.map (fun (node, layers) ->
-            let p = { seq = !next_seq ; layers ; hold ; matched ; failed } in
-            acquire node ;
-            node.patterns <- node.patterns @ [ p ] ;
-            node, p) alternatives in
+        List.concat_map (fun (alternatives, matched) ->
+            List.map (fun (node, layers) ->
+                let p = { seq = !next_seq ; layers ; hold ; matched ; failed } in
+                acquire node ;
+                node.patterns <- node.patterns @ [ p ] ;
+                node, p) alternatives) cases in
     let registered = ref true in
     fun () ->
         if !registered then (

@@ -144,12 +144,11 @@ and stmt_desc =
     (* How many enclosing [repeat] and [on] to leave: *)
     | Break of int
     | Wait of expr
-    (* An [expect] being an [any] of a single case; [form] is which: *)
-    | Any of { form : string ; timeout : expr option ; cases : case list }
+    (* An [expect] being a [first] of a single case; [form] is which: *)
+    | First of { form : string ; timeout : expr option ; cases : case list }
     (* Without [for_], it ends [linger] after the statements of its block: *)
     | On of { for_ : expr option ; linger : expr option ; timeout : expr option ;
-              max : expr option ; patterns : pattern list ; match_ : var ;
-              body : block }
+              max : expr option ; cases : case list }
 
 (* Of alternative [patterns]; [match_] is the variable [MATCH] of the
  * block: *)
@@ -447,7 +446,7 @@ let lookup_var env loc name =
     | None ->
         if List.mem name env.poisoned then raise Already_told ;
         if name = "MATCH" then
-            error loc "MATCH is only defined in the blocks of expect, any and on" ;
+            error loc "MATCH is only defined in the blocks of expect, first and on" ;
         if name = "LAST" then
             error loc "LAST is only defined once a packet was sent, in that block or an enclosing one" ;
         (* In a condition, a name can also be a field of the layer: *)
@@ -1428,16 +1427,17 @@ and block errors env stmts = fst (block_value ~used:false errors env stmts)
 and stmt errors env (s : A.stmt) =
     let loc = s.stmt_loc in
     let mk stmt = { stmt_loc = loc ; stmt } in
-    let any form timeout cases =
-        let timeout =
-            timeout_of env form timeout in
-        let cases =
-            List.map (fun (ps, body) ->
-                let patterns = List.map (pattern env) ps in
-                let match_ = new_var "MATCH" packet_type in
-                let body = block errors { env with vars = match_ :: env.vars } body in
-                { patterns ; match_ ; body }) cases in
-        env, Some (mk (Any { form ; timeout ; cases })) in
+    let cases ?(loops=0) cs =
+        List.map (fun (ps, body) ->
+            let patterns = List.map (pattern env) ps in
+            let match_ = new_var "MATCH" packet_type in
+            let body =
+                block errors { env with vars = match_ :: env.vars ;
+                                        loops = env.loops + loops } body in
+            { patterns ; match_ ; body }) cs in
+    let first form timeout cs =
+        let timeout = timeout_of env form timeout in
+        env, Some (mk (First { form ; timeout ; cases = cases cs })) in
     let declare_typ env name typ =
         if List.mem name env.declared_here then
             error loc "%s is already declared in this block (:= changes it)" name ;
@@ -1454,7 +1454,7 @@ and stmt errors env (s : A.stmt) =
                 | A.Repeat _ -> Some "repeat" | A.Foreach _ -> Some "foreach"
                 | A.Retry _ -> Some "retry" | A.Catch _ -> Some "catch"
                 | A.Break _ -> Some "break" | A.Wait _ -> Some "wait"
-                | A.Expect _ -> Some "expect" | A.Any _ -> Some "any"
+                | A.Expect _ -> Some "expect" | A.First _ -> Some "first"
                 | A.On _ -> Some "on"
                 | A.Expr _ | A.Declare _ | A.Assign _ -> None in
             Option.may (fun what ->
@@ -1651,10 +1651,14 @@ and stmt errors env (s : A.stmt) =
         | A.Wait dur ->
             env, Some (mk (Wait (expect "The duration of wait" (expr env dur) Type.Interval)))
         | A.Expect { timeout ; patterns ; body } ->
-            any "expect" timeout [ patterns, body ]
-        | A.Any { timeout ; cases } ->
-            any "any" timeout cases
-        | A.On { for_ ; linger ; timeout ; max ; patterns = ps ; body } ->
+            first "expect" timeout [ patterns, body ]
+        | A.First { timeout ; cases = cs } ->
+            if List.length cs = 1 then
+                env.warnings :=
+                    (loc, "This first has a single case: it is an expect") ::
+                    !(env.warnings) ;
+            first "first" timeout cs
+        | A.On { for_ ; linger ; timeout ; max ; cases = cs } ->
             if for_ <> None && linger <> None then
                 error loc "An on lasts either for its own duration (for), \
                            keeping its block waiting, or until its block ends, \
@@ -1663,13 +1667,8 @@ and stmt errors env (s : A.stmt) =
             and linger = opt_expr env "The linger of on" Type.Interval linger
             and timeout = timeout_of env "on" timeout
             and max = opt_expr env "The maximum of on" Type.Int max in
-            let patterns = List.map (pattern env) ps in
-            let match_ = new_var "MATCH" packet_type in
-            let body =
-                block errors { env with vars = match_ :: env.vars ;
-                                        loops = env.loops + 1 } body in
-            env, Some (mk (On { for_ ; linger ; timeout ; max ; patterns ; match_ ;
-                                body }))
+            env, Some (mk (On { for_ ; linger ; timeout ; max ;
+                                cases = cases ~loops:1 cs }))
     with Error _ | Already_told as ex ->
         tell errors ex ;
         env, None
@@ -1682,9 +1681,9 @@ let rec declarations (b : block) =
         | Assign { path ; value ; _ } ->
             List.concat_map (expr_declarations % snd) path @ expr_declarations value
         | Expr e -> expr_declarations e
-        | Stack { body = b ; _ } | Retry { body = b ; _ } | Catch b
-        | On { body = b ; _ } -> declarations b
-        | Any { cases ; _ } -> List.concat_map (fun (c : case) -> declarations c.body) cases
+        | Stack { body = b ; _ } | Retry { body = b ; _ } | Catch b -> declarations b
+        | First { cases ; _ } | On { cases ; _ } ->
+            List.concat_map (fun (c : case) -> declarations c.body) cases
         | Repeat { var ; body ; _ } -> var :: declarations body
         | _ -> []) b
 
@@ -1784,6 +1783,9 @@ let check_patterns (ps : A.patterns) =
   "" (warns "/IP(dst=1.2.3.4)/UDP(dst=53) { expect /IP/ICMP {} }")
   "" (warns "/IP(dst=1.2.3.4)/TCP(dst=53) { expect /IP/UDP/DNS/Answer {} }")
   "" (warns "expect /IP/UDP/DNS/Answer {}")
+  "line 1, column 1: This first has a single case: it is an expect" \
+    (warns "first Bytes | ../ICMP {}")
+  "" (warns "first Bytes {} | ../ICMP {}")
 *)
 
 (*$= types & ~printer:identity
@@ -1832,7 +1834,7 @@ let check_patterns (ps : A.patterns) =
   "I: int" \
     (types "repeat { on Bytes(\"x\") { break 2 } }")
   "x: int, y: ip" \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { any Bytes(\"a\") { x = length(MATCH) } | ../ICMP { y = MATCH[IP].src } }")
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { first Bytes(\"a\") { x = length(MATCH) } | ../ICMP { y = MATCH[IP].src } }")
   "x: int, y: ip" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"a\")\n  { x = LAST[UDP].src }\n  Bytes(\"b\")\n  expect ../UDP(IP.src == LAST[IP].dst) { y = LAST[IP].src } }")
   "t: float, x: float, p: {a: int}, y: int" \
@@ -1973,10 +1975,10 @@ let check_patterns (ps : A.patterns) =
     (types "repeat { break 2 }")
   "line 1, column 4: The condition of if must be a bool, not a string" \
     (types "if \"x\" {}")
-  "line 1, column 13: The timeout of any must be an interval, not an int" \
-    (types "any timeout=1 Bytes {}")
-  "line 2, column 5: MATCH is only defined in the blocks of expect, any and on" \
-    (types "any Bytes {} | Bytes { x = MATCH }\ny = MATCH")
+  "line 1, column 15: The timeout of first must be an interval, not an int" \
+    (types "first timeout=1 Bytes {}")
+  "line 2, column 5: MATCH is only defined in the blocks of expect, first and on" \
+    (types "first Bytes {} | Bytes { x = MATCH }\ny = MATCH")
   "line 1, column 11: The maximum of retry must be an int, not an interval" \
     (types "retry max=1s {}")
   "line 1, column 11: The items of foreach must be an array or a map, not an int" \
@@ -2032,7 +2034,7 @@ let check_patterns (ps : A.patterns) =
     (types "/UDP {}")
   "line 1, column 18: IP cannot be on top of IP" \
     (types "/IP(dst=1.2.3.4)/IP {}")
-  "line 1, column 5: MATCH is only defined in the blocks of expect, any and on" \
+  "line 1, column 5: MATCH is only defined in the blocks of expect, first and on" \
     (types "x = MATCH")
   "line 1, column 5: LAST is only defined once a packet was sent, in that block or an enclosing one" \
     (types "x = LAST")

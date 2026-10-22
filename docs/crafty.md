@@ -77,7 +77,7 @@ target = ip_addr(getenv("TARGET"))  # Read the envvar and cast to an IP, or fail
   # back, or the ICMP error a closed port answers with. "../" goes back to
   # /IP(dst=target), and ICMP goes on top of that IP stream instead of
   # UDP: these are the ICMP errors that it receives.
-  any timeout=1s Bytes { print(MATCH[Bytes].data) }
+  first timeout=1s Bytes { print(MATCH[Bytes].data) }
     | ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print("closed") }
 }
 ```
@@ -295,7 +295,7 @@ with the constructors of all, which `case` tells apart:
 
 ```
 result = Pending   # of type (Failed string | Got int | Pending)
-any Bytes("pong") { result := Got(length(MATCH)) }
+first Bytes("pong") { result := Got(length(MATCH)) }
   | ../ICMP { result := Failed("unreachable") }
 print(case result Got { "${result} layers" } else { "${result}" })
 ```
@@ -311,7 +311,7 @@ Interpolated, a variant is written `Got 4`, `Pending`.
   `|=`, `^=`) updates it.
 - Blocks see the variables of the blocks around them. Conditions of patterns
   read them when a packet arrives.
-- Predefined: `MATCH` (in the block of an `expect`, `any` or `on`), `LAST`
+- Predefined: `MATCH` (in the block of an `expect`, `first` or `on`), `LAST`
   (the last packet sent, once a block has sent one), and `I`, the counter of
   a `repeat` or the item of a `foreach`.
 
@@ -407,7 +407,7 @@ is not.
   receives. On the same layer as the stack's, a pattern sees only that
   stream: in a block on `IP/TCP`, `../TCP!` sees that connection's segments.
 - `Bytes("pong") | ../ICMP`: alternatives, wherever a pattern goes (`-p`
-  too). A packet that matches several matches once.
+  too), in parentheses or not. A packet that matches several matches once.
 
 Conditions in parentheses are boolean expressions, where `,` and `=` can
 stand for `&&` and `==`:
@@ -471,15 +471,16 @@ single one (`break 2`, `wait 1s`).
 - `wait dur=d`: pauses.
 - `expect timeout=d PATTERN { ... }`: waits for one matching packet (default
   timeout 1m, which is an error), then runs the block.
-- `any timeout=d PATTERN { ... } | PATTERN { ... }`: waits for the first
+- `first timeout=d PATTERN { ... } | PATTERN { ... }`: waits for the first
   packet that matches any pattern, and runs that pattern's block only. A
   timeout is an error.
-- `on for=d linger=d timeout=d max=n PATTERN { ... }`: the enclosing block
-  goes on, while a new block runs for each matching packet. It ends after
-  `for`, which the enclosing block waits for; or else with the enclosing
-  block, which waits `linger` (default 0) after its statements; not both. It
-  also ends after `max` matches, or at a `break` from its block. A `timeout`
-  (default none) without a match is an error.
+- `on for=d linger=d timeout=d max=n PATTERN { ... } | PATTERN { ... }`: the
+  enclosing block goes on, while for each matching packet a new block runs,
+  that of its pattern. It ends after `for`, which the enclosing block waits
+  for; or else with the enclosing block, which waits `linger` (default 0)
+  after its statements; not both. It also ends after `max` matches, or at a
+  `break` from its block. A `timeout` (default none) without a match is an
+  error.
 
 A block completes once its statements are done, its `linger`s waited, and
 its `on`s with a `for` ended. Leaving a block, normally or on an error, cancels what it still had
@@ -938,7 +939,7 @@ port = int(getenv("PORT", default="33434"))
       p = ../../IP!(ttl=hop + 1, id=probe)/UDP/Bytes("probe")
       if probe == 1 { print("to ${target} from UDP port ${p[UDP].src} to ${port}") }
       catch {
-        any timeout=1s /IP/ICMP/TimeExceeded/IP(id == probe, dst == target)/UDP {
+        first timeout=1s /IP/ICMP/TimeExceeded/IP(id == probe, dst == target)/UDP {
           rtts[MATCH[^IP].src] += MATCH[Eth].ts - p[Eth].ts
         } | /IP/ICMP/DestUnreachable/IP(id == probe, dst == target)/UDP {
           rtts[MATCH[^IP].src] += MATCH[Eth].ts - p[Eth].ts
@@ -993,7 +994,7 @@ hi = int(getenv("MTU", default="1500"))         # what may fit
     answered = false
     Request(seq=size, payload=#00 * (size - 28))
     catch {
-      any timeout=1s Reply(seq == size) {
+      first timeout=1s Reply(seq == size) {
         print("${size}: echoed")
         answered := true
         replies += 1

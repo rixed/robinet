@@ -616,9 +616,13 @@ let expr, set_expr = forward ()
 let cond_expr, set_cond_expr = forward ()
 let block, set_block = forward ()
 let pattern = make_pattern cond_expr
-(* Separated by bars that may start or end lines: *)
+(* Separated by bars that may start or end lines, in parentheses or not: *)
 let patterns =
-    repeat ~min:1 ~sep:(nl_sp -- item '|' -- nl_sp) pattern |? "patterns"
+    fix (fun patterns ->
+        repeat ~min:1 ~sep:(nl_sp -- item '|' -- nl_sp)
+            ((pattern >>: fun p -> [ p ]) |||
+             (quiet (item '(') -- nl_sp -+ patterns +- nl_sp +- item ')') |? "pattern") >>:
+        List.concat)
 let () =
     set_expr (make_expr ~cond:false ~self:expr ~expr ~pattern ~block) ;
     set_cond_expr (make_expr ~cond:true ~self:cond_expr ~expr ~pattern ~block)
@@ -643,6 +647,8 @@ let assign_op =
 
 let stmt =
     let body = sp -+ block in
+    (* Of first and on, separated by bars that may start or end lines: *)
+    let cases = repeat ~min:1 ~sep:(nl_sp -- item '|' -- nl_sp) (patterns ++ body) in
     let with_loc p = here ++ p >>: fun (stmt_loc, stmt) -> { stmt_loc ; stmt } in
     (* Any name, that is then refused if reserved, for a better message: *)
     let variable =
@@ -748,15 +754,13 @@ let stmt =
         (keyword "expect" -+ params ~pattern:true "expect" [ "timeout" ] +- sp ++ patterns ++
          body >>: fun ((p, patterns), body) ->
             Expect { timeout = p "timeout" ; patterns ; body }) |||
-        (* Its cases, separated by bars that may start or end lines: *)
-        (keyword "any" -+ params ~pattern:true "any" [ "timeout" ] +- sp ++
-         repeat ~min:1 ~sep:(nl_sp -- item '|' -- nl_sp) (patterns ++ body) >>:
-            fun (p, cases) -> Any { timeout = p "timeout" ; cases }) |||
+        (keyword "first" -+ params ~pattern:true "first" [ "timeout" ] +- sp ++
+         cases >>: fun (p, cases) -> First { timeout = p "timeout" ; cases }) |||
         (keyword "on" -+
          params ~pattern:true "on" [ "for" ; "linger" ; "timeout" ; "max" ] +- sp ++
-         patterns ++ body >>: fun ((p, patterns), body) ->
+         cases >>: fun (p, cases) ->
             On { for_ = p "for" ; linger = p "linger" ; timeout = p "timeout" ;
-                 max = p "max" ; patterns ; body })) |? "statement"
+                 max = p "max" ; cases })) |? "statement"
 
 let () =
     set_block (
@@ -900,10 +904,14 @@ let parse_patterns text =
   "p = Bytes(\"a\")\n" (reads "p = Bytes(\"a\")")
   "p := ../../IP!/UDP(dst=7)/Bytes(\"a\")\n" (reads "p:=../../IP!/UDP(dst=7)/Bytes(\"a\")")
   "line 1, column 13: UDP is not a terminal layer, therefore /IP!/UDP is not a complete message that could be sent: it needs a terminal layer on top (Bytes)." (reads "p = /IP!/UDP")
-  "any timeout=1s Bytes(\"a\") {\n} | Bytes(\"b\") {\n  x := 1\n}\n" \
-    (reads "any 1s Bytes(\"a\") {} | Bytes(\"b\") { x := 1 }")
-  "any Bytes(data == \"a\") {\n} | ../ICMP {\n} | /IP(src == x)/UDP {\n}\nx := 1\n" \
-    (reads "any Bytes(data = \"a\") {}\n| ../ICMP {} |\n/IP(src=x)/UDP {}\nx := 1")
+  "first timeout=1s Bytes(\"a\") {\n} | Bytes(\"b\") {\n  x := 1\n}\n" \
+    (reads "first 1s Bytes(\"a\") {} | Bytes(\"b\") { x := 1 }")
+  "first Bytes(data == \"a\") {\n} | ../ICMP {\n} | /IP(src == x)/UDP {\n}\nx := 1\n" \
+    (reads "first Bytes(data = \"a\") {}\n| ../ICMP {} |\n/IP(src=x)/UDP {}\nx := 1")
+  "on for=1s Bytes {\n} | ../ICMP | /IP/UDP {\n  x := 1\n}\n" \
+    (reads "on for=1s Bytes {} | (../ICMP | /IP/UDP) { x := 1 }")
+  "expect Bytes | ../ICMP | /IP/UDP {\n}\n" \
+    (reads "expect ((Bytes)\n  | (../ICMP | /IP/UDP)) {}")
 *)
 
 (* Blocks, if and case are expressions, and an expression is a statement;
@@ -982,7 +990,7 @@ let parse_patterns text =
     "expect ../../TCP!(flags & RST) {}" ; "IP!(ttl=1)/TCP!(flags=2)/Bytes(\"x\")" ; \
     "/IP/UDP/Bytes(\"x\")\n{ y = !(a == b) }" ; \
     "if a & 1 {} elsif (b || c) && d { x := 1 }\nelse { if e {} }" ; \
-    "any timeout=2s * n Bytes(\"a\") {} | ../TCP!(flags & (SYN | RST)) {}" ; \
+    "first timeout=2s * n Bytes(\"a\") {} | ../TCP!(flags & (SYN | RST)) {}" ; \
     "x = 1 + if a { { y = 1; y * 2 } } elsif b { 2 } else { 3 }" ; \
     "x = case var=l MATCH[0] Eth { l.src } | IP { if a { 1 } else { 2 } } | else { 0 }" ; \
     "x = case y IP { 1 }\nelse { 2 }" ; \
@@ -1010,7 +1018,7 @@ let parse_patterns text =
   "line 1, column 14: Expected ':' in expression" (reads "x = {a: 1, b 2}")
   "line 2, column 1: Expected '}' in block" \
     (reads "expect Bytes(\"x\") { print(\"ok\")\n")
-  "line 1, column 19: Expected name in pattern" (reads "expect timeout=5s {\n}")
+  "line 1, column 19: Expected pattern in statement" (reads "expect timeout=5s {\n}")
   "line 1, column 13: Unknown parameter cnt for repeat (expected var, count, every, for)" \
     (reads "repeat cnt=3 {\n}")
   "line 1, column 11: Expected '{' in block" (reads "foreach {}")
@@ -1040,8 +1048,8 @@ let parse_patterns text =
   "line 1, column 13: Unknown layer Bytse, do you mean Bytes?" (reads "expect Bytse(\"x\") {}")
   "line 1, column 24: Unknown layer Bytse, do you mean Bytes?" (reads "expect timeout=1s Bytse {}")
   "line 1, column 9: Unknown layer Bytse, do you mean Bytes?" (reads "on Bytse {}")
-  "line 1, column 10: Unknown layer Bytse, do you mean Bytes?" (reads "any Bytse {} | Bytes {}")
-  "line 1, column 8: Expected name in pattern" (reads "expect 2s {}")
+  "line 1, column 12: Unknown layer Bytse, do you mean Bytes?" (reads "first Bytse {} | Bytes {}")
+  "line 1, column 8: Expected pattern in statement" (reads "expect 2s {}")
   "line 1, column 11: Unknown function pirnt, do you mean print?" (reads "pirnt(\"x\")")
   "line 1, column 7: Unknown function foo" (reads "foo(1)")
   "line 1, column 15: Unknown function foo" (reads "x := 1; foo(1); y := 2")
@@ -1057,9 +1065,11 @@ let parse_patterns text =
   "line 1, column 10: Expected '{' in block" (reads "case x IP")
   "line 2, column 15: MATCH is a reserved name" (reads "x = 1\ncase var=MATCH x IP {}")
   "line 2, column 18: Expected expression in statement" (reads "x = 1\ncase x else {} | IP {}")
-  "line 1, column 5: Expected name in pattern" (reads "any {}")
-  "line 1, column 21: Expected name in pattern" (reads "any Bytes(\"a\") {} | {}")
-  "line 1, column 16: Expected name in pattern" (reads "expect Bytes | {}")
+  "line 1, column 7: Expected pattern in statement" (reads "first {}")
+  "line 1, column 23: Expected pattern in statement" (reads "first Bytes(\"a\") {} | {}")
+  "line 1, column 16: Expected pattern in statement" (reads "expect Bytes | {}")
+  "line 1, column 17: Expected pattern in statement" (reads "expect (Bytes | ) {}")
+  "line 1, column 15: Expected ')' in pattern" (reads "expect (Bytes {}")
   "line 1, column 5: wait needs a duration" (reads "wait")
   "line 1, column 5: Expected '{' in block" (reads "if x\n{}")
   "line 1, column 1: Expected end of statement" (reads "else {}")

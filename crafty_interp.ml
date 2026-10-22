@@ -46,8 +46,8 @@
    reaching the program's block ends the program.
 
    [expect] waits for its pattern, failing after its timeout, then runs its
-   block once. [any] does the same with the first of its patterns to match.
-   A packet sent defines [LAST] for the rest of its block, or updates it. [on] lets its block go on, and runs its own block for every
+   block once. [first] does the same with the first of its patterns to match.
+   A packet sent defines [LAST] for the rest of its block, or updates it. [on] lets its block go on, and runs the block of the pattern of every
    match until its timeout, its [max] or a [break] out of it; a block ends
    only once its statements are done and its [on]s are over. The packet
    matched, [MATCH], is decoded to its top, and only if read. *)
@@ -658,7 +658,9 @@ let match_value packet = packet_value (Crafty_tree.complete packet)
  * stack it is on top of, which is seen in the mode of the stack. Its layers
  * that are over layers of the stack match only the streams of their nodes.
  * Returns what unregisters them: *)
-let register t b env (patterns : T.pattern list) ~matched ~failed =
+(* Each case is alternative patterns and what to do of a packet that matches
+ * one; a packet goes to one case at most: *)
+let register t b env (cases : (T.pattern list * _) list) ~failed =
     let alternative (p : T.pattern) =
         let over = List.rev (List.take (List.length env.stack - p.depth) env.stack) in
         let layers =
@@ -681,7 +683,8 @@ let register t b env (patterns : T.pattern list) ~matched ~failed =
             List.nth env.stack (List.length env.stack - p.depth) in
         e.node,
         Crafty_tree.{ player = e.node.layer ; pmode = e.mode ; test = None } :: layers in
-    Crafty_tree.register (List.map alternative patterns) ~matched ~failed ~hold:(fun n ->
+    let cases = List.map (fun (ps, matched) -> List.map alternative ps, matched) cases in
+    Crafty_tree.register cases ~failed ~hold:(fun n ->
         Crafty_tree.acquire n ;
         b.cleanups <- (fun () -> Crafty_tree.release n) :: b.cleanups)
 
@@ -815,28 +818,28 @@ and exec t b env (s : T.stmt) k =
                 let d = Crafty_tree.busy_for stack in
                 if Interval.compare d Interval.zero <= 0 then k env else wait d in
             wait (Interval.psec 1))
-    | T.Any { form ; timeout ; cases } ->
+    | T.First { form ; timeout ; cases } ->
         guard (fun () -> timeout_of eval form timeout) |>
         Option.may (fun timeout ->
-            let armed = ref true and unregisters = ref [] in
-            let disarm () = armed := false ; List.iter (fun u -> u ()) !unregisters in
+            let armed = ref true and unregister = ref ignore in
+            let disarm () = armed := false ; !unregister () in
             let fire f = if !armed && b.live then (disarm () ; f ()) in
-            unregisters :=
-                List.map (fun (c : T.case) ->
-                    register t b env c.patterns
-                        ~matched:(fun packet -> fire (fun () ->
+            unregister :=
+                register t b env
+                    (List.map (fun (c : T.case) ->
+                        c.patterns, fun packet -> fire (fun () ->
                             let inner =
                                 bind_lazy env c.match_ (fun () -> match_value packet) in
                             ignore (run_block t b inner c.body ~fail:b.fail
-                                        ~break_:b.break_ (fun _ -> k env))))
-                        ~failed:(fun where message -> fire (fun () ->
-                            b.fail Crafty_parser.{ where ; message }))) cases ;
+                                        ~break_:b.break_ (fun _ -> k env)))) cases)
+                    ~failed:(fun where message -> fire (fun () ->
+                        b.fail Crafty_parser.{ where ; message })) ;
             b.cleanups <- disarm :: b.cleanups ;
             Simulation.delay t.power timeout (fun () -> fire (fun () ->
                 ignore (guard (fun () ->
                     error s.stmt_loc "Nothing matched within %s"
                         (Interval.to_string timeout))))) ())
-    | T.On { for_ ; linger ; timeout ; max ; patterns ; match_ ; body } ->
+    | T.On { for_ ; linger ; timeout ; max ; cases } ->
         let duration what = Option.map (fun (e : T.expr) ->
             match eval e with
             | Interval i ->
@@ -852,14 +855,14 @@ and exec t b env (s : T.stmt) k =
         Option.may (fun (for_, linger, timeout, max) ->
             (* Like [repeat count=0], [max=0] does nothing: *)
             if Option.map_default (fun m -> m > 0) true max then
-                on t b env s.stmt_loc patterns match_ body ~for_ ~linger ~timeout max ;
+                on t b env s.stmt_loc cases ~for_ ~linger ~timeout max ;
             k env)
 
 (* Disarmed after [for_], or else [linger] after the statements of [b] (or,
  * without a linger, once [b] is no longer held), or after [max] matches;
  * fails [b] after [timeout] without a match. Over once disarmed and its
  * running blocks are done: *)
-and on t b env loc patterns match_ body ~for_ ~linger ~timeout max =
+and on t b env loc cases ~for_ ~linger ~timeout max =
     let armed = ref true and over = ref false and unregister = ref ignore in
     let holds = for_ <> None || Interval.compare linger Interval.zero > 0 in
     let matches = ref 0 in
@@ -887,26 +890,26 @@ and on t b env loc patterns match_ body ~for_ ~linger ~timeout max =
         check_over () in
     b.busy <- b.busy + 1 ;
     if holds then b.holding <- b.holding + 1 ;
+    let matched (c : T.case) packet =
+        if !armed && b.live then (
+            incr matches ;
+            last_match := now () ;
+            if Option.map_default (fun m -> !matches >= m) false max then
+                disarm () ;
+            let inner = bind_lazy env c.match_ (fun () -> match_value packet) in
+            let instance =
+                run_block t b inner c.body ~fail:b.fail
+                    ~break_:(fun n -> if n <= 1 then stop () else b.break_ (n - 1))
+                    (fun _ ->
+                        running := List.filter (fun i -> i.live) !running ;
+                        check_over ()) in
+            (* Unless it was left already, with a break: *)
+            if instance.live then
+                if !over then cancel instance
+                else running := instance :: !running ;
+            check_over ()) in
     unregister :=
-        register t b env patterns
-            ~matched:(fun packet ->
-                if !armed && b.live then (
-                    incr matches ;
-                    last_match := now () ;
-                    if Option.map_default (fun m -> !matches >= m) false max then
-                        disarm () ;
-                    let inner = bind_lazy env match_ (fun () -> match_value packet) in
-                    let instance =
-                        run_block t b inner body ~fail:b.fail
-                            ~break_:(fun n -> if n <= 1 then stop () else b.break_ (n - 1))
-                            (fun _ ->
-                                running := List.filter (fun i -> i.live) !running ;
-                                check_over ()) in
-                    (* Unless it was left already, with a break: *)
-                    if instance.live then
-                        if !over then cancel instance
-                        else running := instance :: !running ;
-                    check_over ()))
+        register t b env (List.map (fun (c : T.case) -> c.patterns, matched c) cases)
             ~failed:(fun where message ->
                 if !armed && b.live then (
                     disarm () ;
@@ -1600,19 +1603,25 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "2ps: 0\n4ps: 1\n4ps: done" \
     (runs "repeat count=2 { /IP!(dst=10.0.0.2, id=I)/UDP(src=1000, dst=53)/Bytes(\"x\")\n  print(\"${LAST[IP].id}\") }")
 *)
-(* any runs the block of the first pattern to match, and no other: *)
+(* first runs the block of the first pattern to match, and no other: *)
 (*$= runs & ~printer:identity
   "500ms: b\n500ms: after\n500ms: done" \
     (runs ~inject:[ 0.3, reply "nope" ; 0.5, reply "b" ; 0.6, reply "a" ; 0.7, reply "b" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  any Bytes(\"a\") { print(\"a\") } | Bytes(\"b\") { print(MATCH[Bytes].data) }\n  print(\"after\") }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  first Bytes(\"a\") { print(\"a\") } | Bytes(\"b\") { print(MATCH[Bytes].data) }\n  print(\"after\") }")
   "1s: failed: line 2, column 3: Nothing matched within 1s" \
     (runs ~inject:[ 1.5, reply "a" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  any timeout=1s Bytes(\"a\") {} | Bytes(\"b\") {} }")
-  "0s: failed: line 1, column 13: The timeout of any cannot be negative" \
-    (runs "any timeout=-1s Bytes(\"x\") {} | Bytes(\"y\") {}")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  first timeout=1s Bytes(\"a\") {} | Bytes(\"b\") {} }")
+  "0s: failed: line 1, column 15: The timeout of first cannot be negative" \
+    (runs "first timeout=-1s Bytes(\"x\") {} | Bytes(\"y\") {}")
   "500ms: b\n500ms: done" \
     (runs ~inject:[ 0.3, reply "nope" ; 0.5, reply "b" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  any Bytes(\"a\") | Bytes(\"b\") { print(MATCH[Bytes].data) } | Bytes(\"c\") { print(\"c\") } }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  first Bytes(\"a\") | Bytes(\"b\") { print(MATCH[Bytes].data) } | Bytes(\"c\") { print(\"c\") } }")
+*)
+(* on runs the block of the pattern of each match, a packet matching once: *)
+(*$= runs & ~printer:identity
+  "300ms: a\n500ms: b\n1s3ps: done" \
+    (runs ~inject:[ 0.3, reply "a" ; 0.5, reply "b" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"x\")\n  on for=1s Bytes(\"a\") { print(\"a\") } | Bytes { print(MATCH[Bytes].data) } }")
 *)
 (* A pattern can be alternatives, which match a packet at most once: *)
 (*$= runs & ~printer:identity
@@ -1858,7 +1867,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         Tools.(udp.Udp.TRX.trx.ins --> sink (fun bits -> tx udp.Udp.TRX.trx bits)))) \
         "/IP(dst=10.0.0.2)/UDP(dst=7) { repeat count=2 { Bytes(\"echo ${I}\")\n    expect timeout=1s Bytes { print(MATCH[Bytes].data) } } }")
   "a 0.000s: unreachable\na 0.000s: done Eth#2" \
-    (with_host "/IP(dst=10.0.0.2)/UDP(dst=9) { Bytes(\"anyone?\")\n  any timeout=1s Bytes { print(\"answer\") } | ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
+    (with_host "/IP(dst=10.0.0.2)/UDP(dst=9) { Bytes(\"anyone?\")\n  first timeout=1s Bytes { print(\"answer\") } | ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
   "a 0.000s: unreachable\na 0.000s: done Eth#2" \
     (with_host "/IP(dst=10.0.0.2)/UDP(dst=9) { Bytes(\"anyone?\")\n  expect timeout=1s ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print(\"unreachable\") } }")
 *)
