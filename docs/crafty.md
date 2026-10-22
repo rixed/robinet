@@ -913,3 +913,209 @@ gw is 192.0.2.1; 2076 bytes in 3 packets
 64 to 1500, median 512
 1s500ms
 ```
+
+### Utilities
+
+Whole programs, which take their arguments from the environment.
+
+#### Traceroute through load balancers
+
+```
+# Every probe goes from the same UDP port to the same port, so that routers
+# that balance per flow send them all the same way: where a hop still shows
+# several routers, they balance per packet.
+target = ip_addr(getenv("TARGET"))
+probes = int(getenv("PROBES", default="5"))      # per hop
+max_hops = int(getenv("MAX_HOPS", default="30"))
+port = int(getenv("PORT", default="33434"))
+/IP!(dst=target)/UDP(dst=port) {
+  probe = 0                       # the IP id, that tells the probes apart
+  repeat var=hop count=max_hops {
+    rtts = map(key=0.0.0.0, default=array(init=0s, len=0))
+    reached = false
+    repeat count=probes {
+      probe += 1
+      p = ../../IP!(ttl=hop + 1, id=probe)/UDP/Bytes("probe")
+      if probe == 1 { print("to ${target} from UDP port ${p[UDP].src} to ${port}") }
+      catch {
+        any timeout=1s /IP/ICMP/TimeExceeded/IP(id == probe, dst == target)/UDP {
+          rtts[MATCH[^IP].src] += MATCH[Eth].ts - p[Eth].ts
+        } | /IP/ICMP/DestUnreachable/IP(id == probe, dst == target)/UDP {
+          rtts[MATCH[^IP].src] += MATCH[Eth].ts - p[Eth].ts
+          reached := true
+        }
+      }
+    }
+    head = "${hop + 1}"
+    answered = 0
+    foreach rtts {
+      answered += length(I.value)
+      ms = float(int(float(min(I.value)) * 100000.0)) / 100.0
+      print("${head}\t${I.key}\t${length(I.value)}/${probes}\tmin ${ms}ms")
+      head := ""
+    }
+    if answered < probes { print("${head}\t*\t${probes - answered}/${probes}") }
+    if reached { break }
+  }
+}
+```
+
+```
+% sudo TARGET=10.2.1.3 PROBES=8 crafty -i eth0 --udp 40000 --fw lbtrace.cfty
+to 10.2.1.3 from UDP port 40000 to 33434
+1	10.1.1.1	8/8	min 0.04ms
+2	10.1.0.5	4/8	min 37.67ms
+	10.1.0.6	4/8	min 34.92ms
+3	10.2.0.1	2/8	min 89.71ms
+	10.2.0.2	6/8	min 90.97ms
+4	10.2.0.6	8/8	min 117.6ms
+5	10.2.1.3	8/8	min 110.92ms
+```
+
+Hops 2 and 3 balance per packet. Behind routers that balance per flow, each
+hop shows one router, and another `PORT` may show another path. A `*` line
+counts the probes without an answer.
+
+#### Path MTU
+
+```
+# Echo requests that must not be fragmented: a router that cannot forward one
+# tells its next hop MTU, which is the next size to try; one that drops it
+# silently leaves a binary search between what came back and what did not.
+target = ip_addr(getenv("TARGET"))
+lo = 68                                         # fits any IPv4 path
+hi = int(getenv("MTU", default="1500"))         # what may fit
+/IP!(dst=target, dont_frag=true)/ICMP/Echo {
+  size = hi
+  replies = 0
+  repeat count=32 {
+    told = 0                      # the next hop MTU a router said
+    answered = false
+    Request(seq=size, payload=#00 * (size - 28))
+    catch {
+      any timeout=1s Reply(seq == size) {
+        print("${size}: echoed")
+        answered := true
+        replies += 1
+        lo := size
+      # Absolute, as routers have addresses of their own. "src != target" only
+      # silences the warning that it is not relative, as the stack's Echo is.
+      } | /IP(src != target)/ICMP/DestUnreachable(code == FRAG_NEEDED)/IP(dst == target, tot_len == size) {
+        told := MATCH[DestUnreachable].mtu
+        print("${size}: too big for ${MATCH[^IP].src}, next hop MTU ${told}")
+        answered := true
+      }
+    }
+    if !answered { print("${size}: no answer") }
+    if told > lo && told < size {
+      hi := told
+      size := told
+    } else {
+      if !answered || told > 0 { hi := size - 1 }
+      if lo >= hi { break }
+      size := (lo + hi + 1) / 2
+    }
+  }
+  print(if replies > 0 { "path MTU to ${target}: ${lo}" } else { "no echo came back" })
+}
+```
+
+```
+% sudo TARGET=10.2.1.3 crafty -i eth0 pmtu.cfty
+1500: too big for 10.1.0.5, next hop MTU 1400
+1400: no answer
+734: echoed
+1067: echoed
+1233: echoed
+1316: no answer
+1274: echoed
+1295: no answer
+1284: no answer
+1279: echoed
+1281: no answer
+1280: echoed
+path MTU to 10.2.1.3: 1280
+```
+
+10.1.0.5 reports its MTU of 1400, but a router further on drops what
+exceeds 1280 without a word.
+
+#### Losses and round trips per hop, over time
+
+```
+# Probes every hop once per round, on one flow as the traceroute does, and
+# reports each hop's losses and round trips every REPORT rounds.
+target = ip_addr(getenv("TARGET"))
+rounds = int(getenv("ROUNDS", default="60"))
+report = int(getenv("REPORT", default="10"))   # rounds per report
+pace = interval(getenv("INTERVAL", default="1s"))
+max_hops = int(getenv("MAX_HOPS", default="30"))   # less than 64
+port = int(getenv("PORT", default="33434"))
+last = max_hops - 1               # the target's hop, from 0, once known
+sent = array(init=0, len=max_hops)
+rtts = array(init=array(init=0s, len=0), len=max_hops)
+hosts = array(init=map(key=0.0.0.0, default=0), len=max_hops)
+sent_at = map(key=0, default=now())     # by IP id: round * 64 + hop
+/IP!(dst=target)/UDP(dst=port) {
+  on /IP/ICMP/TimeExceeded/IP(dst == target)/UDP(dst == port) |
+     /IP/ICMP/DestUnreachable(code == PORT_UNREACHABLE)/IP(dst == target)/UDP(dst == port) {
+    id = MATCH[IP].id
+    if has(sent_at, id) {
+      hop = id % 64
+      rtts[hop] += MATCH[Eth].ts - sent_at[id]
+      hosts[hop][MATCH[^IP].src] += 1
+      if MATCH[^IP].src == target && hop < last { last := hop }
+      sent_at := remove(sent_at, id)
+    }
+  }
+  repeat var=r count=rounds + 1 every=pace {
+    if r > 0 && r % report == 0 {
+      print("after ${r} rounds:")
+      repeat var=hop count=last + 1 {
+        s = sent[hop]
+        n = length(rtts[hop])
+        line = "${hop + 1}\t${keys(hosts[hop])}\tloss ${(s - n) * 100 / s}%"
+        if n > 0 {
+          avg = float(int(float(mean(rtts[hop])) * 100000.0)) / 100.0
+          best = float(int(float(min(rtts[hop])) * 100000.0)) / 100.0
+          worst = float(int(float(max(rtts[hop])) * 100000.0)) / 100.0
+          line := "${line}\tavg ${avg}ms\tbest ${best}ms\tworst ${worst}ms"
+        }
+        print(line)
+        sent[hop] := 0
+        rtts[hop] := array(init=0s, len=0)
+        hosts[hop] := map(key=0.0.0.0, default=0)
+      }
+      sent_at := map(key=0, default=now())    # too late for the next report
+    }
+    if r < rounds {
+      repeat var=hop count=last + 1 {
+        id = (r * 64 + hop) % 65536
+        p = ../../IP!(ttl=hop + 1, id=id)/UDP/Bytes("probe")
+        sent_at[id] := p[Eth].ts
+        sent[hop] += 1
+      }
+    }
+  }
+}
+```
+
+```
+% sudo TARGET=10.2.1.3 ROUNDS=40 REPORT=20 INTERVAL=200ms crafty -i eth0 --udp 40000 --fw mtr.cfty
+after 20 rounds:
+1	[10.1.1.1]	loss 0%	avg 0.33ms	best 0.11ms	worst 0.48ms
+2	[10.1.0.5]	loss 50%	avg 37.81ms	best 37.6ms	worst 38.1ms
+3	[10.2.0.2]	loss 0%	avg 90.91ms	best 90.69ms	worst 91.07ms
+4	[10.2.0.6]	loss 10%	avg 114.42ms	best 114.18ms	worst 115.02ms
+5	[10.2.1.3]	loss 5%	avg 114.23ms	best 114.09ms	worst 114.73ms
+after 40 rounds:
+1	[10.1.1.1]	loss 0%	avg 0.33ms	best 0.09ms	worst 0.6ms
+2	[10.1.0.5]	loss 45%	avg 37.81ms	best 37.6ms	worst 37.97ms
+3	[10.2.0.2]	loss 0%	avg 90.87ms	best 90.68ms	worst 91.3ms
+4	[10.2.0.6]	loss 20%	avg 114.47ms	best 114.1ms	worst 116.44ms
+5	[10.2.1.3]	loss 15%	avg 114.37ms	best 114.02ms	worst 116.14ms
+```
+
+Hop 2 only answers half of its probes: hop 3 losing none, what is lost is the
+answers, not the traffic. The losses start between hops 3 and 4, and go on
+to the target.
