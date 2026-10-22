@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 ee35ab066304a009cff737ca384a4e22) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 fc416858ab88664d5b5dd9e63ca05dd9) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -225,9 +225,9 @@ let reference = {crafty_manual|### Lexical conventions
     space. A block opens on the line of the statement it belongs to.
 -   Comments run from a `#` to the end of the line. A `#` followed by a
     hexadecimal digit is a byte literal instead.
--   Names of layers, fields, functions, constants and keywords are case
-    insensitive, and all but field names are reserved. Variables and
-    constructors are case sensitive.
+-   Names of layers, fields, functions and keywords are case insensitive.
+    Constants, `MATCH` and `LAST` are upper case. All but field names are
+    reserved. Variables and constructors are case sensitive.
 
 ### Types and literals
 

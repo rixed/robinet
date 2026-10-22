@@ -20,8 +20,8 @@
 (** The protocol layers crafty knows of: what the parser, the typer, the tree
    of parsers and the packet generator all read from.
 
-   Names of layers, fields and constants are case insensitive. Constants are
-   reserved names, valid anywhere, as are the layers.
+   Names of layers and fields are case insensitive; constants are upper
+   case. Constants are reserved names, valid anywhere, as are the layers.
 
    Each layer also tells how its nodes in the tree of parsers send: building
    its header in manual mode, filling in what the stack leaves out, or
@@ -1112,10 +1112,9 @@ let find_field (l : layer) name =
 (** All the constants, of all the layers. *)
 let constants = List.concat_map (fun (l : layer) -> l.constants) all
 
-(** The value of that constant. *)
+(** The value of that constant, whose name is case sensitive. *)
 let find_constant name =
-    List.find_opt (fun (n, _) -> same_name n name) constants |>
-    Option.map snd
+    List.assoc_opt name constants
 
 (** The indices of the discriminants of [l] that are not told by the layer
  * on top: what tells apart its nodes under a same parent. *)
@@ -1192,8 +1191,9 @@ let record_type (l : layer) mode =
   key_fields (echo_message N.Reply 0) = []
 *)
 (*$T find_constant
-  find_constant "rst" = Some (Crafty_ast.Int 4)
-  find_constant "port_unreachable" = Some (Crafty_ast.Int 3)
+  find_constant "RST" = Some (Crafty_ast.Int 4)
+  find_constant "PORT_UNREACHABLE" = Some (Crafty_ast.Int 3)
+  find_constant "rst" = None
   find_constant "src" = None
 *)
 (*$= record_type & ~printer:Crafty_ast.Type.to_string
@@ -1229,6 +1229,7 @@ let record_type (l : layer) mode =
   List.length (List.unique names) = List.length names && \
   List.for_all (fun n -> \
       N.of_string n = None && \
-      not (List.mem n Crafty_ast.(keywords @ unsupported @ functions @ predefined)) && \
+      not (List.mem n Crafty_ast.(keywords @ unsupported @ functions @ \
+                                  List.map String.lowercase_ascii predefined)) && \
       List.for_all (fun (l : layer) -> find_field l n = None) all) names
 *)

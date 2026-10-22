@@ -175,7 +175,7 @@ let is_keyword s = is_in keywords s || is_in unsupported s
 
 let is_reserved s =
     is_keyword s || is_in functions s || Layer_name.of_string s <> None ||
-    is_in predefined s ||
+    List.mem s predefined ||
     Crafty_layers.find_constant s <> None
 
 (* Names of the user's variables: *)
@@ -184,7 +184,7 @@ let name =
 
 let predefined_var =
     identifier >>= fun s ->
-        if is_in predefined s then return (String.uppercase_ascii s) else fail
+        if List.mem s predefined then return s else fail
 
 let constant =
     identifier >>= fun s ->
@@ -842,7 +842,7 @@ let parse_patterns text =
   "x = a.b.c[0].d\n" (reads "x = a.b.c[0].d")
   "x = (SYN | ack)\n" (reads "x = SYN | ack")
   "x = (MATCH[IP].src + LAST[TCP].seq)\n" \
-    (reads "x = match[ip].src + Last[TCP].seq")
+    (reads "x = MATCH[ip].src + LAST[TCP].seq")
   "x = (length(MATCH) * rand(max=3))\n" (reads "x = length(MATCH) * rand(max=3)")
   "x = ((((31 + 15) + 5) + 1500.0) + 0.002)\n" \
     (reads "x = 0x1F + 0o17 + 0b101 + 1.5e3 + 2e-3")
@@ -1030,8 +1030,8 @@ let parse_patterns text =
   "line 1, column 11: print is a reserved name" (reads "print += 3")
   "line 1, column 7: An item is not declared (:= changes it)" (reads "x[0] = 1")
   "line 1, column 14: Items without keys in a map" (reads "x = [1: 2, 3]")
-  "line 1, column 10: match is a reserved name" (reads "match = 1")
-  "line 1, column 19: LAST is a reserved name" (reads "repeat var=last {}")
+  "line 1, column 10: MATCH is a reserved name" (reads "MATCH = 1")
+  "line 1, column 19: LAST is a reserved name" (reads "repeat var=LAST {}")
   "line 1, column 20: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")
   "line 1, column 9: Unknown layer HTTP" (reads "/IP/HTTP {}")
   "line 1, column 8: Unknown layer UPD, do you mean UDP?" (reads "/IP/UPD {}")
@@ -1055,7 +1055,7 @@ let parse_patterns text =
   "line 1, column 7: report is not supported yet" (reads "report")
   "line 1, column 8: Expected constructor in expression" (reads "case x {}")
   "line 1, column 10: Expected '{' in block" (reads "case x IP")
-  "line 2, column 15: MATCH is a reserved name" (reads "x = 1\ncase var=match x IP {}")
+  "line 2, column 15: MATCH is a reserved name" (reads "x = 1\ncase var=MATCH x IP {}")
   "line 2, column 18: Expected expression in statement" (reads "x = 1\ncase x else {} | IP {}")
   "line 1, column 5: Expected name in pattern" (reads "any {}")
   "line 1, column 21: Expected name in pattern" (reads "any Bytes(\"a\") {} | {}")

@@ -20,9 +20,10 @@
 (** Abstract syntax of crafty programs, as parsed and before any typing.
 
    Names of layers, fields, functions and special forms are case insensitive;
-   layers are known by their names, and the others kept as written. Variables
-   are case sensitive, and cannot be named after a layer, a constant, a
-   function, a keyword or a predefined variable. *)
+   layers are known by their names, and the others kept as written. Variables,
+   constants and predefined variables are case sensitive, and variables
+   cannot be named after a layer, a constant, a function, a keyword or a
+   predefined variable. *)
 open Batteries
 
 (** Where something starts in the source, counting from 1. *)
@@ -130,8 +131,7 @@ and expr_desc =
     (* One of the layers' constants ([RST]), named as written: *)
     | Constant of string * literal
     | String of string_part list
-    (* The predefined variables ([MATCH], [LAST]) are named in upper case,
-     * however written: *)
+    (* Including the predefined variables ([MATCH], [LAST]): *)
     | Var of string
     (* A layer of a packet ([A[IP]]) or of the one being matched ([IP.src]),
      * counted from the end ([nth] carets after its name: [IP] is the last,
@@ -295,9 +295,8 @@ let functions =
       "sort" ; "sorted" ; "histogram" ;
       "print" ; "print_err" ; "format" ; "assert" ; "stats" ]
 
-(** Variables that the language defines, which are case insensitive as are
- * all the names that the user does not choose. Lower case. *)
-let predefined = [ "match" ; "last" ]
+(** Variables that the language defines, upper case as are the constants. *)
+let predefined = [ "MATCH" ; "LAST" ]
 
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =

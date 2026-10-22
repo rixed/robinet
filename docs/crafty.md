@@ -243,9 +243,9 @@ does not compile, 3 when a budget stops it, 130 when interrupted.
   white space. A block opens on the line of the statement it belongs to.
 - Comments run from a `#` to the end of the line. A `#` followed by a
   hexadecimal digit is a byte literal instead.
-- Names of layers, fields, functions, constants and keywords are case
-  insensitive, and all but field names are reserved. Variables and
-  constructors are case sensitive.
+- Names of layers, fields, functions and keywords are case insensitive.
+  Constants, `MATCH` and `LAST` are upper case. All but field names are
+  reserved. Variables and constructors are case sensitive.
 
 ### Types and literals
 

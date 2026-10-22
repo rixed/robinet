@@ -1799,8 +1799,8 @@ let check_patterns (ps : A.patterns) =
     (types "a = min([3, 1])\nb = mean([1, 2])\nc = mean([1s, 2s])\nd = percentile([1.5, 2], 95)\ne = max([1: \"x\"])\nf = count([1: 2])")
   "x: float[][], i: int" \
     (types "x = [[1.0]]\ni = 0\nx[i][0] += 1\nx[0] := [2]")
-  "x: int, y: int" \
-    (types "x = SYN | ACK\ny = port_unreachable")
+  "x: int, y: int, ack: string" \
+    (types "x = SYN | ACK\ny = PORT_UNREACHABLE\nack = \"a\"")
   "" \
     (types "/IP(dst=1.2.3.4)/ICMP { expect DestUnreachable(code == PORT_UNREACHABLE) {} }")
   "I: int" \
@@ -1879,8 +1879,8 @@ let check_patterns (ps : A.patterns) =
 (*$= types & ~printer:identity
   "line 1, column 5: Cannot apply + to a string and an int" \
     (types "x = \"a\" + 1")
-  "line 1, column 8: ack is a reserved name" \
-    (types "ack = 1")
+  "line 1, column 8: ACK is a reserved name" \
+    (types "ACK = 1")
   "line 2, column 1: x is already declared in this block (:= changes it)" \
     (types "x = 1\nx = 2")
   "line 2, column 1: Cannot assign a string to x, which is an int" \
