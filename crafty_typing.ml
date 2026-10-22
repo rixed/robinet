@@ -535,7 +535,8 @@ let where_to_hint env anchor ws =
                 Printf.sprintf "\n  In this block, the stack is %s (%s)."
                     (string_of_layers env.stack)
                     (List.init (n - 1) (fun j ->
-                        String.repeat "../" (j + 1) ^" being "^
+                        String.repeat "../" (j + 1) ^
+                        (if j = 0 then " goes back to " else " to ") ^
                         string_of_layers (List.drop (j + 1) env.stack)) |>
                      String.concat ", ") in
             let fixes =
@@ -1977,15 +1978,15 @@ let check_patterns (ps : A.patterns) =
     (types "x = IP.src")
   "line 1, column 5: =~ is not supported yet" \
     (types "x = y =~ /IP")
-  "line 1, column 39: ../ goes below the bottom of the stack\n  In this block, the stack is /IP/UDP (../ being /IP, ../../ being /Eth).\n  Do you mean \"../UDP\"?" \
+  "line 1, column 39: ../ goes below the bottom of the stack\n  In this block, the stack is /IP/UDP (../ goes back to /IP, ../../ to /Eth).\n  Do you mean \"../UDP\"?" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../../../../UDP {} }")
-  "line 1, column 32: TCP cannot be on top of TCP\n  In this block, the stack is /IP/TCP (../ being /IP, ../../ being /Eth).\n  Do you mean \"../TCP/Bytes()\" (the same as \"Bytes()\")?" \
+  "line 1, column 32: TCP cannot be on top of TCP\n  In this block, the stack is /IP/TCP (../ goes back to /IP, ../../ to /Eth).\n  Do you mean \"../TCP/Bytes()\" (the same as \"Bytes()\")?" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80) { TCP/Bytes() }")
-  "line 1, column 42: DNS cannot be on top of IP\n  In this block, the stack is /IP/UDP/DNS (../ being /IP/UDP, ../../ being /IP, ../../../ being /Eth).\n  Do you mean \"../DNS(id=3)/Query(\"x\")\"?" \
+  "line 1, column 42: DNS cannot be on top of IP\n  In this block, the stack is /IP/UDP/DNS (../ goes back to /IP/UDP, ../../ to /IP, ../../../ to /Eth).\n  Do you mean \"../DNS(id=3)/Query(\"x\")\"?" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { ../../DNS(id=3)/Query(\"x\") }")
-  "line 1, column 49: DNS cannot be on top of IP\n  In this block, the stack is /IP/UDP/DNS (../ being /IP/UDP, ../../ being /IP, ../../../ being /Eth).\n  Do you mean \"../DNS/Answer\" (the same as \"Answer\")?" \
+  "line 1, column 49: DNS cannot be on top of IP\n  In this block, the stack is /IP/UDP/DNS (../ goes back to /IP/UDP, ../../ to /IP, ../../../ to /Eth).\n  Do you mean \"../DNS/Answer\" (the same as \"Answer\")?" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { expect ../../DNS/Answer {} }")
-  "line 1, column 32: TCP cannot be on top of TCP\n  In this block, the stack is /IP/TCP (../ being /IP, ../../ being /Eth).\n  Do you mean \"../TCP!(flags=RST)/Bytes()\"?" \
+  "line 1, column 32: TCP cannot be on top of TCP\n  In this block, the stack is /IP/TCP (../ goes back to /IP, ../../ to /Eth).\n  Do you mean \"../TCP!(flags=RST)/Bytes()\"?" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80) { TCP!(flags=RST)/Bytes() }")
   "line 1, column 2: DNS cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP/DNS/Query(\"x\")\"?" \
     (types "/DNS/Query(\"x\")")
