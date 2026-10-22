@@ -1853,7 +1853,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 (*$T
   let out = with_host ~setup:tcp_echo ~closed:true \
       "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Bytes(\"hello\")\n  expect timeout=1s Bytes {} }" in \
-  List.exists (fun l -> String.starts_with l "a 0.000s: closed /IP(src=10.0.0.1, dst=10.0.0.2)/TCP(src=4000, dst=7): packets_out=5 bytes_out=5 packets_in=3 bytes_in=5 bytes_acked=5 bytes_received=5 retrans=0 dupacks=0 timeouts=0 ooo_in=0 ") (String.split_on_char '\n' out) && \
+  List.exists (fun l -> String.starts_with l "a 0.000s: closed /IP(src=10.0.0.1, dst=10.0.0.2)/TCP(src=4000, dst=7): packets_out=5 bytes_out=5 packets_in=3 bytes_in=5 bytes_acked=5 bytes_received=5 retrans=0 dupacks=0 timeouts=0 ooo_in=0 dup_in=0 ") (String.split_on_char '\n' out) && \
   List.mem "a 0.000s: closed /IP(src=10.0.0.1, dst=10.0.0.2): packets_out=5 bytes_out=113 packets_in=3 bytes_in=73" (String.split_on_char '\n' out) || (print_endline out ; false)
 *)
 (*$T

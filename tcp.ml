@@ -568,6 +568,7 @@ struct
         mutable dupacks : int ; (* duplicate acks received *)
         mutable rto_expired : int ;
         mutable ooo_in : int ; (* segments with data beyond what was received in order *)
+        mutable dup_in : int ; (* segments with data all already received in order *)
         mutable rtt_samples : int }
 
     type tcp_trx = {
@@ -963,6 +964,8 @@ struct
         let is_probe = len = 0 && offset < t.rcvd_pld in
         if len > 0 && offset > t.rcvd_pld then
             t.counters.ooo_in <- t.counters.ooo_in + 1 ;
+        if len > 0 && offset + len <= t.rcvd_pld then
+            t.counters.dup_in <- t.counters.dup_in + 1 ;
         (* With an application that reads at once, our window is all of rcv_buf,
          * out of order data included: *)
         let beyond_wnd = len > 0 && offset >= t.rcvd_pld + rcv_wnd t in
@@ -1188,7 +1191,7 @@ struct
                   cnx_established_cont = None ; sync_recv ;
                   counters = { segs_out = 0 ; bytes_out = 0 ; segs_in = 0 ; bytes_in = 0 ;
                                bytes_acked = 0 ; bytes_received = 0 ;
-                               retrans = 0 ; dupacks = 0 ; rto_expired = 0 ; ooo_in = 0 ;
+                               retrans = 0 ; dupacks = 0 ; rto_expired = 0 ; ooo_in = 0 ; dup_in = 0 ;
                                rtt_samples = 0 } ;
                   tcp_trx = { trx = null_trx ~logger ;
                               close = ignore ;
@@ -1246,13 +1249,15 @@ end
      * other way, over 10ms of latency each way (without which the RTO would
      * be no longer than a delayed ack). Returns [a], the most that was
      * in flight, the bytes received, the window probes sent and how far beyond
-     * what it received [b] ever held data. *)
+     * what it received [b] ever held data; [b] is left in [last_b]. *)
+    let last_b = ref None in
     let transfer ?rcv_buf ?(mss=100) ?b_mss ?max_timeouts ?(a_to_b=fun p -> Some p)
                  ?(b_to_a=fun _ p -> Some p) size =
         let sim = Simulation.make ~realtime:false "peer-window" in
         let power = sim.root.power and logger = Log.make () in
         let a = make power ~mss ?max_timeouts (Port.o 1) (Port.o 2) logger
         and b = make power ~mss:(b_mss |? mss) ?rcv_buf (Port.o 2) (Port.o 1) logger in
+        last_b := Some b ;
         let max_in_flight = ref 0 and rcvd = ref 0 and probes = ref 0 and ahead = ref 0 in
         let later f = Simulation.delay power (Clock.Interval.msec 10.) f () in
         a.tcp_trx.trx.out --> sink (fun bits ->
@@ -1332,7 +1337,16 @@ end
     let b_to_a _ p = Some { p with Pdu.win_size = 0xffff } in
     let _, _, rcvd, _, ahead = transfer ~rcv_buf:300 ~b_to_a 3000 in
     assert_equal ~printer:string_of_int ~msg:"all received" 3000 rcvd ;
-    assert_bool "nothing held beyond the window" (ahead <= 300)
+    assert_bool "nothing held beyond the window" (ahead <= 300) ;
+    (* Acks lost for 1s, so that [a] resends what [b] has: *)
+    let b_to_a now p =
+        if p.Pdu.flags.Pdu.syn || now >= Clock.Time.of_secs 1. then Some p else None in
+    let a, _, rcvd, _, _ = transfer ~b_to_a 2000 in
+    assert_equal ~printer:string_of_int ~msg:"all received" 2000 rcvd ;
+    assert_bool "resent" (a.counters.retrans > 0) ;
+    let b = Option.get !last_b in
+    assert_bool "duplicates received" (b.counters.dup_in > 0) ;
+    assert_bool "no more duplicates than resent" (b.counters.dup_in <= a.counters.retrans)
 *)
 (*$R sent_manually
     (* [a] connects to [b], over 10ms each way, then runs [steps] 1ms apart.

@@ -597,12 +597,16 @@ let tcp_node ctx =
               "bytes_received", V.Int c.bytes_received ;
               "retrans", V.Int c.retrans ; "dupacks", V.Int c.dupacks ;
               "timeouts", V.Int c.rto_expired ; "ooo_in", V.Int c.ooo_in ;
+              "dup_in", V.Int c.dup_in ;
               "srtt", V.Interval srtt ; "rttvar", V.Interval rttvar ;
               "rtt_samples", V.Int c.rtt_samples ; "rto", V.Interval t.rto ;
               "snd_mss", V.Int t.snd_mss ; "rcv_mss", V.Int t.rcv_mss ;
               (* Infinite until a loss, which Linux tells as 2^31-1: *)
               "cwnd", V.Int t.cwnd ; "ssthresh", V.Int (min t.ssthresh 0x7fff_ffff) ;
               "snd_wnd", V.Int t.snd_wnd ; "rcv_wnd", V.Int (Tcp.TRX.rcv_wnd t) ;
+              (* Both 0 unless both ends offered window scaling: *)
+              "snd_wscale", V.Int (t.snd_wscale |? 0) ;
+              "rcv_wscale", V.Int (if t.snd_wscale = None then 0 else t.rcv_wscale) ;
               "established", V.Bool (Tcp.TRX.is_established t) ]) }
 
 let icmp_upper = function
@@ -962,10 +966,11 @@ let tcp =
     layer N.TCP ~above:[ ip ] ~driven:true ~node:tcp_node ~unpack:unpack_tcp
         ~stats:Type.[
             "bytes_acked", Int ; "bytes_received", Int ; "retrans", Int ;
-            "dupacks", Int ; "timeouts", Int ; "ooo_in", Int ;
+            "dupacks", Int ; "timeouts", Int ; "ooo_in", Int ; "dup_in", Int ;
             "srtt", Interval ; "rttvar", Interval ; "rtt_samples", Int ;
             "rto", Interval ; "snd_mss", Int ; "rcv_mss", Int ; "cwnd", Int ;
-            "ssthresh", Int ; "snd_wnd", Int ; "rcv_wnd", Int ; "established", Bool ]
+            "ssthresh", Int ; "snd_wnd", Int ; "rcv_wnd", Int ;
+            "snd_wscale", Int ; "rcv_wscale", Int ; "established", Bool ]
         ~constants:[ "FIN", Int 1 ; "SYN", Int 2 ; "RST", Int 4 ; "PSH", Int 8 ;
                      "ACK", Int 16 ; "URG", Int 32 ] [
         field "src" Type.Int ~set_in:both ~read_in:both ~discriminant:true

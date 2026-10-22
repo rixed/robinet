@@ -69,12 +69,13 @@ The language is statically typed.
 
 ```
 # Is anyone listening on UDP port 7?
-/IP(dst=192.0.2.10)/UDP(dst=7) {
+target = ip_addr(getenv("TARGET"))  # Read the envvar and cast to an IP, or fail
+/IP(dst=target)/UDP(dst=7) {
   Bytes("hello")      # two messages on top of the same stack:
   Bytes("world")      # the same stream, from the same port
   # Waits for the first packet that matches either pattern: a datagram
   # back, or the ICMP error a closed port answers with. "../" goes back to
-  # /IP(dst=192.0.2.10), and ICMP goes on top of that IP stream instead of
+  # /IP(dst=target), and ICMP goes on top of that IP stream instead of
   # UDP: these are the ICMP errors that it receives.
   any timeout=1s Bytes { print(MATCH[Bytes].data) }
     | ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print("closed") }
@@ -88,7 +89,7 @@ hello
 With `dst=8`, where nothing listens, it prints `closed`.
 
 Each leading `../` goes back one layer down the current stack: in this
-block, `../` goes back to `/IP(dst=192.0.2.10)`, and `../../` to `/Eth`. That
+block, `../` goes back to `/IP(dst=target)`, and `../../` to `/Eth`. That
 is not `/IP`: an absolute pattern, as `/IP/ICMP/DestUnreachable`, matches
 from the interface up, the packets of any stream, whereas `../ICMP` only sees
 what comes to the IP stream of this block.
@@ -499,9 +500,12 @@ that are not named: `append(a, x)`, `histogram(rtts, bucket=5ms)`.
   layer). A self-driven TCP connection counts its segments, retransmissions
   included, and adds, as Linux's `tcp_info`: `bytes_acked`, `bytes_received`
   (in order), `retrans`, `dupacks`, `timeouts`, `ooo_in` (segments received
-  out of order), `srtt`, `rttvar`, `rtt_samples`, `rto`, `snd_mss`,
-  `rcv_mss`, `cwnd`, `ssthresh` (2^31-1 before any loss), `snd_wnd` (the
-  peer's window), `rcv_wnd` and `established`.
+  out of order), `dup_in` (segments with only data already received: the
+  peer's spurious retransmissions), `srtt`, `rttvar`, `rtt_samples`, `rto`,
+  `snd_mss`, `rcv_mss`, `cwnd`, `ssthresh` (2^31-1 before any loss),
+  `snd_wnd` (the peer's window), `rcv_wnd`, `snd_wscale` and `rcv_wscale`
+  (the peer's and our window shifts, 0 unless both offered one) and
+  `established`.
 - `getenv(name, default=s)`: fails if unset and no default.
 - `rand(max)`: an int or a float in `[0, max)` (default 1.0), or a bool if
   `max` is `true`. `randbytes(len)`: random bytes.
