@@ -227,8 +227,8 @@ and stmt_desc =
     | Expect of { timeout : expr option ; patterns : patterns ; body : block }
     (* The block of the first of those patterns to match, never empty: *)
     | Any of { timeout : expr option ; cases : (patterns * block) list }
-    | On of { timeout : expr option ; max : expr option ;
-              patterns : patterns ; body : block }
+    | On of { for_ : expr option ; linger : expr option ; timeout : expr option ;
+              max : expr option ; patterns : patterns ; body : block }
 
 (* Alternatives, never empty: *)
 and patterns = pattern list
@@ -516,8 +516,9 @@ and print_stmt ~all indent oc s =
         List.iteri (fun i (p, body) ->
             Printf.fprintf oc "%s%a " (if i = 0 then " " else " | ") pattern p ;
             print_block ~all indent oc body) cases
-    | On { timeout ; max ; patterns = p ; body } ->
-        String.print oc "on" ; param "timeout" timeout ; param "max" max ;
+    | On { for_ ; linger ; timeout ; max ; patterns = p ; body } ->
+        String.print oc "on" ; param "for" for_ ; param "linger" linger ;
+        param "timeout" timeout ; param "max" max ;
         Printf.fprintf oc " %a " pattern p ;
         print_block ~all indent oc body
 

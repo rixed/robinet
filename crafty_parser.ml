@@ -752,9 +752,11 @@ let stmt =
         (keyword "any" -+ params ~pattern:true "any" [ "timeout" ] +- sp ++
          repeat ~min:1 ~sep:(nl_sp -- item '|' -- nl_sp) (patterns ++ body) >>:
             fun (p, cases) -> Any { timeout = p "timeout" ; cases }) |||
-        (keyword "on" -+ params ~pattern:true "on" [ "timeout" ; "max" ] +- sp ++ patterns ++
-         body >>: fun ((p, patterns), body) ->
-            On { timeout = p "timeout" ; max = p "max" ; patterns ; body }) |||
+        (keyword "on" -+
+         params ~pattern:true "on" [ "for" ; "linger" ; "timeout" ; "max" ] +- sp ++
+         patterns ++ body >>: fun ((p, patterns), body) ->
+            On { for_ = p "for" ; linger = p "linger" ; timeout = p "timeout" ;
+                 max = p "max" ; patterns ; body }) |||
         (identifier >>= (fun s ->
             if List.mem (String.lowercase_ascii s) unsupported then return s
             else fail) >>:
@@ -890,6 +892,8 @@ let parse_patterns text =
     (reads "x = [true: 1, 1.2.3.4: 2, aa:bb:cc:dd:ee:ff: 3, y: [4]]")
   "on timeout=1s max=3 ../UDP {\n  n += 1\n  m := 2\n}\n" \
     (reads "on max=3 timeout=1s ../UDP { n += 1; m := 2 }")
+  "on for=1s timeout=100ms ../UDP {\n}\non linger=1s ../UDP {\n}\n" \
+    (reads "on timeout=100ms for=1s ../UDP {}\non linger=1s ../UDP {}")
   "expect UDP((IP^.ttl == 3) && (^IP.src == 1.2.3.4)) {\n}\n" \
     (reads "expect UDP(IP^.ttl = 3, ^IP.src == 1.2.3.4) {}")
   "expect ../../TCP!(flags & RST) {\n}\n" \
@@ -977,6 +981,7 @@ let parse_patterns text =
     "x = y =~ /IP/UDP(dport = 53)" ; "wait dur=1s * n" ; \
     "repeat every=1s / n count=n*2 {}" ; "foreach t every=1s * 2 [1, 2] {}" ; \
     "on max=3 timeout=1s ../UDP { n += 1; m := 2 }" ; \
+    "on for=1s ../UDP {}\non linger=2s * n ../UDP {}" ; \
     "expect UDP(IP^.ttl = 3, ^IP.src == 1.2.3.4) {}" ; \
     "expect ../../TCP!(flags & RST) {}" ; "IP!(ttl=1)/TCP!(flags=2)/Bytes(\"x\")" ; \
     "/IP/UDP/Bytes(\"x\")\n{ y = !(a == b) }" ; \

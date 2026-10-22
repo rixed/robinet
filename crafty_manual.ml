@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 245821d6bf89ae6370300e30f0decb82) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 0bd14bdc60e4b876063127461df4d748) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -128,8 +128,8 @@ segment, even without data.
     target = 192.0.2.10
     {
       # "on" runs its block for each matching packet, while the enclosing
-      # block goes on; here, for one SYN-ACK at most, within 1s:
-      on max=1 timeout=1s /IP(src == target)/TCP!(src == 7 && flags & SYN &&
+      # block goes on; here, for one SYN-ACK at most, until 1s after the block:
+      on max=1 linger=1s /IP(src == target)/TCP!(src == 7 && flags & SYN &&
                                                    ack_num > 1000 && ack_num <= 2000) {
         print("SYN-ACK: seq ${MATCH[TCP].seq_num}, ack ${MATCH[TCP].ack_num}")
       }
@@ -406,11 +406,10 @@ packet `IP`; TCP data `TCP/Bytes`, in order and once per chunk delivered, and
 each segment `TCP!`.
 
 **`MATCH`** is the packet that matched, as an array of layers, decoded past the
-pattern as `Bytes` (or the `IP` that an ICMP error quotes). It always ends with
-a terminal layer: what is left undecoded, maybe nothing, is a `Bytes`.
-`MATCH[UDP]` is its last UDP layer, `MATCH[IP^]` the last IP but one,
-`MATCH[^IP]` the first; then `MATCH[IP].src`, `MATCH[Bytes].data`. `MATCH[0]` is
-a layer of any kind, which `case` tells apart:
+pattern as `Bytes` (or the `IP` that an ICMP error quotes). `MATCH[UDP]` is its
+last UDP layer, `MATCH[IP^]` the last IP but one, `MATCH[^IP]` the first; then
+`MATCH[IP].src`, `MATCH[Bytes].data`. `MATCH[0]` is a layer of any kind, which
+`case` tells apart:
 
     foreach MATCH {
       print(case I IP { "IP from ${I.src}" } | UDP { "UDP to ${I.dst}" } else { "other" })
@@ -449,14 +448,17 @@ single one (`break 2`, `wait 1s`).
 -   `any timeout=d PATTERN { ... } | PATTERN { ... }`: waits for the first
     packet that matches any pattern, and runs that pattern's block only. A
     timeout is an error.
--   `on timeout=d max=n PATTERN { ... }`: the enclosing block goes on, while a
-    new block runs for each matching packet. It ends at its timeout (default 1m,
-    no error), after `max` matches, or at a `break` from its block.
+-   `on for=d linger=d timeout=d max=n PATTERN { ... }`: the enclosing block
+    goes on, while a new block runs for each matching packet. It ends after
+    `for`, which the enclosing block waits for; or else with the enclosing
+    block, which waits `linger` (default 0) after its statements; not both. It
+    also ends after `max` matches, or at a `break` from its block. A `timeout`
+    (default none) without a match is an error.
 
-A block completes once its statements are done and its `on` forms have ended.
-Leaving a block, normally or on an error, cancels what it still had going:
-patterns, timers, inner blocks, and the nodes it held, closing their
-connections.
+A block completes once its statements are done, its `linger`s waited, and its
+`on`s with a `for` ended. Leaving a block, normally or on an error, cancels what
+it still had going: patterns, timers, inner blocks, and the nodes it held,
+closing their connections.
 
 ### Functions
 
@@ -600,7 +602,7 @@ They have the fields of `IP`, `UDP` and `TCP` (but `is_fragment` and `mss`), all
 readable and settable. They are manual, and no streams: a quoted TCP segment is
 no part of a connection. Errors print them as `IP?`, `UDP?`, `TCP?`.
 
-    on /IP/ICMP/TimeExceeded/IP(dst == target)/UDP(dst == 33434) {
+    on for=5s /IP/ICMP/TimeExceeded/IP(dst == target)/UDP(dst == 33434) {
       print("from ${MATCH[^IP].src}, ttl ${MATCH[IP].ttl}")
     }
 
@@ -711,7 +713,7 @@ The first record is an address only if the name has no CNAME.
 
 ### A UDP echo server
 
-    on timeout=1m /IP/UDP(dst == 7)/Bytes {
+    on for=1h /IP/UDP(dst == 7)/Bytes {
       /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Bytes(MATCH[Bytes].data)
     }
 
@@ -723,7 +725,7 @@ The first record is an address only if the name has no CNAME.
     target = 192.0.2.10
     lost = array(init=25, len=4)
     {
-      on timeout=2s /IP(src == target)/UDP(src == 7, dst >= 40000, dst < 40004) {
+      on linger=1s /IP(src == target)/UDP(src == 7, dst >= 40000, dst < 40004) {
         lost[MATCH[UDP].dst - 40000] -= 1
       }
       repeat count=100 every=10ms {
@@ -736,8 +738,8 @@ The first record is an address only if the name has no CNAME.
     flow 0: 0 lost
     ...
 
-The `on` starts listening before the datagrams go out, and the block around it
-lasts until its timeout.
+The `on` starts listening before the datagrams go out, and goes on 1s after the
+last one.
 
 ### Is a port closed?
 
@@ -770,7 +772,7 @@ sees each segment of the connection.
 
     target = 192.0.2.10
     {
-      on timeout=2s /IP(src == target)/TCP!(src >= 1, src <= 100, flags == SYN | ACK) {
+      on linger=1s /IP(src == target)/TCP!(src >= 1, src <= 100, flags == SYN | ACK) {
         print("port ${MATCH[TCP].src} is open")
       }
       repeat var=i count=100 every=5ms {
@@ -788,10 +790,10 @@ sees each segment of the connection.
       ttl = hop + 1
       port = 33434 + hop
       {
-        on max=1 timeout=1s /IP/ICMP/TimeExceeded(code == TTL_EXCEEDED)/IP/UDP(dst == port) {
+        on max=1 linger=1s /IP/ICMP/TimeExceeded(code == TTL_EXCEEDED)/IP/UDP(dst == port) {
           print("${ttl}: ${MATCH[^IP].src}")
         }
-        on max=1 timeout=1s /IP/ICMP/DestUnreachable(code == PORT_UNREACHABLE)/IP/UDP(dst == port) {
+        on max=1 linger=1s /IP/ICMP/DestUnreachable(code == PORT_UNREACHABLE)/IP/UDP(dst == port) {
           print("${ttl}: ${target}, reached")
           break 2
         }

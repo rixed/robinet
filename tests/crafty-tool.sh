@@ -114,7 +114,7 @@ cat > "$DIR/lossy.cfty" <<'EOF'
 /IP(dst=10.77.0.2)/TCP(dst=7) {
   n = 0
   {
-    on timeout=20s Bytes {
+    on for=20s Bytes {
       n += length(MATCH[Bytes].data)
       if n >= 200000 { break }
     }

@@ -146,8 +146,10 @@ and stmt_desc =
     | Wait of expr
     (* An [expect] being an [any] of a single case; [form] is which: *)
     | Any of { form : string ; timeout : expr option ; cases : case list }
-    | On of { timeout : expr option ; max : expr option ;
-              patterns : pattern list ; match_ : var ; body : block }
+    (* Without [for_], it ends [linger] after the statements of its block: *)
+    | On of { for_ : expr option ; linger : expr option ; timeout : expr option ;
+              max : expr option ; patterns : pattern list ; match_ : var ;
+              body : block }
 
 (* Of alternative [patterns]; [match_] is the variable [MATCH] of the
  * block: *)
@@ -1395,6 +1397,19 @@ and timeout_of env form timeout =
  * expression whose value is [used], else void: *)
 and block_value ?expected ~used errors env stmts =
     let env = { env with declared_here = [] } in
+    (* An [on] ending with its block, which nothing after it keeps waiting,
+     * ends as it starts: *)
+    let rec ends_at_once = function
+        | { A.stmt = A.On { for_ = None ; linger = None ; _ } ; stmt_loc } :: rest ->
+            ends_at_once rest &&
+            (env.warnings :=
+                (stmt_loc, "This on ends at once, with its block: give it a \
+                            duration (for), or a linger after its block") ::
+                !(env.warnings) ;
+             true)
+        | [] -> true
+        | _ :: rest -> ignore (ends_at_once rest) ; false in
+    ignore (ends_at_once stmts) ;
     let rec loop env ss = function
         | [] -> List.rev ss, Type.Void
         | [ { A.stmt = A.Expr e ; stmt_loc } ] when used ->
@@ -1639,15 +1654,22 @@ and stmt errors env (s : A.stmt) =
             any "expect" timeout [ patterns, body ]
         | A.Any { timeout ; cases } ->
             any "any" timeout cases
-        | A.On { timeout ; max ; patterns = ps ; body } ->
-            let timeout = timeout_of env "on" timeout
+        | A.On { for_ ; linger ; timeout ; max ; patterns = ps ; body } ->
+            if for_ <> None && linger <> None then
+                error loc "An on lasts either for its own duration (for), \
+                           keeping its block waiting, or until its block ends, \
+                           which linger delays: not both" ;
+            let for_ = opt_expr env "The duration of on" Type.Interval for_
+            and linger = opt_expr env "The linger of on" Type.Interval linger
+            and timeout = timeout_of env "on" timeout
             and max = opt_expr env "The maximum of on" Type.Int max in
             let patterns = List.map (pattern env) ps in
             let match_ = new_var "MATCH" packet_type in
             let body =
                 block errors { env with vars = match_ :: env.vars ;
                                         loops = env.loops + 1 } body in
-            env, Some (mk (On { timeout ; max ; patterns ; match_ ; body }))
+            env, Some (mk (On { for_ ; linger ; timeout ; max ; patterns ; match_ ;
+                                body }))
     with Error _ | Already_told as ex ->
         tell errors ex ;
         env, None
@@ -1752,6 +1774,10 @@ let check_patterns (ps : A.patterns) =
     (warns "/IP(dst=1.2.3.4)/UDP(dst=53) { expect /IP/UDP {} }")
   "line 1, column 27: This pattern matches any /IP/ICMP, not only those of the current stack /IP(dst=1.2.3.4).\n  Do you mean \"ICMP\"?" \
     (warns "/IP(dst=1.2.3.4) { expect /IP/ICMP {} }")
+  "line 2, column 1: This on ends at once, with its block: give it a duration (for), or a linger after its block\nline 3, column 1: This on ends at once, with its block: give it a duration (for), or a linger after its block" \
+    (warns "on for=1s /IP/UDP {}\non /IP/UDP {}\non max=2 /IP/TCP {}")
+  "" (warns "on /IP/UDP {}\non linger=1s /IP/TCP {}")
+  "" (warns "on /IP/UDP {}\nwait 1s")
   "line 1, column 52: This pattern matches any /IP/UDP/DNS/Answer, not only those of the current stack /IP(dst=1.2.3.4)/UDP(dst=53)/DNS.\n  Do you mean \"Answer\"?" \
     (warns "/IP(dst=1.2.3.4)/UDP(dst=53) { ../UDP/DNS { expect /IP/UDP/DNS/Answer {} } }")
   "" (warns "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { expect /IP(src == 1.2.3.4)/UDP/DNS/Answer {} }")
@@ -2074,6 +2100,8 @@ let check_patterns (ps : A.patterns) =
     (types "x = 1 + if true { /IP(dst=1.2.3.4)/UDP(dst=53)/Bytes(\"x\") ; 1 } else { 2 }")
   "line 1, column 13: wait cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \
     (types "print(\"${ { wait 1s ; 1 } }\")")
+  "line 1, column 1: An on lasts either for its own duration (for), keeping its block waiting, or until its block ends, which linger delays: not both" \
+    (types "on for=1s linger=1s /IP {}")
   "line 1, column 6: The subject of case must be a variant, such as a layer of a packet, not an int" \
     (types "case 3 IP {}")
   "line 1, column 36: Foo is none of Answer, Bytes, DNS, DestUnreachable, Echo, Eth, ICMP, IP, Query, Reply, Request, TCP, TimeExceeded, UDP" \
