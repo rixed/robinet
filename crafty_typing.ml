@@ -449,28 +449,114 @@ let lookup_var env loc name =
 
 (** {2 Stacks and patterns} *)
 
-(* A stack (top first) as in messages, without the root: [/IP/UDP]. *)
+(* A stack (top first) as in messages, without the root unless alone:
+ * [/IP/UDP], [/Eth]. *)
 let string_of_layers stack =
-    List.rev stack |> List.filter_map (fun ((l : L.layer), _) ->
-        if l == L.root then None else Some ("/"^ L.to_string l)) |>
-    String.concat ""
+    match List.rev stack with
+    | [ (l, _) ] -> "/"^ L.to_string l
+    | stack ->
+        List.filter_map (fun ((l : L.layer), _) ->
+            if l == L.root then None else Some ("/"^ L.to_string l)) stack |>
+        String.concat ""
 
 (* [base] (top first) with layer [name] on top, and the layer: the root is
  * put below it if need be: *)
-let push loc base name =
+let push ?(hint=lazy "") loc base name =
     let below = match base with [] -> None | (b, _) :: _ -> Some b in
     match L.find ?below name, below with
     | Some l, _ -> base, l
     | None, None ->
         (match L.find ~below:L.root name with
         | Some l -> [ L.root, L.Driven ], l
-        | None -> error loc "%s cannot be at the bottom of a stack" (lname name))
+        | None ->
+            error loc "%s cannot be at the bottom of a stack%s" (lname name)
+                (Lazy.force hint))
     | None, Some (b : L.layer) ->
         if b.terminal then
             error loc "%s is a terminal layer, therefore %s is a complete message. \
-                       No further layer can be stacked on top of it"
-                (L.to_string b) (string_of_layers base)
-        else error loc "%s cannot be on top of %s" (lname name) (L.to_string b)
+                       No further layer can be stacked on top of it%s"
+                (L.to_string b) (string_of_layers base) (Lazy.force hint)
+        else
+            error loc "%s cannot be on top of %s%s" (lname name) (L.to_string b)
+                (Lazy.force hint)
+
+(* A layer as written in a stack or a pattern, for the fixes of where it
+ * goes: *)
+type written =
+    { w_name : A.Layer_name.t ;
+      bang : bool ;
+      (* With no options, or no condition: *)
+      plain : bool ;
+      text : string }
+
+let string_of_written anchor ws =
+    IO.to_string A.print_anchor anchor ^ String.concat "/" (List.map (fun w -> w.text) ws)
+
+(* The layers [ws] (bottom first) are on top of [base], if they can be: *)
+let fits base ws =
+    let no_loc = A.{ line = 0 ; column = 0 } in
+    try
+        List.fold_left (fun (base, ls) w ->
+            let base, l = push no_loc base w.w_name in
+            (l, L.mode_of l ~bang:w.bang) :: base, l :: ls) (base, []) ws |>
+        fun (_, ls) -> Some (List.rev ls)
+    with Error _ -> None
+
+(* What tells where the layers [ws] (bottom first) can go, for the errors
+ * about where they are put: the current stack, if [anchor] is relative to
+ * it, and the nearest other anchor they fit on (with its shortest form, if
+ * they overlay some of its layers with neither options nor another mode),
+ * or the layers they need below if absolute: *)
+let where_to_hint env anchor ws =
+    lazy (
+        match anchor with
+        | A.Relative k when env.stack <> [] ->
+            let n = List.length env.stack in
+            let context =
+                Printf.sprintf "\n  In this block, the stack is %s (%s)."
+                    (string_of_layers env.stack)
+                    (List.init (n - 1) (fun j ->
+                        String.repeat "../" (j + 1) ^" being "^
+                        string_of_layers (List.drop (j + 1) env.stack)) |>
+                     String.concat ", ") in
+            let fixes =
+                List.init n identity |> List.filter_map (fun j ->
+                    if j = k then None
+                    else Option.map (fun ls -> j, ls) (fits (List.drop j env.stack) ws)) |>
+                List.sort (fun (a, _) (b, _) -> compare (abs (a - k), a) (abs (b - k), b)) in
+            (match fixes with
+            | [] -> context
+            | (j, ls) :: _ ->
+                let rec same m = function
+                    | ((o : L.layer), om) :: over, ((l : L.layer), w) :: rest
+                      when o == l && w.plain && L.mode_of l ~bang:w.bang = om ->
+                        same (m + 1) (over, rest)
+                    | _ -> m in
+                let m = same 0 (List.rev (List.take j env.stack), List.combine ls ws) in
+                Printf.sprintf "%s\n  Do you mean \"%s\"%s?" context
+                    (string_of_written (A.Relative j) ws)
+                    (if m = 0 || m = List.length ws then ""
+                     else Printf.sprintf " (the same as \"%s\")"
+                            (string_of_written (A.Relative (j - m)) (List.drop m ws))))
+        | A.Absolute when fits [] ws = None ->
+            (* The fewest layers to put below, from the root: *)
+            let rec search = function
+                | [] -> ""
+                | path :: paths ->
+                    if fits (List.map (fun l -> l, L.Driven) path) ws <> None then
+                        let below =
+                            List.rev path |> List.tl |> List.map (fun (l : L.layer) ->
+                                { w_name = l.name ; bang = false ; plain = true ;
+                                  text = L.to_string l }) in
+                        Printf.sprintf "\n  Do you mean \"%s\"?"
+                            (string_of_written A.Absolute (below @ ws))
+                    else
+                        search (paths @ (L.uppers (List.hd path) |>
+                            List.filter_map (fun (u : L.layer) ->
+                                if u.terminal || u.quoted || List.memq u path then None
+                                else Some (u :: path)))) in
+            search [ [ L.root ] ]
+        | _ -> "")
 
 let mode_on loc base (l : L.layer) ~bang =
     let mode = L.mode_of l ~bang in
@@ -495,11 +581,11 @@ let overlay over (layers : L.layer list) =
 (* Where the layers of a stack or pattern go: on top of the root, or on top
  * of the current stack once [n] layers are taken off. Returns that base and
  * the layers taken off, bottom first: *)
-let anchor_base env loc = function
+let anchor_base ?(hint=lazy "") env loc = function
     | A.Absolute -> [], []
     | A.Relative n ->
         if n > List.length env.stack then
-            error loc "../ goes below the bottom of the stack" ;
+            error loc "../ goes below the bottom of the stack%s" (Lazy.force hint) ;
         List.drop n env.stack, List.rev_map fst (List.take n env.stack)
 
 (** {2 Expressions} *)
@@ -1091,13 +1177,20 @@ and binop env loc op a b =
             error loc "Cannot order values of type %s" (tname a.typ) ;
         mk Type.Bool (Binop (op, a, b))
 
+(* What tells where the [layers] of a stack statement can go: *)
+and stack_hint env anchor (layers : A.layer list) ~sends =
+    where_to_hint env anchor (List.mapi (fun i (al : A.layer) ->
+        let sends = sends && i = List.length layers - 1 in
+        { w_name = al.layer_name ; bang = al.manual ; plain = al.options = [] ;
+          text = A.string_of_stack ~sends (A.Relative 0) [ al ] }) layers)
+
 (* The layers of a stack statement on top of [base], over the layers [over]
  * (bottom first) that were taken off the current stack, and the new stack.
  * The layers that are over the same ones take their key, which they need
  * not give: *)
-and stack_layers env base over (layers : A.layer list) =
+and stack_layers ~hint env base over (layers : A.layer list) =
     List.fold_left (fun (base, tls) (al : A.layer) ->
-        let base', l = push al.layer_loc base al.layer_name in
+        let base', l = push ~hint al.layer_loc base al.layer_name in
         let tls =
             if base' == base then tls else implicit_root al.layer_loc :: tls in
         let mode = mode_on al.layer_loc base' l ~bang:al.manual in
@@ -1144,11 +1237,17 @@ and stack_layers env base over (layers : A.layer list) =
         base, tls, n
 
 and pattern env (p : A.pattern) =
-    let base, over = anchor_base env p.pat_loc p.anchor in
+    let hint =
+        where_to_hint env p.anchor (List.map (fun (pl : A.pattern_layer) ->
+            { w_name = pl.pl_name ; bang = pl.pl_manual ; plain = pl.cond = None ;
+              text = IO.to_string (A.print_pattern ~all:false ~indent:0)
+                       { p with anchor = A.Relative 0 ; pat_layers = [ pl ] } })
+            p.pat_layers) in
+    let base, over = anchor_base ~hint env p.pat_loc p.anchor in
     let depth = List.length base in
     let _, pls =
         List.fold_left (fun (base, pls) (pl : A.pattern_layer) ->
-            let base', l = push pl.pl_loc base pl.pl_name in
+            let base', l = push ~hint pl.pl_loc base pl.pl_name in
             let pls =
                 if base' == base then pls
                 else { pl_loc = pl.pl_loc ; pl_layer = L.root ; pl_mode = L.Driven ;
@@ -1243,8 +1342,9 @@ and stmt errors env (s : A.stmt) =
                       what) what) ;
         match s.stmt with
         | A.Stack { anchor ; layers ; body } ->
-            let base, over = anchor_base env s.stmt_loc anchor in
-            let stack, tls, overlay = stack_layers env base over layers in
+            let hint = stack_hint env anchor layers ~sends:(body = None) in
+            let base, over = anchor_base ~hint env s.stmt_loc anchor in
+            let stack, tls, overlay = stack_layers ~hint env base over layers in
             (* Which the parser checked: *)
             let top = fst (List.hd stack) in
             assert (top.terminal = (body = None)) ;
@@ -1265,8 +1365,9 @@ and stmt errors env (s : A.stmt) =
                 env, Some (mk (Send { depth ; overlay ; layers = tls ; last ;
                                       capture = None })))
         | A.Capture { var ; declare = decl ; anchor ; layers } ->
-            let base, over = anchor_base env s.stmt_loc anchor in
-            let stack, tls, overlay = stack_layers env base over layers in
+            let hint = stack_hint env anchor layers ~sends:true in
+            let base, over = anchor_base ~hint env s.stmt_loc anchor in
+            let stack, tls, overlay = stack_layers ~hint env base over layers in
             (* What a self-driven layer sends is no one frame that could be
              * waited for, but for the interface's: *)
             List.iter (fun ((l : L.layer), m) ->
@@ -1743,7 +1844,7 @@ let check_patterns (ps : A.patterns) =
   "" (types "/IP(dst=1.2.3.4)/TCP(dst=80) { ../TCP!(flags=RST)/Bytes() }")
   "line 1, column 35: TCP needs a dst" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { ../TCP/Bytes() }")
-  "line 1, column 2: UDP cannot be at the bottom of a stack" \
+  "line 1, column 2: UDP cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP\"?" \
     (types "/UDP {}")
   "line 1, column 18: IP cannot be on top of IP" \
     (types "/IP(dst=1.2.3.4)/IP {}")
@@ -1759,8 +1860,18 @@ let check_patterns (ps : A.patterns) =
     (types "x = IP.src")
   "line 1, column 5: =~ is not supported yet" \
     (types "x = y =~ /IP")
-  "line 1, column 39: ../ goes below the bottom of the stack" \
+  "line 1, column 39: ../ goes below the bottom of the stack\n  In this block, the stack is /IP/UDP (../ being /IP, ../../ being /Eth).\n  Do you mean \"../UDP\"?" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../../../../UDP {} }")
+  "line 1, column 32: TCP cannot be on top of TCP\n  In this block, the stack is /IP/TCP (../ being /IP, ../../ being /Eth).\n  Do you mean \"../TCP/Bytes()\" (the same as \"Bytes()\")?" \
+    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { TCP/Bytes() }")
+  "line 1, column 42: DNS cannot be on top of IP\n  In this block, the stack is /IP/UDP/DNS (../ being /IP/UDP, ../../ being /IP, ../../../ being /Eth).\n  Do you mean \"../DNS(id=3)/Query(\"x\")\"?" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { ../../DNS(id=3)/Query(\"x\") }")
+  "line 1, column 49: DNS cannot be on top of IP\n  In this block, the stack is /IP/UDP/DNS (../ being /IP/UDP, ../../ being /IP, ../../../ being /Eth).\n  Do you mean \"../DNS/Answer\" (the same as \"Answer\")?" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { expect ../../DNS/Answer {} }")
+  "line 1, column 32: TCP cannot be on top of TCP\n  In this block, the stack is /IP/TCP (../ being /IP, ../../ being /Eth).\n  Do you mean \"../TCP!(flags=RST)/Bytes()\"?" \
+    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { TCP!(flags=RST)/Bytes() }")
+  "line 1, column 2: DNS cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP/DNS/Query(\"x\")\"?" \
+    (types "/DNS/Query(\"x\")")
   "line 1, column 46: There is no TCP below UDP" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(TCP.src == 1) {} }")
   "line 1, column 46: There is only one IP below UDP" \
