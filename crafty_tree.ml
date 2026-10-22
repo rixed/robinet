@@ -290,7 +290,7 @@ let fields_of e name =
         | None -> List.assoc_opt i e.options)
 
 (* A layer of [e] that no packet tells: what its stack gives, else [hints],
- * else zeros: *)
+ * else what its layer sends by default: *)
 let assumed e hints =
     let values =
         Array.to_list e.node.layer.fields |>
@@ -299,7 +299,10 @@ let assumed e hints =
             Some (f.name,
                   match fields_of e f.name with
                   | Some v -> v
-                  | None -> List.assoc_opt f.name hints |? zero f.typ)) in
+                  | None ->
+                      (match List.assoc_opt f.name hints with
+                      | Some v -> v
+                      | None -> f.driven_default |? zero f.typ))) in
     e.node.layer,
     L.{ values ; upper = Nothing ; payload = Bitstring.empty_bitstring ;
         up_hints = [] ; bits = Bitstring.empty_bitstring }

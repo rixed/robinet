@@ -71,7 +71,9 @@ type field =
       (* The field of a received packet that holds the value of this one in
        * the packets sent (the source port is the destination port of a
        * reply): *)
-      peer : string }
+      peer : string ;
+      (* What a self-driven layer sends when it is not given, if not zero: *)
+      driven_default : V.value option }
 
 (* Instantiated only once so can be compared with == and != *)
 (** {2 Nodes}
@@ -893,8 +895,9 @@ type layer =
       unpack : hints -> bitstring -> unpacked option }
 
 let field ?(set_in=[ Manual ]) ?(read_in=[ Manual ]) ?(discriminant=false)
-          ?pick ?peer name typ =
-    { name ; typ ; set_in ; read_in ; discriminant ; pick ; peer = peer |? name }
+          ?pick ?peer ?driven_default name typ =
+    { name ; typ ; set_in ; read_in ; discriminant ; pick ; peer = peer |? name ;
+      driven_default }
 
 
 let unsendable name _ =
@@ -940,7 +943,7 @@ let ip =
               ~pick:Required ~peer:"src" ;
         field "proto" Type.Int ~set_in:both ~read_in:both ~discriminant:true ;
         field "tos" Type.Int ~set_in:both ~read_in:both ;
-        field "ttl" Type.Int ~set_in:both ~read_in:both ;
+        field "ttl" Type.Int ~set_in:both ~read_in:both ~driven_default:(V.Int 64) ;
         field "dont_frag" Type.Bool ~set_in:both ~read_in:both ;
         field "id" Type.Int ~read_in:both ;
         field "more_frags" Type.Bool ;

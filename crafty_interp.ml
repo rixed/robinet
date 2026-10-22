@@ -1518,8 +1518,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 (* LAST is the last packet sent by the block or an enclosing one: as packed
  * down to the self-driven layers, which only their stack tells: *)
 (*$= runs & ~printer:identity
-  "3ps: [Eth {dst: 00:00:00:00:00:00, proto: 0, src: 00:00:00:00:00:00, ts: 1970-01-01T00:00:00Z}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 0, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 0, ttl: 0}, UDP {checksum: 0, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n3ps: done" \
+  "3ps: [Eth {dst: 00:00:00:00:00:00, proto: 0, src: 00:00:00:00:00:00, ts: 1970-01-01T00:00:00Z}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 0, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 0, ttl: 64}, UDP {checksum: 0, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n3ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"hi\")\n  print(\"${LAST}\") }")
+  "6ps: 64 1\n6ps: done" \
+    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"a\")\n  x = LAST[IP].ttl\n  ../../IP(ttl=1)/UDP/Bytes(\"b\")\n  print(\"${x} ${LAST[IP].ttl}\") }")
   "2ps: [Eth {dst: 00:00:00:00:00:00, proto: 2048, src: 00:00:00:00:00:00, ts: 1970-01-01T00:00:00Z}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 7, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 30, ttl: 64}, UDP {checksum: 32593, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n2ps: done" \
     (runs "/IP!(dst=10.0.0.2, id=7)/UDP(src=1000, dst=53)/Bytes(\"hi\")\nprint(\"${LAST}\")")
   "9ps: #61 #6262 #62\n9ps: done" \

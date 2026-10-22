@@ -1,9 +1,11 @@
-(* Generated from docs/crafty.md (md5 9f0463e439707c1af069937f86359c05) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 e1be7eba67be271cb46f1691e7a86e70) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
-    # "IP", "UDP" and "Bytes" are layers of a protocol stack. Followed by a
-    # block, a stack is the current stack of that block:
+    # "IP", "UDP" and "Bytes" are layers of a protocol stack. Every stack
+    # starts at the interface, with an "Eth" layer that can be left out:
+    # /IP(dst=192.0.2.10)/UDP(dst=7) is /Eth/IP(dst=192.0.2.10)/UDP(dst=7).
+    # Followed by a block, a stack is the current stack of that block:
     /IP(dst=192.0.2.10)/UDP(dst=7) {
       answers = 0                     # "answers" is a variable holding integers
       # Repeats the block 3 times, "I" being the loop counter, from 0:
@@ -31,9 +33,10 @@ let introduction = {crafty_manual|### A first program
     3 answers out of 3
     Done after 0.3s, status: OK.
 
-A stack is layers and their options, separated by slashes. A leading slash
-starts it from the interface, at the `Eth` layer, which can be left out. Without
-one, it goes on top of the current stack.
+A stack is layers and their options, separated by slashes. At its bottom is
+always `Eth`, the interface. A leading slash starts a stack there, with `Eth` or
+without it (`/IP` is `/Eth/IP`); without a leading slash, a stack goes on top of
+the current stack.
 
 Ending with a terminal layer (`Bytes`, `Request`, `Reply`, `Query`, `Answer`), a
 stack is a complete message, sent there and then: nothing can be stacked on top
@@ -78,23 +81,35 @@ to the IP stream of this block.
     # The same stream, but for one datagram with a TTL of 1:
     /IP(dst=192.0.2.10)/UDP(dst=7) {
       Bytes("ttl 64")
+      print("Sent from port ${LAST[UDP].src}")   # LAST is the last packet sent
       # ../../ goes back to /Eth, where IP and UDP land on the IP and UDP of
       # the current stack. They overlay them: the same streams, with their
       # options (dst, the ports) unless given. ttl=1 is for this message only.
       ../../IP(ttl=1)/UDP/Bytes("ttl 1")
-      print("both from port ${LAST[UDP].src}")   # LAST is the last packet sent
+      print("Also sent from port ${LAST[UDP].src}")
       repeat count=2 {
         expect timeout=1s Bytes { print(MATCH[Bytes].data) }
       }
     }
 
-    both from port 40000
+    Sent from port 40000
+    Also sent from port 40000
     ttl 64
     ttl 1
 
-The absolute `/IP(dst=192.0.2.10, ttl=1)/UDP(dst=7)/Bytes("ttl 1")` would be
-another UDP stream, from another port, whose answer the `expect` of this block
-would not see.
+If we had written an absolute
+`/IP(dst=192.0.2.10, ttl=1)/UDP(dst=7)/Bytes("ttl 1")` instead of the relative
+`../../IP(ttl=1)/UDP/Bytes("ttl 1")`, that would have created another UDP
+stream, from another port, whose answer the `expect` of this block would not
+see.
+
+Similarly, if the expect had used an absolute pattern, as in
+`expect timeout=1s /IP(src == 192.0.2.10)/UDP/Bytes`, that would have matched
+*any* UDP packet from that host, not only those belonging to the current stream.
+
+The rule to remember, for stacks and patterns alike: relative ones stay on the
+streams of the current stack (`../` overlaying some of its layers), whereas
+absolute ones start anew from `Eth`.
 
 Giving a key of a layer that overlays changes the stream instead: in a block on
 `/IP(dst=192.0.2.53)/UDP(dst=53)/DNS`, `../DNS(id=1234)/Query("example.org")` is
@@ -111,14 +126,14 @@ segment, even without data.
     # A SYN of our own, and the SYN-ACK that answers it:
     target = 192.0.2.10
     {
-      # on runs its block for each matching packet, while the enclosing
+      # "on" runs its block for each matching packet, while the enclosing
       # block goes on; here, for one SYN-ACK at most, within 1s:
-      on max=1 timeout=1s /IP(src == target)/TCP!(src == 7, flags & SYN,
-                                                   ack_num > 1000, ack_num <= 2000) {
+      on max=1 timeout=1s /IP(src == target)/TCP!(src == 7 && flags & SYN &&
+                                                   ack_num > 1000 && ack_num <= 2000) {
         print("SYN-ACK: seq ${MATCH[TCP].seq_num}, ack ${MATCH[TCP].ack_num}")
       }
       # Sends the segment, and waits until it is seen leaving: "seg" is the
-      # packet as captured. Every layer but Eth must be manual.
+      # packet as captured. Only fully manual messages can be captured.
       seg = /IP!(dst=target)/TCP!(src=40000, dst=7, flags=SYN, seq_num=1000)/Bytes()
       print("SYN of seq ${seg[TCP].seq_num} sent")
     }
@@ -398,8 +413,9 @@ last UDP layer, `MATCH[IP^]` the last IP but one, `MATCH[^IP]` the first; then
       print(case I IP { "IP from ${I.src}" } | UDP { "UDP to ${I.dst}" } else { "other" })
     }
 
-**`LAST`**, likewise, is the last packet sent. Self-driven layers show what
-crafty picked, as source ports, but not what their engine sets, as checksums.
+**`LAST`**, likewise, is the last packet sent. Self-driven layers show their
+options, what crafty picked (source ports) and their defaults (`ttl`), but not
+what their engine computes (checksums).
 
 ### Special forms
 

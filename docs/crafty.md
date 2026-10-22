@@ -439,8 +439,9 @@ foreach MATCH {
 }
 ```
 
-**`LAST`**, likewise, is the last packet sent. Self-driven layers show what
-crafty picked, as source ports, but not what their engine sets, as checksums.
+**`LAST`**, likewise, is the last packet sent. Self-driven layers show their
+options, what crafty picked (source ports) and their defaults (`ttl`), but not
+what their engine computes (checksums).
 
 ### Special forms
 
