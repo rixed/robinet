@@ -1358,6 +1358,18 @@ and overreach env (p : A.pattern) pat_layers =
 
 and opt_expr env what typ = Option.map (fun e -> expect what (expr env e) typ)
 
+(* The timeout of a [form] that a pattern follows, which a misspelled layer
+ * before an absolute pattern reads as ([UPD/Bytes]): *)
+and timeout_of env form timeout =
+    try opt_expr env ("The timeout of "^ form) Type.Interval timeout
+    with Error (loc, msg) as ex ->
+        match timeout with
+        | Some { desc = A.Var c | A.Construct (c, _) ; _ } when A.is_constructor c ->
+            (match A.did_you_mean (List.map A.Layer_name.to_string A.Layer_name.all) c with
+            | "" -> raise ex
+            | hint -> error loc "%s\n  If %s is a misspelled layer%s" msg c hint)
+        | _ -> raise ex
+
 (* The statements of a block, and its type: that of its last statement if an
  * expression whose value is [used], else void: *)
 and block_value ?expected ~used errors env stmts =
@@ -1382,7 +1394,7 @@ and stmt errors env (s : A.stmt) =
     let mk stmt = { stmt_loc = loc ; stmt } in
     let any form timeout cases =
         let timeout =
-            opt_expr env ("The timeout of "^ form) Type.Interval timeout in
+            timeout_of env form timeout in
         let cases =
             List.map (fun (ps, body) ->
                 let patterns = List.map (pattern env) ps in
@@ -1607,7 +1619,7 @@ and stmt errors env (s : A.stmt) =
         | A.Any { timeout ; cases } ->
             any "any" timeout cases
         | A.On { timeout ; max ; patterns = ps ; body } ->
-            let timeout = opt_expr env "The timeout of on" Type.Interval timeout
+            let timeout = timeout_of env "on" timeout
             and max = opt_expr env "The maximum of on" Type.Int max in
             let patterns = List.map (pattern env) ps in
             let match_ = new_var "MATCH" packet_type in
@@ -1942,6 +1954,9 @@ let check_patterns (ps : A.patterns) =
     (types "x = {abc: 1}\ny = x.abd")
   "line 1, column 10: rand has no parameter mxa, do you mean max?" \
     (types "x = rand(mxa=3)")
+  "line 1, column 8: The timeout of expect must be an interval, not a (UPD)\n  If UPD is a misspelled layer, do you mean UDP?" \
+    (types "expect UPD/Bytes {}")
+  "t: interval" (types "t = 1s\nexpect t Bytes {}")
   "line 1, column 1: This (Bytse string) is not used, do you mean Bytes?" \
     (types "Bytse(\"x\")")
   "line 1, column 30: UDP has no field flags" \

@@ -419,13 +419,15 @@ let var_name what e =
 (* Parameters of a special form, by name, or the single one it has (which
  * starts neither as a record nor as a layer, not to be mistaken for the
  * block or the pattern that follows); only by name if not [unnamed], for a
- * form followed by an expression ([expr]): *)
-let params_of expr ?(unnamed=true) form names =
+ * form followed by an expression ([expr]). Before a [pattern], what is
+ * followed by the block is that pattern, misspelled, rather than a
+ * parameter: *)
+let params_of expr ?(unnamed=true) ?(pattern=false) form names =
     let param_name =
         identifier >>= fun s -> if Layer_name.of_string s <> None then fail else return s in
-    (* Without [unnamed], a name not followed by [=] is no error, but the
-     * expression that follows: *)
-    let equal = if unnamed then item '=' else quiet (item '=') in
+    (* Without [unnamed], or before a pattern, a name not followed by [=] is
+     * no error, but the expression or the pattern that follows: *)
+    let equal = if unnamed && not pattern then item '=' else quiet (item '=') in
     let named =
         (param_name +- sp +- equal +- nay (item '=') +- sp >>: Option.some) ++
         expr in
@@ -433,8 +435,9 @@ let params_of expr ?(unnamed=true) form names =
         here ++
         (if not unnamed then named else
          named |||
-         (nay (item '{' >>: ignore ||| (known_layer >>: ignore)) -+ expr >>:
-            fun e -> None, e)) in
+         (nay (item '{' >>: ignore ||| (known_layer >>: ignore)) --
+          (if pattern then quiet (nay (expr -- sp -- item '{')) else return ()) -+
+          expr >>: fun e -> None, e)) in
     repeat ~sep:none (maybe_next param) >>: fun ps ->
         let ps =
             List.map (fun (_loc, (n, e)) ->
@@ -622,7 +625,7 @@ let () =
 
 (** {2 Statements} *)
 
-let params ?unnamed form names = params_of expr ?unnamed form names
+let params ?unnamed ?pattern form names = params_of expr ?unnamed ?pattern form names
 
 let stmt_sep = sp -- (item '\n' ||| item ';') -- nl_sp |? "end of statement"
 
@@ -742,14 +745,14 @@ let stmt =
                 match p "dur" with
                 | Some d -> Wait d
                 | None -> reject "wait needs a duration") |||
-        (keyword "expect" -+ params "expect" [ "timeout" ] +- sp ++ patterns ++
+        (keyword "expect" -+ params ~pattern:true "expect" [ "timeout" ] +- sp ++ patterns ++
          body >>: fun ((p, patterns), body) ->
             Expect { timeout = p "timeout" ; patterns ; body }) |||
         (* Its cases, separated by bars that may start or end lines: *)
-        (keyword "any" -+ params "any" [ "timeout" ] +- sp ++
+        (keyword "any" -+ params ~pattern:true "any" [ "timeout" ] +- sp ++
          repeat ~min:1 ~sep:(nl_sp -- item '|' -- nl_sp) (patterns ++ body) >>:
             fun (p, cases) -> Any { timeout = p "timeout" ; cases }) |||
-        (keyword "on" -+ params "on" [ "timeout" ; "max" ] +- sp ++ patterns ++
+        (keyword "on" -+ params ~pattern:true "on" [ "timeout" ; "max" ] +- sp ++ patterns ++
          body >>: fun ((p, patterns), body) ->
             On { timeout = p "timeout" ; max = p "max" ; patterns ; body }) |||
         (identifier >>= (fun s ->
@@ -1032,6 +1035,12 @@ let parse_patterns text =
   "line 1, column 20: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")
   "line 1, column 9: Unknown layer HTTP" (reads "/IP/HTTP {}")
   "line 1, column 8: Unknown layer UPD, do you mean UDP?" (reads "/IP/UPD {}")
+  "line 1, column 13: Unknown layer Bytse, do you mean Bytes?" (reads "expect Bytse {}")
+  "line 1, column 13: Unknown layer Bytse, do you mean Bytes?" (reads "expect Bytse(\"x\") {}")
+  "line 1, column 24: Unknown layer Bytse, do you mean Bytes?" (reads "expect timeout=1s Bytse {}")
+  "line 1, column 9: Unknown layer Bytse, do you mean Bytes?" (reads "on Bytse {}")
+  "line 1, column 10: Unknown layer Bytse, do you mean Bytes?" (reads "any Bytse {} | Bytes {}")
+  "line 1, column 8: Expected name in pattern" (reads "expect 2s {}")
   "line 1, column 11: Unknown function pirnt, do you mean print?" (reads "pirnt(\"x\")")
   "line 1, column 7: Unknown function foo" (reads "foo(1)")
   "line 1, column 15: Unknown function foo" (reads "x := 1; foo(1); y := 2")
