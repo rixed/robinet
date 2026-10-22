@@ -489,6 +489,17 @@ let print_expr = print_expr_at ~all:true ~indent:0 0
 (* The same, but for the outermost operation: *)
 let print_bare_expr = print_expr_at ~bare:true ~all:true ~indent:0 0
 
+(** A stack on one line, as in messages, its last layer with parentheses even
+ * with no options if it [sends] ([Bytes()]): *)
+let string_of_stack ?(sends=false) anchor layers =
+    IO.to_string (fun oc () ->
+        print_anchor oc anchor ;
+        List.iteri (fun i l ->
+            if i > 0 then Char.print oc '/' ;
+            print_layer ~all:false ~indent:0 oc l ;
+            if sends && l.options = [] && i = List.length layers - 1 then
+                String.print oc "()") layers) ()
+
 (** The program, with [all] operations in parentheses (default), or only those
  * that need some: *)
 let print_program ?(all=true) oc p =

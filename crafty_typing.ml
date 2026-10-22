@@ -449,6 +449,12 @@ let lookup_var env loc name =
 
 (** {2 Stacks and patterns} *)
 
+(* A stack (top first) as in messages, without the root: [/IP/UDP]. *)
+let string_of_layers stack =
+    List.rev stack |> List.filter_map (fun ((l : L.layer), _) ->
+        if l == L.root then None else Some ("/"^ L.to_string l)) |>
+    String.concat ""
+
 (* [base] (top first) with layer [name] on top, and the layer: the root is
  * put below it if need be: *)
 let push loc base name =
@@ -460,7 +466,10 @@ let push loc base name =
         | Some l -> [ L.root, L.Driven ], l
         | None -> error loc "%s cannot be at the bottom of a stack" (lname name))
     | None, Some (b : L.layer) ->
-        if b.terminal then error loc "Nothing can be on top of %s" (L.to_string b)
+        if b.terminal then
+            error loc "%s is a terminal layer, therefore %s is a complete message. \
+                       No further layer can be stacked on top of it"
+                (L.to_string b) (string_of_layers base)
         else error loc "%s cannot be on top of %s" (lname name) (L.to_string b)
 
 let mode_on loc base (l : L.layer) ~bang =
@@ -1724,7 +1733,7 @@ let check_patterns (ps : A.patterns) =
     (types "/IP!(dst=1.2.3.4)/TCP(dst=80) {}")
   "line 1, column 23: type of ICMP cannot be set" \
     (types "/IP(dst=1.2.3.4)/ICMP(type=8) {}")
-  "line 1, column 43: Nothing can be on top of Request" \
+  "line 1, column 43: Request is a terminal layer, therefore /IP/ICMP/Echo/Request is a complete message. No further layer can be stacked on top of it" \
     (types "/IP(dst=1.2.3.4)/ICMP/Echo/Request(seq=1)/Bytes(\"x\")")
   "line 1, column 2: IP needs a dst" \
     (types "/IP/UDP(dst=53) {}")

@@ -44,6 +44,46 @@ let terminal name =
     List.exists (fun (l : Crafty_layers.layer) ->
         l.terminal && l.name = name) Crafty_layers.all
 
+(* What is wrong with a stack of [layers] that is followed by a block although
+ * it sends, and the fixes: *)
+let no_block_after anchor layers =
+    let top = List.last layers in
+    let name = Layer_name.to_string top.layer_name in
+    let below = List.take (List.length layers - 1) layers in
+    Printf.sprintf "%s is a terminal layer, therefore %s %s message. \
+                    No further layer can be stacked on top of it, therefore it \
+                    cannot open a block.\n  Do you mean \"%s\"%s, or \"expect %s { ... }\"?"
+        name
+        (string_of_stack anchor (List.map (fun l -> { l with options = [] }) layers))
+        (if anchor = Absolute then "is a complete" else "completes a")
+        (string_of_stack ~sends:true anchor layers)
+        (if below = [] then "" else
+         Printf.sprintf ", \"%s { %s ... }\""
+            (string_of_stack anchor below)
+            (string_of_stack ~sends:true (Relative 0) [ top ]))
+        (string_of_stack anchor layers)
+
+(* What is wrong with a stack of [layers] that does not send, but is used as a
+ * message (or, if [block], is not followed by a block): *)
+let not_a_message ?(block=false) anchor layers =
+    let top = Layer_name.to_string (List.last layers).layer_name in
+    let terminals =
+        List.filter_map (fun (l : Crafty_layers.layer) ->
+            if l.terminal &&
+               List.exists (fun (b : Crafty_layers.layer) ->
+                   Layer_name.to_string b.name = top) l.above
+            then Some (Layer_name.to_string l.name) else None) Crafty_layers.all |>
+        List.unique in
+    Printf.sprintf "%s is not a terminal layer, therefore %s is not a complete \
+                    message that could be sent: it needs %s%s."
+        top
+        (string_of_stack anchor (List.map (fun l -> { l with options = [] }) layers))
+        (if terminals = [] then "more layers on top, up to a terminal one"
+         else "a terminal layer on top ("^ String.join " or " terminals ^")")
+        (if not block then ""
+         else if terminals = [] then ", or a block in which to stack them"
+         else ", or a block in which to stack one")
+
 module P = Parsers.Make (ParsersPositions.LineCol (Parsers.SimpleConfig (Char)))
 open P
 
@@ -626,14 +666,11 @@ let stmt =
                 if terminal top then
                     (* Refused at the brace, rather than at the block's end: *)
                     optional ~def:() (sp -- item '{' >>: fun _ ->
-                        reject "No block can follow %s, which sends"
-                            (Layer_name.to_string top)) >>:
+                        reject "%s" (no_block_after anchor layers)) >>:
                     fun () -> Stack { anchor ; layers ; body = None }
                 else
                     optional ~def:None (body >>: Option.some) >>: function
-                    | None ->
-                        reject "%s needs a block, or a layer on top that sends"
-                            (Layer_name.to_string top)
+                    | None -> reject "%s" (not_a_message ~block:true anchor layers)
                     | body -> Stack { anchor ; layers ; body }) |||
         (nay call_of_no_function -+ expr >>: fun e -> Expr e) |||
         (variable ++ maybe_next (
@@ -658,8 +695,7 @@ let stmt =
                 if terminal top then
                     Capture { var = check_var v ; declare ; anchor ; layers }
                 else
-                    reject "Only a packet can be sent, and %s is not terminal"
-                        (Layer_name.to_string top)) |||
+                    reject "%s" (not_a_message anchor layers)) |||
         (* Quiet, not to expect indices after any name: *)
         (variable ++ repeat_greedy ~sep:none (
             quiet (item '[') -- nl_sp -+ expr +- nl_sp +- item ']') >>=
@@ -856,7 +892,7 @@ let parse_patterns text =
   "expect timeout=5s /IP/UDP {\n}\n" (reads "expect timeout=5s /IP/UDP {}")
   "p = Bytes(\"a\")\n" (reads "p = Bytes(\"a\")")
   "p := ../../IP!/UDP(dst=7)/Bytes(\"a\")\n" (reads "p:=../../IP!/UDP(dst=7)/Bytes(\"a\")")
-  "line 1, column 13: Only a packet can be sent, and UDP is not terminal" (reads "p = /IP!/UDP")
+  "line 1, column 13: UDP is not a terminal layer, therefore /IP!/UDP is not a complete message that could be sent: it needs a terminal layer on top (Bytes)." (reads "p = /IP!/UDP")
   "any timeout=1s Bytes(\"a\") {\n} | Bytes(\"b\") {\n  x := 1\n}\n" \
     (reads "any 1s Bytes(\"a\") {} | Bytes(\"b\") { x := 1 }")
   "any Bytes(data == \"a\") {\n} | ../ICMP {\n} | /IP(src == x)/UDP {\n}\nx := 1\n" \
@@ -951,11 +987,11 @@ let parse_patterns text =
   "line 1, column 17: Expected expression in arguments" \
     (reads "/IP(dst=1.2.3.4/UDP")
   "line 1, column 11: Expected end of statement" (reads "print(\"a\"))")
-  "line 1, column 16: UDP needs a block, or a layer on top that sends" \
+  "line 1, column 16: UDP is not a terminal layer, therefore /IP/UDP is not a complete message that could be sent: it needs a terminal layer on top (Bytes), or a block in which to stack one." \
     (reads "/IP/UDP(dst=53)")
-  "line 1, column 18: No block can follow Bytes, which sends" \
+  "line 1, column 18: Bytes is a terminal layer, therefore /IP/UDP/Bytes is a complete message. No further layer can be stacked on top of it, therefore it cannot open a block.\n  Do you mean \"/IP/UDP/Bytes()\", \"/IP/UDP { Bytes() ... }\", or \"expect /IP/UDP/Bytes { ... }\"?" \
     (reads "/IP/UDP/Bytes() {}")
-  "line 4, column 21: No block can follow Bytes, which sends" \
+  "line 4, column 21: Bytes is a terminal layer, therefore /IP/UDP/Bytes is a complete message. No further layer can be stacked on top of it, therefore it cannot open a block.\n  Do you mean \"/IP/UDP/Bytes(\"b\")\", \"/IP/UDP { Bytes(\"b\") ... }\", or \"expect /IP/UDP/Bytes(\"b\") { ... }\"?" \
     (reads "/IP/UDP/Bytes(\"a\")\n{\n}\n/IP/UDP/Bytes(\"b\") {\n  x = 1\n}")
   "line 1, column 12: Expected end of statement" (reads "print(\"a\") print(\"b\")")
   "line 1, column 7: Expected end of statement" (reads "x = 1 2")
@@ -982,7 +1018,7 @@ let parse_patterns text =
   "line 1, column 6: Parameters of on must be named" \
     (reads "on 1s Bytes(\"x\") {\n}")
   "line 1, column 18: Expected '=' in statement" (reads "repeat count=3 x {\n}")
-  "line 1, column 7: Only a packet can be sent, and IP is not terminal" (reads "x = IP")
+  "line 1, column 7: IP is not a terminal layer, therefore IP is not a complete message that could be sent: it needs a terminal layer on top (Bytes)." (reads "x = IP")
   "line 1, column 7: ip is a reserved name" (reads "ip = 3")
   "line 1, column 11: print is a reserved name" (reads "print += 3")
   "line 1, column 7: An item is not declared (:= changes it)" (reads "x[0] = 1")
