@@ -1734,7 +1734,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
       String.concat "\n" (List.rev !out)
 *)
 (* Two programs: a UDP ping retried until the other end listens (after
- * 1.5s); a response counter; a TCP checksum given, then computed; the
+ * 1.5s); a response counter; a TCP checksum given, then computed; MATCH
+ * ending with what was not decoded, if anything, in a Bytes; the
  * counter with losses; losses sparing ARP; ICMP echo requests answered by a
  * program: *)
 (*$= & ~printer:identity
@@ -1747,6 +1748,9 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "a> 0.010s: ARP\na< 0.010s: ARP\na 0.010s: done Eth\na> 0.010s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\" bad-checksum\nb 0.010s: 4660\na> 0.010s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\nb 0.010s: 35896\nb 1.000s: done Eth#3" \
     (two ~frames:true "wait 10ms\n/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=1, checksum=0x1234)/Bytes()\n/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=1)/Bytes()" \
          "on timeout=1s /IP/TCP!(dst == 7) { print(\"${MATCH[TCP].checksum}\") }")
+  "a 0.010s: done Eth\nb 0.010s: 4 []\nb 0.010s: 4 #00000000\nb 1.000s: done Eth#3" \
+    (two "wait 10ms\n/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=1)/Bytes()\n/IP!(dst=10.0.0.2, proto=1)/Bytes(#0d00f2ff00000000)" \
+         "{ on timeout=1s /IP/TCP! { print(\"${length(MATCH)} ${MATCH[Bytes].data}\") }\n  on timeout=1s /IP/ICMP { print(\"${length(MATCH)} ${MATCH[Bytes].data}\") } }")
   "a 1.000s: some lost\na 1.000s: done Eth#\nb 2.000s: done Eth#" \
     (without_counts @@ two ~arp:true ~loss:0.2 "/IP(dst=10.0.0.2)/UDP(src=1000, dst=7) {\n  n = 0\n  { on timeout=1s Bytes(\"pong\") { n += 1 }\n    repeat count=100 every=1ms { Bytes(\"ping\") } }\n  assert(n > 30 && n < 100, msg=\"${n} pongs\")\n  print(\"some lost\") }" \
          "on timeout=2s /IP/UDP(dst == 7)/Bytes(\"ping\") {\n  /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Bytes(\"pong\") }")

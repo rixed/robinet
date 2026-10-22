@@ -584,7 +584,8 @@ and unpack_root root frame =
         { u with values = ("ts", Time ts) :: List.remove_assoc "ts" u.values })
 
 (** [packet] with the layers on top of it, as decoded without any node: of
- * those that could be, the one named, else [Bytes]. *)
+ * those that could be, the one named, else [Bytes]. It always ends with a
+ * terminal layer, the payload left undecoded (if any) in a [Bytes]. *)
 let rec complete (packet : packet) =
     let l, (u : L.unpacked) = List.hd packet in
     let names =
@@ -593,7 +594,10 @@ let rec complete (packet : packet) =
         | L.Only name -> [ name ]
         | L.Any name -> [ name ; L.N.Bytes ] in
     let rec first = function
-        | [] -> packet
+        | [] ->
+            (match L.unpack_bytes [] u.payload with
+            | Some b when not l.terminal -> (L.bytes, b) :: packet
+            | _ -> packet)
         | name :: names ->
             (match Option.bind (L.find ~below:l name) (fun ul ->
                        Option.map (fun uu -> ul, uu) (ul.unpack u.up_hints u.payload)) with

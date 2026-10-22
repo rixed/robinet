@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 8b31f0a6105df149e89d652601904dc1) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 245821d6bf89ae6370300e30f0decb82) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -406,10 +406,11 @@ packet `IP`; TCP data `TCP/Bytes`, in order and once per chunk delivered, and
 each segment `TCP!`.
 
 **`MATCH`** is the packet that matched, as an array of layers, decoded past the
-pattern as `Bytes` (or the `IP` that an ICMP error quotes). `MATCH[UDP]` is its
-last UDP layer, `MATCH[IP^]` the last IP but one, `MATCH[^IP]` the first; then
-`MATCH[IP].src`, `MATCH[Bytes].data`. `MATCH[0]` is a layer of any kind, which
-`case` tells apart:
+pattern as `Bytes` (or the `IP` that an ICMP error quotes). It always ends with
+a terminal layer: what is left undecoded, maybe nothing, is a `Bytes`.
+`MATCH[UDP]` is its last UDP layer, `MATCH[IP^]` the last IP but one,
+`MATCH[^IP]` the first; then `MATCH[IP].src`, `MATCH[Bytes].data`. `MATCH[0]` is
+a layer of any kind, which `case` tells apart:
 
     foreach MATCH {
       print(case I IP { "IP from ${I.src}" } | UDP { "UDP to ${I.dst}" } else { "other" })
