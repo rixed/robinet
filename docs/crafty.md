@@ -11,14 +11,21 @@ by crafty's own stacks (ARP, IPv4, TCP, UDP, ICMP, DNS).
 
 ```
 # Three datagrams to a UDP echo server: how many come back?
+# "IP", "UDP" and "Bytes" are layers of a protocol stack. Followed by a
+# block, a stack is the current stack of that block:
 /IP(dst=192.0.2.10)/UDP(dst=7) {
-  answers = 0
-  repeat count=3 every=100ms {
-    Bytes("ping ${I}")            # I counts the iterations, from 0
+  answers = 0                     # "answers" is a variable holding integers
+  # Repeats the block 3 times, "I" being the loop counter, from 0:
+  repeat var=I count=3 every=100ms {
+    # Bytes is a terminal layer: it sends the message made from
+    # /IP(dst=192.0.2.10)/UDP(dst=7)/Bytes("ping ${I}")
+    Bytes("ping ${I}")
     catch {                       # a lost answer is no error
-      expect timeout=1s Bytes {   # the next datagram back on this stream
+      # expect waits for a packet that matches a pattern; here, any Bytes
+      # layer on top of the current stack, coming back:
+      expect timeout=1s Bytes {
         answers += 1
-        print(MATCH[Bytes].data)
+        print(MATCH[Bytes].data)  # MATCH is the packet that matched
       }
     }
   }
@@ -33,43 +40,117 @@ ping 0
 ping 1
 ping 2
 3 answers out of 3
-Done after 0.2s, status: OK.
+Done after 0.3s, status: OK.
 ```
 
-`/IP(dst=192.0.2.10)/UDP(dst=7)` is a UDP stream, with a source port picked
-once from `--udp`, and the current stack of its block: `Bytes(...)` sends a
-datagram on it, and `expect ... Bytes` waits for one coming back on it.
+A stack is layers and their options, separated by slashes. A leading slash
+starts it from the interface, at the `Eth` layer, which can be left out.
+Without one, it goes on top of the current stack.
 
-### Basic principles
+Ending with a terminal layer (`Bytes`, `Request`, `Reply`, `Query`,
+`Answer`), a stack is a complete message, sent there and then: nothing can
+be stacked on top of it, and so it opens no block. Any other stack needs a
+block.
 
-**Stacks** are layers with their options, separated by slashes. A leading
-slash starts from the interface. A stack followed by a block is the current
-stack of that block, which stacks without the leading slash go on top of. A
-stack that ends with a message (`Bytes`, `Request`, `Query`...) sends it.
+The layers of a stack are streams: `UDP` picks its source port once (from
+`--udp`), and every message sent and every pattern on top of it are of that
+stream.
 
-**Self-driven or manual.** By default, layers are *self-driven*: crafty
-resolves addresses with ARP, connects, retransmits, fragments and
-reassembles. A bang makes a layer *manual*: `TCP!(flags=SYN)` is one segment,
-as given, with the fields left out filled in. On reception, `IP!` sees each
-fragment and `TCP!` each segment, even without data.
+An `expect` that times out is an error. An error leaves the enclosing
+blocks one after the other, until a `catch` drops it or a `retry` runs its
+block again; one that reaches the top ends the program.
 
-**Patterns** describe received packets, layer by layer, with conditions:
+The language is statically typed.
+
+### Going down the stack
 
 ```
-expect /IP/TCP(src == 7)/Bytes("pong") { ... }     # waits for the first match
-any Bytes("pong") { ... } | ../ICMP { ... }        # for the first of several
-on /IP/ICMP/Echo/Request { ... }                   # runs for every match, in the background
+# Is anyone listening on UDP port 7?
+/IP(dst=192.0.2.10)/UDP(dst=7) {
+  Bytes("hello")      # two messages on top of the same stack:
+  Bytes("world")      # the same stream, from the same port
+  # Waits for the first packet that matches either pattern: a datagram
+  # back, or the ICMP error a closed port answers with. "../" goes back to
+  # /IP(dst=192.0.2.10), and ICMP goes on top of that IP stream instead of
+  # UDP: these are the ICMP errors that it receives.
+  any timeout=1s Bytes { print(MATCH[Bytes].data) }
+    | ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print("closed") }
+}
 ```
 
-In their block, `MATCH` is the packet that matched:
-`print("from ${MATCH[IP].src}")`.
+```
+hello
+```
 
-**Errors.** An `expect` that times out, a failed `assert`, and run time errors
-leave the enclosing blocks one after the other, until a `retry` runs its block
-again or a `catch` drops the error. An error that reaches the top ends the
-program.
+With `dst=8`, where nothing listens, it prints `closed`.
 
-The language is statically typed. Comments start with `#`.
+Each leading `../` goes back one layer down the current stack: in this
+block, `../` goes back to `/IP(dst=192.0.2.10)`, and `../../` to `/Eth`. That
+is not `/IP`: an absolute pattern, as `/IP/ICMP/DestUnreachable`, matches
+from the interface up, the packets of any stream, whereas `../ICMP` only sees
+what comes to the IP stream of this block.
+
+### Overlaying
+
+```
+# The same stream, but for one datagram with a TTL of 1:
+/IP(dst=192.0.2.10)/UDP(dst=7) {
+  Bytes("ttl 64")
+  # ../../ goes back to /Eth, where IP and UDP land on the IP and UDP of
+  # the current stack. They overlay them: the same streams, with their
+  # options (dst, the ports) unless given. ttl=1 is for this message only.
+  ../../IP(ttl=1)/UDP/Bytes("ttl 1")
+  print("both from port ${LAST[UDP].src}")   # LAST is the last packet sent
+  repeat count=2 {
+    expect timeout=1s Bytes { print(MATCH[Bytes].data) }
+  }
+}
+```
+
+```
+both from port 40000
+ttl 64
+ttl 1
+```
+
+The absolute `/IP(dst=192.0.2.10, ttl=1)/UDP(dst=7)/Bytes("ttl 1")` would be
+another UDP stream, from another port, whose answer the `expect` of this
+block would not see.
+
+Giving a key of a layer that overlays changes the stream instead: in a block
+on `/IP(dst=192.0.2.53)/UDP(dst=53)/DNS`, `../DNS(id=1234)/Query("example.org")`
+is a query on the DNS stream of id 1234, on the same UDP stream.
+
+### Manual layers
+
+So far, layers were *self-driven*: crafty resolves addresses with ARP,
+connects, retransmits, fragments and reassembles. A bang makes a layer
+*manual*, for packets as on the wire: `TCP!(flags=SYN)` is one segment, as
+given, the fields left out filled in. On reception, `IP!` sees each fragment
+and `TCP!` each segment, even without data.
+
+```
+# A SYN of our own, and the SYN-ACK that answers it:
+target = 192.0.2.10
+{
+  # on runs its block for each matching packet, while the enclosing
+  # block goes on; here, for one SYN-ACK at most, within 1s:
+  on max=1 timeout=1s /IP(src == target)/TCP!(src == 7, flags & SYN,
+                                               ack_num > 1000, ack_num <= 2000) {
+    print("SYN-ACK: seq ${MATCH[TCP].seq_num}, ack ${MATCH[TCP].ack_num}")
+  }
+  # Sends the segment, and waits until it is seen leaving: "seg" is the
+  # packet as captured. Every layer but Eth must be manual.
+  seg = /IP!(dst=target)/TCP!(src=40000, dst=7, flags=SYN, seq_num=1000)/Bytes()
+  print("SYN of seq ${seg[TCP].seq_num} sent")
+}
+```
+
+```
+% sudo crafty -i eth0 --tcp 40000 --fw syn.cfty
+SYN of seq 1000 sent
+SYN-ACK: seq 1969569245, ack 1001
+```
 
 ### Running crafty
 
