@@ -448,7 +448,14 @@ let lookup_var env loc name =
             error loc "MATCH is only defined in the blocks of expect, any and on" ;
         if name = "LAST" then
             error loc "LAST is only defined once a packet was sent, in that block or an enclosing one" ;
-        error loc "Unknown variable %s" name
+        (* In a condition, a name can also be a field of the layer: *)
+        let fields =
+            match env.layer_ctx with
+            | Some { cur ; in_cond = true ; _ } ->
+                Array.to_list cur.fields |> List.map (fun (fd : L.field) -> fd.name)
+            | _ -> [] in
+        error loc "Unknown variable %s%s" name
+            (A.did_you_mean (fields @ List.map (fun (v : var) -> v.name) env.vars) name)
 
 (** {2 Stacks and patterns} *)
 
@@ -487,6 +494,10 @@ let push ?(hint=lazy "") loc base name =
         else
             error loc "%s cannot be on top of %s%s" (lname name) (L.to_string b)
                 (Lazy.force hint)
+
+(* What to append to the message about an unknown field [f] of [l]: *)
+let field_hint (l : L.layer) f =
+    A.did_you_mean (Array.to_list l.fields |> List.map (fun (fd : L.field) -> fd.name)) f
 
 (* A layer as written in a stack or a pattern, for the fixes of where it
  * goes: *)
@@ -759,7 +770,9 @@ let builtins =
 let find_builtin loc name =
     match List.find_opt (fun (n, _, _, _) -> same_name n name) builtins with
     | Some b -> b
-    | None -> error loc "Unknown function %s" name
+    | None ->
+        error loc "Unknown function %s%s" name
+            (A.did_you_mean (List.map (fun (n, _, _, _) -> n) builtins) name)
 
 let numeric t = t = Type.Int || t = Type.Float
 
@@ -846,7 +859,8 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             (match List.findi (fun _ (n, _) -> same_name n f) fs with
             | i, (_, t) -> mk t (Field (r, i))
             | exception Not_found ->
-                error loc "No field %s in %s" f (tname r.typ))
+                error loc "No field %s in %s%s" f (tname r.typ)
+                    (A.did_you_mean (List.map fst fs) f))
         | t -> error loc "No field %s in %s" f (a_type t))
     | A.Index (a, { desc = A.Layer { name ; from_start ; nth } ; _ }) ->
         let a = expr env a in
@@ -1065,7 +1079,7 @@ and layer_field env loc name from_start nth f =
         | n -> error loc "There are only %d %s below %s" n (lname name) (L.to_string ctx.cur))
     | Some (layer, (l : L.layer), mode) ->
         match L.find_field l f with
-        | None -> error loc "%s has no field %s" (L.to_string l) f
+        | None -> error loc "%s has no field %s%s" (L.to_string l) f (field_hint l f)
         | Some i ->
             let fd = l.fields.(i) in
             if not (List.mem mode fd.read_in) then
@@ -1098,7 +1112,9 @@ and call env loc f args =
             | Some n ->
                 (match List.find_opt (fun p -> same_name p.pname n) params with
                 | Some p -> p.pname, a
-                | None -> error a.arg_loc "%s has no parameter %s" fname n)
+                | None ->
+                    error a.arg_loc "%s has no parameter %s%s" fname n
+                        (A.did_you_mean (List.map (fun p -> p.pname) params) n))
             | None ->
                 let p = List.hd !slots in
                 slots := List.tl !slots ;
@@ -1230,7 +1246,9 @@ and stack_layers ~hint env base over (layers : A.layer list) =
                     | Some n ->
                         (match L.find_field l n with
                         | Some i -> i
-                        | None -> error a.arg_loc "%s has no field %s" (L.to_string l) n)
+                        | None ->
+                            error a.arg_loc "%s has no field %s%s" (L.to_string l) n
+                                (field_hint l n))
                     | None ->
                         (match l.default_field with
                         | Some i -> i
@@ -1466,6 +1484,10 @@ and stmt errors env (s : A.stmt) =
             if te.typ <> Type.Void then (
                 match e.desc with
                 | A.Call (f, _) -> error loc "The result of %s is not used" f
+                | A.Construct (c, _) ->
+                    (* Rather a misspelled layer than a value: *)
+                    error loc "This %s is not used%s" (tname te.typ)
+                        (A.did_you_mean (List.map A.Layer_name.to_string A.Layer_name.all) c)
                 | _ -> error loc "This %s is not used" (tname te.typ)) ;
             env, Some (mk (Expr te))
         | A.Declare (name, e) ->
@@ -1907,6 +1929,20 @@ let check_patterns (ps : A.patterns) =
     (types "expect 5 Bytes(\"x\") {}")
   "line 1, column 22: The value of ttl must be an int, not a string" \
     (types "/IP(dst=1.2.3.4, ttl=\"x\")/UDP(dst=53)/Bytes(\"hi\")")
+  "line 1, column 5: IP has no field dts, do you mean dst?" \
+    (types "/IP(dts=1.2.3.4)/UDP(dst=53) {}")
+  "line 1, column 46: Unknown variable scr, do you mean src?" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(scr == 1) {} }")
+  "line 1, column 46: IP has no field scr, do you mean src?" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(IP.scr == 1.2.3.4) {} }")
+  "line 2, column 5: Unknown variable anwsers, do you mean answers?" \
+    (types "answers = 1\nx = anwsers")
+  "line 2, column 5: No field abd in {abc: int}, do you mean abc?" \
+    (types "x = {abc: 1}\ny = x.abd")
+  "line 1, column 10: rand has no parameter mxa, do you mean max?" \
+    (types "x = rand(mxa=3)")
+  "line 1, column 1: This (Bytse string) is not used, do you mean Bytes?" \
+    (types "Bytse(\"x\")")
   "line 1, column 30: UDP has no field flags" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53, flags=2) {}")
   "line 1, column 5: id cannot be set in a self-driven IP" \

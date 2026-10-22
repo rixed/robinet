@@ -237,6 +237,50 @@ and block = stmt list
 
 type program = block
 
+(* The edits from [a] to [b], however written: insertions, deletions,
+ * substitutions, and swaps of two adjacent letters. *)
+let edit_distance a b =
+    let a = String.lowercase_ascii a and b = String.lowercase_ascii b in
+    let la = String.length a and lb = String.length b in
+    let d = Array.make_matrix (la + 1) (lb + 1) 0 in
+    for i = 0 to la do d.(i).(0) <- i done ;
+    for j = 0 to lb do d.(0).(j) <- j done ;
+    for i = 1 to la do
+        for j = 1 to lb do
+            let cost = if a.[i-1] = b.[j-1] then 0 else 1 in
+            d.(i).(j) <- min (min (d.(i-1).(j) + 1) (d.(i).(j-1) + 1))
+                             (d.(i-1).(j-1) + cost) ;
+            if i > 1 && j > 1 && a.[i-1] = b.[j-2] && a.[i-2] = b.[j-1] then
+                d.(i).(j) <- min d.(i).(j) (d.(i-2).(j-2) + 1)
+        done
+    done ;
+    d.(la).(lb)
+
+(** What to append to the message about an unknown name [s]: the closest of
+ * [names], if close enough to be what was meant ([", do you mean UDP?"]). *)
+let did_you_mean names s =
+    (* Short names are only told apart from other cases: *)
+    let max_d = if String.length s < 3 then 0 else max 1 (String.length s / 3) in
+    let close =
+        List.unique names |>
+        List.filter_map (fun n ->
+            let d = edit_distance n s in
+            if n <> s && d <= max_d then Some (d, n) else None) in
+    match List.sort compare close with
+    | [] -> ""
+    | (d, _) :: _ ->
+        let best = List.filter_map (fun (d', n) -> if d' = d then Some n else None) close in
+        ", do you mean "^ String.join " or " best ^"?"
+
+(*$= did_you_mean & ~printer:identity
+  ", do you mean UDP?" (did_you_mean [ "TCP" ; "UDP" ; "IP" ] "UPD")
+  ", do you mean print?" (did_you_mean [ "print" ; "print_err" ] "pirnt")
+  ", do you mean dst?" (did_you_mean [ "src" ; "dst" ] "dts")
+  ", do you mean x?" (did_you_mean [ "x" ] "X")
+  "" (did_you_mean [ "src" ; "dst" ] "foo")
+  "" (did_you_mean [ "a" ] "b")
+*)
+
 (** Whether that name is a constructor's: it starts with a capital letter. *)
 let is_constructor s = s <> "" && Char.is_uppercase s.[0]
 

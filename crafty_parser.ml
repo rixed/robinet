@@ -203,7 +203,9 @@ let unknown_function args =
         if is_keyword s || is_in functions s || Layer_name.of_string s <> None ||
            is_constructor s && not (is_reserved s)
         then fail else return s) ++ args >>:
-    fun (s, _) -> reject "Unknown function %s" s
+    fun (s, _) ->
+        reject "Unknown function %s%s" s
+            (did_you_mean (functions @ List.map Layer_name.to_string Layer_name.all) s)
 
 let known_layer =
     identifier >>= fun s ->
@@ -216,7 +218,9 @@ let layer_name =
     fun s ->
         match Layer_name.of_string s with
         | Some n -> n
-        | None -> reject "Unknown layer %s" s
+        | None ->
+            reject "Unknown layer %s%s" s
+                (did_you_mean (List.map Layer_name.to_string Layer_name.all) s)
 
 (* That keyword, or else no error: a name that starts like it is no
  * misspelling of it. *)
@@ -1027,6 +1031,8 @@ let parse_patterns text =
   "line 1, column 19: LAST is a reserved name" (reads "repeat var=last {}")
   "line 1, column 20: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")
   "line 1, column 9: Unknown layer HTTP" (reads "/IP/HTTP {}")
+  "line 1, column 8: Unknown layer UPD, do you mean UDP?" (reads "/IP/UPD {}")
+  "line 1, column 11: Unknown function pirnt, do you mean print?" (reads "pirnt(\"x\")")
   "line 1, column 7: Unknown function foo" (reads "foo(1)")
   "line 1, column 15: Unknown function foo" (reads "x := 1; foo(1); y := 2")
   "line 1, column 4: Unknown layer foo" (reads "foo(1)/Bytes(\"x\")")
