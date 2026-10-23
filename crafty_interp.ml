@@ -205,6 +205,16 @@ let stat loc (b : T.builtin) vs args =
         vs.(max 0 (rank - 1))
     | _ -> assert false
 
+(* What a setuid crafty, which drops the user's environment, prefixes their
+ * variables with: *)
+let user_env_prefix = "CRAFTY_USER_ENV_"
+
+(* The user's variable, renamed or not: *)
+let getenv name =
+    match Tools.unsafe_getenv_opt (user_env_prefix ^ name) with
+    | None -> Tools.unsafe_getenv_opt name
+    | v -> v
+
 let rec call loc (b : T.builtin) args ~print ~print_err ~now =
     let number = function Bool _ | Int _ | Float _ -> true | _ -> false in
     let reparse what ok s =
@@ -253,7 +263,7 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
     | T.To_ip, [ b ] -> convert loc A.Type.bytes A.Type.Ip b
     | T.To_mac, [ b ] -> convert loc A.Type.bytes A.Type.Mac b
     | T.Getenv, String name :: default ->
-        (match Tools.unsafe_getenv_opt name, default with
+        (match getenv name, default with
         | Some v, _ -> String v
         | None, [ d ] -> d
         | None, _ -> error loc "Environment variable %s is not set" name)

@@ -61,14 +61,18 @@ let record format ?(json=[]) kind fields =
 (* Setuid root, crafty becomes root entirely, for the commands it runs to be
  * root as well (busybox's sh drops an effective uid that is not the real
  * one), and starts over in an environment of its own, since the user's
- * (PATH, LD_PRELOAD...) would decide what runs as root: *)
+ * (PATH, LD_PRELOAD...) would decide what runs as root. The user's variables
+ * come along renamed, for the program's [getenv] only: *)
 let () =
     if Unix.geteuid () = 0 && Unix.getuid () <> 0 then (
         (* Without CAP_SETUID, only the effective uid would change: *)
         Unix.setuid 0 ;
         if Unix.getuid () <> 0 then die "Setuid root, but without CAP_SETUID." ;
+        let user_env =
+            Unix.unsafe_environment () |>
+            Array.map ((^) Crafty_interp.user_env_prefix) in
         Unix.execve Sys.executable_name Sys.argv
-            [| "PATH=/usr/sbin:/usr/bin:/sbin:/bin" |])
+            (Array.append [| "PATH=/usr/sbin:/usr/bin:/sbin:/bin" |] user_env))
 
 let () =
     let ifname = ref "" and own_ip = ref None and ports = ref []
