@@ -993,6 +993,17 @@ let unify what a b =
             | _ -> cannot ())
         | None -> cannot ()
 
+(* Where the fields of a packet sent that only its capture tells are: *)
+let only_captured =
+    "only a packet captured as it leaves has it (p = MESSAGE, through manual layers)"
+
+(* [LAST[Eth]], whose [ts] is never known: *)
+let is_last_eth r =
+    match r.desc with
+    | Select { packet = { desc = Var { name = "LAST" ; _ } ; _ } ; layer ; _ } ->
+        layer.name = L.(eth.name)
+    | _ -> false
+
 (* With [tail], [e] is the value of a declaration, an assignment or a
  * statement, which can wait if its block can. Without [used], the value of
  * a block, [if] or [case] is that of a statement: void. *)
@@ -1033,6 +1044,8 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         (match r.typ with
         | Type.Record fs ->
             (match List.findi (fun _ (n, _) -> same_name n f) fs with
+            | _, ("ts", _) when is_last_eth r ->
+                error loc "LAST[Eth].ts is not known: %s" only_captured
             | i, (_, t) -> mk t (Field (r, i))
             | exception Not_found ->
                 error loc "No field %s in %s%s" f (tname r.typ)
@@ -2328,6 +2341,8 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/TCP(dst=80) { p = Bytes(\"GET /\") }")
   "line 1, column 32: Only a packet sent through manual layers can be seen leaving, and IP is self-driven" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { p = Bytes(\"x\") }")
+  "line 2, column 7: LAST[Eth].ts is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
+    (types "/IP!(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"x\")\n  t = LAST[Eth].ts }")
   "line 2, column 33: p is an int, not a packet" \
     (types "p = 1\n/IP!(dst=1.2.3.4)/UDP(dst=53) { p := Bytes(\"x\") }")
   "line 1, column 7: A packet cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \

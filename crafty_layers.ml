@@ -72,7 +72,8 @@ type field =
        * the packets sent (the source port is the destination port of a
        * reply): *)
       peer : string ;
-      (* What a self-driven layer sends when it is not given, if not zero: *)
+      (* What a self-driven layer sends when it is not given, if that is
+       * known before it sends: *)
       driven_default : V.value option }
 
 (* Instantiated only once so can be compared with == and != *)
@@ -936,7 +937,8 @@ let eth =
     layer N.Eth ~driven:true ~node:eth_node ~unpack:unpack_eth [
         field "src" Type.Mac ~read_in:both ;
         field "dst" Type.Mac ~read_in:both ;
-        field "proto" Type.Int ~read_in:both ~discriminant:true ;
+        field "proto" Type.Int ~read_in:both ~discriminant:true
+              ~driven_default:(V.Int 0x800) ;
         field "ts" Type.Time ~set_in:[] ~read_in:both ]
 
 let ip =
@@ -946,14 +948,16 @@ let ip =
         field "dst" Type.Ip ~set_in:both ~read_in:both ~discriminant:true
               ~pick:Required ~peer:"src" ;
         field "proto" Type.Int ~set_in:both ~read_in:both ~discriminant:true ;
-        field "tos" Type.Int ~set_in:both ~read_in:both ;
+        field "tos" Type.Int ~set_in:both ~read_in:both ~driven_default:(V.Int 0) ;
         field "ttl" Type.Int ~set_in:both ~read_in:both ~driven_default:(V.Int 64) ;
-        field "dont_frag" Type.Bool ~set_in:both ~read_in:both ;
+        field "dont_frag" Type.Bool ~set_in:both ~read_in:both
+              ~driven_default:(V.Bool false) ;
         field "id" Type.Int ~read_in:both ;
         field "more_frags" Type.Bool ;
         field "frag_offset" Type.Int ;
         field "tot_len" Type.Int ;
-        field "options" Type.bytes ~set_in:both ~read_in:both ;
+        field "options" Type.bytes ~set_in:both ~read_in:both
+              ~driven_default:(V.Array [||]) ;
         field "is_fragment" Type.Bool ~set_in:[] ]
 
 (** What the node of any layer tells of its stream: the packets that went

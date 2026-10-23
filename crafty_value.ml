@@ -86,7 +86,7 @@ let empty_map default = Map (Map.PMap.create compare_keys, default)
 (* How a value of type [typ] is written into a string: *)
 let rec to_string (typ : A.Type.t) v =
     match typ, v with
-    | _, Void -> ""
+    | _, Void -> "?"
     | _, Bool b -> if b then "true" else "false"
     | _, Byte b -> Printf.sprintf "#%02x" b
     | _, Int i -> string_of_int i

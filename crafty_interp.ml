@@ -443,12 +443,16 @@ let rec eval output (env : env) (e : T.expr) =
             List.nth env.packet (List.length env.packet - 1 - layer) in
         List.assoc l.fields.(field).name u.values
     | T.Field (r, i) ->
-        (* Void only in the fields of BUDGET and PORTS that are not set: *)
+        (* Void only in the fields of BUDGET and PORTS that are not set, and
+         * in those of a packet sent that only its capture tells: *)
         (match eval r, r.typ with
         | Record vs, A.Type.Record fs ->
             (match vs.(i), List.nth fs i with
             | Void, (n, t) when t <> A.Type.Void ->
-                error e.loc "%s is not set, by the program or the command line" n
+                if r.typ = T.budget_type || r.typ = T.ports_type then
+                    error e.loc "%s is not set, by the program or the command line" n ;
+                let l = List.find (fun l -> T.packet_record l = r.typ) Crafty_layers.all in
+                error e.loc "%s.%s is not known: %s" (T.lname l.name) n T.only_captured
             | v, _ -> v)
         | _ -> assert false)
     | T.Index (a, i) ->
@@ -1674,11 +1678,11 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 (* LAST is the last packet sent by the block or an enclosing one: as packed
  * down to the self-driven layers, which only their stack tells: *)
 (*$= runs & ~printer:identity
-  "3ps: [Eth {dst: 00:00:00:00:00:00, proto: 0, src: 00:00:00:00:00:00, ts: 1970-01-01T00:00:00Z}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 0, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 0, ttl: 64}, UDP {checksum: 0, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n3ps: done" \
+  "3ps: [Eth {dst: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: ?, id: ?, is_fragment: ?, more_frags: ?, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: ?, ttl: 64}, UDP {checksum: 0, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n3ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"hi\")\n  print(\"${LAST}\") }")
   "6ps: 64 1\n6ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"a\")\n  x = LAST[IP].ttl\n  ../../IP(ttl=1)/UDP/Bytes(\"b\")\n  print(\"${x} ${LAST[IP].ttl}\") }")
-  "2ps: [Eth {dst: 00:00:00:00:00:00, proto: 2048, src: 00:00:00:00:00:00, ts: 1970-01-01T00:00:00Z}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 7, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 30, ttl: 64}, UDP {checksum: 32593, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n2ps: done" \
+  "2ps: [Eth {dst: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 7, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 30, ttl: 64}, UDP {checksum: 32593, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n2ps: done" \
     (runs "/IP!(dst=10.0.0.2, id=7)/UDP(src=1000, dst=53)/Bytes(\"hi\")\nprint(\"${LAST}\")")
   "9ps: #61 #6262 #62\n9ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"a\")\n  x = LAST\n  y = x\n  { Bytes(\"bb\")\n    y := LAST }\n  Bytes(\"b\")\n  print(\"${x[Bytes].data} ${y[Bytes].data} ${LAST[Bytes].data}\") }")
@@ -1687,6 +1691,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"a\")\n  on for=1s Bytes(\"pong\") { print(LAST[Bytes].data) }\n  Bytes(\"b\") }")
   "2ps: 0\n4ps: 1\n4ps: done" \
     (runs "repeat count=2 { /IP!(dst=10.0.0.2, id=I)/UDP(src=1000, dst=53)/Bytes(\"x\")\n  print(\"${LAST[IP].id}\") }")
+  "3ps: failed: line 2, column 7: IP.id is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
+    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"a\")\n  x = LAST[IP].id }")
+  "2ps: failed: line 3, column 10: Eth.ts is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
+    (runs "/IP!(dst=10.0.0.2)/UDP(src=1000, dst=53)/Bytes(\"a\")\nx = LAST\nprint(\"${x[Eth].ts}\")")
 *)
 (* first runs the block of the first pattern to match, and no other: *)
 (*$= runs & ~printer:identity

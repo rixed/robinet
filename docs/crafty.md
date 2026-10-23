@@ -317,6 +317,10 @@ Interpolated, a variant is written `Got 4`, `Pending`.
 - Predefined: `MATCH` (in the block of an `expect`, `first` or `on`), `LAST`
   (the last packet sent, once a block has sent one), `I`, the counter of
   a `repeat` or the item of a `foreach`, and `BUDGET` and `PORTS`.
+- `LAST` is the packet as given, not as it left: reading a field that only
+  the wire tells (`LAST[Eth].ts`, or `IP.id`, `TCP.seq_num`... under
+  self-driven layers) is an error. `p = MESSAGE` captures the packet as it
+  leaves (see [Protocol stacks](#protocol-stacks)).
 
 ### Budget and ports
 
