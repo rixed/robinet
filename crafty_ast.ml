@@ -296,8 +296,12 @@ let functions =
       "sort" ; "sorted" ; "histogram" ;
       "print" ; "print_err" ; "format" ; "assert" ; "stats" ]
 
+(** Variables that the program declares of itself, at most once each and at
+ * its top level, with a literal record: its budget and its ports. *)
+let self_declared = [ "BUDGET" ; "PORTS" ]
+
 (** Variables that the language defines, upper case as are the constants. *)
-let predefined = [ "MATCH" ; "LAST" ]
+let predefined = [ "MATCH" ; "LAST" ] @ self_declared
 
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =

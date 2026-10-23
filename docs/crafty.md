@@ -181,7 +181,8 @@ sudo crafty -i eth0 --ip 192.0.2.5 -e '/IP(dst=192.0.2.10)/ICMP/Echo {
 - `-e PROG`: the program itself, rather than a file.
 - `-i IFACE`: the interface to send from and capture on. Crafty needs root.
 - `--tcp LO-HI`, `--udp LO-HI` (repeatable): the ports to pick source ports
-  from. A program that sends TCP or UDP without a `src` needs them.
+  from, with the program's `PORTS` (see [Budget and ports](#budget-and-ports)).
+  A program that sends TCP or UDP without a `src` needs them.
 - `--fw`: crafty shares the interface's address with the host, whose kernel
   would answer what crafty receives with TCP resets and ICMP port
   unreachables. `--fw` keeps the kernel off the ports of `--tcp` and `--udp`.
@@ -215,8 +216,9 @@ sudo crafty -i eth0 --ip 192.0.2.5 -e '/IP(dst=192.0.2.10)/ICMP/Echo {
 
 - `--max-duration D`, `--max-packets N`, `--max-bytes N`,
   `--max-packets-per-secs N`, `--max-bytes-per-secs N`, `--max-syns N`,
-  `--max-syns-per-secs N`: budgets; exceeding one stops the program. SYNs are
-  TCP SYNs without ACK, i.e. connection attempts.
+  `--max-syns-per-secs N`: budgets, with the program's `BUDGET`; exceeding
+  one stops the program. SYNs are TCP SYNs without ACK, i.e. connection
+  attempts.
 - `--linger D`: once the program is done, how long to wait for the traffic to
   stop, so that connections close (default 2s).
 - `--check`: only compiles the program.
@@ -313,8 +315,28 @@ Interpolated, a variant is written `Got 4`, `Pending`.
 - Blocks see the variables of the blocks around them. Conditions of patterns
   read them when a packet arrives.
 - Predefined: `MATCH` (in the block of an `expect`, `first` or `on`), `LAST`
-  (the last packet sent, once a block has sent one), and `I`, the counter of
-  a `repeat` or the item of a `foreach`.
+  (the last packet sent, once a block has sent one), `I`, the counter of
+  a `repeat` or the item of a `foreach`, and `BUDGET` and `PORTS`.
+
+### Budget and ports
+
+A program may declare them, once each, at its top level, with literals only:
+
+```
+BUDGET = {max_duration: 30s, max_syns: 30, max_syns_per_secs: 5, max_bytes: 50000}
+PORTS = {tcp: [[40000, 40100]], udp: [[5000, 5000]]}
+```
+
+- `BUDGET`'s fields are the budget options of crafty, named alike:
+  `max_duration`, `max_packets`, `max_bytes`, `max_packets_per_secs`,
+  `max_bytes_per_secs`, `max_syns`, `max_syns_per_secs`.
+- `PORTS` has ranges `[first, last]` by protocol; a protocol left out gets
+  no port.
+- crafty runs with what both the program and the command line allow: the
+  least of each budget, the ports in both (an error if there is none).
+- `BUDGET` and `PORTS` are readable anywhere, and are those values:
+  `src = PORTS.tcp[0][0]`. Reading a field that neither the program nor the
+  command line sets is an error. They cannot be assigned.
 
 ### Expressions
 
@@ -846,6 +868,32 @@ target = 192.0.2.10
 % sudo crafty -i eth0 --tcp 40000 --fw scan.cfty
 port 7 is open
 ```
+
+### A port scan within its budget
+
+```
+BUDGET = {max_syns: 1000, max_syns_per_secs: 200}
+PORTS = {tcp: [[40000, 40000]]}
+target = 192.0.2.10
+sport = PORTS.tcp[0][0]
+{
+  on linger=1s /IP(src == target)/TCP!(dst == sport, flags == SYN | ACK) {
+    print("port ${MATCH[TCP].src} is open")
+  }
+  repeat var=i count=BUDGET.max_syns every=1s / BUDGET.max_syns_per_secs {
+    /IP(dst=target)/TCP!(src=sport, dst=i + 1, flags=SYN, seq_num=1)/Bytes()
+  }
+}
+```
+
+```
+% sudo crafty -i eth0 --fw --max-syns-per-secs 50 budget-scan.cfty
+port 7 is open
+```
+
+No `--tcp`: `PORTS` gives it, for `--fw` too. With `--max-syns-per-secs 50`,
+`BUDGET.max_syns_per_secs` is 50 and the scan takes 20s; with
+`--max-syns 100`, it scans ports 1 to 100.
 
 ### Traceroute
 

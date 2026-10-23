@@ -405,6 +405,7 @@ let args expr =
     in_ '(' (list_of arg) ')' |? "arguments"
 
 let check_var n =
+    if List.mem n self_declared then reject "%s cannot be changed" n ;
     if is_reserved n then reject "%s is a reserved name" n ;
     n
 
@@ -688,7 +689,8 @@ let stmt =
         (nay call_of_no_function -+ expr >>: fun e -> Expr e) |||
         (variable ++ maybe_next (
             item '=' -- nay (item '=' ||| item '~') -- nl_sp -+ expr) >>:
-            fun (v, e) -> Declare (check_var v, e)) |||
+            fun (v, e) ->
+                Declare ((if List.mem v self_declared then v else check_var v), e)) |||
         (* The packet of a stack, as it leaves: what starts like a stack
          * rather than an expression, up to the end of the statement: *)
         (let assign =

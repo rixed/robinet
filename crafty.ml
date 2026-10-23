@@ -21,9 +21,10 @@
   Run a crafty program on a real interface.
 
   The program sends and receives through the interface, behind a policer that
-  enforces the budgets given on the command line, which limit what the
-  program sends. With [--tcp]/[--udp], it uses only those ports, and only
-  what the interface receives for them is captured; with [--ip], it uses an
+  enforces the budgets, which limit what the program sends. With ports, it
+  uses only those, and only what the interface receives for them is
+  captured. Budgets and ports are those that both the command line and the
+  program (its [BUDGET] and [PORTS]) allow. With [--ip], it uses an
   address of its own, not added to the interface, and only what is for that
   address is captured. With [--fw], the kernel is kept off those ports. What
   is changed on the host is undone at exit, or by [--cleanup] if crafty was
@@ -206,6 +207,38 @@ let () =
         | Error e -> fail [ e ]) ;
         exit 0) ;
     let program = compile () in
+    (* What both the command line and the program allow: *)
+    let limits =
+        let budget =
+            List.filter_map identity Crafty_ast.[
+                Option.map (fun d -> "max_duration", Interval d) !max_duration ;
+                Option.map (fun n -> "max_packets", Int n) !max_packets ;
+                Option.map (fun n -> "max_bytes", Int n) !max_volume ;
+                Option.map (fun x -> "max_packets_per_secs", Float x) !max_packet_rate ;
+                Option.map (fun x -> "max_bytes_per_secs", Float x) !max_throughput ;
+                Option.map (fun n -> "max_syns", Int n) !max_syns ;
+                Option.map (fun x -> "max_syns_per_secs", Float x) !max_syn_rate ] in
+        let ranges proto =
+            List.filter_map (fun (r : Host_config.port_range) ->
+                if r.proto = proto then Some (r.lo, r.hi) else None) !ports |>
+            Crafty_typing.merge_ranges in
+        let cli =
+            Crafty_typing.{
+                budget ;
+                ports = if !ports = [] then None
+                        else Some { tcp = ranges Host_config.Tcp ;
+                                    udp = ranges Host_config.Udp } } in
+        match Crafty_typing.intersect program.limits cli with
+        | Ok l -> l
+        | Error e -> die "%s: %s its PORTS and --tcp/--udp." prog_name e in
+    let ports =
+        Option.map_default (fun (p : Crafty_typing.ports) ->
+            let ranges proto = List.map (fun (lo, hi) -> Host_config.{ proto ; lo ; hi }) in
+            ranges Host_config.Tcp p.tcp @ ranges Host_config.Udp p.udp) [] limits.ports in
+    let budget_int n =
+        match List.assoc_opt n limits.budget with Some (Crafty_ast.Int i) -> Some i | _ -> None
+    and budget_float n =
+        match List.assoc_opt n limits.budget with Some (Crafty_ast.Float x) -> Some x | _ -> None in
     let format = !format in
     (* What crafty tells of how it goes, on stderr unless as text, out of the
      * way of the records: *)
@@ -224,7 +257,7 @@ let () =
         Printf.printf "%s: OK\n" prog_name ;
         exit 0) ;
     if !ifname = "" then die "No interface given (-i)." ;
-    if !fw && !ports = [] then die "--fw needs ports (--tcp, --udp)." ;
+    if !fw && ports = [] then die "--fw needs ports (--tcp, --udp, or PORTS)." ;
     if !fw && !own_ip <> None then
         die "--fw and --ip do not go together: an address of the program's \
              own shares no port with the kernel." ;
@@ -239,9 +272,17 @@ let () =
         (match !speed, speed' with Some s, _ | None, Some s -> s | None, None -> EthSpeed.Eth1Gbps),
         (match !full_duplex, full_duplex' with Some d, _ | None, Some d -> d | None, None -> true)
     and mtu = !mtu |? iface.mtu in
-    if !Host_config.verbose then
+    if !Host_config.verbose then (
         info "Interface %s: %s %s-duplex, MTU %d." !ifname
             (EthSpeed.to_string speed) (if full_duplex then "full" else "half") mtu ;
+        info "Budget: %s." (if limits.budget = [] then "none" else
+            String.concat ", " (List.map (fun (n, l) ->
+                n ^" "^ Crafty_value.(to_string (Crafty_typing.type_of_literal l) (of_literal l)))
+                limits.budget)) ;
+        info "Ports: %s." (if ports = [] then "any" else
+            String.concat ", " (List.map (fun (r : Host_config.port_range) ->
+                String.uppercase_ascii (Host_config.string_of_proto r.proto) ^" "^
+                Host_config.string_of_range r) ports))) ;
     let configure = !fw || !own_ip <> None in
     if configure && Unix.geteuid () <> 0 then
         die "Configuring interface %s is for root; Have you tried under sudo?"
@@ -256,8 +297,8 @@ let () =
             (try
                 Host_config.disable_rx_offloads t !ifname ;
                 if !fw then (
-                    Host_config.firewall t ~ifname:!ifname ~ports:!ports () ;
-                    Host_config.reserve_ports t !ports) ;
+                    Host_config.firewall t ~ifname:!ifname ~ports () ;
+                    Host_config.reserve_ports t ports) ;
                 if !own_ip <> None && Host_config.ip_forward () then
                     Host_config.firewall t ~ifname:!ifname ~forward_drop:ip ()
             with e ->
@@ -277,7 +318,7 @@ let () =
     let injector = open_iface ~direction:Pcap.Out ~filter:"less 0"
     and pcap =
         open_iface ~direction:Pcap.InOut
-            ~filter:(Host_config.pcap_filter ?ip:!own_ip !ports) in
+            ~filter:(Host_config.pcap_filter ?ip:!own_ip ports) in
     let secs () = Clock.Time.to_secs (Simulation.now sim) in
     (* Dated to the microsecond, as the text and captures are: *)
     let emit ?json kind fields =
@@ -294,10 +335,6 @@ let () =
                     ("stream", `String (Crafty_tree.stream_name n)) ::
                     List.map (fun (name, typ, v) -> name, Crafty_value.to_json typ v)
                         (Crafty_tree.typed_stats n)) in
-    let ports_of proto =
-        String.uppercase_ascii (Host_config.string_of_proto proto),
-        List.filter_map (fun (r : Host_config.port_range) ->
-            if r.proto = proto then Some (r.lo, r.hi) else None) !ports in
     (* What the program sends, what goes out and comes in, and what is
      * captured going out, the host's included: *)
     let sent = ref 0 and pkts_out = ref 0 and pkts_in = ref 0
@@ -314,7 +351,7 @@ let () =
             ?gateway:(Option.map (fun gw -> Eth.Gateway.IPv4 gw) iface.gateway)
             (* The kernel answers for its own address: *)
             ~answer_arp:(!own_ip <> None) ~promisc:!promisc
-            ~ports:[ ports_of Host_config.Tcp ; ports_of Host_config.Udp ]
+            ~limits
             ~format
             ~print:(fun s ->
                 if format = Human then print_endline s
@@ -345,10 +382,15 @@ let () =
             program in
     handle := Some h ;
     let policer =
-        Policer.make ~parent:sim.root ?max_packets:!max_packets
-            ?max_volume:!max_volume ?max_packet_rate:!max_packet_rate
-            ?max_throughput:!max_throughput ?max_duration:!max_duration
-            ?max_syns:!max_syns ?max_syn_rate:!max_syn_rate
+        Policer.make ~parent:sim.root
+            ?max_duration:(match List.assoc_opt "max_duration" limits.budget with
+                           | Some (Crafty_ast.Interval d) -> Some d | _ -> None)
+            ?max_packets:(budget_int "max_packets")
+            ?max_volume:(budget_int "max_bytes")
+            ?max_packet_rate:(budget_float "max_packets_per_secs")
+            ?max_throughput:(budget_float "max_bytes_per_secs")
+            ?max_syns:(budget_int "max_syns")
+            ?max_syn_rate:(budget_float "max_syns_per_secs")
             ~on_limit:(fun l ->
                 if !limit = None then (
                     limit := Some l ;

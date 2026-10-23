@@ -440,6 +440,171 @@ let new_var =
     let next = ref 0 in
     fun name typ -> incr next ; { name ; id = !next ; typ }
 
+(** {2 What a program says of itself}
+ *
+ * [BUDGET] and [PORTS], which crafty intersects with its command line. What
+ * a program declares is found without running it: declared at the top level
+ * only, with literals only, and never assigned. *)
+
+(** The fields of [BUDGET], named after crafty's options: *)
+let budget_fields =
+    Type.[ "max_duration", Interval ; "max_packets", Int ; "max_bytes", Int ;
+           "max_packets_per_secs", Float ; "max_bytes_per_secs", Float ;
+           "max_syns", Int ; "max_syns_per_secs", Float ]
+
+let budget_type = record_type budget_fields
+
+(* Ranges of ports, [first, last]: *)
+let ports_type = record_type Type.[ "tcp", Array (Array Int) ; "udp", Array (Array Int) ]
+
+(* Bound to their values in the program as it runs: *)
+let budget_var = new_var "BUDGET" budget_type
+let ports_var = new_var "PORTS" ports_type
+
+type limits =
+    { (* The fields of [BUDGET] that are set, floats as floats: *)
+      budget : (string * A.literal) list ;
+      (* The ranges of local ports, sorted and disjoint, if restricted; then
+       * the ports of a protocol without ranges are none: *)
+      ports : ports option }
+
+and ports = { tcp : (int * int) list ; udp : (int * int) list }
+
+let no_limits = { budget = [] ; ports = None }
+
+(* Sorted, and merged where they overlap or meet: *)
+let merge_ranges rs =
+    List.sort compare rs |>
+    List.fold_left (fun acc (lo, hi) ->
+        match acc with
+        | (lo', hi') :: rest when lo <= hi' + 1 -> (lo', max hi hi') :: rest
+        | _ -> (lo, hi) :: acc) [] |>
+    List.rev
+
+(*$= merge_ranges & ~printer:(IO.to_string (List.print (Tuple2.print Int.print Int.print)))
+  [ 1, 5 ; 7, 9 ] (merge_ranges [ 7, 8 ; 3, 5 ; 1, 3 ; 9, 9 ])
+  [] (merge_ranges [])
+*)
+
+(* The fields of the literal record [e], declaring [var], each of one of the
+ * [known] types, by [f name typ value]: *)
+let literal_fields var known f (e : A.expr) =
+    match e.desc with
+    | A.Record fs ->
+        List.fold_left (fun acc (n, v) ->
+            match List.find_opt (fun (k, _) -> same_name k n) known with
+            | Some (k, _) when List.mem_assoc k acc ->
+                error e.loc "Field %s given twice" n
+            | Some (k, t) -> (k, f k t (v : A.expr)) :: acc
+            | None ->
+                error e.loc "No field %s in %s%s" n var
+                    (A.did_you_mean (List.map fst known) n)) [] fs
+    | _ -> error e.loc "%s is declared with a literal record" var
+
+let budget_literal name typ (e : A.expr) =
+    let bad () =
+        error e.loc "BUDGET.%s must be a literal %s, 0 or more" name (tname typ) in
+    match typ, e.desc with
+    | Type.Interval, A.Lit (A.Interval i) ->
+        if Clock.Interval.(compare i zero) < 0 then bad () ;
+        A.Interval i
+    | Type.Int, A.Lit (A.Int n) -> if n < 0 then bad () ; A.Int n
+    | Type.Float, A.Lit (A.Int n) -> if n < 0 then bad () ; A.Float (float_of_int n)
+    | Type.Float, A.Lit (A.Float x) -> if x < 0. then bad () ; A.Float x
+    | _ -> bad ()
+
+let port_ranges name _typ (e : A.expr) =
+    let port (e : A.expr) =
+        match e.desc with
+        | A.Lit (A.Int p) when p > 0 && p < 0x10000 -> p
+        | _ -> error e.loc "A port is a literal int, from 1 to 65535" in
+    match e.desc with
+    | A.Array rs ->
+        List.map (fun (r : A.expr) ->
+            match r.desc with
+            | A.Array [ lo ; hi ] ->
+                let lo = port lo and hi = port hi in
+                if lo > hi then error r.loc "Empty range of ports: [%d, %d]" lo hi ;
+                lo, hi
+            | _ -> error r.loc "A range of ports is [first, last]") rs |>
+        merge_ranges
+    | _ -> error e.loc "PORTS.%s is an array of ranges [first, last]" name
+
+(* The declarations of [BUDGET] and [PORTS] at the top level of [program],
+ * and the rest of it: *)
+let self_declarations (program : A.program) =
+    List.partition (fun (s : A.stmt) ->
+        match s.stmt with
+        | A.Declare (n, _) -> List.mem n A.self_declared
+        | _ -> false) program
+
+(* What those declarations say, telling [errors] what is wrong with them: *)
+let limits_of errors decls =
+    List.fold_left (fun (declared, limits) (s : A.stmt) ->
+        match s.stmt with
+        | A.Declare (n, e) ->
+            (try
+                if List.mem n declared then
+                    error s.stmt_loc "%s is already declared" n ;
+                let limits =
+                    if n = "BUDGET" then
+                        { limits with budget = literal_fields n budget_fields budget_literal e }
+                    else (
+                        let ranges = literal_fields n [ "tcp", Type.Void ; "udp", Type.Void ]
+                                                    port_ranges e in
+                        let get k = List.assoc_opt k ranges |? [] in
+                        let ports = { tcp = get "tcp" ; udp = get "udp" } in
+                        if ports.tcp = [] && ports.udp = [] then
+                            error e.loc "PORTS gives no port" ;
+                        { limits with ports = Some ports }) in
+                n :: declared, limits
+            with Error _ as ex -> tell errors ex ; n :: declared, limits)
+        | _ -> declared, limits) ([], no_limits) decls |> snd
+
+let least a b =
+    match a, b with
+    | A.Int a, A.Int b -> A.Int (min a b)
+    | A.Float a, A.Float b -> A.Float (Float.min a b)
+    | A.Interval a, A.Interval b ->
+        A.Interval (if Clock.Interval.compare a b <= 0 then a else b)
+    | _ -> invalid_arg "Crafty_typing.least"
+
+(** What both [a] and [b] allow, or why nothing is: *)
+let intersect a b =
+    let budget =
+        List.filter_map (fun (n, _) ->
+            match List.assoc_opt n a.budget, List.assoc_opt n b.budget with
+            | Some x, Some y -> Some (n, least x y)
+            | Some x, None | None, Some x -> Some (n, x)
+            | None, None -> None) budget_fields in
+    let inter ra rb =
+        List.concat_map (fun (lo, hi) ->
+            List.filter_map (fun (lo', hi') ->
+                let lo = max lo lo' and hi = min hi hi' in
+                if lo <= hi then Some (lo, hi) else None) rb) ra |>
+        merge_ranges in
+    match a.ports, b.ports with
+    | Some pa, Some pb ->
+        let ports = { tcp = inter pa.tcp pb.tcp ; udp = inter pa.udp pb.udp } in
+        if ports.tcp = [] && ports.udp = [] then Stdlib.Error "No port is allowed by both"
+        else Ok { budget ; ports = Some ports }
+    | Some p, None | None, Some p -> Ok { budget ; ports = Some p }
+    | None, None -> Ok { budget ; ports = None }
+
+(*$T intersect
+  intersect { budget = [ "max_syns", A.Int 3 ; "max_bytes", A.Int 10 ] ; ports = None } \
+            { budget = [ "max_syns", A.Int 2 ; "max_duration", A.Interval (Clock.Interval.sec 1.) ] ; \
+              ports = Some { tcp = [ 1, 10 ; 20, 30 ] ; udp = [] } } = \
+    Ok { budget = [ "max_duration", A.Interval (Clock.Interval.sec 1.) ; \
+                    "max_bytes", A.Int 10 ; "max_syns", A.Int 2 ] ; \
+         ports = Some { tcp = [ 1, 10 ; 20, 30 ] ; udp = [] } }
+  intersect { no_limits with ports = Some { tcp = [ 5, 25 ] ; udp = [ 1, 2 ] } } \
+            { no_limits with ports = Some { tcp = [ 1, 10 ; 20, 30 ] ; udp = [] } } = \
+    Ok { no_limits with ports = Some { tcp = [ 5, 10 ; 20, 25 ] ; udp = [] } }
+  Result.is_error (intersect { no_limits with ports = Some { tcp = [ 1, 2 ] ; udp = [] } } \
+                             { no_limits with ports = Some { tcp = [] ; udp = [ 1, 2 ] } })
+*)
+
 let lookup_var env loc name =
     match List.find_opt (fun (v : var) -> v.name = name) env.vars with
     | Some v -> v
@@ -1539,6 +1704,8 @@ and stmt errors env (s : A.stmt) =
                         (A.did_you_mean (List.map A.Layer_name.to_string A.Layer_name.all) c)
                 | _ -> error loc "This %s is not used" (tname te.typ)) ;
             env, Some (mk (Expr te))
+        | A.Declare (name, _) when List.mem name A.self_declared ->
+            error loc "%s can only be declared at the top level of the program" name
         | A.Declare (name, e) ->
             (* A declaration in error still declares its variable, so that
              * its uses are not reported as well: *)
@@ -1707,25 +1874,39 @@ and expr_declarations e =
     | Construct (_, e) -> Option.map_default expr_declarations [] e
     | Lit _ | Var _ | Packet_field _ -> []
 
+(* Errors in the order of the source: *)
+let in_order es =
+    List.rev_map (fun (where, message) -> Crafty_parser.{ where ; message }) es |>
+    List.sort (fun (a : Crafty_parser.error) b -> compare a.where b.where)
+
 (** The typed program, or the errors, in the order of the source; and in
- * [warnings], what makes sense but is likely not what was meant. *)
+ * [warnings], what makes sense but is likely not what was meant. [BUDGET]
+ * and [PORTS] are what {!limits} reads. *)
 let check ?(warnings=ref []) (program : A.program) =
+    let self, program = self_declarations program in
+    let self_errors = ref [] in
+    ignore (limits_of self_errors self) ;
     let widened = Hashtbl.create 7 in
     (* Until no variable is widened, which types grow until they have all
      * the constructors of the program: *)
     let rec typed () =
-        let env = { vars = [] ; declared_here = [] ; poisoned = [] ; stack = [] ;
+        let env = { vars = [ budget_var ; ports_var ] ; declared_here = [] ;
+                    poisoned = [] ; stack = [] ;
                     stack_text = [] ; loops = 0 ; layer_ctx = None ;
                     may_wait = true ; errors = ref [] ; warnings = ref [] ;
                     declared_at = Hashtbl.create 7 ; widened ; widening = ref false } in
         let p = block env.errors env program in
         if !(env.widening) then typed () else p, env in
     let p, env = typed () in
-    let in_order es =
-        List.rev_map (fun (where, message) -> Crafty_parser.{ where ; message }) es |>
-        List.sort (fun (a : Crafty_parser.error) b -> compare a.where b.where) in
     warnings := in_order !(env.warnings) ;
-    if !(env.errors) = [] then Ok p else Error (in_order !(env.errors))
+    let errors = !self_errors @ !(env.errors) in
+    if errors = [] then Ok p else Error (in_order errors)
+
+(** What [program] declares of itself, or what is wrong with it. *)
+let limits (program : A.program) =
+    let errors = ref [] in
+    let l = limits_of errors (fst (self_declarations program)) in
+    if !errors = [] then Ok l else Error (in_order !errors)
 
 (** The typed patterns, absolute and with no variable but the fields of their
  * layers, or what is wrong with them. *)

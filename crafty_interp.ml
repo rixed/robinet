@@ -396,7 +396,14 @@ let rec eval output (env : env) (e : T.expr) =
             List.nth env.packet (List.length env.packet - 1 - layer) in
         List.assoc l.fields.(field).name u.values
     | T.Field (r, i) ->
-        (match eval r with Record vs -> vs.(i) | _ -> assert false)
+        (* Void only in the fields of BUDGET and PORTS that are not set: *)
+        (match eval r, r.typ with
+        | Record vs, A.Type.Record fs ->
+            (match vs.(i), List.nth fs i with
+            | Void, (n, t) when t <> A.Type.Void ->
+                error e.loc "%s is not set, by the program or the command line" n
+            | v, _ -> v)
+        | _ -> assert false)
     | T.Index (a, i) ->
         (match eval a, eval i with
         | Array a, Int i -> item e.loc a i
@@ -1055,7 +1062,23 @@ let matches output tree (ps : filter) frame =
  * receiving through [tree] (from {!Crafty_tree.make_root}), writing with
  * [print] and [print_err], and calling [on_exit] with its final status
  * (possibly before returning). *)
-let run_on_tree power tree ?format ~print ~print_err ?(on_exit=ignore) (program : T.block) =
+(* The values of BUDGET and PORTS, void where not set: *)
+let self_values (l : T.limits) =
+    let record typ get =
+        match typ with
+        | A.Type.Record fs -> Record (Array.of_list (List.map (fun (n, _) -> get n) fs))
+        | _ -> assert false in
+    let ranges rs =
+        Array (Array.of_list (List.map (fun (lo, hi) -> Array [| Int lo ; Int hi |]) rs)) in
+    record T.budget_type (fun n ->
+        Option.map_default of_literal Void (List.assoc_opt n l.budget)),
+    record T.ports_type (fun n ->
+        match l.ports with
+        | None -> Void
+        | Some p -> ranges (if n = "tcp" then p.tcp else p.udp))
+
+let run_on_tree power tree ?format ~print ~print_err ?(on_exit=ignore)
+                ?(limits=T.no_limits) (program : T.block) =
     let status = ref Running in
     let t = { power ; output = output_of power ?format ~print ~print_err () ; tree ;
               awaited = ref [] } in
@@ -1068,7 +1091,11 @@ let run_on_tree power tree ?format ~print ~print_err ?(on_exit=ignore) (program 
           fail = (fun e -> cancel root ; exit (Failed e)) ;
           break_ = (fun _ -> assert false) ; busy = 0 ; holding = 0 ;
           stmts_done = [] ; ending = [] ; finish = None } in
-    ignore (run_block t root { vars = Env.empty ; stack = [] ; packet = [] } program
+    let budget, ports = self_values limits in
+    let vars =
+        { vars = Env.empty ; stack = [] ; packet = [] } |>
+        fun env -> bind (bind env T.budget_var budget) T.ports_var ports in
+    ignore (run_block t root vars program
                 ~fail:root.fail ~break_:root.break_
                 (fun _ -> cancel root ; exit Done)) ;
     { stop = (fun () -> cancel root ; exit Stopped) ;
@@ -1078,7 +1105,8 @@ let run_on_tree power tree ?format ~print ~print_err ?(on_exit=ignore) (program 
       matches = matches t.output tree ;
       open_streams = open_streams tree }
 
-type program = Crafty_typing.block
+(* With what it declares of itself: *)
+type program = { body : Crafty_typing.block ; limits : Crafty_typing.limits }
 
 let print_error = Crafty_parser.print_error
 
@@ -1087,7 +1115,9 @@ let print_error = Crafty_parser.print_error
 let compile ?warnings text : (program, error list) result =
     match Crafty_parser.parse text with
     | Error e -> Error [ e ]
-    | Ok p -> Crafty_typing.check ?warnings p
+    | Ok p ->
+        Result.bind (Crafty_typing.check ?warnings p) (fun body ->
+            Result.map (fun limits -> { body ; limits }) (Crafty_typing.limits p))
 
 (** The filter of that text, alternative absolute patterns, or what is wrong
  * with it. *)
@@ -1105,8 +1135,9 @@ let print_status oc = function
  * duplex unless [full_duplex] is false, and of [mtu], sending beyond its
  * subnet to [gateway], answering ARP for [ip] unless [answer_arp] is false,
  * taking the frames for other addresses too if [promisc],
- * picking the local ports it is not given from [ports] (as
- * {!Crafty_tree.make_root} does), printing with [print] and [print_err],
+ * picking the local ports it is not given from the ports of [limits] (as
+ * {!Crafty_tree.make_root} does), [limits] (default: the program's) being
+ * what [BUDGET] and [PORTS] are, printing with [print] and [print_err],
  * [format()] writing in [format] (default {!Crafty_value.Human}),
  * calling [on_exit] with how it ends, and [on_closed] with the node of each
  * stream that goes away. Unless [rx_wire], what is written to the device was
@@ -1116,8 +1147,12 @@ let print_status oc = function
 let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         ?(promisc=false)
         ?(speed=EthSpeed.Eth1Gbps) ?(full_duplex=true) ?mtu
-        ?ports ?format ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
+        ?limits ?format ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
         ?(on_closed=ignore) ?(rx_wire=true) (program : program) =
+    let limits = limits |? program.limits in
+    let ports =
+        Option.map (fun (p : T.ports) -> [ "TCP", p.tcp ; "UDP", p.udp ])
+                   limits.ports in
     let gateways =
         Option.map_default (fun gw ->
             [ Eth.State.gw_selector (), Some gw ]) [] gateway in
@@ -1137,7 +1172,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     Simulation.asap power (fun () ->
         if not !stopped then
             started :=
-                Some (run_on_tree power tree ?format ~print ~print_err ~on_exit program)
+                Some (run_on_tree power tree ?format ~print ~print_err ~on_exit
+                                  ~limits program.body)
     ) () ;
     Eth.Iface.dev eth.iface,
     { stop = (fun () ->
@@ -1999,7 +2035,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
  * the gateway 02:00:00:00:00:fe. It is stopped at [stop_at] seconds, or with
  * [stop] as soon as it is run. *)
 (*$inject
-  let policed ?max_packets ?max_packet_rate ?stop_at ?(stop=false) text =
+  let policed ?max_packets ?max_packet_rate ?max_syns ?max_syn_rate ?stop_at ?(stop=false) text =
       match Crafty_interp.compile text with
       | Error es -> String.concat "\n" (List.map (IO.to_string print_error) es)
       | Ok p ->
@@ -2014,7 +2050,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
                   ~print:line ~print_err:line
                   ~on_exit:(fun s -> line (IO.to_string print_status s)) p in
           let policer =
-              Policer.make ~parent:sim.root ?max_packets ?max_packet_rate
+              Policer.make ~parent:sim.root ?max_packets ?max_packet_rate ?max_syns ?max_syn_rate
                   ~on_limit:(fun l -> line ("hit "^ Policer.string_of_limit l) ; h.stop ()) "policer" in
           Simulation.power_up policer.widget.power ;
           Tools.(dev --> policer.widget.ports.dev 0) ;
@@ -2039,6 +2075,33 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0.110s: hit max-packet-rate\n0.110s: stopped\n110 frames" (policed ~max_packet_rate:100. pings)
   "0.100s: stopped\n100 frames" (policed ~stop_at:0.1 pings)
   "0.000s: stopped\n0 frames" (policed ~stop:true pings)
+  "0.000s: 3 10s [[40000, 40200]] []\n0.000s: done\n0 frames" \
+    (policed "print(\"${BUDGET.max_syns} ${BUDGET.max_duration} ${PORTS.tcp} ${PORTS.udp}\")\n\
+              BUDGET = {max_syns: 3, max_duration: 10s}\n\
+              PORTS = {tcp: [[40000, 40100], [40050, 40200]]}")
+  "0.000s: failed: line 1, column 10: max_bytes is not set, by the program or the command line\n0 frames" \
+    (policed "print(\"${BUDGET.max_bytes}\")")
+  "0.000s: failed: line 1, column 10: tcp is not set, by the program or the command line\n0 frames" \
+    (policed "print(\"${PORTS.tcp}\")")
+  (String.concat "\n" [ \
+    "line 1, column 11: BUDGET can only be declared at the top level of the program" ; \
+    "line 2, column 9: PORTS gives no port" ; \
+    "line 3, column 1: PORTS is already declared" ]) \
+    (policed "if true { BUDGET = {max_syns: 3} }\nPORTS = {tcp: []}\nPORTS = {udp: [[1, 2]]}")
+  "line 1, column 24: BUDGET cannot be changed" (policed "BUDGET := {max_syns: 3}")
+  "5.995s: done\n1000 frames" \
+    (policed ~max_syns:1000 ~max_syn_rate:200. "\
+      BUDGET = {max_syns: 1000, max_syns_per_secs: 200}\n\
+      PORTS = {tcp: [[40000, 40000]]}\n\
+      sport = PORTS.tcp[0][0]\n\
+      {\n\
+        on linger=1s /IP(src == 192.0.2.10)/TCP!(dst == sport, flags == SYN | ACK) {}\n\
+        repeat var=i count=BUDGET.max_syns every=1s / BUDGET.max_syns_per_secs {\n\
+          /IP(dst=192.0.2.10)/TCP!(src=sport, dst=i + 1, flags=SYN, seq_num=1)/Bytes()\n\
+        }\n\
+      }")
+  "line 2, column 21: BUDGET.max_syns must be a literal int, 0 or more" \
+    (policed "x = 1\nBUDGET = {max_syns: x}")
 *)
 (* Sharing the address of the host: the gateway found by ARP, no answer to
  * ARP for the address, the local port from those given, and no node left
@@ -2049,11 +2112,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   let arp ?(from="02:00:00:00:00:fe") pdu =
       Eth.Pdu.(pack (make Eth.Proto.arp (mac from) (mac "02:00:00:00:00:01") (Arp.Pdu.pack pdu))) in
   let p = Result.get_ok (Crafty_interp.compile
-              "wait dur=1s\n/IP(dst=1.2.3.4)/UDP(dst=7)/Bytes(\"x\")") in
+              "PORTS = {udp: [[5000, 5000]]}\n\
+               wait dur=1s\n/IP(dst=1.2.3.4)/UDP(dst=7)/Bytes(\"x\")") in
   let dev, h =
       run ~parent:sim.SimTypes.root ~mac:(mac "02:00:00:00:00:01") ~ip:(ip "10.0.0.1")
           ~netmask:(ip "255.255.255.0") ~gateway:(Eth.Gateway.IPv4 (ip "10.0.0.254"))
-          ~answer_arp:false ~ports:[ "UDP", [ 5000, 5000 ] ] p in
+          ~answer_arp:false p in
   let frames = ref [] in
   Tools.(dev --> sink (fun bits ->
       let d = describe bits in
