@@ -367,7 +367,18 @@ let send stack =
             (match e.node.layer.unpack up_hints bits with
             | Some u -> decode_up ((e.node.layer, u) :: acc) u.up_hints u.payload above
             | None -> List.rev_map (fun e -> assumed e []) above @ assumed e [] :: acc) in
-    decode_up [] [] bits packed @
+    (* The top first. A self-driven layer below (IP) fills in the checksum
+     * of the one it carries, if zero: *)
+    let decoded =
+        match driven, List.rev (decode_up [] [] bits packed) with
+        | { node = { parent = Some _ ; _ } ; _ } :: _, (l, u) :: above ->
+            let values =
+                List.map (function
+                    | "checksum", Int 0 -> "checksum", Void
+                    | v -> v) u.values in
+            List.rev ((l, { u with values }) :: above)
+        | _, bottom_first -> List.rev bottom_first in
+    decoded @
     List.mapi (fun i e -> assumed e (if i = 0 then hints else [])) driven,
     emitted
 
