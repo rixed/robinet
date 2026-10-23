@@ -1,8 +1,8 @@
 # The crafty language
 
-Crafty sends traffic from a real interface and reacts to what comes back: to
-check that a port is open, find where packets are lost, measure round trips,
-or see how a TCP connection behaves. Packets are crafted to the bit, or made
+Crafty sends traffic from a real interface and reacts to what comes back,
+to check a port is open, find where packets are lost, measure round trips,
+or see how a TCP connection behaves. Packets are crafted to the bit, or built
 by crafty's own stacks (ARP, IPv4, TCP, UDP, ICMP, DNS).
 
 ## 1. Introduction
@@ -21,6 +21,7 @@ by crafty's own stacks (ARP, IPv4, TCP, UDP, ICMP, DNS).
   repeat var=I count=3 every=100ms {
     # Bytes is a terminal layer: it sends the message made from
     # /IP(dst=192.0.2.10)/UDP(dst=7)/Bytes("ping ${I}")
+    # Unset options will be filled in automatically.
     Bytes("ping ${I}")
     catch {                       # a lost answer is no error
       # expect waits for a packet that matches a pattern; here, any Bytes
@@ -45,23 +46,21 @@ ping 2
 Done after 0.3s, status: OK.
 ```
 
-A stack is layers and their options, separated by slashes. At its bottom is
-always `Eth`, the interface. A leading slash starts a stack there, with `Eth`
-or without it (`/IP` is `/Eth/IP`); without a leading slash, a stack goes on
-top of the current stack.
+A stack is layers and their options, separated by slashes, like file paths.  An
+absolute stack starts with `/IP` (with an `Eth` layer implied).  A relative
+stack goes on top of the current one.
 
-Ending with a terminal layer (`Bytes`, `Request`, `Reply`, `Query`,
-`Answer`), a stack is a complete message, sent there and then: nothing can
-be stacked on top of it, and so it opens no block. Any other stack needs a
-block.
+Some layers are terminal (`Bytes`, `Request`, `Reply`, `Query`, `Answer`): they
+end the stack and send the message. An incomplete stack is followed instead by
+a block of further instructions.
 
 The layers of a stack are streams: `UDP` picks its source port once (from
-`--udp`), and every message sent and every pattern on top of it are of that
+`--udp`), and every message sent and every pattern on top of it belong to that
 stream.
 
-An `expect` that times out is an error. An error leaves the enclosing
-blocks one after the other, until a `catch` drops it or a `retry` runs its
-block again; one that reaches the top ends the program.
+An `expect` that times out is an error. An error leaves the enclosing blocks
+one after the other, until a `catch` drops it or a `retry` runs its block
+again; one that reaches the top ends the program.
 
 The language is statically typed.
 
@@ -88,13 +87,16 @@ hello
 
 With `dst=8`, where nothing listens, it prints `closed`.
 
-Each leading `../` goes back one layer down the current stack: in this
-block, `../` goes back to `/IP(dst=target)`, and `../../` to `/Eth`. That
-is not `/IP`: an absolute pattern, as `/IP/ICMP/DestUnreachable`, matches
-from the interface up, the packets of any stream, whereas `../ICMP` only sees
-what comes to the IP stream of this block.
+Each leading `../` goes one layer down the current stack: here, `../` is
+`/IP(dst=target)` and `../../` is `/Eth`.  Relative stacks reuse opened
+streams, whereas absolute stacks create new streams: `/IP/ICMP/DestUnreachable`
+matches any Dest-Unreachable packet whereas `../ICMP` matches only those from
+the same `IP/UDP` stream.
 
 ### Overlaying
+
+Like relative patterns, relative stacks can go back with `../` and modify upper
+layers options while reusing the stream:
 
 ```
 # The same stream, but for one datagram with a TTL of 1:
@@ -107,6 +109,8 @@ what comes to the IP stream of this block.
   ../../IP(ttl=1)/UDP/Bytes("ttl 1")
   print("Also sent from port ${LAST[UDP].src}")
   repeat count=2 {
+    # Wait for Bytes in the same stream (unlike with /IP/UDP/Bytes that would
+    # match even outside this stream
     expect timeout=1s Bytes { print(MATCH[Bytes].data) }
   }
 }
@@ -119,31 +123,20 @@ ttl 64
 ttl 1
 ```
 
-If we had written an absolute
-`/IP(dst=192.0.2.10, ttl=1)/UDP(dst=7)/Bytes("ttl 1")` instead of the
-relative `../../IP(ttl=1)/UDP/Bytes("ttl 1")`, that would have created
-another UDP stream, from another port, whose answer the `expect` of this
-block would not see.
-
-Similarly, if the expect had used an absolute pattern, as in `expect
-timeout=1s /IP(src == 192.0.2.10)/UDP/Bytes`, that would have matched *any*
-UDP packet from that host, not only those belonging to the current stream.
-
-The rule to remember, for stacks and patterns alike: relative ones stay on
-the streams of the current stack (`../` overlaying some of its layers),
-whereas absolute ones start anew from `Eth`.
-
-Giving a key of a layer that overlays changes the stream instead: in a block
-on `/IP(dst=192.0.2.53)/UDP(dst=53)/DNS`, `../DNS(id=1234)/Query("example.org")`
-is a query on the DNS stream of id 1234, on the same UDP stream.
+The rule, for stacks and patterns alike: relative ones stay on the streams
+of the current stack (`../` overlaying some of its layers); absolute ones
+start anew from `Eth`. Overlaying can set a temporary value for an earlier
+option; unless that's a key: `../IP(dst=another)` would create a new stream
+indeed.
 
 ### Manual layers
 
-So far, layers were *self-driven*: crafty resolves addresses with ARP,
+So far, streams were *self-driven*: crafty resolves addresses with ARP,
 connects, retransmits, fragments and reassembles. A bang makes a layer
-*manual*, for packets as on the wire: `TCP!(flags=SYN)` is one segment, as
-given, the fields left out filled in. On reception, `IP!` sees each fragment
-and `TCP!` each segment, even without data.
+*manual*, for packets as on the wire: `TCP!(flags=SYN, ack_num=0)` is a SYN
+packet with this sequence number regardless of the state of the TCP connection.
+On reception, `IP!` sees each fragment and `TCP!` each segment, even without
+data.
 
 ```
 # A SYN of our own, and the SYN-ACK that answers it:
@@ -170,17 +163,13 @@ SYN-ACK: seq 1969569245, ack 1001
 
 ### Running crafty
 
-```
-sudo crafty -i eth0 --tcp 40000-40099 --udp 40000-40099 --fw prog.cfty
-sudo crafty -i eth0 --ip 192.0.2.5 --udp 40000-40099 prog.cfty
-sudo crafty -i eth0 --ip 192.0.2.5 -e '/IP(dst=192.0.2.10)/ICMP/Echo {
-  Request("hi")
-  expect timeout=1s Reply { print("up") } }'
-```
+`crafty [options] file` or `crafty [options] -e program`.
+
+Options:
 
 - `-e PROG`: the program itself, rather than a file.
 - `-i IFACE`: the interface to send from and capture on. Crafty needs root.
-- `--tcp LO-HI`, `--udp LO-HI` (repeatable): the ports to pick source ports
+- `--tcp LO-HI`, `--udp LO-HI` (repeatable): the ranges to pick source ports
   from, with the program's `PORTS` (see [Budget and ports](#budget-and-ports)).
   A program that sends TCP or UDP without a `src` needs them.
 - `--fw`: crafty shares the interface's address with the host, whose kernel
@@ -188,52 +177,14 @@ sudo crafty -i eth0 --ip 192.0.2.5 -e '/IP(dst=192.0.2.10)/ICMP/Echo {
   unreachables. `--fw` keeps the kernel off the ports of `--tcp` and `--udp`.
 - `--ip ADDR`: an address of crafty's own instead, on the interface's network,
   for which crafty answers ARP. Then `--fw` is not needed, nor allowed.
-- `-p [/PATTERN]` (or `--print-packets`): prints the packets sent (`>`) and
-  received (`<`), or only those that match the pattern, timed since the start:
-
-  ```
-  > 0.049097 10.77.0.1:14085 > 10.77.0.2:7 TCP [S] seq 3588057113 ack 0 win 65535 options [mss 1460,nop,wscale 7] len 0
-  < 0.049326 10.77.0.2:7 > 10.77.0.1:14085 TCP [S.] seq 670698564 ack 3588057114 win 64240 options [mss 1460,nop,wscale 7] len 0
-  ```
-
-- `--stats`: prints the stats of each stream (see `stats()`) as it closes, and
-  of those still open at the end:
-
-  ```
-  Closed /IP(src=10.77.0.1, dst=10.77.0.2)/TCP(src=14085, dst=7): packets_out=5 bytes_out=5 packets_in=4 bytes_in=5 bytes_acked=5 bytes_received=5 retrans=0 ... established=true
-  ```
-
-- `--format csv|json`: one record per line instead, for the prints, the
-  packets of `-p` (in JSON, with all their `layers`), the stats and the
-  outcome; crafty's other messages go to stderr. `ts` is in seconds since the
-  start, durations in seconds. CSV has the values of the JSON, in that order,
-  without the `layers`:
-
-  ```
-  {"type":"print","ts":0.000412,"text":"ping 0"}
-  {"type":"done","ts":0.215302,"status":"OK","packets_out":3,"packets_in":3,...}
-  ```
-
-- `--max-duration D`, `--max-packets N`, `--max-bytes N`,
-  `--max-packets-per-secs N`, `--max-bytes-per-secs N`, `--max-syns N`,
-  `--max-syns-per-secs N`: budgets, with the program's `BUDGET`; exceeding
-  one stops the program. SYNs are TCP SYNs without ACK, i.e. connection
-  attempts.
-- `--linger D`: once the program is done, how long to wait for the traffic to
-  stop, so that connections close (default 2s).
+- `-p [/PATTERN]` (or `--print-packets`): prints the packets à la tcpdump.
+- `--format csv|json`: change the output format to csv or json (json makes -p
+  print all available details or every packets).
+- `--stats`: prints the stats of each stream (see `stats()`) as it ends.
 - `--check`: only compiles the program.
-- `--warn-error`: the warnings (on stderr) are errors.
-- `--no-warning`: no warnings.
-- `--cleanup`: undoes what a killed crafty left on the host (firewall rules,
-  reserved ports).
-- `--promisc`: receives the frames for other addresses too.
-- `--mtu N`, `--speed 10Mbps|...|1Gbps|...|100Gbps`, `--duplex full|half`:
-  the link's, rather than the interface's.
-- `--verbose`: prints the interface's settings and the commands configuring
-  it.
-- `--normalize`: prints the program back, without its comments.
-- `--reference`: print the reference manual.
-- `--examples`: print examples of use.
+- `--reference`: prints the reference manual.
+- `--examples`: prints many examples of use.
+- `--cliref`: exhaustive list of options including seldom used ones.
 
 Exit status: 0 when the program completes, 1 when an error ends it, 2 when it
 does not compile, 3 when a budget stops it, 130 when interrupted.
@@ -289,8 +240,7 @@ string to bytes and back, bytes to an IP address (4 bytes) or a MAC address
 (6 bytes, checked at run time), an int to a bool (non-zero is true). Others
 use the functions `int`, `float`, `bool`, `byte`, `interval`, `time`,
 `ip_addr` and `mac_addr`, which also read a string as a literal:
-`ip_addr(getenv("SERVER"))`, `interval("1.5s")`. Items of arrays, values of
-maps and fields of records convert likewise.
+`ip_addr(getenv("SERVER"))`.
 
 **Variants** need no declaration. Where variants meet (items of an array,
 branches of an `if`, values assigned to a variable...), they make one variant
@@ -302,8 +252,6 @@ first Bytes("pong") { result := Got(length(MATCH)) }
   | ../ICMP { result := Failed("unreachable") }
 print(case result Got { "${result} layers" } else { "${result}" })
 ```
-
-Interpolated, a variant is written `Got 4`, `Pending`.
 
 ### Variables
 
@@ -318,7 +266,7 @@ Interpolated, a variant is written `Got 4`, `Pending`.
   (the last packet sent, once a block has sent one), `I`, the counter of
   a `repeat` or the item of a `foreach`, and `BUDGET` and `PORTS`.
 - `LAST` is the packet as given, not as it left: reading a field that only
-  the wire tells (`LAST[Eth].ts`, or `IP.id`, `UDP.checksum`... under a
+  the wire knows (`LAST[Eth].ts`, or `IP.id`, `UDP.checksum`... under a
   self-driven `IP`) is an error. `p = MESSAGE` captures the packet as it
   leaves (see [Protocol stacks](#protocol-stacks)).
 
@@ -336,11 +284,7 @@ PORTS = {tcp: [[40000, 40100]], udp: [[5000, 5000]]}
   `max_bytes_per_secs`, `max_syns`, `max_syns_per_secs`.
 - `PORTS` has ranges `[first, last]` by protocol; a protocol left out gets
   no port.
-- crafty runs with what both the program and the command line allow: the
-  least of each budget, the ports in both (an error if there is none).
-- `BUDGET` and `PORTS` are readable anywhere, and are those values:
-  `src = PORTS.tcp[0][0]`. Reading a field that neither the program nor the
-  command line sets is an error. They cannot be assigned.
+- crafty runs with what both the program and the command line allow.
 
 ### Expressions
 
@@ -360,10 +304,9 @@ Operators, from the tightest binding to the loosest:
    numbers, bytes, intervals, times and strings.
 6. `&&`, then `||`.
 
-Also: `r.field`, `a[i]` (from 0, checked at run time), `m[k]` (else the
-default, else an error), `f(arg, name=arg)`, and the layer selectors of
-[Patterns](#patterns). `a[i] := v` and `m[k] += 1` change an item, adding the
-key to a map if need be.
+Also: `r.field`, `a[i]`, `m[k]` (else the default, else an error), `f(arg,
+name=arg)`, and the layer selectors of [Patterns](#patterns). `a[i] := v` and
+`m[k] += 1` change an item, adding the key to a map if need be.
 
 **Blocks, `if` and `case` are expressions**:
 
@@ -377,70 +320,30 @@ A block can wait, send, receive, loop or `break` only as the whole value of
 a declaration, an assignment or a statement: `n = 1 + { wait 1s ; 1 }` is an
 error.
 
-### Protocol stacks
+### Self driven vs manual stacks
 
-`/IP(dst=192.0.2.10, ttl=3)/UDP(src=4000, dst=53)`:
+Sent messages can be assigned to a variable if they are purely manual:
 
-- A stack that starts with `/` starts from the interface, at the Ethernet
-  layer, which can be left out (`/IP` is `/Eth/IP`). Other stacks go on top
-  of the current stack.
-- Followed by a block, a stack is the current stack of that block.
-- Ending with a terminal layer (`Bytes`, `Request`, `Reply`, `Query`,
-  `Answer`), a stack is a message, sent before the program goes on. The
-  current stack is unchanged: `Bytes("a")` then `Bytes("b")` both send on it.
-- `p = MESSAGE` sends it and waits until the interface is seen sending it
-  (an error after 1s): `p` is the packet as captured, `p[Eth].ts` when it
-  left. Every layer but `Eth` must be manual, so that it is one frame. See
-  [When did it leave?](#when-did-it-leave).
-- Options are named (`dst=...`), except a lone option of a layer that has a
-  default field: `Bytes("x")` is `Bytes(data="x")`. Most can be left out:
-  ports, protocols, lengths and checksums are guessed or computed.
-- Options belong to the stack, not to the stream: those of a block's stack
-  apply to everything sent from that block, those of a message to that
-  message only.
-- Each leading `../` goes one layer down the current stack. A layer that
-  lands on the same layer of the current stack overlays it, keeping its
-  options unless given: `../TCP!` is the same connection, sent by hand.
+`p = /IP!(dst=target)/TCP!(src=1, dst=2, flags=SYN)/Bytes()`
 
-**Streams.** The layers of stacks are *nodes*, keyed by the IP addresses, the
-TCP and UDP ports, and the echo and DNS ids. Stacks with the same keys share
-their nodes, and so the state of the protocol: the TCP connection, the IP ids,
-the echo sequence numbers.
+This send a packet and wait until that packet is recaptured on its way out
+with libpcap. Its timestamp `p[Eth].ts` is therefore accurate.
 
-A TCP connection opens when its first message is sent, and closes once no
-block uses its stack any more:
-
-```
-/IP(dst=192.0.2.10)/TCP(src=40000, dst=7) {
-  Bytes("hello\n")
-  expect timeout=2s Bytes("hello\n") { print("echoed") }
-  ../TCP!(flags=RST)/Bytes()     # a RST on that connection
-}
-```
-
-A manual layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP`
-is not.
+Self-driven and manual layers can be mixed with some restrictions: A manual
+layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 
 ### Patterns
 
 - `/IP/UDP(dst == 7)/Bytes`: *absolute*, matched from the interface up, on
-  any stream. In a block, one that shares with its stack more than `IP`, or
-  all of it, with no condition on `IP`, is warned of: `/IP/UDP/DNS/Answer` in
-  a block on `/IP/UDP/DNS` is likely meant as `Answer`.
+  any stream.
 - `Bytes("pong")`: *relative*, on top of the current stack, so only on its
   stream.
 - `../ICMP/DestUnreachable`: relative to a layer below the top of the current
-  stack. In a block on `IP/UDP`, these are the ICMP errors the IP stream
-  receives. On the same layer as the stack's, a pattern sees only that
-  stream: in a block on `IP/TCP`, `../TCP!` sees that connection's segments.
-- `Bytes("pong") | ../ICMP`: alternatives, wherever a pattern goes (`-p`
-  too), in parentheses or not. A packet that matches several matches once.
-
-Conditions in parentheses are boolean expressions, where `,` and `=` can
-stand for `&&` and `==`:
-
-- A bare name is a field of the layer if it has one, else a variable:
-  `UDP(src == port)`.
+  stack.
+- `Bytes("pong") | ../ICMP`: alternatives.
+- `UDP(src == port)`: conditions in parentheses are boolean expressions.
+  A bare name is a field of the layer if it has one (`src`), else a variable
+  (`port).
 - Fields of the layers below read as `IP.src`. When there are several (a
   tunnel, the packet an ICMP error quotes), `IP^.src` is the IP layer below
   the last one, and `^IP.src` the first.
@@ -456,11 +359,10 @@ streams expect there, so a datagram can match both `UDP/DNS/Query` and
 reassembled packet `IP`; TCP data `TCP/Bytes`, in order and once per chunk
 delivered, and each segment `TCP!`.
 
-**`MATCH`** is the packet that matched, as an array of layers, decoded past
-the pattern as `Bytes` (or the `IP` that an ICMP error quotes). `MATCH[UDP]`
-is its last UDP layer, `MATCH[IP^]` the last IP but one, `MATCH[^IP]` the
-first; then `MATCH[IP].src`, `MATCH[Bytes].data`. `MATCH[0]` is a layer of
-any kind, which `case` tells apart:
+**`MATCH`** is the packet that matched, as an array of layers.  `MATCH[UDP]` is
+its last UDP layer, `MATCH[IP^]` the last IP but one, `MATCH[^IP]` the first;
+then `MATCH[IP].src`, `MATCH[Bytes].data`. `MATCH[0]` is a layer of any kind,
+which `case` tells apart:
 
 ```
 foreach MATCH {
@@ -477,7 +379,7 @@ what their engine computes (checksums).
 Parameters are written `name=value`, or without the name for a form with a
 single one (`break 2`, `wait 1s`).
 
-- `{ ... }`: a block of its own; its variables and patterns end with it.
+- `{ ... }`: a block; its variables and patterns end with it.
 - `repeat var=v count=n every=d for=d { ... }`: runs the block `count` times,
   or while `for` (default 5m) has not elapsed. An iteration starts `every`
   after the previous one started, or when it ends if later. `v` (default `I`)
@@ -496,23 +398,22 @@ single one (`break 2`, `wait 1s`).
 - `break depth=n`: leaves the `n` (default 1) innermost `repeat`, `foreach`
   or `on`.
 - `wait dur=d`: pauses.
-- `expect timeout=d PATTERN { ... }`: waits for one matching packet (default
-  timeout 1m, which is an error), then runs the block.
+- `expect timeout=d PATTERN { ... }`: waits for one matching packet, then
+  runs the block; a timeout (1m by default) is an error.
 - `first timeout=d PATTERN { ... } | PATTERN { ... }`: waits for the first
   packet that matches any pattern, and runs that pattern's block only. A
   timeout is an error.
 - `on for=d linger=d timeout=d max=n PATTERN { ... } | PATTERN { ... }`: the
-  enclosing block goes on, while for each matching packet a new block runs,
-  that of its pattern. It ends after `for`, which the enclosing block waits
-  for; or else with the enclosing block, which waits `linger` (default 0)
-  after its statements; not both. It also ends after `max` matches, or at a
-  `break` from its block. A `timeout` (default none) without a match is an
-  error.
+  enclosing block goes on; each matching packet runs the block of its
+  pattern. It ends after `for`, which the enclosing block waits for; or else
+  with the enclosing block, which waits `linger` (default 0) after its
+  statements. It also ends after `max` matches, or a `break` from
+  its block. A `timeout` (default none) without a match is an error.
 
 A block completes once its statements are done, its `linger`s waited, and
-its `on`s with a `for` ended. Leaving a block, normally or on an error, cancels what it still had
-going: patterns, timers, inner blocks, and the nodes it held, closing their
-connections.
+its `on`s with a `for` ended. Leaving a block, normally or on an error, cancels
+what it still had going: patterns, timers, inner blocks, and the streams it held,
+closing their connections.
 
 ### Functions
 
@@ -540,9 +441,7 @@ that are not named: `append(a, x)`, `histogram(rtts, bucket=5ms)`.
 - `getenv(name, default=s)`: fails if unset and no default.
 - `resolve(name)`: the IPv4 addresses of a name, from the system's resolver;
   fails if none. `hostname(ip, default=s)`: the name of an address; fails if
-  none and no default. The first lookup of each name or address blocks
-  everything, timers included, until it is answered: better resolved before
-  sending.
+  none and no default. Blocking, so better resolved before sending.
 - `rand(max)`: an int or a float in `[0, max)` (default 1.0), or a bool if
   `max` is `true`. `randbytes(len)`: random bytes.
 - `int(x)`, `float(x)`, `bool(x)`, `byte(x)` (the low 8 bits): `int` and
@@ -616,10 +515,10 @@ checksum.
 - `mss`: int; set S. The MSS of the connection.
 
 Self-driven, the first message sent connects, and what follows waits for the
-connection. A TCP node created by a pattern accepts the connection instead.
+connection. A TCP stream created by a pattern accepts the connection instead.
 
 `TCP!` segments take the sequence and ack numbers, the window and the ACK|PSH
-flags of the node's connection when not given, and the connection accounts
+flags of the stream's connection when not given, and the connection accounts
 for them: they advance its sequence, FIN closes it, RST aborts it. They are
 not retransmitted. Sending one while the connection is being established is
 an error.

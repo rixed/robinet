@@ -177,6 +177,9 @@ let () =
             " print the reference of the crafty language, and exit" ;
         "--examples", manual Crafty_manual.examples,
             " print examples of crafty programs, and exit" ;
+        "--cliref", Arg.Unit (fun () ->
+                print_string (Arg.usage_string !specs usage) ; exit 0),
+            " print every option, and exit" ;
         "-help", Arg.Unit help, " print this help and an introduction to crafty" ;
         "--help", Arg.Unit help, " same as -help" ] ;
     (* BEWARE: Update docs/crafty.md every time you update the CLI! *)
