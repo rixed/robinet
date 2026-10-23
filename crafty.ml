@@ -74,6 +74,10 @@ let () =
         Unix.execve Sys.executable_name Sys.argv
             (Array.append [| "PATH=/usr/sbin:/usr/bin:/sbin:/bin" |] user_env))
 
+(* Ids, ISNs and ports differ from one run to the next, lest a peer take a
+ * packet of this run for one of a previous run's: *)
+let () = Random.self_init ()
+
 let () =
     let ifname = ref "" and own_ip = ref None and ports = ref []
     and fw = ref false and promisc = ref false and print_packets = ref false
