@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 ff4182d4149ee981f0f709f4f02c4658) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 a48f2137ec34d3ea0adb67b1c9ef253a) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -506,6 +506,11 @@ that are not named: `append(a, x)`, `histogram(rtts, bucket=5ms)`.
     window shifts the peer and we offered, -1 if none; scaling is on only if
     both offered one) and `established`.
 -   `getenv(name, default=s)`: fails if unset and no default.
+-   `resolve(name)`: the IPv4 addresses of a name, from the system's resolver;
+    fails if none. `hostname(ip, default=s)`: the name of an address; fails if
+    none and no default. The first lookup of each name or address blocks
+    everything, timers included, until it is answered: better resolved before
+    sending.
 -   `rand(max)`: an int or a float in `[0, max)` (default 1.0), or a bool if
     `max` is `true`. `randbytes(len)`: random bytes.
 -   `int(x)`, `float(x)`, `bool(x)`, `byte(x)` (the low 8 bits): `int` and

@@ -290,6 +290,7 @@ let is_constructor s = s <> "" && Char.is_uppercase s.[0]
 let functions =
     [ "rand" ; "randbytes" ; "exp" ; "ln" ; "log" ; "log2" ; "int" ; "float" ;
       "bool" ; "byte" ; "interval" ; "time" ; "now" ; "ip_addr" ; "mac_addr" ; "getenv" ;
+      "resolve" ; "hostname" ;
       "array" ; "length" ; "concat" ; "append" ; "prepend" ;
       "map" ; "has" ; "remove" ; "keys" ; "values" ;
       "count" ; "sum" ; "min" ; "max" ; "mean" ; "stddev" ; "percentile" ;

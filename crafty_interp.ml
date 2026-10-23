@@ -215,6 +215,34 @@ let getenv name =
     | None -> Tools.unsafe_getenv_opt name
     | v -> v
 
+(* The system resolver's answers, asked once per name or address for the
+ * whole run; [resolve] keeps only the IPv4 addresses: *)
+let resolved = Hashtbl.create 10
+let resolve name =
+    match Hashtbl.find_option resolved name with
+    | Some addrs -> addrs
+    | None ->
+        let addrs =
+            Unix.getaddrinfo name "" Unix.[ AI_FAMILY PF_INET ] |>
+            List.filter_map (function
+                | Unix.{ ai_addr = ADDR_INET (a, _) ; _ } -> Some (Ip.Addr.o a)
+                | _ -> None) |>
+            List.unique ~eq:(fun a b -> Ip.Addr.compare a b = 0) in
+        Hashtbl.add resolved name addrs ;
+        addrs
+
+let hostnames = Hashtbl.create 10
+let hostname (ip : Ip.Addr.t) =
+    match Hashtbl.find_option hostnames ip with
+    | Some name -> name
+    | None ->
+        let name =
+            try Some (Unix.getnameinfo (Unix.ADDR_INET ((ip :> Unix.inet_addr), 0))
+                                       Unix.[ NI_NAMEREQD ]).ni_hostname
+            with Not_found -> None in
+        Hashtbl.add hostnames ip name ;
+        name
+
 let rec call loc (b : T.builtin) args ~print ~print_err ~now =
     let number = function Bool _ | Int _ | Float _ -> true | _ -> false in
     let reparse what ok s =
@@ -267,6 +295,15 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
         | Some v, _ -> String v
         | None, [ d ] -> d
         | None, _ -> error loc "Environment variable %s is not set" name)
+    | T.Resolve, [ String name ] ->
+        (match resolve name with
+        | [] -> error loc "%s has no IPv4 address" name
+        | addrs -> Array (Array.of_list (List.map (fun a -> Ip a) addrs)))
+    | T.Hostname, Ip ip :: default ->
+        (match hostname ip, default with
+        | Some n, _ -> String n
+        | None, [ d ] -> d
+        | None, _ -> error loc "%s has no name" (Ip.Addr.to_dotted_string ip))
     | T.Make_array, [ init ; Int len ] ->
         if len < 0 then error loc "array needs a length, not %d" len ;
         Array (Array.make len init)
@@ -1440,6 +1477,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "x = getenv(\"CRAFTY_NO_SUCH_VAR\")")
   ("0s: default "^ Sys.getenv "HOME" ^"\n0s: done") \
     (runs "print(\"${getenv(\"CRAFTY_NO_SUCH_VAR\", default=\"default\")} ${getenv(\"HOME\", default=\"\")}\")")
+  "0s: [127.0.0.1] localhost\n0s: done" \
+    (runs "print(\"${resolve(\"localhost\")} ${hostname(resolve(\"localhost\")[0])}\")")
   "0s: {ip: 10.0.0.2, ok: true, rtt: 1ms500µs}\n0s: done" \
     (runs "print(format({ip: 10.0.0.2, rtt: 1.5ms, ok: true}))")
   "0s: {\"data\":\"#0102\",\"ip\":\"10.0.0.2\",\"rtt\":0.0015,\"tags\":[\"a\",\"b\"]}\n0s: done" \
