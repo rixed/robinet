@@ -1428,8 +1428,9 @@ module TRX = struct
         mutable emit_busy_for : unit -> Clock.Interval.t ;
         mutable recv : bitstring -> unit ;
         mutable recv_busy_for : unit -> Clock.Interval.t ;
-        (* TODO: timeout reassembly lines *)
-        reassembled : (reassemble_key, Pdu.t list (* sorted by frag_offset *)) Hashtbl.t
+        (* Fragments, sorted by frag_offset. The ref is to compare with `==`.
+         * See [reassemble_into]. *)
+        reassembled : (reassemble_key, Pdu.t list ref) Hashtbl.t
     }
 
     (* We might want to reassemble packets that are not destined to [t.src] (broadcast, ICMP
@@ -1459,15 +1460,28 @@ module TRX = struct
                 Simulation.asap t.power t.emit bits)
         )
 
+    (* As Linux's ipfrag_time: *)
+    let reassembly_timeout = Clock.Interval.sec 30.
+
     (** The payload of the packet [ip] is a fragment of, once [reassembled]
-     * (the fragments received so far) has all of them. *)
-    let reassemble_into reassembled (ip : Pdu.t) =
+     * (the fragments received so far) has all of them, unless it took more
+     * than [reassembly_timeout] since the first one. *)
+    let reassemble_into power reassembled (ip : Pdu.t) =
         let key = ip.src, ip.dst, ip.proto, ip.id in
         match Hashtbl.find reassembled key with
         | exception Not_found ->
-            Hashtbl.add reassembled key [ ip ] ;
+            let line = ref [ ip ] in
+            Hashtbl.add reassembled key line ;
+            (* A later packet may have reused the key by then.
+             * TODO: an ICMP Time Exceeded (code 1) if the first fragment
+             * was received (RFC 792). *)
+            Simulation.delay power reassembly_timeout (fun () ->
+                match Hashtbl.find_option reassembled key with
+                | Some l when l == line -> Hashtbl.remove reassembled key
+                | _ -> ()) () ;
             None
-        | frags ->
+        | line ->
+            let frags = !line in
             (* Insert the fragment: *)
             let rec loop prevs = function
                 | [] ->
@@ -1512,11 +1526,11 @@ module TRX = struct
                             loop (stop f) (pld :: plds) rest in
                 Some (loop 0 [] frags)
             ) else (
-                Hashtbl.replace reassembled key frags ;
+                line := frags ;
                 None
             )
 
-    let reassemble t ip = reassemble_into t.reassembled ip
+    let reassemble t ip = reassemble_into t.power t.reassembled ip
 
     (* TODO: check checksum? *)
     let rx (t : t) bits =
@@ -1655,6 +1669,19 @@ module TRX = struct
       [ msg ] (receive (Pdu.fragment 36 with_opts))
       [ msg ] (receive (Pdu.fragment 40 with_opts))
       (receive (frags_of ~mtu:1500 udp_wants_chk)) (receive (frags_of udp_wants_chk))
+    *)
+    (*$R
+      (* Fragments [d] apart: *)
+      let receive_apart d =
+        let trx = make sim.root.power b a Proto.udp sim.root.logger in
+        let got = ref [] in
+        trx.ins --> sink (fun bits -> got := Bitstring.string_of_bitstring bits :: !got) ;
+        trx.out.write (frag 0 16 true) ;
+        Simulation.delay sim.root.power d trx.out.write (frag 16 24 false) ;
+        Simulation.run sim false ;
+        !got in
+      assert_equal ~printer [ msg ] (receive_apart (Clock.Interval.sec 29.)) ;
+      assert_equal ~printer [] (receive_apart (Clock.Interval.sec 31.))
     *)
     (*$= emitted & ~printer:hdr_printer
       [ 0x10, 3, 7 ] \

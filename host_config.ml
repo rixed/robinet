@@ -333,7 +333,7 @@ let string_of_range r =
  * respectively. *)
 let pcap_filter ?ip ports =
     (* With the ports as [dirs], and the fragments but the first, which have
-     * no ports to tell: *)
+     * no ports to tell. TODO: IPv6 fragments, which are all missed. *)
     let l4 dirs =
         if ports = [] then None
         else Some (String.concat " or " (

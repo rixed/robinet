@@ -333,7 +333,7 @@ let ip_node ctx =
         match Ip.Pdu.unpack u.bits with
         | Error _ -> [ fragment ]
         | Ok ip ->
-            (match Ip.TRX.reassemble_into fragments ip with
+            (match Ip.TRX.reassemble_into st.iface.widget.power fragments ip with
             | None -> [ fragment ]
             | Some payload ->
                 let ip =
