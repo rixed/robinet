@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 ef443de7325dcd4c5e25404d9b8a9e62) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 5762e7ece2f66612334b71455a6b8212) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -157,6 +157,7 @@ Options:
     print all available details or every packets).
 -   `--stats`: prints the stats of each stream (see `stats()`) as it ends.
 -   `--check`: only compiles the program.
+-   `--max-duration DURATION`: run no longer.
 -   `--reference`: prints the reference manual.
 -   `--examples`: prints many examples of use.
 -   `--cliref`: exhaustive list of options including seldom used ones.
@@ -202,7 +203,8 @@ let reference = {crafty_manual|### Lexical conventions
 -   arrays: `[1, 2, 3]`. Items of one type.
 -   maps: `[192.0.2.1: "gw", 192.0.2.2: "dns"]`, a `string[ip]`, in no
     particular order. `map(key=k, default=v)` is an empty map with keys of the
-    type of `k`, where missing keys have the value `v`.
+    type of `k`, where missing keys have the value `v` (tip: `[0s] * 0` is an
+    empty array with a known type!).
 -   records: `{name: "gw", ip: 192.0.2.1}`. `{}` is an empty block, not a
     record.
 -   variants: `Ok(42)`, `Failed("timeout")`, `Pending`. A constructor starts
