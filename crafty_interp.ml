@@ -304,6 +304,9 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
         | Some n, _ -> String n
         | None, [ d ] -> d
         | None, _ -> error loc "%s has no name" (Ip.Addr.to_dotted_string ip))
+    | T.Split, [ String s ; String by ] ->
+        if by = "" then error loc "Cannot split by an empty string" ;
+        Array (Array.of_list (List.map (fun p -> String p) (String.split_on_string ~by s)))
     | T.Make_array, [ init ; Int len ] ->
         if len < 0 then error loc "array needs a length, not %d" len ;
         Array (Array.make len init)
@@ -1385,6 +1388,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "repeat var=i count=3 { repeat { print(\"${i}\")\n    break 2 } }\nprint(\"after\")")
   "0s: [0, 1, 2, 3, 4] [0, 1, 2, 5] [9, 0, 1, 2] [0, 1, 2, 0, 1, 2] [7]\n0s: done" \
     (runs "x = [1]\nx += 2\nx := 0 + x\ny = array(0, 0) + 7\nprint(\"${x + [3, 4]} ${append(x, 5)} ${prepend(9, x)} ${concat(x, x)} ${y}\")")
+  "0s: [a, , b c] 2 1 [x]\n0s: done" \
+    (runs "p = split(\"a,,b c\", \",\")\nprint(\"${p} ${length(split(\"a--b\", by=\"--\"))} ${length(split(\"\", \",\"))} ${split(\"x\", \"y\")}\")")
+  "0s: failed: line 1, column 5: Cannot split by an empty string" \
+    (runs "x = split(\"a\", \"\")")
   "0s: [a: 2, b: 1] 2 0\n0s: done" \
     (runs "n = map(key=\"\", default=0)\nforeach w [\"a\", \"b\", \"a\"] { n[w] += 1 }\nprint(\"${n} ${length(n)} ${n[\"z\"]}\")")
   "0s: 2=b\n0s: 3=c\n0s: [1: a, 2: b, 3: c] [2, 3] [b, c] false\n0s: done" \

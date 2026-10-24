@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 71654c3be1491f324362bf71d9f1e2d2) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 224628856ecc77c5186694d12e4aa9be) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -414,6 +414,8 @@ that are not named: `append(a, x)`, `histogram(rtts, bucket=5ms)`.
     `interval(secs)`: the reverse.
 -   `exp(x)`, `ln(x)`, `log(x)` (base 10). `log2(n)`: the integer base 2
     logarithm of a positive int.
+-   `split(s, by)`: the parts of `s` between the occurrences of `by`:
+    `split("a,,b", ",")` is `["a", "", "b"]`.
 -   `array(init=v, len=n)`, `length(a)` (or `count(a)`, of an array, a map or a
     string), `concat(a, b)`, `append(a, x)`, `prepend(x, a)`.
 -   `has(m, k)`, `remove(m, k)` (a copy), `keys(m)`, `values(m)`.
