@@ -191,6 +191,16 @@ let signal_err t str =
     (* later, change this into a nice log *)
     Printf.fprintf stderr "Host %s: %s\n%!" t.trx.widget.name str
 
+let rec find_alive_tcp tcps key =
+    match Hashtbl.find_option tcps key with
+    | None ->
+        None
+    | Some (tcp : Tcp.TRX.tcp_trx) ->
+        if not (tcp.is_closed ()) then Some tcp else (
+            Hashtbl.remove tcps key ;
+            find_alive_tcp tcps key
+        )
+
 (* Forward the payload to the socket function or to the server function *)
 let tcp_sock_rx t socks bits =
     match Tcp.Pdu.unpack bits with
@@ -198,6 +208,8 @@ let tcp_sock_rx t socks bits =
             Log.(log t.trx.widget.logger Warning s)
         | Ok (tcp : Tcp.Pdu.t) ->
             let key = tcp.dst_port, tcp.src_port in
+            (* A SYN reopens a closed connection's ports: *)
+            if tcp.flags.syn then ignore (find_alive_tcp socks.tcps key) ;
             try
                 let trx =
                     hash_find_or_insert socks.tcps key (fun () ->
@@ -278,16 +290,6 @@ let icmp_rx t ip_trx bits =
                 Option.may (fun waiter -> waiter seq)
                            (Hashtbl.find_option t.echo_waiters id)
         | _ -> ()
-
-let rec find_alive_tcp tcps key =
-    match Hashtbl.find_option tcps key with
-    | None ->
-        None
-    | Some (tcp : Tcp.TRX.tcp_trx) ->
-        if not (tcp.is_closed ()) then Some tcp else (
-            Hashtbl.remove tcps key ;
-            find_alive_tcp tcps key
-        )
 
 exception AlreadyConnected
 exception NoIp
@@ -669,6 +671,40 @@ let udp_server_stop t port =
     serve () ;
     send () ;
     assert_equal ~printer:string_of_int ~msg:"until restarted" 3 !served
+ *)
+
+(* Once closed, a connection's ports can be used again. *)
+(*$R
+    let sim = Simulation.make ~realtime:false "port-reuse" in
+    let ip n = Ip.Addr.of_string ("192.168.0." ^ string_of_int n) in
+    let host n =
+        make ~parent:sim.root ~static_ip:(ip n)
+             ~netmask:(Ip.Addr.of_string "255.255.255.0")
+             ("h" ^ string_of_int n) in
+    let a = host 1 and b = host 2 in
+    let st = Eth.Cable.State.make ~parent:sim.root ~name:"c" () in
+    Eth.Cable.plug st (a.trx.widget, 0) (b.trx.widget, 0) ;
+    Simulation.run_startup sim ;
+    let port = Tcp.Port.o 80 in
+    (* The server closes when the client does: *)
+    b.trx.tcp_server_start port (fun (c : Tcp.TRX.tcp_trx) ->
+        c.trx.ins --> sink (fun bits ->
+            if Bitstring.bitstring_length bits = 0 then c.close ())) ;
+    let connect () =
+        let cnx = ref None in
+        a.trx.tcp_connect (IPv4 (ip 2)) ~src_port:(Tcp.Port.o 1234) port
+                          (fun c -> cnx := c) ;
+        Simulation.run sim false ;
+        !cnx in
+    for i = 1 to 2 do
+        match connect () with
+        | None ->
+            assert_failure (Printf.sprintf "connection #%d failed" i)
+        | Some (c : Tcp.TRX.tcp_trx) ->
+            c.close () ;
+            Simulation.run sim false ;
+            assert_bool "closed" (c.is_closed ())
+    done
  *)
 
 (* The recv of the eth is responsible for handling the payload to the correct Ip.TRX *)
