@@ -140,6 +140,9 @@ and expr_desc =
     | Layer of { name : Layer_name.t ; from_start : bool ; nth : int }
     | Field of expr * string
     | Index of expr * expr
+    (* The items from the first bound (else the start) up to, excluding, the
+     * second (else the end) of an array or string ([a[1:-1]]): *)
+    | Slice of expr * expr option * expr option
     | Call of string * arg list
     | Unop of unop * expr
     | Binop of binop * expr * expr
@@ -391,6 +394,9 @@ let rec print_expr_at ?(bare=false) ~all ~indent p oc e =
         Printf.fprintf oc "%a.%s" (at max_int) e f
     | Index (e, i) ->
         Printf.fprintf oc "%a[%a]" (at max_int) e sub i
+    | Slice (e, from, to_) ->
+        let bound oc = Option.may (sub oc) in
+        Printf.fprintf oc "%a[%a:%a]" (at max_int) e bound from bound to_
     | Call (f, args) -> Printf.fprintf oc "%s(%a)" f (print_args ~all ~indent) args
     | Unop (Not, e) ->
         paren unary_precedence (fun oc ->

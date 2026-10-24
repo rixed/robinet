@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 f875e920e2494a31205373990eb7f2ca) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 ef443de7325dcd4c5e25404d9b8a9e62) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -280,9 +280,10 @@ Operators, from the tightest binding to the loosest:
     numbers, bytes, intervals, times and strings.
 6.  `&&`, then `||`.
 
-Also: `r.field`, `a[i]`, `m[k]` (else the default, else an error),
-`f(arg, name=arg)`, and the layer selectors of [Patterns](#patterns).
-`a[i] := v` and `m[k] += 1` change an item, adding the key to a map if need be.
+Also: `r.field`, `a[i]` (`a[-1]` is the last item), `m[k]` (else the default,
+else an error), `f(arg, name=arg)`, and the layer selectors of
+[Patterns](#patterns). Arrays, bytes and strings slice as in Python. `a[i] := v`
+and `m[k] += 1` change an item, adding the key to a map if need be.
 
 **Blocks, `if` and `case` are expressions**:
 

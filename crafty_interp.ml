@@ -86,10 +86,22 @@ let bind env (v : T.var) value =
 let bind_lazy env (v : T.var) f =
     { env with vars = Env.add v.id (lazy (ref (f ()))) env.vars }
 
-let item loc a i =
-    if i < 0 || i >= Array.length a then
-        error loc "No item %d in an array of length %d" i (Array.length a) ;
-    a.(i)
+(* The position of item [i] of an array of length [len], counting from the
+ * end if negative: *)
+let position loc len i =
+    let p = if i < 0 then i + len else i in
+    if p < 0 || p >= len then
+        error loc "No item %d in an array of length %d" i len ;
+    p
+
+let item loc a i = a.(position loc (Array.length a) i)
+
+(* The offset and length of the slice [from:to_] of something of length
+ * [len], negative bounds counting from the end, out of range ones clipped: *)
+let slice len from to_ =
+    let clip i = if i < 0 then max 0 (i + len) else min i len in
+    let from = clip (Option.default 0 from) in
+    from, max 0 (clip (Option.default len to_) - from)
 
 (* The value of key [k], of type [typ], in map [m] of default [d]: *)
 let find loc typ m d k =
@@ -106,7 +118,8 @@ let rec set_item loc x path y =
     | _, [] -> y
     | Array a, (_, Int i) :: path ->
         let a' = Array.copy a in
-        a'.(i) <- set_item loc (item loc a i) path y ;
+        let i = position loc (Array.length a) i in
+        a'.(i) <- set_item loc a.(i) path y ;
         Array a'
     | Map (m, d), (typ, k) :: path ->
         let v = if path = [] then y else set_item loc (find loc typ m d k) path y in
@@ -462,6 +475,18 @@ let rec eval output (env : env) (e : T.expr) =
         (match eval a, eval i with
         | Array a, Int i -> item e.loc a i
         | Map (m, d), k -> find e.loc i.T.typ m d k
+        | _ -> assert false)
+    | T.Slice (a, from, to_) ->
+        let a = eval a in
+        let bound = Option.map (fun i -> match eval i with Int i -> i | _ -> assert false) in
+        let from, to_ = bound from, bound to_ in
+        (match a with
+        | Array a ->
+            let o, l = slice (Array.length a) from to_ in
+            Array (Array.sub a o l)
+        | String s ->
+            let o, l = slice (String.length s) from to_ in
+            String (String.sub s o l)
         | _ -> assert false)
     | T.Select { packet ; layer ; from_start ; nth } ->
         (match eval packet with
@@ -1526,8 +1551,16 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "x = 1 + { y = 0 ; z = 1 / y ; z }\nprint(\"not reached\")")
   "1s: in\n1s: failed: line 2, column 17: Division by zero" \
     (runs "x = { wait 1s\n  print(\"in\") ; 1 / 0 }\nprint(\"not reached\")")
-  "0s: failed: line 1, column 5: No item -1 in an array of length 1" \
-    (runs "x = [1][-1]")
+  "0s: failed: line 1, column 5: No item -2 in an array of length 1" \
+    (runs "x = [1][-2]")
+  "0s: 3 [1, 9]\n0s: done" \
+    (runs "x = [1, 2, 3]\nx[-2] := 9\nprint(\"${x[-1]} ${x[:-1]}\")")
+  "0s: [3, 4] [0, 1] [2, 3] [3] [] [] [0, 1, 2, 3, 4]\n0s: done" \
+    (runs "a = [0, 1, 2, 3, 4]\nprint(\"${a[3:]} ${a[:2]} ${a[2:4]} ${a[-2:-1]} ${a[4:2]} ${a[9:]} ${a[-9:9]}\")")
+  "0s: ell #0203 bc\n0s: done" \
+    (runs "b = #01020304\nprint(\"${\"hello\"[1:-1]} ${b[1:3]} ${split(\"abc\", \"/\")[0][ 1 : ]}\")")
+  "line 1, column 5: Cannot slice an int" \
+    (runs "x = 1[1:]")
   "line 2, column 1: Unknown variable y" \
     (runs "x = #0102\ny := x")
   "0s: a\n1s500ms: b\n1s500ms: done" \

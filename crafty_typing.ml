@@ -64,6 +64,7 @@ and desc =
     (* The field of a record, by its index in the record type: *)
     | Field of expr * int
     | Index of expr * expr
+    | Slice of expr * expr option * expr option
     (* The layer of a packet ([MATCH[IP^]]), counted from the end, or from
      * the start: *)
     | Select of { packet : expr ; layer : L.layer ; from_start : bool ;
@@ -1071,6 +1072,12 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         | Type.Array t -> mk t (Index (a, expect "An index" (expr env i) Type.Int))
         | Type.Map (k, v) -> mk v (Index (a, expect "A key" (expr ~expected:k env i) k))
         | t -> error loc "Cannot index %s" (a_type t))
+    | A.Slice (a, from, to_) ->
+        let a = expr env a in
+        let bound = Option.map (fun i -> expect "A bound" (expr env i) Type.Int) in
+        (match a.typ with
+        | Type.Array _ | Type.String -> mk a.typ (Slice (a, bound from, bound to_))
+        | t -> error loc "Cannot slice %s" (a_type t))
     | A.Call (f, _) when same_name f "sort" ->
         error loc "sort changes its array and has no value; sorted(a) is a sorted copy"
     | A.Call (f, args) ->
@@ -1889,6 +1896,8 @@ and expr_declarations e =
     | Field (e, _) | Unop (_, e) | Convert e | Select { packet = e ; _ } ->
         expr_declarations e
     | Index (a, b) | Binop (_, a, b) -> expr_declarations a @ expr_declarations b
+    | Slice (a, from, to_) ->
+        List.concat_map expr_declarations (a :: List.filter_map identity [ from ; to_ ])
     | Call (_, es) | Record es | Array es -> List.concat_map expr_declarations es
     | Map kvs ->
         List.concat_map (fun (k, v) -> expr_declarations k @ expr_declarations v) kvs

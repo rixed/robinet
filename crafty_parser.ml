@@ -549,14 +549,21 @@ let make_expr ~cond ~self ~expr ~pattern ~block =
                     | _ -> reject "Carets on both sides of %s"
                                     (Layer_name.to_string name) in
                 { loc ; desc }) in
+    let bound = optional ~def:None (expr >>: Option.some) in
     let postfix =
         atom ++ repeat_greedy ~sep:none (
             (item '.' -+ identifier >>: fun f -> `Field f) |||
-            (in_ '[' expr ']' >>: fun i -> `Index i)) >>:
+            (in_ '[' (bound ++ optional ~def:None (
+                sp -- item ':' -- nl_sp -+ bound >>: Option.some)) ']' >>= function
+                | Some i, None -> return (`Index i)
+                | from, Some to_ -> return (`Slice (from, to_))
+                | None, None -> fail)) >>:
         fun (a, ops) ->
             List.fold_left (fun e -> function
                 | `Field f -> { loc = a.loc ; desc = Field (e, f) }
-                | `Index i -> { loc = a.loc ; desc = Index (e, i) }) a ops in
+                | `Index i -> { loc = a.loc ; desc = Index (e, i) }
+                | `Slice (from, to_) ->
+                    { loc = a.loc ; desc = Slice (e, from, to_) }) a ops in
     let unary = fix (fun unary ->
         (here ++ (item '!' -- sp -+ unary) >>:
             fun (loc, e) -> { loc ; desc = Unop (Not, e) }) |||
