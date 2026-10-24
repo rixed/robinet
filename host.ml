@@ -711,6 +711,39 @@ let udp_server_stop t port =
     connect_and_close 2
  *)
 
+(* A peer that lost a connection and reuses its ports gets it reset: its SYN is
+   answered by a challenge ACK, that it answers by a RST. *)
+(*$R
+    let sim = Simulation.make ~realtime:false "half-open" in
+    let ip n = Ip.Addr.of_string ("192.168.0." ^ string_of_int n) in
+    let host n =
+        make ~parent:sim.root ~static_ip:(ip n)
+             ~netmask:(Ip.Addr.of_string "255.255.255.0")
+             ("h" ^ string_of_int n) in
+    let a = host 1 and b = host 2 in
+    let st = Eth.Cable.State.make ~parent:sim.root ~name:"c" () in
+    Eth.Cable.plug st (a.trx.widget, 0) (b.trx.widget, 0) ;
+    Simulation.run_startup sim ;
+    let port = Tcp.Port.o 80 in
+    let accepted = ref 0 and closed = ref 0 in
+    b.trx.tcp_server_start port (fun (c : Tcp.TRX.tcp_trx) ->
+        incr accepted ;
+        c.trx.ins --> sink (fun bits ->
+            if Bitstring.bitstring_length bits = 0 then incr closed)) ;
+    let connect () =
+        let cnx = ref None in
+        a.trx.tcp_connect (IPv4 (ip 2)) ~src_port:(Tcp.Port.o 1234) port
+                          (fun c -> cnx := c) ;
+        Simulation.run sim false ;
+        !cnx in
+    assert_bool "connected" (connect () <> None) ;
+    (* [a] forgets that connection: *)
+    Hashtbl.iter (fun _ socks -> Hashtbl.clear socks.tcps) a.tcp_socks ;
+    assert_bool "reconnected" (connect () <> None) ;
+    assert_equal ~printer:string_of_int ~msg:"the old one reset" 1 !closed ;
+    assert_equal ~printer:string_of_int ~msg:"accepted" 2 !accepted
+ *)
+
 (* The recv of the eth is responsible for handling the payload to the correct Ip.TRX *)
 let ip_recv t bits =
     with_my_ip t (fun my_ip ->

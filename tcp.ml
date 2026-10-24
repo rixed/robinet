@@ -1032,11 +1032,15 @@ struct
             (* TODO: check checksum *)
             if tcp.Pdu.flags.Pdu.syn then (
                 if t.rcvd_pld > 0 then (
-                    Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: ignoring Syn while inbound cnx is established"))) ;
                     if t.rcvd_isn = Some tcp.Pdu.seq_num then (
                         (* retransmission of the syn: our SYN-ACK may have been lost *)
                         if t.sent_acked = 0 then retransmit_first t
                         else inqueue_pkt t tcp
+                    ) else if not (is_over t ()) then (
+                        (* The SYN of another connection: a peer that lost this
+                         * one resets it on this challenge ACK (RFC 5961): *)
+                        Log.(log t.logger Debug (lazy "Tcp: SYN on an established cnx, sending a challenge ACK")) ;
+                        emit_one t empty_bitstring
                     )
                 ) else (
                     t.rcvd_isn <- Some tcp.Pdu.seq_num ;
@@ -1063,7 +1067,15 @@ struct
                     abort t ;
                     establish_cnx t false)
             ) else if not (is_established t) then (
-                Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: ignoring recvd packet while cnx is not established")))
+                if tcp.Pdu.flags.Pdu.ack && t.sent_pld > 0 && acked_of t tcp <> t.sent_pld &&
+                   not (is_over t ()) then (
+                    (* What acks something else than our SYN is from another
+                     * connection, which this resets (RFC 9293): *)
+                    Log.(log t.logger Debug (lazy "Tcp: unacceptable ACK while connecting, sending a RST")) ;
+                    emit_segment t (Pdu.make ~src_port:t.src ~dst_port:t.dst ~seq_num:tcp.Pdu.ack_num
+                                             ~rst:true ~win_size:0 empty_bitstring)
+                ) else
+                    Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: ignoring recvd packet while cnx is not established")))
             ) else inqueue_pkt t tcp)
 
     (* Persist timer: with nothing in flight, no ack would tell that the peer's
