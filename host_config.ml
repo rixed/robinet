@@ -328,14 +328,16 @@ let string_of_range r =
     if r.lo = r.hi then string_of_int r.lo else Printf.sprintf "%d-%d" r.lo r.hi
 
 (** A pcap filter for what a program may receive and send: ARP, and IPv4
- * to and from [ip] if given, of which ICMP and the TCP and UDP ports of
- * [ports], if any, as destination and as source respectively. *)
+ * to and from [ip] if given, of which ICMP, fragments but the first, and
+ * the TCP and UDP ports of [ports], if any, as destination and as source
+ * respectively. *)
 let pcap_filter ?ip ports =
-    (* With the ports as [dirs]: *)
+    (* With the ports as [dirs], and the fragments but the first, which have
+     * no ports to tell: *)
     let l4 dirs =
         if ports = [] then None
         else Some (String.concat " or " (
-            "icmp" :: List.concat_map (fun dir -> List.map (fun r ->
+            "icmp" :: "(ip[6:2] & 0x1fff != 0)" :: List.concat_map (fun dir -> List.map (fun r ->
                 Printf.sprintf "(%s %s portrange %d-%d)"
                     (string_of_proto r.proto) dir r.lo r.hi) ports) dirs)) in
     match ip with
@@ -352,9 +354,9 @@ let pcap_filter ?ip ports =
   "" (pcap_filter [])
   "arp or dst host 10.0.0.1 or src host 10.0.0.1" \
     (pcap_filter ~ip:(Ip.Addr.of_string "10.0.0.1") [])
-  "arp or icmp or (tcp dst portrange 14000-14099) or (udp dst portrange 53-53) or (tcp src portrange 14000-14099) or (udp src portrange 53-53)" \
+  "arp or icmp or (ip[6:2] & 0x1fff != 0) or (tcp dst portrange 14000-14099) or (udp dst portrange 53-53) or (tcp src portrange 14000-14099) or (udp src portrange 53-53)" \
     (pcap_filter [ port_range_of_string Tcp "14000-14099" ; port_range_of_string Udp "53" ])
-  "arp or (dst host 10.0.0.1 and (icmp or (udp dst portrange 1-2))) or (src host 10.0.0.1 and (icmp or (udp src portrange 1-2)))" \
+  "arp or (dst host 10.0.0.1 and (icmp or (ip[6:2] & 0x1fff != 0) or (udp dst portrange 1-2))) or (src host 10.0.0.1 and (icmp or (ip[6:2] & 0x1fff != 0) or (udp src portrange 1-2)))" \
     (pcap_filter ~ip:(Ip.Addr.of_string "10.0.0.1") [ port_range_of_string Udp "1-2" ])
  *)
 
