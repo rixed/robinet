@@ -675,6 +675,16 @@ let stmt =
                sp +- check (char_if "" (fun c ->
                    is_word c || c = '[' || c = '(' || c = '"'))) in
     with_loc (
+        (* A keyword given a value, which the special form it starts would
+         * otherwise refuse as a missing pattern or block: *)
+        (let keyword_name =
+            identifier >>= fun s -> if is_keyword s then return s else fail
+         and assign =
+            (item '=' -- nay (item '=' ||| item '~') >>: ignore) |||
+            (assign_op >>: ignore) in
+         check (quiet (keyword_name -- sp -- assign)) -+
+         quiet keyword_name +- sp +- assign +- nl_sp +- expr >>:
+            fun s -> reject "%s is a keyword, it cannot name a variable" s) |||
         (* Alone, a call rather than a stack, of an unknown layer: *)
         unknown_function (quiet (args expr +-
             check (sp -- ((item '\n' ||| item ';' ||| item '}' >>: ignore) ||| eof)))) |||
@@ -1045,6 +1055,10 @@ let parse_patterns text =
   "line 1, column 18: Expected '=' in statement" (reads "repeat count=3 x {\n}")
   "line 1, column 7: IP is not a terminal layer, therefore IP is not a complete message that could be sent: it needs a terminal layer on top (Bytes)." (reads "x = IP")
   "line 1, column 7: ip is a reserved name" (reads "ip = 3")
+  "line 1, column 29: first is a keyword, it cannot name a variable" \
+    (reads "first = int(getenv(\"FIRST\"))")
+  "line 1, column 10: wait is a keyword, it cannot name a variable" (reads "wait += 1")
+  "line 2, column 8: on is a keyword, it cannot name a variable" (reads "x = 1\non := 2")
   "line 1, column 11: print is a reserved name" (reads "print += 3")
   "line 1, column 7: An item is not declared (:= changes it)" (reads "x[0] = 1")
   "line 1, column 14: Items without keys in a map" (reads "x = [1: 2, 3]")
