@@ -71,78 +71,88 @@ type host_trx = {
     (* List of things to do once this host gets its IP address *)
     mutable on_ip : (t -> unit) list }
 
-and tcp_socks = { ip_4_tcp : trx ;
-                   (* Available sockets per IP dest.
-                      The user of TCP does not remove these entries, so the TRX is still there
-                      for some time. We should probably "garbage collect" them once in a while,
-                      if they are closed for long enough. *)
-                   tcps : (Tcp.Port.t * Tcp.Port.t (* local, remote *), Tcp.TRX.tcp_trx) Hashtbl.t }
+and tcp_socks = {
+    ip_4_tcp : trx ;
+    (* Available sockets per IP dest.
+       The user of TCP does not remove these entries, so the TRX is still there
+       for some time. We should probably "garbage collect" them once in a while,
+       if they are closed for long enough. *)
+    tcps : (Tcp.Port.t * Tcp.Port.t (* local, remote *), Tcp.TRX.tcp_trx) Hashtbl.t
+}
 
-and udp_socks = { ip_4_udp : trx ;
-                   (* The user of UDP does not remove them neither, and we probably should have
-                      a "close" for UDP (since once closed all incoming packets must be rejected,
-                      contrary to TCP where we still want to handle incoming FIN). *)
-                   udps : (Udp.Port.t * Udp.Port.t (* local, remote *), Udp.TRX.udp_trx) Hashtbl.t }
+and udp_socks = {
+    ip_4_udp : trx ;
+    (* The user of UDP does not remove them neither, and we probably should have
+       a "close" for UDP (since once closed all incoming packets must be rejected,
+       contrary to TCP where we still want to handle incoming FIN). *)
+    udps : (Udp.Port.t * Udp.Port.t (* local, remote *), Udp.TRX.udp_trx) Hashtbl.t
+}
 
 (* A listening server: what to do with a new connection, and the connections
    it was handed, so that stopping it can close them. *)
-and tcp_server = { tcp_accept : Tcp.TRX.tcp_trx -> unit ;
-                   (* for the connections it accepts: *)
-                   tcp_snd_buf : int option ;
-                   tcp_rcv_buf : int option ;
-                   (* With the table and key each is registered under. Closed
-                      ones are pruned on each accept. *)
-                   mutable tcp_cnxs : (tcp_socks * (Tcp.Port.t * Tcp.Port.t) * Tcp.TRX.tcp_trx) list }
+and tcp_server = {
+    tcp_accept : Tcp.TRX.tcp_trx -> unit ;
+    (* for the connections it accepts: *)
+    tcp_snd_buf : int option ;
+    tcp_rcv_buf : int option ;
+    (* With the table and key each is registered under. Closed
+       ones are pruned on each accept. *)
+    mutable tcp_cnxs : (tcp_socks * (Tcp.Port.t * Tcp.Port.t) * Tcp.TRX.tcp_trx) list ;
+}
 
 (* UDP has nothing to close, but the sockets a server was handed must stop
    receiving when it stops: *)
-and udp_server = { udp_accept : Udp.TRX.udp_trx -> unit ;
-                   mutable udp_peers : (udp_socks * (Udp.Port.t * Udp.Port.t)) list }
+and udp_server = {
+    udp_accept : Udp.TRX.udp_trx -> unit ;
+    mutable udp_peers : (udp_socks * (Udp.Port.t * Udp.Port.t)) list ;
+}
 
-and t = { mutable trx : host_trx ;
-          eth_state   : Eth.State.t ;
-          eth_trx     : trx ;
-          tcp_socks   : (Ip.Addr.t, tcp_socks) Hashtbl.t ;
-          udp_socks   : (Ip.Addr.t, udp_socks) Hashtbl.t ;
-          icmp_socks  : (Ip.Addr.t, trx) Hashtbl.t ;
-          (* the listening servers *)
-          tcp_servers : (Tcp.Port.t, tcp_server) Hashtbl.t ;
-          udp_servers : (Udp.Port.t, udp_server) Hashtbl.t ;
-          (* Whether this host has an IP configuration of its own to apply
-             when it boots. It has, unless it speaks through somebody else's
-             adapter -- a router's admin host does -- in which case the
-             address, the netmask and the reader belong to that owner and must
-             be left alone. *)
-          own_ip_config : bool ;
-          (* The configuration as the reader set it, which is a property of
-             the host and outlives any number of power cycles. What DHCP
-             grants is kept apart in the [leased_] fields below. *)
-          mutable search_sfx : string option ;
-          mutable nameserver : Ip.Addr.t option ;
-          mutable static_ip : Ip.Addr.t option ;
-          mutable host_name : string ;
-          mutable netmask : Ip.Addr.t option ;
-          (* What the current lease granted, if anything. A lease is not a
-             property of the host but of the moment: it goes when the power
-             does (see [reset]), and what it does not carry falls back on the
-             static configuration above. *)
-          mutable leased_netmask : Ip.Addr.t option ;
-          mutable leased_gateway : Ip.Addr.t option ;
-          mutable leased_nameserver : Ip.Addr.t option ;
-          mutable leased_search_sfx : string option ;
-          mutable leased_host_name : string option ;
-          mutable resolv_trx : trx option ;
-          dns_queries : (string, ((Ip.Addr.t list option -> unit) * Metric.Timed.stop_func option)) Hashtbl.t ;
-          dns_cache   : (string, Ip.Addr.t list) Hashtbl.t ;
-          resolutions : Metric.Timed.t ;
-          (* Who is waiting for an ICMP echo reply.
-           * Indexed by ICMP id (which is also the action_state's id).
-           * One waiter may wait for several echo requests (with various seq
-           * number) *)
-          echo_waiters : (int (* ICMP id *), int -> unit) Hashtbl.t ;
-          (* ICMP errors want to embed the first 8 bytes of the IP packet so we save
-           * it here: *)
-          mutable last_ip_packet : Ip.Pdu.t option }
+and t = {
+    mutable trx : host_trx ;
+    eth_state   : Eth.State.t ;
+    eth_trx     : trx ;
+    tcp_socks   : (Ip.Addr.t, tcp_socks) Hashtbl.t ;
+    udp_socks   : (Ip.Addr.t, udp_socks) Hashtbl.t ;
+    icmp_socks  : (Ip.Addr.t, trx) Hashtbl.t ;
+    (* the listening servers *)
+    tcp_servers : (Tcp.Port.t, tcp_server) Hashtbl.t ;
+    udp_servers : (Udp.Port.t, udp_server) Hashtbl.t ;
+    (* Whether this host has an IP configuration of its own to apply
+       when it boots. It has, unless it speaks through somebody else's
+       adapter -- a router's admin host does -- in which case the
+       address, the netmask and the reader belong to that owner and must
+       be left alone. *)
+    own_ip_config : bool ;
+    (* The configuration as the reader set it, which is a property of
+       the host and outlives any number of power cycles. What DHCP
+       grants is kept apart in the [leased_] fields below. *)
+    mutable search_sfx : string option ;
+    mutable nameserver : Ip.Addr.t option ;
+    mutable static_ip : Ip.Addr.t option ;
+    mutable host_name : string ;
+    mutable netmask : Ip.Addr.t option ;
+    (* What the current lease granted, if anything. A lease is not a
+       property of the host but of the moment: it goes when the power
+       does (see [reset]), and what it does not carry falls back on the
+       static configuration above. *)
+    mutable leased_netmask : Ip.Addr.t option ;
+    mutable leased_gateway : Ip.Addr.t option ;
+    mutable leased_nameserver : Ip.Addr.t option ;
+    mutable leased_search_sfx : string option ;
+    mutable leased_host_name : string option ;
+    mutable resolv_trx : trx option ;
+    dns_queries : (string, ((Ip.Addr.t list option -> unit) * Metric.Timed.stop_func option)) Hashtbl.t ;
+    dns_cache   : (string, Ip.Addr.t list) Hashtbl.t ;
+    resolutions : Metric.Timed.t ;
+    (* Who is waiting for an ICMP echo reply.
+     * Indexed by ICMP id (which is also the action_state's id).
+     * One waiter may wait for several echo requests (with various seq
+     * number) *)
+    echo_waiters : (int (* ICMP id *), int -> unit) Hashtbl.t ;
+    (* ICMP errors want to embed the first 8 bytes of the IP packet so we save
+     * it here: *)
+    mutable last_ip_packet : Ip.Pdu.t option
+}
 
 type Widget.device += T of t
 
@@ -191,22 +201,31 @@ let tcp_sock_rx t socks bits =
             try
                 let trx =
                     hash_find_or_insert socks.tcps key (fun () ->
-                        if tcp.flags.Tcp.Pdu.syn then (
-                            let server = try Hashtbl.find t.tcp_servers tcp.dst_port
-                                         with Not_found -> (
-                                            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have no server listening on port %s" (Tcp.Port.to_string tcp.dst_port)))) ;
-                                            raise No_socket
-                                        ) in
-                            let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t) ?snd_buf:server.tcp_snd_buf ?rcv_buf:server.tcp_rcv_buf tcp.dst_port tcp.src_port t.trx.widget.logger in
+                        if tcp.flags.syn then (
+                            let server =
+                                try Hashtbl.find t.tcp_servers tcp.dst_port
+                                with Not_found -> (
+                                    Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have no server listening on port %s" (Tcp.Port.to_string tcp.dst_port)))) ;
+                                    raise No_socket
+                                ) in
+                            let tcp =
+                                Tcp.TRX.make
+                                    t.trx.widget.power ~mss:(tcp_mss t)
+                                    ?snd_buf:server.tcp_snd_buf
+                                    ?rcv_buf:server.tcp_rcv_buf
+                                    tcp.dst_port tcp.src_port
+                                    t.trx.widget.logger in
                             tcp.tcp_trx.trx =-> socks.ip_4_tcp.ins ;
                             server.tcp_cnxs <-
                                 (socks, key, tcp.tcp_trx) ::
                                 List.filter (fun (_, _, (c : Tcp.TRX.tcp_trx)) ->
-                                    not (c.is_closed ())) server.tcp_cnxs ;
-                            server.tcp_accept tcp.tcp_trx ; (* supposed to set the recver of this tcp trx *)
+                                    not (c.is_closed ())
+                                ) server.tcp_cnxs ;
+                            (* Supposed to set the receiver of this tcp trx: *)
+                            server.tcp_accept tcp.tcp_trx ;
                             tcp.tcp_trx
                         ) else (
-                            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have a server but so socket for ports %s:%s and TCP flags=%s" (Tcp.Port.to_string tcp.dst_port) (Tcp.Port.to_string tcp.src_port) (Tcp.Pdu.string_of_flags tcp.flags)))) ;
+                            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have a server but no socket for ports %s:%s and TCP flags=%s" (Tcp.Port.to_string tcp.dst_port) (Tcp.Port.to_string tcp.src_port) (Tcp.Pdu.string_of_flags tcp.flags)))) ;
                             raise No_socket
                         )) in
                 rx trx.trx bits (* will reorder fragments and transmit the messages up to its emit function *)
@@ -262,7 +281,8 @@ let icmp_rx t ip_trx bits =
 
 let rec find_alive_tcp tcps key =
     match Hashtbl.find_option tcps key with
-    | None -> None
+    | None ->
+        None
     | Some (tcp : Tcp.TRX.tcp_trx) ->
         if not (tcp.is_closed ()) then Some tcp else (
             Hashtbl.remove tcps key ;
@@ -910,32 +930,33 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
     let if_on t what f x =
         if t.trx.widget.power.on then f x
         else Log.(log widget.logger Debug (lazy (Printf.sprintf "Ignoring %s since I'm off" what))) in
-    let rec t =
-        { eth_state ;
-          eth_trx ;
-          tcp_socks     = Hashtbl.create 11 ;
-          udp_socks     = Hashtbl.create 11 ;
-          icmp_socks    = Hashtbl.create 11 ;
-          tcp_servers   = Hashtbl.create 11 ;
-          udp_servers   = Hashtbl.create 11 ;
-          own_ip_config ;
-          nameserver ;
-          host_name     = name ;
-          static_ip ;
-          netmask ;
-          leased_netmask = None ;
-          leased_gateway = None ;
-          leased_nameserver = None ;
-          leased_search_sfx = None ;
-          leased_host_name = None ;
-          resolv_trx    = None ;
-          search_sfx    = search_sfx ;
-          dns_queries   = Hashtbl.create 3 ;
-          dns_cache     = Hashtbl.create 3 ;
-          resolutions   = Metric.Timed.make () ;
-          echo_waiters  = Hashtbl.create 3 ;
-          trx           = host_trx ;
-          last_ip_packet = None }
+    let rec t = {
+        eth_state ;
+        eth_trx ;
+        tcp_socks     = Hashtbl.create 11 ;
+        udp_socks     = Hashtbl.create 11 ;
+        icmp_socks    = Hashtbl.create 11 ;
+        tcp_servers   = Hashtbl.create 11 ;
+        udp_servers   = Hashtbl.create 11 ;
+        own_ip_config ;
+        nameserver ;
+        host_name     = name ;
+        static_ip ;
+        netmask ;
+        leased_netmask = None ;
+        leased_gateway = None ;
+        leased_nameserver = None ;
+        leased_search_sfx = None ;
+        leased_host_name = None ;
+        resolv_trx    = None ;
+        search_sfx    = search_sfx ;
+        dns_queries   = Hashtbl.create 3 ;
+        dns_cache     = Hashtbl.create 3 ;
+        resolutions   = Metric.Timed.make () ;
+        echo_waiters  = Hashtbl.create 3 ;
+        trx           = host_trx ;
+        last_ip_packet = None
+    }
     (* Read afresh at every boot, and not chosen once here: which of the three
        applies is a fact about the host as it stands, and the reader may have
        changed it since. *)
@@ -947,33 +968,34 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
         if not t.own_ip_config then ignore
         else if t.static_ip = None then init_dhcp
         else init_static
-    and host_trx =
-        { widget ;
-          dev           = { write = (fun bits ->
-                               Log.(log widget.logger Debug (lazy (Printf.sprintf "got written to %d bits" (bitstring_length bits)))) ;
-                               rx t.eth_trx bits) ;
-                            busy_for = never_busy ;
-                            set_read = (fun f busy_for ->
-                                t.eth_trx.out.set_read f busy_for) } ;
-          tcp_connect   = (fun addr ?src_port ?snd_buf ?rcv_buf dst cont -> if_on t "tcp_connect" (tcp_connect t addr ?src_port ?snd_buf ?rcv_buf dst) cont) ;
-          udp_connect   = (fun dst ?src_port dst_port client_f cont -> if_on t "udp_connect" (udp_connect t dst ?src_port dst_port client_f) cont) ;
-          udp_send      = (fun dst ?src_port dst_port bits -> if_on t "udp_send" (udp_send t dst ?src_port dst_port) bits) ;
-          ping          = (fun ?id ?seq dst -> if_on t "ping" (ping t ?id ?seq) dst) ;
-          gethostbyname = (fun name cont -> if_on t "gethostbyname" (gethostbyname t name) cont) ;
-          (* Not [if_on]: what a machine runs is what it is configured with and
-             not something it does, and a box is configured while it is dark --
-             born that way, and switched on by its power-on when the network
-             around it stands. A server on a box that is off still cannot
-             answer: what it would send is scheduled on the box's supply, and
-             there is none. *)
-          tcp_server_start = (fun ?snd_buf ?rcv_buf port server_f -> tcp_server_start t ?snd_buf ?rcv_buf port server_f) ;
-          tcp_server_stop  = (fun port -> tcp_server_stop t port) ;
-          udp_server_start = (fun port server_f -> udp_server_start t port server_f) ;
-          udp_server_stop  = (fun port -> udp_server_stop t port) ;
-          signal_err    = (fun str -> signal_err t str) ;
-          (* This call is needed by dhcpd servers running on this host: *)
-          arp_set       = (fun ip haddr_opt -> if_on t "arp_set" (Eth.State.set_arp t.eth_state (Ip.Addr.to_bitstring ip)) haddr_opt) ;
-          on_ip         = [] }
+    and host_trx = {
+        widget ;
+        dev           = { write = (fun bits ->
+                             Log.(log widget.logger Debug (lazy (Printf.sprintf "got written to %d bits" (bitstring_length bits)))) ;
+                             rx t.eth_trx bits) ;
+                          busy_for = never_busy ;
+                          set_read = (fun f busy_for ->
+                              t.eth_trx.out.set_read f busy_for) } ;
+        tcp_connect   = (fun addr ?src_port ?snd_buf ?rcv_buf dst cont -> if_on t "tcp_connect" (tcp_connect t addr ?src_port ?snd_buf ?rcv_buf dst) cont) ;
+        udp_connect   = (fun dst ?src_port dst_port client_f cont -> if_on t "udp_connect" (udp_connect t dst ?src_port dst_port client_f) cont) ;
+        udp_send      = (fun dst ?src_port dst_port bits -> if_on t "udp_send" (udp_send t dst ?src_port dst_port) bits) ;
+        ping          = (fun ?id ?seq dst -> if_on t "ping" (ping t ?id ?seq) dst) ;
+        gethostbyname = (fun name cont -> if_on t "gethostbyname" (gethostbyname t name) cont) ;
+        (* Not [if_on]: what a machine runs is what it is configured with and
+           not something it does, and a box is configured while it is dark --
+           born that way, and switched on by its power-on when the network
+           around it stands. A server on a box that is off still cannot
+           answer: what it would send is scheduled on the box's supply, and
+           there is none. *)
+        tcp_server_start = (fun ?snd_buf ?rcv_buf port server_f -> tcp_server_start t ?snd_buf ?rcv_buf port server_f) ;
+        tcp_server_stop  = (fun port -> tcp_server_stop t port) ;
+        udp_server_start = (fun port server_f -> udp_server_start t port server_f) ;
+        udp_server_stop  = (fun port -> udp_server_stop t port) ;
+        signal_err    = (fun str -> signal_err t str) ;
+        (* This call is needed by dhcpd servers running on this host: *)
+        arp_set       = (fun ip haddr_opt -> if_on t "arp_set" (Eth.State.set_arp t.eth_state (Ip.Addr.to_bitstring ip)) haddr_opt) ;
+        on_ip         = [] ;
+    }
     in
     (* No "on" property here: the switch belongs to whoever minted the supply,
        which for a host built on somebody else's adapter is somebody else. See
@@ -1232,16 +1254,17 @@ let param_properties (params : Widget.param list) args =
 type traffic = { mutable sent : int ; mutable received : int }
 
 (* One conversation, whichever the protocol: *)
-type flow =
-    { send : bitstring -> unit ;
-      (* Whether [send] may be called now: not before a TCP connection is
-         established, nor once it is closed. *)
-      writable : unit -> bool ;
-      (* How long what [send] is given now would wait before it leaves: *)
-      busy_for : unit -> Clock.Interval.t ;
-      (* Whether it is over for good: *)
-      finished : unit -> bool ;
-      close : unit -> unit }
+type flow = {
+    send : bitstring -> unit ;
+    (* Whether [send] may be called now: not before a TCP connection is
+       established, nor once it is closed. *)
+    writable : unit -> bool ;
+    (* How long what [send] is given now would wait before it leaves: *)
+    busy_for : unit -> Clock.Interval.t ;
+    (* Whether it is over for good: *)
+    finished : unit -> bool ;
+    close : unit -> unit ;
+}
 
 (* [closed] is called when the peer closes the connection. *)
 let tcp_flow (cnx : Tcp.TRX.tcp_trx) ~recv ~closed =
