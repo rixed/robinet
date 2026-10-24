@@ -73,10 +73,7 @@ type host_trx = {
 
 and tcp_socks = {
     ip_4_tcp : trx ;
-    (* Available sockets per IP dest.
-       The user of TCP does not remove these entries, so the TRX is still there
-       for some time. We should probably "garbage collect" them once in a while,
-       if they are closed for long enough. *)
+    (* Available sockets per IP dest, until they are over (see [sweep_tcps]). *)
     tcps : (Tcp.Port.t * Tcp.Port.t (* local, remote *), Tcp.TRX.tcp_trx) Hashtbl.t
 }
 
@@ -191,15 +188,9 @@ let signal_err t str =
     (* later, change this into a nice log *)
     Printf.fprintf stderr "Host %s: %s\n%!" t.trx.widget.name str
 
-let rec find_alive_tcp tcps key =
-    match Hashtbl.find_option tcps key with
-    | None ->
-        None
-    | Some (tcp : Tcp.TRX.tcp_trx) ->
-        if not (tcp.is_closed ()) then Some tcp else (
-            Hashtbl.remove tcps key ;
-            find_alive_tcp tcps key
-        )
+(* Forgets the connections that are over, whenever a new one is added: *)
+let sweep_tcps tcps =
+    Hashtbl.filter_inplace (fun (c : Tcp.TRX.tcp_trx) -> not (c.is_over ())) tcps
 
 (* Forward the payload to the socket function or to the server function *)
 let tcp_sock_rx t socks bits =
@@ -208,12 +199,15 @@ let tcp_sock_rx t socks bits =
             Log.(log t.trx.widget.logger Warning s)
         | Ok (tcp : Tcp.Pdu.t) ->
             let key = tcp.dst_port, tcp.src_port in
-            (* A SYN reopens a closed connection's ports: *)
-            if tcp.flags.syn then ignore (find_alive_tcp socks.tcps key) ;
+            if tcp.flags.syn then
+                Hashtbl.find_option socks.tcps key |>
+                Option.may (fun (c : Tcp.TRX.tcp_trx) ->
+                    if c.may_reopen tcp.seq_num then Hashtbl.remove socks.tcps key) ;
             try
                 let trx =
                     hash_find_or_insert socks.tcps key (fun () ->
                         if tcp.flags.syn then (
+                            sweep_tcps socks.tcps ;
                             let server =
                                 try Hashtbl.find t.tcp_servers tcp.dst_port
                                 with Not_found -> (
@@ -440,11 +434,12 @@ and tcp_connect t dst ?src_port ?snd_buf ?rcv_buf (dst_port : Tcp.Port.t) cont =
             sink (tcp_sock_rx t socks) <-= trx =-> t.eth_trx.ins ;
             socks) in
         (* Try to find a unused port if none was given, or ensure the given one is free *)
+        sweep_tcps socks.tcps ;
         let src_port = match src_port with
             | None ->
                 let start = Random.int (0x10000 - 1024) + 1024 in
                 let rec aux pnum =
-                    if find_alive_tcp socks.tcps (Tcp.Port.o pnum, dst_port) = None then (
+                    if not (Hashtbl.mem socks.tcps (Tcp.Port.o pnum, dst_port)) then (
                         Some (Tcp.Port.o pnum)
                     ) else (
                         let next = pnum + 1 in
@@ -454,11 +449,11 @@ and tcp_connect t dst ?src_port ?snd_buf ?rcv_buf (dst_port : Tcp.Port.t) cont =
                     ) in
                 aux start
             | Some src_port ->
-                if None = find_alive_tcp socks.tcps (src_port, dst_port) then (
+                if not (Hashtbl.mem socks.tcps (src_port, dst_port)) then (
                     Some src_port
                 ) else (
                     (* Metric.Atomic.fire tcp_cnxs_err ; *)
-                    Log.(log t.trx.widget.logger Error (lazy "Already connected")) ;
+                    Log.(log t.trx.widget.logger Error (lazy "Ports already in use")) ;
                     None
                 ) in
         (* Check we have a source port *)
@@ -673,7 +668,8 @@ let udp_server_stop t port =
     assert_equal ~printer:string_of_int ~msg:"until restarted" 3 !served
  *)
 
-(* Once closed, a connection's ports can be used again. *)
+(* Once over, a connection's ports can be used again: at once for the side that
+   closed last, after TIME_WAIT for the other. *)
 (*$R
     let sim = Simulation.make ~realtime:false "port-reuse" in
     let ip n = Ip.Addr.of_string ("192.168.0." ^ string_of_int n) in
@@ -696,15 +692,20 @@ let udp_server_stop t port =
                           (fun c -> cnx := c) ;
         Simulation.run sim false ;
         !cnx in
-    for i = 1 to 2 do
+    let connect_and_close i =
         match connect () with
         | None ->
             assert_failure (Printf.sprintf "connection #%d failed" i)
         | Some (c : Tcp.TRX.tcp_trx) ->
             c.close () ;
             Simulation.run sim false ;
-            assert_bool "closed" (c.is_closed ())
-    done
+            assert_bool "closed" (c.is_closed ()) ;
+            assert_bool "in TIME_WAIT" (not (c.is_over ())) in
+    connect_and_close 1 ;
+    assert_bool "ports in TIME_WAIT are in use" (connect () = None) ;
+    Simulation.delay a.trx.widget.power Tcp.TRX.default_time_wait ignore () ;
+    Simulation.run sim false ;
+    connect_and_close 2
  *)
 
 (* The recv of the eth is responsible for handling the payload to the correct Ip.TRX *)

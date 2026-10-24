@@ -128,7 +128,9 @@ let tcp_trx_of_socket ctx sock =
       Tcp.TRX.close     = close t ;
       Tcp.TRX.is_closed = (fun () -> t.is_closed) ;
       (* A socket is handed out only once connected: *)
-      Tcp.TRX.is_established = (fun () -> true) }
+      Tcp.TRX.is_established = (fun () -> true) ;
+      Tcp.TRX.is_over = (fun () -> t.is_closed) ;
+      Tcp.TRX.may_reopen = (fun _ -> t.is_closed) }
 
 (* TODO: make use of another thread for an asynchronous gethostbyname *)
 let gethostbyname ctx name cont =

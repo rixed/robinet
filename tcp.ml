@@ -574,8 +574,11 @@ struct
     type tcp_trx = {
         trx : trx ;
         close : unit -> unit ; (* close the trx (only once established) *)
-        is_closed : unit -> bool ;
-        is_established : unit -> bool }
+        is_closed : unit -> bool ; (* nothing more can be written *)
+        is_established : unit -> bool ;
+        is_over : unit -> bool ; (* gone for good: its ports are free *)
+        (* Whether a SYN with that sequence number may take its ports: *)
+        may_reopen : SeqNum.t -> bool }
     type t = {
         logger : Log.t ;
         power : Simulation.power ;
@@ -592,6 +595,12 @@ struct
         mutable rcvd_isn : SeqNum.t option ;
         mutable closed : bool ;  (* set whenever the user want to close or we received a FIN *)
         mutable sent_fin : bool ;
+        mutable closed_first : bool ; (* our FIN went before the peer's *)
+        (* When the ports become free: at once when aborted, else once both
+         * FINs went through and ours was acked, after time_wait for the side
+         * that closed first: *)
+        mutable over_at : Clock.Time.t option ;
+        time_wait : Clock.Interval.t ;
         mutable sent_pld : int ;  (* what was already send, with syn and fin counting as 1 *)
         mutable sent_acked : int ;  (* what was acked from what we sent (must be <= sent_pld) *)
         mutable rcvd_pld : int ;  (* what was already received (sequentially), with same remark *)
@@ -633,8 +642,18 @@ struct
         counters : counters ;
         sync_recv : bool (* whether what is received is handed to the reader at once rather than from the scheduler *) }
 
-    (* FIXME: ideally, wait 2 minutes after the complete close *)
     let is_closed t () = t.closed
+
+    let is_over t () =
+        match t.over_at with
+        | Some at -> Clock.Time.compare (Simulation.now t.power.sim) at >= 0
+        | None -> false
+
+    let check_over t =
+        if t.over_at = None && t.sent_fin && t.rcvd_fin && t.sent_acked >= t.sent_pld then (
+            let now = Simulation.now t.power.sim in
+            Log.(log t.logger Debug (lazy (if t.closed_first then "Tcp: TIME_WAIT" else "Tcp: Over"))) ;
+            t.over_at <- Some (if t.closed_first then Clock.Time.add now t.time_wait else now))
 
     (* Hands [bits] to the reader, an empty bitstring signaling the close: *)
     let deliver t bits =
@@ -736,6 +755,7 @@ struct
     let abort t =
         Log.(log t.logger Debug (lazy "Tcp: Aborting the cnx")) ;
         stop_rto t ;
+        t.over_at <- Some (Simulation.now t.power.sim) ;
         t.closed <- true ;
         t.sent_fin <- true ;
         t.rcvd_fin <- true ;
@@ -991,7 +1011,8 @@ struct
                             t.rcvd_pld - t.rcvd_acked > t.rcv_mss) then
             emit_one t empty_bitstring
         else if t.rcvd_acked < t.rcvd_pld then
-            Simulation.delay t.power tcp_delack_min delayed_ack t
+            Simulation.delay t.power tcp_delack_min delayed_ack t ;
+        check_over t
 
     and is_established t = t.sent_pld > 0 && t.rcvd_pld > 0
 
@@ -1121,6 +1142,7 @@ struct
             if t.closed && not t.sent_fin then (
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: sending FIN"))) ;
                 t.sent_fin <- true ;
+                t.closed_first <- not t.rcvd_fin ;
                 emit_one t ~fin:true empty_bitstring (* TODO: pack the FIN into the last payload? *)
             ) else ( (* maybe we should ack something ? *)
             )
@@ -1152,19 +1174,31 @@ struct
             else match t.rtt with Some (srtt, _) -> srtt | None -> t.rto in
         max own (t.emit_busy_for ())
 
+    (* In TIME_WAIT, a SYN beyond what was received is from a new connection
+     * (RFC 6191): *)
+    let may_reopen t seq =
+        is_over t () ||
+        t.over_at <> None &&
+        match next_ack_num t with
+        | Some nxt -> Int32.compare ((seq : SeqNum.t :> int32) -/ (nxt :> int32)) 0l > 0
+        | None -> false
+
     let default_snd_buf = 65536
     (* The maximum of Linux's tcp_rmem: *)
     let default_rcv_buf = 6 * 1024 * 1024
     (* What the largest window scaling allows to advertise: *)
     let max_rcv_buf = 0xffff lsl 14
 
-    (* Retransmission defaults are those of Linux, as is the initial window
-     * (RFC 6928): *)
+    (* Retransmission defaults are those of Linux, as are the initial window
+     * (RFC 6928) and TIME_WAIT: *)
+    let default_time_wait = Clock.Interval.sec 60.
+
     (* With [sync_recv], what is received in order is handed to the reader
      * while the segment that completes it is being received. *)
     let make power ?(sync_recv=false) ?isn ?(mss=536) ?(ssthresh=max_int) ?(initial_window=10) ?(snd_buf=default_snd_buf) ?(rcv_buf=default_rcv_buf)
              ?(initial_rto=Clock.Interval.sec 1.) ?(min_rto_var=Clock.Interval.msec 200.)
              ?(max_rto=Clock.Interval.sec 120.) ?(max_timeouts=15)
+             ?(time_wait=default_time_wait)
              src dst logger =
         let t = { logger ; power ;
                   src = src ;
@@ -1179,7 +1213,8 @@ struct
                   rto_armed = false ; timeouts = 0 ;
                   isn = may_default isn (fun () -> SeqNum.o (rand32 ())) ;
                   rcvd_isn = None ;
-                  closed = false ; sent_fin = false ;
+                  closed = false ; sent_fin = false ; closed_first = false ;
+                  over_at = None ; time_wait ;
                   sent_pld = 0 ; sent_acked = 0 ; rcvd_pld = 0 ; rcvd_acked = 0 ;
                   rcvd_pkts = Streambuf.empty ;
                   to_send = [] ; to_send_len = 0 ; snd_buf ;
@@ -1200,7 +1235,9 @@ struct
                   tcp_trx = { trx = null_trx ~logger ;
                               close = ignore ;
                               is_closed = (fun _ -> true) ;
-                              is_established = (fun _ -> false) } } in
+                              is_established = (fun _ -> false) ;
+                              is_over = (fun _ -> true) ;
+                              may_reopen = (fun _ -> true) } } in
         t.tcp_trx <- { trx =  { ins = { write = tx t ;
                                         busy_for = busy_for t ;
                                         set_read = fun f busy_for ->
@@ -1213,7 +1250,9 @@ struct
                                             t.emit_busy_for <- busy_for } } ;
                        close = close t ;
                        is_closed = is_closed t ;
-                       is_established = (fun () -> is_established t) } ;
+                       is_established = (fun () -> is_established t) ;
+                       is_over = is_over t ;
+                       may_reopen = may_reopen t } ;
         t
 
     let may_timeout t =
@@ -1241,6 +1280,7 @@ struct
         if tcp.flags.rst then abort t
         else if tcp.flags.fin then (
             t.closed <- true ;
+            t.closed_first <- not t.rcvd_fin ;
             t.sent_fin <- true
         )
 
@@ -1405,6 +1445,28 @@ end
     let _, _, rcvd, _ =
         exchange ~isn:(SeqNum.o 0xFFFFFFF8l) [ write "hello " ; manual "manual " ; write "world" ] in
     assert_equal ~printer:identity "hello manual world" rcvd
+*)
+(* The side that closes first waits in TIME_WAIT, where only a SYN beyond what
+ * it received may reopen its ports: *)
+(*$R may_reopen
+    let sim = Simulation.make ~realtime:false "time-wait" in
+    let power = sim.root.power and logger = Log.make () in
+    let a = make power (Port.o 1) (Port.o 2) logger
+    and b = make power (Port.o 2) (Port.o 1) logger in
+    let later f x = Simulation.delay power (Clock.Interval.msec 10.) f x in
+    a.tcp_trx.trx.out --> sink (later b.tcp_trx.trx.out.write) ;
+    b.tcp_trx.trx.out --> sink (later a.tcp_trx.trx.out.write) ;
+    connect a (fun _ -> a.tcp_trx.close ()) ;
+    Simulation.run sim false ;
+    assert_bool "the last to close is over" (b.tcp_trx.is_over ()) ;
+    assert_bool "the first to close is not" (not (a.tcp_trx.is_over ())) ;
+    let nxt = Option.get (next_ack_num a) in
+    assert_bool "an old SYN may not reopen" (not (may_reopen a (Option.get a.rcvd_isn))) ;
+    assert_bool "nor one at what is expected" (not (may_reopen a nxt)) ;
+    assert_bool "a newer SYN may" (may_reopen a (SeqNum.o ((nxt :> int32) +/ 1l))) ;
+    Simulation.delay power default_time_wait ignore () ;
+    Simulation.run sim false ;
+    assert_bool "over after TIME_WAIT" (a.tcp_trx.is_over ())
 *)
 (*$= make & ~printer:string_of_bool
     false (let sim = Simulation.make ~realtime:false "isn" in \
