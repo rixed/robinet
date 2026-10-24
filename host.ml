@@ -86,7 +86,7 @@ and udp_socks = {
 }
 
 (* A listening server: what to do with a new connection, and the connections
-   it was handed, so that stopping it can close them. *)
+   it opened, so that stopping it can close them. *)
 and tcp_server = {
     tcp_accept : Tcp.TRX.tcp_trx -> unit ;
     (* for the connections it accepts: *)
@@ -227,8 +227,11 @@ let tcp_sock_rx t socks bits =
                                 List.filter (fun (_, _, (c : Tcp.TRX.tcp_trx)) ->
                                     not (c.is_closed ())
                                 ) server.tcp_cnxs ;
-                            (* Supposed to set the receiver of this tcp trx: *)
-                            server.tcp_accept tcp.tcp_trx ;
+                            (* The server, unless stopped meanwhile, gets the
+                               connection once the handshake completes, and is
+                               supposed to set its receiver: *)
+                            tcp.cnx_established_cont <- Some (Option.may (fun (c : Tcp.TRX.tcp_trx) ->
+                                if not (c.is_closed ()) then server.tcp_accept c)) ;
                             tcp.tcp_trx
                         ) else (
                             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have a server but no socket for ports %s:%s and TCP flags=%s" (Tcp.Port.to_string tcp.dst_port) (Tcp.Port.to_string tcp.src_port) (Tcp.Pdu.string_of_flags tcp.flags)))) ;

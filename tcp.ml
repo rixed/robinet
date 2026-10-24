@@ -635,10 +635,11 @@ struct
         min_rto_var : Clock.Interval.t ; (* lower bound of the variation term of rto *)
         max_rto : Clock.Interval.t ;
         max_timeouts : int ; (* consecutive timeouts before giving up on the cnx *)
+        max_syn_timeouts : int ; (* the same while our SYN is not acked *)
         mutable rto_gen : int ; (* only the last armed timer is live *)
         mutable rto_armed : bool ;
         mutable timeouts : int ; (* consecutive expirations of the retransmission timer *)
-        mutable cnx_established_cont : (tcp_trx option -> unit) option ; (* what to do when the cnx is established *)
+        mutable cnx_established_cont : (tcp_trx option -> unit) option ; (* what to do once the handshake completes, or fails *)
         counters : counters ;
         sync_recv : bool (* whether what is received is handed to the reader at once rather than from the scheduler *) }
 
@@ -765,6 +766,15 @@ struct
         (* Nor is anything acked any more: *)
         t.rcvd_acked <- t.rcvd_pld
 
+    (* Calls, once, what waits for the handshake: *)
+    let establish_cnx t ok =
+        match t.cnx_established_cont with
+        | Some f ->
+            t.cnx_established_cont <- None ;
+            Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: handshake %s on port %d" (if ok then "complete" else "failed") (t.src :> int)))) ;
+            f (if ok then Some t.tcp_trx else None)
+        | None -> ()
+
     let rec arm_rto t =
         stop_rto t ;
         t.rto_armed <- true ;
@@ -775,8 +785,9 @@ struct
             t.timeouts <- t.timeouts + 1 ;
             t.counters.rto_expired <- t.counters.rto_expired + 1 ;
             Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Retransmission timeout #%d" t.timeouts))) ;
-            if t.timeouts > t.max_timeouts then (
+            if t.timeouts > (if t.sent_acked = 0 then t.max_syn_timeouts else t.max_timeouts) then (
                 abort t ;
+                establish_cnx t false ;
                 deliver t empty_bitstring (* signal the close *)
             ) else (
                 (* Only the first timeout tells about the window that was in flight: *)
@@ -847,15 +858,9 @@ struct
         if t.rcvd_acked < t.rcvd_pld then emit_one t empty_bitstring
 
     (* The cnx is established (ie its behavior is driven by the rcvd and sent streambuf)
-     * whenever we had the two syns, not when they are acked. *)
-    let rec establish_cnx t ok =
-        match t.cnx_established_cont with
-        | Some f ->
-            Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: calling continuation for serving new cnx on port %d" (t.src :> int)))) ;
-            f (if ok then Some t.tcp_trx else None)
-        | None -> Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: no one was waiting")))
-
-    and try_really_rx t =
+     * whenever we had the two syns, not when they are acked. The handshake
+     * completes once our SYN is acked too, and before any data is delivered. *)
+    let rec try_really_rx t =
         if not (Streambuf.is_empty t.rcvd_pkts) then (
             let (o, tcp) as first = Streambuf.min_elt t.rcvd_pkts in
             Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: First of incoming waiting pkts starts at offset %d (while I've received up to %d)" o t.rcvd_pld))) ;
@@ -869,7 +874,7 @@ struct
                         t.rcvd_pld <- 1 ;
                         (* inconditionnaly answer the SYN before the client starts writing *)
                         emit_one t ~syn:(t.sent_pld=0) empty_bitstring ;
-                        establish_cnx t true
+                        if t.sent_acked > 0 then establish_cnx t true
                     ) ;
                     let pld = dropbytes skip (tcp.Pdu.payload :> bitstring) in
                     t.rcvd_pld <- t.rcvd_pld + (bytelength pld) ;
@@ -983,6 +988,7 @@ struct
                 update_snd_wnd t offset acked (peer_wnd t tcp)
         ) else if tcp.Pdu.flags.Pdu.syn then
             update_snd_wnd t offset 0 (peer_wnd t tcp) ;
+        if t.sent_acked > 0 && t.rcvd_pld > 0 then establish_cnx t true ;
         (* Out of order, filling a gap, or already received: *)
         let unexpected = offset <> t.rcvd_pld || not (Streambuf.is_empty t.rcvd_pkts) in
         let is_probe = len = 0 && offset < t.rcvd_pld in
@@ -1028,8 +1034,9 @@ struct
                 if t.rcvd_pld > 0 then (
                     Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: ignoring Syn while inbound cnx is established"))) ;
                     if t.rcvd_isn = Some tcp.Pdu.seq_num then (
-                        (* retransmission of the syn, we may want to act on the ack (ie. retransmit something) *)
-                        inqueue_pkt t tcp
+                        (* retransmission of the syn: our SYN-ACK may have been lost *)
+                        if t.sent_acked = 0 then retransmit_first t
+                        else inqueue_pkt t tcp
                     )
                 ) else (
                     t.rcvd_isn <- Some tcp.Pdu.seq_num ;
@@ -1054,8 +1061,7 @@ struct
                 if tcp.Pdu.flags.Pdu.ack && t.sent_pld > 0 && acked_of t tcp = t.sent_pld then (
                     Log.(log t.logger Debug (lazy "Tcp: connection refused")) ;
                     abort t ;
-                    establish_cnx t false ;
-                    t.cnx_established_cont <- None)
+                    establish_cnx t false)
             ) else if not (is_established t) then (
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: ignoring recvd packet while cnx is not established")))
             ) else inqueue_pkt t tcp)
@@ -1197,7 +1203,7 @@ struct
      * while the segment that completes it is being received. *)
     let make power ?(sync_recv=false) ?isn ?(mss=536) ?(ssthresh=max_int) ?(initial_window=10) ?(snd_buf=default_snd_buf) ?(rcv_buf=default_rcv_buf)
              ?(initial_rto=Clock.Interval.sec 1.) ?(min_rto_var=Clock.Interval.msec 200.)
-             ?(max_rto=Clock.Interval.sec 120.) ?(max_timeouts=15)
+             ?(max_rto=Clock.Interval.sec 120.) ?(max_timeouts=15) ?(max_syn_timeouts=5)
              ?(time_wait=default_time_wait)
              src dst logger =
         let t = { logger ; power ;
@@ -1209,7 +1215,7 @@ struct
                   recv_busy_for = never_busy ;
                   rcv_mss = mss ; snd_mss = mss ; cwnd = initial_window * mss ; initial_window ; ssthresh ; ca_acked = 0 ; dup_acks = 0 ; recovery = Open ;
                   rtt = None ; rtt_probe = None ; rto = initial_rto ; rto_gen = 0 ;
-                  min_rto_var ; max_rto ; max_timeouts ;
+                  min_rto_var ; max_rto ; max_timeouts ; max_syn_timeouts ;
                   rto_armed = false ; timeouts = 0 ;
                   isn = may_default isn (fun () -> SeqNum.o (rand32 ())) ;
                   rcvd_isn = None ;
@@ -1258,7 +1264,6 @@ struct
     let may_timeout t =
         if not (is_established t) then (
             establish_cnx t false ;
-            t.cnx_established_cont <- None ;
             abort t
         )
     let default_connect_timeout = Clock.Interval.sec 15.
@@ -1445,6 +1450,41 @@ end
     let _, _, rcvd, _ =
         exchange ~isn:(SeqNum.o 0xFFFFFFF8l) [ write "hello " ; manual "manual " ; write "world" ] in
     assert_equal ~printer:identity "hello manual world" rcvd
+*)
+(* The passive side is handed the connection when the handshake completes,
+ * answers a retransmitted SYN with its SYN-ACK, and gives up after
+ * max_syn_timeouts timeouts: *)
+(*$R connect
+    let handshake ~synack_lost =
+        let sim = Simulation.make ~realtime:false "handshake" in
+        let power = sim.root.power and logger = Log.make () in
+        let a = make power (Port.o 1) (Port.o 2) logger
+        and b = make power (Port.o 2) (Port.o 1) logger in
+        let later f x = Simulation.delay power (Clock.Interval.msec 10.) f x in
+        let all_synacks = ref true in
+        a.tcp_trx.trx.out --> sink (later b.tcp_trx.trx.out.write) ;
+        b.tcp_trx.trx.out --> sink (fun bits ->
+            (match Pdu.unpack bits with
+            | Ok tcp -> if not tcp.flags.syn then all_synacks := false
+            | Error _ -> ()) ;
+            if not synack_lost then later a.tcp_trx.trx.out.write bits) ;
+        let outcome cnx = Option.is_some cnx, Simulation.now sim in
+        let a_ok = ref None and b_ok = ref None in
+        b.cnx_established_cont <- Some (fun c -> b_ok := Some (outcome c)) ;
+        connect a (fun c -> a_ok := Some (outcome c)) ;
+        Simulation.run sim false ;
+        b, !all_synacks, Option.get !a_ok, Option.get !b_ok in
+    let _, _, (a_ok, a_at), (b_ok, b_at) = handshake ~synack_lost:false in
+    assert_bool "established" (a_ok && b_ok) ;
+    assert_bool "on the final ACK, one trip after the SYN-ACK"
+        (Clock.Interval.compare (Clock.Time.diff b_at a_at) (Clock.Interval.msec 10.) >= 0) ;
+    let b, all_synacks, (a_ok, _), (b_ok, b_at) = handshake ~synack_lost:true in
+    assert_bool "failed" (not a_ok && not b_ok) ;
+    assert_bool "only SYN-ACKs" all_synacks ;
+    (* 1+2+4+8+16+32 seconds: *)
+    assert_bool "gave up after 63s"
+        (Clock.Time.(compare b_at (of_secs 63.) > 0 && compare b_at (of_secs 64.) < 0)) ;
+    assert_bool "over" (b.tcp_trx.is_over ())
 *)
 (* The side that closes first waits in TIME_WAIT, where only a SYN beyond what
  * it received may reopen its ports: *)
