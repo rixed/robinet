@@ -58,6 +58,16 @@ let record format ?(json=[]) kind fields =
     | Json ->
         Crafty_value.json_to_string (`Assoc (("type", `String kind) :: fields @ json))
 
+(* The stats of streams that tell what -p and the streams may hide, summed
+ * over all streams for a warning at exit, by what they tell: *)
+let suspicious_stats =
+    [ "IP fragmentation", [ "fragmented" ; "frags_in" ] ;
+      "incomplete IP packets", [ "reasm_timeouts" ] ;
+      "TCP retransmissions", [ "retrans" ; "timeouts" ] ;
+      "TCP duplicate acks", [ "dupacks" ] ;
+      "TCP segments out of order", [ "ooo_in" ] ;
+      "duplicate TCP segments", [ "dup_in" ] ]
+
 (* Setuid root, crafty becomes root entirely, for the commands it runs to be
  * root as well (busybox's sh drops an effective uid that is not the real
  * one), and starts over in an environment of its own, since the user's
@@ -346,6 +356,15 @@ let () =
                     ("stream", `String (Crafty_tree.stream_name n)) ::
                     List.map (fun (name, typ, v) -> name, Crafty_value.to_json typ v)
                         (Crafty_tree.typed_stats n)) in
+    let suspicious = Hashtbl.create 8 in
+    let tally n =
+        List.iter (fun (name, v) ->
+            match v with
+            | Crafty_value.Int c
+              when List.exists (List.mem name % snd) suspicious_stats ->
+                Hashtbl.modify_def 0 name ((+) c) suspicious
+            | _ -> ()
+        ) (Crafty_tree.stats n) in
     (* What the program sends, what goes out and comes in, and what is
      * captured going out, the host's included: *)
     let sent = ref 0 and pkts_out = ref 0 and pkts_in = ref 0
@@ -368,7 +387,7 @@ let () =
                 if format = Human then print_endline s
                 else emit "print" [ "text", `String s ])
             ~print_err:prerr_endline
-            ~on_closed:(print_stats "closed")
+            ~on_closed:(fun n -> tally n ; print_stats "closed" n)
             (* What comes in was received by the real interface already: *)
             ~rx_wire:false
             ~on_exit:(fun s ->
@@ -459,7 +478,7 @@ let () =
     Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ] (fun () ->
         Simulation.run sim true) ;
     Option.may Host_config.undo changes ;
-    List.iter (print_stats "open") (h.open_streams ()) ;
+    List.iter (fun n -> tally n ; print_stats "open" n) (h.open_streams ()) ;
     let status_str, code =
         match !status, !limit with
         | Crafty_interp.Done, _ -> "OK", 0
@@ -467,6 +486,25 @@ let () =
         | Stopped, Some l -> "stopped: "^ Policer.string_of_limit l, 3
         | Stopped, None -> "stopped", 3
         | Running, _ -> "interrupted", 130 in
+    (* What was seen, with the counters that are not 0: *)
+    let suspicious =
+        List.filter_map (fun (what, names) ->
+            match List.filter_map (fun name ->
+                    match Hashtbl.find_default suspicious name 0 with
+                    | 0 -> None
+                    | c -> Some (name, c)) names with
+            | [] -> None
+            | counts -> Some (what, counts)) suspicious_stats in
+    if not !no_warning && suspicious <> [] then (
+        let text =
+            "Detected "^ String.concat ", " (List.map (fun (what, counts) ->
+                what ^" ("^ String.concat ", " (List.map (fun (name, c) ->
+                    Printf.sprintf "%s=%d" name c) counts) ^")") suspicious) in
+        if format = Human then Printf.printf "Warning: %s\n" text
+        else
+            emit "warning" [ "text", `String text ]
+                 ~json:(List.concat_map (fun (_, counts) ->
+                     List.map (fun (name, c) -> name, `Int c) counts) suspicious)) ;
     if format = Human then (
         Printf.printf "Done after %.1fs, status: %s.\n" (secs ()) status_str ;
         Printf.printf "Packets: %d out, %d in. Bytes: %d out, %d in.\n"

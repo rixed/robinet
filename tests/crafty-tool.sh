@@ -124,6 +124,13 @@ cat > "$DIR/lossy.cfty" <<'EOF'
   print("echoed ${n}, out of order ${s.ooo_in > 0}")
 }
 EOF
+# Echoed, a datagram larger than the MTU is fragmented both ways:
+cat > "$DIR/frags.cfty" <<'EOF'
+/IP(dst=10.77.0.2)/UDP(dst=7) {
+  Bytes(randbytes(3000))
+  expect timeout=1s Bytes { print("echoed ${length(MATCH[Bytes].data)}") }
+}
+EOF
 printf 'x = "a" + 1\n' > "$DIR/bad.cfty"
 
 setup
@@ -139,6 +146,23 @@ if [ "$(grep -c '^< ' "$DIR/out")" = 3 ] && ! grep -q '^> ' "$DIR/out" ; then
     echo "ok   only the echoes are printed"
 else
     echo "FAIL not only the echoes are printed:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
+fi
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/frags.cfty" > "$DIR/out" 2>&1
+check "fragments are reassembled and warned of" 0 $? "^Warning: Detected IP fragmentation (fragmented=1, frags_in=[1-9]"
+if ! grep -q "echoed 3000" "$DIR/out" ; then
+    echo "FAIL the fragmented echo did not come back:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
+fi
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --no-warning "$DIR/frags.cfty" > "$DIR/out" 2>&1
+check "--no-warning" 0 $? "echoed 3000"
+if grep -q '^Warning' "$DIR/out" ; then
+    echo "FAIL a warning despite --no-warning:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
+fi
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/udp.cfty" > "$DIR/out" 2>&1
+if grep -q '^Warning' "$DIR/out" ; then
+    echo "FAIL a warning without anything suspicious:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
 fi
 
 "$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/ts.cfty" > "$DIR/out" 2>&1
@@ -162,6 +186,11 @@ fi
 ip netns exec $NS tc qdisc add dev $NS_IF root netem loss 10%
 "$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw "$DIR/lossy.cfty" > "$DIR/out" 2>&1
 check "the stats of a lossy connection" 0 $? "echoed 200000, out of order true"
+if grep -q '^Warning: Detected .*TCP retransmissions (retrans=[1-9].*TCP segments out of order (ooo_in=[1-9]' "$DIR/out" ; then
+    echo "ok   the losses are warned of"
+else
+    echo "FAIL no warning of the losses:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
+fi
 ip netns exec $NS tc qdisc del dev $NS_IF root
 
 "$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw --stats "$DIR/tcp.cfty" > "$DIR/out" 2>&1
