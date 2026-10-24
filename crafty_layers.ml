@@ -327,13 +327,14 @@ let ip_node ctx =
     let next_id () = id := (!id + 1) land 0xffff ; !id in
     let trxs = Hashtbl.create 3 in
     let fragments = Hashtbl.create 3 in
+    let counters = Ip.TRX.make_counters () in
     let receive (u : unpacked) =
         if List.assoc "is_fragment" u.values <> V.Bool true then pass u else
         let fragment = u, [ Manual ] in
         match Ip.Pdu.unpack u.bits with
         | Error _ -> [ fragment ]
         | Ok ip ->
-            (match Ip.TRX.reassemble_into st.iface.widget.power fragments ip with
+            (match Ip.TRX.reassemble_into st.iface.widget.power counters fragments ip with
             | None -> [ fragment ]
             | Some payload ->
                 let ip =
@@ -354,7 +355,7 @@ let ip_node ctx =
             | Some t -> t
             | None ->
                 let t =
-                    Ip.TRX.create st.iface.widget.power ~mtu:st.mtu ~next_id
+                    Ip.TRX.create st.iface.widget.power ~mtu:st.mtu ~next_id ~counters
                         (ip_of fields "src") (ip_of fields "dst")
                         (Ip.Proto.o proto) st.iface.widget.logger in
                 Tools.((Ip.TRX.trx_of t).out -->
@@ -364,7 +365,12 @@ let ip_node ctx =
         Ip.TRX.tx ?tos:(Option.map Ip.ToS.o (opt_int fields "tos" 0 0xff))
                   ?ttl:(opt_int fields "ttl" 0 0xff)
                   ?dont_frag:(opt_bool fields "dont_frag") ~options t payload) ;
-      receive }
+      receive ;
+      stats = (fun () ->
+        let c = counters in
+        [ "fragmented", V.Int c.fragmented ; "frags_out", V.Int c.frags_out ;
+          "frags_in", V.Int c.frags_in ; "reassembled", V.Int c.reassembled ;
+          "reasm_timeouts", V.Int c.reasm_timeouts ]) }
 
 let unpack_udp _ bits =
     match Udp.Pdu.unpack bits with
@@ -942,7 +948,10 @@ let eth =
         field "ts" Type.Time ~set_in:[] ~read_in:both ]
 
 let ip =
-    layer N.IP ~above:[ eth ] ~driven:true ~node:ip_node ~unpack:unpack_ip [
+    layer N.IP ~above:[ eth ] ~driven:true ~node:ip_node ~unpack:unpack_ip
+        ~stats:Type.[
+            "fragmented", Int ; "frags_out", Int ; "frags_in", Int ;
+            "reassembled", Int ; "reasm_timeouts", Int ] [
         field "src" Type.Ip ~set_in:both ~read_in:both ~discriminant:true
               ~pick:Local_address ~peer:"dst" ;
         field "dst" Type.Ip ~set_in:both ~read_in:both ~discriminant:true

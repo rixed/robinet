@@ -2056,12 +2056,16 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (with_host ~setup:(fun h _ -> h.Host.trx.Host.udp_server_start (Udp.Port.o 7) (fun udp -> \
         Tools.(udp.Udp.TRX.trx.ins --> sink (fun bits -> tx udp.Udp.TRX.trx bits)))) \
         "/IP(dst=10.0.0.2)/UDP(src=4000, dst=7) { repeat count=2 { Bytes(\"echo ${I}\")\n    expect timeout=1s Bytes {} }\n  s = stats()\n  print(\"2 echoes, out ${s.packets_out} ${s.bytes_out}, in ${s.packets_in} ${s.bytes_in}\") }")
+  "a 0.001s: fragmented 1, frags out 3, in 3, reassembled 1, timeouts 0\na 0.001s: done Eth#4" \
+    (with_host ~setup:(fun h _ -> h.Host.trx.Host.udp_server_start (Udp.Port.o 7) (fun udp -> \
+        Tools.(udp.Udp.TRX.trx.ins --> sink (fun bits -> tx udp.Udp.TRX.trx bits)))) \
+        "/IP(dst=10.0.0.2) {\n  UDP(src=4000, dst=7) {\n    Bytes(randbytes(3000))\n    expect timeout=1s Bytes {} }\n  s = stats()\n  print(\"fragmented ${s.fragmented}, frags out ${s.frags_out}, in ${s.frags_in}, reassembled ${s.reassembled}, timeouts ${s.reasm_timeouts}\") }")
 *)
 (*$T
   let out = with_host ~setup:tcp_echo ~closed:true \
       "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Bytes(\"hello\")\n  expect timeout=1s Bytes {} }" in \
   List.exists (fun l -> String.starts_with l "a 0.000s: closed /IP(src=10.0.0.1, dst=10.0.0.2)/TCP(src=4000, dst=7): packets_out=5 bytes_out=5 packets_in=3 bytes_in=5 bytes_acked=5 bytes_received=5 retrans=0 dupacks=0 timeouts=0 ooo_in=0 dup_in=0 ") (String.split_on_char '\n' out) && \
-  List.mem "a 0.000s: closed /IP(src=10.0.0.1, dst=10.0.0.2): packets_out=5 bytes_out=113 packets_in=3 bytes_in=73" (String.split_on_char '\n' out) || (print_endline out ; false)
+  List.mem "a 0.000s: closed /IP(src=10.0.0.1, dst=10.0.0.2): packets_out=5 bytes_out=113 packets_in=3 bytes_in=73 fragmented=0 frags_out=0 frags_in=0 reassembled=0 reasm_timeouts=0" (String.split_on_char '\n' out) || (print_endline out ; false)
 *)
 (*$T
   let out = two ~arp:true ~loss:0.1 \

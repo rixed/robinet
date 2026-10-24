@@ -1406,6 +1406,19 @@ end
 
 module TRX = struct
 
+    (* What went on since they were made, as Linux's IP MIB, which TRXs can
+     * share: *)
+    type counters = {
+        mutable fragmented : int ; (* packets sent in fragments (FragOKs) *)
+        mutable frags_out : int ; (* the fragments of these (FragCreates) *)
+        mutable frags_in : int ; (* fragments received (ReasmReqds) *)
+        mutable reassembled : int ; (* (ReasmOKs) *)
+        mutable reasm_timeouts : int } (* packets given up on (ReasmTimeout) *)
+
+    let make_counters () =
+        { fragmented = 0 ; frags_out = 0 ; frags_in = 0 ; reassembled = 0 ;
+          reasm_timeouts = 0 }
+
     type t = {
         logger : Log.t ;
         power : Simulation.power ;
@@ -1430,7 +1443,8 @@ module TRX = struct
         mutable recv_busy_for : unit -> Clock.Interval.t ;
         (* Fragments, sorted by frag_offset. The ref is to compare with `==`.
          * See [reassemble_into]. *)
-        reassembled : (reassemble_key, Pdu.t list ref) Hashtbl.t
+        reassembled : (reassemble_key, Pdu.t list ref) Hashtbl.t ;
+        counters : counters
     }
 
     (* We might want to reassemble packets that are not destined to [t.src] (broadcast, ICMP
@@ -1454,10 +1468,15 @@ module TRX = struct
             and options = options |? t.options in
             let pdu =
                 Pdu.make ~tos ~ttl ~id ~dont_frag ~options t.proto t.src t.dst bits in
-            Pdu.fragment t.mtu pdu |>
+            let frags = Pdu.fragment t.mtu pdu in
+            (match List.length frags with
+            | 1 -> ()
+            | n ->
+                t.counters.fragmented <- t.counters.fragmented + 1 ;
+                t.counters.frags_out <- t.counters.frags_out + n) ;
             List.iter (fun bits ->
                 Log.(log t.logger Debug (lazy (Printf.sprintf "Ip: Emitting an IP packet from %s to %s of length %d (content '%s')" (Addr.to_dotted_string t.src) (Addr.to_dotted_string t.dst) (Payload.length pdu.payload) (hexstring_of_bitstring bits)))) ;
-                Simulation.asap t.power t.emit bits)
+                Simulation.asap t.power t.emit bits) frags
         )
 
     (* As Linux's ipfrag_time: *)
@@ -1466,8 +1485,9 @@ module TRX = struct
     (** The payload of the packet [ip] is a fragment of, once [reassembled]
      * (the fragments received so far) has all of them, unless it took more
      * than [reassembly_timeout] since the first one. *)
-    let reassemble_into power reassembled (ip : Pdu.t) =
+    let reassemble_into power counters reassembled (ip : Pdu.t) =
         let key = ip.src, ip.dst, ip.proto, ip.id in
+        counters.frags_in <- counters.frags_in + 1 ;
         match Hashtbl.find reassembled key with
         | exception Not_found ->
             let line = ref [ ip ] in
@@ -1477,7 +1497,9 @@ module TRX = struct
              * was received (RFC 792). *)
             Simulation.delay power reassembly_timeout (fun () ->
                 match Hashtbl.find_option reassembled key with
-                | Some l when l == line -> Hashtbl.remove reassembled key
+                | Some l when l == line ->
+                    counters.reasm_timeouts <- counters.reasm_timeouts + 1 ;
+                    Hashtbl.remove reassembled key
                 | _ -> ()) () ;
             None
         | line ->
@@ -1514,6 +1536,7 @@ module TRX = struct
                     else is_complete (stop f) f.Pdu.more_frags rest in
             if is_complete 0 true frags then (
                 Hashtbl.remove reassembled key ;
+                counters.reassembled <- counters.reassembled + 1 ;
                 (* Rebuild the payload, skipping whatever is already covered: *)
                 let rec loop covered plds = function
                     | [] ->
@@ -1530,7 +1553,7 @@ module TRX = struct
                 None
             )
 
-    let reassemble t ip = reassemble_into t.power t.reassembled ip
+    let reassemble t ip = reassemble_into t.power t.counters t.reassembled ip
 
     (* TODO: check checksum? *)
     let rx (t : t) bits =
@@ -1556,7 +1579,7 @@ module TRX = struct
      *       this layer. *)
     let create power ?(mtu=1500) ?(dont_frag=false) ?(reassemble=true)
                ?(tos=ToS.o 0) ?(ttl=64) ?(options=[]) ?(next_id=Pdu.next_id)
-               src dst proto logger =
+               ?(counters=make_counters ()) src dst proto logger =
         check_options options ;
         ensure (mtu >= Pdu.no_opt_hdr_len + options_len options + 8)
             "Ip: MTU must leave room for at least 8 bytes of payload" ;
@@ -1564,7 +1587,7 @@ module TRX = struct
           tos ; ttl ; options ; next_id ;
           emit = ignore_bits ~logger ; emit_busy_for = never_busy ;
           recv = ignore_bits ~logger ; recv_busy_for = never_busy ;
-          reassembled = Hashtbl.create 10 }
+          reassembled = Hashtbl.create 10 ; counters }
 
     let trx_of t =
         { ins = { write = tx t ;
@@ -1671,17 +1694,29 @@ module TRX = struct
       (receive (frags_of ~mtu:1500 udp_wants_chk)) (receive (frags_of udp_wants_chk))
     *)
     (*$R
-      (* Fragments [d] apart: *)
+      (* Fragments [d] apart, and the counters of
+       * [frags_in, reassembled, reasm_timeouts]: *)
       let receive_apart d =
-        let trx = make sim.root.power b a Proto.udp sim.root.logger in
+        let t = create sim.root.power b a Proto.udp sim.root.logger in
+        let trx = trx_of t in
         let got = ref [] in
         trx.ins --> sink (fun bits -> got := Bitstring.string_of_bitstring bits :: !got) ;
         trx.out.write (frag 0 16 true) ;
         Simulation.delay sim.root.power d trx.out.write (frag 16 24 false) ;
         Simulation.run sim false ;
-        !got in
-      assert_equal ~printer [ msg ] (receive_apart (Clock.Interval.sec 29.)) ;
-      assert_equal ~printer [] (receive_apart (Clock.Interval.sec 31.))
+        let c = t.counters in
+        !got, [ c.frags_in ; c.reassembled ; c.reasm_timeouts ] in
+      let printer = IO.to_string (Tuple2.print (List.print String.print) (List.print Int.print)) in
+      assert_equal ~printer ([ msg ], [ 2 ; 1 ; 0 ]) (receive_apart (Clock.Interval.sec 29.)) ;
+      (* Both fragments start a line, and time out: *)
+      assert_equal ~printer ([], [ 2 ; 0 ; 2 ]) (receive_apart (Clock.Interval.sec 31.)) ;
+      (* And what is sent: *)
+      let t = create sim.root.power ~mtu:36 a b Proto.udp sim.root.logger in
+      tx t (Bitstring.bitstring_of_string msg) ;
+      tx t (Bitstring.bitstring_of_string "hello") ;
+      Simulation.run sim false ;
+      assert_equal ~printer:(IO.to_string (List.print Int.print))
+                   [ 1 ; 3 ] [ t.counters.fragmented ; t.counters.frags_out ]
     *)
     (*$= emitted & ~printer:hdr_printer
       [ 0x10, 3, 7 ] \

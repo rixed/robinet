@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 224628856ecc77c5186694d12e4aa9be) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 599c8ac72785cf9644229104bb7993a3) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -402,7 +402,9 @@ that are not named: `append(a, x)`, `histogram(rtts, bucket=5ms)`.
     `snd_mss`, `rcv_mss`, `cwnd`, `ssthresh` (2\^31-1 before any loss),
     `snd_wnd` (the peer's window), `rcv_wnd`, `snd_wscale` and `rcv_wscale` (the
     window shifts the peer and we offered, -1 if none; scaling is on only if
-    both offered one) and `established`.
+    both offered one) and `established`. An IP stream adds `fragmented` (packets
+    sent in fragments), `frags_out`, `frags_in`, `reassembled` and
+    `reasm_timeouts` (incomplete after 30s).
 -   `getenv(name, default=s)`: fails if unset and no default.
 -   `resolve(name)`: the IPv4 addresses of a name, from the system's resolver;
     fails if none. `hostname(ip, default=s)`: the name of an address; fails if

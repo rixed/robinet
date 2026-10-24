@@ -437,7 +437,9 @@ that are not named: `append(a, x)`, `histogram(rtts, bucket=5ms)`.
   `snd_mss`, `rcv_mss`, `cwnd`, `ssthresh` (2^31-1 before any loss),
   `snd_wnd` (the peer's window), `rcv_wnd`, `snd_wscale` and `rcv_wscale`
   (the window shifts the peer and we offered, -1 if none; scaling is on only
-  if both offered one) and `established`.
+  if both offered one) and `established`. An IP stream adds `fragmented`
+  (packets sent in fragments), `frags_out`, `frags_in`, `reassembled` and
+  `reasm_timeouts` (incomplete after 30s).
 - `getenv(name, default=s)`: fails if unset and no default.
 - `resolve(name)`: the IPv4 addresses of a name, from the system's resolver;
   fails if none. `hostname(ip, default=s)`: the name of an address; fails if
