@@ -189,6 +189,13 @@ Options:
 Exit status: 0 when the program completes, 1 when an error ends it, 2 when it
 does not compile, 3 when a budget stops it, 130 when interrupted.
 
+### Tips
+
+- Use `resolve("hostname")` to resolve a hostname!
+- Parameterize your programs with `getenv("...")`
+- Pay attention to warnings
+- When unsure, use --max-duration
+
 ## 2. Reference
 
 ### Lexical conventions
@@ -781,70 +788,6 @@ target = 192.0.2.10
 port 7 is open
 ```
 
-### A port scan within its budget
-
-```
-BUDGET = {max_syns: 1000, max_syns_per_secs: 200}
-PORTS = {tcp: [[40000, 40000]]}
-target = 192.0.2.10
-sport = PORTS.tcp[0][0]
-{
-  on linger=1s /IP(src == target)/TCP!(dst == sport, flags == SYN | ACK) {
-    print("port ${MATCH[TCP].src} is open")
-  }
-  repeat var=i count=BUDGET.max_syns every=1s / BUDGET.max_syns_per_secs {
-    /IP(dst=target)/TCP!(src=sport, dst=i + 1, flags=SYN, seq_num=1)/Bytes()
-  }
-}
-```
-
-```
-% sudo crafty -i eth0 --fw --max-syns-per-secs 50 budget-scan.cfty
-port 7 is open
-```
-
-No `--tcp`: `PORTS` gives it, for `--fw` too. With `--max-syns-per-secs 50`,
-`BUDGET.max_syns_per_secs` is 50 and the scan takes 20s; with
-`--max-syns 100`, it scans ports 1 to 100.
-
-### Traceroute
-
-```
-target = 192.0.2.10
-repeat var=hop count=30 {
-  ttl = hop + 1
-  port = 33434 + hop
-  {
-    on max=1 linger=1s /IP/ICMP/TimeExceeded(code == TTL_EXCEEDED)/IP/UDP(dst == port) {
-      print("${ttl}: ${MATCH[^IP].src}")
-    }
-    on max=1 linger=1s /IP/ICMP/DestUnreachable(code == PORT_UNREACHABLE)/IP/UDP(dst == port) {
-      print("${ttl}: ${target}, reached")
-      break 2
-    }
-    /IP(dst=target, ttl=ttl)/UDP(dst=port)/Bytes("probe")
-  }
-}
-```
-
-The patterns are absolute, as the routers have addresses of their own, and
-tell the probes apart by the port of the packet the errors quote. `break 2`
-leaves the `on` and the `repeat`.
-
-### Giving up gracefully
-
-```
-/IP(dst=192.0.2.10)/UDP(dst=7) {
-  catch {
-    retry max=2 {
-      Bytes("are you there?")
-      expect timeout=500ms Bytes { print("yes") }
-    }
-  }
-}
-print("moving on")
-```
-
 ### Raw frames
 
 ```
@@ -878,7 +821,7 @@ gw is 192.0.2.1; 2076 bytes in 3 packets
 
 ### Utilities
 
-Whole programs, which take their arguments from the environment.
+Whole programs
 
 #### Traceroute through load balancers
 
