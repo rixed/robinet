@@ -419,6 +419,8 @@ type env =
       warnings : errors ;
       (* Where the variables of the declarations are declared, by id: *)
       declared_at : (int, A.location) Hashtbl.t ;
+      (* Where variables are first read, by id: *)
+      reads : (int, A.location) Hashtbl.t ;
       (* The type of the variables declared there, when wider than that of
        * their value, as their assignments tell: *)
       widened : (A.location, Type.t) Hashtbl.t ;
@@ -428,6 +430,21 @@ type env =
 let bound env name =
     List.exists (fun (v : var) -> v.name = name) env.vars ||
     List.mem name env.poisoned
+
+(* Whether [var], the variable of a repeat, foreach or case, is an [I] that
+ * hides another: *)
+let hides_i env var =
+    var = None && List.exists (fun (v : var) -> v.name = "I") env.vars
+
+(* Warns of the first read of [v], an [I] that hides another, which is
+ * [what]: *)
+let warn_hidden_i env what (v : var) =
+    Hashtbl.find_opt env.reads v.id |>
+    Option.may (fun loc ->
+        env.warnings :=
+            (loc, Printf.sprintf "This I is %s, which hides an outer I: \
+                                  name one of them with var=" what) ::
+            !(env.warnings))
 
 (* Whether a variable declared [at] that type [a] would be of a wider type
  * than it was, to be assigned a [b]: *)
@@ -1192,6 +1209,10 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                                       such as a layer of a packet, not %s" (a_type t) in
         (* The name of what each constructor holds: *)
         let name = Some (var |? "I") in
+        (* Unless the hidden [I] is the subject, which the case narrows: *)
+        let hides =
+            hides_i env var &&
+            match subject.desc with Var { name = "I" ; _ } -> false | _ -> true in
         let arms =
             List.fold_left (fun arms (a : A.arm) ->
                 let ctor =
@@ -1212,7 +1233,10 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                     let env =
                         Option.map_default (fun v -> { inner with vars = v :: inner.vars })
                             inner held in
-                    (ctor, held, branch ~env a.body) :: arms) [] arms |>
+                    let body = branch ~env a.body in
+                    if hides then
+                        Option.may (warn_hidden_i env ("what "^ ctor ^" holds")) held ;
+                    (ctor, held, body) :: arms) [] arms |>
             List.rev in
         let missing =
             List.filter (fun (n, _) ->
@@ -1244,7 +1268,10 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
 
 and var env loc name =
     let mk typ desc = { loc ; typ ; desc } in
-    let as_var () = let v = lookup_var env loc name in mk v.typ (Var v) in
+    let as_var () =
+        let v = lookup_var env loc name in
+        if not (Hashtbl.mem env.reads v.id) then Hashtbl.add env.reads v.id loc ;
+        mk v.typ (Var v) in
     match env.layer_ctx with
     | None -> as_var ()
     | Some ctx ->
@@ -1793,6 +1820,8 @@ and stmt errors env (s : A.stmt) =
             let body =
                 block errors { env with vars = v :: env.vars ;
                                         loops = env.loops + 1 } body in
+            if hides_i env var then
+                warn_hidden_i env "the number of the iteration of this repeat" v ;
             env, Some (mk (Repeat { var = v ; count ; items = None ; every ;
                                     for_ ; body }))
         | A.Foreach { var ; items ; every ; for_ ; body } ->
@@ -1809,6 +1838,7 @@ and stmt errors env (s : A.stmt) =
             let body =
                 block errors { env with vars = v :: env.vars ;
                                         loops = env.loops + 1 } body in
+            if hides_i env var then warn_hidden_i env "the item of this foreach" v ;
             env, Some (mk (Repeat { var = v ; count = None ; items = Some items ;
                                     every ; for_ ; body }))
         | A.Retry { max ; body } ->
@@ -1910,7 +1940,8 @@ let check ?(warnings=ref []) (program : A.program) =
                     poisoned = [] ; stack = [] ;
                     stack_text = [] ; loops = 0 ; layer_ctx = None ;
                     may_wait = true ; errors = ref [] ; warnings = ref [] ;
-                    declared_at = Hashtbl.create 7 ; widened ; widening = ref false } in
+                    declared_at = Hashtbl.create 7 ; reads = Hashtbl.create 7 ;
+                    widened ; widening = ref false } in
         let p = block env.errors env program in
         if !(env.widening) then typed () else p, env in
     let p, env = typed () in
@@ -1930,7 +1961,8 @@ let check_patterns (ps : A.patterns) =
     let env = { vars = [] ; declared_here = [] ; poisoned = [] ; stack = [] ;
                 stack_text = [] ; loops = 0 ; layer_ctx = None ; may_wait = false ;
                 errors = ref [] ; warnings = ref [] ; declared_at = Hashtbl.create 1 ;
-                widened = Hashtbl.create 1 ; widening = ref false } in
+                reads = Hashtbl.create 1 ; widened = Hashtbl.create 1 ;
+                widening = ref false } in
     try
         Ok (List.map (fun (p : A.pattern) ->
             if p.anchor <> A.Absolute then
@@ -1983,6 +2015,16 @@ let check_patterns (ps : A.patterns) =
   "line 1, column 1: This first has a single case: it is an expect" \
     (warns "first Bytes | ../ICMP {}")
   "" (warns "first Bytes {} | ../ICMP {}")
+  "line 1, column 44: This I is the number of the iteration of this repeat, which hides an outer I: name one of them with var=" \
+    (warns "repeat count=2 { repeat count=2 { print(\"${I}\") } }")
+  "line 1, column 44: This I is the item of this foreach, which hides an outer I: name one of them with var=" \
+    (warns "repeat count=2 { foreach [1, 2] { print(\"${I}\") } }")
+  "line 2, column 38: This I is what Got holds, which hides an outer I: name one of them with var=" \
+    (warns "r = [Got(1), Pending]\nforeach r { case r[0] Got { print(\"${I}\") } else {} }")
+  "" (warns "repeat count=2 { repeat count=2 { print(\"x\") }\n  print(\"${I}\") }")
+  "" (warns "repeat count=2 { repeat var=j count=2 { print(\"${I} ${j}\") } }")
+  "" (warns "r = [Got(1), Pending]\nforeach r { case I Got { print(\"${I}\") } else {} }")
+  "" (warns "r = [Got(1), Pending]\nforeach r { case var=g r[0] Got { print(\"${I} ${g}\") } else {} }")
 *)
 
 (*$= types & ~printer:identity
