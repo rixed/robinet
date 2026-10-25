@@ -567,9 +567,13 @@ struct
         mutable retrans : int ; (* segments retransmitted *)
         mutable dupacks : int ; (* duplicate acks received *)
         mutable rto_expired : int ;
-        mutable ooo_in : int ; (* segments with data beyond what was received in order *)
+        mutable holes_in : int ; (* gaps opened in what was received *)
+        (* Segments filling a gap less than min_rtt after the segment beyond it
+         * arrived, too soon to be retransmissions: *)
+        mutable ooo_in : int ;
         mutable dup_in : int ; (* segments with data all already received in order *)
-        mutable rtt_samples : int }
+        mutable rtt_samples : int ;
+        mutable min_rtt : Clock.Interval.t option }
 
     type tcp_trx = {
         trx : trx ;
@@ -606,6 +610,10 @@ struct
         mutable rcvd_pld : int ;  (* what was already received (sequentially), with same remark *)
         mutable rcvd_acked : int ;  (* what we have acked so far (must be <= rcvd_pld) *)
         mutable rcvd_pkts : Streambuf.t ; (* what we received but haven't given to application yet *)
+        mutable rcvd_high : int ; (* the end of the furthest data received *)
+        (* The gaps below rcvd_high, as their start, end and when the segment
+         * at their end arrived: *)
+        mutable holes : (int * int * Clock.Time.t) list ;
         mutable to_send : bitstring list ; (* what we must send next *) (* FIXME: s/list/dequeue/ *)
         mutable to_send_len : int ; (* bytes in to_send *)
         snd_buf : int ; (* to_send makes writers wait once it has that many bytes *)
@@ -744,6 +752,9 @@ struct
                 Interval.(add (mul rttvar 0.75) (mul (abs (sub srtt sample)) 0.25)) in
         t.rtt <- Some (srtt, rttvar) ;
         t.counters.rtt_samples <- t.counters.rtt_samples + 1 ;
+        t.counters.min_rtt <- Some (match t.counters.min_rtt with
+            | Some m -> min m sample
+            | None -> sample) ;
         t.rto <- min t.max_rto (Interval.add srtt (max t.min_rto_var (Interval.mul rttvar 4.))) ;
         Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: RTT sample %s, srtt %s, rto %s"
             (Interval.to_string sample) (Interval.to_string srtt) (Interval.to_string t.rto))))
@@ -992,8 +1003,6 @@ struct
         (* Out of order, filling a gap, or already received: *)
         let unexpected = offset <> t.rcvd_pld || not (Streambuf.is_empty t.rcvd_pkts) in
         let is_probe = len = 0 && offset < t.rcvd_pld in
-        if len > 0 && offset > t.rcvd_pld then
-            t.counters.ooo_in <- t.counters.ooo_in + 1 ;
         if len > 0 && offset + len <= t.rcvd_pld then
             t.counters.dup_in <- t.counters.dup_in + 1 ;
         (* With an application that reads at once, our window is all of rcv_buf,
@@ -1001,8 +1010,10 @@ struct
         let beyond_wnd = len > 0 && offset >= t.rcvd_pld + rcv_wnd t in
         if beyond_wnd then
             Log.(log t.logger Debug (lazy (Printf.sprintf "Tcp: Dropping data at %d, beyond our window" offset)))
-        else
-            t.rcvd_pkts <- Streambuf.add (offset, tcp) t.rcvd_pkts ;
+        else (
+            if len > 0 then track_holes t offset len ;
+            t.rcvd_pkts <- Streambuf.add (offset, tcp) t.rcvd_pkts
+        ) ;
         try_really_rx t ;
         try_really_tx t ; (* because the advertized window may have changed, we might want to send a FIN, etc *)
         (* Data (or SYN/FIN) is acked at once when unexpected (so the sender sees
@@ -1021,6 +1032,28 @@ struct
         check_over t
 
     and is_established t = t.sent_pld > 0 && t.rcvd_pld > 0
+
+    (* Accounts for the data received at [offset], [len] bytes long, in the
+     * gaps and the counters: *)
+    and track_holes t offset len =
+        let now = Simulation.now t.power.sim in
+        let stop = offset + len in
+        let high = max t.rcvd_high t.rcvd_pld in
+        let reordered = ref false in
+        t.holes <- List.concat_map (fun (a, b, at as hole) ->
+            if stop <= a || offset >= b then [ hole ] else (
+                (match t.counters.min_rtt with
+                | Some m when Clock.Interval.compare (Clock.Time.diff now at) m >= 0 -> ()
+                | _ -> reordered := true) ;
+                (if a < offset then [ a, offset, at ] else []) @
+                (if stop < b then [ stop, b, at ] else []))
+        ) t.holes ;
+        if !reordered then t.counters.ooo_in <- t.counters.ooo_in + 1 ;
+        if offset > high then (
+            t.counters.holes_in <- t.counters.holes_in + 1 ;
+            t.holes <- t.holes @ [ high, offset, now ]
+        ) ;
+        t.rcvd_high <- max high stop
 
     and rx (t : t) bits = (match Pdu.unpack bits with (* If rx were receiving unpacked PDUs then we could bind unpack to rx *)
         | Error s ->
@@ -1234,7 +1267,7 @@ struct
                   closed = false ; sent_fin = false ; closed_first = false ;
                   over_at = None ; time_wait ;
                   sent_pld = 0 ; sent_acked = 0 ; rcvd_pld = 0 ; rcvd_acked = 0 ;
-                  rcvd_pkts = Streambuf.empty ;
+                  rcvd_pkts = Streambuf.empty ; rcvd_high = 0 ; holes = [] ;
                   to_send = [] ; to_send_len = 0 ; snd_buf ;
                   unacked_tx = Streambuf.empty ;
                   rcvd_fin = false ;
@@ -1248,8 +1281,8 @@ struct
                   cnx_established_cont = None ; sync_recv ;
                   counters = { segs_out = 0 ; bytes_out = 0 ; segs_in = 0 ; bytes_in = 0 ;
                                bytes_acked = 0 ; bytes_received = 0 ;
-                               retrans = 0 ; dupacks = 0 ; rto_expired = 0 ; ooo_in = 0 ; dup_in = 0 ;
-                               rtt_samples = 0 } ;
+                               retrans = 0 ; dupacks = 0 ; rto_expired = 0 ; holes_in = 0 ;
+                               ooo_in = 0 ; dup_in = 0 ; rtt_samples = 0 ; min_rtt = None } ;
                   tcp_trx = { trx = null_trx ~logger ;
                               close = ignore ;
                               is_closed = (fun _ -> true) ;
@@ -1409,7 +1442,30 @@ end
     assert_bool "resent" (a.counters.retrans > 0) ;
     let b = Option.get !last_b in
     assert_bool "duplicates received" (b.counters.dup_in > 0) ;
-    assert_bool "no more duplicates than resent" (b.counters.dup_in <= a.counters.retrans)
+    assert_bool "no more duplicates than resent" (b.counters.dup_in <= a.counters.retrans) ;
+    (* The third data segment held back [delay], or lost if None: *)
+    let hold delay =
+        let nth = ref 0 in
+        let a_to_b p =
+            if Payload.length p.Pdu.payload = 0 then Some p else (
+                incr nth ;
+                if !nth <> 3 then Some p else (
+                    let b = Option.get !last_b in
+                    Option.may (fun d ->
+                        Simulation.delay b.power d (fun () ->
+                            b.tcp_trx.trx.out.write (Pdu.pack p)) ()) delay ;
+                    None)) in
+        let _, _, rcvd, _, _ = transfer ~a_to_b 1000 in
+        assert_equal ~printer:string_of_int ~msg:"all received" 1000 rcvd ;
+        Option.get !last_b in
+    let b = hold (Some (Clock.Interval.msec 2.)) in
+    assert_equal ~printer:string_of_int ~msg:"one gap" 1 b.counters.holes_in ;
+    assert_equal ~printer:string_of_int ~msg:"reordered" 1 b.counters.ooo_in ;
+    let min_rtt = Clock.Interval.to_secs (Option.get b.counters.min_rtt) in
+    assert_bool "min RTT of the handshake" (min_rtt >= 0.020 && min_rtt < 0.021) ;
+    let b = hold None in
+    assert_equal ~printer:string_of_int ~msg:"one gap" 1 b.counters.holes_in ;
+    assert_equal ~printer:string_of_int ~msg:"filled by a retransmission" 0 b.counters.ooo_in
 *)
 (*$R sent_manually
     (* [a] connects to [b], over 10ms each way, then runs [steps] 1ms apart.

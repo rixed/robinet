@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 fab0bf309c85260de989267f6e7eef9e) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 aa5de9c91c1dbbf23af6c0f5e0f55d9a) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -386,15 +386,16 @@ what their engine computes (checksums).
     `packets_out`, `packets_in`, `bytes_out`, `bytes_in` (the payloads at that
     layer). A self-driven TCP connection counts its segments, retransmissions
     included, and adds, as Linux's `tcp_info`: `bytes_acked`, `bytes_received`
-    (in order), `retrans`, `dupacks`, `timeouts`, `ooo_in` (segments received
-    out of order), `dup_in` (segments with only data already received: the
-    peer's spurious retransmissions), `srtt`, `rttvar`, `rtt_samples`, `rto`,
-    `snd_mss`, `rcv_mss`, `cwnd`, `ssthresh` (2\^31-1 before any loss),
-    `snd_wnd` (the peer's window), `rcv_wnd`, `snd_wscale` and `rcv_wscale` (the
-    window shifts the peer and we offered, -1 if none; scaling is on only if
-    both offered one) and `established`. An IP stream adds `fragmented` (packets
-    sent in fragments), `frags_out`, `frags_in`, `reassembled` and
-    `reasm_timeouts` (incomplete after 30s).
+    (in order), `retrans`, `dupacks`, `timeouts`, `holes_in` (gaps opened in
+    what was received), `ooo_in` (segments filling a gap within `min_rtt` of the
+    one beyond it: reordered, not resent), `dup_in` (segments with only data
+    already received: the peer's spurious retransmissions), `srtt`, `rttvar`,
+    `min_rtt`, `rtt_samples`, `rto`, `snd_mss`, `rcv_mss`, `cwnd`, `ssthresh`
+    (2\^31-1 before any loss), `snd_wnd` (the peer's window), `rcv_wnd`,
+    `snd_wscale` and `rcv_wscale` (the window shifts the peer and we offered, -1
+    if none; scaling is on only if both offered one) and `established`. An IP
+    stream adds `fragmented` (packets sent in fragments), `frags_out`,
+    `frags_in`, `reassembled` and `reasm_timeouts` (incomplete after 30s).
 -   `getenv(name, default=s)`: fails if unset and no default.
 -   `resolve(name)`: the IPv4 addresses of a name, from the system's resolver;
     fails if none. `hostname(ip, default=s)`: the name of an address; fails if

@@ -603,9 +603,10 @@ let tcp_node ctx =
               "bytes_acked", V.Int c.bytes_acked ;
               "bytes_received", V.Int c.bytes_received ;
               "retrans", V.Int c.retrans ; "dupacks", V.Int c.dupacks ;
-              "timeouts", V.Int c.rto_expired ; "ooo_in", V.Int c.ooo_in ;
-              "dup_in", V.Int c.dup_in ;
+              "timeouts", V.Int c.rto_expired ; "holes_in", V.Int c.holes_in ;
+              "ooo_in", V.Int c.ooo_in ; "dup_in", V.Int c.dup_in ;
               "srtt", V.Interval srtt ; "rttvar", V.Interval rttvar ;
+              "min_rtt", V.Interval (c.min_rtt |? Clock.Interval.zero) ;
               "rtt_samples", V.Int c.rtt_samples ; "rto", V.Interval t.rto ;
               "snd_mss", V.Int t.snd_mss ; "rcv_mss", V.Int t.rcv_mss ;
               (* Infinite until a loss, which Linux tells as 2^31-1: *)
@@ -979,8 +980,9 @@ let tcp =
     layer N.TCP ~above:[ ip ] ~driven:true ~node:tcp_node ~unpack:unpack_tcp
         ~stats:Type.[
             "bytes_acked", Int ; "bytes_received", Int ; "retrans", Int ;
-            "dupacks", Int ; "timeouts", Int ; "ooo_in", Int ; "dup_in", Int ;
-            "srtt", Interval ; "rttvar", Interval ; "rtt_samples", Int ;
+            "dupacks", Int ; "timeouts", Int ; "holes_in", Int ; "ooo_in", Int ;
+            "dup_in", Int ; "srtt", Interval ; "rttvar", Interval ;
+            "min_rtt", Interval ; "rtt_samples", Int ;
             "rto", Interval ; "snd_mss", Int ; "rcv_mss", Int ; "cwnd", Int ;
             "ssthresh", Int ; "snd_wnd", Int ; "rcv_wnd", Int ;
             "snd_wscale", Int ; "rcv_wscale", Int ; "established", Bool ]

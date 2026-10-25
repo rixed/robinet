@@ -65,6 +65,7 @@ let suspicious_stats =
       "incomplete IP packets", [ "reasm_timeouts" ] ;
       "TCP retransmissions", [ "retrans" ; "timeouts" ] ;
       "TCP duplicate acks", [ "dupacks" ] ;
+      "gaps in received TCP data", [ "holes_in" ] ;
       "TCP segments out of order", [ "ooo_in" ] ;
       "duplicate TCP segments", [ "dup_in" ] ]
 
