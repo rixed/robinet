@@ -461,8 +461,10 @@ let params_of expr ?(unnamed=true) ?(pattern=false) form names =
 
 let carets = repeat_greedy ~sep:none ~min:1 (item '^') >>: List.length
 
+(* Greedy, so that an expression ending with one without a closing
+ * delimiter (the last branch of an [if]) extends as far as it can: *)
 let left_assoc op term =
-    term ++ repeat ~sep:none (maybe_next (op +- nl_sp ++ term)) >>:
+    term ++ repeat_greedy ~sep:none (maybe_next (op +- nl_sp ++ term)) >>:
     fun (first, rest) ->
         List.fold_left (fun l (op, r) ->
             { loc = l.loc ; desc = Binop (op, l, r) }) first rest
@@ -475,14 +477,24 @@ let op_not_before s c v = word s -- nay (item c) >>: fun () -> v
 (* [self] is the grammar being built: that of normal expressions, or that of
  * conditions, where [=] compares. [expr] is that of normal expressions, used
  * within brackets. *)
-let make_expr ~cond ~self ~expr ~pattern ~block =
+let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
     let body = sp -+ block in
-    (* What follows [if] or [elsif], the else on the same line as the brace
-     * that ends the block before it or on the next ones: *)
+    (* A branch of an [if]: a statement on the same line, a block being the
+     * branch itself: *)
+    let branch =
+        sp -+ (stmt |? "a branch of if, which starts on the same line") >>:
+        fun (s : stmt) ->
+            match s.stmt with
+            | Expr { desc = Block b ; _ } -> b
+            | Declare (v, _) | Capture { var = v ; declare = true ; _ } ->
+                reject "%s would only be declared in this branch" v
+            | _ -> [ s ] in
+    (* What follows [if] or [elsif], the else on the same line as the branch
+     * before it or on the next ones, and to the innermost [if]: *)
     let if_ = fix (fun if_ ->
-        sp -+ expr ++ body ++
-        optional ~def:None (nl_sp -+ (
-            (keyword "else" -+ body) |||
+        sp -+ expr ++ branch ++
+        optional_greedy ~def:None (nl_sp -+ (
+            (keyword "else" -+ branch) |||
             (keyword "elsif" -+ here ++ if_ >>:
                 fun (loc, desc) -> [ { stmt_loc = loc ; stmt = Expr { loc ; desc } } ])) >>:
             Option.some) >>:
@@ -623,6 +635,7 @@ let make_pattern cond_expr =
 let expr, set_expr = forward ()
 let cond_expr, set_cond_expr = forward ()
 let block, set_block = forward ()
+let stmt, set_stmt = forward ()
 let pattern = make_pattern cond_expr
 (* Separated by bars that may start or end lines, in parentheses or not: *)
 let patterns =
@@ -632,14 +645,19 @@ let patterns =
              (quiet (item '(') -- nl_sp -+ patterns +- nl_sp +- item ')') |? "pattern") >>:
         List.concat)
 let () =
-    set_expr (make_expr ~cond:false ~self:expr ~expr ~pattern ~block) ;
-    set_cond_expr (make_expr ~cond:true ~self:cond_expr ~expr ~pattern ~block)
+    set_expr (make_expr ~cond:false ~self:expr ~expr ~pattern ~block ~stmt) ;
+    set_cond_expr (make_expr ~cond:true ~self:cond_expr ~expr ~pattern ~block ~stmt)
 
 (** {2 Statements} *)
 
 let params ?unnamed ?pattern form names = params_of expr ?unnamed ?pattern form names
 
 let stmt_sep = sp -- (item '\n' ||| item ';') -- nl_sp |? "end of statement"
+
+(* What may follow a statement, which is not consumed: *)
+let stmt_end =
+    check (sp -- ((item '\n' ||| item ';' ||| item '}' >>: ignore) |||
+                  quiet (keyword "else" ||| keyword "elsif") ||| eof))
 
 let layer =
     here ++ layer_name ++ optional ~def:false (item '!' >>: fun _ -> true) ++
@@ -653,7 +671,7 @@ let assign_op =
     op "/=" (Some Div) ||| op "%=" (Some Mod) ||| op "|=" (Some BitOr) |||
     op "&=" (Some BitAnd) ||| op "^=" (Some BitXor)
 
-let stmt =
+let () = set_stmt (
     let body = sp -+ block in
     (* Of first and on, separated by bars that may start or end lines: *)
     let cases = repeat ~min:1 ~sep:(nl_sp -- item '|' -- nl_sp) (patterns ++ body) in
@@ -687,7 +705,7 @@ let stmt =
             fun s -> reject "%s is a keyword, it cannot name a variable" s) |||
         (* Alone, a call rather than a stack, of an unknown layer: *)
         unknown_function (quiet (args expr +-
-            check (sp -- ((item '\n' ||| item ';' ||| item '}' >>: ignore) ||| eof)))) |||
+            stmt_end)) |||
         (* A stack sends a packet if its top layer is terminal, and is
          * otherwise that of the block that follows: *)
         (anchor ++
@@ -721,7 +739,7 @@ let stmt =
          check (quiet (variable -- sp -- assign -- nl_sp -- stack_start)) -+
          variable ++ maybe_next assign +- nl_sp ++
          anchor ++ repeat ~min:1 ~sep:(maybe_next (slash -- nl_sp)) layer +-
-         check (sp -- ((item '\n' ||| item ';' ||| item '}' >>: ignore) ||| eof)) >>:
+         stmt_end >>:
             fun (((v, declare), anchor), layers) ->
                 let top = (List.last layers).layer_name in
                 if terminal top then
@@ -779,7 +797,7 @@ let stmt =
          params ~pattern:true "on" [ "for" ; "linger" ; "timeout" ; "max" ] +- sp ++
          cases >>: fun (p, cases) ->
             On { for_ = p "for" ; linger = p "linger" ; timeout = p "timeout" ;
-                 max = p "max" ; cases })) |? "statement"
+                 max = p "max" ; cases })) |? "statement")
 
 let () =
     set_block (
@@ -890,6 +908,12 @@ let parse_patterns text =
   "if a {\n} elsif b {\n}\n" (reads "if a {} else { if b {} }")
   "if a {\n} else {\n  if b {\n  }\n  x := 1\n}\n" \
     (reads "if a {} else { if b {}; x := 1 }")
+  "if a {\n  x += 1\n} else {\n  y += 1\n}\n" (reads "if a x += 1 else y += 1;")
+  "if a {\n  x += 1\n} elsif b {\n  print(1)\n} else {\n  y += 1\n}\n" \
+    (reads "if a x += 1\nelsif b { print(1) }\nelse y += 1")
+  "if a {\n  if b {\n    x += 1\n  } else {\n    y += 1\n  }\n}\n" \
+    (reads "if a if b x += 1 else y += 1")
+  "y = if a {\n  1\n} else {\n  2 + 3\n}\n" (reads "y = if a 1 else 2 + 3")
   "repeat {\n  if I > 3 {\n    break\n  }\n}\n" \
     (reads "repeat { if I > 3 { break } }")
   "wait dur=10ms\nwait dur=(1s * n)\n" (reads "wait 10ms\nwait dur=1s * n")
@@ -1094,7 +1118,9 @@ let parse_patterns text =
   "line 1, column 17: Expected pattern in statement" (reads "expect (Bytes | ) {}")
   "line 1, column 15: Expected ')' in pattern" (reads "expect (Bytes {}")
   "line 1, column 5: wait needs a duration" (reads "wait")
-  "line 1, column 5: Expected '{' in block" (reads "if x\n{}")
+  "line 1, column 5: Expected statement in a branch of if, which starts on the same line" \
+    (reads "if x\n{}")
+  "line 1, column 11: x would only be declared in this branch" (reads "if a x = 1")
   "line 1, column 1: Expected end of statement" (reads "else {}")
   "line 1, column 9: Expected '\\\"' in string" (reads "x = \"abc")
   "line 1, column 9: Unknown escape sequence \\q" (reads "x = \"a\\qb\"")

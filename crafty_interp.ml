@@ -1539,6 +1539,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: caught\n0s: done" \
     (runs "catch { assert(0) }\nprint(\"caught\")")
   "0s: small 0\n0s: odd 1\n0s: big 2\n0s: odd 3\n0s: big 4\n0s: done" \
+    (runs "repeat count=5 { if I & 1 print(\"odd ${I}\") elsif I > 1 print(\"big ${I}\")\n  else print(\"small ${I}\") }")
+  "0s: 1 0 4\n0s: done" \
+    (runs "a = 0 ; b = 0\nif a > 0 a += 1 else b += 1;\nif a > 0 if b > 0 a += 1 else b += 1\ny = if b > 0 1 else 2 + 3\nz = if a > 0 1 else 2 + 2\nprint(\"${b} ${a} ${z}\")")
+  "0s: small 0\n0s: odd 1\n0s: big 2\n0s: odd 3\n0s: big 4\n0s: done" \
     (runs "repeat count=5 { if I & 1 { print(\"odd ${I}\") } elsif I > 1 { print(\"big ${I}\") }\n  else { print(\"small ${I}\") } }")
   "0s: 0\n0s: 1\n0s: after\n0s: done" \
     (runs "repeat { if I == 2 { break }\n  print(\"${I}\") }\nprint(\"after\")")
