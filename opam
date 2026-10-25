@@ -20,7 +20,7 @@ depends: [
   "bitstring"
   "cppo" {build}
   "ocamlfind" {build}
-  "parsercombinator" {>=1.4.0}
+  "parsercombinator" {>= "1.4.0"}
   "ppx_bitstring"
   "ppx_deriving" {build}
   "ppx_deriving_yojson"
