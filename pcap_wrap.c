@@ -172,6 +172,18 @@ CAMLprim value wrap_pcap_inject(value handle_, value str_)
     CAMLreturn(Val_unit);
 }
 
+CAMLprim value wrap_pcap_dropped(value handle_)
+{
+    CAMLparam1(handle_);
+    pcap_t *const handle = Pcap_val(handle_);
+    if (! handle) caml_failwith("Pcap handle has been closed");
+
+    struct pcap_stat stats;
+    if (0 != pcap_stats(handle, &stats)) caml_failwith(pcap_geterr(handle));
+
+    CAMLreturn(Val_long(stats.ps_drop));
+}
+
 CAMLprim value wrap_pcap_unsent(value handle_)
 {
     CAMLparam1(handle_);

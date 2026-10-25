@@ -143,6 +143,11 @@ external inject_ : pcap_handler -> string -> unit = "wrap_pcap_inject"
  * has yet to send, where it can tell (else 0). *)
 external unsent_ : pcap_handler -> int = "wrap_pcap_unsent"
 
+(** [dropped_ pcap_handler] is how many packets the filter of that handle
+ * accepted that the kernel dropped since it was opened, for want of room to
+ * keep them until they are read. *)
+external dropped_ : pcap_handler -> int = "wrap_pcap_dropped"
+
 (** [sniff_ pcap_handler] will return the next available packet as a string,
  * as well as its capture timestamp.
  * If timeout is set then the function will raise Not_found after that number of
@@ -505,6 +510,9 @@ let closeif handler =
 
 let unsent handler =
     unsent_ handler.pcap
+
+let dropped handler =
+    dropped_ handler.pcap
 
 (** [sniff handler] will return the next available packet as a Pcap.Pdu.t.
  *

@@ -539,6 +539,7 @@ let () =
     info "Running..." ;
     Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ] (fun () ->
         Simulation.run sim true) ;
+    let not_captured = Pcap.dropped pcap.handler in
     Option.may Host_config.undo changes ;
     List.iter (fun n -> tally n ; print_stats "open" n) (h.open_streams ()) ;
     let status_str, code =
@@ -575,6 +576,8 @@ let () =
             Printf.printf "Dropped by the policer: %d packets.\n" (!sent - !pkts_out) ;
         if !not_injected > 0 then
             Printf.printf "Not injected: %d packets.\n" !not_injected ;
+        if not_captured > 0 then
+            Printf.printf "Not captured: %d packets.\n" not_captured ;
         Printf.printf "Captured going out: %d packets, %d bytes.\n" !wire_pkts !wire_bytes
     ) else
         emit "done"
@@ -583,6 +586,7 @@ let () =
               "bytes_out", `Int !bytes_out ; "bytes_in", `Int !bytes_in ;
               "dropped", `Int (!sent - !pkts_out) ;
               "not_injected", `Int !not_injected ;
+              "not_captured", `Int not_captured ;
               "captured_packets", `Int !wire_pkts ;
               "captured_bytes", `Int !wire_bytes ] ;
     exit code
