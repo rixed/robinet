@@ -96,7 +96,7 @@ the same `IP/UDP` stream.
 ### Overlaying
 
 Like relative patterns, relative stacks can go back with `../` and modify upper
-layers options while reusing the stream:
+layers' options while reusing the stream:
 
 ```
 # The same stream, but for one datagram with a TTL of 1:
@@ -110,7 +110,7 @@ layers options while reusing the stream:
   print("Also sent from port ${LAST[UDP].src}")
   repeat count=2 {
     # Wait for Bytes in the same stream (unlike with /IP/UDP/Bytes that would
-    # match even outside this stream
+    # match even outside this stream)
     expect timeout=1s Bytes { print(MATCH[Bytes].data) }
   }
 }
@@ -179,7 +179,7 @@ Options:
   for which crafty answers ARP. Then `--fw` is not needed, nor allowed.
 - `-p [/PATTERN]` (or `--print-packets`): prints the packets à la tcpdump.
 - `--format csv|json`: change the output format to csv or json (json makes -p
-  print all available details or every packets).
+  print all available details of every packet).
 - `--stats`: prints the stats of each stream (see `stats()`) as it ends.
 - `--check`: only compiles the program.
 - `--max-duration`, `--max-packets`, `--max-bytes`, `--max-packets-per-secs`,
@@ -195,8 +195,8 @@ does not compile, 3 when a budget stops it, 130 when interrupted.
 ### Tips
 
 - Use `resolve("hostname")` to resolve a hostname
+- Avoid filtering out the "Warning:" lines
 - Parameterize your programs with `getenv("...")`
-- Pay attention to warnings
 - When unsure, use --max-duration
 
 ## 2. Reference
@@ -269,14 +269,14 @@ print(case result Got { "${I} layers" } else { "${result}" })
 - `x = expr` declares `x` in the current block, with the type of `expr`.
   Declaring a name twice in one block is an error; an inner block may shadow
   it.
-- `x := expr` assigns it, and `x += expr` (also `-=`, `*=`, etc) updates it.
+- `x := expr` assigns it, and `x += expr` (also `-=`, `*=`, etc.) updates it.
 - Predefined: `MATCH` (in the block of an `expect`, `first` or `on`), `LAST`
   (the last packet sent, once a block has sent one), `I`, the counter of
   a `repeat` or the item of a `foreach`, and `BUDGET` and `PORTS`.
 - `LAST` is the packet as given, not as it left: reading a field that only
   the wire knows (`LAST[Eth].ts`, or `IP.id`, `UDP.checksum`... under a
   self-driven `IP`) is an error. `p = MESSAGE` captures the packet as it
-  leaves (see [Self driven vs manual stacks](#self-driven-vs-manual-stacks)).
+  leaves (see [Self-driven vs manual stacks](#self-driven-vs-manual-stacks)).
 
 ### Budget and ports
 
@@ -326,16 +326,16 @@ A block can wait, send, receive, loop or `break` only as the whole value of
 a declaration, an assignment or a statement: `n = 1 + { wait 1s ; 1 }` is an
 error.
 
-### Self driven vs manual stacks
+### Self-driven vs manual stacks
 
 Sent messages can be assigned to a variable if they are purely manual:
 
 `p = /IP!(dst=target)/TCP!(src=1, dst=2, flags=SYN)/Bytes()`
 
-This send a packet and wait until that packet is recaptured on its way out.
+This sends a packet and waits until that packet is recaptured on its way out.
 Its timestamp `p[Eth].ts` is therefore accurate.
 
-Self-driven and manual layers can be mixed with some restrictions: A manual
+Self-driven and manual layers can be mixed with some restrictions: a manual
 layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 
 ### Patterns
@@ -384,7 +384,7 @@ what their engine computes (checksums).
   after the previous one started, or when it ends if later. `v` (default `I`)
   counts from 0.
 - `foreach v every=d for=d ARRAY { ... }`: a `repeat` over the items of the
-  array or map (as `{key: k, value: v}`, `v` (default `I`) being the item.
+  array or map (as `{key: k, value: v}`), `v` (default `I`) being the item.
 - `retry max=n { ... }`: runs the block again, up to `n` times (default 3),
   while it fails. The last error escapes.
 - `catch { ... }`: blocks error propagation.
@@ -400,7 +400,7 @@ what their engine computes (checksums).
 - `on for=d linger=d timeout=d max=n PATTERN { ... } | PATTERN { ... }`: the
   enclosing block goes on; each matching packet runs the block of its pattern,
   repeatedly (`max` times or unlimited) until its lifetime or that of the
-  enclosing blocks are over.  `linger` (default 0) instruct that enclosing
+  enclosing blocks are over.  `linger` (default 0) instructs that enclosing
   block to wait further.
 - `{ ... }`: a block; its variables and patterns end with it. A block ends once
   its statements are done, its `linger`s waited, and its `on`s with a `for`
@@ -821,62 +821,74 @@ counts the probes without an answer.
 #### Path MTU
 
 ```
-# Echo requests that must not be fragmented: a router that cannot forward one
-# tells its next hop MTU, which is the next size to try; one that drops it
-# silently leaves a binary search between what came back and what did not.
+# Echo requests that must not be fragmented, to find the path MTU in each direction:
+# - echoed whole: the size fits both ways;
+# - echoed in fragments: it fits the way out, and the largest fragment bounds the
+#   MTU of the way back (fragments carry multiples of 8 bytes, so within 7 bytes);
+# - Frag-Needed: a router on the way out tells its next hop MTU;
+# - nothing: dropped silently, on the way out or, if the reply had DF, on the way back.
 target = ip_addr(getenv("TARGET"))
 lo = 68                                         # fits any IPv4 path
-hi = int(getenv("MTU", default="1500"))         # what may fit
-/IP!(dst=target, dont_frag=true)/ICMP/Echo {
-  size = hi
-  replies = 0
-  repeat count=32 {
-    told = 0                      # the next hop MTU a router said
-    answered = false
-    Request(seq=size, payload=#00 * (size - 28))
-    catch {
-      first timeout=1s Reply(seq == size) {
-        print("${size}: echoed")
-        answered := true
-        replies += 1
-        lo := size
-      # Absolute, as routers have addresses of their own. "src != target" only
-      # silences the warning that it is not relative, as the stack's Echo is.
-      } | /IP(src != target)/ICMP/DestUnreachable(code == FRAG_NEEDED)/IP(dst == target, tot_len == size) {
-        told := MATCH[DestUnreachable].mtu
-        print("${size}: too big for ${MATCH[^IP].src}, next hop MTU ${told}")
-        answered := true
+hi = int(getenv("MTU", default="1500"))
+frag_max = 0                                    # largest fragment of the last reply
+ret_mtu = 0                                     # the way back fragmented at this size
+{
+  # Raw fragments from the target, alongside the self-driven stream that reassembles them
+  on /IP!(src == target && is_fragment) {
+    if MATCH[IP].tot_len > frag_max { frag_max := MATCH[IP].tot_len }
+  }
+  /IP(dst=target, dont_frag=true)/ICMP/Echo {
+    size = hi
+    repeat count=32 {
+      told = 0
+      answered = false
+      frag_max := 0
+      Request(seq=size, payload=#00 * (size - 28))
+      catch {
+        first timeout=1s Reply(seq == size) {
+          answered := true
+          lo := size
+          if frag_max > 0 {
+            print("${size}: echoed in fragments of up to ${frag_max} bytes")
+            ret_mtu := frag_max
+          } else { print("${size}: echoed whole") }
+        } | /IP(src != target)/ICMP/DestUnreachable(code == FRAG_NEEDED)/IP(dst == target, tot_len == size) {
+          told := MATCH[DestUnreachable].mtu
+          answered := true
+          print("${size}: too big for ${MATCH[^IP].src}, next hop MTU ${told}")
+        }
+      }
+      if !answered { print("${size}: no answer (dropped one way or the other)") }
+      if told > lo && told < size {
+        hi := told
+        size := told
+      } else {
+        if !answered || told > 0 { hi := size - 1 }
+        if lo >= hi { break }
+        size := (lo + hi + 1) / 2
       }
     }
-    if !answered { print("${size}: no answer") }
-    if told > lo && told < size {
-      hi := told
-      size := told
-    } else {
-      if !answered || told > 0 { hi := size - 1 }
-      if lo >= hi { break }
-      size := (lo + hi + 1) / 2
-    }
   }
-  print(if replies > 0 "path MTU to ${target}: ${lo}" else "no echo came back")
 }
+print("way out: ${lo} bytes get through")
+if ret_mtu > 0 { print("way back: fragmented, MTU about ${ret_mtu} bytes") }
 ```
 
 ```
 % sudo TARGET=10.2.1.3 crafty -i eth0 pmtu.cfty
 1500: too big for 10.1.0.5, next hop MTU 1400
-1400: no answer
-734: echoed
-1067: echoed
-1233: echoed
-1316: no answer
-1274: echoed
-1295: no answer
-1284: no answer
-1279: echoed
-1281: no answer
-1280: echoed
-path MTU to 10.2.1.3: 1280
+1400: no answer (dropped one way or the other)
+734: echoed whole
+1067: echoed whole
+1233: echoed whole
+1316: no answer (dropped one way or the other)
+1274: echoed whole
+1295: no answer (dropped one way or the other)
+1284: no answer (dropped one way or the other)
+1279: echoed whole
+1281: no answer (dropped one way or the other)
+1280: echoed whole
+way out: 1280 bytes get through
 ```
 
 10.1.0.5 reports its MTU of 1400, but a router further on drops what
