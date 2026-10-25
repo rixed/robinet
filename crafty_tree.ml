@@ -87,8 +87,10 @@ type node =
       eth : Eth.State.t ;
       (* The ranges of local ports to pick from, by layer name: *)
       ports : string -> (int * int) list ;
-      (* Told of a local port that a stack gives, by the layer: *)
-      given_port : A.location -> L.layer -> int -> unit ;
+      (* Told of each local port used, given or picked, by the layer: *)
+      local_port : A.location -> L.layer -> int -> unit ;
+      (* Whether a layer of that name used that local port: *)
+      uses_port : string -> int -> bool ;
       (* Told the nodes of streams that go away, terminal ones aside: *)
       removed : node -> unit ;
       ops : L.ops ;
@@ -164,7 +166,8 @@ let make_child parent (l : L.layer) key =
               children = Hashtbl.create 3 ; users = 0 ; received = 0 ;
               received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
               closing = false ; eth = parent.eth ; ports = parent.ports ;
-              given_port = parent.given_port ; removed = parent.removed ;
+              local_port = parent.local_port ; uses_port = parent.uses_port ;
+              removed = parent.removed ;
               ops = l.node { eth = parent.eth ;
                              key = (fun name -> key_fields l (current ()) name) ;
                              below_key = (fun name -> key_fields parent.layer parent.key name) ;
@@ -194,7 +197,7 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
             match List.assoc_opt i options with
             | Some v ->
                 (match l.fields.(i).pick, v with
-                | Some L.Local_port, Int p -> parent.given_port loc l p
+                | Some L.Local_port, Int p -> parent.local_port loc l p
                 | _ -> ()) ;
                 Some (i, v)
             | None ->
@@ -211,7 +214,9 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
                     Some (pick_random loc parent l i [ lo, hi ])
                 | Some L.Local_port ->
                     random := true ;
-                    Some (pick_random loc parent l i (parent.ports (L.N.to_string l.name)))
+                    let v = pick_random loc parent l i (parent.ports (L.N.to_string l.name)) in
+                    (match v with Int p -> parent.local_port loc l p | _ -> ()) ;
+                    Some v
                 | Some L.Required | None ->
                     error loc "%s needs a %s" (L.N.to_string l.name) l.fields.(i).name)
         ) (L.key_fields l) in
@@ -673,24 +678,29 @@ let dynamic_ports = [ 49152, 65535 ]
  * that a stack leaves out are picked from [ports] for each layer that has
  * some (inclusive and disjoint ranges, by layer name), and else from
  * {!dynamic_ports}; those it gives out of its layer's [ports] are told to
- * [on_foreign_port], with these ranges. *)
+ * [on_foreign_port], with these ranges. The root tells which were used. *)
 let make_root ?(ports=[]) ?(on_removed=ignore)
               ?(on_foreign_port=fun _ _ _ _ -> ()) (eth : Eth.State.t) =
     let restricted name =
         match List.assoc_opt (String.uppercase_ascii name) ports with
         | Some (_ :: _ as ranges) -> Some ranges
         | _ -> None in
-    let given_port loc (l : L.layer) p =
-        restricted (L.N.to_string l.name) |>
+    let used = Hashtbl.create 7 in
+    let local_port loc (l : L.layer) p =
+        let name = L.N.to_string l.name in
+        Hashtbl.replace used (String.uppercase_ascii name, p) () ;
+        restricted name |>
         Option.may (fun ranges ->
             if not (List.exists (fun (lo, hi) -> p >= lo && p <= hi) ranges) then
                 on_foreign_port loc l p ranges) in
+    let uses_port name p = Hashtbl.mem used (String.uppercase_ascii name, p) in
     let ports name = restricted name |? dynamic_ports in
     let root =
         { layer = L.root ; key = [] ; parent = None ;
           children = Hashtbl.create 10 ; users = 0 ; received = 0 ;
           received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
-          closing = false ; eth ; ports ; given_port ; removed = on_removed ;
+          closing = false ; eth ; ports ; local_port ; uses_port ;
+          removed = on_removed ;
           ops = L.root.node { eth ; key = (fun _ -> None) ;
                               below_key = (fun _ -> None) ; below = None } ;
           patterns = [] } in
@@ -792,6 +802,22 @@ let to_string n = IO.to_string print n
       (fun () -> udp ()) ;
   let tcp = child loc ip Crafty_layers.tcp [ 1, port 80 ] in
   assert_bool "other layers keep the dynamic ports" (src tcp >= 49152)
+*)
+(* The root tells the local ports used, given or picked, and those given
+ * out of the ranges: *)
+(*$R child
+  let foreign = ref [] in
+  let root = make_root ~ports:[ "UDP", [ 10, 11 ] ] eth
+      ~on_foreign_port:(fun _ _ p _ -> foreign := p :: !foreign) in
+  let ip = child loc root Crafty_layers.ip (ip_to "1.2.3.4") in
+  let picked = child loc ip Crafty_layers.udp [ 1, port 53 ] in
+  let src = match List.assoc_opt 0 picked.key with Some (Crafty_value.Int p) -> p | _ -> -1 in
+  ignore (child loc ip Crafty_layers.udp [ 0, port 5000 ; 1, port 53 ]) ;
+  assert_bool "picked" (root.uses_port "udp" src) ;
+  assert_bool "given" (root.uses_port "UDP" 5000) ;
+  assert_bool "not used" (not (root.uses_port "UDP" (21 - src))) ;
+  assert_bool "not of TCP" (not (root.uses_port "TCP" 5000)) ;
+  assert_equal ~printer:dump [ 5000 ] !foreign
 *)
 (* A terminal node of the root goes once sent, the root staying; what was
  * sent is told back: *)

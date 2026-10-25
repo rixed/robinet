@@ -472,14 +472,37 @@ let () =
         Pcap.inject injector.handler bits)) ;
     Simulation.run_startup sim ;
     Simulation.power_up policer.widget.power ;
+    (* The host refusing what is for a port crafty uses, once per port: *)
+    let refused = Hashtbl.create 3 in
+    let warn_refused bits =
+        match Host_config.refused_port bits with
+        | Some (proto, p)
+          when not !no_warning && not (Hashtbl.mem refused (proto, p)) &&
+               h.uses_port (Host_config.string_of_proto proto) p ->
+            Hashtbl.add refused (proto, p) () ;
+            let text =
+                Printf.sprintf "The host %s %d, which crafty uses: %s"
+                    (if proto = Host_config.Tcp then "reset TCP port"
+                     else "refused UDP port")
+                    p
+                    (if !fw then
+                        "it is outside the ports that --fw keeps the host off"
+                     else "keep the host off it with --fw, or give crafty \
+                           an address of its own with --ip") in
+            if format = Human then
+                Printf.eprintf "%s: Warning: %s\n%!" prog_name text
+            else emit "warning" [ "text", `String text ]
+        | _ -> () in
     (* What leaves is what crafty injected, or else what the host sends,
      * which has the interface's address: *)
     ignore (Pcap.sniffer pcap (fun bits ->
-        if was_injected bits ||
+        let injected = was_injected bits in
+        if injected ||
            (match Eth.Pdu.unpack bits with
            | Ok f -> Eth.Addr.eq f.src iface.mac
            | Error _ -> false)
         then (
+            if not injected then warn_refused bits ;
             incr wire_pkts ; wire_bytes := !wire_bytes + Tools.bytelength bits ;
             h.emitted bits
         ) else after.out.write bits)) ;

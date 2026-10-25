@@ -1113,7 +1113,9 @@ type handle =
       (* Whether a frame, sent or received, matches a filter: *)
       matches : filter -> Bitstring.bitstring -> bool ;
       (* The streams still open: *)
-      open_streams : unit -> Crafty_tree.node list }
+      open_streams : unit -> Crafty_tree.node list ;
+      (* Whether a layer of that name used that local port: *)
+      uses_port : string -> int -> bool }
 
 (** Alternative absolute patterns, matched against a frame on its own: *)
 and filter = T.pattern list
@@ -1187,7 +1189,8 @@ let run_on_tree power tree ?format ~print ~print_err ?(on_exit=ignore)
       idle = idle tree ;
       emitted = emitted t ;
       matches = matches t.output tree ;
-      open_streams = open_streams tree }
+      open_streams = open_streams tree ;
+      uses_port = tree.uses_port }
 
 (* With what it declares of itself: *)
 type program = { body : Crafty_typing.block ; limits : Crafty_typing.limits }
@@ -1286,7 +1289,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
       idle = idle tree ;
       emitted = (fun frame -> Option.may (fun (h : handle) -> h.emitted frame) !started) ;
       matches = matches (output_of power ?format ~print ~print_err ()) tree ;
-      open_streams = open_streams tree }
+      open_streams = open_streams tree ;
+      uses_port = tree.uses_port }
 
 (* [runs ?stop_at ?trees ?frames ?sent ?inject text] is what the program in that text
  * prints, each line with the time it is printed at (and with [trees], the

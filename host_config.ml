@@ -360,6 +360,48 @@ let pcap_filter ?ip ports =
     (pcap_filter ~ip:(Ip.Addr.of_string "10.0.0.1") [ port_range_of_string Udp "1-2" ])
  *)
 
+(** The local port that the host refuses with [frame], if it is a frame of
+ * its that does: a TCP reset from that port, or an ICMP port unreachable
+ * about a UDP datagram to it. *)
+let refused_port frame =
+    let ( let* ) r f = match r with Ok x -> f x | Error _ -> None in
+    let* eth = Eth.Pdu.unpack frame in
+    let* ip = Ip.Pdu.unpack (eth.payload :> Bitstring.bitstring) in
+    let pld = (ip.payload :> Bitstring.bitstring) in
+    if ip.proto = Ip.Proto.tcp then
+        let* tcp = Tcp.Pdu.unpack pld in
+        if tcp.flags.rst then Some (Tcp, (tcp.src_port :> int)) else None
+    else if ip.proto = Ip.Proto.icmp then
+        let* icmp = Icmp.Pdu.unpack pld in
+        match (icmp.msg_type :> int * int), icmp.payload with
+        | (3, 3), Header { pld ; _ } ->
+            (* The IP header quoted, then the UDP ports: *)
+            (match%bitstring (pld :> Bitstring.bitstring) with
+            | {| 4 : 4 ; ihl : 4 ; _ : 64 ; 17 : 8 ; _ : 16 ; _ : 64 ;
+                 _ : (ihl - 5) * 32 : bitstring ; _ : 16 ; dst : 16 |} ->
+                Some (Udp, dst)
+            | {| _ |} -> None)
+        | _ -> None
+    else None
+
+(*$inject
+  let me = Ip.Addr.of_string "10.0.0.1" and peer = Ip.Addr.of_string "10.0.0.2"
+  let frame proto bits =
+      Eth.Pdu.make Eth.Proto.ip4 (Eth.Addr.of_string "02:00:00:00:00:01")
+          (Eth.Addr.of_string "02:00:00:00:00:02")
+          (Ip.Pdu.pack (Ip.Pdu.make proto me peer bits)) |> Eth.Pdu.pack
+  let tcp ~rst = Tcp.Pdu.make ~src_port:(Tcp.Port.o 40001) ~dst_port:(Tcp.Port.o 80) ~rst ~ack:true Bitstring.empty_bitstring |> Tcp.Pdu.pack
+  let reply = Ip.Pdu.make Ip.Proto.udp peer me
+      (Udp.Pdu.make ~src_port:(Udp.Port.o 53) ~dst_port:(Udp.Port.o 40002) (Bitstring.bitstring_of_string "hi") |> Udp.Pdu.pack)
+*)
+(*$= refused_port & ~printer:dump
+  (Some (Tcp, 40001)) (refused_port (frame Ip.Proto.tcp (tcp ~rst:true)))
+  None (refused_port (frame Ip.Proto.tcp (tcp ~rst:false)))
+  (Some (Udp, 40002)) (refused_port (frame Ip.Proto.icmp (Icmp.Pdu.pack (Icmp.Pdu.make_port_unreachable reply))))
+  None (refused_port (frame Ip.Proto.icmp (Icmp.Pdu.pack (Icmp.Pdu.make_host_unreachable reply))))
+  None (refused_port (frame Ip.Proto.udp (Ip.Pdu.pack reply)))
+*)
+
 (** {2 Firewall} *)
 
 (** The nftables script of a table [table] of rules about interface
