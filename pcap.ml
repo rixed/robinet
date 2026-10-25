@@ -1399,7 +1399,12 @@ type portal = {
   (* Frames captured and waiting for the link, and how many may (as Linux's
    * txqueuelen) before the next is dropped: *)
   mutable queued : int ;
-  mutable tx_queue_len : int }
+  mutable tx_queue_len : int ;
+  (* What makes what sends into the interface send no faster than the link,
+   * given its speed and the queue length, when anything can; and what it
+   * last did: *)
+  mutable shaper : (SimTypes.EthSpeed.t -> queue_len:int -> unit) option ;
+  mutable shaping : string }
 
 type Widget.device += Portal of portal
 
@@ -1417,11 +1422,41 @@ let set_read (portal : portal) f _busy_for =
 let is_connected portal =
     portal.emit <> None
 
-let set_capabilities portal = function
+(* Has the shaper, if any, follow the speed of the link, or else the lowest
+ * speed, so that nothing is sent faster than the next link will take. Raises
+ * if the shaper does. *)
+let shape portal =
+    Option.may (fun shaper ->
+        let speed = portal.link_speed |? SimTypes.EthSpeed.all.(0) in
+        try
+            shaper speed ~queue_len:portal.tx_queue_len ;
+            portal.shaping <- SimTypes.EthSpeed.to_string speed
+        with e ->
+            portal.shaping <- "failed: "^ Printexc.to_string e ;
+            raise e
+    ) portal.shaper
+
+(* As [shape], for when the network carries on whatever the shaper says: *)
+let reshape portal =
+    try shape portal
+    with e ->
+        Log.(log portal.widget.logger Error (lazy (Printf.sprintf
+            "Cannot shape the traffic into %s: %s"
+            portal.ifname (Printexc.to_string e))))
+
+(** Give [portal] its [shaper], and have it shape the traffic right away.
+ * Raises if it cannot. *)
+let set_shaper portal shaper =
+    portal.shaper <- Some shaper ;
+    shape portal
+
+let set_capabilities portal c =
+    (match c with
     | Capabilities.Eth { speeds ; _ } when speeds <> [] ->
         portal.link_speed <- Some (List.reduce SimTypes.EthSpeed.max speeds)
     | _ ->
-        portal.link_speed <- None
+        portal.link_speed <- None) ;
+    reshape portal
 
 let reset_link portal =
     portal.tx_busy_until <- Clock.Time.beginning_of_time ;
@@ -1557,7 +1592,9 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
         link_speed = None ;
         tx_busy_until = Clock.Time.beginning_of_time ;
         queued = 0 ;
-        tx_queue_len = 1000 } in
+        tx_queue_len = 1000 ;
+        shaper = None ;
+        shaping = "none" } in
     widget.device <- Some (Portal portal) ;
     (* Switching this one on opens the interface of the machine it names, and
      * switching it off closes it. *)
@@ -1598,7 +1635,13 @@ let portal ~parent ?location ?(promisc=true) ?(filter="") ?caplen ifname =
             ~descr:"Frames captured that may wait for the link before the \
                     next is dropped."
             ~getter:(fun () -> `Int portal.tx_queue_len)
-            ~setter:(fun v -> portal.tx_queue_len <- to_int_range ~min:0 v) ;
+            ~setter:(fun v ->
+                portal.tx_queue_len <- to_int_range ~min:0 v ;
+                reshape portal) ;
+        property "shaping" ~kind:String
+            ~descr:"The speed what sends into the interface is held to, if \
+                    robinet made the interface."
+            ~getter:(fun () -> `String portal.shaping) ;
         metric_property "volume" ~units:"bytes"
             ~descr:"Volume of traffic that went through the portal."
             (Metric.Counter.T portal.volume) ] ;

@@ -78,6 +78,42 @@ let setup ifname =
         try_run [ "link" ; "del" ; ifname ] ;
         raise e
 
+(* The largest frame a portal may be handed (a jumbo one, VLAN tag included),
+ * and the size of a standard one: *)
+let max_frame = 9022
+let std_frame = 1518
+
+(** The arguments to [tc qdisc replace] that make an interface send no faster
+ * than a link at [speed], holding [queue_len] standard frames in its queue.
+ * Frames are counted as the portal counts them, with the inter-frame gap
+ * (12 bytes) and without preamble or FCS. The burst is two of the largest
+ * frames, or what the link sends in a millisecond, so that the timer keeps up
+ * at high speeds; the queue is never less than the largest frame. *)
+let tbf_args speed ~queue_len =
+    let bps = SimTypes.EthSpeed.to_bps speed in
+    let burst = max (2 * max_frame) (Float.to_int (bps /. 8e3))
+    and limit = max max_frame (queue_len * std_frame) in
+    [ "root" ; "tbf" ; "rate" ; Printf.sprintf "%.0fbit" bps ;
+      "burst" ; string_of_int burst ; "limit" ; string_of_int limit ;
+      "overhead" ; "12" ]
+
+(*$= tbf_args & ~printer:(String.concat " ")
+  [ "root" ; "tbf" ; "rate" ; "10000000bit" ; "burst" ; "18044" ; \
+    "limit" ; "1518000" ; "overhead" ; "12" ] \
+    (tbf_args SimTypes.EthSpeed.Eth10Mbps ~queue_len:1000)
+  [ "root" ; "tbf" ; "rate" ; "10000000000bit" ; "burst" ; "1250000" ; \
+    "limit" ; "9022" ; "overhead" ; "12" ] \
+    (tbf_args SimTypes.EthSpeed.Eth10Gbps ~queue_len:0)
+*)
+
+(** Make the end of the pair in the namespace of the portal called [ifname]
+ * send no faster than a link at [speed], with a queue of [queue_len] frames
+ * (see {!tbf_args}). That end is where the frames the portal captures are
+ * sent from, and its queue is how what sends them learns to wait. *)
+let shape ifname speed ~queue_len =
+    run ([ "netns" ; "exec" ; namespace_of ifname ; "tc" ; "qdisc" ; "replace" ;
+           "dev" ; peer_of ifname ] @ tbf_args speed ~queue_len)
+
 (** Take back what {!setup} made for [ifname], and nothing else: a namespace
  * takes the veth inside it with it, and a pair goes when either of its ends
  * does. Best effort, since this runs while the program is leaving and the

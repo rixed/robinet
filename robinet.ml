@@ -97,13 +97,12 @@ let open_document (path, (clock : Cli.clock)) =
 
 (* The interfaces the portals of these simulations name, which is their
  * widgets' names. *)
-let portal_ifnames sims =
+let portals sims =
     List.concat_map (fun (sim, _) ->
         Simulation.borrow sim (fun () ->
-            Widget.enum sim.root //@ (fun (w : Widget.t) ->
-                Option.map (fun (p : Pcap.portal) -> p.ifname)
-                           (Pcap.portal_of_widget w)) |>
-            List.of_enum)
+            Widget.enum sim.root //@ Pcap.portal_of_widget |>
+            List.of_enum) |>
+        List.map (fun p -> sim, p)
     ) sims
 
 (* What the command line has to say about a clock, once the network has had
@@ -173,14 +172,20 @@ let main =
     Host_config.verbose := opts.Cli.verbose ;
     set_seed opts.Cli.seed ;
     let sims = List.map open_document opts.Cli.documents in
-    let ifnames =
+    let portals =
         match opts.Cli.portals with
         | None -> []
         | Some Cli.Veth ->
-            let ifnames = portal_ifnames sims in
-            List.iter Netns.setup ifnames ;
-            ifnames in
-    finally (fun () -> List.iter Netns.teardown ifnames) (fun () ->
+            let portals = portals sims in
+            List.iter (fun (_, (p : Pcap.portal)) -> Netns.setup p.ifname) portals ;
+            portals in
+    finally (fun () ->
+        List.iter (fun (_, (p : Pcap.portal)) -> Netns.teardown p.ifname) portals)
+      (fun () ->
+        (* Before anything can send from the namespaces: *)
+        List.iter (fun (sim, (p : Pcap.portal)) ->
+            Simulation.borrow sim (fun () ->
+                Pcap.set_shaper p (Netns.shape p.ifname))) portals ;
         List.iter run_startup sims ;
         List.iter set_speed sims ;
         List.iter set_duration sims ;

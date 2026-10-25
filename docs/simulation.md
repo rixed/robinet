@@ -315,9 +315,16 @@ other at the speed the cable negotiated, a burst waiting in the portal's queue
 rather than colliding at the other end. A frame captured while that queue is
 full is dropped, and counted as `rx-dropped` in its `volume`.
 
+With `--portals=veth`, the end in the namespace also sends no faster than that
+speed, through a `tbf` qdisc holding `tx queue length` frames: the queue is then
+in the sender's kernel, where a sender that does not pace itself is made to
+wait. Before any cable is plugged, the qdisc holds it to 10Mbps, the lowest
+speed, and it follows every speed negotiated after that.
+
 | property | kind | default | |
 | --- | --- | --- | --- |
 | `tx queue length` | 0… | `1000` | Frames that may wait for the link, as Linux's `txqueuelen`. |
+| `shaping` | string, read-only | `"none"` | The speed the namespace's end is held to; `none` when robinet did not make the interface, or `failed: …`. |
 
 ### recorder
 
