@@ -89,6 +89,10 @@ let () =
  * packet of this run for one of a previous run's: *)
 let () = Random.self_init ()
 
+(* Each line is out as soon as written, for whoever reads crafty through a
+ * pipe; OCaml channels have no line buffering: *)
+let () = Out_channel.set_buffered Stdlib.stdout false
+
 let () =
     let ifname = ref "" and own_ip = ref None and ports = ref []
     and fw = ref false and promisc = ref false and print_packets = ref false
@@ -365,12 +369,11 @@ let () =
     (* Dated to the microsecond, as the text and captures are: *)
     let emit ?json kind fields =
         let ts = Float.round (secs () *. 1e6) /. 1e6 in
-        print_endline (record format ?json kind (("ts", `Float ts) :: fields)) ;
-        flush stdout in
+        print_endline (record format ?json kind (("ts", `Float ts) :: fields)) in
     let print_stats what n =
         if !stats then
             if format = Human then
-                Printf.printf "%s %s\n%!" (String.capitalize_ascii what)
+                Printf.printf "%s %s\n" (String.capitalize_ascii what)
                     (Crafty_tree.stats_line n)
             else
                 emit what (
@@ -469,7 +472,7 @@ let () =
             let packet = Packet.of_frame bits in
             let summary = Packet.Pdu.Printer.oneline packet in
             if format = Human then
-                Printf.printf "%s %.6f %s\n%!" dir (secs ()) summary
+                Printf.printf "%s %.6f %s\n" dir (secs ()) summary
             else
                 emit "packet" ~json:[ "layers", Packet.Pdu.to_json packet ]
                     [ "dir", `String (if dir = ">" then "out" else "in") ;
