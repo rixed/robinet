@@ -91,7 +91,7 @@ and desc =
 
 and part = Text of string | Interp of expr
 
-(* [held] is what the constructor holds, unless void or not named: *)
+(* [held] is what the constructor holds, unless void: *)
 and arm = { ctor : string ; held : var option ; branch : block }
 
 and layer =
@@ -1191,11 +1191,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             | t -> error subject.loc "The subject of case must be a variant, \
                                       such as a layer of a packet, not %s" (a_type t) in
         (* The name of what each constructor holds: *)
-        let name =
-            match var, subject.desc with
-            | Some n, _ -> Some n
-            | None, Var v -> Some v.name
-            | _ -> None in
+        let name = Some (var |? "I") in
         let arms =
             List.fold_left (fun arms (a : A.arm) ->
                 let ctor =
@@ -2066,10 +2062,11 @@ let check_patterns (ps : A.patterns) =
   "I: int, x: int" \
     (types "repeat { x = if I > 3 { break } else { I } }")
   "x: int" (types "if 1 { wait 1s }\nx = 1\nif x > 0 { print(\"a\") } else { x := 2 }")
-  "x: ip, b: {data: byte[]}, y: byte[]" \
+  "x: ip, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, b: {data: byte[]}, y: byte[]" \
     (types "expect /IP { x = case MATCH[1] IP { MATCH[IP].src } | else { 0.0.0.0 }\n  case var=b MATCH[2] Bytes { y = b.data } }")
-  "x: int" (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Bytes { 13 } }")
-  "x: int, y: int" \
+  "x: int, I: {dst: mac, proto: int, src: mac, ts: time}, I: {code: int, type: int}, I: {id: int}, I: {payload: byte[], seq: int}, I: {payload: byte[], seq: int}, I: {code: int, mtu: int}, I: {code: int}, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, I: {checksum: int, dst: int, length: int, src: int}, I: {ack_num: int, checksum: int, dst: int, flags: int, seq_num: int, src: int, urg_ptr: int, win_size: int}, I: {id: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {data: byte[]}" \
+    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Bytes { 13 } }")
+  "x: int, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, y: int" \
     (types "expect /IP { x = case MATCH[1] IP { wait 1s\n  1 } | else { 2 }\n  y = { expect Bytes {}\n  3 } }")
 *)
 
@@ -2077,8 +2074,8 @@ let check_patterns (ps : A.patterns) =
  * of a variable, branches, items or operands, they make one of the
  * constructors of all: *)
 (*$= types & ~printer:identity
-  "r: (Failed string | Got int | Pending), r: int, n: int" \
-    (types "r = Pending\nr := Got(3)\nif true { r := Failed(\"x\") }\ncase r Got { n = r } else {}")
+  "r: (Failed string | Got int | Pending), I: int, n: int" \
+    (types "r = Pending\nr := Got(3)\nif true { r := Failed(\"x\") }\ncase r Got { n = I } else {}")
   "x: (Err string | Ok float)[], y: (Nope | Ok int), z: bool" \
     (types "x = [Ok(1), Err(\"a\"), Ok(2.5)]\ny = if true { Ok(1) } else { Nope }\nz = Ok(1) == Err(\"a\")")
   "Pending: int, y: int" (types "Pending = 3\ny = Pending + 1")

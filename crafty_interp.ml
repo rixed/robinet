@@ -1794,10 +1794,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
  * holds converted along: *)
 (*$= runs & ~printer:identity
   "0s: pending\n0s: got 2\n0s: Failed late\n0s: [Ok 1.0, Err a, Ok 2.5] true false A {b: [C]}\n0s: done" \
-    (runs "assert(Pending() == Pending)\nr = Pending\nforeach [1, 2, 3] {\n  if I == 2 { r := Got(I) } elsif I == 3 { r := Failed(\"late\") }\n  print(case r Pending { \"pending\" } | Got { \"got ${r}\" } else { \"${r}\" }) }\nx = [Ok(1), Err(\"a\"), Ok(2.5)]\nprint(\"${x} ${x[0] == Ok(1.0)} ${x[1] == Ok(1)} ${A({b: [C]})}\")")
+    (runs "assert(Pending() == Pending)\nr = Pending\nforeach [1, 2, 3] {\n  if I == 2 { r := Got(I) } elsif I == 3 { r := Failed(\"late\") }\n  print(case r Pending { \"pending\" } | Got { \"got ${I}\" } else { \"${r}\" }) }\nx = [Ok(1), Err(\"a\"), Ok(2.5)]\nprint(\"${x} ${x[0] == Ok(1.0)} ${x[1] == Ok(1)} ${A({b: [C]})}\")")
 *)
-(* case runs the arm of a value's constructor, in which the variable that
- * was cased is what that constructor holds: *)
+(* case runs the arm of a value's constructor, in which its var (I by
+ * default) is what that constructor holds: *)
 (*$= runs & ~printer:identity
   "500ms: other\n500ms: ip 10.0.0.2\n500ms: udp 53\n500ms: other\n500ms: Bytes\n1s500ms: 64\n1s500ms: done" \
     (runs ~inject:[ 0.5, reply "pong" ] \

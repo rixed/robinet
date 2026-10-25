@@ -261,7 +261,7 @@ with the constructors of all, which `case` tells apart:
 result = Pending   # of type (Failed string | Got int | Pending)
 first Bytes("pong") { result := Got(length(MATCH)) }
   | ../ICMP { result := Failed("unreachable") }
-print(case result Got { "${result} layers" } else { "${result}" })
+print(case result Got { "${I} layers" } else { "${result}" })
 ```
 
 ### Variables
@@ -390,8 +390,7 @@ what their engine computes (checksums).
 - `catch { ... }`: blocks error propagation.
 - `if COND STMT [elsif COND STMT] else STMT`: conditionals.
 - `case var=v X C { ... } | C { ... } else { ... }`: runs the block of the
-  constructor of `X`. Without `var`, a variable `X` is, in each block, what the
-  constructor holds.
+  constructor of `X`, where `v` (default `I`) is what that constructor holds.
 - `break n`: leaves the `n` (default 1) innermost `repeat`, `foreach` or `on`.
 - `wait d`: pauses.
 - `expect timeout=d PATTERN { ... }`: waits for one matching packet, then
