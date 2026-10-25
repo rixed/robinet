@@ -455,7 +455,7 @@ let budget_fields =
 
 let budget_type = record_type budget_fields
 
-(* Ranges of ports, [first, last]: *)
+(* Ranges of ports, [first, last], whether declared as ranges or ports: *)
 let ports_type = record_type Type.[ "tcp", Array (Array Int) ; "udp", Array (Array Int) ]
 
 (* Bound to their values in the program as it runs: *)
@@ -527,9 +527,10 @@ let port_ranges name _typ (e : A.expr) =
                 let lo = port lo and hi = port hi in
                 if lo > hi then error r.loc "Empty range of ports: [%d, %d]" lo hi ;
                 lo, hi
-            | _ -> error r.loc "A range of ports is [first, last]") rs |>
+            | A.Lit _ -> let p = port r in p, p
+            | _ -> error r.loc "A range of ports is [first, last], or a port") rs |>
         merge_ranges
-    | _ -> error e.loc "PORTS.%s is an array of ranges [first, last]" name
+    | _ -> error e.loc "PORTS.%s is an array of ports and ranges [first, last]" name
 
 (* The declarations of [BUDGET] and [PORTS] at the top level of [program],
  * and the rest of it: *)

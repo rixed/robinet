@@ -2189,6 +2189,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (policed "print(\"${BUDGET.max_syns} ${BUDGET.max_duration} ${PORTS.tcp} ${PORTS.udp}\")\n\
               BUDGET = {max_syns: 3, max_duration: 10s}\n\
               PORTS = {tcp: [[40000, 40100], [40050, 40200]]}")
+  "0.000s: [[53, 53], [40000, 40100]]\n0.000s: done\n0 frames" \
+    (policed "print(\"${PORTS.udp}\")\nPORTS = {udp: [[40000, 40100], 53]}")
   "0.000s: failed: line 1, column 10: max_bytes is not set, by the program or the command line\n0 frames" \
     (policed "print(\"${BUDGET.max_bytes}\")")
   "0.000s: failed: line 1, column 10: tcp is not set, by the program or the command line\n0 frames" \
