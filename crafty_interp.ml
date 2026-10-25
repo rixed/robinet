@@ -47,7 +47,7 @@
 
    [expect] waits for its pattern, failing after its timeout, then runs its
    block once. [first] does the same with the first of its patterns to match.
-   A packet sent defines [LAST] for the rest of its block, or updates it. [on] lets its block go on, and runs the block of the pattern of every
+   A packet sent, by any block, is then [LAST]. [on] lets its block go on, and runs the block of the pattern of every
    match until its timeout, its [max] or a [break] out of it; a block ends
    only once its statements are done and its [on]s are over. The packet
    matched, [MATCH], is decoded to its top, and only if read. *)
@@ -454,7 +454,10 @@ let rec eval output (env : env) (e : T.expr) =
         String (String.concat "" (List.map (function
             | T.Text s -> s
             | T.Interp e -> to_string e.typ (eval e)) parts))
-    | T.Var v -> !(lookup env v)
+    | T.Var v ->
+        (match !(lookup env v) with
+        | Void when v.id = T.last_var.id -> error e.loc "LAST is not set: no packet was sent yet"
+        | x -> x)
     | T.Packet_field { layer ; field } ->
         let (l : Crafty_layers.layer), (u : Crafty_layers.unpacked) =
             List.nth env.packet (List.length env.packet - 1 - layer) in
@@ -869,7 +872,7 @@ and exec t b env (s : T.stmt) k =
                 b.fail Crafty_parser.{ where ; message } ; None in
         ignore (run_block ~enter t b env body ~fail:b.fail ~break_:b.break_
                     (fun _ -> k env))
-    | T.Send { depth ; overlay ; layers ; last ; capture } ->
+    | T.Send { depth ; overlay ; layers ; capture } ->
         (* A packet, leaving the current stack as it was, once it can go on
          * without waiting (as a blocking write does). Its frames reach the
          * interface through events of their own, due now, so the stack is
@@ -882,12 +885,12 @@ and exec t b env (s : T.stmt) k =
                 stack, Crafty_tree.send stack
             with Failed msg -> error s.stmt_loc "%s" msg) |>
         Option.may (fun (stack, (packet, emitted)) ->
-            (* The first packet of the block makes its [LAST], which the
-             * next ones update, as the first capture does its variable: *)
+            lookup env T.last_var := packet_value packet ;
+            (* The first capture makes its variable, which the next ones
+             * update: *)
             let set env v x =
                 if Env.mem v.T.id env.vars then (lookup env v := x ; env)
                 else bind env v x in
-            let env = set env last (packet_value packet) in
             match capture, emitted with
             | Some v, Some e ->
                 await t b s.stmt_loc e (fun p -> k (set env v (packet_value p)))
@@ -1174,7 +1177,8 @@ let run_on_tree power tree ?format ~print ~print_err ?(on_exit=ignore)
     let budget, ports = self_values limits in
     let vars =
         { vars = Env.empty ; stack = [] ; packet = [] } |>
-        fun env -> bind (bind env T.budget_var budget) T.ports_var ports in
+        fun env -> bind (bind (bind env T.budget_var budget) T.ports_var ports)
+                        T.last_var Void in
     ignore (run_block t root vars program
                 ~fail:root.fail ~break_:root.break_
                 (fun _ -> cancel root ; exit Done)) ;
@@ -1718,11 +1722,17 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
                     (Ip.Pdu.pack (udp_packet 53 1000 "pong")) ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect timeout=1s Bytes(\"pong\") { print(\"${MATCH[Eth].dst}\") } }")
 *)
-(* LAST is the last packet sent by the block or an enclosing one: as packed
- * down to the self-driven layers, which only their stack tells: *)
+(* LAST is the last packet sent by any block: as packed down to the
+ * self-driven layers, which only their stack tells: *)
 (*$= runs & ~printer:identity
   "3ps: [Eth {dst: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: ?, id: ?, is_fragment: ?, more_frags: ?, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: ?, ttl: 64}, UDP {checksum: ?, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n3ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"hi\")\n  print(\"${LAST}\") }")
+  "3ps: #61\n3ps: done" \
+    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"a\") }\nprint(\"${LAST[Bytes].data}\")")
+  "0s: failed: line 1, column 5: LAST is not set: no packet was sent yet" \
+    (runs "x = LAST\nprint(\"not reached\")")
+  "6ps: #62\n6ps: done" \
+    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"a\")\n  { Bytes(\"b\") }\n  print(\"${LAST[Bytes].data}\") }")
   "6ps: 64 1\n6ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"a\")\n  x = LAST[IP].ttl\n  ../../IP(ttl=1)/UDP/Bytes(\"b\")\n  print(\"${x} ${LAST[IP].ttl}\") }")
   "2ps: [Eth {dst: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 7, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 30, ttl: 64}, UDP {checksum: 32593, dst: 53, length: 10, src: 1000}, Bytes {data: #6869}]\n2ps: done" \

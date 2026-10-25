@@ -127,8 +127,8 @@ and stmt_desc =
      * give them. The stack of [body]: *)
     | Stack of { depth : int ; overlay : int ; layers : layer list ;
                  body : block }
-    (* The same, for a packet to send, which [last] is then: *)
-    | Send of { depth : int ; overlay : int ; layers : layer list ; last : var ;
+    (* The same, for a packet to send, which [LAST] is then: *)
+    | Send of { depth : int ; overlay : int ; layers : layer list ;
                 (* Set to the packet as captured on its way out, once it is: *)
                 capture : var option }
     (* Its value unused, or that of the block it ends: *)
@@ -462,6 +462,9 @@ let ports_type = record_type Type.[ "tcp", Array (Array Int) ; "udp", Array (Arr
 let budget_var = new_var "BUDGET" budget_type
 let ports_var = new_var "PORTS" ports_type
 
+(* The last packet sent by any block, void until one is: *)
+let last_var = new_var "LAST" packet_type
+
 type limits =
     { (* The fields of [BUDGET] that are set, floats as floats: *)
       budget : (string * A.literal) list ;
@@ -614,8 +617,6 @@ let lookup_var env loc name =
         if List.mem name env.poisoned then raise Already_told ;
         if name = "MATCH" then
             error loc "MATCH is only defined in the blocks of expect, first and on" ;
-        if name = "LAST" then
-            error loc "LAST is only defined once a packet was sent, in that block or an enclosing one" ;
         (* In a condition, a name can also be a field of the layer: *)
         let fields =
             match env.layer_ctx with
@@ -1674,16 +1675,7 @@ and stmt errors env (s : A.stmt) =
                 let body = block errors { env with stack ; stack_text } body in
                 env, Some (mk (Stack { depth ; overlay ; layers = tls ; body }))
             | None ->
-                (* One [LAST] per block, that the packets it sends update: *)
-                let env, last =
-                    if List.mem "LAST" env.declared_here then
-                        env, lookup_var env loc "LAST"
-                    else
-                        let v = new_var "LAST" packet_type in
-                        { env with vars = v :: env.vars ;
-                                   declared_here = "LAST" :: env.declared_here }, v in
-                env, Some (mk (Send { depth ; overlay ; layers = tls ; last ;
-                                      capture = None })))
+                env, Some (mk (Send { depth ; overlay ; layers = tls ; capture = None })))
         | A.Capture { var ; declare = decl ; anchor ; layers } ->
             let hint = stack_hint env anchor layers ~sends:true in
             let base, over = anchor_base ~hint env s.stmt_loc anchor in
@@ -1695,13 +1687,6 @@ and stmt errors env (s : A.stmt) =
                     error s.stmt_loc "Only a packet sent through manual layers can \
                                       be seen leaving, and %s is self-driven"
                         (L.to_string l)) stack ;
-            let env, last =
-                if List.mem "LAST" env.declared_here then
-                    env, lookup_var env loc "LAST"
-                else
-                    let v = new_var "LAST" packet_type in
-                    { env with vars = v :: env.vars ;
-                               declared_here = "LAST" :: env.declared_here }, v in
             let env, capture =
                 if decl then
                     declare_typ env var packet_type
@@ -1711,7 +1696,7 @@ and stmt errors env (s : A.stmt) =
                         error loc "%s is %s, not a packet" var (a_type v.typ) ;
                     env, v in
             env, Some (mk (Send { depth = List.length base ; overlay ; layers = tls ;
-                                  last ; capture = Some capture }))
+                                  capture = Some capture }))
         (* [sort(x[i])] is [x[i] := sorted(x[i])]: *)
         | A.Expr { desc = A.Call (f, [ arg ]) ; _ }
           when same_name f "sort" && (arg.arg_name = None || arg.arg_name = Some "a") ->
@@ -1925,7 +1910,7 @@ let check ?(warnings=ref []) (program : A.program) =
     (* Until no variable is widened, which types grow until they have all
      * the constructors of the program: *)
     let rec typed () =
-        let env = { vars = [ budget_var ; ports_var ] ; declared_here = [] ;
+        let env = { vars = [ budget_var ; ports_var ; last_var ] ; declared_here = [] ;
                     poisoned = [] ; stack = [] ;
                     stack_text = [] ; loops = 0 ; layer_ctx = None ;
                     may_wait = true ; errors = ref [] ; warnings = ref [] ;
@@ -2252,12 +2237,6 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/IP {}")
   "line 1, column 5: MATCH is only defined in the blocks of expect, first and on" \
     (types "x = MATCH")
-  "line 1, column 5: LAST is only defined once a packet was sent, in that block or an enclosing one" \
-    (types "x = LAST")
-  "line 2, column 5: LAST is only defined once a packet was sent, in that block or an enclosing one" \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"a\") }\nx = LAST")
-  "line 1, column 36: LAST is only defined once a packet was sent, in that block or an enclosing one" \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { x = LAST\n  Bytes(\"a\") }")
   "line 1, column 5: IP.src is a field of a packet being matched, which only the condition of a pattern can read (as in \"expect Bytes(IP.src == x)\").\n  Of a packet in a variable, it is \"p[IP].src\": \"LAST[IP].src\" for the last one sent, \"MATCH[IP].src\" for the one that matched." \
     (types "x = IP.src")
   "line 1, column 44: IP.ttl is a field of a packet being matched, which only the condition of a pattern can read (as in \"expect Bytes(IP.ttl == x)\"); the options of a stack cannot read the layers below.\n  Of a packet in a variable, it is \"p[IP].ttl\": \"LAST[IP].ttl\" for the last one sent, \"MATCH[IP].ttl\" for the one that matched." \
