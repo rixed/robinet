@@ -350,14 +350,16 @@ let () =
      * one, capturing either way, sees it leave, before whatever it causes
      * comes back: *)
     let sim = Simulation.make "crafty" in
-    let open_iface ~direction ~filter =
+    let open_iface ?blocking ~direction ~filter () =
         Pcap.open_iface ~widget:(Widget.make ~parent:sim.root !ifname)
             ~promisc:!promisc ~direction ~caplen:(Pcap.caplen_of_mtu mtu)
-            ~filter !ifname in
-    let injector = open_iface ~direction:Pcap.Out ~filter:"less 0"
+            ?blocking ~filter !ifname in
+    (* Blocking, so that crafty sends no faster than the kernel takes: *)
+    let injector =
+        open_iface ~blocking:true ~direction:Pcap.Out ~filter:"less 0" ()
     and pcap =
         open_iface ~direction:Pcap.InOut
-            ~filter:(Host_config.pcap_filter ?ip:!own_ip ports) in
+            ~filter:(Host_config.pcap_filter ?ip:!own_ip ports) () in
     let secs () = Clock.Time.to_secs (Simulation.now sim) in
     (* Dated to the microsecond, as the text and captures are: *)
     let emit ?json kind fields =
@@ -422,17 +424,23 @@ let () =
                 (* Streams that are closing, and frames on their way, go on
                  * for as long as packets keep going out or coming in, until
                  * none did for [linger]; checked from the next tick, once
-                 * what was sent last is out: *)
-                let linger = Clock.Interval.to_secs !linger in
+                 * the kernel has sent all that was injected, and once the
+                 * clock has caught up with the wall clock, which dates what
+                 * is captured, and which blocking injections leave it
+                 * behind: *)
+                let linger = Clock.Interval.to_secs !linger
+                and tick = Clock.Interval.msec 100. in
                 (* From a thread of its own, as stopping takes the lock this
                  * event runs under: *)
                 let stop () = ignore (Thread.create (Simulation.stop sim) ()) in
                 let rec check pkts deadline =
-                    Simulation.delay sim.root.power (Clock.Interval.msec 100.) (fun () ->
+                    Simulation.delay sim.root.power tick (fun () ->
                         let pkts' = !pkts_out + !pkts_in in
                         let deadline =
                             if pkts' <> pkts then secs () +. linger else deadline in
-                        if idle () || secs () >= deadline then stop ()
+                        if Pcap.unsent injector.handler = 0 &&
+                           Clock.Interval.compare sim.late tick < 0 &&
+                           (idle () || secs () >= deadline) then stop ()
                         else check pkts' deadline) () in
                 if s = Crafty_interp.Stopped then stop ()
                 else check (!pkts_out + !pkts_in) (secs () +. linger))
@@ -485,9 +493,13 @@ let () =
             while not (is_it (Queue.pop injected)) do () done ;
             true
         ) else false in
+    let not_injected = ref 0 in
     Tools.(after.out --> sink (fun bits ->
         Queue.push bits injected ;
-        Pcap.inject injector.handler bits)) ;
+        try Pcap.inject injector.handler bits
+        with Failure msg ->
+            if !not_injected = 0 then info "Cannot inject: %s." msg ;
+            incr not_injected)) ;
     Simulation.run_startup sim ;
     Simulation.power_up policer.widget.power ;
     (* The host refusing what is for a port crafty uses, once per port: *)
@@ -561,6 +573,8 @@ let () =
             !pkts_out !pkts_in !bytes_out !bytes_in ;
         if !sent > !pkts_out then
             Printf.printf "Dropped by the policer: %d packets.\n" (!sent - !pkts_out) ;
+        if !not_injected > 0 then
+            Printf.printf "Not injected: %d packets.\n" !not_injected ;
         Printf.printf "Captured going out: %d packets, %d bytes.\n" !wire_pkts !wire_bytes
     ) else
         emit "done"
@@ -568,6 +582,7 @@ let () =
               "packets_out", `Int !pkts_out ; "packets_in", `Int !pkts_in ;
               "bytes_out", `Int !bytes_out ; "bytes_in", `Int !bytes_in ;
               "dropped", `Int (!sent - !pkts_out) ;
+              "not_injected", `Int !not_injected ;
               "captured_packets", `Int !wire_pkts ;
               "captured_bytes", `Int !wire_bytes ] ;
     exit code

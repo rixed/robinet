@@ -139,6 +139,10 @@ type pcap_handler
 (** [inject_ pcap_handler packet] inject this packet into this interface *)
 external inject_ : pcap_handler -> string -> unit = "wrap_pcap_inject"
 
+(** [unsent_ pcap_handler] is how many bytes injected through it the kernel
+ * has yet to send, where it can tell (else 0). *)
+external unsent_ : pcap_handler -> int = "wrap_pcap_unsent"
+
 (** [sniff_ pcap_handler] will return the next available packet as a string,
  * as well as its capture timestamp.
  * If timeout is set then the function will raise Not_found after that number of
@@ -155,12 +159,13 @@ external sniff_ : ?timeout:float -> pcap_handler -> sniff_ret_ = "wrap_pcap_read
  * injected through the very same handle. *)
 type direction = InOut | In | Out
 
-(** [openif_ "eth0" true "port 80" 96 In] returns the iface representing eth0,
- * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
- * of each packets. Notice that if [caplen] is set to 0 then a "default" value
- * of 65535 will be chosen, which is probably not what you want. See
- * [default_caplen] for what you probably want. *)
-external openif_ : string -> bool -> string -> int -> direction -> pcap_handler = "wrap_pcap_make"
+(** [openif_ "eth0" true "port 80" 96 In false] returns the iface representing
+ * eth0, in promiscuous mode, filtering port 80 and capturing only the first 96
+ * bytes of each packets, without blocking. Notice that if [caplen] is set to 0
+ * then a "default" value of 65535 will be chosen, which is probably not what
+ * you want. See [default_caplen] for what you probably want. *)
+external openif_ : string -> bool -> string -> int -> direction -> bool -> pcap_handler =
+    "wrap_pcap_make_byte" "wrap_pcap_make"
 
 external closeif_ : pcap_handler -> unit = "wrap_pcap_close"
 
@@ -486,15 +491,20 @@ type iface_handler = {
 (** [openif "eth0" true "port 80" 96] returns the iface representing eth0,
  * in promiscuous mode, filtering port 80 and capturing only the first 96 bytes
  * of each packets. Notice that if [caplen] is not set then whole frames are
- * captured (see [default_caplen]). *)
-let openif ?(promisc=true) ?(filter="") ?caplen ?(direction=InOut) name =
+ * captured (see [default_caplen]).
+ * With [blocking], injecting waits for the kernel to take the frame, rather
+ * than fail, when the send buffer is full; reading waits too. *)
+let openif ?(promisc=true) ?(filter="") ?caplen ?(direction=InOut) ?(blocking=false) name =
     let caplen =
         Option.default_delayed (fun () -> default_caplen name) caplen in
-    { pcap = openif_ name promisc filter caplen direction ;
+    { pcap = openif_ name promisc filter caplen direction blocking ;
       name ; caplen }
 
 let closeif handler =
     closeif_ handler.pcap
+
+let unsent handler =
+    unsent_ handler.pcap
 
 (** [sniff handler] will return the next available packet as a Pcap.Pdu.t.
  *
@@ -1253,9 +1263,9 @@ type iface = { handler : iface_handler ;
 
 (* An iface if a pcap handler that's part of a simulation.
  * It needs a widget to log and pay for events. *)
-let open_iface ~(widget : Widget.t) ?promisc ?filter ?caplen ?direction ifname =
+let open_iface ~(widget : Widget.t) ?promisc ?filter ?caplen ?direction ?blocking ifname =
     let iface = {
-        handler = openif ?promisc ?filter ?caplen ?direction ifname ;
+        handler = openif ?promisc ?filter ?caplen ?direction ?blocking ifname ;
         widget
     } in
     (* A real interface only makes sense in a realtime simulation: *)

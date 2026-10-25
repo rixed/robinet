@@ -23,6 +23,10 @@
 #include <stdbool.h>
 #include <string.h>
 #include <sys/select.h>
+#include <sys/ioctl.h>
+#ifdef __linux__
+#   include <linux/sockios.h>
+#endif
 #include <pcap/pcap.h>
 #include <caml/mlvalues.h>
 #include <caml/fail.h>
@@ -76,7 +80,7 @@ static int set_filter(pcap_t *handle, char const *filter)
 // The OCaml [Pcap.direction], in the order of its constructors:
 static pcap_direction_t const directions[] = { PCAP_D_INOUT, PCAP_D_IN, PCAP_D_OUT };
 
-static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, size_t snaplen, pcap_direction_t direction, char *errbuf)
+static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, size_t snaplen, pcap_direction_t direction, bool blocking, char *errbuf)
 {
     if (! snaplen) snaplen = 65535; // FIXME: let libpcap deal with it
 
@@ -87,8 +91,9 @@ static pcap_t *make_pcap(char const *ifname, bool promisc, char const *filter, s
     if (0 != pcap_set_snaplen(handle, snaplen)) goto err;
     // Ask libpcap to ask the kernel not to buffer packets:
     if (0 != pcap_set_immediate_mode(handle, 1)) goto err;
-    // Also, not to wait when there are no packets at all:
-    if (0 != pcap_setnonblock(handle, 1, errbuf)) goto err1;
+    // Also, unless blocking, not to wait when there are no packets at all,
+    // nor for room to send:
+    if (0 != pcap_setnonblock(handle, ! blocking, errbuf)) goto err1;
     // Nanosecond timestamps where the platform has them (else microseconds):
     (void)pcap_set_tstamp_precision(handle, PCAP_TSTAMP_PRECISION_NANO);
     // We will implement timeout ourselves
@@ -104,9 +109,10 @@ err1:
     return NULL;
 }
 
-CAMLprim value wrap_pcap_make(value ifname_, value promisc_, value filter_, value snaplen_, value direction_)
+CAMLprim value wrap_pcap_make(value ifname_, value promisc_, value filter_, value snaplen_, value direction_, value blocking_)
 {
     CAMLparam5(ifname_, promisc_, filter_, snaplen_, direction_);
+    CAMLxparam1(blocking_);
     char errbuf[PCAP_ERRBUF_SIZE] = "";
 
     char const *const ifname = String_val(ifname_);
@@ -114,14 +120,21 @@ CAMLprim value wrap_pcap_make(value ifname_, value promisc_, value filter_, valu
     char const *const filter = String_val(filter_);
     unsigned const snaplen = Unsigned_int_val(snaplen_);
     pcap_direction_t const direction = directions[Int_val(direction_)];
+    bool const blocking = Bool_val(blocking_);
 
-    pcap_t *handle = make_pcap(ifname, promisc, filter, snaplen, direction, errbuf);
+    pcap_t *handle = make_pcap(ifname, promisc, filter, snaplen, direction, blocking, errbuf);
     if (! handle) caml_failwith(errbuf);
 
     CAMLlocal1(v);
     v = caml_alloc_custom(&ops, sizeof(handle), 1000 /* the size behind a handle */, 100000);
     memcpy(Data_custom_val(v), &handle, sizeof(handle));
     CAMLreturn(v);
+}
+
+CAMLprim value wrap_pcap_make_byte(value *argv, int argn)
+{
+    (void)argn;
+    return wrap_pcap_make(argv[0], argv[1], argv[2], argv[3], argv[4], argv[5]);
 }
 
 CAMLprim value wrap_pcap_close(value handle_)
@@ -142,15 +155,36 @@ CAMLprim value wrap_pcap_inject(value handle_, value str_)
     pcap_t *const handle = Pcap_val(handle_);
     if (! handle) caml_failwith("Pcap handle has been closed");
 
+    // A copy, since the string may move while the runtime is released:
     size_t size = caml_string_length(str_); // believed to be faster than strlen()
-    char const *str = String_val(str_);
+    char *str = malloc(size);
+    if (! str) caml_raise_out_of_memory();
+    memcpy(str, String_val(str_), size);
 
-    if (PCAP_ERROR == pcap_inject(handle, str, size)) {
-        char *err_msg = pcap_geterr(handle);
-        caml_failwith(err_msg);
-    }
+    // A blocking handle may wait here for the kernel to take the frame:
+    caml_release_runtime_system();
+    int const res = pcap_inject(handle, str, size);
+    caml_acquire_runtime_system();
+    free(str);
+
+    if (PCAP_ERROR == res) caml_failwith(pcap_geterr(handle));
 
     CAMLreturn(Val_unit);
+}
+
+CAMLprim value wrap_pcap_unsent(value handle_)
+{
+    CAMLparam1(handle_);
+    pcap_t *const handle = Pcap_val(handle_);
+    if (! handle) caml_failwith("Pcap handle has been closed");
+
+    int unsent = 0;
+#   ifdef SIOCOUTQ
+    if (0 != ioctl(pcap_fileno(handle), SIOCOUTQ, &unsent))
+        caml_failwith(strerror(errno));
+#   endif
+
+    CAMLreturn(Val_int(unsent));
 }
 
 CAMLprim value wrap_pcap_read(value timeout_, value handle_)
