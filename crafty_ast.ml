@@ -323,11 +323,23 @@ let string_of_binop = function
     | BitAnd -> "&" | BitOr -> "|" | BitXor -> "^"
     | Eq -> "==" | Ne -> "!=" | Lt -> "<" | Le -> "<=" | Gt -> ">" | Ge -> ">="
 
-(* The shortest that reads back as [f], and as a float: *)
+(* The shortest that reads back as [f], and as a float; "inf", "-inf" and
+ * "nan" for the non-finite ones: *)
 let string_of_float f =
-    let s = Printf.sprintf "%.15g" f in
-    let s = if float_of_string s = f then s else Printf.sprintf "%.17g" f in
-    if String.exists s "." || String.exists s "e" then s else s ^".0"
+    if Stdlib.Float.is_nan f then "nan" else
+    if Stdlib.Float.is_finite f then
+        let s = Printf.sprintf "%.15g" f in
+        let s = if float_of_string s = f then s else Printf.sprintf "%.17g" f in
+        if String.exists s "." || String.exists s "e" then s else s ^".0"
+    else if f > 0. then "inf" else "-inf"
+
+(*$= string_of_float & ~printer:identity
+  "1.0" (string_of_float 1.)
+  "0.25" (string_of_float 0.25)
+  "inf" (string_of_float infinity)
+  "-inf" (string_of_float neg_infinity)
+  "nan" (string_of_float nan)
+*)
 
 let print_literal oc = function
     | Bool b -> String.print oc (if b then "true" else "false")
