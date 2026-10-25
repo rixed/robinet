@@ -1046,7 +1046,7 @@ and repeat t b env var count items every for_ body body_loc k =
         | _ -> None),
         items,
         interval Interval.zero every,
-        interval (Interval.min 5.) for_) |>
+        interval (Interval.min 1.) for_) |>
     Option.may (fun (count, items, every, for_) ->
     let now () = Simulation.now t.power.sim in
     let start = now () in
@@ -1392,6 +1392,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "repeat for=2500ms every=1s { print(\"${I}\") }")
   "0s: 0\n1s: 1\n1s: done" \
     (runs "repeat for=2s every=1s { print(\"${I}\") }")
+  "0s: 0\n25s: 1\n50s: 2\n50s: done" \
+    (runs "repeat every=25s { print(\"${I}\") }")
   "0s: 0\n1s: 1\n2s: done" \
     (runs "repeat for=1500ms { print(\"${I}\")\n  repeat count=2 every=1s {} }")
   "0s: 0\n400ms: 1\n1s: 0\n1s400ms: 1\n2s: 0\n2s400ms: 1\n2s400ms: done" \
