@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 5762e7ece2f66612334b71455a6b8212) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 13556cfbbf17978d718ec3cf7900facd) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -270,8 +270,8 @@ Operators, from the tightest binding to the loosest:
 
 1.  `!x`, `-x`.
 2.  `*`, `/`, `%`: on numbers; an interval can be multiplied or divided by a
-    number. An array (or a byte) times an int repeats it: `#01 * 2` is `#0101`,
-    `[0] * 3` is `[0, 0, 0]`.
+    number, or divided by an interval (giving a float). An array (or a byte)
+    times an int repeats it: `#01 * 2` is `#0101`, `[0] * 3` is `[0, 0, 0]`.
 3.  `+`, `-`: on numbers and intervals; a time minus a time is an interval, a
     time plus an interval (or a number of seconds) is a time. `+` also
     concatenates arrays (`[1] + [2, 3]`) and appends or prepends an item

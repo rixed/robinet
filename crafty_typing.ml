@@ -1368,6 +1368,8 @@ and binop env loc op a b =
             mk a.typ (Binop (op, a, b))
         | Type.Interval, Type.Interval when op = A.Add || op = A.Sub ->
             mk Type.Interval (Binop (op, a, b))
+        | Type.Interval, Type.Interval when op = A.Div ->
+            mk Type.Float (Binop (op, a, b))
         | Type.Interval, (Type.Int | Type.Float) when op = A.Mul || op = A.Div ->
             mk Type.Interval (Binop (op, a, expect "" b Type.Float))
         | (Type.Int | Type.Float), Type.Interval when op = A.Mul ->

@@ -416,6 +416,7 @@ let arith loc op a b =
         Array (Array.concat (List.make n a))
     | A.Div, Interval _, Float 0. -> error loc "Division by zero"
     | A.Div, Interval a, Float b -> Interval (Interval.div a b)
+    | A.Div, Interval a, Interval b -> Float (Interval.to_secs a /. Interval.to_secs b)
     | A.Sub, Time a, Time b ->
         let d = Clock.Wall.to_secs a -. Clock.Wall.to_secs b in
         (* As many picoseconds as an int holds: *)
@@ -1535,6 +1536,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "repeat count=5 { if I & 1 { print(\"odd ${I}\") } elsif I > 1 { print(\"big ${I}\") }\n  else { print(\"small ${I}\") } }")
   "0s: 0\n0s: 1\n0s: after\n0s: done" \
     (runs "repeat { if I == 2 { break }\n  print(\"${I}\") }\nprint(\"after\")")
+  "0s: 2.5 0.25\n0s: done" \
+    (runs "print(\"${5s / 2s} ${1ms / 4ms}\")")
   "0s: failed: line 1, column 4: Division by zero" \
     (runs "if 1 / 0 > 0 {}\nprint(\"not reached\")")
   "0s: #0101 #010201020102 [1, 2, 1, 2] 0\n0s: done" \
