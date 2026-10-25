@@ -395,7 +395,12 @@ type layer_ctx =
       cur_mode : L.mode ;
       in_cond : bool ;
       (* The layers of the packet below it, from the bottom: *)
-      below : (L.layer * L.mode) array }
+      below : (L.layer * L.mode) array ;
+      (* The bare names of the condition read as variables though fields of
+       * [cur] (where, name, field): *)
+      shadowing : (A.location * string * int) list ref ;
+      (* The fields of [cur] that the condition reads with a prefix: *)
+      prefixed : int list ref }
 
 type env =
     { (* Innermost first: *)
@@ -1273,18 +1278,19 @@ and var env loc name =
         if not (Hashtbl.mem env.reads v.id) then Hashtbl.add env.reads v.id loc ;
         mk v.typ (Var v) in
     match env.layer_ctx with
-    | None -> as_var ()
-    | Some ctx ->
-        let field =
-            if ctx.in_cond then L.find_field ctx.cur name else None in
-        match field with
+    | Some ctx when ctx.in_cond ->
+        (match L.find_field ctx.cur name with
+        | Some i when bound env name ->
+            ctx.shadowing := (loc, name, i) :: !(ctx.shadowing) ;
+            as_var ()
         | Some i ->
             let f = ctx.cur.fields.(i) in
             if not (List.mem ctx.cur_mode f.read_in) then
                 error loc "%s cannot be read in a %s %s" f.name
                     (L.string_of_mode ctx.cur_mode) (L.to_string ctx.cur) ;
             mk f.typ (Packet_field { layer = Array.length ctx.below ; field = i })
-        | None -> as_var ()
+        | None -> as_var ())
+    | _ -> as_var ()
 
 and layer_field env loc name from_start nth f =
     let ctx =
@@ -1300,21 +1306,27 @@ and layer_field env loc name from_start nth f =
                 (if Option.is_none ctx then ""
                  else "; the options of a stack cannot read the layers below")
                 n f n f n f in
+    (* The current layer included: *)
     let positions =
-        Array.to_list ctx.below |>
+        Array.to_list ctx.below @ [ ctx.cur, ctx.cur_mode ] |>
         List.mapi (fun i (l, m) -> i, l, m) |>
         List.filter (fun (_, (l : L.layer), _) -> l.name = name) in
     let positions = if from_start then positions else List.rev positions in
     match List.nth_opt positions nth with
     | None ->
+        let where =
+            if ctx.cur.name = name then ", this one included"
+            else " below "^ L.to_string ctx.cur in
         (match List.length positions with
-        | 0 -> error loc "There is no %s below %s" (lname name) (L.to_string ctx.cur)
-        | 1 -> error loc "There is only one %s below %s" (lname name) (L.to_string ctx.cur)
-        | n -> error loc "There are only %d %s below %s" n (lname name) (L.to_string ctx.cur))
+        | 0 -> error loc "There is no %s%s" (lname name) where
+        | 1 -> error loc "There is only one %s%s" (lname name) where
+        | n -> error loc "There are only %d %s%s" n (lname name) where)
     | Some (layer, (l : L.layer), mode) ->
         match L.find_field l f with
         | None -> error loc "%s has no field %s%s" (L.to_string l) f (field_hint l f)
         | Some i ->
+            if layer = Array.length ctx.below then
+                ctx.prefixed := i :: !(ctx.prefixed) ;
             let fd = l.fields.(i) in
             if not (List.mem mode fd.read_in) then
                 error loc "%s cannot be read in a %s %s" fd.name
@@ -1482,7 +1494,8 @@ and stack_layers ~hint env base over (layers : A.layer list) =
             if base' == base then tls else implicit_root al.layer_loc :: tls in
         let mode = mode_on al.layer_loc base' l ~bang:al.manual in
         let ctx = { cur = l ; cur_mode = mode ; in_cond = false ;
-                    below = Array.of_list (List.rev base') } in
+                    below = Array.of_list (List.rev base') ;
+                    shadowing = ref [] ; prefixed = ref [] } in
         let env = { env with layer_ctx = Some ctx } in
         let options =
             List.map (fun (a : A.arg) ->
@@ -1543,11 +1556,24 @@ and pattern env (p : A.pattern) =
                        cond = None } :: pls in
             let mode = mode_on pl.pl_loc base' l ~bang:pl.pl_manual in
             let ctx = { cur = l ; cur_mode = mode ; in_cond = true ;
-                        below = Array.of_list (List.rev base') } in
+                        below = Array.of_list (List.rev base') ;
+                        shadowing = ref [] ; prefixed = ref [] } in
             let env = { env with layer_ctx = Some ctx } in
             let cond =
                 Option.map (fun c ->
                     let c = expr env c in
+                    (* A condition that prefixes a field tells it from the
+                     * variable of the same name: *)
+                    List.iter (fun (loc, name, i) ->
+                        if not (List.mem i !(ctx.prefixed)) then
+                            let n = lname l.name in
+                            env.warnings :=
+                                (loc, Printf.sprintf "This %s is the variable %s, \
+                                                      not the field of %s: write %s.%s \
+                                                      for the field"
+                                    name name n n l.fields.(i).name) ::
+                                !(env.warnings)
+                    ) !(ctx.shadowing) ;
                     match c.typ, l.default_field with
                     | (Type.Bool | Type.Int), _ -> as_bool "" c
                     | _, Some i when List.mem mode l.fields.(i).read_in ->
@@ -2006,6 +2032,10 @@ let check_patterns (ps : A.patterns) =
     (warns "on for=1s /IP/UDP {}\non /IP/UDP {}\non max=2 /IP/TCP {}")
   "" (warns "on /IP/UDP {}\non linger=1s /IP/TCP {}")
   "" (warns "on /IP/UDP {}\nwait 1s")
+  "line 2, column 12: This id is the variable id, not the field of IP: write IP.id for the field\nline 2, column 18: This id is the variable id, not the field of IP: write IP.id for the field" \
+    (warns "id = 5\nexpect /IP(id == id) {}")
+  "" (warns "id = 5\nexpect /IP(IP.id == id) {}")
+  "" (warns "n = 5\nexpect /IP(id == n) {}")
   "line 1, column 52: This pattern matches any /IP/UDP/DNS/Answer, not only those of the current stack /IP(dst=1.2.3.4)/UDP(dst=53)/DNS.\n  Do you mean \"Answer\"?" \
     (warns "/IP(dst=1.2.3.4)/UDP(dst=53) { ../UDP/DNS { expect /IP/UDP/DNS/Answer {} } }")
   "" (warns "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { expect /IP(src == 1.2.3.4)/UDP/DNS/Answer {} }")
@@ -2088,6 +2118,8 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"hi\")\n  expect Bytes(\"ho\") { x = MATCH[IP].src } }")
   "x: int" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(dst == 53, IP.ttl < 3, ^IP.src = 1.2.3.4, Eth.proto == 0x800) { x = MATCH[UDP].src } }")
+  "id: int" \
+    (types "id = 5\nexpect /IP(IP.id == id, IP.src == ^IP.src) {}")
   "" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80) { expect ../TCP!(flags & RST, seq_num > 3) {}\n  expect ../TCP!/Bytes(data == \"x\") {} }")
   "t: time, d: interval, u: time, v: time, w: bool" \
@@ -2304,6 +2336,8 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(TCP.src == 1) {} }")
   "line 1, column 46: There is only one IP below UDP" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(IP^.ttl == 1) {} }")
+  "line 1, column 12: There is only one IP, this one included" \
+    (types "expect /IP(IP^.ttl == 1) {}")
   "line 1, column 46: The condition on TCP must be a bool, not a string" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80) { expect ../TCP(\"x\") {} }")
   "line 1, column 46: flags cannot be read in a self-driven TCP" \

@@ -348,11 +348,11 @@ layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
   stack.
 - `Bytes("pong") | ../ICMP`: alternatives.
 - `UDP(src == port)`: conditions in parentheses are boolean expressions.
-  A bare name is a field of the layer if it has one (`src`), else a variable
-  (`port`).
-- Fields of the layers below read as `IP.src`. When there are several (a
-  tunnel, the packet an ICMP error quotes), `IP^.src` is the IP layer below
-  the last one, and `^IP.src` the first.
+  A bare name is a variable if there is one (`port`), else a field of the layer
+  (`src`).
+- `IP.src` is the field of the last IP layer, this one included. When there are
+  several (a tunnel, the packet an ICMP error quotes), `IP^.src` is the IP
+  layer below the last one, and `^IP.src` the first.
 - A condition that is not a bool compares the default field:
   `Bytes("pong")` is `Bytes(data == "pong")`.
 - The fields that can be read depend on the mode (see [Layers](#layers)): a
