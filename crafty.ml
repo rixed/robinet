@@ -387,6 +387,15 @@ let () =
                 if format = Human then print_endline s
                 else emit "print" [ "text", `String s ])
             ~print_err:prerr_endline
+            ~on_warning:(fun e ->
+                if not !no_warning then
+                    if format = Human then
+                        Printf.eprintf "%s: %a: Warning: %s\n%!" prog_name
+                            Crafty_ast.print_location e.where e.message
+                    else
+                        emit "warning" [ "text", `String e.message ;
+                                         "line", `Int e.where.line ;
+                                         "column", `Int e.where.column ])
             ~on_closed:(fun n -> tally n ; print_stats "closed" n)
             (* What comes in was received by the real interface already: *)
             ~rx_wire:false

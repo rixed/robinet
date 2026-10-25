@@ -87,6 +87,8 @@ type node =
       eth : Eth.State.t ;
       (* The ranges of local ports to pick from, by layer name: *)
       ports : string -> (int * int) list ;
+      (* Told of a local port that a stack gives, by the layer: *)
+      given_port : A.location -> L.layer -> int -> unit ;
       (* Told the nodes of streams that go away, terminal ones aside: *)
       removed : node -> unit ;
       ops : L.ops ;
@@ -162,7 +164,7 @@ let make_child parent (l : L.layer) key =
               children = Hashtbl.create 3 ; users = 0 ; received = 0 ;
               received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
               closing = false ; eth = parent.eth ; ports = parent.ports ;
-              removed = parent.removed ;
+              given_port = parent.given_port ; removed = parent.removed ;
               ops = l.node { eth = parent.eth ;
                              key = (fun name -> key_fields l (current ()) name) ;
                              below_key = (fun name -> key_fields parent.layer parent.key name) ;
@@ -190,7 +192,11 @@ let child loc parent (l : L.layer) (options : (int * value) list) =
     let key =
         List.filter_map (fun i ->
             match List.assoc_opt i options with
-            | Some v -> Some (i, v)
+            | Some v ->
+                (match l.fields.(i).pick, v with
+                | Some L.Local_port, Int p -> parent.given_port loc l p
+                | _ -> ()) ;
+                Some (i, v)
             | None ->
                 Option.map (fun v -> i, v) @@
                 (match l.fields.(i).pick with
@@ -666,17 +672,25 @@ let dynamic_ports = [ 49152, 65535 ]
 (** The tree of an interface, which then receives through it. Local ports
  * that a stack leaves out are picked from [ports] for each layer that has
  * some (inclusive and disjoint ranges, by layer name), and else from
- * {!dynamic_ports}. *)
-let make_root ?(ports=[]) ?(on_removed=ignore) (eth : Eth.State.t) =
-    let ports name =
+ * {!dynamic_ports}; those it gives out of its layer's [ports] are told to
+ * [on_foreign_port], with these ranges. *)
+let make_root ?(ports=[]) ?(on_removed=ignore)
+              ?(on_foreign_port=fun _ _ _ _ -> ()) (eth : Eth.State.t) =
+    let restricted name =
         match List.assoc_opt (String.uppercase_ascii name) ports with
-        | Some (_ :: _ as ranges) -> ranges
-        | _ -> dynamic_ports in
+        | Some (_ :: _ as ranges) -> Some ranges
+        | _ -> None in
+    let given_port loc (l : L.layer) p =
+        restricted (L.N.to_string l.name) |>
+        Option.may (fun ranges ->
+            if not (List.exists (fun (lo, hi) -> p >= lo && p <= hi) ranges) then
+                on_foreign_port loc l p ranges) in
+    let ports name = restricted name |? dynamic_ports in
     let root =
         { layer = L.root ; key = [] ; parent = None ;
           children = Hashtbl.create 10 ; users = 0 ; received = 0 ;
           received_bytes = 0 ; sent = 0 ; sent_bytes = 0 ;
-          closing = false ; eth ; ports ; removed = on_removed ;
+          closing = false ; eth ; ports ; given_port ; removed = on_removed ;
           ops = L.root.node { eth ; key = (fun _ -> None) ;
                               below_key = (fun _ -> None) ; below = None } ;
           patterns = [] } in

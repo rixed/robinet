@@ -1222,6 +1222,7 @@ let print_status oc = function
  * picking the local ports it is not given from the ports of [limits] (as
  * {!Crafty_tree.make_root} does), [limits] (default: the program's) being
  * what [BUDGET] and [PORTS] are, printing with [print] and [print_err],
+ * telling [on_warning] of what is likely not what was meant (once each),
  * [format()] writing in [format] (default {!Crafty_value.Human}),
  * calling [on_exit] with how it ends, and [on_closed] with the node of each
  * stream that goes away. Unless [rx_wire], what is written to the device was
@@ -1232,7 +1233,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         ?(promisc=false)
         ?(speed=EthSpeed.Eth1Gbps) ?(full_duplex=true) ?mtu
         ?limits ?format ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
-        ?(on_closed=ignore) ?(rx_wire=true) (program : program) =
+        ?(on_warning=ignore) ?(on_closed=ignore) ?(rx_wire=true) (program : program) =
     let limits = limits |? program.limits in
     let ports =
         Option.map (fun (p : T.ports) -> [ "TCP", p.tcp ; "UDP", p.udp ])
@@ -1249,9 +1250,20 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     eth.iface.widget.ports.set_capabilities 0 Capabilities.Any ;
     eth.iface.rx_wire <- rx_wire ;
     let power = eth.iface.widget.power in
+    let told = Hashtbl.create 3 in
+    let on_foreign_port where (l : Crafty_layers.layer) p ranges =
+        let name = Crafty_layers.N.to_string l.name in
+        if not (Hashtbl.mem told (name, p)) then (
+            Hashtbl.add told (name, p) () ;
+            on_warning { Crafty_parser.where ; message =
+                Printf.sprintf "%s source port %d is outside the ports allowed (%s): \
+                                replies to it are not captured" name p
+                    (String.concat ", " (List.map (fun (lo, hi) ->
+                        if lo = hi then string_of_int lo
+                        else Printf.sprintf "%d-%d" lo hi) ranges)) }) in
     let tree =
         Crafty_tree.make_root ?ports eth
-            ~on_removed:on_closed in
+            ~on_removed:on_closed ~on_foreign_port in
     let started = ref None and stopped = ref false in
     Simulation.asap power (fun () ->
         if not !stopped then
@@ -2174,6 +2186,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
                   ~ip:(Ip.Addr.of_string "10.0.0.1") ~netmask:(Ip.Addr.of_string "255.255.255.0")
                   ~gateway:(Eth.Gateway.Mac (Eth.Addr.of_string "02:00:00:00:00:fe"))
                   ~print:line ~print_err:line
+                  ~on_warning:(fun e -> line ("warning "^ IO.to_string print_error e))
                   ~on_exit:(fun s -> line (IO.to_string print_status s)) p in
           let policer =
               Policer.make ~parent:sim.root ?max_packets ?max_packet_rate ?max_syns ?max_syn_rate
@@ -2201,6 +2214,9 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0.110s: hit max-packet-rate\n0.110s: stopped\n110 frames" (policed ~max_packet_rate:100. pings)
   "0.100s: stopped\n100 frames" (policed ~stop_at:0.1 pings)
   "0.000s: stopped\n0 frames" (policed ~stop:true pings)
+  "0.000s: warning line 2, column 35: UDP source port 5000 is outside the ports allowed (53, 40000-40100): replies to it are not captured\n0.000s: done\n4 frames" \
+    (policed "PORTS = {udp: [[40000, 40100], 53]}\nrepeat count=2 { /IP(dst=1.2.3.4)/UDP(src=5000, dst=7)/Bytes(\"x\") }\n\
+              /IP(dst=1.2.3.4)/UDP(src=53, dst=7)/Bytes(\"y\")\n/IP(dst=1.2.3.4)/UDP(dst=7)/Bytes(\"z\")")
   "0.000s: 3 10s [[40000, 40200]] []\n0.000s: done\n0 frames" \
     (policed "print(\"${BUDGET.max_syns} ${BUDGET.max_duration} ${PORTS.tcp} ${PORTS.udp}\")\n\
               BUDGET = {max_syns: 3, max_duration: 10s}\n\
