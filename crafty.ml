@@ -283,6 +283,24 @@ let () =
         die "--fw and --ip do not go together: an address of the program's \
              own shares no port with the kernel." ;
     let iface = Host_config.iface !ifname in
+    if !fw then (
+        match Host_config.fenced ~addresses:iface.addresses ports
+                                 (Host_config.listening ()) with
+        | [] -> ()
+        | sockets ->
+            (* By port, with the addresses listened on: *)
+            let ports =
+                List.map (fun (proto, _, p) -> proto, p) sockets |> List.unique |>
+                List.sort (fun (a, p) (b, q) -> compare (p, a) (q, b)) in
+            die "--fw would keep the host off ports it listens on: %s. \
+                 Narrow --tcp, --udp or PORTS."
+                (String.concat ", " (List.map (fun (proto, p) ->
+                    Printf.sprintf "%s %d (%s)"
+                        (String.uppercase_ascii (Host_config.string_of_proto proto)) p
+                        (String.concat ", " (List.filter_map (fun (proto', a, p') ->
+                            if proto' = proto && p' = p then
+                                Some (Unix.string_of_inet_addr a)
+                            else None) sockets))) ports))) ;
     let ip, netmask =
         match iface.ip, !own_ip with
         | Some (ip, netmask), None -> ip, netmask

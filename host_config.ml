@@ -138,6 +138,8 @@ type iface =
       mtu : int ;
       (* Its first IPv4 address and netmask, if any: *)
       ip : (Ip.Addr.t * Ip.Addr.t) option ;
+      (* All its addresses, IPv4 and IPv6: *)
+      addresses : Unix.inet_addr list ;
       (* The IPv4 gateway of its default route, if any: *)
       gateway : Ip.Addr.t option }
 
@@ -181,12 +183,18 @@ let iface_of_ip_output ifname ~ip_addr ~ip_route =
                 Some (Ip.Addr.of_dotted_string a,
                       netmask_of_prefix (int_of_string p))
             | _ -> None) addr
+    and addresses =
+        List.filter_map (function
+            | ("inet" | "inet6") :: a :: _ ->
+                Some (Unix.inet_addr_of_string (fst (try String.split a ~by:"/"
+                                                     with Not_found -> a, "")))
+            | _ -> None) addr
     and gateway =
         lines ip_route |>
         List.find_map_opt (function
             | "default" :: r -> Option.map Ip.Addr.of_dotted_string (after "via" r)
             | _ -> None) in
-    { ifname ; mac = Eth.Addr.of_string mac ; mtu ; ip ; gateway }
+    { ifname ; mac = Eth.Addr.of_string mac ; mtu ; ip ; addresses ; gateway }
 
 (*$inject
   let iproute2_addr = {|3: wlp59s0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
@@ -226,6 +234,11 @@ let iface_of_ip_output ifname ~ip_addr ~ip_route =
   "No MAC address for interface tun0" \
     (try describe (iface_of_ip_output "tun0" ~ip_addr:"7: tun0: <UP> mtu 1500\n    link/none\n" ~ip_route:"") \
      with Failure e -> e)
+ *)
+(*$= iface_of_ip_output & ~printer:dump
+  [ "192.168.1.31" ; "2a01:e0a:823:6270:fa1f:2a78:30a:3da2" ] \
+    (List.sort Stdlib.compare (List.map Unix.string_of_inet_addr \
+      (iface_of_ip_output "wlp59s0" ~ip_addr:iproute2_addr ~ip_route:"").addresses))
  *)
 
 (** The configuration of interface [ifname]. *)
@@ -568,6 +581,75 @@ let cleanup_stale () =
 (** {2 What can be changed} *)
 
 (** Install the nftables table of {!ruleset}, named after [t]. *)
+(* The local address and port of a line of /proc/net/{tcp,udp}[6], if its
+ * socket is in [state] (hexadecimal, as there): *)
+let socket_of_proc_line state line =
+    match String.split_on_char ' ' line |> List.filter ((<>) "") with
+    | _ :: local :: _ :: st :: _ when st = state ->
+        (try
+            let hex, port = String.split local ~by:":" in
+            (* Words of 4 bytes, each in the host's order: *)
+            let byte i =
+                let i = if Sys.big_endian then i else i - i mod 4 + 3 - i mod 4 in
+                int_of_string ("0x"^ String.sub hex (2 * i) 2) in
+            let addr =
+                if String.length hex = 8 then
+                    String.join "." (List.init 4 (string_of_int % byte))
+                else
+                    String.join ":" (List.init 8 (fun g ->
+                        Printf.sprintf "%x" (byte (2 * g) * 256 + byte (2 * g + 1)))) in
+            Some (Unix.inet_addr_of_string addr, int_of_string ("0x"^ port))
+        with _ -> None)
+    | _ -> None
+
+(*$= socket_of_proc_line & ~printer:dump
+  (Some ("127.0.0.1", 22)) (if Sys.big_endian then Some ("127.0.0.1", 22) else \
+    Option.map (fun (a, p) -> Unix.string_of_inet_addr a, p) \
+      (socket_of_proc_line "0A" "   0: 0100007F:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 11995 1"))
+  (Some ("::", 80)) \
+    (Option.map (fun (a, p) -> Unix.string_of_inet_addr a, p) \
+      (socket_of_proc_line "0A" "   0: 00000000000000000000000000000000:0050 00000000000000000000000000000000:0000 0A 00000000:00000000"))
+  (Some ("2a01:e0a::1", 53)) (if Sys.big_endian then Some ("2a01:e0a::1", 53) else \
+    Option.map (fun (a, p) -> Unix.string_of_inet_addr a, p) \
+      (socket_of_proc_line "07" "  12: 0A0E012A000000000000000001000000:0035 00000000000000000000000000000000:0000 07 00000000:00000000"))
+  None (socket_of_proc_line "0A" "  61: 5C01A8C0:8F60 0A8EFB8E:01BB 01 00000000:00000000")
+  None (socket_of_proc_line "0A" "  sl  local_address rem_address   st tx_queue")
+*)
+
+(** The sockets of the host that wait for what comes to a port of theirs:
+ * TCP ones that listen, UDP ones bound but not connected. *)
+let listening () =
+    List.concat_map (fun (proto, file, state) ->
+        match File.with_file_in file IO.read_all with
+        | text ->
+            String.split_on_char '\n' text |>
+            List.filter_map (fun l ->
+                Option.map (fun (a, p) -> proto, a, p) (socket_of_proc_line state l))
+        | exception Sys_error _ -> [])
+        [ Tcp, "/proc/net/tcp", "0A" ; Tcp, "/proc/net/tcp6", "0A" ;
+          Udp, "/proc/net/udp", "07" ; Udp, "/proc/net/udp6", "07" ]
+
+(** Of [sockets], those that a firewall of [ports] on an interface of
+ * [addresses] keeps the host off: on one of those ports, and for any
+ * address or one of those. *)
+let fenced ~addresses ports sockets =
+    List.filter (fun (proto, a, p) ->
+        List.exists (fun r -> r.proto = proto && p >= r.lo && p <= r.hi) ports &&
+        (a = Unix.inet_addr_any || a = Unix.inet6_addr_any || List.mem a addresses))
+        sockets |>
+    List.unique
+
+(*$= fenced & ~printer:dump
+  [ Tcp, "0.0.0.0", 22 ; Udp, "192.168.1.31", 53 ] \
+    (let a = Unix.inet_addr_of_string in \
+     fenced ~addresses:[ a "192.168.1.31" ] \
+       [ port_range_of_string Tcp "1-100" ; port_range_of_string Udp "53" ] \
+       [ Tcp, a "0.0.0.0", 22 ; Tcp, a "0.0.0.0", 22 ; Udp, a "192.168.1.31", 53 ; \
+         Udp, a "127.0.0.53", 53 ; Udp, a "10.0.0.1", 53 ; Tcp, a "::", 8080 ; \
+         Udp, a "::", 22 ] |> \
+     List.map (fun (p, a, n) -> p, Unix.string_of_inet_addr a, n))
+*)
+
 let firewall t ~ifname ?ports ?forward_drop () =
     let script = t.file ^".nft" in
     File.with_file_out script (fun oc ->
