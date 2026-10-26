@@ -540,7 +540,6 @@ let () =
             incr wire_pkts ; wire_bytes := !wire_bytes + Tools.bytelength bits ;
             h.emitted bits
         ) else after.out.write bits)) ;
-    info "Running..." ;
     Simulation.with_trapped [ Sys.sigint ; Sys.sigterm ] (fun () ->
         Simulation.run sim true) ;
     let not_captured = Pcap.dropped pcap.handler in
@@ -567,22 +566,27 @@ let () =
             "Detected "^ String.concat ", " (List.map (fun (what, counts) ->
                 what ^" ("^ String.concat ", " (List.map (fun (name, c) ->
                     Printf.sprintf "%s=%d" name c) counts) ^")") suspicious) in
-        if format = Human then Printf.printf "Warning: %s\n" text
+        if format = Human then Printf.eprintf "Warning: %s\n%!" text
         else
             emit "warning" [ "text", `String text ]
                  ~json:(List.concat_map (fun (_, counts) ->
                      List.map (fun (name, c) -> name, `Int c) counts) suspicious)) ;
     if format = Human then (
-        Printf.printf "Done after %.1fs, status: %s.\n" (secs ()) status_str ;
-        Printf.printf "Packets: %d out, %d in. Bytes: %d out, %d in.\n"
-            !pkts_out !pkts_in !bytes_out !bytes_in ;
+        (* Display verose details regarding captured traffic if we had an error: *)
+        let verbose = !Host_config.verbose || code <> 0 in
+        if verbose then
+            Printf.printf "Done after %.1fs, status: %s.\n" (secs ()) status_str ;
+        if verbose then
+            Printf.printf "Packets: %d out, %d in. Bytes: %d out, %d in.\n"
+                !pkts_out !pkts_in !bytes_out !bytes_in ;
         if !sent > !pkts_out then
             Printf.printf "Dropped by the policer: %d packets.\n" (!sent - !pkts_out) ;
         if !not_injected > 0 then
             Printf.printf "Not injected: %d packets.\n" !not_injected ;
         if not_captured > 0 then
             Printf.printf "Not captured: %d packets.\n" not_captured ;
-        Printf.printf "Captured going out: %d packets, %d bytes.\n" !wire_pkts !wire_bytes
+        if verbose then
+            Printf.printf "Captured going out: %d packets, %d bytes.\n" !wire_pkts !wire_bytes
     ) else
         emit "done"
             [ "status", `String status_str ;

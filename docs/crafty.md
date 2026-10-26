@@ -195,7 +195,8 @@ does not compile, 3 when a budget stops it, 130 when interrupted.
 ### Tips
 
 - Use `resolve("hostname")` to resolve a hostname
-- Avoid filtering out the "Warning:" lines
+- Errors and warnings go to stderr, all else to stdout: filter stdout as
+  you like, but not stderr (`crafty x.cfty | grep ...`, not `2>&1 | grep`)
 - Parameterize your programs with `getenv("...")`
 - When unsure, use --max-duration
 
