@@ -395,7 +395,7 @@ what their engine computes (checksums).
 - `break n`: leaves the `n` (default 1) innermost `repeat`, `foreach` or `on`.
 - `wait d`: pauses.
 - `expect timeout=d PATTERN { ... }`: waits for one matching packet, then
-  runs the block; a timeout (1m by default) is an error.
+  runs the block; a timeout (none by default) is an error.
 - `first timeout=d PATTERN { ... } | PATTERN { ... }`: waits for the first
   packet that matches any pattern.
 - `on for=d linger=d timeout=d max=n PATTERN { ... } | PATTERN { ... }`: the

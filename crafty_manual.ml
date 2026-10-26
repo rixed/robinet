@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 7e9a9d1a17d1144ff680f9ae525b23d9) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 c4e63acbcdd96b725d80513dd42f809e) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -170,8 +170,8 @@ does not compile, 3 when a budget stops it, 130 when interrupted.
 ### Tips
 
 -   Use `resolve("hostname")` to resolve a hostname
--   Errors and warnings go to stderr, all else to stdout: filter stdout as
-    you like, but not stderr (`crafty x.cfty | grep ...`, not `2>&1 | grep`)
+-   Errors and warnings go to stderr, all else to stdout: filter stdout as you
+    like, but not stderr (`crafty x.cfty | grep ...`, not `2>&1 | grep`)
 -   Parameterize your programs with `getenv("...")`
 -   When unsure, use --max-duration
 |crafty_manual}
@@ -361,7 +361,7 @@ what their engine computes (checksums).
 -   `break n`: leaves the `n` (default 1) innermost `repeat`, `foreach` or `on`.
 -   `wait d`: pauses.
 -   `expect timeout=d PATTERN { ... }`: waits for one matching packet, then runs
-    the block; a timeout (1m by default) is an error.
+    the block; a timeout (none by default) is an error.
 -   `first timeout=d PATTERN { ... } | PATTERN { ... }`: waits for the first
     packet that matches any pattern.
 -   `on for=d linger=d timeout=d max=n PATTERN { ... } | PATTERN { ... }`: the

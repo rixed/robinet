@@ -45,8 +45,8 @@
    typer lets it only compute, and it is evaluated at once. An error
    reaching the program's block ends the program.
 
-   [expect] waits for its pattern, failing after its timeout, then runs its
-   block once. [first] does the same with the first of its patterns to match.
+   [expect] waits for its pattern, failing after its timeout if any, then
+   runs its block once. [first] does the same with the first of its patterns to match.
    A packet sent, by any block, is then [LAST]. [on] lets its block go on, and runs the block of the pattern of every
    match until its timeout, its [max] or a [break] out of it; a block ends
    only once its statements are done and its [on]s are over. The packet
@@ -720,16 +720,15 @@ let push t b env depth overlay (layers : T.layer list) =
         Crafty_tree.{ node ; mode = l.mode ; options } :: stack
     ) base layers
 
-(* The value of the [timeout] parameter of that statement: *)
-let timeout_of eval what = function
-    | Some (e : T.expr) ->
-        (match eval e with
+(* The value of the [timeout] parameter of that statement, if any: *)
+let timeout_of eval what =
+    Option.map (fun (e : T.expr) ->
+        match eval e with
         | Interval i ->
             if Interval.compare i Interval.zero < 0 then
                 error e.loc "The timeout of %s cannot be negative" what ;
             i
         | _ -> assert false)
-    | None -> Interval.min 1.
 
 (* A packet, the bottom first: *)
 let packet_value packet =
@@ -925,10 +924,11 @@ and exec t b env (s : T.stmt) k =
                     ~failed:(fun where message -> fire (fun () ->
                         b.fail Crafty_parser.{ where ; message })) ;
             b.cleanups <- disarm :: b.cleanups ;
-            Simulation.delay t.power timeout (fun () -> fire (fun () ->
-                ignore (guard (fun () ->
-                    error s.stmt_loc "Nothing matched within %s"
-                        (Interval.to_string timeout))))) ())
+            Option.may (fun timeout ->
+                Simulation.delay t.power timeout (fun () -> fire (fun () ->
+                    ignore (guard (fun () ->
+                        error s.stmt_loc "Nothing matched within %s"
+                            (Interval.to_string timeout))))) ()) timeout)
     | T.On { for_ ; linger ; timeout ; max ; cases } ->
         let duration what = Option.map (fun (e : T.expr) ->
             match eval e with
