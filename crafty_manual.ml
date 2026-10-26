@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 c4e63acbcdd96b725d80513dd42f809e) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 b7d98d26a5b95a5c66fda05780b09b78) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -198,7 +198,8 @@ let reference = {crafty_manual|### Lexical conventions
     expected. An array of bytes.
 -   `string`: `"text ${expr}"`.
 -   `interval`: `5s`, `10ms`, `1m30s`, `1.5ms`, `-2s`. Units: `d`, `h`, `m`,
-    `s`, `ms`, `us` (or `µs`), `ns`, `ps`. Printed as `1s500ms`.
+    `s`, `ms`, `us` (or `µs`), `ns`, `ps`. Printed in one unit up to `s`, to 6
+    significant digits: `157.949ms`, `8.85159µs`, `3725.5s`.
 -   `time`: `2026-10-20T22:02:45.25Z`, `2026-10-20T22:02+02:00`,
     `2026-10-20T22:02` (local time). Printed in UTC. `int(t)` and `float(t)`
     give its unix timestamp, `time(secs)` the reverse.
@@ -398,9 +399,9 @@ what their engine computes (checksums).
     stream adds `fragmented` (packets sent in fragments), `frags_out`,
     `frags_in`, `reassembled` and `reasm_timeouts` (incomplete after 30s).
 -   `getenv(name, default=s)`: fails if unset and no default.
--   `resolve(name)`: the IPv4 addresses of a name, from the system's resolver;
-    fails if none. `hostname(ip, default=s)`: the name of an address; fails if
-    none and no default. Blocking, so better resolved before sending.
+-   `resolve(name)`: the IPv4 addresses of a name, as an array, from the
+    system's resolver. `hostname(ip, default=s)`: the name of an address.
+    Blocking, so better resolved before sending.
 -   `rand(max)`: an int or a float in `[0, max)` (default 1.0), or a bool if
     `max` is `true`. `randbytes(len)`: random bytes.
 -   `int(x)`, `float(x)`, `bool(x)`, `byte(x)` (the low 8 bits): `int` and
@@ -604,8 +605,8 @@ The replies come back to the `Echo` stream of the requests, whatever its id.
     }
 
     % sudo crafty -i eth0 --ip 192.0.2.5 --udp 40000-40010 rtt.cfty
-    100/100 echoed, rtt min 4ms343µs509ns674ps median 7ms940µs530ns777ps p99 10ms282µs516ns479ps max 10ms662µs794ns113ps
-    4ms343µs509ns674ps to 4ms773µs139ns954ps: 8
+    100/100 echoed, rtt min 4.34351ms median 7.94053ms p99 10.2825ms max 10.6628ms
+    4.34351ms to 4.77314ms: 8
     ...
 
 The times are those of the captures, of the probe going out and of its echo

@@ -674,7 +674,7 @@ let await t b loc e k =
             disarm () ;
             ignore (guard b (fun () ->
                 error loc "The packet sent was not seen leaving within %s"
-                    (Interval.to_string capture_timeout))))) ()
+                    (Interval.to_short_string capture_timeout))))) ()
 
 (* Tells the first that waits for [frame], captured on its way out: *)
 let emitted t frame =
@@ -840,7 +840,7 @@ and exec t b env (s : T.stmt) k =
             match eval dur with
             | Interval i ->
                 if Interval.compare i Interval.zero < 0 then
-                    error dur.loc "Cannot wait %s" (Interval.to_string i) ;
+                    error dur.loc "Cannot wait %s" (Interval.to_short_string i) ;
                 i
             | _ -> assert false) |>
         Option.may (fun i ->
@@ -928,7 +928,7 @@ and exec t b env (s : T.stmt) k =
                 Simulation.delay t.power timeout (fun () -> fire (fun () ->
                     ignore (guard (fun () ->
                         error s.stmt_loc "Nothing matched within %s"
-                            (Interval.to_string timeout))))) ()) timeout)
+                            (Interval.to_short_string timeout))))) ()) timeout)
     | T.On { for_ ; linger ; timeout ; max ; cases } ->
         let duration what = Option.map (fun (e : T.expr) ->
             match eval e with
@@ -1022,7 +1022,7 @@ and on t b env loc cases ~for_ ~linger ~timeout max =
                     disarm () ;
                     ignore (guard b (fun () ->
                         error loc "Nothing matched within %s"
-                            (Interval.to_string timeout)))) in
+                            (Interval.to_short_string timeout)))) in
         Simulation.delay t.power timeout idle ()) timeout
 
 and repeat t b env var count items every for_ body body_loc k =
@@ -1454,7 +1454,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "m = map(key=1, default=0.5)\nm := [1: 2]\nprint(\"${m}\")")
   "0s: [tcp: 1, udp: 2], and 0 icmp\n0s: done" \
     (runs "seen = map(key=\"\", default=0)\nforeach p [\"udp\", \"tcp\", \"udp\"] { seen[p] += 1 }\nprint(\"${seen}, and ${seen[\"icmp\"]} icmp\")")
-  "0s: 1 7 1.5 1s500ms 2 3 1 2\n0s: done" \
+  "0s: 1 7 1.5 1.5s 2 3 1 2\n0s: done" \
     (runs "a = [5, 1, 4, 2, 3]\nprint(\"${min([3, 1, 2])} ${max([1: 5, 2: 7])} ${mean([1, 2])} ${mean([1s, 2s])} ${percentile(a, 40)} ${percentile(a, 40.1)} ${percentile([1], 0)} ${count([1, 2])}\")")
   "0s: 64 to 1500, median 512\n0s: done" \
     (runs "sizes = [64, 512, 1500]\nprint(\"${min(sizes)} to ${max(sizes)}, median ${percentile(sizes, 50)}\")")
@@ -1464,9 +1464,9 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "x = stddev(array(init=1s, len=0))")
   "0s: [1, 2, 3] [3, 1, 2] [[1, 2], [3]] [b: [1, 2]]\n0s: done" \
     (runs "a = [3, 1, 2]\nb = sorted(a)\nc = [[2, 1], [3]]\nsort(c[0])\nm = [\"b\": [2, 1]]\nsort(a=m[\"b\"])\nprint(\"${b} ${a} ${c} ${m}\")\nsort(a)\nassert(a == b)")
-  "0s: 2s 1s500ms 2026-10-21T00:00:00Z 2026-10-21T00:00:00.25Z true\n0s: done" \
+  "0s: 2s 1.5s 2026-10-21T00:00:00Z 2026-10-21T00:00:00.25Z true\n0s: done" \
     (runs "t = time(1792540800.25)\nprint(\"${interval(2)} ${interval(1.5)} ${time(1792540800)} ${t} ${time(float(t)) == t && interval(float(90s)) == 90s}\")")
-  "0s: 6 2.5 1s500ms 300 0 0.0 0s\n0s: done" \
+  "0s: 6 2.5 1.5s 300 0 0.0 0s\n0s: done" \
     (runs "e = array(init=1, len=0)\nprint(\"${sum([1, 2, 3])} ${sum([1: 1, 2: 1.5])} ${sum([1s, 500ms])} ${sum([#ff, #2d])} ${sum(e)} ${sum(array(init=0.5, len=0))} ${sum(map(key=1, default=1s))}\")")
   "0s: [{count: 2, max: 2.0, min: 1.0}, {count: 1, max: 12.0, min: 12.0}, {count: 1, max: 15.0, min: 15.0}] []\n0s: done" \
     (runs "print(\"${histogram([12, 1, 15, 2], bucket=5)} ${histogram(array(init=1.5, len=0), 1)}\")")
@@ -1508,13 +1508,13 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "retry max=2 { print(\"ok\") }\nx = 1 / 0")
   "0s: 2 {a: 1, b: [1, 2]} #414243 1.2.3.4 AA:BB:CC:DD:EE:FF\n0s: done" \
     (runs "x = {a: 1, b: [1, 2]}\nprint(\"${x.b[1]} ${x} ${#414243} ${1.2.3.4} ${aa:bb:cc:dd:ee:ff}\")")
-  "0s: ABC\n0s: true 1s500ms 2s -1s 1 1.5\n0s: done" \
+  "0s: ABC\n0s: true 1.5s 2s -1s 1 1.5\n0s: done" \
     (runs "print(#414243)\nprint(\"${1.2.3.4 == #01020304} ${1s + 500ms} ${2 * 1s} ${-1s} ${7 % 3} ${7.5 % 2}\")")
-  "0s: 13 3.0 false #2c 1s500ms\n0s: done" \
+  "0s: 13 3.0 false #2c 1.5s\n0s: done" \
     (runs "print(\"${int(3.7) + log2(1024)} ${float(3)} ${bool(0)} ${byte(300)} ${interval(1.5)}\")")
-  "0s: 2026-10-20T22:02:46.5Z 1s500ms 2026-10-20T22:02:46.5Z true 1970-01-01T00:00:00Z 1970-01-01T00:00:11Z 2026-10-20T22:02:44Z\n0s: done" \
+  "0s: 2026-10-20T22:02:46.5Z 1.5s 2026-10-20T22:02:46.5Z true 1970-01-01T00:00:00Z 1970-01-01T00:00:11Z 2026-10-20T22:02:44Z\n0s: done" \
     (runs "t0 = 2026-10-20T22:02:45Z\nt1 = t0 + 1.5\nprint(\"${t1} ${t1 - t0} ${t0 + 2s - 500ms} ${t1 > t0} ${time(0)} ${10 + time(1)} ${t0 - 1}\")")
-  "1s500ms: 1s500ms\n1s500ms: done" \
+  "1s500ms: 1.5s\n1s500ms: done" \
     (runs "t = now()\nwait 1500ms\nprint(\"${now() - t}\")")
   "0s: failed: line 1, column 10: 2026-10-20T00:00:00Z - 1970-01-01T00:00:00Z is too long an interval" \
     (runs "print(\"${2026-10-20T00:00Z - time(0)}\")")
@@ -1524,7 +1524,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "x = ip_addr(#010203)")
   "0s: failed: line 1, column 5: 4 bytes are no MAC address" \
     (runs "x = mac_addr(#01020304)")
-  "0s: 16 -1.5 1 true #2c 1s500ms 2026-10-20T22:02:45Z 10.0.0.1 01:02:03:04:05:06\n0s: done" \
+  "0s: 16 -1.5 1 true #2c 1.5s 2026-10-20T22:02:45Z 10.0.0.1 01:02:03:04:05:06\n0s: done" \
     (runs "print(\"${int(\"0x10\")} ${float(\" -1.5 \")} ${int(\"1.9\")} ${bool(\"true\")} ${byte(\"300\")} ${interval(\"1.5s\")} ${time(\"2026-10-20T22:02:45Z\")} ${ip_addr(\"10.0.0.1\")} ${mac_addr(\"1:2:3:4:5:6\")}\")")
   "0s: failed: line 1, column 5: Cannot convert \"1.2.3.4\" to an int" \
     (runs "x = int(\"1.2.3.4\")")
@@ -1538,7 +1538,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "print(\"${getenv(\"CRAFTY_NO_SUCH_VAR\", default=\"default\")} ${getenv(\"HOME\", default=\"\")}\")")
   "0s: [127.0.0.1] localhost\n0s: done" \
     (runs "print(\"${resolve(\"localhost\")} ${hostname(resolve(\"localhost\")[0])}\")")
-  "0s: {ip: 10.0.0.2, ok: true, rtt: 1ms500µs}\n0s: done" \
+  "0s: {ip: 10.0.0.2, ok: true, rtt: 1.5ms}\n0s: done" \
     (runs "print(format({ip: 10.0.0.2, rtt: 1.5ms, ok: true}))")
   "0s: {\"data\":\"#0102\",\"ip\":\"10.0.0.2\",\"rtt\":0.0015,\"tags\":[\"a\",\"b\"]}\n0s: done" \
     (runs ~format:Json "print(format({ip: 10.0.0.2, rtt: 1.5ms, tags: [\"a\", \"b\"], data: #0102}))")
@@ -1693,13 +1693,13 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 (* A packet sent into a variable is waited for until seen leaving, and is
  * then that very frame, even among others alike: *)
 (*$= runs & ~printer:identity
-  "4µs640ns2ps: true true true 3ps 4µs639ns999ps\n9µs280ns2ps: pong\n9µs280ns2ps: done" \
+  "4µs640ns2ps: true true true 0.003ns 4.639999e-06\n9µs280ns2ps: pong\n9µs280ns2ps: done" \
     (runs ~sent:true \
         "/IP!(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n\
            a = Bytes(\"ping\")\n\
            ida = LAST[IP].id\n\
            b = Bytes(\"ping\")\n\
-           print(\"${a[IP].id == ida} ${b[IP].id == LAST[IP].id} ${a[IP].id != b[IP].id} ${a[Eth].ts - time(0)} ${b[Eth].ts - a[Eth].ts}\")\n\
+           print(\"${a[IP].id == ida} ${b[IP].id == LAST[IP].id} ${a[IP].id != b[IP].id} ${a[Eth].ts - time(0)} ${float(b[Eth].ts - a[Eth].ts)}\")\n\
            b := Bytes(\"pong\")\n\
            print(b[Bytes].data) }")
   "3ps: 53 #78\n3ps: done" \

@@ -50,6 +50,7 @@ module rec Interval : sig
     val of_secs : float -> t
     val to_secs : t -> float
     val of_string : string -> t
+    val to_short_string : t -> string
     (* In seconds, for whoever reads the API: picoseconds are for computing
      * with, not for a graph's axis. *)
     val to_yojson : t -> Yojson.Safe.t
@@ -232,6 +233,59 @@ end = struct
     let to_secs (t : t) = float_of_int (t :> int) /. 1e12
 
     let to_yojson (t : t) = `Float (to_secs t)
+
+    (** For people to read and compare: at most six significant digits, in
+     * the largest of s, ms, µs and ns that leaves an integer part (ns below
+     * that), trailing zeros removed: "157.949ms", "3725.5s", "0.523ns".
+     * [of_string] reads it back, to within that rounding. *)
+    let rec to_short_string (t : t) =
+        let t = (t :> int) in
+        if t < 0 then "-"^ to_short_string (o (~- t)) else
+        if t = 0 then "0s" else
+        let rec digits n = if n < 10 then 1 else 1 + digits (n / 10) in
+        let rec pow10 k = if k = 0 then 1 else 10 * pow10 (k - 1) in
+        (* The unit, its name, and how many of its decimals to print: *)
+        let pick t =
+            let u, n =
+                List.find_opt (fun (u, _) -> t >= u)
+                    [ 1_000_000_000_000, "s" ; 1_000_000_000, "ms" ;
+                      1_000_000, "µs" ; 1_000, "ns" ] |>
+                Option.default (1_000, "ns") in
+            u, n, Int.min (digits u - 1) (Int.max 0 (6 - digits (t / u))) in
+        let u, _, k = pick t in
+        let q = u / pow10 k in
+        let r = (if t > max_int - q / 2 then t else t + q / 2) / q * q in
+        (* Rounding up may reach the next unit or another integer digit: *)
+        let u, n, k = pick r in
+        let q = u / pow10 k in
+        let frac =
+            if k = 0 then "" else
+            let f = Printf.sprintf "%0*d" k (r mod u / q) in
+            let len = ref k in
+            while !len > 0 && f.[!len - 1] = '0' do decr len done ;
+            if !len = 0 then "" else "."^ String.sub f 0 !len in
+        string_of_int (r / u) ^ frac ^ n
+
+    (*$= to_short_string & ~printer:identity
+      "0s" (to_short_string zero)
+      "1.5s" (to_short_string (msec 1500.))
+      "-2s" (to_short_string (sec (-2.)))
+      "157.949ms" (to_short_string (of_secs 0.157_949_2))
+      "8.85159µs" (to_short_string (of_secs 8.851_594e-6))
+      "10.0865s" (to_short_string (of_secs 10.086_480_617_523))
+      "3725.5s" (to_short_string (sec 3725.5))
+      "1000000s" (to_short_string (sec 999_999.6))
+      "1ms" (to_short_string (of_secs 999.999_6e-6))
+      "100s" (to_short_string (of_secs 99.999_996))
+      "0.523ns" (to_short_string (psec 523))
+      "0.001ns" (to_short_string (psec 1))
+      "96ns" (to_short_string (nsec 96.))
+    *)
+    (*$Q to_short_string
+      Q.int (fun i -> i = min_int || \
+        let t = o i in let r = of_string (to_short_string t) in \
+        Int.abs ((r :> int) - i) <= Int.max 1 (Int.abs i / 100_000))
+    *)
 
     (*$= to_secs & ~printer:string_of_float
       0.5 (to_secs (sec 0.5))

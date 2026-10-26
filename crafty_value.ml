@@ -92,7 +92,7 @@ let rec to_string (typ : A.Type.t) v =
     | _, Int i -> string_of_int i
     | _, Float f -> A.string_of_float f
     | _, String s -> s
-    | _, Interval i -> Interval.to_string i
+    | _, Interval i -> Interval.to_short_string i
     | _, Time t -> Clock.Wall.to_iso8601 t
     | _, Ip ip -> Ip.Addr.to_dotted_string ip
     | _, Mac mac ->
