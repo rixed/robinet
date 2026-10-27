@@ -922,12 +922,12 @@ let parse_patterns text =
     (reads "repeat { if I > 3 { break } }")
   "wait dur=10ms\nwait dur=(1s * n)\n" (reads "wait 10ms\nwait dur=1s * n")
   "repeat var=j {\n  break depth=2\n}\n" (reads "repeat var=\"j\" { break 2 }")
-  "repeat var=i count=3 every=1ms for=1s {\n  print(\"${i}\")\n}\n" \
-    (reads "repeat var=i count=3 every=1ms for=1s { print(\"${i}\") }")
+  "repeat var=i count=3 every=1ms for=1s {\n  print(i)\n}\n" \
+    (reads "repeat var=i count=3 every=1ms for=1s { print(i) }")
   "repeat count=(n * 2) every=(1s / n) {\n}\n" \
     (reads "repeat every=1s / n count=n*2 {}")
-  "foreach t [3, 5, 6] {\n  print(\"${t}\")\n}\n" \
-    (reads "foreach t [3, 5, 6] { print(\"${t}\") }")
+  "foreach t [3, 5, 6] {\n  print(t)\n}\n" \
+    (reads "foreach t [3, 5, 6] { print(t) }")
   "foreach t every=1s ts {\n}\nforeach t for=1m ts {\n}\nforeach t ts {\n}\n" \
     (reads "foreach t every=1s ts {}\nforeach for=1m t (ts) {}\nforeach var=t ts {}")
   "foreach t ts {\n}\nforeach a - b {\n}\n" (reads "foreach t\tts {}\nforeach a - b {}")

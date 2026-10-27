@@ -545,6 +545,9 @@ let rec eval output (env : env) (e : T.expr) =
         | None ->
             error e.loc "Only a scalar, or a record, array or map of scalars, \
                          makes CSV, not %s" (A.Type.to_string x.typ))
+    | T.Call ((T.Print | T.Print_err) as b, [ x ]) when x.typ <> A.Type.String ->
+        call e.loc b [ String (to_string x.typ (eval x)) ]
+             ~print:output.print ~print_err:output.print_err ~now:output.now
     | T.Call (b, args) ->
         call e.loc b (List.map eval args)
              ~print:output.print ~print_err:output.print_err ~now:output.now
@@ -1434,23 +1437,23 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: hello 3\nerr 0s: oops\n0s: done" \
     (runs "print(\"hello ${1 + 2}\")\nprint_err(\"oops\")")
   "0s: 0\n1s: 1\n2s: 2\n2s: after\n2s: done" \
-    (runs "repeat count=3 every=1s { print(\"${I}\") }\nprint(\"after\")")
+    (runs "repeat count=3 every=1s { print(I) }\nprint(\"after\")")
   "0s: 0\n1s: 1\n2s: 2\n2s: done" \
-    (runs "repeat for=2500ms every=1s { print(\"${I}\") }")
+    (runs "repeat for=2500ms every=1s { print(I) }")
   "0s: 0\n1s: 1\n1s: done" \
-    (runs "repeat for=2s every=1s { print(\"${I}\") }")
+    (runs "repeat for=2s every=1s { print(I) }")
   "0s: 0\n25s: 1\n50s: 2\n50s: done" \
-    (runs "repeat every=25s { print(\"${I}\") }")
+    (runs "repeat every=25s { print(I) }")
   "0s: 0\n1s: 1\n2s: done" \
-    (runs "repeat for=1500ms { print(\"${I}\")\n  repeat count=2 every=1s {} }")
+    (runs "repeat for=1500ms { print(I)\n  repeat count=2 every=1s {} }")
   "0s: 0\n400ms: 1\n1s: 0\n1s400ms: 1\n2s: 0\n2s400ms: 1\n2s400ms: done" \
-    (runs "repeat count=3 every=1s { repeat count=2 every=400ms { print(\"${I}\") } }")
+    (runs "repeat count=3 every=1s { repeat count=2 every=400ms { print(I) } }")
   "0s: 0.0\n0s: 0.1\n0s: 1.0\n0s: 1.1\n0s: done" \
     (runs "repeat var=i count=2 { repeat var=j count=2 { print(\"${i}.${j}\") } }")
   "0s: done" \
     (runs "repeat count=0 { print(\"never\") }")
   "0s: 3\n0s: 5\n0s: 6\n0s: done" \
-    (runs "foreach t [3, 5, 6] { print(\"${t}\") }")
+    (runs "foreach t [3, 5, 6] { print(t) }")
   "0s: a\n1s: b\n1s: after\n1s: done" \
     (runs "foreach s every=1s [\"a\", \"b\"] { print(s) }\nprint(\"after\")")
   "0s: a\n1s: b\n1s: done" \
@@ -1458,13 +1461,13 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: done" \
     (runs "foreach array(init=1, len=0) { print(\"never\") }")
   "0s: 1\n0s: 2\n0s: [9]\n0s: done" \
-    (runs "x = [1, 2]\nforeach v x { x := [9]\n  print(\"${v}\") }\nprint(\"${x}\")")
+    (runs "x = [1, 2]\nforeach v x { x := [9]\n  print(v) }\nprint(x)")
   "0s: 1\n0s: done" \
-    (runs "foreach [1, 2, 3] { if I == 2 { break }\n  print(\"${I}\") }")
+    (runs "foreach [1, 2, 3] { if I == 2 { break }\n  print(I) }")
   "0s: 0\n0s: after\n0s: done" \
-    (runs "repeat count=5 every=1s { print(\"${I}\")\n  break }\nprint(\"after\")")
+    (runs "repeat count=5 every=1s { print(I)\n  break }\nprint(\"after\")")
   "0s: 0\n0s: after\n0s: done" \
-    (runs "repeat var=i count=3 { repeat { print(\"${i}\")\n    break 2 } }\nprint(\"after\")")
+    (runs "repeat var=i count=3 { repeat { print(i)\n    break 2 } }\nprint(\"after\")")
   "0s: [0, 1, 2, 3, 4] [0, 1, 2, 5] [9, 0, 1, 2] [0, 1, 2, 0, 1, 2] [7]\n0s: done" \
     (runs "x = [1]\nx += 2\nx := 0 + x\ny = array(0, 0) + 7\nprint(\"${x + [3, 4]} ${append(x, 5)} ${prepend(9, x)} ${concat(x, x)} ${y}\")")
   "0s: [a, , b c] 2 1 [x]\n0s: done" \
@@ -1482,7 +1485,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: failed: line 2, column 1: No key 2 in this map" \
     (runs "m = [1: [0]]\nm[2][0] := 1")
   "0s: [1: 2.0]\n0s: done" \
-    (runs "m = map(key=1, default=0.5)\nm := [1: 2]\nprint(\"${m}\")")
+    (runs "m = map(key=1, default=0.5)\nm := [1: 2]\nprint(m)")
   "0s: [tcp: 1, udp: 2], and 0 icmp\n0s: done" \
     (runs "seen = map(key=\"\", default=0)\nforeach p [\"udp\", \"tcp\", \"udp\"] { seen[p] += 1 }\nprint(\"${seen}, and ${seen[\"icmp\"]} icmp\")")
   "0s: 1 7 1.5 1.5s 2 3 1 2\n0s: done" \
@@ -1514,15 +1517,15 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: [1, 5] [9, 2]\n0s: done" \
     (runs "x = [1, 2]\ny = x\nx[1] += 3\ny[0] := 9\nprint(\"${x} ${y}\")")
   "0s: [[1], [0]]\n0s: done" \
-    (runs "a = array(init=[0], len=2)\na[0][0] := 1\nprint(\"${a}\")")
+    (runs "a = array(init=[0], len=2)\na[0][0] := 1\nprint(a)")
   "0s: 1 [0, 5]\n0s: done" \
     (runs "n = 0\nx = [0, 0]\nx[{ n += 1 ; n }] += 5\nprint(\"${n} ${x}\")")
   "0s: failed: line 2, column 1: No item 1 in an array of length 1" \
     (runs "x = [1]\nx[1] := 2")
   "0s: 499999500000\n0s: done" \
-    (runs "n = 0\nrepeat count=1000000 { n += I }\nprint(\"${n}\")")
+    (runs "n = 0\nrepeat count=1000000 { n += I }\nprint(n)")
   "0s: 0\n0s: 2\n0s: 4\n0s: done" \
-    (runs "repeat count=3 { x = I * 2\n  print(\"${x}\") }")
+    (runs "repeat count=3 { x = I * 2\n  print(x) }")
   "0s: failed: line 1, column 1: This repeat runs 100000 times without the time moving on" \
     (runs "repeat { x = 1 }")
   "0s: try\n0s: try\n0s: try\n0s: failed: line 2, column 7: Division by zero" \
@@ -1532,7 +1535,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: try\n0s: failed: line 2, column 7: Division by zero" \
     (runs "retry max=0 { print(\"try\")\n  x = 1 / 0 }")
   "0s: 0\n0s: 1\n0s: 2\n0s: after\n0s: done" \
-    (runs "repeat count=3 { catch { print(\"${I}\")\n    x = 1 / 0\n    print(\"not reached\") } }\nprint(\"after\")")
+    (runs "repeat count=3 { catch { print(I)\n    x = 1 / 0\n    print(\"not reached\") } }\nprint(\"after\")")
   "0s: ok\n0s: failed: line 2, column 5: Division by zero" \
     (runs "catch { print(\"ok\") }\nx = 1 / 0")
   "0s: ok\n0s: failed: line 2, column 5: Division by zero" \
@@ -1546,9 +1549,9 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: 2026-10-20T22:02:46.5Z 1.5s 2026-10-20T22:02:46.5Z true 1970-01-01T00:00:00Z 1970-01-01T00:00:11Z 2026-10-20T22:02:44Z\n0s: done" \
     (runs "t0 = 2026-10-20T22:02:45Z\nt1 = t0 + 1.5\nprint(\"${t1} ${t1 - t0} ${t0 + 2s - 500ms} ${t1 > t0} ${time(0)} ${10 + time(1)} ${t0 - 1}\")")
   "1s500ms: 1.5s\n1s500ms: done" \
-    (runs "t = now()\nwait 1500ms\nprint(\"${now() - t}\")")
-  "0s: failed: line 1, column 10: 2026-10-20T00:00:00Z - 1970-01-01T00:00:00Z is too long an interval" \
-    (runs "print(\"${2026-10-20T00:00Z - time(0)}\")")
+    (runs "t = now()\nwait 1500ms\nprint(now() - t)")
+  "0s: failed: line 1, column 7: 2026-10-20T00:00:00Z - 1970-01-01T00:00:00Z is too long an interval" \
+    (runs "print(2026-10-20T00:00Z - time(0))")
   "0s: 10.0.0.1 true 01:02:03:04:05:06\n0s: done" \
     (runs "x = ip_addr(#0a000001)\nprint(\"${x} ${x == 10.0.0.1} ${mac_addr(#010203040506)}\")")
   "0s: failed: line 1, column 5: 3 bytes are no IP address" \
@@ -1559,6 +1562,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "x = 5\nx <<= 3\nb = #ff\nprint(\"${x} ${x >> 4} ${-3 >> 1} ${1 << 63} ${1 >> 100} ${b << 4} ${b >> 4} ${b << 8}\")")
   "0s: failed: line 1, column 5: Cannot shift by -1" \
     (runs "x = 1 << -1")
+  "0s: 42\n0s: 1.5\n0s: 10.0.0.1\n0s: #01\n0s: hi\n0s: [1, 2]\n0s: done" \
+    (runs "print(42)\nprint(1.5)\nprint(10.0.0.1)\nprint(#01)\nprint(#6869)\nprint([1, 2])")
   "0s: #b861 #feff #0000\n0s: done" \
     (runs "h = #450000730000400040110000c0a80001c0a800c7\nprint(\"${checksum(h)} ${checksum(#01)} ${checksum(h[:10] + checksum(h) + h[12:])}\")")
   "0s: 3232235778 4294967295 192.168.1.3 0.0.0.0\n0s: done" \
@@ -1614,21 +1619,21 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: small 0\n0s: odd 1\n0s: big 2\n0s: odd 3\n0s: big 4\n0s: done" \
     (runs "repeat count=5 { if I & 1 { print(\"odd ${I}\") } elsif I > 1 { print(\"big ${I}\") }\n  else { print(\"small ${I}\") } }")
   "0s: 0\n0s: 1\n0s: after\n0s: done" \
-    (runs "repeat { if I == 2 { break }\n  print(\"${I}\") }\nprint(\"after\")")
+    (runs "repeat { if I == 2 { break }\n  print(I) }\nprint(\"after\")")
   "0s: 2.5 0.25 inf\n0s: done" \
     (runs "print(\"${5s / 2s} ${1ms / 4ms} ${1ms / 0s}\")")
   "0s: failed: line 1, column 4: Division by zero" \
     (runs "if 1 / 0 > 0 {}\nprint(\"not reached\")")
   "0s: #0101 #010201020102 [1, 2, 1, 2] 0\n0s: done" \
     (runs "x = 0\nprint(\"${#01 * 2} ${3 * #0102} ${[1, 2] * 2} ${length(#00 * x)}\")")
-  "0s: failed: line 1, column 10: Cannot repeat -1 times" \
-    (runs "print(\"${#01 * -1}\")")
+  "0s: failed: line 1, column 7: Cannot repeat -1 times" \
+    (runs "print(#01 * -1)")
   "0s: 1.0 6 11 small\n0s: done" \
     (runs "x = if 1 > 0 { 1 } else { 2.5 }\ny = { z = 2 ; z * 3 }\nprint(\"${x} ${y} ${1 + if y > 5 { 10 } else { 20 }} ${if y > 9 { \"big\" } else { \"small\" }}\")")
   "1s: 2\n1s: 3\n1s: done" \
-    (runs "x = if true { wait 1s\n  2 } else { 3 }\nprint(\"${x}\")\nx := { y = x + 1\n  y }\nprint(\"${x}\")")
+    (runs "x = if true { wait 1s\n  2 } else { 3 }\nprint(x)\nx := { y = x + 1\n  y }\nprint(x)")
   "0s: 0\n0s: 1\n0s: 2\n0s: after\n0s: done" \
-    (runs "repeat { x = if I > 2 { break } else { I }\n  print(\"${x}\") }\nprint(\"after\")")
+    (runs "repeat { x = if I > 2 { break } else { I }\n  print(x) }\nprint(\"after\")")
   "0s: failed: line 1, column 23: Division by zero" \
     (runs "x = 1 + { y = 0 ; z = 1 / y ; z }\nprint(\"not reached\")")
   "1s: in\n1s: failed: line 2, column 17: Division by zero" \
@@ -1648,12 +1653,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "0s: a\n1s500ms: b\n1s500ms: done" \
     (runs "print(\"a\")\nwait 1500ms\nprint(\"b\")")
   "1s: 0\n1s500ms: stopped" \
-    (runs ~stop_at:(Clock.Time.of_secs 1.5) "repeat count=3 { wait 1s\n  print(\"${I}\") }")
+    (runs ~stop_at:(Clock.Time.of_secs 1.5) "repeat count=3 { wait 1s\n  print(I) }")
   "0s: failed: line 1, column 6: Cannot wait -1s" \
     (runs "wait -1s")
   "0s: 0\n1s: 1\n1s500ms: stopped" \
     (runs ~stop_at:(Clock.Time.of_secs 1.5) \
-          "repeat count=5 every=1s { print(\"${I}\") }")
+          "repeat count=5 every=1s { print(I) }")
 *)
 (* Stacks hold their nodes for the block they are in: *)
 (*$= runs & ~printer:identity
@@ -1767,7 +1772,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 (*$= runs & ~printer:identity
   "500ms: 500ms\n700ms: 700ms\n1s: done" \
     (runs ~inject:[ 0.2, reply "a" ; 0.5, reply "b" ; 0.7, reply "c" ] \
-        "t0 = time(0)\non for=1s /Eth(ts > t0 + 300ms)/IP/UDP { print(\"${MATCH[Eth].ts - t0}\") }")
+        "t0 = time(0)\non for=1s /Eth(ts > t0 + 300ms)/IP/UDP { print(MATCH[Eth].ts - t0) }")
 *)
 (* expect waits for its pattern, on the stream of the stack, conditions
  * evaluated at match time: *)
@@ -1779,7 +1784,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect timeout=1s Raw(\"pong\") { print(\"no\") } }")
   "2s400ms3ps: 2\n2s400ms3ps: done" \
     (runs ~inject:[ 0.5, reply "pong" ; 1.4, reply "pong" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  catch { repeat count=3 { Raw(\"ping\")\n      expect timeout=1s Raw(\"pong\") { n += 1 } } }\n  print(\"${n}\") }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  catch { repeat count=3 { Raw(\"ping\")\n      expect timeout=1s Raw(\"pong\") { n += 1 } } }\n  print(n) }")
   "500ms: false false\n500ms: done" \
     (runs ~inject:[ 0.5, reply "pong!" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw {\n    print(\"${MATCH[IP].dst == MATCH[Raw].data} ${MATCH[Raw].data == MATCH[IP].dst}\") } }")
@@ -1790,18 +1795,18 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs ~promisc:true \
         ~inject:[ 0.5, incoming ~dst_mac:(Eth.Addr.of_string "02:00:00:00:00:09") \
                     (Ip.Pdu.pack (udp_packet 53 1000 "pong")) ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect timeout=1s Raw(\"pong\") { print(\"${MATCH[Eth].dst}\") } }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect timeout=1s Raw(\"pong\") { print(MATCH[Eth].dst) } }")
   "1s: failed: line 2, column 3: Nothing matched within 1s" \
     (runs \
         ~inject:[ 0.5, incoming ~dst_mac:(Eth.Addr.of_string "02:00:00:00:00:09") \
                     (Ip.Pdu.pack (udp_packet 53 1000 "pong")) ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect timeout=1s Raw(\"pong\") { print(\"${MATCH[Eth].dst}\") } }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect timeout=1s Raw(\"pong\") { print(MATCH[Eth].dst) } }")
 *)
 (* LAST is the last packet sent by any block: as packed down to the
  * self-driven layers, which only their stack tells: *)
 (*$= runs & ~printer:identity
   "3ps: [Eth {dst: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: ?, id: ?, is_fragment: ?, more_frags: ?, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: ?, ttl: 64}, UDP {checksum: ?, dst: 53, length: 10, src: 1000}, Raw {data: #6869}]\n3ps: done" \
-    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"hi\")\n  print(\"${LAST}\") }")
+    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"hi\")\n  print(LAST) }")
   "3ps: #61\n3ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\") }\nprint(\"${LAST[Raw].data}\")")
   "0s: failed: line 1, column 5: LAST is not set: no packet was sent yet" \
@@ -1811,24 +1816,24 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "6ps: 64 1\n6ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  x = LAST[IP].ttl\n  ../../IP(ttl=1)/UDP/Raw(\"b\")\n  print(\"${x} ${LAST[IP].ttl}\") }")
   "2ps: [Eth {dst: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 7, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 30, ttl: 64}, UDP {checksum: 32593, dst: 53, length: 10, src: 1000}, Raw {data: #6869}]\n2ps: done" \
-    (runs "/IP!(dst=10.0.0.2, id=7)/UDP(src=1000, dst=53)/Raw(\"hi\")\nprint(\"${LAST}\")")
+    (runs "/IP!(dst=10.0.0.2, id=7)/UDP(src=1000, dst=53)/Raw(\"hi\")\nprint(LAST)")
   "9ps: #61 #6262 #62\n9ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  x = LAST\n  y = x\n  { Raw(\"bb\")\n    y := LAST }\n  Raw(\"b\")\n  print(\"${x[Raw].data} ${y[Raw].data} ${LAST[Raw].data}\") }")
   "400ms: b\n1s3ps: done" \
     (runs ~inject:[ 0.4, reply "pong" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  on for=1s Raw(\"pong\") { print(LAST[Raw].data) }\n  Raw(\"b\") }")
   "2ps: 0\n4ps: 1\n4ps: done" \
-    (runs "repeat count=2 { /IP!(dst=10.0.0.2, id=I)/UDP(src=1000, dst=53)/Raw(\"x\")\n  print(\"${LAST[IP].id}\") }")
+    (runs "repeat count=2 { /IP!(dst=10.0.0.2, id=I)/UDP(src=1000, dst=53)/Raw(\"x\")\n  print(LAST[IP].id) }")
   "3ps: 4660\n3ps: done" \
-    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53, checksum=0x1234) { Raw(\"a\")\n  print(\"${LAST[UDP].checksum}\") }")
+    (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53, checksum=0x1234) { Raw(\"a\")\n  print(LAST[UDP].checksum) }")
   "3ps: {ack_num: 0, checksum: ?, dst: 80, flags: 2, mss: -1, options: [], sack_ok: false, seq_num: 0, src: 1000, ts_ecr: -1, ts_val: -1, urg_ptr: 0, win_size: 65535, wscale: -1}\n3ps: failed: line 3, column 5: TCP.checksum is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
-    (runs "/IP(dst=10.0.0.2)/TCP!(src=1000, dst=80, flags=SYN, seq_num=0)/Raw()\nprint(\"${LAST[TCP]}\")\nx = LAST[TCP].checksum")
+    (runs "/IP(dst=10.0.0.2)/TCP!(src=1000, dst=80, flags=SYN, seq_num=0)/Raw()\nprint(LAST[TCP])\nx = LAST[TCP].checksum")
   "3ps: failed: line 2, column 7: UDP.checksum is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  x = LAST[UDP].checksum }")
   "3ps: failed: line 2, column 7: IP.id is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  x = LAST[IP].id }")
-  "2ps: failed: line 3, column 10: Eth.ts is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
-    (runs "/IP!(dst=10.0.0.2)/UDP(src=1000, dst=53)/Raw(\"a\")\nx = LAST\nprint(\"${x[Eth].ts}\")")
+  "2ps: failed: line 3, column 7: Eth.ts is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
+    (runs "/IP!(dst=10.0.0.2)/UDP(src=1000, dst=53)/Raw(\"a\")\nx = LAST\nprint(x[Eth].ts)")
 *)
 (* first runs the block of the first pattern to match, and no other: *)
 (*$= runs & ~printer:identity
@@ -1857,7 +1862,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw(\"ping\")\n    | /IP/UDP(src == 53)/Raw(\"pong\") { print(MATCH[Raw].data) } }")
   "1s: 2\n1s: done" \
     (runs ~inject:[ 0.1, reply "pong" ; 0.2, reply "pang" ; 0.3, reply "x" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  { on for=1s Raw(\"pong\") | Raw(\"pang\") | Raw(\"pong\") { n += 1 } }\n  print(\"${n}\") }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  { on for=1s Raw(\"pong\") | Raw(\"pang\") | Raw(\"pong\") { n += 1 } }\n  print(n) }")
 *)
 (* A constructor makes a variant, which converts to a wider one, what it
  * holds converted along: *)
@@ -1870,13 +1875,13 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 (*$= runs & ~printer:identity
   "500ms: other\n500ms: ip 10.0.0.2\n500ms: udp 53\n500ms: other\n500ms: Raw\n1s500ms: 64\n1s500ms: done" \
     (runs ~inject:[ 0.5, reply "pong" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw(\"pong\") {\n    foreach MATCH { print(case I IP { \"ip ${I.src}\" } | UDP { \"udp ${I.src}\" } | else { \"other\" }) }\n    case var=l MATCH[3] Raw { print(\"Raw\") }\n    case MATCH[3] IP { print(\"not reached\") }\n    ttl = case var=h MATCH[1] IP { wait 1s\n      h.ttl } | else { 0 }\n    print(\"${ttl}\") } }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw(\"pong\") {\n    foreach MATCH { print(case I IP { \"ip ${I.src}\" } | UDP { \"udp ${I.src}\" } | else { \"other\" }) }\n    case var=l MATCH[3] Raw { print(\"Raw\") }\n    case MATCH[3] IP { print(\"not reached\") }\n    ttl = case var=h MATCH[1] IP { wait 1s\n      h.ttl } | else { 0 }\n    print(ttl) } }")
 *)
 (* on runs its block for every match, and its block waits for it: *)
 (*$= runs & ~printer:identity
   "0s: armed\n1s: 3\n1s: done" \
     (runs ~inject:[ 0.1, reply "pong" ; 0.2, reply "pong" ; 0.3, reply "pong" ; 1.5, reply "pong" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  { on for=1s Raw(\"pong\") { n += 1 }\n    print(\"armed\") }\n  print(\"${n}\") }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  { on for=1s Raw(\"pong\") { n += 1 }\n    print(\"armed\") }\n  print(n) }")
   "100ms: pong\n200ms: pong\n200ms: done" \
     (runs ~inject:[ 0.1, reply "pong" ; 0.2, reply "pong" ; 0.3, reply "pong" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on for=1s max=2 Raw(\"pong\") { print(\"pong\") } }")
@@ -1885,7 +1890,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on for=10s Raw(\"stop\") { print(\"stop\")\n    break } }\nprint(\"after\")")
   "400ms: 0\n400ms: after\n400ms: done" \
     (runs ~inject:[ 0.4, reply "pong" ] \
-        "repeat count=3 { /IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on for=1s Raw(\"pong\") { print(\"${I}\")\n    break 2 } } }\nprint(\"after\")")
+        "repeat count=3 { /IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on for=1s Raw(\"pong\") { print(I)\n    break 2 } } }\nprint(\"after\")")
   "0s: done" \
     (runs ~inject:[ 0.4, reply "pong" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on max=0 Raw(\"pong\") { print(\"no\") } }")
@@ -1904,10 +1909,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 (*$= runs & ~printer:identity
   "250ms: 2\n250ms: done" \
     (runs ~inject:[ 0.1, reply "pong" ; 0.2, reply "pong" ; 0.3, reply "pong" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  { on Raw(\"pong\") { n += 1 }\n    wait 250ms }\n  print(\"${n}\") }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  { on Raw(\"pong\") { n += 1 }\n    wait 250ms }\n  print(n) }")
   "450ms: 3\n450ms: done" \
     (runs ~inject:[ 0.1, reply "pong" ; 0.2, reply "pong" ; 0.3, reply "pong" ; 0.5, reply "pong" ] \
-        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  { on linger=200ms Raw(\"pong\") { n += 1 }\n    wait 250ms }\n  print(\"${n}\") }")
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  n = 0\n  { on linger=200ms Raw(\"pong\") { n += 1 }\n    wait 250ms }\n  print(n) }")
   "300ms: a\n1s: done" \
     (runs ~inject:[ 0.3, reply "a" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on Raw(\"a\") { print(\"a\") }\n  on for=1s Raw(\"b\") {} }")
@@ -1935,7 +1940,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         "{ expect /IP(src == 10.0.0.2)/UDP(dst == 7) { print(\"got\") }\n  print(\"after\") }\nprint(\"out\")")
   "500ms: 54 Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)*2#2{UDP(src=1000, dst=54)*1#1}}\n1s: done Eth#2" \
     (runs ~trees:true ~inject:[ 0.2, reply "a" ; 0.5, reply ~sport:54 "b" ] \
-        "x = 53\n/IP(dst=10.0.0.2) {\n  on for=1s UDP(src == x, IP.src == 10.0.0.2) { print(\"${MATCH[UDP].src}\") }\n  x := 54 }")
+        "x = 53\n/IP(dst=10.0.0.2) {\n  on for=1s UDP(src == x, IP.src == 10.0.0.2) { print(MATCH[UDP].src) }\n  x := 54 }")
   "500ms: a\n1s: done" \
     (runs ~inject:[ 0.2, reply ~sport:54 "b" ; 0.5, reply "a" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on for=1s ../UDP { print(MATCH[Raw].data) } }")
@@ -2071,7 +2076,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
          "on for=2s /IP/UDP(dst == 7)/Raw(\"ping\") {\n  /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Raw(\"pong\") }")
   "a> 0.010s: ARP\na< 0.010s: ARP\na 0.010s: done Eth\na> 0.010s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\" bad-checksum\nb 0.010s: 4660\na> 0.010s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\nb 0.010s: 35896\nb 1.000s: done Eth#3" \
     (two ~frames:true "wait 10ms\n/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=1, checksum=0x1234)/Raw()\n/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=1)/Raw()" \
-         "on for=1s /IP/TCP!(dst == 7) { print(\"${MATCH[TCP].checksum}\") }")
+         "on for=1s /IP/TCP!(dst == 7) { print(MATCH[TCP].checksum) }")
   "a 0.010s: done Eth\nb 0.010s: 4 []\nb 0.010s: 4 #00000000\nb 1.000s: done Eth#3" \
     (two "wait 10ms\n/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=1)/Raw()\n/IP!(dst=10.0.0.2, proto=1)/Raw(#0d00f2ff00000000)" \
          "{ on for=1s /IP/TCP! { print(\"${length(MATCH)} ${MATCH[Raw].data}\") }\n  on for=1s /IP/ICMP { print(\"${length(MATCH)} ${MATCH[Raw].data}\") } }")
@@ -2230,7 +2235,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  Raw(\"hello\")\n  expect timeout=1s Raw(\"hello\") {}\n  ../TCP!/Raw(\" world\")\n  expect timeout=1s Raw(\" world\") {}\n  ../TCP!(flags=RST)/Raw()\n  Raw(\"too late\") }")
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckRst \"\"\na 0.000s: 101\na 0.000s: done Eth#2" \
     (with_host ~frames:true \
-        "/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=100)/Raw()\nexpect timeout=1s /IP/TCP!(src == 7, flags & RST) { print(\"${MATCH[TCP].ack_num}\") }")
+        "/IP(dst=10.0.0.2)/TCP!(src=4000, dst=7, flags=SYN, seq_num=100)/Raw()\nexpect timeout=1s /IP/TCP!(src == 7, flags & RST) { print(MATCH[TCP].ack_num) }")
 *)
 (* [policed ?limits ?stop_at ?stop text] is what the program in that text prints,
  * each line with the time to the millisecond, how it ends, then how many
@@ -2288,11 +2293,11 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
               BUDGET = {max_syns: 3, max_duration: 10s}\n\
               PORTS = {tcp: [[40000, 40100], [40050, 40200]]}")
   "0.000s: [[53, 53], [40000, 40100]]\n0.000s: done\n0 frames" \
-    (policed "print(\"${PORTS.udp}\")\nPORTS = {udp: [[40000, 40100], 53]}")
-  "0.000s: failed: line 1, column 10: max_bytes is not set, by the program or the command line\n0 frames" \
-    (policed "print(\"${BUDGET.max_bytes}\")")
-  "0.000s: failed: line 1, column 10: tcp is not set, by the program or the command line\n0 frames" \
-    (policed "print(\"${PORTS.tcp}\")")
+    (policed "print(PORTS.udp)\nPORTS = {udp: [[40000, 40100], 53]}")
+  "0.000s: failed: line 1, column 7: max_bytes is not set, by the program or the command line\n0 frames" \
+    (policed "print(BUDGET.max_bytes)")
+  "0.000s: failed: line 1, column 7: tcp is not set, by the program or the command line\n0 frames" \
+    (policed "print(PORTS.tcp)")
   (String.concat "\n" [ \
     "line 1, column 11: BUDGET can only be declared at the top level of the program" ; \
     "line 2, column 9: PORTS gives no port" ; \

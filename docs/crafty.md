@@ -425,7 +425,8 @@ what their engine computes (checksums).
 
 ### Functions
 
-- `print(s)`, `print_err(s)`: to stdout, to stderr.
+- `print(x)`, `print_err(x)`: to stdout, to stderr, as `"${x}"` (bytes as
+  text).
 - `format(x)`: any value as a string, in the format of `--format`. CSV takes a
   scalar, or a record, array or map of scalars; record fields come in the
   order of their names: `print(format(stats()))`.

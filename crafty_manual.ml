@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 c2fd2ab030f420130de871ddcab43fc8) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 99d5df03f77def55ea32d5d22a0a553a) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -391,7 +391,8 @@ what their engine computes (checksums).
 
 ### Functions
 
--   `print(s)`, `print_err(s)`: to stdout, to stderr.
+-   `print(x)`, `print_err(x)`: to stdout, to stderr, as `"${x}"` (bytes as
+    text).
 -   `format(x)`: any value as a string, in the format of `--format`. CSV takes a
     scalar, or a record, array or map of scalars; record fields come in the
     order of their names: `print(format(stats()))`.

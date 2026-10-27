@@ -828,6 +828,10 @@ let only_exactly typs t = if List.mem t typs then Some t else None
 let any_value t =
     match t with Type.Void | Type.Pattern -> None | t -> Some t
 
+(* Bytes print as text, other values as interpolated: *)
+let printable t =
+    match only Type.[ String ] t with None -> any_value t | s -> s
+
 let any_array t = match t with Type.Array _ -> Some t | _ -> None
 
 let any_map t = match t with Type.Map _ -> Some t | _ -> None
@@ -977,8 +981,8 @@ let builtins =
         (function [ Type.Map (k, _) ] -> Type.Array k | _ -> assert false) ;
       "values", Values, [ param "m" "a map" any_map ],
         (function [ Type.Map (_, v) ] -> Type.Array v | _ -> assert false) ;
-      "print", Print, [ param "s" "a string" (only Type.[ String ]) ], res Type.Void ;
-      "print_err", Print_err, [ param "s" "a string" (only Type.[ String ]) ],
+      "print", Print, [ param "x" "a value" printable ], res Type.Void ;
+      "print_err", Print_err, [ param "x" "a value" printable ],
         res Type.Void ;
       "format", Format, [ param "x" "a value" any_value ], res Type.String ;
       (* Failing, as any error, where it is called: *)
@@ -2071,15 +2075,15 @@ let check_patterns (ps : A.patterns) =
   "line 1, column 1: This first has a single case: it is an expect" \
     (warns "first Raw | ../ICMP {}")
   "" (warns "first Raw {} | ../ICMP {}")
-  "line 1, column 44: This I is the number of the iteration of this repeat, which hides an outer I: name one of them with var=" \
-    (warns "repeat count=2 { repeat count=2 { print(\"${I}\") } }")
-  "line 1, column 44: This I is the item of this foreach, which hides an outer I: name one of them with var=" \
-    (warns "repeat count=2 { foreach [1, 2] { print(\"${I}\") } }")
-  "line 2, column 38: This I is what Got holds, which hides an outer I: name one of them with var=" \
-    (warns "r = [Got(1), Pending]\nforeach r { case r[0] Got { print(\"${I}\") } else {} }")
-  "" (warns "repeat count=2 { repeat count=2 { print(\"x\") }\n  print(\"${I}\") }")
+  "line 1, column 41: This I is the number of the iteration of this repeat, which hides an outer I: name one of them with var=" \
+    (warns "repeat count=2 { repeat count=2 { print(I) } }")
+  "line 1, column 41: This I is the item of this foreach, which hides an outer I: name one of them with var=" \
+    (warns "repeat count=2 { foreach [1, 2] { print(I) } }")
+  "line 2, column 35: This I is what Got holds, which hides an outer I: name one of them with var=" \
+    (warns "r = [Got(1), Pending]\nforeach r { case r[0] Got { print(I) } else {} }")
+  "" (warns "repeat count=2 { repeat count=2 { print(\"x\") }\n  print(I) }")
   "" (warns "repeat count=2 { repeat var=j count=2 { print(\"${I} ${j}\") } }")
-  "" (warns "r = [Got(1), Pending]\nforeach r { case I Got { print(\"${I}\") } else {} }")
+  "" (warns "r = [Got(1), Pending]\nforeach r { case I Got { print(I) } else {} }")
   "" (warns "r = [Got(1), Pending]\nforeach r { case var=g r[0] Got { print(\"${I} ${g}\") } else {} }")
 *)
 
@@ -2265,8 +2269,8 @@ let check_patterns (ps : A.patterns) =
     (types "x = ip_addr(1.5)")
   "line 1, column 1: x would have no value" \
     (types "x = assert(true)")
-  "line 1, column 7: Argument s of print must be a string, not an int" \
-    (types "print(1)")
+  "line 1, column 7: Argument x of print must be a value, not a void" \
+    (types "print(print(1))")
   "line 1, column 1: Break out of 1 repeat, foreach or on, but there is none" \
     (types "break")
   "line 1, column 10: Break out of 2 repeat, foreach or on, but there is only one" \
@@ -2384,8 +2388,8 @@ let check_patterns (ps : A.patterns) =
     (types "x = now() + now()")
   "line 1, column 5: Cannot apply - to an int and a time" \
     (types "x = 1 - now()")
-  "line 1, column 5: Unknown variable z\nline 3, column 1: Unknown variable w\nline 4, column 7: Argument s of print must be a string, not an int" \
-    (types "x = z\ny = x + 1\nw := 1\nprint(2)")
+  "line 1, column 5: Unknown variable z\nline 3, column 1: Unknown variable w\nline 4, column 7: Argument x of print must be a value, not a void" \
+    (types "x = z\ny = x + 1\nw := 1\nprint(print(2))")
   "line 2, column 1: This bool is not used" \
     (types "x = 1\nx == 1")
   "line 1, column 11: This int is not used\nline 1, column 22: This int is not used" \
