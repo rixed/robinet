@@ -99,7 +99,7 @@ let debug = false
 (* Where the recorded files are kept: a library the reader saves into, picks
  * from and (eventually) replays. Everything in it is named by a plain file
  * name, never by a path -- see [check_fname]. *)
-let pcap_dir = ref "/tmp"
+let pcap_dir = ref (Filename.get_temp_dir_name ())
 
 let path_of_fname fname = Filename.concat !pcap_dir fname
 

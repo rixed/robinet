@@ -1268,7 +1268,7 @@ end
 (** {2 Global record of every Ethernet traffic} *)
 
 let recording = ref false
-let recorder_file = ref "/tmp/robinet_eth.pcap"
+let recorder_file = ref (Filename.get_temp_dir_name () ^ "/robinet_eth.pcap")
 
 let maybe_record =
     let recorder = ref ignore in
