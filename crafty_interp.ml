@@ -458,6 +458,13 @@ let arith loc op a b =
     | A.BitAnd, Byte a, Byte b -> Byte (a land b)
     | A.BitOr, Byte a, Byte b -> Byte (a lor b)
     | A.BitXor, Byte a, Byte b -> Byte (a lxor b)
+    | (A.Shl | A.Shr), _, Int n when n < 0 ->
+        error loc "Cannot shift by %d" n
+    (* What a shift pushes out is lost; [>>] keeps the sign of an int: *)
+    | A.Shl, Int a, Int n -> Int (if n >= Sys.int_size then 0 else a lsl n)
+    | A.Shr, Int a, Int n -> Int (a asr min n (Sys.int_size - 1))
+    | A.Shl, Byte a, Int n -> Byte (if n >= 8 then 0 else (a lsl n) land 255)
+    | A.Shr, Byte a, Int n -> Byte (if n >= 8 then 0 else a lsr n)
     | _ -> invalid_arg "Crafty_interp.arith"
 
 (* Where a program writes, and the date it reads: *)
@@ -1548,6 +1555,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "x = ip_addr(#010203)")
   "0s: #01020a00000102000000000147455442ff\n0s: done" \
     (runs "x = #0102 + bytes(10.0.0.1) + bytes(02:00:00:00:00:01) + bytes(\"GET\") + bytes(#42) + bytes(#ff)\nprint(\"${x}\")")
+  "0s: 40 2 -2 0 0 #f0 #0f #00\n0s: done" \
+    (runs "x = 5\nx <<= 3\nb = #ff\nprint(\"${x} ${x >> 4} ${-3 >> 1} ${1 << 63} ${1 >> 100} ${b << 4} ${b >> 4} ${b << 8}\")")
+  "0s: failed: line 1, column 5: Cannot shift by -1" \
+    (runs "x = 1 << -1")
   "0s: #b861 #feff #0000\n0s: done" \
     (runs "h = #450000730000400040110000c0a80001c0a800c7\nprint(\"${checksum(h)} ${checksum(#01)} ${checksum(h[:10] + checksum(h) + h[12:])}\")")
   "0s: 3232235778 4294967295 192.168.1.3 0.0.0.0\n0s: done" \

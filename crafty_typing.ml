@@ -1462,6 +1462,11 @@ and binop env loc op a b =
         | (Type.Int | Type.Byte), (Type.Int | Type.Byte) ->
             mk Type.Int (Binop (op, expect "" a Type.Int, expect "" b Type.Int))
         | _ -> cannot ())
+    | A.Shl | A.Shr ->
+        (match a.typ, b.typ with
+        | (Type.Int | Type.Byte), (Type.Int | Type.Byte) ->
+            mk a.typ (Binop (op, a, expect "" b Type.Int))
+        | _ -> cannot ())
     | A.And | A.Or ->
         let what = "An operand of "^ sym in
         mk Type.Bool (Binop (op, as_bool what a, as_bool what b))

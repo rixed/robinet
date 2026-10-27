@@ -586,7 +586,9 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
     let product =
         left_assoc (op "*" Mul ||| op "/" Div ||| op "%" Mod) unary in
     let sum = left_assoc (op "+" Add ||| op "-" Sub) product in
-    let bit_and = left_assoc (op_not_before "&" '&' BitAnd) sum in
+    let shift =
+        left_assoc (op_not_before "<<" '=' Shl ||| op_not_before ">>" '=' Shr) sum in
+    let bit_and = left_assoc (op_not_before "&" '&' BitAnd) shift in
     let bit_xor = left_assoc (op "^" BitXor) bit_and in
     let bit_or = left_assoc (op_not_before "|" '|' BitOr) bit_xor in
     let comparison =
@@ -669,7 +671,8 @@ let assign_op =
     op ":=" None |||
     op "+=" (Some Add) ||| op "-=" (Some Sub) ||| op "*=" (Some Mul) |||
     op "/=" (Some Div) ||| op "%=" (Some Mod) ||| op "|=" (Some BitOr) |||
-    op "&=" (Some BitAnd) ||| op "^=" (Some BitXor)
+    op "&=" (Some BitAnd) ||| op "^=" (Some BitXor) |||
+    op "<<=" (Some Shl) ||| op ">>=" (Some Shr)
 
 let () = set_stmt (
     let body = sp -+ block in
@@ -876,6 +879,7 @@ let parse_patterns text =
   "x = (((-1 + -2.5) - -3s) - (- 1))\n" (reads "x = -1 + -2.5 - -3s - - 1")
   "x = (3 - 1)\n" (reads "x = 3 -1")
   "x = ((3 & 4) == 4)\n" (reads "x = 3 & 4 == 4")
+  "x = ((a & (1 << (n + 1))) < (b >> 2))\n" (reads "x = a & 1 << n + 1 < b >> 2")
   "x = (MATCH[IP^].src + MATCH[^^IP].dst)\n" \
     (reads "x = MATCH[IP^].src + MATCH[^^IP].dst")
   "x = a.b.c[0].d\n" (reads "x = a.b.c[0].d")
@@ -1021,7 +1025,7 @@ let parse_patterns text =
   List.for_all (fun t -> reads (formats t) = reads t) [ \
     "x = 1 + 2 * 3 - 4 / 2 % 3" ; "x = a || b && c == d | e ^ f & g + h" ; \
     "x = !a && -b < 3" ; "x = -1 + -2.5 - -3s - - 1" ; "x = 3 -1" ; \
-    "x = 3 & 4 == 4" ; "x = MATCH[IP^].src + MATCH[^^IP].dst" ; \
+    "x = 3 & 4 == 4" ; "x = a & 1 << n + 1 < b >> 2" ; "x <<= 1" ; "x = MATCH[IP^].src + MATCH[^^IP].dst" ; \
     "x = length(MATCH) * rand(max=3)" ; "x = - -1 - - (2 - 3)" ; \
     "x = 1m30s + 10ms + 1.5\xc2\xb5s" ; "x = [1.2.3.4 == y, aa:bb:cc:dd:ee:ff]" ; \
     "x = #1ee7 # a comment\nx = #f" ; "x = \"a ${x + 1} b \\${not} \\x41$\"" ; \

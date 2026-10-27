@@ -111,7 +111,7 @@ type unop = Not | Neg
 type binop =
     | Add | Sub | Mul | Div | Mod
     | And | Or
-    | BitAnd | BitOr | BitXor
+    | BitAnd | BitOr | BitXor | Shl | Shr
     | Eq | Ne | Lt | Le | Gt | Ge
 
 type literal =
@@ -320,7 +320,7 @@ let keywords =
 let string_of_binop = function
     | Add -> "+" | Sub -> "-" | Mul -> "*" | Div -> "/" | Mod -> "%"
     | And -> "&&" | Or -> "||"
-    | BitAnd -> "&" | BitOr -> "|" | BitXor -> "^"
+    | BitAnd -> "&" | BitOr -> "|" | BitXor -> "^" | Shl -> "<<" | Shr -> ">>"
     | Eq -> "==" | Ne -> "!=" | Lt -> "<" | Le -> "<=" | Gt -> ">" | Ge -> ">="
 
 (* The shortest that reads back as [f], and as a float; "inf", "-inf" and
@@ -373,10 +373,10 @@ let print_list print oc l =
 let precedence = function
     | Or -> 1 | And -> 2
     | Eq | Ne | Lt | Le | Gt | Ge -> 3
-    | BitOr -> 4 | BitXor -> 5 | BitAnd -> 6
-    | Add | Sub -> 7 | Mul | Div | Mod -> 8
+    | BitOr -> 4 | BitXor -> 5 | BitAnd -> 6 | Shl | Shr -> 7
+    | Add | Sub -> 8 | Mul | Div | Mod -> 9
 
-let unary_precedence = 9
+let unary_precedence = 10
 
 (* [e] where an operation binding less than [p] needs parentheses, as do all
  * of them with [all] (but the outermost one if [bare]), its blocks at that

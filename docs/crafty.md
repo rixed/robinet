@@ -316,11 +316,13 @@ Operators, from the tightest binding to the loosest:
    interval (or a number of seconds) is a time. `+` also concatenates arrays
    (`[1] + [2, 3]`) and appends or prepends an item
    (`[1, 2] + 3`, `0 + [1, 2]`). Strings do not add up: interpolate them.
-4. `&`, then `^`, then `|`: bitwise, on ints or bytes. They bind tighter than
+4. `<<`, `>>`: shift an int or a byte by an int; `>>` keeps the sign of an
+   int, and a byte stays 8 bits.
+5. `&`, then `^`, then `|`: bitwise, on ints or bytes. They bind tighter than
    comparisons: `flags & RST == 0` is `(flags & RST) == 0`.
-5. `==`, `!=`, `<`, `<=`, `>`, `>=`: they do not chain; ordering works on
+6. `==`, `!=`, `<`, `<=`, `>`, `>=`: they do not chain; ordering works on
    numbers, bytes, intervals, times and strings.
-6. `&&`, then `||`.
+7. `&&`, then `||`.
 
 Also: `r.field`, `a[i]` (`a[-1]` is the last item), `m[k]` (else the
 default, else an error), `f(arg, name=arg)`, and the layer selectors of
