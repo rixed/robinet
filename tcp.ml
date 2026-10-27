@@ -620,7 +620,7 @@ struct
         mutable unacked_tx : Streambuf.t ; (* previous packet we sent but that were not acked yet *)
         mutable rcvd_fin : bool ; (* if we already passed the fin to the application *)
         rcv_buf : int ; (* the window we advertise and enforce (at most 0xffff without window scaling) *)
-        rcv_wscale : int ; (* the shift we offer: the smallest that makes rcv_buf fit in 16 bits *)
+        rcv_wscale : int option ; (* the shift we offer, if any: by default the smallest that makes rcv_buf fit in 16 bits *)
         mutable offered_wscale : bool ; (* once a SYN of ours offered rcv_wscale *)
         mutable snd_wscale : int option ; (* the peer's shift, once its SYN offered one (RFC 7323) *)
         mutable snd_wnd : int ; (* the window the peer advertises: bytes allowed in flight *)
@@ -689,33 +689,40 @@ struct
 
     let acked_of t tcp = Int32.to_int ((tcp.Pdu.ack_num :> int32) -/ (t.isn :> int32))
 
-    (* Window scaling is on once the peer's SYN offered it, as we offer it in
-     * every SYN but a SYN-ACK to a peer that did not. The window of a SYN is
-     * never scaled. *)
+    (* Window scaling is on once both SYNs offered it (RFC 7323), ours
+     * offering [rcv_wscale] but in a SYN-ACK to a peer that did not. The
+     * window of a SYN is never scaled. *)
+
+    (* Our shift and the peer's, if scaling is on: *)
+    let wscales t =
+        match t.rcv_wscale, t.snd_wscale with
+        | Some ours, Some peer when t.offered_wscale -> Some (ours, peer)
+        | _ -> None
 
     (* What the window field of our segments says: *)
     let adv_wnd ?(syn=false) t =
-        match t.snd_wscale with
-        | Some _ when not syn -> min 0xffff (t.rcv_buf lsr t.rcv_wscale)
+        match wscales t with
+        | Some (shift, _) when not syn -> min 0xffff (t.rcv_buf lsr shift)
         | _ -> min 0xffff t.rcv_buf
 
     (* The window we enforce, ie. what that field means to the peer: *)
     let rcv_wnd t =
-        match t.snd_wscale with
-        | Some _ -> adv_wnd t lsl t.rcv_wscale
+        match wscales t with
+        | Some (shift, _) -> adv_wnd t lsl shift
         | None -> adv_wnd t
 
     (* The window the peer advertises in [tcp]: *)
     let peer_wnd t tcp =
-        match t.snd_wscale with
-        | Some shift when not tcp.Pdu.flags.Pdu.syn -> tcp.Pdu.win_size lsl shift
+        match wscales t with
+        | Some (_, shift) when not tcp.Pdu.flags.Pdu.syn -> tcp.Pdu.win_size lsl shift
         | _ -> tcp.Pdu.win_size
 
     let syn_options t =
         Pdu.Opt.Mss t.rcv_mss ::
-        if t.rcvd_isn = None || t.snd_wscale <> None then
-            Pdu.Opt.[ Nop ; Wscale t.rcv_wscale ]
-        else []
+        match t.rcv_wscale with
+        | Some shift when t.rcvd_isn = None || t.snd_wscale <> None ->
+            Pdu.Opt.[ Nop ; Wscale shift ]
+        | _ -> []
 
     (* The MSS assumed of a peer that advertises none (RFC 9293, for IPv4), and
      * the smallest we accept (as Linux), lest no segment carries anything: *)
@@ -1082,7 +1089,8 @@ struct
                             | Pdu.Opt.Wscale shift -> Some (min shift 14) (* RFC 7323 *)
                             | _ -> found) None tcp.Pdu.options ;
                     Log.(log t.logger Debug (lazy (match t.snd_wscale with
-                        | Some shift -> Printf.sprintf "Tcp: Window scaling, peer's shift %d, ours %d" shift t.rcv_wscale
+                        | Some shift -> Printf.sprintf "Tcp: Window scaling, peer's shift %d, ours %s" shift
+                                            (Option.map_default string_of_int "none" t.rcv_wscale)
                         | None -> "Tcp: No window scaling"))) ;
                     let peer_mss =
                         List.fold_left (fun found -> function
@@ -1245,8 +1253,9 @@ struct
     let default_time_wait = Clock.Interval.sec 60.
 
     (* With [sync_recv], what is received in order is handed to the reader
-     * while the segment that completes it is being received. *)
-    let make power ?(sync_recv=false) ?isn ?(mss=536) ?(ssthresh=max_int) ?(initial_window=10) ?(snd_buf=default_snd_buf) ?(rcv_buf=default_rcv_buf)
+     * while the segment that completes it is being received. [wscale] is
+     * the shift to offer, [None] for no window scaling. *)
+    let make power ?(sync_recv=false) ?isn ?(mss=536) ?wscale ?(ssthresh=max_int) ?(initial_window=10) ?(snd_buf=default_snd_buf) ?(rcv_buf=default_rcv_buf)
              ?(initial_rto=Clock.Interval.sec 1.) ?(min_rto_var=Clock.Interval.msec 200.)
              ?(max_rto=Clock.Interval.sec 120.) ?(max_timeouts=15) ?(max_syn_timeouts=5)
              ?(time_wait=default_time_wait)
@@ -1275,7 +1284,7 @@ struct
                   rcv_wscale = (let rec shift s =
                                     if s >= 14 || rcv_buf lsr s <= 0xffff then s
                                     else shift (s + 1) in
-                                shift 0) ;
+                                wscale |? Some (shift 0)) ;
                   snd_wnd = 0 ; snd_wl1 = -1 ; snd_wl2 = 0 ; max_snd_wnd = 0 ;
                   persist_gen = 0 ; persist_armed = false ; probes = 0 ; unanswered_probes = 0 ;
                   cnx_established_cont = None ; sync_recv ;
@@ -1345,12 +1354,12 @@ end
      * in flight, the bytes received, the window probes sent and how far beyond
      * what it received [b] ever held data; [b] is left in [last_b]. *)
     let last_b = ref None in
-    let transfer ?rcv_buf ?(mss=100) ?b_mss ?max_timeouts ?(a_to_b=fun p -> Some p)
+    let transfer ?rcv_buf ?(mss=100) ?b_mss ?b_wscale ?max_timeouts ?(a_to_b=fun p -> Some p)
                  ?(b_to_a=fun _ p -> Some p) size =
         let sim = Simulation.make ~realtime:false "peer-window" in
         let power = sim.root.power and logger = Log.make () in
         let a = make power ~mss ?max_timeouts (Port.o 1) (Port.o 2) logger
-        and b = make power ~mss:(b_mss |? mss) ?rcv_buf (Port.o 2) (Port.o 1) logger in
+        and b = make power ~mss:(b_mss |? mss) ?wscale:b_wscale ?rcv_buf (Port.o 2) (Port.o 1) logger in
         last_b := Some b ;
         let max_in_flight = ref 0 and rcvd = ref 0 and probes = ref 0 and ahead = ref 0 in
         let later f = Simulation.delay power (Clock.Interval.msec 10.) f () in
@@ -1389,6 +1398,14 @@ end
     assert_bool "offered by the opener only" (a.offered_wscale && not (Option.get !last_b).offered_wscale) ;
     assert_equal ~printer:string_of_int ~msg:"unscaled window" 0xffff a.snd_wnd ;
     assert_bool "at most 64KiB in flight" (m <= 0xffff) ;
+    (* A peer that offers no window scaling, but knows of it: *)
+    let a, _, rcvd, _, _ = transfer ~mss:1000 ~b_wscale:None 500_000 in
+    let b = Option.get !last_b in
+    assert_equal ~printer:string_of_int ~msg:"all received" 500_000 rcvd ;
+    assert_bool "offered by the opener only" (a.offered_wscale && not b.offered_wscale) ;
+    assert_equal ~msg:"opener's shift" (Some 7) b.snd_wscale ;
+    assert_equal ~printer:string_of_int ~msg:"unscaled window" 0xffff a.snd_wnd ;
+    assert_bool "unscaled peer window" (b.snd_wnd <= 0xffff) ;
     (* Segments are sized for the smaller MSS, or 536 if the peer gives none: *)
     let largest = ref 0 in
     let a_to_b p = largest := max !largest (Payload.length p.Pdu.payload) ; Some p in

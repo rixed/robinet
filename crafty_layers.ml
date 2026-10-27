@@ -58,10 +58,13 @@ type field =
       typ : Type.t ;
       (* The modes in which the field can be given as an option, and those in
        * which a condition can read it. Some are read only (computed or
-       * virtual, such as [is_fragment]), and some are options of a TRX that
-       * are not header fields (such as TCP's [mss]): *)
+       * virtual, such as [is_fragment]): *)
       set_in : mode list ;
       read_in : mode list ;
+      (* The field this one is a part of, which it cannot be given with. Set
+       * in one mode, it means something else in the other (TCP's [mss]: an
+       * option of the segment, or of the connection): *)
+      part_of : string option ;
       (* Whether it tells streams apart, which the tree of parsers keys its
        * nodes on: *)
       discriminant : bool ;
@@ -398,6 +401,44 @@ let tcp_proto = (Ip.Proto.tcp :> int)
 (* Sequence numbers as unsigned ints: *)
 let int_of_seq_num (n : Tcp.SeqNum.t) = Int32.to_int (n :> int32) land 0xffff_ffff
 
+(* The options of a segment, also by those of their fields that the first
+ * option of each kind tells; those missing read -1, but [sack_ok]: *)
+let tcp_option_values opts =
+    let open Tcp.Pdu.Opt in
+    let int f = V.Int (List.find_map_opt f opts |? -1)
+    and u32 n = Int32.to_int n land 0xffff_ffff in
+    let ts f = int (function Timestamps (v, e) -> Some (u32 (f (v, e))) | _ -> None) in
+    [ "options", bytes_value (pack opts) ;
+      "mss", int (function Mss m -> Some m | _ -> None) ;
+      "wscale", int (function Wscale s -> Some s | _ -> None) ;
+      "sack_ok", V.Bool (List.mem Sack_permitted opts) ;
+      "ts_val", ts fst ; "ts_ecr", ts snd ]
+
+(* The options of a segment as given, either as bytes, or by their fields,
+ * which go in the order of Linux: *)
+let tcp_options (fields : fields) =
+    let open Tcp.Pdu.Opt in
+    match fields "options" with
+    | Some _ ->
+        let options = bytes_of fields "options" in
+        if Tools.bytelength options mod 4 <> 0 || Tools.bytelength options > max_len then
+            V.fail "The options of TCP must be a multiple of 4 bytes, up to 40" ;
+        unpack options
+    | None ->
+        let ts =
+            match opt_int fields "ts_val" 0 0xffff_ffff,
+                  opt_int fields "ts_ecr" 0 0xffff_ffff with
+            | None, None -> None
+            | v, e -> Some (Int32.of_int (v |? 0), Int32.of_int (e |? 0)) in
+        Option.map_default (fun m -> [ Mss m ]) [] (opt_int fields "mss" 0 0xffff) @
+        (match bool_of fields "sack_ok" ~def:false, ts with
+        | true, Some (v, e) -> [ Sack_permitted ; Timestamps (v, e) ]
+        | false, Some (v, e) -> [ Nop ; Nop ; Timestamps (v, e) ]
+        | true, None -> [ Nop ; Nop ; Sack_permitted ]
+        | false, None -> []) @
+        Option.map_default (fun s -> [ Nop ; Wscale s ]) []
+            (opt_int fields "wscale" 0 0xff)
+
 let unpack_tcp _ bits =
     match Tcp.Pdu.unpack bits with
     | Error _ -> None
@@ -407,11 +448,12 @@ let unpack_tcp _ bits =
             bit f.fin 1 lor bit f.syn 2 lor bit f.rst 4 lor bit f.psh 8 lor
             bit f.ack 16 lor bit f.urg 32 in
         let payload = (t.payload :> bitstring) in
-        unpacked [ "src", V.Int (t.src_port :> int) ; "dst", V.Int (t.dst_port :> int) ;
+        unpacked ([ "src", V.Int (t.src_port :> int) ; "dst", V.Int (t.dst_port :> int) ;
                    "seq_num", V.Int (int_of_seq_num t.seq_num) ;
                    "ack_num", V.Int (int_of_seq_num t.ack_num) ;
                    "flags", V.Int flags ; "win_size", V.Int t.win_size ;
-                   "urg_ptr", V.Int t.urg_ptr ; "checksum", V.Int t.checksum ]
+                   "urg_ptr", V.Int t.urg_ptr ; "checksum", V.Int t.checksum ] @
+                 tcp_option_values t.options)
                  ~upper:(if bitstring_length payload > 0 then Any N.Bytes else Nothing)
                  ~payload bits
 
@@ -484,11 +526,11 @@ let tcp_node ctx =
             s.pending <- [] ;
             removed s ;
             wake () in
-    let new_stream ?(mss=st.mtu - 40) () =
+    let new_stream ?(mss=st.mtu - 40) ?wscale () =
         (match !state with
         | Stream s -> Tcp.TRX.abort s.trx ; removed s
         | _ -> ()) ;
-        let t = Tcp.TRX.make power ~sync_recv:true ~mss (port "src") (port "dst") logger in
+        let t = Tcp.TRX.make power ~sync_recv:true ~mss ?wscale (port "src") (port "dst") logger in
         Tools.(t.tcp_trx.trx.out --> sink (below.send ctx.below_key [ "proto", V.Int tcp_proto ])) ;
         Tools.(t.tcp_trx.trx.ins --> sink (fun bits ->
             if bitstring_length bits > 0 then received := bits :: !received)) ;
@@ -502,7 +544,9 @@ let tcp_node ctx =
         match !state with
         | Stream s when not s.closing -> s
         | _ ->
-            let s = new_stream ?mss:(opt_int fields "mss" 1 0xffff) () in
+            let s = new_stream ?mss:(opt_int fields "mss" 1 0xffff)
+                               ?wscale:(Option.map (fun s -> if s < 0 then None else Some s)
+                                           (opt_int fields "wscale" (-1) 14)) () in
             Tcp.TRX.connect s.trx (established s) ;
             s in
     { pack = (fun fields _ payload ->
@@ -541,6 +585,7 @@ let tcp_node ctx =
                 ~fin:(bit 1) ~syn:(bit 2) ~rst:(bit 4) ~psh:(bit 8) ~ack:(bit 16)
                 ~urg:(bit 32) ~win_size
                 ~urg_ptr:(int_of ~def:0 fields "TCP!" "urg_ptr" 0 0xffff)
+                ~options:(tcp_options fields)
                 ?checksum:(opt_int fields "checksum" 0 0xffff) payload in
         (match seq_given, trx with
         | None, Some t -> Tcp.TRX.sent_manually t pdu
@@ -614,7 +659,9 @@ let tcp_node ctx =
               "snd_wnd", V.Int t.snd_wnd ; "rcv_wnd", V.Int (Tcp.TRX.rcv_wnd t) ;
               (* -1 for a side that offered no window scaling: *)
               "snd_wscale", V.Int (t.snd_wscale |? -1) ;
-              "rcv_wscale", V.Int (if t.offered_wscale then t.rcv_wscale else -1) ;
+              "rcv_wscale", V.Int (match t.rcv_wscale with
+                                   | Some s when t.offered_wscale -> s
+                                   | _ -> -1) ;
               "established", V.Bool (Tcp.TRX.is_established t) ]) }
 
 let icmp_upper = function
@@ -742,19 +789,21 @@ let unpack_quoted_tcp _ bits =
     let u32 n = Int32.to_int n land 0xffff_ffff in
     match%bitstring bits with
     | {| src : 16 ; dst : 16 ; seq_num : 32 ; rest : -1 : bitstring |} ->
-        let ack_num, flags, win_size, checksum, urg_ptr, payload =
+        let ack_num, flags, win_size, checksum, urg_ptr, options, payload =
             match%bitstring rest with
             | {| ack_num : 32 ; hdr_len : 4 ; _ : 6 ; flags : 6 ; win_size : 16 ;
                  checksum : 16 ; urg_ptr : 16 ; rest : -1 : bitstring |} ->
-                let options = max 0 (hdr_len * 32 - 160) in
+                let opt_len = max 0 (hdr_len * 32 - 160) in
                 u32 ack_num, flags, win_size, checksum, urg_ptr,
-                (if bitstring_length rest > options then dropbits options rest
+                takebits (min opt_len (bitstring_length rest)) rest,
+                (if bitstring_length rest > opt_len then dropbits opt_len rest
                  else empty_bitstring)
-            | {| _ |} -> 0, 0, 0, 0, 0, empty_bitstring in
-        unpacked [ "src", V.Int src ; "dst", V.Int dst ;
-                   "seq_num", V.Int (u32 seq_num) ; "ack_num", V.Int ack_num ;
-                   "flags", V.Int flags ; "win_size", V.Int win_size ;
-                   "urg_ptr", V.Int urg_ptr ; "checksum", V.Int checksum ]
+            | {| _ |} -> 0, 0, 0, 0, 0, empty_bitstring, empty_bitstring in
+        unpacked ([ "src", V.Int src ; "dst", V.Int dst ;
+                    "seq_num", V.Int (u32 seq_num) ; "ack_num", V.Int ack_num ;
+                    "flags", V.Int flags ; "win_size", V.Int win_size ;
+                    "urg_ptr", V.Int urg_ptr ; "checksum", V.Int checksum ] @
+                  tcp_option_values (Tcp.Pdu.Opt.unpack options))
                  ~upper:(if bitstring_length payload > 0 then Only N.Bytes else Nothing)
                  ~payload bits
     | {| _ |} -> None
@@ -772,7 +821,7 @@ let quoted_tcp_node _ =
             ~seq_num:(seq_num "seq_num") ~ack_num:(seq_num "ack_num")
             ~fin:(bit 1) ~syn:(bit 2) ~rst:(bit 4) ~psh:(bit 8) ~ack:(bit 16)
             ~urg:(bit 32) ~win_size:(int ~def:0xffff "win_size" 0xffff)
-            ~urg_ptr:(int ~def:0 "urg_ptr" 0xffff)
+            ~urg_ptr:(int ~def:0 "urg_ptr" 0xffff) ~options:(tcp_options fields)
             ?checksum:(opt_int fields "checksum" 0 0xffff) payload |>
         Tcp.Pdu.pack, [ "proto", V.Int tcp_proto ])
 
@@ -907,9 +956,14 @@ type layer =
       unpack : hints -> bitstring -> unpacked option }
 
 let field ?(set_in=[ Manual ]) ?(read_in=[ Manual ]) ?(discriminant=false)
-          ?pick ?peer ?driven_default name typ =
+          ?pick ?peer ?driven_default ?part_of name typ =
     { name ; typ ; set_in ; read_in ; discriminant ; pick ; peer = peer |? name ;
-      driven_default }
+      driven_default ; part_of }
+
+(** Whether fields [i] and [j] of [l] cannot both be given: *)
+let overlap (l : layer) i j =
+    i = j || l.fields.(i).part_of = Some l.fields.(j).name ||
+    l.fields.(j).part_of = Some l.fields.(i).name
 
 
 let unsendable name _ =
@@ -998,7 +1052,12 @@ let tcp =
         field "win_size" Type.Int ;
         field "urg_ptr" Type.Int ;
         field "checksum" Type.Int ;
-        field "mss" Type.Int ~set_in:[ Driven ] ~read_in:[] ]
+        field "options" Type.bytes ;
+        field "mss" Type.Int ~set_in:both ~part_of:"options" ;
+        field "wscale" Type.Int ~set_in:both ~part_of:"options" ;
+        field "sack_ok" Type.Bool ~part_of:"options" ;
+        field "ts_val" Type.Int ~part_of:"options" ;
+        field "ts_ecr" Type.Int ~part_of:"options" ]
 
 let udp =
     layer N.UDP ~above:[ ip ] ~node:udp_node ~unpack:unpack_udp [
@@ -1195,7 +1254,7 @@ let record_type (l : layer) mode =
 *)
 (*$T find_field
   find_field bytes "DATA" = Some 0
-  find_field tcp "mss" = Some 8
+  find_field tcp "mss" = Some 9
   find_field tcp "payload" = None
 *)
 (* Defaults are found by name: *)

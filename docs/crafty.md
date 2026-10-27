@@ -517,7 +517,18 @@ checksum.
 - `win_size`: int; set M; read M.
 - `urg_ptr`: int; set M; read M.
 - `checksum`: int; set M; read M. Default: computed, as when 0.
-- `mss`: int; set S. The MSS of the connection.
+- `options`: bytes; set M; read M. Default: none.
+- `mss`, `wscale`: int; set M, S; read M. The first option of each kind,
+  or -1.
+- `ts_val`, `ts_ecr`: int; set M; read M. Those of the timestamps option, or
+  -1.
+- `sack_ok`: bool; set M; read M. Whether SACK is permitted.
+
+The fields of the options cannot be given with `options`. A missing `ts_val` or
+`ts_ecr` is 0. Self-driven, `mss` and `wscale` are what the connection
+offers (default: the MTU less 40, and what fits the receive buffer; -1
+offers no window scaling, which caps its window at 64KiB); a `TCP!` over it
+does not send them.
 
 Self-driven, the first message sent connects, and what follows waits for the
 connection. A TCP stream created by a pattern accepts the connection instead.
@@ -563,8 +574,8 @@ On top is the start of the packet the error is about: a quoted `IP`, or
 
 #### Quoted `IP`, `UDP` and `TCP` (on `DestUnreachable` and `TimeExceeded`)
 
-They have the fields of `IP`, `UDP` and `TCP` (but `is_fragment` and `mss`),
-all readable and settable. They are no streams: a quoted TCP segment is no part
+They have the fields of `IP`, `UDP` and `TCP` (but `is_fragment`), all
+readable and settable. They are no streams: a quoted TCP segment is no part
 of a connection. Errors print them as `IP?`, `UDP?`, `TCP?`.
 
 ```

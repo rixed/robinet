@@ -1528,7 +1528,11 @@ and stack_layers ~hint env base over (layers : A.layer list) =
             ) al.options in
         List.iter (fun (i, (e : expr)) ->
             if List.length (List.filter (fun (i', _) -> i = i') options) > 1 then
-                error e.loc "%s given twice" l.fields.(i).name) options ;
+                error e.loc "%s given twice" l.fields.(i).name ;
+            Option.may (fun p ->
+                if List.exists (fun (j, _) -> l.fields.(j).name = p) options then
+                    error e.loc "%s and %s cannot both be given" l.fields.(i).name p
+            ) l.fields.(i).part_of) options ;
         (l, mode) :: base',
         { layer_loc = al.layer_loc ; layer = l ; mode ; options } :: tls
     ) (base, []) layers |>
@@ -2143,7 +2147,7 @@ let check_patterns (ps : A.patterns) =
   "x: int" (types "if 1 { wait 1s }\nx = 1\nif x > 0 { print(\"a\") } else { x := 2 }")
   "x: ip, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, b: {data: byte[]}, y: byte[]" \
     (types "expect /IP { x = case MATCH[1] IP { MATCH[IP].src } | else { 0.0.0.0 }\n  case var=b MATCH[2] Bytes { y = b.data } }")
-  "x: int, I: {dst: mac, proto: int, src: mac, ts: time}, I: {code: int, type: int}, I: {id: int}, I: {payload: byte[], seq: int}, I: {payload: byte[], seq: int}, I: {code: int, mtu: int}, I: {code: int}, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, I: {checksum: int, dst: int, length: int, src: int}, I: {ack_num: int, checksum: int, dst: int, flags: int, seq_num: int, src: int, urg_ptr: int, win_size: int}, I: {id: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {data: byte[]}" \
+  "x: int, I: {dst: mac, proto: int, src: mac, ts: time}, I: {code: int, type: int}, I: {id: int}, I: {payload: byte[], seq: int}, I: {payload: byte[], seq: int}, I: {code: int, mtu: int}, I: {code: int}, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, I: {checksum: int, dst: int, length: int, src: int}, I: {ack_num: int, checksum: int, dst: int, flags: int, mss: int, options: byte[], sack_ok: bool, seq_num: int, src: int, ts_ecr: int, ts_val: int, urg_ptr: int, win_size: int, wscale: int}, I: {id: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {data: byte[]}" \
     (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Bytes { 13 } }")
   "x: int, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, y: int" \
     (types "expect /IP { x = case MATCH[1] IP { wait 1s\n  1 } | else { 2 }\n  y = { expect Bytes {}\n  3 } }")
@@ -2291,6 +2295,10 @@ let check_patterns (ps : A.patterns) =
     (types "Bytse(\"x\")")
   "line 1, column 30: UDP has no field flags" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53, flags=2) {}")
+  "line 1, column 36: mss and options cannot both be given" \
+    (types "/IP!(dst=1.2.3.4)/TCP!(dst=80, mss=1400, options=#01010101)/Bytes()")
+  "line 1, column 30: sack_ok cannot be set in a self-driven TCP" \
+    (types "/IP(dst=1.2.3.4)/TCP(dst=80, sack_ok=true) {}")
   "line 1, column 5: id cannot be set in a self-driven IP" \
     (types "/IP(id=3)/TCP(dst=80) {}")
   "line 1, column 19: TCP cannot be self-driven on top of a manual IP" \

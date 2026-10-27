@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 1913e5dc765b647a7c8e9b8069626d69) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 b7c6558b75adda7a525b599809fb4835) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -139,9 +139,9 @@ reception, `IP!` sees each fragment and `TCP!` each segment, even without data.
 
 `crafty [options] file [arg...]` or `crafty [options] -e program [arg...]`.
 
-The options end at the file: what follows it are the program's arguments, which
-it reads with `arg(n)`. With `-e`, every argument that is not an option is the
-program's; `--` ends the options.
+What follow the file are the program's own arguments (that are returned by
+`arg(n)`. With `-e`, every argument that's not an option is a program's
+argument, and `--` ends the options.
 
 Options:
 
@@ -481,7 +481,17 @@ connection. `IP!` sends the header as given, but for the checksum.
 -   `win_size`: int; set M; read M.
 -   `urg_ptr`: int; set M; read M.
 -   `checksum`: int; set M; read M. Default: computed, as when 0.
--   `mss`: int; set S. The MSS of the connection.
+-   `options`: bytes; set M; read M. Default: none.
+-   `mss`, `wscale`: int; set M, S; read M. The first option of each kind, or
+    -1.
+-   `ts_val`, `ts_ecr`: int; set M; read M. Those of the timestamps option, or
+    -1.
+-   `sack_ok`: bool; set M; read M. Whether SACK is permitted.
+
+The fields of the options cannot be given with `options`. A missing `ts_val` or
+`ts_ecr` is 0. Self-driven, `mss` and `wscale` are what the connection offers
+(default: the MTU less 40, and what fits the receive buffer; -1 offers no window
+scaling, which caps its window at 64KiB); a `TCP!` over it does not send them.
 
 Self-driven, the first message sent connects, and what follows waits for the
 connection. A TCP stream created by a pattern accepts the connection instead.
@@ -525,8 +535,8 @@ On top is the start of the packet the error is about: a quoted `IP`, or `Bytes`.
 
 #### Quoted `IP`, `UDP` and `TCP` (on `DestUnreachable` and `TimeExceeded`)
 
-They have the fields of `IP`, `UDP` and `TCP` (but `is_fragment` and `mss`), all
-readable and settable. They are no streams: a quoted TCP segment is no part of a
+They have the fields of `IP`, `UDP` and `TCP` (but `is_fragment`), all readable
+and settable. They are no streams: a quoted TCP segment is no part of a
 connection. Errors print them as `IP?`, `UDP?`, `TCP?`.
 
     on for=5s /IP/ICMP/TimeExceeded/IP(dst == target)/UDP(dst == 33434) {

@@ -707,8 +707,11 @@ let push t b env depth overlay (layers : T.layer list) =
         let options =
             if j >= overlay then options else
             let (o : Crafty_tree.entry) = List.nth over j in
-            let given (i, _) = List.mem_assoc i options in
-            let settable (i, _) = List.mem l.mode l.layer.fields.(i).set_in in
+            let given (i, _) =
+                List.exists (fun (j, _) -> Crafty_layers.overlap l.layer i j) options in
+            let settable (i, _) =
+                let f = l.layer.fields.(i) in
+                List.mem l.mode f.set_in && (o.mode = l.mode || f.part_of = None) in
             options @
             List.filter (not % given) o.node.key @
             List.filter (fun opt ->
@@ -1783,7 +1786,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "repeat count=2 { /IP!(dst=10.0.0.2, id=I)/UDP(src=1000, dst=53)/Bytes(\"x\")\n  print(\"${LAST[IP].id}\") }")
   "3ps: 4660\n3ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53, checksum=0x1234) { Bytes(\"a\")\n  print(\"${LAST[UDP].checksum}\") }")
-  "3ps: {ack_num: 0, checksum: ?, dst: 80, flags: 2, seq_num: 0, src: 1000, urg_ptr: 0, win_size: 65535}\n3ps: failed: line 3, column 5: TCP.checksum is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
+  "3ps: {ack_num: 0, checksum: ?, dst: 80, flags: 2, mss: -1, options: [], sack_ok: false, seq_num: 0, src: 1000, ts_ecr: -1, ts_val: -1, urg_ptr: 0, win_size: 65535, wscale: -1}\n3ps: failed: line 3, column 5: TCP.checksum is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
     (runs "/IP(dst=10.0.0.2)/TCP!(src=1000, dst=80, flags=SYN, seq_num=0)/Bytes()\nprint(\"${LAST[TCP]}\")\nx = LAST[TCP].checksum")
   "3ps: failed: line 2, column 7: UDP.checksum is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Bytes(\"a\")\n  x = LAST[UDP].checksum }")
@@ -2170,8 +2173,17 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     "a 0.000s: written")
 *)
 (* Manual segments, inserted into a connection or not (a handshake made
- * by hand), and resets: *)
+ * by hand), their options, and resets: *)
 (*$= & ~printer:identity
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1400,sackOK,TS val 5 ecr 0,nop,wscale 3] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460,nop,wscale 7] \"\"\na 0.000s: 1460 7 false -1 #020405b401030307\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Rst opts=[nop,nop,nop,nop] \"\"\na 0.000s: done Eth#2" \
+    (with_host ~setup:tcp_echo ~frames:true \
+        "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7) {\n  ../TCP!(flags=SYN, seq_num=123, mss=1400, sack_ok=true, ts_val=5, wscale=3)/Bytes()\n  expect timeout=1s ../TCP!(flags == SYN | ACK) {\n    t = MATCH[TCP]\n    print(\"${t.mss} ${t.wscale} ${t.sack_ok} ${t.ts_val} ${t.options}\")\n    ../TCP!(flags=RST, seq_num=124, options=#01010101)/Bytes() } }")
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1000,nop,wscale 2] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460,nop,wscale 7] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hi\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hi\"\na 0.000s: 1000 2\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Rst \"\"\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Bytes#2}}}" \
+    (with_host ~setup:tcp_echo ~frames:true \
+        "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7, mss=1000, wscale=2) {\n  Bytes(\"hi\")\n  expect timeout=1s Bytes {\n    s = stats()\n    print(\"${s.rcv_mss} ${s.rcv_wscale}\")\n    ../TCP!(flags=RST)/Bytes() } }")
+  "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Syn opts=[mss 1460] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckSyn opts=[mss 1460] \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckPsh \"hi\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckPsh \"hi\"\na 0.000s: -1 -1 65535\na 0.000s: done Eth#3{IP(src=10.0.0.1, dst=10.0.0.2)#2{TCP(src=4000, dst=7)#2{Bytes#2}}}\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 AckFin \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 7>4000 AckFin \"\"\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4000>7 Ack \"\"" \
+    (with_host ~setup:tcp_echo ~frames:true \
+        "/IP(dst=10.0.0.2)/TCP(src=4000, dst=7, wscale=-1) {\n  Bytes(\"hi\")\n  expect timeout=1s Bytes {\n    s = stats()\n    print(\"${s.rcv_wscale} ${s.snd_wscale} ${s.rcv_wnd}\") } }")
   "a> 0.000s: ARP\na< 0.000s: ARP\na> 0.000s: 10.0.0.1>10.0.0.2 ttl=64 TCP 4001>22 Syn opts=[mss 1460,nop,wscale 7] \"\"\na< 0.000s: 10.0.0.2>10.0.0.1 ttl=64 TCP 22>4001 AckRst \"\"\na 0.000s: reset\na 0.000s: done Eth#2{IP(src=10.0.0.1, dst=10.0.0.2)#1{TCP(src=4001, dst=22)#1{Bytes}}}" \
     (with_host ~frames:true \
         "/IP(dst=10.0.0.2)/TCP(src=4001, dst=22) {\n  Bytes(#1ee7)\n  expect timeout=1s ../TCP!(flags & RST) { print(\"reset\") } }")
