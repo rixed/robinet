@@ -237,7 +237,7 @@ let unpack_eth _ bits =
         (* [ts] is for the receiver to tell: *)
         unpacked [ "src", V.Mac e.src ; "dst", V.Mac e.dst ; "proto", V.Int proto ;
                    "ts", V.Time (Clock.Wall.of_secs 0.) ]
-                 ~upper:(Only (if proto = ip4 then N.IP else N.Bytes))
+                 ~upper:(Only (if proto = ip4 then N.IP else N.Raw))
                  ~payload:(e.payload :> bitstring) bits
 
 (* The root: an Ethernet interface, which a self-driven Eth sends IPv4
@@ -271,11 +271,11 @@ let eth_node ctx =
       busy_for = Eth.Iface.tx_busy_for st.iface }
 
 let ip_upper (ip : Ip.Pdu.t) =
-    if Ip.Pdu.is_fragment ip then N.Bytes
+    if Ip.Pdu.is_fragment ip then N.Raw
     else if ip.proto = Ip.Proto.icmp then N.ICMP
     else if ip.proto = Ip.Proto.udp then N.UDP
     else if ip.proto = Ip.Proto.tcp then N.TCP
-    else N.Bytes
+    else N.Raw
 
 let ip_values (ip : Ip.Pdu.t) =
     [ "src", V.Ip ip.src ; "dst", V.Ip ip.dst ; "proto", V.Int (ip.proto :> int) ;
@@ -285,7 +285,7 @@ let ip_values (ip : Ip.Pdu.t) =
       "tot_len", V.Int ip.tot_len ; "options", bytes_value (Ip.Pdu.Opt.pack ip.options) ;
       "is_fragment", V.Bool (Ip.Pdu.is_fragment ip) ]
 
-(* A fragment goes on as bytes: *)
+(* A fragment goes on as Raw: *)
 let unpack_ip _ bits =
     match Ip.Pdu.unpack bits with
     | Error _ -> None
@@ -382,7 +382,7 @@ let unpack_udp _ bits =
         let payload = (u.payload :> bitstring) in
         unpacked [ "src", V.Int (u.src_port :> int) ; "dst", V.Int (u.dst_port :> int) ;
                    "length", V.Int u.length ; "checksum", V.Int u.checksum ]
-                 ~upper:(if bitstring_length payload > 0 then Any N.Bytes else Nothing)
+                 ~upper:(if bitstring_length payload > 0 then Any N.Raw else Nothing)
                  ~payload bits
 
 (* The checksum is left to IP: *)
@@ -454,7 +454,7 @@ let unpack_tcp _ bits =
                    "flags", V.Int flags ; "win_size", V.Int t.win_size ;
                    "urg_ptr", V.Int t.urg_ptr ; "checksum", V.Int t.checksum ] @
                  tcp_option_values t.options)
-                 ~upper:(if bitstring_length payload > 0 then Any N.Bytes else Nothing)
+                 ~upper:(if bitstring_length payload > 0 then Any N.Raw else Nothing)
                  ~payload bits
 
 (* A connection: robinet's TRX, what was written before it was established,
@@ -621,7 +621,7 @@ let tcp_node ctx =
                 | [] -> []
                 | data ->
                     let d = Bitstring.concat data in
-                    [ { u with payload = d ; upper = Any N.Bytes ; bits = d }, [ Driven ] ])
+                    [ { u with payload = d ; upper = Any N.Raw ; bits = d }, [ Driven ] ])
         | Idle | Listening -> [ raw ]) ;
       listen = (fun () -> match !state with Idle -> state := Listening | _ -> ()) ;
       close = (fun k ->
@@ -757,7 +757,7 @@ let unpack_quoted_ip _ bits =
     match Ip.Pdu.unpack bits with
     | Error _ -> None
     | Ok ip ->
-        let upper = match ip_upper ip with N.ICMP -> N.Bytes | u -> u in
+        let upper = match ip_upper ip with N.ICMP -> N.Raw | u -> u in
         unpacked (ip_values ip) ~upper:(Only upper)
                  ~payload:(ip.payload :> bitstring) bits
 
@@ -779,7 +779,7 @@ let unpack_quoted_udp _ bits =
             takebits (min (bitstring_length rest) (max 0 (length - 8) * 8)) rest in
         unpacked [ "src", V.Int src ; "dst", V.Int dst ;
                    "length", V.Int length ; "checksum", V.Int checksum ]
-                 ~upper:(if bitstring_length payload > 0 then Only N.Bytes else Nothing)
+                 ~upper:(if bitstring_length payload > 0 then Only N.Raw else Nothing)
                  ~payload bits
     | {| _ |} -> None
 
@@ -804,7 +804,7 @@ let unpack_quoted_tcp _ bits =
                     "flags", V.Int flags ; "win_size", V.Int win_size ;
                     "urg_ptr", V.Int urg_ptr ; "checksum", V.Int checksum ] @
                   tcp_option_values (Tcp.Pdu.Opt.unpack options))
-                 ~upper:(if bitstring_length payload > 0 then Only N.Bytes else Nothing)
+                 ~upper:(if bitstring_length payload > 0 then Only N.Raw else Nothing)
                  ~payload bits
     | {| _ |} -> None
 
@@ -825,9 +825,9 @@ let quoted_tcp_node _ =
             ?checksum:(opt_int fields "checksum" 0 0xffff) payload |>
         Tcp.Pdu.pack, [ "proto", V.Int tcp_proto ])
 
-let unpack_bytes _ bits = unpacked [ "data", bytes_value bits ] bits
+let unpack_raw _ bits = unpacked [ "data", bytes_value bits ] bits
 
-let bytes_node _ =
+let raw_node _ =
     manual (fun fields _ _ -> bytes_of fields "data", [])
 
 (* The message on top is given the whole of it, as its names can point
@@ -943,7 +943,7 @@ type layer =
       terminal : bool ;
       fields : field array ;
       (* The index of the field that a lone option, or a lone condition that
-       * is not a boolean, is about ([Bytes("x")]): *)
+       * is not a boolean, is about ([Raw("x")]): *)
       default_field : int option ;
       (* The constants for its fields ([flags & RST]): *)
       constants : (string * literal) list ;
@@ -1115,11 +1115,11 @@ let quoted_tcp =
         ~unpack:unpack_quoted_tcp (quoted_fields tcp)
 
 (* What is carried by a layer that is not decoded any further: *)
-let bytes =
-    layer N.Bytes ~terminal:true
+let raw =
+    layer N.Raw ~terminal:true
         ~above:[ eth ; ip ; tcp ; udp ; dest_unreachable ; time_exceeded ;
                  quoted_ip ; quoted_udp ; quoted_tcp ]
-        ~node:bytes_node ~unpack:unpack_bytes
+        ~node:raw_node ~unpack:unpack_raw
         ~default:"data" [ field "data" Type.bytes ]
 
 (* The stream of the messages of an id, whose constants are those of the
@@ -1164,7 +1164,7 @@ let all =
       echo_message N.Reply 0 ;
       dest_unreachable ; time_exceeded ; quoted_ip ; quoted_udp ; quoted_tcp ;
       dns ; dns_message N.Query ~query:true ; dns_message N.Answer ~query:false ;
-      bytes ]
+      raw ]
 
 let same_name a b = String.lowercase_ascii a = String.lowercase_ascii b
 
@@ -1218,8 +1218,8 @@ let record_type (l : layer) mode =
   find N.IP = None
   Option.map_default ((==) ip) false (find ~below:eth N.IP)
   find ~below:icmp N.Request = None
-  Option.map_default ((==) bytes) false (find ~below:tcp N.Bytes)
-  find ~below:bytes N.Bytes = None
+  Option.map_default ((==) raw) false (find ~below:tcp N.Raw)
+  find ~below:raw N.Raw = None
   (find ~below:dns N.Query |> Option.map (fun (l : layer) -> l.name)) = Some N.Query
   find ~below:udp N.Query = None
   Option.map_default ((==) quoted_ip) false (find ~below:time_exceeded N.IP)
@@ -1253,13 +1253,13 @@ let record_type (l : layer) mode =
   | _ -> false
 *)
 (*$T find_field
-  find_field bytes "DATA" = Some 0
+  find_field raw "DATA" = Some 0
   find_field tcp "mss" = Some 9
   find_field tcp "payload" = None
 *)
 (* Defaults are found by name: *)
 (*$T
-  bytes.default_field = Some 0
+  raw.default_field = Some 0
   (echo_message N.Request 8).default_field = Some 1
   tcp.default_field = None
 *)
@@ -1277,7 +1277,7 @@ let record_type (l : layer) mode =
 *)
 (*$= record_type & ~printer:Crafty_ast.Type.to_string
   (Crafty_ast.Type.Record [ "src", Crafty_ast.Type.Int ; "dst", Crafty_ast.Type.Int ]) (record_type tcp Driven)
-  (Crafty_ast.Type.Record [ "data", Crafty_ast.Type.bytes ]) (record_type bytes Manual)
+  (Crafty_ast.Type.Record [ "data", Crafty_ast.Type.bytes ]) (record_type raw Manual)
 *)
 (* The registry holds together: *)
 (*$T

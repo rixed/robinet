@@ -608,19 +608,19 @@ and unpack_root root frame =
         { u with values = ("ts", Time ts) :: List.remove_assoc "ts" u.values })
 
 (** [packet] with the layers on top of it, as decoded without any node: of
- * those that could be, the one named, else [Bytes]. It always ends with a
- * terminal layer, the payload left undecoded (if any) in a [Bytes]. *)
+ * those that could be, the one named, else [Raw]. It always ends with a
+ * terminal layer, the payload left undecoded (if any) in a [Raw]. *)
 let rec complete (packet : packet) =
     let l, (u : L.unpacked) = List.hd packet in
     let names =
         match u.upper with
         | L.Nothing -> []
         | L.Only name -> [ name ]
-        | L.Any name -> [ name ; L.N.Bytes ] in
+        | L.Any name -> [ name ; L.N.Raw ] in
     let rec first = function
         | [] ->
-            (match L.unpack_bytes [] u.payload with
-            | Some b when not l.terminal -> (L.bytes, b) :: packet
+            (match L.unpack_raw [] u.payload with
+            | Some b when not l.terminal -> (L.raw, b) :: packet
             | _ -> packet)
         | name :: names ->
             (match Option.bind (L.find ~below:l name) (fun ul ->
@@ -823,17 +823,17 @@ let to_string n = IO.to_string print n
  * sent is told back: *)
 (*$R send
   let root = make_root eth in
-  let bytes = child loc root Crafty_layers.bytes [] in
-  assert_equal ~printer:identity "Eth{Bytes}" (to_string root) ;
+  let raw = child loc root Crafty_layers.raw [] in
+  assert_equal ~printer:identity "Eth{Raw}" (to_string root) ;
   let sent, emitted =
-      send [ { node = bytes ; mode = Crafty_layers.Manual ;
+      send [ { node = raw ; mode = Crafty_layers.Manual ;
                options = [ 0, Crafty_value.bytes_of_string "hi" ] } ;
              { node = root ; mode = Crafty_layers.Manual ;
                options = [ 1, Crafty_value.Mac Eth.Addr.broadcast ;
                            2, Crafty_value.Int 0x88b5 ] } ] in
   assert_equal ~printer:identity "Eth" (to_string root) ;
   assert_equal ~printer:identity
-      "Eth(src=02:00:00:00:00:01, dst=FF:FF:FF:FF:FF:FF, proto=34997, ts=1970-01-01T00:00:00Z)/Bytes(data=#6869)"
+      "Eth(src=02:00:00:00:00:01, dst=FF:FF:FF:FF:FF:FF, proto=34997, ts=1970-01-01T00:00:00Z)/Raw(data=#6869)"
       (IO.to_string print_packet sent) ;
   let frame = Eth.Pdu.(pack (make (Eth.Proto.o 0x88b5) (Eth.Addr.of_string "02:00:00:00:00:01")
                           Eth.Addr.broadcast (Bitstring.bitstring_of_string "hi"))) in
@@ -845,13 +845,13 @@ let to_string n = IO.to_string print n
       | None -> false)
 *)
 (*$= decode & ~printer:identity
-  "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048, ts=1970-01-01T00:00:00Z)/IP(src=10.0.0.2, dst=10.0.0.1, proto=17, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=30, options=[], is_fragment=false)/UDP(src=53, dst=1000, length=10, checksum=32593)/Bytes(data=#6869)" \
+  "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048, ts=1970-01-01T00:00:00Z)/IP(src=10.0.0.2, dst=10.0.0.1, proto=17, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=30, options=[], is_fragment=false)/UDP(src=53, dst=1000, length=10, checksum=32593)/Raw(data=#6869)" \
     (IO.to_string print_packet (decode (Eth.Pdu.(pack (make Eth.Proto.ip4 \
         (Eth.Addr.of_string "02:00:00:00:00:02") (Eth.Addr.of_string "02:00:00:00:00:01") \
         (Ip.Pdu.pack (Ip.Pdu.make ~id:1 Ip.Proto.udp (Ip.Addr.of_string "10.0.0.2") (Ip.Addr.of_string "10.0.0.1") \
             (Udp.Pdu.(pack (make ~src_port:(Udp.Port.o 53) ~dst_port:(Udp.Port.o 1000) \
                 (Bitstring.bitstring_of_string "hi")))))))))))
-  "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048, ts=1970-01-01T00:00:00Z)/IP(src=10.0.0.2, dst=10.0.0.1, proto=1, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=29, options=[], is_fragment=false)/ICMP(type=3, code=3)/DestUnreachable(mtu=0, code=3)/Bytes(data=#41)" \
+  "Eth(src=02:00:00:00:00:02, dst=02:00:00:00:00:01, proto=2048, ts=1970-01-01T00:00:00Z)/IP(src=10.0.0.2, dst=10.0.0.1, proto=1, tos=0, ttl=64, dont_frag=false, id=1, more_frags=false, frag_offset=0, tot_len=29, options=[], is_fragment=false)/ICMP(type=3, code=3)/DestUnreachable(mtu=0, code=3)/Raw(data=#41)" \
     (IO.to_string print_packet (decode (Eth.Pdu.(pack (make Eth.Proto.ip4 \
         (Eth.Addr.of_string "02:00:00:00:00:02") (Eth.Addr.of_string "02:00:00:00:00:01") \
         (Ip.Pdu.pack (Ip.Pdu.make ~id:1 Ip.Proto.icmp (Ip.Addr.of_string "10.0.0.2") (Ip.Addr.of_string "10.0.0.1") \

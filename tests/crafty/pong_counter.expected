@@ -1,8 +1,8 @@
 {
-  on timeout=1s Bytes("Pong\n") {
+  on timeout=1s Raw("Pong\n") {
     n += 1
   }
   repeat count=100 every=1ms {
-    Bytes("Ping\n")
+    Raw("Ping\n")
   }
 }

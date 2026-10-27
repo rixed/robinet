@@ -1,9 +1,9 @@
 /IP(dst=1.2.3.4)/TCP(dst=80) {
-  Bytes("GET /\r\n")
+  Raw("GET /\r\n")
   expect /IP(dst == LAST[IP].src)/ICMP/DestUnreachable(payload =~ IP((src == LAST[IP].src) && (dst == LAST[IP].dst))/TCP((src == LAST[TCP].src) && (dst == LAST[TCP].dst))) {
     print("unreachable")
   }
-  expect Bytes("418 I'm a teapot") {
+  expect Raw("418 I'm a teapot") {
     print("teapot")
   }
 }

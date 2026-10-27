@@ -46,7 +46,7 @@ type var = { name : string ; id : int ; typ : Type.t }
 type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
     | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
-    | To_ip | To_mac | Getenv | Arg | Nargs | Resolve | Hostname | Split
+    | To_bytes | To_ip | To_mac | Getenv | Arg | Nargs | Resolve | Hostname | Split
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
     | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
@@ -237,7 +237,7 @@ let rec converts a b =
     match a, b with
     | Type.Int, Type.Float
     | Type.Byte, Type.Int
-    | Type.String, Type.Array Type.Byte
+    | (Type.String | Type.Ip | Type.Mac), Type.Array Type.Byte
     | Type.Array Type.Byte, (Type.String | Type.Ip | Type.Mac) -> true
     | Type.Variant cs, Type.Variant ds ->
         a <> b &&
@@ -881,7 +881,10 @@ let builtins =
       "ln", Ln, [ num ], res Type.Float ;
       "log", Log, [ num ], res Type.Float ;
       "log2", Log2, [ param "x" "an int" (only Type.[ Int ]) ], res Type.Int ;
-      "int", To_int, [ number ], res Type.Int ;
+      "int", To_int,
+        [ param "x" "a bool, int, float, byte, interval, time, string or IP address"
+                (only_exactly Type.(Ip :: String :: Interval :: Time :: scalars)) ],
+        res Type.Int ;
       "float", To_float, [ number ], res Type.Float ;
       "bool", To_bool, [ scalar ], res Type.Bool ;
       "byte", To_byte, [ scalar ], res Type.Byte ;
@@ -892,8 +895,15 @@ let builtins =
       "now", Now, [], res Type.Time ;
       (* Of a type that [expr] tells: *)
       "stats", Stats, [], res Type.Void ;
+      "bytes", To_bytes,
+        [ param "x" "bytes, a byte, a string, an IP or a MAC address" (function
+            | Type.Byte -> Some Type.Byte
+            | t when t = Type.bytes || converts t Type.bytes -> Some Type.bytes
+            | _ -> None) ],
+        res Type.bytes ;
       "ip_addr", To_ip,
-        [ param "b" "4 bytes or a string" (only_exactly Type.[ bytes ; String ]) ],
+        [ param "b" "4 bytes, an int or a string"
+                (only_exactly Type.[ bytes ; Int ; String ]) ],
         res Type.Ip ;
       "mac_addr", To_mac,
         [ param "b" "6 bytes or a string" (only_exactly Type.[ bytes ; String ]) ],
@@ -1010,12 +1020,13 @@ let map_call f loc typ m k =
         | None -> error k.loc "The keys of %s are not %s" (a_type m.typ) (a_type k.typ))
     | _ -> assert false
 
-(* Both of the same type, converting one to the other's if need be: *)
+(* Both of the same type, converting one to the other's if need be; to
+ * bytes rather than from them, as that never fails: *)
 let unify what a b =
     if a.typ = b.typ then a, b else
     let cannot () =
         error a.loc "Cannot %s %s and %s" what (a_type a.typ) (a_type b.typ) in
-    match coerce a b.typ, coerce b a.typ with
+    match (if a.typ = Type.bytes then None else coerce a b.typ), coerce b a.typ with
     | Some a, _ -> a, b
     | _, Some b -> a, b
     | None, None ->
@@ -1304,7 +1315,7 @@ and layer_field env loc name from_start nth f =
         | ctx ->
             let n = lname name in
             error loc "%s.%s is a field of a packet being matched, which only the \
-                       condition of a pattern can read (as in \"expect Bytes(%s.%s == x)\")%s.\n  \
+                       condition of a pattern can read (as in \"expect Raw(%s.%s == x)\")%s.\n  \
                        Of a packet in a variable, it is \"p[%s].%s\": \"LAST[%s].%s\" for the \
                        last one sent, \"MATCH[%s].%s\" for the one that matched."
                 n f n f
@@ -1638,7 +1649,7 @@ and overreach env (p : A.pattern) pat_layers =
 and opt_expr env what typ = Option.map (fun e -> expect what (expr env e) typ)
 
 (* The timeout of a [form] that a pattern follows, which a misspelled layer
- * before an absolute pattern reads as ([UPD/Bytes]): *)
+ * before an absolute pattern reads as ([UPD/Raw]): *)
 and timeout_of env form timeout =
     try opt_expr env ("The timeout of "^ form) Type.Interval timeout
     with Error (loc, msg) as ex ->
@@ -2052,8 +2063,8 @@ let check_patterns (ps : A.patterns) =
   "" (warns "/IP(dst=1.2.3.4)/TCP(dst=53) { expect /IP/UDP/DNS/Answer {} }")
   "" (warns "expect /IP/UDP/DNS/Answer {}")
   "line 1, column 1: This first has a single case: it is an expect" \
-    (warns "first Bytes | ../ICMP {}")
-  "" (warns "first Bytes {} | ../ICMP {}")
+    (warns "first Raw | ../ICMP {}")
+  "" (warns "first Raw {} | ../ICMP {}")
   "line 1, column 44: This I is the number of the iteration of this repeat, which hides an outer I: name one of them with var=" \
     (warns "repeat count=2 { repeat count=2 { print(\"${I}\") } }")
   "line 1, column 44: This I is the item of this foreach, which hides an outer I: name one of them with var=" \
@@ -2110,27 +2121,27 @@ let check_patterns (ps : A.patterns) =
   "" \
     (types "/IP(dst=1.2.3.4)/ICMP { expect DestUnreachable(code == PORT_UNREACHABLE) {} }")
   "I: int" \
-    (types "repeat { on Bytes(\"x\") { break 2 } }")
+    (types "repeat { on Raw(\"x\") { break 2 } }")
   "x: int, y: ip" \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { first Bytes(\"a\") { x = length(MATCH) } | ../ICMP { y = MATCH[IP].src } }")
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { first Raw(\"a\") { x = length(MATCH) } | ../ICMP { y = MATCH[IP].src } }")
   "x: int, y: ip" \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"a\")\n  { x = LAST[UDP].src }\n  Bytes(\"b\")\n  expect ../UDP(IP.src == LAST[IP].dst) { y = LAST[IP].src } }")
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Raw(\"a\")\n  { x = LAST[UDP].src }\n  Raw(\"b\")\n  expect ../UDP(IP.src == LAST[IP].dst) { y = LAST[IP].src } }")
   "t: float, x: float, p: {a: int}, y: int" \
     (types "foreach t [1, 2.5] { x = t * 2 }\nforeach p [{a: 1}] { y = p.a }")
   "n: int, x: int, y: bool, z: float" \
     (types "n = 3\nif n & 1 { x = 1 } elsif n > 2 { y = true } else { z = 1.0 }")
   "" \
-    (types "/IP!(dst=1.2.3.4, id=3)/TCP!(dst=80, flags=SYN|ACK)/Bytes(\"x\")")
+    (types "/IP!(dst=1.2.3.4, id=3)/TCP!(dst=80, flags=SYN|ACK)/Raw(\"x\")")
   "" \
     (types "/IP(dst=1.2.3.4)/ICMP/Echo/Request(\"hello\")")
   "x: ip" \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"hi\")\n  expect Bytes(\"ho\") { x = MATCH[IP].src } }")
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Raw(\"hi\")\n  expect Raw(\"ho\") { x = MATCH[IP].src } }")
   "x: int" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(dst == 53, IP.ttl < 3, ^IP.src = 1.2.3.4, Eth.proto == 0x800) { x = MATCH[UDP].src } }")
   "id: int" \
     (types "id = 5\nexpect /IP(IP.id == id, IP.src == ^IP.src) {}")
   "" \
-    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { expect ../TCP!(flags & RST, seq_num > 3) {}\n  expect ../TCP!/Bytes(data == \"x\") {} }")
+    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { expect ../TCP!(flags & RST, seq_num > 3) {}\n  expect ../TCP!/Raw(data == \"x\") {} }")
   "t: time, d: interval, u: time, v: time, w: bool" \
     (types "t = now()\nd = t - time(0)\nu = t + 1\nv = 2.5 + t - 1s\nw = t < u")
 *)
@@ -2146,11 +2157,11 @@ let check_patterns (ps : A.patterns) =
     (types "repeat { x = if I > 3 { break } else { I } }")
   "x: int" (types "if 1 { wait 1s }\nx = 1\nif x > 0 { print(\"a\") } else { x := 2 }")
   "x: ip, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, b: {data: byte[]}, y: byte[]" \
-    (types "expect /IP { x = case MATCH[1] IP { MATCH[IP].src } | else { 0.0.0.0 }\n  case var=b MATCH[2] Bytes { y = b.data } }")
+    (types "expect /IP { x = case MATCH[1] IP { MATCH[IP].src } | else { 0.0.0.0 }\n  case var=b MATCH[2] Raw { y = b.data } }")
   "x: int, I: {dst: mac, proto: int, src: mac, ts: time}, I: {code: int, type: int}, I: {id: int}, I: {payload: byte[], seq: int}, I: {payload: byte[], seq: int}, I: {code: int, mtu: int}, I: {code: int}, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, I: {checksum: int, dst: int, length: int, src: int}, I: {ack_num: int, checksum: int, dst: int, flags: int, mss: int, options: byte[], sack_ok: bool, seq_num: int, src: int, ts_ecr: int, ts_val: int, urg_ptr: int, win_size: int, wscale: int}, I: {id: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {data: byte[]}" \
-    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Bytes { 13 } }")
+    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } }")
   "x: int, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, y: int" \
-    (types "expect /IP { x = case MATCH[1] IP { wait 1s\n  1 } | else { 2 }\n  y = { expect Bytes {}\n  3 } }")
+    (types "expect /IP { x = case MATCH[1] IP { wait 1s\n  1 } | else { 2 }\n  y = { expect Raw {}\n  3 } }")
 *)
 
 (* A constructor makes a variant of its own; where variants meet, as values
@@ -2244,8 +2255,8 @@ let check_patterns (ps : A.patterns) =
     (types "x = length(3)")
   "line 1, column 8: Argument cond of assert must be a bool or an int, not a string" \
     (types "assert(\"x\")")
-  "line 1, column 13: Argument b of ip_addr must be 4 bytes or a string, not an int" \
-    (types "x = ip_addr(1)")
+  "line 1, column 13: Argument b of ip_addr must be 4 bytes, an int or a string, not a float" \
+    (types "x = ip_addr(1.5)")
   "line 1, column 1: x would have no value" \
     (types "x = assert(true)")
   "line 1, column 7: Argument s of print must be a string, not an int" \
@@ -2257,9 +2268,9 @@ let check_patterns (ps : A.patterns) =
   "line 1, column 4: The condition of if must be a bool, not a string" \
     (types "if \"x\" {}")
   "line 1, column 15: The timeout of first must be an interval, not an int" \
-    (types "first timeout=1 Bytes {}")
+    (types "first timeout=1 Raw {}")
   "line 2, column 5: MATCH is only defined in the blocks of expect, first and on" \
-    (types "first Bytes {} | Bytes { x = MATCH }\ny = MATCH")
+    (types "first Raw {} | Raw { x = MATCH }\ny = MATCH")
   "line 1, column 11: The maximum of retry must be an int, not an interval" \
     (types "retry max=1s {}")
   "line 1, column 11: The items of foreach must be an array or a map, not an int" \
@@ -2273,9 +2284,9 @@ let check_patterns (ps : A.patterns) =
   "line 1, column 6: The duration of wait must be an interval, not an int" \
     (types "wait 3")
   "line 1, column 8: The timeout of expect must be an interval, not an int" \
-    (types "expect 5 Bytes(\"x\") {}")
+    (types "expect 5 Raw(\"x\") {}")
   "line 1, column 22: The value of ttl must be an int, not a string" \
-    (types "/IP(dst=1.2.3.4, ttl=\"x\")/UDP(dst=53)/Bytes(\"hi\")")
+    (types "/IP(dst=1.2.3.4, ttl=\"x\")/UDP(dst=53)/Raw(\"hi\")")
   "line 1, column 5: IP has no field dts, do you mean dst?" \
     (types "/IP(dts=1.2.3.4)/UDP(dst=53) {}")
   "line 1, column 46: Unknown variable scr, do you mean src?" \
@@ -2289,14 +2300,14 @@ let check_patterns (ps : A.patterns) =
   "line 1, column 10: rand has no parameter mxa, do you mean max?" \
     (types "x = rand(mxa=3)")
   "line 1, column 8: The timeout of expect must be an interval, not a (UPD)\n  If UPD is a misspelled layer, do you mean UDP?" \
-    (types "expect UPD/Bytes {}")
-  "t: interval" (types "t = 1s\nexpect t Bytes {}")
-  "line 1, column 1: This (Bytse string) is not used, do you mean Bytes?" \
-    (types "Bytse(\"x\")")
+    (types "expect UPD/Raw {}")
+  "t: interval" (types "t = 1s\nexpect t Raw {}")
+  "line 1, column 1: This (Rae string) is not used, do you mean Raw?" \
+    (types "Rae(\"x\")")
   "line 1, column 30: UDP has no field flags" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53, flags=2) {}")
   "line 1, column 36: mss and options cannot both be given" \
-    (types "/IP!(dst=1.2.3.4)/TCP!(dst=80, mss=1400, options=#01010101)/Bytes()")
+    (types "/IP!(dst=1.2.3.4)/TCP!(dst=80, mss=1400, options=#01010101)/Raw()")
   "line 1, column 30: sack_ok cannot be set in a self-driven TCP" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80, sack_ok=true) {}")
   "line 1, column 5: id cannot be set in a self-driven IP" \
@@ -2306,37 +2317,37 @@ let check_patterns (ps : A.patterns) =
   "line 1, column 23: type of ICMP cannot be set" \
     (types "/IP(dst=1.2.3.4)/ICMP(type=8) {}")
   "line 1, column 43: Request is a terminal layer, therefore /IP/ICMP/Echo/Request is a complete message. No further layer can be stacked on top of it" \
-    (types "/IP(dst=1.2.3.4)/ICMP/Echo/Request(seq=1)/Bytes(\"x\")")
+    (types "/IP(dst=1.2.3.4)/ICMP/Echo/Request(seq=1)/Raw(\"x\")")
   "line 1, column 2: IP needs a dst" \
     (types "/IP/UDP(dst=53) {}")
   "line 1, column 18: TCP needs a dst" \
     (types "/IP(dst=1.2.3.4)/TCP(src=1) {}")
   "" (types "/IP(dst=1.2.3.4)/UDP(src=1) { DNS/Query(\"x\") }")
-  "" (types "/IP(dst=1.2.3.4)/TCP(dst=80) { ../TCP!(flags=RST)/Bytes() }")
+  "" (types "/IP(dst=1.2.3.4)/TCP(dst=80) { ../TCP!(flags=RST)/Raw() }")
   "line 1, column 35: TCP needs a dst" \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { ../TCP/Bytes() }")
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { ../TCP/Raw() }")
   "line 1, column 2: UDP cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP\"?" \
     (types "/UDP {}")
   "line 1, column 18: IP cannot be on top of IP" \
     (types "/IP(dst=1.2.3.4)/IP {}")
   "line 1, column 5: MATCH is only defined in the blocks of expect, first and on" \
     (types "x = MATCH")
-  "line 1, column 5: IP.src is a field of a packet being matched, which only the condition of a pattern can read (as in \"expect Bytes(IP.src == x)\").\n  Of a packet in a variable, it is \"p[IP].src\": \"LAST[IP].src\" for the last one sent, \"MATCH[IP].src\" for the one that matched." \
+  "line 1, column 5: IP.src is a field of a packet being matched, which only the condition of a pattern can read (as in \"expect Raw(IP.src == x)\").\n  Of a packet in a variable, it is \"p[IP].src\": \"LAST[IP].src\" for the last one sent, \"MATCH[IP].src\" for the one that matched." \
     (types "x = IP.src")
-  "line 1, column 44: IP.ttl is a field of a packet being matched, which only the condition of a pattern can read (as in \"expect Bytes(IP.ttl == x)\"); the options of a stack cannot read the layers below.\n  Of a packet in a variable, it is \"p[IP].ttl\": \"LAST[IP].ttl\" for the last one sent, \"MATCH[IP].ttl\" for the one that matched." \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=7) { Bytes(\"ttl ${IP.ttl}\") }")
+  "line 1, column 42: IP.ttl is a field of a packet being matched, which only the condition of a pattern can read (as in \"expect Raw(IP.ttl == x)\"); the options of a stack cannot read the layers below.\n  Of a packet in a variable, it is \"p[IP].ttl\": \"LAST[IP].ttl\" for the last one sent, \"MATCH[IP].ttl\" for the one that matched." \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(\"ttl ${IP.ttl}\") }")
   "line 1, column 5: =~ is not supported yet" \
     (types "x = y =~ /IP")
   "line 1, column 39: ../ goes below the bottom of the stack\n  In this block, the stack is /IP/UDP (../ goes back to /IP, ../../ to /Eth).\n  Do you mean \"../UDP\"?" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../../../../UDP {} }")
-  "line 1, column 32: TCP cannot be on top of TCP\n  In this block, the stack is /IP/TCP (../ goes back to /IP, ../../ to /Eth).\n  Do you mean \"../TCP/Bytes()\" (the same as \"Bytes()\")?" \
-    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { TCP/Bytes() }")
+  "line 1, column 32: TCP cannot be on top of TCP\n  In this block, the stack is /IP/TCP (../ goes back to /IP, ../../ to /Eth).\n  Do you mean \"../TCP/Raw()\" (the same as \"Raw()\")?" \
+    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { TCP/Raw() }")
   "line 1, column 42: DNS cannot be on top of IP\n  In this block, the stack is /IP/UDP/DNS (../ goes back to /IP/UDP, ../../ to /IP, ../../../ to /Eth).\n  Do you mean \"../DNS(id=3)/Query(\"x\")\"?" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { ../../DNS(id=3)/Query(\"x\") }")
   "line 1, column 49: DNS cannot be on top of IP\n  In this block, the stack is /IP/UDP/DNS (../ goes back to /IP/UDP, ../../ to /IP, ../../../ to /Eth).\n  Do you mean \"../DNS/Answer\" (the same as \"Answer\")?" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { expect ../../DNS/Answer {} }")
-  "line 1, column 32: TCP cannot be on top of TCP\n  In this block, the stack is /IP/TCP (../ goes back to /IP, ../../ to /Eth).\n  Do you mean \"../TCP!(flags=RST)/Bytes()\"?" \
-    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { TCP!(flags=RST)/Bytes() }")
+  "line 1, column 32: TCP cannot be on top of TCP\n  In this block, the stack is /IP/TCP (../ goes back to /IP, ../../ to /Eth).\n  Do you mean \"../TCP!(flags=RST)/Raw()\"?" \
+    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { TCP!(flags=RST)/Raw() }")
   "line 1, column 2: DNS cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP/DNS/Query(\"x\")\"?" \
     (types "/DNS/Query(\"x\")")
   "line 1, column 1: DNS cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP/DNS/Query(\"x\")\"?" \
@@ -2380,32 +2391,32 @@ let check_patterns (ps : A.patterns) =
   "line 1, column 5: The branches of this if are of different types: an int and a string" \
     (types "x = if true { 1 } else { \"a\" }")
   "line 1, column 19: A packet cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \
-    (types "x = 1 + if true { /IP(dst=1.2.3.4)/UDP(dst=53)/Bytes(\"x\") ; 1 } else { 2 }")
+    (types "x = 1 + if true { /IP(dst=1.2.3.4)/UDP(dst=53)/Raw(\"x\") ; 1 } else { 2 }")
   "line 1, column 13: wait cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \
     (types "print(\"${ { wait 1s ; 1 } }\")")
   "line 1, column 1: An on lasts either for its own duration (for), keeping its block waiting, or until its block ends, which linger delays: not both" \
     (types "on for=1s linger=1s /IP {}")
   "line 1, column 6: The subject of case must be a variant, such as a layer of a packet, not an int" \
     (types "case 3 IP {}")
-  "line 1, column 36: Foo is none of Answer, Bytes, DNS, DestUnreachable, Echo, Eth, ICMP, IP, Query, Reply, Request, TCP, TimeExceeded, UDP" \
+  "line 1, column 36: Foo is none of Answer, DNS, DestUnreachable, Echo, Eth, ICMP, IP, Query, Raw, Reply, Request, TCP, TimeExceeded, UDP" \
     (types "expect /IP { case MATCH[0] IP {} | Foo {} }")
   "line 1, column 36: IP already has a block in this case" \
     (types "expect /IP { case MATCH[0] IP {} | ip {} }")
-  "line 1, column 18: This case needs an else, or a block for each of Answer, Bytes, DNS, DestUnreachable, Echo, Eth, ICMP, Query, Reply, Request, TimeExceeded, UDP, to have a value" \
+  "line 1, column 18: This case needs an else, or a block for each of Answer, DNS, DestUnreachable, Echo, Eth, ICMP, Query, Raw, Reply, Request, TimeExceeded, UDP, to have a value" \
     (types "expect /IP { x = case MATCH[1] IP { 1 } | TCP { 2 } }")
   "line 1, column 18: The branches of this case are of different types: a string and an int" \
-    (types "expect /IP { x = case MATCH[1] Bytes { \"a\" } | IP { 1 } | else { 2 } }")
-  "line 1, column 18: This case has a block for each of Answer, Bytes, DNS, DestUnreachable, Echo, Eth, ICMP, IP, Query, Reply, Request, TCP, TimeExceeded, UDP: its else is never run" \
-    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Bytes { 13 } | else { 0 } }")
-  "line 1, column 40: Unknown variable l" \
-    (types "expect /IP { case MATCH[1] Bytes { x = l.data } }")
+    (types "expect /IP { x = case MATCH[1] Raw { \"a\" } | IP { 1 } | else { 2 } }")
+  "line 1, column 18: This case has a block for each of Answer, DNS, DestUnreachable, Echo, Eth, ICMP, IP, Query, Raw, Reply, Request, TCP, TimeExceeded, UDP: its else is never run" \
+    (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } | else { 0 } }")
+  "line 1, column 38: Unknown variable l" \
+    (types "expect /IP { case MATCH[1] Raw { x = l.data } }")
 *)
 
 (* The examples of the spec that use only v1 features: *)
 (*$= types & ~printer:identity
   "num_resp: int, I: int" (types (Tools.file_content "tests/crafty/ping_counter.crafty"))
   "" (types (Tools.file_content "tests/crafty/reset.crafty"))
-  "line 3, column 35: Unknown variable n" \
+  "line 3, column 33: Unknown variable n" \
     (types (Tools.file_content "tests/crafty/pong_counter.crafty"))
   "line 4, column 19: flags cannot be read in a self-driven TCP" \
     (types (Tools.file_content "tests/crafty/not_acked.crafty"))
@@ -2416,18 +2427,18 @@ let check_patterns (ps : A.patterns) =
 (* A packet sent into a variable must go through manual layers only, but the
  * interface: *)
 (*$= types & ~printer:identity
-  "" (types "/IP!(dst=1.2.3.4)/UDP(dst=53) { p = Bytes(\"x\") }")
-  "" (types "/IP(dst=1.2.3.4)/TCP(dst=80) { p = ../../IP!/TCP!/Bytes(\"GET /\") }")
+  "" (types "/IP!(dst=1.2.3.4)/UDP(dst=53) { p = Raw(\"x\") }")
+  "" (types "/IP(dst=1.2.3.4)/TCP(dst=80) { p = ../../IP!/TCP!/Raw(\"GET /\") }")
   "line 1, column 32: Only a packet sent through manual layers can be seen leaving, and TCP is self-driven" \
-    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { p = Bytes(\"GET /\") }")
+    (types "/IP(dst=1.2.3.4)/TCP(dst=80) { p = Raw(\"GET /\") }")
   "line 1, column 32: Only a packet sent through manual layers can be seen leaving, and IP is self-driven" \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { p = Bytes(\"x\") }")
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { p = Raw(\"x\") }")
   "line 2, column 7: LAST[Eth].ts is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
-    (types "/IP!(dst=1.2.3.4)/UDP(dst=53) { Bytes(\"x\")\n  t = LAST[Eth].ts }")
+    (types "/IP!(dst=1.2.3.4)/UDP(dst=53) { Raw(\"x\")\n  t = LAST[Eth].ts }")
   "line 2, column 33: p is an int, not a packet" \
-    (types "p = 1\n/IP!(dst=1.2.3.4)/UDP(dst=53) { p := Bytes(\"x\") }")
+    (types "p = 1\n/IP!(dst=1.2.3.4)/UDP(dst=53) { p := Raw(\"x\") }")
   "line 1, column 7: A packet cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \
-    (types "x = { p = /IP!(dst=1.2.3.4)/UDP(dst=53)/Bytes(\"x\") ; 1 } + 1")
+    (types "x = { p = /IP!(dst=1.2.3.4)/UDP(dst=53)/Raw(\"x\") ; 1 } + 1")
 *)
 
 (* The stats of the stream at the top of the stack: *)

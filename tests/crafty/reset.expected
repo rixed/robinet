@@ -1,5 +1,5 @@
 /IP(dst=1.2.3.4)/TCP(dst=22) {
-  Bytes([#1e, #e7])
+  Raw([#1e, #e7])
   expect ../TCP!(flags & RST) {
     print("reset")
   }

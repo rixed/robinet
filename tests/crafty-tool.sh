@@ -73,27 +73,27 @@ check() {
 cat > "$DIR/udp.cfty" <<'EOF'
 /IP(dst=10.77.0.2)/UDP(dst=7) {
   repeat count=3 {
-    Bytes("echo ${I}")
-    expect timeout=1s Bytes { print(MATCH[Bytes].data) }
+    Raw("echo ${I}")
+    expect timeout=1s Raw { print(MATCH[Raw].data) }
   }
 }
 EOF
 cat > "$DIR/tcp.cfty" <<'EOF'
 /IP(dst=10.77.0.2)/TCP(dst=7) {
-  Bytes("hello")
-  expect timeout=2s Bytes { print(MATCH[Bytes].data) }
+  Raw("hello")
+  expect timeout=2s Raw { print(MATCH[Raw].data) }
 }
 EOF
 cat > "$DIR/flood.cfty" <<'EOF'
 /IP(dst=10.77.0.2)/UDP(dst=7) {
-  repeat count=1000 every=10ms { Bytes("x") }
+  repeat count=1000 every=10ms { Raw("x") }
 }
 EOF
 # A frame comes in after its capture, by its serialization at least:
 cat > "$DIR/ts.cfty" <<'EOF'
 /IP(dst=10.77.0.2)/UDP(dst=7) {
-  Bytes("stamp")
-  expect timeout=1s Bytes {
+  Raw("stamp")
+  expect timeout=1s Raw {
     d = now() - MATCH[Eth].ts
     print(if d > 0s && d < 10ms { "captured ${d} before" } else { "not captured then: ${d}" })
   }
@@ -102,8 +102,8 @@ EOF
 # A packet sent into a variable is that packet as captured on its way out:
 cat > "$DIR/sent.cfty" <<'EOF'
 /IP!(dst=10.77.0.2)/UDP(dst=7) {
-  p = Bytes("ping")
-  expect timeout=1s Bytes {
+  p = Raw("ping")
+  expect timeout=1s Raw {
     d = MATCH[Eth].ts - p[Eth].ts
     print(if d > 0s && d < 100ms { "round trip ${d}" } else { "no round trip: ${d}" })
   }
@@ -114,11 +114,11 @@ cat > "$DIR/lossy.cfty" <<'EOF'
 /IP(dst=10.77.0.2)/TCP(dst=7) {
   n = 0
   {
-    on for=20s Bytes {
-      n += length(MATCH[Bytes].data)
+    on for=20s Raw {
+      n += length(MATCH[Raw].data)
       if n >= 200000 { break }
     }
-    Bytes(randbytes(200000))
+    Raw(randbytes(200000))
   }
   s = stats()
   print("echoed ${n}, out of order ${s.ooo_in > 0}")
@@ -127,8 +127,8 @@ EOF
 # Echoed, a datagram larger than the MTU is fragmented both ways:
 cat > "$DIR/frags.cfty" <<'EOF'
 /IP(dst=10.77.0.2)/UDP(dst=7) {
-  Bytes(randbytes(3000))
-  expect timeout=1s Bytes { print("echoed ${length(MATCH[Bytes].data)}") }
+  Raw(randbytes(3000))
+  expect timeout=1s Raw { print("echoed ${length(MATCH[Raw].data)}") }
 }
 EOF
 printf 'x = "a" + 1\n' > "$DIR/bad.cfty"

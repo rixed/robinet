@@ -2,8 +2,8 @@
   num_resp = 0
   catch {
     repeat count=10 {
-      Bytes("Ping\n")
-      expect timeout=1s Bytes("Pong\n") {
+      Raw("Ping\n")
+      expect timeout=1s Raw("Pong\n") {
         num_resp += 1
       }
     }

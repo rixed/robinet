@@ -1,8 +1,8 @@
-(* Generated from docs/crafty.md (md5 b7c6558b75adda7a525b599809fb4835) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 f236e1c6600792ca7b034e37ce133087) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
-    # "IP", "UDP" and "Bytes" are layers of a protocol stack. Every stack
+    # "IP", "UDP" and "Raw" are layers of a protocol stack. Every stack
     # starts at the interface, with an "Eth" layer that can be left out:
     # /IP(dst=192.0.2.10)/UDP(dst=7) is /Eth/IP(dst=192.0.2.10)/UDP(dst=7).
     # Followed by a block, a stack is the current stack of that block:
@@ -10,16 +10,16 @@ let introduction = {crafty_manual|### A first program
       answers = 0                     # "answers" is a variable holding integers
       # Repeats the block 3 times, "I" being the loop counter, from 0:
       repeat var=I count=3 every=100ms {
-        # Bytes is a terminal layer: it sends the message made from
-        # /IP(dst=192.0.2.10)/UDP(dst=7)/Bytes("ping ${I}")
+        # Raw is a terminal layer: it sends the message made from
+        # /IP(dst=192.0.2.10)/UDP(dst=7)/Raw("ping ${I}")
         # Unset options will be filled in automatically.
-        Bytes("ping ${I}")
+        Raw("ping ${I}")
         catch {                       # a lost answer is no error
-          # expect waits for a packet that matches a pattern; here, any Bytes
+          # expect waits for a packet that matches a pattern; here, any Raw
           # layer on top of the current stack, coming back:
-          expect timeout=1s Bytes {
+          expect timeout=1s Raw {
             answers += 1
-            print(MATCH[Bytes].data)  # MATCH is the packet that matched
+            print(MATCH[Raw].data)  # MATCH is the packet that matched
           }
         }
       }
@@ -38,7 +38,7 @@ A stack is layers and their options, separated by slashes, like file paths. An
 absolute stack starts with `/IP` (with an `Eth` layer implied). A relative stack
 goes on top of the current one.
 
-Some layers are terminal (`Bytes`, `Request`, `Reply`, `Query`, `Answer`): they
+Some layers are terminal (`Raw`, `Request`, `Reply`, `Query`, `Answer`): they
 end the stack and send the message. An incomplete stack is followed instead by a
 block of further instructions.
 
@@ -57,13 +57,13 @@ The language is statically typed.
     # Is anyone listening on UDP port 7?
     target = ip_addr(getenv("TARGET"))  # Read the envvar and cast to an IP, or fail
     /IP(dst=target)/UDP(dst=7) {
-      Bytes("hello")      # two messages on top of the same stack:
-      Bytes("world")      # the same stream, from the same port
+      Raw("hello")      # two messages on top of the same stack:
+      Raw("world")      # the same stream, from the same port
       # Waits for the first packet that matches either pattern: a datagram
       # back, or the ICMP error a closed port answers with. "../" goes back to
       # /IP(dst=target), and ICMP goes on top of that IP stream instead of
       # UDP: these are the ICMP errors that it receives.
-      first timeout=1s Bytes { print(MATCH[Bytes].data) }
+      first timeout=1s Raw { print(MATCH[Raw].data) }
         | ../ICMP/DestUnreachable(code == PORT_UNREACHABLE) { print("closed") }
     }
 
@@ -84,17 +84,17 @@ layers' options while reusing the stream:
 
     # The same stream, but for one datagram with a TTL of 1:
     /IP(dst=192.0.2.10)/UDP(dst=7) {
-      Bytes("ttl 64")
+      Raw("ttl 64")
       print("Sent from port ${LAST[UDP].src}")   # LAST is the last packet sent
       # ../../ goes back to /Eth, where IP and UDP land on the IP and UDP of
       # the current stack. They overlay them: the same streams, with their
       # options (dst, the ports) unless given. ttl=1 is for this message only.
-      ../../IP(ttl=1)/UDP/Bytes("ttl 1")
+      ../../IP(ttl=1)/UDP/Raw("ttl 1")
       print("Also sent from port ${LAST[UDP].src}")
       repeat count=2 {
-        # Wait for Bytes in the same stream (unlike with /IP/UDP/Bytes that would
+        # Wait for Raw in the same stream (unlike with /IP/UDP/Raw that would
         # match even outside this stream)
-        expect timeout=1s Bytes { print(MATCH[Bytes].data) }
+        expect timeout=1s Raw { print(MATCH[Raw].data) }
       }
     }
 
@@ -127,7 +127,7 @@ reception, `IP!` sees each fragment and `TCP!` each segment, even without data.
       }
       # Sends the segment, and waits until it is seen leaving: "seg" is the
       # packet as captured. Only fully manual messages can be captured.
-      seg = /IP!(dst=target)/TCP!(src=40000, dst=7, flags=SYN, seq_num=1000)/Bytes()
+      seg = /IP!(dst=target)/TCP!(src=40000, dst=7, flags=SYN, seq_num=1000)/Raw()
       print("SYN of seq ${seg[TCP].seq_num} sent")
     }
 
@@ -231,17 +231,19 @@ hexadecimal (`#68656c6c6f`); bytes passed where a string is expected, as to
 `print`, are text.
 
 **Conversions** happen where needed: an int to a float, a byte to an int, a
-string to bytes and back, bytes to an IP address (4 bytes) or a MAC address (6
-bytes), an int to a bool. Others use the functions `int`, `float`, `bool`,
-`byte`, `interval`, `time`, `ip_addr` and `mac_addr`, which also read a string
-as a literal: `ip_addr(getenv("SERVER"))`.
+string, an IP address or a MAC address to bytes and back (4 and 6 bytes), an int
+to a bool. Bytes compare with the others as bytes. Others use the functions
+`int`, `float`, `bool`, `byte`, `interval`, `time`, `ip_addr` and `mac_addr`,
+which also read a string as a literal: `ip_addr(getenv("SERVER"))`. An IPv4
+address converts to an int and back: `ip_addr(int(a) + 1)`. `bytes(x)` makes
+bytes of a byte or of what converts to them, for `+`: `#0102 + bytes(10.0.0.1)`.
 
 **Variants** need no declaration. Where variants meet (items of an array,
 branches of an `if`, values assigned to a variable...), they make one variant
 with the constructors of all, which `case` tells apart:
 
     result = Pending   # of type (Failed string | Got int | Pending)
-    first Bytes("pong") { result := Got(length(MATCH)) }
+    first Raw("pong") { result := Got(length(MATCH)) }
       | ../ICMP { result := Failed("unreachable") }
     print(case result Got { "${I} layers" } else { "${result}" })
 
@@ -307,7 +309,7 @@ error.
 
 Sent messages can be assigned to a variable if they are purely manual:
 
-`p = /IP!(dst=target)/TCP!(src=1, dst=2, flags=SYN)/Bytes()`
+`p = /IP!(dst=target)/TCP!(src=1, dst=2, flags=SYN)/Raw()`
 
 This sends a packet and waits until that packet is recaptured on its way out.
 Its timestamp `p[Eth].ts` is therefore accurate.
@@ -317,31 +319,31 @@ layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 
 ### Patterns
 
--   `/IP/UDP(dst == 7)/Bytes`: *absolute*, matched from the interface up, on any
+-   `/IP/UDP(dst == 7)/Raw`: *absolute*, matched from the interface up, on any
     stream.
--   `Bytes("pong")`: *relative*, on top of the current stack, so only on its
+-   `Raw("pong")`: *relative*, on top of the current stack, so only on its
     stream.
 -   `../ICMP/DestUnreachable`: relative to a layer below the top of the current
     stack.
--   `Bytes("pong") | ../ICMP`: alternatives.
+-   `Raw("pong") | ../ICMP`: alternatives.
 -   `UDP(src == port)`: conditions in parentheses are boolean expressions. A
     bare name is a variable if there is one (`port`), else a field of the layer
     (`src`).
 -   `IP.src` is the field of the last IP layer, this one included. When there
     are several (a tunnel, the packet an ICMP error quotes), `IP^.src` is the IP
     layer below the last one, and `^IP.src` the first.
--   A condition that is not a bool compares the default field: `Bytes("pong")`
-    is `Bytes(data == "pong")`.
+-   A condition that is not a bool compares the default field: `Raw("pong")` is
+    `Raw(data == "pong")`.
 -   The fields that can be read depend on the mode (see [Layers](#layers)): a
     self-driven `TCP` shows its ports, a manual `TCP!` each segment's header.
 
 A packet matches in one mode only: a fragment `IP!`, a reassembled packet `IP`;
-TCP data `TCP/Bytes`, in order and once per chunk delivered, and each segment
+TCP data `TCP/Raw`, in order and once per chunk delivered, and each segment
 `TCP!`.
 
 **`MATCH`** is the packet that matched, as an array of layers. `MATCH[UDP]` is
 its last UDP layer, `MATCH[IP^]` the last IP but one, `MATCH[^IP]` the first;
-then `MATCH[IP].src`, `MATCH[Bytes].data`. `MATCH[0]` is a layer of any kind,
+then `MATCH[IP].src`, `MATCH[Raw].data`. `MATCH[0]` is a layer of any kind,
 which `case` tells apart:
 
     foreach MATCH {
@@ -531,7 +533,7 @@ sequence numbers per stream.
     `FRAG_NEEDED`, `SOURCE_ROUTE_FAILED`; `TTL_EXCEEDED`, `REASSEMBLY_TIMEOUT`.
 -   `mtu`: int; set M; read M. `DestUnreachable` only; default 0.
 
-On top is the start of the packet the error is about: a quoted `IP`, or `Bytes`.
+On top is the start of the packet the error is about: a quoted `IP`, or `Raw`.
 
 #### Quoted `IP`, `UDP` and `TCP` (on `DestUnreachable` and `TimeExceeded`)
 
@@ -575,12 +577,12 @@ The stream of a DNS id, for `Query` and `Answer` messages.
 A message has one question (`name`, `type`, `class`): the first, of a received
 message with several.
 
-#### `Bytes` (on `Eth`, `IP`, `TCP`, `UDP`, the ICMP errors and the quoted layers, terminal)
+#### `Raw` (on `Eth`, `IP`, `TCP`, `UDP`, the ICMP errors and the quoted layers, terminal)
 
 -   `data`: bytes; set M; read M. Default field.
 
 What a layer carries when not decoded further: the payload of UDP, the data of
-TCP, a fragment, a quote, an unknown protocol.
+TCP, a fragment, a quote, an unknown protocol. Sent as given.
 |crafty_manual}
 
 let examples = {crafty_manual|These ran against a host with UDP and TCP echo servers on port 7.
@@ -614,9 +616,9 @@ The replies come back to the `Echo` stream of the requests, whatever its id.
     /IP!(dst=192.0.2.10)/UDP(dst=7) {
       rtts = array(init=0s, len=0)
       repeat count=100 every=10ms {
-        p = Bytes("probe ${I}")
+        p = Raw("probe ${I}")
         catch {
-          expect timeout=500ms Bytes("probe ${I}") { rtts += MATCH[Eth].ts - p[Eth].ts }
+          expect timeout=500ms Raw("probe ${I}") { rtts += MATCH[Eth].ts - p[Eth].ts }
         }
       }
       print("${length(rtts)}/100 echoed, rtt min ${min(rtts)} median ${percentile(rtts, 50)} p99 ${percentile(rtts, 99)} max ${max(rtts)}")
@@ -650,8 +652,8 @@ The first record is an address only if the name has no CNAME.
 
 ### A UDP echo server
 
-    on for=1h /IP/UDP(dst == 7)/Bytes {
-      /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Bytes(MATCH[Bytes].data)
+    on for=1h /IP/UDP(dst == 7)/Raw {
+      /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Raw(MATCH[Raw].data)
     }
 
     % sudo crafty --udp 7 --fw server.cfty
@@ -666,7 +668,7 @@ The first record is an address only if the name has no CNAME.
         lost[MATCH[UDP].dst - 40000] -= 1
       }
       repeat count=100 every=10ms {
-        /IP(dst=target)/UDP(src=40000 + I % 4, dst=7)/Bytes("ping")
+        /IP(dst=target)/UDP(src=40000 + I % 4, dst=7)/Raw("ping")
       }
     }
     repeat var=f count=4 { print("flow ${f}: ${lost[f]} lost") }
@@ -681,7 +683,7 @@ last one.
 ### Is a port closed?
 
     /IP(dst=192.0.2.10)/TCP(src=40001, dst=22) {
-      Bytes("hello")
+      Raw("hello")
       expect timeout=1s ../TCP!(flags & RST) { print("reset by ${MATCH[IP].src}") }
     }
 
@@ -691,15 +693,15 @@ sees each segment of the connection.
 ### When did it leave?
 
     /IP!(dst=192.0.2.10)/UDP(dst=7) {
-      p = Bytes("ping")
-      expect timeout=1s Bytes { print("rtt: ${MATCH[Eth].ts - p[Eth].ts}") }
+      p = Raw("ping")
+      expect timeout=1s Raw { print("rtt: ${MATCH[Eth].ts - p[Eth].ts}") }
     }
 
 ### How is the connection doing?
 
     /IP(dst=192.0.2.10)/TCP(dst=7) {
-      Bytes("hello")
-      expect timeout=1s Bytes {
+      Raw("hello")
+      expect timeout=1s Raw {
         s = stats()
         print("srtt ${s.srtt}, mss ${s.snd_mss}, peer window ${s.snd_wnd}")
       }
@@ -707,8 +709,8 @@ sees each segment of the connection.
 
 ### Raw frames
 
-    /Eth!(dst=ff:ff:ff:ff:ff:ff, proto=0x88b5)/Bytes("hello")
-    /IP!(dst=192.0.2.10, ttl=1, id=1234, dont_frag=true)/UDP(src=40000, dst=9)/Bytes(#deadbeef)
+    /Eth!(dst=ff:ff:ff:ff:ff:ff, proto=0x88b5)/Raw("hello")
+    /IP!(dst=192.0.2.10, ttl=1, id=1234, dont_frag=true)/UDP(src=40000, dst=9)/Raw(#deadbeef)
 
 ### Utilities
 
@@ -731,7 +733,7 @@ Whole programs
         reached = false
         repeat count=probes {
           probe += 1
-          p = ../../IP!(ttl=hop + 1, id=probe)/UDP/Bytes("probe")
+          p = ../../IP!(ttl=hop + 1, id=probe)/UDP/Raw("probe")
           if probe == 1 { print("to ${target} from UDP port ${p[UDP].src} to ${port}") }
           catch {
             first timeout=1s /IP/ICMP/TimeExceeded/IP(id == probe, dst == target)/UDP {
@@ -893,7 +895,7 @@ probes without an answer.
         if r < rounds {
           repeat var=hop count=last + 1 {
             id = (r * 64 + hop) % 65536
-            p = ../../IP!(ttl=hop + 1, id=id)/UDP/Bytes("probe")
+            p = ../../IP!(ttl=hop + 1, id=id)/UDP/Raw("probe")
             sent_at[id] := p[Eth].ts
             sent[hop] += 1
           }

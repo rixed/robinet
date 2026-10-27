@@ -38,18 +38,18 @@ module Layer_name =
 struct
     type t =
         | Eth | IP | TCP | UDP | ICMP | Echo | Request | Reply
-        | DestUnreachable | TimeExceeded | DNS | Query | Answer | Bytes
+        | DestUnreachable | TimeExceeded | DNS | Query | Answer | Raw
 
     let all =
         [ Eth ; IP ; TCP ; UDP ; ICMP ; Echo ; Request ; Reply ;
-          DestUnreachable ; TimeExceeded ; DNS ; Query ; Answer ; Bytes ]
+          DestUnreachable ; TimeExceeded ; DNS ; Query ; Answer ; Raw ]
 
     let to_string = function
         | Eth -> "Eth" | IP -> "IP" | TCP -> "TCP" | UDP -> "UDP"
         | ICMP -> "ICMP" | Echo -> "Echo" | Request -> "Request"
         | Reply -> "Reply" | DestUnreachable -> "DestUnreachable"
         | TimeExceeded -> "TimeExceeded" | DNS -> "DNS" | Query -> "Query"
-        | Answer -> "Answer" | Bytes -> "Bytes"
+        | Answer -> "Answer" | Raw -> "Raw"
 
     (* However written: *)
     let of_string s =
@@ -292,7 +292,7 @@ let is_constructor s = s <> "" && Char.is_uppercase s.[0]
  * Lower case. *)
 let functions =
     [ "rand" ; "randbytes" ; "exp" ; "ln" ; "log" ; "log2" ; "int" ; "float" ;
-      "bool" ; "byte" ; "interval" ; "time" ; "now" ; "ip_addr" ; "mac_addr" ; "getenv" ;
+      "bool" ; "byte" ; "interval" ; "time" ; "now" ; "bytes" ; "ip_addr" ; "mac_addr" ; "getenv" ;
       "arg" ; "nargs" ; "resolve" ; "hostname" ; "split" ;
       "array" ; "length" ; "concat" ; "append" ; "prepend" ;
       "map" ; "has" ; "remove" ; "keys" ; "values" ;
@@ -555,7 +555,7 @@ let print_expr = print_expr_at ~all:true ~indent:0 0
 let print_bare_expr = print_expr_at ~bare:true ~all:true ~indent:0 0
 
 (** A stack on one line, as in messages, its last layer with parentheses even
- * with no options if it [sends] ([Bytes()]): *)
+ * with no options if it [sends] ([Raw()]): *)
 let string_of_stack ?(sends=false) anchor layers =
     IO.to_string (fun oc () ->
         print_anchor oc anchor ;

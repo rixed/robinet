@@ -1,5 +1,5 @@
 # From the spec's "Self-driven protocols", with a print in place of the "...".
 /IP(dst=1.2.3.4)/TCP(dst=22) {
-    Bytes(#1ee7)
+    Raw(#1ee7)
     expect ../TCP!(flags & RST) { print("reset") }
 }

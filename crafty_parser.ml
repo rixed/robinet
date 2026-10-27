@@ -894,10 +894,10 @@ let parse_patterns text =
   "x = (1 + 2)\ny = [1, 2]\nz = {a: 1, b: \"x\"}\n" \
     (reads "x = 1 +\n  2\ny = [1,\n 2,\n]\nz = {a: 1, b: \"x\",}")
   "x = a\n/IP {\n}\n" (reads "x = a\n/IP {}")
-  "/IP/UDP/Bytes(\"x\")\n{\n  y = 1\n}\n" (reads "/IP/UDP/Bytes(\"x\")\n{ y = 1 }")
-  "IP!(ttl=1)/TCP!(flags=2)/Bytes(\"x\")\n" \
-    (reads "IP!(ttl=1)\\TCP!(flags=2)/Bytes(\"x\")")
-  "../../IP!/TCP!(flags=4)/Bytes\n" (reads "../../IP!/TCP!(flags=4)/Bytes()")
+  "/IP/UDP/Raw(\"x\")\n{\n  y = 1\n}\n" (reads "/IP/UDP/Raw(\"x\")\n{ y = 1 }")
+  "IP!(ttl=1)/TCP!(flags=2)/Raw(\"x\")\n" \
+    (reads "IP!(ttl=1)\\TCP!(flags=2)/Raw(\"x\")")
+  "../../IP!/TCP!(flags=4)/Raw\n" (reads "../../IP!/TCP!(flags=4)/Raw()")
   "x = (y =~ /IP/UDP(dport == 53))\n" (reads "x = y =~ /IP/UDP(dport = 53)")
   "retry max=3 {\n  break\n}\n" (reads "retry 3 {\n  break\n}")
   "catch {\n  x = 1\n}\n" (reads "catch { x = 1 }")
@@ -944,17 +944,17 @@ let parse_patterns text =
   "expect timeout=5s /IP(src == x)/UDP {\n}\n" \
     (reads "expect 5s /IP(src=x)/UDP {}")
   "expect timeout=5s /IP/UDP {\n}\n" (reads "expect timeout=5s /IP/UDP {}")
-  "p = Bytes(\"a\")\n" (reads "p = Bytes(\"a\")")
-  "p := ../../IP!/UDP(dst=7)/Bytes(\"a\")\n" (reads "p:=../../IP!/UDP(dst=7)/Bytes(\"a\")")
-  "line 1, column 13: UDP is not a terminal layer, therefore /IP!/UDP is not a complete message that could be sent: it needs a terminal layer on top (Bytes)." (reads "p = /IP!/UDP")
-  "first timeout=1s Bytes(\"a\") {\n} | Bytes(\"b\") {\n  x := 1\n}\n" \
-    (reads "first 1s Bytes(\"a\") {} | Bytes(\"b\") { x := 1 }")
-  "first Bytes(data == \"a\") {\n} | ../ICMP {\n} | /IP(src == x)/UDP {\n}\nx := 1\n" \
-    (reads "first Bytes(data = \"a\") {}\n| ../ICMP {} |\n/IP(src=x)/UDP {}\nx := 1")
-  "on for=1s Bytes {\n} | ../ICMP | /IP/UDP {\n  x := 1\n}\n" \
-    (reads "on for=1s Bytes {} | (../ICMP | /IP/UDP) { x := 1 }")
-  "expect Bytes | ../ICMP | /IP/UDP {\n}\n" \
-    (reads "expect ((Bytes)\n  | (../ICMP | /IP/UDP)) {}")
+  "p = Raw(\"a\")\n" (reads "p = Raw(\"a\")")
+  "p := ../../IP!/UDP(dst=7)/Raw(\"a\")\n" (reads "p:=../../IP!/UDP(dst=7)/Raw(\"a\")")
+  "line 1, column 13: UDP is not a terminal layer, therefore /IP!/UDP is not a complete message that could be sent: it needs a terminal layer on top (Raw)." (reads "p = /IP!/UDP")
+  "first timeout=1s Raw(\"a\") {\n} | Raw(\"b\") {\n  x := 1\n}\n" \
+    (reads "first 1s Raw(\"a\") {} | Raw(\"b\") { x := 1 }")
+  "first Raw(data == \"a\") {\n} | ../ICMP {\n} | /IP(src == x)/UDP {\n}\nx := 1\n" \
+    (reads "first Raw(data = \"a\") {}\n| ../ICMP {} |\n/IP(src=x)/UDP {}\nx := 1")
+  "on for=1s Raw {\n} | ../ICMP | /IP/UDP {\n  x := 1\n}\n" \
+    (reads "on for=1s Raw {} | (../ICMP | /IP/UDP) { x := 1 }")
+  "expect Raw | ../ICMP | /IP/UDP {\n}\n" \
+    (reads "expect ((Raw)\n  | (../ICMP | /IP/UDP)) {}")
 *)
 
 (* Blocks, if and case are expressions, and an expression is a statement;
@@ -977,8 +977,8 @@ let parse_patterns text =
   "case x else {\n}\n" (reads "case x else {}")
   "x = Ok(1 + 2)\ny = [Pending, Err(\"a\")]\n" (reads "x = Ok(1 + 2)\ny = [Pending, Err(\"a\")]")
   "x = [Pending(), Pending]\n" (reads "x = [Pending( ), Pending]")
-  "print(case x Bytes {\n  \"b\"\n} else {\n  \"?\"\n})\n" \
-    (reads "print(case x Bytes { \"b\" } | else { \"?\" })")
+  "print(case x Raw {\n  \"b\"\n} else {\n  \"?\"\n})\n" \
+    (reads "print(case x Raw { \"b\" } | else { \"?\" })")
 *)
 
 (*$= formats & ~printer:identity
@@ -1030,10 +1030,10 @@ let parse_patterns text =
     "on max=3 timeout=1s ../UDP { n += 1; m := 2 }" ; \
     "on for=1s ../UDP {}\non linger=2s * n ../UDP {}" ; \
     "expect UDP(IP^.ttl = 3, ^IP.src == 1.2.3.4) {}" ; \
-    "expect ../../TCP!(flags & RST) {}" ; "IP!(ttl=1)/TCP!(flags=2)/Bytes(\"x\")" ; \
-    "/IP/UDP/Bytes(\"x\")\n{ y = !(a == b) }" ; \
+    "expect ../../TCP!(flags & RST) {}" ; "IP!(ttl=1)/TCP!(flags=2)/Raw(\"x\")" ; \
+    "/IP/UDP/Raw(\"x\")\n{ y = !(a == b) }" ; \
     "if a & 1 {} elsif (b || c) && d { x := 1 }\nelse { if e {} }" ; \
-    "first timeout=2s * n Bytes(\"a\") {} | ../TCP!(flags & (SYN | RST)) {}" ; \
+    "first timeout=2s * n Raw(\"a\") {} | ../TCP!(flags & (SYN | RST)) {}" ; \
     "x = 1 + if a { { y = 1; y * 2 } } elsif b { 2 } else { 3 }" ; \
     "x = case var=l MATCH[0] Eth { l.src } | IP { if a { 1 } else { 2 } } | else { 0 }" ; \
     "x = case y IP { 1 }\nelse { 2 }" ; \
@@ -1046,12 +1046,12 @@ let parse_patterns text =
   "line 1, column 17: Expected expression in arguments" \
     (reads "/IP(dst=1.2.3.4/UDP")
   "line 1, column 11: Expected end of statement" (reads "print(\"a\"))")
-  "line 1, column 16: UDP is not a terminal layer, therefore /IP/UDP is not a complete message that could be sent: it needs a terminal layer on top (Bytes), or a block in which to stack one." \
+  "line 1, column 16: UDP is not a terminal layer, therefore /IP/UDP is not a complete message that could be sent: it needs a terminal layer on top (Raw), or a block in which to stack one." \
     (reads "/IP/UDP(dst=53)")
-  "line 1, column 18: Bytes is a terminal layer, therefore /IP/UDP/Bytes is a complete message. No further layer can be stacked on top of it, therefore it cannot open a block.\n  Do you mean \"/IP/UDP/Bytes()\", \"/IP/UDP { Bytes() ... }\", or \"expect /IP/UDP/Bytes { ... }\"?" \
-    (reads "/IP/UDP/Bytes() {}")
-  "line 4, column 21: Bytes is a terminal layer, therefore /IP/UDP/Bytes is a complete message. No further layer can be stacked on top of it, therefore it cannot open a block.\n  Do you mean \"/IP/UDP/Bytes(\"b\")\", \"/IP/UDP { Bytes(\"b\") ... }\", or \"expect /IP/UDP/Bytes(\"b\") { ... }\"?" \
-    (reads "/IP/UDP/Bytes(\"a\")\n{\n}\n/IP/UDP/Bytes(\"b\") {\n  x = 1\n}")
+  "line 1, column 16: Raw is a terminal layer, therefore /IP/UDP/Raw is a complete message. No further layer can be stacked on top of it, therefore it cannot open a block.\n  Do you mean \"/IP/UDP/Raw()\", \"/IP/UDP { Raw() ... }\", or \"expect /IP/UDP/Raw { ... }\"?" \
+    (reads "/IP/UDP/Raw() {}")
+  "line 4, column 19: Raw is a terminal layer, therefore /IP/UDP/Raw is a complete message. No further layer can be stacked on top of it, therefore it cannot open a block.\n  Do you mean \"/IP/UDP/Raw(\"b\")\", \"/IP/UDP { Raw(\"b\") ... }\", or \"expect /IP/UDP/Raw(\"b\") { ... }\"?" \
+    (reads "/IP/UDP/Raw(\"a\")\n{\n}\n/IP/UDP/Raw(\"b\") {\n  x = 1\n}")
   "line 1, column 12: Expected end of statement" (reads "print(\"a\") print(\"b\")")
   "line 1, column 7: Expected end of statement" (reads "x = 1 2")
   "line 1, column 5: Expected expression in statement" (reads "x = ")
@@ -1060,7 +1060,7 @@ let parse_patterns text =
   "line 1, column 10: Expected ']' in expression" (reads "x = [1, 2")
   "line 1, column 14: Expected ':' in expression" (reads "x = {a: 1, b 2}")
   "line 2, column 1: Expected '}' in block" \
-    (reads "expect Bytes(\"x\") { print(\"ok\")\n")
+    (reads "expect Raw(\"x\") { print(\"ok\")\n")
   "line 1, column 19: Expected pattern in statement" (reads "expect timeout=5s {\n}")
   "line 1, column 13: Unknown parameter cnt for repeat (expected var, count, every, for)" \
     (reads "repeat cnt=3 {\n}")
@@ -1075,9 +1075,9 @@ let parse_patterns text =
     (reads "retry max=1 max=2 {\n}")
   "line 1, column 10: Parameter depth of break given twice" (reads "break 2 3")
   "line 1, column 6: Parameters of on must be named" \
-    (reads "on 1s Bytes(\"x\") {\n}")
+    (reads "on 1s Raw(\"x\") {\n}")
   "line 1, column 18: Expected '=' in statement" (reads "repeat count=3 x {\n}")
-  "line 1, column 7: IP is not a terminal layer, therefore IP is not a complete message that could be sent: it needs a terminal layer on top (Bytes)." (reads "x = IP")
+  "line 1, column 7: IP is not a terminal layer, therefore IP is not a complete message that could be sent: it needs a terminal layer on top (Raw)." (reads "x = IP")
   "line 1, column 7: ip is a reserved name" (reads "ip = 3")
   "line 1, column 29: first is a keyword, it cannot name a variable" \
     (reads "first = int(getenv(\"FIRST\"))")
@@ -1091,21 +1091,21 @@ let parse_patterns text =
   "line 1, column 20: tcp is a reserved name" (reads "repeat var=\"tcp\" {}")
   "line 1, column 9: Unknown layer HTTP" (reads "/IP/HTTP {}")
   "line 1, column 8: Unknown layer UPD, do you mean UDP?" (reads "/IP/UPD {}")
-  "line 1, column 13: Unknown layer Bytse, do you mean Bytes?" (reads "expect Bytse {}")
-  "line 1, column 13: Unknown layer Bytse, do you mean Bytes?" (reads "expect Bytse(\"x\") {}")
-  "line 1, column 24: Unknown layer Bytse, do you mean Bytes?" (reads "expect timeout=1s Bytse {}")
-  "line 1, column 9: Unknown layer Bytse, do you mean Bytes?" (reads "on Bytse {}")
-  "line 1, column 12: Unknown layer Bytse, do you mean Bytes?" (reads "first Bytse {} | Bytes {}")
+  "line 1, column 11: Unknown layer Rae, do you mean Raw?" (reads "expect Rae {}")
+  "line 1, column 11: Unknown layer Rae, do you mean Raw?" (reads "expect Rae(\"x\") {}")
+  "line 1, column 22: Unknown layer Rae, do you mean Raw?" (reads "expect timeout=1s Rae {}")
+  "line 1, column 7: Unknown layer Rae, do you mean Raw?" (reads "on Rae {}")
+  "line 1, column 10: Unknown layer Rae, do you mean Raw?" (reads "first Rae {} | Raw {}")
   "line 1, column 8: Expected pattern in statement" (reads "expect 2s {}")
   "line 1, column 11: Unknown function pirnt, do you mean print?" (reads "pirnt(\"x\")")
   "line 1, column 7: Unknown function foo" (reads "foo(1)")
   "line 1, column 15: Unknown function foo" (reads "x := 1; foo(1); y := 2")
-  "line 1, column 4: Unknown layer foo" (reads "foo(1)/Bytes(\"x\")")
+  "line 1, column 4: Unknown layer foo" (reads "foo(1)/Raw(\"x\")")
   "line 1, column 4: Unknown layer foo" (reads "foo(1) {}")
   "line 1, column 24: Unknown function get" (reads "x = get(a=[1], index=0)")
   "line 1, column 14: Unknown function foo" (reads "x = 1 + foo()")
   "line 1, column 18: Unknown function foo" (reads "expect UDP(foo(1)) {}")
-  "line 1, column 15: Unknown function foo" (reads "/IP(dst=foo(1))/UDP(dst=1)/Bytes(\"x\")")
+  "line 1, column 15: Unknown function foo" (reads "/IP(dst=foo(1))/UDP(dst=1)/Raw(\"x\")")
   "line 1, column 16: Unknown function foo" (reads "print(\"${foo(2)}\")")
   "line 1, column 11: Carets on both sides of IP" (reads "x = a[^IP^]")
   "line 1, column 8: Expected constructor in expression" (reads "case x {}")
@@ -1113,10 +1113,10 @@ let parse_patterns text =
   "line 2, column 15: MATCH is a reserved name" (reads "x = 1\ncase var=MATCH x IP {}")
   "line 2, column 18: Expected expression in statement" (reads "x = 1\ncase x else {} | IP {}")
   "line 1, column 7: Expected pattern in statement" (reads "first {}")
-  "line 1, column 23: Expected pattern in statement" (reads "first Bytes(\"a\") {} | {}")
-  "line 1, column 16: Expected pattern in statement" (reads "expect Bytes | {}")
-  "line 1, column 17: Expected pattern in statement" (reads "expect (Bytes | ) {}")
-  "line 1, column 15: Expected ')' in pattern" (reads "expect (Bytes {}")
+  "line 1, column 21: Expected pattern in statement" (reads "first Raw(\"a\") {} | {}")
+  "line 1, column 14: Expected pattern in statement" (reads "expect Raw | {}")
+  "line 1, column 15: Expected pattern in statement" (reads "expect (Raw | ) {}")
+  "line 1, column 13: Expected ')' in pattern" (reads "expect (Raw {}")
   "line 1, column 5: wait needs a duration" (reads "wait")
   "line 1, column 5: Expected statement in a branch of if, which starts on the same line" \
     (reads "if x\n{}")
