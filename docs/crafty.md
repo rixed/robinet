@@ -37,7 +37,7 @@ by crafty's own stacks (ARP, IPv4, TCP, UDP, ICMP, DNS).
 ```
 
 ```
-% sudo crafty -i eth0 --udp 40000-40010 --fw intro.cfty
+% sudo crafty --udp 40000-40010 --fw intro.cfty
 ...
 ping 0
 ping 1
@@ -156,7 +156,7 @@ target = 192.0.2.10
 ```
 
 ```
-% sudo crafty -i eth0 --tcp 40000 --fw syn.cfty
+% sudo crafty --tcp 40000 --fw syn.cfty
 SYN of seq 1000 sent
 SYN-ACK: seq 1969569245, ack 1001
 ```
@@ -168,7 +168,8 @@ SYN-ACK: seq 1969569245, ack 1001
 Options:
 
 - `-e PROG`: the program itself, rather than a file.
-- `-i IFACE`: the interface to send from and capture on. Crafty needs root.
+- `-i IFACE`: the interface to send from and capture on, rather than that of
+  the default route. Crafty needs root.
 - `--tcp LO-HI`, `--udp LO-HI` (repeatable): the ranges to pick source ports
   from, with the program's `PORTS` (see [Budget and ports](#budget-and-ports)).
   A program that sends TCP or UDP without a `src` needs them.
@@ -626,7 +627,7 @@ These ran against a host with UDP and TCP echo servers on port 7.
 ```
 
 ```
-% sudo crafty -i eth0 --ip 192.0.2.5 ping.cfty
+% sudo crafty --ip 192.0.2.5 ping.cfty
 reply from 192.0.2.10: seq=1 ttl=64
 ...
 5 replies out of 5
@@ -652,7 +653,7 @@ The replies come back to the `Echo` stream of the requests, whatever its id.
 ```
 
 ```
-% sudo crafty -i eth0 --ip 192.0.2.5 --udp 40000-40010 rtt.cfty
+% sudo crafty --ip 192.0.2.5 --udp 40000-40010 rtt.cfty
 100/100 echoed, rtt min 4.34351ms median 7.94053ms p99 10.2825ms max 10.6628ms
 4.34351ms to 4.77314ms: 8
 ...
@@ -689,7 +690,7 @@ on for=1h /IP/UDP(dst == 7)/Bytes {
 ```
 
 ```
-% sudo crafty -i eth0 --udp 7 --fw server.cfty
+% sudo crafty --udp 7 --fw server.cfty
 ```
 
 ### Losses per flow
@@ -710,7 +711,7 @@ repeat var=f count=4 { print("flow ${f}: ${lost[f]} lost") }
 ```
 
 ```
-% sudo crafty -i eth0 --udp 40000-40003 --fw losses.cfty
+% sudo crafty --udp 40000-40003 --fw losses.cfty
 flow 0: 0 lost
 ...
 ```
@@ -805,7 +806,7 @@ port = int(getenv("PORT", default="33434"))
 ```
 
 ```
-% sudo TARGET=10.2.1.3 PROBES=8 crafty -i eth0 --udp 40000 --fw lbtrace.cfty
+% sudo TARGET=10.2.1.3 PROBES=8 crafty --udp 40000 --fw lbtrace.cfty
 to 10.2.1.3 from UDP port 40000 to 33434
 1	10.1.1.1	8/8	min 0.04ms
 2	10.1.0.5	4/8	min 37.67ms
@@ -877,7 +878,7 @@ if ret_mtu > 0 { print("way back: fragmented, MTU about ${ret_mtu} bytes") }
 ```
 
 ```
-% sudo TARGET=10.2.1.3 crafty -i eth0 pmtu.cfty
+% sudo TARGET=10.2.1.3 crafty pmtu.cfty
 1500: too big for 10.1.0.5, next hop MTU 1400
 1400: no answer (dropped one way or the other)
 734: echoed whole
@@ -957,7 +958,7 @@ sent_at = map(key=0, default=now())     # by IP id: round * 64 + hop
 ```
 
 ```
-% sudo TARGET=10.2.1.3 ROUNDS=40 REPORT=20 INTERVAL=200ms crafty -i eth0 --udp 40000 --fw mtr.cfty
+% sudo TARGET=10.2.1.3 ROUNDS=40 REPORT=20 INTERVAL=200ms crafty --udp 40000 --fw mtr.cfty
 after 20 rounds:
 1	[10.1.1.1]	loss 0%	avg 0.33ms	best 0.11ms	worst 0.48ms
 2	[10.1.0.5]	loss 50%	avg 37.81ms	best 37.6ms	worst 38.1ms

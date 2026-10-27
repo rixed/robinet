@@ -248,6 +248,30 @@ let iface ifname =
         ~ip_route:(output "ip" [ "-4" ; "route" ; "show" ; "default" ;
                                  "dev" ; ifname ])
 
+(* The interface of the first default route in [ip_route], the output of
+ * [ip -4 route show default]: *)
+let ifname_of_default_route ip_route =
+    String.split_on_char '\n' ip_route |>
+    List.find_map_opt (fun line ->
+        let rec dev = function
+            | "dev" :: d :: _ -> Some d
+            | _ :: rest -> dev rest
+            | [] -> None in
+        match List.filter ((<>) "") (String.split_on_char ' ' line) with
+        | "default" :: r -> dev r
+        | _ -> None)
+
+(*$= ifname_of_default_route & ~printer:(Option.map_default identity "none")
+  (Some "wlp59s0") (ifname_of_default_route iproute2_route)
+  (Some "eth0") (ifname_of_default_route busybox_route)
+  (Some "eth1") (ifname_of_default_route "default dev eth1 scope link\n")
+  None (ifname_of_default_route "")
+ *)
+
+(** The interface of the IPv4 default route, if any. *)
+let default_ifname () =
+    ifname_of_default_route (output "ip" [ "-4" ; "route" ; "show" ; "default" ])
+
 (** The slowest Ethernet speed at least as fast as [mbps] Mb/s, the fastest
  * past it, or none for a speed that is not positive (unknown). *)
 let eth_speed_of_mbps mbps =

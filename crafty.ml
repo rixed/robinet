@@ -139,7 +139,7 @@ let () =
         prog := Some (name, text) in
     (* BEWARE: Update docs/crafty.md every time you update the CLI! *)
     specs := Arg.align [
-        "-i", Arg.Set_string ifname, "IFACE the interface to use (required)" ;
+        "-i", Arg.Set_string ifname, "IFACE the interface to use (default: that of the default route)" ;
         "-e", Arg.String (fun s -> set_prog "-e" (lazy s)),
             "PROG the program, rather than from a file" ;
         "--ip", Arg.String (fun s -> own_ip := Some (Ip.Addr.of_dotted_string s)),
@@ -282,7 +282,10 @@ let () =
     if !check then (
         Printf.printf "%s: OK\n" prog_name ;
         exit 0) ;
-    if !ifname = "" then die "No interface given (-i)." ;
+    if !ifname = "" then (
+        match Host_config.default_ifname () with
+        | Some i -> ifname := i
+        | None -> die "No default route: give the interface (-i).") ;
     if !fw && ports = [] then die "--fw needs ports (--tcp, --udp, or PORTS)." ;
     if !fw && !own_ip <> None then
         die "--fw and --ip do not go together: an address of the program's \
