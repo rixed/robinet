@@ -413,7 +413,7 @@ module Cidr = struct
         (** Converts a CIDR to its string representation. *)
         let to_string ((ip : Addr.t), n) =
             Addr.to_dotted_string ip ^ "/" ^ String.of_int n
-        let is_valid _ = true
+        let is_valid (ip, n) = n >= 0 && n <= Addr.length ip
         let repl_tag = "addr"
     end)
 
@@ -421,7 +421,15 @@ module Cidr = struct
         let ip_str, width_str =
             try String.split ~by:"/" str
             with Not_found -> error (Printf.sprintf "not a CIDR: %s" str) in
-        o (Addr.of_string ip_str, Int.of_string width_str)
+        let ip = Addr.of_string ip_str and width = Int.of_string width_str in
+        if width < 0 || width > Addr.length ip then
+            invalid_arg (Printf.sprintf "not a CIDR width: %s" str) ;
+        o (ip, width)
+    (*$T of_string
+      try ignore (of_string "10.0.0.0/33") ; false with Invalid_argument _ -> true
+      try ignore (of_string "10.0.0.0/-1") ; false with Invalid_argument _ -> true
+      width (of_string "2001:db8::/128") = 128
+    *)
 
     (* Test that we actually keep the masked bits, so a Cidr can be
      * used to write a network address _or_ a host+netmask (such as when

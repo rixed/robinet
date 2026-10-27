@@ -236,12 +236,22 @@ module Pdu = struct
         { msg_type = MsgType.o (0, 0) ;
           payload  = Ids (id, seq, pld) }
 
+    (* The header and the first 8 bytes of the payload, or all of it if
+     * shorter (RFC 792): *)
     let make_ttl_expired code ip =
         let ip_hdr = Ip.Pdu.pack_header ip
-        and ip_pld = Ip.Pdu.pack_payload ip in
-        let ip_start = concat [ ip_hdr ; takebits 64 (ip_pld :> bitstring) ] in
+        and ip_pld = (Ip.Pdu.pack_payload ip :> bitstring) in
+        let ip_start =
+            concat [ ip_hdr ; takebits (min 64 (bitstring_length ip_pld)) ip_pld ] in
         { msg_type = MsgType.o (11, code) ;
           payload = Header { ptr = 0 ; mtu = 0 ; pld = Payload.o ip_start } }
+    (*$T make_ttl_expired
+      let ip pld = Ip.Pdu.make Ip.Proto.udp (Ip.Addr.of_string "10.0.0.1") \
+                     (Ip.Addr.of_string "10.0.0.2") (bitstring_of_string pld) in \
+      let quoted pld = match (make_ttl_expired 0 (ip pld)).payload with \
+        | Header { pld ; _ } -> Payload.length pld | _ -> -1 in \
+      quoted "abc" = 20 + 3 && quoted "" = 20 && quoted "0123456789" = 20 + 8
+    *)
 
     let make_ttl_expired_in_transit = make_ttl_expired 0
     let make_ttl_expired_during_reassembly = make_ttl_expired 1

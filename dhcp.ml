@@ -310,7 +310,7 @@ struct
             sname : 64*8 : string ;
             file : 128*8 : string ;
             0x63825363l : 32 ;
-            options : -1 : bitstring |} ->
+            options : -1 : bitstring |} when hlen <= 16 ->
           let t = { op = if op = bootrequest then BootRequest else BootReply ;
                     htype = Arp.HwType.o htype ; hlen ; hops ; xid ;
                     secs ; broadcast = flags land 0x8000 = 0x8000 ;
@@ -476,6 +476,10 @@ struct
     (*$Q pack
       (Q.make (fun _ -> random () |> pack)) (fun t -> t = pack (Result.get_ok (unpack t)))
      *)
+    (* chaddr has room for 16 bytes: *)
+    (*$T unpack
+      Result.is_error (unpack (pack { (make_discover ()) with hlen = 17 }))
+    *)
 
     (* Options handed to a message reach the other end, whether or not the
        message has a field of its own to hold them. *)
