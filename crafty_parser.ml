@@ -496,7 +496,11 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
         optional_greedy ~def:None (nl_sp -+ (
             (keyword "else" -+ branch) |||
             (keyword "elsif" -+ here ++ if_ >>:
-                fun (loc, desc) -> [ { stmt_loc = loc ; stmt = Expr { loc ; desc } } ])) >>:
+                fun (loc, desc) -> [ { stmt_loc = loc ; stmt = Expr { loc ; desc } } ]) |||
+            (quiet (identifier >>= fun s ->
+                if is_in [ "elif" ; "elseif" ] s then return s else fail) +-
+             quiet (char_if "space" (fun c -> c = ' ' || c = '\t')) >>:
+                fun s -> reject "%s is no keyword: use elsif" s)) >>:
             Option.some) >>:
         fun ((cond, then_), else_) -> If { cond ; then_ ; else_ }) in
     (* Its cases, separated by bars that may start or end lines, then maybe
@@ -695,7 +699,25 @@ let () = set_stmt (
         quiet (variable +- char_if "space" (fun c -> c = ' ' || c = '\t') +-
                sp +- check (char_if "" (fun c ->
                    is_word c || c = '[' || c = '(' || c = '"'))) in
-    with_loc (
+    (* A keyword of other languages, followed by what would continue its
+     * statement rather than an expression: *)
+    let foreign_start =
+        let hints =
+            [ [ "while" ; "until" ; "loop" ; "do" ],
+                "loop with repeat, which a break ends: \
+                 repeat { if !cond { break } ... }" ;
+              [ "for" ], "loop with foreach x items { ... } or repeat var=i count=n { ... }" ;
+              [ "switch" ; "match" ], "tell values apart with case" ;
+              [ "let" ; "var" ; "const" ], "declare with x = value" ;
+              [ "return" ], "a block is worth its last expression" ;
+              [ "def" ; "fn" ; "func" ; "function" ], "there are no user functions" ] in
+        quiet (identifier >>= fun s ->
+            match List.find_opt (fun (ws, _) -> is_in ws s) hints with
+            | Some (_, hint) -> return (s, hint)
+            | None -> fail) +-
+        quiet (char_if "space" (fun c -> c = ' ' || c = '\t') -- sp -- check (
+            char_if "" (fun c -> is_word c || String.contains "([{\"#" c))) in
+    let known_stmt = with_loc (
         (* A keyword given a value, which the special form it starts would
          * otherwise refuse as a missing pattern or block: *)
         (let keyword_name =
@@ -786,11 +808,13 @@ let () = set_stmt (
         (keyword "catch" -+ body >>: fun body -> Catch body) |||
         (keyword "break" -+ params "break" [ "depth" ] >>:
             fun p -> Break { depth = p "depth" }) |||
-        (keyword "wait" -+ params "wait" [ "dur" ] >>:
-            fun p ->
-                match p "dur" with
-                | Some d -> Wait d
-                | None -> reject "wait needs a duration") |||
+        (let wait k =
+            keyword k -+ params k [ "dur" ] >>:
+                fun p ->
+                    match p "dur" with
+                    | Some d -> Wait d
+                    | None -> reject "%s needs a duration" k in
+         wait "wait" ||| wait "sleep") |||
         (keyword "expect" -+ params ~pattern:true "expect" [ "timeout" ] +- sp ++ patterns ++
          body >>: fun ((p, patterns), body) ->
             Expect { timeout = p "timeout" ; patterns ; body }) |||
@@ -800,7 +824,10 @@ let () = set_stmt (
          params ~pattern:true "on" [ "for" ; "linger" ; "timeout" ; "max" ] +- sp ++
          cases >>: fun (p, cases) ->
             On { for_ = p "for" ; linger = p "linger" ; timeout = p "timeout" ;
-                 max = p "max" ; cases })) |? "statement")
+                 max = p "max" ; cases })) in
+    (* Read as nothing else, so that this rejection is the furthest error: *)
+    ((foreign_start >>: fun (s, hint) -> reject "%s is no keyword: %s" s hint) |||
+     (quiet (nay foreign_start) -+ known_stmt)) |? "statement")
 
 let () =
     set_block (
@@ -921,6 +948,8 @@ let parse_patterns text =
   "repeat {\n  if I > 3 {\n    break\n  }\n}\n" \
     (reads "repeat { if I > 3 { break } }")
   "wait dur=10ms\nwait dur=(1s * n)\n" (reads "wait 10ms\nwait dur=1s * n")
+  "wait dur=10ms\n" (reads "sleep 10ms")
+  "while = 1\nloop := (while - 1)\nprint(loop)\n" (reads "while = 1\nloop := while - 1\nprint(loop)")
   "repeat var=j {\n  break depth=2\n}\n" (reads "repeat var=\"j\" { break 2 }")
   "repeat var=i count=3 every=1ms for=1s {\n  print(i)\n}\n" \
     (reads "repeat var=i count=3 every=1ms for=1s { print(i) }")
@@ -1087,6 +1116,12 @@ let parse_patterns text =
     (reads "first = int(getenv(\"FIRST\"))")
   "line 1, column 10: wait is a keyword, it cannot name a variable" (reads "wait += 1")
   "line 2, column 8: on is a keyword, it cannot name a variable" (reads "x = 1\non := 2")
+  "line 1, column 7: while is no keyword: loop with repeat, which a break ends: repeat { if !cond { break } ... }" \
+    (reads "while x < 3 {\n}")
+  "line 2, column 5: for is no keyword: loop with foreach x items { ... } or repeat var=i count=n { ... }" \
+    (reads "x = 1\nfor i in [1, 2] {}")
+  "line 1, column 8: return is no keyword: a block is worth its last expression" (reads "return 1")
+  "line 2, column 17: elif is no keyword: use elsif" (reads "x = 1\nif x { 1 } elif x { 2 }")
   "line 1, column 11: print is a reserved name" (reads "print += 3")
   "line 1, column 7: An item is not declared (:= changes it)" (reads "x[0] = 1")
   "line 1, column 14: Items without keys in a map" (reads "x = [1: 2, 3]")
@@ -1122,6 +1157,7 @@ let parse_patterns text =
   "line 1, column 15: Expected pattern in statement" (reads "expect (Raw | ) {}")
   "line 1, column 13: Expected ')' in pattern" (reads "expect (Raw {}")
   "line 1, column 5: wait needs a duration" (reads "wait")
+  "line 1, column 6: sleep needs a duration" (reads "sleep")
   "line 1, column 5: Expected statement in a branch of if, which starts on the same line" \
     (reads "if x\n{}")
   "line 1, column 11: x would only be declared in this branch" (reads "if a x = 1")

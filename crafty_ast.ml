@@ -310,7 +310,8 @@ let predefined = [ "MATCH" ; "LAST" ] @ self_declared
 (** Names that are neither variables, layers nor functions. Lower case. *)
 let keywords =
     [ "true" ; "false" ; "repeat" ; "foreach" ; "retry" ; "catch" ; "if" ;
-      "elsif" ; "else" ; "case" ; "break" ; "expect" ; "first" ; "on" ; "wait" ]
+      "elsif" ; "else" ; "case" ; "break" ; "expect" ; "first" ; "on" ; "wait" ;
+      "sleep" ]
 
 (** {2 Printing}
  *

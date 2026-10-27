@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 99d5df03f77def55ea32d5d22a0a553a) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 8368601669d82c290ae2ff73125c0a1f) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -373,7 +373,7 @@ what their engine computes (checksums).
 -   `case var=v X C { ... } | C { ... } else { ... }`: runs the block of the
     constructor of `X`, where `v` (default `I`) is what that constructor holds.
 -   `break n`: leaves the `n` (default 1) innermost `repeat`, `foreach` or `on`.
--   `wait d`: pauses.
+-   `wait d` (or `sleep d`): pauses.
 -   `expect timeout=d PATTERN { ... }`: waits for one matching packet, then runs
     the block; a timeout (none by default) is an error.
 -   `first timeout=d PATTERN { ... } | PATTERN { ... }`: waits for the first
