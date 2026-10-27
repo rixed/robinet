@@ -33,7 +33,7 @@
 open Batteries
 module EthSpeed = SimTypes.EthSpeed
 
-let synopsis = "crafty [options] (PROG.cfty | -e PROG)"
+let synopsis = "crafty [options] (PROG.cfty | -e PROG) [ARG...]"
 let usage = synopsis ^"\n\nOptions:"
 
 let die fmt =
@@ -101,7 +101,7 @@ let () =
     and warn_error = ref false and no_warning = ref false
     and linger = ref (Clock.Interval.sec 2.)
     (* What the errors name it after, and its text: *)
-    and prog = ref None
+    and prog = ref None and prog_args = ref []
     and max_duration = ref None and max_packets = ref None
     and max_volume = ref None and max_packet_rate = ref None
     and max_throughput = ref None and max_syns = ref None and max_syn_rate = ref None
@@ -137,6 +137,15 @@ let () =
     let set_prog name text =
         if !prog <> None then die "Only one program, please" ;
         prog := Some (name, text) in
+    (* The first file is the program, and options stop there; with -e, all
+     * are arguments: *)
+    let program_or_arg ~stop s =
+        if !prog <> None then prog_args := !prog_args @ [ s ] else (
+            set_prog s (lazy (File.with_file_in s IO.read_all)) ;
+            if stop then (
+                prog_args := Array.(to_list (sub Sys.argv (!Arg.current + 1)
+                                       (length Sys.argv - !Arg.current - 1))) ;
+                Arg.current := Array.length Sys.argv - 1)) in
     (* BEWARE: Update docs/crafty.md every time you update the CLI! *)
     specs := Arg.align [
         "-i", Arg.Set_string ifname, "IFACE the interface to use (default: that of the default route)" ;
@@ -196,11 +205,12 @@ let () =
                 print_string (Arg.usage_string !specs usage) ; exit 0),
             " print every option, and exit" ;
         "-help", Arg.Unit help, " print this help and an introduction to crafty" ;
-        "--help", Arg.Unit help, " same as -help" ] ;
+        "--help", Arg.Unit help, " same as -help" ;
+        "--", Arg.Rest (program_or_arg ~stop:false),
+            " end the options, even before a program from -e" ] ;
     (* BEWARE: Update docs/crafty.md every time you update the CLI! *)
-    Arg.parse !specs
-        (fun f -> set_prog f (lazy (File.with_file_in f IO.read_all)))
-        usage ;
+    Arg.parse !specs (program_or_arg ~stop:true) usage ;
+    Crafty_interp.prog_args := Array.of_list !prog_args ;
     if !cleanup then (
         (match Host_config.cleanup_stale () with
         | [] -> print_endline "Nothing to clean up."

@@ -228,6 +228,9 @@ let getenv name =
     | None -> Tools.unsafe_getenv_opt name
     | v -> v
 
+(* The arguments that follow the program on the command line: *)
+let prog_args = ref [||]
+
 (* The system resolver's answers, asked once per name or address for the
  * whole run; [resolve] keeps only the IPv4 addresses: *)
 let resolved = Hashtbl.create 10
@@ -308,6 +311,12 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
         | Some v, _ -> String v
         | None, [ d ] -> d
         | None, _ -> error loc "Environment variable %s is not set" name)
+    | T.Arg, Int n :: default ->
+        (match default with
+        | _ when n >= 0 && n < Array.length !prog_args -> String !prog_args.(n)
+        | [ d ] -> d
+        | _ -> error loc "No argument %d: %d given" n (Array.length !prog_args))
+    | T.Nargs, [] -> Int (Array.length !prog_args)
     | T.Resolve, [ String name ] ->
         (match resolve name with
         | [] -> error loc "%s has no IPv4 address" name
@@ -1536,6 +1545,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "x = getenv(\"CRAFTY_NO_SUCH_VAR\")")
   ("0s: default "^ Sys.getenv "HOME" ^"\n0s: done") \
     (runs "print(\"${getenv(\"CRAFTY_NO_SUCH_VAR\", default=\"default\")} ${getenv(\"HOME\", default=\"\")}\")")
+  "0s: 2 a b c\n0s: done" \
+    (prog_args := [| "a" ; "b" |] ; \
+     Fun.protect ~finally:(fun () -> prog_args := [||]) (fun () -> \
+       runs "print(\"${nargs()} ${arg(0)} ${arg(1, default=\"x\")} ${arg(2, default=\"c\")}\")"))
+  "0s: failed: line 1, column 5: No argument 0: 0 given" \
+    (runs "x = arg(0)")
   "0s: [127.0.0.1] localhost\n0s: done" \
     (runs "print(\"${resolve(\"localhost\")} ${hostname(resolve(\"localhost\")[0])}\")")
   "0s: {ip: 10.0.0.2, ok: true, rtt: 1.5ms}\n0s: done" \

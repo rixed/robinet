@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 1dd281ee7ee218869f55b207e837d0d9) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 1913e5dc765b647a7c8e9b8069626d69) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -137,7 +137,11 @@ reception, `IP!` sees each fragment and `TCP!` each segment, even without data.
 
 ### Running crafty
 
-`crafty [options] file` or `crafty [options] -e program`.
+`crafty [options] file [arg...]` or `crafty [options] -e program [arg...]`.
+
+The options end at the file: what follows it are the program's arguments, which
+it reads with `arg(n)`. With `-e`, every argument that is not an option is the
+program's; `--` ends the options.
 
 Options:
 
@@ -173,7 +177,9 @@ does not compile, 3 when a budget stops it, 130 when interrupted.
 -   Use `resolve("hostname")` to resolve a hostname
 -   Errors and warnings go to stderr, all else to stdout: filter stdout as you
     like, but not stderr (`crafty x.cfty | grep ...`, not `2>&1 | grep`)
--   Parameterize your programs with `getenv("...")`
+-   Parameterize your programs with arguments (`crafty x.cfty 10.0.0.1 5`, read
+    with `arg(0)`, `arg(1)`) or environment variables
+    (`TARGET=10.0.0.1 crafty x.cfty`, read with `getenv("TARGET")`)
 -   When unsure, use --max-duration
 |crafty_manual}
 
@@ -400,9 +406,11 @@ what their engine computes (checksums).
     stream adds `fragmented` (packets sent in fragments), `frags_out`,
     `frags_in`, `reassembled` and `reasm_timeouts` (incomplete after 30s).
 -   `getenv(name, default=s)`: fails if unset and no default.
+-   `arg(n, default=s)`: the n-th argument after the program, from 0; fails if
+    missing and no default. `nargs()`: how many there are.
 -   `resolve(name)`: the IPv4 addresses of a name, as an array, from the
-    system's resolver. `hostname(ip, default=s)`: the name of an address.
-    Blocking, so better resolved before sending.
+    system's resolver; an address resolves to itself. `hostname(ip, default=s)`:
+    the name of an address. Blocking, so better resolved before sending.
 -   `rand(max)`: an int or a float in `[0, max)` (default 1.0), or a bool if
     `max` is `true`. `randbytes(len)`: random bytes.
 -   `int(x)`, `float(x)`, `bool(x)`, `byte(x)` (the low 8 bits): `int` and
@@ -701,10 +709,11 @@ Whole programs
     # Every probe goes from the same UDP port to the same port, so that routers
     # that balance per flow send them all the same way: where a hop still shows
     # several routers, they balance per packet.
-    target = ip_addr(getenv("TARGET"))
-    probes = int(getenv("PROBES", default="5"))      # per hop
-    max_hops = int(getenv("MAX_HOPS", default="30"))
-    port = int(getenv("PORT", default="33434"))
+    # usage: lbtrace.cfty TARGET [PROBES] [MAX_HOPS] [PORT]
+    target = resolve(arg(0))[0]
+    probes = int(arg(1, default="5"))      # per hop
+    max_hops = int(arg(2, default="30"))
+    port = int(arg(3, default="33434"))
     /IP!(dst=target)/UDP(dst=port) {
       probe = 0                       # the IP id, that tells the probes apart
       repeat var=hop count=max_hops {
@@ -736,7 +745,7 @@ Whole programs
       }
     }
 
-    % sudo TARGET=10.2.1.3 PROBES=8 crafty --udp 40000 --fw lbtrace.cfty
+    % sudo crafty --udp 40000 --fw lbtrace.cfty 10.2.1.3 8
     to 10.2.1.3 from UDP port 40000 to 33434
     1   10.1.1.1    8/8 min 0.04ms
     2   10.1.0.5    4/8 min 37.67ms
@@ -747,8 +756,8 @@ Whole programs
     5   10.2.1.3    8/8 min 110.92ms
 
 Hops 2 and 3 balance per packet. Behind routers that balance per flow, each hop
-shows one router, and another `PORT` may show another path. A `*` line counts
-the probes without an answer.
+shows one router, and another port may show another path. A `*` line counts the
+probes without an answer.
 
 #### Path MTU
 
@@ -758,9 +767,10 @@ the probes without an answer.
     #   MTU of the way back (fragments carry multiples of 8 bytes, so within 7 bytes);
     # - Frag-Needed: a router on the way out tells its next hop MTU;
     # - nothing: dropped silently, on the way out or, if the reply had DF, on the way back.
-    target = ip_addr(getenv("TARGET"))
+    # usage: pmtu.cfty TARGET [MTU]
+    target = resolve(arg(0))[0]
     lo = 68                                         # fits any IPv4 path
-    hi = int(getenv("MTU", default="1500"))
+    hi = int(arg(1, default="1500"))
     frag_max = 0                                    # largest fragment of the last reply
     ret_mtu = 0                                     # the way back fragmented at this size
     {
@@ -804,7 +814,7 @@ the probes without an answer.
     print("way out: ${lo} bytes get through")
     if ret_mtu > 0 { print("way back: fragmented, MTU about ${ret_mtu} bytes") }
 
-    % sudo TARGET=10.2.1.3 crafty pmtu.cfty
+    % sudo crafty pmtu.cfty 10.2.1.3
     1500: too big for 10.1.0.5, next hop MTU 1400
     1400: no answer (dropped one way or the other)
     734: echoed whole
@@ -826,12 +836,13 @@ the probes without an answer.
 
     # Probes every hop once per round, on one flow as the traceroute does, and
     # reports each hop's losses and round trips every REPORT rounds.
-    target = ip_addr(getenv("TARGET"))
-    rounds = int(getenv("ROUNDS", default="60"))
-    report = int(getenv("REPORT", default="10"))   # rounds per report
-    pace = interval(getenv("INTERVAL", default="1s"))
-    max_hops = int(getenv("MAX_HOPS", default="30"))   # less than 64
-    port = int(getenv("PORT", default="33434"))
+    # usage: mtr.cfty TARGET [ROUNDS] [REPORT] [INTERVAL] [MAX_HOPS] [PORT]
+    target = resolve(arg(0))[0]
+    rounds = int(arg(1, default="60"))
+    report = int(arg(2, default="10"))   # rounds per report
+    pace = interval(arg(3, default="1s"))
+    max_hops = int(arg(4, default="30"))   # less than 64
+    port = int(arg(5, default="33434"))
     last = max_hops - 1               # the target's hop, from 0, once known
     sent = array(init=0, len=max_hops)
     rtts = array(init=array(init=0s, len=0), len=max_hops)
@@ -880,7 +891,7 @@ the probes without an answer.
       }
     }
 
-    % sudo TARGET=10.2.1.3 ROUNDS=40 REPORT=20 INTERVAL=200ms crafty --udp 40000 --fw mtr.cfty
+    % sudo crafty --udp 40000 --fw mtr.cfty 10.2.1.3 40 20 200ms
     after 20 rounds:
     1   [10.1.1.1]  loss 0% avg 0.33ms  best 0.11ms worst 0.48ms
     2   [10.1.0.5]  loss 50%    avg 37.81ms best 37.6ms worst 38.1ms

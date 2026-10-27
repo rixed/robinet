@@ -46,7 +46,7 @@ type var = { name : string ; id : int ; typ : Type.t }
 type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
     | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
-    | To_ip | To_mac | Getenv | Resolve | Hostname | Split
+    | To_ip | To_mac | Getenv | Arg | Nargs | Resolve | Hostname | Split
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
     | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
@@ -902,6 +902,11 @@ let builtins =
         [ param "name" "a string" (only Type.[ String ]) ;
           param "default" "a string" (only Type.[ String ]) ~default:Omitted ],
         res Type.String ;
+      "arg", Arg,
+        [ param "n" "an int" (only Type.[ Int ]) ;
+          param "default" "a string" (only Type.[ String ]) ~default:Omitted ],
+        res Type.String ;
+      "nargs", Nargs, [], res Type.Int ;
       "resolve", Resolve, [ param "name" "a string" (only Type.[ String ]) ],
         res (Type.Array Type.Ip) ;
       "hostname", Hostname,
