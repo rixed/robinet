@@ -46,7 +46,7 @@ type var = { name : string ; id : int ; typ : Type.t }
 type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
     | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
-    | To_bytes | To_ip | To_mac | Getenv | Arg | Nargs | Resolve | Hostname | Split
+    | To_bytes | Checksum | To_ip | To_mac | Getenv | Arg | Nargs | Resolve | Hostname | Split
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
     | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
@@ -856,6 +856,11 @@ let builtins =
     let number =
         param "x" "a bool, int, float, byte, interval, time or string"
               (only_exactly Type.(String :: Interval :: Time :: scalars)) in
+    let bytes_like name =
+        param name "bytes, a byte, a string, an IP or a MAC address" (function
+            | Type.Byte -> Some Type.Byte
+            | t when t = Type.bytes || converts t Type.bytes -> Some Type.bytes
+            | _ -> None) in
     let secs what = param "x" what (only_exactly Type.[ Int ; Float ; String ]) in
     let res t _ = t in
     let sized =
@@ -895,12 +900,8 @@ let builtins =
       "now", Now, [], res Type.Time ;
       (* Of a type that [expr] tells: *)
       "stats", Stats, [], res Type.Void ;
-      "bytes", To_bytes,
-        [ param "x" "bytes, a byte, a string, an IP or a MAC address" (function
-            | Type.Byte -> Some Type.Byte
-            | t when t = Type.bytes || converts t Type.bytes -> Some Type.bytes
-            | _ -> None) ],
-        res Type.bytes ;
+      "bytes", To_bytes, [ bytes_like "x" ], res Type.bytes ;
+      "checksum", Checksum, [ bytes_like "b" ], res Type.bytes ;
       "ip_addr", To_ip,
         [ param "b" "4 bytes, an int or a string"
                 (only_exactly Type.[ bytes ; Int ; String ]) ],

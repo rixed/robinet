@@ -309,6 +309,10 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
     | T.Now, [] -> Time (now ())
     | T.To_bytes, [ Byte _ as b ] -> Array [| b |]
     | T.To_bytes, [ b ] -> b
+    | T.Checksum, [ (Byte _ | Array _) as b ] ->
+        let a = match b with Array a -> a | b -> [| b |] in
+        let s = Tools.sum (Bitstring.bitstring_of_string (string_of_bytes a)) in
+        Array [| Byte (s lsr 8) ; Byte (s land 0xff) |]
     | T.To_ip, [ Int i ] ->
         if i < 0 || i > 0xffff_ffff then error loc "%d is no IPv4 address" i ;
         Ip (Ip.Addr.o32 (Int32.of_int i))
@@ -1544,6 +1548,8 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "x = ip_addr(#010203)")
   "0s: #01020a00000102000000000147455442ff\n0s: done" \
     (runs "x = #0102 + bytes(10.0.0.1) + bytes(02:00:00:00:00:01) + bytes(\"GET\") + bytes(#42) + bytes(#ff)\nprint(\"${x}\")")
+  "0s: #b861 #feff #0000\n0s: done" \
+    (runs "h = #450000730000400040110000c0a80001c0a800c7\nprint(\"${checksum(h)} ${checksum(#01)} ${checksum(h[:10] + checksum(h) + h[12:])}\")")
   "0s: 3232235778 4294967295 192.168.1.3 0.0.0.0\n0s: done" \
     (runs "x = 192.168.1.2\nprint(\"${int(x)} ${int(255.255.255.255)} ${ip_addr(int(x) + 1)} ${ip_addr(0)}\")")
   "0s: failed: line 1, column 5: 4294967296 is no IPv4 address" \

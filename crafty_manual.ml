@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 f236e1c6600792ca7b034e37ce133087) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 12dfb325f0daa6f5aa0426bcc9a2ac99) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -237,6 +237,8 @@ to a bool. Bytes compare with the others as bytes. Others use the functions
 which also read a string as a literal: `ip_addr(getenv("SERVER"))`. An IPv4
 address converts to an int and back: `ip_addr(int(a) + 1)`. `bytes(x)` makes
 bytes of a byte or of what converts to them, for `+`: `#0102 + bytes(10.0.0.1)`.
+`checksum(b)` is the 2 bytes of the Internet checksum of `b` (RFC 1071):
+`h1 + checksum(h1 + #0000 + h2) + h2`.
 
 **Variants** need no declaration. Where variants meet (items of an array,
 branches of an `if`, values assigned to a variable...), they make one variant

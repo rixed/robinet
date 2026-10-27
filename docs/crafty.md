@@ -263,7 +263,8 @@ functions `int`, `float`, `bool`, `byte`, `interval`, `time`, `ip_addr` and
 `mac_addr`, which also read a string as a literal: `ip_addr(getenv("SERVER"))`.
 An IPv4 address converts to an int and back: `ip_addr(int(a) + 1)`.
 `bytes(x)` makes bytes of a byte or of what converts to them, for `+`:
-`#0102 + bytes(10.0.0.1)`.
+`#0102 + bytes(10.0.0.1)`. `checksum(b)` is the 2 bytes of the Internet
+checksum of `b` (RFC 1071): `h1 + checksum(h1 + #0000 + h2) + h2`.
 
 **Variants** need no declaration. Where variants meet (items of an array,
 branches of an `if`, values assigned to a variable...), they make one variant
