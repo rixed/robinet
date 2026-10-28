@@ -321,8 +321,10 @@ PERMISSIONS = {remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
   - `exfiltration` (default `false`): allows sending what was received.
   - The rules of `--local-ip` and `--remote-ip` come before the program's,
     and `--mac-spoofing` and `--exfiltration` override its flags.
-  - A packet sent that they deny stops the program, which `catch` does not
-    prevent; one received is dropped. An ICMP error received is judged by the
+  - A literal address they deny is an error when compiling; a local one only
+    once the interface is known, unless `local_ips` is set. A packet sent
+    that they deny stops the program, which `catch` does not prevent; one
+    received is dropped. An ICMP error received is judged by the
     packet it quotes, not by the router that sent it. Only IPv4 and ARP are
     permitted.
 

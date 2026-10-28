@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 ee9b342096d85ae760cbfbd63539116a) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 5b93c0a283622bd5146e8eac8205de33) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -292,10 +292,11 @@ A program may declare them, once each, at its top level, with literals only:
     -   `exfiltration` (default `false`): allows sending what was received.
     -   The rules of `--local-ip` and `--remote-ip` come before the program's,
         and `--mac-spoofing` and `--exfiltration` override its flags.
-    -   A packet sent that they deny stops the program, which `catch` does not
-        prevent; one received is dropped. An ICMP error received is judged by
-        the packet it quotes, not by the router that sent it. Only IPv4 and ARP
-        are permitted.
+    -   A literal address they deny is an error when compiling; a local one only
+        once the interface is known, unless `local_ips` is set. A packet sent
+        that they deny stops the program, which `catch` does not prevent; one
+        received is dropped. An ICMP error received is judged by the packet it
+        quotes, not by the router that sent it. Only IPv4 and ARP are permitted.
 
 ### Expressions
 

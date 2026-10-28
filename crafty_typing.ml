@@ -2078,6 +2078,107 @@ let in_order es =
     List.rev_map (fun (where, message) -> Crafty_parser.{ where ; message }) es |>
     List.sort (fun (a : Crafty_parser.error) b -> compare a.where b.where)
 
+(** Calls [f] on every statement of [b], outer ones first, including those
+ * in the blocks of expressions. *)
+let rec iter_stmts f (b : block) =
+    List.iter (fun s ->
+        f s ;
+        let e = iter_expr_stmts f and opt = Option.may (iter_expr_stmts f) in
+        let layers = List.iter (fun l -> List.iter (e % snd) l.options) in
+        match s.stmt with
+        | Stack { layers = ls ; body ; _ } -> layers ls ; iter_stmts f body
+        | Send { layers = ls ; _ } -> layers ls
+        | Expr x | Declare (_, x) | Wait x -> e x
+        | Assign { path ; value ; _ } -> List.iter (e % snd) path ; e value
+        | Repeat { count ; items ; every ; for_ ; body ; _ } ->
+            List.iter opt [ count ; items ; every ; for_ ] ; iter_stmts f body
+        | Retry { max ; body } -> opt max ; iter_stmts f body
+        | Catch body -> iter_stmts f body
+        | Break _ -> ()
+        | First { timeout ; cases ; _ } ->
+            opt timeout ; List.iter (fun (c : case) -> iter_stmts f c.body) cases
+        | On { for_ ; linger ; timeout ; max ; cases } ->
+            List.iter opt [ for_ ; linger ; timeout ; max ] ;
+            List.iter (fun (c : case) -> iter_stmts f c.body) cases) b
+
+and iter_expr_stmts f e =
+    let sub = iter_expr_stmts f in
+    match e.desc with
+    | Block b -> iter_stmts f b
+    | If { cond ; then_ ; else_ } -> sub cond ; iter_stmts f then_ ; iter_stmts f else_
+    | Case { subject ; arms ; else_ } ->
+        sub subject ;
+        List.iter (fun a -> iter_stmts f a.branch) arms ;
+        Option.may (iter_stmts f) else_
+    | Field (e, _) | Unop (_, e) | Convert e | Select { packet = e ; _ } -> sub e
+    | Index (a, b) | Binop (_, a, b) -> sub a ; sub b
+    | Slice (a, from, to_) -> sub a ; Option.may sub from ; Option.may sub to_
+    | Call (_, es) | Record es | Array es -> List.iter sub es
+    | Map kvs -> List.iter (fun (k, v) -> sub k ; sub v) kvs
+    | String parts -> List.iter (function Interp e -> sub e | Text _ -> ()) parts
+    | Construct (_, e) -> Option.may sub e
+    | Lit _ | Var _ | Packet_field _ -> ()
+
+(** The literal addresses that the stacks of [b] send from or to and that are
+ * not permitted, as errors where they are written: an IP source by the
+ * [local] rules and a destination by the [remote] ones (the other way round
+ * in a quoted IP), an Ethernet source other than [mac]. Without rules or
+ * [mac], those are not checked. *)
+let denied_literals ~local ~remote ~mac (b : block) =
+    let errors = ref [] in
+    let deny (e : expr) what addr =
+        errors := (e.loc, Printf.sprintf "%s %s is not permitted" what addr) :: !errors in
+    let ip e what rules ip =
+        Option.may (fun rules ->
+            if Firewall.verdict rules ip = Firewall.Deny then
+                deny e what (Ip.Addr.to_dotted_string ip)) rules in
+    let layer l =
+        let quoted = l.layer.L.quoted in
+        let q = if quoted then "Quoted source" else "Source"
+        and r = if quoted then "Quoted destination" else "Destination" in
+        List.iter (fun (i, e) ->
+            match l.layer.L.name, l.layer.L.fields.(i).L.name, e.desc with
+            | A.Layer_name.IP, "src", Lit (A.Ip a) ->
+                ip e (q ^" address") (if quoted then remote else local) a
+            | A.Layer_name.IP, "dst", Lit (A.Ip a) ->
+                ip e (r ^" address") (if quoted then local else remote) a
+            | A.Layer_name.Eth, "src", Lit (A.Mac m) ->
+                Option.may (fun mac ->
+                    if not (Eth.Addr.eq m mac) then
+                        deny e "Source MAC" (Eth.Addr.to_hexstring m)) mac
+            | _ -> ()) l.options in
+    iter_stmts (fun s ->
+        match s.stmt with
+        | Stack { layers ; _ } | Send { layers ; _ } -> List.iter layer layers
+        | _ -> ()) b ;
+    in_order !errors
+
+(* [denied text] is what [denied_literals] says of that program, with local
+ * rules accepting 10.0.0.0/8, remote ones anything but 192.0.2.66, and the
+ * MAC 02:00:00:00:00:01: *)
+(*$inject
+  let denied text =
+      let cidr = Firewall.cidr_of_string in
+      match Result.bind (Result.map_error (fun e -> [ e ]) (Crafty_parser.parse text)) check with
+      | Error es -> String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es)
+      | Ok b ->
+          denied_literals b ~local:(Some [ Firewall.Accept, cidr "10.0.0.0/8" ])
+              ~remote:(Some [ Firewall.Deny, cidr "192.0.2.66" ; Firewall.Accept, cidr "0.0.0.0/0" ])
+              ~mac:(Some (Eth.Addr.of_string "02:00:00:00:00:01")) |>
+          List.map (IO.to_string Crafty_parser.print_error) |> String.concat "\n"
+*)
+(*$= denied & ~printer:identity
+  "" (denied "/IP(dst=192.0.2.1)/UDP(dst=7)/Raw()")
+  "line 1, column 9: Destination address 192.0.2.66 is not permitted" \
+    (denied "/IP(dst=192.0.2.66)/UDP(dst=7)/Raw()")
+  "line 1, column 41: Source address 172.16.0.1 is not permitted" \
+    (denied "/IP(dst=192.0.2.1) { if true { /IP!(src=172.16.0.1, dst=192.0.2.1)/UDP(dst=7)/Raw() } }")
+  "line 1, column 78: Quoted destination address 172.16.0.2 is not permitted" \
+    (denied "/IP!(src=10.0.0.1, dst=192.0.2.1)/ICMP/DestUnreachable/IP(src=192.0.2.1, dst=172.16.0.2)/UDP(src=1, dst=2)/Raw()")
+  "line 1, column 11: Source MAC 02:00:00:00:00:99 is not permitted" \
+    (denied "/Eth!(src=02:00:00:00:00:99, dst=ff:ff:ff:ff:ff:ff)/Raw()")
+*)
+
 (** The typed program, or the errors, in the order of the source; and in
  * [warnings], what makes sense but is likely not what was meant. [BUDGET]
  * and [PORTS] are what {!limits} reads. *)

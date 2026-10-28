@@ -320,7 +320,19 @@ let () =
             | Error e ->
                 Printf.eprintf "-p: %s\n" (IO.to_string Crafty_interp.print_error e) ;
                 exit 2) !print_only in
+    let denied_literals (p : Crafty_typing.permissions) ~mac =
+        match Crafty_typing.denied_literals ~local:p.local_ips
+                  ~remote:p.remote_ips ~mac program.body with
+        | [] -> ()
+        | es -> fail es in
     if !check then (
+        (* Without the interface, the local rules are checked only when they
+         * do not end with its addresses: *)
+        let p = program.limits.permissions in
+        let r = Crafty_typing.resolve_permissions ~program:p ~cli:cli_permissions
+                                                  ~local:[] in
+        denied_literals { r with local_ips = if p.local_ips = None then None
+                                              else r.local_ips } ~mac:None ;
         Printf.printf "%s: OK\n" prog_name ;
         exit 0) ;
     if !ifname = "" then (
@@ -370,6 +382,8 @@ let () =
                                               ~cli:cli_permissions ~local } in
     let permissions = limits.permissions in
     let rules = Option.default [] and flag = Option.default false in
+    denied_literals permissions
+        ~mac:(if flag permissions.mac_spoofing then None else Some iface.mac) ;
     let speed, full_duplex =
         let speed', full_duplex' = Host_config.link !ifname in
         (match !speed, speed' with Some s, _ | None, Some s -> s | None, None -> EthSpeed.Eth1Gbps),

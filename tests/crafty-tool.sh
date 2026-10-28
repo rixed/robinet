@@ -139,11 +139,20 @@ PERMISSIONS = {remote_ips: [Accept(10.77.0.0/24)]}
   expect timeout=1s Raw { print(MATCH[Raw].data) }
 }
 EOF
+# Addresses that only running tells, then literal ones:
+cat > "$DIR/to.cfty" <<'EOF'
+/IP(dst=ip_addr(arg(0)))/UDP(dst=7)/Raw("x")
+EOF
 cat > "$DIR/spoof_ip.cfty" <<'EOF'
-/IP!(src=10.77.0.9, dst=10.77.0.2)/UDP(dst=7)/Raw("spoofed")
+src = 10.77.0.9
+/IP!(src=src, dst=10.77.0.2)/UDP(dst=7)/Raw("spoofed")
 EOF
 cat > "$DIR/spoof_mac.cfty" <<'EOF'
-/Eth!(src=02:00:00:00:00:99, dst=ff:ff:ff:ff:ff:ff)/IP!(src=10.77.0.5, dst=10.77.0.2)/UDP(dst=7)/Raw("spoofed")
+src = 02:00:00:00:00:99
+/Eth!(src=src, dst=ff:ff:ff:ff:ff:ff)/IP!(src=10.77.0.5, dst=10.77.0.2)/UDP(dst=7)/Raw("spoofed")
+EOF
+cat > "$DIR/spoof_ip_literal.cfty" <<'EOF'
+/IP!(src=10.77.0.9, dst=10.77.0.2)/UDP(dst=7)/Raw("spoofed")
 EOF
 
 setup
@@ -242,8 +251,14 @@ check "a budget stops the program" 3 $? "stopped: max-packets"
 "$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/permitted.cfty" > "$DIR/out" 2>&1
 check "a remote address the program permits" 0 $? "permitted"
 
-"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --remote-ip deny:10.77.0.2 "$DIR/permitted.cfty" > "$DIR/out" 2>&1
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --remote-ip deny:10.77.0.2 "$DIR/to.cfty" 10.77.0.2 > "$DIR/out" 2>&1
 check "a remote address the command line denies" 4 $? "stopped: remote address 10.77.0.2 not permitted"
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --remote-ip deny:10.77.0.2 "$DIR/permitted.cfty" > "$DIR/out" 2>&1
+check "a literal remote address denied" 2 $? "Destination address 10.77.0.2 is not permitted"
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/spoof_ip_literal.cfty" > "$DIR/out" 2>&1
+check "a literal spoofed IP address" 2 $? "Source address 10.77.0.9 is not permitted"
 
 "$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/spoof_ip.cfty" > "$DIR/out" 2>&1
 check "a spoofed IP address" 4 $? "stopped: local address 10.77.0.9 not permitted"
