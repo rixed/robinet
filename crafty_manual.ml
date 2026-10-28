@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 5b93c0a283622bd5146e8eac8205de33) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 5c71b0b7a2f45933977ad958c4038567) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -289,7 +289,10 @@ A program may declare them, once each, at its top level, with literals only:
         address (or `--ip`), `remote_ips` any.
     -   `mac_spoofing` (default `false`): allows sending from another MAC than
         the interface's.
-    -   `exfiltration` (default `false`): allows sending what was received.
+    -   `exfiltration` (default `false`): allows sending a payload (bytes and
+        strings of `Raw`, `Request`, `Reply`, `Query`, `Answer`) made of the
+        payload of a packet received, through any variable or computation.
+        Without it, such a payload is an error when compiling.
     -   The rules of `--local-ip` and `--remote-ip` come before the program's,
         and `--mac-spoofing` and `--exfiltration` override its flags.
     -   A literal address they deny is an error when compiling; a local one only
@@ -681,6 +684,7 @@ The first record is an address only if the name has no CNAME.
 
 ### A UDP echo server
 
+    PERMISSIONS = {exfiltration: true}  # it sends back what it receives
     on for=1h /IP/UDP(dst == 7)/Raw {
       /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Raw(MATCH[Raw].data)
     }

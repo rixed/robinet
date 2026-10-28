@@ -318,7 +318,10 @@ PERMISSIONS = {remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
     address (or `--ip`), `remote_ips` any.
   - `mac_spoofing` (default `false`): allows sending from another MAC than
     the interface's.
-  - `exfiltration` (default `false`): allows sending what was received.
+  - `exfiltration` (default `false`): allows sending a payload (bytes and
+    strings of `Raw`, `Request`, `Reply`, `Query`, `Answer`) made of the
+    payload of a packet received, through any variable or computation.
+    Without it, such a payload is an error when compiling.
   - The rules of `--local-ip` and `--remote-ip` come before the program's,
     and `--mac-spoofing` and `--exfiltration` override its flags.
   - A literal address they deny is an error when compiling; a local one only
@@ -734,6 +737,7 @@ The first record is an address only if the name has no CNAME.
 ### A UDP echo server
 
 ```
+PERMISSIONS = {exfiltration: true}  # it sends back what it receives
 on for=1h /IP/UDP(dst == 7)/Raw {
   /IP(dst=MATCH[IP].src)/UDP(src=7, dst=MATCH[UDP].src)/Raw(MATCH[Raw].data)
 }

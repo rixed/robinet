@@ -139,6 +139,13 @@ PERMISSIONS = {remote_ips: [Accept(10.77.0.0/24)]}
   expect timeout=1s Raw { print(MATCH[Raw].data) }
 }
 EOF
+cat > "$DIR/echo_back.cfty" <<'EOF'
+/IP(dst=10.77.0.2)/UDP(dst=7) {
+  Raw("ping")
+  expect timeout=1s Raw { Raw(MATCH[Raw].data) }
+  expect timeout=1s Raw { print("echoed back") }
+}
+EOF
 # Addresses that only running tells, then literal ones:
 cat > "$DIR/to.cfty" <<'EOF'
 /IP(dst=ip_addr(arg(0)))/UDP(dst=7)/Raw("x")
@@ -265,6 +272,12 @@ check "a spoofed IP address" 4 $? "stopped: local address 10.77.0.9 not permitte
 
 "$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --local-ip accept:10.77.0.9 "$DIR/spoof_ip.cfty" > "$DIR/out" 2>&1
 check "a spoofed IP address, permitted" 0 $?
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/echo_back.cfty" > "$DIR/out" 2>&1
+check "sending back what was received" 2 $? "PERMISSIONS.exfiltration does not allow"
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --exfiltration true "$DIR/echo_back.cfty" > "$DIR/out" 2>&1
+check "sending back what was received, permitted" 0 $? "echoed back"
 
 "$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/spoof_mac.cfty" > "$DIR/out" 2>&1
 check "a spoofed MAC" 4 $? "stopped: source MAC 02:00:00:00:00:99 not permitted"

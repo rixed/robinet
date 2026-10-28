@@ -273,6 +273,11 @@ let () =
     let cli_permissions =
         Crafty_typing.{ local_ips = !local_ips ; remote_ips = !remote_ips ;
                         mac_spoofing = !mac_spoofing ; exfiltration = !exfiltration } in
+    (* Unless allowed, nothing received is sent: *)
+    if not (!exfiltration |? (program.limits.permissions.exfiltration |? false)) then (
+        match Crafty_typing.exfiltrations program.body with
+        | [] -> ()
+        | es -> fail es) ;
     (* What both the command line and the program allow: *)
     let limits =
         let budget =

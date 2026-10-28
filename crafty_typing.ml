@@ -2078,46 +2078,61 @@ let in_order es =
     List.rev_map (fun (where, message) -> Crafty_parser.{ where ; message }) es |>
     List.sort (fun (a : Crafty_parser.error) b -> compare a.where b.where)
 
+(* The expressions directly within [s], not within its blocks: *)
+let stmt_exprs s =
+    let opts = List.filter_map identity in
+    let layers = List.concat_map (fun l -> List.map snd l.options) in
+    match s.stmt with
+    | Stack { layers = ls ; _ } | Send { layers = ls ; _ } -> layers ls
+    | Expr e | Declare (_, e) | Wait e -> [ e ]
+    | Assign { path ; value ; _ } -> List.map snd path @ [ value ]
+    | Repeat { count ; items ; every ; for_ ; _ } -> opts [ count ; items ; every ; for_ ]
+    | Retry { max ; _ } -> opts [ max ]
+    | First { timeout ; _ } -> opts [ timeout ]
+    | On { for_ ; linger ; timeout ; max ; _ } -> opts [ for_ ; linger ; timeout ; max ]
+    | Catch _ | Break _ -> []
+
+(* The expressions directly within [e], not within its blocks: *)
+let sub_exprs e =
+    match e.desc with
+    | Field (e, _) | Unop (_, e) | Convert e | Select { packet = e ; _ } -> [ e ]
+    | Index (a, b) | Binop (_, a, b) -> [ a ; b ]
+    | Slice (a, from, to_) -> a :: List.filter_map identity [ from ; to_ ]
+    | Call (_, es) | Record es | Array es -> es
+    | Map kvs -> List.concat_map (fun (k, v) -> [ k ; v ]) kvs
+    | String parts -> List.filter_map (function Interp e -> Some e | Text _ -> None) parts
+    | Construct (_, e) -> Option.map_default (fun e -> [ e ]) [] e
+    | If { cond ; _ } -> [ cond ]
+    | Case { subject ; _ } -> [ subject ]
+    | Block _ | Lit _ | Var _ | Packet_field _ -> []
+
+(* The blocks directly within [s] and [e]: *)
+let stmt_blocks s =
+    match s.stmt with
+    | Stack { body ; _ } | Repeat { body ; _ } | Retry { body ; _ } | Catch body ->
+        [ body ]
+    | First { cases ; _ } | On { cases ; _ } -> List.map (fun (c : case) -> c.body) cases
+    | Send _ | Expr _ | Declare _ | Wait _ | Assign _ | Break _ -> []
+
+let expr_blocks e =
+    match e.desc with
+    | Block b -> [ b ]
+    | If { then_ ; else_ ; _ } -> [ then_ ; else_ ]
+    | Case { arms ; else_ ; _ } ->
+        List.map (fun a -> a.branch) arms @ Option.map_default (fun b -> [ b ]) [] else_
+    | _ -> []
+
 (** Calls [f] on every statement of [b], outer ones first, including those
  * in the blocks of expressions. *)
 let rec iter_stmts f (b : block) =
     List.iter (fun s ->
         f s ;
-        let e = iter_expr_stmts f and opt = Option.may (iter_expr_stmts f) in
-        let layers = List.iter (fun l -> List.iter (e % snd) l.options) in
-        match s.stmt with
-        | Stack { layers = ls ; body ; _ } -> layers ls ; iter_stmts f body
-        | Send { layers = ls ; _ } -> layers ls
-        | Expr x | Declare (_, x) | Wait x -> e x
-        | Assign { path ; value ; _ } -> List.iter (e % snd) path ; e value
-        | Repeat { count ; items ; every ; for_ ; body ; _ } ->
-            List.iter opt [ count ; items ; every ; for_ ] ; iter_stmts f body
-        | Retry { max ; body } -> opt max ; iter_stmts f body
-        | Catch body -> iter_stmts f body
-        | Break _ -> ()
-        | First { timeout ; cases ; _ } ->
-            opt timeout ; List.iter (fun (c : case) -> iter_stmts f c.body) cases
-        | On { for_ ; linger ; timeout ; max ; cases } ->
-            List.iter opt [ for_ ; linger ; timeout ; max ] ;
-            List.iter (fun (c : case) -> iter_stmts f c.body) cases) b
+        List.iter (iter_expr_stmts f) (stmt_exprs s) ;
+        List.iter (iter_stmts f) (stmt_blocks s)) b
 
 and iter_expr_stmts f e =
-    let sub = iter_expr_stmts f in
-    match e.desc with
-    | Block b -> iter_stmts f b
-    | If { cond ; then_ ; else_ } -> sub cond ; iter_stmts f then_ ; iter_stmts f else_
-    | Case { subject ; arms ; else_ } ->
-        sub subject ;
-        List.iter (fun a -> iter_stmts f a.branch) arms ;
-        Option.may (iter_stmts f) else_
-    | Field (e, _) | Unop (_, e) | Convert e | Select { packet = e ; _ } -> sub e
-    | Index (a, b) | Binop (_, a, b) -> sub a ; sub b
-    | Slice (a, from, to_) -> sub a ; Option.may sub from ; Option.may sub to_
-    | Call (_, es) | Record es | Array es -> List.iter sub es
-    | Map kvs -> List.iter (fun (k, v) -> sub k ; sub v) kvs
-    | String parts -> List.iter (function Interp e -> sub e | Text _ -> ()) parts
-    | Construct (_, e) -> Option.may sub e
-    | Lit _ | Var _ | Packet_field _ -> ()
+    List.iter (iter_stmts f) (expr_blocks e) ;
+    List.iter (iter_expr_stmts f) (sub_exprs e)
 
 (** The literal addresses that the stacks of [b] send from or to and that are
  * not permitted, as errors where they are written: an IP source by the
@@ -2152,6 +2167,115 @@ let denied_literals ~local ~remote ~mac (b : block) =
         | Stack { layers ; _ } | Send { layers ; _ } -> List.iter layer layers
         | _ -> ()) b ;
     in_order !errors
+
+(* What a terminal layer carries, which is the payload of the packet: its
+ * bytes and strings, and what holds them, rather than its numbers: *)
+let is_payload (l : L.layer) (f : L.field) =
+    l.terminal &&
+    match f.typ with
+    | Type.Bool | Type.Byte | Type.Int | Type.Float -> false
+    | _ -> true
+
+(** Where [b] sets a payload with what it received, as errors: the payload
+ * fields of what [MATCH] matched taint what they are copied, assigned or
+ * computed into, whichever the order of the statements. *)
+let exfiltrations (b : block) =
+    (* The variables that hold received packets or their layers, and those
+     * that hold what their payloads made: *)
+    let packets = Hashtbl.create 7 and tainted = Hashtbl.create 7 in
+    let changed = ref true in
+    let mark tbl (v : var) =
+        if not (Hashtbl.mem tbl v.id) then (
+            Hashtbl.add tbl v.id () ;
+            changed := true) in
+    (* Whether [e] holds received packets or their layers: *)
+    let rec is_packet e =
+        match e.desc with
+        | Var v -> Hashtbl.mem packets v.id
+        | Select { packet ; _ } | Index (packet, _) | Slice (packet, _, _) ->
+            is_packet packet
+        | _ -> false in
+    (* Whether [e] is made of what a received packet carried, which a packet
+     * read whole is: *)
+    let rec taints e =
+        match e.desc with
+        | Var v -> Hashtbl.mem tainted v.id
+        | Field (r, i) when is_packet r ->
+            (match r.typ with
+            | Type.Record fs ->
+                let name = fst (List.nth fs i) in
+                List.exists (fun (l : L.layer) ->
+                    packet_record l = r.typ &&
+                    Array.exists (fun (f : L.field) -> f.name = name && is_payload l f)
+                                 l.fields) L.all
+            | _ -> false)
+        | _ when is_packet e -> false
+        | Block b -> block_taints b
+        | If { then_ ; else_ ; _ } -> block_taints then_ || block_taints else_
+        | Case { arms ; else_ ; _ } ->
+            List.exists (fun a -> block_taints a.branch) arms ||
+            Option.map_default block_taints false else_
+        | _ -> List.exists (fun e -> is_packet e || taints e) (sub_exprs e)
+    and block_taints b =
+        match List.last b with
+        | { stmt = Expr e ; _ } -> taints e
+        | _ | exception _ -> false in
+    let flows (v : var) e =
+        if is_packet e then mark packets v ;
+        if taints e then mark tainted v in
+    (* What a case binds, in any expression: *)
+    let rec bind_cases e =
+        (match e.desc with
+        | Case { subject ; arms ; _ } ->
+            List.iter (fun a -> Option.may (fun v -> flows v subject) a.held) arms
+        | _ -> ()) ;
+        List.iter bind_cases (sub_exprs e) in
+    while !changed do
+        changed := false ;
+        iter_stmts (fun s ->
+            List.iter bind_cases (stmt_exprs s) ;
+            match s.stmt with
+            | Declare (v, e) -> flows v e
+            | Assign { var ; value ; _ } -> flows var value
+            | Repeat { var ; items = Some e ; _ } -> flows var e
+            | First { cases ; _ } | On { cases ; _ } ->
+                List.iter (fun (c : case) -> mark packets c.match_) cases
+            | _ -> ()) b
+    done ;
+    let errors = ref [] in
+    iter_stmts (fun s ->
+        match s.stmt with
+        | Stack { layers ; _ } | Send { layers ; _ } ->
+            List.iter (fun l ->
+                List.iter (fun (i, e) ->
+                    if is_payload l.layer l.layer.L.fields.(i) && taints e then
+                        errors := (e.loc, "This payload is made of what was received, \
+                                           which PERMISSIONS.exfiltration does not allow") ::
+                                  !errors) l.options) layers
+        | _ -> ()) b ;
+    in_order !errors
+
+(* [exfiltrated text] is what [exfiltrations] says of that program: *)
+(*$inject
+  let exfiltrated text =
+      match Result.bind (Result.map_error (fun e -> [ e ]) (Crafty_parser.parse text)) check with
+      | Error es -> String.concat "\n" (List.map (IO.to_string Crafty_parser.print_error) es)
+      | Ok b ->
+          exfiltrations b |>
+          List.map (fun (e : Crafty_parser.error) -> Printf.sprintf "%d:%d" e.where.line e.where.column) |>
+          String.concat " "
+*)
+(*$= exfiltrated & ~printer:identity
+  "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) { Raw(\"x\")\nexpect Raw { Raw(\"${MATCH[UDP].src}\") } }")
+  "2:18" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { Raw(MATCH[Raw].data) } }")
+  "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nx = randbytes(1)\nexpect Raw { x := x + MATCH[Raw].data[1:] }\nRaw(x) }")
+  "2:18" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { Raw(\"${MATCH}\") } }")
+  "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { p = MATCH\nq = p[Raw]\nRaw(q.data) } }")
+  "2:45" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { case var=r MATCH[-1] Raw { Raw(r.data) } else {} } }")
+  "" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nexpect Raw { case var=r MATCH[-1] UDP { Raw(\"${r.src}\") } else {} } }")
+  "4:5" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=7) {\nn = 0\non Raw { n += length(MATCH[Raw].data) }\nRaw(\"${n}\") }")
+  "2:23" (exfiltrated "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { Query(\"a\")\nexpect Answer { Query(MATCH[Answer].answers[0].name) } }")
+*)
 
 (* [denied text] is what [denied_literals] says of that program, with local
  * rules accepting 10.0.0.0/8, remote ones anything but 192.0.2.66, and the
