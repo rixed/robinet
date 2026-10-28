@@ -238,6 +238,8 @@ does not compile, 3 when a budget stops it, 130 when interrupted.
   give its unix timestamp, `time(secs)` the reverse.
 - `ip`: `192.0.2.1`. IPv4 only.
 - `mac`: `aa:bb:cc:dd:ee:ff`.
+- `cidr`: `10.0.0.0/8`, no bit set beyond the mask. `ip in net` tells whether
+  an address is in it.
 - arrays: `[1, 2, 3]`. Items of one type.
 - maps: `[192.0.2.1: "gw", 192.0.2.2: "dns"]`, a `string[ip]`, in no
   particular order. `map(key=k, default=v)` is an empty map with keys of the
@@ -259,8 +261,8 @@ expected, as to `print`, are text.
 **Conversions** happen where needed: an int to a float, a byte to an int, a
 string, an IP address or a MAC address to bytes and back (4 and 6 bytes), an
 int to a bool. Bytes compare with the others as bytes. Others use the
-functions `int`, `float`, `bool`, `byte`, `interval`, `time`, `ip_addr` and
-`mac_addr`, which also read a string as a literal: `ip_addr(getenv("SERVER"))`.
+functions `int`, `float`, `bool`, `byte`, `interval`, `time`, `ip_addr`,
+`mac_addr` and `cidr`, which also read a string as a literal: `ip_addr(getenv("SERVER"))`.
 An IPv4 address converts to an int and back: `ip_addr(int(a) + 1)`.
 `bytes(x)` makes bytes of a byte or of what converts to them, for `+`:
 `#0102 + bytes(10.0.0.1)`. `checksum(b)` is the 2 bytes of the Internet
@@ -320,8 +322,9 @@ Operators, from the tightest binding to the loosest:
    int, and a byte stays 8 bits.
 5. `&`, then `^`, then `|`: bitwise, on ints or bytes. They bind tighter than
    comparisons: `flags & RST == 0` is `(flags & RST) == 0`.
-6. `==`, `!=`, `<`, `<=`, `>`, `>=`: they do not chain; ordering works on
-   numbers, bytes, intervals, times and strings.
+6. `==`, `!=`, `<`, `<=`, `>`, `>=`, and `in` (an IP address in a CIDR):
+   they do not chain; ordering works on numbers, bytes, intervals, times and
+   strings.
 7. `&&`, then `||`.
 
 Also: `r.field`, `a[i]` (`a[-1]` is the last item), `m[k]` (else the

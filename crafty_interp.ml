@@ -279,6 +279,8 @@ let rec call loc (b : T.builtin) args ~print ~print_err ~now =
         parsed loc "an IP address" (function Ip _ -> true | _ -> false) s
     | T.To_mac, [ String s ] ->
         parsed loc "a MAC address" (function Mac _ -> true | _ -> false) s
+    | T.To_cidr, [ String s ] ->
+        parsed loc "a CIDR" (function Cidr _ -> true | _ -> false) s
     | T.To_interval, [ Interval _ as i ] -> i
     | T.To_time, [ Time _ as t ] -> t
     | T.Rand, [ max ] -> rand loc max
@@ -573,6 +575,10 @@ let rec eval output (env : env) (e : T.expr) =
         | A.Le -> Bool (compare_values a b <= 0)
         | A.Gt -> Bool (compare_values a b > 0)
         | A.Ge -> Bool (compare_values a b >= 0)
+        | A.In ->
+            (match a, b with
+            | Ip ip, Cidr c -> Bool (Ip.Cidr.mem c ip)
+            | _ -> assert false)
         | op -> arith e.loc op a b)
     | T.Record es -> Record (Array.of_list (List.map eval es))
     | T.Array es -> Array (Array.of_list (List.map eval es))
@@ -1568,6 +1574,10 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "h = #450000730000400040110000c0a80001c0a800c7\nprint(\"${checksum(h)} ${checksum(#01)} ${checksum(h[:10] + checksum(h) + h[12:])}\")")
   "0s: 3232235778 4294967295 192.168.1.3 0.0.0.0\n0s: done" \
     (runs "x = 192.168.1.2\nprint(\"${int(x)} ${int(255.255.255.255)} ${ip_addr(int(x) + 1)} ${ip_addr(0)}\")")
+  "0s: true false true false 10.0.0.0/8 true 0.0.0.0/0\n0s: done" \
+    (runs "n = 10.0.0.0/8\nm = [n: 1]\nprint(\"${10.1.2.3 in n} ${11.0.0.1 in n} ${1.2.3.4 in 0.0.0.0/0} ${n == cidr(\"10.0.0.0/16\")} ${n} ${has(m, cidr(\" 10.0.0.0/8\"))} ${0.0.0.0/0}\")")
+  "0s: failed: line 1, column 5: Cannot convert \"10.0.0.0\" to a CIDR" \
+    (runs "x = cidr(\"10.0.0.0\")")
   "0s: failed: line 1, column 5: 4294967296 is no IPv4 address" \
     (runs "x = ip_addr(4294967296)")
   "0s: #0a000001 4 #020000000001\n0s: done" \

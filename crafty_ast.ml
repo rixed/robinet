@@ -71,7 +71,7 @@ end
 module Type =
 struct
     type t =
-        | Void | Bool | Byte | Int | Float | String | Interval | Time | Ip | Mac
+        | Void | Bool | Byte | Int | Float | String | Interval | Time | Ip | Mac | Cidr
         | Record of (string * t) list
         | Array of t
         (* Of the keys, then of the values: *)
@@ -92,6 +92,7 @@ struct
         | Time -> String.print oc "time"
         | Ip -> String.print oc "ip"
         | Mac -> String.print oc "mac"
+        | Cidr -> String.print oc "cidr"
         | Record fs ->
             List.print ~first:"{" ~last:"}" ~sep:", " (fun oc (n, t) ->
                 Printf.fprintf oc "%s: %a" n print t) oc fs
@@ -113,6 +114,8 @@ type binop =
     | And | Or
     | BitAnd | BitOr | BitXor | Shl | Shr
     | Eq | Ne | Lt | Le | Gt | Ge
+    (* An address in a CIDR: *)
+    | In
 
 type literal =
     | Bool of bool
@@ -123,6 +126,7 @@ type literal =
     | Time of Clock.Wall.t
     | Ip of Ip.Addr.t
     | Mac of Eth.Addr.t
+    | Cidr of Ip.Cidr.t
 
 type expr = { loc : location ; desc : expr_desc }
 
@@ -292,7 +296,7 @@ let is_constructor s = s <> "" && Char.is_uppercase s.[0]
  * Lower case. *)
 let functions =
     [ "rand" ; "randbytes" ; "exp" ; "ln" ; "log" ; "log2" ; "int" ; "float" ;
-      "bool" ; "byte" ; "interval" ; "time" ; "now" ; "bytes" ; "checksum" ; "ip_addr" ; "mac_addr" ; "getenv" ;
+      "bool" ; "byte" ; "interval" ; "time" ; "now" ; "bytes" ; "checksum" ; "ip_addr" ; "mac_addr" ; "cidr" ; "getenv" ;
       "arg" ; "nargs" ; "resolve" ; "hostname" ; "split" ;
       "array" ; "length" ; "concat" ; "append" ; "prepend" ;
       "map" ; "has" ; "remove" ; "keys" ; "values" ;
@@ -311,7 +315,7 @@ let predefined = [ "MATCH" ; "LAST" ] @ self_declared
 let keywords =
     [ "true" ; "false" ; "repeat" ; "foreach" ; "retry" ; "catch" ; "if" ;
       "elsif" ; "else" ; "case" ; "break" ; "expect" ; "first" ; "on" ; "wait" ;
-      "sleep" ]
+      "sleep" ; "in" ]
 
 (** {2 Printing}
  *
@@ -323,6 +327,7 @@ let string_of_binop = function
     | And -> "&&" | Or -> "||"
     | BitAnd -> "&" | BitOr -> "|" | BitXor -> "^" | Shl -> "<<" | Shr -> ">>"
     | Eq -> "==" | Ne -> "!=" | Lt -> "<" | Le -> "<=" | Gt -> ">" | Ge -> ">="
+    | In -> "in"
 
 (* The shortest that reads back as [f], and as a float; "inf", "-inf" and
  * "nan" for the non-finite ones: *)
@@ -354,6 +359,7 @@ let print_literal oc = function
         (* Not [Eth.Addr.to_string], which may name the vendor: *)
         String.print oc (Tools.hexstring ~sep:":"
             (Bitstring.string_of_bitstring (mac :> Bitstring.bitstring)))
+    | Cidr c -> String.print oc (Ip.Cidr.to_string c)
 
 let print_text oc s =
     String.iter (function
@@ -373,7 +379,7 @@ let print_list print oc l =
 (* How tightly an operation binds, as the parser reads them: *)
 let precedence = function
     | Or -> 1 | And -> 2
-    | Eq | Ne | Lt | Le | Gt | Ge -> 3
+    | Eq | Ne | Lt | Le | Gt | Ge | In -> 3
     | BitOr -> 4 | BitXor -> 5 | BitAnd -> 6 | Shl | Shr -> 7
     | Add | Sub -> 8 | Mul | Div | Mod -> 9
 

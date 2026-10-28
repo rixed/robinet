@@ -262,14 +262,32 @@ let float_lit =
      (digits ++ exponent >>: fun (i, e) -> i ^ e) |> signed) +- end_of_word >>:
     fun s -> Float (float_of_string s)
 
+(* Not followed by a slash and a digit, which make a CIDR: *)
 let ip_lit =
     let octet = chars_of ~max:3 "digit" is_digit in
-    octet ++ times 3 ~sep:none (item '.' -+ octet) +- end_of_word >>:
+    octet ++ times 3 ~sep:none (item '.' -+ octet) +- end_of_word +-
+    quiet (nay (item '/' -- char_if "digit" is_digit)) >>:
     fun (o, os) ->
         let s = String.concat "." (o :: os) in
         if List.exists (fun o -> int_of_string o > 255) (o :: os) then
             reject "Invalid IP address %s" s ;
         Ip (Ip.Addr.of_dotted_string s)
+
+(* A network address: no bit is set beyond the mask. *)
+let cidr_lit =
+    let octet = chars_of ~max:3 "digit" is_digit in
+    octet ++ times 3 ~sep:none (item '.' -+ octet) +- item '/' ++
+    chars_of ~max:2 "digit" is_digit +- end_of_word >>:
+    fun ((o, os), w) ->
+        let s = String.concat "." (o :: os) ^"/"^ w in
+        if List.exists (fun o -> int_of_string o > 255) (o :: os) ||
+           int_of_string w > 32 then
+            reject "Invalid CIDR %s" s ;
+        let c = Ip.Cidr.of_string s in
+        let net, width = (c :> Ip.Addr.t * int) in
+        if Ip.Addr.compare (Ip.Addr.higher_bits net width) net <> 0 then
+            reject "Invalid CIDR %s: bits are set beyond the mask" s ;
+        Cidr c
 
 (* No error before its first colon, as a word can start like a byte: *)
 let mac_lit =
@@ -322,7 +340,7 @@ let bool_lit =
 
 (* Of those that fail at the same place, the last one tried tells why: *)
 let literal =
-    time_lit ||| interval_lit ||| bool_lit ||| ip_lit ||| mac_lit ||| float_lit |||
+    time_lit ||| interval_lit ||| bool_lit ||| cidr_lit ||| ip_lit ||| mac_lit ||| float_lit |||
     int_lit
 
 (** The literal that is all of that text, if any. *)
@@ -599,7 +617,8 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
         let cmp =
             op "==" Eq ||| op "!=" Ne |||
             op_not_before "<" '=' Lt ||| op "<=" Le |||
-            op_not_before ">" '=' Gt ||| op ">=" Ge in
+            op_not_before ">" '=' Gt ||| op ">=" Ge |||
+            (word "in" -- end_of_word >>: fun () -> In) in
         let cmp =
             if cond then
                 cmp ||| (item '=' -- nay (item '=' ||| item '~') >>: fun () -> Eq)
@@ -1166,6 +1185,9 @@ let parse_patterns text =
   "line 1, column 9: Unknown escape sequence \\q" (reads "x = \"a\\qb\"")
   "line 1, column 9: Odd number of hexadecimal digits in #123" (reads "x = #123")
   "line 1, column 14: Invalid IP address 300.1.2.3" (reads "x = 300.1.2.3")
+  "line 1, column 16: Invalid CIDR 10.0.0.0/33" (reads "x = 10.0.0.0/33")
+  "line 1, column 15: Invalid CIDR 10.0.0.1/8: bits are set beyond the mask" \
+    (reads "x = 10.0.0.1/8")
   "line 1, column 7: Invalid interval 5x: unknown unit x" (reads "x = 5x")
   "line 1, column 25: Integer 99999999999999999999 is too large" \
     (reads "x = 99999999999999999999")

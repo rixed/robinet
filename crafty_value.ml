@@ -33,6 +33,7 @@ type value =
     | Time of Clock.Wall.t
     | Ip of Ip.Addr.t
     | Mac of Eth.Addr.t
+    | Cidr of Ip.Cidr.t
     (* In the order of the fields of the record type: *)
     | Record of value array
     | Array of value array
@@ -49,6 +50,7 @@ let of_literal = function
     | A.Time t -> Time t
     | A.Ip ip -> Ip ip
     | A.Mac mac -> Mac mac
+    | A.Cidr c -> Cidr c
 
 let bytes_of_string s =
     Array (Array.init (String.length s) (fun i -> Byte (Char.code s.[i])))
@@ -58,6 +60,11 @@ let string_of_bytes a =
         match a.(i) with Byte b -> Char.chr b | _ -> assert false)
 
 let mac_bits mac = (mac : Eth.Addr.t :> Bitstring.bitstring)
+
+let compare_cidrs a b =
+    let a, n = (a : Ip.Cidr.t :> Ip.Addr.t * int)
+    and b, m = (b : Ip.Cidr.t :> Ip.Addr.t * int) in
+    match Ip.Addr.compare a b with 0 -> Int.compare n m | c -> c
 
 (* A total order that agrees with [equal], which ignores the defaults of
  * maps: *)
@@ -73,6 +80,7 @@ let rec compare_keys a b =
     match a, b with
     | Ip a, Ip b -> Ip.Addr.compare a b
     | Mac a, Mac b -> Bitstring.compare (mac_bits a) (mac_bits b)
+    | Cidr a, Cidr b -> compare_cidrs a b
     | Interval a, Interval b -> Interval.compare a b
     | Time a, Time b -> Clock.Wall.compare a b
     | Record a, Record b | Array a, Array b -> compare_arrays a b
@@ -97,6 +105,7 @@ let rec to_string (typ : A.Type.t) v =
     | _, Ip ip -> Ip.Addr.to_dotted_string ip
     | _, Mac mac ->
         Tools.hexstring ~sep:":" (Bitstring.string_of_bitstring (mac_bits mac))
+    | _, Cidr c -> Ip.Cidr.to_string c
     | Record fs, Record vs ->
         "{"^ String.concat ", " (List.mapi (fun i (n, t) ->
             n ^": "^ to_string t vs.(i)) fs) ^"}"
@@ -226,6 +235,7 @@ let rec zero (typ : A.Type.t) =
     | Time -> Time (Clock.Wall.of_secs 0.)
     | Ip -> Ip Ip.Addr.zero
     | Mac -> Mac Eth.Addr.zero
+    | Cidr -> Cidr (Ip.Cidr.of_string "0.0.0.0/0")
     | Record fs -> Record (Array.of_list (List.map (zero % snd) fs))
     | Array _ -> Array [||]
     | Map (_, t) -> empty_map (Some (zero t))
@@ -236,6 +246,7 @@ let rec equal a b =
     match a, b with
     | Ip a, Ip b -> Ip.Addr.compare a b = 0
     | Mac a, Mac b -> Bitstring.equals (mac_bits a) (mac_bits b)
+    | Cidr a, Cidr b -> compare_cidrs a b = 0
     | Record a, Record b | Array a, Array b ->
         Array.length a = Array.length b && Array.for_all2 equal a b
     | Variant (n, a), Variant (m, b) -> n = m && equal a b

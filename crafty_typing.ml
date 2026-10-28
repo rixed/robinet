@@ -46,7 +46,7 @@ type var = { name : string ; id : int ; typ : Type.t }
 type builtin =
     | Rand | Randbytes | Exp | Ln | Log | Log2
     | To_int | To_float | To_bool | To_byte | To_interval | To_time | Now
-    | To_bytes | Checksum | To_ip | To_mac | Getenv | Arg | Nargs | Resolve | Hostname | Split
+    | To_bytes | Checksum | To_ip | To_mac | To_cidr | Getenv | Arg | Nargs | Resolve | Hostname | Split
     | Make_array | Length | Concat | Append | Prepend
     | Make_map | Has | Keys | Values | Remove
     | Min | Max | Mean | Stddev | Percentile | Sorted | Sum | Histogram
@@ -202,6 +202,7 @@ let type_of_literal = function
     | A.Time _ -> Type.Time
     | A.Ip _ -> Type.Ip
     | A.Mac _ -> Type.Mac
+    | A.Cidr _ -> Type.Cidr
 
 (** {2 Errors} *)
 
@@ -913,6 +914,8 @@ let builtins =
       "mac_addr", To_mac,
         [ param "b" "6 bytes or a string" (only_exactly Type.[ bytes ; String ]) ],
         res Type.Mac ;
+      "cidr", To_cidr, [ param "s" "a string" (only Type.[ String ]) ],
+        res Type.Cidr ;
       "getenv", Getenv,
         [ param "name" "a string" (only Type.[ String ]) ;
           param "default" "a string" (only Type.[ String ]) ~default:Omitted ],
@@ -1483,6 +1486,10 @@ and binop env loc op a b =
         if not (List.mem a.typ ordered) then
             error loc "Cannot order values of type %s" (tname a.typ) ;
         mk Type.Bool (Binop (op, a, b))
+    | A.In ->
+        (match a.typ, b.typ with
+        | Type.Ip, Type.Cidr -> mk Type.Bool (Binop (op, a, b))
+        | _ -> cannot ())
 
 (* What tells where the [layers] of a stack statement can go: *)
 and stack_hint env anchor (layers : A.layer list) ~sends =
@@ -2384,6 +2391,8 @@ let check_patterns (ps : A.patterns) =
     (types "x = [1, \"a\"]")
   "line 1, column 5: Cannot apply / to an int and an interval" \
     (types "x = 3 / 2s")
+  "line 1, column 5: Cannot apply in to a cidr and an ip" \
+    (types "x = 10.0.0.0/8 in 10.0.0.1")
   "line 1, column 5: Cannot apply + to a time and a time" \
     (types "x = now() + now()")
   "line 1, column 5: Cannot apply - to an int and a time" \

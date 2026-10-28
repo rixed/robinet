@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 8368601669d82c290ae2ff73125c0a1f) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 99be3464636061c1ce08d765a9e2f780) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -212,6 +212,8 @@ let reference = {crafty_manual|### Lexical conventions
     give its unix timestamp, `time(secs)` the reverse.
 -   `ip`: `192.0.2.1`. IPv4 only.
 -   `mac`: `aa:bb:cc:dd:ee:ff`.
+-   `cidr`: `10.0.0.0/8`, no bit set beyond the mask. `ip in net` tells whether
+    an address is in it.
 -   arrays: `[1, 2, 3]`. Items of one type.
 -   maps: `[192.0.2.1: "gw", 192.0.2.2: "dns"]`, a `string[ip]`, in no
     particular order. `map(key=k, default=v)` is an empty map with keys of the
@@ -233,12 +235,12 @@ hexadecimal (`#68656c6c6f`); bytes passed where a string is expected, as to
 **Conversions** happen where needed: an int to a float, a byte to an int, a
 string, an IP address or a MAC address to bytes and back (4 and 6 bytes), an int
 to a bool. Bytes compare with the others as bytes. Others use the functions
-`int`, `float`, `bool`, `byte`, `interval`, `time`, `ip_addr` and `mac_addr`,
-which also read a string as a literal: `ip_addr(getenv("SERVER"))`. An IPv4
-address converts to an int and back: `ip_addr(int(a) + 1)`. `bytes(x)` makes
-bytes of a byte or of what converts to them, for `+`: `#0102 + bytes(10.0.0.1)`.
-`checksum(b)` is the 2 bytes of the Internet checksum of `b` (RFC 1071):
-`h1 + checksum(h1 + #0000 + h2) + h2`.
+`int`, `float`, `bool`, `byte`, `interval`, `time`, `ip_addr`, `mac_addr` and
+`cidr`, which also read a string as a literal: `ip_addr(getenv("SERVER"))`. An
+IPv4 address converts to an int and back: `ip_addr(int(a) + 1)`. `bytes(x)`
+makes bytes of a byte or of what converts to them, for `+`:
+`#0102 + bytes(10.0.0.1)`. `checksum(b)` is the 2 bytes of the Internet checksum
+of `b` (RFC 1071): `h1 + checksum(h1 + #0000 + h2) + h2`.
 
 **Variants** need no declaration. Where variants meet (items of an array,
 branches of an `if`, values assigned to a variable...), they make one variant
@@ -290,8 +292,9 @@ Operators, from the tightest binding to the loosest:
     and a byte stays 8 bits.
 5.  `&`, then `^`, then `|`: bitwise, on ints or bytes. They bind tighter than
     comparisons: `flags & RST == 0` is `(flags & RST) == 0`.
-6.  `==`, `!=`, `<`, `<=`, `>`, `>=`: they do not chain; ordering works on
-    numbers, bytes, intervals, times and strings.
+6.  `==`, `!=`, `<`, `<=`, `>`, `>=`, and `in` (an IP address in a CIDR): they
+    do not chain; ordering works on numbers, bytes, intervals, times and
+    strings.
 7.  `&&`, then `||`.
 
 Also: `r.field`, `a[i]` (`a[-1]` is the last item), `m[k]` (else the default,
