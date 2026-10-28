@@ -109,7 +109,8 @@ cat > "$DIR/sent.cfty" <<'EOF'
   }
 }
 EOF
-# Over a lossy path, data echoed comes back out of order, but all of it:
+# Over a lossy or reordering path, data echoed comes back with gaps, or out
+# of order, but all of it:
 cat > "$DIR/lossy.cfty" <<'EOF'
 /IP(dst=10.77.0.2)/TCP(dst=7) {
   n = 0
@@ -121,7 +122,7 @@ cat > "$DIR/lossy.cfty" <<'EOF'
     Raw(randbytes(200000))
   }
   s = stats()
-  print("echoed ${n}, out of order ${s.ooo_in > 0}")
+  print("echoed ${n}, gaps ${s.holes_in > 0}, out of order ${s.ooo_in > 0}")
 }
 EOF
 # Echoed, a datagram larger than the MTU is fragmented both ways:
@@ -214,13 +215,27 @@ fi
 
 ip netns exec $NS tc qdisc add dev $NS_IF root netem loss 10%
 "$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw "$DIR/lossy.cfty" > "$DIR/out" 2>&1
-check "the stats of a lossy connection" 0 $? "echoed 200000, out of order true"
-if grep -q '^Warning: Detected .*TCP retransmissions (retrans=[1-9].*TCP segments out of order (ooo_in=[1-9]' "$DIR/out" ; then
+check "the stats of a lossy connection" 0 $? "echoed 200000, gaps true"
+if grep -q '^Warning: Detected .*gaps in received TCP data (holes_in=[1-9]' "$DIR/out" ; then
     echo "ok   the losses are warned of"
 else
     echo "FAIL no warning of the losses:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
 fi
 ip netns exec $NS tc qdisc del dev $NS_IF root
+
+# Reordered within the minimal RTT, which the delay of the way there keeps
+# above the 5ms by which some echoes overtake others:
+tc qdisc add dev $HOST_IF root netem delay 20ms
+ip netns exec $NS tc qdisc add dev $NS_IF root netem delay 5ms reorder 25% 50%
+"$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw "$DIR/lossy.cfty" > "$DIR/out" 2>&1
+check "the stats of a reordering connection" 0 $? "echoed 200000, .*out of order true"
+if grep -q '^Warning: Detected .*TCP segments out of order (ooo_in=[1-9]' "$DIR/out" ; then
+    echo "ok   the reordering is warned of"
+else
+    echo "FAIL no warning of the reordering:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
+fi
+ip netns exec $NS tc qdisc del dev $NS_IF root
+tc qdisc del dev $HOST_IF root
 
 "$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw --stats "$DIR/tcp.cfty" > "$DIR/out" 2>&1
 check "--stats with TCP" 0 $? "hello"
@@ -230,10 +245,11 @@ else
     echo "FAIL no stats of the stream as it closes:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1
 fi
 
-"$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw --stats -p --format csv "$DIR/tcp.cfty" > "$DIR/out" 2> "$DIR/err"
+"$CRAFTY" -i $HOST_IF --tcp 14000-14099 --fw --stats -p --verbose --format csv "$DIR/tcp.cfty" > "$DIR/out" 2> "$DIR/err"
 check "CSV" 0 $? '^closed,[0-9.]*,"/IP(src=10.77.0.1, dst=10.77.0.2)/TCP(src=140[0-9][0-9], dst=7)",[0-9]*,5,'
 if grep -q '^packet,[0-9.]*,out,' "$DIR/out" && grep -q '^print,[0-9.]*,hello$' "$DIR/out" &&
-   grep -q '^done,[0-9.]*,OK,' "$DIR/out" && grep -q '^Running' "$DIR/err" ; then
+   grep -q '^done,[0-9.]*,OK,' "$DIR/out" && ! grep -qv '^[a-z]*,[0-9.]*,' "$DIR/out" &&
+   grep -q '^Interface ' "$DIR/err" && grep -q '/nft ' "$DIR/err" ; then
     echo "ok   packets, prints and the outcome in CSV, the rest on stderr"
 else
     echo "FAIL not all in CSV:" ; sed 's/^/    /' "$DIR/out" ; FAILED=1

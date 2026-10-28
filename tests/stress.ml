@@ -1363,7 +1363,7 @@ let test_http net cable duration nthreads
             (fst (post {|{"type":"cable","params":{"from":%d,"to":%d}}|}
                        host_a host_c) = 400) ;
         check "an unknown kind of device is refused"
-            (fst (post {|{"type":"firewall","name":"fw"}|}) = 400) ;
+            (fst (post {|{"type":"teapot","name":"pot"}|}) = 400) ;
         check "a parameter that is not one is refused"
             (fst (post {|{"type":"switch","name":"x","params":{"port":2}}|}) = 400) ;
         check "a value out of range is refused"

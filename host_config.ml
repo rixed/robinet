@@ -72,8 +72,9 @@ let find_prog prog =
     try Filename.concat (List.find executable (path @ [ "/usr/sbin" ; "/sbin" ])) prog
     with Not_found -> prog
 
-(** Whether {!run_line} prints the commands it runs. *)
+(** Whether {!run_line} prints the commands it runs, and how: *)
 let verbose = ref false
+let print_command = ref (fun cmd -> Printf.printf "%s\n%!" cmd)
 
 (** Run the command line [cmd], or say which command would not run; with
  * {!verbose}, print it first, so that a reader can see what was done to their
@@ -84,7 +85,7 @@ let verbose = ref false
  * up on -- half of it may be gone before it runs -- and the error that matters
  * was reported before it. *)
 let run_line ?(quiet=false) cmd =
-    if !verbose then Printf.printf "%s\n%!" cmd ;
+    if !verbose then !print_command cmd ;
     match Unix.system (if quiet then cmd ^" >/dev/null 2>&1" else cmd) with
     | Unix.WEXITED 0 -> ()
     | Unix.WEXITED n ->

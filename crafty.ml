@@ -318,6 +318,7 @@ let () =
         Printf.ksprintf (fun s ->
             let oc = if format = Human then stdout else stderr in
             Printf.fprintf oc "%s\n%!" s) fmt in
+    Host_config.print_command := info "%s" ;
     let print_only =
         Option.map (fun s ->
             match Crafty_interp.compile_filter s with
