@@ -132,6 +132,19 @@ cat > "$DIR/frags.cfty" <<'EOF'
 }
 EOF
 printf 'x = "a" + 1\n' > "$DIR/bad.cfty"
+cat > "$DIR/permitted.cfty" <<'EOF'
+PERMISSIONS = {remote_ips: [Accept(10.77.0.0/24)]}
+/IP(dst=10.77.0.2)/UDP(dst=7) {
+  Raw("permitted")
+  expect timeout=1s Raw { print(MATCH[Raw].data) }
+}
+EOF
+cat > "$DIR/spoof_ip.cfty" <<'EOF'
+/IP!(src=10.77.0.9, dst=10.77.0.2)/UDP(dst=7)/Raw("spoofed")
+EOF
+cat > "$DIR/spoof_mac.cfty" <<'EOF'
+/Eth!(src=02:00:00:00:00:99, dst=ff:ff:ff:ff:ff:ff)/IP!(src=10.77.0.5, dst=10.77.0.2)/UDP(dst=7)/Raw("spoofed")
+EOF
 
 setup
 trap teardown EXIT
@@ -225,6 +238,24 @@ fi
 
 "$CRAFTY" -i $HOST_IF --udp 40000-40010 --fw --max-packets 3 "$DIR/flood.cfty" > "$DIR/out" 2>&1
 check "a budget stops the program" 3 $? "stopped: max-packets"
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/permitted.cfty" > "$DIR/out" 2>&1
+check "a remote address the program permits" 0 $? "permitted"
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --remote-ip deny:10.77.0.2 "$DIR/permitted.cfty" > "$DIR/out" 2>&1
+check "a remote address the command line denies" 4 $? "stopped: remote address 10.77.0.2 not permitted"
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/spoof_ip.cfty" > "$DIR/out" 2>&1
+check "a spoofed IP address" 4 $? "stopped: local address 10.77.0.9 not permitted"
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --local-ip accept:10.77.0.9 "$DIR/spoof_ip.cfty" > "$DIR/out" 2>&1
+check "a spoofed IP address, permitted" 0 $?
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 "$DIR/spoof_mac.cfty" > "$DIR/out" 2>&1
+check "a spoofed MAC" 4 $? "stopped: source MAC 02:00:00:00:00:99 not permitted"
+
+"$CRAFTY" -i $HOST_IF --ip 10.77.0.5 --udp 40000-40010 --mac-spoofing true "$DIR/spoof_mac.cfty" > "$DIR/out" 2>&1
+check "a spoofed MAC, permitted" 0 $?
 
 "$CRAFTY" -i $HOST_IF --udp 40000-40010 --fw "$DIR/flood.cfty" > "$DIR/out" 2>&1 &
 sleep 1.5

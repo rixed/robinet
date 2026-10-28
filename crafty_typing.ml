@@ -653,18 +653,10 @@ let least a b =
     | _ -> invalid_arg "Crafty_typing.least"
 
 (** What both the [program] and the [cli] allow, or why nothing is. The
- * permissions are the [cli]'s, its rules before the [program]'s. *)
+ * permissions are the [program]'s, which {!resolve_permissions} combines
+ * with the [cli]'s. *)
 let combine ~program:a ~cli:b =
-    let rules a b =
-        match a, b with
-        | Some a, Some b -> Some (b @ a)
-        | x, None | None, x -> x
-    and first b a = match b with Some _ -> b | None -> a in
-    let permissions =
-        { local_ips = rules a.permissions.local_ips b.permissions.local_ips ;
-          remote_ips = rules a.permissions.remote_ips b.permissions.remote_ips ;
-          mac_spoofing = first b.permissions.mac_spoofing a.permissions.mac_spoofing ;
-          exfiltration = first b.permissions.exfiltration a.permissions.exfiltration } in
+    let permissions = a.permissions in
     let budget =
         List.filter_map (fun (n, _) ->
             match List.assoc_opt n a.budget, List.assoc_opt n b.budget with
@@ -699,18 +691,36 @@ let combine ~program:a ~cli:b =
     Ok { no_limits with ports = Some { tcp = [ 5, 10 ; 20, 25 ] ; udp = [] } }
   Result.is_error (combine ~program:{ no_limits with ports = Some { tcp = [ 1, 2 ] ; udp = [] } } \
                            ~cli:{ no_limits with ports = Some { tcp = [] ; udp = [ 1, 2 ] } })
+*)
+
+(** The permissions a program runs with, all set: the [cli]'s rules before the
+ * [program]'s, or before the defaults where it sets none: accepting the
+ * [local] addresses, and any remote one; the [cli]'s flags over the
+ * [program]'s, false by default. *)
+let resolve_permissions ~program ~cli ~local =
+    let rules cli prog default = Some ((cli |? []) @ (prog |? default))
+    and flag cli prog = Some (cli |? (prog |? false)) in
+    { local_ips =
+        rules cli.local_ips program.local_ips
+              (List.map (fun ip -> Firewall.Accept, Ip.Cidr.single ip) local) ;
+      remote_ips = rules cli.remote_ips program.remote_ips Firewall.accept_all ;
+      mac_spoofing = flag cli.mac_spoofing program.mac_spoofing ;
+      exfiltration = flag cli.exfiltration program.exfiltration }
+
+(*$T resolve_permissions
   let cidr = Firewall.cidr_of_string in \
-  combine ~program:{ no_limits with permissions = { no_permissions with \
-                       remote_ips = Some [ Firewall.Accept, cidr "10.0.0.0/8" ] ; \
-                       mac_spoofing = Some true ; exfiltration = Some true } } \
-          ~cli:{ no_limits with permissions = { no_permissions with \
-                   remote_ips = Some [ Firewall.Deny, cidr "10.0.0.1" ] ; \
-                   local_ips = Some [ Firewall.Accept, cidr "0.0.0.0/0" ] ; \
-                   exfiltration = Some false } } = \
-    Ok { no_limits with permissions = { \
-           local_ips = Some [ Firewall.Accept, cidr "0.0.0.0/0" ] ; \
-           remote_ips = Some [ Firewall.Deny, cidr "10.0.0.1" ; Firewall.Accept, cidr "10.0.0.0/8" ] ; \
-           mac_spoofing = Some true ; exfiltration = Some false } }
+  resolve_permissions ~local:[ Ip.Addr.of_string "10.0.0.1" ] \
+    ~program:{ no_permissions with remote_ips = Some [ Firewall.Accept, cidr "10.0.0.0/8" ] ; \
+                                   mac_spoofing = Some true ; exfiltration = Some true } \
+    ~cli:{ no_permissions with remote_ips = Some [ Firewall.Deny, cidr "10.0.0.1" ] ; \
+                               local_ips = Some [ Firewall.Deny, cidr "10.0.0.2" ] ; \
+                               exfiltration = Some false } = \
+    { local_ips = Some [ Firewall.Deny, cidr "10.0.0.2" ; Firewall.Accept, cidr "10.0.0.1" ] ; \
+      remote_ips = Some [ Firewall.Deny, cidr "10.0.0.1" ; Firewall.Accept, cidr "10.0.0.0/8" ] ; \
+      mac_spoofing = Some true ; exfiltration = Some false }
+  resolve_permissions ~local:[] ~program:no_permissions ~cli:no_permissions = \
+    { local_ips = Some [] ; remote_ips = Some Firewall.accept_all ; \
+      mac_spoofing = Some false ; exfiltration = Some false }
 *)
 
 let lookup_var env loc name =

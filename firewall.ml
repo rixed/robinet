@@ -114,7 +114,7 @@ type t =
       (* The Ethernet source of what goes out, if imposed: *)
       mutable mac : Eth.Addr.t option ;
       (* Called on each frame dropped: *)
-      mutable on_drop : direction -> cause -> unit ;
+      mutable on_drop : direction -> cause -> bitstring -> unit ;
       (* Per port, whether a cable is on it and what to emit into it: *)
       forward : (bool * (bitstring -> unit)) array ;
       (* Per port, the port the cable on it reaches (see {!Hub.Tap}): *)
@@ -235,7 +235,7 @@ let filter t dir bits =
                 ~params:(Metric.Params.make [
                     direction ;
                     "cause", Metric.Param.String (cause_name cause) ]) ;
-            t.on_drop dir cause
+            t.on_drop dir cause bits
         | None ->
             Metric.Counter.inc t.passed ~now:(now t)
                 ~params:(Metric.Params.make [ direction ]) ;
@@ -282,7 +282,7 @@ let accept_all = [ Accept, Ip.Cidr.of_string "0.0.0.0/0" ]
 let num_ports = 2
 
 let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
-         ?(uninspectable=Deny) ?mac ?(on_drop=fun _ _ -> ()) name =
+         ?(uninspectable=Deny) ?mac ?(on_drop=fun _ _ _ -> ()) name =
     let widget =
         Widget.make ~parent ?location ~device_type:"firewall" ~own_power:true
                     name in
@@ -367,7 +367,7 @@ let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
                 ~inside:[ Accept, cidr_of_string "10.0.0.0/8" ]
                 ~outside:[ Deny, cidr_of_string "192.0.2.66" ;
                            Accept, cidr_of_string "0.0.0.0/0" ]
-                ~on_drop:(fun _ c -> cause := string_of_cause c) "fw" in
+                ~on_drop:(fun _ c _ -> cause := string_of_cause c) "fw" in
       Simulation.power_up t.widget.power ;
       (t.widget.ports.dev (if dir = Out then 0 else 1)).write bits ;
       !cause

@@ -20,11 +20,13 @@
 (**
   Run a crafty program on a real interface.
 
-  The program sends and receives through the interface, behind a policer that
-  enforces the budgets, which limit what the program sends. With ports, it
+  The program sends and receives through the interface, behind a firewall
+  that enforces its permissions, then a policer that enforces the budgets,
+  which limit what the program sends. With ports, it
   uses only those, and only what the interface receives for them is
   captured. Budgets and ports are those that both the command line and the
-  program (its [BUDGET] and [PORTS]) allow. With [--ip], it uses an
+  program (its [BUDGET] and [PORTS]) allow; permissions are the program's
+  [PERMISSIONS], which the command line overrides. With [--ip], it uses an
   address of its own, not added to the interface, and only what is for that
   address is captured. With [--fw], the kernel is kept off those ports. What
   is changed on the host is undone at exit, or by [--cleanup] if crafty was
@@ -268,6 +270,9 @@ let () =
         | Error e -> fail [ e ]) ;
         exit 0) ;
     let program = compile () in
+    let cli_permissions =
+        Crafty_typing.{ local_ips = !local_ips ; remote_ips = !remote_ips ;
+                        mac_spoofing = !mac_spoofing ; exfiltration = !exfiltration } in
     (* What both the command line and the program allow: *)
     let limits =
         let budget =
@@ -289,9 +294,7 @@ let () =
                 ports = if !ports = [] then None
                         else Some { tcp = ranges Host_config.Tcp ;
                                     udp = ranges Host_config.Udp } ;
-                permissions = { local_ips = !local_ips ; remote_ips = !remote_ips ;
-                                mac_spoofing = !mac_spoofing ;
-                                exfiltration = !exfiltration } } in
+                permissions = cli_permissions } in
         match Crafty_typing.combine ~program:program.limits ~cli with
         | Ok l -> l
         | Error e -> die "%s: %s its PORTS and --tcp/--udp." prog_name e in
@@ -352,6 +355,21 @@ let () =
         | Some (ip, netmask), None -> ip, netmask
         | Some (_, netmask), Some ip -> ip, netmask
         | None, _ -> die "Interface %s has no IPv4 address." !ifname in
+    (* The local addresses accepted unless said otherwise: the program's own,
+     * or else the interface's: *)
+    let limits =
+        let local =
+            match !own_ip with
+            | Some ip -> [ ip ]
+            | None ->
+                List.filter_map (fun a ->
+                    if Unix.is_inet6_addr a then None else Some (Ip.Addr.o a))
+                    iface.addresses in
+        { limits with permissions =
+            Crafty_typing.resolve_permissions ~program:program.limits.permissions
+                                              ~cli:cli_permissions ~local } in
+    let permissions = limits.permissions in
+    let rules = Option.default [] and flag = Option.default false in
     let speed, full_duplex =
         let speed', full_duplex' = Host_config.link !ifname in
         (match !speed, speed' with Some s, _ | None, Some s -> s | None, None -> EthSpeed.Eth1Gbps),
@@ -367,7 +385,13 @@ let () =
         info "Ports: %s." (if ports = [] then "any" else
             String.concat ", " (List.map (fun (r : Host_config.port_range) ->
                 String.uppercase_ascii (Host_config.string_of_proto r.proto) ^" "^
-                Host_config.string_of_range r) ports))) ;
+                Host_config.string_of_range r) ports)) ;
+        let rules rs =
+            String.concat ", " (List.map Firewall.string_of_rule (rules rs)) in
+        info "Permissions: local IPs %s; remote IPs %s; MAC spoofing %b; \
+              exfiltration %b."
+            (rules permissions.local_ips) (rules permissions.remote_ips)
+            (flag permissions.mac_spoofing) (flag permissions.exfiltration)) ;
     let configure = !fw || !own_ip <> None in
     if configure && Unix.geteuid () <> 0 then
         die "Configuring interface %s is for root; Have you tried under sudo?"
@@ -507,6 +531,23 @@ let () =
                     info "Limit reached: %s." (Policer.string_of_limit l) ;
                     h.stop ()))
             "policer" in
+    (* The first packet sent that the permissions deny, which stops the
+     * program, and how many of those were sent and received: *)
+    let denied = ref None and denied_out = ref 0 and denied_in = ref 0 in
+    let firewall =
+        Firewall.make ~parent:sim.root
+            ~inside:(rules permissions.local_ips)
+            ~outside:(rules permissions.remote_ips)
+            ?mac:(if flag permissions.mac_spoofing then None else Some iface.mac)
+            ~on_drop:(fun dir cause bits ->
+                match dir with
+                | Firewall.In -> incr denied_in
+                | Firewall.Out ->
+                    incr denied_out ;
+                    if !denied = None then (
+                        denied := Some (cause, bits) ;
+                        h.stop ()))
+            "firewall" in
     let print dir bits =
         if !print_packets &&
            Option.map_default (fun f -> h.matches f bits) true print_only then
@@ -527,7 +568,8 @@ let () =
             (fun bits ->
                 incr pkts_out ; bytes_out := !bytes_out + Tools.bytelength bits ; print ">" bits) in
     Tools.(dev <--> before.ins) ;
-    Tools.(before.out <--> policer.widget.ports.dev 0) ;
+    Tools.(before.out <--> firewall.widget.ports.dev 0) ;
+    Tools.(firewall.widget.ports.dev 1 <--> policer.widget.ports.dev 0) ;
     Tools.(policer.widget.ports.dev 1 <--> after.ins) ;
     (* What was injected and not seen leaving yet, oldest first, of which
      * those that are never seen are passed by the next that is: *)
@@ -546,6 +588,7 @@ let () =
             if !not_injected = 0 then info "Cannot inject: %s." msg ;
             incr not_injected)) ;
     Simulation.run_startup sim ;
+    Simulation.power_up firewall.widget.power ;
     Simulation.power_up policer.widget.power ;
     (* The host refusing what is for a port crafty uses, once per port: *)
     let refused = Hashtbl.create 3 in
@@ -588,6 +631,17 @@ let () =
     List.iter (fun n -> tally n ; print_stats "open" n) (h.open_streams ()) ;
     let status_str, code =
         match !status, !limit with
+        (* Whether or not the program was over by the time it was denied: *)
+        | _ when !denied <> None ->
+            let cause, bits = Option.get !denied in
+            let what =
+                match cause with
+                | Firewall.Inside ip -> "local address "^ Ip.Addr.to_dotted_string ip
+                | Outside ip -> "remote address "^ Ip.Addr.to_dotted_string ip
+                | Mac m -> "source MAC "^ Eth.Addr.to_hexstring m
+                | Uninspectable -> "uninspectable frame" in
+            Printf.sprintf "stopped: %s not permitted, in %s" what
+                (Packet.Pdu.Printer.oneline (Packet.of_frame bits)), 4
         | Crafty_interp.Done, _ -> "OK", 0
         | Failed e, _ -> "failed: "^ IO.to_string Crafty_interp.print_error e, 1
         | Stopped, Some l -> "stopped: "^ Policer.string_of_limit l, 3
@@ -602,6 +656,11 @@ let () =
                     | c -> Some (name, c)) names with
             | [] -> None
             | counts -> Some (what, counts)) suspicious_stats in
+    if not !no_warning && !denied_in > 0 then (
+        let text =
+            Printf.sprintf "Received %d packets the permissions deny, dropped" !denied_in in
+        if format = Human then Printf.eprintf "Warning: %s\n%!" text
+        else emit "warning" [ "text", `String text ] ~json:[ "denied_in", `Int !denied_in ]) ;
     if not !no_warning && suspicious <> [] then (
         let text =
             "Detected "^ String.concat ", " (List.map (fun (what, counts) ->
@@ -620,8 +679,11 @@ let () =
         if verbose then
             Printf.printf "Packets: %d out, %d in. Bytes: %d out, %d in.\n"
                 !pkts_out !pkts_in !bytes_out !bytes_in ;
-        if !sent > !pkts_out then
-            Printf.printf "Dropped by the policer: %d packets.\n" (!sent - !pkts_out) ;
+        if !sent - !denied_out > !pkts_out then
+            Printf.printf "Dropped by the policer: %d packets.\n"
+                (!sent - !denied_out - !pkts_out) ;
+        if !denied_out > 0 then
+            Printf.printf "Not permitted: %d packets.\n" !denied_out ;
         if !not_injected > 0 then
             Printf.printf "Not injected: %d packets.\n" !not_injected ;
         if not_captured > 0 then
@@ -633,7 +695,8 @@ let () =
             [ "status", `String status_str ;
               "packets_out", `Int !pkts_out ; "packets_in", `Int !pkts_in ;
               "bytes_out", `Int !bytes_out ; "bytes_in", `Int !bytes_in ;
-              "dropped", `Int (!sent - !pkts_out) ;
+              "dropped", `Int (!sent - !denied_out - !pkts_out) ;
+              "not_permitted", `Int !denied_out ;
               "not_injected", `Int !not_injected ;
               "not_captured", `Int not_captured ;
               "captured_packets", `Int !wire_pkts ;

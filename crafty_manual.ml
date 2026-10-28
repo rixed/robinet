@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 c8984a9bb1798ed80358e4b0ba065750) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 ee9b342096d85ae760cbfbd63539116a) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -174,7 +174,8 @@ Options:
 -   `--cliref`: exhaustive list of options including seldom used ones.
 
 Exit status: 0 when the program completes, 1 when an error ends it, 2 when it
-does not compile, 3 when a budget stops it, 130 when interrupted.
+does not compile, 3 when a budget stops it, 4 when it sends what its permissions
+deny, 130 when interrupted.
 
 ### Tips
 
@@ -291,6 +292,10 @@ A program may declare them, once each, at its top level, with literals only:
     -   `exfiltration` (default `false`): allows sending what was received.
     -   The rules of `--local-ip` and `--remote-ip` come before the program's,
         and `--mac-spoofing` and `--exfiltration` override its flags.
+    -   A packet sent that they deny stops the program, which `catch` does not
+        prevent; one received is dropped. An ICMP error received is judged by
+        the packet it quotes, not by the router that sent it. Only IPv4 and ARP
+        are permitted.
 
 ### Expressions
 

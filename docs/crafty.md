@@ -198,7 +198,8 @@ Options:
 - `--cliref`: exhaustive list of options including seldom used ones.
 
 Exit status: 0 when the program completes, 1 when an error ends it, 2 when it
-does not compile, 3 when a budget stops it, 130 when interrupted.
+does not compile, 3 when a budget stops it, 4 when it sends what its
+permissions deny, 130 when interrupted.
 
 ### Tips
 
@@ -320,6 +321,10 @@ PERMISSIONS = {remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
   - `exfiltration` (default `false`): allows sending what was received.
   - The rules of `--local-ip` and `--remote-ip` come before the program's,
     and `--mac-spoofing` and `--exfiltration` override its flags.
+  - A packet sent that they deny stops the program, which `catch` does not
+    prevent; one received is dropped. An ICMP error received is judged by the
+    packet it quotes, not by the router that sent it. Only IPv4 and ARP are
+    permitted.
 
 ### Expressions
 
