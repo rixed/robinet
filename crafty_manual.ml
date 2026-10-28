@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 5c71b0b7a2f45933977ad958c4038567) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 75fcb8d31e679cd97634416ff29cc39a) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -283,23 +283,15 @@ A program may declare them, once each, at its top level, with literals only:
     port.
 -   crafty runs with what both the program and the command line allow.
 -   `PERMISSIONS`:
-    -   `local_ips`, `remote_ips`: rules `Accept(cidr)` or `Deny(cidr)` (an IP
-        is its /32), tried in order; the first that matches an address decides,
-        and none matching denies. Unset, `local_ips` accepts the interface's
-        address (or `--ip`), `remote_ips` any.
-    -   `mac_spoofing` (default `false`): allows sending from another MAC than
-        the interface's.
-    -   `exfiltration` (default `false`): allows sending a payload (bytes and
-        strings of `Raw`, `Request`, `Reply`, `Query`, `Answer`) made of the
-        payload of a packet received, through any variable or computation.
-        Without it, such a payload is an error when compiling.
-    -   The rules of `--local-ip` and `--remote-ip` come before the program's,
-        and `--mac-spoofing` and `--exfiltration` override its flags.
-    -   A literal address they deny is an error when compiling; a local one only
-        once the interface is known, unless `local_ips` is set. A packet sent
-        that they deny stops the program, which `catch` does not prevent; one
-        received is dropped. An ICMP error received is judged by the packet it
-        quotes, not by the router that sent it. Only IPv4 and ARP are permitted.
+    -   `local_ips`, `remote_ips`: rules `Accept(cidr)` or `Deny(cidr)`; the
+        first that matches an address decides, and none matching denies. Unset,
+        `local_ips` accepts the interface's address and `remote_ips` any.
+    -   `mac_spoofing`: allows sending from another MAC than the interface's.
+    -   `exfiltration`: allows sending a payload made of the payload of a
+        received packet.
+    -   A sent packet denied by the above rules stops the program. A received
+        one that is denied is dropped. Received ICMP errors are judged by the
+        packet they quote, not by the router that sent it.
 
 ### Expressions
 
