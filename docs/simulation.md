@@ -239,6 +239,33 @@ reset. The `dropped` metric counts what was dropped, by the limit that dropped
 it (`max-packets`, `max-volume`, `expired`, `max-packet-rate`,
 `max-throughput`, `max-syns`, `max-syn-rate`).
 
+### firewall
+
+Passes the IPv4 packets between its inside, port 0, and its outside, port 1,
+whose addresses its rules accept. Like a tap, it is transparent to negotiation.
+It has a power switch, and passes nothing while off.
+
+| param | kind | default | |
+| --- | --- | --- | --- |
+| `inside rules` | list of rules | `[{"verdict": 0, "CIDR": "0.0.0.0/0"}]` | For the addresses on the inside. |
+| `outside rules` | list of rules | `[{"verdict": 0, "CIDR": "0.0.0.0/0"}]` | For the addresses on the outside. |
+| `uninspectable` | `0` (accept) or `1` (deny) | `1` | For what is neither IPv4 nor ARP, or carries IP in IP (IPv4 protocols 4, 41 and 47). |
+| `MAC` | optional string | `null` | The Ethernet source that what goes out must have. |
+
+A rule is `{"verdict": 0, "CIDR": "10.0.0.0/8"}`, `0` accepting and `1`
+denying; an address stands for its /32. The rules are tried in order, the first
+that matches an address decides, and an address none matches is denied.
+
+The inside rules judge the source of what goes out and the destination of what
+comes in; the outside rules the other address. A quoted IP header, in an ICMP
+error, is judged the other way round, as it travelled the other way; and an
+ICMP error that comes in is judged by its quoted header only, so that the
+routers that send them need not be accepted. ARP passes.
+
+The `passed` and `dropped` metrics count packets by `direction` (`out` from
+port 0, `in` from port 1), and dropped ones by `cause` too (`inside`,
+`outside`, `MAC`, `uninspectable`).
+
 ### router
 
 Forwards packets between its interfaces. It arrives with an **empty routing
@@ -422,6 +449,7 @@ under:
 | hub | `""` | `speed` |
 | tap | | *none* |
 | policer | `""` | `max packets`, `max volume`, `max duration`, `max packet rate`, `max throughput`, `max syns`, `max syn rate`; the flags `max packets reached`, `max volume reached`, `max syns reached`, `expired` (which are only reset); and, read only, `start`, `packets`, `volume`, `syns`, `elapsed` |
+| firewall | `""` | `inside rules`, `outside rules`, `uninspectable`, `MAC` |
 | router | `""` | `routes`, `errors probability`, `errors delay`, `cut-through bytes`, `load balancing`, `reroute admin`, `buffer capacity` |
 | | `#0`… | *its interfaces*, and `link fragmentation`, `max queue delay`, `errors probability`, `errors delay` |
 | | `#0/admin@0`… | `hostname`, `search suffix` — the stack answering for the address that interface holds |

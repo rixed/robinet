@@ -47,6 +47,7 @@ LIB_SOURCES  = \
 	sockopt.ml \
 	hub.ml \
 	policer.ml \
+	firewall.ml \
 	host.ml \
 	named.ml \
 	localhost.ml \

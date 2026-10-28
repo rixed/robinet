@@ -74,6 +74,9 @@ type model =
                     max_throughput : float option ;
                     max_duration : float option ;
                     max_syns : int option ; max_syn_rate : float option }
+    | TFirewall of { inside : Firewall.rule list ; outside : Firewall.rule list ;
+                     uninspectable : Firewall.verdict ;
+                     mac : Eth.Addr.t option }
     | THub of { ports : int ; speed : EthSpeed.t }
     | TSwitch of { ports : int ; speeds : EthSpeed.t list ;
                    full_duplex : bool ; macs : int }
@@ -284,6 +287,37 @@ let policer =
               max_throughput = opt args "max throughput" Widget.to_float ;
               max_syns = opt args "max syns" Widget.to_int ;
               max_syn_rate = opt args "max syn rate" Widget.to_float } }
+
+let firewall =
+    { name = "firewall" ;
+      descr = "Passes the IPv4 packets between its inside (port 0) and its \
+               outside (port 1) whose addresses its rules accept: the inside \
+               rules for the addresses on the inside, the outside rules for \
+               those on the outside. ARP passes; ICMP errors that come in are \
+               judged by the packet they quote." ;
+      params = [
+          param "inside rules" ~kind:Firewall.rules_kind
+              ~default:(Firewall.rules_to_json Firewall.accept_all)
+              ~descr:"The rules for the addresses on the inside, tried in \
+                      order; an address none matches is denied." ;
+          param "outside rules" ~kind:Firewall.rules_kind
+              ~default:(Firewall.rules_to_json Firewall.accept_all)
+              ~descr:"The rules for the addresses on the outside, tried in \
+                      order; an address none matches is denied." ;
+          param "uninspectable"
+              ~kind:(Widget.one_of (Widget.choices Firewall.verdict_names))
+              ~default:(`Int (Firewall.int_of_verdict Deny))
+              ~descr:"The verdict for what is neither IPv4 nor ARP, or \
+                      carries IP in IP." ;
+          param "MAC" ~kind:(Widget.optional Firewall.mac_kind)
+              ~descr:"The Ethernet source that what goes out must have, if \
+                      any." ] ;
+      of_params = fun args ->
+          TFirewall {
+              inside = Firewall.rules_of_json (Widget.arg args "inside rules") ;
+              outside = Firewall.rules_of_json (Widget.arg args "outside rules") ;
+              uninspectable = Firewall.verdict_of_int (int args "uninspectable") ;
+              mac = opt args "MAC" (Firewall.mac_of_string % Widget.to_string) } }
 
 let hub =
     { name = "hub" ;
@@ -628,6 +662,7 @@ let note =
 let type_of = function
     | TTap -> "tap"
     | TPolicer _ -> "policer"
+    | TFirewall _ -> "firewall"
     | THub _ -> "hub"
     | TSwitch _ -> "switch"
     | THost _ -> "host"
@@ -671,6 +706,11 @@ let to_params =
           "max throughput", float_opt max_throughput ;
           "max syns", int_opt max_syns ;
           "max syn rate", float_opt max_syn_rate ]
+    | TFirewall { inside ; outside ; uninspectable ; mac } ->
+        [ "inside rules", Firewall.rules_to_json inside ;
+          "outside rules", Firewall.rules_to_json outside ;
+          "uninspectable", `Int (Firewall.int_of_verdict uninspectable) ;
+          "MAC", mac_opt mac ]
     | THub { ports ; speed } ->
         [ "ports", `Int ports ;
           "speed", `Int (Array.findi ((=) speed) Hub.Repeater.speeds) ]
@@ -751,6 +791,10 @@ let build ~parent name = function
                 ?max_duration:(Option.map Clock.Interval.of_secs max_duration)
                 name in
         t.Policer.widget, m
+    | TFirewall { inside ; outside ; uninspectable ; mac } as m ->
+        let t =
+            Firewall.make ~parent ~inside ~outside ~uninspectable ?mac name in
+        t.Firewall.widget, m
     | THub { ports ; speed } as m ->
         let t = Hub.Repeater.make ~parent ~speed ports name in
         t.Hub.Repeater.widget, m
@@ -861,7 +905,7 @@ let build ~parent name = function
  * offers them: what a network is mostly made of first, and what is not a
  * device at all last. *)
 let all =
-    [ host ; switch ; hub ; tap ; policer ; router ; gateway ; portal ;
+    [ host ; switch ; hub ; tap ; policer ; firewall ; router ; gateway ; portal ;
       recorder ; replayer ; synthesizer ; cable ; note ]
 
 let find name =
