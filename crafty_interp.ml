@@ -493,13 +493,15 @@ let rec eval output (env : env) (e : T.expr) =
             List.nth env.packet (List.length env.packet - 1 - layer) in
         List.assoc l.fields.(field).name u.values
     | T.Field (r, i) ->
-        (* Void only in the fields of BUDGET and PORTS that are not set, and
+        (* Void only in the fields of BUDGET, PORTS and PERMISSIONS that are
+         * not set, and
          * in those of a packet sent that only its capture tells: *)
         (match eval r, r.typ with
         | Record vs, A.Type.Record fs ->
             (match vs.(i), List.nth fs i with
             | Void, (n, t) when t <> A.Type.Void ->
-                if r.typ = T.budget_type || r.typ = T.ports_type then
+                if r.typ = T.budget_type || r.typ = T.ports_type ||
+                   r.typ = T.permissions_type then
                     error e.loc "%s is not set, by the program or the command line" n ;
                 let l = List.find (fun l -> T.packet_record l = r.typ) Crafty_layers.all in
                 error e.loc "%s.%s is not known: %s" (T.lname l.name) n T.only_captured
@@ -1187,7 +1189,7 @@ let matches output tree (ps : filter) frame =
  * receiving through [tree] (from {!Crafty_tree.make_root}), writing with
  * [print] and [print_err], and calling [on_exit] with its final status
  * (possibly before returning). *)
-(* The values of BUDGET and PORTS, void where not set: *)
+(* The values of BUDGET, PORTS and PERMISSIONS, void where not set: *)
 let self_values (l : T.limits) =
     let record typ get =
         match typ with
@@ -1200,7 +1202,20 @@ let self_values (l : T.limits) =
     record T.ports_type (fun n ->
         match l.ports with
         | None -> Void
-        | Some p -> ranges (if n = "tcp" then p.tcp else p.udp))
+        | Some p -> ranges (if n = "tcp" then p.tcp else p.udp)),
+    record T.permissions_type (fun n ->
+        let p = l.permissions in
+        let rules =
+            Option.map_default (fun rs ->
+                Array (Array.of_list (List.map (fun (v, c) ->
+                    Variant ((if v = Firewall.Accept then "Accept" else "Deny"),
+                             Cidr c)) rs))) Void
+        and flag = Option.map_default (fun b -> Bool b) Void in
+        match n with
+        | "local_ips" -> rules p.local_ips
+        | "remote_ips" -> rules p.remote_ips
+        | "mac_spoofing" -> flag p.mac_spoofing
+        | _ -> flag p.exfiltration)
 
 let run_on_tree power tree ?format ~print ~print_err ?(on_exit=ignore)
                 ?(limits=T.no_limits) (program : T.block) =
@@ -1216,10 +1231,11 @@ let run_on_tree power tree ?format ~print ~print_err ?(on_exit=ignore)
           fail = (fun e -> cancel root ; exit (Failed e)) ;
           break_ = (fun _ -> assert false) ; busy = 0 ; holding = 0 ;
           stmts_done = [] ; ending = [] ; finish = None } in
-    let budget, ports = self_values limits in
+    let budget, ports, permissions = self_values limits in
     let vars =
         { vars = Env.empty ; stack = [] ; packet = [] } |>
-        fun env -> bind (bind (bind env T.budget_var budget) T.ports_var ports)
+        fun env -> bind (bind (bind (bind env T.budget_var budget) T.ports_var ports)
+                              T.permissions_var permissions)
                         T.last_var Void in
     ignore (run_block t root vars program
                 ~fail:root.fail ~break_:root.break_
@@ -2327,6 +2343,17 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
       }")
   "line 2, column 21: BUDGET.max_syns must be a literal int, 0 or more" \
     (policed "x = 1\nBUDGET = {max_syns: x}")
+  "0.000s: [Deny 10.0.0.1/32, Accept 10.0.0.0/8] true\n0.000s: done\n0 frames" \
+    (policed "PERMISSIONS = {remote_ips: [Deny(10.0.0.1), Accept(10.0.0.0/8)], exfiltration: true}\n\
+              print(\"${PERMISSIONS.remote_ips} ${PERMISSIONS.exfiltration}\")")
+  "0.000s: failed: line 1, column 7: mac_spoofing is not set, by the program or the command line\n0 frames" \
+    (policed "print(PERMISSIONS.mac_spoofing)")
+  "line 1, column 28: A rule is Accept(CIDR) or Deny(CIDR)" \
+    (policed "PERMISSIONS = {local_ips: [Ok(10.0.0.0/8)]}")
+  "line 1, column 36: A rule is about a literal CIDR or IP address" \
+    (policed "PERMISSIONS = {remote_ips: [Accept(\"x\")]}")
+  "line 1, column 30: PERMISSIONS.exfiltration must be true or false" \
+    (policed "PERMISSIONS = {exfiltration: 1}")
 *)
 (* Sharing the address of the host: the gateway found by ARP, no answer to
  * ARP for the address, the local port from those given, and no node left

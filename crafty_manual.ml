@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 99be3464636061c1ce08d765a9e2f780) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 c8984a9bb1798ed80358e4b0ba065750) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -149,9 +149,9 @@ Options:
 -   `-i IFACE`: the interface to send from and capture on, rather than that of
     the default route. Crafty needs root.
 -   `--tcp LO-HI`, `--udp LO-HI` (repeatable): the ranges to pick source ports
-    from, with the program's `PORTS` (see [Budget and
-    ports](#budget-and-ports)). A program that sends TCP or UDP without a `src`
-    needs them.
+    from, with the program's `PORTS` (see [Budget, ports and
+    permissions](#budget-ports-and-permissions)). A program that sends TCP or
+    UDP without a `src` needs them.
 -   `--fw`: crafty shares the interface's address with the host, whose kernel
     would answer what crafty receives with TCP resets and ICMP port
     unreachables. `--fw` keeps the kernel off the ports of `--tcp` and `--udp`.
@@ -165,6 +165,10 @@ Options:
 -   `--max-duration`, `--max-packets`, `--max-bytes`, `--max-packets-per-secs`,
     `--max-bytes-per-secs`, `--max-syns`, `--max-syns-per-secs`: self-imposed
     budget.
+-   `--local-ip accept|deny:CIDR`, `--remote-ip accept|deny:CIDR` (repeatable),
+    `--mac-spoofing BOOL`, `--exfiltration BOOL`: permissions, over the
+    program's (see [Budget, ports and
+    permissions](#budget-ports-and-permissions)).
 -   `--reference`: prints the reference manual.
 -   `--examples`: prints many examples of use.
 -   `--cliref`: exhaustive list of options including seldom used ones.
@@ -265,17 +269,28 @@ with the constructors of all, which `case` tells apart:
     self-driven `IP`) is an error. `p = MESSAGE` captures the packet as it
     leaves (see [Self-driven vs manual stacks](#self-driven-vs-manual-stacks)).
 
-### Budget and ports
+### Budget, ports and permissions
 
 A program may declare them, once each, at its top level, with literals only:
 
     BUDGET = {max_duration: 30s, max_syns: 30}
     PORTS = {tcp: [[40000, 40100]], udp: [[5000, 5000]]}
+    PERMISSIONS = {remote_ips: [Deny(192.0.2.66), Accept(192.0.2.0/24)]}
 
 -   `BUDGET`'s fields are the budget options of crafty, named alike.
 -   `PORTS` has ranges `[first, last]` by protocol; a protocol left out gets no
     port.
 -   crafty runs with what both the program and the command line allow.
+-   `PERMISSIONS`:
+    -   `local_ips`, `remote_ips`: rules `Accept(cidr)` or `Deny(cidr)` (an IP
+        is its /32), tried in order; the first that matches an address decides,
+        and none matching denies. Unset, `local_ips` accepts the interface's
+        address (or `--ip`), `remote_ips` any.
+    -   `mac_spoofing` (default `false`): allows sending from another MAC than
+        the interface's.
+    -   `exfiltration` (default `false`): allows sending what was received.
+    -   The rules of `--local-ip` and `--remote-ip` come before the program's,
+        and `--mac-spoofing` and `--exfiltration` override its flags.
 
 ### Expressions
 

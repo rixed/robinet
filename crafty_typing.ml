@@ -466,7 +466,8 @@ let new_var =
 
 (** {2 What a program says of itself}
  *
- * [BUDGET] and [PORTS], which crafty intersects with its command line. What
+ * [BUDGET], [PORTS] and [PERMISSIONS], which crafty combines with its
+ * command line. What
  * a program declares is found without running it: declared at the top level
  * only, with literals only, and never assigned. *)
 
@@ -481,9 +482,17 @@ let budget_type = record_type budget_fields
 (* Ranges of ports, [first, last], whether declared as ranges or ports: *)
 let ports_type = record_type Type.[ "tcp", Array (Array Int) ; "udp", Array (Array Int) ]
 
+(* An address rule, an address standing for its /32: *)
+let rule_type = Type.Variant [ "Accept", Type.Cidr ; "Deny", Type.Cidr ]
+
+let permissions_type =
+    record_type Type.[ "local_ips", Array rule_type ; "remote_ips", Array rule_type ;
+                       "mac_spoofing", Bool ; "exfiltration", Bool ]
+
 (* Bound to their values in the program as it runs: *)
 let budget_var = new_var "BUDGET" budget_type
 let ports_var = new_var "PORTS" ports_type
+let permissions_var = new_var "PERMISSIONS" permissions_type
 
 (* The last packet sent by any block, void until one is: *)
 let last_var = new_var "LAST" packet_type
@@ -493,11 +502,23 @@ type limits =
       budget : (string * A.literal) list ;
       (* The ranges of local ports, sorted and disjoint, if restricted; then
        * the ports of a protocol without ranges are none: *)
-      ports : ports option }
+      ports : ports option ;
+      permissions : permissions }
 
 and ports = { tcp : (int * int) list ; udp : (int * int) list }
 
-let no_limits = { budget = [] ; ports = None }
+(* The fields of [PERMISSIONS], if set: *)
+and permissions =
+    { local_ips : Firewall.rule list option ;
+      remote_ips : Firewall.rule list option ;
+      mac_spoofing : bool option ;
+      exfiltration : bool option }
+
+let no_permissions =
+    { local_ips = None ; remote_ips = None ; mac_spoofing = None ;
+      exfiltration = None }
+
+let no_limits = { budget = [] ; ports = None ; permissions = no_permissions }
 
 (* Sorted, and merged where they overlap or meet: *)
 let merge_ranges rs =
@@ -558,8 +579,27 @@ let port_ranges name _typ (e : A.expr) =
         merge_ranges
     | _ -> error e.loc "PORTS.%s is an array of ports and ranges [first, last]" name
 
-(* The declarations of [BUDGET] and [PORTS] at the top level of [program],
- * and the rest of it: *)
+type permission = Rules of Firewall.rule list | Flag of bool
+
+let permission_literal name typ (e : A.expr) =
+    match typ, e.desc with
+    | Type.Bool, A.Lit (A.Bool b) -> Flag b
+    | Type.Bool, _ -> error e.loc "PERMISSIONS.%s must be true or false" name
+    | _, A.Array rs ->
+        Rules (List.map (fun (r : A.expr) ->
+            let cidr (e : A.expr) =
+                match e.desc with
+                | A.Lit (A.Cidr c) -> c
+                | A.Lit (A.Ip ip) -> Ip.Cidr.single ip
+                | _ -> error e.loc "A rule is about a literal CIDR or IP address" in
+            match r.desc with
+            | A.Construct ("Accept", Some c) -> Firewall.Accept, cidr c
+            | A.Construct ("Deny", Some c) -> Firewall.Deny, cidr c
+            | _ -> error r.loc "A rule is Accept(CIDR) or Deny(CIDR)") rs)
+    | _ -> error e.loc "PERMISSIONS.%s is an array of rules" name
+
+(* The declarations of [BUDGET], [PORTS] and [PERMISSIONS] at the top level
+ * of [program], and the rest of it: *)
 let self_declarations (program : A.program) =
     List.partition (fun (s : A.stmt) ->
         match s.stmt with
@@ -577,6 +617,21 @@ let limits_of errors decls =
                 let limits =
                     if n = "BUDGET" then
                         { limits with budget = literal_fields n budget_fields budget_literal e }
+                    else if n = "PERMISSIONS" then
+                        let fields = match permissions_type with
+                            | Type.Record fs -> fs | _ -> assert false in
+                        let ps = literal_fields n fields permission_literal e in
+                        let rules k =
+                            match List.assoc_opt k ps with
+                            | Some (Rules r) -> Some r | _ -> None
+                        and flag k =
+                            match List.assoc_opt k ps with
+                            | Some (Flag b) -> Some b | _ -> None in
+                        { limits with permissions = {
+                            local_ips = rules "local_ips" ;
+                            remote_ips = rules "remote_ips" ;
+                            mac_spoofing = flag "mac_spoofing" ;
+                            exfiltration = flag "exfiltration" } }
                     else (
                         let ranges = literal_fields n [ "tcp", Type.Void ; "udp", Type.Void ]
                                                     port_ranges e in
@@ -597,8 +652,19 @@ let least a b =
         A.Interval (if Clock.Interval.compare a b <= 0 then a else b)
     | _ -> invalid_arg "Crafty_typing.least"
 
-(** What both [a] and [b] allow, or why nothing is: *)
-let intersect a b =
+(** What both the [program] and the [cli] allow, or why nothing is. The
+ * permissions are the [cli]'s, its rules before the [program]'s. *)
+let combine ~program:a ~cli:b =
+    let rules a b =
+        match a, b with
+        | Some a, Some b -> Some (b @ a)
+        | x, None | None, x -> x
+    and first b a = match b with Some _ -> b | None -> a in
+    let permissions =
+        { local_ips = rules a.permissions.local_ips b.permissions.local_ips ;
+          remote_ips = rules a.permissions.remote_ips b.permissions.remote_ips ;
+          mac_spoofing = first b.permissions.mac_spoofing a.permissions.mac_spoofing ;
+          exfiltration = first b.permissions.exfiltration a.permissions.exfiltration } in
     let budget =
         List.filter_map (fun (n, _) ->
             match List.assoc_opt n a.budget, List.assoc_opt n b.budget with
@@ -615,22 +681,36 @@ let intersect a b =
     | Some pa, Some pb ->
         let ports = { tcp = inter pa.tcp pb.tcp ; udp = inter pa.udp pb.udp } in
         if ports.tcp = [] && ports.udp = [] then Stdlib.Error "No port is allowed by both"
-        else Ok { budget ; ports = Some ports }
-    | Some p, None | None, Some p -> Ok { budget ; ports = Some p }
-    | None, None -> Ok { budget ; ports = None }
+        else Ok { budget ; ports = Some ports ; permissions }
+    | Some p, None | None, Some p -> Ok { budget ; ports = Some p ; permissions }
+    | None, None -> Ok { budget ; ports = None ; permissions }
 
-(*$T intersect
-  intersect { budget = [ "max_syns", A.Int 3 ; "max_bytes", A.Int 10 ] ; ports = None } \
-            { budget = [ "max_syns", A.Int 2 ; "max_duration", A.Interval (Clock.Interval.sec 1.) ] ; \
-              ports = Some { tcp = [ 1, 10 ; 20, 30 ] ; udp = [] } } = \
-    Ok { budget = [ "max_duration", A.Interval (Clock.Interval.sec 1.) ; \
+(*$T combine
+  combine ~program:{ no_limits with budget = [ "max_syns", A.Int 3 ; "max_bytes", A.Int 10 ] } \
+          ~cli:{ no_limits with \
+                 budget = [ "max_syns", A.Int 2 ; "max_duration", A.Interval (Clock.Interval.sec 1.) ] ; \
+                 ports = Some { tcp = [ 1, 10 ; 20, 30 ] ; udp = [] } } = \
+    Ok { no_limits with \
+         budget = [ "max_duration", A.Interval (Clock.Interval.sec 1.) ; \
                     "max_bytes", A.Int 10 ; "max_syns", A.Int 2 ] ; \
          ports = Some { tcp = [ 1, 10 ; 20, 30 ] ; udp = [] } }
-  intersect { no_limits with ports = Some { tcp = [ 5, 25 ] ; udp = [ 1, 2 ] } } \
-            { no_limits with ports = Some { tcp = [ 1, 10 ; 20, 30 ] ; udp = [] } } = \
+  combine ~program:{ no_limits with ports = Some { tcp = [ 5, 25 ] ; udp = [ 1, 2 ] } } \
+          ~cli:{ no_limits with ports = Some { tcp = [ 1, 10 ; 20, 30 ] ; udp = [] } } = \
     Ok { no_limits with ports = Some { tcp = [ 5, 10 ; 20, 25 ] ; udp = [] } }
-  Result.is_error (intersect { no_limits with ports = Some { tcp = [ 1, 2 ] ; udp = [] } } \
-                             { no_limits with ports = Some { tcp = [] ; udp = [ 1, 2 ] } })
+  Result.is_error (combine ~program:{ no_limits with ports = Some { tcp = [ 1, 2 ] ; udp = [] } } \
+                           ~cli:{ no_limits with ports = Some { tcp = [] ; udp = [ 1, 2 ] } })
+  let cidr = Firewall.cidr_of_string in \
+  combine ~program:{ no_limits with permissions = { no_permissions with \
+                       remote_ips = Some [ Firewall.Accept, cidr "10.0.0.0/8" ] ; \
+                       mac_spoofing = Some true ; exfiltration = Some true } } \
+          ~cli:{ no_limits with permissions = { no_permissions with \
+                   remote_ips = Some [ Firewall.Deny, cidr "10.0.0.1" ] ; \
+                   local_ips = Some [ Firewall.Accept, cidr "0.0.0.0/0" ] ; \
+                   exfiltration = Some false } } = \
+    Ok { no_limits with permissions = { \
+           local_ips = Some [ Firewall.Accept, cidr "0.0.0.0/0" ] ; \
+           remote_ips = Some [ Firewall.Deny, cidr "10.0.0.1" ; Firewall.Accept, cidr "10.0.0.0/8" ] ; \
+           mac_spoofing = Some true ; exfiltration = Some false } }
 *)
 
 let lookup_var env loc name =
@@ -1999,7 +2079,8 @@ let check ?(warnings=ref []) (program : A.program) =
     (* Until no variable is widened, which types grow until they have all
      * the constructors of the program: *)
     let rec typed () =
-        let env = { vars = [ budget_var ; ports_var ; last_var ] ; declared_here = [] ;
+        let env = { vars = [ budget_var ; ports_var ; permissions_var ; last_var ] ;
+                    declared_here = [] ;
                     poisoned = [] ; stack = [] ;
                     stack_text = [] ; loops = 0 ; layer_ctx = None ;
                     may_wait = true ; errors = ref [] ; warnings = ref [] ;

@@ -54,13 +54,33 @@ type rule = verdict * Ip.Cidr.t
 let string_of_rule (v, cidr) =
     string_of_verdict v ^" "^ Ip.Cidr.to_string cidr
 
-(** A CIDR, or an address standing for its /32: *)
+(** An IPv4 CIDR, with no bit set beyond its mask, or an address standing
+ * for its /32: *)
 let cidr_of_string s =
     let s = String.trim s in
-    try
-        if String.contains s '/' then Ip.Cidr.of_string s
-        else Ip.Cidr.single (Ip.Addr.of_string s)
-    with _ -> Widget.bad_value "not a CIDR: %S" s
+    let bad () = Widget.bad_value "not a CIDR: %S" s in
+    let ip, width =
+        match String.split s ~by:"/" with
+        | exception Not_found -> s, "32"
+        | ip, w -> ip, w in
+    match Ip.Addr.of_dotted_string ip, int_of_string_opt width with
+    | exception _ -> bad ()
+    | ip, Some w when Ip.Addr.length ip = 32 && w >= 0 && w <= 32 ->
+        if Ip.Addr.compare (Ip.Addr.higher_bits ip w) ip <> 0 then
+            Widget.bad_value "%S has bits set beyond its mask" s ;
+        Ip.Cidr.o (ip, w)
+    | _ -> bad ()
+
+(*$T cidr_of_string
+  Ip.Cidr.to_string (cidr_of_string " 10.0.0.1 ") = "10.0.0.1/32"
+  Ip.Cidr.to_string (cidr_of_string "10.0.0.0/8") = "10.0.0.0/8"
+  (try ignore (cidr_of_string "10.0.0") ; false with Widget.Bad_value _ -> true)
+  (try ignore (cidr_of_string "10.0.0.0/33") ; false with Widget.Bad_value _ -> true)
+  (try ignore (cidr_of_string "localhost") ; false with Widget.Bad_value _ -> true)
+  (try ignore (cidr_of_string "::1/128") ; false with Widget.Bad_value _ -> true)
+  (try ignore (cidr_of_string "10.0.0.1/8") ; false \
+   with Widget.Bad_value m -> m = "\"10.0.0.1/8\" has bits set beyond its mask")
+*)
 
 (** Out from port 0 to port 1, in from port 1 to port 0: *)
 type direction = Out | In

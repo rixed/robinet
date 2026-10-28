@@ -105,7 +105,9 @@ let () =
     and max_duration = ref None and max_packets = ref None
     and max_volume = ref None and max_packet_rate = ref None
     and max_throughput = ref None and max_syns = ref None and max_syn_rate = ref None
-    and speed = ref None and full_duplex = ref None and mtu = ref None in
+    and speed = ref None and full_duplex = ref None and mtu = ref None
+    and local_ips = ref None and remote_ips = ref None
+    and mac_spoofing = ref None and exfiltration = ref None in
     let interval r = Arg.String (fun s ->
         try r := Clock.Interval.of_string s
         with Invalid_argument _ -> die "Not a duration: %S" s) in
@@ -114,6 +116,21 @@ let () =
         with Invalid_argument _ -> die "Not a duration: %S" s) in
     let some_int r = Arg.Int (fun n -> r := Some n)
     and some_float r = Arg.Float (fun n -> r := Some n) in
+    (* VERDICT:CIDR, after those already given: *)
+    let rule r = Arg.String (fun s ->
+        match String.split s ~by:":" with
+        | exception Not_found -> die "Not a rule (accept:CIDR or deny:CIDR): %S" s
+        | v, c ->
+            let v =
+                match String.lowercase_ascii v with
+                | "accept" -> Firewall.Accept
+                | "deny" -> Firewall.Deny
+                | _ -> die "Not a verdict (accept or deny): %S" v in
+            let c =
+                try Firewall.cidr_of_string c
+                with Widget.Bad_value e -> die "%s" e in
+            r := Some ((!r |? []) @ [ v, c ]))
+    and some_bool r = Arg.Bool (fun b -> r := Some b) in
     let port_range proto = Arg.String (fun s ->
         try ports := !ports @ [ Host_config.port_range_of_string proto s ]
         with Invalid_argument e -> die "%s" e) in
@@ -178,6 +195,14 @@ let () =
         "--max-syns", some_int max_syns, "N send no more TCP SYNs (without ACK)" ;
         "--max-syns-per-secs", some_float max_syn_rate,
             "N send no more TCP SYNs (without ACK) per second" ;
+        "--local-ip", rule local_ips,
+            "VERDICT:CIDR accept or deny these local addresses, before the program's rules (repeatable)" ;
+        "--remote-ip", rule remote_ips,
+            "VERDICT:CIDR accept or deny these remote addresses, before the program's rules (repeatable)" ;
+        "--mac-spoofing", some_bool mac_spoofing,
+            "BOOL allow sending from another MAC than the interface's, whatever the program says" ;
+        "--exfiltration", some_bool exfiltration,
+            "BOOL allow sending what was received, whatever the program says" ;
         "--linger", interval linger,
             "DURATION once done, stop after that long without traffic (default 2s)" ;
         "-p", print_packets_spec,
@@ -263,8 +288,11 @@ let () =
                 budget ;
                 ports = if !ports = [] then None
                         else Some { tcp = ranges Host_config.Tcp ;
-                                    udp = ranges Host_config.Udp } } in
-        match Crafty_typing.intersect program.limits cli with
+                                    udp = ranges Host_config.Udp } ;
+                permissions = { local_ips = !local_ips ; remote_ips = !remote_ips ;
+                                mac_spoofing = !mac_spoofing ;
+                                exfiltration = !exfiltration } } in
+        match Crafty_typing.combine ~program:program.limits ~cli with
         | Ok l -> l
         | Error e -> die "%s: %s its PORTS and --tcp/--udp." prog_name e in
     let ports =

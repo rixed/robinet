@@ -306,7 +306,7 @@ let functions =
 
 (** Variables that the program declares of itself, at most once each and at
  * its top level, with a literal record: its budget and its ports. *)
-let self_declared = [ "BUDGET" ; "PORTS" ]
+let self_declared = [ "BUDGET" ; "PORTS" ; "PERMISSIONS" ]
 
 (** Variables that the language defines, upper case as are the constants. *)
 let predefined = [ "MATCH" ; "LAST" ] @ self_declared

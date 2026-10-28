@@ -37,6 +37,7 @@ LIB_SOURCES  = \
 	tap.ml \
 	packet.ml \
 	synth.ml \
+	firewall.ml \
 	crafty_ast.ml \
 	crafty_value.ml \
 	crafty_layers.ml \
@@ -47,7 +48,6 @@ LIB_SOURCES  = \
 	sockopt.ml \
 	hub.ml \
 	policer.ml \
-	firewall.ml \
 	host.ml \
 	named.ml \
 	localhost.ml \
