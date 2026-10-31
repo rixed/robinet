@@ -668,26 +668,35 @@ let icmp_upper = function
     | 0 | 8 -> Only N.Echo
     | 3 -> Only N.DestUnreachable
     | 11 -> Only N.TimeExceeded
-    | _ -> Nothing
+    | _ -> Only N.Raw
 
 (* What is on top is what follows the checksum, and is told the type and
  * code: *)
 let unpack_icmp _ bits =
     match%bitstring bits with
     | {| typ : 8 ; code : 8 ; _checksum : 16 ; payload : -1 : bitstring |} ->
-        unpacked [ "type", V.Int typ ; "code", V.Int code ] ~upper:(icmp_upper typ)
+        let upper =
+            match icmp_upper typ with
+            | Only N.Raw when bitstring_length payload = 0 -> Nothing
+            | u -> u in
+        unpacked [ "type", V.Int typ ; "code", V.Int code ] ~upper
                  ~up_hints:[ "type", V.Int typ ; "code", V.Int code ] ~payload bits
     | {| _ |} -> None
 
-(* The message on top tells the type and code, and its own bits are what
- * follows them: *)
+(* The message on top tells the type and code, but for [Raw], under which
+ * they are options; its own bits are what follows them: *)
 let icmp_node _ =
-    manual (fun _ hints payload ->
-        let int name =
-            match List.assoc_opt name hints with
-            | Some v -> int_value name 0 0xff v
-            | None -> V.fail "ICMP needs a message on top" in
-        let typ = int "type" and code = int "code" in
+    manual (fun fields hints payload ->
+        let typ, code =
+            if List.mem_assoc "type" hints then (
+                if fields "type" <> None || fields "code" <> None then
+                    V.fail "The type and code of ICMP are those of the message on top" ;
+                let none _ = None in
+                int_of ~hints none "ICMP" "type" 0 0xff,
+                int_of ~hints ~def:0 none "ICMP" "code" 0 0xff)
+            else
+                int_of fields "ICMP" "type" 0 0xff,
+                int_of ~def:0 fields "ICMP" "code" 0 0xff in
         let msg chk =
             let%bitstring hdr = {| typ : 8 ; code : 8 ; chk : 16 |} in
             concat [ hdr ; payload ] in
@@ -1066,11 +1075,11 @@ let udp =
         field "length" Type.Int ;
         field "checksum" Type.Int ]
 
-(* The kind of message is told by the layer on top of it: *)
+(* The kind of message is told by the layer on top of it, but for [Raw]: *)
 let icmp =
     layer N.ICMP ~above:[ ip ] ~node:icmp_node ~unpack:unpack_icmp [
-        field "type" Type.Int ~set_in:[] ;
-        field "code" Type.Int ~set_in:[] ]
+        field "type" Type.Int ;
+        field "code" Type.Int ]
 
 (* The stream of the requests and replies of an id: *)
 let echo =
@@ -1117,7 +1126,7 @@ let quoted_tcp =
 (* What is carried by a layer that is not decoded any further: *)
 let raw =
     layer N.Raw ~terminal:true
-        ~above:[ eth ; ip ; tcp ; udp ; dest_unreachable ; time_exceeded ;
+        ~above:[ eth ; ip ; tcp ; udp ; icmp ; dest_unreachable ; time_exceeded ;
                  quoted_ip ; quoted_udp ; quoted_tcp ]
         ~node:raw_node ~unpack:unpack_raw
         ~default:"data" [ field "data" Type.bytes ]

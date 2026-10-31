@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 9eb489a229c2664d7d12f2597865bce7) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 119c81e87027c7c0886aa676f4f6c575) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -540,7 +540,8 @@ retransmitted.
 
 #### `ICMP`
 
--   `type`, `code`: int; read M. Set by the message on top.
+-   `type`, `code`: int; set M; read M. Set by the message on top, but for
+    `Raw`: `ICMP(type=13)/Raw(...)` needs a `type` (`code` defaults to 0).
 
 #### `Echo` (on `ICMP`)
 
@@ -605,7 +606,7 @@ The stream of a DNS id, for `Query` and `Answer` messages.
 A message has one question (`name`, `type`, `class`): the first, of a received
 message with several.
 
-#### `Raw` (on `Eth`, `IP`, `TCP`, `UDP`, the ICMP errors and the quoted layers, terminal)
+#### `Raw` (on `Eth`, `IP`, `TCP`, `UDP`, `ICMP`, the ICMP errors and the quoted layers, terminal)
 
 -   `data`: bytes; set M; read M. Default field.
 

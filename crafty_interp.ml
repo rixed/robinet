@@ -1766,6 +1766,16 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 3/3 mtu=1400 \"\\001\\002\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 11/0 mtu=0 \"\\003\\004\"\n8µs960ns2ps: done" \
     (runs ~frames:true "/IP!(dst=10.0.0.2)/ICMP/DestUnreachable(code=PORT_UNREACHABLE, mtu=1400)/Raw(#0102)\n/IP!(dst=10.0.0.2)/ICMP/TimeExceeded/Raw(#0304)")
 *)
+(* Under Raw, ICMP takes its type and code as options: *)
+(*$= runs & ~printer:identity
+  "> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 42/1 mtu=772 \"\\170\"\n> 02:00:00:00:00:01>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 ICMP 8/0 id=7 seq=1 \"\\002\\003\"\n8µs880ns2ps: done" \
+    (runs ~frames:true "/IP!(dst=10.0.0.2)/ICMP(type=42, code=1)/Raw(#01020304aa)\n/IP!(dst=10.0.0.2)/ICMP(type=8)/Raw(#000700010203)")
+  "0s: failed: line 1, column 26: ICMP needs a type" \
+    (runs ~frames:true "/IP(dst=10.0.0.2)/ICMP { Raw(\"x\") }")
+  "400ms: abc\n400ms: done" \
+    (runs ~inject:[ 0.4, incoming (Ip.Pdu.pack (ip_packet Ip.Proto.icmp (Bitstring.bitstring_of_string "\013\000\000\000abc"))) ] \
+        "expect timeout=1s /IP/ICMP(type == 13)/Raw { print(MATCH[Raw].data) }")
+*)
 (* Manual frames, to a given MAC address or to what the interface knows: *)
 (*$= runs & ~printer:identity
   "> 02:00:00:00:00:01>AA:BB:CC:DD:EE:FF proto=0x88b5 \"raw\"\n> 02:00:00:00:00:01>02:00:00:00:00:FE IP 10.0.0.1>1.2.3.4 ttl=64 UDP 1>2 \"y\"\n> 02:00:00:00:00:99>02:00:00:00:00:02 IP 10.0.0.1>10.0.0.2 ttl=64 proto=99 \"z\"\n10µs480ns3ps: done" \

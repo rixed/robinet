@@ -577,7 +577,8 @@ not retransmitted.
 
 #### `ICMP`
 
-- `type`, `code`: int; read M. Set by the message on top.
+- `type`, `code`: int; set M; read M. Set by the message on top, but for
+  `Raw`: `ICMP(type=13)/Raw(...)` needs a `type` (`code` defaults to 0).
 
 #### `Echo` (on `ICMP`)
 
@@ -645,7 +646,7 @@ The stream of a DNS id, for `Query` and `Answer` messages.
 A message has one question (`name`, `type`, `class`): the first, of a
 received message with several.
 
-#### `Raw` (on `Eth`, `IP`, `TCP`, `UDP`, the ICMP errors and the quoted layers, terminal)
+#### `Raw` (on `Eth`, `IP`, `TCP`, `UDP`, `ICMP`, the ICMP errors and the quoted layers, terminal)
 
 - `data`: bytes; set M; read M. Default field.
 

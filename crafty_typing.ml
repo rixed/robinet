@@ -1709,7 +1709,20 @@ and stack_layers ~hint env base over (layers : A.layer list) =
                 Array.iteri (fun i (f : L.field) ->
                     if f.pick = Some L.Required && not (List.mem_assoc i tl.options) then
                         error tl.layer_loc "%s needs a %s" (L.to_string tl.layer) f.name
-                ) tl.layer.fields) tls ;
+                ) tl.layer.fields ;
+            (* The type and code of ICMP are those of the message on top, but
+             * for Raw: *)
+            if tl.layer == L.icmp then
+                match List.nth_opt tls (j + 1) with
+                | Some up when up.layer == L.raw ->
+                    if j >= n && not (List.exists (fun (i, _) ->
+                                         tl.layer.fields.(i).name = "type") tl.options) then
+                        error tl.layer_loc "ICMP needs a type, with Raw on top"
+                | Some up ->
+                    List.iter (fun (i, (e : expr)) ->
+                        error e.loc "The %s of ICMP is that of the %s on top"
+                            tl.layer.fields.(i).name (L.to_string up.layer)) tl.options
+                | None -> ()) tls ;
         base, tls, n
 
 and pattern env (p : A.pattern) =
@@ -2714,8 +2727,11 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(id=3)/TCP(dst=80) {}")
   "line 1, column 19: TCP cannot be self-driven on top of a manual IP" \
     (types "/IP!(dst=1.2.3.4)/TCP(dst=80) {}")
-  "line 1, column 23: type of ICMP cannot be set" \
-    (types "/IP(dst=1.2.3.4)/ICMP(type=8) {}")
+  "line 1, column 28: The type of ICMP is that of the Echo on top" \
+    (types "/IP(dst=1.2.3.4)/ICMP(type=8)/Echo {}")
+  "line 1, column 18: ICMP needs a type, with Raw on top" \
+    (types "/IP(dst=1.2.3.4)/ICMP/Raw(\"x\")")
+  "" (types "/IP(dst=1.2.3.4)/ICMP(type=8) {}")
   "line 1, column 43: Request is a terminal layer, therefore /IP/ICMP/Echo/Request is a complete message. No further layer can be stacked on top of it" \
     (types "/IP(dst=1.2.3.4)/ICMP/Echo/Request(seq=1)/Raw(\"x\")")
   "line 1, column 2: IP needs a dst" \
