@@ -50,7 +50,12 @@
    A packet sent, by any block, is then [LAST]. [on] lets its block go on, and runs the block of the pattern of every
    match until its timeout, its [max] or a [break] out of it; a block ends
    only once its statements are done and its [on]s are over. The packet
-   matched, [MATCH], is decoded to its top, and only if read. *)
+   matched, [MATCH], is decoded to its top, and only if read.
+
+   [spawn] runs its block alongside the enclosing one, which goes on, and
+   which it keeps busy as an [on] does: one with a [for] holds that block
+   until it ends, or until [for] elapses and it is left; one without ends
+   with the statements of that block. A [break] out of it ends it. *)
 open Batteries
 open Crafty_value
 module EthSpeed = SimTypes.EthSpeed
@@ -989,6 +994,44 @@ and exec t b env (s : T.stmt) k =
             if Option.map_default (fun m -> m > 0) true max then
                 on t b env s.stmt_loc cases ~for_ ~linger ~timeout max ;
             k env)
+    | T.Spawn { for_ ; body } ->
+        guard (fun () ->
+            Option.map (fun (e : T.expr) ->
+                match eval e with
+                | Interval i ->
+                    if Interval.compare i Interval.zero < 0 then
+                        error e.loc "The duration of spawn cannot be negative" ;
+                    i
+                | _ -> assert false) for_) |>
+        Option.may (fun for_ -> spawn t b env body for_ ; k env)
+
+(* Runs [body] within [b], counting as busy until it ends, is broken out of,
+ * or is left: after [for_], holding [b] meanwhile; or else once [b]'s
+ * statements are done and nothing holds it: *)
+and spawn t b env body for_ =
+    let over = ref false and thread = ref None in
+    let holds = for_ <> None in
+    b.busy <- b.busy + 1 ;
+    if holds then b.holding <- b.holding + 1 ;
+    let end_ () =
+        if not !over then (
+            over := true ;
+            Option.may cancel !thread ;
+            if b.live then (
+                b.busy <- b.busy - 1 ;
+                if holds then (
+                    b.holding <- b.holding - 1 ;
+                    release b) ;
+                settle b)) in
+    let th =
+        run_block t b env body ~fail:b.fail
+            ~break_:(fun n -> if n <= 1 then end_ () else b.break_ (n - 1))
+            (fun _ -> end_ ()) in
+    (* Unless it ended already: *)
+    if !over then cancel th else thread := Some th ;
+    match for_ with
+    | Some d -> Simulation.delay t.power d end_ ()
+    | None -> b.ending <- end_ :: b.ending
 
 (* Disarmed after [for_], or else [linger] after the statements of [b] (or,
  * without a linger, once [b] is no longer held), or after [max] matches;
@@ -1944,6 +1987,29 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on Raw(\"a\") { print(\"a\") }\n  on for=1s Raw(\"b\") {} }")
   "0s: failed: line 2, column 13: The linger of on cannot be negative" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on linger=-1s Raw(\"a\") {} }")
+*)
+(* A spawn runs alongside its block: without a duration, until the
+ * statements of that block are done; with one, the block waits for it, up
+ * to that duration. A break ends it, and its errors leave its block: *)
+(*$= runs & ~printer:identity
+  "0s: a\n0s: b\n250ms: 3\n250ms: done" \
+    (runs "n = 0\n{ spawn { print(\"a\") ; repeat every=100ms { n += 1 } }\n  print(\"b\")\n  wait 250ms }\nprint(n)")
+  "300ms: a\n300ms: b\n300ms: done" \
+    (runs "{ spawn for=1s { wait 300ms ; print(\"a\") } }\nprint(\"b\")")
+  "200ms: b\n200ms: done" \
+    (runs "{ spawn for=200ms { wait 300ms ; print(\"a\") } }\nprint(\"b\")")
+  "250ms: 3\n1s: done" \
+    (runs "n = 0\n{ spawn { repeat every=100ms { n += 1 } }\n  on for=250ms /IP {} }\nprint(n)\nwait 750ms")
+  "100ms: b\n100ms: done" \
+    (runs "{ spawn for=1s { wait 100ms ; break ; print(\"a\") } }\nprint(\"b\")")
+  "0s: 0\n0s: 1\n0s: 2\n0s: done" \
+    (runs "repeat count=5 { spawn { if I == 3 { break 2 } } ; print(I) }")
+  "100ms: b\n100ms: done" \
+    (runs "catch { spawn for=1s { wait 100ms ; x = 1 / 0 }\n  wait 500ms ; print(\"a\") }\nprint(\"b\")")
+  "100ms: failed: line 1, column 33: Division by zero" \
+    (runs "spawn for=1s { wait 100ms ; x = 1 / 0 }")
+  "0s: failed: line 1, column 11: The duration of spawn cannot be negative" \
+    (runs "spawn for=-1s {}")
 *)
 (* An on with a timeout fails once that long passes without a match: *)
 (*$= runs & ~printer:identity

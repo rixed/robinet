@@ -843,7 +843,9 @@ let () = set_stmt (
          params ~pattern:true "on" [ "for" ; "linger" ; "timeout" ; "max" ] +- sp ++
          cases >>: fun (p, cases) ->
             On { for_ = p "for" ; linger = p "linger" ; timeout = p "timeout" ;
-                 max = p "max" ; cases })) in
+                 max = p "max" ; cases }) |||
+        (keyword "spawn" -+ params "spawn" [ "for" ] ++ body >>:
+            fun (p, body) -> Spawn { for_ = p "for" ; body })) in
     (* Read as nothing else, so that this rejection is the furthest error: *)
     ((foreign_start >>: fun (s, hint) -> reject "%s is no keyword: %s" s hint) |||
      (quiet (nay foreign_start) -+ known_stmt)) |? "statement")

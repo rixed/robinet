@@ -424,7 +424,8 @@ what their engine computes (checksums).
 - `if COND STMT [elsif COND STMT] else STMT`: conditionals.
 - `case var=v X C { ... } | C { ... } else { ... }`: runs the block of the
   constructor of `X`, where `v` (default `I`) is what that constructor holds.
-- `break n`: leaves the `n` (default 1) innermost `repeat`, `foreach` or `on`.
+- `break n`: leaves the `n` (default 1) innermost `repeat`, `foreach`, `on` or
+  `spawn`.
 - `wait d` (or `sleep d`): pauses.
 - `expect timeout=d PATTERN { ... }`: waits for one matching packet, then
   runs the block; a timeout (none by default) is an error.
@@ -435,9 +436,12 @@ what their engine computes (checksums).
   repeatedly (`max` times or unlimited) until its lifetime or that of the
   enclosing blocks are over.  `linger` (default 0) instructs that enclosing
   block to wait further.
+- `spawn for=d { ... }`: runs the block alongside the enclosing one, which goes
+  on. With `for`, the enclosing block waits for it, cancelling it after `d`;
+  without, it ends with the statements of the enclosing block.
 - `{ ... }`: a block; its variables and patterns end with it. A block ends once
-  its statements are done, its `linger`s waited, and its `on`s with a `for`
-  ended. Leaving a block, normally or on an error, cancels what it still had
+  its statements are done, its `linger`s waited, and its `on`s and `spawn`s
+  with a `for` ended. Leaving a block, normally or on an error, cancels what it still had
   going: patterns, timers, inner blocks, and the streams it held, closing their
   connections.
 

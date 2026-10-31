@@ -142,7 +142,7 @@ and stmt_desc =
                   every : expr option ; for_ : expr option ; body : block }
     | Retry of { max : expr option ; body : block }
     | Catch of block
-    (* How many enclosing [repeat] and [on] to leave: *)
+    (* How many enclosing [repeat], [on] and [spawn] to leave: *)
     | Break of int
     | Wait of expr
     (* An [expect] being a [first] of a single case; [form] is which: *)
@@ -150,6 +150,9 @@ and stmt_desc =
     (* Without [for_], it ends [linger] after the statements of its block: *)
     | On of { for_ : expr option ; linger : expr option ; timeout : expr option ;
               max : expr option ; cases : case list }
+    (* Without [for_], it ends with the statements of its block, as an [on]
+     * without [for_] nor [linger] does: *)
+    | Spawn of { for_ : expr option ; body : block }
 
 (* Of alternative [patterns]; [match_] is the variable [MATCH] of the
  * block: *)
@@ -1771,14 +1774,21 @@ and timeout_of env form timeout =
  * expression whose value is [used], else void: *)
 and block_value ?expected ~used errors env stmts =
     let env = { env with declared_here = [] } in
-    (* An [on] ending with its block, which nothing after it keeps waiting,
-     * ends as it starts: *)
+    (* An [on] or a [spawn] ending with its block, which nothing after it
+     * keeps waiting, ends as it starts: *)
     let rec ends_at_once = function
         | { A.stmt = A.On { for_ = None ; linger = None ; _ } ; stmt_loc } :: rest ->
             ends_at_once rest &&
             (env.warnings :=
                 (stmt_loc, "This on ends at once, with its block: give it a \
                             duration (for), or a linger after its block") ::
+                !(env.warnings) ;
+             true)
+        | { A.stmt = A.Spawn { for_ = None ; _ } ; stmt_loc } :: rest ->
+            ends_at_once rest &&
+            (env.warnings :=
+                (stmt_loc, "This spawn ends at once, with its block: give it a \
+                            duration (for)") ::
                 !(env.warnings) ;
              true)
         | [] -> true
@@ -1830,7 +1840,7 @@ and stmt errors env (s : A.stmt) =
                 | A.Retry _ -> Some "retry" | A.Catch _ -> Some "catch"
                 | A.Break _ -> Some "break" | A.Wait _ -> Some "wait"
                 | A.Expect _ -> Some "expect" | A.First _ -> Some "first"
-                | A.On _ -> Some "on"
+                | A.On _ -> Some "on" | A.Spawn _ -> Some "spawn"
                 | A.Expr _ | A.Declare _ | A.Assign _ -> None in
             Option.may (fun what ->
                 error loc "%s cannot be in a block within an expression, but for \
@@ -2006,7 +2016,7 @@ and stmt errors env (s : A.stmt) =
                 | Some { desc = A.Lit (A.Int n) ; _ } when n > 0 -> n
                 | Some e -> error e.loc "The depth of break must be a positive integer" in
             if depth > env.loops then
-                error loc "Break out of %d repeat, foreach or on, but %s" depth
+                error loc "Break out of %d repeat, foreach, on or spawn, but %s" depth
                     (match env.loops with
                     | 0 -> "there is none"
                     | 1 -> "there is only one"
@@ -2033,6 +2043,10 @@ and stmt errors env (s : A.stmt) =
             and max = opt_expr env "The maximum of on" Type.Int max in
             env, Some (mk (On { for_ ; linger ; timeout ; max ;
                                 cases = cases ~loops:1 cs }))
+        | A.Spawn { for_ ; body } ->
+            let for_ = opt_expr env "The duration of spawn" Type.Interval for_ in
+            let body = block errors { env with loops = env.loops + 1 } body in
+            env, Some (mk (Spawn { for_ ; body }))
     with Error _ | Already_told as ex ->
         tell errors ex ;
         env, None
@@ -2045,7 +2059,8 @@ let rec declarations (b : block) =
         | Assign { path ; value ; _ } ->
             List.concat_map (expr_declarations % snd) path @ expr_declarations value
         | Expr e -> expr_declarations e
-        | Stack { body = b ; _ } | Retry { body = b ; _ } | Catch b -> declarations b
+        | Stack { body = b ; _ } | Retry { body = b ; _ } | Catch b
+        | Spawn { body = b ; _ } -> declarations b
         | First { cases ; _ } | On { cases ; _ } ->
             List.concat_map (fun (c : case) -> declarations c.body) cases
         | Repeat { var ; body ; _ } -> var :: declarations body
@@ -2090,6 +2105,7 @@ let stmt_exprs s =
     | Retry { max ; _ } -> opts [ max ]
     | First { timeout ; _ } -> opts [ timeout ]
     | On { for_ ; linger ; timeout ; max ; _ } -> opts [ for_ ; linger ; timeout ; max ]
+    | Spawn { for_ ; _ } -> opts [ for_ ]
     | Catch _ | Break _ -> []
 
 (* The expressions directly within [e], not within its blocks: *)
@@ -2109,7 +2125,8 @@ let sub_exprs e =
 (* The blocks directly within [s] and [e]: *)
 let stmt_blocks s =
     match s.stmt with
-    | Stack { body ; _ } | Repeat { body ; _ } | Retry { body ; _ } | Catch body ->
+    | Stack { body ; _ } | Repeat { body ; _ } | Retry { body ; _ } | Catch body
+    | Spawn { body ; _ } ->
         [ body ]
     | First { cases ; _ } | On { cases ; _ } -> List.map (fun (c : case) -> c.body) cases
     | Send _ | Expr _ | Declare _ | Wait _ | Assign _ | Break _ -> []
@@ -2594,10 +2611,16 @@ let check_patterns (ps : A.patterns) =
     (types "x = assert(true)")
   "line 1, column 7: Argument x of print must be a value, not a void" \
     (types "print(print(1))")
-  "line 1, column 1: Break out of 1 repeat, foreach or on, but there is none" \
+  "line 1, column 1: Break out of 1 repeat, foreach, on or spawn, but there is none" \
     (types "break")
-  "line 1, column 10: Break out of 2 repeat, foreach or on, but there is only one" \
+  "line 1, column 10: Break out of 2 repeat, foreach, on or spawn, but there is only one" \
     (types "repeat { break 2 }")
+  "line 1, column 9: Break out of 2 repeat, foreach, on or spawn, but there is only one" \
+    (types "spawn { break 2 }")
+  "line 1, column 11: The duration of spawn must be an interval, not an int" \
+    (types "spawn for=1 {}")
+  "line 1, column 11: spawn cannot be in a block within an expression, but for the value of a declaration, an assignment or a statement" \
+    (types "x = 1 + { spawn {} ; 1 }")
   "line 1, column 4: The condition of if must be a bool, not a string" \
     (types "if \"x\" {}")
   "line 1, column 15: The timeout of first must be an interval, not an int" \
@@ -2610,7 +2633,7 @@ let check_patterns (ps : A.patterns) =
     (types "foreach t 3 {}")
   "line 1, column 15: The period of foreach must be an interval, not an int" \
     (types "foreach every=1 [1] {}")
-  "line 2, column 2: Break out of 2 repeat, foreach or on, but there is only one" \
+  "line 2, column 2: Break out of 2 repeat, foreach, on or spawn, but there is only one" \
     (types "foreach t [1] { x = t * 2.0\n break 2 }")
   "line 1, column 22: The period of repeat must be an interval, not an int" \
     (types "repeat count=3 every=1 {}")

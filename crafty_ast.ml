@@ -237,6 +237,8 @@ and stmt_desc =
     (* The block of the patterns of each match, never empty: *)
     | On of { for_ : expr option ; linger : expr option ; timeout : expr option ;
               max : expr option ; cases : (patterns * block) list }
+    (* Runs [body] alongside the block, which goes on: *)
+    | Spawn of { for_ : expr option ; body : block }
 
 (* Alternatives, never empty: *)
 and patterns = pattern list
@@ -315,7 +317,7 @@ let predefined = [ "MATCH" ; "LAST" ] @ self_declared
 let keywords =
     [ "true" ; "false" ; "repeat" ; "foreach" ; "retry" ; "catch" ; "if" ;
       "elsif" ; "else" ; "case" ; "break" ; "expect" ; "first" ; "on" ; "wait" ;
-      "sleep" ; "in" ]
+      "sleep" ; "in" ; "spawn" ]
 
 (** {2 Printing}
  *
@@ -549,6 +551,9 @@ and print_stmt ~all indent oc s =
         String.print oc "on" ; param "for" for_ ; param "linger" linger ;
         param "timeout" timeout ; param "max" max ;
         print_cases cases
+    | Spawn { for_ ; body } ->
+        String.print oc "spawn" ; param "for" for_ ;
+        Char.print oc ' ' ; print_block ~all indent oc body
 
 and print_block ~all indent oc b =
     String.print oc "{\n" ;
