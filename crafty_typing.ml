@@ -733,14 +733,27 @@ let lookup_var env loc name =
         if List.mem name env.poisoned then raise Already_told ;
         if name = "MATCH" then
             error loc "MATCH is only defined in the blocks of expect, first and on" ;
-        (* In a condition, a name can also be a field of the layer: *)
-        let fields =
+        (* In a condition, a name can also be a field of the layer, and
+         * those of the layers around it read otherwise: *)
+        let fields, elsewhere =
             match env.layer_ctx with
-            | Some { cur ; in_cond = true ; _ } ->
-                Array.to_list cur.fields |> List.map (fun (fd : L.field) -> fd.name)
-            | _ -> [] in
-        error loc "Unknown variable %s%s" name
-            (A.did_you_mean (fields @ List.map (fun (v : var) -> v.name) env.vars) name)
+            | Some { cur ; in_cond = true ; below ; _ } ->
+                let having ls =
+                    List.filter (fun l -> L.find_field l name <> None) ls |>
+                    List.map L.to_string |> List.unique in
+                Array.to_list cur.fields |> List.map (fun (fd : L.field) -> fd.name),
+                (match List.rev (having (List.map fst (Array.to_list below))),
+                       having (L.uppers cur) with
+                | l :: _, _ -> Printf.sprintf ": the field of %s below is %s.%s" l l name
+                | [], [] -> ""
+                | [], ls ->
+                    Printf.sprintf ": %s, on top of %s, %s one"
+                        (String.concat " and " ls) (L.to_string cur)
+                        (if List.length ls = 1 then "has" else "have"))
+            | _ -> [], "" in
+        match A.did_you_mean (fields @ List.map (fun (v : var) -> v.name) env.vars) name with
+        | "" -> error loc "Unknown variable %s%s" name elsewhere
+        | hint -> error loc "Unknown variable %s%s" name hint
 
 (** {2 Stacks and patterns} *)
 
@@ -777,12 +790,32 @@ let push ?(hint=lazy "") loc base name =
                        No further layer can be stacked on top of it%s"
                 (L.to_string b) (string_of_layers base) (Lazy.force hint)
         else
-            error loc "%s cannot be on top of %s%s" (lname name) (L.to_string b)
-                (Lazy.force hint)
+            let hint =
+                match Lazy.force hint with
+                | "" ->
+                    "\n  On top of "^ L.to_string b ^" can be: "^
+                    (L.uppers b |> List.map L.to_string |> List.unique |> String.concat ", ") ^"."
+                | hint -> hint in
+            error loc "%s cannot be on top of %s%s" (lname name) (L.to_string b) hint
 
-(* What to append to the message about an unknown field [f] of [l]: *)
-let field_hint (l : L.layer) f =
-    A.did_you_mean (Array.to_list l.fields |> List.map (fun (fd : L.field) -> fd.name)) f
+(* What to append to the message about an unknown field [f] of [l], on top
+ * of the layers [below]: a field of [l] of a similar name, or else the
+ * layers that have one of that name, on top of [l] or below it: *)
+let field_hint ?(below=[]) (l : L.layer) f =
+    match A.did_you_mean (Array.to_list l.fields |> List.map (fun (fd : L.field) -> fd.name)) f with
+    | "" ->
+        let having ls =
+            List.filter (fun u -> L.find_field u f <> None) ls |>
+            List.map L.to_string |> List.unique in
+        let names = function
+            | [ n ] -> n ^" has one"
+            | ns -> String.concat ", " (List.take (List.length ns - 1) ns) ^
+                    " and "^ List.last ns ^" have one" in
+        (match having (L.uppers l), having below with
+        | [], [] -> ""
+        | [], ns -> ": "^ names ns ^", below it"
+        | ns, _ -> ": "^ names ns ^", on top of it")
+    | hint -> hint
 
 (* A layer as written in a stack or a pattern, for the fixes of where it
  * goes: *)
@@ -1542,7 +1575,9 @@ and layer_field env loc name from_start nth f =
         | n -> error loc "There are only %d %s%s" n (lname name) where)
     | Some (layer, (l : L.layer), mode) ->
         match L.find_field l f with
-        | None -> error loc "%s has no field %s%s" (L.to_string l) f (field_hint l f)
+        | None ->
+            let below = List.take layer (Array.to_list ctx.below) |> List.map fst in
+            error loc "%s has no field %s%s" (L.to_string l) f (field_hint ~below l f)
         | Some i ->
             if layer = Array.length ctx.below then
                 ctx.prefixed := i :: !(ctx.prefixed) ;
@@ -1734,7 +1769,7 @@ and stack_layers ~hint env base over (layers : A.layer list) =
                         | Some i -> i
                         | None ->
                             error a.arg_loc "%s has no field %s%s" (L.to_string l) n
-                                (field_hint l n))
+                                (field_hint ~below:(List.map fst base) l n))
                     | None ->
                         (match l.default_field with
                         | Some i -> i
@@ -1778,7 +1813,8 @@ and stack_layers ~hint env base over (layers : A.layer list) =
                         error tl.layer_loc "ICMP needs a type, with Raw on top"
                 | Some up ->
                     List.iter (fun (i, (e : expr)) ->
-                        error e.loc "The %s of ICMP is that of the %s on top"
+                        error e.loc "The %s of ICMP is that of the %s on top: \
+                                     it can be set only with Raw on top"
                             tl.layer.fields.(i).name (L.to_string up.layer)) tl.options
                 | None -> ()) tls ;
         base, tls, n
@@ -2783,6 +2819,16 @@ let check_patterns (ps : A.patterns) =
     (types "Rae(\"x\")")
   "line 1, column 30: UDP has no field flags" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53, flags=2) {}")
+  "line 1, column 30: UDP has no field ttl: IP has one, below it" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53, ttl=3)/Raw()")
+  "line 1, column 28: Echo has no field seq: Request and Reply have one, on top of it" \
+    (types "/IP(dst=1.2.3.4)/ICMP/Echo(seq=3)/Request()")
+  "line 1, column 28: Raw cannot be on top of Echo\n  On top of Echo can be: Request, Reply." \
+    (types "/IP(dst=1.2.3.4)/ICMP/Echo/Raw()")
+  "line 1, column 16: Unknown variable ttl: the field of IP below is IP.ttl" \
+    (types "expect /IP/UDP(ttl == 3) {}")
+  "line 1, column 22: Unknown variable seq: Request and Reply, on top of Echo, have one" \
+    (types "expect /IP/ICMP/Echo(seq == 3) {}")
   "line 1, column 36: mss and options cannot both be given" \
     (types "/IP!(dst=1.2.3.4)/TCP!(dst=80, mss=1400, options=#01010101)/Raw()")
   "line 1, column 30: sack_ok cannot be set in a self-driven TCP" \
@@ -2791,7 +2837,7 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(id=3)/TCP(dst=80) {}")
   "line 1, column 19: TCP cannot be self-driven on top of a manual IP" \
     (types "/IP!(dst=1.2.3.4)/TCP(dst=80) {}")
-  "line 1, column 28: The type of ICMP is that of the Echo on top" \
+  "line 1, column 28: The type of ICMP is that of the Echo on top: it can be set only with Raw on top" \
     (types "/IP(dst=1.2.3.4)/ICMP(type=8)/Echo {}")
   "line 1, column 18: ICMP needs a type, with Raw on top" \
     (types "/IP(dst=1.2.3.4)/ICMP/Raw(\"x\")")
@@ -2808,7 +2854,7 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { ../TCP/Raw() }")
   "line 1, column 2: UDP cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP\"?" \
     (types "/UDP {}")
-  "line 1, column 18: IP cannot be on top of IP" \
+  "line 1, column 18: IP cannot be on top of IP\n  On top of IP can be: TCP, UDP, ICMP, Raw." \
     (types "/IP(dst=1.2.3.4)/IP {}")
   "line 1, column 5: MATCH is only defined in the blocks of expect, first and on" \
     (types "x = MATCH")
@@ -2836,9 +2882,9 @@ let check_patterns (ps : A.patterns) =
     (types "/DNS/Query(\"x\")")
   "line 1, column 36: Reply cannot be on top of ICMP\n  Do you mean \"/IP(src == 1.2.3.4)/ICMP/Echo/Reply\"?" \
     (types "on for=1s /IP(src == 1.2.3.4)/ICMP/Reply {}")
-  "line 1, column 12: Reply cannot be on top of IP" \
+  "line 1, column 12: Reply cannot be on top of IP\n  On top of IP can be: TCP, UDP, ICMP, Raw." \
     (types "expect /IP/Reply {}")
-  "line 1, column 17: IP cannot be on top of ICMP" \
+  "line 1, column 17: IP cannot be on top of ICMP\n  On top of ICMP can be: Echo, DestUnreachable, TimeExceeded, Raw." \
     (types "expect /IP/ICMP/IP {}")
   "line 1, column 30: Query cannot be on top of UDP\n  Do you mean \"/IP(dst=1.2.3.4)/UDP(dst=53)/DNS/Query(\"x\")\"?" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53)/Query(\"x\")")
