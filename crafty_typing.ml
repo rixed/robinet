@@ -1238,8 +1238,22 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 error loc "LAST[Eth].ts is not known: %s" only_captured
             | i, (_, t) -> mk t (Field (r, i))
             | exception Not_found ->
-                error loc "No field %s in %s%s" f (tname r.typ)
-                    (A.did_you_mean (List.map fst fs) f))
+                (match r.desc with
+                | Select { packet ; layer ; _ } ->
+                    (* What ICMP errors quote is on top of them: *)
+                    let quoted =
+                        match packet.desc with
+                        | Var { name ; _ } when List.memq layer L.quoted_ip.above ->
+                            Printf.sprintf "\n  The packet it quotes is on top of it: \
+                                            %s[IP].id is the id of the quoted IP, \
+                                            %s[^IP] the IP of the error." name name
+                        | _ -> "" in
+                    let hint = A.did_you_mean (List.map fst fs) f in
+                    error loc "No field %s in %s (only %s)%s" f (L.to_string layer)
+                        (tname r.typ) (if hint = "" then quoted else hint)
+                | _ ->
+                    error loc "No field %s in %s%s" f (tname r.typ)
+                        (A.did_you_mean (List.map fst fs) f)))
         | t -> error loc "No field %s in %s" f (a_type t))
     | A.Index (a, { desc = A.Layer { name ; from_start ; nth } ; _ }) ->
         let a = expr env a in
@@ -2708,6 +2722,12 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(IP.scr == 1.2.3.4) {} }")
   "line 2, column 5: Unknown variable anwsers, do you mean answers?" \
     (types "answers = 1\nx = anwsers")
+  "line 1, column 39: No field unused in TimeExceeded (only {code: int})\n  The packet it quotes is on top of it: MATCH[IP].id is the id of the quoted IP, MATCH[^IP] the IP of the error." \
+    (types "on for=1s /IP/ICMP/TimeExceeded { x = MATCH[TimeExceeded].unused }")
+  "line 1, column 36: No field cod in TimeExceeded (only {code: int}), do you mean code?" \
+    (types "expect /IP/ICMP/TimeExceeded { x = MATCH[TimeExceeded].cod }")
+  "line 1, column 22: No field port in UDP (only {checksum: int, dst: int, length: int, src: int})" \
+    (types "expect /IP/UDP { x = MATCH[UDP].port }")
   "line 2, column 5: No field abd in {abc: int}, do you mean abc?" \
     (types "x = {abc: 1}\ny = x.abd")
   "line 1, column 10: rand has no parameter mxa, do you mean max?" \
