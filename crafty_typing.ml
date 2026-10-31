@@ -806,11 +806,45 @@ let fits base ws =
         fun (_, ls) -> Some (List.rev ls)
     with Error _ -> None
 
+(* [ws] (bottom first) with the layers of [over] (bottom first, with their
+ * modes) that they skip put back, so that they fit on top of [base] and
+ * overlay [over], if they can; [None] if none is skipped: *)
+let filled base over ws =
+    let no_loc = A.{ line = 0 ; column = 0 } in
+    (* As [mode_on] requires: *)
+    let carried base m =
+        m = L.Manual ||
+        not (List.exists (fun ((b : L.layer), bm) -> b.driven && bm = L.Manual) base) in
+    let rec go base over ws acc skipped =
+        match ws, over with
+        | [], _ -> if skipped then Some (List.rev acc) else None
+        | w :: _, ((o : L.layer), om) :: over' when o.name <> w.w_name ->
+            let bang = om = L.Manual && o.driven in
+            let o_w = { w_name = o.name ; bang ; plain = true ;
+                        text = L.to_string o ^ (if bang then "!" else "") } in
+            (match go ((o, om) :: base) over' ws (o_w :: acc) true with
+            | Some _ as r -> r
+            | None -> place base over ws acc skipped)
+        | _ -> place base over ws acc skipped
+    and place base over ws acc skipped =
+        match ws with
+        | [] -> assert false
+        | w :: ws ->
+            match push no_loc base w.w_name with
+            | exception Error _ -> None
+            | base, l ->
+                let m = L.mode_of l ~bang:w.bang in
+                if not (carried base m) then None else
+                let over = match over with (o, _) :: over when o == l -> over | _ -> [] in
+                go ((l, m) :: base) over ws (w :: acc) skipped in
+    go base over ws [] false
+
 (* What tells where the layers [ws] (bottom first) can go, for the errors
  * about where they are put: the current stack, if [anchor] is relative to
  * it, and the nearest other anchor they fit on (with its shortest form, if
  * they overlay some of its layers with neither options nor another mode),
- * or the layers they need below if absolute or out of any stack: *)
+ * or else the nearest one they overlay once the layers they skip are put
+ * back, or the layers they need below if absolute or out of any stack: *)
 let where_to_hint env anchor ws =
     lazy (
         match anchor with
@@ -824,14 +858,24 @@ let where_to_hint env anchor ws =
                         (if j = 0 then " goes back to " else " to ") ^
                         string_of_layers (List.drop (j + 1) env.stack)) |>
                      String.concat ", ") in
+            let nearest =
+                List.sort (fun (a, _, _) (b, _, _) ->
+                    compare (abs (a - k), a) (abs (b - k), b)) in
             let fixes =
                 List.init n identity |> List.filter_map (fun j ->
                     if j = k then None
-                    else Option.map (fun ls -> j, ls) (fits (List.drop j env.stack) ws)) |>
-                List.sort (fun (a, _) (b, _) -> compare (abs (a - k), a) (abs (b - k), b)) in
+                    else Option.map (fun ls -> j, ls, ws) (fits (List.drop j env.stack) ws)) |>
+                nearest in
+            let fixes =
+                if fixes <> [] then fixes else
+                List.init n identity |> List.filter_map (fun j ->
+                    let base = List.drop j env.stack in
+                    Option.bind (filled base (List.rev (List.take j env.stack)) ws)
+                        (fun ws -> Option.map (fun ls -> j, ls, ws) (fits base ws))) |>
+                nearest in
             (match fixes with
             | [] -> context
-            | (j, ls) :: _ ->
+            | (j, ls, ws) :: _ ->
                 let rec same m = function
                     | ((o : L.layer), om) :: over, ((l : L.layer), w) :: rest
                       when o == l && w.plain && L.mode_of l ~bang:w.bang = om ->
@@ -2704,6 +2748,10 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { expect ../../DNS/Answer {} }")
   "line 1, column 32: TCP cannot be on top of TCP\n  In this block, the stack is /IP/TCP (../ goes back to /IP, ../../ to /Eth).\n  Do you mean \"../TCP!(flags=RST)/Raw()\"?" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80) { TCP!(flags=RST)/Raw() }")
+  "line 1, column 36: IP cannot be on top of IP\n  In this block, the stack is /IP/ICMP/Echo (../ goes back to /IP/ICMP, ../../ to /IP, ../../../ to /Eth).\n  Do you mean \"../../../IP!(ttl=1)/ICMP/Echo/Request(seq=1)\"?" \
+    (types "/IP(dst=1.2.3.4)/ICMP/Echo { ../../IP!(ttl=1)/Request(seq=1) }")
+  "line 1, column 33: Request cannot be on top of ICMP\n  In this block, the stack is /IP/ICMP/Echo (../ goes back to /IP/ICMP, ../../ to /IP, ../../../ to /Eth).\n  Do you mean \"Request(seq=1)\"?" \
+    (types "/IP(dst=1.2.3.4)/ICMP/Echo { ../Request(seq=1) }")
   "line 1, column 2: DNS cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP/DNS/Query(\"x\")\"?" \
     (types "/DNS/Query(\"x\")")
   "line 1, column 1: DNS cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP/DNS/Query(\"x\")\"?" \
