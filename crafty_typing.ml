@@ -806,23 +806,27 @@ let fits base ws =
         fun (_, ls) -> Some (List.rev ls)
     with Error _ -> None
 
+(* Whether a layer in mode [m] can be on top of [base], as [mode_on]
+ * requires: *)
+let carried base m =
+    m = L.Manual ||
+    not (List.exists (fun ((b : L.layer), bm) -> b.driven && bm = L.Manual) base)
+
+let written_of (l : L.layer) m =
+    let bang = m = L.Manual && l.driven in
+    { w_name = l.name ; bang ; plain = true ;
+      text = L.to_string l ^ (if bang then "!" else "") }
+
 (* [ws] (bottom first) with the layers of [over] (bottom first, with their
  * modes) that they skip put back, so that they fit on top of [base] and
  * overlay [over], if they can; [None] if none is skipped: *)
 let filled base over ws =
     let no_loc = A.{ line = 0 ; column = 0 } in
-    (* As [mode_on] requires: *)
-    let carried base m =
-        m = L.Manual ||
-        not (List.exists (fun ((b : L.layer), bm) -> b.driven && bm = L.Manual) base) in
     let rec go base over ws acc skipped =
         match ws, over with
         | [], _ -> if skipped then Some (List.rev acc) else None
         | w :: _, ((o : L.layer), om) :: over' when o.name <> w.w_name ->
-            let bang = om = L.Manual && o.driven in
-            let o_w = { w_name = o.name ; bang ; plain = true ;
-                        text = L.to_string o ^ (if bang then "!" else "") } in
-            (match go ((o, om) :: base) over' ws (o_w :: acc) true with
+            (match go ((o, om) :: base) over' ws (written_of o om :: acc) true with
             | Some _ as r -> r
             | None -> place base over ws acc skipped)
         | _ -> place base over ws acc skipped
@@ -839,12 +843,57 @@ let filled base over ws =
                 go ((l, m) :: base) over ws (w :: acc) skipped in
     go base over ws [] false
 
+(* [ws] (bottom first) with the layers missing put in, so that they fit on
+ * top of [base]: one between two of them (Echo between ICMP and Reply), or
+ * any number below the first of an absolute stack (IP/UDP below DNS), each
+ * time the only way with the fewest. [None] if none is missing, or if that
+ * is not known: *)
+let bridged base ws =
+    let no_loc = A.{ line = 0 ; column = 0 } in
+    let on base w =
+        match push no_loc base w.w_name with
+        | exception Error _ -> None
+        | base, l ->
+            let m = L.mode_of l ~bang:w.bang in
+            if carried base m then Some ((l, m) :: base) else None in
+    let rec go base acc added = function
+        | [] -> if added then Some (List.rev acc) else None
+        | w :: ws ->
+            match bridge base w with
+            | None -> None
+            | Some (path, stack) ->
+                go stack (w :: List.rev_append (List.map (fun (l, m) -> written_of l m) path) acc)
+                   (added || path <> []) ws
+    (* The fewest layers (bottom first) on top of [base] for [w] to fit, and
+     * the stack with them and [w], searched one more layer at a time: *)
+    and bridge base w =
+        let max = if base = [] then 5 else 1 in
+        let rec search depth paths =
+            match List.filter_map (fun (path, base) ->
+                      Option.map (fun stack -> List.rev path, stack) (on base w)) paths with
+            | [ found ] -> Some found
+            | _ :: _ -> None
+            | [] when depth >= max -> None
+            | [] ->
+                List.concat_map (fun (path, base) ->
+                    let base = if base = [] then [ L.root, L.Driven ] else base in
+                    L.uppers (fst (List.hd base)) |> List.filter_map (fun (u : L.layer) ->
+                        if u.terminal || u.quoted || List.exists (fun (l, _) -> l == u) base
+                        then None else
+                        let m = if carried base L.Driven then L.mode_of u ~bang:false
+                                else L.Manual in
+                        Some ((u, m) :: path, (u, m) :: base))) paths |>
+                search (depth + 1) in
+        search 0 [ [], base ] in
+    go base [] false ws
+
 (* What tells where the layers [ws] (bottom first) can go, for the errors
  * about where they are put: the current stack, if [anchor] is relative to
  * it, and the nearest other anchor they fit on (with its shortest form, if
  * they overlay some of its layers with neither options nor another mode),
  * or else the nearest one they overlay once the layers they skip are put
- * back, or the layers they need below if absolute or out of any stack: *)
+ * back, or else the nearest one they fit on once the missing layers are put
+ * in; if absolute or out of any stack, with the missing layers put in: *)
 let where_to_hint env anchor ws =
     lazy (
         match anchor with
@@ -873,6 +922,13 @@ let where_to_hint env anchor ws =
                     Option.bind (filled base (List.rev (List.take j env.stack)) ws)
                         (fun ws -> Option.map (fun ls -> j, ls, ws) (fits base ws))) |>
                 nearest in
+            let fixes =
+                if fixes <> [] then fixes else
+                List.init n identity |> List.filter_map (fun j ->
+                    let base = List.drop j env.stack in
+                    Option.bind (bridged base ws)
+                        (fun ws -> Option.map (fun ls -> j, ls, ws) (fits base ws))) |>
+                nearest in
             (match fixes with
             | [] -> context
             | (j, ls, ws) :: _ ->
@@ -888,23 +944,11 @@ let where_to_hint env anchor ws =
                      else Printf.sprintf " (the same as \"%s\")"
                             (string_of_written (A.Relative (j - m)) (List.drop m ws))))
         | A.Relative _ | A.Absolute when anchor <> A.Absolute || fits [] ws = None ->
-            (* The fewest layers to put below, from the root: *)
-            let rec search = function
-                | [] -> ""
-                | path :: paths ->
-                    if fits (List.map (fun l -> l, L.Driven) path) ws <> None then
-                        let below =
-                            List.rev path |> List.tl |> List.map (fun (l : L.layer) ->
-                                { w_name = l.name ; bang = false ; plain = true ;
-                                  text = L.to_string l }) in
-                        Printf.sprintf "\n  Do you mean \"%s\"?"
-                            (string_of_written A.Absolute (below @ ws))
-                    else
-                        search (paths @ (L.uppers (List.hd path) |>
-                            List.filter_map (fun (u : L.layer) ->
-                                if u.terminal || u.quoted || List.memq u path then None
-                                else Some (u :: path)))) in
-            search [ [ L.root ] ]
+            (* With the fewest layers put below, from the root, and in
+             * between: *)
+            (match bridged [] ws with
+            | Some ws -> Printf.sprintf "\n  Do you mean \"%s\"?" (string_of_written A.Absolute ws)
+            | None -> "")
         | _ -> "")
 
 let mode_on loc base (l : L.layer) ~bang =
@@ -2790,6 +2834,16 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/ICMP/Echo { ../Request(seq=1) }")
   "line 1, column 2: DNS cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP/DNS/Query(\"x\")\"?" \
     (types "/DNS/Query(\"x\")")
+  "line 1, column 36: Reply cannot be on top of ICMP\n  Do you mean \"/IP(src == 1.2.3.4)/ICMP/Echo/Reply\"?" \
+    (types "on for=1s /IP(src == 1.2.3.4)/ICMP/Reply {}")
+  "line 1, column 12: Reply cannot be on top of IP" \
+    (types "expect /IP/Reply {}")
+  "line 1, column 17: IP cannot be on top of ICMP" \
+    (types "expect /IP/ICMP/IP {}")
+  "line 1, column 30: Query cannot be on top of UDP\n  Do you mean \"/IP(dst=1.2.3.4)/UDP(dst=53)/DNS/Query(\"x\")\"?" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53)/Query(\"x\")")
+  "line 1, column 25: Request cannot be on top of ICMP\n  In this block, the stack is /IP (../ goes back to /Eth).\n  Do you mean \"ICMP/Echo/Request(\"x\")\"?" \
+    (types "/IP(dst=1.2.3.4) { ICMP/Request(\"x\") }")
   "line 1, column 1: DNS cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP/DNS/Query(\"x\")\"?" \
     (types "DNS/Query(\"x\")")
   "line 1, column 8: UDP cannot be at the bottom of a stack\n  Do you mean \"/IP/UDP\"?" \
