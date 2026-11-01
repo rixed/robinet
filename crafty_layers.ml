@@ -1212,10 +1212,23 @@ let uppers (l : layer) =
 let root = eth
 
 (** The index of that field of [l]. *)
+(* Other names of fields, of a layer or of any, left out of the manual: *)
+let aliases = [ None, "len", length_field.name ; Some N.Raw, "payload", "data" ]
+
+(** The field of [l] that [name] is another name of, else [name]. *)
+let unalias (l : layer) name =
+    match List.find_opt (fun (on, a, _) ->
+              same_name a name && Option.map_default ((=) l.name) true on) aliases with
+    | Some (_, _, f) -> f
+    | None -> name
+
 let find_field (l : layer) name =
-    let name = if same_name name "len" then length_field.name else name in
-    try Some (Array.findi (fun (f : field) -> same_name f.name name) l.fields)
-    with Not_found -> None
+    let find name =
+        try Some (Array.findi (fun (f : field) -> same_name f.name name) l.fields)
+        with Not_found -> None in
+    match find name with
+    | None -> find (unalias l name)
+    | i -> i
 
 (** All the constants, of all the layers. *)
 let constants = List.concat_map (fun (l : layer) -> l.constants) all
@@ -1283,6 +1296,9 @@ let record_type (l : layer) mode =
 *)
 (*$T find_field
   find_field raw "DATA" = Some 0
+  find_field raw "payload" = Some 0
+  find_field tcp "len" = find_field tcp "length"
+  find_field udp "payload" = None
   find_field tcp "mss" = Some 9
   find_field tcp "payload" = None
 *)

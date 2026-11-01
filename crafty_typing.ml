@@ -785,11 +785,15 @@ let lookup_var env loc name =
             | Some { cur ; in_cond = true ; below ; _ } ->
                 let having ls =
                     List.filter (fun l -> L.find_field l name <> None) ls |>
-                    List.map L.to_string |> List.unique in
+                    List.unique ~eq:(fun a b -> L.to_string a = L.to_string b) in
+                let names ls = List.map L.to_string ls in
                 Array.to_list cur.fields |> List.map (fun (fd : L.field) -> fd.name),
                 (match List.rev (having (List.map fst (Array.to_list below))),
-                       having (L.uppers cur) with
-                | l :: _, _ -> Printf.sprintf ": the field of %s below is %s.%s" l l name
+                       names (having (L.uppers cur)) with
+                | l :: _, _ ->
+                    let f = l.fields.(Option.get (L.find_field l name)) in
+                    let l = L.to_string l in
+                    Printf.sprintf ": the field of %s below is %s.%s" l l f.name
                 | [], [] -> ""
                 | [], ls ->
                     Printf.sprintf ": %s, on top of %s, %s one"
@@ -1369,10 +1373,11 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         let r = expr env r in
         (match r.typ with
         | Type.Record fs ->
+            let has f = List.exists (fun (n, _) -> same_name n f) fs in
             let f =
-                if same_name f "len" && not (List.exists (fun (n, _) -> same_name n f) fs) &&
-                   List.exists (fun l -> packet_record l = r.typ) L.all
-                then L.length_field.name else f in
+                if has f then f else
+                List.filter (fun l -> packet_record l = r.typ) L.all |>
+                List.map (fun l -> L.unalias l f) |> List.find_opt has |? f in
             (match List.findi (fun _ (n, _) -> same_name n f) fs with
             | _, ("ts", _) when is_last_eth r ->
                 error loc "LAST[Eth].ts is not known: %s" only_captured
@@ -2953,6 +2958,10 @@ let check_patterns (ps : A.patterns) =
     (types "on for=1s /IP/ICMP/Echo/Reply { case var=l MATCH[0] Echo { print(l.seq) } else {} }")
   "line 1, column 64: No field ttl in DNS (only {id: int, length: int})" \
     (types "on for=1s /IP/UDP/DNS/Answer { case var=l MATCH[0] DNS { print(l.ttl) } else {} }")
+  "x: byte[]" \
+    (types "expect /IP/UDP/Raw(payload == \"echo\") { x = MATCH[Raw].payload }")
+  "line 1, column 31: Unknown field or variable len: the field of Echo below is Echo.length" \
+    (types "on for=1s /IP/ICMP/Echo/Reply(len > 0) {}")
   "line 1, column 31: TCP.length is a virtual field (the bytes TCP carries): it cannot be set" \
     (types "/IP(dst=1.2.3.4)/TCP!(dst=80, len=3)/Raw(\"x\")")
   "line 1, column 7: Eth.ts is a virtual field (when the frame was captured): it cannot be set" \
