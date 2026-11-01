@@ -798,8 +798,13 @@ let lookup_var env loc name =
             match env.layer_ctx with
             | Some { in_cond = true ; _ } -> "field or variable"
             | _ -> "variable" in
+        let predefined =
+            if elsewhere = "" && A.is_constructor name then
+                "\n  The packets predefined are MATCH, the one that matched, and \
+                 LAST, the last one sent."
+            else "" in
         match A.did_you_mean (fields @ List.map (fun (v : var) -> v.name) env.vars) name with
-        | "" -> error loc "Unknown %s %s%s" what name elsewhere
+        | "" -> error loc "Unknown %s %s%s%s" what name elsewhere predefined
         | hint -> error loc "Unknown %s %s%s" what name hint
 
 (** {2 Stacks and patterns} *)
@@ -1385,7 +1390,7 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                 | _ ->
                     error loc "No field %s in %s%s" f (tname r.typ)
                         (A.did_you_mean (List.map fst fs) f)))
-        | t -> error loc "No field %s in %s" f (a_type t))
+        | t -> no_constructor env r ; error loc "No field %s in %s" f (a_type t))
     | A.Index (a, { desc = A.Layer { path ; absolute } ; _ }) ->
         let a = expr env a in
         (match a.typ with
@@ -1399,19 +1404,19 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             let t = Option.map_default (fun n -> List.assoc (lname n) cs) t (List.last path) in
             mk t (Select { packet = a ; layer ; path = List.map (Option.map lname) path ;
                            absolute })
-        | t -> error loc "Cannot select a layer of %s" (a_type t))
+        | t -> no_constructor env a ; error loc "Cannot select a layer of %s" (a_type t))
     | A.Index (a, i) ->
         let a = expr env a in
         (match a.typ with
         | Type.Array t -> mk t (Index (a, expect "An index" (expr env i) Type.Int))
         | Type.Map (k, v) -> mk v (Index (a, expect "A key" (expr ~expected:k env i) k))
-        | t -> error loc "Cannot index %s" (a_type t))
+        | t -> no_constructor env a ; error loc "Cannot index %s" (a_type t))
     | A.Slice (a, from, to_) ->
         let a = expr env a in
         let bound = Option.map (fun i -> expect "A bound" (expr env i) Type.Int) in
         (match a.typ with
         | Type.Array _ | Type.String -> mk a.typ (Slice (a, bound from, bound to_))
-        | t -> error loc "Cannot slice %s" (a_type t))
+        | t -> no_constructor env a ; error loc "Cannot slice %s" (a_type t))
     | A.Call (f, _) when same_name f "sort" ->
         error loc "sort changes its array and has no value; sorted(a) is a sorted copy"
     | A.Call (f, args) ->
@@ -1581,6 +1586,14 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             mk typ (Case { subject ; arms = with_branches arm_bs ;
                            else_ = List.Exceptionless.hd else_bs })
 
+(* A capitalized name that is not a variable is a constructor ([Pending]),
+ * which no operation applies to but [case]: used otherwise, it is more likely
+ * a misnamed variable. *)
+and no_constructor env e =
+    match e.desc with
+    | Construct (c, None) -> ignore (var env e.loc c)
+    | _ -> ()
+
 and var env loc name =
     let mk typ desc = { loc ; typ ; desc } in
     let as_var () =
@@ -1713,6 +1726,7 @@ and binop env loc op a b =
     let mk typ desc = { loc ; typ ; desc } in
     let sym = A.string_of_binop op in
     let cannot () =
+        no_constructor env a ; no_constructor env b ;
         error loc "Cannot apply %s to %s and %s" sym (a_type a.typ) (a_type b.typ) in
     match op with
     | A.Add | A.Sub | A.Mul | A.Div | A.Mod ->
@@ -2904,6 +2918,12 @@ let check_patterns (ps : A.patterns) =
     (types "expect /IP/ICMP/Echo(seq == 3) {}")
   "line 1, column 36: mss and options cannot both be given" \
     (types "/IP!(dst=1.2.3.4)/TCP!(dst=80, mss=1400, options=#01010101)/Raw()")
+  "line 2, column 45: Unknown variable SENT\n  The packets predefined are MATCH, the one that matched, and LAST, the last one sent." \
+    (types "tsum = 0s\non for=1s /IP/UDP { tsum += MATCH[Eth].ts - SENT[Eth].ts }")
+  "line 1, column 9: Unknown variable SENT\n  The packets predefined are MATCH, the one that matched, and LAST, the last one sent." \
+    (types "x = 1 + SENT")
+  "line 1, column 5: Unknown variable LASTT, do you mean LAST?" \
+    (types "x = LASTT.ts")
   "line 1, column 31: TCP.length is a virtual field (the bytes TCP carries): it cannot be set" \
     (types "/IP(dst=1.2.3.4)/TCP!(dst=80, len=3)/Raw(\"x\")")
   "line 1, column 7: Eth.ts is a virtual field (when the frame was captured): it cannot be set" \
