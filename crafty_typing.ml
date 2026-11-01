@@ -477,7 +477,9 @@ type env =
        * their value, as their assignments tell: *)
       widened : (A.location, Type.t) Hashtbl.t ;
       (* Whether a variable was widened while typing: *)
-      widening : bool ref }
+      widening : bool ref ;
+      (* The constructor of what the variables of a case hold, by id: *)
+      held_by : (int, string) Hashtbl.t }
 
 let bound env name =
     List.exists (fun (v : var) -> v.name = name) env.vars ||
@@ -853,7 +855,9 @@ let push ?(hint=lazy "") loc base name =
 (* What to append to the message about an unknown field [f] of [l], on top
  * of the layers [below]: a field of [l] of a similar name, or else the
  * layers that have one of that name, on top of [l] or below it: *)
-let field_hint ?(below=[]) (l : L.layer) f =
+(* A misspelling of a field of [l], else the layers that can be on top of
+ * it or below it and have field [f]: *)
+let field_hint (l : L.layer) f =
     match A.did_you_mean (Array.to_list l.fields |> List.map (fun (fd : L.field) -> fd.name)) f with
     | "" ->
         let having ls =
@@ -863,10 +867,11 @@ let field_hint ?(below=[]) (l : L.layer) f =
             | [ n ] -> n ^" has one"
             | ns -> String.concat ", " (List.take (List.length ns - 1) ns) ^
                     " and "^ List.last ns ^" have one" in
-        (match having (L.uppers l), having below with
+        (match having (L.uppers l), having l.above with
         | [], [] -> ""
         | [], ns -> ": "^ names ns ^", below it"
-        | ns, _ -> ": "^ names ns ^", on top of it")
+        | ns, [] -> ": "^ names ns ^", on top of it"
+        | ns, ns' -> ": "^ names ns ^", on top of it, and "^ names ns' ^", below it")
     | hint -> hint
 
 (* A layer as written in a stack or a pattern, for the fixes of where it
@@ -1384,12 +1389,26 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                                             %s[%s/IP].id is the id of the quoted IP, \
                                             %s[/IP] the IP of the error." name l name
                         | _ -> "" in
-                    let hint = A.did_you_mean (List.map fst fs) f in
+                    let hint = field_hint layer f in
                     error loc "No field %s in %s (only %s)%s" f (L.to_string layer)
                         (tname r.typ) (if hint = "" then quoted else hint)
                 | _ ->
-                    error loc "No field %s in %s%s" f (tname r.typ)
-                        (A.did_you_mean (List.map fst fs) f)))
+                    (* A layer of a packet, of a kind that [case] told: *)
+                    let ctor =
+                        match r.desc with
+                        | Var v -> Hashtbl.find_opt env.held_by v.id
+                        | _ -> None in
+                    let ls =
+                        List.filter (fun (l : L.layer) ->
+                            packet_record l = r.typ &&
+                            Option.map_default ((=) (lname l.name)) true ctor) L.all in
+                    let hint =
+                        match List.unique (List.map (fun l -> field_hint l f) ls) with
+                        | [ h ] -> h
+                        | _ -> A.did_you_mean (List.map fst fs) f in
+                    (match List.unique (List.map L.to_string ls) with
+                    | [ n ] -> error loc "No field %s in %s (only %s)%s" f n (tname r.typ) hint
+                    | _ -> error loc "No field %s in %s%s" f (tname r.typ) hint)))
         | t -> no_constructor env r ; error loc "No field %s in %s" f (a_type t))
     | A.Index (a, { desc = A.Layer { path ; absolute } ; _ }) ->
         let a = expr env a in
@@ -1548,7 +1567,10 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                         error a.arm_loc "%s already has a block in this case" ctor ;
                     let held =
                         match name with
-                        | Some n when t <> Type.Void -> Some (new_var n t)
+                        | Some n when t <> Type.Void ->
+                            let v = new_var n t in
+                            Hashtbl.replace env.held_by v.id ctor ;
+                            Some v
                         | _ -> None in
                     let env =
                         Option.map_default (fun v -> { inner with vars = v :: inner.vars })
@@ -1652,8 +1674,7 @@ and layer_field env loc path absolute f =
         let l, mode = List.nth layers layer in
         match L.find_field l f with
         | None ->
-            let below = List.take layer (Array.to_list ctx.below) |> List.map fst in
-            error loc "%s has no field %s%s" (L.to_string l) f (field_hint ~below l f)
+            error loc "%s has no field %s%s" (L.to_string l) f (field_hint l f)
         | Some i ->
             if layer = Array.length ctx.below then
                 ctx.prefixed := i :: !(ctx.prefixed) ;
@@ -1846,7 +1867,7 @@ and stack_layers ~hint env base over (layers : A.layer list) =
                         | Some i -> i
                         | None ->
                             error a.arg_loc "%s has no field %s%s" (L.to_string l) n
-                                (field_hint ~below:(List.map fst base) l n))
+                                (field_hint l n))
                     | None ->
                         (match l.default_field with
                         | Some i -> i
@@ -2569,7 +2590,7 @@ let check ?(warnings=ref []) (program : A.program) =
                     stack_text = [] ; loops = 0 ; layer_ctx = None ;
                     may_wait = true ; errors = ref [] ; warnings = ref [] ;
                     declared_at = Hashtbl.create 7 ; reads = Hashtbl.create 7 ;
-                    widened ; widening = ref false } in
+                    widened ; widening = ref false ; held_by = Hashtbl.create 7 } in
         let p = block env.errors env program in
         if !(env.widening) then typed () else p, env in
     let p, env = typed () in
@@ -2590,7 +2611,7 @@ let check_patterns (ps : A.patterns) =
                 stack_text = [] ; loops = 0 ; layer_ctx = None ; may_wait = false ;
                 errors = ref [] ; warnings = ref [] ; declared_at = Hashtbl.create 1 ;
                 reads = Hashtbl.create 1 ; widened = Hashtbl.create 1 ;
-                widening = ref false } in
+                widening = ref false ; held_by = Hashtbl.create 1 } in
     try
         Ok (List.map (fun (p : A.pattern) ->
             if p.anchor <> A.Absolute then
@@ -2924,6 +2945,14 @@ let check_patterns (ps : A.patterns) =
     (types "x = 1 + SENT")
   "line 1, column 5: Unknown variable LASTT, do you mean LAST?" \
     (types "x = LASTT.ts")
+  "line 1, column 37: No field seq in Echo (only {id: int, length: int}): Request and Reply have one, on top of it" \
+    (types "on for=1s /IP/ICMP/Echo/Reply { x = MATCH[Echo].seq }")
+  "line 1, column 37: No field id in ICMP (only {code: int, length: int, type: int}): Echo has one, on top of it, and IP has one, below it" \
+    (types "on for=1s /IP/ICMP/Echo/Reply { x = MATCH[ICMP].id }")
+  "line 1, column 66: No field seq in Echo (only {id: int, length: int}): Request and Reply have one, on top of it" \
+    (types "on for=1s /IP/ICMP/Echo/Reply { case var=l MATCH[0] Echo { print(l.seq) } else {} }")
+  "line 1, column 64: No field ttl in DNS (only {id: int, length: int})" \
+    (types "on for=1s /IP/UDP/DNS/Answer { case var=l MATCH[0] DNS { print(l.ttl) } else {} }")
   "line 1, column 31: TCP.length is a virtual field (the bytes TCP carries): it cannot be set" \
     (types "/IP(dst=1.2.3.4)/TCP!(dst=80, len=3)/Raw(\"x\")")
   "line 1, column 7: Eth.ts is a virtual field (when the frame was captured): it cannot be set" \
