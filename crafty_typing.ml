@@ -471,6 +471,8 @@ type env =
       warnings : errors ;
       (* Where the variables of the declarations are declared, by id: *)
       declared_at : (int, A.location) Hashtbl.t ;
+      (* And the value they are declared with: *)
+      declared_as : (int, A.expr) Hashtbl.t ;
       (* Where variables are first read, by id: *)
       reads : (int, A.location) Hashtbl.t ;
       (* The type of the variables declared there, when wider than that of
@@ -1305,10 +1307,10 @@ let map_call f loc typ m k =
 
 (* Both of the same type, converting one to the other's if need be; to
  * bytes rather than from them, as that never fails: *)
-let unify what a b =
+let unify ?(describe=fun e -> a_type e.typ) what a b =
     if a.typ = b.typ then a, b else
     let cannot () =
-        error a.loc "Cannot %s %s and %s" what (a_type a.typ) (a_type b.typ) in
+        error a.loc "Cannot %s %s and %s" what (describe a) (describe b) in
     match (if a.typ = Type.bytes then None else coerce a b.typ), coerce b a.typ with
     | Some a, _ -> a, b
     | _, Some b -> a, b
@@ -1613,6 +1615,28 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             mk typ (Case { subject ; arms = with_branches arm_bs ;
                            else_ = List.Exceptionless.hd else_bs })
 
+(* An operand, named if a variable, with where its type comes from: *)
+and describe env e =
+    match e.desc with
+    | Var v when not (String.starts_with v.name "#") ->
+        (match origin env v with
+        | "" -> Printf.sprintf "%s (%s)" v.name (a_type e.typ)
+        | o -> Printf.sprintf "%s (%s, %s)" v.name (a_type e.typ) o)
+    | _ -> a_type e.typ
+
+(* Where [v] was declared, and as what if short: *)
+and origin env (v : var) =
+    match Hashtbl.find_opt env.declared_at v.id with
+    | None -> ""
+    | Some loc ->
+        let as_ =
+            match Hashtbl.find_opt env.declared_as v.id with
+            | Some e ->
+                let s = IO.to_string A.print_bare_expr e in
+                if String.length s <= 40 && not (String.contains s '\n') then " as "^ s else ""
+            | None -> "" in
+        Printf.sprintf "declared at line %d%s" loc.line as_
+
 (* A capitalized name that is not a variable is a constructor ([Pending]),
  * which no operation applies to but [case]: used otherwise, it is more likely
  * a misnamed variable. *)
@@ -1753,7 +1777,8 @@ and binop env loc op a b =
     let sym = A.string_of_binop op in
     let cannot () =
         no_constructor env a ; no_constructor env b ;
-        error loc "Cannot apply %s to %s and %s" sym (a_type a.typ) (a_type b.typ) in
+        error loc "Cannot apply %s to %s and %s" sym (describe env a) (describe env b) in
+    let unify = unify ~describe:(describe env) in
     match op with
     | A.Add | A.Sub | A.Mul | A.Div | A.Mod ->
         (match a.typ, b.typ with
@@ -2168,7 +2193,8 @@ and stmt errors env (s : A.stmt) =
             env, Some (mk (Expr te))
         | A.Declare (name, _) when List.mem name A.self_declared ->
             error loc "%s can only be declared at the top level of the program" name
-        | A.Declare (name, e) ->
+        | A.Declare (name, value) ->
+            let e = value in
             (* A declaration in error still declares its variable, so that
              * its uses are not reported as well: *)
             let poisoned () =
@@ -2186,6 +2212,7 @@ and stmt errors env (s : A.stmt) =
             | e ->
                 let env, v = declare env name e in
                 Hashtbl.replace env.declared_at v.id loc ;
+                Hashtbl.replace env.declared_as v.id value ;
                 env, Some (mk (Declare (v, e)))
             | exception (Error _ | Already_told as ex) ->
                 tell errors ex ;
@@ -2231,8 +2258,11 @@ and stmt errors env (s : A.stmt) =
                 env.widening := true ;
                 env, None
             | None, _ ->
-                error loc "Cannot assign %s to %s, which is %s"
-                    (a_type e.typ) name (a_type v.typ))
+                error loc "Cannot assign %s to %s, which is %s%s%s"
+                    (a_type e.typ) name (a_type v.typ)
+                    (match origin env v with "" -> "" | o -> " ("^ o ^")")
+                    (if v.typ = Type.Interval && e.typ = Type.Time then
+                        "\n  A time variable starts as now(), or time(0)." else ""))
         | A.Repeat { var ; count ; every ; for_ ; body } ->
             let count = opt_expr env "The count of repeat" Type.Int count
             and every = opt_expr env "The period of repeat" Type.Interval every
@@ -2594,7 +2624,8 @@ let check ?(warnings=ref []) (program : A.program) =
                     poisoned = [] ; stack = [] ;
                     stack_text = [] ; loops = 0 ; layer_ctx = None ;
                     may_wait = true ; errors = ref [] ; warnings = ref [] ;
-                    declared_at = Hashtbl.create 7 ; reads = Hashtbl.create 7 ;
+                    declared_at = Hashtbl.create 7 ; declared_as = Hashtbl.create 7 ;
+                    reads = Hashtbl.create 7 ;
                     widened ; widening = ref false ; held_by = Hashtbl.create 7 } in
         let p = block env.errors env program in
         if !(env.widening) then typed () else p, env in
@@ -2615,6 +2646,7 @@ let check_patterns (ps : A.patterns) =
     let env = { vars = [] ; declared_here = [] ; poisoned = [] ; stack = [] ;
                 stack_text = [] ; loops = 0 ; layer_ctx = None ; may_wait = false ;
                 errors = ref [] ; warnings = ref [] ; declared_at = Hashtbl.create 1 ;
+                declared_as = Hashtbl.create 1 ;
                 reads = Hashtbl.create 1 ; widened = Hashtbl.create 1 ;
                 widening = ref false ; held_by = Hashtbl.create 1 } in
     try
@@ -2797,11 +2829,11 @@ let check_patterns (ps : A.patterns) =
 (* What makes no sense, and where; after an error in a declaration, the uses
  * of that variable are not reported: *)
 (*$= types & ~printer:identity
-  "line 2, column 1: Cannot assign a float[] to x, which is an int[]" \
+  "line 2, column 1: Cannot assign a float[] to x, which is an int[] (declared at line 1 as [1])" \
     (types "x = [1]\nx := [2.5]")
-  "line 2, column 1: Cannot assign an int to x, which is a (Ok int)" \
+  "line 2, column 1: Cannot assign an int to x, which is a (Ok int) (declared at line 1 as Ok(1))" \
     (types "x = Ok(1)\nx := 3")
-  "line 2, column 1: Cannot assign a (Ok string) to r, which is a (Ok int)" \
+  "line 2, column 1: Cannot assign a (Ok string) to r, which is a (Ok int) (declared at line 1 as Ok(1))" \
     (types "r = Ok(1)\nr := Ok(\"s\")")
   "line 1, column 8: A constructor cannot hold a void" \
     (types "x = Ok(print(\"a\"))")
@@ -2817,11 +2849,11 @@ let check_patterns (ps : A.patterns) =
     (types "ACK = 1")
   "line 2, column 1: x is already declared in this block (:= changes it)" \
     (types "x = 1\nx = 2")
-  "line 2, column 1: Cannot assign a string to x, which is an int" \
+  "line 2, column 1: Cannot assign a string to x, which is an int (declared at line 1 as 1)" \
     (types "x = 1\nx := \"s\"")
   "line 1, column 1: Unknown variable x" \
     (types "x := 1")
-  "line 2, column 1: Cannot assign a float to x, which is an int" \
+  "line 2, column 1: Cannot assign a float to x, which is an int (declared at line 1 as 1)" \
     (types "x = 1\nx += 1.5")
   "line 2, column 1: Cannot assign a float to an item of x, which is an int" \
     (types "x = [[1]]\nx[0][0] += 1.5")
@@ -2962,6 +2994,10 @@ let check_patterns (ps : A.patterns) =
     (types "expect /IP/UDP/Raw(payload == \"echo\") { x = MATCH[Raw].payload }")
   "line 1, column 31: Unknown field or variable len: the field of Echo below is Echo.length" \
     (types "on for=1s /IP/ICMP/Echo/Reply(len > 0) {}")
+  "line 3, column 4: Cannot compare d (a time, declared at line 2 as last + 1s) and an interval" \
+    (types "last = now()\nd = last + 1s\nif d > 100ms { }")
+  "line 2, column 1: Cannot assign a time to last, which is an interval (declared at line 1 as 0s)\n  A time variable starts as now(), or time(0)." \
+    (types "last = 0s\nlast := now()")
   "line 1, column 31: TCP.length is a virtual field (the bytes TCP carries): it cannot be set" \
     (types "/IP(dst=1.2.3.4)/TCP!(dst=80, len=3)/Raw(\"x\")")
   "line 1, column 7: Eth.ts is a virtual field (when the frame was captured): it cannot be set" \
