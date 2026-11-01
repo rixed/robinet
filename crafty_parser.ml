@@ -448,9 +448,14 @@ let params_of expr ?(unnamed=true) ?(pattern=false) form names =
     (* Without [unnamed], or before a pattern, a name not followed by [=] is
      * no error, but the expression or the pattern that follows: *)
     let equal = if unnamed && not pattern then item '=' else quiet (item '=') in
+    (* A reserved name is no expression, but what the variable is misnamed: *)
+    let reserved =
+        (identifier >>= fun s -> if is_reserved s then return s else fail) >>:
+        fun s -> reject "%s is a reserved name" s in
     let named =
-        (param_name +- sp +- equal +- nay (item '=') +- sp >>: Option.some) ++
-        expr in
+        param_name +- sp +- equal +- nay (item '=') +- sp >>= fun n ->
+            (if String.lowercase_ascii n = "var" then expr ||| reserved else expr) >>:
+            fun e -> Some n, e in
     let param =
         here ++
         (if not unnamed then named else
@@ -1174,6 +1179,9 @@ let parse_patterns text =
   "line 1, column 16: Unknown function foo" (reads "print(\"${foo(2)}\")")
   "line 1, column 10: A layer is selected by the layers below it, not by carets: /IP is the first IP, TimeExceeded/IP the one on top of TimeExceeded" (reads "x = a[^IP]")
   "line 1, column 6: _ is a reserved name" (reads "_ = 1")
+  "line 1, column 14: _ is a reserved name" (reads "foreach var=_ [1] {}")
+  "line 1, column 15: IP is a reserved name" (reads "foreach var=IP [1] {}")
+  "line 1, column 11: _ is a reserved name" (reads "case var=_ 1 else {}")
   "line 1, column 8: Expected constructor in expression" (reads "case x {}")
   "line 1, column 10: Expected '{' in block" (reads "case x IP")
   "line 2, column 15: MATCH is a reserved name" (reads "x = 1\ncase var=MATCH x IP {}")
