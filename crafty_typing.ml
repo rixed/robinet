@@ -2293,9 +2293,17 @@ and stmt errors env (s : A.stmt) =
             env, Some (mk (Repeat { var = v ; count = None ; items = Some items ;
                                     every ; for_ ; body }))
         | A.Retry { max ; body } ->
+            if body = [] then
+                env.warnings :=
+                    (loc, "This retry has an empty block: it has nothing to retry") ::
+                    !(env.warnings) ;
             let max = opt_expr env "The maximum of retry" Type.Int max in
             env, Some (mk (Retry { max ; body = block errors env body }))
         | A.Catch body ->
+            if body = [] then
+                env.warnings :=
+                    (loc, "This catch has an empty block: it catches nothing") ::
+                    !(env.warnings) ;
             env, Some (mk (Catch (block errors env body)))
         | A.Break { depth } ->
             let depth =
@@ -2696,6 +2704,10 @@ let check_patterns (ps : A.patterns) =
     (warns "on for=1s /IP/UDP {}\non /IP/UDP {}\non max=2 /IP/TCP {}")
   "" (warns "on /IP/UDP {}\non linger=1s /IP/TCP {}")
   "" (warns "on /IP/UDP {}\nwait 1s")
+  "line 2, column 1: This catch has an empty block: it catches nothing" \
+    (warns "wait 1s\ncatch { }")
+  "line 1, column 1: This retry has an empty block: it has nothing to retry" \
+    (warns "retry max=2 { }")
   "line 2, column 12: This id is the variable id, not the field of IP: write IP.id for the field\nline 2, column 18: This id is the variable id, not the field of IP: write IP.id for the field" \
     (warns "id = 5\nexpect /IP(id == id) {}")
   "" (warns "id = 5\nexpect /IP(IP.id == id) {}")
