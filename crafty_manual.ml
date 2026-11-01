@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 119c81e87027c7c0886aa676f4f6c575) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 cd0ebf667397dc62c6f5319903338186) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -352,9 +352,10 @@ layer cannot carry a self-driven one: `IP/TCP!` is fine, `IP!/TCP` is not.
 -   `UDP(src == port)`: conditions in parentheses are boolean expressions. A
     bare name is a variable if there is one (`port`), else a field of the layer
     (`src`).
--   `IP.src` is the field of the last IP layer, this one included. When there
-    are several (a tunnel, the packet an ICMP error quotes), `IP^.src` is the IP
-    layer below the last one, and `^IP.src` the first.
+-   `IP.src` is the field of the innermost IP layer, this one included. A path
+    names the layers below the one meant, `_` being any one: `/IP.src` is the
+    first IP, `TimeExceeded/IP.src` the one on top of `TimeExceeded`,
+    `ICMP/_/IP.src` the one on top of any ICMP error.
 -   A condition that is not a bool compares the default field: `Raw("pong")` is
     `Raw(data == "pong")`.
 -   The fields that can be read depend on the mode (see [Layers](#layers)): a
@@ -364,9 +365,9 @@ A packet matches in one mode only: a fragment `IP!`, a reassembled packet `IP`;
 TCP data `TCP/Raw`, in order and once per chunk delivered, and each segment
 `TCP!`.
 
-**`MATCH`** is the packet that matched, as an array of layers. `MATCH[UDP]` is
-its last UDP layer, `MATCH[IP^]` the last IP but one, `MATCH[^IP]` the first;
-then `MATCH[IP].src`, `MATCH[Raw].data`. `MATCH[0]` is a layer of any kind,
+**`MATCH`** is the packet that matched, as an array of layers: `MATCH[IP].src`,
+`MATCH[Raw].data`, with paths as in conditions (`MATCH[/IP]`,
+`MATCH[ICMP/_/IP]`). `MATCH[0]` and `MATCH[ICMP/_]` are layers of any kind,
 which `case` tells apart:
 
     foreach MATCH {
@@ -571,13 +572,13 @@ and settable. They are no streams: a quoted TCP segment is no part of a
 connection. Errors print them as `IP?`, `UDP?`, `TCP?`.
 
     on for=5s /IP/ICMP/TimeExceeded/IP(dst == target)/UDP(dst == 33434) {
-      print("from ${MATCH[^IP].src}, ttl ${MATCH[IP].ttl}")
+      print("from ${MATCH[/IP].src}, ttl ${MATCH[TimeExceeded/IP].ttl}")
     }
 
-`MATCH[IP]` is the quoted packet, `MATCH[^IP]` the error's. A quote is often cut
-8 bytes after the IP header: of `TCP`, only the ports and `seq_num` are then
-sure, the other fields reading 0. Sent, a quoted `IP` needs a `src` and a `dst`;
-lengths and checksums are computed unless given.
+`MATCH[TimeExceeded/IP]` is the quoted packet, `MATCH[/IP]` the error's. A quote
+is often cut 8 bytes after the IP header: of `TCP`, only the ports and `seq_num`
+are then sure, the other fields reading 0. Sent, a quoted `IP` needs a `src` and
+a `dst`; lengths and checksums are computed unless given.
 
 #### `DNS`
 
@@ -767,9 +768,9 @@ Whole programs
           if probe == 1 { print("to ${target} from UDP port ${p[UDP].src} to ${port}") }
           catch {
             first timeout=1s /IP/ICMP/TimeExceeded/IP(id == probe, dst == target)/UDP {
-              rtts[MATCH[^IP].src] += MATCH[Eth].ts - p[Eth].ts
+              rtts[MATCH[/IP].src] += MATCH[Eth].ts - p[Eth].ts
             } | /IP/ICMP/DestUnreachable/IP(id == probe, dst == target)/UDP {
-              rtts[MATCH[^IP].src] += MATCH[Eth].ts - p[Eth].ts
+              rtts[MATCH[/IP].src] += MATCH[Eth].ts - p[Eth].ts
               reached := true
             }
           }
@@ -838,7 +839,7 @@ probes without an answer.
             } | /IP(src != target)/ICMP/DestUnreachable(code == FRAG_NEEDED)/IP(dst == target, tot_len == size) {
               told := MATCH[DestUnreachable].mtu
               answered := true
-              print("${size}: too big for ${MATCH[^IP].src}, next hop MTU ${told}")
+              print("${size}: too big for ${MATCH[/IP].src}, next hop MTU ${told}")
             }
           }
           if !answered { print("${size}: no answer (dropped one way or the other)") }
@@ -893,12 +894,12 @@ probes without an answer.
     /IP!(dst=target)/UDP(dst=port) {
       on /IP/ICMP/TimeExceeded/IP(dst == target)/UDP(dst == port) |
          /IP/ICMP/DestUnreachable(code == PORT_UNREACHABLE)/IP(dst == target)/UDP(dst == port) {
-        id = MATCH[IP].id
+        id = MATCH[ICMP/_/IP].id
         if has(sent_at, id) {
           hop = id % 64
           rtts[hop] += MATCH[Eth].ts - sent_at[id]
-          hosts[hop][MATCH[^IP].src] += 1
-          if MATCH[^IP].src == target && hop < last { last := hop }
+          hosts[hop][MATCH[/IP].src] += 1
+          if MATCH[/IP].src == target && hop < last { last := hop }
           sent_at := remove(sent_at, id)
         }
       }

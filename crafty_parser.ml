@@ -173,8 +173,9 @@ let is_in names s = List.mem (String.lowercase_ascii s) names
 
 let is_keyword s = is_in keywords s
 
+(* [_] is any layer in a path ([ICMP/_/IP]): *)
 let is_reserved s =
-    is_keyword s || is_in functions s || Layer_name.of_string s <> None ||
+    s = "_" || is_keyword s || is_in functions s || Layer_name.of_string s <> None ||
     List.mem s predefined ||
     Crafty_layers.find_constant s <> None
 
@@ -573,16 +574,20 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
         (here ++ constant >>: fun (loc, (n, l)) -> { loc ; desc = Constant (n, l) }) |||
         (* A layer that is not followed by what makes it a value is not an
          * error of its own; whatever is expected there is: *)
-        (quiet (here ++ optional ~def:0 carets ++ known_layer ++
+        let any = item '_' -- nay (char_if "" is_word) >>: fun _ -> None in
+        (quiet (here ++ optional ~def:0 carets ++
+                optional ~def:false (item '/' >>: fun _ -> true) ++
+                repeat_greedy ~sep:(item '/') ~min:1
+                    ((known_layer >>: Option.some) ||| any) ++
                 optional ~def:0 carets +- check (item '.' ||| item ']')) >>:
-            fun (((loc, before), name), after) ->
-                let desc =
-                    match before, after with
-                    | 0, n -> Layer { name ; from_start = false ; nth = n }
-                    | n, 0 -> Layer { name ; from_start = true ; nth = n - 1 }
-                    | _ -> reject "Carets on both sides of %s"
-                                    (Layer_name.to_string name) in
-                { loc ; desc }) in
+            fun ((((loc, before), absolute), path), after) ->
+                if before + after > 0 then (
+                    let n = Option.map_default Layer_name.to_string "IP"
+                                               (List.last path) in
+                    reject "A layer is selected by the layers below it, not by \
+                            carets: /%s is the first %s, TimeExceeded/%s the \
+                            one on top of TimeExceeded" n n n) ;
+                { loc ; desc = Layer { path ; absolute } }) in
     let bound = optional ~def:None (expr >>: Option.some) in
     let postfix =
         atom ++ repeat_greedy ~sep:none (
@@ -928,8 +933,8 @@ let parse_patterns text =
   "x = (3 - 1)\n" (reads "x = 3 -1")
   "x = ((3 & 4) == 4)\n" (reads "x = 3 & 4 == 4")
   "x = ((a & (1 << (n + 1))) < (b >> 2))\n" (reads "x = a & 1 << n + 1 < b >> 2")
-  "x = (MATCH[IP^].src + MATCH[^^IP].dst)\n" \
-    (reads "x = MATCH[IP^].src + MATCH[^^IP].dst")
+  "x = (MATCH[IP/IP].src + MATCH[/IP].dst)\n" \
+    (reads "x = MATCH[IP/IP].src + MATCH[/IP].dst")
   "x = a.b.c[0].d\n" (reads "x = a.b.c[0].d")
   "x = (SYN | ack)\n" (reads "x = SYN | ack")
   "x = (MATCH[IP].src + LAST[TCP].seq)\n" \
@@ -991,8 +996,8 @@ let parse_patterns text =
     (reads "on max=3 timeout=1s ../UDP { n += 1; m := 2 }")
   "on for=1s timeout=100ms ../UDP {\n}\non linger=1s ../UDP {\n}\n" \
     (reads "on timeout=100ms for=1s ../UDP {}\non linger=1s ../UDP {}")
-  "expect UDP((IP^.ttl == 3) && (^IP.src == 1.2.3.4)) {\n}\n" \
-    (reads "expect UDP(IP^.ttl = 3, ^IP.src == 1.2.3.4) {}")
+  "expect UDP((TimeExceeded/IP.ttl == 3) && (/IP.src == 1.2.3.4)) {\n}\n" \
+    (reads "expect UDP(TimeExceeded/IP.ttl = 3, /IP.src == 1.2.3.4) {}")
   "expect ../../TCP!(flags & RST) {\n}\n" \
     (reads "expect ../../TCP!(flags & RST) {}")
   "expect timeout=5s /IP(src == x)/UDP {\n}\n" \
@@ -1051,8 +1056,8 @@ let parse_patterns text =
   "wait 1s * n\nrepeat count=n * 2 {\n}\n" (formats "wait dur=1s * n\nrepeat count=n*2 {}")
   "if x & FLAG {\n} elsif x == 1 || y {\n}\n" \
     (formats "if (x & FLAG) {} elsif (x == 1) || y {}")
-  "expect UDP(IP^.ttl == 3 && (a || b)) {\n}\n" \
-    (formats "expect UDP(IP^.ttl = 3, a || b) {}")
+  "expect UDP(/IP.ttl == 3 && (a || b)) {\n}\n" \
+    (formats "expect UDP(/IP.ttl = 3, a || b) {}")
 *)
 
 (* Times, printed in UTC; without a zone, in the local time of the host: *)
@@ -1075,7 +1080,7 @@ let parse_patterns text =
   List.for_all (fun t -> reads (formats t) = reads t) [ \
     "x = 1 + 2 * 3 - 4 / 2 % 3" ; "x = a || b && c == d | e ^ f & g + h" ; \
     "x = !a && -b < 3" ; "x = -1 + -2.5 - -3s - - 1" ; "x = 3 -1" ; \
-    "x = 3 & 4 == 4" ; "x = a & 1 << n + 1 < b >> 2" ; "x <<= 1" ; "x = MATCH[IP^].src + MATCH[^^IP].dst" ; \
+    "x = 3 & 4 == 4" ; "x = a & 1 << n + 1 < b >> 2" ; "x <<= 1" ; "x = MATCH[IP/IP].src + MATCH[/IP].dst" ; "x = MATCH[ICMP/_/IP].id + MATCH[/_].src + _/UDP.src" ; \
     "x = length(MATCH) * rand(max=3)" ; "x = - -1 - - (2 - 3)" ; \
     "x = 1m30s + 10ms + 1.5\xc2\xb5s" ; "x = [1.2.3.4 == y, aa:bb:cc:dd:ee:ff]" ; \
     "x = #1ee7 # a comment\nx = #f" ; "x = \"a ${x + 1} b \\${not} \\x41$\"" ; \
@@ -1083,7 +1088,7 @@ let parse_patterns text =
     "repeat every=1s / n count=n*2 {}" ; "foreach t every=1s * 2 [1, 2] {}" ; \
     "on max=3 timeout=1s ../UDP { n += 1; m := 2 }" ; \
     "on for=1s ../UDP {}\non linger=2s * n ../UDP {}" ; \
-    "expect UDP(IP^.ttl = 3, ^IP.src == 1.2.3.4) {}" ; \
+    "expect UDP(TimeExceeded/IP.ttl = 3, /IP.src == 1.2.3.4) {}" ; \
     "expect ../../TCP!(flags & RST) {}" ; "IP!(ttl=1)/TCP!(flags=2)/Raw(\"x\")" ; \
     "/IP/UDP/Raw(\"x\")\n{ y = !(a == b) }" ; \
     "if a & 1 {} elsif (b || c) && d { x := 1 }\nelse { if e {} }" ; \
@@ -1167,7 +1172,8 @@ let parse_patterns text =
   "line 1, column 18: Unknown function foo" (reads "expect UDP(foo(1)) {}")
   "line 1, column 15: Unknown function foo" (reads "/IP(dst=foo(1))/UDP(dst=1)/Raw(\"x\")")
   "line 1, column 16: Unknown function foo" (reads "print(\"${foo(2)}\")")
-  "line 1, column 11: Carets on both sides of IP" (reads "x = a[^IP^]")
+  "line 1, column 10: A layer is selected by the layers below it, not by carets: /IP is the first IP, TimeExceeded/IP the one on top of TimeExceeded" (reads "x = a[^IP]")
+  "line 1, column 6: _ is a reserved name" (reads "_ = 1")
   "line 1, column 8: Expected constructor in expression" (reads "case x {}")
   "line 1, column 10: Expected '{' in block" (reads "case x IP")
   "line 2, column 15: MATCH is a reserved name" (reads "x = 1\ncase var=MATCH x IP {}")

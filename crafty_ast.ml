@@ -137,11 +137,11 @@ and expr_desc =
     | String of string_part list
     (* Including the predefined variables ([MATCH], [LAST]): *)
     | Var of string
-    (* A layer of a packet ([A[IP]]) or of the one being matched ([IP.src]),
-     * counted from the end ([nth] carets after its name: [IP] is the last,
-     * [IP^] the last but one), or from the start ([nth] + 1 carets before
-     * it: [^IP] is the first one). *)
-    | Layer of { name : Layer_name.t ; from_start : bool ; nth : int }
+    (* A layer of a packet ([A[IP]]) or of the one being matched ([IP.src]):
+     * the top of the innermost run of layers named as [path]
+     * ([TimeExceeded/IP]), [None] being any layer ([ICMP/_/IP]), which starts
+     * at the bottom (an Eth left out) when [absolute] ([/IP]). *)
+    | Layer of { path : Layer_name.t option list ; absolute : bool }
     | Field of expr * string
     | Index of expr * expr
     (* The items from the first bound (else the start) up to, excluding, the
@@ -407,10 +407,12 @@ let rec print_expr_at ?(bare=false) ~all ~indent p oc e =
             | Interp e -> Printf.fprintf oc "${%a}" sub e) parts ;
         Char.print oc '"'
     | Var n -> String.print oc n
-    | Layer { name ; from_start ; nth } ->
-        let carets = String.make (if from_start then nth + 1 else nth) '^' in
-        if from_start then Printf.fprintf oc "%s%a" carets Layer_name.print name
-        else Printf.fprintf oc "%a%s" Layer_name.print name carets
+    | Layer { path ; absolute } ->
+        if absolute then Char.print oc '/' ;
+        List.print ~first:"" ~last:"" ~sep:"/"
+            (fun oc -> function
+                | Some n -> Layer_name.print oc n
+                | None -> Char.print oc '_') oc path
     | Field (e, f) ->
         Printf.fprintf oc "%a.%s" (at max_int) e f
     | Index (e, i) ->

@@ -529,18 +529,18 @@ let rec eval output (env : env) (e : T.expr) =
             let o, l = slice (String.length s) from to_ in
             String (String.sub s o l)
         | _ -> assert false)
-    | T.Select { packet ; layer ; from_start ; nth } ->
+    | T.Select { packet ; path ; absolute ; _ } ->
         (match eval packet with
         | Array a ->
-            let layers =
+            let names =
                 Array.to_list a |>
-                List.filter_map (function
-                    | Variant (n, v) when n = T.lname layer.name -> Some v
-                    | _ -> None) in
-            let layers = if from_start then layers else List.rev layers in
-            (match List.nth_opt layers nth with
-            | Some v -> v
-            | None -> error e.loc "No such %s in this packet" (T.lname layer.name))
+                List.map (function Variant (n, _) -> n | _ -> assert false) in
+            (match T.path_positions names ~absolute path with
+            | i :: _ ->
+                (* A layer of any kind is the variant itself: *)
+                if List.last path = None then a.(i)
+                else (match a.(i) with Variant (_, v) -> v | _ -> assert false)
+            | [] -> error e.loc "No %s in this packet" (T.string_of_path ~absolute path))
         | _ -> assert false)
     | T.Call (T.Stats, []) ->
         let stats = Crafty_tree.stats (List.hd env.stack).node in
@@ -2227,10 +2227,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
  * segment: *)
 (*$= & ~printer:identity
   "a 0.000s: port 9 of 10.0.0.2, from 10.0.0.2, length 15\na 0.000s: done Eth#2" \
-    (with_host "/IP(dst=10.0.0.2)/UDP(src=4000, dst=9)/Raw(\"anyone?\")\nexpect timeout=1s /IP/ICMP/DestUnreachable(code == PORT_UNREACHABLE)/IP/UDP(src == 4000) {\n  print(\"port ${MATCH[UDP].dst} of ${MATCH[IP].dst}, from ${MATCH[^IP].src}, length ${MATCH[UDP].length}\") }")
+    (with_host "/IP(dst=10.0.0.2)/UDP(src=4000, dst=9)/Raw(\"anyone?\")\nexpect timeout=1s /IP/ICMP/DestUnreachable(code == PORT_UNREACHABLE)/IP/UDP(src == 4000) {\n  print(\"port ${MATCH[UDP].dst} of ${MATCH[DestUnreachable/IP].dst}, from ${MATCH[/IP].src}, length ${MATCH[UDP].length}\") }")
   "a 0.000s: udp to 33434, ttl 1, from 10.0.0.2\na 0.000s: tcp seq 7, win 0\nb 0.000s: done Eth#1\na 1.000s: done Eth#2" \
-    (two ~arp:true "{ on for=1s /IP/ICMP/TimeExceeded/IP/UDP(src == 4000) {\n    print(\"udp to ${MATCH[UDP].dst}, ttl ${MATCH[IP].ttl}, from ${MATCH[^IP].src}\") }\n  on for=1s /IP/ICMP/TimeExceeded/IP/TCP(src == 4000) {\n    print(\"tcp seq ${MATCH[TCP].seq_num}, win ${MATCH[TCP].win_size}\") }\n  /IP(dst=10.0.0.2)/UDP(src=4000, dst=33434)/Raw(\"probe\") }" \
+    (two ~arp:true "{ on for=1s /IP/ICMP/TimeExceeded/IP/UDP(src == 4000) {\n    print(\"udp to ${MATCH[UDP].dst}, ttl ${MATCH[ICMP/_/IP].ttl}, from ${MATCH[/IP].src}\") }\n  on for=1s /IP/ICMP/TimeExceeded/IP/TCP(src == 4000) {\n    print(\"tcp seq ${MATCH[TCP].seq_num}, win ${MATCH[TCP].win_size}\") }\n  /IP(dst=10.0.0.2)/UDP(src=4000, dst=33434)/Raw(\"probe\") }" \
          "expect timeout=1s /IP/UDP(dst == 33434)/Raw {\n  /IP(dst=MATCH[IP].src)/ICMP/TimeExceeded/IP(src=MATCH[IP].src, dst=MATCH[IP].dst, ttl=1)/UDP(src=MATCH[UDP].src, dst=MATCH[UDP].dst)/Raw(MATCH[Raw].data)\n  /IP(dst=MATCH[IP].src)/ICMP/TimeExceeded/IP(src=MATCH[IP].src, dst=MATCH[IP].dst, proto=6, tot_len=60)/Raw(#0fa0005000000007) }")
+  "a 0.000s: 10.0.0.2\na 0.000s: done Eth#2" \
+    (with_host "/IP(dst=10.0.0.2)/UDP(src=4000, dst=9)/Raw(\"anyone?\")\nexpect timeout=1s /IP/ICMP/DestUnreachable/IP/UDP { print(\"${MATCH[IP].dst}\") }")
 *)
 (* DNS: a name resolved by a host's server then pinged; and between two
  * programs, the server's query also seen as bytes: *)

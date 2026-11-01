@@ -26,8 +26,9 @@
    terminal; a packet leaves the current stack as it was.
 
    Within a pattern's condition, a name is a field of that layer if it has
-   one, else a variable; [IP.src] is a field of the nearest IP below ([IP^]
-   the next one, [^IP] the first one of the packet).
+   one, else a variable; [IP.src] is a field of the only IP below, this one
+   included ([/IP] the first one, [TimeExceeded/IP] the one on top of a
+   TimeExceeded, when there are several).
 
    A block, an [if] or a [case] has the value of the branch it runs, and can
    wait (or send, receive, loop, break) only as the value of a declaration,
@@ -65,10 +66,10 @@ and desc =
     | Field of expr * int
     | Index of expr * expr
     | Slice of expr * expr option * expr option
-    (* The layer of a packet ([MATCH[IP^]]), counted from the end, or from
-     * the start: *)
-    | Select of { packet : expr ; layer : L.layer ; from_start : bool ;
-                  nth : int }
+    (* The innermost layer of a packet that a path selects ([MATCH[/IP]]),
+     * of kind [layer] if its top is named: *)
+    | Select of { packet : expr ; layer : L.layer option ;
+                  path : string option list ; absolute : bool }
     (* With all the arguments, in the order of the function's parameters: *)
     | Call of builtin * expr list
     | Unop of A.unop * expr
@@ -165,6 +166,48 @@ and block = stmt list
 let same_name a b = String.lowercase_ascii a = String.lowercase_ascii b
 
 let lname = A.Layer_name.to_string
+
+(** {2 Layer paths} *)
+
+let string_of_path ~absolute path =
+    (if absolute then "/" else "") ^
+    String.concat "/" (List.map (Option.default "_") path)
+
+(* The positions in [names] (bottom first), innermost first, of the layers
+ * that [path] selects: the tops of the runs of layers named as it ([None]
+ * being any layer), which start at the bottom (or right above a root it
+ * leaves out) when [absolute]: *)
+let path_positions names ~absolute path =
+    let names = Array.of_list names and path = Array.of_list path in
+    let n = Array.length names and k = Array.length path in
+    let root = lname L.root.name in
+    let rec fits s j =
+        j >= k ||
+        ((match path.(j) with None -> true | Some p -> names.(s + j) = p) &&
+         fits s (j + 1)) in
+    let starts_well s =
+        not absolute ||
+        s = (if names.(0) = root && path.(0) <> Some root then 1 else 0) in
+    List.init (max 0 (n - k + 1)) identity |>
+    List.filter_map (fun s ->
+        if starts_well s && fits s 0 then Some (s + k - 1) else None) |>
+    List.rev
+
+(* The shortest path that selects only the layer at [i] in [names]: *)
+let unique_path names i =
+    let below = List.take (i + 1) names in
+    let from_root =
+        match below with
+        | r :: (_ :: _ as rest) when r = lname L.root.name -> rest
+        | _ -> below in
+    let rec loop k =
+        let path = List.drop (i + 1 - k) below |> List.map Option.some in
+        if k > List.length from_root then
+            string_of_path ~absolute:true (List.map Option.some from_root)
+        else if path_positions names ~absolute:false path = [ i ] then
+            string_of_path ~absolute:false path
+        else loop (k + 1) in
+    loop 1
 
 (* Records are compared field by field, whatever the order they were written
  * in: *)
@@ -1267,7 +1310,8 @@ let only_captured =
 (* [LAST[Eth]], whose [ts] is never known: *)
 let is_last_eth r =
     match r.desc with
-    | Select { packet = { desc = Var { name = "LAST" ; _ } ; _ } ; layer ; _ } ->
+    | Select { packet = { desc = Var { name = "LAST" ; _ } ; _ } ;
+               layer = Some layer ; _ } ->
         layer.name = L.(eth.name)
     | _ -> false
 
@@ -1300,12 +1344,13 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         if any_value e.typ = None then
             error e.loc "A constructor cannot hold %s" (a_type e.typ) ;
         mk (variant_type [ c, e.typ ]) (Construct (c, Some e))
-    | A.Layer { name ; _ } ->
+    | A.Layer { path ; absolute } ->
+        let name = string_of_path ~absolute (List.map (Option.map lname) path) in
         error loc "A layer is no value: %s needs a field, as in %s.src, or to \
                    select a layer of a packet, as in MATCH[%s]"
-              (lname name) (lname name) (lname name)
-    | A.Field ({ desc = A.Layer { name ; from_start ; nth } ; _ }, f) ->
-        layer_field env loc name from_start nth f
+              name name name
+    | A.Field ({ desc = A.Layer { path ; absolute } ; _ }, f) ->
+        layer_field env loc path absolute f
     | A.Field (r, f) ->
         let r = expr env r in
         (match r.typ with
@@ -1316,14 +1361,15 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
             | i, (_, t) -> mk t (Field (r, i))
             | exception Not_found ->
                 (match r.desc with
-                | Select { packet ; layer ; _ } ->
+                | Select { packet ; layer = Some layer ; _ } ->
                     (* What ICMP errors quote is on top of them: *)
                     let quoted =
                         match packet.desc with
                         | Var { name ; _ } when List.memq layer L.quoted_ip.above ->
+                            let l = L.to_string layer in
                             Printf.sprintf "\n  The packet it quotes is on top of it: \
-                                            %s[IP].id is the id of the quoted IP, \
-                                            %s[^IP] the IP of the error." name name
+                                            %s[%s/IP].id is the id of the quoted IP, \
+                                            %s[/IP] the IP of the error." name l name
                         | _ -> "" in
                     let hint = A.did_you_mean (List.map fst fs) f in
                     error loc "No field %s in %s (only %s)%s" f (L.to_string layer)
@@ -1332,15 +1378,19 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
                     error loc "No field %s in %s%s" f (tname r.typ)
                         (A.did_you_mean (List.map fst fs) f)))
         | t -> error loc "No field %s in %s" f (a_type t))
-    | A.Index (a, { desc = A.Layer { name ; from_start ; nth } ; _ }) ->
+    | A.Index (a, { desc = A.Layer { path ; absolute } ; _ }) ->
         let a = expr env a in
         (match a.typ with
-        | Type.Array (Type.Variant cs) ->
-            (match List.assoc_opt (lname name) cs with
-            | Some t ->
-                let layer = List.find (fun (l : L.layer) -> l.name = name) L.all in
-                mk t (Select { packet = a ; layer ; from_start ; nth })
-            | None -> error loc "No %s in %s" (lname name) (a_type a.typ))
+        | Type.Array (Type.Variant cs as t) ->
+            List.iter (Option.may (fun n ->
+                if not (List.mem_assoc (lname n) cs) then
+                    error loc "No %s in %s" (lname n) (a_type a.typ))) path ;
+            let layer =
+                Option.map (fun n -> List.find (fun (l : L.layer) -> l.name = n) L.all)
+                           (List.last path) in
+            let t = Option.map_default (fun n -> List.assoc (lname n) cs) t (List.last path) in
+            mk t (Select { packet = a ; layer ; path = List.map (Option.map lname) path ;
+                           absolute })
         | t -> error loc "Cannot select a layer of %s" (a_type t))
     | A.Index (a, i) ->
         let a = expr env a in
@@ -1544,12 +1594,12 @@ and var env loc name =
         | None -> as_var ())
     | _ -> as_var ()
 
-and layer_field env loc name from_start nth f =
+and layer_field env loc path absolute f =
     let ctx =
         match env.layer_ctx with
         | Some ctx when ctx.in_cond -> ctx
         | ctx ->
-            let n = lname name in
+            let n = string_of_path ~absolute (List.map (Option.map lname) path) in
             error loc "%s.%s is a field of a packet being matched, which only the \
                        condition of a pattern can read (as in \"expect Raw(%s.%s == x)\")%s.\n  \
                        Of a packet in a variable, it is \"p[%s].%s\": \"LAST[%s].%s\" for the \
@@ -1559,21 +1609,26 @@ and layer_field env loc name from_start nth f =
                  else "; the options of a stack cannot read the layers below")
                 n f n f n f in
     (* The current layer included: *)
-    let positions =
-        Array.to_list ctx.below @ [ ctx.cur, ctx.cur_mode ] |>
-        List.mapi (fun i (l, m) -> i, l, m) |>
-        List.filter (fun (_, (l : L.layer), _) -> l.name = name) in
-    let positions = if from_start then positions else List.rev positions in
-    match List.nth_opt positions nth with
-    | None ->
-        let where =
-            if ctx.cur.name = name then ", this one included"
-            else " below "^ L.to_string ctx.cur in
-        (match List.length positions with
-        | 0 -> error loc "There is no %s%s" (lname name) where
-        | 1 -> error loc "There is only one %s%s" (lname name) where
-        | n -> error loc "There are only %d %s%s" n (lname name) where)
-    | Some (layer, (l : L.layer), mode) ->
+    let layers = Array.to_list ctx.below @ [ ctx.cur, ctx.cur_mode ] in
+    let names = List.map (fun ((l : L.layer), _) -> lname l.name) layers in
+    let path = List.map (Option.map lname) path in
+    let where =
+        match List.last path with
+        | Some n when n <> lname ctx.cur.name -> " below "^ L.to_string ctx.cur
+        | _ -> ", this one included" in
+    match path_positions names ~absolute path with
+    | [] -> error loc "There is no %s%s" (string_of_path ~absolute path) where
+    | layer :: others ->
+        if others <> [] then (
+            let written i = unique_path names i ^"."^ f in
+            env.warnings :=
+                (loc, Printf.sprintf "%s.%s is any of %d layers%s: it reads %s, \
+                                      not %s"
+                          (string_of_path ~absolute path) f (List.length others + 1)
+                          where (written layer)
+                          (String.concat " or " (List.map written others))) ::
+                !(env.warnings)) ;
+        let l, mode = List.nth layers layer in
         match L.find_field l f with
         | None ->
             let below = List.take layer (Array.to_list ctx.below) |> List.map fst in
@@ -2541,6 +2596,10 @@ let check_patterns (ps : A.patterns) =
 *)
 
 (*$= warns & ~printer:identity
+  "line 1, column 33: IP.ttl is any of 2 layers, this one included: it reads TimeExceeded/IP.ttl, not /IP.ttl" \
+    (warns "expect /IP/ICMP/TimeExceeded/IP(IP.ttl == 1) {}")
+  "" \
+    (warns "expect /IP/ICMP/TimeExceeded/IP(/IP.ttl == 1, TimeExceeded/IP.ttl == 2, ICMP/_.code == 0) {}")
   "line 2, column 9: This pattern matches any /IP/UDP/DNS/Answer, not only those of the current stack /IP(dst=1.2.3.4)/UDP(dst=53)/DNS.\n  Do you mean \"Answer\"?" \
     (warns "/IP(dst=1.2.3.4)/UDP(dst=53)/DNS { Query(\"x\")\n expect /IP/UDP/DNS/Answer {} }")
   "line 1, column 43: This pattern matches any /IP/UDP/DNS/Answer, not only those of the current stack /IP(dst=1.2.3.4)/UDP(dst=53)/DNS.\n  Do you mean \"../../UDP(src == 53)/DNS/Answer\"?" \
@@ -2637,10 +2696,12 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/ICMP/Echo/Request(\"hello\")")
   "x: ip" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Raw(\"hi\")\n  expect Raw(\"ho\") { x = MATCH[IP].src } }")
+  "x: int, c: int, l: {code: int}" \
+    (types "expect /IP/ICMP/TimeExceeded/IP/UDP { x = MATCH[ICMP/_/IP].id\n  c = case var=l MATCH[ICMP/_] TimeExceeded { l.code } else { 0 } }")
   "x: int" \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(dst == 53, IP.ttl < 3, ^IP.src = 1.2.3.4, Eth.proto == 0x800) { x = MATCH[UDP].src } }")
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(dst == 53, IP.ttl < 3, /IP.src = 1.2.3.4, Eth.proto == 0x800) { x = MATCH[UDP].src } }")
   "id: int" \
-    (types "id = 5\nexpect /IP(IP.id == id, IP.src == ^IP.src) {}")
+    (types "id = 5\nexpect /IP(IP.id == id, IP.src == /IP.src) {}")
   "" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80) { expect ../TCP!(flags & RST, seq_num > 3) {}\n  expect ../TCP!/Raw(data == \"x\") {} }")
   "t: time, d: interval, u: time, v: time, w: bool" \
@@ -2802,7 +2863,7 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(IP.scr == 1.2.3.4) {} }")
   "line 2, column 5: Unknown variable anwsers, do you mean answers?" \
     (types "answers = 1\nx = anwsers")
-  "line 1, column 39: No field unused in TimeExceeded (only {code: int})\n  The packet it quotes is on top of it: MATCH[IP].id is the id of the quoted IP, MATCH[^IP] the IP of the error." \
+  "line 1, column 39: No field unused in TimeExceeded (only {code: int})\n  The packet it quotes is on top of it: MATCH[TimeExceeded/IP].id is the id of the quoted IP, MATCH[/IP] the IP of the error." \
     (types "on for=1s /IP/ICMP/TimeExceeded { x = MATCH[TimeExceeded].unused }")
   "line 1, column 36: No field cod in TimeExceeded (only {code: int}), do you mean code?" \
     (types "expect /IP/ICMP/TimeExceeded { x = MATCH[TimeExceeded].cod }")
@@ -2898,10 +2959,10 @@ let check_patterns (ps : A.patterns) =
     (types "expect ../UDP {}")
   "line 1, column 46: There is no TCP below UDP" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(TCP.src == 1) {} }")
-  "line 1, column 46: There is only one IP below UDP" \
-    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(IP^.ttl == 1) {} }")
-  "line 1, column 12: There is only one IP, this one included" \
-    (types "expect /IP(IP^.ttl == 1) {}")
+  "line 1, column 46: There is no ICMP/IP below UDP" \
+    (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(ICMP/IP.ttl == 1) {} }")
+  "line 1, column 16: There is no /IP/_/_/IP below UDP" \
+    (types "expect /IP/UDP(/IP/_/_/IP.ttl == 1) {}")
   "line 1, column 46: The condition on TCP must be a bool, not a string" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80) { expect ../TCP(\"x\") {} }")
   "line 1, column 46: flags cannot be read in a self-driven TCP" \
