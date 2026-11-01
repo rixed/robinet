@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 cd0ebf667397dc62c6f5319903338186) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 28301a04144aecdf398a467b6f5d4044) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -467,6 +467,10 @@ what their engine computes (checksums).
 Each field has its type, and the modes in which it can be *set* as an option and
 *read* in a condition or in `MATCH`: **M** manual, **S** self-driven. A layer
 with a single mode is manual. *(key)* fields tell streams apart.
+
+Every layer but `UDP` and the terminal ones has also `length`: int; read M; the
+bytes it carries (`TCP!(length > 0)`: segments with data). `Raw` has it too: the
+bytes of its data.
 
 #### `Eth`: Ethernet (bottom of every stack)
 

@@ -502,6 +502,10 @@ Each field has its type, and the modes in which it can be *set* as an option
 and *read* in a condition or in `MATCH`: **M** manual, **S** self-driven. A
 layer with a single mode is manual. *(key)* fields tell streams apart.
 
+Every layer but `UDP` and the terminal ones has also `length`: int; read M;
+the bytes it carries (`TCP!(length > 0)`: segments with data). `Raw` has it
+too: the bytes of its data.
+
 #### `Eth`: Ethernet (bottom of every stack)
 
 - `src`: mac; set M; read M, S. Default: the interface's.

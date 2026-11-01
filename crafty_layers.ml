@@ -77,7 +77,9 @@ type field =
       peer : string ;
       (* What a self-driven layer sends when it is not given, if that is
        * known before it sends: *)
-      driven_default : V.value option }
+      driven_default : V.value option ;
+      (* For a field that is never set, what it tells of the layer [%s]: *)
+      about : string }
 
 (* Instantiated only once so can be compared with == and != *)
 (** {2 Nodes}
@@ -207,6 +209,11 @@ let bytes_value bits = V.bytes_of_string (string_of_bitstring bits)
 
 let unpacked ?(upper=Nothing) ?(up_hints=[]) ?(payload=empty_bitstring) values bits =
     Some { values ; upper ; payload ; up_hints ; bits }
+
+(* [u] with the bytes its layer carries, or holds if [terminal]: *)
+let with_length ~terminal u =
+    let carried = if terminal then u.bits else u.payload in
+    { u with values = u.values @ [ "length", V.Int (bitstring_length carried / 8) ] }
 
 let ip4 = (Eth.Proto.ip4 :> int)
 
@@ -345,8 +352,9 @@ let ip_node ctx =
                               tot_len = Ip.Pdu.hdr_len ip + Tools.bytelength payload ;
                               payload = Payload.o payload } in
                 [ fragment ;
-                  { values = ip_values ip ; upper = Only (ip_upper ip) ;
-                    payload ; up_hints = [] ; bits = Ip.Pdu.pack ip }, [ Driven ] ]) in
+                  with_length ~terminal:false
+                    { values = ip_values ip ; upper = Only (ip_upper ip) ;
+                      payload ; up_hints = [] ; bits = Ip.Pdu.pack ip }, [ Driven ] ]) in
     { (manual (pack_ip next_id)) with
       send = (fun fields hints payload ->
         if Tools.bytelength payload = 0 then
@@ -965,9 +973,9 @@ type layer =
       unpack : hints -> bitstring -> unpacked option }
 
 let field ?(set_in=[ Manual ]) ?(read_in=[ Manual ]) ?(discriminant=false)
-          ?pick ?peer ?driven_default ?part_of name typ =
+          ?pick ?peer ?driven_default ?part_of ?(about="") name typ =
     { name ; typ ; set_in ; read_in ; discriminant ; pick ; peer = peer |? name ;
-      driven_default ; part_of }
+      driven_default ; part_of ; about }
 
 (** Whether fields [i] and [j] of [l] cannot both be given: *)
 let overlap (l : layer) i j =
@@ -979,8 +987,19 @@ let unsendable name _ =
     let fail _ _ _ = V.fail "%s cannot be sent" (N.to_string name) in
     { (manual fail) with send = fail }
 
+(* The bytes a layer carries, or a Raw holds, that a layer without a length of
+ * its own has: *)
+let length_field = field "length" Type.Int ~set_in:[] ~about:"the bytes %s carries"
+
 let layer ?(above=[]) ?(quoted=false) ?(driven=false) ?(terminal=false) ?default
           ?(constants=[]) ?node ?(stats=[]) ?(unpack=fun _ _ -> None) name fields =
+    let fields, unpack =
+        if (terminal && name <> N.Raw) ||
+           List.exists (fun (f : field) -> f.name = length_field.name) fields
+        then fields, unpack
+        else
+            fields @ [ length_field ],
+            fun hints bits -> Option.map (with_length ~terminal) (unpack hints bits) in
     let fields = Array.of_list fields in
     let default_field =
         Option.map (fun d ->
@@ -999,7 +1018,7 @@ let to_string (l : layer) = N.to_string l.name ^ if l.quoted then "?" else ""
 let quoted_fields (l : layer) =
     Array.to_list l.fields |>
     List.filter_map (fun (f : field) ->
-        if f.read_in = [] then None else
+        if f.read_in = [] || f == length_field then None else
         Some { f with set_in = (if f.set_in = [] then [] else [ Manual ]) ;
                       read_in = [ Manual ] ; discriminant = false ; pick = None })
 
@@ -1009,7 +1028,7 @@ let eth =
         field "dst" Type.Mac ~read_in:both ;
         field "proto" Type.Int ~read_in:both ~discriminant:true
               ~driven_default:(V.Int 0x800) ;
-        field "ts" Type.Time ~set_in:[] ~read_in:both ]
+        field "ts" Type.Time ~set_in:[] ~read_in:both ~about:"when the frame was captured" ]
 
 let ip =
     layer N.IP ~above:[ eth ] ~driven:true ~node:ip_node ~unpack:unpack_ip
@@ -1031,7 +1050,7 @@ let ip =
         field "tot_len" Type.Int ;
         field "options" Type.bytes ~set_in:both ~read_in:both
               ~driven_default:(V.Array [||]) ;
-        field "is_fragment" Type.Bool ~set_in:[] ]
+        field "is_fragment" Type.Bool ~set_in:[] ~about:"whether %s is a fragment" ]
 
 (** What the node of any layer tells of its stream: the packets that went
  * through it, and the bytes of their payloads at that layer. *)
@@ -1194,6 +1213,7 @@ let root = eth
 
 (** The index of that field of [l]. *)
 let find_field (l : layer) name =
+    let name = if same_name name "len" then length_field.name else name in
     try Some (Array.findi (fun (f : field) -> same_name f.name name) l.fields)
     with Not_found -> None
 
@@ -1286,7 +1306,7 @@ let record_type (l : layer) mode =
 *)
 (*$= record_type & ~printer:Crafty_ast.Type.to_string
   (Crafty_ast.Type.Record [ "src", Crafty_ast.Type.Int ; "dst", Crafty_ast.Type.Int ]) (record_type tcp Driven)
-  (Crafty_ast.Type.Record [ "data", Crafty_ast.Type.bytes ]) (record_type raw Manual)
+  (Crafty_ast.Type.Record [ "data", Crafty_ast.Type.bytes ; "length", Crafty_ast.Type.Int ]) (record_type raw Manual)
 *)
 (* The registry holds together: *)
 (*$T

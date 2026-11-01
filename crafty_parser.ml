@@ -571,6 +571,9 @@ let make_expr ~cond ~self ~expr ~pattern ~block ~stmt =
         (here ++ function_name ++ args expr >>:
             fun ((loc, f), args) -> { loc ; desc = Call (f, args) }) |||
         unknown_function (args expr) |||
+        (* Without arguments, a function name is a field in a condition: *)
+        (here ++ (function_name +- nay (sp -- item '(')) >>:
+            fun (loc, n) -> { loc ; desc = Var n }) |||
         (here ++ (name >>= fun s -> if is_constructor s then return s else fail) ++
          in_ '(' (optional ~def:None (expr >>: Option.some)) ')' >>:
             fun ((loc, c), e) -> { loc ; desc = Construct (c, e) }) |||

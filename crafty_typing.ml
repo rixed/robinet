@@ -794,9 +794,13 @@ let lookup_var env loc name =
                         (String.concat " and " ls) (L.to_string cur)
                         (if List.length ls = 1 then "has" else "have"))
             | _ -> [], "" in
+        let what =
+            match env.layer_ctx with
+            | Some { in_cond = true ; _ } -> "field or variable"
+            | _ -> "variable" in
         match A.did_you_mean (fields @ List.map (fun (v : var) -> v.name) env.vars) name with
-        | "" -> error loc "Unknown variable %s%s" name elsewhere
-        | hint -> error loc "Unknown variable %s%s" name hint
+        | "" -> error loc "Unknown %s %s%s" what name elsewhere
+        | hint -> error loc "Unknown %s %s%s" what name hint
 
 (** {2 Stacks and patterns} *)
 
@@ -1355,6 +1359,10 @@ let rec expr ?expected ?(tail=false) ?(used=true) env (e : A.expr) =
         let r = expr env r in
         (match r.typ with
         | Type.Record fs ->
+            let f =
+                if same_name f "len" && not (List.exists (fun (n, _) -> same_name n f) fs) &&
+                   List.exists (fun l -> packet_record l = r.typ) L.all
+                then L.length_field.name else f in
             (match List.findi (fun _ (n, _) -> same_name n f) fs with
             | _, ("ts", _) when is_last_eth r ->
                 error loc "LAST[Eth].ts is not known: %s" only_captured
@@ -1832,7 +1840,11 @@ and stack_layers ~hint env base over (layers : A.layer list) =
                 let f = l.fields.(i) in
                 if not (List.mem mode f.set_in) then (
                     if f.set_in = [] then
-                        error a.arg_loc "%s of %s cannot be set" f.name (L.to_string l)
+                        let ln = L.to_string l in
+                        error a.arg_loc "%s.%s is a virtual field%s: it cannot be set"
+                            ln f.name
+                            (if f.about = "" then "" else
+                             " ("^ String.nreplace ~str:f.about ~sub:"%s" ~by:ln ^")")
                     else
                         error a.arg_loc "%s cannot be set in a %s %s" f.name
                             (L.string_of_mode mode) (L.to_string l)) ;
@@ -2696,7 +2708,7 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/ICMP/Echo/Request(\"hello\")")
   "x: ip" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { Raw(\"hi\")\n  expect Raw(\"ho\") { x = MATCH[IP].src } }")
-  "x: int, c: int, l: {code: int}" \
+  "x: int, c: int, l: {code: int, length: int}" \
     (types "expect /IP/ICMP/TimeExceeded/IP/UDP { x = MATCH[ICMP/_/IP].id\n  c = case var=l MATCH[ICMP/_] TimeExceeded { l.code } else { 0 } }")
   "x: int" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(dst == 53, IP.ttl < 3, /IP.src = 1.2.3.4, Eth.proto == 0x800) { x = MATCH[UDP].src } }")
@@ -2718,11 +2730,11 @@ let check_patterns (ps : A.patterns) =
   "I: int, x: int" \
     (types "repeat { x = if I > 3 { break } else { I } }")
   "x: int" (types "if 1 { wait 1s }\nx = 1\nif x > 0 { print(\"a\") } else { x := 2 }")
-  "x: ip, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, b: {data: byte[]}, y: byte[]" \
+  "x: ip, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, b: {data: byte[], length: int}, y: byte[]" \
     (types "expect /IP { x = case MATCH[1] IP { MATCH[IP].src } | else { 0.0.0.0 }\n  case var=b MATCH[2] Raw { y = b.data } }")
-  "x: int, I: {dst: mac, proto: int, src: mac, ts: time}, I: {code: int, type: int}, I: {id: int}, I: {payload: byte[], seq: int}, I: {payload: byte[], seq: int}, I: {code: int, mtu: int}, I: {code: int}, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, I: {checksum: int, dst: int, length: int, src: int}, I: {ack_num: int, checksum: int, dst: int, flags: int, mss: int, options: byte[], sack_ok: bool, seq_num: int, src: int, ts_ecr: int, ts_val: int, urg_ptr: int, win_size: int, wscale: int}, I: {id: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {data: byte[]}" \
+  "x: int, I: {dst: mac, length: int, proto: int, src: mac, ts: time}, I: {code: int, length: int, type: int}, I: {id: int, length: int}, I: {payload: byte[], seq: int}, I: {payload: byte[], seq: int}, I: {code: int, length: int, mtu: int}, I: {code: int, length: int}, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, I: {checksum: int, dst: int, length: int, src: int}, I: {ack_num: int, checksum: int, dst: int, flags: int, length: int, mss: int, options: byte[], sack_ok: bool, seq_num: int, src: int, ts_ecr: int, ts_val: int, urg_ptr: int, win_size: int, wscale: int}, I: {id: int, length: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {additional: {class: int, data: byte[], name: string, ttl: int, type: int}[], answers: {class: int, data: byte[], name: string, ttl: int, type: int}[], authentic_data: bool, authoritative: bool, authority: {class: int, data: byte[], name: string, ttl: int, type: int}[], checking_disabled: bool, class: int, name: string, opcode: int, rec_avail: bool, rec_desired: bool, status: int, truncated: bool, type: int}, I: {data: byte[], length: int}" \
     (types "expect /IP { x = case MATCH[0] Eth { 0 } | ICMP { 1 } | Echo { 2 } | Request { 3 } | Reply { 4 } | DestUnreachable { 5 } | TimeExceeded { 6 } | IP { 7 } | UDP { 8 } | TCP { 9 } | DNS { 10 } | Query { 11 } | Answer { 12 } | Raw { 13 } }")
-  "x: int, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, y: int" \
+  "x: int, I: {dont_frag: bool, dst: ip, frag_offset: int, id: int, is_fragment: bool, length: int, more_frags: bool, options: byte[], proto: int, src: ip, tos: int, tot_len: int, ttl: int}, y: int" \
     (types "expect /IP { x = case MATCH[1] IP { wait 1s\n  1 } | else { 2 }\n  y = { expect Raw {}\n  3 } }")
 *)
 
@@ -2857,15 +2869,15 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4, ttl=\"x\")/UDP(dst=53)/Raw(\"hi\")")
   "line 1, column 5: IP has no field dts, do you mean dst?" \
     (types "/IP(dts=1.2.3.4)/UDP(dst=53) {}")
-  "line 1, column 46: Unknown variable scr, do you mean src?" \
+  "line 1, column 46: Unknown field or variable scr, do you mean src?" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(scr == 1) {} }")
   "line 1, column 46: IP has no field scr, do you mean src?" \
     (types "/IP(dst=1.2.3.4)/UDP(dst=53) { expect ../UDP(IP.scr == 1.2.3.4) {} }")
   "line 2, column 5: Unknown variable anwsers, do you mean answers?" \
     (types "answers = 1\nx = anwsers")
-  "line 1, column 39: No field unused in TimeExceeded (only {code: int})\n  The packet it quotes is on top of it: MATCH[TimeExceeded/IP].id is the id of the quoted IP, MATCH[/IP] the IP of the error." \
+  "line 1, column 39: No field unused in TimeExceeded (only {code: int, length: int})\n  The packet it quotes is on top of it: MATCH[TimeExceeded/IP].id is the id of the quoted IP, MATCH[/IP] the IP of the error." \
     (types "on for=1s /IP/ICMP/TimeExceeded { x = MATCH[TimeExceeded].unused }")
-  "line 1, column 36: No field cod in TimeExceeded (only {code: int}), do you mean code?" \
+  "line 1, column 36: No field cod in TimeExceeded (only {code: int, length: int}), do you mean code?" \
     (types "expect /IP/ICMP/TimeExceeded { x = MATCH[TimeExceeded].cod }")
   "line 1, column 22: No field port in UDP (only {checksum: int, dst: int, length: int, src: int})" \
     (types "expect /IP/UDP { x = MATCH[UDP].port }")
@@ -2886,12 +2898,16 @@ let check_patterns (ps : A.patterns) =
     (types "/IP(dst=1.2.3.4)/ICMP/Echo(seq=3)/Request()")
   "line 1, column 28: Raw cannot be on top of Echo\n  On top of Echo can be: Request, Reply." \
     (types "/IP(dst=1.2.3.4)/ICMP/Echo/Raw()")
-  "line 1, column 16: Unknown variable ttl: the field of IP below is IP.ttl" \
+  "line 1, column 16: Unknown field or variable ttl: the field of IP below is IP.ttl" \
     (types "expect /IP/UDP(ttl == 3) {}")
-  "line 1, column 22: Unknown variable seq: Request and Reply, on top of Echo, have one" \
+  "line 1, column 22: Unknown field or variable seq: Request and Reply, on top of Echo, have one" \
     (types "expect /IP/ICMP/Echo(seq == 3) {}")
   "line 1, column 36: mss and options cannot both be given" \
     (types "/IP!(dst=1.2.3.4)/TCP!(dst=80, mss=1400, options=#01010101)/Raw()")
+  "line 1, column 31: TCP.length is a virtual field (the bytes TCP carries): it cannot be set" \
+    (types "/IP(dst=1.2.3.4)/TCP!(dst=80, len=3)/Raw(\"x\")")
+  "line 1, column 7: Eth.ts is a virtual field (when the frame was captured): it cannot be set" \
+    (types "/Eth!(ts=now(), dst=ff:ff:ff:ff:ff:ff, proto=1)/Raw(\"x\")")
   "line 1, column 30: sack_ok cannot be set in a self-driven TCP" \
     (types "/IP(dst=1.2.3.4)/TCP(dst=80, sack_ok=true) {}")
   "line 1, column 5: id cannot be set in a self-driven IP" \

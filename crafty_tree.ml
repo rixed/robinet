@@ -619,7 +619,7 @@ let rec complete (packet : packet) =
         | L.Any name -> [ name ; L.N.Raw ] in
     let rec first = function
         | [] ->
-            (match L.unpack_raw [] u.payload with
+            (match L.raw.unpack [] u.payload with
             | Some b when not l.terminal -> (L.raw, b) :: packet
             | _ -> packet)
         | name :: names ->
@@ -713,12 +713,16 @@ let make_root ?(ports=[]) ?(on_removed=ignore)
 let print_packet oc (p : packet) =
     List.print ~first:"" ~last:"" ~sep:"/" (fun oc ((l : L.layer), (u : L.unpacked)) ->
         String.print oc (L.to_string l) ;
+        (* But the virtual length, which no capture tool prints: *)
+        let virtual_length n =
+            n = L.length_field.name && Array.exists ((==) L.length_field) l.fields in
         List.print ~first:"(" ~last:")" ~sep:", " (fun oc (n, v) ->
             let typ =
                 match L.find_field l n with
                 | Some i -> l.fields.(i).typ
                 | None -> A.Type.Void in
-            Printf.fprintf oc "%s=%s" n (to_string typ v)) oc u.values
+            Printf.fprintf oc "%s=%s" n (to_string typ v)) oc
+            (List.filter (fun (n, _) -> not (virtual_length n)) u.values)
     ) oc (List.rev p)
 
 let rec size n = List.fold_left (fun s c -> s + size c) 1 (children n)

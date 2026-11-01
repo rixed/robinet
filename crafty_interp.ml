@@ -1856,7 +1856,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 (* expect waits for its pattern, on the stream of the stack, conditions
  * evaluated at match time: *)
 (*$= runs & ~printer:identity
-  "500ms: 10.0.0.2 53 [Eth {dst: 02:00:00:00:00:01, proto: 2048, src: 02:00:00:00:00:02, ts: 1970-01-01T00:00:00.5Z}, IP {dont_frag: false, dst: 10.0.0.1, frag_offset: 0, id: 1, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.2, tos: 0, tot_len: 32, ttl: 64}, UDP {checksum: 2272, dst: 1000, length: 12, src: 53}, Raw {data: #706f6e67}]\n500ms: after\n500ms: done" \
+  "500ms: 10.0.0.2 53 [Eth {dst: 02:00:00:00:00:01, length: 32, proto: 2048, src: 02:00:00:00:00:02, ts: 1970-01-01T00:00:00.5Z}, IP {dont_frag: false, dst: 10.0.0.1, frag_offset: 0, id: 1, is_fragment: false, length: 12, more_frags: false, options: [], proto: 17, src: 10.0.0.2, tos: 0, tot_len: 32, ttl: 64}, UDP {checksum: 2272, dst: 1000, length: 12, src: 53}, Raw {data: #706f6e67, length: 4}]\n500ms: after\n500ms: done" \
     (runs ~inject:[ 0.2, reply ~sport:54 "pong" ; 0.3, reply "nope" ; 0.5, reply "pong" ; 0.6, reply "pong" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  expect Raw(\"pong\") { print(\"${MATCH[IP].src} ${MATCH[UDP].src} ${MATCH}\") }\n  print(\"after\") }")
   "1s: failed: line 2, column 3: Nothing matched within 1s" \
@@ -1884,7 +1884,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
 (* LAST is the last packet sent by any block: as packed down to the
  * self-driven layers, which only their stack tells: *)
 (*$= runs & ~printer:identity
-  "3ps: [Eth {dst: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: ?, id: ?, is_fragment: ?, more_frags: ?, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: ?, ttl: 64}, UDP {checksum: ?, dst: 53, length: 10, src: 1000}, Raw {data: #6869}]\n3ps: done" \
+  "3ps: [Eth {dst: ?, length: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: ?, id: ?, is_fragment: ?, length: ?, more_frags: ?, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: ?, ttl: 64}, UDP {checksum: ?, dst: 53, length: 10, src: 1000}, Raw {data: #6869, length: 2}]\n3ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"hi\")\n  print(LAST) }")
   "3ps: #61\n3ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\") }\nprint(\"${LAST[Raw].data}\")")
@@ -1894,7 +1894,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  { Raw(\"b\") }\n  print(\"${LAST[Raw].data}\") }")
   "6ps: 64 1\n6ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  x = LAST[IP].ttl\n  ../../IP(ttl=1)/UDP/Raw(\"b\")\n  print(\"${x} ${LAST[IP].ttl}\") }")
-  "2ps: [Eth {dst: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 7, is_fragment: false, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 30, ttl: 64}, UDP {checksum: 32593, dst: 53, length: 10, src: 1000}, Raw {data: #6869}]\n2ps: done" \
+  "2ps: [Eth {dst: ?, length: ?, proto: 2048, src: ?, ts: ?}, IP {dont_frag: false, dst: 10.0.0.2, frag_offset: 0, id: 7, is_fragment: false, length: 10, more_frags: false, options: [], proto: 17, src: 10.0.0.1, tos: 0, tot_len: 30, ttl: 64}, UDP {checksum: 32593, dst: 53, length: 10, src: 1000}, Raw {data: #6869, length: 2}]\n2ps: done" \
     (runs "/IP!(dst=10.0.0.2, id=7)/UDP(src=1000, dst=53)/Raw(\"hi\")\nprint(LAST)")
   "9ps: #61 #6262 #62\n9ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  x = LAST\n  y = x\n  { Raw(\"bb\")\n    y := LAST }\n  Raw(\"b\")\n  print(\"${x[Raw].data} ${y[Raw].data} ${LAST[Raw].data}\") }")
@@ -1905,7 +1905,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "repeat count=2 { /IP!(dst=10.0.0.2, id=I)/UDP(src=1000, dst=53)/Raw(\"x\")\n  print(LAST[IP].id) }")
   "3ps: 4660\n3ps: done" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53, checksum=0x1234) { Raw(\"a\")\n  print(LAST[UDP].checksum) }")
-  "3ps: {ack_num: 0, checksum: ?, dst: 80, flags: 2, mss: -1, options: [], sack_ok: false, seq_num: 0, src: 1000, ts_ecr: -1, ts_val: -1, urg_ptr: 0, win_size: 65535, wscale: -1}\n3ps: failed: line 3, column 5: TCP.checksum is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
+  "3ps: {ack_num: 0, checksum: ?, dst: 80, flags: 2, length: 0, mss: -1, options: [], sack_ok: false, seq_num: 0, src: 1000, ts_ecr: -1, ts_val: -1, urg_ptr: 0, win_size: 65535, wscale: -1}\n3ps: failed: line 3, column 5: TCP.checksum is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
     (runs "/IP(dst=10.0.0.2)/TCP!(src=1000, dst=80, flags=SYN, seq_num=0)/Raw()\nprint(LAST[TCP])\nx = LAST[TCP].checksum")
   "3ps: failed: line 2, column 7: UDP.checksum is not known: only a packet captured as it leaves has it (p = MESSAGE, through manual layers)" \
     (runs "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) { Raw(\"a\")\n  x = LAST[UDP].checksum }")
@@ -2046,6 +2046,9 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "500ms: a\n1s: done" \
     (runs ~inject:[ 0.2, reply ~sport:54 "b" ; 0.5, reply "a" ] \
         "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on for=1s ../UDP { print(MATCH[Raw].data) } }")
+  "500ms: 2 10 10\n1s: done" \
+    (runs ~inject:[ 0.2, reply "" ; 0.5, reply "hi" ] \
+        "/IP(dst=10.0.0.2)/UDP(src=1000, dst=53) {\n  on for=1s ../UDP(length > 8)/Raw(len == 2) { print(\"${MATCH[Raw].length} ${MATCH[UDP].len} ${MATCH[IP].len}\") } }")
   "500ms: fragment 0\n500ms1ps: fragment 2\n500ms1ps: id 2\n500ms1ps: in two fragments\n1s1ps: done" \
     (runs ~inject:(List.map (fun f -> 0.5, incoming f) (Ip.Pdu.fragment 36 (udp_packet ~id:2 53 1000 "in two fragments"))) \
         "/IP(dst=10.0.0.2) {\n  on for=1s ../IP!(is_fragment) { print(\"fragment ${MATCH[IP].frag_offset}\") }\n  on for=1s ../IP/UDP { print(\"id ${MATCH[IP].id}\") ; print(MATCH[Raw].data) } }")
@@ -2498,7 +2501,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   "true" (filters "/Eth" (arp "10.0.0.2"))
   "line 1, column 1: The pattern must be absolute (start with /)" \
     (filters "IP/UDP" (reply "x"))
-  "line 1, column 9: Unknown variable x" (filters "/IP/UDP(x == 1)" (reply "x"))
+  "line 1, column 9: Unknown field or variable x" (filters "/IP/UDP(x == 1)" (reply "x"))
   "line 1, column 9: Expected end of pattern" (filters "/IP/UDP {}" (reply "x"))
   "true" (filters "/IP | /Eth" (arp "10.0.0.2"))
   "false" (filters "/IP/TCP | /IP/UDP(dst == 7)" (reply "x"))
