@@ -1,4 +1,4 @@
-(* Generated from docs/crafty.md (md5 0b53b633acf9cf816dd327245cddeee5) by the Makefile. Do not edit. *)
+(* Generated from docs/crafty.md (md5 17fad7745217527c065e8312e5a7c187) by the Makefile. Do not edit. *)
 let introduction = {crafty_manual|### A first program
 
     # Three datagrams to a UDP echo server: how many come back?
@@ -219,11 +219,11 @@ let reference = {crafty_manual|### Lexical conventions
 -   `mac`: `aa:bb:cc:dd:ee:ff`.
 -   `cidr`: `10.0.0.0/8`, no bit set beyond the mask. `ip in net` tells whether
     an address is in it.
--   arrays: `[1, 2, 3]`. Items of one type.
+-   arrays: `[1, 2, 3]`. Items of one type, typed lazily (when that fails:
+    `[0s] * 0`).
 -   maps: `[192.0.2.1: "gw", 192.0.2.2: "dns"]`, a `string[ip]`, in no
     particular order. `map(key=k, default=v)` is an empty map with keys of the
-    type of `k`, where missing keys have the value `v` (tip: `[0s] * 0` is an
-    empty array with a known type!).
+    type of `k`, where missing keys have the value `v`.
 -   records: `{name: "gw", ip: 192.0.2.1}`. `{}` is an empty block, not a
     record.
 -   variants: `Ok(42)`, `Failed("timeout")`, `Pending`. A constructor starts
@@ -651,8 +651,8 @@ The replies come back to the `Echo` stream of the requests, whatever its id.
 
     # Every 10s, the round trip times of the last 10s
     /IP!(dst=192.0.2.10)/UDP(dst=7) {
-      rtts = [0s] * 0
-      spawn { repeat every=10s { report(rtts, name="rtt") ; rtts := [0s] * 0 } }
+      rtts = []
+      spawn { repeat every=10s { report(rtts, name="rtt") ; rtts := [] } }
       repeat count=6000 every=10ms {
         p = Raw("probe ${I}")
         catch { expect timeout=500ms Raw("probe ${I}") { rtts += MATCH[Eth].ts - p[Eth].ts } }
@@ -667,7 +667,7 @@ With `--format json`, each report is a line such as
 
     # 100 probes to a UDP echo server: how many come back, and how fast?
     /IP!(dst=192.0.2.10)/UDP(dst=7) {
-      rtts = array(init=0s, len=0)
+      rtts = []
       repeat count=100 every=10ms {
         p = Raw("probe ${I}")
         catch {
@@ -783,7 +783,7 @@ Whole programs
     /IP!(dst=target)/UDP(dst=port) {
       probe = 0                       # the IP id, that tells the probes apart
       repeat var=hop count=max_hops {
-        rtts = map(key=0.0.0.0, default=array(init=0s, len=0))
+        rtts = map(key=0.0.0.0, default=[0s] * 0)
         reached = false
         repeat count=probes {
           probe += 1
@@ -911,7 +911,7 @@ probes without an answer.
     port = int(arg(5, default="33434"))
     last = max_hops - 1               # the target's hop, from 0, once known
     sent = array(init=0, len=max_hops)
-    rtts = array(init=array(init=0s, len=0), len=max_hops)
+    rtts = array(init=[0s] * 0, len=max_hops)
     hosts = array(init=map(key=0.0.0.0, default=0), len=max_hops)
     sent_at = map(key=0, default=now())     # by IP id: round * 64 + hop
     /IP!(dst=target)/UDP(dst=port) {
@@ -941,7 +941,7 @@ probes without an answer.
             }
             print(line)
             sent[hop] := 0
-            rtts[hop] := array(init=0s, len=0)
+            rtts[hop] := []
             hosts[hop] := map(key=0.0.0.0, default=0)
           }
           sent_at := map(key=0, default=now())    # too late for the next report

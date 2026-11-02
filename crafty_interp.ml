@@ -1626,10 +1626,12 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
     (runs "s = summary([1.5] * 0)\nprint(\"${s} ${s.count}\")\nx = s.mean")
   "0s: [a: {count: 1, max: 2, mean: 2.0, min: 2, p50: 2, p95: 2, p99: 2, stddev: 0.0}] {n: x, v: 5} #0102\n0s: done" \
     (runs "m = summary([\"a\": [2]])\nr = summary({n: \"x\", v: 5})\nprint(\"${m} ${r} ${summary(#0102)}\")")
+  "0s: [1ms, 2ms] [a] [1, 2] [2.5]\n0s: done" \
+    (runs "a = []\nb = []\nc = []\nd = [1.5]\na += 1ms\nb += \"a\"\nc := [1]\nc += 2\nd := []\nd += 2.5\na := append(a, 2ms)\nprint(\"${a} ${b} ${c} ${d}\")")
   "0s: rtt: {count: 2, max: 2ms, mean: 1.5ms, min: 1ms, p50: 1ms, p95: 2ms, p99: 2ms, stddev: 500µs}\n0s: done" \
     (runs "report([1ms, 2ms], name=\"rtt\")")
   "200ms: n: 2\n400ms: n: 2\n450ms1ps: n: 1\n450ms1ps: done" \
-    (runs "a = [0] * 0\nspawn { repeat every=200ms { wait 200ms ; report(length(a), name=\"n\") ; a := [0] * 0 } }\nrepeat count=5 every=100ms { a := append(a, 1) }\nwait 50ms\nreport(length(a), name=\"n\")")
+    (runs "a = []\nspawn { repeat every=200ms { wait 200ms ; report(length(a), name=\"n\") ; a := [] } }\nrepeat count=5 every=100ms { a := append(a, 1) }\nwait 50ms\nreport(length(a), name=\"n\")")
   "0s: 1.5 1 -2 1792540800.25 1792540800\n0s: done" \
     (runs "t = 2026-10-21T00:00:00.25Z\nprint(\"${float(1500ms)} ${int(1500ms)} ${int(-2500ms)} ${float(t)} ${int(t)}\")")
   "0s: failed: line 1, column 5: No minimum of no values" \
