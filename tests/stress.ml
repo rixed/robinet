@@ -829,7 +829,7 @@ let test_power () =
        believing a request is in flight; left there across a power cut, the
        next frame for that address joins the queue and no request ever goes
        out again. The cut comes before the adapter gives up on the address
-       (see [Eth.arp_max_requests]), which would clear it as well. *)
+       (see [Eth.TRX.max_solicits]), which would clear it as well. *)
     let waiting () =
         Tools.BitHash.length h2.Host.eth_state.Eth.State.postponed in
     let to_nowhere ?(meanwhile=ignore) () =

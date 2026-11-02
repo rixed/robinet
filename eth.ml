@@ -261,31 +261,40 @@ module Pdu = struct
         | {| _ |} ->
            Error (lazy "Not Eth")
 
-    (* The 32 bits at byte [off] of the header of the IPv4 packet in [pld],
-     * the payload of a frame of [proto], as a view on [pld] rather than a
-     * copy: *)
-    let ip4_addr_at off proto pld =
-        let at ip =
-            match%bitstring ip with
-            | {| 4 : 4 ; hdr_len : 4 ; _ : -1 : bitstring |}
-              when hdr_len >= 5 && bitstring_length ip >= hdr_len * 32 ->
-                Ok (subbitstring ip (off * 8) 32)
-            | {| _ |} ->
-                Error (lazy "Not IPv4") in
-        if proto = Proto.ip4 then
-            at pld
+    (* An address at byte [v4_off] of the header of the IPv4 packet in [pld],
+     * or at byte [v6_off] of the IPv6 one, according to [proto], that of the
+     * frame [pld] is the payload of. A view on [pld] rather than a copy: *)
+    let ip_addr_at ~v4_off ~v6_off proto pld =
+        let at proto ip =
+            if proto = Proto.ip4 then
+                match%bitstring ip with
+                | {| 4 : 4 ; hdr_len : 4 ; _ : -1 : bitstring |}
+                  when hdr_len >= 5 && bitstring_length ip >= hdr_len * 32 ->
+                    Ok (subbitstring ip (v4_off * 8) 32)
+                | {| _ |} ->
+                    Error (lazy "Not IPv4")
+            else
+                match%bitstring ip with
+                | {| 6 : 4 ; _ : -1 : bitstring |}
+                  when bitstring_length ip >= 40 * 8 ->
+                    Ok (subbitstring ip (v6_off * 8) 128)
+                | {| _ |} ->
+                    Error (lazy "Not IPv6") in
+        if proto = Proto.ip4 || proto = Proto.ip6 then
+            at proto pld
         else if proto = Proto.ieee8021q then
             match%bitstring pld with
             | {| _ : 16 ; vlan_proto : 16 ; ip : -1 : bitstring |}
-              when vlan_proto = (Proto.ip4 :> int) ->
-                at ip
+              when vlan_proto = (Proto.ip4 :> int) ||
+                   vlan_proto = (Proto.ip6 :> int) ->
+                at (Proto.o vlan_proto) ip
             | {| _ |} ->
-                Error (lazy "Vlan proto not IPv4")
-        else Error (lazy "Eth proto neither IPv4 not ieee8021q")
+                Error (lazy "Vlan proto not IP")
+        else Error (lazy "Eth proto neither IP nor ieee8021q")
 
-    let extract_src_proto = ip4_addr_at 12
+    let extract_src_proto = ip_addr_at ~v4_off:12 ~v6_off:8
 
-    let extract_dst_proto = ip4_addr_at 16
+    let extract_dst_proto = ip_addr_at ~v4_off:16 ~v6_off:24
     (*$Q extract_src_proto
       (Q.make (fun _ -> Ip.Pdu.random ())) (fun ip -> \
         let bits = Ip.Pdu.pack ip in \
@@ -297,6 +306,17 @@ module Pdu = struct
         is ip.Ip.Pdu.dst (extract_dst_proto Proto.ip4 bits) && \
         is ip.Ip.Pdu.src (extract_src_proto Proto.ieee8021q vlan) && \
         is ip.Ip.Pdu.dst (extract_dst_proto Proto.ieee8021q vlan))
+      (Q.make (fun _ -> Ip6.Pdu.random ())) (fun ip -> \
+        let bits = Ip6.Pdu.pack ip in \
+        let vlan = Vlan.Pdu.(pack (make 42 Proto.ip6 bits)) in \
+        let is a = function \
+          | Ok b -> Bitstring.equals b (Ip.Addr.to_bitstring a) \
+          | Error _ -> false in \
+        is ip.Ip6.Pdu.src (extract_src_proto Proto.ip6 bits) && \
+        is ip.Ip6.Pdu.dst (extract_dst_proto Proto.ip6 bits) && \
+        is ip.Ip6.Pdu.src (extract_src_proto Proto.ieee8021q vlan) && \
+        is ip.Ip6.Pdu.dst (extract_dst_proto Proto.ieee8021q vlan) && \
+        Result.is_error (extract_dst_proto Proto.ip4 bits))
      *)
 
     (*$Q pack
@@ -724,6 +744,41 @@ struct
     let names = [| "never" ; "subnet" ; "always" |]
 end
 
+(** {3 Neighbor discovery (RFC 4861)} *)
+
+module Ndp =
+struct
+    (* An ICMPv6 neighbor discovery message [msg] in an IPv6 packet from
+     * [src] (a bitstring) to [dst], of the hop limit of 255 that tells a
+     * receiver it was not routed: *)
+    let packet src dst msg =
+        Icmp6.Pdu.pack msg |>
+        Ip6.Pdu.make ~ttl:255 Ip.Proto.icmpv6 (Ip.Addr.of_bitstring src) dst |>
+        Ip6.Pdu.pack
+
+    let all_nodes = Ip.Addr.of_string "ff02::1"
+    let all_nodes_mac = Addr.of_ip6_multicast all_nodes
+
+    (* As a link-layer address option holds it: *)
+    let lla (mac : Addr.t) = string_of_bitstring (mac :> bitstring)
+
+    (* The neighbor solicitation or advertisement in [bits], an IPv6 packet,
+     * if it is one; what the fixed header rules out is not decoded. A
+     * routed one, of a hop limit below 255, is still returned. *)
+    let message bits =
+        match%bitstring bits with
+        | {| 6 : 4 ; _ : 28 ; _ : 16 ; 58 : 8 ; _ : 8 ; _ : 256 : bitstring ;
+             (135|136) : 8 |} ->
+            (match Ip6.Pdu.unpack bits with
+            | Ok ip when ip.proto = Ip.Proto.icmpv6 && ip.extensions = [] ->
+                (match Icmp6.Pdu.unpack (ip.payload :> bitstring) with
+                | Ok ({ payload = Neighbor_solicit _ | Neighbor_advert _ ; _ } as m) ->
+                    Some (ip, m)
+                | _ -> None)
+            | _ -> None)
+        | {| _ |} -> None
+end
+
 module State =
 struct
     (*$< State *)
@@ -773,7 +828,6 @@ struct
           mutable gateways : (gw_selector * Gateway.t option) list ;
           (* Which can be overridden for one packet in routers with: *)
           mutable via : Gateway.t option ;
-          proto : Proto.t ;
           mutable mtu : int ;
           mutable my_addresses : my_address list ;
           mutable promisc : (bitstring -> unit) option ;
@@ -798,6 +852,19 @@ struct
           mutable delay : Interval.t ;
           (* Optional packet loss ratio: *)
           mutable loss : float }
+
+    (* Whether a frame to [dst] is for this adapter: to its MAC, to
+     * broadcast, or, if it has IPv6 addresses, to the all-nodes group or to
+     * the solicited-node group of one of them: *)
+    let accepts t dst =
+        Addr.eq dst t.mac || Addr.is_broadcast dst ||
+        let v6 =
+            List.filter (fun a -> bitstring_length a.addr = 128) t.my_addresses in
+        v6 <> [] &&
+        (Addr.eq dst Ndp.all_nodes_mac ||
+         List.exists (fun a ->
+             Ip.Addr.of_bitstring a.addr |> Ip.Addr.solicited_node |>
+             Addr.of_ip6_multicast |> Addr.eq dst) v6)
 
     let find_ip4 t =
         List.find_map (fun my_addr ->
@@ -846,17 +913,26 @@ struct
         t.via <- None ;
         Iface.reset t.iface
 
-    (** Broadcast one ARP request per address of this adapter, each asking
-     * for that very address: what neighbours that accept gratuitous ARP
-     * learn this adapter from, without having to ask. *)
+    (** Announce every address of this adapter: an ARP request asking for
+     * that very address for IPv4, an unsolicited neighbor advertisement to
+     * all nodes for IPv6. What neighbours that accept announcements learn
+     * this adapter from, without having to ask. *)
     let emit_gratuitous_arp t =
-        List.iter (fun my_addr ->
-            Arp.Pdu.make_request Arp.HwType.eth t.proto (t.mac :> bitstring)
-                                 my_addr.addr my_addr.addr |>
-            Arp.Pdu.pack |>
-            Pdu.make Proto.arp t.mac Addr.broadcast |>
+        let emit proto dst bits =
+            Pdu.make proto t.mac dst bits |>
             Pdu.pack |>
-            Simulation.asap t.iface.widget.power t.iface.emit
+            Simulation.asap t.iface.widget.power t.iface.emit in
+        List.iter (fun my_addr ->
+            if bitstring_length my_addr.addr = 32 then
+                Arp.Pdu.make_request Arp.HwType.eth Proto.ip4 (t.mac :> bitstring)
+                                     my_addr.addr my_addr.addr |>
+                Arp.Pdu.pack |>
+                emit Proto.arp Addr.broadcast
+            else
+                Icmp6.Pdu.make_neighbor_advert ~tgt_lla:(Ndp.lla t.mac)
+                    (Ip.Addr.of_bitstring my_addr.addr) |>
+                Ndp.packet my_addr.addr Ndp.all_nodes |>
+                emit Proto.ip6 Ndp.all_nodes_mac
         ) t.my_addresses
 
     (* The destination of a row of the gateways property: a CIDR, or an
@@ -898,7 +974,6 @@ struct
      * @param promisc an optional function that will receive frames received but not destined to this TRX.
      * @param do_proxy_arp an optional function instructing the driver to perform proxy-arp on a give ARP request
      * @param answer_arp whether to answer ARP requests for [my_addresses] (default: true)
-     * @param proto the {!Proto} we want to transmit/receive.
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
     let make ?speeds ?full_duplex ?inter_frame_gap ?can_forward_after
@@ -906,7 +981,7 @@ struct
              ?(mac=Addr.random ()) ?(gateways=[])
              ?promisc ?(do_proxy_arp=(fun _ -> false)) ?(answer_arp=true)
              ?(learn_neighbors_from_incoming=Learn.Never)
-             ?(my_addresses=[]) ?(proto=Proto.ip4) ?(name="eth")
+             ?(my_addresses=[]) ?(name="eth")
              ~parent ?power () =
         (* An adapter is called "eth" unless its owner names it, which a
          * device with several of them has to do: which one this is is the
@@ -917,7 +992,7 @@ struct
             Iface.make ~parent ?power ?speeds ?full_duplex ?inter_frame_gap
                        ?can_forward_after name in
         let t = {
-            iface ; mac ; gateways ; proto ; mtu ; promisc ; do_proxy_arp ;
+            iface ; mac ; gateways ; mtu ; promisc ; do_proxy_arp ;
             answer_arp ; accept_gratuitous_arp = false ;
             learn_neighbors_from_incoming ;
             rx_otherhost_dropped = Metric.Counter.make () ;
@@ -1030,12 +1105,13 @@ struct
         )
 
     (** Low level send function. Takes a {!Proto} since it's used both
-     * for the user payload protocol and ARP protocol. *)
-    let really_send (st : State.t) proto dst bits =
+     * for the user payload protocol and ARP protocol. Neighbor resolution
+     * ([control]) is neither delayed nor lost. *)
+    let really_send ?(control=false) (st : State.t) proto dst bits =
         let pdu = Pdu.make proto st.mac dst bits in
         Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Emitting an Eth packet, proto %s, from %s to %s (content '%s')" (Proto.to_string proto) (Addr.to_string st.mac) (Addr.to_string dst) (hexstring_of_bitstring bits)))) ;
         let delay =
-            if proto <> Proto.arp &&
+            if not control &&
                Interval.compare st.delay Interval.zero > 0 then
                 Interval.sec
                     (max 0. (jitter 0.1 (Interval.to_secs st.delay)))
@@ -1043,28 +1119,47 @@ struct
         Simulation.delay st.iface.widget.power delay
                          st.iface.emit (Pdu.pack pdu)
 
-    let send (st : State.t) proto dst bits =
-        if proto = Proto.arp || st.loss = 0. || Random.float 1. >= st.loss then
-            really_send st proto dst bits
+    let send ?(control=false) (st : State.t) proto dst bits =
+        if control || st.loss = 0. || Random.float 1. >= st.loss then
+            really_send ~control st proto dst bits
         else
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Dropping packet of proto %s from %s" (Proto.to_string proto) (Addr.to_string st.mac))))
 
-    (* As Linux's retrans_time and mcast_solicit: *)
-    let arp_retrans_time = Interval.sec 1.
-    let arp_max_requests = 3
+    (* The ethertype of an IP packet, by its version: *)
+    let proto_of bits =
+        match%bitstring bits with
+        | {| 6 : 4 ; _ : -1 : bitstring |} -> Proto.ip6
+        | {| _ |} -> Proto.ip4
 
+    (* As Linux's retrans_time and mcast_solicit: *)
+    let retrans_time = Interval.sec 1.
+    let max_solicits = 3
+
+    (* Ask who has [target], from [sender]: an ARP request for IPv4, a
+     * neighbor solicitation to the solicited-node group for IPv6. *)
+    let solicit (st : State.t) sender target =
+        if bitstring_length target = 32 then
+            Arp.Pdu.make_request Arp.HwType.eth Proto.ip4 (st.mac :> bitstring)
+                                 sender target |>
+            Arp.Pdu.pack |>
+            send ~control:true st Proto.arp Addr.broadcast
+        else
+            let target = Ip.Addr.of_bitstring target in
+            let group = Ip.Addr.solicited_node target in
+            Icmp6.Pdu.make_neighbor_solicit ~src_lla:(Ndp.lla st.mac) target |>
+            Ndp.packet sender group |>
+            send ~control:true st Proto.ip6 (Addr.of_ip6_multicast group)
     (* Asks again while unanswered, then gives up on the address, dropping what
      * waited for it, so that the next frame for it asks anew: *)
     let resolve_proto_addr (st : State.t) bits sender_proto_addr target_proto_addr =
         (* Add the msg to postponed messages _before_ sending the query *)
         Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Postponing a msg for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
         BitHash.add st.postponed target_proto_addr bits ;
-        let request = Arp.Pdu.make_request Arp.HwType.eth st.proto (st.mac :> bitstring) sender_proto_addr target_proto_addr in
         let rec ask n =
-            send st Proto.arp Addr.broadcast (Arp.Pdu.pack request) ;
-            Simulation.delay st.iface.widget.power arp_retrans_time (fun () ->
+            solicit st sender_proto_addr target_proto_addr ;
+            Simulation.delay st.iface.widget.power retrans_time (fun () ->
                 match BitHash.find_opt st.arp_cache target_proto_addr with
-                | Some None when n < arp_max_requests -> ask (n + 1)
+                | Some None when n < max_solicits -> ask (n + 1)
                 | Some None ->
                     Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "No answer for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
                     BitHash.remove_all st.arp_cache target_proto_addr ;
@@ -1074,70 +1169,139 @@ struct
 
     type dst = Postponed | Dst of Addr.t
 
+    (* The address of this adapter to ask for [target] from, of the same
+     * family: one on the same subnet, or else a link-local one, or else any;
+     * the unspecified address if it has none. A router forwarding a packet
+     * asks from its own address and not the packet's source. *)
+    let sender_for (st : State.t) target =
+        let len = bitstring_length target in
+        let same =
+            List.filter (fun a -> bitstring_length a.State.addr = len)
+                        st.my_addresses in
+        let link_local a =
+            len = 128 && Ip.Addr.is_link_local (Ip.Addr.of_bitstring a.State.addr) in
+        match List.find_opt (fun a -> State.on_subnet a target) same with
+        | Some a -> a.addr
+        | None ->
+            (match List.find_opt link_local same with
+            | Some a -> a.addr
+            | None ->
+                (match same with
+                | a :: _ -> a.addr
+                | [] -> zeroes_bitstring len))
+
     (* [target_ip] may be a view on [bits]: what is kept of it is a copy. *)
-    let arp_resolve_ipv4 (st : State.t) bits sender_ip target_ip =
+    let resolve (st : State.t) bits target_ip =
         match Option.get (BitHash.find st.arp_cache target_ip) with
         | dst ->
-            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "found HW addr for '%s' in the ARP cache" (hexstring_of_bitstring target_ip)))) ;
+            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "found HW addr for '%s' in the neighbor cache" (hexstring_of_bitstring target_ip)))) ;
             Dst dst
         | exception Not_found ->
-            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Cannot find HW addr for '%s' in ARP cache" (hexstring_of_bitstring target_ip)))) ;
+            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Cannot find HW addr for '%s' in the neighbor cache" (hexstring_of_bitstring target_ip)))) ;
             let target_ip = concat [ target_ip ] in
             BitHash.add st.arp_cache target_ip None ;
-            resolve_proto_addr st bits sender_ip target_ip ;
+            resolve_proto_addr st bits (sender_for st target_ip) target_ip ;
             Postponed
         | exception Invalid_argument _ ->
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "HW addr for '%s' is still resolving" (hexstring_of_bitstring target_ip)))) ;
             (* Every frame waiting on that address, and not merely the one that
              * asked for it: they all leave together when the reply comes (see
-             * the loop that drains [postponed]). *)
+             * [learn]). *)
             BitHash.add st.postponed (concat [ target_ip ]) bits ;
             Postponed
 
     let broadcast_bits = Ip.Addr.(to_bitstring broadcast)
 
     let dst_for (st : State.t) bits =
-        (* Note: we might be a router forwarding a packet. In that case, the
-         * source of the packet is not us, yet the ARP sender addr is that of
-         * the emitting device, aka the router: *)
-        let arp_resolve target_ip =
-            match st.my_addresses with
-            | [] -> failwith "No address to use as sender proto addr for ARP"
-            | a :: _ -> Ok (arp_resolve_ipv4 st bits a.addr target_ip) in
-        match Pdu.extract_dst_proto st.proto bits with
+        match Pdu.extract_dst_proto (proto_of bits) bits with
         | Ok dst when bits_equal dst broadcast_bits ->
             Ok (Dst Addr.broadcast)
-        | Ok dst when State.on_my_subnet st dst ->
+        | Ok dst when bitstring_length dst = 128 &&
+                      Ip.Addr.is_multicast (Ip.Addr.of_bitstring dst) ->
+            Ok (Dst (Addr.of_ip6_multicast (Ip.Addr.of_bitstring dst)))
+        | Ok dst when State.on_my_subnet st dst ||
+                      (bitstring_length dst = 128 &&
+                       Ip.Addr.is_link_local (Ip.Addr.of_bitstring dst)) ->
             Log.(log st.iface.widget.logger Debug (lazy "Same network as me, sending directly")) ;
-            arp_resolve dst (* FIXME: should also tell us which source address to use *)
+            Ok (resolve st bits dst) (* FIXME: should also tell us which source address to use *)
         | Ok dst ->
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf2 "Not on my LAN (my addresses = %a)" (List.print State.print_my_address) st.my_addresses))) ;
             (match gw_for_ip st (Ip.Addr.of_bitstring dst) with
             | None ->
-                Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "No GW, resolving with ARP"))) ;
-                arp_resolve dst
+                Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "No GW, resolving directly"))) ;
+                Ok (resolve st bits dst)
             | Some (Mac addr) ->
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Using GW MAC %s" (Addr.to_string addr)))) ;
                 Ok (Dst addr)
             | Some (Ip ip)  ->
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Using GW IP %s" (Ip.Addr.to_string ip)))) ;
-                let sender_ip = match st.my_addresses with
-                    | my_ip::_ -> my_ip.addr
-                    | []       -> Ip.Addr.zero |> Ip.Addr.to_bitstring (* maybe take the source IP from the payload? *) in
-                Ok (arp_resolve_ipv4 st bits sender_ip (Ip.Addr.to_bitstring ip)))
+                Ok (resolve st bits (Ip.Addr.to_bitstring ip)))
         | Error s ->
             Error (lazy ("Cannot extract dest IP: "^ Lazy.force s))
 
-    (** Transmit function. [tx t payload] Will send the payload. *)
+    (** Transmit function. [tx t payload] sends the IP packet [payload], as
+     * IPv4 or IPv6 according to its version. *)
     let tx (st : State.t) bits =
         Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "TX a payload of %d bytes (while MTU=%d)" (bytelength bits) st.mtu))) ;
         if bytelength bits > st.mtu then
             Log.(log st.iface.widget.logger Warning (lazy (Printf.sprintf "Dropping a frame larger than MTU (%d > %d)" (bytelength bits) st.mtu)))
         else
             match dst_for st bits with
-            | Ok (Dst dst) -> send st st.proto dst bits
+            | Ok (Dst dst) -> send st (proto_of bits) dst bits
             | Ok Postponed -> Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...postponed")))
             | Error s -> Log.(log st.iface.widget.logger Debug s)
+
+    (* That [ip] is at [hw]: an entry already in the cache, resolving or not,
+     * is updated, and a new one added only if [add]. Then what waited for
+     * it leaves, in the order it was postponed, which [find_all] gives the
+     * reverse of. *)
+    let learn (st : State.t) ~add ip hw =
+        if add || BitHash.mem st.arp_cache ip then (
+            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...%s is at %s" (hexstring_of_bitstring ip) (Addr.to_string hw)))) ;
+            BitHash.replace st.arp_cache (concat [ ip ]) (Some hw)) ;
+        let waiting = List.rev (BitHash.find_all st.postponed ip) in
+        BitHash.remove_all st.postponed ip ;
+        List.iter (fun msg -> send st (proto_of msg) hw msg) waiting
+
+    let is_mine (st : State.t) ip =
+        List.exists (fun my_addr -> bits_equal ip my_addr.State.addr) st.my_addresses
+
+    (* A neighbor solicitation or advertisement [m] in the IPv6 packet [ip],
+     * brought by a frame from [frame_src]. As for ARP, the sender of a
+     * solicitation is learnt if it is about one of this adapter's addresses,
+     * and an advertisement updates what is already known, or is learnt when
+     * unsolicited and announcements are accepted. *)
+    let ndp_rx (st : State.t) frame_src (ip : Ip6.Pdu.t) (m : Icmp6.Pdu.t) =
+        let lla f opts =
+            List.find_map_opt (fun o ->
+                Option.map (fun a -> Addr.o (bitstring_of_string a)) (f o)
+            ) opts in
+        match m.payload with
+        | Neighbor_solicit { target ; options } ->
+            let target_bits = Ip.Addr.to_bitstring target in
+            let from_dad = Ip.Addr.is_zero ip.src in
+            let about_me = is_mine st target_bits in
+            let src_hw =
+                lla (function Icmp6.Opt.Source_lla a -> Some a | _ -> None) options |?
+                frame_src in
+            if not from_dad then
+                learn st ~add:about_me (Ip.Addr.to_bitstring ip.src) src_hw ;
+            if about_me && st.answer_arp then (
+                Log.(log st.iface.widget.logger Debug (lazy "...a solicitation for me, let's advertise!")) ;
+                let dst, dst_hw =
+                    if from_dad then Ndp.all_nodes, Ndp.all_nodes_mac
+                    else ip.src, src_hw in
+                Icmp6.Pdu.make_neighbor_advert ~solicited:(not from_dad)
+                    ~tgt_lla:(Ndp.lla st.mac) target |>
+                Ndp.packet target_bits dst |>
+                send ~control:true st Proto.ip6 dst_hw)
+        | Neighbor_advert { target ; solicited ; options ; _ } ->
+            let hw =
+                lla (function Icmp6.Opt.Target_lla a -> Some a | _ -> None) options |?
+                frame_src in
+            learn st ~add:(st.accept_gratuitous_arp && not solicited)
+                  (Ip.Addr.to_bitstring target) hw
+        | _ -> ()
 
     (** Receive function, called to input an Ethernet frame into the TRX. *)
     let rx (st : State.t) bits =
@@ -1146,26 +1310,32 @@ struct
             Log.(log st.iface.widget.logger Warning s)
         | Ok (frame : Pdu.t) ->
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Got an eth frame of proto %s for %s" (Proto.to_string frame.proto) (Addr.to_string frame.dst)))) ;
-            if frame.proto = st.proto &&
-               (Addr.eq frame.dst st.mac || Addr.eq frame.dst Addr.broadcast) then (
+            if (frame.proto = Proto.ip4 || frame.proto = Proto.ip6) &&
+               State.accepts st frame.dst then (
                 Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...that's me!"))) ;
                 if Payload.bitlength frame.payload > 0 then (
-                    (* Take note of the MAC/IP pair of the sender (TODO: with a short timeout) : *)
-                    let learn src =
-                        (* A copy, not to keep the whole frame alive: *)
-                        BitHash.replace st.arp_cache (concat [ src ])
-                                        (Some frame.src) in
-                    let src () =
-                        Pdu.extract_src_proto frame.proto (frame.payload :> bitstring) in
-                    (match st.learn_neighbors_from_incoming with
-                    | Learn.Never -> ()
-                    | Learn.Subnet ->
-                        Result.iter (fun src ->
-                            if State.on_my_subnet st src then learn src) (src ())
-                    | Learn.Always ->
-                        Result.iter learn (src ())) ;
-                    Simulation.asap st.iface.widget.power
-                                    st.recv (frame.payload :> bitstring)
+                    let payload = (frame.payload :> bitstring) in
+                    (* Neighbor discovery is this adapter's business, not
+                     * that of the stack above: *)
+                    match if frame.proto = Proto.ip6 then Ndp.message payload
+                          else None with
+                    | Some (ip, m) ->
+                        if ip.ttl = 255 then ndp_rx st frame.src ip m
+                    | None ->
+                        (* Take note of the MAC/IP pair of the sender (TODO: with a short timeout) : *)
+                        let learn src =
+                            (* A copy, not to keep the whole frame alive: *)
+                            BitHash.replace st.arp_cache (concat [ src ])
+                                            (Some frame.src) in
+                        let src () = Pdu.extract_src_proto frame.proto payload in
+                        (match st.learn_neighbors_from_incoming with
+                        | Learn.Never -> ()
+                        | Learn.Subnet ->
+                            Result.iter (fun src ->
+                                if State.on_my_subnet st src then learn src) (src ())
+                        | Learn.Always ->
+                            Result.iter learn (src ())) ;
+                        Simulation.asap st.iface.widget.power st.recv payload
                 )
             ) else if frame.proto = Proto.arp then (
                 match Arp.Pdu.unpack (frame.payload :> bitstring) with
@@ -1173,60 +1343,32 @@ struct
                     Log.(log st.iface.widget.logger Warning s)
                 | Ok (arp : Arp.Pdu.t) ->
                     Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...an ARP of opcode %s" (Arp.Op.to_string arp.operation)))) ;
-                    if arp.hw_type = Arp.HwType.eth then (
-                        Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...regarding an ethernet device!"))) ;
-                        let sender_hw = Addr.o arp.sender_hw (* will raise if not of the advertised type *)
-                        and merge_flag = ref false in
-                        if arp.proto_type = st.proto then (
-                            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...transporting same proto than me!"))) ;
-                            if BitHash.mem st.arp_cache arp.sender_proto then (
-                                Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...updating entry %s->%s in ARP cache" (hexstring_of_bitstring arp.sender_proto) (Addr.to_string sender_hw)))) ;
-                                merge_flag := true ;
-                                BitHash.replace st.arp_cache arp.sender_proto (Some sender_hw)
-                            ) else if st.accept_gratuitous_arp &&
-                                      bits_equal arp.sender_proto
-                                                       arp.target_proto then (
-                                Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...learning %s->%s from a gratuitous ARP" (hexstring_of_bitstring arp.sender_proto) (Addr.to_string sender_hw)))) ;
-                                merge_flag := true ;
-                                BitHash.replace st.arp_cache arp.sender_proto (Some sender_hw)
-                            ) ;
-                            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf2 "...concerning '%s' (I'm %a)" (hexstring_of_bitstring arp.target_proto) (List.print (fun oc a -> String.print oc (hexstring_of_bitstring a.State.addr))) st.my_addresses))) ;
-                            let do_reply () =
-                                Arp.Pdu.make_reply arp.hw_type arp.proto_type
-                                    (st.mac :> bitstring) arp.target_proto
-                                    arp.sender_hw arp.sender_proto |>
-                                Arp.Pdu.pack |>
-                                send st Proto.arp sender_hw in
-                            if List.exists (fun my_addr -> bits_equal arp.target_proto my_addr.State.addr) st.my_addresses then (
-                                Log.(log st.iface.widget.logger Debug (lazy "...It's about me!!")) ;
-                                if not !merge_flag then (
-                                    BitHash.add st.arp_cache arp.sender_proto (Some sender_hw) ;
-                                    Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...adding %s->%s in ARP cache" (hexstring_of_bitstring arp.sender_proto) (Addr.to_string sender_hw)))) ;
-                                ) ;
-                                if arp.operation = Arp.Op.request && st.answer_arp then (
-                                    Log.(log st.iface.widget.logger Debug (lazy "...It's a request, let's reply!")) ;
-                                    do_reply ()
-                                )
-                            ) else if arp.operation = Arp.Op.request &&
-                                      st.do_proxy_arp arp then (
-                                (* Pretend that's me! *)
-                                Log.(log st.iface.widget.logger Debug (lazy "...Let's impersonate the requested IP")) ;
+                    if arp.hw_type = Arp.HwType.eth &&
+                       arp.proto_type = Proto.ip4 then (
+                        let sender_hw = Addr.o arp.sender_hw (* will raise if not of the advertised type *) in
+                        let about_me = is_mine st arp.target_proto in
+                        Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf2 "...concerning '%s' (I'm %a)" (hexstring_of_bitstring arp.target_proto) (List.print (fun oc a -> String.print oc (hexstring_of_bitstring a.State.addr))) st.my_addresses))) ;
+                        let announcement =
+                            bits_equal arp.sender_proto arp.target_proto in
+                        learn st ~add:(about_me ||
+                                       (st.accept_gratuitous_arp && announcement))
+                              arp.sender_proto sender_hw ;
+                        let do_reply () =
+                            Arp.Pdu.make_reply arp.hw_type arp.proto_type
+                                (st.mac :> bitstring) arp.target_proto
+                                arp.sender_hw arp.sender_proto |>
+                            Arp.Pdu.pack |>
+                            send ~control:true st Proto.arp sender_hw in
+                        if about_me then (
+                            if arp.operation = Arp.Op.request && st.answer_arp then (
+                                Log.(log st.iface.widget.logger Debug (lazy "...It's a request, let's reply!")) ;
                                 do_reply ()
-                            ) ;
-                            (* Now that we may have gained knowledge, try to send the msg in waiting queue *)
-                            (* TODO: timeout some? *)
-                            Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...Do I have a msg waiting for '%s'?" (hexstring_of_bitstring arp.sender_proto)))) ;
-                            (* In the order they were postponed, which
-                             * [find_all] gives the reverse of. *)
-                            let waiting =
-                                List.rev
-                                    (BitHash.find_all st.postponed
-                                                      arp.sender_proto) in
-                            BitHash.remove_all st.postponed arp.sender_proto ;
-                            List.iter (fun msg ->
-                                Log.(log st.iface.widget.logger Debug (lazy "...Yes!! Let's send it!")) ;
-                                send st st.proto sender_hw msg
-                            ) waiting
+                            )
+                        ) else if arp.operation = Arp.Op.request &&
+                                  st.do_proxy_arp arp then (
+                            (* Pretend that's me! *)
+                            Log.(log st.iface.widget.logger Debug (lazy "...Let's impersonate the requested IP")) ;
+                            do_reply ()
                         )
                     )
             ) else ( (* not for me, send to promisc function *)
@@ -1282,6 +1424,86 @@ struct
       Simulation.run sim false ;
       assert_bool "and can be reached without asking"
           (BitHash.find b.State.arp_cache (Ip.Addr.to_bitstring (ip 1)) <> None)
+    *)
+    (* [dual ()] wires two adapters, 1 and 2, with an IPv4 and an IPv6
+     * address each, over a full-duplex link as a switch port would give
+     * them (both talk at once), and returns them with what each received,
+     * as "4:" or "6:" and the payload; [send6 st src dst s] emits an IPv6
+     * packet. *)
+    (*$inject
+      let ip6 n = Ip.Addr.of_string ("2001:db8::"^ string_of_int n)
+      let dual () =
+          let sim = Simulation.make ~realtime:false "eth-dual-stack" in
+          let adapter n =
+              State.make ~parent:sim.root ~name:(string_of_int n)
+                         ~mac:(Addr.of_string (Printf.sprintf "02:00:00:00:00:%02x" n))
+                         ~my_addresses:[ State.make_my_ip_address ~prefix_len:24 (ip n) ;
+                                         State.make_my_ip_address ~prefix_len:64 (ip6 n) ]
+                         () in
+          let a = adapter 1 and b = adapter 2 in
+          List.iter (fun st ->
+              st.State.iface.Iface.negotiated <- Some (EthSpeed.Eth100Mbps, true)
+          ) [ a ; b ] ;
+          let received got bits =
+              let s =
+                  match Ip6.Pdu.unpack bits with
+                  | Ok p -> "6:"^ Bitstring.string_of_bitstring (p.payload :> Bitstring.bitstring)
+                  | Error _ ->
+                      let p = Result.get_ok (Ip.Pdu.unpack bits) in
+                      "4:"^ Bitstring.string_of_bitstring (p.payload :> Bitstring.bitstring) in
+              got := s :: !got in
+          let got_a = ref [] and got_b = ref [] in
+          let trx_a = make a and trx_b = make b in
+          ignore Tools.(sink (received got_a) <-= trx_a) ;
+          ignore Tools.(sink (received got_b) <-= trx_b) ;
+          Tools.(trx_a <==> trx_b) ;
+          sim, a, b, got_a, got_b
+      let send6 st src dst s =
+          Ip6.Pdu.make Ip.Proto.udp src dst (Bitstring.bitstring_of_string s) |>
+          Ip6.Pdu.pack |> tx st
+      let knows st addr =
+          match BitHash.find_option st.State.arp_cache (Ip.Addr.to_bitstring addr) with
+          | Some (Some _) -> true
+          | _ -> false
+    *)
+    (*$R
+      let sim, a, b, got_a, got_b = dual () in
+      send a (ip 2) ; send6 a (ip6 1) (ip6 2) "one" ; send6 a (ip6 1) (ip6 2) "two" ;
+      send b (ip 1) ; send6 b (ip6 2) (ip6 1) "back" ;
+      Simulation.run sim false ;
+      let printer = String.concat ", " in
+      assert_equal ~printer ~msg:"both families, in order"
+          [ "4:hello" ; "6:one" ; "6:two" ]
+          (List.rev !got_b |> List.stable_sort (fun x y -> Char.compare x.[0] y.[0])) ;
+      assert_equal ~printer [ "4:hello" ; "6:back" ] (List.sort String.compare !got_a) ;
+      assert_bool "nothing left postponed"
+          (BitHash.length a.postponed = 0 && BitHash.length b.postponed = 0)
+    *)
+    (*$R
+      let sim, a, _b, _, _ = dual () in
+      send6 a (ip6 1) (ip6 99) "lost" ;
+      send6 a (ip6 1) (ip6 99) "lost too" ;
+      Simulation.run sim false ;
+      assert_bool "gives up on an address nobody answers for"
+          (not (BitHash.mem a.arp_cache (Ip.Addr.to_bitstring (ip6 99))) &&
+           BitHash.length a.postponed = 0)
+    *)
+    (*$R
+      let sim, a, b, _, got_b = dual () in
+      b.answer_arp <- false ;
+      send6 a (ip6 1) (ip6 2) "unanswered" ;
+      Simulation.run sim false ;
+      assert_equal ~printer:(String.concat ", ") ~msg:"not answering" [] !got_b ;
+      assert_bool "the solicitor is learnt all the same" (knows b (ip6 1)) ;
+      let sim, a, b, _, _ = dual () in
+      State.emit_gratuitous_arp a ;
+      Simulation.run sim false ;
+      assert_bool "announcements are not learnt unless accepted"
+          (not (knows b (ip6 1)) && not (knows b (ip 1))) ;
+      b.accept_gratuitous_arp <- true ;
+      State.emit_gratuitous_arp a ;
+      Simulation.run sim false ;
+      assert_bool "and are when they are" (knows b (ip6 1) && knows b (ip 1))
     *)
     (*$>*)
 

@@ -478,8 +478,7 @@ let buffer_alloc t n len =
  * if [ip] does not fit the MTU and cannot be fragmented. What is not an IPv4
  * packet is left whole for Eth to deal with. *)
 let maybe_fragment iface bits =
-    if bytelength bits <= iface.eth.mtu ||
-       iface.eth.proto <> Eth.Proto.ip4 then Ok [ bits ]
+    if bytelength bits <= iface.eth.mtu then Ok [ bits ]
     else match Ip.Pdu.unpack bits with
         | Error _ -> Ok [ bits ]
         | Ok ip ->
@@ -710,7 +709,7 @@ let set_proxy_arp t n v =
         else
             fun _ -> false
 
-let iface_make ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
+let iface_make ?speeds ?mtu ?delay ?loss ?inter_frame_gap
                ?can_forward_after ?mac ?my_addresses ?(link_fragmentation=true)
                ?(max_queue_delay=0.2)
                ?(notify_errs=notify_always ()) ~parent n =
@@ -718,7 +717,7 @@ let iface_make ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
     (* For our ifaces we force the GW on a packet by packet basis according
      * to the dynamic (and likely still unset) routing table. *)
     let eth =
-        Eth.State.make ?speeds ?proto ?mtu ?delay ?loss ?inter_frame_gap
+        Eth.State.make ?speeds ?mtu ?delay ?loss ?inter_frame_gap
                        ?can_forward_after ?mac ?my_addresses ~name
                        ~parent () in
     let trx = Eth.TRX.make eth in
@@ -1091,7 +1090,7 @@ let make_from_addrs
     reset_count () ;
     easy_send 0 "192.168.3.42" ;
     Simulation.run sim false ;
-    let n = Eth.TRX.arp_max_requests in
+    let n = Eth.TRX.max_solicits in
     "route from 0 to 2" @? (counts = [| 0;0;n |]) ;
 
     reset_count () ;
