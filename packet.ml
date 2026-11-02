@@ -156,7 +156,8 @@ module Pdu = struct
                | Ip   of Ip.Pdu.t   | Ip6  of Ip6.Pdu.t
                | Udp  of Udp.Pdu.t  | Tcp  of Tcp.Pdu.t
                | Dns  of Dns.Pdu.t  | Sll  of Sll.Pdu.t | Vlan of Vlan.Pdu.t
-               | Icmp of Icmp.Pdu.t | Pcap of Pcap.Pdu.t
+               | Icmp of Icmp.Pdu.t | Icmp6 of Icmp6.Pdu.t
+               | Pcap of Pcap.Pdu.t
 
     (** Name of the protocol for that layer: *)
     let name_of_layer = function
@@ -172,6 +173,7 @@ module Pdu = struct
         | Sll _ -> "Sll"
         | Vlan _ -> "Vlan"
         | Icmp _ -> "Icmp"
+        | Icmp6 _ -> "Icmp6"
         | Pcap _ -> "Pcap"
 
     let payload = function
@@ -226,7 +228,8 @@ module Pdu = struct
             | Udp t  -> Udp.Pdu.pack t  | Tcp t  -> Tcp.Pdu.pack t
             | Dns t  -> Dns.Pdu.pack t  | Sll t  -> Sll.Pdu.pack t
             | Vlan t -> Vlan.Pdu.pack t | Pcap t -> Pcap.Pdu.pack t
-            | Icmp t -> Icmp.Pdu.pack t | Raw t  -> t in
+            | Icmp t -> Icmp.Pdu.pack t | Icmp6 t -> Icmp6.Pdu.pack t
+            | Raw t  -> t in
         let rec aux bits = function
             | [] -> Option.get bits
             | p :: ps ->
@@ -256,6 +259,7 @@ module Pdu = struct
         let unpack_dhcp = try_unpack Dhcp.Pdu.unpack (fun x -> [ Dhcp x]) in
         let unpack_dns  = try_unpack Dns.Pdu.unpack  (fun x -> [ Dns x]) in
         let unpack_icmp = try_unpack Icmp.Pdu.unpack (fun x -> [ Icmp x]) in
+        let unpack_icmp6 = try_unpack Icmp6.Pdu.unpack (fun x -> [ Icmp6 x]) in
         let unpack_arp  = try_unpack Arp.Pdu.unpack  (fun x -> [ Arp x]) in
         let unpack_ports src dst = (match src, dst with
                 | 53, _ | _, 53 -> unpack_dns
@@ -274,6 +278,7 @@ module Pdu = struct
                       else if ip.Ip6.Pdu.proto = Ip.Proto.tcp then unpack_tcp
                       else if ip.Ip6.Pdu.proto = Ip.Proto.udp then unpack_udp
                       else if ip.Ip6.Pdu.proto = Ip.Proto.icmp then unpack_icmp
+                      else if ip.Ip6.Pdu.proto = Ip.Proto.icmpv6 then unpack_icmp6
                       else unpack_raw) (ip.Ip6.Pdu.payload :> bitstring))) in
         let unpack_ip = try_unpack Ip.Pdu.unpack (fun ip -> Ip ip ::
                     ((if ip.Ip.Pdu.proto = Ip.Proto.tcp then unpack_tcp
@@ -283,6 +288,7 @@ module Pdu = struct
                       else unpack_raw) (ip.Ip.Pdu.payload :> bitstring))) in
         let unpack_vlan = try_unpack Vlan.Pdu.unpack (fun vlan -> Vlan vlan ::
                     ((if vlan.Vlan.Pdu.proto = Arp.HwProto.ip4 then unpack_ip
+                      else if vlan.Vlan.Pdu.proto = Arp.HwProto.ip6 then unpack_ip6
                       else if vlan.Vlan.Pdu.proto = Arp.HwProto.arp then unpack_arp
                       else unpack_raw) (vlan.Vlan.Pdu.payload :> bitstring))) in
         let unpack_eth = try_unpack Eth.Pdu.unpack (fun eth -> Eth eth ::
@@ -362,6 +368,19 @@ module Pdu = struct
                             u))
                 | _ ->
                     u)
+            | Icmp6 (pdu : Icmp6.Pdu.t) ->
+                (match pdu.payload with
+                | Err { pld ; _ } ->
+                    (match Ip6.Pdu.unpack (pld :> bitstring) with
+                    | Ok (ip : Ip6.Pdu.t) -> f ip.src u |> f ip.dst
+                    | Error _ -> u)
+                | Neighbor_solicit { target ; _ }
+                | Neighbor_advert { target ; _ } ->
+                    f target u
+                | Redirect { target ; dst ; _ } ->
+                    f target u |> f dst
+                | _ ->
+                    u)
         ) u t
 
     (** {2 A packet, in the kind language}
@@ -395,6 +414,7 @@ module Pdu = struct
           "Sll", Sll.Pdu.kind ;
           "Vlan", Vlan.Pdu.kind ;
           "Icmp", Icmp.Pdu.kind ;
+          "Icmp6", Icmp6.Pdu.kind ;
           "Pcap", Pcap.Pdu.kind ]
 
     let kind_of_protocol name = List.assoc_opt name kinds_of_protocols
@@ -412,6 +432,7 @@ module Pdu = struct
         | Sll  _ -> Sll.Pdu.kind
         | Vlan _ -> Vlan.Pdu.kind
         | Icmp _ -> Icmp.Pdu.kind
+        | Icmp6 _ -> Icmp6.Pdu.kind
         | Pcap _ -> Pcap.Pdu.kind
 
     (* Every layer a packet can be made of is a protocol that can be named, and
@@ -436,6 +457,7 @@ module Pdu = struct
         | Sll  p -> Sll.Pdu.to_json p
         | Vlan p -> Vlan.Pdu.to_json p
         | Icmp p -> Icmp.Pdu.to_json p
+        | Icmp6 p -> Icmp6.Pdu.to_json p
         | Pcap p -> Pcap.Pdu.to_json p
 
     (* What each layer is called, which is a field name and so must be its own:
@@ -576,6 +598,8 @@ module Pdu = struct
                     | Icmp.Pdu.Ids (id, seq, p) ->
                         add " id %d seq %d len %d" id seq (Payload.length p)
                     | _ -> ())
+                | Icmp6 i :: _ ->
+                    add "%s > %s ICMP6 %s" src dst (Icmp6.Pdu.to_string i)
                 | _ ->
                     add "%s > %s IP proto %d len %d" src dst (proto :> int)
                         (Payload.length payload)) ;
@@ -628,6 +652,14 @@ module Pdu = struct
                     (Ip.Addr.of_string "2001:db8::1") (Ip.Addr.of_string "2001:db8::2") \
                     (Udp.Pdu.(pack (make ~src_port:(Udp.Port.o 1000) \
                         (Bitstring.bitstring_of_string "x"))))))))))))
+          "fe80::1 > ff02::1:ff00:2 ICMP6 Neighbor Solicitation who has fe80::2" \
+            (oneline (of_frame (Eth.Pdu.(pack (make Eth.Proto.ip6 \
+                (Eth.Addr.of_string "02:00:00:00:00:01") \
+                (Eth.Addr.of_string "33:33:ff:00:00:02") \
+                (Ip6.Pdu.(pack (make Ip.Proto.icmpv6 ~ttl:255 \
+                    (Ip.Addr.of_string "fe80::1") (Ip.Addr.of_string "ff02::1:ff00:2") \
+                    (Icmp6.Pdu.(pack (make_neighbor_solicit \
+                        (Ip.Addr.of_string "fe80::2"))))))))))))
           "2001:db8::1 > 2001:db8::2 IP proto 17 len 3 (frag id 7 off 8)" \
             (oneline (of_frame (Eth.Pdu.(pack (make Eth.Proto.ip6 \
                 (Eth.Addr.of_string "02:00:00:00:00:01") \

@@ -644,7 +644,7 @@ protocol number says what is above it, a length counts what is below, a TTL is
 64, an IP id is the previous packet's plus one, IP and TCP options and IPv6
 extensions are none. `Data` is the raw bottom layer and its whole `fields` is
 one value: from a generator, it is that many random bytes. Layer names are `Eth`, `Arp`, `Ip`, `Ip6`, `Udp`,
-`Tcp`, `Icmp`, `Dns`, `Dhcp`, `Vlan`, `Sll`, `Pcap`, `Data`; a field left out
+`Tcp`, `Icmp`, `Icmp6`, `Dns`, `Dhcp`, `Vlan`, `Sll`, `Pcap`, `Data`; a field left out
 of `fields` is refused, so write them all, `null` for the ones to leave alone.
 
 A synthesizer emits nothing until `emitting` is set. Set in a document, it

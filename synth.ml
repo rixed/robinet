@@ -194,6 +194,7 @@ struct
         | Pdu.Sll t -> Sll.Pdu.pack t
         | Pdu.Vlan t -> Vlan.Pdu.pack t
         | Pdu.Icmp t -> Icmp.Pdu.pack t
+        | Pdu.Icmp6 t -> Icmp6.Pdu.pack t
         | Pdu.Pcap t -> Pcap.Pdu.pack t
 
     (* The layer named [layer_name], synthesized from [js] -- or [fields], the
@@ -238,6 +239,9 @@ struct
         | "Icmp" ->
             Pdu.Icmp (Icmp.Pdu.of_synth js ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Icmp p) -> Some p | _ -> None))
+        | "Icmp6" ->
+            Pdu.Icmp6 (Icmp6.Pdu.of_synth js ?upper gen_values
+                ?prev:(match prev with Some (Pdu.Icmp6 p) -> Some p | _ -> None))
         | "Pcap" ->
             Pdu.Pcap (Pcap.Pdu.of_synth (Lazy.force fields) ?upper gen_values
                 ?prev:(match prev with Some (Pdu.Pcap p) -> Some p | _ -> None))
