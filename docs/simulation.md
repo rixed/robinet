@@ -295,8 +295,16 @@ outside, port 1 the network it serves.**
 | `public netmask` | optional string | `null` | Left out, everything outside is directly reachable — right for a gateway plugged into a LAN of real machines, wrong for one hanging off a router. |
 | `public gateway` | optional string | `null` | Where to send what that netmask does not cover, as an IP or a MAC. |
 | `LAN` | string | `"192.168.0.0/24"` | The network behind it. Its **first** address is the gateway, and the pool it hands out starts at the second. |
+| `LAN IPv6` | optional string | `null` | An IPv6 prefix for the network behind it, such as `"2001:db8:1::/64"`, routed without translation. Its first address, `::1`, is the gateway's. |
+| `public IPv6` | optional string | `null` | Its IPv6 address outside, with its prefix length. |
+| `public IPv6 gateway` | optional string | `null` | Where to send the IPv6 that prefix does not cover, as an IP or a MAC. |
 | `max connections` | 1…1000000 | `500` | Translations its NAT holds at once. |
 | `MAC` | optional string | `null` | Its address on the LAN side, which is the one the machines behind it send to. |
+
+IPv6 is neither translated nor served: without `LAN IPv6` the gateway forwards
+none, and with it the machines behind it are configured statically (no DHCPv6,
+no router advertisements), and its own IPv6 addresses answer only neighbor
+discovery. The outside must route that prefix to `public IPv6`.
 
 On the LAN a gateway is **one machine at one address**: `.1` is where its
 clients send what is to be forwarded, and also the DHCP server that leased them

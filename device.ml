@@ -101,6 +101,9 @@ type model =
                     public_netmask : Ip.Addr.t option ;
                     public_gw : Eth.Gateway.t option ;
                     lan : Ip.Cidr.t ;
+                    lan6 : Ip.Cidr.t option ;
+                    public6 : Ip.Cidr.t option ;
+                    public_gw6 : Eth.Gateway.t option ;
                     max_cnxs : int ; mac : Eth.Addr.t option }
     | TPortal of { promisc : bool ; filter : string ; caplen : int option }
     | TRecorder of { fname : string option ; flush : bool ;
@@ -204,13 +207,16 @@ let mac name v =
 
 (* [Ip.Cidr.of_string] resolves the address half, and resolving a name would
  * hold the simulation's lock across a DNS lookup. *)
-let cidr name v =
+let cidr ?(v6=false) name v =
     let s = Widget.to_string v in
     match String.split_on_char '/' s with
     | [ addr ; width ] ->
         (match Ip.Addr.of_dotted_string_opt addr, int_of_string_opt width with
-        | Some a, Some w when w >= 0 && w <= 32 -> Ip.Cidr.o (a, w)
-        | _ -> Widget.bad_value "%s: %S is not a CIDR" name s)
+        | Some a, Some w when Ip.Addr.is_v6 a = v6 &&
+                              w >= 0 && w <= Ip.Addr.length a ->
+            Ip.Cidr.o (a, w)
+        | _ -> Widget.bad_value "%s: %S is not an IPv%d CIDR" name s
+                                (if v6 then 6 else 4))
     | _ -> Widget.bad_value "%s: %S is not a CIDR" name s
 
 (* A gateway is named by a MAC address when it reads as one and by an IP
@@ -546,6 +552,19 @@ let gateway =
               ~descr:"The network behind it, in CIDR notation. Its first \
                       address is the gateway itself, the second the server that \
                       hands out the rest." ;
+          param "LAN IPv6" ~kind:(Widget.optional String)
+              ~placeholder:"2001:db8:1::/64"
+              ~descr:"An IPv6 prefix for the network behind it, which it \
+                      routes without translating. Its first address is the \
+                      gateway's own." ;
+          param "public IPv6" ~kind:(Widget.optional String)
+              ~placeholder:"2001:db8::2/64"
+              ~descr:"Its IPv6 address on the outside, with its prefix \
+                      length." ;
+          param "public IPv6 gateway" ~kind:(Widget.optional String)
+              ~placeholder:"2001:db8::1"
+              ~descr:"Where to send the IPv6 traffic its public prefix does \
+                      not cover, as an IP or a MAC address." ;
           param "max connections" ~kind:(IRange (1, 1_000_000))
               ~default:(`Int 500)
               ~descr:"How many translations its NAT holds at once." ;
@@ -563,6 +582,11 @@ let gateway =
               public_gw =
                   opt args "public gateway" (gateway_addr "public gateway") ;
               lan = cidr "LAN" (arg args "LAN") ;
+              lan6 = opt args "LAN IPv6" (cidr ~v6:true "LAN IPv6") ;
+              public6 = opt args "public IPv6" (cidr ~v6:true "public IPv6") ;
+              public_gw6 =
+                  opt args "public IPv6 gateway"
+                      (gateway_addr "public IPv6 gateway") ;
               max_cnxs = int args "max connections" ;
               mac = opt args "MAC" (mac "MAC") } }
 
@@ -757,16 +781,23 @@ let to_params =
                                     speeds) ;
           "MAC range", `String mac_range ;
           "MACs", `String (string_of_macs macs) ]
-    | TGateway { public ; public_netmask ; public_gw ; lan ; max_cnxs ; mac } ->
+    | TGateway { public ; public_netmask ; public_gw ; lan ; lan6 ; public6 ;
+                 public_gw6 ; max_cnxs ; mac } ->
+        let gw_opt = function
+            | None -> `Null
+            | Some (Eth.Gateway.Mac m) -> `String (Eth.Addr.to_hexstring m)
+            | Some (Eth.Gateway.Ip ip) ->
+                `String (Ip.Addr.to_dotted_string ip)
+        and cidr_opt = function
+            | None -> `Null
+            | Some c -> `String (Ip.Cidr.to_string c) in
         [ "public address", `String (Ip.Addr.to_dotted_string public) ;
           "public netmask", ip_opt public_netmask ;
-          "public gateway",
-              (match public_gw with
-              | None -> `Null
-              | Some (Eth.Gateway.Mac m) -> `String (Eth.Addr.to_hexstring m)
-              | Some (Eth.Gateway.Ip ip) ->
-                  `String (Ip.Addr.to_dotted_string ip)) ;
+          "public gateway", gw_opt public_gw ;
           "LAN", `String (Ip.Cidr.to_string lan) ;
+          "LAN IPv6", cidr_opt lan6 ;
+          "public IPv6", cidr_opt public6 ;
+          "public IPv6 gateway", gw_opt public_gw6 ;
           "max connections", `Int max_cnxs ;
           "MAC", mac_opt mac ]
     | TPortal { promisc ; filter ; caplen } ->
@@ -887,15 +918,16 @@ let build ~parent name = function
            addresses are written down it has nothing left to say. *)
         r.Router.widget,
         TRouter { ports ; speeds ; mac_range = "" ; macs }
-    | TGateway ({ public ; public_netmask ; public_gw ; lan ; max_cnxs ;
-                  mac } as g) ->
+    | TGateway ({ public ; public_netmask ; public_gw ; lan ; lan6 ; public6 ;
+                  public_gw6 ; max_cnxs ; mac } as g) ->
         (* Drawn here rather than left to the gateway to draw, so that what it
            ends up with can be written down: it keeps no property of its
            address, and a network whose machines come back sending to somewhere
            else is not the one that was saved. *)
         let mac = Option.default_delayed Eth.Addr.random mac in
         let gw = Gateway.make ~parent ~name ~mac ~num_max_cnxs:max_cnxs
-                              ?public_netmask ?public_gw public lan in
+                              ?public_netmask ?public_gw ?lan6
+                              ?public_ip6:public6 ?public_gw6 public lan in
         gw.widget, TGateway { g with mac = Some mac }
     | TPortal { promisc ; filter ; caplen } as m ->
         let portal = Pcap.portal ~parent ~promisc ~filter ?caplen name in

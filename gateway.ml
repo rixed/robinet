@@ -19,7 +19,8 @@
  *)
 (** A gateway is a device with 2 Eth interfaces, with a public IP address
  * and a private network address, performing routing between these two,
- * NAT, DHCP and relaying DNS for the LAN.
+ * NAT, DHCP and relaying DNS for the LAN. It may also have an IPv6 prefix
+ * for its LAN, which it routes without translating it.
  * The returned TRX is seen from the LAN (ie, tx for going out).
  * Internally, it's made of a 3 ifaces hub, with the dhcp/name server
  * attached to iface 1, the NATing router to iface 2, and the LAN to iface 0:
@@ -104,7 +105,7 @@ struct
             (* [eq] and not [=]: an address is a bitstring, and two of them
                with the same bytes at different offsets are not structurally
                equal. *)
-            if not (Eth.Addr.is_broadcast frame.dst ||
+            if not (Eth.Addr.is_group frame.dst ||
                     Eth.Addr.eq frame.dst t.mac) then
                 log t "Frame for someone else" "dropped"
             else
@@ -189,7 +190,8 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
          ?dhcp_range ?dhcp_mtu ?lease_time_sec ?mac
          ?(name="gw") ?notify_errs ?admin_reroute
          ~parent ?location ?(own_power=true)
-         ?public_netmask ?public_gw ?port_forwards public_ip local_cidr =
+         ?public_netmask ?public_gw ?port_forwards
+         ?lan6 ?public_ip6 ?public_gw6 public_ip local_cidr =
     (* We want all parts inherit this widget: *)
     let widget = Widget.make ~parent ?location ~own_power name in
     (* A whole machine, whatever it is made of inside. *)
@@ -201,18 +203,26 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     let router =
         Router.(make ~parent:widget ~own_power:false ?delay ?loss ?mtu ?notify_errs
                      ?admin_reroute ?macs:(Option.map (Array.make 1) mac) 2
-            [ (* route everything from anywhere to LAN if dest fits local_cidr *)
-              Route.forward ~dst_mask:local_cidr 0 ;
-              (* or zero IP address *)
-              Route.forward ~src_mask:(Ip.Cidr.single Ip.Addr.zero) 0 ;
-              (* route everything else toward the outside *)
-              Route.forward ?via:public_gw 1 ]
+            ([ (* route everything from anywhere to LAN if dest fits local_cidr *)
+               Route.forward ~dst_mask:local_cidr 0 ;
+               (* or zero IP address *)
+               Route.forward ~src_mask:(Ip.Cidr.single Ip.Addr.zero) 0 ;
+               (* route everything else toward the outside *)
+               Route.forward ~dst_mask:(Ip.Cidr.of_string "0.0.0.0/0")
+                             ?via:public_gw 1 ] @
+             (* and likewise for IPv6, but only with a prefix of its own: *)
+             match lan6 with
+             | None -> []
+             | Some lan6 ->
+                 [ Route.forward ~dst_mask:lan6 0 ;
+                   Route.forward ~dst_mask:(Ip.Cidr.of_string "::/0")
+                                 ?via:public_gw6 1 ])
             "router") in
     (* Configure those 2 ifaces: *)
     (* 1st iface is for the GW: *)
     let gw_mac = router.ifaces.(0).eth.mac in
     let gw_ip = Enum.get_exn local_ips in   (* first IP of the subnet is the GW *)
-    Eth.State.add_ip4 router.ifaces.(0).eth
+    Eth.State.add_ip router.ifaces.(0).eth
         ~prefix_len:(Ip.Cidr.width_of_netmask netmask) gw_ip ;
     (* FIXME: the server shares [gw_ip] with this adapter, which can then
      * reach it only by learning its MAC from the frames it sends: an ARP for
@@ -220,8 +230,16 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
      * an address of its own, or be delivered to as the admin host is. *)
     router.ifaces.(0).eth.learn_neighbors_from_incoming <- Eth.Learn.Subnet ;
     (* The second iface of our router (facing internet) is the NAT *)
-    Eth.State.add_ip4 router.ifaces.(1).eth
+    Eth.State.add_ip router.ifaces.(1).eth
         ?prefix_len:(Option.map Ip.Cidr.width_of_netmask public_netmask) public_ip ;
+    (* The IPv6 addresses, the LAN one the first of its prefix: *)
+    let add_ip6 n cidr =
+        let ip, prefix_len = (cidr : Ip.Cidr.t :> Ip.Addr.t * int) in
+        Eth.State.add_ip router.ifaces.(n).eth ~prefix_len ip in
+    Option.may (fun lan6 ->
+        add_ip6 0 (Ip.Cidr.o (Enum.get_exn (Ip.Cidr.local_addrs lan6),
+                              Ip.Cidr.width lan6))) lan6 ;
+    Option.may (add_ip6 1) public_ip6 ;
     let nat_state =
         Nat.State.make ~num_max_cnxs ~parent:widget ?port_forwards public_ip in
     let nat_trx = Nat.TRX.make nat_state in
@@ -422,6 +440,61 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
     assert_equal ~printer:string_of_int
         ~msg:"and still routes what is only passing through" 1
         (ping 2 "80.82.17.1")
+ *)
+
+(* With an IPv6 prefix, a dual-stack LAN reaches the outside with its IPv4
+   translated and its IPv6 as it is, both ways. *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "gw-ipv6" in
+    let a = Ip.Addr.of_string and c = Ip.Cidr.of_string in
+    let gw =
+        make ~parent:sim.root ~lan6:(c "2001:db8:1::/64")
+             ~public_ip6:(c "2001:db8::2/64")
+             (a "80.82.17.127") (c "192.168.0.0/24") in
+    let far : Host.t =
+        Host.make ~parent:sim.root ~netmask:Ip.Addr.zero
+                  ~static_ip:(a "80.82.17.1")
+                  ~addresses:[ c "2001:db8::1/64" ]
+                  ~gateways:[ c "2001:db8:1::/64",
+                              Some (Eth.Gateway.Ip (a "2001:db8::2")) ]
+                  "far" in
+    far.Host.trx.Host.dev --> gw.trx.out ;
+    gw.trx.out --> far.Host.trx.Host.dev ;
+    let client : Host.t =
+        Host.make ~parent:sim.root ~static_ip:(a "192.168.0.10")
+                  ~netmask:(a "255.255.255.0")
+                  ~addresses:[ c "2001:db8:1::10/64" ]
+                  ~gateways:[ Eth.State.gw_selector (),
+                              Some (Eth.Gateway.Ip (a "192.168.0.1")) ;
+                              Eth.State.gw_selector ~v6:true (),
+                              Some (Eth.Gateway.Ip (a "2001:db8:1::1")) ]
+                  "client" in
+    client.Host.trx.Host.dev --> gw.trx.ins ;
+    ignore (client.Host.trx.Host.dev <-= gw.trx) ;
+    Simulation.run_startup sim ;
+    (* Who the far host sees, by the family it is reached at: *)
+    let peers = ref [] in
+    far.trx.udp_server_start (Udp.Port.o 9) (fun udp ->
+        udp.trx.ins --> sink (fun _ -> ())) ;
+    let send dst =
+        client.trx.udp_send (Host.Ip (a dst)) (Udp.Port.o 9)
+                            (Bitstring.zeroes_bitstring 64) ;
+        Simulation.run sim false in
+    send "2001:db8::1" ;
+    send "80.82.17.1" ;
+    Hashtbl.iter (fun (k : Host.sock_key) _ ->
+        peers := Ip.Addr.to_string k.remote :: !peers) far.sockets ;
+    assert_equal ~printer:(String.concat ",")
+        [ "2001:db8:1::10" ; "80.82.17.127" ] (List.sort String.compare !peers) ;
+    let replies = ref 0 in
+    Hashtbl.replace client.Host.echo_waiters 1 (fun _ -> incr replies) ;
+    (* One at a time, as the bare links between the hosts and the gateway
+       are half duplex: *)
+    client.trx.ping ~id:1 ~seq:1 (Host.Ip (a "2001:db8::1")) ;
+    Simulation.run sim false ;
+    client.trx.ping ~id:1 ~seq:2 (Host.Ip (a "80.82.17.1")) ;
+    Simulation.run sim false ;
+    assert_equal ~printer:string_of_int ~msg:"replies come back" 2 !replies
  *)
 
 (* And the two halves are not sealed off from each other: a name the server

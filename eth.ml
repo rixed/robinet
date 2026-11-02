@@ -174,6 +174,17 @@ module Addr = struct
 
     let is_broadcast = eq broadcast
 
+    (* Broadcast and multicast addresses have the group bit: *)
+    let is_group (t : t) =
+        match%bitstring (t :> bitstring) with
+        | {| _ : 7 ; group : 1 ; _ |} -> group
+        | {| _ |} -> false
+    (*$T is_group
+      is_group broadcast
+      is_group (of_string "33:33:00:00:00:01")
+      not (is_group (of_string "02:00:00:00:00:01"))
+     *)
+
     (** Returns a random Ethernet address.
      * i_g:
      * « The I/G address bit is used to identify the destination MAC address as
@@ -875,8 +886,8 @@ struct
             else None
         ) t.my_addresses
 
-    (* Add this IPv4 in the list of my addresses: *)
-    let add_ip4 t ?prefix_len ip =
+    (* Add this address in the list of my addresses: *)
+    let add_ip t ?prefix_len ip =
         t.my_addresses <- make_my_ip_address ?prefix_len ip :: t.my_addresses
 
     let on_subnet my_addr addr =

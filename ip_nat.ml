@@ -604,8 +604,14 @@ v}
                        rest : -1 : bitstring |} in
                 recv_with_err_ip_pld err_ip_pld err_ip cnx))
 
-    (** bits are flowing from LAN to outside world *)
+    let is_ip6 bits =
+        match%bitstring bits with
+        | {| 6 : 4 ; _ |} -> true
+        | {| _ |} -> false
+
+    (** bits are flowing from LAN to outside world. IPv6 is not translated. *)
     let tx (st : State.t) bits =
+        if is_ip6 bits then st.emit bits else
         match Ip.Pdu.unpack bits with
         | Ok (ip : Ip.Pdu.t) ->
             if Ip.Addr.is_natable ip.src then (
@@ -649,6 +655,7 @@ v}
 
     let rx (st : State.t) bits =
         Log.(log st.widget.logger Debug (lazy (Printf.sprintf "Received %d bytes" (bytelength bits)))) ;
+        if is_ip6 bits then st.recv bits else
         match Ip.Pdu.unpack bits with
         | Ok (ip : Ip.Pdu.t) ->
             if ip.dst = st.addr then (
