@@ -242,26 +242,27 @@ it (`max-packets`, `max-volume`, `expired`, `max-packet-rate`,
 
 ### firewall
 
-Passes the IPv4 packets between its inside, port 0, and its outside, port 1,
-whose addresses its rules accept. Like a tap, it is transparent to negotiation.
+Passes the IP packets, IPv4 or IPv6, between its inside, port 0, and its
+outside, port 1, whose addresses its rules accept. Like a tap, it is transparent to negotiation.
 It has a power switch, and passes nothing while off.
 
 | param | kind | default | |
 | --- | --- | --- | --- |
-| `inside rules` | list of rules | `[{"verdict": 0, "CIDR": "0.0.0.0/0"}]` | For the addresses on the inside. |
-| `outside rules` | list of rules | `[{"verdict": 0, "CIDR": "0.0.0.0/0"}]` | For the addresses on the outside. |
-| `uninspectable` | `0` (accept) or `1` (deny) | `1` | For what is neither IPv4 nor ARP, or carries IP in IP (IPv4 protocols 4, 41 and 47). |
+| `inside rules` | list of rules | `[{"verdict": 0, "CIDR": "0.0.0.0/0"}, {"verdict": 0, "CIDR": "::/0"}]` | For the addresses on the inside. |
+| `outside rules` | list of rules | `[{"verdict": 0, "CIDR": "0.0.0.0/0"}, {"verdict": 0, "CIDR": "::/0"}]` | For the addresses on the outside. |
+| `uninspectable` | `0` (accept) or `1` (deny) | `1` | For what is neither IP nor ARP, or carries IP in IP (protocols 4, 41 and 47, past IPv6 extension headers). |
 | `MAC` | optional string | `null` | The Ethernet source that what goes out must have. |
 
 A rule is `{"verdict": 0, "CIDR": "10.0.0.0/8"}`, `0` accepting and `1`
-denying; an address stands for its /32. The rules are tried in order, the first
+denying, IPv4 or IPv6; an address stands for itself alone (/32 or /128). The rules are tried in order, the first
 that matches an address decides, and an address none matches is denied.
 
 The inside rules judge the source of what goes out and the destination of what
 comes in; the outside rules the other address. A quoted IP header, in an ICMP
 error, is judged the other way round, as it travelled the other way; and an
 ICMP error that comes in is judged by its quoted header only, so that the
-routers that send them need not be accepted. ARP passes.
+routers that send them need not be accepted; so is an ICMPv6 error. ARP
+passes, and so does neighbor discovery (ICMPv6 with a hop limit of 255).
 
 The `passed` and `dropped` metrics count packets by `direction` (`out` from
 port 0, `in` from port 1), and dropped ones by `cause` too (`inside`,

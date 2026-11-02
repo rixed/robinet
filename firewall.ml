@@ -18,7 +18,8 @@
  * along with RobiNet.  If not, see <http://www.gnu.org/licenses/>.
  *)
 (** A box between an inside, its port 0, and an outside, its port 1, that
-   passes the IPv4 packets whose addresses its rules accept.
+   passes the IP packets, of either version, whose addresses its rules
+   accept.
 
    The inside rules judge the addresses on the inside: the source of what
    goes out, the destination of what comes in; the outside rules those on
@@ -30,9 +31,9 @@
    in is judged by its quoted header only, so that the routers that send
    them need not be accepted.
 
-   ARP passes. What cannot be inspected (neither IPv4 nor ARP, IPv4 carrying
-   IP, an ICMP error quoting no IPv4 header) takes the verdict
-   [uninspectable]. What goes out may also be required to have a given
+   ARP passes, and so does neighbor discovery. What cannot be inspected
+   (neither IP nor ARP, IP carrying IP, an ICMP error quoting no IP header)
+   takes the verdict [uninspectable]. What goes out may also be required to have a given
    Ethernet source. Switched off, it passes nothing. *)
 open Batteries
 open Bitstring
@@ -54,18 +55,21 @@ type rule = verdict * Ip.Cidr.t
 let string_of_rule (v, cidr) =
     string_of_verdict v ^" "^ Ip.Cidr.to_string cidr
 
-(** An IPv4 CIDR, with no bit set beyond its mask, or an address standing
- * for its /32: *)
+(** A CIDR, with no bit set beyond its mask, or an address standing for the
+ * network of that address alone: *)
 let cidr_of_string s =
     let s = String.trim s in
     let bad () = Widget.bad_value "not a CIDR: %S" s in
     let ip, width =
         match String.split s ~by:"/" with
-        | exception Not_found -> s, "32"
-        | ip, w -> ip, w in
-    match Ip.Addr.of_dotted_string ip, int_of_string_opt width with
+        | exception Not_found -> s, None
+        | ip, w -> ip, Some w in
+    match Ip.Addr.of_dotted_string ip with
     | exception _ -> bad ()
-    | ip, Some w when Ip.Addr.length ip = 32 && w >= 0 && w <= 32 ->
+    | ip ->
+    let len = Ip.Addr.length ip in
+    match Option.map_default int_of_string_opt (Some len) width with
+    | Some w when w >= 0 && w <= len ->
         if Ip.Addr.compare (Ip.Addr.higher_bits ip w) ip <> 0 then
             Widget.bad_value "%S has bits set beyond its mask" s ;
         Ip.Cidr.o (ip, w)
@@ -77,7 +81,10 @@ let cidr_of_string s =
   (try ignore (cidr_of_string "10.0.0") ; false with Widget.Bad_value _ -> true)
   (try ignore (cidr_of_string "10.0.0.0/33") ; false with Widget.Bad_value _ -> true)
   (try ignore (cidr_of_string "localhost") ; false with Widget.Bad_value _ -> true)
-  (try ignore (cidr_of_string "::1/128") ; false with Widget.Bad_value _ -> true)
+  Ip.Cidr.to_string (cidr_of_string "2001:db8::/32") = "2001:db8::/32"
+  Ip.Cidr.to_string (cidr_of_string "::1") = "::1/128"
+  (try ignore (cidr_of_string "::1/129") ; false with Widget.Bad_value _ -> true)
+  (try ignore (cidr_of_string "2001:db8::1/64") ; false with Widget.Bad_value _ -> true)
   (try ignore (cidr_of_string "10.0.0.1/8") ; false \
    with Widget.Bad_value m -> m = "\"10.0.0.1/8\" has bits set beyond its mask")
 *)
@@ -146,43 +153,89 @@ let verdict rules ip =
   Deny (verdict [] (Ip.Addr.of_string "10.0.0.1"))
 *)
 
-(* What is read of an IPv4 header, which may be truncated beyond its
- * addresses, as a quoted one may be: *)
+(* What is read of an IP header, of either version, which may be truncated
+ * beyond its addresses, as a quoted one may be. For IPv6, [proto] and
+ * [payload] are past the extension headers: *)
 type ip_header =
     { proto : int ; first_frag : bool ;
       src : Ip.Addr.t ; dst : Ip.Addr.t ;
+      ttl : int ;
       payload : bitstring }
+
+(* The upper-layer protocol of the IPv6 payload [bits] whose first header is
+ * [next], whether it is the first fragment, and that protocol's header: *)
+let rec past_extensions next first_frag bits =
+    let skip n = if bitstring_length bits >= n then dropbits n bits
+                 else empty_bitstring in
+    match next with
+    | 0 | 43 | 60 -> (* hop-by-hop, routing, destination options *)
+        (match%bitstring bits with
+        | {| next' : 8 ; len : 8 ; _ |} ->
+            past_extensions next' first_frag (skip ((len + 1) * 64))
+        | {| _ |} -> next, first_frag, empty_bitstring)
+    | 44 -> (* fragment *)
+        (match%bitstring bits with
+        | {| next' : 8 ; _ : 8 ; offset : 13 ; _ : 3 ; _ : 32 |} ->
+            past_extensions next' (first_frag && offset = 0) (skip 64)
+        | {| _ |} -> next, first_frag, empty_bitstring)
+    | 51 -> (* authentication *)
+        (match%bitstring bits with
+        | {| next' : 8 ; len : 8 ; _ |} ->
+            past_extensions next' first_frag (skip ((len + 2) * 32))
+        | {| _ |} -> next, first_frag, empty_bitstring)
+    | _ -> next, first_frag, bits
 
 let ip_header bits =
     match%bitstring bits with
     | {| 4 : 4 ; ihl : 4 ; _ : 8 ; _ : 16 ; _ : 16 ; _ : 3 ; frag_offset : 13 ;
-         _ : 8 ; proto : 8 ; _ : 16 ; src : 32 ; dst : 32 ;
+         ttl : 8 ; proto : 8 ; _ : 16 ; src : 32 ; dst : 32 ;
          rest : -1 : bitstring |} when ihl >= 5 ->
         let opts = (ihl - 5) * 32 in
-        Some { proto ; first_frag = frag_offset = 0 ;
+        Some { proto ; first_frag = frag_offset = 0 ; ttl ;
                src = Ip.Addr.o32 src ; dst = Ip.Addr.o32 dst ;
                payload =
                    if bitstring_length rest >= opts then dropbits opts rest
                    else empty_bitstring }
+    | {| 6 : 4 ; _ : 28 ; _ : 16 ; next : 8 ; ttl : 8 ;
+         src : 128 : bitstring ; dst : 128 : bitstring ;
+         rest : -1 : bitstring |} ->
+        let proto, first_frag, payload = past_extensions next true rest in
+        Some { proto ; first_frag ; ttl ;
+               src = Ip.Addr.of_bitstring src ; dst = Ip.Addr.of_bitstring dst ;
+               payload }
     | {| _ |} -> None
 
 (* Protocols that carry IP, whose inner addresses are not inspected:
  * IP in IP, IPv6 and GRE. *)
 let encapsulations = [ 4 ; 41 ; 47 ]
 
-(* The ICMP types that quote the datagram they are about: *)
+(* The ICMP and ICMPv6 types that quote the datagram they are about: *)
 let icmp_errors = [ 3 ; 4 ; 5 ; 11 ; 12 ]
+let icmp6_errors = [ 1 ; 2 ; 3 ; 4 ]
 
 (* The header quoted by [ip], if it is an ICMP error: *)
 let quote ip =
-    if ip.proto <> (Ip.Proto.icmp :> int) || not ip.first_frag then `None
+    let errors =
+        if ip.proto = (Ip.Proto.icmp :> int) && Ip.Addr.is_v4 ip.src then
+            icmp_errors
+        else if ip.proto = (Ip.Proto.icmpv6 :> int) && Ip.Addr.is_v6 ip.src then
+            icmp6_errors
+        else [] in
+    if errors = [] || not ip.first_frag then `None
     else match%bitstring ip.payload with
         | {| typ : 8 ; _ : 56 ; quoted : -1 : bitstring |}
-          when List.mem typ icmp_errors ->
+          when List.mem typ errors ->
             (match ip_header quoted with
             | Some q -> `Quote q
             | None -> `Unreadable)
         | {| _ |} -> `None
+
+(* Neighbor discovery (RFC 4861), which, as ARP, stays on its link: *)
+let is_ndp ip =
+    ip.proto = (Ip.Proto.icmpv6 :> int) && ip.ttl = 255 && ip.first_frag &&
+    match%bitstring ip.payload with
+    | {| typ : 8 ; _ |} -> typ >= 133 && typ <= 137
+    | {| _ |} -> false
 
 (* Why addresses [src] and [dst] are denied, if they are, [src_inside]
  * telling which side the source is on: *)
@@ -206,9 +259,11 @@ let inspect t dir bits =
             Some (Mac eth.src)
         | _ ->
             if eth.proto = Arp.HwProto.arp then None
-            else if eth.proto <> Arp.HwProto.ip4 then uninspectable ()
+            else if eth.proto <> Arp.HwProto.ip4 &&
+                    eth.proto <> Arp.HwProto.ip6 then uninspectable ()
             else match ip_header (eth.payload :> bitstring) with
             | None -> uninspectable ()
+            | Some ip when is_ndp ip -> None
             | Some ip when List.mem ip.proto encapsulations -> uninspectable ()
             | Some ip ->
                 let src_inside = dir = Out in
@@ -277,7 +332,8 @@ let mac_of_string s =
     with _ -> Widget.bad_value "not a MAC address: %S" s
 
 (** Accept everything: *)
-let accept_all = [ Accept, Ip.Cidr.of_string "0.0.0.0/0" ]
+let accept_all = [ Accept, Ip.Cidr.of_string "0.0.0.0/0" ;
+                   Accept, Ip.Cidr.of_string "::/0" ]
 
 let num_ports = 2
 
@@ -323,7 +379,7 @@ let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
             ~getter:(fun () -> rules_to_json t.outside)
             ~setter:(fun v -> t.outside <- rules_of_json v) ;
         property "uninspectable" ~kind:(one_of (choices verdict_names))
-            ~descr:"The verdict for what is neither IPv4 nor ARP, or carries \
+            ~descr:"The verdict for what is neither IP nor ARP, or carries \
                     IP in IP."
             ~getter:(fun () -> `Int (int_of_verdict t.uninspectable))
             ~setter:(fun v ->
@@ -346,8 +402,8 @@ let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
     t
 
 (* [through ?rules dir frame] is what the firewall makes of [frame] sent
- * [dir]: "passed", or the cause of its drop. Inside is 10.0.0.0/8, outside
- * is anything but 192.0.2.66. *)
+ * [dir]: "passed", or the cause of its drop. Inside is 10.0.0.0/8 and
+ * 2001:db8:1::/48, outside is anything but 192.0.2.66 and 2001:db8:66::1. *)
 (*$inject
   let addr = Ip.Addr.of_string
   let mine = Eth.Addr.of_string "02:00:00:00:00:01"
@@ -360,13 +416,28 @@ let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
   let error_about ~src ~dst quoted =
       packet ~proto:Ip.Proto.icmp src dst
           ~payload:Icmp.Pdu.(pack (make_ttl_expired_in_transit quoted))
+  let ip6 ?(proto=Ip.Proto.o 253) ?(ttl=64) ?extensions
+          ?(payload=Bitstring.empty_bitstring) src dst =
+      Ip6.Pdu.make ~ttl ?extensions proto (addr src) (addr dst) payload
+  let packet6 ?proto ?ttl ?extensions ?payload src dst =
+      frame ~proto:Arp.HwProto.ip6
+            (Ip6.Pdu.pack (ip6 ?proto ?ttl ?extensions ?payload src dst))
+  let error6_about ~src ~dst quoted =
+      packet6 ~proto:Ip.Proto.icmpv6 src dst
+          ~payload:Icmp6.Pdu.(pack (make_hop_limit_exceeded quoted))
+  let solicit ~ttl =
+      packet6 ~proto:Ip.Proto.icmpv6 ~ttl "fe80::1" "ff02::1:ff00:1"
+          ~payload:Icmp6.Pdu.(pack (make_neighbor_solicit (addr "2001:db8:1::1")))
   let through ?(mac=mine) dir bits =
       let sim = Simulation.make ~realtime:false "firewall" in
       let cause = ref "passed" in
       let t = make ~parent:sim.root ~mac
-                ~inside:[ Accept, cidr_of_string "10.0.0.0/8" ]
+                ~inside:[ Accept, cidr_of_string "10.0.0.0/8" ;
+                          Accept, cidr_of_string "2001:db8:1::/48" ]
                 ~outside:[ Deny, cidr_of_string "192.0.2.66" ;
-                           Accept, cidr_of_string "0.0.0.0/0" ]
+                           Accept, cidr_of_string "0.0.0.0/0" ;
+                           Deny, cidr_of_string "2001:db8:66::1" ;
+                           Accept, cidr_of_string "::/0" ]
                 ~on_drop:(fun _ c _ -> cause := string_of_cause c) "fw" in
       Simulation.power_up t.widget.power ;
       (t.widget.ports.dev (if dir = Out then 0 else 1)).write bits ;
@@ -396,6 +467,31 @@ let make ~parent ?location ?(inside=accept_all) ?(outside=accept_all)
   "passed" (through Out (frame ~proto:Arp.HwProto.arp (Bitstring.create_bitstring 224)))
   "uninspectable" \
     (through Out (frame ~proto:Arp.HwProto.ip6 (Bitstring.create_bitstring 320)))
+  "passed" (through Out (packet6 "2001:db8:1::1" "2001:db8:2::1"))
+  "passed" (through In (packet6 "2001:db8:2::1" "2001:db8:1::1"))
+  "inside address 2001:db8:2::1 denied" \
+    (through Out (packet6 "2001:db8:2::1" "2001:db8:3::1"))
+  "outside address 2001:db8:66::1 denied" \
+    (through In (packet6 "2001:db8:66::1" "2001:db8:1::1"))
+  "outside address 2001:db8:66::1 denied" \
+    (through Out (packet6 "2001:db8:1::1" "2001:db8:66::1" \
+                    ~extensions:[ Ip6.Extension.(pad (Hop_by_hop [])) ]))
+  "uninspectable" \
+    (through Out (packet6 ~proto:Ip.Proto.ipv6 "2001:db8:1::1" "2001:db8:2::1"))
+  "uninspectable" \
+    (through Out (packet6 ~proto:Ip.Proto.ipv6 "2001:db8:1::1" "2001:db8:2::1" \
+                    ~extensions:[ Ip6.Extension.(pad (Dest_opts [])) ]))
+  "passed" \
+    (through In (error6_about ~src:"2001:db8:66::1" ~dst:"2001:db8:1::1" \
+                   (ip6 "2001:db8:1::1" "2001:db8:2::1")))
+  "outside address 2001:db8:66::1 denied" \
+    (through In (error6_about ~src:"2001:db8:2::1" ~dst:"2001:db8:1::1" \
+                   (ip6 "2001:db8:1::1" "2001:db8:66::1")))
+  "inside address 2001:db8:5::1 denied" \
+    (through Out (error6_about ~src:"2001:db8:1::1" ~dst:"2001:db8:2::1" \
+                    (ip6 "2001:db8:2::1" "2001:db8:5::1")))
+  "passed" (through Out (solicit ~ttl:255))
+  "inside address fe80::1 denied" (through Out (solicit ~ttl:64))
   "uninspectable" \
     (through Out (packet ~proto:Ip.Proto.ipv6 "10.0.0.1" "192.0.2.1"))
   "Ethernet source 02:00:00:00:00:02 denied" \

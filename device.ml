@@ -291,11 +291,11 @@ let policer =
 
 let firewall =
     { name = "firewall" ;
-      descr = "Passes the IPv4 packets between its inside (port 0) and its \
+      descr = "Passes the IP packets between its inside (port 0) and its \
                outside (port 1) whose addresses its rules accept: the inside \
                rules for the addresses on the inside, the outside rules for \
-               those on the outside. ARP passes; ICMP errors that come in are \
-               judged by the packet they quote." ;
+               those on the outside. ARP and neighbor discovery pass; ICMP \
+               errors that come in are judged by the packet they quote." ;
       params = [
           param "inside rules" ~kind:Firewall.rules_kind
               ~default:(Firewall.rules_to_json Firewall.accept_all)
@@ -308,7 +308,7 @@ let firewall =
           param "uninspectable"
               ~kind:(Widget.one_of (Widget.choices Firewall.verdict_names))
               ~default:(`Int (Firewall.int_of_verdict Deny))
-              ~descr:"The verdict for what is neither IPv4 nor ARP, or \
+              ~descr:"The verdict for what is neither IP nor ARP, or \
                       carries IP in IP." ;
           param "MAC" ~kind:(Widget.optional Firewall.mac_kind)
               ~descr:"The Ethernet source that what goes out must have, if \
