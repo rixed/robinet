@@ -346,10 +346,10 @@ def main():
         for p, (j, k) in enumerate(ports[i]):
             routes.append(route(link_addr(k, i) + "/30", input_port=p))
             props["#%d" % p] = {"speeds": [speed(i, j)],
-                                "accept gratuitous ARP": True}
+                                "accept neighbor announcements": True}
         routes.append(route("10.1.%d.253/30" % i, input_port=stub))
         props["#%d" % stub] = {"speeds": [SPEED_10G],
-                               "accept gratuitous ARP": True}
+                               "accept neighbor announcements": True}
         if gen is not None:
             routes.append(route("10.4.%d.1/24" % i, input_port=gen))
             props["#%d" % gen] = {"speeds": [SPEED_10G]}
@@ -448,8 +448,8 @@ def main():
     # Announce every router address, so that no packet waits for an ARP
     # exchange; the synthesizers start with the rest, at time zero, and their
     # first frames arrive after these.
-    startup += [{"path": c[0], "action": "emit gratuitous ARP"} for c in cities]
-    startup += [{"path": c[0] + "-sink/eth", "action": "emit gratuitous ARP"}
+    startup += [{"path": c[0], "action": "announce addresses"} for c in cities]
+    startup += [{"path": c[0] + "-sink/eth", "action": "announce addresses"}
                 for c in cities]
 
     doc = {"version": 1, "name": "world-%d" % n, "devices": devices,

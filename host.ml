@@ -67,7 +67,7 @@ type host_trx = {
     udp_server_stop  : Udp.Port.t -> unit ;
     signal_err    : string -> unit ;
     dev           : dev ; (* as seen from the outside *)
-    arp_set       : Ip.Addr.t -> Eth.Addr.t option -> unit ;
+    neighbor_set  : Ip.Addr.t -> Eth.Addr.t option -> unit ;
     (* List of things to do once this host gets its IP address *)
     mutable on_ip : (t -> unit) list }
 
@@ -1067,7 +1067,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
         udp_server_stop  = (fun port -> udp_server_stop t port) ;
         signal_err    = (fun str -> signal_err t str) ;
         (* This call is needed by dhcpd servers running on this host: *)
-        arp_set       = (fun ip haddr_opt -> if_on t "arp_set" (Eth.State.set_arp t.eth_state (Ip.Addr.to_bitstring ip)) haddr_opt) ;
+        neighbor_set  = (fun ip haddr_opt -> if_on t "neighbor_set" (Eth.State.set_neighbor t.eth_state (Ip.Addr.to_bitstring ip)) haddr_opt) ;
         on_ip         = [] ;
     }
     in

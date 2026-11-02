@@ -1366,7 +1366,7 @@ let print_status oc = function
 (** Runs [program] on a new Ethernet interface under [parent], of address
  * [mac] and [ip] (in [netmask]), of link [speed] (default 1Gbps), full
  * duplex unless [full_duplex] is false, and of [mtu], sending beyond its
- * subnet to [gateway], answering ARP for [ip] unless [answer_arp] is false,
+ * subnet to [gateway], answering ARP for [ip] unless [answer_requests] is false,
  * taking the frames for other addresses too if [promisc],
  * picking the local ports it is not given from the ports of [limits] (as
  * {!Crafty_tree.make_root} does), [limits] (default: the program's) being
@@ -1378,7 +1378,7 @@ let print_status oc = function
  * received already (captured) and is taken at once, in order. Returns the device of the interface, and a handle to stop the
  * program, ask its status or tell it what the interface sent. The program starts at the next tick of the
  * simulation, once that device can be connected. *)
-let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
+let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
         ?(promisc=false)
         ?(speed=EthSpeed.Eth1Gbps) ?(full_duplex=true) ?mtu
         ?limits ?format ?report ?(print=ignore) ?(print_err=ignore) ?(on_exit=ignore)
@@ -1391,7 +1391,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
         Option.map_default (fun gw ->
             [ Eth.State.gw_selector (), Some gw ]) [] gateway in
     let eth =
-        Eth.State.make ~parent ~name ~mac ~gateways ?answer_arp
+        Eth.State.make ~parent ~name ~mac ~gateways ?answer_requests
             ?promisc:(if promisc then Some ignore else None)
             ~speeds:[ speed ] ~full_duplex ?mtu
             ~my_addresses:[ Eth.State.make_my_ip_address
@@ -1459,7 +1459,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
               ~gateways:[ Eth.State.gw_selector (), Some (Eth.Gateway.Mac gw_mac) ]
               ~my_addresses:[ Eth.State.make_my_ip_address ~prefix_len:24
                                   (Ip.Addr.of_string "10.0.0.1") ] () in
-      Tools.BitHash.replace eth.Eth.State.arp_cache
+      Tools.BitHash.replace eth.Eth.State.neighbors
           (Ip.Addr.to_bitstring (Ip.Addr.of_string "10.0.0.2"))
           (Some (Eth.Addr.of_string "02:00:00:00:00:02")) ;
       eth
@@ -2152,7 +2152,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
           ~my_addresses:[ Eth.State.make_my_ip_address ~prefix_len:24 (address n) ] ()
 
   let knows (eth : Eth.State.t) n =
-      Tools.BitHash.replace eth.arp_cache (Ip.Addr.to_bitstring (address n)) (Some (mac n))
+      Tools.BitHash.replace eth.neighbors (Ip.Addr.to_bitstring (address n)) (Some (mac n))
 
   let start ?(closed=false) sim out name eth text =
       let line s =
@@ -2511,7 +2511,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_arp
   let dev, h =
       run ~parent:sim.SimTypes.root ~mac:(mac "02:00:00:00:00:01") ~ip:(ip "10.0.0.1")
           ~netmask:(ip "255.255.255.0") ~gateway:(Eth.Gateway.Ip (ip "10.0.0.254"))
-          ~answer_arp:false p in
+          ~answer_requests:false p in
   let frames = ref [] in
   Tools.(dev --> sink (fun bits ->
       let d = describe bits in

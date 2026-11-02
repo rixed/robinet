@@ -731,8 +731,8 @@ end
 
 (** {2 Stateful Eth adapters} *)
 
-(* Which senders of the IP packets it receives an adapter adds to its ARP
- * cache, beside the neighbours ARP itself tells it about: *)
+(* Which senders of the IP packets it receives an adapter adds to its
+ * neighbor cache, beside the neighbours ARP and NDP tell it about: *)
 module Learn =
 struct
     type t =
@@ -833,18 +833,20 @@ struct
           mutable promisc : (bitstring -> unit) option ;
           rx_otherhost_dropped : Metric.Counter.t ;
           mutable do_proxy_arp : Arp.Pdu.t -> bool ;
-          (* Whether ARP requests for [my_addresses] are answered. Not when
-           * the iface is shared with the kernel. *)
-          mutable answer_arp : bool ;
-          (* Whether an ARP announcing its own sender adds that sender to the
-           * cache. Otherwise, as RFC 826 has it, only an ARP about this
+          (* Whether ARP requests and neighbor solicitations for
+           * [my_addresses] are answered. Not when the iface is shared with
+           * the kernel. *)
+          mutable answer_requests : bool ;
+          (* Whether an ARP announcing its own sender, or an unsolicited
+           * neighbor advertisement, adds that sender to the cache.
+           * Otherwise, as RFC 826 has it, only a request about this
            * adapter's own address adds its sender, and any other merely
            * updates an entry already there. *)
-          mutable accept_gratuitous_arp : bool ;
+          mutable accept_announcements : bool ;
           mutable learn_neighbors_from_incoming : Learn.t ;
           (* TODO: these two should be timeouted, requiring a clock *)
-          arp_cache : Addr.t option BitHash.t ;     (* proto_addr -> hw_addr option (None when resolving) *)
-          (* Hash of messages waiting for an ARP resolution.
+          neighbors : Addr.t option BitHash.t ;     (* proto_addr -> hw_addr option (None when resolving) *)
+          (* Hash of messages waiting for a neighbor resolution.
            * dest_proto_addr -> msg *)
           postponed : bitstring BitHash.t ;
           (* TODO: a gauge for how many packets are postponed *)
@@ -892,23 +894,23 @@ struct
       not (on "2001:db8:1::1") && not (on "a00::1")
      *)
 
-    let set_arp (t : t) iaddr = function
+    let set_neighbor (t : t) iaddr = function
         | None      ->
-            Log.(log t.iface.widget.logger Debug (lazy (Printf.sprintf "Removing entry for iaddr %s from ARP table" (hexstring_of_bitstring iaddr)))) ;
-            BitHash.remove_all t.arp_cache iaddr
+            Log.(log t.iface.widget.logger Debug (lazy (Printf.sprintf "Removing entry for iaddr %s from the neighbor cache" (hexstring_of_bitstring iaddr)))) ;
+            BitHash.remove_all t.neighbors iaddr
         | haddr_opt ->
-            Log.(log t.iface.widget.logger Debug (lazy (Printf.sprintf "Adding entry for iaddr %s to MAC %s from ARP table" (hexstring_of_bitstring iaddr) (match haddr_opt with None -> "None" | Some haddr -> Addr.to_string haddr)))) ;
-            BitHash.replace t.arp_cache iaddr haddr_opt
+            Log.(log t.iface.widget.logger Debug (lazy (Printf.sprintf "Adding entry for iaddr %s to MAC %s in the neighbor cache" (hexstring_of_bitstring iaddr) (match haddr_opt with None -> "None" | Some haddr -> Addr.to_string haddr)))) ;
+            BitHash.replace t.neighbors iaddr haddr_opt
 
     (* What an adapter learnt about its neighbours, and what it was holding
      * back until it learnt more. Both are true only for as long as the device
-     * is running: an ARP request that went out and was answered while the
+     * is running: a request that went out and was answered while the
      * device was off would have to be asked again, and a frame waiting on one
      * is a frame nobody is waiting for any more. Left behind, the postponed
-     * entry is worse than useless -- the adapter takes it as an ARP request
+     * entry is worse than useless -- the adapter takes it as a request
      * already in flight and sends no other. *)
     let reset t =
-        BitHash.clear t.arp_cache ;
+        BitHash.clear t.neighbors ;
         BitHash.clear t.postponed ;
         t.via <- None ;
         Iface.reset t.iface
@@ -917,7 +919,7 @@ struct
      * that very address for IPv4, an unsolicited neighbor advertisement to
      * all nodes for IPv6. What neighbours that accept announcements learn
      * this adapter from, without having to ask. *)
-    let emit_gratuitous_arp t =
+    let announce t =
         let emit proto dst bits =
             Pdu.make proto t.mac dst bits |>
             Pdu.pack |>
@@ -973,13 +975,13 @@ struct
      * @param gateways list of [Gateeway.t]
      * @param promisc an optional function that will receive frames received but not destined to this TRX.
      * @param do_proxy_arp an optional function instructing the driver to perform proxy-arp on a give ARP request
-     * @param answer_arp whether to answer ARP requests for [my_addresses] (default: true)
+     * @param answer_requests whether to answer ARP requests and neighbor solicitations for [my_addresses] (default: true)
      * @param my_addresses a list of [bitstring]s that we consider to be our address (used for instance to reply to ARP queries)
      *)
     let make ?speeds ?full_duplex ?inter_frame_gap ?can_forward_after
              ?(mtu=1500) ?(delay=Interval.zero) ?(loss=0.)
              ?(mac=Addr.random ()) ?(gateways=[])
-             ?promisc ?(do_proxy_arp=(fun _ -> false)) ?(answer_arp=true)
+             ?promisc ?(do_proxy_arp=(fun _ -> false)) ?(answer_requests=true)
              ?(learn_neighbors_from_incoming=Learn.Never)
              ?(my_addresses=[]) ?(name="eth")
              ~parent ?power () =
@@ -993,12 +995,12 @@ struct
                        ?can_forward_after name in
         let t = {
             iface ; mac ; gateways ; mtu ; promisc ; do_proxy_arp ;
-            answer_arp ; accept_gratuitous_arp = false ;
+            answer_requests ; accept_announcements = false ;
             learn_neighbors_from_incoming ;
             rx_otherhost_dropped = Metric.Counter.make () ;
             recv = ignore_bits ~logger:iface.widget.logger ;
             my_addresses ; delay ; loss ; via = None ;
-            arp_cache = BitHash.create 3 ;
+            neighbors = BitHash.create 3 ;
             postponed = BitHash.create 3 } in
         (* Enrich the underlying dumb adapter with more properties: *)
         Widget.add_properties iface.widget Widget.[
@@ -1008,9 +1010,9 @@ struct
                 ~descr:"MTU of the interface."
                 ~getter:(fun () -> `Int t.mtu)
                 ~setter:(fun v -> t.mtu <- to_int_range ~min:68 ~max:65535 v) ;
-            property "ARP cache size" ~kind:Int
-                ~descr:"Current size of the ARP cache"
-                ~getter:(fun () -> `Int (BitHash.length t.arp_cache)) ;
+            property "neighbor cache size" ~kind:Int
+                ~descr:"Current size of the neighbor cache, ARP and NDP alike."
+                ~getter:(fun () -> `Int (BitHash.length t.neighbors)) ;
             property "gateways"
                 ~descr:"Where to send what is not on this LAN."
                 ~kind:(list (row [| "destination", String ;
@@ -1045,20 +1047,22 @@ struct
                 ~descr:"Packet loss ratio."
                 ~getter:(fun () -> `Float t.loss)
                 ~setter:(fun v -> t.loss <- to_float_range ~min:0. ~max:1. v) ;
-            property "accept gratuitous ARP" ~kind:Bool
+            property "accept neighbor announcements" ~kind:Bool
                 ~descr:"Learn the neighbours that announce themselves, and not \
                         only the ones that were asked for."
-                ~getter:(fun () -> `Bool t.accept_gratuitous_arp)
-                ~setter:(fun v -> t.accept_gratuitous_arp <- to_bool v) ;
-            property "answer ARP" ~kind:Bool
-                ~descr:"Answer the ARP requests for this adapter's addresses."
-                ~getter:(fun () -> `Bool t.answer_arp)
-                ~setter:(fun v -> t.answer_arp <- to_bool v) ;
+                ~getter:(fun () -> `Bool t.accept_announcements)
+                ~setter:(fun v -> t.accept_announcements <- to_bool v) ;
+            property "answer neighbor requests" ~kind:Bool
+                ~descr:"Answer the ARP requests and neighbor solicitations for \
+                        this adapter's addresses."
+                ~getter:(fun () -> `Bool t.answer_requests)
+                ~setter:(fun v -> t.answer_requests <- to_bool v) ;
             property "learn neighbors from incoming"
                 ~kind:(one_of (choices Learn.names))
                 ~descr:"Which senders of the IP packets received to learn the \
-                        hardware address of, beside the neighbours ARP tells \
-                        about: none, those on one of this adapter's subnets, \
+                        hardware address of, beside the neighbours ARP and \
+                        NDP tell about: none, those on one of this adapter's \
+                        subnets, \
                         or any, as reachable through whoever handed the frame \
                         over."
                 ~getter:(fun () ->
@@ -1073,19 +1077,19 @@ struct
                 ~descr:"Number of frames dropped by the MAC recipient filter."
                 (Metric.Counter.T t.rx_otherhost_dropped) ] ;
         Widget.add_actions iface.widget Widget.[
-            action "emit gratuitous ARP"
+            action "announce addresses"
                 ~descr:"Announce this adapter's addresses to its neighbours."
                 ~can_run:(fun () ->
                     iface.widget.power.on && t.my_addresses <> [])
-                ~handler:(fun s -> emit_gratuitous_arp t ; Action.stop s) ] ;
+                ~handler:(fun s -> announce t ; Action.stop s) ] ;
         t
     (*$>*)
 end
 
 (** {2 Transceiver} *)
 
-(** An Ethernet TRX will convert from payload to Ethernet frames (resolving
- * destinations using ARP), for a single {!Proto}. *)
+(** An Ethernet TRX will convert from IP packets to Ethernet frames
+ * (resolving destinations using ARP or NDP). *)
 module TRX =
 struct
     let gw_for_ip (st : State.t) ip =
@@ -1158,11 +1162,11 @@ struct
         let rec ask n =
             solicit st sender_proto_addr target_proto_addr ;
             Simulation.delay st.iface.widget.power retrans_time (fun () ->
-                match BitHash.find_opt st.arp_cache target_proto_addr with
+                match BitHash.find_opt st.neighbors target_proto_addr with
                 | Some None when n < max_solicits -> ask (n + 1)
                 | Some None ->
                     Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "No answer for '%s'" (hexstring_of_bitstring target_proto_addr)))) ;
-                    BitHash.remove_all st.arp_cache target_proto_addr ;
+                    BitHash.remove_all st.neighbors target_proto_addr ;
                     BitHash.remove_all st.postponed target_proto_addr
                 | _ -> ()) () in
         ask 1
@@ -1192,14 +1196,14 @@ struct
 
     (* [target_ip] may be a view on [bits]: what is kept of it is a copy. *)
     let resolve (st : State.t) bits target_ip =
-        match Option.get (BitHash.find st.arp_cache target_ip) with
+        match Option.get (BitHash.find st.neighbors target_ip) with
         | dst ->
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "found HW addr for '%s' in the neighbor cache" (hexstring_of_bitstring target_ip)))) ;
             Dst dst
         | exception Not_found ->
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "Cannot find HW addr for '%s' in the neighbor cache" (hexstring_of_bitstring target_ip)))) ;
             let target_ip = concat [ target_ip ] in
-            BitHash.add st.arp_cache target_ip None ;
+            BitHash.add st.neighbors target_ip None ;
             resolve_proto_addr st bits (sender_for st target_ip) target_ip ;
             Postponed
         | exception Invalid_argument _ ->
@@ -1256,9 +1260,9 @@ struct
      * it leaves, in the order it was postponed, which [find_all] gives the
      * reverse of. *)
     let learn (st : State.t) ~add ip hw =
-        if add || BitHash.mem st.arp_cache ip then (
+        if add || BitHash.mem st.neighbors ip then (
             Log.(log st.iface.widget.logger Debug (lazy (Printf.sprintf "...%s is at %s" (hexstring_of_bitstring ip) (Addr.to_string hw)))) ;
-            BitHash.replace st.arp_cache (concat [ ip ]) (Some hw)) ;
+            BitHash.replace st.neighbors (concat [ ip ]) (Some hw)) ;
         let waiting = List.rev (BitHash.find_all st.postponed ip) in
         BitHash.remove_all st.postponed ip ;
         List.iter (fun msg -> send st (proto_of msg) hw msg) waiting
@@ -1286,7 +1290,7 @@ struct
                 frame_src in
             if not from_dad then
                 learn st ~add:about_me (Ip.Addr.to_bitstring ip.src) src_hw ;
-            if about_me && st.answer_arp then (
+            if about_me && st.answer_requests then (
                 Log.(log st.iface.widget.logger Debug (lazy "...a solicitation for me, let's advertise!")) ;
                 let dst, dst_hw =
                     if from_dad then Ndp.all_nodes, Ndp.all_nodes_mac
@@ -1299,7 +1303,7 @@ struct
             let hw =
                 lla (function Icmp6.Opt.Target_lla a -> Some a | _ -> None) options |?
                 frame_src in
-            learn st ~add:(st.accept_gratuitous_arp && not solicited)
+            learn st ~add:(st.accept_announcements && not solicited)
                   (Ip.Addr.to_bitstring target) hw
         | _ -> ()
 
@@ -1325,7 +1329,7 @@ struct
                         (* Take note of the MAC/IP pair of the sender (TODO: with a short timeout) : *)
                         let learn src =
                             (* A copy, not to keep the whole frame alive: *)
-                            BitHash.replace st.arp_cache (concat [ src ])
+                            BitHash.replace st.neighbors (concat [ src ])
                                             (Some frame.src) in
                         let src () = Pdu.extract_src_proto frame.proto payload in
                         (match st.learn_neighbors_from_incoming with
@@ -1351,7 +1355,7 @@ struct
                         let announcement =
                             bits_equal arp.sender_proto arp.target_proto in
                         learn st ~add:(about_me ||
-                                       (st.accept_gratuitous_arp && announcement))
+                                       (st.accept_announcements && announcement))
                               arp.sender_proto sender_hw ;
                         let do_reply () =
                             Arp.Pdu.make_reply arp.hw_type arp.proto_type
@@ -1360,7 +1364,7 @@ struct
                             Arp.Pdu.pack |>
                             send ~control:true st Proto.arp sender_hw in
                         if about_me then (
-                            if arp.operation = Arp.Op.request && st.answer_arp then (
+                            if arp.operation = Arp.Op.request && st.answer_requests then (
                                 Log.(log st.iface.widget.logger Debug (lazy "...It's a request, let's reply!")) ;
                                 do_reply ()
                             )
@@ -1385,20 +1389,20 @@ struct
             )
 
     (*$< TRX *)
-    (* [pair ~answer_arp] wires two adapters built outside of any host, [a]
+    (* [pair ~answer_requests] wires two adapters built outside of any host, [a]
      * and [b] (which answers ARP or not), and returns them with what [b]
      * received; [send st dst] emits an IP packet from [st] to [dst]. *)
     (*$inject
       let ip n = Ip.Addr.of_string ("10.0.0."^ string_of_int n)
-      let pair ~answer_arp =
+      let pair ~answer_requests =
           let sim = Simulation.make ~realtime:false "eth-outside-host" in
-          let adapter ?answer_arp mac n =
-              State.make ~parent:sim.root ~name:mac ?answer_arp
+          let adapter ?answer_requests mac n =
+              State.make ~parent:sim.root ~name:mac ?answer_requests
                          ~mac:(Addr.of_string mac)
                          ~my_addresses:[ State.make_my_ip_address ~prefix_len:24
                                                                   (ip n) ] () in
           let a = adapter "02:00:00:00:00:01" 1
-          and b = adapter ~answer_arp "02:00:00:00:00:02" 2 in
+          and b = adapter ~answer_requests "02:00:00:00:00:02" 2 in
           let got = ref 0 in
           let trx_a = make a and trx_b = make b in
           ignore Tools.(sink (fun _ -> incr got) <-= trx_b) ;
@@ -1410,20 +1414,20 @@ struct
           Ip.Pdu.pack |> tx st
     *)
     (*$R
-      let sim, a, _b, got = pair ~answer_arp:true in
+      let sim, a, _b, got = pair ~answer_requests:true in
       send a (ip 2) ;
       Simulation.run sim false ;
       assert_equal ~printer:string_of_int ~msg:"answering ARP" 1 !got ;
-      let sim, a, b, got = pair ~answer_arp:false in
+      let sim, a, b, got = pair ~answer_requests:false in
       send a (ip 2) ;
       Simulation.run sim false ;
       assert_equal ~printer:string_of_int ~msg:"not answering ARP" 0 !got ;
       assert_bool "the requester is learnt all the same"
-          (BitHash.mem b.State.arp_cache (Ip.Addr.to_bitstring (ip 1))) ;
+          (BitHash.mem b.State.neighbors (Ip.Addr.to_bitstring (ip 1))) ;
       send b (ip 1) ;
       Simulation.run sim false ;
       assert_bool "and can be reached without asking"
-          (BitHash.find b.State.arp_cache (Ip.Addr.to_bitstring (ip 1)) <> None)
+          (BitHash.find b.State.neighbors (Ip.Addr.to_bitstring (ip 1)) <> None)
     *)
     (* [dual ()] wires two adapters, 1 and 2, with an IPv4 and an IPv6
      * address each, over a full-duplex link as a switch port would give
@@ -1462,7 +1466,7 @@ struct
           Ip6.Pdu.make Ip.Proto.udp src dst (Bitstring.bitstring_of_string s) |>
           Ip6.Pdu.pack |> tx st
       let knows st addr =
-          match BitHash.find_option st.State.arp_cache (Ip.Addr.to_bitstring addr) with
+          match BitHash.find_option st.State.neighbors (Ip.Addr.to_bitstring addr) with
           | Some (Some _) -> true
           | _ -> false
     *)
@@ -1485,23 +1489,23 @@ struct
       send6 a (ip6 1) (ip6 99) "lost too" ;
       Simulation.run sim false ;
       assert_bool "gives up on an address nobody answers for"
-          (not (BitHash.mem a.arp_cache (Ip.Addr.to_bitstring (ip6 99))) &&
+          (not (BitHash.mem a.neighbors (Ip.Addr.to_bitstring (ip6 99))) &&
            BitHash.length a.postponed = 0)
     *)
     (*$R
       let sim, a, b, _, got_b = dual () in
-      b.answer_arp <- false ;
+      b.answer_requests <- false ;
       send6 a (ip6 1) (ip6 2) "unanswered" ;
       Simulation.run sim false ;
       assert_equal ~printer:(String.concat ", ") ~msg:"not answering" [] !got_b ;
       assert_bool "the solicitor is learnt all the same" (knows b (ip6 1)) ;
       let sim, a, b, _, _ = dual () in
-      State.emit_gratuitous_arp a ;
+      State.announce a ;
       Simulation.run sim false ;
       assert_bool "announcements are not learnt unless accepted"
           (not (knows b (ip6 1)) && not (knows b (ip 1))) ;
-      b.accept_gratuitous_arp <- true ;
-      State.emit_gratuitous_arp a ;
+      b.accept_announcements <- true ;
+      State.announce a ;
       Simulation.run sim false ;
       assert_bool "and are when they are" (knows b (ip6 1) && knows b (ip 1))
     *)

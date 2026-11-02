@@ -243,7 +243,7 @@ let host ?location sim =
         todo "UDP server for localhost"
     and udp_server_stop _ =
         todo "UDP server for localhost"
-    and arp_set _ _ =
+    and neighbor_set _ _ =
         todo "set ARP table of localhost" in
     { Host.widget = ctx.widget ;
       tcp_connect ; udp_connect ; udp_send ; ping ;
@@ -253,4 +253,4 @@ let host ?location sim =
       dev = sink ignore ;
       (* Nothing here waits for an address: this host has the one the machine
          running the simulation has, and had it before the simulation began. *)
-      arp_set ; on_ip = [] }
+      neighbor_set ; on_ip = [] }

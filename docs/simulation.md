@@ -466,24 +466,26 @@ under:
 | note | `""` | `text` |
 
 *An Ethernet adapter* is `speeds`, `full-duplex` and `inter-frame-gap`, and on
-one with an IP stack above it also `MTU` (68…65535), `gateways`, `delay`, `loss`, `answer
-ARP`, `accept gratuitous ARP` and `learn neighbors from incoming` — a loss of 0.01 drops one
-frame in a hundred, which is how a machine is made to misbehave without
-touching the cable. `gateways` rows are `{"destination": "0.0.0.0/0",
-"via": "10.0.0.1"}`, IPv4 or IPv6, `via` an IP or a MAC, or `null` for
-reaching the destination directly; a `destination` address beside a dotted
-`mask`, as older simulations have it, still reads. An adapter learns a neighbour's hardware address when it
-asks for it, or when the neighbour asks for its own; with `accept gratuitous
-ARP` it also learns one that merely announces itself (see `emit gratuitous ARP`
-below), which is what spares the first frame to a neighbour the wait of an ARP
-exchange. It is off unless set, as on most real machines. `answer ARP`, on
-unless unset, has it answer the ARP requests for its own addresses; off, it
-still asks for others' with them, as an adapter whose addresses some other
-stack answers for. `learn neighbors from
-incoming` (`0`–`2`: never, subnet, always) has it also learn the sender of
-every IP packet it receives, from the frame that brought it: never, unless set,
-as real machines do; only senders on one of its subnets; or any, a distant one
-then being reached through whoever handed its packet over. Its MAC is a parameter of the device it belongs to,
+one with an IP stack above it also `MTU` (68…65535), `gateways`, `delay`,
+`loss`, `answer neighbor requests`, `accept neighbor announcements` and `learn
+neighbors from incoming` — a loss of 0.01 drops one frame in a hundred, which
+is how a machine is made to misbehave without touching the cable. `gateways`
+rows are `{"destination": "0.0.0.0/0", "via": "10.0.0.1"}`, IPv4 or IPv6,
+`via` an IP or a MAC, or `null` for reaching the destination directly; a
+`destination` address beside a dotted `mask`, as older simulations have it,
+still reads. An adapter carries IPv4 and IPv6 alike, and finds a neighbour's
+hardware address with ARP for the one and neighbor discovery for the other: it
+learns it when it asks for it, or when the neighbour asks for its own; with
+`accept neighbor announcements` it also learns one that merely announces
+itself (see `announce addresses` below), which is what spares the first frame
+to a neighbour the wait of an exchange. It is off unless set, as on most real
+machines. `answer neighbor requests`, on unless unset, has it answer the ARP
+requests and neighbor solicitations for its own addresses; off, it still asks
+for others' with them, as an adapter whose addresses some other stack answers
+for. `learn neighbors from incoming` (`0`–`2`: never, subnet, always) has it
+also learn the sender of every IP packet it receives, from the frame that
+brought it: never, unless set, as real machines do; only senders on one of its
+subnets; or any, a distant one then being reached through whoever handed its packet over. Its MAC is a parameter of the device it belongs to,
 not a property: an address is not something a running machine is reconfigured
 with.
 
@@ -709,7 +711,7 @@ What can be asked:
 | action | of | params |
 | --- | --- | --- |
 | `power on`, `power off` | anything with a power switch of its own: hosts, switches, hubs, routers, gateways, portals, synthesizers and **cables** (but not recorders, replayers or notes) | — |
-| `emit gratuitous ARP` | a router, on every port that has an address; or one adapter with an address: a host's `eth`, a router's `#0`… | — |
+| `announce addresses` | a router, on every port that has an address; or one adapter with an address: a host's `eth`, a router's `#0`… — a gratuitous ARP for each IPv4 address, an unsolicited neighbor advertisement for each IPv6 one | — |
 | `ping` | a host | `target` (address or name), `count` (3), `interval` secs (1), `timeout` secs (4) |
 | `start TCP server`, `start UDP server` | a host | `port`, how it behaves (below), and for TCP its buffers (below) |
 | `start TCP client`, `start UDP client` | a host | `target` (address or name), `port`, `source port` (random), how it behaves (below), when to stop: `duration` secs, `volume` bytes sent and received (both unset), and for TCP its buffers (below) |
@@ -1111,8 +1113,8 @@ is `atlantic-7-3_land-5-2` for the four variables as they are by default.
 gen-us sends three frames of 1KiB to host-eu: one, then 0.1s later two back to
 back — a packet pair. A pair that met a router still asking for its next hop's
 address would wait out that ARP exchange together and arrive as close as it
-left, so the startup list ends with every router and host-eu emitting a
-gratuitous ARP, and the ports on the ways east accept them. The first frame is
+left, so the startup list ends with every router and host-eu announcing their
+addresses, and the ports on the ways east accept them. The first frame is
 there only to hold the pair back until those announcements have crossed the
 ocean, since nothing in that startup list is delayed.
 

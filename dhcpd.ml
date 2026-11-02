@@ -320,7 +320,7 @@ let serve ?(port=Udp.Port.o 67) (st : State.t) (host : Host.host_trx) =
                     (* Add this entry to our ARP cache.
                      * FIXME: actually, shouldn't we wait for the ack, in case the
                      * offer is rejected? We could clean the ARP cache then. *)
-                    host.Host.arp_set offered_ip (Some (Eth.Addr.o chaddr)) ;
+                    host.Host.neighbor_set offered_ip (Some (Eth.Addr.o chaddr)) ;
                     (* Store the offer *before* spawning the responding thread *)
                     let offer_key = Dhcp.Option.default_client_id ~htype chaddr in
                     Hashtbl.replace st.offers offer_key offered_ip ;

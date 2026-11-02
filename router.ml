@@ -960,13 +960,13 @@ let make ~parent ?(own_power=true) ?(notify_errs=notify_always ())
     let addressed () =
         Array.exists (fun iface -> iface.eth.my_addresses <> []) t.ifaces in
     Widget.add_actions widget Widget.[
-        action "emit gratuitous ARP"
+        action "announce addresses"
             ~descr:"Announce the router's addresses on every port that \
                     has one."
             ~can_run:(fun () -> widget.power.on && addressed ())
             ~handler:(fun s ->
                 Array.iter (fun iface ->
-                    Eth.State.emit_gratuitous_arp iface.eth) t.ifaces ;
+                    Eth.State.announce iface.eth) t.ifaces ;
                 Action.stop s) ] ;
     Array.iteri (fun n iface ->
         configure_iface t n ;
@@ -1211,14 +1211,14 @@ let make_from_addrs
        switched off again: there is something to forget only once the box
        has been switched on. *)
     flip true ;
-    Eth.State.set_arp eth
+    Eth.State.set_neighbor eth
         (Ip.Addr.to_bitstring (Ip.Addr.of_dotted_string "1.2.3.4"))
         (Some (Eth.Addr.random ())) ;
     "and its adapter still learns" @?
-        (Tools.BitHash.length eth.Eth.State.arp_cache = 1) ;
+        (Tools.BitHash.length eth.Eth.State.neighbors = 1) ;
     flip false ;
     "which the box forgets when it is switched off" @?
-        (Tools.BitHash.length eth.Eth.State.arp_cache = 0) ;
+        (Tools.BitHash.length eth.Eth.State.neighbors = 0) ;
     flip true ;
     (* Deleting it takes its future with it, which is what stops a deleted
        thing for good. Not its destructor's doing: what a widget holds of
@@ -1384,7 +1384,7 @@ let make_from_addrs
  *)
 
 (* A router announces itself on its ports, and a neighbour learns it from
-   that only if it accepts gratuitous ARP. *)
+   that only if it accepts announcements. *)
 (*$R make
     let sim = Simulation.make ~realtime:false "gratuitous-arp" in
     let router name addr =
@@ -1405,19 +1405,19 @@ let make_from_addrs
     Tools.(a <--> b) ;
     let eth2 = r2.ifaces.(0).eth in
     let knows_r1 () =
-        match Tools.BitHash.find_option eth2.Eth.State.arp_cache
+        match Tools.BitHash.find_option eth2.Eth.State.neighbors
                 (Ip.Addr.to_bitstring (Ip.Addr.of_dotted_string "10.0.0.1")) with
         | Some (Some mac) -> Eth.Addr.eq mac r1.ifaces.(0).eth.Eth.State.mac
         | _ -> false in
     (* Which switches both on. *)
     Simulation.run sim false ;
     "not before it has been told" @? not (knows_r1 ()) ;
-    Eth.State.emit_gratuitous_arp r1.ifaces.(0).eth ;
+    Eth.State.announce r1.ifaces.(0).eth ;
     Simulation.run sim false ;
     "a neighbour that does not accept them learns nothing" @?
         not (knows_r1 ()) ;
-    eth2.Eth.State.accept_gratuitous_arp <- true ;
-    let announce = Option.get (Action.find r1.widget "emit gratuitous ARP") in
+    eth2.Eth.State.accept_announcements <- true ;
+    let announce = Option.get (Action.find r1.widget "announce addresses") in
     ignore (Action.start r1.widget announce []) ;
     Simulation.run sim false ;
     "one that does learns the router's address on that port" @?

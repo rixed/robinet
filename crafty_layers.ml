@@ -221,7 +221,7 @@ let ip4 = (Eth.Proto.ip4 :> int)
  * knows already, as ARP is not asked: *)
 let next_mac (st : Eth.State.t) proto payload =
     let arp ip =
-        match Tools.BitHash.find st.arp_cache ip with
+        match Tools.BitHash.find st.neighbors ip with
         | Some mac -> mac
         | None | exception Not_found ->
             V.fail "The MAC address of %s is not known: Eth! needs a dst"

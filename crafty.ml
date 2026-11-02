@@ -514,7 +514,7 @@ let () =
             ~speed ~full_duplex ~mtu
             ?gateway:(Option.map (fun gw -> Eth.Gateway.Ip gw) iface.gateway)
             (* The kernel answers for its own address: *)
-            ~answer_arp:(!own_ip <> None) ~promisc:!promisc
+            ~answer_requests:(!own_ip <> None) ~promisc:!promisc
             ~limits
             ~format ~report
             ~print:(fun s ->
