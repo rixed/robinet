@@ -71,19 +71,20 @@ type host_trx = {
     (* List of things to do once this host gets its IP address *)
     mutable on_ip : (t -> unit) list }
 
-and tcp_socks = {
-    ip_4_tcp : trx ;
-    (* Available sockets per IP dest, until they are over (see [sweep_tcps]). *)
-    tcps : (Tcp.Port.t * Tcp.Port.t (* local, remote *), Tcp.TRX.tcp_trx) Hashtbl.t
-}
+(* A socket is named by its protocol and both its ends: *)
+and sock_key = {
+    proto : Ip.Proto.t ;
+    local : Ip.Addr.t ;
+    local_port : int ;
+    remote : Ip.Addr.t ;
+    remote_port : int }
 
-and udp_socks = {
-    ip_4_udp : trx ;
-    (* The user of UDP does not remove them neither, and we probably should have
-       a "close" for UDP (since once closed all incoming packets must be rejected,
-       contrary to TCP where we still want to handle incoming FIN). *)
-    udps : (Udp.Port.t * Udp.Port.t (* local, remote *), Udp.TRX.udp_trx) Hashtbl.t
-}
+(* Each emits through an IP TRX of its own; what it receives is handed to it
+   by [ip_recv]. TCP sockets stay until they are over (see [sweep_tcps]); UDP
+   ones until their server stops, if they have one. *)
+and socket =
+    | Tcp_sock of Tcp.TRX.tcp_trx
+    | Udp_sock of Udp.TRX.udp_trx
 
 (* A listening server: what to do with a new connection, and the connections
    it opened, so that stopping it can close them. *)
@@ -92,25 +93,26 @@ and tcp_server = {
     (* for the connections it accepts: *)
     tcp_snd_buf : int option ;
     tcp_rcv_buf : int option ;
-    (* With the table and key each is registered under. Closed
-       ones are pruned on each accept. *)
-    mutable tcp_cnxs : (tcp_socks * (Tcp.Port.t * Tcp.Port.t) * Tcp.TRX.tcp_trx) list ;
+    (* With the key each is registered under. Closed ones are pruned on each
+       accept. *)
+    mutable tcp_cnxs : (sock_key * Tcp.TRX.tcp_trx) list ;
 }
 
 (* UDP has nothing to close, but the sockets a server was handed must stop
    receiving when it stops: *)
 and udp_server = {
     udp_accept : Udp.TRX.udp_trx -> unit ;
-    mutable udp_peers : (udp_socks * (Udp.Port.t * Udp.Port.t)) list ;
+    mutable udp_peers : sock_key list ;
 }
 
 and t = {
     mutable trx : host_trx ;
     eth_state   : Eth.State.t ;
     eth_trx     : trx ;
-    tcp_socks   : (Ip.Addr.t, tcp_socks) Hashtbl.t ;
-    udp_socks   : (Ip.Addr.t, udp_socks) Hashtbl.t ;
-    icmp_socks  : (Ip.Addr.t, trx) Hashtbl.t ;
+    sockets     : (sock_key, socket) Hashtbl.t ;
+    (* Fragments received so far, for every socket: *)
+    reassembled : (Ip.TRX.reassemble_key, Ip.Pdu.t list ref) Hashtbl.t ;
+    ip_counters : Ip.TRX.counters ;
     (* the listening servers *)
     tcp_servers : (Tcp.Port.t, tcp_server) Hashtbl.t ;
     udp_servers : (Udp.Port.t, udp_server) Hashtbl.t ;
@@ -145,10 +147,7 @@ and t = {
      * Indexed by ICMP id (which is also the action_state's id).
      * One waiter may wait for several echo requests (with various seq
      * number) *)
-    echo_waiters : (int (* ICMP id *), int -> unit) Hashtbl.t ;
-    (* ICMP errors want to embed the first 8 bytes of the IP packet so we save
-     * it here: *)
-    mutable last_ip_packet : Ip.Pdu.t option
+    echo_waiters : (int (* ICMP id *), int -> unit) Hashtbl.t
 }
 
 type Widget.device += T of t
@@ -179,99 +178,125 @@ let ip_mtu t = t.eth_state.Eth.State.mtu
 let tcp_mss t = ip_mtu t - Ip.Pdu.no_opt_hdr_len - Tcp.Pdu.no_opt_hdr_len
 
 let print oc trx = String.print oc trx.widget.name
-let make_tcp_socks ip = { ip_4_tcp = ip ; tcps = Hashtbl.create 3 }
-let make_udp_socks ip = { ip_4_udp = ip ; udps = Hashtbl.create 3 }
-
-exception No_socket
 
 let signal_err t str =
     (* later, change this into a nice log *)
     Printf.fprintf stderr "Host %s: %s\n%!" t.trx.widget.name str
 
+let tcp_key local local_port remote remote_port =
+    { proto = Ip.Proto.tcp ; local ; local_port = (local_port : Tcp.Port.t :> int) ;
+      remote ; remote_port = (remote_port : Tcp.Port.t :> int) }
+
+let udp_key local local_port remote remote_port =
+    { proto = Ip.Proto.udp ; local ; local_port = (local_port : Udp.Port.t :> int) ;
+      remote ; remote_port = (remote_port : Udp.Port.t :> int) }
+
+let find_tcp t key =
+    match Hashtbl.find_option t.sockets key with
+    | Some (Tcp_sock c) -> Some c
+    | _ -> None
+
+let find_udp t key =
+    match Hashtbl.find_option t.sockets key with
+    | Some (Udp_sock u) -> Some u
+    | _ -> None
+
 (* Forgets the connections that are over, whenever a new one is added: *)
-let sweep_tcps tcps =
-    Hashtbl.filter_inplace (fun (c : Tcp.TRX.tcp_trx) -> not (c.is_over ())) tcps
+let sweep_tcps t =
+    Hashtbl.filter_inplace (function
+        | Tcp_sock c -> not (c.is_over ())
+        | Udp_sock _ -> true) t.sockets
 
-(* Forward the payload to the socket function or to the server function *)
-let tcp_sock_rx t socks bits =
+(* A new IP TRX from [local] to [remote], emitting to the adapter: *)
+let ip_trx t proto local remote =
+    let trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) local remote proto
+                          t.trx.widget.logger in
+    trx =-> t.eth_trx.ins ;
+    trx
+
+(* What is sent from no socket (resets, ICMP errors and echo replies): *)
+let ip_reply t proto local remote bits =
+    tx (ip_trx t proto local remote) bits
+
+(* Hand the segment to its connection, or to a server that opens one, or
+ * answer with a reset. *)
+let tcp_rx t ~local ~remote bits =
     match Tcp.Pdu.unpack bits with
-        | Error s ->
-            Log.(log t.trx.widget.logger Warning s)
-        | Ok (tcp : Tcp.Pdu.t) ->
-            let key = tcp.dst_port, tcp.src_port in
-            if tcp.flags.syn then
-                Hashtbl.find_option socks.tcps key |>
-                Option.may (fun (c : Tcp.TRX.tcp_trx) ->
-                    if c.may_reopen tcp.seq_num then Hashtbl.remove socks.tcps key) ;
-            try
-                let trx =
-                    hash_find_or_insert socks.tcps key (fun () ->
-                        if tcp.flags.syn then (
-                            sweep_tcps socks.tcps ;
-                            let server =
-                                try Hashtbl.find t.tcp_servers tcp.dst_port
-                                with Not_found -> (
-                                    Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have no server listening on port %s" (Tcp.Port.to_string tcp.dst_port)))) ;
-                                    raise No_socket
-                                ) in
-                            let tcp =
-                                Tcp.TRX.make
-                                    t.trx.widget.power ~mss:(tcp_mss t)
-                                    ?snd_buf:server.tcp_snd_buf
-                                    ?rcv_buf:server.tcp_rcv_buf
-                                    tcp.dst_port tcp.src_port
-                                    t.trx.widget.logger in
-                            tcp.tcp_trx.trx =-> socks.ip_4_tcp.ins ;
-                            server.tcp_cnxs <-
-                                (socks, key, tcp.tcp_trx) ::
-                                List.filter (fun (_, _, (c : Tcp.TRX.tcp_trx)) ->
-                                    not (c.is_closed ())
-                                ) server.tcp_cnxs ;
-                            (* The server, unless stopped meanwhile, gets the
-                               connection once the handshake completes, and is
-                               supposed to set its receiver: *)
-                            tcp.cnx_established_cont <- Some (Option.may (fun (c : Tcp.TRX.tcp_trx) ->
-                                if not (c.is_closed ()) then server.tcp_accept c)) ;
-                            tcp.tcp_trx
-                        ) else (
-                            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have a server but no socket for ports %s:%s and TCP flags=%s" (Tcp.Port.to_string tcp.dst_port) (Tcp.Port.to_string tcp.src_port) (Tcp.Pdu.string_of_flags tcp.flags)))) ;
-                            raise No_socket
-                        )) in
-                rx trx.trx bits (* will reorder fragments and transmit the messages up to its emit function *)
-            with No_socket ->
-                Log.(log t.trx.widget.logger Debug (lazy "Sending a TCP-RST")) ;
-                Tcp.Pdu.make_reset_of tcp |> Tcp.Pdu.pack |> tx socks.ip_4_tcp
+    | Error s ->
+        Log.(log t.trx.widget.logger Warning s)
+    | Ok (tcp : Tcp.Pdu.t) ->
+        let key = tcp_key local tcp.dst_port remote tcp.src_port in
+        let reset () =
+            Log.(log t.trx.widget.logger Debug (lazy "Sending a TCP-RST")) ;
+            Tcp.Pdu.make_reset_of tcp |> Tcp.Pdu.pack |>
+            ip_reply t Ip.Proto.tcp local remote in
+        if tcp.flags.syn then
+            find_tcp t key |>
+            Option.may (fun (c : Tcp.TRX.tcp_trx) ->
+                if c.may_reopen tcp.seq_num then Hashtbl.remove t.sockets key) ;
+        match find_tcp t key with
+        | Some c ->
+            rx c.trx bits
+        | None when not tcp.flags.syn ->
+            Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "No socket for ports %s:%s and TCP flags=%s" (Tcp.Port.to_string tcp.dst_port) (Tcp.Port.to_string tcp.src_port) (Tcp.Pdu.string_of_flags tcp.flags)))) ;
+            reset ()
+        | None ->
+            match Hashtbl.find_option t.tcp_servers tcp.dst_port with
+            | None ->
+                Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "We have no server listening on port %s" (Tcp.Port.to_string tcp.dst_port)))) ;
+                reset ()
+            | Some server ->
+                sweep_tcps t ;
+                let cnx =
+                    Tcp.TRX.make
+                        t.trx.widget.power ~mss:(tcp_mss t)
+                        ?snd_buf:server.tcp_snd_buf
+                        ?rcv_buf:server.tcp_rcv_buf
+                        tcp.dst_port tcp.src_port
+                        t.trx.widget.logger in
+                cnx.tcp_trx.trx =-> (ip_trx t Ip.Proto.tcp local remote).ins ;
+                Hashtbl.add t.sockets key (Tcp_sock cnx.tcp_trx) ;
+                server.tcp_cnxs <-
+                    (key, cnx.tcp_trx) ::
+                    List.filter (fun (_, (c : Tcp.TRX.tcp_trx)) ->
+                        not (c.is_closed ())
+                    ) server.tcp_cnxs ;
+                (* The server, unless stopped meanwhile, gets the connection
+                   once the handshake completes, and is supposed to set its
+                   receiver: *)
+                cnx.cnx_established_cont <- Some (Option.may (fun (c : Tcp.TRX.tcp_trx) ->
+                    if not (c.is_closed ()) then server.tcp_accept c)) ;
+                rx cnx.tcp_trx.trx bits
 
-let udp_sock_rx t socks icmp_trx bits =
-    match Udp.Pdu.unpack bits with
-        | Error s ->
-            Log.(log t.trx.widget.logger Warning s)
-        | Ok udp ->
-            let key = udp.Udp.Pdu.dst_port, udp.Udp.Pdu.src_port in
-            try
-                let trx =
-                    hash_find_or_insert socks.udps key (fun () ->
-                        let server = try Hashtbl.find t.udp_servers udp.Udp.Pdu.dst_port
-                                     with Not_found -> raise No_socket in
-                        let trx = Udp.TRX.make t.trx.widget.power udp.Udp.Pdu.dst_port udp.Udp.Pdu.src_port t.trx.widget.logger in
-                        trx.trx =-> socks.ip_4_udp.ins ;
-                        server.udp_peers <- (socks, key) :: server.udp_peers ;
-                        server.udp_accept trx ; (* supposed to set the recver of this udp trx *)
-                        trx) in
-                rx trx.trx bits
-            with No_socket ->
-                Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "No socket for UDP packet on port %s, sending ICMP error" (Udp.Port.to_string udp.Udp.Pdu.dst_port)))) ;
-                (* Send ICMP error *)
-                match t.last_ip_packet with
-                | None ->
-                    Printf.eprintf "No last IP packet!?\n%!" ;
-                    assert false
-                | Some last_ip_packet ->
-                    let icmp_err = Icmp.Pdu.make_port_unreachable last_ip_packet in
-                    let icmp_bits = Icmp.Pdu.pack icmp_err in
-                    tx icmp_trx icmp_bits
+(* Hand the datagram [ip] to its socket, or to a server that opens one, or
+ * answer with a port unreachable. *)
+let udp_rx t ~local (ip : Ip.Pdu.t) =
+    match Udp.Pdu.unpack (ip.payload :> bitstring) with
+    | Error s ->
+        Log.(log t.trx.widget.logger Warning s)
+    | Ok udp ->
+        let bits = (ip.payload :> bitstring) in
+        let key = udp_key local udp.dst_port ip.src udp.src_port in
+        match find_udp t key with
+        | Some u ->
+            rx u.trx bits
+        | None ->
+            match Hashtbl.find_option t.udp_servers udp.dst_port with
+            | Some server ->
+                let u = Udp.TRX.make t.trx.widget.power udp.dst_port udp.src_port t.trx.widget.logger in
+                u.trx =-> (ip_trx t Ip.Proto.udp local ip.src).ins ;
+                Hashtbl.add t.sockets key (Udp_sock u) ;
+                server.udp_peers <- key :: server.udp_peers ;
+                server.udp_accept u ; (* supposed to set the recver of this udp trx *)
+                rx u.trx bits
+            | None ->
+                Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "No socket for UDP packet on port %s" (Udp.Port.to_string udp.dst_port)))) ;
+                (* Not to what was sent to all (RFC 1122, 3.2.2): *)
+                if not Ip.Addr.(is_broadcast ip.dst || is_multicast ip.dst) then
+                    Icmp.Pdu.make_port_unreachable ip |> Icmp.Pdu.pack |>
+                    ip_reply t Ip.Proto.icmp local ip.src
 
-let icmp_rx t ip_trx bits =
+let icmp_rx t ~local ~remote bits =
     match Icmp.Pdu.unpack bits with
         | Error s ->
             Log.(log t.trx.widget.logger Warning s)
@@ -280,7 +305,7 @@ let icmp_rx t ip_trx bits =
                 Log.(log t.trx.widget.logger Debug (lazy "Answering a PING")) ;
                 Icmp.Pdu.make_echo_reply id seq ~pld |>
                 Icmp.Pdu.pack |>
-                tx ip_trx
+                ip_reply t Ip.Proto.icmp local remote
         (* A reply nobody is waiting for is dropped. *)
         | Ok Icmp.Pdu.{ msg_type ; payload = Ids (id, seq, _) ; _ }
             when Icmp.MsgType.is_echo_reply msg_type ->
@@ -431,18 +456,14 @@ and tcp_connect t dst ?src_port ?snd_buf ?rcv_buf (dst_port : Tcp.Port.t) cont =
     let my_ip = Eth.State.find_ip4 t.eth_state in
     let connect dst_ip =
         Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Connecting to %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
-        let socks = hash_find_or_insert t.tcp_socks dst_ip (fun () ->
-            let trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip dst_ip Ip.Proto.tcp t.trx.widget.logger in
-            let socks = make_tcp_socks trx in
-            sink (tcp_sock_rx t socks) <-= trx =-> t.eth_trx.ins ;
-            socks) in
+        let key src_port = tcp_key my_ip src_port dst_ip dst_port in
         (* Try to find a unused port if none was given, or ensure the given one is free *)
-        sweep_tcps socks.tcps ;
+        sweep_tcps t ;
         let src_port = match src_port with
             | None ->
                 let start = Random.int (0x10000 - 1024) + 1024 in
                 let rec aux pnum =
-                    if not (Hashtbl.mem socks.tcps (Tcp.Port.o pnum, dst_port)) then (
+                    if not (Hashtbl.mem t.sockets (key (Tcp.Port.o pnum))) then (
                         Some (Tcp.Port.o pnum)
                     ) else (
                         let next = pnum + 1 in
@@ -452,7 +473,7 @@ and tcp_connect t dst ?src_port ?snd_buf ?rcv_buf (dst_port : Tcp.Port.t) cont =
                     ) in
                 aux start
             | Some src_port ->
-                if not (Hashtbl.mem socks.tcps (src_port, dst_port)) then (
+                if not (Hashtbl.mem t.sockets (key src_port)) then (
                     Some src_port
                 ) else (
                     (* Metric.Atomic.fire tcp_cnxs_err ; *)
@@ -465,8 +486,8 @@ and tcp_connect t dst ?src_port ?snd_buf ?rcv_buf (dst_port : Tcp.Port.t) cont =
                 cont None
             | Some src_port ->
                 let tcp = Tcp.TRX.make t.trx.widget.power ~mss:(tcp_mss t) ?snd_buf ?rcv_buf src_port dst_port t.trx.widget.logger in
-                tcp.tcp_trx.trx.out --> socks.ip_4_tcp.ins ;
-                Hashtbl.add socks.tcps (src_port, dst_port) tcp.tcp_trx ;
+                tcp.tcp_trx.trx =-> (ip_trx t Ip.Proto.tcp my_ip dst_ip).ins ;
+                Hashtbl.add t.sockets (key src_port) (Tcp_sock tcp.tcp_trx) ;
                 Tcp.TRX.connect tcp (function
                 | Some trx ->
                     Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf2 "Connection established with %s:%d" (Ip.Addr.to_string dst_ip) (dst_port :> int)))) ;
@@ -497,24 +518,17 @@ and udp_connect t dst ?src_port dst_port client_f cont =
     if not (t.trx.widget.power.on && ip_is_set t) then cont None else
     let my_ip = Eth.State.find_ip4 t.eth_state in
     let connect dst_ip =
-        let socks = hash_find_or_insert t.udp_socks dst_ip (fun () ->
-            let icmp_trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip dst_ip Ip.Proto.icmp t.trx.widget.logger in
-            icmp_trx =-> t.eth_trx.ins ;
-            let ip_trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip dst_ip Ip.Proto.udp t.trx.widget.logger in
-            let socks = make_udp_socks ip_trx in
-            sink (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> t.eth_trx.ins ;
-            socks) in
         let src_port = may_default src_port (fun () -> Udp.Port.o (Random.int 0x10000)) in
-        let key = src_port, dst_port in
-        if Hashtbl.mem socks.udps key then (
+        let key = udp_key my_ip src_port dst_ip dst_port in
+        if Hashtbl.mem t.sockets key then (
             (* Metric.Atomic.fire udp_cnxs_err ; *)
             Log.(log t.trx.widget.logger Error (lazy "Already connected")) ;
             cont None
         ) else (
             let trx = Udp.TRX.make t.trx.widget.power src_port dst_port t.trx.widget.logger in
             (* connect this udp to the underlaying ip *)
-            sink (client_f trx) <-= trx.trx =-> socks.ip_4_udp.ins ;
-            Hashtbl.add socks.udps key trx ;
+            sink (client_f trx) <-= trx.trx =-> (ip_trx t Ip.Proto.udp my_ip dst_ip).ins ;
+            Hashtbl.add t.sockets key (Udp_sock trx) ;
             (* Metric.Atomic.fire udp_cnxs_ok ; *)
             cont (Some trx)
         )
@@ -588,10 +602,10 @@ let tcp_server_stop t port =
         Widget.bad_value "No TCP server on port %s" (Tcp.Port.to_string port)
     | Some server ->
         Hashtbl.remove t.tcp_servers port ;
-        List.iter (fun (socks, key, (cnx : Tcp.TRX.tcp_trx)) ->
+        List.iter (fun (key, (cnx : Tcp.TRX.tcp_trx)) ->
             if not (cnx.is_closed ()) then
                 if cnx.is_established () then cnx.close ()
-                else Hashtbl.remove socks.tcps key
+                else Hashtbl.remove t.sockets key
         ) server.tcp_cnxs
 
 let udp_server_start t port udp_accept =
@@ -606,8 +620,7 @@ let udp_server_stop t port =
         Widget.bad_value "No UDP server on port %s" (Udp.Port.to_string port)
     | Some server ->
         Hashtbl.remove t.udp_servers port ;
-        List.iter (fun (socks, key) -> Hashtbl.remove socks.udps key)
-                  server.udp_peers
+        List.iter (Hashtbl.remove t.sockets) server.udp_peers
 
 (* A port takes one server at a time, and a stopped server stops answering,
    including the peers it was already talking to. *)
@@ -738,13 +751,15 @@ let udp_server_stop t port =
         !cnx in
     assert_bool "connected" (connect () <> None) ;
     (* [a] forgets that connection: *)
-    Hashtbl.iter (fun _ socks -> Hashtbl.clear socks.tcps) a.tcp_socks ;
+    Hashtbl.clear a.sockets ;
     assert_bool "reconnected" (connect () <> None) ;
     assert_equal ~printer:string_of_int ~msg:"the old one reset" 1 !closed ;
     assert_equal ~printer:string_of_int ~msg:"accepted" 2 !accepted
  *)
 
-(* The recv of the eth is responsible for handling the payload to the correct Ip.TRX *)
+(* What the adapter receives for this host, reassembled and handed to the
+ * socket it is for. What is sent to all is received on this host's own
+ * address. *)
 let ip_recv t bits =
     with_my_ip t (fun my_ip ->
         match Ip.Pdu.unpack bits with
@@ -754,34 +769,60 @@ let ip_recv t bits =
             when Ip.Addr.compare my_ip ip.dst = 0 ||
                  Ip.Addr.(is_broadcast ip.dst || is_multicast ip.dst) ->
             Log.(log t.trx.widget.logger Debug (lazy (Printf.sprintf "Received an IP packet."))) ;
-            t.last_ip_packet <- Some ip ;
-            if ip.proto = Ip.Proto.tcp then (
-                let sock = hash_find_or_insert t.tcp_socks ip.src (fun () ->
-                    let ip_trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip ip.src ip.proto t.trx.widget.logger in
-                    let socks = make_tcp_socks ip_trx in
-                    sink (tcp_sock_rx t socks) <-= ip_trx =-> t.eth_trx.ins ;
-                    socks) in
-                rx sock.ip_4_tcp bits (* will handle fragmentation then pass payload to its emit function *)
-            ) else if ip.proto = Ip.Proto.udp then (
-                let sock = hash_find_or_insert t.udp_socks ip.src (fun () ->
-                    let icmp_trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip ip.src Ip.Proto.icmp t.trx.widget.logger in
-                    icmp_trx =-> t.eth_trx.ins ;
-                    let ip_trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip ip.src ip.proto t.trx.widget.logger in
-                    let socks = make_udp_socks ip_trx in
-                    sink (udp_sock_rx t socks icmp_trx) <-= ip_trx =-> t.eth_trx.ins ;
-                    socks) in
-                rx sock.ip_4_udp bits
-            ) else if ip.proto = Ip.Proto.icmp then (
-                let ip_trx = hash_find_or_insert t.icmp_socks ip.src (fun () ->
-                    let ip_trx = Ip.TRX.make t.trx.widget.power ~mtu:(ip_mtu t) my_ip ip.src ip.proto t.trx.widget.logger in
-                    sink (icmp_rx t ip_trx) <-= ip_trx =-> t.eth_trx.ins ;
-                    ip_trx) in
-                rx ip_trx bits
-            )
+            let local = my_ip and remote = ip.src in
+            let deliver (ip : Ip.Pdu.t) =
+                let bits = (ip.payload :> bitstring) in
+                if ip.proto = Ip.Proto.tcp then tcp_rx t ~local ~remote bits
+                else if ip.proto = Ip.Proto.udp then udp_rx t ~local ip
+                else if ip.proto = Ip.Proto.icmp then icmp_rx t ~local ~remote bits in
+            if Payload.bitlength ip.payload = 0 then
+                Log.(log t.trx.widget.logger Debug (lazy "Ignoring an empty IP packet"))
+            else if ip.more_frags || ip.frag_offset > 0 then
+                Ip.TRX.reassemble_into t.trx.widget.power t.ip_counters
+                                       t.reassembled ip |>
+                Option.may (fun pld ->
+                    (* The datagram as if it had not been fragmented: *)
+                    deliver { ip with more_frags = false ; frag_offset = 0 ;
+                                      tot_len = Ip.Pdu.hdr_len ip + bytelength pld ;
+                                      payload = Payload.o pld })
+            else
+                deliver ip
         | Ok ip ->
             Log.(log t.trx.widget.logger Info (lazy (Printf.sprintf
                 "Received an IP packet for %s (I'm %s)"
                 (Ip.Addr.to_string ip.dst) (Ip.Addr.to_string my_ip)))))
+
+(* Datagrams larger than the MTU arrive whole, each to the socket of its
+   ports. *)
+(*$R make
+    let sim = Simulation.make ~realtime:false "reassembly" in
+    let ip n = Ip.Addr.of_string ("192.168.0." ^ string_of_int n) in
+    let host n =
+        make ~parent:sim.root ~static_ip:(ip n)
+             ~netmask:(Ip.Addr.of_string "255.255.255.0")
+             ("h" ^ string_of_int n) in
+    let a = host 1 and b = host 2 in
+    let st = Eth.Cable.State.make ~parent:sim.root ~name:"c" () in
+    Eth.Cable.plug st (a.trx.widget, 0) (b.trx.widget, 0) ;
+    Simulation.run_startup sim ;
+    let received = ref [] in
+    b.trx.udp_server_start (Udp.Port.o 5000) (fun udp ->
+        udp.trx.ins --> sink (fun bits ->
+            received := ((snd (udp.get_ports ()) :> int), Bitstring.bitstring_length bits / 8)
+                        :: !received)) ;
+    let send src_port len =
+        a.trx.udp_connect (IPv4 (ip 2)) ~src_port:(Udp.Port.o src_port)
+            (Udp.Port.o 5000) (fun _ _ -> ()) (function
+            | None -> assert_failure "cannot connect"
+            | Some (u : Udp.TRX.udp_trx) ->
+                tx u.trx (Bitstring.zeroes_bitstring (len * 8))) ;
+        Simulation.run sim false in
+    send 6000 4000 ;
+    send 6001 3000 ;
+    assert_equal ~printer:(IO.to_string (List.print (Tuple2.print Int.print Int.print)))
+        [ 6000, 4000 ; 6001, 3000 ] (List.sort Stdlib.compare !received) ;
+    assert_equal ~printer:string_of_int 2 (Hashtbl.length b.sockets)
+ *)
 
 (* The default route a lease installed on the adapter, taken off it again.
  * There is at most one at a time, so this is for whoever grants another as
@@ -821,9 +862,8 @@ let reset t =
     t.leased_nameserver <- None ;
     t.leased_search_sfx <- None ;
     t.leased_host_name <- None ;
-    Hashtbl.clear t.tcp_socks ;
-    Hashtbl.clear t.udp_socks ;
-    Hashtbl.clear t.icmp_socks ;
+    Hashtbl.clear t.sockets ;
+    Hashtbl.clear t.reassembled ;
     (* What it was serving stays: a machine switched off and on again comes
        back running what it runs, and the conversations it was having are what
        it loses. Clearing these left a gateway that had been switched off
@@ -1007,9 +1047,9 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
     let rec t = {
         eth_state ;
         eth_trx ;
-        tcp_socks     = Hashtbl.create 11 ;
-        udp_socks     = Hashtbl.create 11 ;
-        icmp_socks    = Hashtbl.create 11 ;
+        sockets       = Hashtbl.create 11 ;
+        reassembled   = Hashtbl.create 11 ;
+        ip_counters   = Ip.TRX.make_counters () ;
         tcp_servers   = Hashtbl.create 11 ;
         udp_servers   = Hashtbl.create 11 ;
         own_ip_config ;
@@ -1028,8 +1068,7 @@ let make_from_eth ?search_sfx ?nameserver ?static_ip ?netmask
         dns_cache     = Hashtbl.create 3 ;
         resolutions   = Metric.Timed.make () ;
         echo_waiters  = Hashtbl.create 3 ;
-        trx           = host_trx ;
-        last_ip_packet = None
+        trx           = host_trx
     }
     (* Read afresh at every boot, and not chosen once here: which of the three
        applies is a fact about the host as it stands, and the reader may have

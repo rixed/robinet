@@ -1129,13 +1129,18 @@ let make_from_addrs
         Array.fold_left (fun n iface ->
             match iface.admin_host with
             | None -> n
-            | Some h -> n + Hashtbl.length h.Host.udp_socks
+            | Some h -> n + Hashtbl.length h.Host.sockets
         ) 0 router.ifaces in
+    let port = Udp.Port.o 9 in
+    Array.iter (fun iface ->
+        Option.may (fun (h : Host.t) -> h.trx.udp_server_start port ignore)
+                   iface.admin_host
+    ) router.ifaces ;
     let poke n =
-        Ip.Pdu.{ (random ()) with
-                 dst = Ip.Addr.of_string
-                           (Printf.sprintf "192.168.%d.254" (n + 1)) ;
-                 proto = Ip.Proto.udp ; ttl = 9 } |>
+        Udp.Pdu.make ~src_port:port ~dst_port:port (Bitstring.zeroes_bitstring 64) |>
+        Udp.Pdu.pack |>
+        Ip.Pdu.make Ip.Proto.udp (Ip.Addr.of_string "10.0.0.1")
+                    (Ip.Addr.of_string (Printf.sprintf "192.168.%d.254" (n + 1))) |>
         Ip.Pdu.pack |>
         Eth.Pdu.make Arp.HwProto.ip4 (Eth.Addr.random ()) (snd addrs.(n)) |>
         Eth.Pdu.pack |>
