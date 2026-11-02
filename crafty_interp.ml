@@ -2276,7 +2276,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
   "a 0.000s: popo. has 1 address\na 0.000s: done Eth#2" \
     (with_host ~setup:(fun h _ -> \
         Named.serve (Named.State.make ~parent:h.Host.trx.Host.widget (function \
-            | "popo" -> Some (address 2) | _ -> None)) h.Host.trx) \
+            | "popo" -> Some [ address 2 ] | _ -> None)) h.Host.trx) \
         "/IP(dst=10.0.0.2)/UDP {\n  DNS {\n    Query(\"popo\")\n    expect timeout=1s Answer { print(\"${MATCH[Answer].name}. has ${length(MATCH[Answer].answers)} address\") } } }")
   "a 0.000s: failed: line 1, column 25: UDP needs a dst Eth" \
     (with_host "/IP(dst=10.0.0.2)/UDP { Raw(\"x\") }")
@@ -2304,7 +2304,7 @@ let run ~parent ?(name="crafty") ~mac ~ip ?netmask ?gateway ?answer_requests
   "a 0.000s: popo. has 1 address\na 0.000s: pong\na 0.000s: done Eth#3" \
     (with_host ~setup:(fun h _ -> \
         Named.serve (Named.State.make ~parent:h.Host.trx.Host.widget (function \
-            | "popo" -> Some (address 2) | _ -> None)) h.Host.trx) \
+            | "popo" -> Some [ address 2 ] | _ -> None)) h.Host.trx) \
         "/IP(dst=10.0.0.2)/UDP(dst=53)/DNS {\n  Query(\"popo\")\n  expect timeout=1s Answer(status == NOERROR) {\n    print(\"${MATCH[Answer].name}. has ${length(MATCH[Answer].answers)} address\")\n    /IP(dst=MATCH[Answer].answers[0].data)/ICMP/Echo {\n      Request(\"hi\")\n      expect timeout=1s Reply { print(\"pong\") } } } }")
   "b 0.000s: 29 bytes\nb 0.000s: query for example.com\na 0.000s: example.com is #0a000002\na 0.000s: done Eth#1\nb 1.000s: done Eth#1" \
     (two ~arp:true "/IP(dst=10.0.0.2)/UDP(dst=5353)/DNS {\n  Query(\"example.com\")\n  expect timeout=1s Answer(\"example.com\") {\n    print(\"${MATCH[Answer].name} is ${MATCH[Answer].answers[0].data}\") } }" \

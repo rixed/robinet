@@ -441,7 +441,7 @@ let make ?delay ?loss ?mtu ?(num_max_cnxs=500) ?nameserver
                   "far" in
     Named.serve
         (Named.State.make ~parent:sim.root (function
-            | "popo" -> Some (Ip.Addr.of_string "1.2.3.4")
+            | "popo" -> Some [ Ip.Addr.of_string "1.2.3.4" ]
             | _ -> None))
         far.Host.trx ;
     far.Host.trx.Host.dev --> gw.trx.out ;

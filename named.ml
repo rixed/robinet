@@ -28,10 +28,11 @@ struct
     type t =
         { widget : Widget.t ;
           mutable default_ttl : int ;
-          lookup : string -> Ip.Addr.t option }
+          lookup : string -> Ip.Addr.t list option }
 
-    (* [lookup] is a function taking names as string and returning
-     * IP addresses or None in which case the server will delegate.
+    (* [lookup] is a function taking names as string and returning their
+     * IP addresses, of either family, or None in which case the server will
+     * delegate.
      * FIXME: any serializable/inspectable datastructure *)
     let make ?(default_ttl=3600) ~parent lookup =
         let widget = Widget.make ~parent "named" in
@@ -92,12 +93,11 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
                       List.fold_lefti (fun lst i question ->
                         match  Option.get answers.(i) with
                         | None -> lst
-                        | Some (_auth, ip) ->
+                        | Some (_auth, ips) ->
                             let ttl = Int32.of_int st.default_ttl in
-                            match answer_rr ttl question ip with
-                            | None -> lst
-                            | Some rr -> rr :: lst
-                      ) [] query.Pdu.questions in
+                            List.rev_append
+                                (List.filter_map (answer_rr ttl question) ips) lst
+                      ) [] query.Pdu.questions |> List.rev in
                     Log.(log st.widget.logger Debug (lazy "Answering")) ;
                     stop_func () ; (* stop_func Metric.Params.(make []) ; *)
                     Pdu.make_answer query.Pdu.id query.Pdu.questions answer_rrs |>
@@ -116,16 +116,13 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
                             | None | Some [] ->
                                 Log.(log st.widget.logger Debug (lazy "Got error from delegated query")) ;
                                 answers.(i) <- Some None
-                            | Some [ ip ] ->
+                            | Some ips ->
                                 Log.(log st.widget.logger Debug (lazy "Got answer from delegated query")) ;
-                                answers.(i) <- Some (Some (false, ip))
-                            | Some lst ->
-                                Log.(log st.widget.logger Warning (lazy (Printf.sprintf "Bogus answer from delegated query with %d answers!" (List.length lst)))) ;
-                                answers.(i) <- Some None) ;
+                                answers.(i) <- Some (Some (false, ips))) ;
                             check_all_answered ())
-                    | Some ip ->
+                    | Some ips ->
                         Log.(log st.widget.logger Debug (lazy (Printf.sprintf "I know host %S!" qname))) ;
-                        answers.(i) <- Some (Some (true, ip)) ;
+                        answers.(i) <- Some (Some (true, ips)) ;
                         check_all_answered ()
                 ) query.Pdu.questions
             | _ ->
@@ -137,7 +134,7 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
     let netmask = Ip.Addr.all_ones in
     let srv : Host.t = Host.make ~parent:sim.root ~netmask ~static_ip:(Ip.Addr.of_dotted_string "1.1.1.1") "server" in
     let lookup = function
-        | "popo" -> Some (Ip.Addr.of_dotted_string "1.1.1.1")
+        | "popo" -> Some [ Ip.Addr.of_dotted_string "1.1.1.1" ]
         | _ -> None in
     let st = State.make ~parent:sim.root lookup in
     serve st srv.trx ;
@@ -154,7 +151,7 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
  *)
 
 (* A dual-stack client asks for both families, of a server reached over
- * IPv6, and gets its preferred one first. *)
+ * IPv6, and gets the preferred one first. *)
 (*$R serve
     let sim = Simulation.make ~realtime:false "test-named-v6" in
     let a s = Ip.Addr.of_string s in
@@ -165,8 +162,9 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
                   ("h" ^ n) in
     let srv = host "1" in
     let st = State.make ~parent:sim.root (function
-        | "v4" -> Some (a "10.0.0.9")
-        | "v6" -> Some (a "2001:db8::9")
+        | "v4" -> Some [ a "10.0.0.9" ]
+        | "v6" -> Some [ a "2001:db8::9" ]
+        | "both" -> Some [ a "10.0.0.9" ; a "2001:db8::9" ]
         | _ -> None) in
     serve st srv.trx ;
     let clt = host ~nameserver:(a "2001:db8::1") "2" in
@@ -183,5 +181,9 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
         | Some l -> String.concat "," l in
     assert_equal ~printer (Some [ "2001:db8::9" ]) (resolve "v6") ;
     assert_equal ~printer (Some [ "10.0.0.9" ]) (resolve "v4") ;
-    assert_equal ~printer (Some []) (resolve "nope")
+    assert_equal ~printer (Some []) (resolve "nope") ;
+    assert_equal ~printer (Some [ "2001:db8::9" ; "10.0.0.9" ]) (resolve "both") ;
+    clt.prefer_v6 <- false ;
+    Hashtbl.clear clt.dns_cache ;
+    assert_equal ~printer (Some [ "10.0.0.9" ; "2001:db8::9" ]) (resolve "both")
  *)
