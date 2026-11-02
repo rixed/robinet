@@ -1100,6 +1100,21 @@ the machine at the far end. The two captures are the same two frames seen from
 either side, which is what makes the translation visible: they leave as
 192.168.10.3 and arrive as 198.51.100.1.
 
+### Both families
+
+`examples/dual-stack.json` is a small network speaking IPv4 and IPv6 at once.
+An office switch holds alice, with an address of each family, and bob, with
+only an IPv6 one; a router, core, joins it to a server behind a firewall. Every
+address is static, given with its prefix length (`static-ip` and `addresses`),
+and each host's adapter has one default route per family in its `gateways`.
+core takes its addresses from its routing table, one row to itself per family
+and port, and drops packets with a hop-by-hop header. The firewall's rules mix
+both families, and deny bob alone.
+
+At startup the server echoes TCP port 7; alice pings it at both its addresses
+and then talks to it over IPv6 for two seconds, while bob's pings go
+unanswered.
+
 ### Load balancing over an ocean
 
 `examples/two-continents.json` is what the load balancing is for: two full

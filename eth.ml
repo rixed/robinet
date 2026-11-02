@@ -1042,8 +1042,8 @@ struct
                 ~getter:(fun () -> `Int (BitHash.length t.neighbors)) ;
             property "gateways"
                 ~descr:"Where to send what is not on this LAN."
-                ~kind:(list (row [| "destination", String ;
-                                    "via", optional String |]))
+                ~kind:(list (row [| "destination", hint "0.0.0.0/0" String ;
+                                    "via", optional (hint "MAC or IP address" String) |]))
                 ~getter:(fun () ->
                     (* Dotted rather than [Ip.Addr.to_string]: that may hand
                        back a name, and a name is not something the setter can

@@ -372,7 +372,7 @@ let host =
            * the host is configured statically, without one it goes looking for
            * a DHCP server, and the two are different machines from here on. *)
           param "static-ip" ~kind:(Widget.optional String)
-              ~placeholder:"static IP (or use DHCP)"
+              ~placeholder:"192.168.0.1/24 (or use DHCP)"
               ~descr:"Its static IPv4 address, with its prefix length if not \
                       with a netmask." ;
           (* A host that is given an address of its own is given the netmask
@@ -382,7 +382,8 @@ let host =
           param "netmask" ~kind:(Widget.optional String)
               ~default:(`String "255.255.255.0")
               ~descr:"Which addresses it can reach without a gateway." ;
-          param "addresses" ~kind:(Widget.list String) ~default:(`List [])
+          param "addresses" ~kind:Widget.(list (hint "2001:db8::1/64" String))
+              ~default:(`List [])
               ~descr:"Other static addresses, of either family, each with its \
                       prefix length." ;
           param "gateway" ~kind:(Widget.optional String)

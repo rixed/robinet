@@ -1908,7 +1908,7 @@ let make ?gateways ?search_sfx ?nameserver ?mac ?(on=true) ?static_ip ?netmask
                 | Some (ip, netmask) ->
                     t.static_ip <- Some ip ;
                     Option.may (fun m -> t.netmask <- Some m) netmask) ;
-        property "addresses" ~kind:(list String)
+        property "addresses" ~kind:(list (hint "2001:db8::1/64" String))
             ~descr:"Other addresses given at boot, of either family, each \
                     with its prefix length."
             ~getter:(fun () ->

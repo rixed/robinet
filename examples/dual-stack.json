@@ -1,0 +1,393 @@
+{
+ "version": 1,
+ "name": "dual-stack",
+ "devices": [
+  {
+   "type": "router",
+   "path": "core",
+   "at": {
+    "lat": 48.85,
+    "lon": 2.35
+   },
+   "params": {
+    "ports": 2,
+    "MAC range": "02:52:01"
+   },
+   "properties": {
+    "": {
+     "routes": [
+      {
+       "input port": 0,
+       "src mask": null,
+       "dst mask": "10.0.1.254/24",
+       "ip proto": null,
+       "src port": null,
+       "dst port": null,
+       "output port": null,
+       "via": null
+      },
+      {
+       "input port": 0,
+       "src mask": null,
+       "dst mask": "2001:db8:1::fe/64",
+       "ip proto": null,
+       "src port": null,
+       "dst port": null,
+       "output port": null,
+       "via": null
+      },
+      {
+       "input port": 1,
+       "src mask": null,
+       "dst mask": "10.0.2.254/24",
+       "ip proto": null,
+       "src port": null,
+       "dst port": null,
+       "output port": null,
+       "via": null
+      },
+      {
+       "input port": 1,
+       "src mask": null,
+       "dst mask": "2001:db8:2::fe/64",
+       "ip proto": null,
+       "src port": null,
+       "dst port": null,
+       "output port": null,
+       "via": null
+      },
+      {
+       "input port": null,
+       "src mask": null,
+       "dst mask": "10.0.1.0/24",
+       "ip proto": null,
+       "src port": null,
+       "dst port": null,
+       "output port": 0,
+       "via": null
+      },
+      {
+       "input port": null,
+       "src mask": null,
+       "dst mask": "2001:db8:1::/64",
+       "ip proto": null,
+       "src port": null,
+       "dst port": null,
+       "output port": 0,
+       "via": null
+      },
+      {
+       "input port": null,
+       "src mask": null,
+       "dst mask": "10.0.2.0/24",
+       "ip proto": null,
+       "src port": null,
+       "dst port": null,
+       "output port": 1,
+       "via": null
+      },
+      {
+       "input port": null,
+       "src mask": null,
+       "dst mask": "2001:db8:2::/64",
+       "ip proto": null,
+       "src port": null,
+       "dst port": null,
+       "output port": 1,
+       "via": null
+      }
+     ],
+     "drop hop-by-hop": true
+    }
+   }
+  },
+  {
+   "type": "switch",
+   "path": "office",
+   "at": {
+    "lat": 48.95,
+    "lon": 2.15
+   },
+   "params": {
+    "ports": 4
+   }
+  },
+  {
+   "type": "host",
+   "path": "alice",
+   "at": {
+    "lat": 49.05,
+    "lon": 2.0
+   },
+   "params": {
+    "static-ip": "10.0.1.10/24",
+    "addresses": [
+     "2001:db8:1::10/64"
+    ],
+    "MAC": "02:52:0a:00:00:01"
+   },
+   "properties": {
+    "eth": {
+     "gateways": [
+      {
+       "destination": "0.0.0.0/0",
+       "via": "10.0.1.254"
+      },
+      {
+       "destination": "::/0",
+       "via": "2001:db8:1::fe"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "type": "host",
+   "path": "bob",
+   "at": {
+    "lat": 48.85,
+    "lon": 1.95
+   },
+   "params": {
+    "addresses": [
+     "2001:db8:1::11/64"
+    ],
+    "MAC": "02:52:0a:00:00:02"
+   },
+   "properties": {
+    "eth": {
+     "gateways": [
+      {
+       "destination": "::/0",
+       "via": "2001:db8:1::fe"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "type": "firewall",
+   "path": "fw",
+   "at": {
+    "lat": 48.85,
+    "lon": 2.6
+   },
+   "params": {
+    "inside rules": [
+     {
+      "verdict": 0,
+      "CIDR": "10.0.2.0/24"
+     },
+     {
+      "verdict": 0,
+      "CIDR": "2001:db8:2::/64"
+     }
+    ],
+    "outside rules": [
+     {
+      "verdict": 1,
+      "CIDR": "2001:db8:1::11"
+     },
+     {
+      "verdict": 0,
+      "CIDR": "10.0.1.0/24"
+     },
+     {
+      "verdict": 0,
+      "CIDR": "2001:db8:1::/64"
+     }
+    ]
+   }
+  },
+  {
+   "type": "host",
+   "path": "server",
+   "at": {
+    "lat": 48.85,
+    "lon": 2.85
+   },
+   "params": {
+    "static-ip": "10.0.2.10/24",
+    "addresses": [
+     "2001:db8:2::10/64"
+    ],
+    "MAC": "02:52:0b:00:00:01"
+   },
+   "properties": {
+    "eth": {
+     "gateways": [
+      {
+       "destination": "0.0.0.0/0",
+       "via": "10.0.2.254"
+      },
+      {
+       "destination": "::/0",
+       "via": "2001:db8:2::fe"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "type": "cable",
+   "path": "core-office",
+   "params": {
+    "from": "core",
+    "to": "office",
+    "from port": 0,
+    "to port": 0
+   }
+  },
+  {
+   "type": "cable",
+   "path": "office-alice",
+   "params": {
+    "from": "office",
+    "to": "alice",
+    "from port": 1,
+    "to port": 0
+   }
+  },
+  {
+   "type": "cable",
+   "path": "office-bob",
+   "params": {
+    "from": "office",
+    "to": "bob",
+    "from port": 2,
+    "to port": 0
+   }
+  },
+  {
+   "type": "cable",
+   "path": "core-fw",
+   "params": {
+    "from": "core",
+    "to": "fw",
+    "from port": 1,
+    "to port": 1
+   }
+  },
+  {
+   "type": "cable",
+   "path": "fw-server",
+   "params": {
+    "from": "fw",
+    "to": "server",
+    "from port": 0,
+    "to port": 0
+   }
+  },
+  {
+   "type": "note",
+   "path": "note",
+   "at": {
+    "lat": 49.2,
+    "lon": 2.4
+   },
+   "params": {
+    "text": "Dual stack. core routes 10.0.1.0/24 and 2001:db8:1::/64 (the office, port 0) to 10.0.2.0/24 and 2001:db8:2::/64 (behind fw, port 1), and answers at .254 and ::fe on either side; it drops packets with a hop-by-hop header. alice has an address of each family, bob only an IPv6 one, which fw denies. server echoes TCP port 7. At startup alice pings server over both families and talks to it over IPv6, and bob's ping goes unanswered."
+   }
+  }
+ ],
+ "startup": [
+  {
+   "path": "core",
+   "action": "power on"
+  },
+  {
+   "path": "office",
+   "action": "power on"
+  },
+  {
+   "path": "alice",
+   "action": "power on"
+  },
+  {
+   "path": "bob",
+   "action": "power on"
+  },
+  {
+   "path": "fw",
+   "action": "power on"
+  },
+  {
+   "path": "server",
+   "action": "power on"
+  },
+  {
+   "path": "core-office",
+   "action": "power on"
+  },
+  {
+   "path": "office-alice",
+   "action": "power on"
+  },
+  {
+   "path": "office-bob",
+   "action": "power on"
+  },
+  {
+   "path": "core-fw",
+   "action": "power on"
+  },
+  {
+   "path": "fw-server",
+   "action": "power on"
+  },
+  {
+   "path": "server",
+   "action": "start TCP server",
+   "params": {
+    "port": 7,
+    "behavior": {
+     "echo": null
+    }
+   }
+  },
+  {
+   "path": "alice",
+   "action": "ping",
+   "params": {
+    "target": "2001:db8:2::10",
+    "count": 3
+   },
+   "delay": 1
+  },
+  {
+   "path": "alice",
+   "action": "ping",
+   "params": {
+    "target": "10.0.2.10",
+    "count": 3
+   },
+   "delay": 1
+  },
+  {
+   "path": "bob",
+   "action": "ping",
+   "params": {
+    "target": "2001:db8:2::10",
+    "count": 3
+   },
+   "delay": 1
+  },
+  {
+   "path": "alice",
+   "action": "start TCP client",
+   "params": {
+    "target": "2001:db8:2::10",
+    "port": 7,
+    "duration": 2,
+    "behavior": {
+     "random": {
+      "min size": 100,
+      "max size": 1400,
+      "interval": 0.1
+     }
+    }
+   },
+   "delay": 5
+  }
+ ]
+}
