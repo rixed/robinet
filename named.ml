@@ -47,6 +47,21 @@ struct
         st.lookup qname
 end
 
+(* The resource record answering that question with [ip], if [ip] is of the
+ * family the question asks for: *)
+let answer_rr ttl (qname, qtype, qclass) ip =
+    if qtype = QType.a && Ip.Addr.is_v4 ip ||
+       qtype = QType.aaaa && Ip.Addr.is_v6 ip
+    then Some (qname, qtype, qclass, ttl, Ip.Addr.to_bytes ip)
+    else None
+(*$T answer_rr
+  answer_rr 1l ("a.", Dns.QType.a, 1) (Ip.Addr.of_string "1.2.3.4") <> None
+  answer_rr 1l ("a.", Dns.QType.aaaa, 1) (Ip.Addr.of_string "::1") <> None
+  answer_rr 1l ("a.", Dns.QType.aaaa, 1) (Ip.Addr.of_string "1.2.3.4") = None
+  answer_rr 1l ("a.", Dns.QType.a, 1) (Ip.Addr.of_string "::1") = None
+  answer_rr 1l ("a.", Dns.QType.ptr, 1) (Ip.Addr.of_string "1.2.3.4") = None
+ *)
+
 (** [serve host] listen on host name port and
  * answer queries (or delegates to its own nameserver). *)
 let serve ?(port=Udp.Port.o 53) (st : State.t) host =
@@ -74,12 +89,14 @@ let serve ?(port=Udp.Port.o 53) (st : State.t) host =
                 let check_all_answered () =
                   if Array.for_all ((<>) None) answers then (
                     let answer_rrs =
-                      List.fold_lefti (fun lst i (qname, qtype, qclass) ->
+                      List.fold_lefti (fun lst i question ->
                         match  Option.get answers.(i) with
                         | None -> lst
                         | Some (_auth, ip) ->
                             let ttl = Int32.of_int st.default_ttl in
-                            (qname, qtype, qclass, ttl, Ip.Addr.to_bytes ip) :: lst
+                            match answer_rr ttl question ip with
+                            | None -> lst
+                            | Some rr -> rr :: lst
                       ) [] query.Pdu.questions in
                     Log.(log st.widget.logger Debug (lazy "Answering")) ;
                     stop_func () ; (* stop_func Metric.Params.(make []) ; *)
